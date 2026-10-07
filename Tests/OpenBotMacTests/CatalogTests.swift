@@ -98,6 +98,13 @@ struct LiveCatalogTests {
         #expect(document.instructions.count > 200)
     }
 
+    @Test func connectsToAPublicRemoteServer() async throws {
+        let connection = MCPConnection(config: MCPServerConfig(name: "DeepWiki", url: "https://mcp.deepwiki.com/mcp"))
+        let tools = try await connection.start()
+        #expect(!tools.isEmpty)
+        await connection.stop()
+    }
+
     @Test func searchesTheMCPRegistry() async throws {
         let servers = try await MCPRegistry.shared.search("github")
         #expect(!servers.isEmpty)

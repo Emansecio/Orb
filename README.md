@@ -19,8 +19,8 @@ Na primeira vez: **Ajustes → Modelo**, escolha o provedor, cole a chave e cliq
 | **Modelos** | Qualquer API compatível com OpenAI: xAI (Grok), OpenAI, OpenRouter, Ollama, LM Studio ou URL própria. Resposta em streaming; modelo padrão + modelo por bot. Chave no **Keychain**. |
 | **Ferramentas** | `run_command` (zsh), `read_file`, `write_file`, `list_directory`, `search_files` (Spotlight), `web_fetch`, `open`, `applescript` (Mail, Calendário, Notas…), `remember`. |
 | **Permissões** | Por bot: **Perguntar antes** (ações que mudam algo, acessam a web ou guardam memória pedem aprovação), **Automático** ou **Só leitura**. “Sempre permitir” vale por ferramenta e pode ser revogado no painel do bot. Cada grupo de ferramentas pode ser desligado (Terminal e arquivos, Web, Apps do Mac, Conectores). |
-| **Conectores** | Servidores **MCP** locais (stdio), com modelos prontos (Arquivos, Memória, Fetch, GitHub) ou comando próprio. Status ao vivo e reconexão. |
-| **Skills** | Instruções reutilizáveis: comece a mensagem com `/resumir`, `/organizar`, `/revisar` ou crie as suas. |
+| **Conectores** | Servidores **MCP** locais (stdio: npx, uvx, docker) ou **remotos** (Streamable HTTP, com fallback SSE). Aba **Explorar** busca no [registro oficial do MCP](https://registry.modelcontextprotocol.io) e monta a configuração (você só preenche as chaves); aba **Instalados** com status ao vivo, ativar/desativar, editar e apagar. |
+| **Skills** | Formato aberto **SKILL.md**. Aba **Explorar** busca no catálogo [Skills.sh](https://skills.sh) e lê o `SKILL.md` no GitHub de quem publicou, com prévia completa antes de instalar; aba **Instaladas** para ativar/desativar, editar e apagar. Use com `/atalho` (ex.: `/pdf`, `/resumir`). |
 | **Rotinas** | O bot faz uma tarefa sozinho todo dia, toda semana ou a cada X horas enquanto o app está aberto; resultado no card e notificação. |
 | **Memória** | O bot guarda fatos duradouros sobre você (`remember`); você vê e apaga no painel. |
 | **Mac** | Ícone na barra de menus com pergunta rápida, notificações quando termina ou precisa de você, abrir ao iniciar sessão, arrastar arquivos para o chat. |
@@ -70,6 +70,8 @@ open -n build/OpenBot.app --env OPENBOT_SEND="Como está meu Mac?"   # envia um 
 | `OPENBOT_SEND` | Envia o texto ao bot selecionado ao abrir (teste ponta a ponta) |
 | `OPENBOT_STATIC_ORBS` | Desliga a animação dos Orbs |
 | `--render-orbs arquivo.png` / `--render-icon arquivo.png` | Gera a folha de Orbs / o ícone e sai |
+| `--snapshot <tela> arquivo.png` | Renderiza uma tela fora do monitor (chat, skills, skills-explore, connectors, connectors-explore, routines) e sai |
+| `OPENBOT_LIVE_TESTS=1 swift test --filter LiveCatalogTests` | Testa os catálogos e um conector remoto de verdade (precisa de internet) |
 
 ## Próximos passos
 1. Distribuição: assinatura Developer ID, Hardened Runtime, notarização e atualizações (Sparkle).
