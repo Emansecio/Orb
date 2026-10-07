@@ -13,6 +13,7 @@ struct NewBotSheet: View {
     @State private var orb = OrbConfig.random()
     @State private var modelName = ""
     @State private var mode: PermissionMode = .ask
+    @State private var isConfirmingBypass = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -27,9 +28,10 @@ struct NewBotSheet: View {
                     }
                     Section("Inteligência") {
                         ModelPicker(selection: $modelName)
-                        Picker("Antes de agir", selection: $mode) {
+                        Picker("Antes de agir", selection: $mode.confirmingBypass { isConfirmingBypass = true }) {
                             ForEach(PermissionMode.allCases) { Text($0.label).tag($0) }
                         }
+                        .bypassConfirmation(isPresented: $isConfirmingBypass) { mode = .bypass }
                     }
                 }
                 .formStyle(.grouped)

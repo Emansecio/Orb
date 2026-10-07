@@ -145,13 +145,14 @@ private struct SkillMenu: View {
 private struct PermissionMenu: View {
     @Environment(AppModel.self) private var model
     let bot: Bot
+    @State private var isConfirmingBypass = false
 
     var body: some View {
         Menu {
             Picker("Permissões", selection: Binding(
                 get: { bot.permissionMode },
                 set: { mode in model.update(bot.id) { $0.permissionMode = mode } }
-            )) {
+            ).confirmingBypass { isConfirmingBypass = true }) {
                 ForEach(PermissionMode.allCases) { mode in
                     Label(mode.label, systemImage: mode.symbol).tag(mode)
                 }
@@ -159,10 +160,14 @@ private struct PermissionMenu: View {
             .pickerStyle(.inline)
         } label: {
             Label(bot.permissionMode.label, systemImage: bot.permissionMode.symbol)
+                .foregroundStyle(bot.permissionMode == .bypass ? Palette.warn : Palette.muted)
         }
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Permissões: \(bot.permissionMode.label)")
+        .help("Permissões: \(bot.permissionMode.label). \(bot.permissionMode.summary)")
+        .bypassConfirmation(isPresented: $isConfirmingBypass) {
+            model.update(bot.id) { $0.permissionMode = .bypass }
+        }
     }
 }
 

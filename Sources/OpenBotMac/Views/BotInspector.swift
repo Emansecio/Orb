@@ -7,6 +7,7 @@ struct BotInspector: View {
     @State private var isEditingOrb = false
     @State private var isPickingFolder = false
     @State private var isConfirmingDelete = false
+    @State private var isConfirmingBypass = false
 
     var body: some View {
         if let bot = model.bot(botID) {
@@ -38,8 +39,10 @@ struct BotInspector: View {
                     Button("Personalizar Orb…", systemImage: "paintpalette") { isEditingOrb = true }
                 }
 
-                Section("Permissões") {
-                    Picker("Antes de agir", selection: binding(\.permissionMode, of: bot)) {
+                Section {
+                    Picker("Antes de agir", selection: binding(\.permissionMode, of: bot).confirmingBypass {
+                        isConfirmingBypass = true
+                    }) {
                         ForEach(PermissionMode.allCases) { Text($0.label).tag($0) }
                     }
                     ForEach(Capability.allCases) { capability in
@@ -47,6 +50,14 @@ struct BotInspector: View {
                             Label(capability.label, systemImage: capability.symbol)
                         }
                     }
+                } header: {
+                    Text("Permissões")
+                } footer: {
+                    Text(bot.permissionMode.summary)
+                        .foregroundStyle(bot.permissionMode == .bypass ? Palette.warn : .secondary)
+                }
+                .bypassConfirmation(isPresented: $isConfirmingBypass) {
+                    model.update(bot.id) { $0.permissionMode = .bypass }
                 }
 
                 Section {

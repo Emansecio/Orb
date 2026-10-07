@@ -111,9 +111,13 @@ actor AgentEngine {
         }
         let summary = tool.summary(arguments)
 
+        // Shell text a tool would run (commands, or AppleScript's `do shell script`) checked for destructive patterns.
+        let danger = (arguments["command"]?.string ?? arguments["script"]?.string).flatMap(DangerousCommand.reason)
         if tool.risk(arguments) == .sensitive {
             switch request.bot.permissionMode {
-            case .auto:
+            case .bypass:
+                break
+            case .auto where danger == nil, .ask where danger == nil && allowed.contains(call.name):
                 break
             case .readOnly:
                 // Read-only wins over any earlier "Sempre permitir".
@@ -121,10 +125,11 @@ actor AgentEngine {
                                                 state: .failed, output: "Bloqueado: o bot está em modo Só leitura.",
                                                 finishedAt: .now)))
                 return "Not run: the user set this bot to read-only mode. Explain what you would do instead."
-            case .ask where !allowed.contains(call.name):
+            case .ask, .auto:
                 // The model's own explanation is already on screen right above the card.
-                let approval = ApprovalRequest(toolName: call.name, title: summary.title, command: summary.detail,
-                                               reason: reason.isEmpty ? "\(request.bot.name) precisa da sua permissão para continuar." : "")
+                let why = danger.map { "Comando arriscado: \($0)." }
+                    ?? (reason.isEmpty ? "\(request.bot.name) precisa da sua permissão para continuar." : "")
+                let approval = ApprovalRequest(toolName: call.name, title: summary.title, command: summary.detail, reason: why)
                 out.yield(.approval(approval))
                 out.yield(.status("Esperando sua resposta"))
                 let decision = await withCheckedContinuation { pending[approval.id] = (request.bot.id, $0) }
@@ -133,8 +138,6 @@ actor AgentEngine {
                 case .always: allowed.insert(call.name)
                 case .once: break
                 }
-            case .ask:
-                break
             }
         }
 

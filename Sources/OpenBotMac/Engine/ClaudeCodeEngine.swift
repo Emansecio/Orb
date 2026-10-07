@@ -141,14 +141,16 @@ actor ClaudeCodeEngine {
     /// Answers a `can_use_tool` request: by the bot's mode and "Sempre permitir" list, or by asking the user.
     private func permission(_ request: ClaudeCodePermissionRequest, turn: ClaudeCodeTurn, hasText: Bool,
                             allowed: inout Set<String>, out: AsyncStream<TurnEvent>.Continuation) async -> ClaudeCodePermissionAnswer {
-        if let answer = ClaudeCodePolicy.answer(mode: turn.bot.permissionMode, toolName: request.toolName, allowed: allowed) {
+        if let answer = ClaudeCodePolicy.answer(mode: turn.bot.permissionMode, toolName: request.toolName,
+                                                input: request.input, allowed: allowed) {
             return answer
         }
         guard !Task.isCancelled else { return .deny(ClaudeCodePolicy.userDenial) }
         let summary = ClaudeCodeTools.summary(request.toolName, request.input)
         let fallback = hasText ? "" : "\(turn.bot.name) precisa da sua permissão para continuar."
+        let danger = request.input["command"]?.string.flatMap(DangerousCommand.reason).map { "Comando arriscado: \($0)." }
         let approval = ApprovalRequest(toolName: request.toolName, title: summary.title, command: summary.detail,
-                                       reason: request.reason ?? fallback)
+                                       reason: danger ?? request.reason ?? fallback)
         out.yield(.approval(approval))
         out.yield(.status("Esperando sua resposta"))
         let decision = await withCheckedContinuation { pending[approval.id] = (turn.bot.id, $0) }

@@ -259,24 +259,30 @@ enum ClaudeCodeTools {
 
 enum ClaudeCodePolicy {
     /// `--permission-mode` for a bot: read-only plans (edits reach us and are denied), "ask" uses the default
-    /// mode (unapproved tools reach us as approval cards), automatic accepts edits and we allow the rest.
+    /// mode (unapproved tools reach us as approval cards), automatic accepts edits and we allow the rest except
+    /// destructive commands, and "sem pedir permissão" is Claude Code's own `bypassPermissions`.
     static func cliMode(_ mode: PermissionMode) -> String {
         switch mode {
         case .readOnly: "plan"
         case .ask: "default"
         case .auto: "acceptEdits"
+        case .bypass: "bypassPermissions"
         }
     }
 
     static let readOnlyDenial = "Not run: the user set this bot to read-only mode. Explain what you would do instead."
     static let userDenial = "The user denied this action. Do not retry it; ask or suggest an alternative."
 
-    /// The answer when no one needs to be asked; nil means show an approval card.
-    static func answer(mode: PermissionMode, toolName: String, allowed: Set<String>) -> ClaudeCodePermissionAnswer? {
+    /// The answer when no one needs to be asked; nil means show an approval card. Destructive shell commands
+    /// always ask in "Perguntar antes" and "Automático", even for tools marked "Sempre permitir".
+    static func answer(mode: PermissionMode, toolName: String, input: JSONValue = .null,
+                       allowed: Set<String>) -> ClaudeCodePermissionAnswer? {
+        let isDangerous = input["command"]?.string.flatMap(DangerousCommand.reason) != nil
         switch mode {
-        case .readOnly: .deny(readOnlyDenial)
-        case .auto: .allow
-        case .ask: allowed.contains(toolName) ? .allow : nil
+        case .readOnly: return .deny(readOnlyDenial)
+        case .bypass: return .allow
+        case .auto: return isDangerous ? nil : .allow
+        case .ask: return allowed.contains(toolName) && !isDangerous ? .allow : nil
         }
     }
 }

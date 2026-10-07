@@ -1,7 +1,7 @@
 import Foundation
 
 enum PermissionMode: String, CaseIterable, Identifiable, Codable, Sendable {
-    case ask, auto, readOnly
+    case ask, auto, bypass, readOnly
 
     var id: String { rawValue }
 
@@ -9,7 +9,17 @@ enum PermissionMode: String, CaseIterable, Identifiable, Codable, Sendable {
         switch self {
         case .ask: "Perguntar antes"
         case .auto: "Automático"
+        case .bypass: "Sem pedir permissão"
         case .readOnly: "Só leitura"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .ask: "Pede sua aprovação antes de mudar algo, rodar comandos ou acessar a web."
+        case .auto: "Faz tudo sozinho, mas pergunta antes de comandos destrutivos (rm -rf, sudo, push --force…)."
+        case .bypass: "Nunca pergunta: roda qualquer comando e altera qualquer arquivo sem confirmação."
+        case .readOnly: "Só lê e pesquisa; não muda nada no seu Mac."
         }
     }
 
@@ -17,6 +27,7 @@ enum PermissionMode: String, CaseIterable, Identifiable, Codable, Sendable {
         switch self {
         case .ask: "hand.raised"
         case .auto: "bolt"
+        case .bypass: "bolt.trianglebadge.exclamationmark"
         case .readOnly: "eye"
         }
     }
