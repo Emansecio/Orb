@@ -113,6 +113,8 @@ struct TranscriptItem: Identifiable, Codable, Sendable, Equatable {
 struct Conversation: Codable, Sendable {
     var items: [TranscriptItem] = []
     var messages: [ChatMessage] = []
+    /// Claude Code keeps its own history; turns run through it resume this session.
+    var claudeSessionID: String?
 
     /// After a quit or crash mid-turn: nothing is streaming, running or waiting anymore.
     func closingInterruptedTurn() -> Conversation {

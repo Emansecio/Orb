@@ -34,12 +34,14 @@ final class AppModel {
     /// Incremented when a prompt is sent; Orbs jump when it changes.
     var pokes: [UUID: Int] = [:]
     var connectorStatus: [UUID: MCPStatus] = [:]
-    /// Providers with a key in the Keychain (or, for ChatGPT, a sign-in).
+    /// Providers with a key in the Keychain (or, for ChatGPT and Claude Code, a sign-in).
     private(set) var connected: Set<ProviderKind> = []
     /// What each working bot's current tool does, and bots waiting for an approval. Kept apart from the
     /// transcript so the Orbs (sidebar, inspector) don't re-render on every streamed token.
     private var runningTool: [UUID: ToolCall.Kind] = [:]
     private var awaitingApproval: Set<UUID> = []
+    /// What the local Claude Code reports (checked while that provider is set up).
+    private(set) var claudeCode = ClaudeCodeStatus()
     var selection: SidebarItem? {
         didSet {
             if case .bot(let id) = selection { update(id) { $0.unread = 0 } }
@@ -50,6 +52,9 @@ final class AppModel {
 
     @ObservationIgnored private let store: Store
     @ObservationIgnored private let engine = AgentEngine()
+    @ObservationIgnored private let claudeEngine = ClaudeCodeEngine()
+    /// Bots whose running turn belongs to `claudeEngine` (stop and approvals go there).
+    @ObservationIgnored private var claudeTurns: Set<UUID> = []
     @ObservationIgnored private let mcp = MCPManager()
     @ObservationIgnored private var turns: [UUID: Task<Void, Never>] = [:]
     /// Bot id → routine id, for turns started by a routine.
@@ -170,10 +175,11 @@ final class AppModel {
         if ModelRef(defaultModel)?.provider == kind { defaultModel = "" }
     }
 
-    /// Forgets the key or sign-in (the provider stays listed).
+    /// Forgets the key or sign-in (the provider stays listed). Claude Code's own login is left alone:
+    /// it belongs to the user's Claude Code, not to OpenBot (see `signOutOfClaudeCode`).
     func signOut(_ kind: ProviderKind) {
         Keychain.set("", account: kind.rawValue)
-        if kind.usesSignIn { Task { await ChatGPTAuth.shared.signOut() } }
+        if kind == .chatgpt { Task { await ChatGPTAuth.shared.signOut() } }
         connected.remove(kind)
         updateProvider(kind) { $0.models = [] }
     }
@@ -190,18 +196,35 @@ final class AppModel {
         try await refreshModels(kind)
     }
 
-    /// Browser sign-in (ChatGPT), then loads the plan's models.
+    /// Browser sign-in (ChatGPT's, or Claude Code's own `claude auth login`), then loads the plan's models.
     func signIn(_ kind: ProviderKind) async throws {
-        guard kind == .chatgpt else { return }
-        _ = try await ChatGPTAuth.shared.signIn { url in await MainActor.run { _ = NSWorkspace.shared.open(url) } }
+        switch kind {
+        case .chatgpt:
+            _ = try await ChatGPTAuth.shared.signIn { url in await MainActor.run { _ = NSWorkspace.shared.open(url) } }
+        case .claudeCode:
+            try await ClaudeCode.shared.login()
+        default:
+            return
+        }
         addProvider(kind)
         await refreshConnections()
+        if kind == .claudeCode && !connected.contains(kind) { throw ToolError("O login do Claude Code não foi concluído.") }
         try await refreshModels(kind)
+    }
+
+    /// Runs `claude auth logout`: Claude Code signs out on this Mac (in the Terminal too).
+    func signOutOfClaudeCode() async {
+        await ClaudeCode.shared.logout()
+        await refreshConnections()
     }
 
     func refreshConnections() async {
         var found = Set(ProviderKind.allCases.filter { $0.needsKey && Keychain.get($0.rawValue) != nil })
         if await ChatGPTAuth.shared.credential != nil { found.insert(.chatgpt) }
+        if account(.claudeCode) != nil {
+            claudeCode = await ClaudeCode.shared.status()
+            if claudeCode.isLoggedIn { found.insert(.claudeCode) }
+        }
         connected = found
     }
 
@@ -227,7 +250,7 @@ final class AppModel {
     }
 
     private func token(for kind: ProviderKind) async throws -> String? {
-        kind.usesSignIn ? try await ChatGPTAuth.shared.accessToken() : Keychain.get(kind.rawValue)
+        kind == .chatgpt ? try await ChatGPTAuth.shared.accessToken() : Keychain.get(kind.rawValue)
     }
 
     // MARK: Bots
@@ -316,6 +339,10 @@ final class AppModel {
         if !attachments.isEmpty {
             prompt += "\n\nAttached files (read them with your tools):\n" + attachments.map { "- \($0.path)" }.joined(separator: "\n")
         }
+        if ref.provider == .claudeCode {
+            runClaudeCode(bot, model: ref.model, prompt: prompt)
+            return
+        }
         let system = SystemPrompt.make(bot: bot, skills: enabledSkills)
         let history = (conversations[botID]?.messages ?? []).modelContext()
         let context = ToolContext(workingDirectory: bot.workingURL) { [weak self] fact in
@@ -337,21 +364,49 @@ final class AppModel {
             if bot.capabilities.contains(.connectors) { tools += await mcp.tools() }
             let request = TurnRequest(bot: bot, model: ref.model, system: system, history: history, prompt: prompt,
                                       client: client, tools: tools, context: context)
-            var succeeded = true
-            for await event in engine.run(request) {
-                // A stopped stream still delivers queued events; `stop` already closed the turn.
-                guard !Task.isCancelled else { break }
-                if case .failed = event { succeeded = false }
-                apply(event, to: botID)
-            }
-            if !Task.isCancelled { finishTurn(botID, succeeded: succeeded) }
+            await play(engine.run(request), for: botID)
         }
+    }
+
+    /// A turn run by the user's Claude Code, continuing the conversation's Claude Code session.
+    private func runClaudeCode(_ bot: Bot, model: String, prompt: String) {
+        let botID = bot.id
+        let sessionID = conversations[botID]?.claudeSessionID
+        let system = ClaudeCodePrompt.make(bot: bot, skills: enabledSkills)
+        let servers = bot.capabilities.contains(.connectors) ? connectors.filter(\.isEnabled) : []
+        claudeTurns.insert(botID)
+        turns[botID] = Task {
+            guard let installation = await ClaudeCode.shared.installation() else {
+                apply(.failed("O Claude Code não foi encontrado neste Mac. Veja Ajustes → Modelos."), to: botID)
+                finishTurn(botID, succeeded: false)
+                return
+            }
+            let turn = ClaudeCodeTurn(bot: bot, executable: installation.executable, model: model, system: system,
+                                      prompt: prompt, sessionID: sessionID, connectors: servers,
+                                      environment: await ClaudeCode.shared.environment(for: installation))
+            await play(claudeEngine.run(turn), for: botID)
+        }
+    }
+
+    private func play(_ events: AsyncStream<TurnEvent>, for botID: UUID) async {
+        var succeeded = true
+        for await event in events {
+            // A stopped stream still delivers queued events; `stop` already closed the turn.
+            guard !Task.isCancelled else { break }
+            if case .failed = event { succeeded = false }
+            apply(event, to: botID)
+        }
+        if !Task.isCancelled { finishTurn(botID, succeeded: succeeded) }
     }
 
     func stop(_ botID: UUID) {
         guard let task = turns[botID] else { return }
         task.cancel()
-        Task { await engine.cancelApprovals(for: botID) }
+        if claudeTurns.contains(botID) {
+            Task { await claudeEngine.cancelApprovals(for: botID) }
+        } else {
+            Task { await engine.cancelApprovals(for: botID) }
+        }
         closeStreaming(botID)
         awaitingApproval.remove(botID)
         mutateItems(of: botID) { items in
@@ -381,7 +436,11 @@ final class AppModel {
         if decision == .always, let toolName {
             update(botID) { $0.allowedTools.insert(toolName) }
         }
-        Task { await engine.resolve(approvalID: approvalID, decision: decision) }
+        if claudeTurns.contains(botID) {
+            Task { await claudeEngine.resolve(approvalID: approvalID, decision: decision) }
+        } else {
+            Task { await engine.resolve(approvalID: approvalID, decision: decision) }
+        }
     }
 
     private func apply(_ event: TurnEvent, to botID: UUID) {
@@ -423,12 +482,16 @@ final class AppModel {
         case .failed(let message):
             closeStreaming(botID)
             append(.notice("Não deu certo: \(message)"), to: botID)
+        case .session(let id):
+            conversations[botID, default: Conversation()].claudeSessionID = id.isEmpty ? nil : id
+            scheduleConversationSave(botID, delay: 1)
         }
     }
 
     private func finishTurn(_ botID: UUID, succeeded: Bool = true) {
         guard turns[botID] != nil else { return }
         turns[botID] = nil
+        claudeTurns.remove(botID)
         closeStreaming(botID)
         statusLine[botID] = nil
         runningTool[botID] = nil
