@@ -55,10 +55,6 @@ struct Spring: Equatable {
             value += velocity * h
         }
     }
-
-    func isSettled(at target: Double, tolerance: Double = 0.001) -> Bool {
-        abs(value - target) < tolerance && abs(velocity) < tolerance * 10
-    }
 }
 
 /// A 2D point that follows its target with a spring on each axis.
@@ -152,20 +148,6 @@ enum OrbFrameRate {
     static func rate(forSpeed pixelsPerSecond: Double, cap: Float) -> Float {
         let needed = Float(pixelsPerSecond / maxStep)
         return min(cap, steps.first { $0 >= needed } ?? cap)
-    }
-}
-
-/// Seeded generator (SplitMix64) for reproducible tests; the app uses `SystemRandomNumberGenerator`.
-struct SeededRandom: RandomNumberGenerator {
-    private var state: UInt64
-    init(seed: UInt64) { state = seed }
-
-    mutating func next() -> UInt64 {
-        state &+= 0x9E37_79B9_7F4A_7C15
-        var z = state
-        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
-        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
-        return z ^ (z >> 31)
     }
 }
 
