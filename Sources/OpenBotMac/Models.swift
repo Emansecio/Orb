@@ -91,8 +91,8 @@ struct MemoryFact: Identifiable, Hashable, Codable, Sendable {
     var text: String
 }
 
-struct TranscriptItem: Identifiable, Codable, Sendable {
-    enum Kind: Codable, Sendable {
+struct TranscriptItem: Identifiable, Codable, Sendable, Equatable {
+    enum Kind: Codable, Sendable, Equatable {
         case user(text: String, attachments: [String])
         case bot(text: String, isStreaming: Bool)
         case tool(ToolCall)
@@ -136,7 +136,7 @@ struct Conversation: Codable, Sendable {
     }
 }
 
-struct ToolCall: Identifiable, Codable, Sendable {
+struct ToolCall: Identifiable, Codable, Sendable, Equatable {
     enum Kind: String, Codable, Sendable {
         case shell, browser, file, search, computer, connector, memory
 
@@ -181,7 +181,7 @@ enum ApprovalDecision: String, Codable, Sendable, Equatable {
     }
 }
 
-struct ApprovalRequest: Identifiable, Codable, Sendable {
+struct ApprovalRequest: Identifiable, Codable, Sendable, Equatable {
     var id = UUID()
     /// Model-facing tool name ("Sempre permitir" remembers it per bot).
     var toolName: String

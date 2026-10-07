@@ -1,6 +1,7 @@
 import SwiftUI
 
-struct TranscriptRow: View {
+/// Equatable: while a reply streams, only the row whose item changed re-renders.
+struct TranscriptRow: View, Equatable {
     let item: TranscriptItem
     let bot: Bot
 
@@ -67,7 +68,7 @@ private struct BotMessage: View {
     var body: some View {
         HStack(alignment: .bottom, spacing: 10) {
             BotAvatar(bot: bot, size: 30, animated: false)
-            (Text(Self.markdown(text)) + Text(isStreaming ? " ●" : "").foregroundColor(Palette.faint))
+            content
                 .font(Palette.conversationFont)
                 .foregroundStyle(Palette.ink)
                 .lineSpacing(Palette.conversationLineSpacing)
@@ -79,7 +80,30 @@ private struct BotMessage: View {
         }
     }
 
-    private static func markdown(_ text: String) -> AttributedString {
+    /// While streaming, the finished paragraphs and the one being written are two texts (rendered
+    /// pixel-identical to one), so each update re-parses and re-lays out only the last paragraph.
+    @ViewBuilder private var content: some View {
+        if isStreaming, let lastBreak = text.range(of: "\n\n", options: .backwards) {
+            VStack(alignment: .leading, spacing: Palette.conversationLineSpacing) {
+                MarkdownText(source: text[..<lastBreak.lowerBound] + "\n")
+                MarkdownText(source: String(text[lastBreak.upperBound...]), showsCursor: true)
+            }
+        } else {
+            MarkdownText(source: text, showsCursor: isStreaming)
+        }
+    }
+}
+
+/// Inline Markdown. Equatable on its source, so unchanged text is neither re-parsed nor re-measured.
+private struct MarkdownText: View, Equatable {
+    let source: String
+    var showsCursor = false
+
+    var body: some View {
+        Text(Self.parse(source)) + Text(showsCursor ? " ●" : "").foregroundColor(Palette.faint)
+    }
+
+    private static func parse(_ text: String) -> AttributedString {
         let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
     }
@@ -118,6 +142,7 @@ struct ToolCallLine: View {
             }
             .buttonStyle(.plain)
             .disabled(call.output == nil)
+            .animateChanges(of: call.state)
 
             if isExpanded, let output = call.output {
                 Text(output)
@@ -209,6 +234,6 @@ struct ApprovalCard: View {
         .opacity(isPending ? 1 : 0.7)
         .padding(.leading, gutter)
         .frame(maxWidth: 560, alignment: .leading)
-        .animation(.snappy, value: request.decision)
+        .animateChanges(of: request.decision)
     }
 }

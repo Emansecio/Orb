@@ -177,6 +177,7 @@ private struct ExploreSkills: View {
                     }
                 }
             }
+            .animateChanges(of: isLoading)
             .padding(24)
             .frame(maxWidth: 980)
             .frame(maxWidth: .infinity)
@@ -241,13 +242,15 @@ private struct CatalogSkillCard: View {
                     if let document {
                         Text(document.description.isEmpty ? "Sem descrição." : document.description)
                     } else {
-                        Text("Carregando descrição…").shimmer()
+                        // Static: a grid of cards loading at once shouldn't run a shimmer each.
+                        Text("Carregando descrição…").foregroundStyle(Palette.faint)
                     }
                 }
                 .font(.system(size: 12))
                 .foregroundStyle(Palette.muted)
                 .lineLimit(3, reservesSpace: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .animateChanges(of: document == nil)
                 HStack(spacing: 6) {
                     if entry.isFromKnownSource {
                         CatalogBadge(text: "Fonte conhecida", symbol: "checkmark.seal.fill", tint: Palette.accentText)

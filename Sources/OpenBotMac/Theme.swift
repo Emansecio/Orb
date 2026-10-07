@@ -75,18 +75,36 @@ extension View {
         modifier(CardBackground(radius: radius, fill: fill, stroke: stroke, lineWidth: lineWidth))
     }
 
-    /// Sweeping highlight across dim text, used for "working" states.
+    /// Sweeping highlight across dim text, used for "working" states (steady text under Reduce Motion).
     func shimmer(active: Bool = true) -> some View {
         modifier(Shimmer(active: active))
+    }
+
+    /// Animates what changes along with `value` (rows appearing, states settling) with the app's one
+    /// content curve; instant under Reduce Motion.
+    func animateChanges(of value: some Equatable) -> some View {
+        modifier(ContentAnimation(value: value))
+    }
+}
+
+private struct ContentAnimation<Value: Equatable>: ViewModifier {
+    let value: Value
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content.animation(reduceMotion ? nil : .smooth(duration: 0.25), value: value)
     }
 }
 
 private struct Shimmer: ViewModifier {
     let active: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var phase: CGFloat = -0.6
 
     func body(content: Content) -> some View {
-        if active {
+        if active && reduceMotion {
+            content.foregroundStyle(Palette.muted)
+        } else if active {
             content
                 .foregroundStyle(Palette.faint)
                 .overlay {

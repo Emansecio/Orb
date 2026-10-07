@@ -16,7 +16,7 @@ struct OpenBotMacApp: App {
                 .task {
                     // Dev aid for scripted end-to-end checks: OPENBOT_SEND="texto" sends it to the selected bot on launch.
                     if let text = ProcessInfo.processInfo.environment["OPENBOT_SEND"], !Self.didSendLaunchPrompt,
-                       let id = model.selectedBot?.id {
+                       !CommandLine.arguments.contains("--snapshot"), let id = model.selectedBot?.id {
                         Self.didSendLaunchPrompt = true
                         model.send(text, to: id)
                     }
@@ -174,11 +174,16 @@ enum OrbSheet {
 /// Offscreen render of one screen with real data, for visual review without touching the user's screen.
 @MainActor
 enum Snapshot {
-    static let screens = ["chat", "skills", "skills-explore", "connectors", "connectors-explore", "routines"]
+    static let screens = ["app", "chat", "skills", "skills-explore", "connectors", "connectors-explore", "routines"]
 
     static func render(_ screen: String, to url: URL) {
         let model = AppModel()
+        // OPENBOT_SEND works here too, so a streaming turn can be profiled without a visible window.
+        if let text = ProcessInfo.processInfo.environment["OPENBOT_SEND"], let id = model.selectedBot?.id {
+            model.send(text, to: id)
+        }
         let content: AnyView = switch screen {
+        case "app": AnyView(RootView())
         case "skills": AnyView(SkillsView())
         case "skills-explore": AnyView(SkillsView(tab: .explore))
         case "connectors": AnyView(ConnectorsView())
