@@ -17,23 +17,31 @@ struct ProviderSettings: View {
                      ? "Adicione um provedor abaixo para escolher um modelo."
                      : "Usado pelos bots que não têm um modelo próprio. As listas de modelos se atualizam sozinhas.")
             }
-            ForEach(model.providers) { account in
-                ProviderSection(kind: account.kind)
-            }
             Section {
+                ForEach(model.providers) { account in
+                    ProviderRow(kind: account.kind)
+                }
                 Menu("Adicionar provedor", systemImage: "plus") {
                     ForEach(available) { kind in
-                        Button(kind.label) { model.addProvider(kind) }
+                        Button(kind.label) {
+                            model.addProvider(kind)
+                            ProviderExpansion.set(kind, expanded: true) // a new provider opens for setup
+                        }
                     }
                 }
                 .disabled(available.isEmpty)
+            } header: {
+                Text("Provedores")
+            } footer: {
+                Text("Clique num provedor para abrir ou recolher. Só o do modelo padrão começa aberto.")
             }
         }
         .formStyle(.grouped)
     }
 }
 
-private struct ProviderSection: View {
+/// One provider as an expandable row: status at a glance, details (sign-in or key, models, enable, remove) inside.
+private struct ProviderRow: View {
     @Environment(AppModel.self) private var model
     let kind: ProviderKind
     @State private var key = ""
@@ -41,14 +49,46 @@ private struct ProviderSection: View {
     @State private var error: String?
     @State private var email: String?
     @State private var isConfirmingRemoval = false
+    @AppStorage(ProviderExpansion.storageKey) private var expansion = ""
 
     private var account: ProviderAccount? { model.account(kind) }
     private var isConnected: Bool { account.map(model.isUsable) ?? false }
+    private var isDefault: Bool { ModelRef(model.defaultModel)?.provider == kind }
+    /// The user's choice, else open only the provider of the default model.
+    private var isExpanded: Bool { ProviderExpansion.parse(expansion)[kind] ?? isDefault }
 
     var body: some View {
         if let account {
-            Section {
-                LabeledContent("Status") { status(account) }
+            DisclosureGroup(isExpanded: Binding(get: { isExpanded }, set: { ProviderExpansion.set(kind, expanded: $0) })) {
+                Text(kind.summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                details(account)
+            } label: {
+                HStack(spacing: 8) {
+                    Text(kind.label)
+                    if isDefault {
+                        CatalogBadge(text: "Padrão", tint: Palette.accentText)
+                    }
+                    Spacer()
+                    status(account)
+                }
+                .contentShape(.rect)
+                .onTapGesture {
+                    withAnimation(.snappy(duration: 0.2)) { ProviderExpansion.set(kind, expanded: !isExpanded) }
+                }
+            }
+            .confirmationDialog("Remover \(kind.label)?", isPresented: $isConfirmingRemoval) {
+                Button("Remover e apagar a chave", role: .destructive) { model.removeProvider(kind) }
+            } message: {
+                Text("Bots que usam modelos deste provedor passam a usar o modelo padrão.")
+            }
+            .task(id: kind) { email = kind == .chatgpt ? await ChatGPTAuth.shared.credential?.email : nil }
+        }
+    }
+
+    @ViewBuilder private func details(_ account: ProviderAccount) -> some View {
                 if kind == .claudeCode {
                     ClaudeCodeAccountRow()
                 } else if kind.usesSignIn {
@@ -77,18 +117,6 @@ private struct ProviderSection: View {
                         .font(.caption)
                         .foregroundStyle(Palette.warn)
                 }
-            } header: {
-                Text(kind.label)
-            } footer: {
-                Text(kind.summary)
-            }
-            .confirmationDialog("Remover \(kind.label)?", isPresented: $isConfirmingRemoval) {
-                Button("Remover e apagar a chave", role: .destructive) { model.removeProvider(kind) }
-            } message: {
-                Text("Bots que usam modelos deste provedor passam a usar o modelo padrão.")
-            }
-            .task(id: kind) { email = kind == .chatgpt ? await ChatGPTAuth.shared.credential?.email : nil }
-        }
     }
 
     @ViewBuilder private func status(_ account: ProviderAccount) -> some View {
@@ -161,5 +189,25 @@ private struct ProviderSection: View {
             do { try await work() } catch { self.error = error.localizedDescription }
             isWorking = false
         }
+    }
+}
+
+/// Which provider sections are open in Ajustes → Modelos, remembered as "kind:1,kind:0" in UserDefaults.
+enum ProviderExpansion {
+    static let storageKey = "expandedProviders"
+
+    static func parse(_ text: String) -> [ProviderKind: Bool] {
+        Dictionary(text.split(separator: ",").compactMap { pair -> (ProviderKind, Bool)? in
+            let parts = pair.split(separator: ":")
+            guard parts.count == 2, let kind = ProviderKind(rawValue: String(parts[0])) else { return nil }
+            return (kind, parts[1] == "1")
+        }, uniquingKeysWith: { _, last in last })
+    }
+
+    static func set(_ kind: ProviderKind, expanded: Bool) {
+        var state = parse(UserDefaults.standard.string(forKey: storageKey) ?? "")
+        state[kind] = expanded
+        UserDefaults.standard.set(state.map { "\($0.key.rawValue):\($0.value ? 1 : 0)" }.sorted().joined(separator: ","),
+                                  forKey: storageKey)
     }
 }

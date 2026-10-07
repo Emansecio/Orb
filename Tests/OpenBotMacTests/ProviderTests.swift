@@ -93,3 +93,11 @@ struct ProviderTests {
         #expect(account.client(for: messages, token: "k", conversationID: "abc") is AnthropicClient)
     }
 }
+
+struct ProviderExpansionTests {
+    @Test func remembersOpenAndClosedProviders() {
+        let state = ProviderExpansion.parse("xai:0,claudeCode:1,nope:1,quebrado")
+        #expect(state == [.xai: false, .claudeCode: true])
+        #expect(ProviderExpansion.parse("").isEmpty)
+    }
+}
