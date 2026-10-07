@@ -4,15 +4,17 @@ import Foundation
 struct AnthropicClient: LLMClient {
     let baseURL: URL
     let apiKey: String?
+    var extraHeaders: [String: String] = [:]
     let session: URLSession
     /// Upper bound on the reply length (the API requires one).
     var maxTokens = 16_000
 
     static let apiVersion = "2023-06-01"
 
-    init(baseURL: URL, apiKey: String?, session: URLSession = .shared) {
+    init(baseURL: URL, apiKey: String?, extraHeaders: [String: String] = [:], session: URLSession = .shared) {
         self.baseURL = baseURL
         self.apiKey = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.extraHeaders = extraHeaders
         self.session = session
     }
 
@@ -71,7 +73,8 @@ struct AnthropicClient: LLMClient {
     }
 
     private func makeRequest(_ path: String) -> URLRequest {
-        var request = URLRequest(url: baseURL.appending(path: path))
+        // Anthropic takes the key in `x-api-key`; gateways accept it there too.
+        var request = OpenAIClient.authorizedRequest(baseURL.appending(path: path), apiKey: nil, headers: extraHeaders)
         request.setValue(Self.apiVersion, forHTTPHeaderField: "anthropic-version")
         if let apiKey, !apiKey.isEmpty { request.setValue(apiKey, forHTTPHeaderField: "x-api-key") }
         return request

@@ -6,8 +6,6 @@ struct RegistryServer: Identifiable, Hashable, Sendable {
     let id: String
     let title: String
     let summary: String
-    let version: String
-    let repository: URL?
     /// Ready-to-edit connector (secrets left blank for the user to fill in).
     let config: MCPServerConfig
     /// Variables or headers the user must (or may) fill in.
@@ -82,10 +80,7 @@ struct MCPRegistry: Sendable {
             return nil
         }
         config.source = name
-        return RegistryServer(id: name, title: title, summary: json["description"]?.string ?? "",
-                              version: json["version"]?.string ?? "",
-                              repository: json["repository"]?["url"]?.string.flatMap(URL.init(string:)),
-                              config: config, inputs: inputs)
+        return RegistryServer(id: name, title: title, summary: json["description"]?.string ?? "", config: config, inputs: inputs)
     }
 
     /// Streamable HTTP when offered, otherwise legacy SSE.

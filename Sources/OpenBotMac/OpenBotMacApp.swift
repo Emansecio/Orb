@@ -174,8 +174,6 @@ enum OrbSheet {
 /// Offscreen render of one screen with real data, for visual review without touching the user's screen.
 @MainActor
 enum Snapshot {
-    static let screens = ["chat", "skills", "skills-explore", "connectors", "connectors-explore", "routines"]
-
     static func render(_ screen: String, to url: URL) {
         let model = AppModel()
         let content: AnyView = switch screen {

@@ -4,11 +4,13 @@ import Foundation
 struct OpenAIClient: LLMClient {
     let baseURL: URL
     let apiKey: String?
+    var extraHeaders: [String: String] = [:]
     let session: URLSession
 
-    init(baseURL: URL, apiKey: String?, session: URLSession = .shared) {
+    init(baseURL: URL, apiKey: String?, extraHeaders: [String: String] = [:], session: URLSession = .shared) {
         self.baseURL = baseURL
         self.apiKey = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.extraHeaders = extraHeaders
         self.session = session
     }
 
@@ -68,10 +70,20 @@ struct OpenAIClient: LLMClient {
     }
 
     private func makeRequest(_ path: String) -> URLRequest {
-        var request = URLRequest(url: baseURL.appending(path: path))
+        Self.authorizedRequest(baseURL.appending(path: path), apiKey: apiKey, headers: extraHeaders)
+    }
+
+    /// Identifies the app (some gateways reject generic HTTP-library user agents).
+    static let userAgent = "OpenBot/\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev") (macOS)"
+
+    /// A request with `Authorization: Bearer` (when a key is set), the app's User-Agent and any extra headers.
+    static func authorizedRequest(_ url: URL, apiKey: String?, headers: [String: String] = [:]) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         if let apiKey, !apiKey.isEmpty {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
+        for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
         return request
     }
 }
