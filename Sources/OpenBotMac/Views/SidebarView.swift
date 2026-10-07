@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openSettings) private var openSettings
     @State private var deleting: Bot?
 
     var body: some View {
@@ -55,10 +56,19 @@ struct SidebarView: View {
             Text("A conversa, a memória e as rotinas deste bot serão apagadas.")
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            SidebarRow(isSelected: false) {
-                model.showNewBot = true
-            } content: {
-                NavLabel(title: "Novo bot", symbol: "plus")
+            VStack(alignment: .leading, spacing: 1) {
+                SidebarRow(isSelected: false) {
+                    openSettings()
+                } content: {
+                    NavLabel(title: "Ajustes", symbol: "gearshape")
+                }
+                .help("Ajustes (⌘,)")
+                SidebarRow(isSelected: false) {
+                    model.showNewBot = true
+                } content: {
+                    NavLabel(title: "Novo bot", symbol: "plus")
+                }
+                .help("Novo bot (⌘N)")
             }
             .padding(8)
             .background(Palette.chrome)
