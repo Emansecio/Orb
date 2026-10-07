@@ -1,0 +1,187 @@
+import Foundation
+import Testing
+@testable import OpenBotMac
+
+/// Plays back one scripted response per model call and records what the model was sent.
+private actor Script {
+    private var responses: [[LLMEvent]]
+    private(set) var received: [[ChatMessage]] = []
+
+    init(_ responses: [[LLMEvent]]) { self.responses = responses }
+
+    func next(_ messages: [ChatMessage]) -> [LLMEvent] {
+        received.append(messages)
+        return responses.isEmpty ? [.text("fim")] : responses.removeFirst()
+    }
+}
+
+private struct ScriptedLLM: LLMClient {
+    let script: Script
+
+    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec]) -> AsyncThrowingStream<LLMEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                for event in await script.next(messages) { continuation.yield(event) }
+                continuation.finish()
+            }
+        }
+    }
+
+    func models() async throws -> [String] { ["fake"] }
+}
+
+private actor Counter {
+    private(set) var value = 0
+    func increment() { value += 1 }
+}
+
+/// A sensitive tool that counts its runs.
+private struct TouchTool: AgentTool {
+    let runs: Counter
+    var spec: ToolSpec { ToolSpec(name: "touch", description: "Touches a file", parameters: .schema([:])) }
+    var kind: ToolCall.Kind { .file }
+    var capability: Capability? { nil }
+    func risk(_ arguments: JSONValue) -> ToolRisk { .sensitive }
+    func summary(_ arguments: JSONValue) -> (title: String, detail: String) { ("Tocando", "arquivo") }
+    func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
+        await runs.increment()
+        return "ok"
+    }
+}
+
+struct AgentEngineTests {
+    private func request(_ script: Script, mode: PermissionMode, allowed: Set<String> = [], runs: Counter) -> TurnRequest {
+        var bot = Bot(name: "Teste", role: "", orb: OrbConfig(), permissionMode: mode)
+        bot.allowedTools = allowed
+        return TurnRequest(bot: bot, model: "fake", system: "sys", history: [], prompt: "oi",
+                           client: ScriptedLLM(script: script), tools: [TouchTool(runs: runs)],
+                           context: ToolContext(workingDirectory: URL(fileURLWithPath: NSTemporaryDirectory())) { _ in })
+    }
+
+    private let touchCall = LLMEvent.toolCalls([ToolCallRequest(id: "c1", name: "touch", arguments: "{}")])
+
+    /// Collects events; approves (or denies) every approval request with `decision`.
+    private func run(_ engine: AgentEngine, _ request: TurnRequest, decision: ApprovalDecision = .once) async -> [TurnEvent] {
+        var events: [TurnEvent] = []
+        for await event in engine.run(request) {
+            events.append(event)
+            if case .approval(let approval) = event {
+                await engine.resolve(approvalID: approval.id, decision: decision)
+            }
+        }
+        return events
+    }
+
+    private func messages(_ events: [TurnEvent]) -> [ChatMessage] {
+        events.compactMap { if case .message(let message) = $0 { message } else { nil } }
+    }
+
+    @Test func textOnlyTurnRecordsUserAndAssistant() async {
+        let script = Script([[.text("Olá"), .text("!")]])
+        let events = await run(AgentEngine(), request(script, mode: .ask, runs: Counter()))
+        #expect(messages(events).map(\.role) == [.user, .assistant])
+        #expect(messages(events).last?.content == "Olá!")
+    }
+
+    @Test func autoModeRunsToolAndFeedsResultBack() async {
+        let runs = Counter()
+        let script = Script([[touchCall], [.text("Feito")]])
+        let events = await run(AgentEngine(), request(script, mode: .auto, runs: runs))
+        #expect(await runs.value == 1)
+        #expect(messages(events).map(\.role) == [.user, .assistant, .tool, .assistant])
+        let secondCall = await script.received[1]
+        #expect(secondCall.first?.role == .system)
+        #expect(secondCall.last == .tool("c1", "ok"))
+    }
+
+    @Test func askModeDenialSkipsTheTool() async {
+        let runs = Counter()
+        let script = Script([[touchCall], [.text("Tudo bem")]])
+        let events = await run(AgentEngine(), request(script, mode: .ask, runs: runs), decision: .deny)
+        #expect(await runs.value == 0)
+        #expect(events.contains { if case .approval = $0 { true } else { false } })
+        #expect(messages(events)[2].content.contains("denied"))
+    }
+
+    @Test func alwaysAllowStopsAskingForThatTool() async {
+        let runs = Counter()
+        let script = Script([[touchCall], [touchCall], [.text("Pronto")]])
+        let events = await run(AgentEngine(), request(script, mode: .ask, runs: runs), decision: .always)
+        let approvals = events.filter { if case .approval = $0 { true } else { false } }
+        #expect(approvals.count == 1)
+        #expect(await runs.value == 2)
+    }
+
+    @Test func previouslyAllowedToolRunsWithoutAsking() async {
+        let runs = Counter()
+        let script = Script([[touchCall], [.text("Pronto")]])
+        let events = await run(AgentEngine(), request(script, mode: .ask, allowed: ["touch"], runs: runs))
+        #expect(!events.contains { if case .approval = $0 { true } else { false } })
+        #expect(await runs.value == 1)
+    }
+
+    @Test func readOnlyBlocksSensitiveTools() async {
+        let runs = Counter()
+        let script = Script([[touchCall], [.text("Ok")]])
+        let events = await run(AgentEngine(), request(script, mode: .readOnly, runs: runs))
+        #expect(await runs.value == 0)
+        #expect(messages(events)[2].content.contains("read-only"))
+    }
+
+    @Test func unknownToolAndBadArgumentsAreReportedToTheModel() async {
+        let script = Script([[.toolCalls([ToolCallRequest(id: "a", name: "nope", arguments: "{}"),
+                                          ToolCallRequest(id: "b", name: "touch", arguments: "{bad")])],
+                             [.text("Ok")]])
+        let events = await run(AgentEngine(), request(script, mode: .auto, runs: Counter()))
+        let results = messages(events).filter { $0.role == .tool }.map(\.content)
+        #expect(results.count == 2)
+        #expect(results[0].contains("unknown tool"))
+        #expect(results[1].contains("not valid JSON"))
+    }
+}
+
+struct ModelTests {
+    @Test func skillExpansion() throws {
+        let skills = Skill.starters
+        let expanded = try #require(SystemPrompt.expandSkill(in: "/resumir ~/notas.txt", skills: skills))
+        #expect(expanded.skill.slug == "resumir")
+        #expect(expanded.prompt.contains("User request: ~/notas.txt"))
+        #expect(SystemPrompt.expandSkill(in: "/inexistente oi", skills: skills) == nil)
+        #expect(SystemPrompt.expandSkill(in: "sem barra", skills: skills) == nil)
+    }
+
+    @Test func scheduleNextRun() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: "America/Sao_Paulo"))
+        let monday9 = try #require(calendar.date(from: DateComponents(year: 2026, month: 10, day: 5, hour: 9)))
+        let daily = Schedule.daily(hour: 8, minute: 30).next(after: monday9, calendar: calendar)
+        #expect(calendar.dateComponents([.day, .hour, .minute], from: daily) == DateComponents(day: 6, hour: 8, minute: 30))
+        let weekly = Schedule.weekly(weekday: 6, hour: 18, minute: 0).next(after: monday9, calendar: calendar)
+        #expect(calendar.dateComponents([.day, .hour], from: weekly) == DateComponents(day: 9, hour: 18))
+        #expect(Schedule.everyHours(3).next(after: monday9) == monday9.addingTimeInterval(3 * 3600))
+    }
+
+    @Test func oldBotFilesStillDecode() throws {
+        let json = #"{"id":"\#(UUID().uuidString)","name":"Velho"}"#
+        let bot = try JSONDecoder().decode(Bot.self, from: Data(json.utf8))
+        #expect(bot.name == "Velho")
+        #expect(bot.permissionMode == .ask)
+        #expect(bot.capabilities == [.terminal, .browser])
+    }
+
+    @Test func storeRoundTrip() throws {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = Store(directory: directory)
+        var state = AppState.initial
+        state.provider.defaultModel = "grok-4"
+        store.save(state)
+        #expect(store.loadState()?.bots.map(\.name) == ["Atlas"])
+        #expect(store.loadState()?.provider.defaultModel == "grok-4")
+
+        let botID = state.bots[0].id
+        let conversation = Conversation(items: [TranscriptItem(.user(text: "oi", attachments: []))], messages: [.user("oi")])
+        store.save(conversation, for: botID)
+        #expect(store.loadConversation(botID)?.messages == [.user("oi")])
+    }
+}

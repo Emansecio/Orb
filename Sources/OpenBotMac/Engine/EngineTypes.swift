@@ -41,7 +41,8 @@ enum JSONValue: Codable, Hashable, Sendable {
 
     var string: String? { if case .string(let value) = self { value } else { nil } }
     var number: Double? { if case .number(let value) = self { value } else { nil } }
-    var int: Int? { number.map { Int($0) } }
+    /// Truncated integer; nil for NaN or out-of-range numbers (never traps on model input).
+    var int: Int? { number.flatMap { Int(exactly: $0.rounded(.towardZero)) } }
     var bool: Bool? { if case .bool(let value) = self { value } else { nil } }
     var array: [JSONValue]? { if case .array(let value) = self { value } else { nil } }
 
@@ -162,7 +163,8 @@ enum ProviderPreset: String, Codable, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    var needsKey: Bool { ![.ollama, .lmstudio].contains(self) }
+    /// Local servers and custom endpoints usually work without a key.
+    var needsKey: Bool { ![.ollama, .lmstudio, .custom].contains(self) }
 }
 
 struct ProviderConfig: Codable, Hashable, Sendable {

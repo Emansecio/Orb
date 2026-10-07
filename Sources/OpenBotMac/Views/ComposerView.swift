@@ -49,7 +49,6 @@ struct ComposerView: View {
                 Button("Anexar", systemImage: "plus") { isImporting = true }
                     .help("Anexar arquivos")
                 SkillMenu { insert("/\($0) ") }
-                MentionMenu(currentBotID: bot.id) { insert("@\($0) ") }
                 PermissionMenu(bot: bot)
                 Spacer()
                 ModelMenu(bot: bot)
@@ -83,6 +82,10 @@ struct ComposerView: View {
         .background {
             LinearGradient(colors: [Palette.canvas.opacity(0), Palette.canvas], startPoint: .top, endPoint: .init(x: 0.5, y: 0.35))
         }
+        .dropDestination(for: URL.self) { urls, _ in
+            attachments.append(contentsOf: urls.filter(\.isFileURL))
+            return true
+        }
         .fileImporter(isPresented: $isImporting, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { attachments.append(contentsOf: urls) }
         }
@@ -91,7 +94,7 @@ struct ComposerView: View {
 
     private func send() {
         guard canSend else { return }
-        model.send(draft.wrappedValue, attachments: attachments.map(\.lastPathComponent), to: bot.id)
+        model.send(draft.wrappedValue, attachments: attachments, to: bot.id)
         attachments.removeAll()
     }
 
@@ -139,25 +142,6 @@ private struct SkillMenu: View {
     }
 }
 
-private struct MentionMenu: View {
-    @Environment(AppModel.self) private var model
-    let currentBotID: UUID
-    let onPick: (String) -> Void
-
-    var body: some View {
-        Menu {
-            ForEach(model.bots.filter { $0.id != currentBotID }) { other in
-                Button(other.name) { onPick(other.name) }
-            }
-        } label: {
-            Label("Chamar outro bot", systemImage: "at")
-        }
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("Chamar outro bot para a conversa")
-    }
-}
-
 private struct PermissionMenu: View {
     @Environment(AppModel.self) private var model
     let bot: Bot
@@ -188,15 +172,13 @@ private struct ModelMenu: View {
 
     var body: some View {
         Menu {
-            Picker("Modelo", selection: Binding(
+            ModelPicker(selection: Binding(
                 get: { bot.model },
                 set: { name in model.update(bot.id) { $0.model = name } }
-            )) {
-                ForEach(Catalog.models, id: \.self) { Text($0).tag($0) }
-            }
+            ))
             .pickerStyle(.inline)
         } label: {
-            Text(bot.model)
+            Text(model.modelID(for: bot).isEmpty ? "Sem modelo" : model.modelID(for: bot))
                 .font(.caption.weight(.medium))
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)

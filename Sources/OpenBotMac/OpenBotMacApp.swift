@@ -12,7 +12,6 @@ struct OpenBotMacApp: App {
                 .environment(model)
                 .frame(minWidth: 960, minHeight: 620)
                 .preferredColorScheme(.dark)
-                .task { await runDemoIfRequested() }
         }
         .defaultSize(width: 1280, height: 820)
         .commands { AppCommands(model: model) }
@@ -32,17 +31,6 @@ struct OpenBotMacApp: App {
     }
 }
 
-extension OpenBotMacApp {
-    /// Dev aid: `OPENBOT_DEMO=1` sends a prompt to the selected bot shortly after launch,
-    /// to watch the Orb go through listening → task activities → celebrating without typing.
-    @MainActor
-    private func runDemoIfRequested() async {
-        guard ProcessInfo.processInfo.environment["OPENBOT_DEMO"] != nil, let bot = model.selectedBot else { return }
-        try? await Task.sleep(for: .seconds(2))
-        model.send("Organize meus downloads e pesquise o que há de novo no macOS", to: bot.id)
-    }
-}
-
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -50,6 +38,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let arguments = CommandLine.arguments
         if let flag = arguments.firstIndex(of: "--render-orbs"), arguments.indices.contains(flag + 1) {
             OrbSheet.render(to: URL(fileURLWithPath: arguments[flag + 1]))
+            exit(0)
+        }
+        // `OpenBot --render-icon out.png` writes the 1024 px app icon (used by scripts/bundle.sh).
+        if let flag = arguments.firstIndex(of: "--render-icon"), arguments.indices.contains(flag + 1) {
+            OrbSheet.renderIcon(to: URL(fileURLWithPath: arguments[flag + 1]))
             exit(0)
         }
         // Needed when launched as a bare SwiftPM executable (no .app bundle).
@@ -93,7 +86,10 @@ struct AppCommands: Commands {
 enum OrbSheet {
     static func render(to url: URL) {
         let activities: [OrbActivity] = [.idle, .thinking, .typing, .searching, .waiting, .happy, .error, .sleepy]
-        let orbs = SeedData.make().bots.map(\.orb) + [
+        let orbs = AppState.initial.bots.map(\.orb) + [
+            OrbConfig(color: "rosa", eyes: "ovais", cheeks: "blush", hair: "tufinho", accessories: ["laco"]),
+            OrbConfig(color: "grafite", eyes: "pilulas", brows: "retas", mustache: "classico", accessories: ["fones"]),
+            OrbConfig(color: "menta", eyes: "felizes", mouth: "sorriso", cheeks: "sardas", accessories: ["flor"]),
             OrbConfig(color: "sol", eyes: "pontos", mouth: "sorrisao", mustache: "enrolado", mustacheColor: 0x5A3B22),
             OrbConfig(color: "noite", eyes: "pilulas", hair: "topete", accessories: ["cartola"]),
             OrbConfig(color: "perola", eyes: "pilulas", cheeks: "blush", accessories: ["aureola"]),
@@ -122,8 +118,27 @@ enum OrbSheet {
         .background(Palette.canvas)
         .environment(\.colorScheme, .dark)
 
-        let renderer = ImageRenderer(content: sheet)
-        renderer.scale = 2
+        write(sheet, scale: 2, to: url)
+    }
+
+    /// Atlas on the standard macOS icon tile (824 pt rounded square inside a 1024 canvas).
+    static func renderIcon(to url: URL) {
+        let orb = AppState.initial.bots[0].orb
+        let icon = ZStack {
+            RoundedRectangle(cornerRadius: 185, style: .continuous)
+                .fill(LinearGradient(colors: [Color(hex: 0x24233A), Color(hex: 0x09090F)], startPoint: .top, endPoint: .bottom))
+                .overlay(RoundedRectangle(cornerRadius: 185, style: .continuous).strokeBorder(.white.opacity(0.08), lineWidth: 2))
+                .frame(width: 824, height: 824)
+            OrbView(config: orb, size: 420, animated: false)
+                .offset(y: -20)
+        }
+        .frame(width: 1024, height: 1024)
+        write(icon, scale: 1, to: url)
+    }
+
+    private static func write(_ view: some View, scale: CGFloat, to url: URL) {
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = scale
         guard let image = renderer.nsImage, let tiff = image.tiffRepresentation,
               let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]) else { return }
         try? png.write(to: url)

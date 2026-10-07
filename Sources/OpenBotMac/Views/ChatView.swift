@@ -35,11 +35,16 @@ struct ChatView: View {
             .onAppear { proxy.scrollTo(BottomAnchor.id, anchor: .bottom) }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            ComposerView(bot: bot)
+            VStack(spacing: 0) {
+                if !model.isProviderReady {
+                    SetupBanner()
+                }
+                ComposerView(bot: bot)
+            }
         }
         .background(Palette.canvas)
         .navigationTitle(bot.name)
-        .navigationSubtitle(bot.model)
+        .navigationSubtitle(model.modelID(for: bot))
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button("Nova conversa", systemImage: "square.and.pencil") {
@@ -68,7 +73,7 @@ private struct EmptyChatView: View {
     private let suggestions = [
         ("folder", "Organize minha pasta Downloads"),
         ("envelope", "Resuma meus e-mails de hoje"),
-        ("clock.arrow.circlepath", "Crie uma rotina toda manhã"),
+        ("internaldrive", "Quanto espaço livre tenho no disco?"),
         ("terminal", "Veja o que está desatualizado no brew")
     ]
 
@@ -127,6 +132,30 @@ private struct SuggestionButton: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
+    }
+}
+
+/// Shown until a model provider is configured.
+private struct SetupBanner: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "cpu")
+                .foregroundStyle(Palette.muted)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Conecte um modelo para começar")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("xAI, OpenAI, OpenRouter ou um modelo local (Ollama, LM Studio).")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.muted)
+            }
+            Spacer()
+            SettingsLink { Text("Abrir Ajustes") }
+                .buttonStyle(PrimaryPillStyle())
+        }
+        .padding(14)
+        .card(radius: 14)
+        .frame(maxWidth: 760)
+        .padding(.horizontal, 28)
     }
 }
 

@@ -14,6 +14,11 @@ struct SidebarView: View {
                         BotRowContent(bot: bot, status: model.statusLine[bot.id], activity: model.activity(for: bot.id),
                                       isSelected: model.selection == .bot(bot.id), poke: model.pokes[bot.id, default: 0])
                     }
+                    .contextMenu {
+                        Button("Nova conversa") { model.newConversation(bot.id) }
+                        Divider()
+                        Button("Apagar \(bot.name)", role: .destructive) { model.deleteBot(bot.id) }
+                    }
                 }
 
                 SectionTitle("Espaço de trabalho")
@@ -21,8 +26,7 @@ struct SidebarView: View {
                 SidebarRow(isSelected: model.selection == .routines) {
                     model.selection = .routines
                 } content: {
-                    NavLabel(title: "Rotinas", symbol: "clock.arrow.circlepath",
-                             badge: model.routines.filter(\.pausedForInactivity).count)
+                    NavLabel(title: "Rotinas", symbol: "clock.arrow.circlepath")
                 }
                 SidebarRow(isSelected: model.selection == .connectors) {
                     model.selection = .connectors
@@ -92,7 +96,6 @@ private struct SidebarRow<Content: View>: View {
 private struct NavLabel: View {
     let title: String
     let symbol: String
-    var badge = 0
 
     var body: some View {
         HStack(spacing: 10) {
@@ -104,12 +107,6 @@ private struct NavLabel: View {
                 .font(.system(size: 13))
                 .foregroundStyle(Palette.secondary)
             Spacer(minLength: 4)
-            if badge > 0 {
-                Text("\(badge)")
-                    .font(.system(size: 11, weight: .medium))
-                    .monospacedDigit()
-                    .foregroundStyle(Palette.muted)
-            }
         }
     }
 }

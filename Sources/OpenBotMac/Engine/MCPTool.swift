@@ -58,10 +58,15 @@ actor MCPManager {
 
     private var entries: [UUID: Entry] = [:]
 
-    /// Stops removed, disabled or edited servers and starts new ones concurrently; returns once each has started or failed.
+    /// Stops removed, disabled, edited or dead servers and (re)starts the rest concurrently;
+    /// returns once each has started or failed.
     func sync(_ configs: [MCPServerConfig]) async {
         let wanted = Dictionary(configs.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        for (id, entry) in entries where wanted[id] != entry.config {
+        for (id, entry) in entries {
+            var stale = wanted[id] != entry.config
+            if case .failed = entry.status { stale = true }
+            if case .ready = entry.status, let connection = entry.connection, await !connection.isRunning { stale = true }
+            guard stale else { continue }
             entries[id] = nil
             await entry.connection?.stop()
         }

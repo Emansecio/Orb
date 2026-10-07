@@ -5,6 +5,8 @@ struct BotInspector: View {
     @Environment(AppModel.self) private var model
     let botID: UUID
     @State private var isEditingOrb = false
+    @State private var isPickingFolder = false
+    @State private var isConfirmingDelete = false
 
     var body: some View {
         if let bot = model.bot(botID) {
@@ -22,9 +24,7 @@ struct BotInspector: View {
                         }
                     }
                     .padding(.vertical, 4)
-                    Picker("Modelo", selection: binding(\.model)) {
-                        ForEach(Catalog.models, id: \.self) { Text($0).tag($0) }
-                    }
+                    ModelPicker(selection: binding(\.model, of: bot))
                 }
 
                 Section("Orb") {
@@ -38,7 +38,7 @@ struct BotInspector: View {
                 }
 
                 Section("Permissões") {
-                    Picker("Antes de agir", selection: binding(\.permissionMode)) {
+                    Picker("Antes de agir", selection: binding(\.permissionMode, of: bot)) {
                         ForEach(PermissionMode.allCases) { Text($0.label).tag($0) }
                     }
                     ForEach(Capability.allCases) { capability in
@@ -48,15 +48,26 @@ struct BotInspector: View {
                     }
                 }
 
-                Section("Mesa de trabalho") {
-                    WorkspaceRow(name: "Desktop", used: 0.12)
-                    WorkspaceRow(name: "Documentos", used: 0.34)
-                    WorkspaceRow(name: "Downloads", used: 0.71)
-                    WorkspaceRow(name: "Projetos", used: 0.48)
-                    LabeledContent("Local") {
-                        Text("~/OpenBot/\(bot.name)")
+                Section {
+                    LabeledContent("Pasta") {
+                        Text(bot.workingURL.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
                             .font(.caption.monospaced())
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.head)
+                    }
+                    Button("Escolher pasta…", systemImage: "folder") { isPickingFolder = true }
+                    ForEach(bot.allowedTools.sorted(), id: \.self) { tool in
+                        LabeledContent(tool) {
+                            Button("Revogar") { model.update(bot.id) { $0.allowedTools.remove(tool) } }
+                                .controlSize(.small)
+                        }
+                    }
+                } header: {
+                    Text("Trabalho")
+                } footer: {
+                    if !bot.allowedTools.isEmpty {
+                        Text("Ações acima rodam sem perguntar (“Sempre permitir”).")
                     }
                 }
 
@@ -90,15 +101,27 @@ struct BotInspector: View {
                             .foregroundStyle(.secondary)
                     }
                     ForEach(routines) { routine in
-                        LabeledContent(routine.name, value: routine.schedule)
+                        LabeledContent(routine.name, value: routine.schedule.label)
                     }
+                }
+
+                Section {
+                    Button("Apagar \(bot.name)…", role: .destructive) { isConfirmingDelete = true }
                 }
             }
             .formStyle(.grouped)
             .scrollContentBackground(.hidden)
+            .fileImporter(isPresented: $isPickingFolder, allowedContentTypes: [.folder]) { result in
+                if case .success(let url) = result { model.update(bot.id) { $0.workingDirectory = url.path } }
+            }
+            .confirmationDialog("Apagar \(bot.name)?", isPresented: $isConfirmingDelete) {
+                Button("Apagar bot e conversa", role: .destructive) { model.deleteBot(bot.id) }
+            } message: {
+                Text("A conversa, a memória e as rotinas deste bot serão apagadas.")
+            }
             .sheet(isPresented: $isEditingOrb) {
                 VStack(spacing: 0) {
-                    OrbEditor(config: binding(\.orb), name: bot.name)
+                    OrbEditor(config: binding(\.orb, of: bot), name: bot.name)
                     HStack {
                         Spacer()
                         Button("Pronto") { isEditingOrb = false }
@@ -114,9 +137,10 @@ struct BotInspector: View {
         }
     }
 
-    private func binding<Value>(_ keyPath: WritableKeyPath<Bot, Value>) -> Binding<Value> {
+    /// Falls back to the last rendered value, so a sheet closing after deletion never reads a missing bot.
+    private func binding<Value>(_ keyPath: WritableKeyPath<Bot, Value>, of bot: Bot) -> Binding<Value> {
         Binding(
-            get: { model.bot(botID)![keyPath: keyPath] },
+            get: { model.bot(botID)?[keyPath: keyPath] ?? bot[keyPath: keyPath] },
             set: { value in model.update(botID) { $0[keyPath: keyPath] = value } }
         )
     }
@@ -130,20 +154,5 @@ struct BotInspector: View {
                 }
             }
         )
-    }
-}
-
-private struct WorkspaceRow: View {
-    let name: String
-    let used: Double
-
-    var body: some View {
-        LabeledContent {
-            ProgressView(value: used)
-                .frame(width: 90)
-                .tint(used > 0.66 ? Palette.warn : Palette.muted)
-        } label: {
-            Label(name, systemImage: "folder")
-        }
     }
 }

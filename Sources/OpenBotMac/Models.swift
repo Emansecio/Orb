@@ -1,6 +1,6 @@
 import Foundation
 
-enum PermissionMode: String, CaseIterable, Identifiable, Sendable {
+enum PermissionMode: String, CaseIterable, Identifiable, Codable, Sendable {
     case ask, auto, readOnly
 
     var id: String { rawValue }
@@ -22,17 +22,17 @@ enum PermissionMode: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-enum Capability: String, CaseIterable, Identifiable, Sendable {
+enum Capability: String, CaseIterable, Identifiable, Codable, Sendable {
     case terminal, browser, computerUse, connectors
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
-        case .terminal: "Comandos no Terminal"
-        case .browser: "Navegador"
-        case .computerUse: "Controlar o Mac"
-        case .connectors: "Apps conectados"
+        case .terminal: "Terminal e arquivos"
+        case .browser: "Ler páginas da web"
+        case .computerUse: "Apps do Mac (AppleScript)"
+        case .connectors: "Conectores"
         }
     }
 
@@ -40,31 +40,59 @@ enum Capability: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .terminal: "terminal"
         case .browser: "globe"
-        case .computerUse: "cursorarrow.rays"
+        case .computerUse: "macwindow"
         case .connectors: "point.3.filled.connected.trianglepath.dotted"
         }
     }
 }
 
-struct Bot: Identifiable, Hashable, Sendable {
-    let id: UUID
+struct Bot: Identifiable, Hashable, Codable, Sendable {
+    var id = UUID()
     var name: String
     var role: String
     var orb: OrbConfig
-    var model: String
-    var permissionMode: PermissionMode
-    var capabilities: Set<Capability>
+    /// Model id; empty means the provider's default model.
+    var model = ""
+    var permissionMode = PermissionMode.ask
+    var capabilities: Set<Capability> = [.terminal, .browser]
+    /// Tools the user chose "Sempre permitir" for.
+    var allowedTools: Set<String> = []
+    /// Where commands run and relative paths resolve; empty means the home folder.
+    var workingDirectory = ""
     var unread = 0
     var memory: [MemoryFact] = []
+
+    var workingURL: URL {
+        workingDirectory.isEmpty ? FileManager.default.homeDirectoryForCurrentUser
+            : URL(fileURLWithPath: (workingDirectory as NSString).expandingTildeInPath)
+    }
 }
 
-struct MemoryFact: Identifiable, Hashable, Sendable {
-    let id = UUID()
+/// Tolerant decoding (see `KeyedDecodingContainer.value(_:default:)` in Store.swift).
+extension Bot {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        role = try c.value(.role, default: "")
+        orb = try c.value(.orb, default: OrbConfig())
+        model = try c.value(.model, default: "")
+        permissionMode = try c.value(.permissionMode, default: .ask)
+        capabilities = try c.value(.capabilities, default: [.terminal, .browser])
+        allowedTools = try c.value(.allowedTools, default: [])
+        workingDirectory = try c.value(.workingDirectory, default: "")
+        unread = try c.value(.unread, default: 0)
+        memory = try c.value(.memory, default: [])
+    }
+}
+
+struct MemoryFact: Identifiable, Hashable, Codable, Sendable {
+    var id = UUID()
     var text: String
 }
 
-struct TranscriptItem: Identifiable, Sendable {
-    enum Kind: Sendable {
+struct TranscriptItem: Identifiable, Codable, Sendable {
+    enum Kind: Codable, Sendable {
         case user(text: String, attachments: [String])
         case bot(text: String, isStreaming: Bool)
         case tool(ToolCall)
@@ -72,19 +100,23 @@ struct TranscriptItem: Identifiable, Sendable {
         case notice(String)
     }
 
-    let id: UUID
+    var id = UUID()
     var kind: Kind
-    let date: Date
+    var date = Date.now
 
-    init(_ kind: Kind, id: UUID = UUID(), date: Date = .now) {
-        self.id = id
+    init(_ kind: Kind) {
         self.kind = kind
-        self.date = date
     }
 }
 
-struct ToolCall: Identifiable, Sendable {
-    enum Kind: String, Sendable {
+/// A bot's current conversation: what the UI shows and what the model sees.
+struct Conversation: Codable, Sendable {
+    var items: [TranscriptItem] = []
+    var messages: [ChatMessage] = []
+}
+
+struct ToolCall: Identifiable, Codable, Sendable {
+    enum Kind: String, Codable, Sendable {
         case shell, browser, file, search, computer, connector, memory
 
         var symbol: String {
@@ -93,42 +125,30 @@ struct ToolCall: Identifiable, Sendable {
             case .browser: "globe"
             case .file: "doc.text"
             case .search: "magnifyingglass"
-            case .computer: "cursorarrow.rays"
+            case .computer: "macwindow"
             case .connector: "puzzlepiece.extension"
             case .memory: "brain"
             }
         }
     }
 
-    enum State: Sendable, Equatable {
+    enum State: String, Codable, Sendable, Equatable {
         case running, done, failed
     }
 
-    let id: UUID
+    var id = UUID()
     var kind: Kind
     var title: String
     var detail: String
-    var state: State
+    var state = State.running
     var output: String?
-    var startedAt: Date
+    var startedAt = Date.now
     var finishedAt: Date?
-
-    init(kind: Kind, title: String, detail: String, state: State = .running, output: String? = nil,
-         startedAt: Date = .now, finishedAt: Date? = nil) {
-        self.id = UUID()
-        self.kind = kind
-        self.title = title
-        self.detail = detail
-        self.state = state
-        self.output = output
-        self.startedAt = startedAt
-        self.finishedAt = finishedAt
-    }
 
     var duration: TimeInterval? { finishedAt.map { $0.timeIntervalSince(startedAt) } }
 }
 
-enum ApprovalDecision: Sendable, Equatable {
+enum ApprovalDecision: String, Codable, Sendable, Equatable {
     case deny, once, always
 
     var label: String {
@@ -140,49 +160,76 @@ enum ApprovalDecision: Sendable, Equatable {
     }
 }
 
-struct ApprovalRequest: Identifiable, Sendable {
-    let id: UUID
+struct ApprovalRequest: Identifiable, Codable, Sendable {
+    var id = UUID()
+    /// Model-facing tool name ("Sempre permitir" remembers it per bot).
+    var toolName: String
     var title: String
     var command: String
     var reason: String
     var decision: ApprovalDecision?
+}
 
-    init(title: String, command: String, reason: String, decision: ApprovalDecision? = nil) {
-        self.id = UUID()
-        self.title = title
-        self.command = command
-        self.reason = reason
-        self.decision = decision
+// MARK: - Routines
+
+struct Routine: Identifiable, Codable, Sendable {
+    var id = UUID()
+    var name: String
+    var botID: UUID
+    var prompt: String
+    var schedule: Schedule
+    var isEnabled = true
+    var createdAt = Date.now
+    var lastRun: Date?
+    var lastResult: String?
+
+    var nextRun: Date { schedule.next(after: lastRun ?? createdAt) }
+}
+
+enum Schedule: Codable, Hashable, Sendable {
+    case daily(hour: Int, minute: Int)
+    /// `weekday` uses Calendar numbering (1 = domingo).
+    case weekly(weekday: Int, hour: Int, minute: Int)
+    case everyHours(Int)
+
+    func next(after date: Date, calendar: Calendar = .current) -> Date {
+        switch self {
+        case .daily(let hour, let minute):
+            calendar.nextDate(after: date, matching: DateComponents(hour: hour, minute: minute), matchingPolicy: .nextTime) ?? date
+        case .weekly(let weekday, let hour, let minute):
+            calendar.nextDate(after: date, matching: DateComponents(hour: hour, minute: minute, weekday: weekday),
+                              matchingPolicy: .nextTime) ?? date
+        case .everyHours(let hours):
+            date.addingTimeInterval(Double(max(1, hours)) * 3600)
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .daily(let hour, let minute):
+            "Todo dia às \(Self.time(hour, minute))"
+        case .weekly(let weekday, let hour, let minute):
+            "\([1, 7].contains(weekday) ? "Todo" : "Toda") \(Calendar.current.weekdaySymbols[(weekday + 6) % 7]) às \(Self.time(hour, minute))"
+        case .everyHours(let hours):
+            hours == 1 ? "A cada hora" : "A cada \(hours) horas"
+        }
+    }
+
+    private static func time(_ hour: Int, _ minute: Int) -> String {
+        String(format: "%02d:%02d", hour, minute)
     }
 }
 
-struct Routine: Identifiable, Sendable {
-    let id = UUID()
-    var name: String
-    var botID: UUID
-    var schedule: String
-    var nextRun: Date
-    var isEnabled: Bool
-    var pausedForInactivity: Bool
-    var lastResult: String
-}
+// MARK: - Skills
 
-struct Connector: Identifiable, Sendable {
-    let id = UUID()
-    var name: String
-    var symbol: String
-    var category: String
-    var summary: String
-    var isConnected: Bool
-}
-
-struct Skill: Identifiable, Sendable {
-    let id = UUID()
+/// Reusable instructions, invoked with "/slug" at the start of a prompt.
+struct Skill: Identifiable, Codable, Sendable {
+    var id = UUID()
     var slug: String
     var name: String
     var summary: String
-    var uses: Int
-    var owner: String
+    var instructions: String
+    var uses = 0
 }
 
 enum SidebarItem: Hashable {
@@ -190,8 +237,4 @@ enum SidebarItem: Hashable {
     case routines
     case connectors
     case skills
-}
-
-enum Catalog {
-    static let models = ["grok-4.6", "grok-4.6-fast", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]
 }
