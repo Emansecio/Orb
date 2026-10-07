@@ -186,6 +186,7 @@ enum SystemPrompt {
         let parts = prompt.dropFirst().split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
         guard let slug = parts.first, let skill = skills.first(where: { $0.slug == slug }) else { return nil }
         let rest = parts.count > 1 ? String(parts[1]) : ""
-        return (skill, "Skill \"\(skill.name)\":\n\(skill.instructions)\n\nUser request: \(rest.isEmpty ? "(none)" : rest)")
+        let files = skill.folderURL.map { "\n\n(Files this skill refers to are in \($0.absoluteString); fetch them if needed.)" } ?? ""
+        return (skill, "Skill \"\(skill.name)\":\n\(skill.instructions)\(files)\n\nUser request: \(rest.isEmpty ? "(none)" : rest)")
     }
 }

@@ -130,7 +130,7 @@ private struct SkillMenu: View {
 
     var body: some View {
         Menu {
-            ForEach(model.skills) { skill in
+            ForEach(model.enabledSkills) { skill in
                 Button(skill.name) { onPick(skill.slug) }
             }
         } label: {

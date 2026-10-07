@@ -99,6 +99,8 @@ final class AppModel {
 
     func routines(for botID: UUID) -> [Routine] { routines.filter { $0.botID == botID } }
 
+    var enabledSkills: [Skill] { skills.filter(\.isEnabled) }
+
     /// The model a bot actually uses (its own or the provider default).
     func modelID(for bot: Bot) -> String { bot.model.isEmpty ? provider.defaultModel : bot.model }
 
@@ -230,14 +232,14 @@ final class AppModel {
         flash(\.listening, botID, seconds: 1.4)
 
         var prompt = typed
-        if let expansion = SystemPrompt.expandSkill(in: typed, skills: skills) {
+        if let expansion = SystemPrompt.expandSkill(in: typed, skills: enabledSkills) {
             prompt = expansion.prompt
             if let index = skills.firstIndex(where: { $0.id == expansion.skill.id }) { skills[index].uses += 1 }
         }
         if !attachments.isEmpty {
             prompt += "\n\nAttached files (read them with your tools):\n" + attachments.map { "- \($0.path)" }.joined(separator: "\n")
         }
-        let system = SystemPrompt.make(bot: bot, skills: skills)
+        let system = SystemPrompt.make(bot: bot, skills: enabledSkills)
         let history = (conversations[botID]?.messages ?? []).modelContext()
         let model = modelID(for: bot)
         let context = ToolContext(workingDirectory: bot.workingURL) { [weak self] fact in
@@ -408,6 +410,25 @@ final class AppModel {
             runRoutine(routine.id)
         }
     }
+
+    // MARK: Catalogs
+
+    func installedSkill(_ catalogID: String) -> Skill? { skills.first { $0.source == catalogID } }
+
+    /// Adds a catalog skill; its slug gets a numeric suffix if one is already taken.
+    func install(_ document: SkillDocument, from entry: CatalogSkill) {
+        guard installedSkill(entry.id) == nil else { return }
+        let base = Skill.slugify(entry.skillId)
+        var slug = base, suffix = 2
+        while skills.contains(where: { $0.slug == slug }) {
+            slug = "\(base)-\(suffix)"
+            suffix += 1
+        }
+        skills.append(Skill(slug: slug, name: document.name, summary: document.description,
+                            instructions: document.instructions, source: entry.id, folderURL: document.folderURL))
+    }
+
+    func installedConnector(_ registryName: String) -> MCPServerConfig? { connectors.first { $0.source == registryName } }
 
     // MARK: Connectors
 

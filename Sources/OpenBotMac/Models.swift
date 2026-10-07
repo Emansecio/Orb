@@ -251,6 +251,33 @@ struct Skill: Identifiable, Codable, Sendable {
     var summary: String
     var instructions: String
     var uses = 0
+    /// Disabled skills stay installed but can't be invoked.
+    var isEnabled = true
+    /// Catalog id ("owner/repo/skill") when installed from the catalog.
+    var source: String?
+    /// GitHub folder of a catalog skill (its instructions may point to files there).
+    var folderURL: URL?
+}
+
+extension Skill {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.value(.id, default: UUID())
+        slug = try c.decode(String.self, forKey: .slug)
+        name = try c.value(.name, default: slug)
+        summary = try c.value(.summary, default: "")
+        instructions = try c.value(.instructions, default: "")
+        uses = try c.value(.uses, default: 0)
+        isEnabled = try c.value(.isEnabled, default: true)
+        source = try c.decodeIfPresent(String.self, forKey: .source)
+        folderURL = try c.decodeIfPresent(URL.self, forKey: .folderURL)
+    }
+
+    /// A slug from free text: lowercase letters, digits and dashes.
+    static func slugify(_ text: String) -> String {
+        String(text.lowercased().folding(options: .diacriticInsensitive, locale: nil)
+            .map { $0.isLetter || $0.isNumber ? $0 : "-" }.prefix(32))
+    }
 }
 
 enum SidebarItem: Hashable {
