@@ -1,5 +1,7 @@
 import SwiftUI
 import AppKit
+import ImageIO
+import os
 
 // MARK: - Configuration
 
@@ -178,73 +180,63 @@ final class OrbCatalog: Sendable {
 
 // MARK: - Layer images
 
-@MainActor
+/// Decoded, downsampled and tinted layer bitmaps, cached per size bucket. Thread-safe, so layers can be
+/// prepared off the main thread (`prewarm`) before an orb needs them.
 enum OrbImages {
-    private static var cache: [String: NSImage] = [:]
+    private static let cache = OSAllocatedUnfairLock(initialState: [String: CGImage]())
+    private static let buckets = [96, 128, 192, 256, 384, 512, 640]
 
-    /// Layer image downsampled to the nearest size bucket for `pixels` (keeps per-frame compositing cheap).
-    static func image(_ relativePath: String, pixels: CGFloat) -> NSImage? {
-        let bucket = [96, 160, 256, 384, 640].first { CGFloat($0) >= pixels } ?? 640
-        let key = "\(relativePath)@\(bucket)"
-        if let cached = cache[key] { return cached }
-        guard let original = original(relativePath) else { return nil }
-        let image = bucket >= 640 ? original : resized(original, to: bucket)
-        cache[key] = image
+    /// Smallest bucket that covers `pixels`, so bitmaps are never much larger than they appear on screen.
+    static func bucket(for pixels: CGFloat) -> Int {
+        buckets.first { CGFloat($0) >= pixels } ?? 640
+    }
+
+    /// Bitmap with the multiply tint baked in (Core Animation layers can't multiply cheaply).
+    static func cgImage(_ relativePath: String, pixels: CGFloat, tint: UInt32?) -> CGImage? {
+        let side = bucket(for: pixels)
+        let key = "\(relativePath)@\(side)#\(tint.map { String($0, radix: 16) } ?? "-")"
+        if let cached = cache.withLock({ $0[key] }) { return cached }
+        guard let image = render(relativePath, side: side, tint: tint) else { return nil }
+        cache.withLock { $0[key] = image }
         return image
     }
 
-    private static var cgCache: [String: CGImage] = [:]
+    /// Decodes `layers` in the background so later expression changes don't decode on the main thread.
+    static func prewarm(_ layers: [OrbLayer], pixels: CGFloat) {
+        Task.detached(priority: .utility) {
+            for layer in layers { _ = cgImage(layer.path, pixels: pixels, tint: layer.tint) }
+        }
+    }
 
-    /// Bitmap for Core Animation layers, with the multiply tint baked in (layers can't multiply cheaply).
-    static func cgImage(_ relativePath: String, pixels: CGFloat, tint: UInt32?) -> CGImage? {
-        let bucket = [96, 160, 256, 384, 640].first { CGFloat($0) >= pixels } ?? 640
-        let key = "\(relativePath)@\(bucket)#\(tint.map { String($0, radix: 16) } ?? "-")"
-        if let cached = cgCache[key] { return cached }
-        guard let source = original(relativePath)?.cgImage(forProposedRect: nil, context: nil, hints: nil),
-              let context = CGContext(data: nil, width: bucket, height: bucket, bitsPerComponent: 8, bytesPerRow: 0,
-                                      space: CGColorSpace(name: CGColorSpace.sRGB)!,
+    /// ImageIO decodes straight to the target size (no full-size bitmap is kept around).
+    private static func render(_ relativePath: String, side: Int, tint: UInt32?) -> CGImage? {
+        guard let url = OrbCatalog.shared.root?.appendingPathComponent(relativePath + ".png"),
+              let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let decoded = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true,
+                  kCGImageSourceThumbnailMaxPixelSize: side,
+                  kCGImageSourceShouldCacheImmediately: true
+              ] as CFDictionary),
+              let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0, space: space,
                                       bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-        let rect = CGRect(x: 0, y: 0, width: bucket, height: bucket)
+        let rect = CGRect(x: 0, y: 0, width: side, height: side)
         context.interpolationQuality = .high
-        context.draw(source, in: rect)
+        context.draw(decoded, in: rect)
         if let tint {
             context.setBlendMode(.multiply)
-            context.setFillColor(NSColor(hex: tint).cgColor)
+            context.setFillColor(red: CGFloat((tint >> 16) & 0xFF) / 255, green: CGFloat((tint >> 8) & 0xFF) / 255,
+                                 blue: CGFloat(tint & 0xFF) / 255, alpha: 1)
             context.fill(rect)
             context.setBlendMode(.destinationIn)
-            context.draw(source, in: rect)
+            context.draw(decoded, in: rect)
         }
-        let image = context.makeImage()
-        cgCache[key] = image
-        return image
-    }
-
-    private static func original(_ relativePath: String) -> NSImage? {
-        let key = relativePath + "@full"
-        if let cached = cache[key] { return cached }
-        guard let root = OrbCatalog.shared.root,
-              let image = NSImage(contentsOf: root.appendingPathComponent(relativePath + ".png")) else { return nil }
-        cache[key] = image
-        return image
-    }
-
-    private static func resized(_ image: NSImage, to side: Int) -> NSImage {
-        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: side, pixelsHigh: side, bitsPerSample: 8,
-                                         samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
-                                         bytesPerRow: 0, bitsPerPixel: 0) else { return image }
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
-        NSGraphicsContext.current?.imageInterpolation = .high
-        image.draw(in: NSRect(x: 0, y: 0, width: side, height: side))
-        NSGraphicsContext.restoreGraphicsState()
-        let result = NSImage(size: NSSize(width: side, height: side))
-        result.addRepresentation(rep)
-        return result
+        return context.makeImage()
     }
 }
 
 /// One composited layer: an image path plus an optional multiply tint.
-struct OrbLayer: Identifiable, Hashable {
+struct OrbLayer: Identifiable, Hashable, Sendable {
     enum Kind { case body, cheeks, mouth, mustache, brows, eyes, hair, accessory }
     let kind: Kind
     let path: String
@@ -260,6 +252,13 @@ struct OrbLayer: Identifiable, Hashable {
         case .mouth, .mustache, .cheeks: 0.055
         case .hair, .accessory: 0.025
         }
+    }
+
+    static let maxDepth = 0.075
+
+    /// Hair and head-worn accessories trail the head a little; eyewear stays put on the face.
+    var isLoose: Bool {
+        kind == .hair || (kind == .accessory && !path.contains("oculos") && !path.contains("monoculo"))
     }
 }
 

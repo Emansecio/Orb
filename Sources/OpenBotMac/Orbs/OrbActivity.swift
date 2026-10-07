@@ -85,13 +85,30 @@ enum OrbActivity: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    var isBusy: Bool { ![.idle, .sleepy].contains(self) }
+    /// Lowest frame rate that still shows this activity's fastest motion (vibrations and hops would alias
+    /// into slow wobbles below it).
+    var minFrameRate: Float {
+        switch self {
+        case .typing, .error, .waiting, .happy: 30
+        case .thinking, .browsing, .reading, .searching: 15
+        case .idle, .listening, .sleepy: 10
+        }
+    }
+
+    /// How much the idle saccades move the gaze (the rest follow their own pattern).
+    var wander: Double {
+        switch self {
+        case .idle: 1
+        case .listening, .waiting, .happy: 0.3
+        default: 0
+        }
+    }
 
     /// Activity-driven gaze (x right, y up, both -1...1) and how much the pointer may override it.
     func gaze(at t: Double) -> (look: CGPoint, pointerWeight: Double) {
         switch self {
         case .idle:
-            return (CGPoint(x: 0.35 * sin(t * 0.37), y: 0.18 * sin(t * 0.29 + 1)), 1)
+            return (.zero, 1)
         case .listening:
             return (CGPoint(x: 0, y: -0.15), 1)
         case .thinking:
@@ -116,38 +133,56 @@ enum OrbActivity: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Body motion: vertical offset (fraction of size, + = up), squash (+ = wider), tilt (degrees), shake (fraction).
-    func motion(at t: Double) -> (lift: Double, squash: Double, tilt: Double, shake: Double) {
+    /// Body motion and glow at time `t`.
+    func motion(at t: Double) -> OrbBodyMotion {
         let breathe = sin(t * 2.0)
         switch self {
         case .idle, .listening:
-            return (0.025 * sin(t * 1.6), 0.012 * breathe, 0, 0)
+            return OrbBodyMotion(lift: 0.025 * sin(t * 1.6), squash: 0.012 * breathe)
         case .thinking:
-            return (0.03 * sin(t * 1.2), 0.01 * breathe, 4 * sin(t * 0.8), 0)
+            return OrbBodyMotion(lift: 0.03 * sin(t * 1.2), squash: 0.01 * breathe, tilt: 4 * sin(t * 0.8), glow: Self.pulse(t))
         case .typing:
-            return (0.01 * sin(t * 3), 0.015 * sin(t * 14), 0, 0.006 * sin(t * 38))
+            return OrbBodyMotion(lift: 0.01 * sin(t * 3), squash: 0.015 * sin(t * 14), shake: 0.006 * sin(t * 38),
+                                 glow: Self.pulse(t))
         case .browsing, .reading, .searching:
-            return (0.025 * sin(t * 1.8), 0.012 * breathe, 3 * sin(t * 1.5), 0)
+            return OrbBodyMotion(lift: 0.025 * sin(t * 1.8), squash: 0.012 * breathe, tilt: 3 * sin(t * 1.5), glow: Self.pulse(t))
         case .waiting:
             let hop = abs(sin(t * 3.2))
-            return (0.07 * hop, hop < 0.15 ? 0.06 : -0.02, 0, 0)
+            return OrbBodyMotion(lift: 0.07 * hop, squash: Self.bounce(hop, squash: 0.06, stretch: 0.02), glow: Self.pulse(t))
         case .happy:
             let hop = abs(sin(t * 4))
-            return (0.09 * hop, hop < 0.15 ? 0.07 : -0.03, 7 * sin(t * 4), 0)
+            return OrbBodyMotion(lift: 0.09 * hop, squash: Self.bounce(hop, squash: 0.07, stretch: 0.03), tilt: 7 * sin(t * 4),
+                                 glow: Self.pulse(t))
         case .error:
-            return (0, 0.01 * breathe, 0, 0.025 * sin(t * 32) * (0.5 + 0.5 * sin(t * 1.5)))
+            return OrbBodyMotion(squash: 0.01 * breathe, shake: 0.025 * sin(t * 32) * (0.5 + 0.5 * sin(t * 1.5)),
+                                 glow: 0.8 + 0.2 * sin(t * 10))
         case .sleepy:
-            return (0.012 * sin(t * 0.9), 0.025 * sin(t * 0.9), -6, 0)
+            return OrbBodyMotion(lift: 0.012 * sin(t * 0.9), squash: 0.025 * sin(t * 0.9), tilt: -6, glow: 0.55)
         }
     }
 
-    /// Glow intensity multiplier (busy orbs pulse).
-    func glow(at t: Double) -> Double {
-        switch self {
-        case .idle, .listening: 1
-        case .sleepy: 0.55
-        case .error: 0.8 + 0.2 * sin(t * 10)
-        default: 1 + 0.25 * sin(t * 4)
-        }
+    /// Busy orbs' glow pulses.
+    private static func pulse(_ t: Double) -> Double { 1 + 0.25 * sin(t * 4) }
+
+    /// Squashed on contact (`hop` near 0), stretched in the air, with a smooth hand-off between the two.
+    static func bounce(_ hop: Double, squash: Double, stretch: Double) -> Double {
+        let contact = pow(max(0, 1 - hop / 0.3), 2)
+        return -stretch + (squash + stretch) * contact
+    }
+}
+
+/// Body motion: vertical offset (fraction of size, + = up), squash (+ = wider), tilt (degrees),
+/// shake (fraction of size) and glow multiplier.
+struct OrbBodyMotion: Equatable {
+    var lift = 0.0
+    var squash = 0.0
+    var tilt = 0.0
+    var shake = 0.0
+    var glow = 1.0
+
+    static func mix(_ a: OrbBodyMotion, _ b: OrbBodyMotion, _ t: Double) -> OrbBodyMotion {
+        OrbBodyMotion(lift: OrbMath.mix(a.lift, b.lift, t), squash: OrbMath.mix(a.squash, b.squash, t),
+                      tilt: OrbMath.mix(a.tilt, b.tilt, t), shake: OrbMath.mix(a.shake, b.shake, t),
+                      glow: OrbMath.mix(a.glow, b.glow, t))
     }
 }

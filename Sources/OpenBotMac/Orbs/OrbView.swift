@@ -23,7 +23,7 @@ struct OrbView: View {
 
     var body: some View {
         Group {
-            if animated && appearsActive && !reduceMotion && !OrbView.forceStatic {
+            if animated && (appearsActive || OrbView.animateInactive) && !reduceMotion && !OrbView.forceStatic {
                 AnimatedOrb(config: config, activity: activity, size: size, followsPointer: followsPointer,
                             poke: poke, interactive: interactive)
             } else {
@@ -37,21 +37,9 @@ struct OrbView: View {
 
     /// Dev aid for profiling: `OPENBOT_STATIC_ORBS=1`.
     static let forceStatic = ProcessInfo.processInfo.environment["OPENBOT_STATIC_ORBS"] != nil
-}
-
-/// Per-frame pose (all relative to size).
-struct OrbPose {
-    var look = CGPoint.zero
-    var lift = 0.0
-    var squash = 0.0
-    var tilt = 0.0
-    var shake = 0.0
-    var blink = 0.0
-    var glow = 1.0
-    var hover = 0.0
-    var time = 0.0
-
-    static let rest = OrbPose()
+    /// Dev aid for profiling without focusing the app: `OPENBOT_ANIMATE_INACTIVE=1` keeps orbs animating
+    /// while the window is inactive or hidden.
+    static let animateInactive = ProcessInfo.processInfo.environment["OPENBOT_ANIMATE_INACTIVE"] != nil
 }
 
 /// Draws one frame of the Orb from its layers in a single Canvas (no per-frame layout work).
@@ -119,7 +107,7 @@ private struct OrbPainter {
         orb.translateBy(x: -anchor.x, y: -anchor.y)
 
         for layer in layers {
-            guard let image = OrbImages.image(layer.path, pixels: side * 2) else { continue }
+            guard let image = OrbImages.cgImage(layer.path, pixels: side * 2, tint: layer.tint) else { continue }
             var layerContext = orb
             let shift = parallax(layer)
             layerContext.translateBy(x: shift.width, y: shift.height)
@@ -129,10 +117,7 @@ private struct OrbPainter {
                 layerContext.scaleBy(x: 1, y: max(0.08, 1 - pose.blink))
                 layerContext.translateBy(x: 0, y: -line)
             }
-            if let tint = layer.tint {
-                layerContext.addFilter(.colorMultiply(Color(hex: tint)))
-            }
-            layerContext.draw(Image(nsImage: image).interpolation(.high), in: CGRect(x: 0, y: 0, width: side, height: side))
+            layerContext.draw(Image(decorative: image, scale: 1).interpolation(.high), in: CGRect(x: 0, y: 0, width: side, height: side))
         }
 
         if let bubble = activity.bubble, size >= 26 {
@@ -140,12 +125,16 @@ private struct OrbPainter {
         }
     }
 
+    /// Same offsets as `OrbAnimationView.applyPose` (y flipped: Canvas grows downward).
     private func parallax(_ layer: OrbLayer) -> CGSize {
-        CGSize(width: pose.look.x * layer.depth * size, height: -pose.look.y * layer.depth * size)
+        var x = pose.look.x * layer.depth, y = pose.look.y * layer.depth
+        if layer.kind == .eyes { x += pose.eyeLead.x; y += pose.eyeLead.y }
+        if layer.isLoose { x += pose.hairLag.x; y += pose.hairLag.y }
+        return CGSize(width: x * size, height: -y * size)
     }
 
     private func drawBubble(_ text: String, in context: inout GraphicsContext, center: CGPoint) {
-        let bob = sin(pose.time * 3) * size * 0.03
+        let bob = pose.bubbleBob * size
         let fontSize = max(8, size * 0.2)
         let resolved = context.resolve(Text(text).font(.system(size: fontSize, weight: .heavy, design: .rounded))
             .foregroundStyle(Palette.ink))
@@ -153,7 +142,7 @@ private struct OrbPainter {
         let rect = CGRect(x: center.x - textSize.width / 2 - fontSize * 0.45, y: center.y + bob - textSize.height / 2 - fontSize * 0.1,
                           width: textSize.width + fontSize * 0.9, height: textSize.height + fontSize * 0.2)
         var bubble = context
-        bubble.opacity = 0.6 + 0.4 * (0.5 + 0.5 * sin(pose.time * 2.4))
+        bubble.opacity = pose.bubbleOpacity
         let capsule = Path(roundedRect: rect, cornerRadius: rect.height / 2)
         bubble.fill(capsule, with: .color(.white.opacity(0.14)))
         bubble.stroke(capsule, with: .color(.white.opacity(0.2)), lineWidth: 0.5)
