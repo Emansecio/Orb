@@ -9,6 +9,11 @@ let package = Package(
             name: "OpenBotMac",
             path: "Sources/OpenBotMac",
             exclude: ["Resources"]
+        ),
+        .testTarget(
+            name: "OpenBotMacTests",
+            dependencies: ["OpenBotMac"],
+            path: "Tests/OpenBotMacTests"
         )
     ]
 )
