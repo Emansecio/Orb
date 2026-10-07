@@ -244,6 +244,55 @@ MOUTHS = [
 ]
 
 # ---------------------------------------------------------------------------
+# Visemes: mouth shapes for talking (the app swaps them while a reply streams). Not user options.
+# All share the mouth's center line (x = 0) and the same top corners, so the lower lip "drops"
+# between shapes instead of the whole mouth jumping around.
+
+VISEME_TOP = 0.02   # corners of the open shapes sit at ctx.mouth_z + VISEME_TOP, like `sorrisao`
+
+
+def _smiling_opening(ctx, half_width, rise, smile, depth, steps=48):
+    """Dark opening with soft corners: the top edge dips by `smile` in the middle, the bottom hangs `depth`."""
+    pts = []
+    for i in range(steps):
+        t = 2 * math.pi * i / steps
+        c, s = math.cos(t), math.sin(t)
+        z = rise * s - smile * s * s if s > 0 else depth * s
+        pts.append((half_width * c, z))
+    mouth = flat_shape(pts, ctx.ink, extrude=0.008)
+    on_surface(mouth, ctx.orb, 0, ctx.mouth_z + VISEME_TOP, sink=-0.012)
+    return mouth
+
+
+def viseme_a(ctx):
+    _smiling_opening(ctx, 0.12, 0.016, 0.036, 0.14)
+    tongue = flat_shape([(0.052 * math.cos(2 * math.pi * i / 32), 0.03 * math.sin(2 * math.pi * i / 32)) for i in range(32)],
+                        ctx.tongue, extrude=0.006)
+    on_surface(tongue, ctx.orb, 0, ctx.mouth_z + VISEME_TOP - 0.104, sink=-0.022)
+
+
+def viseme_o(ctx):
+    o = flat_shape([(0.058 * math.cos(2 * math.pi * i / 40), 0.066 * math.sin(2 * math.pi * i / 40)) for i in range(40)],
+                   ctx.ink, extrude=0.008)
+    on_surface(o, ctx.orb, 0, ctx.mouth_z + VISEME_TOP - 0.068, sink=-0.012)
+
+
+def viseme_e(ctx):
+    _smiling_opening(ctx, 0.13, 0.012, 0.032, 0.092)
+
+
+def viseme_m(ctx):
+    tube(arc(0, ctx.mouth_z + VISEME_TOP - 0.005, 0.21, -0.032), [1, 1, 1], ctx.feature, bevel=0.0235, orb=ctx.orb, lift=0.008)
+
+
+VISEMES = [
+    ("fala-a", "Fala A", viseme_a),
+    ("fala-o", "Fala O", viseme_o),
+    ("fala-e", "Fala E", viseme_e),
+    ("fala-m", "Fala M", viseme_m),
+]
+
+# ---------------------------------------------------------------------------
 # Brows
 
 
@@ -642,14 +691,19 @@ def _scaled(builder, ctx, key):
 
 
 def build_features(ctx, only=None):
+    """All features from ctx.config, or just `only=(category, option)`. A config "viseme" replaces the mouth."""
     config = ctx.config
     lookup = {name: {oid: builder for oid, _, builder in options} for name, options in CATEGORIES.items() if name != "color"}
+    lookup["visemes"] = {oid: builder for oid, _, builder in VISEMES}
     if only is not None:
         category, option = only
         builder = lookup[category].get(option)
         if builder:
             _scaled(builder, ctx, option if category == "accessories" else category)
         return
+    if "viseme" in config:
+        config = dict(config, mouth=None)
+        _scaled(lookup["visemes"][config["viseme"]], ctx, "visemes")
     lookup["eyes"][config.get("eyes", "pilulas")](ctx)
     for category, default in (("mouth", "nenhuma"), ("brows", "nenhuma"), ("cheeks", "nenhuma"),
                               ("mustache", "nenhum"), ("hair", "nenhum")):

@@ -6,6 +6,9 @@ Commands:
     render  --config '{"color": "rosa", "eyes": "ovais", "hair": "tufinho", "accessories": ["fones"]}'
             --name rosa-dj        -> art/renders/<name>.png (+ -dark/-light previews)
     catalog [--category eyes]     -> one labeled tile per option + a contact sheet per category
+                                     (--category visemes: the talking mouths, not user options)
+    layers [--category mouth]     -> app layers in Sources/OpenBotMac/Resources/Orbs (+ options.json)
+                                     (--category visemes -> visemes/<id>.png and <id>-dark.png)
     manifest                      -> art/orb_options.json (ids + labels for the app editor)
 """
 
@@ -78,14 +81,20 @@ CATALOG_OVERRIDES = {
 }
 
 
+def options_of(category):
+    return features.VISEMES if category == "visemes" else features.CATEGORIES[category]
+
+
 def catalog(category, samples, size):
     out_dir = os.path.join(ART, "renders", "catalog", category)
     os.makedirs(out_dir, exist_ok=True)
     tiles = []
-    for option_id, label, _ in features.CATEGORIES[category]:
+    for option_id, label, _ in options_of(category):
         config = dict(CATALOG_BASE, **CATALOG_OVERRIDES.get(category, {}))
         if category == "accessories":
             config["accessories"] = [option_id]
+        elif category == "visemes":
+            config["viseme"] = option_id
         else:
             config[category] = option_id
         path = os.path.join(out_dir, f"{option_id}.png")
@@ -134,6 +143,7 @@ def personas(samples, size):
 TINTED = {"hair", "mustache"}
 TINTED_ACCESSORIES = {"bone", "gorro", "laco", "fones", "chifres", "flor", "orelhas-gato"}
 VARIANT_CATEGORIES = {"eyes", "mouth", "brows"}   # light (glowing) + dark (for light palettes)
+LAYER_CATEGORIES = [name for name in features.CATEGORIES if name != "color"] + ["visemes"]   # visemes: like mouth
 
 
 def layers(samples, size, out, only_category=None):
@@ -161,15 +171,16 @@ def layers(samples, size, out, only_category=None):
             render_scene({"color": pid}, os.path.join(out, "body", f"{pid}.png"))
             print("layer body", pid)
 
-    for category, options in features.CATEGORIES.items():
-        if category == "color" or not wanted(category):
+    for category in LAYER_CATEGORIES:
+        if not wanted(category):
             continue
         os.makedirs(os.path.join(out, category), exist_ok=True)
-        for option_id, _, builder in options:
+        for option_id, _, builder in options_of(category):
             if builder is None:
                 continue
             # Neutral (white) body light for non-variant layers so tints stay true in the app
-            variants = [("", "indigo"), ("-dark", "perola")] if category in VARIANT_CATEGORIES else [("", "perola")]
+            has_variants = category in VARIANT_CATEGORIES or category == "visemes"
+            variants = [("", "indigo"), ("-dark", "perola")] if has_variants else [("", "perola")]
             for suffix, color in variants:
                 config = {"color": color}
                 if category == "hair":
@@ -192,6 +203,7 @@ def manifest(path=None):
     data["tinted"] = sorted(TINTED)
     data["tintedAccessories"] = sorted(TINTED_ACCESSORIES)
     data["variants"] = sorted(VARIANT_CATEGORIES)
+    data["visemes"] = [oid for oid, _, _ in features.VISEMES]
     with open(path or os.path.join(ART, "orb_options.json"), "w", encoding="utf-8") as handle:
         json.dump(data, handle, ensure_ascii=False, indent=2)
     print("manifest written")
@@ -213,7 +225,7 @@ def main():
         os.makedirs(os.path.join(ART, "renders"), exist_ok=True)
         render(json.loads(args.config), os.path.join(ART, "renders", f"{args.name}.png"), args.samples, args.size)
     elif args.command == "catalog":
-        for category in ([args.category] if args.category else list(features.CATEGORIES)):
+        for category in ([args.category] if args.category else list(features.CATEGORIES) + ["visemes"]):
             catalog(category, args.samples, args.size)
     elif args.command == "layers":
         layers(args.samples, args.size, args.out, args.category)
