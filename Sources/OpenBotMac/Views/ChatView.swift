@@ -6,34 +6,7 @@ struct ChatView: View {
 
     var body: some View {
         @Bindable var model = model
-        let items = model.transcript(bot.id)
-
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
-                    if items.isEmpty {
-                        EmptyChatView(bot: bot)
-                    }
-                    ForEach(items) { item in
-                        TranscriptRow(item: item, bot: bot)
-                    }
-                    if let status = model.statusLine[bot.id] {
-                        WorkingLine(bot: bot, text: status)
-                    }
-                    Color.clear.frame(height: 1).id(BottomAnchor.id)
-                }
-                .padding(.horizontal, 28)
-                .padding(.top, 20)
-                .padding(.bottom, 12)
-                .frame(maxWidth: 760)
-                .frame(maxWidth: .infinity)
-            }
-            .scrollIndicators(.automatic)
-            .onChange(of: model.scrollTick[bot.id]) {
-                proxy.scrollTo(BottomAnchor.id, anchor: .bottom)
-            }
-            .onAppear { proxy.scrollTo(BottomAnchor.id, anchor: .bottom) }
-        }
+        TranscriptList(bot: bot)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
                 if !model.isProviderReady {
@@ -62,8 +35,81 @@ struct ChatView: View {
                 .inspectorColumnWidth(min: 244, ideal: 320, max: 420)
         }
     }
+}
+
+/// The conversation. Its own view so streaming re-renders only this list, not the toolbar, composer or
+/// inspector; rows are `Equatable`, so only the row that changed re-renders.
+private struct TranscriptList: View {
+    @Environment(AppModel.self) private var model
+    let bot: Bot
+    /// Off while the user has scrolled up to read, so new content doesn't pull the view down.
+    @State private var followsBottom = true
+
+    var body: some View {
+        let items = model.transcript(bot.id)
+        let status = model.statusLine[bot.id]
+
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 12) {
+                    if items.isEmpty {
+                        EmptyChatView(bot: bot)
+                    }
+                    ForEach(items) { item in
+                        TranscriptRow(item: item, bot: bot)
+                            .equatable()
+                    }
+                    if let status {
+                        WorkingLine(bot: bot, text: status)
+                    }
+                    Color.clear.frame(height: 1).id(BottomAnchor.id)
+                }
+                .animateChanges(of: items.count)
+                .animateChanges(of: status == nil)
+                .padding(.horizontal, 28)
+                .padding(.top, 20)
+                .padding(.bottom, 12)
+                .frame(maxWidth: 760)
+                .frame(maxWidth: .infinity)
+            }
+            .scrollIndicators(.automatic)
+            .modifier(BottomFollowing(isFollowing: $followsBottom))
+            .onChange(of: model.scrollTick[bot.id]) {
+                if followsBottom { proxy.scrollTo(BottomAnchor.id, anchor: .bottom) }
+            }
+            .onChange(of: model.pokes[bot.id]) {
+                // The user just sent a message: always show it.
+                followsBottom = true
+                proxy.scrollTo(BottomAnchor.id, anchor: .bottom)
+            }
+            .onAppear { proxy.scrollTo(BottomAnchor.id, anchor: .bottom) }
+        }
+    }
 
     private enum BottomAnchor { static let id = "bottom" }
+}
+
+/// Stops following new content while the user scrolls away from the bottom and resumes once they
+/// scroll back down. Needs scroll phases (macOS 15); on macOS 14 the chat always follows.
+private struct BottomFollowing: ViewModifier {
+    @Binding var isFollowing: Bool
+
+    func body(content: Content) -> some View {
+        if #available(macOS 15, *) {
+            content.onScrollPhaseChange { old, new, context in
+                // Only the user's own scrolling counts, not programmatic scrolls (`.animating`).
+                let byUser: [ScrollPhase] = [.tracking, .interacting, .decelerating]
+                if byUser.contains(new) {
+                    isFollowing = false
+                } else if new == .idle, byUser.contains(old) {
+                    let geometry = context.geometry
+                    isFollowing = geometry.contentSize.height - geometry.visibleRect.maxY < 48
+                }
+            }
+        } else {
+            content
+        }
+    }
 }
 
 private struct EmptyChatView: View {

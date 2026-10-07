@@ -73,8 +73,36 @@ open -n build/OpenBot.app --env OPENBOT_SEND="Como está meu Mac?"   # envia um 
 | `OPENBOT_SEND` | Envia o texto ao bot selecionado ao abrir (teste ponta a ponta) |
 | `OPENBOT_STATIC_ORBS` | Desliga a animação dos Orbs |
 | `--render-orbs arquivo.png` / `--render-icon arquivo.png` | Gera a folha de Orbs / o ícone e sai |
-| `--snapshot <tela> arquivo.png` | Renderiza uma tela fora do monitor (chat, skills, skills-explore, connectors, connectors-explore, routines) e sai |
+| `--snapshot <tela> arquivo.png` | Desenha uma tela fora da vista (`app`, `chat`, `skills`, `connectors`…) e sai; respeita `OPENBOT_SEND` |
 | `OPENBOT_LIVE_TESTS=1 swift test --filter LiveCatalogTests` | Testa os catálogos e um conector remoto de verdade (precisa de internet) |
+
+## Desempenho da interface
+
+O que mantém a conversa leve enquanto uma resposta chega:
+- **Texto em lotes**: os pedaços do modelo são juntados e publicados no máximo ~30 vezes por segundo
+  (`AppModel.flushText`); rolagem para o fim e salvamento seguem esse ritmo (salva ~1×/s, não a cada pedaço).
+- **Só o que mudou re-renderiza**: `TranscriptRow` é `Equatable`; a lista (`TranscriptList`) é separada da barra de
+  ferramentas, do compositor e do painel; o estado dos Orbs (`activity`) não lê mais a conversa, então a barra lateral
+  e o painel não redesenham a cada palavra.
+- **Só o último parágrafo é refeito**: durante o streaming a mensagem vira dois textos (parágrafos prontos + o atual),
+  com o mesmo resultado visual de um só; o Markdown e a medição do texto pronto ficam em cache.
+- **Rolagem natural** (macOS 15+): se você rolar para cima para ler, a conversa para de puxar para o fim; volta a
+  seguir quando você desce até o fim ou envia uma mensagem.
+- **Transições discretas** (`animateChanges`, 0,25 s) para mensagens novas, ferramentas terminando, aprovações,
+  status da barra lateral e resultados dos catálogos; com “Reduzir movimento” nada anima e o brilho vira texto fixo.
+
+Para medir sem abrir janela (desenho fora da tela, CPU do processo), com um `state.json` em `OPENBOT_DATA_DIR`
+cujo provedor é `{"preset":"custom","baseURL":"http://127.0.0.1:8765/v1","defaultModel":"fake-model"}`:
+
+```bash
+python3 scripts/fake-llm.py 8765 --long    # resposta de ~2000 palavras, uma a cada 15 ms
+OPENBOT_DATA_DIR=/tmp/openbot-perf OPENBOT_SEND="Oi" OPENBOT_SNAPSHOT_WAIT=40 \
+  ./build/OpenBot.app/Contents/MacOS/OpenBot --snapshot app /tmp/perf.png &
+sleep 5; ps -o %cpu= -p $!; sample $! 5        # durante o streaming
+```
+
+Referência (M4, conversa com 240 itens, resposta longa): CPU durante o streaming caiu de ~96% para ~20%;
+parado, ~0% antes e depois.
 
 ## Próximos passos
 1. Distribuição: assinatura Developer ID, Hardened Runtime, notarização e atualizações (Sparkle).

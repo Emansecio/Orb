@@ -12,7 +12,10 @@ struct OpenBotMacApp: App {
                 .environment(model)
                 .frame(minWidth: 960, minHeight: 620)
                 .preferredColorScheme(.dark)
-                .task { model.sendLaunchPrompt() }
+                .task {
+                    // Snapshots send their own launch prompt; the regular window must not send it again.
+                    if !CommandLine.arguments.contains("--snapshot") { model.sendLaunchPrompt() }
+                }
         }
         .defaultSize(width: 1280, height: 820)
         .commands { AppCommands(model: model) }
@@ -171,6 +174,7 @@ enum Snapshot {
         model.showInspector = false // the inspector column does not render offscreen
         model.sendLaunchPrompt()
         let content: AnyView = switch screen {
+        case "app": AnyView(RootView())
         case "skills": AnyView(SkillsView())
         case "skills-explore": AnyView(SkillsView(tab: .explore))
         case "connectors": AnyView(ConnectorsView())

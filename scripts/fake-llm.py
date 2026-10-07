@@ -2,6 +2,7 @@
 """Fake OpenAI-compatible server for trying the app end to end without an API key.
 
     python3 scripts/fake-llm.py [port]        # default 8765
+    python3 scripts/fake-llm.py 8765 --long   # first reply: ~2000 words of Markdown, one word every 15 ms
 
 In OpenBot: Ajustes → Modelo → "Outro compatível com OpenAI", URL http://127.0.0.1:8765/v1,
 then "Testar e buscar modelos". Each prompt gets a short reply, a `run_command` call (so the
@@ -9,7 +10,26 @@ approval card shows up) and, after the tool result, a final answer quoting its f
 """
 import json
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+LONG = "--long" in sys.argv
+
+
+def long_reply(words=2000):
+    """Inline Markdown paragraphs, for measuring the UI while a long reply streams."""
+    vocabulary = ("o disco tem espaço livre suficiente para o backup e a pasta Downloads guarda arquivos "
+                  "antigos que podem ir para o lixo depois de uma revisão rápida").split()
+    out = []
+    for i in range(words):
+        word = vocabulary[i % len(vocabulary)]
+        if i % 37 == 5:
+            word = f"**{word}**"
+        elif i % 53 == 11:
+            word = f"`{word}`"
+        out.append(word + ("\n\n" if i % 90 == 89 else " "))
+    return out
 
 
 def chunk(delta):
@@ -37,13 +57,16 @@ class Handler(BaseHTTPRequestHandler):
             call = {"index": 0, "id": "call_1", "type": "function",
                     "function": {"name": "run_command", "arguments": ""}}
             args = json.dumps({"command": "sw_vers -productVersion && df -h / | tail -1"})
-            events = [chunk({"content": "Vou checar a versão do macOS e o disco. "}),
-                      chunk({"tool_calls": [call]}),
-                      chunk({"tool_calls": [{"index": 0, "function": {"arguments": args[:20]}}]}),
-                      chunk({"tool_calls": [{"index": 0, "function": {"arguments": args[20:]}}]})]
+            intro = long_reply() if LONG else ["Vou checar a versão do macOS e o disco. "]
+            events = [chunk({"content": word}) for word in intro] + [
+                chunk({"tool_calls": [call]}),
+                chunk({"tool_calls": [{"index": 0, "function": {"arguments": args[:20]}}]}),
+                chunk({"tool_calls": [{"index": 0, "function": {"arguments": args[20:]}}]})]
         for event in events + ["data: [DONE]\n\n"]:
             self.wfile.write(event.encode())
             self.wfile.flush()
+            if LONG:
+                time.sleep(0.015)
 
     def reply_json(self, value):
         data = json.dumps(value).encode()
@@ -58,6 +81,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8765
+    numbers = [arg for arg in sys.argv[1:] if arg.isdigit()]
+    port = int(numbers[0]) if numbers else 8765
     print(f"fake LLM em http://127.0.0.1:{port}/v1")
     ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()

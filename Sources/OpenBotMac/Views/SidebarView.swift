@@ -156,13 +156,18 @@ private struct BotRowContent: View {
                 .font(.system(size: 11))
                 .lineLimit(1)
             }
+            .animateChanges(of: status)
             Spacer(minLength: 4)
-            if bot.unread > 0 {
-                Circle()
-                    .fill(Palette.accentText)
-                    .frame(width: 7, height: 7)
-                    .accessibilityLabel("\(bot.unread) não lidas")
+            ZStack {
+                if bot.unread > 0 {
+                    Circle()
+                        .fill(Palette.accentText)
+                        .frame(width: 7, height: 7)
+                        .transition(.scale.combined(with: .opacity))
+                        .accessibilityLabel("\(bot.unread) não lidas")
+                }
             }
+            .animateChanges(of: bot.unread > 0)
         }
         .accessibilityElement(children: .combine)
     }

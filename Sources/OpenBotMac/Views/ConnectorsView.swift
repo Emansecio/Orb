@@ -179,8 +179,9 @@ private struct ExploreConnectors: View {
                 if !isSearching {
                     Text("Em destaque")
                         .font(.system(size: 13, weight: .semibold))
-                    grid(MCPServerConfig.templates.map { ConnectorDraft(config: $0.withNewID()) }) { draft in
-                        FeaturedConnectorCard(config: draft.config) { editing = draft }
+                    // Stable template ids keep the cards (and their hover state) across re-renders.
+                    grid(MCPServerConfig.templates) { template in
+                        FeaturedConnectorCard(config: template) { editing = ConnectorDraft(config: template.withNewID()) }
                     }
                     Text("A busca usa o registro oficial do MCP (registry.modelcontextprotocol.io). O nome de cada servidor é verificado pelo registro, mas o código é de quem publicou.")
                         .font(.system(size: 12))
@@ -196,6 +197,7 @@ private struct ExploreConnectors: View {
                     }
                 }
             }
+            .animateChanges(of: isLoading)
             .padding(24)
             .frame(maxWidth: 980)
             .frame(maxWidth: .infinity)

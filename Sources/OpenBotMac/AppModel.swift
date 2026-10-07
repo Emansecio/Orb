@@ -36,6 +36,10 @@ final class AppModel {
     var connectorStatus: [UUID: MCPStatus] = [:]
     /// Providers with a key in the Keychain (or, for ChatGPT, a sign-in).
     private(set) var connected: Set<ProviderKind> = []
+    /// What each working bot's current tool does, and bots waiting for an approval. Kept apart from the
+    /// transcript so the Orbs (sidebar, inspector) don't re-render on every streamed token.
+    private var runningTool: [UUID: ToolCall.Kind] = [:]
+    private var awaitingApproval: Set<UUID> = []
     var selection: SidebarItem? {
         didSet {
             if case .bot(let id) = selection { update(id) { $0.unread = 0 } }
@@ -52,6 +56,10 @@ final class AppModel {
     @ObservationIgnored private var routineTurns: [UUID: UUID] = [:]
     @ObservationIgnored private var stateSave: Task<Void, Never>?
     @ObservationIgnored private var conversationSaves: [UUID: Task<Void, Never>] = [:]
+    /// Streamed text not shown yet: deltas are published at most every `textFlushInterval`.
+    @ObservationIgnored private var pendingText: [UUID: String] = [:]
+    @ObservationIgnored private var textFlushes: [UUID: Task<Void, Never>] = [:]
+    private static let textFlushInterval = Duration.milliseconds(33)
     @ObservationIgnored private var scheduler: Task<Void, Never>?
 
     init(store: Store = .standard) {
@@ -121,11 +129,11 @@ final class AppModel {
 
     /// What the bot's Orb is doing right now (expression, gaze and motion follow this).
     func activity(for botID: UUID) -> OrbActivity {
-        if hasPendingApproval(botID) { return .waiting }
+        if awaitingApproval.contains(botID) { return .waiting }
         if failed.contains(botID) { return .error }
         if celebrating.contains(botID) { return .happy }
         guard isWorking(botID) else { return .idle }
-        if let kind = runningToolKind(botID) {
+        if let kind = runningTool[botID] {
             switch kind {
             case .shell: return .typing
             case .browser, .computer: return .browsing
@@ -135,19 +143,6 @@ final class AppModel {
             }
         }
         return listening.contains(botID) ? .listening : .thinking
-    }
-
-    private func runningToolKind(_ botID: UUID) -> ToolCall.Kind? {
-        for item in transcript(botID).reversed().prefix(3) {
-            if case .tool(let call) = item.kind, call.state == .running { return call.kind }
-        }
-        return nil
-    }
-
-    private func hasPendingApproval(_ botID: UUID) -> Bool {
-        transcript(botID).reversed().prefix(4).contains { item in
-            if case .approval(let request) = item.kind { request.decision == nil } else { false }
-        }
     }
 
     // MARK: Providers
@@ -357,6 +352,8 @@ final class AppModel {
         guard let task = turns[botID] else { return }
         task.cancel()
         Task { await engine.cancelApprovals(for: botID) }
+        closeStreaming(botID)
+        awaitingApproval.remove(botID)
         mutateItems(of: botID) { items in
             for index in items.indices {
                 if case .approval(var request) = items[index].kind, request.decision == nil {
@@ -380,6 +377,7 @@ final class AppModel {
                 }
             }
         }
+        awaitingApproval.remove(botID)
         if decision == .always, let toolName {
             update(botID) { $0.allowedTools.insert(toolName) }
         }
@@ -391,17 +389,20 @@ final class AppModel {
         case .status(let text):
             statusLine[botID] = text
         case .text(let delta):
-            mutateItems(of: botID) { items in
-                if let last = items.indices.last, case .bot(let text, true) = items[last].kind {
-                    items[last].kind = .bot(text: text + delta, isStreaming: true)
-                } else {
-                    items.append(TranscriptItem(.bot(text: delta.trimmingCharacters(in: .newlines), isStreaming: true)))
+            // Shown by `flushText`; anything that adds to the transcript flushes first (`closeStreaming`).
+            pendingText[botID, default: ""] += delta
+            if textFlushes[botID] == nil {
+                textFlushes[botID] = Task { [weak self] in
+                    try? await Task.sleep(for: Self.textFlushInterval)
+                    if !Task.isCancelled { self?.flushText(botID) }
                 }
             }
         case .toolStarted(let call):
             closeStreaming(botID)
             append(.tool(call), to: botID)
+            runningTool[botID] = call.kind
         case .toolFinished(let id, let state, let output):
+            runningTool[botID] = nil
             mutateItems(of: botID) { items in
                 for index in items.indices {
                     if case .tool(var call) = items[index].kind, call.id == id {
@@ -415,6 +416,7 @@ final class AppModel {
         case .approval(let request):
             closeStreaming(botID)
             append(.approval(request), to: botID)
+            awaitingApproval.insert(botID)
             if let bot = bot(botID) { notify(bot.name, "Precisa da sua permissão: \(request.title.lowercased())") }
         case .message(let message):
             conversations[botID, default: Conversation()].messages.append(message)
@@ -429,6 +431,8 @@ final class AppModel {
         turns[botID] = nil
         closeStreaming(botID)
         statusLine[botID] = nil
+        runningTool[botID] = nil
+        awaitingApproval.remove(botID)
         let reply = lastReply(botID)
         if let routineID = routineTurns.removeValue(forKey: botID),
            let index = routines.firstIndex(where: { $0.id == routineID }) {
@@ -463,7 +467,21 @@ final class AppModel {
         }
     }
 
+    /// Shows the streamed text received since the last flush (one transcript update for many tokens).
+    private func flushText(_ botID: UUID) {
+        textFlushes.removeValue(forKey: botID)?.cancel()
+        guard let delta = pendingText.removeValue(forKey: botID) else { return }
+        mutateItems(of: botID) { items in
+            if let last = items.indices.last, case .bot(let text, true) = items[last].kind {
+                items[last].kind = .bot(text: text + delta, isStreaming: true)
+            } else {
+                items.append(TranscriptItem(.bot(text: delta.trimmingCharacters(in: .newlines), isStreaming: true)))
+            }
+        }
+    }
+
     private func closeStreaming(_ botID: UUID) {
+        flushText(botID)
         guard let last = conversations[botID]?.items.last, case .bot(let text, true) = last.kind else { return }
         mutateItems(of: botID) { items in
             items[items.count - 1].kind = .bot(text: text.trimmingCharacters(in: .whitespacesAndNewlines), isStreaming: false)
@@ -571,12 +589,16 @@ final class AppModel {
         }
     }
 
+    /// Saves `delay` seconds after the first unsaved change (a streaming reply is saved about once a second,
+    /// not rescheduled per token); `delay: 0` saves right away.
     private func scheduleConversationSave(_ botID: UUID, delay: Double) {
+        if delay > 0, conversationSaves[botID] != nil { return }
         conversationSaves[botID]?.cancel()
         conversationSaves[botID] = Task { [store] in
             if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
-            guard !Task.isCancelled, let conversation = conversations[botID] else { return }
-            store.save(conversation, for: botID)
+            guard !Task.isCancelled else { return }
+            conversationSaves[botID] = nil
+            if let conversation = conversations[botID] { store.save(conversation, for: botID) }
         }
     }
 
