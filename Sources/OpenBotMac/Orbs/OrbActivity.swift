@@ -3,7 +3,7 @@ import SwiftUI
 /// What the bot is doing right now. Drives the Orb's expression (eye/mouth/brow overrides),
 /// gaze pattern, body motion and the little status bubble.
 enum OrbActivity: String, CaseIterable, Identifiable, Sendable {
-    case idle, listening, thinking, typing, browsing, reading, searching, waiting, happy, error, sleepy
+    case idle, listening, speaking, thinking, typing, browsing, reading, searching, waiting, happy, error, sleepy
 
     var id: String { rawValue }
 
@@ -11,6 +11,7 @@ enum OrbActivity: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .idle: "Parado"
         case .listening: "Ouvindo"
+        case .speaking: "Falando"
         case .thinking: "Pensando"
         case .typing: "Terminal"
         case .browsing: "Navegando"
@@ -27,6 +28,7 @@ enum OrbActivity: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .idle: "circle"
         case .listening: "ear"
+        case .speaking: "waveform"
         case .thinking: "ellipsis"
         case .typing: "terminal"
         case .browsing: "globe"
@@ -90,6 +92,7 @@ enum OrbActivity: String, CaseIterable, Identifiable, Sendable {
     var minFrameRate: Float {
         switch self {
         case .typing, .error, .waiting, .happy: 30
+        case .speaking: 20
         case .thinking, .browsing, .reading, .searching: 15
         case .idle, .listening, .sleepy: 10
         }
@@ -100,6 +103,7 @@ enum OrbActivity: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .idle: 1
         case .listening, .waiting, .happy: 0.3
+        case .speaking: 0.35
         default: 0
         }
     }
@@ -111,6 +115,8 @@ enum OrbActivity: String, CaseIterable, Identifiable, Sendable {
             return (.zero, 1)
         case .listening:
             return (CGPoint(x: 0, y: -0.15), 1)
+        case .speaking:
+            return (CGPoint(x: 0.06 * sin(t * 0.7), y: -0.05), 0.7)
         case .thinking:
             return (CGPoint(x: 0.55 + 0.08 * sin(t * 1.3), y: 0.6), 0.25)
         case .typing:
@@ -133,12 +139,17 @@ enum OrbActivity: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Body motion and glow at time `t`.
-    func motion(at t: Double) -> OrbBodyMotion {
+    /// Body motion and glow at time `t`. The temperament scales the idle bob and the hops (its pace is applied
+    /// to `t` by the caller, so the motion stays continuous when it changes).
+    func motion(at t: Double, traits: OrbTemperament.Traits = .init()) -> OrbBodyMotion {
         let breathe = sin(t * 2.0)
+        let bob = traits.bob, jump = traits.jump
         switch self {
         case .idle, .listening:
-            return OrbBodyMotion(lift: 0.025 * sin(t * 1.6), squash: 0.012 * breathe)
+            return OrbBodyMotion(lift: 0.025 * bob * sin(t * 1.6), squash: 0.012 * bob * breathe)
+        case .speaking:
+            // A gentle nod in the rhythm of speech.
+            return OrbBodyMotion(lift: 0.014 * bob * sin(t * 4.4), squash: 0.01 * bob * sin(t * 2.2 + 1), tilt: 2 * sin(t * 1.3))
         case .thinking:
             return OrbBodyMotion(lift: 0.03 * sin(t * 1.2), squash: 0.01 * breathe, tilt: 4 * sin(t * 0.8), glow: Self.pulse(t))
         case .typing:
@@ -148,16 +159,16 @@ enum OrbActivity: String, CaseIterable, Identifiable, Sendable {
             return OrbBodyMotion(lift: 0.025 * sin(t * 1.8), squash: 0.012 * breathe, tilt: 3 * sin(t * 1.5), glow: Self.pulse(t))
         case .waiting:
             let hop = abs(sin(t * 3.2))
-            return OrbBodyMotion(lift: 0.07 * hop, squash: Self.bounce(hop, squash: 0.06, stretch: 0.02), glow: Self.pulse(t))
+            return OrbBodyMotion(lift: 0.07 * jump * hop, squash: Self.bounce(hop, squash: 0.06, stretch: 0.02), glow: Self.pulse(t))
         case .happy:
             let hop = abs(sin(t * 4))
-            return OrbBodyMotion(lift: 0.09 * hop, squash: Self.bounce(hop, squash: 0.07, stretch: 0.03), tilt: 7 * sin(t * 4),
+            return OrbBodyMotion(lift: 0.09 * jump * hop, squash: Self.bounce(hop, squash: 0.07, stretch: 0.03), tilt: 7 * sin(t * 4),
                                  glow: Self.pulse(t))
         case .error:
             return OrbBodyMotion(squash: 0.01 * breathe, shake: 0.025 * sin(t * 32) * (0.5 + 0.5 * sin(t * 1.5)),
                                  glow: 0.8 + 0.2 * sin(t * 10))
         case .sleepy:
-            return OrbBodyMotion(lift: 0.012 * sin(t * 0.9), squash: 0.025 * sin(t * 0.9), tilt: -6, glow: 0.55)
+            return OrbBodyMotion(lift: 0.012 * bob * sin(t * 0.9), squash: 0.025 * bob * sin(t * 0.9), tilt: -6, glow: 0.55)
         }
     }
 

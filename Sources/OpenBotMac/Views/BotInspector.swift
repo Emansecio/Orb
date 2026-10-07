@@ -30,6 +30,7 @@ struct BotInspector: View {
                 Section("Orb") {
                     LabeledContent("Cor", value: OrbCatalog.shared.label(.color, bot.orb.color))
                     LabeledContent("Olhos", value: OrbCatalog.shared.label(.eyes, bot.orb.eyes))
+                    LabeledContent("Jeito", value: bot.orb.temperament.label)
                     if !bot.orb.accessories.isEmpty {
                         LabeledContent("Acessórios", value: bot.orb.accessories
                             .map { OrbCatalog.shared.label(.accessories, $0) }.joined(separator: ", "))

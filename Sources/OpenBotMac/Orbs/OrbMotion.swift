@@ -21,6 +21,9 @@ struct OrbPose: Equatable {
     var bubbleBob = 0.0
     var bubbleOpacity = 0.8
     var bubbleScale = 1.0
+    /// Speaking: jaw opening (0 closed ... ~1 open) and the mouth shape shown (nil = the regular mouth).
+    var talk = 0.0
+    var viseme: OrbViseme?
 
     static let rest = OrbPose()
 
@@ -33,9 +36,10 @@ struct OrbPose: Equatable {
                          hypot(look.x - other.look.x, look.y - other.look.y) * OrbLayer.maxDepth,
                          abs(squash - other.squash) / 2, abs(hover - other.hover) * 0.02,
                          abs(tilt - other.tilt) * .pi / 360, abs(blink - other.blink) * 0.12,
-                         abs(bubbleScale - other.bubbleScale) * 0.2)
+                         abs(bubbleScale - other.bubbleScale) * 0.2, abs(talk - other.talk) * 0.02)
         let fade = max(abs(glow - other.glow), abs(bubbleOpacity - other.bubbleOpacity)) * 8
-        return max(length * size * scale, fade)
+        let swap = viseme == other.viseme ? 0.0 : 8
+        return max(length * size * scale, fade, swap)
     }
 }
 
@@ -73,6 +77,9 @@ struct SpringPoint: Equatable {
 struct Blinker {
     private(set) var nextBlink: Double
     private var start: Double?
+    /// Seconds between blinks (short gaps are more likely) and the chance of a double blink.
+    var gap: ClosedRange<Double> = 2...7
+    var doubleChance = 0.12
     static let close = 0.06, hold = 0.03, open = 0.14
     static var duration: Double { close + hold + open }
 
@@ -84,8 +91,8 @@ struct Blinker {
     mutating func amount<R: RandomNumberGenerator>(at time: Double, using rng: inout R) -> Double {
         if start == nil, time >= nextBlink {
             start = time
-            let double = Double.random(in: 0..<1, using: &rng) < 0.12
-            let pause = 2 + 5 * pow(Double.random(in: 0..<1, using: &rng), 2)
+            let double = Double.random(in: 0..<1, using: &rng) < doubleChance
+            let pause = gap.lowerBound + (gap.upperBound - gap.lowerBound) * pow(Double.random(in: 0..<1, using: &rng), 2)
             nextBlink = time + (double ? Self.duration + 0.06 : pause)
         }
         guard let start else { return 0 }
@@ -117,6 +124,9 @@ struct Blinker {
 struct Saccades {
     private(set) var fixation = CGPoint.zero
     private(set) var next: Double
+    /// Multipliers on how far the saccades go and how long each fixation is held.
+    var reach = 1.0
+    var hold = 1.0
 
     init(firstAt time: Double) { next = time }
 
@@ -128,8 +138,9 @@ struct Saccades {
             : kind < 0.85 ? Double.random(in: 0.15...0.4, using: &rng)
             : Double.random(in: 0.5...0.75, using: &rng)
         let angle = Double.random(in: 0..<(2 * .pi), using: &rng)
-        fixation = CGPoint(x: radius * cos(angle), y: radius * sin(angle) * 0.6)
-        next = time + (radius > 0.45 ? Double.random(in: 0.5...1.1, using: &rng) : Double.random(in: 0.8...2.8, using: &rng))
+        let distance = min(0.9, radius * reach)
+        fixation = CGPoint(x: distance * cos(angle), y: distance * sin(angle) * 0.6)
+        next = time + hold * (radius > 0.45 ? Double.random(in: 0.5...1.1, using: &rng) : Double.random(in: 0.8...2.8, using: &rng))
         return true
     }
 

@@ -452,5 +452,11 @@
     "brows",
     "eyes",
     "mouth"
+  ],
+  "visemes": [
+    "fala-a",
+    "fala-o",
+    "fala-e",
+    "fala-m"
   ]
 }
