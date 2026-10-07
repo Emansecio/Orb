@@ -247,12 +247,36 @@ struct ToolError: LocalizedError, Equatable {
 
 // MARK: - MCP
 
-/// A local MCP server launched over stdio.
+/// An MCP server: local (launched over stdio) or remote (HTTP).
 struct MCPServerConfig: Codable, Hashable, Identifiable, Sendable {
     var id = UUID()
     var name: String
-    var command: String
+    /// Local server: executable and arguments, run through the user's login shell.
+    var command = ""
     var arguments: [String] = []
     var environment: [String: String] = [:]
+    /// Remote server: Streamable HTTP endpoint (or legacy SSE). When set, `command` is ignored.
+    var url = ""
+    var headers: [String: String] = [:]
     var isEnabled = true
+    /// Registry name when installed from the catalog (e.g. "io.github.owner/server").
+    var source: String?
+
+    var isRemote: Bool { !url.isEmpty }
+}
+
+extension MCPServerConfig {
+    /// Tolerant decoding: configs saved by older versions lack the newer fields.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.value(.id, default: UUID())
+        name = try c.decode(String.self, forKey: .name)
+        command = try c.value(.command, default: "")
+        arguments = try c.value(.arguments, default: [])
+        environment = try c.value(.environment, default: [:])
+        url = try c.value(.url, default: "")
+        headers = try c.value(.headers, default: [:])
+        isEnabled = try c.value(.isEnabled, default: true)
+        source = try c.decodeIfPresent(String.self, forKey: .source)
+    }
 }
