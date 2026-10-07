@@ -144,7 +144,8 @@ extension OpenAIClient {
         error.string ?? error["message"]?.string
     }
 
-    private static func prefix(of bytes: URLSession.AsyncBytes) async throws -> Data {
+    /// The start of an error body (enough for the message, without reading huge responses).
+    static func prefix(of bytes: URLSession.AsyncBytes) async throws -> Data {
         var data = Data()
         for try await byte in bytes {
             data.append(byte)
