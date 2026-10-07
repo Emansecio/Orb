@@ -10,6 +10,8 @@ enum TurnEvent: Sendable {
     /// A message to append to the model history (user, assistant or tool result).
     case message(ChatMessage)
     case failed(String)
+    /// The Claude Code session this conversation continues in ("" = forget it and start a new one next time).
+    case session(String)
 }
 
 /// Everything one turn needs, captured up front so the turn never reads UI state.

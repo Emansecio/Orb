@@ -5,6 +5,8 @@ import Foundation
 
 enum APIFormat: String, Codable, Sendable {
     case chat, responses, messages
+    /// Not an HTTP API: the turn runs through the local Claude Code CLI (`ClaudeCodeEngine`).
+    case claudeCode
 }
 
 /// One model offered by a provider, as fetched from its live catalog.
@@ -17,13 +19,14 @@ struct ProviderModel: Codable, Hashable, Identifiable, Sendable {
 }
 
 enum ProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
-    case chatgpt, openai, anthropic, opencodeZen, opencodeGo, commandCode, xai, openrouter, ollama, lmstudio, custom
+    case chatgpt, claudeCode, openai, anthropic, opencodeZen, opencodeGo, commandCode, xai, openrouter, ollama, lmstudio, custom
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
         case .chatgpt: "ChatGPT (sua assinatura)"
+        case .claudeCode: "Claude Code (sua assinatura)"
         case .openai: "OpenAI (chave de API)"
         case .anthropic: "Claude (chave de API)"
         case .opencodeZen: "OpenCode Zen"
@@ -40,6 +43,7 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
     var summary: String {
         switch self {
         case .chatgpt: "Entre com sua conta ChatGPT Plus ou Pro e use o limite do seu plano."
+        case .claudeCode: "Usa o Claude Code instalado no seu Mac, com o login da própria Anthropic (Pro ou Max). O OpenBot só abre o Claude Code; nunca vê nem guarda a sua sessão."
         case .openai: "Modelos GPT pela API da OpenAI, cobrados por uso."
         case .anthropic: "Modelos Claude pela API da Anthropic, cobrados por uso."
         case .opencodeZen: "Gateway da OpenCode com modelos selecionados para agentes, cobrado por uso."
@@ -64,7 +68,7 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .openrouter: "https://openrouter.ai/api/v1"
         case .ollama: "http://localhost:11434/v1"
         case .lmstudio: "http://localhost:1234/v1"
-        case .custom: ""
+        case .claudeCode, .custom: ""
         }
     }
 
@@ -77,12 +81,12 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .commandCode: URL(string: "https://commandcode.ai/settings/keys")
         case .xai: URL(string: "https://console.x.ai")
         case .openrouter: URL(string: "https://openrouter.ai/keys")
-        case .chatgpt, .ollama, .lmstudio, .custom: nil
+        case .chatgpt, .claudeCode, .ollama, .lmstudio, .custom: nil
         }
     }
 
-    var usesSignIn: Bool { self == .chatgpt }
-    var needsKey: Bool { ![.chatgpt, .ollama, .lmstudio, .custom].contains(self) }
+    var usesSignIn: Bool { self == .chatgpt || self == .claudeCode }
+    var needsKey: Bool { ![.chatgpt, .claudeCode, .ollama, .lmstudio, .custom].contains(self) }
     var hasEditableURL: Bool { [.ollama, .lmstudio, .custom].contains(self) }
 }
 
@@ -127,6 +131,7 @@ enum ModelCatalog {
     /// Fetches the provider's current models with their wire format.
     /// `token` is the API key or, for ChatGPT, the access token.
     static func fetch(_ account: ProviderAccount, token: String?, session: URLSession = .shared) async throws -> [ProviderModel] {
+        if account.kind == .claudeCode { return try await ClaudeCode.shared.models() }
         guard let base = URL(string: account.baseURL), base.host != nil else { throw LLMError.notConfigured }
         switch account.kind {
         case .chatgpt:
@@ -144,7 +149,7 @@ enum ModelCatalog {
             async let metadata = getJSON(modelsDevURL, token: nil, session: session)
             let key = account.kind == .opencodeZen ? "opencode" : "opencode-go"
             return openCodeModels(live: try await live, metadata: (try? await metadata)?[key]?["models"])
-        case .xai, .openrouter, .ollama, .lmstudio, .custom:
+        case .claudeCode, .xai, .openrouter, .ollama, .lmstudio, .custom:
             return try await OpenAIClient(baseURL: base, apiKey: token, session: session).models()
                 .map { ProviderModel(id: $0, name: $0, format: .chat) }
         }
@@ -232,6 +237,8 @@ extension ProviderAccount {
         case .responses:
             // Sign in with ChatGPT takes tools as an `additional_tools` input item, not top-level `tools`.
             return ResponsesClient(baseURL: base, apiKey: token, extraHeaders: headers, toolsAsInputItem: kind == .chatgpt)
+        case .claudeCode:
+            return nil
         }
     }
 }

@@ -49,7 +49,9 @@ private struct ProviderSection: View {
         if let account {
             Section {
                 LabeledContent("Status") { status(account) }
-                if kind.usesSignIn {
+                if kind == .claudeCode {
+                    ClaudeCodeAccountRow()
+                } else if kind.usesSignIn {
                     signInRow
                 } else if kind.needsKey || kind == .custom {
                     keyRow
@@ -85,7 +87,7 @@ private struct ProviderSection: View {
             } message: {
                 Text("Bots que usam modelos deste provedor passam a usar o modelo padrão.")
             }
-            .task(id: kind) { email = kind.usesSignIn ? await ChatGPTAuth.shared.credential?.email : nil }
+            .task(id: kind) { email = kind == .chatgpt ? await ChatGPTAuth.shared.credential?.email : nil }
         }
     }
 
