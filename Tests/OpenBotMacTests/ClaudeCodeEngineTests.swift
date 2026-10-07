@@ -96,6 +96,23 @@ struct ClaudeCodeEngineTests {
         return events
     }
 
+    /// What other models did reaches Claude Code before the prompt, but the history keeps only the user's words.
+    @Test func catchUpContextIsSentButNotRecorded() async throws {
+        let fake = try FakeClaude()
+        defer { fake.remove() }
+        var turn = fake.turn(mode: .auto, sessionID: "sess-1")
+        turn.context = "Earlier in this OpenBot conversation: CONTEXTO-DE-TESTE"
+        let events = await run(ClaudeCodeEngine(), turn)
+
+        guard case .message(let user) = events.first else { Issue.record("no user message"); return }
+        #expect(user == .user("liste os arquivos"))
+        let lines = await fake.logLines(waitingFor: "eof")
+        let userLine = lines.dropFirst().compactMap { JSONValue.parse($0) }.first { $0["type"] == .string("user") }
+        let sent = userLine?["message"]?["content"]?.string ?? userLine?.jsonString ?? ""
+        #expect(sent.contains("CONTEXTO-DE-TESTE"))
+        #expect(sent.contains("liste os arquivos"))
+    }
+
     @Test func approvedToolRunsEndToEnd() async throws {
         let fake = try FakeClaude()
         defer { fake.remove() }
@@ -109,7 +126,7 @@ struct ClaudeCodeEngineTests {
         let finished = events.compactMap { if case .toolFinished(_, let state, let output) = $0 { (state, output) } else { nil } }
         #expect(finished.count == 1 && finished[0].0 == .done && finished[0].1 == "a.txt")
         guard case .message(let reply) = events.last else { Issue.record("no reply"); return }
-        #expect(reply.content == "Vou listar.\n\nPronto.")
+        #expect(reply.content.hasPrefix("Vou listar.\n\nPronto.\n\n(Actions taken in this turn: "))
         #expect(!events.contains { if case .failed = $0 { true } else { false } })
 
         let lines = await fake.logLines(waitingFor: "eof")

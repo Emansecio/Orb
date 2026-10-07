@@ -229,7 +229,41 @@ struct ClaudeCodeTranscriptTests {
         let finished = events.compactMap { if case .toolFinished(let id, let state, let output) = $0 { (id, state, output) } else { nil } }
         #expect(finished.count == 1 && finished[0].0 == started[0].id && finished[0].1 == .done && finished[0].2 == "a.txt")
         guard case .message(let reply) = events.last else { Issue.record("no reply message"); return }
-        #expect(reply == ChatMessage(role: .assistant, content: "Vou olhar.\n\nPronto."))
+        // The reply plus a short note of what was done, so other models taking over know.
+        #expect(reply.content.hasPrefix("Vou olhar.\n\nPronto.\n\n(Actions taken in this turn: "))
+        #expect(reply.content.contains("ls"))
+    }
+
+    @Test func replyWithoutToolsHasNoActionNote() {
+        var transcript = ClaudeCodeTranscript(isResuming: false)
+        var events: [TurnEvent] = []
+        for message: ClaudeCodeMessage in [.started(sessionID: "s"), .text("Oi!"),
+                                           .result(ClaudeCodeResult(isError: false, message: "Oi!", sessionID: "s"))] {
+            events += transcript.apply(message)
+        }
+        guard case .message(let reply) = events.last else { Issue.record("no reply"); return }
+        #expect(reply.content == "Oi!")
+    }
+
+    @Test func catchUpSummarizesWhatOtherModelsDid() {
+        #expect(ClaudeCodePrompt.catchUp([]).isEmpty)
+        let call = ToolCallRequest(id: "c1", name: "run_command", arguments: #"{"command":"npm test"}"#)
+        let text = ClaudeCodePrompt.catchUp([
+            .user("Rode os testes"), ChatMessage(role: .assistant, content: "Vou rodar.", toolCalls: [call]),
+            .tool("c1", "12 passed"), ChatMessage(role: .assistant, content: "Todos passaram."),
+        ])
+        #expect(text.hasPrefix("Earlier in this OpenBot conversation"))
+        #expect(text.contains("User: Rode os testes"))
+        #expect(text.contains("run_command"))
+        #expect(text.contains("Tool result: 12 passed"))
+        #expect(text.hasSuffix("The user's new message:"))
+    }
+
+    @Test func catchUpKeepsTheMostRecentPartWhenLong() {
+        let long = (0..<200).map { ChatMessage.user("mensagem \($0) " + String(repeating: "x", count: 100)) }
+        let text = ClaudeCodePrompt.catchUp(long, limit: 2_000)
+        #expect(text.contains("mensagem 199"))
+        #expect(!text.contains("mensagem 0 "))
     }
 
     @Test func failuresAndDenials() {

@@ -397,7 +397,12 @@ final class AppModel {
     /// A turn run by the user's Claude Code, continuing the conversation's Claude Code session.
     private func runClaudeCode(_ bot: Bot, model: String, prompt: String) {
         let botID = bot.id
-        let sessionID = conversations[botID]?.claudeSessionID
+        let conversation = conversations[botID] ?? Conversation()
+        let sessionID = conversation.claudeSessionID
+        // New session: hand it the whole conversation so far. Resumed: only what other models did since.
+        // (Sessions from before this was tracked count as up to date.)
+        let seen = sessionID == nil ? 0 : min(conversation.claudeSeenCount ?? conversation.messages.count, conversation.messages.count)
+        let context = ClaudeCodePrompt.catchUp(Array(conversation.messages[seen...]).modelContext())
         let system = ClaudeCodePrompt.make(bot: bot, skills: enabledSkills)
         let servers = bot.capabilities.contains(.connectors) ? connectors.filter(\.isEnabled) : []
         claudeTurns.insert(botID)
@@ -408,7 +413,7 @@ final class AppModel {
                 return
             }
             let turn = ClaudeCodeTurn(bot: bot, executable: installation.executable, model: model, system: system,
-                                      prompt: prompt, sessionID: sessionID, connectors: servers,
+                                      prompt: prompt, context: context, sessionID: sessionID, connectors: servers,
                                       environment: await ClaudeCode.shared.environment(for: installation))
             await play(claudeEngine.run(turn), for: botID)
         }
@@ -513,6 +518,7 @@ final class AppModel {
             append(.notice("Não deu certo: \(message)"), to: botID)
         case .session(let id):
             conversations[botID, default: Conversation()].claudeSessionID = id.isEmpty ? nil : id
+            if id.isEmpty { conversations[botID]?.claudeSeenCount = nil }
             scheduleConversationSave(botID, delay: 1)
         }
     }
@@ -520,7 +526,10 @@ final class AppModel {
     private func finishTurn(_ botID: UUID, succeeded: Bool = true) {
         guard turns[botID] != nil else { return }
         turns[botID] = nil
-        claudeTurns.remove(botID)
+        if claudeTurns.remove(botID) != nil, conversations[botID]?.claudeSessionID != nil {
+            // Everything so far went through (or was handed to) this Claude Code session.
+            conversations[botID]?.claudeSeenCount = conversations[botID]?.messages.count
+        }
         stopSpeaking(botID)
         closeStreaming(botID)
         statusLine[botID] = nil

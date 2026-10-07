@@ -126,6 +126,9 @@ struct Conversation: Codable, Sendable {
     var messages: [ChatMessage] = []
     /// Claude Code keeps its own history; turns run through it resume this session.
     var claudeSessionID: String?
+    /// How many of `messages` that Claude Code session has seen; later ones (other models' turns) are
+    /// handed to it as context on its next turn.
+    var claudeSeenCount: Int?
 
     /// After a quit or crash mid-turn: nothing is streaming, running or waiting anymore.
     func closingInterruptedTurn() -> Conversation {

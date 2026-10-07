@@ -9,6 +9,8 @@ struct ClaudeCodeTurn: Sendable {
     /// Appended to Claude Code's system prompt (persona, memory, skills).
     var system: String
     var prompt: String
+    /// What happened in the conversation that this Claude Code session has not seen; sent before the prompt.
+    var context = ""
     /// Claude Code session to resume; nil starts a new one.
     var sessionID: String?
     /// Enabled connectors, passed with `--mcp-config` when the bot may use them.
@@ -116,7 +118,7 @@ actor ClaudeCodeEngine {
             for message in parser.parse(line) {
                 switch message {
                 case .controlResponse(let id, _) where id == initializeID:
-                    process.send(ClaudeCodeWire.userMessage(turn.prompt))
+                    process.send(ClaudeCodeWire.userMessage(turn.context.isEmpty ? turn.prompt : turn.context + "\n\n" + turn.prompt))
                 case .permission(let request):
                     let answer = await permission(request, turn: turn, hasText: transcript.hasText, allowed: &allowed, out: out)
                     if case .deny = answer { transcript.noteDenied(request.toolUseID, mode: turn.bot.permissionMode) }
@@ -183,6 +185,8 @@ struct ClaudeCodeTranscript {
     private var running: [String: UUID] = [:]
     private var denials: [String: String] = [:]
     private var apiError: String?
+    /// Short notes of what Claude Code did this turn, kept in the history so other models know.
+    private var actions: [String] = []
 
     init(isResuming: Bool) { self.isResuming = isResuming }
 
@@ -207,6 +211,7 @@ struct ClaudeCodeTranscript {
             let summary = ClaudeCodeTools.summary(name, input)
             let call = ToolCall(kind: ClaudeCodeTools.kind(name), title: summary.title, detail: summary.detail)
             running[id] = call.id
+            if actions.count < 20 { actions.append("\(summary.title): \(summary.detail.prefix(120))") }
             return [.toolStarted(call), .status(summary.title)]
         case .toolResult(let id, let output, let isError):
             guard let callID = running.removeValue(forKey: id) else { return [] }
@@ -220,7 +225,11 @@ struct ClaudeCodeTranscript {
             var events = closeRunningTools()
             if !result.isError {
                 let reply = segments.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
-                if !reply.isEmpty { events.append(.message(ChatMessage(role: .assistant, content: reply.joined(separator: "\n\n")))) }
+                var content = reply.joined(separator: "\n\n")
+                if !actions.isEmpty {
+                    content += (content.isEmpty ? "" : "\n\n") + "(Actions taken in this turn: " + actions.joined(separator: "; ") + ")"
+                }
+                if !content.isEmpty { events.append(.message(ChatMessage(role: .assistant, content: content))) }
             } else if isResuming && !didStart {
                 // The saved session is gone (e.g. deleted in Claude Code): forget it so the next message starts fresh.
                 events += [.session(""), .failed("A conversa anterior não existe mais no Claude Code. Mande de novo para começar uma nova.")]
@@ -259,6 +268,31 @@ struct ClaudeCodeTranscript {
 /// Text appended to Claude Code's own system prompt. No clock or other per-turn values: Claude Code records the
 /// prompt on a session's first request and reuses it when resuming.
 enum ClaudeCodePrompt {
+    /// Conversation turns this Claude Code session has not seen (other models answered in OpenBot), as a compact
+    /// preface for its next prompt. Empty when there is nothing to catch up on.
+    static func catchUp(_ messages: [ChatMessage], limit: Int = 12_000) -> String {
+        let lines: [String] = messages.compactMap { message in
+            switch message.role {
+            case .system:
+                return nil
+            case .user:
+                return "User: \(message.content)"
+            case .assistant:
+                var text = message.content
+                let calls = message.toolCalls.map { "\($0.name)(\($0.arguments.prefix(200)))" }
+                if !calls.isEmpty { text += (text.isEmpty ? "" : "\n") + "[called: " + calls.joined(separator: "; ") + "]" }
+                return text.isEmpty ? nil : "Assistant: \(text)"
+            case .tool:
+                return "Tool result: \(message.content.prefix(500))"
+            }
+        }
+        guard !lines.isEmpty else { return "" }
+        var body = lines.joined(separator: "\n\n")
+        if body.count > limit { body = "…" + body.suffix(limit) }
+        return "Earlier in this OpenBot conversation (answered by another model, so you have not seen it):\n\n"
+            + body + "\n\n---\nThe user's new message:"
+    }
+
     static func make(bot: Bot, skills: [Skill]) -> String {
         var lines = [
             "In this conversation you are \(bot.name), \(bot.role.isEmpty ? "a personal assistant" : bot.role), "
