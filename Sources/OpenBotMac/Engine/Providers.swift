@@ -36,7 +36,7 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .openrouter: "OpenRouter"
         case .ollama: "Ollama (local)"
         case .lmstudio: "LM Studio (local)"
-        case .custom: "Outro compatível com OpenAI"
+        case .custom: "Gateway próprio"
         }
     }
 
@@ -53,7 +53,7 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .openrouter: "Centenas de modelos com uma chave só."
         case .ollama: "Modelos rodando no seu Mac com o Ollama."
         case .lmstudio: "Modelos rodando no seu Mac com o LM Studio."
-        case .custom: "Qualquer servidor que fale a API de chat da OpenAI."
+        case .custom: "Qualquer gateway compatível (OpenAI, Responses ou Anthropic Messages). Útil para apontar o motor do OpenBot a um servidor seu."
         }
     }
 
@@ -97,12 +97,27 @@ struct ProviderAccount: Codable, Hashable, Identifiable, Sendable {
     var isEnabled = true
     var models: [ProviderModel] = []
     var modelsUpdatedAt: Date?
+    /// Custom provider only: the wire format its gateway speaks, and any extra request headers it needs.
+    var format: APIFormat = .chat
+    var headers: [String: String] = [:]
 
     var id: ProviderKind { kind }
 
     init(kind: ProviderKind) {
         self.kind = kind
         baseURL = kind.defaultBaseURL
+    }
+
+    /// Tolerant: accounts saved before `format`/`headers` existed still decode.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try c.decode(ProviderKind.self, forKey: .kind)
+        baseURL = try c.value(.baseURL, default: kind.defaultBaseURL)
+        isEnabled = try c.value(.isEnabled, default: true)
+        models = try c.value(.models, default: [])
+        modelsUpdatedAt = try c.decodeIfPresent(Date.self, forKey: .modelsUpdatedAt)
+        format = try c.value(.format, default: .chat)
+        headers = try c.value(.headers, default: [:])
     }
 }
 
@@ -149,7 +164,13 @@ enum ModelCatalog {
             async let metadata = getJSON(modelsDevURL, token: nil, session: session)
             let key = account.kind == .opencodeZen ? "opencode" : "opencode-go"
             return openCodeModels(live: try await live, metadata: (try? await metadata)?[key]?["models"])
-        case .claudeCode, .xai, .openrouter, .ollama, .lmstudio, .custom:
+        case .custom:
+            // The gateway speaks one chosen format; list via the matching endpoint, with the user's headers.
+            let ids = account.format == .messages
+                ? try await AnthropicClient(baseURL: base, apiKey: token, extraHeaders: account.headers, session: session).models()
+                : try await OpenAIClient(baseURL: base, apiKey: token, extraHeaders: account.headers, session: session).models()
+            return ids.map { ProviderModel(id: $0, name: $0, format: account.format) }
+        case .claudeCode, .xai, .openrouter, .ollama, .lmstudio:
             return try await OpenAIClient(baseURL: base, apiKey: token, session: session).models()
                 .map { ProviderModel(id: $0, name: $0, format: .chat) }
         }
@@ -227,7 +248,7 @@ extension ProviderAccount {
     /// The client for one model: the format decides the wire protocol; OpenCode also wants a stable session id.
     func client(for model: ProviderModel?, token: String?, conversationID: String) -> (any LLMClient)? {
         guard let base = URL(string: baseURL), base.host != nil else { return nil }
-        var headers: [String: String] = [:]
+        var headers = kind == .custom ? self.headers : [:]
         if kind == .opencodeZen || kind == .opencodeGo { headers["x-opencode-session"] = conversationID }
         switch model?.format ?? .chat {
         case .chat:

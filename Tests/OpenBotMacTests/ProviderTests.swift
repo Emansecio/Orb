@@ -101,3 +101,31 @@ struct ProviderExpansionTests {
         #expect(ProviderExpansion.parse("").isEmpty)
     }
 }
+
+struct CustomProviderTests {
+    @Test func oldAccountsWithoutFormatOrHeadersStillDecode() throws {
+        let json = #"{"kind":"custom","baseURL":"http://127.0.0.1:8080/v1","isEnabled":true,"models":[]}"#
+        let account = try JSONDecoder().decode(ProviderAccount.self, from: Data(json.utf8))
+        #expect(account.format == .chat)
+        #expect(account.headers.isEmpty)
+    }
+
+    @Test func customClientUsesChosenFormatAndHeaders() throws {
+        var account = ProviderAccount(kind: .custom)
+        account.baseURL = "http://127.0.0.1:8080/v1"
+        account.format = .messages
+        account.headers = ["X-Gateway-Token": "abc"]
+        account.models = [ProviderModel(id: "claude-x", name: "Claude X", format: .messages)]
+        let client = try #require(account.client(for: account.models[0], token: nil, conversationID: "c") as? AnthropicClient)
+        #expect(client.extraHeaders["X-Gateway-Token"] == "abc")
+    }
+
+    @Test func customChatFormatKeepsOpenAIClientWithHeaders() throws {
+        var account = ProviderAccount(kind: .custom)
+        account.baseURL = "http://127.0.0.1:8080/v1"
+        account.headers = ["Authorization": "Bearer t"]
+        let model = ProviderModel(id: "m", name: "m", format: .chat)
+        let client = try #require(account.client(for: model, token: nil, conversationID: "c") as? OpenAIClient)
+        #expect(client.extraHeaders["Authorization"] == "Bearer t")
+    }
+}

@@ -101,6 +101,9 @@ private struct ProviderRow: View {
                                                        set: { url in model.updateProvider(kind) { $0.baseURL = url } }),
                               prompt: Text("http://localhost:11434/v1"))
                 }
+                if kind == .custom {
+                    CustomProviderFields(account: account)
+                }
                 Toggle("Usar este provedor", isOn: Binding(get: { account.isEnabled },
                                                           set: { on in model.updateProvider(kind) { $0.isEnabled = on } }))
                 HStack {
