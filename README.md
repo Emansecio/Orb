@@ -6,7 +6,7 @@ funcionalidades do Grok Bot, com design e código próprios.
 
 ```bash
 ./scripts/bundle.sh && open build/OpenBot.app   # gera e abre o app (com ícone)
-swift test                                      # 38 testes (motor, cliente, ferramentas, MCP, dados)
+swift test                                      # 42 testes (motor, cliente, ferramentas, MCP, dados)
 ```
 
 Na primeira vez: **Ajustes → Modelo**, escolha o provedor, cole a chave e clique em
@@ -18,7 +18,7 @@ Na primeira vez: **Ajustes → Modelo**, escolha o provedor, cole a chave e cliq
 |---|---|
 | **Modelos** | Qualquer API compatível com OpenAI: xAI (Grok), OpenAI, OpenRouter, Ollama, LM Studio ou URL própria. Resposta em streaming; modelo padrão + modelo por bot. Chave no **Keychain**. |
 | **Ferramentas** | `run_command` (zsh), `read_file`, `write_file`, `list_directory`, `search_files` (Spotlight), `web_fetch`, `open`, `applescript` (Mail, Calendário, Notas…), `remember`. |
-| **Permissões** | Por bot: **Perguntar antes** (ações que mudam algo pedem aprovação), **Automático** ou **Só leitura**. “Sempre permitir” vale por ferramenta e pode ser revogado no painel do bot. Cada grupo de ferramentas pode ser desligado (Terminal e arquivos, Web, Apps do Mac, Conectores). |
+| **Permissões** | Por bot: **Perguntar antes** (ações que mudam algo, acessam a web ou guardam memória pedem aprovação), **Automático** ou **Só leitura**. “Sempre permitir” vale por ferramenta e pode ser revogado no painel do bot. Cada grupo de ferramentas pode ser desligado (Terminal e arquivos, Web, Apps do Mac, Conectores). |
 | **Conectores** | Servidores **MCP** locais (stdio), com modelos prontos (Arquivos, Memória, Fetch, GitHub) ou comando próprio. Status ao vivo e reconexão. |
 | **Skills** | Instruções reutilizáveis: comece a mensagem com `/resumir`, `/organizar`, `/revisar` ou crie as suas. |
 | **Rotinas** | O bot faz uma tarefa sozinho todo dia, toda semana ou a cada X horas enquanto o app está aberto; resultado no card e notificação. |
@@ -45,8 +45,12 @@ Views (SwiftUI)  ──►  AppModel (@MainActor @Observable)
   `ToolSpec`, `ChatMessage`, `JSONValue`. Uma ferramenta nova é um `struct` que implementa `AgentTool` e entra em `ToolBox.all`.
 - **Um turno**: `AppModel.send` monta um `TurnRequest` (prompt do sistema, histórico, ferramentas permitidas) e consome os
   `TurnEvent`s do `AgentEngine` (texto, ferramenta iniciada/terminada, aprovação, mensagens para o histórico, erro).
-- **Risco**: cada ferramenta diz se a chamada é `.safe` (lê) ou `.sensitive` (muda algo / roda código). Só as sensíveis
-  passam pelo portão. Ferramentas de conectores são sempre sensíveis.
+- **Risco**: só ler arquivos, listar pastas e buscar no Spotlight é `.safe`. Todo o resto é `.sensitive` e passa pelo
+  portão: o que muda o Mac ou roda código, e também o que pode **mandar dados para fora** (`web_fetch`, `open`) ou ficar no
+  prompt de todas as conversas (`remember`). Assim, um texto malicioso numa página não consegue ler um segredo e enviá-lo
+  sem você aprovar. “Só leitura” vale mesmo para ferramentas marcadas como “Sempre permitir”.
+- **Contexto**: o modelo recebe as últimas 60 mensagens (começando numa mensagem sua), com saídas antigas de ferramentas
+  encurtadas; chamadas interrompidas recebem um resultado “não executado” para o histórico continuar válido.
 - **Dados**: `state.json` (bots, rotinas, skills, conectores, provedor) e `conversations/<bot>.json` (o que a tela mostra e
   o histórico do modelo). Campos novos devem ter valor padrão na decodificação (`value(_:default:)`), para arquivos antigos
   continuarem abrindo.
@@ -64,7 +68,7 @@ open -n build/OpenBot.app --env OPENBOT_SEND="Como está meu Mac?"   # envia um 
 |---|---|
 | `OPENBOT_DATA_DIR` | Pasta de dados alternativa (testes sem tocar nos seus bots) |
 | `OPENBOT_SEND` | Envia o texto ao bot selecionado ao abrir (teste ponta a ponta) |
-| `OPENBOT_STATIC_PETS` | Desliga a animação dos Orbs |
+| `OPENBOT_STATIC_ORBS` | Desliga a animação dos Orbs |
 | `--render-orbs arquivo.png` / `--render-icon arquivo.png` | Gera a folha de Orbs / o ícone e sai |
 
 ## Próximos passos

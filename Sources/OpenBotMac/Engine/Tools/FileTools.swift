@@ -16,7 +16,7 @@ struct ReadFileTool: AgentTool {
         ], required: ["path"]))
 
     var kind: ToolCall.Kind { .file }
-    var capability: Capability? { nil }
+    var capability: Capability? { .terminal }
     func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
 
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) {
@@ -69,8 +69,11 @@ struct WriteFileTool: AgentTool {
     var capability: Capability? { .terminal }
     func risk(_ arguments: JSONValue) -> ToolRisk { .sensitive }
 
+    /// Shows the path and the start of the content, so the approval card says what will be written.
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) {
-        ("Gravando arquivo", arguments["path"]?.string ?? "")
+        let content = arguments["content"]?.string ?? ""
+        let preview = content.count > 600 ? content.prefix(600) + "\n…" : content
+        return ("Gravando arquivo", (arguments["path"]?.string ?? "") + (preview.isEmpty ? "" : "\n\n" + preview))
     }
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
@@ -106,7 +109,7 @@ struct ListDirectoryTool: AgentTool {
         ]))
 
     var kind: ToolCall.Kind { .file }
-    var capability: Capability? { nil }
+    var capability: Capability? { .terminal }
     func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
 
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) {
@@ -148,7 +151,7 @@ struct SearchFilesTool: AgentTool {
         ], required: ["query"]))
 
     var kind: ToolCall.Kind { .search }
-    var capability: Capability? { nil }
+    var capability: Capability? { .terminal }
     func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
 
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) {

@@ -18,8 +18,11 @@ struct AppState: Codable, Sendable {
 }
 
 /// JSON files in ~/Library/Application Support/OpenBot (override with `OPENBOT_DATA_DIR`).
+/// Encoding and disk I/O run in order on one background queue, off the main thread.
 struct Store: Sendable {
     let directory: URL
+
+    private static let queue = DispatchQueue(label: "app.openbot.store", qos: .utility)
 
     static let standard = Store(directory: ProcessInfo.processInfo.environment["OPENBOT_DATA_DIR"]
         .map { URL(fileURLWithPath: $0) }
@@ -31,12 +34,18 @@ struct Store: Sendable {
         directory.appendingPathComponent("conversations/\(botID.uuidString).json")
     }
 
-    func loadState() -> AppState? { read(AppState.self, from: stateURL) }
-    func save(_ state: AppState) { write(state, to: stateURL) }
+    func loadState() -> AppState? { Self.queue.sync { read(AppState.self, from: stateURL) } }
+    func save(_ state: AppState) { Self.queue.async { write(state, to: stateURL) } }
 
-    func loadConversation(_ botID: UUID) -> Conversation? { read(Conversation.self, from: conversationURL(botID)) }
-    func save(_ conversation: Conversation, for botID: UUID) { write(conversation, to: conversationURL(botID)) }
-    func deleteConversation(_ botID: UUID) { try? FileManager.default.removeItem(at: conversationURL(botID)) }
+    func loadConversation(_ botID: UUID) -> Conversation? { Self.queue.sync { read(Conversation.self, from: conversationURL(botID)) } }
+    func save(_ conversation: Conversation, for botID: UUID) { Self.queue.async { write(conversation, to: conversationURL(botID)) } }
+    func deleteConversation(_ botID: UUID) {
+        let url = conversationURL(botID)
+        Self.queue.async { try? FileManager.default.removeItem(at: url) }
+    }
+
+    /// Waits for pending writes.
+    func flush() { Self.queue.sync {} }
 
     private func read<T: Decodable>(_ type: T.Type, from url: URL) -> T? {
         guard let data = try? Data(contentsOf: url) else { return nil }

@@ -319,7 +319,7 @@ private struct ConnectorEditor: View {
                 } header: {
                     Text("Variáveis de ambiente (NOME=valor, uma por linha)")
                 } footer: {
-                    Text("O comando roda com o PATH do seu shell de login. Ferramentas de conectores sempre pedem permissão no modo “Perguntar antes”.")
+                    Text("O comando roda com o PATH do seu shell de login. As variáveis ficam no arquivo de dados do app, sem criptografia. Ferramentas de conectores pedem permissão no modo “Perguntar antes”.")
                 }
             }
             .formStyle(.grouped)

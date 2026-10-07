@@ -125,12 +125,10 @@ final class ToolTests {
 
     // MARK: Catalog
 
-    @Test func openRiskDependsOnTarget() {
-        let tool = OpenTool()
-        #expect(tool.risk(.object(["target": .string("https://example.com")])) == .safe)
-        #expect(tool.risk(.object(["target": .string("Safari")])) == .sensitive)
-        #expect(tool.risk(.object(["target": .string("~/Downloads/app.dmg")])) == .sensitive)
-        #expect(tool.risk(.object(["target": .string("file:///Applications/Calculator.app")])) == .sensitive)
+    /// Anything that can change the Mac or send data out (web, open, memory) must go through the approval gate.
+    @Test func onlyLocalReadsRunWithoutAsking() {
+        let safe = ToolBox.all.filter { $0.risk(.object(["target": .string("https://example.com")])) == .safe }
+        #expect(Set(safe.map(\.spec.name)) == ["read_file", "list_directory", "search_files"])
     }
 
     @Test func rememberCallsTheContext() async throws {
@@ -144,8 +142,6 @@ final class ToolTests {
         let names = ToolBox.all.map(\.spec.name)
         #expect(Set(names).count == names.count)
         #expect(names.first == "run_command")
-        #expect(ToolBox.tool(named: "read_file") is ReadFileTool)
-        #expect(ToolBox.tool(named: "nope") == nil)
         for tool in ToolBox.all {
             let parameters = tool.spec.parameters
             #expect(parameters["type"] == .string("object"), "\(tool.spec.name)")

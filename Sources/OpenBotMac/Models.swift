@@ -113,6 +113,27 @@ struct TranscriptItem: Identifiable, Codable, Sendable {
 struct Conversation: Codable, Sendable {
     var items: [TranscriptItem] = []
     var messages: [ChatMessage] = []
+
+    /// After a quit or crash mid-turn: nothing is streaming, running or waiting anymore.
+    func closingInterruptedTurn() -> Conversation {
+        var copy = self
+        for index in copy.items.indices {
+            switch copy.items[index].kind {
+            case .bot(let text, true):
+                copy.items[index].kind = .bot(text: text, isStreaming: false)
+            case .tool(var call) where call.state == .running:
+                call.state = .failed
+                call.output = call.output ?? "Interrompido."
+                copy.items[index].kind = .tool(call)
+            case .approval(var request) where request.decision == nil:
+                request.decision = .deny
+                copy.items[index].kind = .approval(request)
+            default:
+                break
+            }
+        }
+        return copy
+    }
 }
 
 struct ToolCall: Identifiable, Codable, Sendable {

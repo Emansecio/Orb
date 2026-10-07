@@ -15,11 +15,8 @@ struct OpenTool: AgentTool {
     var capability: Capability? { nil }
 
     /// Web pages are harmless to open; files, apps and other URL schemes can run code.
-    func risk(_ arguments: JSONValue) -> ToolRisk {
-        guard let url = URL(string: arguments["target"]?.string ?? ""),
-              ["http", "https"].contains(url.scheme?.lowercased()), url.host != nil else { return .sensitive }
-        return .safe
-    }
+    /// Even a web URL can carry data out (in its query), so opening anything asks first.
+    func risk(_ arguments: JSONValue) -> ToolRisk { .sensitive }
 
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) {
         ("Abrindo", arguments["target"]?.string ?? "")
@@ -99,7 +96,8 @@ struct RememberTool: AgentTool {
 
     var kind: ToolCall.Kind { .memory }
     var capability: Capability? { nil }
-    func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
+    /// Memory goes into every future system prompt, so injected text must not land there silently.
+    func risk(_ arguments: JSONValue) -> ToolRisk { .sensitive }
 
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) {
         ("Guardando na memória", arguments["fact"]?.string ?? "")

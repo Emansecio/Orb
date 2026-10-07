@@ -36,7 +36,7 @@ private struct DetailView: View {
                 SkillsView()
             case nil:
                 ContentUnavailableView("Escolha um bot", systemImage: "circle.hexagongrid",
-                                       description: Text("Ou crie um novo com ⇧⌘N."))
+                                       description: Text("Ou crie um novo com ⌘N."))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

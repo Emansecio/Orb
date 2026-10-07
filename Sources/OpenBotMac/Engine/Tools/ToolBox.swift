@@ -6,10 +6,6 @@ enum ToolBox {
         RunCommandTool(), ReadFileTool(), WriteFileTool(), ListDirectoryTool(), SearchFilesTool(),
         WebFetchTool(), OpenTool(), AppleScriptTool(), RememberTool(),
     ]
-
-    static func tool(named name: String) -> (any AgentTool)? {
-        all.first { $0.spec.name == name }
-    }
 }
 
 // MARK: - Helpers shared by the tools

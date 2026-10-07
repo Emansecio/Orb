@@ -118,7 +118,7 @@ struct QuickAskView: View {
     private var selectedID: UUID? { botID ?? model.selectedBot?.id ?? model.bots.first?.id }
 
     private func send() {
-        guard let id = selectedID, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard let id = selectedID, !model.isWorking(id), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         model.send(text, to: id)
         model.selection = .bot(id)
         text = ""

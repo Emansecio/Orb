@@ -90,6 +90,43 @@ struct ChatMessage: Codable, Hashable, Sendable {
     static func tool(_ id: String, _ output: String) -> ChatMessage { ChatMessage(role: .tool, content: output, toolCallID: id) }
 }
 
+extension [ChatMessage] {
+    /// The part of a conversation sent to the model: the last `limit` messages starting at a user message,
+    /// older tool outputs shortened, and every tool call answered.
+    func modelContext(limit: Int = 60, oldToolOutput: Int = 4000) -> [ChatMessage] {
+        var window = Array(suffix(limit))
+        let start = window.firstIndex { $0.role == .user } ?? window.firstIndex { $0.role != .tool } ?? window.count
+        window.removeFirst(start)
+        let lastUser = window.lastIndex { $0.role == .user } ?? 0
+        for index in window.indices where index < lastUser && window[index].role == .tool
+            && window[index].content.count > oldToolOutput {
+            window[index].content = window[index].content.prefix(oldToolOutput) + "\n[… saída antiga cortada …]"
+        }
+        return window.answeringDanglingToolCalls()
+    }
+
+    /// Gives every assistant tool call a result. A stopped turn leaves calls unanswered, which providers reject.
+    func answeringDanglingToolCalls() -> [ChatMessage] {
+        var result: [ChatMessage] = []
+        var open: [String] = []
+        func close() {
+            result += open.map { ChatMessage.tool($0, "Not run: the turn was interrupted.") }
+            open = []
+        }
+        for message in self {
+            if message.role == .tool, let id = message.toolCallID {
+                open.removeAll { $0 == id }
+            } else {
+                close()
+            }
+            result.append(message)
+            if message.role == .assistant { open = message.toolCalls.map(\.id) }
+        }
+        close()
+        return result
+    }
+}
+
 struct ToolCallRequest: Codable, Hashable, Sendable {
     var id: String
     var name: String

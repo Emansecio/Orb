@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
+    @State private var deleting: Bot?
 
     var body: some View {
         ScrollView {
@@ -17,7 +18,7 @@ struct SidebarView: View {
                     .contextMenu {
                         Button("Nova conversa") { model.newConversation(bot.id) }
                         Divider()
-                        Button("Apagar \(bot.name)", role: .destructive) { model.deleteBot(bot.id) }
+                        Button("Apagar \(bot.name)…", role: .destructive) { deleting = bot }
                     }
                 }
 
@@ -44,6 +45,15 @@ struct SidebarView: View {
         }
         .scrollIndicators(.never)
         .background(Palette.chrome)
+        .confirmationDialog("Apagar \(deleting?.name ?? "")?", isPresented: Binding(
+            get: { deleting != nil }, set: { if !$0 { deleting = nil } }
+        )) {
+            Button("Apagar bot e conversa", role: .destructive) {
+                if let bot = deleting { model.deleteBot(bot.id) }
+            }
+        } message: {
+            Text("A conversa, a memória e as rotinas deste bot serão apagadas.")
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             SidebarRow(isSelected: false) {
                 model.showNewBot = true

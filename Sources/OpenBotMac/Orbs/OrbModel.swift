@@ -250,6 +250,25 @@ struct OrbLayer: Identifiable, Hashable {
     let path: String
     let tint: UInt32?
     var id: String { path }
+
+    /// How far the layer shifts with the gaze (fraction of the orb size); nearer features move more.
+    var depth: Double {
+        switch kind {
+        case .body: 0
+        case .eyes: 0.075
+        case .brows: 0.07
+        case .mouth, .mustache, .cheeks: 0.055
+        case .hair, .accessory: 0.025
+        }
+    }
+}
+
+/// Where things sit in the rendered layer images, as fractions measured from the top.
+enum OrbGeometry {
+    /// The orb fills `size`, but the images are this much larger so hats and halos fit.
+    static let imageScale: CGFloat = 1.96
+    static let eyeLine: CGFloat = 0.455
+    static let orbBottom: CGFloat = 0.755
 }
 
 extension OrbConfig {

@@ -5,6 +5,7 @@ import AppKit
 struct OpenBotMacApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var model = AppModel()
+    @MainActor private static var didSendLaunchPrompt = false
 
     var body: some Scene {
         Window("OpenBot", id: "main") {
@@ -14,7 +15,9 @@ struct OpenBotMacApp: App {
                 .preferredColorScheme(.dark)
                 .task {
                     // Dev aid for scripted end-to-end checks: OPENBOT_SEND="texto" sends it to the selected bot on launch.
-                    if let text = ProcessInfo.processInfo.environment["OPENBOT_SEND"], let id = model.selectedBot?.id {
+                    if let text = ProcessInfo.processInfo.environment["OPENBOT_SEND"], !Self.didSendLaunchPrompt,
+                       let id = model.selectedBot?.id {
+                        Self.didSendLaunchPrompt = true
                         model.send(text, to: id)
                     }
                 }

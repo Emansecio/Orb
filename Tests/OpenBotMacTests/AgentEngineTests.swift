@@ -128,6 +128,13 @@ struct AgentEngineTests {
         #expect(messages(events)[2].content.contains("read-only"))
     }
 
+    @Test func readOnlyWinsOverAlwaysAllow() async {
+        let runs = Counter()
+        let script = Script([[touchCall], [.text("Ok")]])
+        _ = await run(AgentEngine(), request(script, mode: .readOnly, allowed: ["touch"], runs: runs))
+        #expect(await runs.value == 0)
+    }
+
     @Test func unknownToolAndBadArgumentsAreReportedToTheModel() async {
         let script = Script([[.toolCalls([ToolCallRequest(id: "a", name: "nope", arguments: "{}"),
                                           ToolCallRequest(id: "b", name: "touch", arguments: "{bad")])],
@@ -141,6 +148,44 @@ struct AgentEngineTests {
 }
 
 struct ModelTests {
+    @Test func unansweredToolCallsGetAResult() {
+        let call = ToolCallRequest(id: "c1", name: "touch", arguments: "{}")
+        let history: [ChatMessage] = [.user("oi"), ChatMessage(role: .assistant, content: "", toolCalls: [call]), .user("de novo")]
+        let repaired = history.answeringDanglingToolCalls()
+        #expect(repaired.map(\.role) == [.user, .assistant, .tool, .user])
+        #expect(repaired[2].toolCallID == "c1")
+        #expect(repaired.answeringDanglingToolCalls() == repaired)
+    }
+
+    @Test func modelContextStartsAtAUserMessageAndShortensOldOutputs() {
+        let call = ToolCallRequest(id: "c1", name: "touch", arguments: "{}")
+        let history: [ChatMessage] = [
+            .user("velho"), ChatMessage(role: .assistant, content: "", toolCalls: [call]),
+            .tool("c1", String(repeating: "x", count: 10_000)), ChatMessage(role: .assistant, content: "ok"),
+            .user("novo"),
+        ]
+        let full = history.modelContext()
+        #expect(full[2].content.count < 5000)
+        let cut = history.modelContext(limit: 3)
+        #expect(cut == [.user("novo")])
+    }
+
+    @Test func reopeningClosesAnInterruptedTurn() {
+        var conversation = Conversation()
+        conversation.items = [
+            TranscriptItem(.bot(text: "meio", isStreaming: true)),
+            TranscriptItem(.tool(ToolCall(kind: .shell, title: "t", detail: "d"))),
+            TranscriptItem(.approval(ApprovalRequest(toolName: "touch", title: "t", command: "c", reason: ""))),
+        ]
+        let closed = conversation.closingInterruptedTurn().items.map(\.kind)
+        guard case .bot(_, false) = closed[0], case .tool(let call) = closed[1], case .approval(let request) = closed[2] else {
+            Issue.record("unexpected kinds")
+            return
+        }
+        #expect(call.state == .failed)
+        #expect(request.decision == .deny)
+    }
+
     @Test func skillExpansion() throws {
         let skills = Skill.starters
         let expanded = try #require(SystemPrompt.expandSkill(in: "/resumir ~/notas.txt", skills: skills))
@@ -176,6 +221,7 @@ struct ModelTests {
         var state = AppState.initial
         state.provider.defaultModel = "grok-4"
         store.save(state)
+        store.flush()
         #expect(store.loadState()?.bots.map(\.name) == ["Atlas"])
         #expect(store.loadState()?.provider.defaultModel == "grok-4")
 

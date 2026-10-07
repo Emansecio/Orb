@@ -119,7 +119,7 @@ atual:
 - Pausa quando a janela fica inativa (`appearsActive`) e respeita **Reduzir movimento**.
 
 Medido no app empacotado: **~1 % de CPU** parado com a janela em foco (antes ~37 %) e ~17 % no meio
-de um turno (Orbs ocupados + brilhos do transcript). `OPENBOT_STATIC_PETS=1` desliga toda a animação.
+de um turno (Orbs ocupados + brilhos do transcript). `OPENBOT_STATIC_ORBS=1` desliga toda a animação.
 
 ## 7. Ferramentas de desenvolvimento
 
@@ -133,7 +133,7 @@ de um turno (Orbs ocupados + brilhos do transcript). `OPENBOT_STATIC_PETS=1` des
 open -n build/OpenBot.app --env OPENBOT_SEND="Como está meu Mac?"
 
 # Sem animação (comparar CPU)
-OPENBOT_STATIC_PETS=1 ./build/OpenBot.app/Contents/MacOS/OpenBot
+OPENBOT_STATIC_ORBS=1 ./build/OpenBot.app/Contents/MacOS/OpenBot
 ```
 
 ## 8. Arte: gerar e adicionar opções (Blender)

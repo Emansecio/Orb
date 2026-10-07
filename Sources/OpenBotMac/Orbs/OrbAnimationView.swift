@@ -51,7 +51,7 @@ final class OrbAnimationView: NSView {
     private let aura = CAGradientLayer()
     private let orb = CALayer()
     private let bubble = CATextLayer()
-    private var imageLayers: [(kind: OrbLayer.Kind, layer: CALayer)] = []
+    private var imageLayers: [(layer: OrbLayer, view: CALayer)] = []
     private var shownLayers: [OrbLayer] = []
     private var shownColor = ""
 
@@ -66,11 +66,8 @@ final class OrbAnimationView: NSView {
     private var tickleUntil = 0.0
     private var trackingArea: NSTrackingArea?
 
-    /// Image-relative eye line and orb bottom, measured from the top of the render.
-    private static let eyeLine: CGFloat = 0.455
-    private static let orbBottom: CGFloat = 0.755
 
-    private var side: CGFloat { size * 1.96 }
+    private var side: CGFloat { size * OrbGeometry.imageScale }
     private var now: Double { CACurrentMediaTime() }
 
     override init(frame: NSRect) {
@@ -143,16 +140,16 @@ final class OrbAnimationView: NSView {
                 orb.add(fade, forKey: "swap")
             }
             shownLayers = layers
-            imageLayers.forEach { $0.layer.removeFromSuperlayer() }
+            imageLayers.forEach { $0.view.removeFromSuperlayer() }
             imageLayers = layers.map { item in
                 let imageLayer = CALayer()
                 imageLayer.contents = OrbImages.cgImage(item.path, pixels: side * scale, tint: item.tint)
                 imageLayer.contentsGravity = .resize
                 imageLayer.minificationFilter = .trilinear
                 imageLayer.bounds = CGRect(x: 0, y: 0, width: side, height: side)
-                if item.kind == .eyes { imageLayer.anchorPoint = CGPoint(x: 0.5, y: 1 - Self.eyeLine) }
+                if item.kind == .eyes { imageLayer.anchorPoint = CGPoint(x: 0.5, y: 1 - OrbGeometry.eyeLine) }
                 orb.addSublayer(imageLayer)
-                return (item.kind, imageLayer)
+                return (item, imageLayer)
             }
         }
 
@@ -292,23 +289,16 @@ final class OrbAnimationView: NSView {
 
         // Body: squash/tilt around the orb's bottom, then lift, shake and hover
         orb.bounds = CGRect(x: 0, y: 0, width: side, height: side)
-        orb.anchorPoint = CGPoint(x: 0.5, y: 1 - Self.orbBottom)
-        orb.position = CGPoint(x: mid + pose.shake * size, y: side * (1 - Self.orbBottom) + lift)
+        orb.anchorPoint = CGPoint(x: 0.5, y: 1 - OrbGeometry.orbBottom)
+        orb.position = CGPoint(x: mid + pose.shake * size, y: side * (1 - OrbGeometry.orbBottom) + lift)
         let turn = 1 - abs(pose.look.x) * 0.03
         let scale = CATransform3DMakeScale((1 + pose.squash + pose.hover * 0.04) * turn, 1 - pose.squash + pose.hover * 0.04, 1)
         orb.transform = CATransform3DConcat(scale, CATransform3DMakeRotation(-pose.tilt * .pi / 180, 0, 0, 1))
 
-        for (kind, imageLayer) in imageLayers {
-            let depth: Double = switch kind {
-            case .body: 0
-            case .eyes: 0.075
-            case .brows: 0.07
-            case .mouth, .mustache, .cheeks: 0.055
-            case .hair, .accessory: 0.025
-            }
-            let dx = pose.look.x * depth * size, dy = pose.look.y * depth * size
-            if kind == .eyes {
-                imageLayer.position = CGPoint(x: mid + dx, y: side * (1 - Self.eyeLine) + dy)
+        for (layer, imageLayer) in imageLayers {
+            let dx = pose.look.x * layer.depth * size, dy = pose.look.y * layer.depth * size
+            if layer.kind == .eyes {
+                imageLayer.position = CGPoint(x: mid + dx, y: side * (1 - OrbGeometry.eyeLine) + dy)
                 imageLayer.transform = CATransform3DMakeScale(1, max(0.08, 1 - pose.blink), 1)
             } else {
                 imageLayer.position = CGPoint(x: mid + dx, y: mid + dy)

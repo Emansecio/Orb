@@ -35,8 +35,8 @@ struct OrbView: View {
         .accessibilityLabel("Orb, \(activity.label)")
     }
 
-    /// Dev aid for profiling: `OPENBOT_STATIC_PETS=1`.
-    static let forceStatic = ProcessInfo.processInfo.environment["OPENBOT_STATIC_PETS"] != nil
+    /// Dev aid for profiling: `OPENBOT_STATIC_ORBS=1`.
+    static let forceStatic = ProcessInfo.processInfo.environment["OPENBOT_STATIC_ORBS"] != nil
 }
 
 /// Per-frame pose (all relative to size).
@@ -64,7 +64,7 @@ struct OrbFrame: View {
 
     var body: some View {
         let layers = config.layers(eyes: activity.eyes, mouth: activity.mouth(base: config.mouth), brows: activity.brows)
-        let side = size * 1.96
+        let side = size * OrbGeometry.imageScale
         Color.clear
             .frame(width: size, height: size)
             .overlay {
@@ -87,9 +87,6 @@ private struct OrbPainter {
     let side: CGFloat
     let pose: OrbPose
 
-    /// Eye line and orb bottom in image-relative coordinates.
-    private static let eyeLine: CGFloat = 0.455
-    private static let orbBottom: CGFloat = 0.755
 
     @MainActor
     func draw(in context: inout GraphicsContext) {
@@ -114,7 +111,7 @@ private struct OrbPainter {
 
         // Body transform: squash/tilt around the orb's bottom, then lift, shake and hover
         var orb = context
-        let anchor = CGPoint(x: center.x, y: side * Self.orbBottom)
+        let anchor = CGPoint(x: center.x, y: side * OrbGeometry.orbBottom)
         orb.translateBy(x: anchor.x + pose.shake * size, y: anchor.y - lift)
         orb.rotate(by: .degrees(pose.tilt))
         let turn = 1 - abs(pose.look.x) * 0.03
@@ -124,10 +121,10 @@ private struct OrbPainter {
         for layer in layers {
             guard let image = OrbImages.image(layer.path, pixels: side * 2) else { continue }
             var layerContext = orb
-            let shift = parallax(layer.kind)
+            let shift = parallax(layer)
             layerContext.translateBy(x: shift.width, y: shift.height)
             if layer.kind == .eyes, pose.blink > 0 {
-                let line = side * Self.eyeLine
+                let line = side * OrbGeometry.eyeLine
                 layerContext.translateBy(x: 0, y: line)
                 layerContext.scaleBy(x: 1, y: max(0.08, 1 - pose.blink))
                 layerContext.translateBy(x: 0, y: -line)
@@ -143,15 +140,8 @@ private struct OrbPainter {
         }
     }
 
-    private func parallax(_ kind: OrbLayer.Kind) -> CGSize {
-        let depth: Double = switch kind {
-        case .body: 0
-        case .eyes: 0.075
-        case .brows: 0.07
-        case .mouth, .mustache, .cheeks: 0.055
-        case .hair, .accessory: 0.025
-        }
-        return CGSize(width: pose.look.x * depth * size, height: -pose.look.y * depth * size)
+    private func parallax(_ layer: OrbLayer) -> CGSize {
+        CGSize(width: pose.look.x * layer.depth * size, height: -pose.look.y * layer.depth * size)
     }
 
     private func drawBubble(_ text: String, in context: inout GraphicsContext, center: CGPoint) {

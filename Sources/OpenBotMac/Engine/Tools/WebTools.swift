@@ -15,7 +15,8 @@ struct WebFetchTool: AgentTool {
 
     var kind: ToolCall.Kind { .browser }
     var capability: Capability? { .browser }
-    func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
+    /// A request can carry data out in its URL, so fetching asks first (unless "Sempre permitir").
+    func risk(_ arguments: JSONValue) -> ToolRisk { .sensitive }
 
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) {
         ("Lendo página", arguments["url"]?.string ?? "")
@@ -28,7 +29,12 @@ struct WebFetchTool: AgentTool {
         }
         var request = URLRequest(url: url, timeoutInterval: 20)
         request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        var data = Data()
+        for try await byte in bytes {
+            data.append(byte)
+            if data.count >= Self.maxBytes { break }
+        }
         if let status = (response as? HTTPURLResponse)?.statusCode, status >= 400 {
             throw ToolError("O site respondeu HTTP \(status).")
         }
@@ -48,6 +54,9 @@ struct WebFetchTool: AgentTool {
         }
         return header + "\n\n" + text.truncated(to: 30_000)
     }
+
+    /// Pages larger than this are cut (keeps memory bounded on huge downloads).
+    static let maxBytes = 5_000_000
 
     private static func decode(_ data: Data, charset: String?) -> String {
         if let charset {

@@ -109,16 +109,17 @@ actor AgentEngine {
         }
         let summary = tool.summary(arguments)
 
-        if tool.risk(arguments) == .sensitive && !allowed.contains(call.name) {
+        if tool.risk(arguments) == .sensitive {
             switch request.bot.permissionMode {
             case .auto:
                 break
             case .readOnly:
+                // Read-only wins over any earlier "Sempre permitir".
                 out.yield(.toolStarted(ToolCall(kind: tool.kind, title: summary.title, detail: summary.detail,
                                                 state: .failed, output: "Bloqueado: o bot está em modo Só leitura.",
                                                 finishedAt: .now)))
                 return "Not run: the user set this bot to read-only mode. Explain what you would do instead."
-            case .ask:
+            case .ask where !allowed.contains(call.name):
                 // The model's own explanation is already on screen right above the card.
                 let approval = ApprovalRequest(toolName: call.name, title: summary.title, command: summary.detail,
                                                reason: reason.isEmpty ? "\(request.bot.name) precisa da sua permissão para continuar." : "")
@@ -130,6 +131,8 @@ actor AgentEngine {
                 case .always: allowed.insert(call.name)
                 case .once: break
                 }
+            case .ask:
+                break
             }
         }
 

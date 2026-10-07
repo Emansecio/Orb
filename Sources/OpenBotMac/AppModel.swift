@@ -61,7 +61,9 @@ final class AppModel {
         connectors = state.connectors
         provider = state.provider
         models = state.models
-        conversations = Dictionary(uniqueKeysWithValues: state.bots.map { ($0.id, store.loadConversation($0.id) ?? Conversation()) })
+        conversations = Dictionary(uniqueKeysWithValues: state.bots.map { bot in
+            (bot.id, store.loadConversation(bot.id)?.closingInterruptedTurn() ?? Conversation())
+        })
         hasAPIKey = Keychain.key(for: state.provider.preset) != nil
         selection = state.bots.first.map { .bot($0.id) }
 
@@ -74,6 +76,11 @@ final class AppModel {
         }
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.saveNow() }
+        }
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                if let self, case .bot(let id) = self.selection { self.update(id) { $0.unread = 0 } }
+            }
         }
     }
 
@@ -231,7 +238,7 @@ final class AppModel {
             prompt += "\n\nAttached files (read them with your tools):\n" + attachments.map { "- \($0.path)" }.joined(separator: "\n")
         }
         let system = SystemPrompt.make(bot: bot, skills: skills)
-        let history = conversations[botID]?.messages ?? []
+        let history = (conversations[botID]?.messages ?? []).modelContext()
         let model = modelID(for: bot)
         let context = ToolContext(workingDirectory: bot.workingURL) { [weak self] fact in
             await self?.remember(fact, for: botID)
@@ -242,10 +249,14 @@ final class AppModel {
             if bot.capabilities.contains(.connectors) { tools += await mcp.tools() }
             let request = TurnRequest(bot: bot, model: model, system: system, history: history, prompt: prompt,
                                       client: client, tools: tools, context: context)
+            var succeeded = true
             for await event in engine.run(request) {
+                // A stopped stream still delivers queued events; `stop` already closed the turn.
+                guard !Task.isCancelled else { break }
+                if case .failed = event { succeeded = false }
                 apply(event, to: botID)
             }
-            finishTurn(botID)
+            if !Task.isCancelled { finishTurn(botID, succeeded: succeeded) }
         }
     }
 
@@ -317,7 +328,6 @@ final class AppModel {
         case .failed(let message):
             closeStreaming(botID)
             append(.notice("Não deu certo: \(message)"), to: botID)
-            flash(\.failed, botID, seconds: 2.5)
         }
     }
 
@@ -329,9 +339,9 @@ final class AppModel {
         let reply = lastReply(botID)
         if let routineID = routineTurns.removeValue(forKey: botID),
            let index = routines.firstIndex(where: { $0.id == routineID }) {
-            routines[index].lastResult = succeeded ? reply.map { String($0.prefix(160)) } : "Interrompida"
+            routines[index].lastResult = succeeded ? reply.map { String($0.prefix(160)) } : "Não terminou: veja a conversa."
         }
-        if succeeded && !failed.contains(botID) {
+        if succeeded {
             flash(\.celebrating, botID, seconds: 3)
             if let bot = bot(botID), let reply { notify(bot.name, String(reply.prefix(180))) }
         } else {
@@ -457,9 +467,10 @@ final class AppModel {
         }
     }
 
-    /// Writes everything immediately (on quit).
+    /// Writes everything and waits for the disk (on quit).
     func saveNow() {
         store.save(state)
         for (id, conversation) in conversations { store.save(conversation, for: id) }
+        store.flush()
     }
 }

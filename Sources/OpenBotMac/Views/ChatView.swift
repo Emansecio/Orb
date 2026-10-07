@@ -72,7 +72,7 @@ private struct EmptyChatView: View {
 
     private let suggestions = [
         ("folder", "Organize minha pasta Downloads"),
-        ("envelope", "Resuma meus e-mails de hoje"),
+        ("doc.text", "Resuma o arquivo mais recente da minha Mesa"),
         ("internaldrive", "Quanto espaço livre tenho no disco?"),
         ("terminal", "Veja o que está desatualizado no brew")
     ]
