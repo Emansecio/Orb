@@ -85,9 +85,30 @@ O brilho (aura e sombra no chão) pulsa enquanto o bot trabalha.
   (paralaxe), então o Orb parece virar a cabeça.
 - Cada atividade define o quanto o cursor pode “roubar” o olhar (`pointerWeight`): parado obedece
   totalmente; digitando no terminal quase não tira o olho do trabalho; com erro ou dormindo, ignora.
-- **Passar o mouse por cima**: o Orb cresce um pouco, encara o ponteiro e acelera para 60 fps (grandes) ou 30 fps (pequenos).
+- **Passar o mouse por cima**: o Orb cresce um pouco (com uma leve sobra de mola), encara o ponteiro e,
+  enquanto o ponteiro se mexe, roda a 60 fps (grandes) ou 30 fps (pequenos).
 - **Clicar** (Orbs interativos: painel do bot, estado vazio do chat, editor): pula e fica feliz por 1,4 s.
-- Piscadas a cada ~4,3 s, com fase aleatória por Orb.
+
+### Movimento natural
+
+Tudo em [`Orbs/OrbMotion.swift`](../Sources/OpenBotMac/Orbs/OrbMotion.swift) (funções puras, testadas em `OrbTests`):
+
+- **Molas** (`Spring`, `SpringPoint`) no lugar de suavização exponencial: olhar, hover, balão e “gelatina”.
+  Integradas em passos fixos de 1/240 s, então o resultado é o mesmo a 10 ou a 60 fps.
+- **Olhos × cabeça**: os olhos pulam rápido para o alvo (mola de 0,07 s) e a cabeça (paralaxe do rosto)
+  vem atrás (0,4 s); durante o movimento os olhos “lideram” (`eyeLead`).
+- **Sacadas** (`Saccades`) quando parado: fixa um ponto por 0,8–2,8 s, salta para outro (quase sempre
+  perto do centro, às vezes uma olhada mais longe) e tem uma deriva mínima durante a fixação. Ouvindo,
+  esperando e feliz usam 30 % disso; as demais atividades seguem só o próprio padrão.
+- **Piscadas** (`Blinker`): intervalo irregular de 2–7 s, fecha em 0,06 s e abre em 0,14 s, e 12 % das
+  vezes pisca duas vezes. Também pisca quando a expressão muda (esconde a troca de camadas).
+- **Troca de atividade sem saltos**: corpo, olhar, brilho e peso do ponteiro misturam a atividade anterior e
+  a nova por 0,35 s (`OrbBodyMotion.mix`), a expressão faz crossfade de 0,18 s e o corpo dá um balanço leve.
+- **Movimento secundário**: cabelo e acessórios de cabeça (não os óculos, `OrbLayer.isLoose`) atrasam um
+  pouco nas viradas e nos pulos; o pouso do pulo vira uma mola subamortecida (amassa, estica, assenta).
+  Nos pulinhos de `waiting`/`happy` o amassado no chão passa suave para o esticado no ar (`bounce`).
+- **Balão** entra e sai com escala e opacidade em mola, em vez de aparecer de uma vez.
+- **Reduzir movimento** continua mostrando o Orb estático.
 - Orbs pequenos não interativos deixam o clique passar (selecionar a linha da barra lateral continua funcionando).
 
 ## 5. Onde aparecem
@@ -113,13 +134,39 @@ atual:
   `CADisplayLink` (`NSView.displayLink`) só move as camadas (posição, escala, rotação, opacidade)
   dentro de uma `CATransaction` sem animações implícitas. O SwiftUI só é avisado quando a
   configuração ou a atividade muda.
-- Camadas são `CGImage` **pré-tingidas** e reduzidas ao tamanho na tela (baldes 96/160/256/384/640 px, em cache).
-- Taxa adaptativa: 15 fps parado (pequenos) / 30 fps (grandes); 30/60 fps ao passar o mouse,
-  depois de um pulo ou enquanto o bot trabalha.
-- Pausa quando a janela fica inativa (`appearsActive`) e respeita **Reduzir movimento**.
+- Por frame só se mudam posição, transformação e opacidade. Tamanhos, `anchorPoint`, cores dos
+  gradientes e texto do balão são definidos uma vez (ao montar, mudar o tamanho ou a atividade).
+  Ao trocar de expressão, as camadas que não mudam (corpo, bochechas, cabelo…) são reaproveitadas.
+- **Taxa guiada pelo movimento** (`OrbFrameRate`): a cada frame mede-se quanto a pose andou na tela
+  (`OrbPose.pixelDistance`, em pixels do dispositivo) e escolhe-se a menor taxa entre 10/15/20/30/60 fps
+  em que cada passo fica abaixo de ~0,8 px. Sobe na hora, desce depois de 0,3 s calmo. Piscadas sobem para
+  30 fps só enquanto duram; clique, hover com o ponteiro mexendo e troca de atividade vão ao máximo
+  (60 grandes / 30 pequenos) por 0,4 s. Cada atividade tem um piso (`minFrameRate`): digitando/erro
+  tremem a ~6 Hz e pulos precisam de 30 fps, senão a vibração vira um balanço lento (aliasing).
+- **Frames sem mudança visível não são enviados**: se a pose mudou menos de 0,25 px desde o último frame
+  desenhado, nada é tocado (sem `CATransaction`).
+- **Pausa quando ninguém vê**: o display link para com a janela coberta ou minimizada
+  (`NSWindow.occlusionState`) ou a view escondida, além de virar estático com a janela inativa
+  (`appearsActive`). Respeita **Reduzir movimento**.
+- **Imagens**: `OrbImages` decodifica com ImageIO direto no tamanho do balde (96/128/192/256/384/512/640 px;
+  sem guardar o PNG inteiro decodificado), assa a tinta e guarda num cache thread-safe. Ao montar um Orb,
+  todas as expressões das atividades são pré-decodificadas em segundo plano, então trocar de atividade
+  não decodifica nada na thread principal. O `OrbFrame` estático usa os mesmos bitmaps (sem filtro de cor).
 
-Medido no app empacotado: **~1 % de CPU** parado com a janela em foco (antes ~37 %) e ~17 % no meio
-de um turno (Orbs ocupados + brilhos do transcript). `OPENBOT_STATIC_ORBS=1` desliga toda a animação.
+Frames por segundo (simulação da lógica real com tempo virtual, 120 s; 3 Orbs: 30, 96 e 60 pt):
+
+| Cenário | Antes (frames = commits) | Agora: frames | Agora: commits |
+|---|---|---|---|
+| Parado (30 / 96 / 60 pt) | 15 / 30 / 15 = 60 | 12 / 18 / 14 = 44 | 6 / 13 / 10 = 30 |
+| Trabalhando (terminal / pensando / buscando) | 30 / 60 / 30 = 120 | 30 / 24 / 20 = 74 | 21 / 23 / 20 = 63 |
+
+CPU do processo, medido com os mesmos 3 Orbs numa janela invisível que não ativa o app (média de 20 s,
+4 rodadas alternadas): parado **~1,0 % → ~0,7 %**, trabalhando **~1,6 % → ~1,4 %**. A maior parte do custo
+restante é acordar a cada frame; o que cai pela metade (commits) também deixa de ser composto pelo
+WindowServer, que não entra nesse número.
+
+`OPENBOT_STATIC_ORBS=1` desliga toda a animação. `OPENBOT_ANIMATE_INACTIVE=1` mantém os Orbs animando com a
+janela inativa ou coberta, só para medir CPU sem trazer o app para a frente.
 
 ## 7. Ferramentas de desenvolvimento
 
@@ -134,7 +181,16 @@ open -n build/OpenBot.app --env OPENBOT_SEND="Como está meu Mac?"
 
 # Sem animação (comparar CPU)
 OPENBOT_STATIC_ORBS=1 ./build/OpenBot.app/Contents/MacOS/OpenBot
+
+# Medir CPU sem roubar o foco: anima mesmo com a janela inativa/coberta
+open -g -n build/OpenBot.app --env OPENBOT_ANIMATE_INACTIVE=1 --env OPENBOT_DATA_DIR=/tmp/openbot-perf
+ps -o %cpu= -p <pid>; sample <pid> 5
 ```
+
+O display link só dispara com a tela ligada: com o monitor em repouso o custo é zero e a medição não
+diz nada. `open -g` pode não criar a janela principal enquanto o app não é ativado; nesse caso, hospede
+os Orbs numa janela própria sem borda, `alphaValue = 0`, `ignoresMouseEvents = true` e
+`orderFrontRegardless()` (não ativa o app), com `OPENBOT_ANIMATE_INACTIVE=1`.
 
 ## 8. Arte: gerar e adicionar opções (Blender)
 
@@ -165,7 +221,7 @@ Como as camadas são feitas:
 3. Teste com `catalog --category accessories`, compare com as outras e depois rode `layers --category accessories` e `manifest`.
 4. `./scripts/bundle.sh`: a opção aparece no editor sem mexer em Swift.
 
-Para mudar a ordem das camadas ou a paralaxe: `OrbConfig.layers(...)` (ordem) e `OrbAnimationView.applyPose` / `OrbPainter.parallax` (profundidade).
+Para mudar a ordem das camadas ou a paralaxe: `OrbConfig.layers(...)` (ordem) e `OrbLayer.depth` (profundidade), aplicada em `OrbAnimationView.apply` e `OrbPainter.parallax`.
 
 ## 9. Mapa dos arquivos
 
@@ -178,6 +234,7 @@ Para mudar a ordem das camadas ou a paralaxe: `OrbConfig.layers(...)` (ordem) e 
 | `Orbs/OrbModel.swift` | `OrbConfig`, `OrbCatalog`, `OrbImages` (cache/redução/tinta), ordem das camadas |
 | `Orbs/OrbActivity.swift` | atividades: expressão, olhar, movimento, brilho, balão |
 | `Orbs/OrbView.swift` | `OrbView` (escolhe animado ou estático), `OrbFrame` (Canvas), `BotAvatar` |
-| `Orbs/OrbAnimationView.swift` | `AnimatedOrb`: Core Animation, display link, mouse, pulo |
+| `Orbs/OrbAnimationView.swift` | `AnimatedOrb`: Core Animation, display link, ritmo de frames, mouse, pulo |
+| `Orbs/OrbMotion.swift` | `OrbPose`, molas, piscadas, sacadas, escolha da taxa de frames (puro, testado em `OrbTests`) |
 | `Orbs/OrbEditor.swift` | editor de personalização |
 | `AppModel.swift` | `activity(for:)`, pulo ao enviar, feliz ao terminar, erro ao parar |
