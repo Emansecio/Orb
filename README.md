@@ -6,7 +6,7 @@ funcionalidades do Grok Bot, com design e código próprios.
 
 ```bash
 ./scripts/bundle.sh && open build/OpenBot.app   # gera e abre o app (com ícone)
-swift test                                      # 42 testes (motor, cliente, ferramentas, MCP, dados)
+swift test                                      # 129 testes (motor, provedores, Claude Code, ferramentas, MCP, Orbs, dados)
 ```
 
 Na primeira vez: **Ajustes → Modelos → Adicionar provedor**, cole a chave (ou entre com o ChatGPT ou o Claude Code)

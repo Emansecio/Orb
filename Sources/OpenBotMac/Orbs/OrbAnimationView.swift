@@ -59,6 +59,11 @@ final class OrbAnimationView: NSView {
     private var imageLayers: [(layer: OrbLayer, view: CALayer)] = []
     private var shownColor = ""
     private var shownBubble: String?
+    /// Talking mouth: the regular mouth's bitmap (restored when talking stops), the viseme bitmaps (looked up
+    /// on first use; prewarmed in the background) and the shape on screen.
+    private var mouthImage: CGImage?
+    private var visemeImages: [OrbViseme: CGImage] = [:]
+    private var shownViseme: OrbViseme?
 
     // Motion state
     private var displayLink: CADisplayLink?
@@ -71,8 +76,16 @@ final class OrbAnimationView: NSView {
     private var hover = Spring()
     private var wobble = Spring()        // jelly squash after landings and expression changes
     private var bubbleIn = Spring()
+    private var lean = Spring()          // head tilt toward (or away from) a close pointer
+    private var jaw = Spring()           // mouth opening while speaking
     private lazy var blinker = Blinker(firstAt: now + .random(in: 0.5...3))
     private lazy var saccades = Saccades(firstAt: now + .random(in: 0.3...1.5))
+    private lazy var flourishes = Flourishes(firstAt: now + .random(in: 4...10))
+    private lazy var glances = Glances(firstAt: now)
+    private lazy var syllables = Syllables(firstAt: now)
+    private var traits = OrbTemperament.Traits()
+    /// Body motion time, advancing at the temperament's pace (continuous when the temperament changes).
+    private var bodyClock = 0.0
     /// Activity on screen (the bot's, or `happy` for a moment after a click) and the one it is blending from.
     private var shown: OrbActivity = .idle
     private var previous: OrbActivity = .idle
@@ -127,17 +140,33 @@ final class OrbAnimationView: NSView {
 
     func configure(config: OrbConfig, activity: OrbActivity, size: CGFloat, followsPointer: Bool, interactive: Bool) {
         let resized = size != self.size, restyled = config != self.config
+        let retempered = config.temperament != self.config.temperament
         self.config = config
         self.activity = activity
         self.size = size
         self.followsPointer = followsPointer
         self.interactive = interactive
         if resized { invalidateIntrinsicContentSize() }
+        if retempered { applyTemperament(showcase: window != nil) }
         if resized || restyled {
+            visemeImages = [:]
             rebuild(resize: resized)
             prewarmExpressions()
         }
         syncActivity(at: now)
+    }
+
+    /// Hands the temperament's rhythm to the motion helpers; `showcase` plays its signature flourish.
+    private func applyTemperament(showcase: Bool) {
+        traits = config.temperament.traits
+        blinker.gap = traits.blinkGap
+        blinker.doubleChance = traits.doubleBlink
+        saccades.reach = traits.saccadeReach
+        saccades.hold = traits.saccadeHold
+        if showcase {
+            flourishes.play(config.temperament.showcase, at: now)
+            liven(at: now)
+        }
     }
 
     func pokeNow() {
@@ -205,11 +234,17 @@ final class OrbAnimationView: NSView {
             imageLayers = layers.map { item in
                 if let view = reusable.removeValue(forKey: item) { return (item, view) }
                 let view = CALayer()
-                view.contents = OrbImages.cgImage(item.path, pixels: side * scale, tint: item.tint)
+                let image = OrbImages.cgImage(item.path, pixels: side * scale, tint: item.tint)
+                view.contents = image
                 view.contentsGravity = .resize
                 view.minificationFilter = .trilinear
                 view.bounds = CGRect(x: 0, y: 0, width: side, height: side)
                 if item.kind == .eyes { view.anchorPoint = CGPoint(x: 0.5, y: 1 - OrbGeometry.eyeLine) }
+                if item.kind == .mouth {
+                    view.anchorPoint = CGPoint(x: 0.5, y: 1 - OrbGeometry.mouthLine)
+                    mouthImage = image
+                    shownViseme = nil
+                }
                 return (item, view)
             }
             orb.sublayers = imageLayers.map(\.view)
@@ -231,9 +266,10 @@ final class OrbAnimationView: NSView {
     /// Decodes every expression this orb can show in the background, so activity changes never decode on
     /// the main thread.
     private func prewarmExpressions() {
-        let layers = Set(OrbActivity.allCases.flatMap {
+        var layers = Set(OrbActivity.allCases.flatMap {
             config.layers(eyes: $0.eyes, mouth: $0.mouth(base: config.mouth), brows: $0.brows)
         })
+        if let visemes = config.visemeLayers() { layers.formUnion(visemes.values) }
         OrbImages.prewarm(Array(layers), pixels: side * backingScale)
     }
 
@@ -295,10 +331,13 @@ final class OrbAnimationView: NSView {
         let time = link.targetTimestamp
         let dt = min(0.1, max(0, time - (lastTime ?? time)))
         lastTime = time
+        bodyClock += dt * traits.pace
         syncActivity(at: time)
         let pose = pose(at: time, dt: dt)
         var moved = pose
         moved.blink = lastPose.blink    // blinks are paced as short bursts, not as motion
+        moved.viseme = lastPose.viseme  // so are mouth shapes and their jaw tween (speaking keeps a floor rate)
+        moved.talk = lastPose.talk
         let speed = dt > 0 ? moved.pixelDistance(to: lastPose, size: size, scale: backingScale) / dt : 0
         lastPose = pose
         if drawnPose.map({ pose.pixelDistance(to: $0, size: size, scale: backingScale) >= 0.25 }) ?? true {
@@ -320,6 +359,7 @@ final class OrbAnimationView: NSView {
         let blending = time - transitionStart < Self.transition
         var floor = max(shown.minFrameRate, blending ? previous.minFrameRate : 0)
         if blinker.isBlinking || blinker.nextBlink - time < 0.1 { floor = max(floor, 30) }
+        if let flourish = flourishes.current { floor = max(floor, flourish.minFrameRate) }
         if time < livelyUntil { floor = maxFrameRate }
         setFrameRate(min(maxFrameRate, max(floor, motionRate)))
     }
@@ -340,10 +380,12 @@ final class OrbAnimationView: NSView {
 
     private func pose(at time: Double, dt: Double) -> OrbPose {
         let t = time + phase
+        let body = bodyClock + phase
         let blend = OrbMath.smoothstep((time - transitionStart) / Self.transition)
+        let springs = traits.springResponse
         var pose = OrbPose()
 
-        let motion = OrbBodyMotion.mix(previous.motion(at: t), shown.motion(at: t), blend)
+        let motion = OrbBodyMotion.mix(previous.motion(at: body, traits: traits), shown.motion(at: body, traits: traits), blend)
         pose.lift = motion.lift
         pose.squash = motion.squash
         pose.tilt = motion.tilt
@@ -357,7 +399,7 @@ final class OrbAnimationView: NSView {
                 pose.squash += 0.12 * sin(.pi * e / 0.1)
             } else if e < 0.55 {
                 let p = (e - 0.1) / 0.45
-                pose.lift += 0.16 * sin(.pi * p)
+                pose.lift += 0.16 * traits.jump * sin(.pi * p)
                 pose.squash -= 0.06 * sin(.pi * p)
             } else {
                 pokeStart = nil
@@ -367,7 +409,16 @@ final class OrbAnimationView: NSView {
         wobble.step(toward: 0, dt: dt, response: 0.32, damping: 0.3)
         pose.squash += wobble.value
 
-        // Gaze: the activity's pattern plus idle saccades, blended across activity changes, then the pointer.
+        // Flourishes: the temperament's spontaneous moves (only while idle and left alone) and its showcase.
+        _ = flourishes.update(at: time, kinds: traits.flourishes, gap: traits.flourishGap,
+                              allowed: shown == .idle && hoverPoint == nil && pokeStart == nil, using: &rng)
+        let flourish = flourishes.current.map { $0.offset(at: flourishes.elapsed(at: time)) } ?? OrbFlourish.Offset()
+        pose.lift += flourish.lift * traits.jump
+        pose.squash += flourish.squash
+        pose.tilt += flourish.tilt
+
+        // Gaze: the activity's pattern plus idle saccades, blended across activity changes, then the pointer
+        // and any flourish.
         let from = previous.gaze(at: t), to = shown.gaze(at: t)
         _ = saccades.update(at: time, using: &rng)
         let wander = OrbMath.mix(previous.wander, shown.wander, blend)
@@ -375,11 +426,14 @@ final class OrbAnimationView: NSView {
         var target = OrbMath.mix(from.look, to.look, blend)
         target.x += (saccades.fixation.x + drift.x) * wander
         target.y += (saccades.fixation.y + drift.y) * wander
-        target = pointerGaze(target, weight: OrbMath.mix(from.pointerWeight, to.pointerWeight, blend))
-        eyes.step(toward: target, dt: dt, response: 0.07)
-        head.step(toward: target, dt: dt, response: 0.4, damping: 0.9)
+        let pointer = pointerGaze(target, weight: OrbMath.mix(from.pointerWeight, to.pointerWeight, blend), at: time)
+        target = OrbMath.mix(pointer.look, flourish.look, flourish.lookWeight)
+        eyes.step(toward: target, dt: dt, response: 0.07 * springs)
+        head.step(toward: target, dt: dt, response: 0.4 * springs, damping: 0.9)
         pose.look = head.value
         pose.eyeLead = CGPoint(x: (eyes.value.x - head.value.x) * 0.035, y: (eyes.value.y - head.value.y) * 0.035)
+        lean.step(toward: pointer.lean, dt: dt, response: 0.5 * springs, damping: 0.8)
+        pose.tilt += 7 * lean.value
 
         // Hair and hats trail the head turn and the body's bounce, with a little overshoot.
         let anchor = CGPoint(x: pose.look.x * 0.05, y: pose.look.y * 0.05 + pose.lift)
@@ -387,10 +441,11 @@ final class OrbAnimationView: NSView {
         pose.hairLag = CGPoint(x: max(-0.02, min(0.02, loose.value.x - anchor.x)),
                                y: max(-0.02, min(0.02, loose.value.y - anchor.y)))
 
-        hover.step(toward: hoverPoint == nil ? 0 : 1, dt: dt, response: 0.35, damping: 0.6)
-        pose.hover = hover.value
+        hover.step(toward: hoverPoint == nil ? 0 : 1, dt: dt, response: 0.35 * springs, damping: 0.6)
+        pose.hover = hover.value * (1 + 0.75 * traits.lean)
 
-        pose.blink = blinker.amount(at: time, using: &rng)
+        pose.blink = max(blinker.amount(at: time, using: &rng), flourish.squint)
+        speak(&pose, at: time, dt: dt)
 
         bubbleIn.step(toward: shown.bubble != nil && size >= 26 ? 1 : 0, dt: dt, response: 0.35, damping: 0.6)
         let appear = max(0, bubbleIn.value)
@@ -400,21 +455,50 @@ final class OrbAnimationView: NSView {
         return pose
     }
 
-    /// Mixes the pointer into the gaze: fully while hovering, otherwise within a radius around the orb.
-    private func pointerGaze(_ target: CGPoint, weight: Double) -> CGPoint {
-        if let hoverPoint {
-            let local = CGPoint(x: (hoverPoint.x / bounds.width - 0.5) * 2.4, y: (hoverPoint.y / bounds.height - 0.5) * 2.4)
-            return OrbMath.mix(target, local, max(weight, 0.6))
+    /// Talking: syllable-paced mouth shapes with a springy jaw. When talking stops the mouth closes, then the
+    /// regular mouth comes back. Shapes only replace the bot's own mouth (not an activity's expression).
+    private func speak(_ pose: inout OrbPose, at time: Double, dt: Double) {
+        let speaking = shown == .speaking
+        if speaking {
+            _ = syllables.update(at: time, rate: traits.syllableRate, using: &rng)
+        } else if syllables.shape != .rest {
+            syllables.rest(at: time)
         }
-        guard followsPointer, weight > 0, let window, NSApp.isActive else { return target }
-        let pointer = window.mouseLocationOutsideOfEventStream
-        let center = convert(CGPoint(x: bounds.midX, y: bounds.midY), to: nil)
-        let radius = max(320, size * 5)
-        let dx = (pointer.x - center.x) / radius, dy = (pointer.y - center.y) / radius
-        let distance = hypot(dx, dy)
-        guard distance < 1.6 else { return target }
-        let scale = min(1, distance) / max(distance, 0.001)
-        return OrbMath.mix(target, CGPoint(x: dx * scale, y: dy * scale), weight * (1 - max(0, distance - 1) / 0.6))
+        jaw.step(toward: speaking ? syllables.shape.opening : 0, dt: dt, response: 0.09, damping: 0.7)
+        pose.talk = jaw.value
+        let ownMouth = config.mouth != "nenhuma" && shown.mouth(base: config.mouth) == nil
+        if ownMouth && (speaking || abs(jaw.value) > 0.03) { pose.viseme = syllables.shape }
+    }
+
+    /// Mixes the pointer into the gaze: fully while hovering, otherwise within a radius around the orb (wider
+    /// and stronger for curious temperaments). Shy orbs look away from a close pointer, peeking back now and
+    /// then. Also returns how far the head leans toward (or away from) the pointer.
+    private func pointerGaze(_ target: CGPoint, weight: Double, at time: Double) -> (look: CGPoint, lean: Double) {
+        var aim: CGPoint, pull: Double, closeness: Double
+        if let hoverPoint {
+            aim = CGPoint(x: (hoverPoint.x / bounds.width - 0.5) * 2.4, y: (hoverPoint.y / bounds.height - 0.5) * 2.4)
+            pull = max(weight, 0.6)
+            closeness = 1
+        } else {
+            guard followsPointer, weight > 0, let window, NSApp.isActive else { return (target, 0) }
+            let pointer = window.mouseLocationOutsideOfEventStream
+            let center = convert(CGPoint(x: bounds.midX, y: bounds.midY), to: nil)
+            let offset = hypot(pointer.x - center.x, pointer.y - center.y)
+            let radius = max(320, size * 5) * traits.pointerReach
+            let distance = offset / radius
+            guard distance < 1.6 else { return (target, 0) }
+            let scale = min(1, distance) / max(distance, 0.001) / radius
+            aim = CGPoint(x: (pointer.x - center.x) * scale, y: (pointer.y - center.y) * scale)
+            pull = min(1, weight * traits.pointerInterest) * (1 - max(0, distance - 1) / 0.6)
+            closeness = 1 - OrbMath.smoothstep((offset - size * 0.5) / max(140, size * 2))
+        }
+        let lean = traits.lean * max(-1, min(1, aim.x)) * closeness * pull
+        if traits.avertsGaze {
+            // A pointer arriving is met by looking away first; the peeks come later.
+            if closeness < 0.05 { glances = Glances(firstAt: time + 1.2) } else { _ = glances.update(at: time, using: &rng) }
+            aim = OrbTemperament.shyGaze(pointer: aim, closeness: closeness, peeking: glances.isPeeking)
+        }
+        return (OrbMath.mix(target, aim, pull), lean)
     }
 
     /// Moves layers only: positions, transforms and opacities (y grows upward here).
@@ -438,15 +522,24 @@ final class OrbAnimationView: NSView {
         let scale = CATransform3DMakeScale((1 + pose.squash + grow) * turn, 1 - pose.squash + grow, 1)
         orb.transform = CATransform3DConcat(scale, CATransform3DMakeRotation(-pose.tilt * .pi / 180, 0, 0, 1))
 
+        // Mouthless orbs show talking with a rhythmic squint instead.
+        let eyeTalk = config.mouth == "nenhuma" ? max(0, pose.talk) * traits.mouthOpening : 0
         for (layer, view) in imageLayers {
             var dx = pose.look.x * layer.depth, dy = pose.look.y * layer.depth
             if layer.isLoose { dx += pose.hairLag.x; dy += pose.hairLag.y }
-            if layer.kind == .eyes {
+            switch layer.kind {
+            case .eyes:
                 dx += pose.eyeLead.x
-                dy += pose.eyeLead.y
+                dy += pose.eyeLead.y + 0.006 * eyeTalk
                 view.position = CGPoint(x: mid + dx * size, y: side * (1 - OrbGeometry.eyeLine) + dy * size)
-                view.transform = CATransform3DMakeScale(1, max(0.08, 1 - pose.blink), 1)
-            } else {
+                view.transform = CATransform3DMakeScale(1, max(0.08, 1 - pose.blink - 0.14 * eyeTalk), 1)
+            case .mouth:
+                view.position = CGPoint(x: mid + dx * size, y: side * (1 - OrbGeometry.mouthLine) + dy * size)
+                showViseme(pose.viseme, on: view)
+                // The new shape starts from the jaw's current opening and springs into place.
+                let stretch = 1 + 0.25 * traits.mouthOpening * (pose.talk - (pose.viseme?.opening ?? 0))
+                view.transform = CATransform3DMakeScale(1, min(1.5, max(0.6, stretch)), 1)
+            default:
                 view.position = CGPoint(x: mid + dx * size, y: mid + dy * size)
             }
         }
@@ -456,6 +549,28 @@ final class OrbAnimationView: NSView {
             bubble.position = CGPoint(x: mid + size * 0.48, y: mid + size * 0.5 + lift + pose.bubbleBob * size)
             bubble.opacity = Float(pose.bubbleOpacity)
             bubble.transform = CATransform3DMakeScale(pose.bubbleScale, pose.bubbleScale, 1)
+        }
+    }
+
+    /// Swaps the mouth bitmap (no decoding here: viseme bitmaps are prewarmed and then kept). Swaps between
+    /// an opening and a closed or regular mouth get a very short crossfade (they differ most in brightness).
+    private func showViseme(_ viseme: OrbViseme?, on view: CALayer) {
+        guard viseme != shownViseme else { return }
+        let opened = { (shape: OrbViseme?) in shape.map { $0 != .rest } ?? false }
+        if opened(viseme) != opened(shownViseme) {
+            let fade = CATransition()
+            fade.type = .fade
+            fade.duration = 0.06
+            view.add(fade, forKey: "viseme")
+        }
+        shownViseme = viseme
+        if let viseme {
+            if visemeImages[viseme] == nil, let layer = config.visemeLayers()?[viseme] {
+                visemeImages[viseme] = OrbImages.cgImage(layer.path, pixels: side * backingScale, tint: nil)
+            }
+            view.contents = visemeImages[viseme]
+        } else {
+            view.contents = mouthImage
         }
     }
 

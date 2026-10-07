@@ -50,8 +50,15 @@ struct OrbFrame: View {
     let size: CGFloat
     let pose: OrbPose
 
-    var body: some View {
+    /// The activity's expression; a talking Orb shows an open mouth shape.
+    private var layers: [OrbLayer] {
         let layers = config.layers(eyes: activity.eyes, mouth: activity.mouth(base: config.mouth), brows: activity.brows)
+        guard activity == .speaking, let open = config.visemeLayers()?[.open] else { return layers }
+        return layers.map { $0.kind == .mouth ? open : $0 }
+    }
+
+    var body: some View {
+        let layers = layers
         let side = size * OrbGeometry.imageScale
         Color.clear
             .frame(width: size, height: size)

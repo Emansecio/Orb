@@ -106,7 +106,7 @@ struct AppCommands: Commands {
 @MainActor
 enum OrbSheet {
     static func render(to url: URL) {
-        let activities: [OrbActivity] = [.idle, .thinking, .typing, .searching, .waiting, .happy, .error, .sleepy]
+        let activities: [OrbActivity] = [.idle, .speaking, .thinking, .typing, .searching, .waiting, .happy, .error, .sleepy]
         let orbs = AppState.initial.bots.map(\.orb) + [
             OrbConfig(color: "rosa", eyes: "ovais", cheeks: "blush", hair: "tufinho", accessories: ["laco"]),
             OrbConfig(color: "grafite", eyes: "pilulas", brows: "retas", mustache: "classico", accessories: ["fones"]),
@@ -181,6 +181,7 @@ enum Snapshot {
         case "connectors-explore": AnyView(ConnectorsView(tab: .explore))
         case "routines": AnyView(RoutinesView())
         case "models": AnyView(ProviderSettings())
+        case "editor": AnyView(OrbEditor(config: .constant(AppState.initial.bots[0].orb), name: "Atlas", category: .temperament))
         default: AnyView(model.bots.first.map { ChatView(bot: $0) })
         }
         let size = NSSize(width: 1100, height: 760)

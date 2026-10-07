@@ -20,6 +20,8 @@ struct OrbConfig: Hashable, Codable, Sendable {
     var hairColor: UInt32?
     var mustacheColor: UInt32?
     var accentColor: UInt32?
+    /// Personality: how the Orb moves and reacts (not how it looks).
+    var temperament = OrbTemperament.equilibrado
 
     static func random() -> OrbConfig {
         let catalog = OrbCatalog.shared
@@ -45,6 +47,7 @@ struct OrbConfig: Hashable, Codable, Sendable {
     func value(for category: OrbCategory) -> String {
         switch category {
         case .color: color
+        case .temperament: temperament.rawValue
         case .eyes: eyes
         case .mouth: mouth
         case .brows: brows
@@ -58,6 +61,7 @@ struct OrbConfig: Hashable, Codable, Sendable {
     mutating func set(_ category: OrbCategory, _ id: String) {
         switch category {
         case .color: color = id
+        case .temperament: temperament = OrbTemperament(rawValue: id) ?? temperament
         case .eyes: eyes = id
         case .mouth: mouth = id
         case .brows: brows = id
@@ -70,14 +74,35 @@ struct OrbConfig: Hashable, Codable, Sendable {
     }
 }
 
+/// Tolerant decoding: Orbs saved by older versions (missing newer keys) still load.
+extension OrbConfig {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let fallback = OrbConfig()
+        color = try c.value(.color, default: fallback.color)
+        eyes = try c.value(.eyes, default: fallback.eyes)
+        mouth = try c.value(.mouth, default: fallback.mouth)
+        brows = try c.value(.brows, default: fallback.brows)
+        cheeks = try c.value(.cheeks, default: fallback.cheeks)
+        mustache = try c.value(.mustache, default: fallback.mustache)
+        hair = try c.value(.hair, default: fallback.hair)
+        accessories = try c.value(.accessories, default: [])
+        hairColor = try c.decodeIfPresent(UInt32.self, forKey: .hairColor)
+        mustacheColor = try c.decodeIfPresent(UInt32.self, forKey: .mustacheColor)
+        accentColor = try c.decodeIfPresent(UInt32.self, forKey: .accentColor)
+        temperament = try c.value(.temperament, default: fallback.temperament)
+    }
+}
+
 enum OrbCategory: String, CaseIterable, Identifiable, Sendable {
-    case color, eyes, mouth, brows, cheeks, mustache, hair, accessories
+    case color, temperament, eyes, mouth, brows, cheeks, mustache, hair, accessories
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
         case .color: "Cor"
+        case .temperament: "Jeito"
         case .eyes: "Olhos"
         case .mouth: "Boca"
         case .brows: "Sobrancelhas"
@@ -91,6 +116,7 @@ enum OrbCategory: String, CaseIterable, Identifiable, Sendable {
     var symbol: String {
         switch self {
         case .color: "paintpalette"
+        case .temperament: "theatermasks"
         case .eyes: "eye"
         case .mouth: "mouth"
         case .brows: "eyebrow"
@@ -128,6 +154,8 @@ final class OrbCatalog: Sendable {
     let palettes: [OrbPalette]
     private let categories: [OrbCategory: [OrbOption]]
     let tintedAccessories: Set<String>
+    /// Viseme images present in `visemes/` (ids with variant suffix), see `OrbConfig.visemePath`.
+    let visemes: Set<String>
     let root: URL?
 
     private init() {
@@ -151,7 +179,7 @@ final class OrbCatalog: Sendable {
                     palettes.append(OrbPalette(id: id, label: label, hexes: hexes))
                 }
             }
-            for category in OrbCategory.allCases where category != .color {
+            for category in OrbCategory.allCases where category != .color && category != .temperament {
                 categories[category] = (json[category.rawValue] as? [[String: Any]] ?? []).compactMap { entry in
                     guard let id = entry["id"] as? String, let label = entry["label"] as? String else { return nil }
                     return OrbOption(id: id, label: label)
@@ -162,10 +190,16 @@ final class OrbCatalog: Sendable {
         self.palettes = palettes
         self.categories = categories
         self.tintedAccessories = tinted
+        let visemeFiles = root.flatMap { try? FileManager.default.contentsOfDirectory(atPath: $0.appendingPathComponent("visemes").path) }
+        visemes = Set((visemeFiles ?? []).filter { $0.hasSuffix(".png") }.map { String($0.dropLast(4)) })
     }
 
     func options(_ category: OrbCategory) -> [OrbOption] {
-        category == .color ? palettes.map { OrbOption(id: $0.id, label: $0.label) } : categories[category] ?? []
+        switch category {
+        case .color: palettes.map { OrbOption(id: $0.id, label: $0.label) }
+        case .temperament: OrbTemperament.allCases.map { OrbOption(id: $0.rawValue, label: $0.label) }
+        default: categories[category] ?? []
+        }
     }
 
     func palette(_ id: String) -> OrbPalette {
@@ -267,6 +301,8 @@ enum OrbGeometry {
     /// The orb fills `size`, but the images are this much larger so hats and halos fit.
     static let imageScale: CGFloat = 1.96
     static let eyeLine: CGFloat = 0.455
+    /// Upper lip: talking mouths open downward from here.
+    static let mouthLine: CGFloat = 0.533
     static let orbBottom: CGFloat = 0.755
 }
 
@@ -295,6 +331,21 @@ extension OrbConfig {
             layers.append(OrbLayer(kind: .accessory, path: "accessories/\(accessory)", tint: tint))
         }
         return layers
+    }
+
+    /// Image for a talking mouth shape: `visemes/<id>` when rendered, else the closest regular mouth.
+    func visemePath(_ viseme: OrbViseme) -> String {
+        let variant = OrbCatalog.shared.palette(color).isLight ? "-dark" : ""
+        return OrbCatalog.shared.visemes.contains(viseme.rawValue + variant)
+            ? "visemes/\(viseme.rawValue)\(variant)" : "mouth/\(viseme.fallbackMouth)\(variant)"
+    }
+
+    /// Talking mouth layers (nil when the bot has no mouth: then talking shows in the eyes instead).
+    func visemeLayers() -> [OrbViseme: OrbLayer]? {
+        guard mouth != "nenhuma" else { return nil }
+        return Dictionary(uniqueKeysWithValues: OrbViseme.allCases.map {
+            ($0, OrbLayer(kind: .mouth, path: visemePath($0), tint: nil))
+        })
     }
 
     static func defaultAccent(_ accessory: String, palette: OrbPalette) -> UInt32 {

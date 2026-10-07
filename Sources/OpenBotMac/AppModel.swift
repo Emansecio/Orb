@@ -42,6 +42,12 @@ final class AppModel {
     private var awaitingApproval: Set<UUID> = []
     /// What the local Claude Code reports (checked while that provider is set up).
     private(set) var claudeCode = ClaudeCodeStatus()
+    /// Bots whose reply text is arriving right now (the Orb talks). Changes only when a burst of text starts
+    /// or ends, not per token.
+    private var speaking: Set<UUID> = []
+    @ObservationIgnored private var speakingUntil: [UUID: ContinuousClock.Instant] = [:]
+    @ObservationIgnored private var speakingWatch: [UUID: Task<Void, Never>] = [:]
+    private static let speakingQuiet = Duration.milliseconds(600)
     var selection: SidebarItem? {
         didSet {
             if case .bot(let id) = selection { update(id) { $0.unread = 0 } }
@@ -147,7 +153,27 @@ final class AppModel {
             case .connector, .memory: return .thinking
             }
         }
+        if speaking.contains(botID) { return .speaking }
         return listening.contains(botID) ? .listening : .thinking
+    }
+
+    /// Keeps the bot `speaking` until no text arrived for `speakingQuiet`.
+    private func markSpeaking(_ botID: UUID) {
+        speakingUntil[botID] = .now + Self.speakingQuiet
+        guard !speaking.contains(botID) else { return }
+        speaking.insert(botID)
+        speakingWatch[botID] = Task { [weak self] in
+            while !Task.isCancelled, let deadline = self?.speakingUntil[botID] {
+                if deadline <= .now { self?.stopSpeaking(botID); return }
+                try? await Task.sleep(until: deadline)
+            }
+        }
+    }
+
+    private func stopSpeaking(_ botID: UUID) {
+        speakingUntil[botID] = nil
+        speakingWatch.removeValue(forKey: botID)?.cancel()
+        if speaking.contains(botID) { speaking.remove(botID) }
     }
 
     // MARK: Providers
@@ -450,6 +476,7 @@ final class AppModel {
         case .text(let delta):
             // Shown by `flushText`; anything that adds to the transcript flushes first (`closeStreaming`).
             pendingText[botID, default: ""] += delta
+            if !delta.allSatisfy(\.isWhitespace) { markSpeaking(botID) }
             if textFlushes[botID] == nil {
                 textFlushes[botID] = Task { [weak self] in
                     try? await Task.sleep(for: Self.textFlushInterval)
@@ -457,6 +484,7 @@ final class AppModel {
                 }
             }
         case .toolStarted(let call):
+            stopSpeaking(botID)
             closeStreaming(botID)
             append(.tool(call), to: botID)
             runningTool[botID] = call.kind
@@ -473,6 +501,7 @@ final class AppModel {
                 }
             }
         case .approval(let request):
+            stopSpeaking(botID)
             closeStreaming(botID)
             append(.approval(request), to: botID)
             awaitingApproval.insert(botID)
@@ -492,6 +521,7 @@ final class AppModel {
         guard turns[botID] != nil else { return }
         turns[botID] = nil
         claudeTurns.remove(botID)
+        stopSpeaking(botID)
         closeStreaming(botID)
         statusLine[botID] = nil
         runningTool[botID] = nil
