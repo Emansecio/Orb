@@ -7,9 +7,9 @@ struct AppState: Codable, Sendable {
     var routines: [Routine] = []
     var skills: [Skill] = Skill.starters
     var connectors: [MCPServerConfig] = []
-    var provider = ProviderConfig()
-    /// Last model list fetched from the provider.
-    var models: [String] = []
+    var providers: [ProviderAccount] = []
+    /// "provider/model" for bots without a model of their own.
+    var defaultModel = ""
 
     static let initial = AppState(bots: [
         Bot(name: "Atlas", role: "Assistente do seu Mac",
@@ -68,12 +68,12 @@ struct Store: Sendable {
     }
 }
 
-/// API keys in the login Keychain, one item per provider.
+/// Secrets in the login Keychain (API keys per provider, sign-in tokens), one item per account name.
 enum Keychain {
     private static let service = "app.openbot.mac"
 
-    static func key(for preset: ProviderPreset) -> String? {
-        var query = baseQuery(preset)
+    static func get(_ account: String) -> String? {
+        var query = baseQuery(account)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
@@ -82,18 +82,19 @@ enum Keychain {
         return String(data: data, encoding: .utf8)
     }
 
-    static func setKey(_ key: String, for preset: ProviderPreset) {
-        SecItemDelete(baseQuery(preset) as CFDictionary)
-        guard !key.isEmpty else { return }
-        var item = baseQuery(preset)
-        item[kSecValueData as String] = Data(key.utf8)
+    /// Stores `value`; an empty value deletes the item.
+    static func set(_ value: String, account: String) {
+        SecItemDelete(baseQuery(account) as CFDictionary)
+        guard !value.isEmpty else { return }
+        var item = baseQuery(account)
+        item[kSecValueData as String] = Data(value.utf8)
         SecItemAdd(item as CFDictionary, nil)
     }
 
-    private static func baseQuery(_ preset: ProviderPreset) -> [String: Any] {
+    private static func baseQuery(_ account: String) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
          kSecAttrService as String: service,
-         kSecAttrAccount as String: preset.rawValue]
+         kSecAttrAccount as String: account]
     }
 }
 
@@ -125,7 +126,28 @@ extension AppState {
         routines = try c.value(.routines, default: [])
         skills = try c.value(.skills, default: Skill.starters)
         connectors = try c.value(.connectors, default: [])
-        provider = try c.value(.provider, default: ProviderConfig())
-        models = try c.value(.models, default: [])
+        providers = try c.value(.providers, default: [])
+        defaultModel = try c.value(.defaultModel, default: "")
+        try migrateSingleProvider(from: decoder)
+    }
+
+    /// Before multi-provider support the app had one OpenAI-compatible `provider`, a `models` list and
+    /// bare model ids on bots. Turn that into an account and "provider/model" references.
+    private mutating func migrateSingleProvider(from decoder: Decoder) throws {
+        struct Legacy: Decodable { var preset: String; var baseURL: String; var defaultModel: String }
+        enum Keys: CodingKey { case provider, models }
+        let c = try decoder.container(keyedBy: Keys.self)
+        guard providers.isEmpty, let legacy = try? c.decodeIfPresent(Legacy.self, forKey: .provider),
+              let kind = ProviderKind(rawValue: legacy.preset) else { return }
+        var account = ProviderAccount(kind: kind)
+        account.baseURL = legacy.baseURL
+        account.models = (try? c.decodeIfPresent([String].self, forKey: .models))?.map {
+            ProviderModel(id: $0, name: $0, format: .chat)
+        } ?? []
+        providers = [account]
+        if !legacy.defaultModel.isEmpty { defaultModel = ModelRef(provider: kind, model: legacy.defaultModel).text }
+        for index in bots.indices where !bots[index].model.isEmpty && ModelRef(bots[index].model) == nil {
+            bots[index].model = ModelRef(provider: kind, model: bots[index].model).text
+        }
     }
 }

@@ -11,9 +11,10 @@ final class AppModel {
     var routines: [Routine] { didSet { scheduleStateSave() } }
     var skills: [Skill] { didSet { scheduleStateSave() } }
     var connectors: [MCPServerConfig] { didSet { scheduleStateSave(); syncConnectors() } }
-    var provider: ProviderConfig { didSet { scheduleStateSave() } }
-    /// Model ids last fetched from the provider.
-    var models: [String] { didSet { scheduleStateSave() } }
+    /// Providers the user set up, with their last fetched model lists.
+    var providers: [ProviderAccount] { didSet { scheduleStateSave() } }
+    /// "provider/model" for bots without a model of their own.
+    var defaultModel: String { didSet { scheduleStateSave() } }
     private(set) var conversations: [UUID: Conversation]
 
     // MARK: UI state
@@ -33,7 +34,8 @@ final class AppModel {
     /// Incremented when a prompt is sent; Orbs jump when it changes.
     var pokes: [UUID: Int] = [:]
     var connectorStatus: [UUID: MCPStatus] = [:]
-    private(set) var hasAPIKey: Bool
+    /// Providers with a key in the Keychain (or, for ChatGPT, a sign-in).
+    private(set) var connected: Set<ProviderKind> = []
     var selection: SidebarItem? {
         didSet {
             if case .bot(let id) = selection { update(id) { $0.unread = 0 } }
@@ -59,18 +61,19 @@ final class AppModel {
         routines = state.routines
         skills = state.skills
         connectors = state.connectors
-        provider = state.provider
-        models = state.models
+        providers = state.providers
+        defaultModel = state.defaultModel
         conversations = Dictionary(uniqueKeysWithValues: state.bots.map { bot in
             (bot.id, store.loadConversation(bot.id)?.closingInterruptedTurn() ?? Conversation())
         })
-        hasAPIKey = Keychain.key(for: state.provider.preset) != nil
         selection = state.bots.first.map { .bot($0.id) }
 
         syncConnectors()
         scheduler = Task { [weak self] in
+            await self?.refreshConnections()
             while !Task.isCancelled {
                 self?.runDueRoutines()
+                await self?.refreshAllModels()
                 try? await Task.sleep(for: .seconds(30))
             }
         }
@@ -101,12 +104,19 @@ final class AppModel {
 
     var enabledSkills: [Skill] { skills.filter(\.isEnabled) }
 
-    /// The model a bot actually uses (its own or the provider default).
-    func modelID(for bot: Bot) -> String { bot.model.isEmpty ? provider.defaultModel : bot.model }
+    /// The model a bot actually uses: its own or the default ("provider/model").
+    func modelRef(for bot: Bot) -> ModelRef? { ModelRef(bot.model.isEmpty ? defaultModel : bot.model) }
 
-    /// True when a model can be called: base URL, key (if the provider needs one) and a default model.
+    /// Short model name for the UI ("" when none is set).
+    func modelName(for bot: Bot) -> String {
+        guard let ref = modelRef(for: bot) else { return "" }
+        return account(ref.provider)?.models.first { $0.id == ref.model }?.name ?? ref.model
+    }
+
+    /// True when the default model's provider is set up and usable.
     var isProviderReady: Bool {
-        URL(string: provider.baseURL)?.host != nil && (hasAPIKey || !provider.preset.needsKey) && !provider.defaultModel.isEmpty
+        guard let ref = ModelRef(defaultModel), let account = account(ref.provider) else { return false }
+        return account.isEnabled && isUsable(account)
     }
 
     /// What the bot's Orb is doing right now (expression, gaze and motion follow this).
@@ -140,32 +150,89 @@ final class AppModel {
         }
     }
 
-    // MARK: Provider
+    // MARK: Providers
 
-    func setAPIKey(_ key: String) {
-        Keychain.setKey(key.trimmingCharacters(in: .whitespacesAndNewlines), for: provider.preset)
-        hasAPIKey = Keychain.key(for: provider.preset) != nil
+    func account(_ kind: ProviderKind) -> ProviderAccount? { providers.first { $0.kind == kind } }
+
+    /// Has what it needs to be called: a sign-in, a key, or nothing (local servers).
+    func isUsable(_ account: ProviderAccount) -> Bool {
+        connected.contains(account.kind) || (!account.kind.needsKey && !account.kind.usesSignIn)
     }
 
-    func selectPreset(_ preset: ProviderPreset) {
-        provider = ProviderConfig(preset: preset, baseURL: preset.defaultBaseURL)
-        models = []
-        hasAPIKey = Keychain.key(for: preset) != nil
+    /// Models of every enabled, usable provider, for pickers.
+    var modelChoices: [(account: ProviderAccount, models: [ProviderModel])] {
+        providers.filter { $0.isEnabled && isUsable($0) && !$0.models.isEmpty }.map { ($0, $0.models) }
     }
 
-    private func makeClient() -> (any LLMClient)? {
-        guard let url = URL(string: provider.baseURL), url.host != nil else { return nil }
-        return OpenAIClient(baseURL: url, apiKey: Keychain.key(for: provider.preset))
+    func addProvider(_ kind: ProviderKind) {
+        guard account(kind) == nil else { return }
+        providers.append(ProviderAccount(kind: kind))
     }
 
-    /// Fetches the provider's models; picks a default model if none is set.
-    func refreshModels() async throws {
-        guard let client = makeClient() else { throw LLMError.notConfigured }
-        let fetched = try await client.models()
-        models = fetched
-        if provider.defaultModel.isEmpty || !fetched.contains(provider.defaultModel), let first = fetched.first {
-            provider.defaultModel = first
+    func removeProvider(_ kind: ProviderKind) {
+        signOut(kind)
+        providers.removeAll { $0.kind == kind }
+        if ModelRef(defaultModel)?.provider == kind { defaultModel = "" }
+    }
+
+    /// Forgets the key or sign-in (the provider stays listed).
+    func signOut(_ kind: ProviderKind) {
+        Keychain.set("", account: kind.rawValue)
+        if kind.usesSignIn { Task { await ChatGPTAuth.shared.signOut() } }
+        connected.remove(kind)
+        updateProvider(kind) { $0.models = [] }
+    }
+
+    func updateProvider(_ kind: ProviderKind, _ change: (inout ProviderAccount) -> Void) {
+        guard let index = providers.firstIndex(where: { $0.kind == kind }) else { return }
+        change(&providers[index])
+    }
+
+    /// Saves (or, when empty, removes) the provider's key and reloads its models.
+    func setKey(_ key: String, for kind: ProviderKind) async throws {
+        Keychain.set(key.trimmingCharacters(in: .whitespacesAndNewlines), account: kind.rawValue)
+        await refreshConnections()
+        try await refreshModels(kind)
+    }
+
+    /// Browser sign-in (ChatGPT), then loads the plan's models.
+    func signIn(_ kind: ProviderKind) async throws {
+        guard kind == .chatgpt else { return }
+        _ = try await ChatGPTAuth.shared.signIn { url in await MainActor.run { _ = NSWorkspace.shared.open(url) } }
+        addProvider(kind)
+        await refreshConnections()
+        try await refreshModels(kind)
+    }
+
+    func refreshConnections() async {
+        var found = Set(ProviderKind.allCases.filter { $0.needsKey && Keychain.get($0.rawValue) != nil })
+        if await ChatGPTAuth.shared.credential != nil { found.insert(.chatgpt) }
+        connected = found
+    }
+
+    /// Reloads the provider's live model list; picks a default model if there is none yet.
+    func refreshModels(_ kind: ProviderKind) async throws {
+        guard let current = account(kind) else { return }
+        let fetched = try await ModelCatalog.fetch(current, token: try await token(for: kind))
+        updateProvider(kind) {
+            $0.models = fetched
+            $0.modelsUpdatedAt = .now
         }
+        if ModelRef(defaultModel).flatMap({ account($0.provider) }) == nil, let first = fetched.first {
+            defaultModel = ModelRef(provider: kind, model: first.id).text
+        }
+    }
+
+    /// Keeps model lists current: on launch and then every few hours, for every usable provider.
+    func refreshAllModels(olderThan age: TimeInterval = 6 * 3600) async {
+        for account in providers where account.isEnabled && isUsable(account)
+            && (account.modelsUpdatedAt.map { -$0.timeIntervalSinceNow > age } ?? true) {
+            try? await refreshModels(account.kind)
+        }
+    }
+
+    private func token(for kind: ProviderKind) async throws -> String? {
+        kind.usesSignIn ? try await ChatGPTAuth.shared.accessToken() : Keychain.get(kind.rawValue)
     }
 
     // MARK: Bots
@@ -217,13 +284,28 @@ final class AppModel {
 
     // MARK: Turns
 
+    @ObservationIgnored private var didSendLaunchPrompt = false
+
+    /// Dev aid for scripted end-to-end checks: `OPENBOT_SEND="texto"` sends it to the selected bot once,
+    /// after the provider connections are known.
+    func sendLaunchPrompt() {
+        guard !didSendLaunchPrompt, let text = ProcessInfo.processInfo.environment["OPENBOT_SEND"],
+              let id = selectedBot?.id else { return }
+        didSendLaunchPrompt = true
+        Task {
+            await refreshConnections()
+            send(text, to: id)
+        }
+    }
+
     func send(_ text: String, attachments: [URL] = [], to botID: UUID) {
         let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !typed.isEmpty, turns[botID] == nil, let bot = bot(botID) else { return }
-        guard isProviderReady, let client = makeClient() else {
-            append(.notice("Conecte um modelo em Ajustes → Modelo para começar."), to: botID)
+        guard let ref = modelRef(for: bot), let account = account(ref.provider), account.isEnabled, isUsable(account) else {
+            append(.notice("Conecte um modelo em Ajustes → Modelos para começar."), to: botID)
             return
         }
+        let modelInfo = account.models.first { $0.id == ref.model }
 
         append(.user(text: typed, attachments: attachments.map(\.lastPathComponent)), to: botID)
         drafts[botID] = ""
@@ -241,15 +323,24 @@ final class AppModel {
         }
         let system = SystemPrompt.make(bot: bot, skills: enabledSkills)
         let history = (conversations[botID]?.messages ?? []).modelContext()
-        let model = modelID(for: bot)
         let context = ToolContext(workingDirectory: bot.workingURL) { [weak self] fact in
             await self?.remember(fact, for: botID)
         }
 
         turns[botID] = Task {
+            let client: any LLMClient
+            do {
+                guard let made = account.client(for: modelInfo, token: try await token(for: ref.provider),
+                                                 conversationID: botID.uuidString) else { throw LLMError.notConfigured }
+                client = made
+            } catch {
+                apply(.failed(error.localizedDescription), to: botID)
+                finishTurn(botID, succeeded: false)
+                return
+            }
             var tools = ToolBox.all.filter { $0.capability.map(bot.capabilities.contains) ?? true }
             if bot.capabilities.contains(.connectors) { tools += await mcp.tools() }
-            let request = TurnRequest(bot: bot, model: model, system: system, history: history, prompt: prompt,
+            let request = TurnRequest(bot: bot, model: ref.model, system: system, history: history, prompt: prompt,
                                       client: client, tools: tools, context: context)
             var succeeded = true
             for await event in engine.run(request) {
@@ -467,7 +558,8 @@ final class AppModel {
     // MARK: Saving
 
     private var state: AppState {
-        AppState(bots: bots, routines: routines, skills: skills, connectors: connectors, provider: provider, models: models)
+        AppState(bots: bots, routines: routines, skills: skills, connectors: connectors, providers: providers,
+                 defaultModel: defaultModel)
     }
 
     private func scheduleStateSave() {

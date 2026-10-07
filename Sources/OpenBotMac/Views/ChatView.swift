@@ -44,7 +44,7 @@ struct ChatView: View {
         }
         .background(Palette.canvas)
         .navigationTitle(bot.name)
-        .navigationSubtitle(model.modelID(for: bot))
+        .navigationSubtitle(model.modelName(for: bot))
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button("Nova conversa", systemImage: "square.and.pencil") {

@@ -6,12 +6,16 @@ struct ResponsesClient: LLMClient {
     let baseURL: URL
     let apiKey: String?
     var extraHeaders: [String: String] = [:]
+    /// Send tools as an `additional_tools` input item (required by Sign in with ChatGPT) instead of top-level `tools`.
+    var toolsAsInputItem = false
     let session: URLSession
 
-    init(baseURL: URL, apiKey: String?, extraHeaders: [String: String] = [:], session: URLSession = .shared) {
+    init(baseURL: URL, apiKey: String?, extraHeaders: [String: String] = [:], toolsAsInputItem: Bool = false,
+         session: URLSession = .shared) {
         self.baseURL = baseURL
         self.apiKey = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.extraHeaders = extraHeaders
+        self.toolsAsInputItem = toolsAsInputItem
         self.session = session
     }
 
@@ -25,7 +29,8 @@ struct ResponsesClient: LLMClient {
                     request.timeoutInterval = 300
                     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
                     request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-                    request.httpBody = try JSONEncoder().encode(Self.requestBody(model: model, messages: messages, tools: tools))
+                    request.httpBody = try JSONEncoder().encode(
+                        Self.requestBody(model: model, messages: messages, tools: tools, toolsAsInputItem: toolsAsInputItem))
 
                     let (bytes, response) = try await session.bytes(for: request)
                     try await OpenAIClient.check(response, body: { try await OpenAIClient.prefix(of: bytes) })
@@ -55,7 +60,7 @@ struct ResponsesClient: LLMClient {
 
     /// System messages become `instructions`; tool calls and results become `function_call` /
     /// `function_call_output` items.
-    static func requestBody(model: String, messages: [ChatMessage], tools: [ToolSpec]) -> JSONValue {
+    static func requestBody(model: String, messages: [ChatMessage], tools: [ToolSpec], toolsAsInputItem: Bool = false) -> JSONValue {
         let instructions = messages.filter { $0.role == .system }.map(\.content).joined(separator: "\n\n")
         var input: [JSONValue] = []
         for message in messages {
@@ -82,11 +87,17 @@ struct ResponsesClient: LLMClient {
             "model": .string(model), "input": .array(input), "stream": .bool(true), "store": .bool(false),
         ]
         if !instructions.isEmpty { body["instructions"] = .string(instructions) }
+        let functions = JSONValue.array(tools.map {
+            .object(["type": .string("function"), "name": .string($0.name), "description": .string($0.description),
+                     "parameters": $0.parameters, "strict": .bool(false)])
+        })
         if !tools.isEmpty {
-            body["tools"] = .array(tools.map {
-                .object(["type": .string("function"), "name": .string($0.name), "description": .string($0.description),
-                         "parameters": $0.parameters])
-            })
+            if toolsAsInputItem {
+                input.insert(.object(["type": .string("additional_tools"), "role": .string("developer"), "tools": functions]), at: 0)
+                body["input"] = .array(input)
+            } else {
+                body["tools"] = functions
+            }
         }
         return .object(body)
     }

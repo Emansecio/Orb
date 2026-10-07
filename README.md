@@ -9,14 +9,17 @@ funcionalidades do Grok Bot, com design e código próprios.
 swift test                                      # 42 testes (motor, cliente, ferramentas, MCP, dados)
 ```
 
-Na primeira vez: **Ajustes → Modelo**, escolha o provedor, cole a chave e clique em
-**Testar e buscar modelos**.
+Na primeira vez: **Ajustes → Modelos → Adicionar provedor**, cole a chave (ou entre com o ChatGPT)
+e escolha o modelo padrão.
+
+> Login com a assinatura do **Claude (Pro/Max)** não é oferecido: os termos da Anthropic proíbem usar esse login
+> fora do Claude Code e do claude.ai. Para Claude, use uma chave da API (console.anthropic.com).
 
 ## O que o app faz
 
 | Área | Como funciona |
 |---|---|
-| **Modelos** | Qualquer API compatível com OpenAI: xAI (Grok), OpenAI, OpenRouter, Ollama, LM Studio ou URL própria. Resposta em streaming; modelo padrão + modelo por bot. Chave no **Keychain**. |
+| **Modelos** | Vários provedores ao mesmo tempo, cada bot escolhe o seu (`provedor/modelo`): **ChatGPT** (sua assinatura Plus/Pro, login oficial "Sign in with ChatGPT" para apps locais), **OpenAI**, **Claude** (chave da API Anthropic), **OpenCode Zen**, **OpenCode Go**, **Command Code**, xAI, OpenRouter, Ollama, LM Studio ou URL própria. Listas de modelos vêm **ao vivo** do endpoint de cada provedor (ao abrir e a cada 6 h), com o formato certo de cada modelo: chat completions, Responses ou Messages. Chaves e login no **Keychain**. |
 | **Ferramentas** | `run_command` (zsh), `read_file`, `write_file`, `list_directory`, `search_files` (Spotlight), `web_fetch`, `open`, `applescript` (Mail, Calendário, Notas…), `remember`. |
 | **Permissões** | Por bot: **Perguntar antes** (ações que mudam algo, acessam a web ou guardam memória pedem aprovação), **Automático** ou **Só leitura**. “Sempre permitir” vale por ferramenta e pode ser revogado no painel do bot. Cada grupo de ferramentas pode ser desligado (Terminal e arquivos, Web, Apps do Mac, Conectores). |
 | **Conectores** | Servidores **MCP** locais (stdio: npx, uvx, docker) ou **remotos** (Streamable HTTP, com fallback SSE). Aba **Explorar** busca no [registro oficial do MCP](https://registry.modelcontextprotocol.io) e monta a configuração (você só preenche as chaves); aba **Instalados** com status ao vivo, ativar/desativar, editar e apagar. |

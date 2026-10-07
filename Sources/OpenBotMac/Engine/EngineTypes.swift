@@ -165,49 +165,11 @@ enum LLMError: LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
-        case .notConfigured: "Nenhum provedor de modelo configurado. Abra Ajustes → Modelo."
+        case .notConfigured: "Nenhum modelo configurado. Abra Ajustes → Modelos."
         case .http(let status, let message): "O provedor respondeu \(status): \(message)"
         case .invalidResponse(let detail): "Resposta inválida do provedor: \(detail)"
         }
     }
-}
-
-/// OpenAI-compatible providers. All speak `POST {baseURL}/chat/completions` and `GET {baseURL}/models`.
-enum ProviderPreset: String, Codable, CaseIterable, Identifiable, Sendable {
-    case xai, openai, openrouter, ollama, lmstudio, custom
-
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .xai: "xAI (Grok)"
-        case .openai: "OpenAI"
-        case .openrouter: "OpenRouter"
-        case .ollama: "Ollama (local)"
-        case .lmstudio: "LM Studio (local)"
-        case .custom: "Outro compatível com OpenAI"
-        }
-    }
-
-    var defaultBaseURL: String {
-        switch self {
-        case .xai: "https://api.x.ai/v1"
-        case .openai: "https://api.openai.com/v1"
-        case .openrouter: "https://openrouter.ai/api/v1"
-        case .ollama: "http://localhost:11434/v1"
-        case .lmstudio: "http://localhost:1234/v1"
-        case .custom: ""
-        }
-    }
-
-    /// Local servers and custom endpoints usually work without a key.
-    var needsKey: Bool { ![.ollama, .lmstudio, .custom].contains(self) }
-}
-
-struct ProviderConfig: Codable, Hashable, Sendable {
-    var preset: ProviderPreset = .xai
-    var baseURL = ProviderPreset.xai.defaultBaseURL
-    var defaultModel = ""
 }
 
 // MARK: - Tools

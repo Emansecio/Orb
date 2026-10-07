@@ -1,22 +1,35 @@
 import SwiftUI
 
-/// Picks a bot's model: the provider default ("") or one of the fetched models.
+/// Picks a model as "provider/model", grouped by provider. With `allowsDefault`, "" means the app's default model.
 struct ModelPicker: View {
     @Environment(AppModel.self) private var model
     @Binding var selection: String
     var title = "Modelo"
+    var allowsDefault = true
 
-    private var choices: [String] {
-        var list = model.models
-        if !selection.isEmpty && !list.contains(selection) { list.insert(selection, at: 0) }
-        return list
+    private var defaultLabel: String {
+        guard let ref = ModelRef(model.defaultModel) else { return "Padrão" }
+        let name = model.account(ref.provider)?.models.first { $0.id == ref.model }?.name ?? ref.model
+        return "Padrão (\(name))"
+    }
+
+    private var isKnown: Bool {
+        selection.isEmpty || model.modelChoices.contains { choice in
+            choice.models.contains { ModelRef(provider: choice.account.kind, model: $0.id).text == selection }
+        }
     }
 
     var body: some View {
         Picker(title, selection: $selection) {
-            Text(model.provider.defaultModel.isEmpty ? "Padrão" : "Padrão (\(model.provider.defaultModel))").tag("")
-            if !choices.isEmpty { Divider() }
-            ForEach(choices, id: \.self) { Text($0).tag($0) }
+            if allowsDefault { Text(defaultLabel).tag("") }
+            if !isKnown { Text(ModelRef(selection)?.model ?? selection).tag(selection) }
+            ForEach(model.modelChoices, id: \.account.kind) { choice in
+                Section(choice.account.kind.label) {
+                    ForEach(choice.models) { item in
+                        Text(item.name).tag(ModelRef(provider: choice.account.kind, model: item.id).text)
+                    }
+                }
+            }
         }
     }
 }

@@ -105,6 +105,13 @@ struct LiveCatalogTests {
         await connection.stop()
     }
 
+    @Test(arguments: [ProviderKind.commandCode, .opencodeZen, .opencodeGo])
+    func listsProviderModelsLive(_ kind: ProviderKind) async throws {
+        let models = try await ModelCatalog.fetch(ProviderAccount(kind: kind), token: nil)
+        #expect(models.count > 5)
+        #expect(Set(models.map(\.format)).count >= 2, "esperava modelos em mais de um formato")
+    }
+
     @Test func searchesTheMCPRegistry() async throws {
         let servers = try await MCPRegistry.shared.search("github")
         #expect(!servers.isEmpty)

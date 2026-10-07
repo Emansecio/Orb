@@ -178,7 +178,7 @@ private struct ModelMenu: View {
             ))
             .pickerStyle(.inline)
         } label: {
-            Text(model.modelID(for: bot).isEmpty ? "Sem modelo" : model.modelID(for: bot))
+            Text(model.modelName(for: bot).isEmpty ? "Sem modelo" : model.modelName(for: bot))
                 .font(.caption.weight(.medium))
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)

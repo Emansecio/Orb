@@ -137,89 +137,13 @@ struct SettingsView: View {
     var body: some View {
         TabView {
             ProviderSettings()
-                .tabItem { Label("Modelo", systemImage: "cpu") }
+                .tabItem { Label("Modelos", systemImage: "cpu") }
             GeneralSettings()
                 .tabItem { Label("Geral", systemImage: "gearshape") }
             PermissionSettings()
                 .tabItem { Label("Permissões do Mac", systemImage: "lock.shield") }
         }
-        .frame(width: 560, height: 440)
-    }
-}
-
-private struct ProviderSettings: View {
-    @Environment(AppModel.self) private var model
-    @State private var key = ""
-    @State private var isTesting = false
-    @State private var result: Result<Int, Error>?
-
-    var body: some View {
-        @Bindable var model = model
-        Form {
-            Section {
-                Picker("Provedor", selection: Binding(get: { model.provider.preset }, set: { preset in
-                    model.selectPreset(preset)
-                    key = ""
-                    result = nil
-                })) {
-                    ForEach(ProviderPreset.allCases) { Text($0.label).tag($0) }
-                }
-                TextField("URL base", text: $model.provider.baseURL, prompt: Text("https://…/v1"))
-                if model.provider.preset.needsKey || model.provider.preset == .custom {
-                    SecureField("Chave de API", text: $key, prompt: Text(model.hasAPIKey ? "Salva no Keychain" : "Cole sua chave"))
-                        .onSubmit(saveKey)
-                }
-            } footer: {
-                Text("A chave fica no Keychain do macOS e só é enviada para a URL acima.")
-            }
-            Section {
-                if model.models.isEmpty {
-                    TextField("Modelo padrão", text: $model.provider.defaultModel, prompt: Text("ex.: grok-4"))
-                } else {
-                    Picker("Modelo padrão", selection: $model.provider.defaultModel) {
-                        ForEach(model.models, id: \.self) { Text($0).tag($0) }
-                    }
-                }
-                HStack {
-                    Button(isTesting ? "Testando…" : "Testar e buscar modelos", action: test)
-                        .disabled(isTesting)
-                    Spacer()
-                    switch result {
-                    case .success(let count):
-                        Label("Conectado · \(count) modelos", systemImage: "checkmark.circle.fill").foregroundStyle(Palette.ok)
-                    case .failure(let error):
-                        Label(error.localizedDescription, systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(Palette.warn).lineLimit(2)
-                    case nil:
-                        if model.isProviderReady {
-                            Label("Pronto", systemImage: "checkmark.circle").foregroundStyle(Palette.muted)
-                        }
-                    }
-                }
-                .font(.caption)
-            }
-        }
-        .formStyle(.grouped)
-    }
-
-    private func saveKey() {
-        guard !key.isEmpty else { return }
-        model.setAPIKey(key)
-        key = ""
-    }
-
-    private func test() {
-        saveKey()
-        isTesting = true
-        Task {
-            do {
-                try await model.refreshModels()
-                result = .success(model.models.count)
-            } catch {
-                result = .failure(error)
-            }
-            isTesting = false
-        }
+        .frame(width: 620, height: 600)
     }
 }
 

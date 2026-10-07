@@ -219,11 +219,11 @@ struct ModelTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = Store(directory: directory)
         var state = AppState.initial
-        state.provider.defaultModel = "grok-4"
+        state.defaultModel = "xai/grok-4"
         store.save(state)
         store.flush()
         #expect(store.loadState()?.bots.map(\.name) == ["Atlas"])
-        #expect(store.loadState()?.provider.defaultModel == "grok-4")
+        #expect(store.loadState()?.defaultModel == "xai/grok-4")
 
         let botID = state.bots[0].id
         let conversation = Conversation(items: [TranscriptItem(.user(text: "oi", attachments: []))], messages: [.user("oi")])

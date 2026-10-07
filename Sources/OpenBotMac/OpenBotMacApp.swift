@@ -5,7 +5,6 @@ import AppKit
 struct OpenBotMacApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var model = AppModel()
-    @MainActor private static var didSendLaunchPrompt = false
 
     var body: some Scene {
         Window("OpenBot", id: "main") {
@@ -13,14 +12,7 @@ struct OpenBotMacApp: App {
                 .environment(model)
                 .frame(minWidth: 960, minHeight: 620)
                 .preferredColorScheme(.dark)
-                .task {
-                    // Dev aid for scripted end-to-end checks: OPENBOT_SEND="texto" sends it to the selected bot on launch.
-                    if let text = ProcessInfo.processInfo.environment["OPENBOT_SEND"], !Self.didSendLaunchPrompt,
-                       let id = model.selectedBot?.id {
-                        Self.didSendLaunchPrompt = true
-                        model.send(text, to: id)
-                    }
-                }
+                .task { model.sendLaunchPrompt() }
         }
         .defaultSize(width: 1280, height: 820)
         .commands { AppCommands(model: model) }
@@ -176,12 +168,15 @@ enum OrbSheet {
 enum Snapshot {
     static func render(_ screen: String, to url: URL) {
         let model = AppModel()
+        model.showInspector = false // the inspector column does not render offscreen
+        model.sendLaunchPrompt()
         let content: AnyView = switch screen {
         case "skills": AnyView(SkillsView())
         case "skills-explore": AnyView(SkillsView(tab: .explore))
         case "connectors": AnyView(ConnectorsView())
         case "connectors-explore": AnyView(ConnectorsView(tab: .explore))
         case "routines": AnyView(RoutinesView())
+        case "models": AnyView(ProviderSettings())
         default: AnyView(model.bots.first.map { ChatView(bot: $0) })
         }
         let size = NSSize(width: 1100, height: 760)
