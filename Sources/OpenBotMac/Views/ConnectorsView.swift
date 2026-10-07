@@ -3,8 +3,12 @@ import SwiftUI
 /// Connectors (MCP servers): the installed ones (enable, status, edit, delete) and the official registry.
 struct ConnectorsView: View {
     @Environment(AppModel.self) private var model
-    @State private var tab = CatalogTab.installed
+    @State private var tab: CatalogTab
     @State private var editing: ConnectorDraft?
+
+    init(tab: CatalogTab = .installed) {
+        _tab = State(initialValue: tab)
+    }
 
     var body: some View {
         VStack(spacing: 0) {

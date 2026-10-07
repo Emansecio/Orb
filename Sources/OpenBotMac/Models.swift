@@ -273,6 +273,9 @@ extension Skill {
         folderURL = try c.decodeIfPresent(URL.self, forKey: .folderURL)
     }
 
+    /// `source` of the skills that ship with the app.
+    static let builtInSource = "openbot"
+
     /// A slug from free text: lowercase letters, digits and dashes.
     static func slugify(_ text: String) -> String {
         String(text.lowercased().folding(options: .diacriticInsensitive, locale: nil)

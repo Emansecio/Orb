@@ -42,7 +42,24 @@ struct OpenBotMacApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var snapshot: (screen: String, url: URL)? {
+        let arguments = CommandLine.arguments
+        guard let flag = arguments.firstIndex(of: "--snapshot"), arguments.indices.contains(flag + 2) else { return nil }
+        return (arguments[flag + 1], URL(fileURLWithPath: arguments[flag + 2]))
+    }
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Snapshots render in the background: no Dock icon, never takes focus.
+        if snapshot != nil { NSApp.setActivationPolicy(.accessory) }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Dev aid: `OpenBot --snapshot skills-explore out.png` renders one screen offscreen and exits.
+        if let snapshot {
+            NSApp.windows.forEach { $0.orderOut(nil) }
+            Snapshot.render(snapshot.screen, to: snapshot.url)
+            return
+        }
         // Dev aid: `OpenBot --render-orbs out.png` writes a sheet of Orbs × activities and exits.
         let arguments = CommandLine.arguments
         if let flag = arguments.firstIndex(of: "--render-orbs"), arguments.indices.contains(flag + 1) {
@@ -151,5 +168,40 @@ enum OrbSheet {
         guard let image = renderer.nsImage, let tiff = image.tiffRepresentation,
               let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]) else { return }
         try? png.write(to: url)
+    }
+}
+
+/// Offscreen render of one screen with real data, for visual review without touching the user's screen.
+@MainActor
+enum Snapshot {
+    static let screens = ["chat", "skills", "skills-explore", "connectors", "connectors-explore", "routines"]
+
+    static func render(_ screen: String, to url: URL) {
+        let model = AppModel()
+        let content: AnyView = switch screen {
+        case "skills": AnyView(SkillsView())
+        case "skills-explore": AnyView(SkillsView(tab: .explore))
+        case "connectors": AnyView(ConnectorsView())
+        case "connectors-explore": AnyView(ConnectorsView(tab: .explore))
+        case "routines": AnyView(RoutinesView())
+        default: AnyView(model.bots.first.map { ChatView(bot: $0) })
+        }
+        let size = NSSize(width: 1100, height: 760)
+        let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: -30_000, y: -30_000), size: size),
+                              styleMask: .borderless, backing: .buffered, defer: false)
+        window.contentView = NSHostingView(rootView: NavigationStack { content }
+            .environment(model)
+            .preferredColorScheme(.dark)
+            .frame(width: size.width, height: size.height))
+        window.orderFrontRegardless()
+        Task {
+            // Give catalogs and images time to load.
+            try? await Task.sleep(for: .seconds(Double(ProcessInfo.processInfo.environment["OPENBOT_SNAPSHOT_WAIT"] ?? "") ?? 8))
+            if let view = window.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                view.cacheDisplay(in: view.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: url)
+            }
+            exit(0)
+        }
     }
 }

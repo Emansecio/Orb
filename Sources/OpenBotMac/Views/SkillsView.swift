@@ -3,8 +3,12 @@ import SwiftUI
 /// Skills: the installed ones (enable, edit, delete) and the public catalog (search, preview, install).
 struct SkillsView: View {
     @Environment(AppModel.self) private var model
-    @State private var tab = CatalogTab.installed
+    @State private var tab: CatalogTab
     @State private var editing: Skill?
+
+    init(tab: CatalogTab = .installed) {
+        _tab = State(initialValue: tab)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -85,7 +89,7 @@ private struct InstalledSkillRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
-            CatalogIcon(symbol: skill.source == nil ? "wand.and.stars" : "shippingbox")
+            CatalogIcon(symbol: skill.source == nil || skill.source == Skill.builtInSource ? "wand.and.stars" : "shippingbox")
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 8) {
                     Text(skill.name)
@@ -101,7 +105,9 @@ private struct InstalledSkillRow: View {
                         .lineLimit(2)
                 }
                 HStack(spacing: 6) {
-                    if let source = skill.source {
+                    if skill.source == Skill.builtInSource {
+                        CatalogBadge(text: "Incluída no OpenBot", symbol: "circle.hexagongrid")
+                    } else if let source = skill.source {
                         CatalogBadge(text: source.split(separator: "/").prefix(2).joined(separator: "/"), symbol: "shippingbox")
                     } else {
                         CatalogBadge(text: "Criada por você", symbol: "person")
