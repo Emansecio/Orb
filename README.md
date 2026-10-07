@@ -1,57 +1,74 @@
-# OpenBot para macOS (protótipo de interface)
+# OpenBot para macOS
 
-App nativo em SwiftUI (macOS 14+). Usa as funcionalidades do Grok Bot como referência,
-mas com design próprio. Os dados ainda são simulados (`MockGateway`); o próximo passo é
-ligar no gateway do OpenBot.
+App nativo em SwiftUI (macOS 14+) para conversar com bots que agem no seu Mac. Cada bot é um
+**Orb** animado, tem seu modelo, sua memória, suas permissões e suas rotinas. Inspirado nas
+funcionalidades do Grok Bot, com design e código próprios.
 
 ```bash
-swift run                 # roda direto
-./scripts/bundle.sh       # gera build/OpenBot.app
-open build/OpenBot.app
+./scripts/bundle.sh && open build/OpenBot.app   # gera e abre o app (com ícone)
+swift test                                      # 38 testes (motor, cliente, ferramentas, MCP, dados)
 ```
 
-## Design: dark monocromático (tokens do tema dark do Grok Bot)
-- Conversa `#070707`, barra lateral/detalhes `#111111`, cards/compositor `#181818`, texto `#FCFCFC` em 100/74/60/36%.
-- Balão do usuário `#5A5A5A`, balão do bot `#262626`, bordas `#FCFCFC` a 10–15%, azul `#1084FE`/`#459FFE`.
-- Layout: barra lateral 280 px (240–400), conversa ≥ 424 px, painel de detalhes 320 px; fonte 14 px com altura de linha de 22 px.
-- Aprovação: Não permitir · Sempre permitir · Permitir uma vez. Ferramentas como linhas discretas com brilho animado enquanto rodam.
-- Atalhos: ⌘N novo bot, ⇧⌘N nova conversa, ⌥⌘B detalhes, ⌥↑/⌥↓ trocar de bot, ⌘1…⌘9 ir para um bot, ⌘↩ enviar.
-- **Personalização:** cada bot é um Orb próprio (veja abaixo). Sem nome, logo, fontes (XVF) ou sons do Grok Bot (usa SF Pro).
+Na primeira vez: **Ajustes → Modelo**, escolha o provedor, cole a chave e clique em
+**Testar e buscar modelos**.
 
-## Orbs (os bots)
-Cada bot é um **Orb**, uma esfera de gel brilhante renderizada em 3D no Blender e composta em camadas no app.
-Documentação completa em [docs/ORBS.md](docs/ORBS.md).
-- 18 cores, 12 olhos, 10 bocas, 5 sobrancelhas, 4 bochechas, 6 bigodes, 8 cabelos e 15 acessórios combináveis, com cor livre para cabelo, bigode e acessórios.
-- Editor ao vivo em **Novo bot** e em **Painel do bot → Personalizar Orb…** (miniaturas renderizadas, Sortear).
-- Mostra o que o bot está fazendo: ouvindo (pula quando você envia), pensando, terminal, navegando, lendo, buscando,
-  esperando aprovação, feliz ao terminar, erro ao parar, dormindo (rotina pausada).
-- Os olhos seguem o cursor (com paralaxe), crescem e encaram ao passar o mouse, pulam ao clicar e piscam.
-- Animação em Core Animation (~1 % de CPU parado). `OPENBOT_STATIC_PETS=1` desliga, `OPENBOT_DEMO=1` envia um prompt
-  sozinho, `--render-orbs docs/orbs-activities.png` gera a folha de referência.
+## O que o app faz
 
-## Funcionalidades do Grok Bot → telas daqui
-| Grok Bot | OpenBot Mac |
+| Área | Como funciona |
 |---|---|
-| Vários bots, avatares 3D | Barra lateral com Orbs animados, não lidas e status ao vivo; ⌘N cria bot com editor de Orb |
-| Status "trabalhando" | Linha pulsante com a atividade atual + Orb que muda de expressão por tipo de tarefa |
-| Cards de ferramenta | `ToolCallStrip`: rodando → concluído (com duração), saída expansível |
-| Aprovações | `ApprovalCard`: Negar · Permitir uma vez · Sempre para este bot |
-| Compositor | Anexos, `/` skills, `@` outro bot, modo de permissão, seletor de modelo, parar |
-| Computador do bot | Painel "Mesa de trabalho" (pastas e uso) |
-| Memória | Lista editável no painel do bot ("Esquecer") |
-| Rotinas com pausa por inatividade | Tela Rotinas com cards, liga/desliga e "Retomar" |
-| Conectores / MCP | Tela Conectores por categoria, com busca |
-| Skills | Tabela com busca; uso via `/` no chat |
-| Atalho rápido | Ícone na barra de menus com pergunta rápida |
-| Permissões do Mac | Ajustes → Permissões (checa Acessibilidade e Gravação de Tela de verdade) |
+| **Modelos** | Qualquer API compatível com OpenAI: xAI (Grok), OpenAI, OpenRouter, Ollama, LM Studio ou URL própria. Resposta em streaming; modelo padrão + modelo por bot. Chave no **Keychain**. |
+| **Ferramentas** | `run_command` (zsh), `read_file`, `write_file`, `list_directory`, `search_files` (Spotlight), `web_fetch`, `open`, `applescript` (Mail, Calendário, Notas…), `remember`. |
+| **Permissões** | Por bot: **Perguntar antes** (ações que mudam algo pedem aprovação), **Automático** ou **Só leitura**. “Sempre permitir” vale por ferramenta e pode ser revogado no painel do bot. Cada grupo de ferramentas pode ser desligado (Terminal e arquivos, Web, Apps do Mac, Conectores). |
+| **Conectores** | Servidores **MCP** locais (stdio), com modelos prontos (Arquivos, Memória, Fetch, GitHub) ou comando próprio. Status ao vivo e reconexão. |
+| **Skills** | Instruções reutilizáveis: comece a mensagem com `/resumir`, `/organizar`, `/revisar` ou crie as suas. |
+| **Rotinas** | O bot faz uma tarefa sozinho todo dia, toda semana ou a cada X horas enquanto o app está aberto; resultado no card e notificação. |
+| **Memória** | O bot guarda fatos duradouros sobre você (`remember`); você vê e apaga no painel. |
+| **Mac** | Ícone na barra de menus com pergunta rápida, notificações quando termina ou precisa de você, abrir ao iniciar sessão, arrastar arquivos para o chat. |
+| **Orbs** | 18 cores e dezenas de rostos, cabelos e acessórios; expressões por tipo de tarefa; olhos seguem o cursor. Veja [docs/ORBS.md](docs/ORBS.md). |
+
+Atalhos: ⌘N novo bot · ⇧⌘N nova conversa · ⌥⌘B painel do bot · ⌥↑/⌥↓ trocar de bot · ⌘1…⌘9 ir para um bot · ↩ enviar.
 
 ## Arquitetura
-- `AppModel` (`@Observable`, MainActor): estado, turnos, aprovações.
-- `AgentGateway` (protocolo): `runTurn` devolve um `AsyncStream<TurnEvent>` (status, texto, ferramentas, aprovação).
-  Trocar `MockGateway` por um cliente HTTP+SSE para `127.0.0.1:1340` (gateway do OpenBot) não muda nada na UI.
+
+```
+Views (SwiftUI)  ──►  AppModel (@MainActor @Observable)
+                        │  estado, conversas, rotinas, notificações
+                        ├─ Store ............ JSON em ~/Library/Application Support/OpenBot + Keychain
+                        ├─ AgentEngine ...... loop modelo ↔ ferramentas + portão de aprovação (actor)
+                        │    ├─ OpenAIClient  streaming SSE, tool calls
+                        │    ├─ ToolBox ..... ferramentas nativas (ProcessRunner com timeout e grupo de processos)
+                        │    └─ MCPManager .. conectores MCP via stdio
+                        └─ Orbs ............. avatar 3D em camadas, animado em Core Animation
+```
+
+- **Contratos** em [`Engine/EngineTypes.swift`](Sources/OpenBotMac/Engine/EngineTypes.swift): `LLMClient`, `AgentTool`,
+  `ToolSpec`, `ChatMessage`, `JSONValue`. Uma ferramenta nova é um `struct` que implementa `AgentTool` e entra em `ToolBox.all`.
+- **Um turno**: `AppModel.send` monta um `TurnRequest` (prompt do sistema, histórico, ferramentas permitidas) e consome os
+  `TurnEvent`s do `AgentEngine` (texto, ferramenta iniciada/terminada, aprovação, mensagens para o histórico, erro).
+- **Risco**: cada ferramenta diz se a chamada é `.safe` (lê) ou `.sensitive` (muda algo / roda código). Só as sensíveis
+  passam pelo portão. Ferramentas de conectores são sempre sensíveis.
+- **Dados**: `state.json` (bots, rotinas, skills, conectores, provedor) e `conversations/<bot>.json` (o que a tela mostra e
+  o histórico do modelo). Campos novos devem ter valor padrão na decodificação (`value(_:default:)`), para arquivos antigos
+  continuarem abrindo.
+
+## Desenvolvimento
+
+```bash
+python3 scripts/fake-llm.py          # modelo falso em http://127.0.0.1:8765/v1 (pede um run_command)
+open -n build/OpenBot.app --env OPENBOT_DATA_DIR=/tmp/openbot-teste   # dados isolados
+open -n build/OpenBot.app --env OPENBOT_SEND="Como está meu Mac?"   # envia um prompt ao abrir
+./build/OpenBot.app/Contents/MacOS/OpenBot --render-orbs docs/orbs-activities.png
+```
+
+| Variável / argumento | Efeito |
+|---|---|
+| `OPENBOT_DATA_DIR` | Pasta de dados alternativa (testes sem tocar nos seus bots) |
+| `OPENBOT_SEND` | Envia o texto ao bot selecionado ao abrir (teste ponta a ponta) |
+| `OPENBOT_STATIC_PETS` | Desliga a animação dos Orbs |
+| `--render-orbs arquivo.png` / `--render-icon arquivo.png` | Gera a folha de Orbs / o ícone e sai |
 
 ## Próximos passos
-1. `OpenBotGatewayClient` (SSE `/api/events` + `POST /api/<method>`) no lugar do mock.
-2. Chaves no Keychain; item de login com `SMAppService`; atalho global.
-3. Helper de Computer Use (Acessibilidade + ScreenCaptureKit) via XPC.
-4. Notificações ao terminar/pedir aprovação; Sparkle para atualizações.
+1. Distribuição: assinatura Developer ID, Hardened Runtime, notarização e atualizações (Sparkle).
+2. Atalho global para a pergunta rápida; chamar outro bot com `@`.
+3. Controle do Mac por Acessibilidade e captura de tela (helper separado, com onboarding de permissões).
+4. Anexar imagens para modelos com visão; histórico de várias conversas por bot.

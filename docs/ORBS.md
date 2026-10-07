@@ -129,8 +129,8 @@ de um turno (Orbs ocupados + brilhos do transcript). `OPENBOT_STATIC_PETS=1` des
 # Folha de referência: Orbs de exemplo × atividades (usa o renderizador estático)
 ./build/OpenBot.app/Contents/MacOS/OpenBot --render-orbs docs/orbs-activities.png
 
-# Envia um prompt sozinho 2 s após abrir, para ver ouvir → tarefas → aprovação → feliz
-OPENBOT_DEMO=1 ./build/OpenBot.app/Contents/MacOS/OpenBot
+# Envia um prompt ao abrir, para ver ouvir → tarefas → aprovação → feliz (use com scripts/fake-llm.py)
+open -n build/OpenBot.app --env OPENBOT_SEND="Como está meu Mac?"
 
 # Sem animação (comparar CPU)
 OPENBOT_STATIC_PETS=1 ./build/OpenBot.app/Contents/MacOS/OpenBot
