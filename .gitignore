@@ -1,0 +1,7 @@
+.build/
+build/
+.swiftpm/
+art/renders/
+__pycache__/
+*.blend1
+.DS_Store

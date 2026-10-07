@@ -1,0 +1,438 @@
+{
+  "color": [
+    {
+      "id": "indigo",
+      "label": "Índigo",
+      "hex": [
+        "#E4DEFF",
+        "#4A34F2",
+        "#3D2BE4",
+        "#86DFFF"
+      ]
+    },
+    {
+      "id": "ceu",
+      "label": "Céu",
+      "hex": [
+        "#D6F1FF",
+        "#2E9BFF",
+        "#1D63D6",
+        "#B5FFF6"
+      ]
+    },
+    {
+      "id": "oceano",
+      "label": "Oceano",
+      "hex": [
+        "#C9FFF6",
+        "#0FB5B0",
+        "#07706F",
+        "#9EF0FF"
+      ]
+    },
+    {
+      "id": "menta",
+      "label": "Menta",
+      "hex": [
+        "#B8FFE6",
+        "#14C08C",
+        "#0A7A59",
+        "#D8FF6B"
+      ]
+    },
+    {
+      "id": "lima",
+      "label": "Lima",
+      "hex": [
+        "#F3FFC2",
+        "#9BE02E",
+        "#5FA30E",
+        "#FFF59E"
+      ]
+    },
+    {
+      "id": "sol",
+      "label": "Sol",
+      "hex": [
+        "#FFF0B8",
+        "#FFB21F",
+        "#C97A00",
+        "#FFF6C2"
+      ]
+    },
+    {
+      "id": "pessego",
+      "label": "Pêssego",
+      "hex": [
+        "#FFE6D6",
+        "#FF9A6B",
+        "#E0603A",
+        "#FFE3A3"
+      ]
+    },
+    {
+      "id": "coral",
+      "label": "Coral",
+      "hex": [
+        "#FFB3A0",
+        "#F2533F",
+        "#B8281B",
+        "#FFD36B"
+      ]
+    },
+    {
+      "id": "cereja",
+      "label": "Cereja",
+      "hex": [
+        "#FFC2C9",
+        "#E11D3F",
+        "#9C0A24",
+        "#FF9E7A"
+      ]
+    },
+    {
+      "id": "rosa",
+      "label": "Rosa",
+      "hex": [
+        "#FFC4E6",
+        "#E8409A",
+        "#A81D66",
+        "#FF9DF2"
+      ]
+    },
+    {
+      "id": "lavanda",
+      "label": "Lavanda",
+      "hex": [
+        "#F1E6FF",
+        "#A77BFF",
+        "#7A4FE0",
+        "#FFC7F5"
+      ]
+    },
+    {
+      "id": "ametista",
+      "label": "Ametista",
+      "hex": [
+        "#E9C9FF",
+        "#8A2BE2",
+        "#5A1196",
+        "#FF8AD8"
+      ]
+    },
+    {
+      "id": "aurora",
+      "label": "Aurora",
+      "hex": [
+        "#E0FFF5",
+        "#37D4C0",
+        "#7A3CF0",
+        "#FF7AD9"
+      ]
+    },
+    {
+      "id": "algodao",
+      "label": "Algodão-doce",
+      "hex": [
+        "#FFFFFF",
+        "#FFB3E1",
+        "#9FD3FF",
+        "#FFF0B3"
+      ]
+    },
+    {
+      "id": "chocolate",
+      "label": "Chocolate",
+      "hex": [
+        "#F2D3B8",
+        "#8B5A3C",
+        "#4E2E1C",
+        "#FFB86B"
+      ]
+    },
+    {
+      "id": "noite",
+      "label": "Noite",
+      "hex": [
+        "#9FA8FF",
+        "#1B1F5E",
+        "#0D0F33",
+        "#6F7BFF"
+      ]
+    },
+    {
+      "id": "grafite",
+      "label": "Grafite",
+      "hex": [
+        "#B9BED0",
+        "#3A3F52",
+        "#1C1F2A",
+        "#7CE3FF"
+      ]
+    },
+    {
+      "id": "perola",
+      "label": "Pérola",
+      "hex": [
+        "#FFFFFF",
+        "#ECE8F6",
+        "#C4BDD9",
+        "#FFFFFF"
+      ]
+    }
+  ],
+  "eyes": [
+    {
+      "id": "pilulas",
+      "label": "Pílulas"
+    },
+    {
+      "id": "pontos",
+      "label": "Pontos"
+    },
+    {
+      "id": "ovais",
+      "label": "Ovais"
+    },
+    {
+      "id": "grandes",
+      "label": "Grandões"
+    },
+    {
+      "id": "fendas",
+      "label": "Fendas"
+    },
+    {
+      "id": "felizes",
+      "label": "Felizes ^^"
+    },
+    {
+      "id": "sono",
+      "label": "Sono"
+    },
+    {
+      "id": "piscadela",
+      "label": "Piscadela"
+    },
+    {
+      "id": "estrelas",
+      "label": "Estrelas"
+    },
+    {
+      "id": "coracoes",
+      "label": "Corações"
+    },
+    {
+      "id": "tontos",
+      "label": "Tontos"
+    },
+    {
+      "id": "bravos",
+      "label": "Bravos"
+    }
+  ],
+  "mouth": [
+    {
+      "id": "nenhuma",
+      "label": "Nenhuma"
+    },
+    {
+      "id": "sorriso",
+      "label": "Sorriso"
+    },
+    {
+      "id": "sorrisao",
+      "label": "Sorrisão"
+    },
+    {
+      "id": "surpresa",
+      "label": "Surpresa"
+    },
+    {
+      "id": "neutra",
+      "label": "Neutra"
+    },
+    {
+      "id": "gatinho",
+      "label": "Gatinho :3"
+    },
+    {
+      "id": "lingua",
+      "label": "Língua"
+    },
+    {
+      "id": "dentinho",
+      "label": "Dentinho"
+    },
+    {
+      "id": "triste",
+      "label": "Triste"
+    },
+    {
+      "id": "assobio",
+      "label": "Assobio"
+    }
+  ],
+  "brows": [
+    {
+      "id": "nenhuma",
+      "label": "Nenhuma"
+    },
+    {
+      "id": "retas",
+      "label": "Retas"
+    },
+    {
+      "id": "arqueadas",
+      "label": "Arqueadas"
+    },
+    {
+      "id": "bravas",
+      "label": "Bravas"
+    },
+    {
+      "id": "preocupadas",
+      "label": "Preocupadas"
+    }
+  ],
+  "cheeks": [
+    {
+      "id": "nenhuma",
+      "label": "Nenhuma"
+    },
+    {
+      "id": "blush",
+      "label": "Blush"
+    },
+    {
+      "id": "sardas",
+      "label": "Sardas"
+    },
+    {
+      "id": "coracoes",
+      "label": "Coraçõezinhos"
+    }
+  ],
+  "mustache": [
+    {
+      "id": "nenhum",
+      "label": "Nenhum"
+    },
+    {
+      "id": "classico",
+      "label": "Clássico"
+    },
+    {
+      "id": "enrolado",
+      "label": "Enrolado"
+    },
+    {
+      "id": "fino",
+      "label": "Fino"
+    },
+    {
+      "id": "chevron",
+      "label": "Escovinha"
+    },
+    {
+      "id": "cavanhaque",
+      "label": "Cavanhaque"
+    }
+  ],
+  "hair": [
+    {
+      "id": "nenhum",
+      "label": "Nenhum"
+    },
+    {
+      "id": "topete",
+      "label": "Topete"
+    },
+    {
+      "id": "tufinho",
+      "label": "Tufinho"
+    },
+    {
+      "id": "franja",
+      "label": "Franja"
+    },
+    {
+      "id": "cachos",
+      "label": "Cachinhos"
+    },
+    {
+      "id": "coque",
+      "label": "Coque"
+    },
+    {
+      "id": "moicano",
+      "label": "Moicano"
+    },
+    {
+      "id": "antena",
+      "label": "Antena"
+    }
+  ],
+  "accessories": [
+    {
+      "id": "oculos-redondos",
+      "label": "Óculos redondos"
+    },
+    {
+      "id": "oculos-quadrados",
+      "label": "Óculos quadrados"
+    },
+    {
+      "id": "oculos-sol",
+      "label": "Óculos de sol"
+    },
+    {
+      "id": "monoculo",
+      "label": "Monóculo"
+    },
+    {
+      "id": "chapeu-festa",
+      "label": "Chapéu de festa"
+    },
+    {
+      "id": "bone",
+      "label": "Boné"
+    },
+    {
+      "id": "gorro",
+      "label": "Gorro"
+    },
+    {
+      "id": "cartola",
+      "label": "Cartola"
+    },
+    {
+      "id": "coroa",
+      "label": "Coroa"
+    },
+    {
+      "id": "laco",
+      "label": "Laço"
+    },
+    {
+      "id": "fones",
+      "label": "Fones"
+    },
+    {
+      "id": "aureola",
+      "label": "Auréola"
+    },
+    {
+      "id": "chifres",
+      "label": "Chifrinhos"
+    },
+    {
+      "id": "orelhas-gato",
+      "label": "Orelhas de gato"
+    },
+    {
+      "id": "flor",
+      "label": "Flor"
+    }
+  ]
+}
