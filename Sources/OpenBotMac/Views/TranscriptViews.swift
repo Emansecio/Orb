@@ -174,9 +174,11 @@ struct ApprovalCard: View {
                         .foregroundStyle(decision == .deny ? Palette.danger : Palette.muted)
                 }
             }
-            Text(request.reason)
-                .font(.system(size: 13))
-                .foregroundStyle(Palette.muted)
+            if !request.reason.isEmpty {
+                Text(request.reason)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Palette.muted)
+            }
             Text(request.command)
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(Palette.secondary)

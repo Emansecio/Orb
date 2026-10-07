@@ -12,6 +12,12 @@ struct OpenBotMacApp: App {
                 .environment(model)
                 .frame(minWidth: 960, minHeight: 620)
                 .preferredColorScheme(.dark)
+                .task {
+                    // Dev aid for scripted end-to-end checks: OPENBOT_SEND="texto" sends it to the selected bot on launch.
+                    if let text = ProcessInfo.processInfo.environment["OPENBOT_SEND"], let id = model.selectedBot?.id {
+                        model.send(text, to: id)
+                    }
+                }
         }
         .defaultSize(width: 1280, height: 820)
         .commands { AppCommands(model: model) }

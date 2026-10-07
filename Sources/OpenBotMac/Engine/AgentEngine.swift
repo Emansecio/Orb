@@ -82,7 +82,8 @@ actor AgentEngine {
                 if calls.isEmpty { return }
 
                 for call in calls {
-                    let output = await execute(call, request: request, reason: text, allowed: &allowed, out: out)
+                    let output = await execute(call, request: request, reason: text.trimmingCharacters(in: .whitespacesAndNewlines),
+                                               allowed: &allowed, out: out)
                     try Task.checkCancellation()
                     let result = ChatMessage.tool(call.id, output)
                     messages.append(result)
@@ -118,8 +119,9 @@ actor AgentEngine {
                                                 finishedAt: .now)))
                 return "Not run: the user set this bot to read-only mode. Explain what you would do instead."
             case .ask:
+                // The model's own explanation is already on screen right above the card.
                 let approval = ApprovalRequest(toolName: call.name, title: summary.title, command: summary.detail,
-                                               reason: Self.reason(from: reason, bot: request.bot))
+                                               reason: reason.isEmpty ? "\(request.bot.name) precisa da sua permissão para continuar." : "")
                 out.yield(.approval(approval))
                 out.yield(.status("Esperando sua resposta"))
                 let decision = await withCheckedContinuation { pending[approval.id] = (request.bot.id, $0) }
@@ -143,13 +145,6 @@ actor AgentEngine {
             out.yield(.toolFinished(id: started.id, state: .failed, output: message))
             return "Error: \(message)"
         }
-    }
-
-    /// The model's last sentence before the call explains why it wants to act; fall back to a generic line.
-    private static func reason(from text: String, bot: Bot) -> String {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "\(bot.name) precisa da sua permissão para continuar." }
-        return trimmed.count > 280 ? "…" + trimmed.suffix(280) : trimmed
     }
 
     /// Tool output shown in the transcript (the model always gets the full text).

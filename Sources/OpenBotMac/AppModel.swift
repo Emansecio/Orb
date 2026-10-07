@@ -87,7 +87,8 @@ final class AppModel {
 
     func transcript(_ botID: UUID) -> [TranscriptItem] { conversations[botID]?.items ?? [] }
 
-    func isWorking(_ botID: UUID) -> Bool { turns[botID] != nil }
+    /// Observable (the status line is set for exactly as long as a turn runs).
+    func isWorking(_ botID: UUID) -> Bool { statusLine[botID] != nil }
 
     func routines(for botID: UUID) -> [Routine] { routines.filter { $0.botID == botID } }
 
