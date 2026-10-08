@@ -6,7 +6,7 @@ import Foundation
 // MARK: - Memory level
 
 /// How much conversation an Orb remembers word for word before the beginning is folded into a summary
-/// ("Memória da conversa" in the settings). More is not always better: every message is billed with all of it, and
+/// ("Contexto das conversas" in the settings). More is not always better: every message is billed with all of it, and
 /// models answer worse from a very long context.
 enum ContextMemoryLevel: String, Codable, CaseIterable, Sendable {
     /// Up to 40 thousand tokens of history.
@@ -20,17 +20,17 @@ enum ContextMemoryLevel: String, Codable, CaseIterable, Sendable {
 
     var label: String {
         switch self {
-        case .economical: "Econômica"
-        case .balanced: "Equilibrada"
-        case .wide: "Ampla"
+        case .economical: "Econômico"
+        case .balanced: "Equilibrado"
+        case .wide: "Amplo"
         }
     }
 
     var summary: String {
         switch self {
         case .economical: "Lembra até ~40 mil tokens palavra por palavra. Gasta menos por mensagem."
-        case .balanced: "Lembra até ~80 mil tokens palavra por palavra. O equilíbrio entre custo e memória."
-        case .wide: "Usa até 60% da janela do modelo. Mais memória, mais custo por mensagem."
+        case .balanced: "Lembra até ~80 mil tokens palavra por palavra. O equilíbrio entre custo e contexto."
+        case .wide: "Usa até 60% da janela do modelo. Mais contexto, mais custo por mensagem."
         }
     }
 

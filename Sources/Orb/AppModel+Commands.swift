@@ -47,7 +47,7 @@ enum MenuBarState: Equatable {
         switch self {
         case .idle: "Orb"
         case .working(let count): count == 1 ? "Orb: 1 Orb trabalhando" : "Orb: \(count) Orbs trabalhando"
-        case .waiting(let count): count == 1 ? "Orb: 1 Orb esperando sua permissão" : "Orb: \(count) Orbs esperando sua permissão"
+        case .waiting(let count): count == 1 ? "Orb: 1 Orb precisa da sua permissão" : "Orb: \(count) Orbs precisam da sua permissão"
         }
     }
 

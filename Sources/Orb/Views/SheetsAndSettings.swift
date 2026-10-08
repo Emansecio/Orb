@@ -17,14 +17,35 @@ struct NewBotSheet: View {
     @State private var isConfirmingBypass = false
     @State private var isShowingAdvanced = false
     @State private var folder = OrbFolderChoice.own
+    /// The memories kept from Orbs that were deleted or reset (read off the main thread when the sheet opens) and the
+    /// one the new Orb starts from ("" for none).
+    @State private var kept: [KeptMemory]
+    @State private var keptChoice: String
+    /// The name, role and look from before a memory filled them in; nil while no memory is chosen.
+    @State private var beforeMemory: StartSnapshot?
     @FocusState private var isNameFocused: Bool
     /// The window's height less a margin when the window is short (the form scrolls then).
     @State private var height: CGFloat
 
     /// `height`: a fixed sheet height (review snapshots of a short window); by default it follows the window.
-    init(height: CGFloat? = nil) {
+    /// `kept` and `chosen`: what the "Começar de" menu holds and has chosen, for review snapshots; the app reads
+    /// them itself, and a chosen memory fills the name, the role and the look as choosing it in the menu does.
+    init(height: CGFloat? = nil, kept: [KeptMemory] = [], chosen: KeptMemory? = nil) {
         _height = State(initialValue: height ?? NewBotSheetLayout.height())
+        _kept = State(initialValue: kept)
+        _keptChoice = State(initialValue: chosen?.id ?? "")
+        if let chosen {
+            var name = "", role = "", orb = OrbConfig.random()
+            _beforeMemory = State(initialValue: StartSnapshot(name: name, role: role, orb: orb))
+            chosen.fill(name: &name, role: &role, orb: &orb)
+            _name = State(initialValue: name)
+            _role = State(initialValue: role)
+            _orb = State(initialValue: orb)
+        }
     }
+
+    /// The memory the new Orb starts from, if one is chosen and still listed.
+    private var chosenMemory: KeptMemory? { kept.first { $0.id == keptChoice } }
 
     private var trimmedName: String { name.trimmingCharacters(in: .whitespaces) }
 
@@ -58,10 +79,16 @@ struct NewBotSheet: View {
         }
         .frame(width: 820, height: height)
         .task { isNameFocused = true }
+        .task {
+            let memories = model.memory.root
+            let found = await Task.detached(priority: .userInitiated) { KeptMemories.list(in: memories) }.value
+            if !found.isEmpty || kept.isEmpty { kept = found }
+        }
     }
 
     private var form: some View {
         Form {
+            if !kept.isEmpty { startFromSection }
             Section {
                 TextField("Nome", text: $name, prompt: Text("Ex.: Atlas"))
                     .focused($isNameFocused)
@@ -98,12 +125,39 @@ struct NewBotSheet: View {
         .scrollContentBackground(.hidden)
     }
 
+    /// "Começar de": a memory kept from an Orb that is gone. Only when there are kept memories; choosing one fills in
+    /// the Orb's name, role and look, which stay editable.
+    private var startFromSection: some View {
+        Section {
+            Picker("Memória", selection: $keptChoice) {
+                Text("Nenhuma (Orb novo)").tag("")
+                ForEach(kept) { memory in Text(memory.menuTitle).tag(memory.id) }
+            }
+            .onChange(of: keptChoice) { old, _ in changeMemory(from: kept.first { $0.id == old }) }
+        } header: {
+            Text("Começar de")
+        } footer: {
+            if let chosenMemory { Text(chosenMemory.startingNote) }
+        }
+    }
+
+    /// Leaves the old memory (what it gave and the person has not changed goes back) and takes the chosen one.
+    private func changeMemory(from old: KeptMemory?) {
+        if let old, let beforeMemory { old.unfill(name: &name, role: &role, orb: &orb, before: beforeMemory) }
+        guard let chosenMemory else {
+            beforeMemory = nil
+            return
+        }
+        if beforeMemory == nil { beforeMemory = StartSnapshot(name: name, role: role, orb: orb) }
+        chosenMemory.fill(name: &name, role: &role, orb: &orb)
+    }
+
     private func create() {
         guard !trimmedName.isEmpty else { return }
         model.createBot(name: trimmedName,
                         role: role.isEmpty ? "Assistente pessoal" : role,
                         orb: orb, model: modelName, mode: mode, identity: identity, interview: interview,
-                        folder: folder)
+                        folder: folder, adopting: chosenMemory)
         dismiss()
     }
 }
@@ -165,5 +219,41 @@ private struct NewBotFolderSection: View {
         case .home: "Sem pasta própria, em “Perguntar antes” ele pergunta antes de escrever. Dá para criar uma depois, no painel."
         case .existing: "Esta pasta é usada como está: nada é criado nem apagado nela."
         }
+    }
+}
+
+// MARK: - Snapshots
+
+/// `--snapshot new-orb-kept`: the new-Orb sheet over two kept memories, the newest one chosen. They are written into
+/// the snapshot's own data folder (a temporary one, or `ORB_DATA_DIR`), never the user's.
+@MainActor
+enum NewBotSnapshots {
+    static func keptSheet(model: AppModel, height: CGFloat?) -> AnyView {
+        // The examples live in a folder of their own, gone as soon as they are listed: never in the data folder, which
+        // may be the real one when `ORB_DATA_DIR` points at it.
+        let scratch = FileManager.default.temporaryDirectory.appending(path: "orb-kept-sample-\(UUID().uuidString)", directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let root = scratch.appending(path: "memoria", directoryHint: .isDirectory)
+        func day(_ month: Int, _ day: Int) -> Date {
+            Calendar.current.date(from: DateComponents(year: 2026, month: month, day: day, hour: 12, minute: 30)) ?? .now
+        }
+        let nina = KeptProfile(name: "Nina", role: "Cuida da minha agenda",
+                               orb: OrbConfig(color: "menta", eyes: "pilulas", mouth: "sorriso", hair: "franja", accessories: ["laco"]))
+        let luna = KeptProfile(name: "Luna", role: "Escreve comigo", orb: OrbConfig(color: "rosa", eyes: "ovais", cheeks: "blush"))
+        seed(nina, pages: 12, at: day(10, 8), in: root)
+        seed(luna, pages: 5, at: day(9, 30), in: root)
+        let list = KeptMemories.list(in: root)
+        return AnyView(NewBotSheet(height: height, kept: list, chosen: list.first))
+    }
+
+    private static func seed(_ profile: KeptProfile, pages: Int, at date: Date, in root: URL) {
+        let folder = KeptMemories.folder(in: root).appending(path: KeptMemories.folderName(for: profile.name, at: date))
+        let facts = folder.appending(path: MemoryKind.fato.folder)
+        try? FileManager.default.createDirectory(at: facts, withIntermediateDirectories: true)
+        for number in 1...pages {
+            try? Data("---\ntipo: fato\ntitulo: Exemplo \(number)\n---\n\nUma lembrança de exemplo.".utf8)
+                .write(to: facts.appending(path: "exemplo-\(number).md"))
+        }
+        KeptMemories.write(profile, into: folder)
     }
 }

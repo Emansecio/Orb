@@ -364,10 +364,10 @@ struct ShortcutsSheet: View {
             .padding(.horizontal, 20)
             .padding(.bottom, 12)
         }
-        .orbSheet("Atalhos do teclado", subtitle: "Tudo isso também está nos menus do Mac e em Ir para… (⌘K).") {
+        .orbSheet("Atalhos do teclado", subtitle: "Os comandos de Navegar também estão no menu Orbs e em Ir para… (⌘K).") {
             HStack {
                 Spacer()
-                Button("Pronto") { model.showShortcuts = false }
+                Button("Fechar") { model.showShortcuts = false }
                     .buttonStyle(PrimaryPillStyle())
                     .keyboardShortcut(.defaultAction)
             }

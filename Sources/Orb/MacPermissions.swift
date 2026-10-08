@@ -66,7 +66,7 @@ enum MacPermissionKind: Hashable, Sendable {
         switch self {
         case .automation(let target): target.name
         case .accessibility: "Acessibilidade"
-        case .screenRecording: "Gravação de Tela"
+        case .screenRecording: MacPermissionProblem.screenRecording.paneTitle
         case .fullDiskAccess: "Acesso Total ao Disco"
         }
     }
@@ -367,18 +367,23 @@ enum MacPermissionProblem: Equatable, Sendable {
         }
     }
 
-    /// The pane's name in System Settings (pt-BR), as the user will see it.
+    /// The pane's name in System Settings (pt-BR), as the user will see it. Screen recording is the one macOS renamed
+    /// (from macOS 15 the pane also holds the system audio): the name is the one in the system's own localization files.
     var paneTitle: String {
         switch self {
         case .automation: "Automação"
         case .accessibility: "Acessibilidade"
-        case .screenRecording: "Gravação de Tela"
+        case .screenRecording: "Gravação do Áudio do Sistema e da Tela"
         case .fullDiskAccess: "Acesso Total ao Disco"
         }
     }
 
     /// "Ajustes do Sistema → Privacidade e Segurança → Automação". Also how a translated message is recognized again.
     var settingsPath: String { "Privacidade e Segurança → \(paneTitle)" }
+
+    /// What the pane was called before macOS 15: a message written with it (an older tool result, a copy of one) still
+    /// counts as this problem.
+    private static let formerScreenRecordingPath = "Privacidade e Segurança → Gravação de Tela"
 
     /// What is missing, in English for the model.
     var summary: String {
@@ -434,7 +439,8 @@ enum MacPermissionProblem: Equatable, Sendable {
             return .fullDiskAccess
         }
         // "from window" is also what a window that closed mid-capture prints, with the permission granted: not a match.
-        if lower.contains("could not create image from display") || text.contains(screenRecording.settingsPath) {
+        if lower.contains("could not create image from display") || text.contains(screenRecording.settingsPath)
+            || text.contains(formerScreenRecordingPath) {
             return .screenRecording
         }
         return nil

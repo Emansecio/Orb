@@ -22,14 +22,14 @@ struct DeleteOrbSummary: Equatable {
         self.init(name: bot.name, archivedCount: archivedCount, routineCount: routineCount, folder: shown == "~" ? nil : shown)
     }
 
-    /// "Some: a conversa, as 12 conversas arquivadas e as 2 rotinas."
+    /// "Some: a conversa, as 12 conversas anteriores e as 2 rotinas."
     var goes: String {
         var parts = ["a conversa atual"]
         switch archivedCount {
-        case nil: parts.append("as conversas arquivadas")
+        case nil: parts.append("as conversas anteriores")
         case 0?: break
-        case 1?: parts.append("1 conversa arquivada")
-        case let count?: parts.append("\(count) conversas arquivadas")
+        case 1?: parts.append("1 conversa anterior")
+        case let count?: parts.append("\(count) conversas anteriores")
         }
         if routineCount == 1 { parts.append("1 rotina") } else if routineCount > 1 { parts.append("\(routineCount) rotinas") }
         return "Some: " + Self.list(parts) + "."
@@ -42,7 +42,16 @@ struct DeleteOrbSummary: Equatable {
     }
 
     /// Where a kept memory goes and what each button does with it.
-    static let memoryNote = "Guardada, a memória fica em memoria/_guardadas na pasta de dados do app, e você pode abrir no Finder logo depois. Apagada, não volta."
+    static let memoryNote = "Guardada, a memória vai para Memórias guardadas (Ajustes → Geral), e um Orb novo pode começar dela. Apagada, não volta."
+
+    /// "3 Orbs", "1 Orb"; nil for none (so a sentence leaves it out).
+    static func counted(_ count: Int, _ one: String, _ many: String) -> String? {
+        switch count {
+        case ...0: nil
+        case 1: "1 \(one)"
+        default: "\(count) \(many)"
+        }
+    }
 
     /// "a, b e c".
     static func list(_ parts: [String]) -> String {
@@ -50,6 +59,38 @@ struct DeleteOrbSummary: Equatable {
         case 0: ""
         case 1: parts[0]
         default: parts.dropLast().joined(separator: ", ") + " e " + parts[parts.count - 1]
+        }
+    }
+}
+
+/// A line of what a destructive sheet takes away or leaves: a red minus ("Some: …") or a green check ("Fica: …") and the
+/// sentence. "Apagar Atlas?" and "Redefinir o Orb?" use it.
+struct SummaryLine: View {
+    enum Kind {
+        case goes, stays
+
+        var symbol: String { self == .goes ? "minus.circle.fill" : "checkmark.circle.fill" }
+        var color: Color { self == .goes ? Palette.danger : Palette.ok }
+    }
+
+    let kind: Kind
+    let text: String
+
+    init(_ kind: Kind, _ text: String) {
+        self.kind = kind
+        self.text = text
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: kind.symbol)
+                .foregroundStyle(kind.color)
+                .frame(width: 18)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(.system(size: 13))
+                .foregroundStyle(Palette.ink)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -66,8 +107,8 @@ struct DeleteOrbSheet: View {
             let summary = DeleteOrbSummary(bot: bot, archivedCount: archivedCount, routineCount: model.routines(for: botID).count)
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 12) {
-                    line("minus.circle.fill", Palette.danger, summary.goes)
-                    line("checkmark.circle.fill", Palette.ok, summary.stays)
+                    SummaryLine(.goes, summary.goes)
+                    SummaryLine(.stays, summary.stays)
                     Text(DeleteOrbSummary.memoryNote)
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.muted)
@@ -88,19 +129,6 @@ struct DeleteOrbSheet: View {
                 await model.loadArchive(botID)
                 archivedCount = model.archives[botID]?.count ?? 0
             }
-        }
-    }
-
-    private func line(_ symbol: String, _ color: Color, _ text: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Image(systemName: symbol)
-                .foregroundStyle(color)
-                .frame(width: 18)
-                .accessibilityHidden(true)
-            Text(text)
-                .font(.system(size: 13))
-                .foregroundStyle(Palette.ink)
-                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

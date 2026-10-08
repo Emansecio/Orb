@@ -53,7 +53,7 @@ enum CapabilityCopy {
         switch capability {
         case .terminal: "Rodar comandos e ler e escrever arquivos"
         case .browser: "Abrir e ler páginas da internet"
-        case .computerUse: "Abrir, clicar e digitar em outros apps"
+        case .computerUse: "Abrir, clicar e preencher campos em outros apps"
         case .connectors: "Usar as ferramentas dos seus conectores"
         }
     }
@@ -88,7 +88,7 @@ struct MemoryGroup: Identifiable, Equatable, Sendable {
         case .preferencia: "Preferências"
         case .fato: "Fatos"
         case .procedimento: "Procedimentos"
-        case .sessao: "Conversas guardadas"
+        case .sessao: "Resumos de conversas"
         case .identidade: "Identidade"
         }
     }
@@ -122,13 +122,13 @@ enum MemoryGroups {
         return words.allSatisfy { haystack.contains($0) }
     }
 
-    /// "12 lembranças · 9 conversas guardadas", for the line under the memory's heading.
+    /// "12 lembranças · 9 resumos de conversas", for the line under the memory's heading.
     static func summary(_ items: [MemorySnapshot.Item]) -> String {
         let sessions = items.filter { $0.kind == .sessao }.count
         let notes = items.count - sessions
         var parts: [String] = []
         if notes > 0 { parts.append(notes == 1 ? "1 lembrança" : "\(notes) lembranças") }
-        if sessions > 0 { parts.append(sessions == 1 ? "1 conversa guardada" : "\(sessions) conversas guardadas") }
+        if sessions > 0 { parts.append(sessions == 1 ? "1 resumo de conversa" : "\(sessions) resumos de conversas") }
         return parts.isEmpty ? "Nada guardado ainda" : parts.joined(separator: " · ")
     }
 }

@@ -95,11 +95,11 @@ struct PermissionPopover: View {
             ForEach(PermissionMode.allCases) { mode in
                 PermissionRow(mode: mode, isSelected: mode == permission.mode) { choose(mode) }
             }
-            if let grants = PermissionChipText.grantsLine(permission) {
+            if let grants = PermissionChipText.grantsTitle(permission) {
                 Divider().padding(.top, 6)
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("\(grants) permanentes")
+                        Text(grants)
                             .font(.system(size: 12, weight: .medium))
                         Spacer()
                         Button("Gerenciar", action: manage)

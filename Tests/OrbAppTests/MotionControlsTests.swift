@@ -92,7 +92,7 @@ struct MotionControlsTests {
     @Test func eachStateKeepsItsLabelAndItsHelp() {
         #expect(ComposerAction.send.title == "Enviar")
         #expect(ComposerAction.send.help == "Enviar (↩)")
-        #expect(ComposerAction.queue.title == "Enviar para a fila")
+        #expect(ComposerAction.queue.title == "Colocar na fila")
         #expect(ComposerAction.queue.help == "Colocar na fila (↩)")
         #expect(ComposerAction.stop.title == "Parar")
         #expect(ComposerAction.stop.help == "\(CommandName.stop) (\(AppShortcut.stop.label))")

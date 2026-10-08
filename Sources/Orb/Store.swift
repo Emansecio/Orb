@@ -162,14 +162,21 @@ struct Store: Sendable {
 
     // MARK: Writing
 
-    /// Queues `work` on the writer, registering the files it touches first so that reads of them wait.
+    /// Queues `work` on the writer, registering the files it touches first so that reads of them wait. Once the
+    /// folder is sealed (`sealWrites`) the work is dropped.
     private func enqueue(touching urls: [URL], _ work: @escaping @Sendable () -> Void) {
         Self.gate.willWrite(urls)
+        let directory = directory
         queue.async {
-            work()
+            if !WriteSeals.isSealed(directory) { work() }
             Self.gate.didWrite(urls)
         }
     }
+
+    /// Ends every write to this folder from now on, the ones already queued included: the app is about to wipe it
+    /// (`ResetExecutor`) and nothing may write the old state back afterwards. It does not wait: `flush()` afterwards
+    /// waits for the write that was running. Not undone: the process is over soon after.
+    func sealWrites() { WriteSeals.seal(directory) }
 
     func save(_ state: AppState) {
         enqueue(touching: [stateURL]) { write(state, to: stateURL) }
@@ -504,6 +511,7 @@ struct Store: Sendable {
     @discardableResult
     private func writeFile(to url: URL, _ content: () throws -> Data?) -> WriteResult {
         let name = url.lastPathComponent
+        guard !WriteSeals.isSealed(directory) else { return .skipped }
         guard !Self.gate.isBlocked(url) else {
             onSaveFailure?(StoreNotice(message: "Ao abrir o app, não foi possível ler “\(name)”, e por isso nada é gravado por cima: "
                 + "o que você mudou desde então não está sendo salvo. Feche e abra o Orb de novo.", file: url))
@@ -525,6 +533,15 @@ struct Store: Sendable {
             return .failed
         }
     }
+}
+
+/// The data folders that must not be written to any more (see `Store.sealWrites`).
+enum WriteSeals {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var sealed: Set<String> = []
+
+    static func seal(_ directory: URL) { lock.withLock { _ = sealed.insert(directory.standardizedFileURL.path) } }
+    static func isSealed(_ directory: URL) -> Bool { lock.withLock { sealed.contains(directory.standardizedFileURL.path) } }
 }
 
 /// The serial writer queue of each data folder.
@@ -702,11 +719,11 @@ enum Keychain {
 extension Skill {
     static let starters: [Skill] = [
         Skill(slug: "resumir", name: "Resumir", summary: "Resume um texto, arquivo ou página em tópicos",
-              instructions: "Summarize the material the user points to (text, file path or URL — read it with your tools first). Answer with a one-line takeaway followed by at most 7 short bullet points. Keep names, numbers and dates exact.", source: builtInSource),
+              instructions: "Resuma o material que o usuário indicar (texto, caminho de arquivo ou URL; leia com suas ferramentas antes). Responda com uma conclusão de uma linha seguida de no máximo 7 tópicos curtos. Mantenha nomes, números e datas exatos.", source: builtInSource),
         Skill(slug: "organizar", name: "Organizar pasta", summary: "Propõe e aplica uma organização para uma pasta",
-              instructions: "Organize the folder the user names (default ~/Downloads). First list it and propose a structure (by type and month) with counts, without moving anything. Only after the user agrees, move files with run_command using `mv -n` so nothing is overwritten, then report what moved.", source: builtInSource),
+              instructions: "Organize a pasta que o usuário indicar (padrão ~/Downloads). Primeiro liste o conteúdo e proponha uma estrutura (por tipo e mês) com as contagens, sem mover nada. Só depois que o usuário concordar, mova os arquivos com run_command usando `mv -n`, para nada ser sobrescrito, e conte o que foi movido.", source: builtInSource),
         Skill(slug: "revisar", name: "Revisar texto", summary: "Corrige e melhora um texto mantendo a voz do autor",
-              instructions: "Proofread the user's text: fix grammar, spelling and clarity while keeping their voice and language. Return the revised text first, then a short list of the most important changes.", source: builtInSource),
+              instructions: "Revise o texto do usuário: corrija gramática, ortografia e clareza, mantendo a voz e o idioma dele. Devolva primeiro o texto revisado, depois uma lista curta das mudanças mais importantes.", source: builtInSource),
     ]
 }
 

@@ -162,7 +162,7 @@ struct OrbDesignTests {
         #expect(ears(OrbConfig(color: "ceu", hair: "cachos", accessories: ["orelhas-gato"])) == ceu.hexes[1])
     }
 
-    // MARK: Aleatório
+    // MARK: Sortear
 
     @Test func aRandomLookKeepsTheSproutAwayFromCapsAndCrowns() {
         for accessory in ["bone", "gorro", "coroa"] { #expect(!OrbConfig.goesWith(hair: "tufinho", accessory: accessory)) }

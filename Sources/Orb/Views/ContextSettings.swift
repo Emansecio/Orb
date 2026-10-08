@@ -3,25 +3,30 @@ import AppKit
 
 // Ajustes → Geral: how much conversation the Orbs remember word for word, and the windows Orb learned from refusals.
 
-/// "Memória das conversas": the three levels with a line each, as a group of radio rows.
+/// "Contexto das conversas": the three levels with a line each, as a group of radio rows.
 struct ContextMemorySettings: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         Section {
             ForEach(ContextMemoryLevel.allCases, id: \.self) { level in
-                ContextMemoryRow(level: level, isSelected: model.contextMemory == level) { model.contextMemory = level }
+                RadioChoiceRow(title: level.label, summary: level.summary, isSelected: model.contextMemory == level) {
+                    model.contextMemory = level
+                }
             }
         } header: {
-            Text("Memória das conversas")
+            Text("Contexto das conversas")
         } footer: {
-            Text("Vale para todos os Orbs. Quando passa do limite, o começo da conversa vira um resumo; as mensagens continuam salvas em Conversas.")
+            Text("Vale para todos os Orbs. Quando passa do limite, o começo da conversa vira um resumo; as mensagens continuam salvas em Conversas anteriores.")
         }
     }
 }
 
-private struct ContextMemoryRow: View {
-    let level: ContextMemoryLevel
+/// One option of a group of radio rows: a title and a gray line under it. "Contexto das conversas" and
+/// "Redefinir o Orb" use it, so the two look and read alike.
+struct RadioChoiceRow: View {
+    let title: String
+    let summary: String
     let isSelected: Bool
     let select: () -> Void
 
@@ -32,8 +37,8 @@ private struct ContextMemoryRow: View {
                     .foregroundStyle(isSelected ? Palette.accentText : Palette.muted)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(level.label)
-                    Text(level.summary)
+                    Text(title)
+                    Text(summary)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -44,8 +49,8 @@ private struct ContextMemoryRow: View {
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(level.label)
-        .accessibilityValue(level.summary)
+        .accessibilityLabel(title)
+        .accessibilityValue(summary)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 }

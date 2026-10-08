@@ -110,7 +110,7 @@ extension PermissionRule {
             case .open: "Abrir arquivos, apps e links"
             case .appleScript: "Controlar apps com AppleScript"
             case .macApps: "Usar Atalhos, a área de transferência e encerrar apps"
-            case .appInterface: "Clicar e digitar na interface de outros apps"
+            case .appInterface: "Clicar e preencher campos na interface de outros apps"
             case .connector: "Usar qualquer ferramenta dos conectores"
             case .memory: "Guardar na memória"
             case .jobs: "Gerenciar processos em segundo plano"

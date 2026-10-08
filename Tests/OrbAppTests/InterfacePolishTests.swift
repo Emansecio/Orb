@@ -115,4 +115,11 @@ import Testing
         #expect(FirstRunStyle.chat(botName: "").title == "Vamos preparar seu Orb")
         #expect(!FirstRunStyle.chat(botName: "Lia").subtitle.contains("dele"))
     }
+
+    // MARK: Plurals a screen reader says
+
+    @Test func theUnreadCountAgreesInNumber() {
+        #expect(SidebarText.unread(1) == "1 não lida")
+        #expect(SidebarText.unread(3) == "3 não lidas")
+    }
 }

@@ -7,7 +7,7 @@ struct ConversationsMenuButton: View {
     @State private var isOpen = false
 
     var body: some View {
-        Button("Conversas", systemImage: "clock.arrow.circlepath") { isOpen.toggle() }
+        Button("Conversas anteriores", systemImage: "clock.arrow.circlepath") { isOpen.toggle() }
             .keyboardShortcut(AppShortcut.conversations)
             .help("Conversas anteriores deste Orb (\(AppShortcut.conversations.label))")
             .popover(isPresented: $isOpen, arrowEdge: .bottom) {

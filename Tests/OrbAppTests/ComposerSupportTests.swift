@@ -77,8 +77,9 @@ struct ComposerSupportTests {
         #expect(PermissionChipText.label(PermissionState(mode: .bypass, rules: [])) == "Sem pedir permissão")
         #expect(PermissionChipText.spoken(PermissionState(mode: .ask, rules: [rules[0]])) == "Perguntar antes, 1 liberação")
         #expect(PermissionChipText.spoken(PermissionState(mode: .ask, rules: rules)) == "Perguntar antes, 2 liberações")
-        #expect(PermissionChipText.grantsLine(PermissionState(mode: .readOnly, rules: rules)) == "2 liberações")
-        #expect(PermissionChipText.grantsLine(PermissionState(mode: .ask, rules: [])) == nil)
+        #expect(PermissionChipText.grantsTitle(PermissionState(mode: .readOnly, rules: rules)) == "Liberações permanentes: 2")
+        #expect(PermissionChipText.grantsTitle(PermissionState(mode: .ask, rules: [rules[0]])) == "Liberações permanentes: 1")
+        #expect(PermissionChipText.grantsTitle(PermissionState(mode: .ask, rules: [])) == nil)
     }
 
     /// One order everywhere (the Orb's panel, the new-Orb sheet and the composer all list `allCases`) and one wording:

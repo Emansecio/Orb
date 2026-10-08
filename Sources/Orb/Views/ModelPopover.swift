@@ -142,7 +142,7 @@ struct ModelPopover: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(group.provider.label), \(group.models.count) modelos")
+        .accessibilityLabel("\(group.provider.label), \(group.models.count) \(group.models.count == 1 ? "modelo" : "modelos")")
         .accessibilityHint(isSearch ? "" : (isFolded ? "Mostrar modelos" : "Recolher modelos"))
         .accessibilityAddTraits(.isHeader)
     }

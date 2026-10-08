@@ -22,11 +22,11 @@ enum PermissionChipText {
         return "\(permission.mode.label), \(count) \(count == 1 ? "liberação" : "liberações")"
     }
 
-    /// The footer of the picker; nil when there is nothing standing to explain.
-    static func grantsLine(_ permission: PermissionState) -> String? {
+    /// The heading of the picker's footer, nil when there is nothing standing to explain. The count comes last, so
+    /// one rule or many reads right.
+    static func grantsTitle(_ permission: PermissionState) -> String? {
         let count = permission.rules.count
-        guard count > 0 else { return nil }
-        return "\(count) \(count == 1 ? "liberação" : "liberações")"
+        return count > 0 ? "Liberações permanentes: \(count)" : nil
     }
 }
 

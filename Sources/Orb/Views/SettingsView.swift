@@ -100,8 +100,9 @@ struct GeneralSettings: View {
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var loginError: String?
     @State private var notifications: NotificationPermission?
-    @State private var hasKeptMemories = false
+    @State private var keptCount = 0
     @State private var hasOrbsFolder = false
+    @State private var isShowingReset = false
 
     var body: some View {
         Form {
@@ -121,13 +122,17 @@ struct GeneralSettings: View {
                 dataRow("Pasta de dados", "Conversas, memórias e ajustes", button: "Mostrar no Finder", isEnabled: true) {
                     NSWorkspace.shared.activateFileViewerSelecting([Store.standard.directory])
                 }
-                dataRow("Memórias guardadas", hasKeptMemories ? "De Orbs que você apagou" : "Nenhuma ainda",
-                        button: "Mostrar no Finder", isEnabled: hasKeptMemories) {
+                dataRow("Memórias guardadas", GeneralSettings.keptMemoriesDetail(count: keptCount),
+                        button: "Mostrar no Finder", isEnabled: keptCount > 0) {
                     NSWorkspace.shared.activateFileViewerSelecting([GeneralSettings.keptMemoriesFolder])
                 }
                 dataRow("Pasta dos Orbs", OrbFolder.display(OrbFolder.defaultBase), button: "Mostrar no Finder",
                         isEnabled: hasOrbsFolder) {
                     NSWorkspace.shared.activateFileViewerSelecting([OrbFolder.defaultBase])
+                }
+                dataRow("Redefinir o Orb", "Volta ao primeiro uso. Você escolhe se guarda as memórias.", button: "Redefinir…",
+                        isEnabled: true, tint: Palette.danger) {
+                    isShowingReset = true
                 }
             } header: {
                 Text("Seus dados")
@@ -163,6 +168,7 @@ struct GeneralSettings: View {
         }
         .formStyle(.grouped)
         .orbFormBackground()
+        .sheet(isPresented: $isShowingReset) { ResetOrbSheet() }
         .task { await refresh() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await refresh() }
@@ -175,7 +181,7 @@ struct GeneralSettings: View {
             LabeledContent {
                 Button("Abrir Ajustes do Sistema") { NSWorkspace.shared.open(NotificationPermission.settingsURL) }
             } label: {
-                Label("O macOS está bloqueando os avisos do Orb.", systemImage: "exclamationmark.triangle.fill")
+                Label("O macOS está bloqueando as notificações do Orb.", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundStyle(Palette.warn)
             }
@@ -192,10 +198,19 @@ struct GeneralSettings: View {
         }
     }
 
-    private func dataRow(_ title: String, _ detail: String, button: String, isEnabled: Bool,
+    /// `tint`: a color for the button's text only (the one that redefines the app is the tone of danger).
+    private func dataRow(_ title: String, _ detail: String, button: String, isEnabled: Bool, tint: Color? = nil,
                          action: @escaping () -> Void) -> some View {
         LabeledContent {
-            Button(button, action: action).disabled(!isEnabled)
+            Group {
+                // The label is as wide as "Mostrar no Finder", so the buttons of the rows are one size, whatever they say.
+                if let tint {
+                    Button(action: action) { Text(button).frame(minWidth: Self.dataButtonLabelWidth).foregroundStyle(tint) }
+                } else {
+                    Button(action: action) { Text(button).frame(minWidth: Self.dataButtonLabelWidth) }
+                }
+            }
+            .disabled(!isEnabled)
         } label: {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -208,8 +223,21 @@ struct GeneralSettings: View {
         learnedWindows = model.learnedWindowRows()
         notifications = await NotificationPermission.current()
         // A look at the disk, once, off the render path.
-        hasKeptMemories = FileManager.default.fileExists(atPath: GeneralSettings.keptMemoriesFolder.path)
+        let memories = model.memory.root
+        keptCount = await Task.detached(priority: .utility) { KeptMemories.count(in: memories) }.value
         hasOrbsFolder = FileManager.default.fileExists(atPath: OrbFolder.defaultBase.path)
+    }
+
+    /// The width of the text "Mostrar no Finder", the longest label of the rows' buttons.
+    private static let dataButtonLabelWidth: CGFloat = 108
+
+    /// What the "Memórias guardadas" row says: how many, and that a new Orb can start from one.
+    static func keptMemoriesDetail(count: Int) -> String {
+        switch count {
+        case ...0: "Nenhuma ainda"
+        case 1: "1 guardada · um Orb novo pode começar dela"
+        default: "\(count) guardadas · um Orb novo pode começar de uma delas"
+        }
     }
 
     /// Where a deleted Orb's memory goes when you keep it.
@@ -249,6 +277,12 @@ enum SettingsSnapshots {
         let content: AnyView
         switch screen {
         case "settings-general": (tab, content) = (.general, AnyView(GeneralSettings()))
+        case "settings-reset":
+            // The sheet on its own, as wide as a sheet is, with the numbers of the example in its description.
+            return AnyView(ResetOrbSheet(sample: ResetSummary(orbs: 3, conversations: 42, routines: 5, connectors: 2, skills: 4,
+                                                                folder: OrbFolder.display(OrbFolder.defaultBase)))
+                .background(Palette.chrome)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading))
         case "settings-models": (tab, content) = (.models, AnyView(ProviderSettings()))
         case "settings-perms": (tab, content) = (.permissions, AnyView(MacPermissionsView()))
         default: return nil

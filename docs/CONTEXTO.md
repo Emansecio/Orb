@@ -1,7 +1,7 @@
 # Contexto e compactação
 
 Como o Orb decide o que o modelo vê de uma conversa que não cabe na janela dele, e como faz isso gastando poucos tokens.
-Para quem desenvolve; o lado de quem usa (anel de contexto, "Compactar agora", "Memória das conversas") está no
+Para quem desenvolve; o lado de quem usa (anel de contexto, "Compactar agora", "Contexto das conversas") está no
 [README](../README.md).
 
 Duas ideias dirigem tudo:
@@ -35,7 +35,7 @@ histórico (tokens) = máx( 2 000,  mín( 90% da janela − sobrecarga − reser
 | Janela | a do catálogo do modelo (`ProviderModel.contextLength`); senão 16 000 (Ollama e LM Studio), 128 000 (chat e Responses) ou 200 000 (Messages e Claude Code); o menor entre ela e a **janela aprendida** |
 | Sobrecarga | prompt do sistema + especificações das ferramentas. O motor mede a real (`ContextBudget.overheadTokens`) e avisa o app (`onOverheadMeasured`); antes disso vale 8 000 |
 | Reserva da resposta | 16 000 (Messages, Claude Code) ou 4 000 (demais), nunca mais que 1/8 da janela |
-| Teto do nível | "Memória das conversas" em Ajustes → Geral: **Econômica** 40 000 · **Equilibrada** 80 000 (padrão) · **Ampla** 60% da janela. `ContextMemoryLevel`, salvo em `AppState.contextMemory` |
+| Teto do nível | "Contexto das conversas" em Ajustes → Geral: **Econômico** 40 000 · **Equilibrado** 80 000 (padrão) · **Amplo** 60% da janela. `ContextMemoryLevel`, salvo em `AppState.contextMemory` |
 | Folga para o pedido | `leavingRoom`: tira do orçamento a mensagem nova e o prefácio (até 4 000 caracteres de reserva, `AppModel.prefaceAllowance`), nunca mais que a metade |
 
 Um modelo fora do catálogo usa o formato do provedor (ou o `format` da conta, no gateway próprio). Claude Code não tem

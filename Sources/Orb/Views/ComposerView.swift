@@ -496,7 +496,7 @@ enum ComposerAction: Equatable {
     var title: String {
         switch self {
         case .send: "Enviar"
-        case .queue: "Enviar para a fila"
+        case .queue: "Colocar na fila"
         case .stop: "Parar"
         }
     }

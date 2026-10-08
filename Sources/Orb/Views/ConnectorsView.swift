@@ -213,7 +213,7 @@ private struct ConnectorCard: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .accessibilityLabel("Mais ações de \(connector.name)")
+                .accessibilityLabel("Mais opções de \(connector.name)")
             }
         }
         .padding(14)
@@ -581,7 +581,7 @@ struct ConnectorEditor: View {
         case .connecting:
             SheetFooter(cancelTitle: "Fechar", cancel: { dismiss() }, primaryTitle: "Conectando…", isPrimaryDisabled: true, primary: {})
         case .connected:
-            SheetFooter(cancelTitle: "Fechar", cancel: { dismiss() }, primaryTitle: "Concluir", primary: { dismiss() })
+            SheetFooter(cancel: { dismiss() }, primaryTitle: "Fechar", showsCancel: false, primary: { dismiss() })
         case .failed:
             SheetFooter(message: "O conector foi salvo. Corrija e tente de novo.", cancelTitle: "Fechar", cancel: { dismiss() },
                         primaryTitle: "Editar", primary: { phase = .form })

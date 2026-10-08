@@ -267,17 +267,22 @@ private struct BotRowContent: View, Equatable {
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.warn)
                         .transition(.scale.combined(with: .opacity))
-                        .accessibilityLabel("Aguardando sua permissão")
+                        .accessibilityLabel("Precisa da sua permissão")
                 } else if row.unread > 0 {
                     Circle()
                         .fill(Palette.accentText)
                         .frame(width: 7, height: 7)
                         .transition(.scale.combined(with: .opacity))
-                        .accessibilityLabel("\(row.unread) não lidas")
+                        .accessibilityLabel(SidebarText.unread(row.unread))
                 }
             }
             .animateChanges(of: needsYou || row.unread > 0)
         }
         .accessibilityElement(children: .combine)
     }
+}
+
+/// The sentences the sidebar's rows say aloud.
+enum SidebarText {
+    static func unread(_ count: Int) -> String { count == 1 ? "1 não lida" : "\(count) não lidas" }
 }

@@ -130,7 +130,7 @@ Detalhes que costumam surpreender:
 - `ui_act` tem perigo quando o rótulo do elemento (ou o item de menu) fala em excluir, enviar, comprar ou descartar, ou
   quando preenche um campo de senha. `app_quit` com `force` tem perigo ("encerra o app à força").
 - A família `appInterface` é só do `ui_act`: uma liberação antiga de Atalhos ou da área de transferência (`macApps`) não passa a
-  cobrir "clicar e digitar em qualquer app".
+  cobrir "clicar e preencher campos em qualquer app".
 
 ## Liberações ("Sempre permitir")
 
@@ -147,6 +147,10 @@ Uma liberação é uma `PermissionRule`: uma família com um **escopo** (`Bot.pe
 
 Regras de validade (`PermissionRule.isValid`): o escopo só faz sentido para a sua família. Ao ler o arquivo, uma regra de
 escopo inválido ou desconhecido é **descartada**, nunca ampliada.
+
+As liberações, como o modo de permissão, ficam no Orb: apagar o Orb ou "Redefinir o Orb" (Ajustes → Geral) as apaga com ele. A
+memória que se guarda (e o `perfil.json` dela) não leva liberações nem modo, então um Orb que começa de uma memória guardada
+nasce sem nenhuma e no modo que você escolher na folha.
 
 `isCovered` por família:
 
@@ -366,11 +370,11 @@ Separadas das anteriores: dizem o que o **macOS** deixa o app fazer. Ficam em Aj
 |---|---|---|
 | Automação (por app: Mail, Calendário, Notas, Lembretes, Finder, System Events, Mensagens, Safari, Música) | `AEDeterminePermissionToAutomateTarget`, sem perguntar | `applescript`, `browser_tab` |
 | Acessibilidade | `AXIsProcessTrusted` | `ui_read`, `ui_act` |
-| Gravação de Tela | `CGPreflightScreenCaptureAccess` | `screenshot` |
+| Gravação do Áudio do Sistema e da Tela | `CGPreflightScreenCaptureAccess` | `screenshot` |
 | Acesso Total ao Disco | **estimativa**: tenta abrir `~/Library/Mail` ou `~/Library/Safari/Bookmarks.plist` | pastas protegidas |
 
 - A aba nunca pede nada sozinha; cada linha tem um botão: "Pedir agora" mostra o aviso do macOS onde ele existe, "Abrir <app> e
-  pedir" cobre a Automação de um app fechado e "Abrir Ajustes do Sistema" leva ao painel certo. Atualiza ao voltar ao app. Gravação de Tela e Acesso Total só valem depois de reabrir o Orb.
+  pedir" cobre a Automação de um app fechado e "Abrir Ajustes do Sistema" leva ao painel certo. Atualiza ao voltar ao app. Gravação do Áudio do Sistema e da Tela e Acesso Total só valem depois de reabrir o Orb.
 - **Pré-voo de Automação.** Antes de rodar AppleScript/JXA, `AutomationPreflight` lê os apps que o script endereça
   (`tell application "X"`, `application id "…"`, `Application("X")`) e, para os que estão abertos e ainda sem resposta do
   macOS, mostra o aviso e espera (até 120 s, fora do tempo do script). Um app conhecido que está fechado (o System Events

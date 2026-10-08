@@ -16,8 +16,8 @@ import Testing
 
     @Test func iconSpeaksInPortuguese() {
         #expect(MenuBarState.idle.accessibilityLabel == "Orb")
-        #expect(MenuBarState.waiting(1).accessibilityLabel == "Orb: 1 Orb esperando sua permissão")
-        #expect(MenuBarState.waiting(3).accessibilityLabel == "Orb: 3 Orbs esperando sua permissão")
+        #expect(MenuBarState.waiting(1).accessibilityLabel == "Orb: 1 Orb precisa da sua permissão")
+        #expect(MenuBarState.waiting(3).accessibilityLabel == "Orb: 3 Orbs precisam da sua permissão")
         #expect(MenuBarState.working(1).accessibilityLabel == "Orb: 1 Orb trabalhando")
     }
 
@@ -234,16 +234,16 @@ import Testing
 
     @Test func deleteSummaryNamesWhatGoesAndWhatStays() {
         let summary = DeleteOrbSummary(name: "Atlas", archivedCount: 12, routineCount: 2, folder: "~/Orbs/Atlas")
-        #expect(summary.goes == "Some: a conversa atual, 12 conversas arquivadas e 2 rotinas.")
+        #expect(summary.goes == "Some: a conversa atual, 12 conversas anteriores e 2 rotinas.")
         #expect(summary.stays == "Fica: a pasta ~/Orbs/Atlas e, se você quiser, a memória.")
     }
 
     @Test func deleteSummaryHandlesSingularsAndNothingElse() {
         #expect(DeleteOrbSummary(name: "A", archivedCount: 1, routineCount: 1, folder: nil).goes
-                == "Some: a conversa atual, 1 conversa arquivada e 1 rotina.")
+                == "Some: a conversa atual, 1 conversa anterior e 1 rotina.")
         #expect(DeleteOrbSummary(name: "A", archivedCount: 0, routineCount: 0, folder: nil).goes == "Some: a conversa atual.")
         #expect(DeleteOrbSummary(name: "A", archivedCount: nil, routineCount: 0, folder: nil).goes
-                == "Some: a conversa atual e as conversas arquivadas.")
+                == "Some: a conversa atual e as conversas anteriores.")
         #expect(DeleteOrbSummary(name: "A", archivedCount: 0, routineCount: 0, folder: nil).stays.hasPrefix("Fica: tudo o que está no seu Mac"))
     }
 

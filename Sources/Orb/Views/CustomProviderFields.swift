@@ -41,7 +41,7 @@ struct CustomProviderFields<KeyRow: View>: View {
         }
 
         if isClaudeGateway {
-            Label("Para usar sua assinatura (inclusive Max) no motor do app, rode um gateway que faça o login da sua conta e aponte a URL acima para ele. O token fica no gateway, não no Orb.",
+            Label("Para usar sua assinatura (inclusive Max) no Orb, rode um gateway (um servidor intermediário) que faça o login da sua conta e aponte a URL acima para ele. O token fica nesse servidor, não no Orb.",
                   systemImage: "info.circle")
                 .font(.caption)
                 .foregroundStyle(.secondary)

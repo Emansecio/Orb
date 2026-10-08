@@ -94,11 +94,11 @@ orb.hair = "tufinho"; orb.accessories = ["laco"]; orb.accentColor = 0xFF4F8B
   Bochechas, Bigode; **Estilo**: Cabelo, Acessórios), miniaturas que enquadram o que mudam (close do rosto para
   os traços, cabeça com espaço em cima para cabelo e chapéus; animam ao passar o mouse), cores com nome (anel
   visível em cores claras e escuras, cor personalizada aparece como amostra, bigode pode ser branco),
-  **Aleatório** (sorteio harmonioso que mantém o jeito, `OrbConfig.random(using:)`, sem antena sob chapéu, cartola
+  **Sortear** (sorteio harmonioso que mantém o jeito, `OrbConfig.random(using:)`, sem antena sob chapéu, cartola
   afundada no black power nem tufinho atravessando boné, gorro ou coroa), **Pular** e **Desfazer** pelo gerenciador de desfazer da janela
   (`OrbEditUndo`: ⌘Z, ⇧⌘Z e Editar ▸ Desfazer). As categorias quebram em duas linhas quando o editor é estreito.
   O VoiceOver lê o visual inteiro do palco (`OrbConfig.summary`).
-- **Palco compacto** (folha Novo Orb, ou o editor com menos de 680 pt de altura): Orb de 112 pt, Aleatório,
+- **Palco compacto** (folha Novo Orb, ou o editor com menos de 680 pt de altura): Orb de 112 pt, Sortear,
   Desfazer e Pular no alto, ao lado da cabeça (onde nem chapéu nem pulo chegam), a prévia de atividade num menu no
   canto de baixo, sem o nome (o formulário ao lado já mostra) e as categorias numa linha de ícones (a escolhida com o
   nome). Assim as opções ficam com ~180 pt na folha de 520 pt e ~360 pt na de 700 pt.

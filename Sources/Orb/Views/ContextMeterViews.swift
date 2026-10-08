@@ -219,14 +219,14 @@ struct ContextPopover: View {
             } else {
                 row("text.quote", ContextWords.kept(totalRequests: reading.requestCount, foldedRequests: reading.foldedRequests))
                 if let fill = reading.fill, fill.budgetFraction > fill.fraction, fill.budgetFraction >= ContextReading.warmsAt {
-                    row("arrow.triangle.merge", "Memória \(reading.memory.label.lowercased()): perto de ~\(ContextWords.approx(fill.budgetTokens)) tokens de conversa, o começo vira resumo sozinho.")
+                    row("arrow.triangle.merge", "Contexto \(reading.memory.label.lowercased()): perto de ~\(ContextWords.approx(fill.budgetTokens)) tokens de conversa, o começo vira resumo sozinho.")
                 }
                 if let hit = reading.cacheHit {
                     row("bolt", ContextWords.cache(hit), detail: "na última chamada ao modelo")
                 }
             }
             if !reading.isClaudeCode {
-                Button("Ajustar a memória das conversas…", action: adjustMemory)
+                Button("Ajustar o contexto das conversas…", action: adjustMemory)
                     .buttonStyle(.link)
                     .font(.system(size: 11))
             }
@@ -442,7 +442,7 @@ struct ContextNudge: View {
             model.newConversation(botID)
         }
         .buttonStyle(CardButtonStyle(isProminent: !canCompact))
-        .help("Guardar esta conversa em Conversas e começar outra")
+        .help("Guardar esta conversa em Conversas anteriores e começar outra")
     }
 
     private var dismiss: some View {

@@ -1,5 +1,6 @@
 import SwiftUI
 import Observation
+import os
 import UserNotifications
 
 @MainActor
@@ -120,7 +121,14 @@ final class AppModel {
     @ObservationIgnored private var connectorSyncGeneration = 0
     @ObservationIgnored private var settledConnectors: [UUID: MCPStatus] = [:]
     /// Processes the Orbs left running with `run_command(background: true)`.
-    @ObservationIgnored private let jobs = BackgroundJobs()
+    @ObservationIgnored let jobs = BackgroundJobs()
+    /// Where the app keeps its secrets (the Keychain in the app, a dictionary in tests): "Redefinir o Orb" removes them.
+    @ObservationIgnored let secretVault: any SecretVault
+    /// "Redefinir o Orb" is under way: nothing is saved any more and the app quits when it is done (`resetEverything`;
+    /// only the reset sets this).
+    var isResetting = false
+    /// What the reset needs from outside the app (tests lead it to a temporary folder and keep it from quitting).
+    @ObservationIgnored var resetEnvironment = ResetEnvironment()
     /// Stands in for the provider's client (tests).
     /// Where "the home folder" is, for deciding whether an Orb's folder is its own (tests point it elsewhere).
     @ObservationIgnored var homeFolder = FileManager.default.homeDirectoryForCurrentUser
@@ -150,7 +158,9 @@ final class AppModel {
          devRun: Bool = DevRun.isActive) {
         self.store = store
         isDevRun = devRun
-        let secrets = ConnectorSecrets(vault: secretVault ?? (runsBackgroundWork && !devRun ? KeychainVault() : MemoryVault()))
+        let vault = secretVault ?? (runsBackgroundWork && !devRun ? KeychainVault() : MemoryVault())
+        self.secretVault = vault
+        let secrets = ConnectorSecrets(vault: vault)
         connectorSecrets = secrets
         images = ImageStore(dataFolder: store.directory)
         let gate = ApprovalGate()
@@ -183,6 +193,7 @@ final class AppModel {
             shown.lastUsed = .now
         }
         dataNotices = notices
+        if !runsBackgroundWork { resetEnvironment = .inert } // a model that is not the running app never resets the app's preferences
         selection = state.bots.first.map { .bot($0.id) }
         self.store.onSaveFailure = { [weak self] notice in
             Task { @MainActor in self?.reportSaveFailure(notice) }
@@ -547,6 +558,7 @@ final class AppModel {
     }
 
     func refreshConnections() async {
+        guard !isResetting else { return } // a read of a key that was just removed could bring OpenBot's copy back
         var found = await keyedProviders()
         if await ChatGPTAuth.shared.credential != nil { found.insert(.chatgpt) }
         if !isDevRun, account(.claudeCode) != nil { // the status runs the real `claude`
@@ -624,8 +636,9 @@ final class AppModel {
     @discardableResult
     func createBot(name: String, role: String, orb: OrbConfig, model: String, mode: PermissionMode,
                    identity: String = "", interview: Bool = true, folder: OrbFolderChoice = .own,
-                   base: URL = OrbFolder.defaultBase) -> Bot {
+                   base: URL = OrbFolder.defaultBase, adopting kept: KeptMemory? = nil) -> Bot {
         let name = Self.clippedName(name)
+        let kept = isResetting ? nil : kept // a kept memory is not moved while the reset walks through the folder
         var bot = Bot(name: name, role: role, orb: orb, model: model, permissionMode: mode)
         var folderProblem: String?
         switch folder {
@@ -646,9 +659,17 @@ final class AppModel {
         bots.append(bot)
         selection = .bot(bot.id)
         if let folderProblem { append(.notice("\(folderProblem). \(bot.name) vai trabalhar na pasta pessoal."), to: bot.id) }
+        // Starting from a kept memory: its folder becomes this Orb's (a rename, so it is as quick as making a folder).
+        // When it cannot be moved the Orb starts with a memory of its own and says so.
+        let adopted = kept.map { memory.adopt($0, as: bot.id) } ?? false
+        if kept != nil, !adopted { append(.notice("Não foi possível usar a memória guardada. \(bot.name) começou com uma memória nova."), to: bot.id) }
         let bank = memory.bank(for: bot.id)
         Task {
-            await bank.ensureIdentity(notes: identity, interview: interview)
+            if adopted {
+                await bank.startFromKept(notes: identity, interview: interview)
+            } else {
+                await bank.ensureIdentity(notes: identity, interview: interview)
+            }
             await refreshMemory(bot.id)
         }
         return bot
@@ -704,6 +725,7 @@ final class AppModel {
     @discardableResult
     func deleteBot(_ botID: UUID, keepMemory: Bool = false) -> Task<URL?, Never>? {
         let name = bot(botID)?.name ?? "Orb"
+        let profile = bot(botID).map(KeptProfile.init)
         let session = session(botID)
         liveBot(botID)?.stopComposing() // its watcher task ends with it
         session.memoryRequest = nil
@@ -730,7 +752,7 @@ final class AppModel {
             let bank = library.bank(for: botID)
             keeping = Task.detached(priority: .utility) {
                 if let stretch, let page = SessionSummary.page(from: stretch) { await bank.saveSession(page) }
-                return library.keep(botID, name: name)
+                return library.keep(botID, name: name, profile: profile)
             }
         } else {
             library.delete(botID)
@@ -751,6 +773,46 @@ final class AppModel {
         let current = selectedBot.flatMap { bot in bots.firstIndex { $0.id == bot.id } } ?? -offset
         let next = (current + offset + bots.count) % bots.count
         selection = .bot(bots[next].id)
+    }
+
+    // MARK: Reset
+
+    /// The first thing "Redefinir o Orb" does: stops everything the app is doing, so nothing writes while the data is
+    /// removed and nothing starts again after: the scheduler, every Orb's turn (Claude Code's process included), the
+    /// routines and their queue, the approval cards and banners, the connectors. Returns when the turns have ended, or
+    /// after `wait` (a command that does not stop does not hold the reset). Writing is sealed before this is called.
+    func stopForReset(wait: Duration = .seconds(3)) async {
+        stateSave?.cancel()
+        stateSave = nil
+        let loop = scheduler
+        loop?.cancel()
+        scheduler = nil
+        queuedRoutines = []
+        routines = [] // the end of a running routine finds nothing to record
+        var ending: [Task<Void, Never>] = loop.map { [$0] } ?? []
+        if let reads = keyReads?.task { ending.append(Task { _ = await reads.value }) }
+        ending += sessions.values.compactMap(\.turnTask)
+        for session in sessions.values {
+            session.memoryIdle?.cancel()
+            session.memoryIdle = nil
+            session.memoryRequest = nil
+            session.saveTask?.cancel()
+            session.saveTask = nil
+            stop(session.id)
+        }
+        for bot in bots { await gate.cancelApprovals(for: bot.id) }
+        ApprovalNotifications.clearStale()
+        // The connectors stop (a server still starting is stopped by it, not waited for), inside the same wait.
+        connectorSync?.cancel()
+        let mcp = mcp
+        ending.append(Task { await mcp.sync([]) })
+        let finished = OSAllocatedUnfairLock(initialState: false)
+        Task {
+            for task in ending { await task.value }
+            finished.withLock { $0 = true }
+        }
+        let deadline = ContinuousClock.now + wait
+        while !finished.withLock({ $0 }), ContinuousClock.now < deadline { try? await Task.sleep(for: .milliseconds(25)) }
     }
 
     // MARK: Conversation history
@@ -1033,7 +1095,7 @@ final class AppModel {
               fromUser: Bool = false) -> Bool {
         let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let session = session(botID)
-        guard !typed.isEmpty || !pictures.isEmpty, session.turnTask == nil, let bot = effectiveBot(botID) else { return false }
+        guard !isResetting, !typed.isEmpty || !pictures.isEmpty, session.turnTask == nil, let bot = effectiveBot(botID) else { return false }
         ensureLoaded(botID)
         // "/compactar [foco]" is a command of the composer, not a message for the model.
         if fromUser, attachments.isEmpty, pictures.isEmpty, let focus = CompactionCommand.parse(typed) {
@@ -1339,7 +1401,7 @@ final class AppModel {
     /// A run has a conversation of its own (`conversations/<Orb>/routine-<routine>.json`): your chat gets one line
     /// when it ends, nothing else.
     func runRoutine(_ routineID: UUID) {
-        guard let routine = routines.first(where: { $0.id == routineID }), bot(routine.botID) != nil else { return }
+        guard !isResetting, let routine = routines.first(where: { $0.id == routineID }), bot(routine.botID) != nil else { return }
         if sessions[routine.botID]?.isUnloaded == true { // its chat is read off the main thread first
             Task {
                 await loadedConversation(routine.botID)
@@ -1394,7 +1456,7 @@ final class AppModel {
     /// Orb takes no other routine (`startingRoutines`); a message sent meanwhile gets the Orb first.
     private func startRoutine(_ routine: Routine) {
         let botID = routine.botID
-        guard session(botID).turnTask == nil, startingRoutines[botID] == nil, bot(botID) != nil,
+        guard !isResetting, session(botID).turnTask == nil, startingRoutines[botID] == nil, bot(botID) != nil,
               routines.contains(where: { $0.id == routine.id }) else { return }
         ensureLoaded(botID)
         startingRoutines[botID] = routine.id
@@ -1407,7 +1469,7 @@ final class AppModel {
 
     private func beginRoutine(_ routineID: UUID, of botID: UUID, read: StoreRead<Conversation>) {
         // The Orb or the routine is gone, or the routine was moved to another Orb: its file here is not the one to run.
-        guard bot(botID) != nil, let index = routines.firstIndex(where: { $0.id == routineID }) else { return }
+        guard !isResetting, bot(botID) != nil, let index = routines.firstIndex(where: { $0.id == routineID }) else { return }
         guard routines[index].botID == botID else {
             if !queuedRoutines.contains(routineID) { queuedRoutines.append(routineID) }
             startIdleQueuedRoutines() // it runs when its new Orb is free
@@ -1634,6 +1696,7 @@ final class AppModel {
     }
 
     private func scheduleStateSave() {
+        guard !isResetting else { return }
         stateSave?.cancel()
         stateSave = Task { [store] in
             try? await Task.sleep(for: .milliseconds(400))
@@ -1647,6 +1710,7 @@ final class AppModel {
 
     /// Writes everything that changed and waits for the disk (on quit).
     func saveNow() {
+        guard !isResetting else { return } // quitting after a reset must not write the old state back
         store.save(state)
         for session in sessions.values { session.saveNow() }
         store.flush()

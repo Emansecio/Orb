@@ -205,7 +205,7 @@ struct MacPermissionsView: View {
             } header: {
                 Text("Essenciais")
             } footer: {
-                Text("A Gravação de Tela só vale depois de reabrir o Orb, e o macOS pergunta uma vez só.")
+                Text("A gravação de tela só vale depois de reabrir o Orb, e o macOS pergunta uma vez só.")
             }
             Section {
                 DisclosureGroup(isExpanded: $showsAutomation) {

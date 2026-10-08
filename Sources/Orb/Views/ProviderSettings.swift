@@ -192,7 +192,7 @@ private struct ProviderRow: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Mais opções")
+        .help("Mais opções de \(kind.shortName)")
         .accessibilityLabel("Mais opções de \(kind.shortName)")
     }
 

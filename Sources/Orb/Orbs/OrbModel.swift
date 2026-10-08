@@ -25,7 +25,7 @@ struct OrbConfig: Hashable, Codable, Sendable {
     /// Which automatic colors the nil tints get (see `OrbAutoColors`).
     var autoColors = OrbAutoColors.designed
 
-    /// A random look that hangs together (new Orbs and the editor's "Aleatório"): friendly expressions are much
+    /// A random look that hangs together (new Orbs and the editor's "Sortear"): friendly expressions are much
     /// likelier than the ones activities borrow (dizzy, angry, sleepy, sad), brows and mustaches are occasional, there
     /// is at most one accessory, and the hair keeps the palette's own color most of the time (otherwise a natural one).
     static func random() -> OrbConfig {

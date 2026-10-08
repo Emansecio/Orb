@@ -38,7 +38,7 @@ struct SkillsView: View {
 
 // MARK: Using a skill
 
-/// "Usar": opens the chat of the Orb the user was on with `/atalho ` ready in the composer (one click); with no
+/// "Usar": opens the chat of the Orb the user was on with `/comando ` ready in the composer (one click); with no
 /// such Orb, a menu of the Orbs that may use the skill.
 struct UseSkillButton: View {
     @Environment(AppModel.self) private var model
@@ -132,7 +132,7 @@ enum SkillDeleteCopy {
     static func message(for skill: Skill) -> String {
         switch skill.source {
         case nil: "As instruções que você escreveu serão apagadas. Não dá para desfazer."
-        case Skill.builtInSource?: "Ela vem com o app e não volta sozinha depois de apagada. Você pode escrever outra com o mesmo atalho."
+        case Skill.builtInSource?: "Ela vem com o app e não volta sozinha depois de apagada. Você pode escrever outra com o mesmo comando."
         default: "Você pode instalar de novo pelo catálogo depois."
         }
     }
@@ -206,7 +206,7 @@ private struct InstalledSkillRow: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .accessibilityLabel("Mais ações de \(skill.name)")
+            .accessibilityLabel("Mais opções de \(skill.name)")
         }
         .padding(14)
         .card(radius: 14)
@@ -277,7 +277,7 @@ private struct ExploreSkills: View {
         VStack(alignment: .leading, spacing: 10) {
             Label("Escolha um tema ou digite o que você precisa", systemImage: "sparkle.magnifyingglass")
                 .font(.system(size: 14, weight: .semibold))
-            Text("As skills vêm do catálogo aberto Skills.sh e o conteúdo é de quem publicou, no GitHub. Você lê as instruções antes de instalar e depois usa com /atalho no chat.")
+            Text("As skills vêm do catálogo aberto Skills.sh e o conteúdo é de quem publicou, no GitHub. Você lê as instruções antes de instalar e depois usa com /comando no chat.")
                 .font(.system(size: 12))
                 .foregroundStyle(Palette.muted)
                 .fixedSize(horizontal: false, vertical: true)
@@ -498,8 +498,8 @@ struct SkillEditor: View {
                         skill.slug = Skill.suggestedSlug(forName: skill.name, current: skill.slug, edited: slugEdited)
                     }
                 // The slash sits in the field's text, so the value lines up with the other rows.
-                LabeledContent("Atalho") {
-                    TextField("Atalho", text: Binding(
+                LabeledContent("Comando") {
+                    TextField("Comando", text: Binding(
                         get: { skill.slug.isEmpty ? "" : "/" + skill.slug },
                         set: { skill.slug = String($0.drop { $0 == "/" }) }
                     ), prompt: Text("/resumir"))
@@ -514,7 +514,7 @@ struct SkillEditor: View {
                 }
                 TextField("O que faz", text: $skill.summary, prompt: Text("ex.: Resume um texto em 5 tópicos"))
             } footer: {
-                Text(finalSlug.isEmpty ? "O atalho é o que você escreve no chat para usar a skill."
+                Text(finalSlug.isEmpty ? "O comando é o que você escreve no chat para usar a skill."
                      : "Para usar, escreva /\(finalSlug) no começo da mensagem no chat.")
             }
             Section {
@@ -539,7 +539,7 @@ struct SkillEditor: View {
             }
         }
         .formStyle(.grouped)
-        .orbSheet(title, subtitle: "Instruções que o Orb segue quando você começa a mensagem com o atalho.", size: .medium) {
+        .orbSheet(title, subtitle: "Instruções que o Orb segue quando você começa a mensagem com o comando.", size: .medium) {
             SheetFooter(message: message, cancel: { dismiss() }, primaryTitle: "Salvar", isPrimaryDisabled: !canSave, primary: save)
         }
     }

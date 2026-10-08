@@ -105,7 +105,7 @@ private struct IdentityBlock: View {
                     .foregroundStyle(.secondary)
             }
             if memory.interviewPending {
-                Label("Vai te fazer perguntas nas primeiras mensagens", systemImage: "questionmark.bubble")
+                Label("Vai fazer perguntas a você nas primeiras mensagens", systemImage: "questionmark.bubble")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -115,15 +115,15 @@ private struct IdentityBlock: View {
                 if !memory.interviewPending {
                     Menu {
                         Button("Fazer a entrevista de novo", systemImage: "questionmark.bubble", action: restartInterview)
-                            .help("Na próxima conversa, \(name) faz algumas perguntas para entender como te ajudar")
+                            .help("Na próxima conversa, \(name) faz algumas perguntas para entender como ajudar você")
                     } label: {
                         Image(systemName: "ellipsis.circle")
                     }
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
                     .fixedSize()
-                    .help("Mais opções")
-                    .accessibilityLabel("Mais opções")
+                    .help("Mais opções de \(name)")
+                    .accessibilityLabel("Mais opções de \(name)")
                 }
             }
             .controlSize(.small)

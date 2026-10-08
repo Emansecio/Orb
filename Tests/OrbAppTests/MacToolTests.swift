@@ -552,16 +552,16 @@ struct MacToolTests {
 
     @Test func screenshotFailureBlamesThePermissionOnlyWhenItIsMissing() {
         let granted = ScreenshotImage.failureAdvice(captureOutput: "invalid display", hasPermission: true)
-        #expect(!granted.contains("Gravação de Tela"))
+        #expect(!granted.contains("Gravação do Áudio do Sistema e da Tela"))
         #expect(granted.contains("invalid display"))
     }
 
     @Test func screenshotFailureAdvisesTheScreenRecordingSetting() {
         let advice = ScreenshotImage.failureAdvice(captureOutput: "could not create image from display")
-        #expect(advice.contains("Gravação de Tela"))
+        #expect(advice.contains("Gravação do Áudio do Sistema e da Tela"))
         #expect(advice.contains("Privacidade e Segurança"))
         #expect(advice.contains("could not create image"))
-        #expect(ScreenshotImage.blankAdvice.contains("Gravação de Tela"))
+        #expect(ScreenshotImage.blankAdvice.contains("Gravação do Áudio do Sistema e da Tela"))
     }
 
     @Test func readsImageSizeAndOrdersRecognizedLines() throws {

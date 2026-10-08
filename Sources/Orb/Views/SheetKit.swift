@@ -107,6 +107,8 @@ struct SheetFooter: View {
     let primaryTitle: String
     var isPrimaryDisabled = false
     var primaryIsDefault = true
+    /// False when the only button closes the sheet anyway (a finished connection): Esc still does it.
+    var showsCancel = true
     let primary: () -> Void
 
     /// Return's shortcut for the primary button, or none when the sheet keeps it from being the default.
@@ -125,13 +127,20 @@ struct SheetFooter: View {
                     .lineLimit(2)
             }
             Spacer(minLength: 12)
-            Button(cancelTitle, action: cancel)
-                .buttonStyle(GhostStyle())
-                .keyboardShortcut(.cancelAction)
+            if showsCancel {
+                Button(cancelTitle, action: cancel)
+                    .buttonStyle(GhostStyle())
+                    .keyboardShortcut(.cancelAction)
+            }
             Button(primaryTitle, action: primary)
                 .buttonStyle(PrimaryPillStyle())
                 .keyboardShortcut(SheetFooter.primaryShortcut(isDefault: primaryIsDefault))
                 .disabled(isPrimaryDisabled)
+        }
+        .background {
+            if !showsCancel {
+                Button("", action: cancel).keyboardShortcut(.cancelAction).opacity(0).accessibilityHidden(true)
+            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)

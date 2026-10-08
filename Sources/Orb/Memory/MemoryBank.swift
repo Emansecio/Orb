@@ -127,6 +127,20 @@ actor MemoryBank {
 
     func identity() -> MemoryPage? { read(Self.identityPath) }
 
+    /// The first thing a new Orb's bank does when its folder is a kept memory (`MemoryLibrary.adopt`): the index is
+    /// built from the pages that came with it, an identity page is made if the old folder had none, and what you
+    /// wrote for the new Orb is added to it. The interview already counts as done when the memory holds an identity
+    /// or preferences (what it would have asked is there), or when you turned it off.
+    func startFromKept(notes: String, interview: Bool, now: Date = .now) {
+        prepare(now: now)
+        reconcile(now: now)
+        ensureIdentity(notes: "", interview: interview, now: now)
+        let hasIdentity = !(identity()?.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        let hasPreferences = !(index?.rows("SELECT path FROM pages WHERE kind = ? LIMIT 1", [.text(MemoryKind.preferencia.rawValue)]).isEmpty ?? true)
+        if !notes.isEmpty { remember(notes, kind: .identidade, origin: .voce, now: now) }
+        if hasIdentity || hasPreferences || !interview { finishInterview() }
+    }
+
     /// Your own edit of the identity notes (from the panel).
     @discardableResult
     func setIdentity(_ body: String, now: Date = .now) -> Bool {
@@ -666,7 +680,7 @@ actor MemoryBank {
 /// Every Orb's memory bank, one folder per Orb under `memoria/` in the data folder.
 final class MemoryLibrary: Sendable {
     let root: URL
-    private let state = OSAllocatedUnfairLock(initialState: (banks: [UUID: MemoryBank](), closed: Set<UUID>()))
+    private let state = OSAllocatedUnfairLock(initialState: (banks: [UUID: MemoryBank](), closed: Set<UUID>(), isSealed: false))
 
     init(root: URL) { self.root = root }
 
@@ -691,7 +705,7 @@ final class MemoryLibrary: Sendable {
         state.withLock { state in
             if let bank = state.banks[orbID] { return bank }
             let bank = MemoryBank(directory: directory(for: orbID))
-            if state.closed.contains(orbID) { bank.close() } else { state.banks[orbID] = bank }
+            if state.closed.contains(orbID) || state.isSealed { bank.close() } else { state.banks[orbID] = bank }
             return bank
         }
     }
@@ -703,30 +717,34 @@ final class MemoryLibrary: Sendable {
         }
     }
 
+    /// The app is being reset: every bank, and any made from now on, writes nothing, so a late task cannot bring a
+    /// folder back after the memory was moved or deleted.
+    func seal() {
+        state.withLock { state in
+            state.isSealed = true
+            for bank in state.banks.values { bank.close() }
+            state.banks.removeAll()
+        }
+    }
+
     /// Deletes an Orb's memory for good.
     func delete(_ orbID: UUID) {
         closeBank(orbID)
         try? FileManager.default.removeItem(at: directory(for: orbID))
     }
 
-    /// Keeps a deleted Orb's memory in `memoria/_guardadas/<nome> – <data>` and returns where it went.
+    /// Keeps a deleted Orb's memory in `memoria/_guardadas/<nome> – <data>`, with `profile` beside it, and returns
+    /// where it went.
     @discardableResult
-    func keep(_ orbID: UUID, name: String, now: Date = .now) -> URL? {
+    func keep(_ orbID: UUID, name: String, profile: KeptProfile? = nil, now: Date = .now) -> URL? {
         closeBank(orbID)
-        let source = directory(for: orbID)
-        guard FileManager.default.fileExists(atPath: source.path) else { return nil }
-        let format = DateFormatter()
-        format.locale = Locale(identifier: "en_US_POSIX")
-        format.dateFormat = "yyyy-MM-dd HH.mm"
-        let safeName = String(name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-").prefix(60))
-        let base = "\(safeName.isEmpty ? "Orb" : safeName) – \(format.string(from: now))"
-        let kept = root.appending(path: "_guardadas")
-        try? FileManager.default.createDirectory(at: kept, withIntermediateDirectories: true)
-        var target = kept.appending(path: base), suffix = 2
-        while FileManager.default.fileExists(atPath: target.path) {
-            target = kept.appending(path: "\(base) (\(suffix))")
-            suffix += 1
-        }
-        return (try? FileManager.default.moveItem(at: source, to: target)) != nil ? target : nil
+        return KeptMemories.keep(directory(for: orbID), name: name, profile: profile, in: root, now: now)
+    }
+
+    /// Makes a kept memory the memory of the Orb `orbID` (which has none yet): the folder moves out of
+    /// `_guardadas` and the index is rebuilt from its pages when the Orb first uses it. False when the move failed.
+    @discardableResult
+    func adopt(_ kept: KeptMemory, as orbID: UUID) -> Bool {
+        (try? KeptMemories.adopt(kept.url, into: directory(for: orbID))) != nil
     }
 }

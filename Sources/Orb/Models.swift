@@ -35,7 +35,7 @@ enum PermissionMode: String, CaseIterable, Identifiable, Codable, Sendable {
 
     private var detail: String {
         switch self {
-        case .ask: "Ler e pesquisar nunca pergunta."
+        case .ask: "Ler e procurar em arquivos não pergunta (chaves e senhas são exceção)."
         case .auto: "Ler senhas e chaves, ou mudar a identidade ou as preferências do Orb, também pergunta."
         case .readOnly: "Para o Orb agir, troque de modo."
         case .bypass: "Roda qualquer comando e altera qualquer arquivo sem confirmação. Use só com Orbs e pastas em que você confia."

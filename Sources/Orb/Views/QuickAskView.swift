@@ -335,7 +335,7 @@ struct QuickAskReply: View {
             if let reply {
                 ReplyExcerpt(botID: botID, reply: reply)
             }
-            Button("Abrir conversa", action: openChat)
+            Button("Ver conversa", action: openChat)
                 .buttonStyle(.link)
                 .font(.system(size: 12))
         }

@@ -328,8 +328,8 @@ enum CacheHealth {
     /// A turn whose prompts were read from the cache less than this is not caching.
     static let healthyRatio = 0.2
 
-    static let notice = "O cache de prompt do provedor não está pegando, o que encarece cada passo. "
-        + "Se o problema continuar, confira o modelo e o provedor em Ajustes → Modelos."
+    static let notice = "O provedor não está reaproveitando o início das conversas (cache), o que deixa cada passo mais caro. "
+        + "Se continuar, confira o modelo e o provedor em Ajustes → Modelos."
 
     /// `total` is the turn's usage summed over `requests` model calls.
     static func isFailing(_ total: TokenUsage, requests: Int) -> Bool {
@@ -463,7 +463,7 @@ enum LLMError: LocalizedError, Equatable {
         case 401 where isModelRefused(lowered), 403 where isModelRefused(lowered):
             // OpenCode: a model the workspace turned off, the gateway does not serve, that needs a data-use
             // opt-in (Muse Spark Contributor, DeepSeek in the Go plan) or that is closed to the country.
-            "O provedor recusou este modelo (\(status)), mas a chave está certa. Ele pode estar desativado no workspace, exigir aceite de uso de dados no console da OpenCode ou não estar liberado no seu país. Escolha outro modelo ou confira o console. Detalhe do provedor: \(message)"
+            "O provedor recusou este modelo (\(status)), mas a chave está certa. Ele pode estar desativado no espaço de trabalho da OpenCode, exigir aceite de uso de dados no console da OpenCode ou não estar liberado no seu país. Escolha outro modelo ou confira o console. Detalhe do provedor: \(message)"
         case 401 where isAboutMoney, 403 where isAboutMoney:
             // OpenCode answers a missing balance or a spent monthly limit with 401, which is not a bad key.
             "Sem saldo ou limite de gasto liberado no provedor (\(status)). Confira o saldo e o plano no console do provedor. Detalhe do provedor: \(message)"

@@ -450,7 +450,7 @@ struct ToolCallLine: View {
             EmptyView()
         case .done:
             if let duration = call.duration {
-                (Text(duration, format: .number.precision(.fractionLength(1))) + Text("s"))
+                (Text(duration, format: .number.precision(.fractionLength(1))) + Text(" s"))
                     .font(.system(size: 11))
                     .monospacedDigit()
                     .foregroundStyle(Palette.faint)
@@ -831,7 +831,7 @@ struct ApprovalCard: View {
             .buttonStyle(.plain)
             .help("\(allowTitle) (\(AppShortcut.commandReturn.label))")
             .accessibilityLabel(allowTitle)
-            .accessibilityHint("Atalho: comando e return")
+            .accessibilityHint("Atalho: ⌘↩")
             if hasMoreOptions {
                 Rectangle().fill(Palette.onInk.opacity(0.25)).frame(width: 1, height: 16)
                     .accessibilityHidden(true)

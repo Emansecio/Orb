@@ -19,7 +19,9 @@ documento descreve o que existe no código. Como a memória se combina com a com
     sessoes/*.md              um resumo de cada trecho de conversa (envelhecem e são compactadas)
     _arquivo/                 texto completo das páginas de sessão compactadas (mesmos caminhos)
     index.sqlite              índice de busca (+ -wal e -shm); reconstruível a partir dos .md
-  _guardadas/<nome> – <aaaa-mm-dd hh.mm>/    memória de Orbs apagados com "guardar a memória"
+  _guardadas/<nome> – <aaaa-mm-dd hh.mm>/    memória de Orbs apagados ou redefinidos com "guardar a memória"
+    perfil.json               quem era o Orb: nome, papel e aparência (OrbConfig). Sem liberações, modo nem segredos
+    …o resto igual à pasta de um Orb (nucleo/, fatos/, …); com " (2)" no fim se o nome já existia
 ```
 
 Os arquivos `.md` são a fonte da verdade: dá para abrir no Obsidian, editar à mão ou apagar. A cada ~20 s de uso (e quando
@@ -55,7 +57,7 @@ Campos extras (como `tags` do Obsidian) são mantidos quando o app reescreve a p
 | `procedimento` | Procedimento | `procedimentos/` | só títulos e o que for relacionado | não |
 | `sessao` | Conversa | `sessoes/` | só "onde paramos" e o que for relacionado | sim |
 
-No painel os grupos se chamam Preferências, Fatos, Procedimentos e "Conversas guardadas"; a identidade tem bloco próprio
+No painel os grupos se chamam Preferências, Fatos, Procedimentos e "Resumos de conversas"; a identidade tem bloco próprio
 ("Como <Orb> funciona").
 
 ## Ciclo de vida
@@ -69,7 +71,9 @@ No painel os grupos se chamam Preferências, Fatos, Procedimentos e "Conversas g
 | Você pede para guardar | "memorize…", "lembra que…" etc. (`MemoryIntent`, abaixo) |
 | 30 min sem mensagens, "Nova conversa", reabrir outra conversa, abrir o app, **ou quando a conversa é compactada** | O trecho ainda não salvo (`Conversation.memorySavedCount`) vira uma página em `sessoes/`. Quando o começo da conversa vira resumo para caber na janela do modelo (sozinho ou em "Compactar agora"), o que ele continha é gravado **antes**, uma vez. Execuções de rotinas não viram sessões |
 | Uma vez por dia (durante o uso) | Varredura de envelhecimento (`MemoryBank.sweep`): sessões frias são compactadas (abaixo) |
-| Apagar o Orb | O diálogo oferece **Apagar com a memória** ou **Apagar e guardar a memória** (grava o último trecho e move a pasta para `_guardadas/`; a barra lateral avisa "Guardando a memória de <Orb>…" e, quando a pasta já foi movida, "Memória de <Orb> guardada" com "Mostrar no Finder", que abre a pasta exata) |
+| Apagar o Orb | O diálogo oferece **Apagar com a memória** ou **Apagar e guardar a memória** (grava o último trecho, escreve `perfil.json` e move a pasta para `_guardadas/`; a barra lateral avisa "Guardando a memória de <Orb>…" e, quando a pasta já foi movida, "Memória de <Orb> guardada" com "Mostrar no Finder", que abre a pasta exata) |
+| Redefinir o Orb | Ajustes → Geral → "Redefinir o Orb…". Com **Guardar as memórias**, a memória de cada Orb vai para `_guardadas/` do mesmo jeito (o último trecho da conversa vira página em `sessoes/` antes, e o perfil é escrito); com **Apagar tudo, inclusive as memórias**, a pasta `memoria/` inteira some, as guardadas também. Veja "Redefinir o Orb" no [README](../README.md#redefinir-o-orb) e em ARQUITETURA.md |
+| Criar um Orb a partir de uma memória guardada | Em "Novo Orb" → "Começar de" → "Memória". Escolher uma preenche nome, papel e aparência (`KeptMemory.fill`); voltar a "Nenhuma (Orb novo)" ou trocar de memória devolve o que ainda está como a memória deu (`unfill`, com o `StartSnapshot` de antes) e mantém o que você digitou. A pasta guardada é **movida** (`MemoryLibrary.adopt`, um `rename`: sai de `_guardadas/`) para `memoria/<id do novo Orb>/`; o índice e o perfil velhos são apagados e o índice é refeito a partir das páginas (`MemoryBank.startFromKept`). O que você escreveu em "Como deve funcionar" é somado à identidade. **A entrevista conta como feita** quando a memória tem identidade ou preferências (ou se você a desligou); sem nenhuma das duas, segue o que você escolheu. Se a pasta não puder ser movida, o Orb nasce com memória nova e avisa na conversa |
 
 `ORB_MEMORY_IDLE=<segundos>` troca os 30 minutos (testes ponta a ponta).
 
@@ -213,7 +217,8 @@ trecho de conversa (página de sessão), na varredura diária e na conferência 
 |---|---|
 | `Memory/MemoryPage.swift` | `MemoryKind`, formato `.md`, `MemoryText` (palavras, semelhança, busca, achatar), `MemorySanitizer` (segredos) |
 | `Memory/MemoryIndex.swift` | SQLite (tabela + FTS5 + gatilhos, esquema versionado) |
-| `Memory/MemoryBank.swift` | a memória de um Orb (actor): identidade, `remember`, `recall`, `related`, `brief`, sessões, envelhecimento, `forget`; `MemoryLibrary` (uma por Orb, apagar/guardar) |
+| `Memory/MemoryBank.swift` | a memória de um Orb (actor): identidade, `remember`, `recall`, `related`, `brief`, sessões, envelhecimento, `forget`, `startFromKept`; `MemoryLibrary` (uma por Orb, apagar/guardar/adotar, `seal` na redefinição) |
+| `Memory/KeptMemories.swift` | `_guardadas`: `KeptProfile` (`perfil.json`), `KeptMemory` (o que o menu "Começar de" e Ajustes listam), guardar, listar, contar, adotar |
 | `Memory/SessionSummary.swift` | trecho de conversa → página de sessão, sem LLM; `idleGap` |
 | `Memory/MemoryIntent.swift` | reconhece "memorize…" e o que guardar |
 | `Memory/OrbToolsMCPServer.swift` | servidor MCP stdio (`--tools-mcp`) para o Claude Code |

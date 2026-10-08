@@ -75,7 +75,7 @@ import Testing
                      item("fatos/b.md", .fato, "Gato Pixel", daysAgo: 2),
                      item("fatos/a.md", .fato, "Mora em SP", daysAgo: 5)]
         let groups = MemoryGroups.make(items)
-        #expect(groups.map(\.title) == ["Preferências", "Fatos", "Conversas guardadas"])
+        #expect(groups.map(\.title) == ["Preferências", "Fatos", "Resumos de conversas"])
         #expect(groups[1].items.map(\.path) == ["fatos/b.md", "fatos/a.md"])
     }
 
@@ -107,7 +107,7 @@ import Testing
     @Test func memorySummaryCountsNotesAndConversations() {
         #expect(MemoryGroups.summary([]) == "Nada guardado ainda")
         let items = [item("fatos/a.md", .fato, "A"), item("fatos/b.md", .fato, "B"), item("sessoes/s.md", .sessao, "S")]
-        #expect(MemoryGroups.summary(items) == "2 lembranças · 1 conversa guardada")
+        #expect(MemoryGroups.summary(items) == "2 lembranças · 1 resumo de conversa")
         #expect(MemoryGroups.summary([items[0]]) == "1 lembrança")
     }
 

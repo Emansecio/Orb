@@ -13,7 +13,7 @@ mensagem envia ao provedor do modelo está em [Privacidade](#privacidade).
 - [Permissões](#permissões) · [Permissões do macOS](#permissões-do-macos)
 - [Memória](#memória) · [Conversas e rotinas](#conversas-e-rotinas) · [Contexto](#contexto-da-conversa)
 - [Conectores e skills](#conectores-e-skills) · [Atalhos](#atalhos) · [Barra de menus](#barra-de-menus-e-pergunta-rápida)
-- [Privacidade](#privacidade) · [Problemas comuns](#problemas-comuns) · [Para quem desenvolve](#para-quem-desenvolve)
+- [Redefinir o Orb](#redefinir-o-orb) · [Privacidade](#privacidade) · [Problemas comuns](#problemas-comuns) · [Para quem desenvolve](#para-quem-desenvolve)
 
 ## Instalar
 
@@ -87,6 +87,8 @@ rotinas, apagar). No meio fica o chat; à direita, o painel do Orb.
 
 **⌘N** (ou "Novo Orb" na barra lateral):
 
+- **Começar de** (só aparece quando há [memórias guardadas](#memória)): "Nenhuma (Orb novo)" ou a memória de um Orb que você
+  apagou ou redefiniu; escolher uma preenche nome, papel e aparência e dá ao novo Orb o que o antigo aprendeu.
 - **Nome** e **Papel** (o papel é uma frase de quem ele é: "Cuida da minha agenda").
 - **Inteligência**: o modelo deste Orb (ou o padrão do app).
 - **Pasta**: por padrão cada Orb ganha **uma pasta só dele**, `~/Orbs/<Nome>` (se o nome já existe, `~/Orbs/<Nome> 2`). É a
@@ -97,7 +99,7 @@ rotinas, apagar). No meio fica o chat; à direita, o painel do Orb.
   "Na primeira conversa, me fazer perguntas" (ligado por padrão: o Orb se apresenta e conhece você).
 - O **editor de aparência** ao lado: Cor (18), Jeito (calmo, equilibrado, animado, tímido, curioso: como ele se mexe e reage
   ao mouse, não o que faz), Olhos, Boca, Sobrancelhas, Bochechas, Bigode, Cabelo e Acessórios (vários ao mesmo tempo), com
-  **Sortear**. Os olhos seguem o cursor; o Orb mostra o que está fazendo (pensando, digitando no terminal, lendo, esperando
+  **Sortear**. Os olhos seguem o cursor; o Orb mostra o que está fazendo (pensando, digitando no terminal, lendo, precisando de
   você, feliz ao terminar) e "fala" enquanto a resposta chega.
 
 O **painel do Orb** (⌥⌘B mostra ou esconde) tem quatro abas:
@@ -190,13 +192,13 @@ arquivo mudar depois, volta a ser só referência até você confiar de novo.
 
 Ajustes (**⌘,**) → **Permissões do Mac** mostra o que o macOS já deixa o Orb fazer, com o estado de cada uma:
 
-- **Essenciais**: Acessibilidade (ler e operar a interface de outros apps), Gravação de Tela, Acesso Total ao Disco (é uma
+- **Essenciais**: Acessibilidade (ler e operar a interface de outros apps), Gravação do Áudio do Sistema e da Tela, Acesso Total ao Disco (é uma
   estimativa: o macOS não informa; o Orb tenta abrir uma pasta protegida) e **Notificações**.
 - **Apps que o Orb controla** (Automação): Mail, Calendário, Notas, Lembretes, Finder, System Events, Mensagens, Safari e Música.
 
 Cada linha mostra o estado (Liberado, Negado, Não pedido…) e **um** botão: **Pedir agora** (o macOS mostra o aviso dele),
 **Abrir `<app>` e pedir** (Automação de um app fechado) ou **Abrir Ajustes do Sistema** (leva ao painel certo). A aba só olha,
-atualiza quando você volta ao app e tem **Verificar de novo**. Gravação de Tela e Acesso Total ao Disco só valem depois de
+atualiza quando você volta ao app e tem **Verificar de novo**. Gravação do Áudio do Sistema e da Tela e Acesso Total ao Disco só valem depois de
 **reabrir o Orb**.
 
 - Antes de rodar um AppleScript, o Orb mostra o aviso de Automação dos apps que o script usa e espera você responder (um app
@@ -221,7 +223,7 @@ Cada Orb tem a **sua** memória, que nasce com ele e cresce a cada conversa: nad
 | **Preferências** | "Respostas curtas, em português" |
 | **Fatos** | "Moro em São Paulo; meu cachorro é o Thor" |
 | **Procedimentos** | "Para publicar: rode os testes e depois o script de deploy" |
-| **Conversas guardadas** | um resumo de cada trecho de conversa (pedidos, decisões, o que foi feito, pendências) |
+| **Resumos de conversas** | um resumo de cada trecho de conversa (pedidos, decisões, o que foi feito, pendências) |
 
 - **Pedir para guardar.** Diga "memorize que…", "lembra que…", "guarda na memória…", "anota aí que…" ou "não esquece que…".
   O pedido vale como a sua aprovação para fatos e procedimentos; identidade e preferências ainda pedem o cartão. Se o
@@ -239,7 +241,13 @@ Cada Orb tem a **sua** memória, que nasce com ele e cresce a cada conversa: nad
 - **O tempo.** Conversas antigas (mais de 30 dias e pouco usadas) são compactadas, nunca apagadas sozinhas. Só você apaga.
 - **Ao apagar um Orb**, o diálogo mostra o que some (a conversa atual, as arquivadas, as rotinas) e o que fica (a pasta), e
   oferece **Apagar e guardar a memória** (o botão principal: a memória vai para `memoria/_guardadas/<nome> – <data>`, com
-  "Mostrar no Finder") ou **Apagar com a memória**. Ajustes → Geral → "Memórias guardadas" abre essa pasta.
+  "Mostrar no Finder") ou **Apagar com a memória**. Ajustes → Geral → "Memórias guardadas" diz quantas há e abre essa pasta.
+  Junto da memória fica um pequeno `perfil.json` com o nome, o papel e a aparência do Orb (nunca permissões, modo ou segredos).
+- **Começar de uma memória guardada.** Em **Novo Orb**, quando há memórias guardadas, o primeiro cartão ("Começar de") tem um
+  menu **Memória**: "Nenhuma (Orb novo)" ou uma por memória ("Atlas · 08/10/2026 · 12 lembranças"). Escolher uma preenche o
+  nome, o papel e a aparência (dá para mudar; voltar a "Nenhuma" desfaz o que a memória trouxe e mantém o que você digitou). Ao criar, a pasta guardada **é movida** para ser a memória do novo Orb (ela sai
+  das guardadas) e, como já tem identidade ou preferências, ele não refaz a entrevista. Pastas guardadas antes dos perfis
+  também aparecem; delas só vem o nome.
 - No **Claude Code**, a memória chega por um servidor de ferramentas que o próprio app oferece; o histórico do Claude Code
   (`~/.claude/projects/`) é dele, e "Esquecer" no Orb não o apaga.
 
@@ -266,7 +274,7 @@ Uma **rotina** é uma tarefa que um Orb faz sozinho, no horário, **enquanto o a
   relatório, e a próxima execução sabe o que a anterior encontrou.
 - **Relatório em arquivo.** Se o Orb tem pasta própria, cada execução grava `Rotinas/<nome>/<aaaa-mm-dd hhmm>.md` nela.
 - **Permissões.** Ninguém está lá para responder, então uma rotina em "Perguntar antes" **espera por você** (o editor avisa e
-  oferece "Usar Automático" e "Só leitura"). Em Avançado: "Permissões da rotina" (Igual ao Orb, Automático ou Só leitura).
+  oferece "Usar Automático" e "Usar Só leitura"). Em Avançado: "Permissões da rotina" (Igual ao Orb, Automático ou Só leitura).
 - Se o Orb está ocupado, a rotina entra na fila ("Na fila") e roda quando ele terminar. "Rodar agora" e "Rodar uma vez
   agora, para testar" ao criar. O mesmo vale para "Rodar agora" no painel do Orb. Rotina desativada fica "Pausada".
 
@@ -284,8 +292,8 @@ janela vai antes para a memória do Orb. As mensagens continuam salvas na conver
   mil → 19 mil tokens)."
 - Quando a conversa passa de 85% do que cabe, aparece uma vez "Esta conversa está ficando longa. Compactar agora ou começar uma
   nova?".
-- **Ajustes → Geral → Memória das conversas**: *Econômica* (cerca de 40 mil tokens palavra por palavra, gasta menos por
-  mensagem), *Equilibrada* (80 mil, o padrão) ou *Ampla* (até 60% da janela, custa mais por mensagem). Vale para todos os Orbs.
+- **Ajustes → Geral → Contexto das conversas**: *Econômico* (cerca de 40 mil tokens palavra por palavra, gasta menos por
+  mensagem), *Equilibrado* (80 mil, o padrão) ou *Amplo* (até 60% da janela, custa mais por mensagem). Vale para todos os Orbs.
 - Se um provedor recusa uma conversa por tamanho, o Orb aprende a janela real daquele modelo (**Janelas aprendidas**, com
   "Esquecer", útil depois de aumentar o limite do servidor).
 - No **Claude Code** o contexto é do próprio Claude Code, que se resume sozinho; "Compactar agora" faz um resumo e **a próxima
@@ -308,7 +316,7 @@ Páginas **Conectores** (⌥⌘C) e **Skills** (⌥⌘K) na barra lateral, cada 
 - **Chaves e tokens** dos conectores ficam no **Keychain**, não no arquivo de dados.
 - **Skills** são instruções reutilizáveis no formato aberto `SKILL.md`. *Explorar* busca no catálogo [Skills.sh](https://skills.sh)
   e lê o `SKILL.md` no GitHub de quem publicou, com **prévia completa antes de instalar** (instale só de fontes em que você
-  confia: a skill vira instrução para o Orb). Use com `/atalho` no começo da mensagem, ou pelo botão "Usar". "Nova skill" cria a sua.
+  confia: a skill vira instrução para o Orb). Use com `/comando` no começo da mensagem, ou pelo botão "Usar". "Nova skill" cria a sua.
 
 ## Atalhos
 
@@ -343,10 +351,36 @@ já usa essas teclas, o Orb avisa e deixa desligado. **Ajuda → Atalhos do tecl
 O ícone do Orb na barra de menus muda quando algum Orb trabalha (cheio) e ganha um ponto quando algum espera por você. O
 painel dele deixa **perguntar a um Orb sem abrir o app** (escolha o Orb, escreva, ↩ envia, ⌥↩ pula de linha), ler o fim da
 resposta e **responder pedidos de permissão** de todos os Orbs. Se o Orb escolhido já está trabalhando, a mensagem entra na fila,
-como no chat (numa rotina, o painel avisa que ela precisa terminar). "Abrir conversa" continua no app. A conversa é a mesma do chat.
+como no chat (numa rotina, o painel avisa que ela precisa terminar). "Ver conversa" continua no app. A conversa é a mesma do chat.
 
 Em Ajustes → Geral: **Abrir ao iniciar sessão**, **Me avisar quando um Orb terminar ou precisar de mim** (banners só aparecem com o
-app em segundo plano), a **Pasta de dados** e a **Pasta dos Orbs** com "Mostrar no Finder".
+app em segundo plano), a **Pasta de dados**, as **Memórias guardadas**, a **Pasta dos Orbs** com "Mostrar no Finder" e
+**Redefinir o Orb…**.
+
+## Redefinir o Orb
+
+Ajustes → Geral → Seus dados → **Redefinir o Orb…** volta o app ao primeiro uso. A folha é irmã de "Apagar Atlas?": diz o que some ("3 Orbs, 42 conversas,
+5 rotinas, 2 conectores, 4 skills e os ajustes") e o que fica (a pasta `~/Orbs` com os arquivos que os Orbs criaram, que
+**nunca** é apagada, e, se você quiser, as memórias), e pede duas escolhas:
+
+- **Guardar as memórias** (padrão): cada Orb é apagado, mas o que ele aprendeu vai para Memórias guardadas (com o último trecho
+  da conversa, gravado antes), e um Orb novo pode [começar de uma delas](#memória). **Apagar tudo, inclusive as memórias** apaga também as que
+  já estavam guardadas; não dá para desfazer.
+- **Também sair dos provedores** (desligado): apaga as chaves de API e o login do ChatGPT guardados no Keychain do Orb e a
+  configuração dos provedores. Desligado, provedores, chaves e modelo padrão continuam. O login do Claude Code no Terminal
+  nunca é tocado.
+
+Sempre somem: os Orbs, as conversas (atuais, anteriores e de rotinas), os anexos e as saídas de ferramentas, as rotinas, os
+conectores e os segredos deles no Keychain, as skills instaladas ou criadas, as liberações ("Sempre permitir") e os ajustes do
+app (voltam ao padrão, inclusive o primeiro uso). Nada fora da pasta de dados e do Keychain do app é tocado (dentro da pasta de
+dados, só o que o Orb mesmo grava), e a migração do OpenBot não roda de novo: as chaves que o Orb apagou não voltam do Keychain
+antigo. Se `ORB_DATA_DIR` aponta para uma pasta que não parece do Orb (sem `state.json`) ou para `~/Orbs`, a redefinição recusa.
+
+**Redefinir…** (a pílula branca do rodapé, como nas outras folhas) abre um alerta ("Redefinir o Orb agora?") com **Redefinir e reabrir**; Esc cancela e Return
+não confirma. O app
+para tudo (conversas em andamento, rotinas, pedidos de permissão, conectores, processos em segundo plano), cobre a janela
+enquanto trabalha (nada de mensagem nova nem de Novo Orb), apaga e abre de novo.
+Rodando pelo SwiftPM (sem um `.app`), ele só fecha: abra de novo. Nos modos de desenvolvedor (`--snapshot`…) a redefinição nunca roda.
 
 ## Privacidade
 
@@ -380,20 +414,20 @@ app em segundo plano), a **Pasta de dados** e a **Pasta dos Orbs** com "Mostrar 
 | "Você atingiu o limite de uso do provedor (429)" | Espere um pouco ou confira o plano. O Orb tenta de novo sozinho em falhas passageiras |
 | Claude Code "não encontrado neste Mac" | Instale o `claude` ([guia](https://code.claude.com/docs/en/setup)) e use "Verificar de novo" em Ajustes → Modelos |
 | Ollama ou LM Studio "Servidor não encontrado" | Abra o app e ligue o servidor local (LM Studio: o servidor precisa estar ligado e com um modelo carregado); baixe pelo menos um modelo |
-| "A conversa ficou grande demais para este modelo" | Compactar agora, Nova conversa, ou escolha a Memória das conversas "Econômica" |
-| O Orb diz que falta uma permissão do macOS | Ajustes → Permissões do Mac (ou o botão "Permitir…" na linha da ferramenta). Reabra o app depois de Gravação de Tela e Acesso Total ao Disco |
+| "A conversa ficou grande demais para este modelo" | Compactar agora, Nova conversa, ou escolha o Contexto das conversas "Econômico" |
+| O Orb diz que falta uma permissão do macOS | Ajustes → Permissões do Mac (ou o botão "Permitir…" na linha da ferramenta). Reabra o app depois de Gravação do Áudio do Sistema e da Tela e Acesso Total ao Disco |
 | As permissões do macOS somem a cada compilação | [Assinatura estável](#assinatura-estável-recomendado) |
 | O Orb parou numa pergunta | Veja o cartão na conversa, o ponto na barra de menus ou a notificação |
 | Não aparecem notificações | Ajustes → Geral mostra o estado; "Abrir Ajustes do Sistema" leva ao painel de notificações |
 | "Pasta não encontrada" no painel | A pasta foi apagada, renomeada ou está em disco desconectado: "Recriar" ou "Mudar pasta" |
 | "Atenção com seus dados" | Um arquivo de dados não pôde ser lido. Ele **não é sobrescrito**: o Orb guarda uma cópia (`….corrupt-<data>`) e diz onde. "Mostrar no Finder" leva a ela |
-| Quer começar do zero | Feche o app e renomeie a pasta `~/Library/Application Support/Orb` (as chaves ficam no Keychain) |
+| Quer começar do zero | Ajustes → Geral → Seus dados → **Redefinir o Orb…** ([Redefinir o Orb](#redefinir-o-orb)) |
 
 ## Para quem desenvolve
 
 ```bash
 swift build          # compila o executável
-swift test           # mais de 1.700 testes (motor, provedores, Claude Code, ferramentas, MCP, Orbs, dados)
+swift test           # mais de 2.000 testes (motor, provedores, Claude Code, ferramentas, MCP, Orbs, dados)
 ./scripts/bundle.sh  # monta e assina build/Orb.app
 ```
 

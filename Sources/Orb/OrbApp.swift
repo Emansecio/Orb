@@ -21,6 +21,7 @@ struct OrbApp: App {
         Window("Orb", id: "main") {
             RootView()
                 .environment(model)
+                .resetShield(model)
                 .frame(minWidth: 1000, minHeight: 620)
                 .preferredColorScheme(.dark)
                 .task {
@@ -39,12 +40,14 @@ struct OrbApp: App {
         Settings {
             SettingsView()
                 .environment(model)
+                .resetShield(model)
                 .preferredColorScheme(.dark)
         }
 
         MenuBarExtra {
             QuickAskView()
                 .environment(model)
+                .resetShield(model)
                 .preferredColorScheme(.dark)
         } label: {
             // Idle, an Orb working, or Orbs waiting for a permission (with an orange dot).
@@ -301,6 +304,7 @@ enum Snapshot {
         case "memory-sheet": AnyView(model.bots.first.map { MemorySheet(botID: $0.id, name: $0.name) })
         case "approvals": AnyView(model.bots.first.map { ApprovalCardsSample(bot: $0) })
         case "new-orb": AnyView(NewBotSheet(height: ProcessInfo.processInfo.environment["ORB_SNAPSHOT_HEIGHT"].flatMap(Double.init).map { CGFloat($0) }))
+        case "new-orb-kept": NewBotSnapshots.keptSheet(model: model, height: ProcessInfo.processInfo.environment["ORB_SNAPSHOT_HEIGHT"].flatMap(Double.init).map { CGFloat($0) })
         case "sidebar": AnyView(SidebarView().frame(width: 280))
         case "quickask": AnyView(SystemSnapshots.quickAsk(model, approvals: false))
         case "quickask-approvals": AnyView(SystemSnapshots.quickAsk(model, approvals: true))

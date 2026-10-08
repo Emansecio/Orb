@@ -139,7 +139,7 @@ struct MacPermissionsTests {
         let kinds = MacPermissionChecker.allKinds
         let titles = kinds.map(\.title)
         #expect(titles == ["Mail", "Calendário", "Notas", "Lembretes", "Finder", "System Events", "Mensagens", "Safari", "Música",
-                           "Acessibilidade", "Gravação de Tela", "Acesso Total ao Disco"])
+                           "Acessibilidade", "Gravação do Áudio do Sistema e da Tela", "Acesso Total ao Disco"])
         #expect(Set(kinds).count == kinds.count)
         #expect(MacPermissionKind.fullDiskAccess.canBeAskedNow == false)
         #expect(MacPermissionKind.accessibility.canBeAskedNow)
@@ -264,7 +264,7 @@ struct MacPermissionsTests {
     @Test func theMessageForTheModelNamesWhatIsMissingAndWhereToEnableIt() {
         let problems: [(MacPermissionProblem, pane: String)] = [
             (.automation(app: "Mail"), "Automação"), (.accessibility, "Acessibilidade"),
-            (.screenRecording, "Gravação de Tela"), (.fullDiskAccess, "Acesso Total ao Disco"),
+            (.screenRecording, "Gravação do Áudio do Sistema e da Tela"), (.fullDiskAccess, "Acesso Total ao Disco"),
         ]
         for (problem, pane) in problems {
             let message = problem.modelMessage
@@ -277,6 +277,12 @@ struct MacPermissionsTests {
         #expect(MacPermissionProblem.automation(app: "Mail").modelMessage.contains("Mail"))
         #expect(MacPermissionProblem.screenRecording.modelMessage.contains("reopen Orb"))
         #expect(!MacPermissionProblem.accessibility.modelMessage.contains("reopen"))
+    }
+
+    @Test func theOldNameOfTheScreenRecordingPaneIsStillRecognized() {
+        let former = "Ajustes do Sistema → Privacidade e Segurança → Gravação de Tela"
+        #expect(MacPermissionProblem.detect(in: former) == .screenRecording)
+        #expect(!MacPermissionProblem.screenRecording.settingsPath.contains(former))
     }
 
     @Test func osascriptFailuresReachTheModelAsPermissionMessages() {

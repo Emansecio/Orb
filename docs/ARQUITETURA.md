@@ -42,7 +42,7 @@ Tudo em `Sources/Orb/`.
 | Arquivo | Papel |
 |---|---|
 | `OrbApp.swift` | `Launcher` (`@main`: com `--tools-mcp` roda só o servidor MCP, sem janela), `OrbApp` (janela, Ajustes, barra de menus), `AppDelegate`, `AppCommands` (menu "Orbs"), `OrbSheet` (`--render-orbs`, `--render-icon`), `Snapshot` (`--snapshot`) |
-| `AppModel.swift` | `@MainActor @Observable`: Orbs, rotinas, skills, conectores, provedores, modelo padrão, nível de memória da conversa; criar/apagar Orb, `send`, `runClaudeCode`, `compactNow`, rotinas e fila, conexão de provedores, salvar |
+| `AppModel.swift` | `@MainActor @Observable`: Orbs, rotinas, skills, conectores, provedores, modelo padrão, nível de contexto das conversas; criar/apagar Orb, `send`, `runClaudeCode`, `compactNow`, rotinas e fila, conexão de provedores, salvar |
 | `AppModel+Approvals / +Commands / +ContextUI / +MemoryUI / +RoutinesUI / +Steering / +Transcript` | o que cada área pede ao modelo: `decide` e banners; comandos, paleta e barra de menus; dados do medidor; esquecer/desfazer; modelos de rotina e listas; fila "enquanto trabalha"; "Tentar de novo"/"Continuar" |
 | `BotSession.swift`, `BotSession+Turn.swift`, `BotSession+Conversation.swift` | a maquinaria de um Orb: conversa em memória (carregar, descarregar, salvar, estacionar durante rotina), turno (id, eventos, texto em stream, cartões), uso de tokens, trechos para a memória |
 | `BotLive.swift` | o que as telas leem de um Orb: configurações, `status`, `activity` (com "digitando" e a olhada ao ser escolhido), `needsYou`, não lidas, memória, medidor. `WritesOnlyChanges` (`assign`, `writeIfChanged`) |
@@ -51,6 +51,7 @@ Tudo em `Sources/Orb/`.
 | `Store.swift`, `StoreCoordination.swift`, `ConversationCoding.swift`, `ConversationHistory.swift` | `AppState`, `Store` (leitura/escrita com filas), `Keychain`, decodificação tolerante, `FileGate`, codificação incremental da conversa, arquivo de conversas, relatórios de rotina |
 | `DevRun.swift` | os modos de desenho (`--snapshot`, `--render-*`): decide a pasta de dados (temporária, a menos que `ORB_DATA_DIR`) e bloqueia o Keychain e a migração neles; apaga a pasta temporária ao sair |
 | `LegacyMigration.swift` | migração do app que se chamava OpenBot (dados e preferências; as chaves do Keychain são copiadas uma a uma quando usadas; as contas já copiadas, ou removidas no Orb, ficam anotadas em `UserDefaults` (`keychainAccountsFromOpenBot`) e o item do OpenBot, mantido como backup, não é mais consultado para elas) |
+| `Reset/ResetPlan.swift`, `Reset/ResetExecutor.swift`, `Reset/AppRelaunch.swift`, `AppModel+Reset.swift` | "Redefinir o Orb": o plano puro (`ResetPlan`, `ResetSummary`, `ResetGuard`), o executor com pasta, cofre e preferências injetáveis, o relançar e a orquestração (`AppModel.resetEverything`). Veja "Redefinir o Orb" abaixo |
 | `OrbFolder.swift` | pasta própria `~/Orbs/<Nome>`, estado da pasta, arquivos recentes e alterados do painel |
 | `MacPermissions.swift` | permissões do macOS (TCC), pré-voo de Automação (abre escondido o app conhecido que está fechado), tradução de erros |
 | `ImageAttachments.swift` | imagens do usuário e de ferramentas: reduzir, guardar em `anexos/`, formato de cada API |
@@ -114,7 +115,8 @@ linha, cartões) é em português (`AgentTool.summary`).
 ### Memória (`Memory/`)
 
 `MemoryBank` (um actor por Orb) + `MemoryIndex` (SQLite/FTS5) + `MemoryPage`/`MemoryText`/`MemorySanitizer` +
-`SessionSummary` + `MemoryIntent` + `OrbToolsMCPServer`. Detalhes em [MEMORIA.md](MEMORIA.md).
+`SessionSummary` + `MemoryIntent` + `KeptMemories` (memórias guardadas e o perfil de cada uma) + `OrbToolsMCPServer`.
+Detalhes em [MEMORIA.md](MEMORIA.md).
 
 ### Catálogos (`Catalog/`)
 
@@ -135,7 +137,7 @@ O avatar e seu sistema de animação: `OrbModel` (config, catálogo, imagens), `
 | Conversa | `TranscriptViews` (`TranscriptRow` Equatable, ferramentas, `ApprovalCard`, `WorkingLine`), `MarkdownBlockViews`, `QueuedMessages`, `ImageThumbnails`, `ApprovalKeyboard` |
 | Compositor | `ComposerView`, `ComposerChips` (permissões, skills, modelo), `ComposerSupport`, `ModelPopover`, `ModelPicker`, `ContextMeterViews` |
 | Painel do Orb | `BotInspector` (abas Geral, Memória, Pasta e acessos, Rotinas), `InspectorSupport`, `MemoryViews`, `DeleteOrbDialog`, `PermissionConfirmation` |
-| Ajustes | `SettingsView` (Geral, Modelos, Permissões do Mac), `ProviderSettings`, `ProviderPresentation`, `CustomProviderFields`, `ClaudeCodeSettings`, `MacPermissionsView`, `ContextSettings` |
+| Ajustes | `SettingsView` (Geral, Modelos, Permissões do Mac), `ResetOrbSheet` ("Redefinir o Orb?" e o alerta), `ProviderSettings`, `ProviderPresentation`, `CustomProviderFields`, `ClaudeCodeSettings`, `MacPermissionsView`, `ContextSettings` |
 | Páginas | `RoutinesView`, `ConversationsMenu`, `SkillsView`, `ConnectorsView`, `CatalogParts` |
 | Sistema | `CommandPalette` (⌘K e a folha de atalhos; as teclas vêm de `ShortcutCatalog`, em `Shortcuts.swift`, a mesma lista que Ajustes → Geral mostra), `QuickAskView` (painel da barra de menus), `SheetKit` |
 | Para revisão (só `--snapshot`) | `CatalogSnapshots`, `ContextSnapshots`, `SystemSnapshots`, `TranscriptSamples`, e `SnapshotComposerScenes.swift` (na raiz de `Sources/Orb/`) |
@@ -184,13 +186,14 @@ Pasta de dados: `~/Library/Application Support/Orb/` (a variável `ORB_DATA_DIR`
 
 ```
 state.json                       AppState: Orbs, rotinas, skills, conectores (segredos viram "@keychain"), provedores,
-                                 modelo padrão, não lidas, nível de memória da conversa, janelas aprendidas
+                                 modelo padrão, não lidas, nível de contexto das conversas, janelas aprendidas
 conversations/<Orb>.json         conversa atual: itens da tela + mensagens do modelo + resumo/ledger + marcas
 conversations/<Orb>.meta.json    nota ao lado: quantos itens, quantos já foram para a memória, impressão digital do arquivo
-conversations/<Orb>/<id>.json    conversas arquivadas ("Nova conversa"), com index.json (cache corrigido pelos arquivos)
+conversations/<Orb>/<id>.json    conversas anteriores ("Nova conversa"), com index.json (cache corrigido pelos arquivos)
 conversations/<Orb>/routine-<rotina>.json   a conversa de cada rotina
-memoria/<Orb>/…                  a memória (páginas .md + index.sqlite); memoria/_guardadas/ de Orbs apagados
-anexos/<Orb>/<uuid>.jpg|png      imagens reduzidas (a conversa guarda o caminho); saem com o Orb ou com a conversa arquivada que só elas usava (as cópias `.corrupt-…` também contam como uso)
+memoria/<Orb>/…                  a memória (páginas .md + index.sqlite); memoria/_guardadas/<nome> – <data>/ de Orbs apagados ou
+                                 redefinidos, com perfil.json (nome, papel e aparência) ao lado das páginas
+anexos/<Orb>/<uuid>.jpg|png      imagens reduzidas (a conversa guarda o caminho); saem com o Orb ou com a conversa anterior que só elas usava (as cópias `.corrupt-…` também contam como uso)
 saidas/<Orb>/*.txt               saídas grandes de ferramentas; limpas por idade (14 dias) e tamanho (200 MB)
 *.corrupt-<aaaammdd-hhmmss>      cópia de um arquivo que não pôde ser lido (nunca sobrescrito)
 .migrado-do-openbot              marca de que a migração do OpenBot já foi feita
@@ -204,6 +207,48 @@ Claude Code, `$TMPDIR/orb-mcp-p<pid>-<uuid>.json` (0600), com a configuração d
 na abertura o app apaga os que sobraram de uma saída no meio do turno (`ClaudeCodeEngine.removeStaleMCPConfigs`): os que levam o
 `pid` de um processo que não existe mais, e os de versões antigas (sem `pid`) parados há mais de 2 minutos. O `$TMPDIR` é o mesmo
 do app real, então os modos de desenvolvedor (`--snapshot`…) não fazem essa limpeza.
+
+### Redefinir o Orb
+
+Ajustes → Geral → Seus dados → "Redefinir o Orb…" leva o app ao primeiro uso. A ordem importa, porque o app continua rodando
+até o fim:
+
+1. **Recusa** (`ResetGuard.refusal`): nos modos de desenvolvedor (`--snapshot`, `--render-*`); numa pasta que não pode ser a
+   de dados (a raiz, a pasta pessoal ou uma que a contenha); e, quando a pasta não é a padrão (`~/Library/Application Support/Orb`,
+   por exemplo `ORB_DATA_DIR`), se ela for, ficar dentro de ou conter `~/Orbs` ou a pasta de algum Orb (arquivos dos Orbs
+   nunca são apagados) ou se não tiver `state.json` (não parece dados do Orb: `~/Documents`, um disco externo). Nada é tocado.
+2. **Sela o estado** (`isResetting`, `Store.sealWrites`): `scheduleStateSave` e `saveNow` (que o término do app chama) não fazem
+   nada, o `Store` descarta tudo o que já estava na fila e tudo o que vier (`WriteSeals`, em `enqueue` e `writeFile`). Nenhuma
+   gravação atrasada, nem a do término, regrava o estado antigo depois da limpeza. Com `isResetting` a janela, o painel da
+   barra de menus e Ajustes ficam cobertos (`resetShield`) e o modelo recusa `send`, rotinas e adotar uma memória guardada.
+3. **Para tudo** (`AppModel.stopForReset`): agendador, turnos de todos os Orbs (cancelar o turno termina o processo do Claude
+   Code), rotinas e a fila delas, cartões de aprovação e banners, conectores (MCP). Espera os turnos acabarem, no máximo 3 s.
+4. **Guarda o último trecho** (`saveLastStretches`, só em "Guardar as memórias"): a conversa depois da última página de sessão de
+   cada Orb vira página em `sessoes/`, como em `deleteBot(keepMemory:)`, e a espera termina (no máximo 5 s) **antes** de
+   `MemoryLibrary.seal`, que fecha os bancos para que nenhuma tarefa atrasada recrie uma pasta depois de movida.
+5. **Limpa fora da thread principal** (`ResetExecutor.run`, em `Task.detached`): `store.flush()` (o que estava sendo gravado
+   termina), `BackgroundJobs.killAllNow()`, e então, na ordem: move a memória de cada Orb para `_guardadas` com o perfil (ou, em
+   "Apagar tudo", remove `memoria/` inteira); remove **só o que o app grava** na pasta de dados (`ResetGuard.removes(entry:)`:
+   `state.json` e suas cópias `state.json.…`, `conversations/`, `memoria/`, `anexos/`, `saidas/`; qualquer outro arquivo, como
+   `.migrado-do-openbot`, fica); apaga os segredos pelo cofre injetável (`SecretVault.remove` = `Keychain.set("")`, o mesmo
+   caminho público de apagar chave: conectores e, com "Também sair dos provedores", uma conta por provedor mais `chatgpt`;
+   nunca o Claude Code); devolve as preferências ao padrão (`UserDefaults` do próprio app, menos `LegacyKeychainLedger.key`);
+   grava um `state.json` novo só com os provedores, o modelo padrão e as janelas aprendidas quando eles ficam; e, se a pasta do
+   OpenBot ainda tem dados e o marcador faltava, cria o marcador. Cada passo continua se outro falhou; o relatório
+   (`ResetReport`) diz o que sobrou.
+6. **Fecha e reabre** (`AppRelaunch.finish`): um `sh` espera o processo acabar (até 20 s) e roda `open` no `.app` (sem `-n`; se o
+   processo não acabou, não abre nada); fora de um `.app` (SwiftPM) só fecha.
+
+**Por que o OpenBot não volta.** O Keychain do OpenBot (`app.openbot.mac`) é só backup: `Keychain.lookup` copia uma conta dele
+na primeira leitura e anota a conta em `LegacyKeychainLedger` (`keychainAccountsFromOpenBot`, nas preferências); depois disso o
+item antigo não é mais consultado. Apagar uma chave pelo `Keychain.write` já anota a conta, então a redefinição só precisa
+(a) apagar pelo caminho público e (b) deixar essa chave das preferências em paz (`ResetGuard.keepsPreference`, a mesma
+constante). Sem isso, "Também sair dos provedores" seria desfeito na reabertura, que copiaria as chaves do OpenBot de volta.
+Os testes usam um Keychain de mentira com os itens do OpenBot.
+
+O alerta de confirmação é um `NSAlert` (`ResetConfirmation`): Esc aperta "Cancelar", Return não aperta nada e o botão
+destrutivo não tem tecla. Nos testes, `AppModel.resetEnvironment` (argumentos, preferências, pasta do OpenBot, o último passo)
+é "inerte" quando o modelo não é o app (`runsBackgroundWork: false`), então um teste nunca toca nas preferências reais.
 
 ### Decodificação tolerante
 
@@ -286,7 +331,7 @@ ORB_LIVE_TESTS=1 swift test --filter LiveCatalogTests      # catálogos reais (i
 ORB_LIVE_TESTS=1 swift test --filter ClaudeCodeLiveTests   # o `claude` real, deslogado (flags, handshake, modelos)
 ```
 
-São mais de 1.700 testes em `Tests/OrbAppTests`, em Swift Testing (`@Test`, `@Suite`, `#expect`, `#require`).
+São mais de 2.000 testes em `Tests/OrbAppTests`, em Swift Testing (`@Test`, `@Suite`, `#expect`, `#require`).
 
 - **Determinismo.** Nada de dormir um tempo fixo para "dar tempo": `waitUntil(_:timeout:poll:_:)` (em `TestSupport/Waiting.swift`)
   espera uma **condição** (com limite generoso e `Issue` descritiva se estourar). Para afirmações negativas, espere primeiro
@@ -360,10 +405,10 @@ Modos (qualquer outro nome mostra o chat do primeiro Orb):
 
 | Área | Modos |
 |---|---|
-| Janela e painéis | `app`, `sidebar`, `inspector` (= `inspector-general`), `inspector-memory`, `inspector-folder`, `inspector-routines`, `memory-sheet`, `new-orb`, `editor`, `delete-orb`, `palette`, `shortcuts`, `menubar-icons` |
+| Janela e painéis | `app`, `sidebar`, `inspector` (= `inspector-general`), `inspector-memory`, `inspector-folder`, `inspector-routines`, `memory-sheet`, `new-orb`, `new-orb-kept` (com memórias guardadas, uma escolhida), `editor`, `delete-orb`, `palette`, `shortcuts`, `menubar-icons` |
 | Conversa | `chat-working`, `chat-typed`, `chat-slash`, `popover-permissions`, `popover-model`, `popover-skills`, `approvals`, `transcript`, `transcript-approvals`, `transcript-notices`, `transcript-failed`, `transcript-retry` |
 | Contexto | `context-meter`, `context-nudge`, `context-popover`, `context-popover-result`, `context-popover-short`, `context-popover-claude`, `settings-context` |
-| Ajustes | `settings-general`, `settings-models`, `settings-perms`, `first-run-banner`, `models` |
+| Ajustes | `settings-general`, `settings-reset` (a folha "Redefinir o Orb?"), `settings-models`, `settings-perms`, `first-run-banner`, `models` |
 | Barra de menus | `quickask`, `quickask-approvals`, `quickask-reply` |
 | Rotinas e conversas | `routines`, `routine-editor`, `routine-editor-new`, `routine-run`, `routine-run-failed`, `routine-conversation`, `conversations` |
 | Skills e conectores | `skills`, `skills-explore`, `skill-editor`, `skill-editor-new`, `skill-preview`, `skill-preview-installed`, `connectors`, `connectors-explore`, `conn-editor-github`, `conn-editor-files`, `conn-editor-slack`, `conn-editor-manual`, `conn-editor-edit`, `conn-editor-edit-registry`, `conn-editor-connecting`, `conn-editor-connected`, `conn-editor-failed` |

@@ -711,7 +711,7 @@ struct RoutineEditor: View {
             .foregroundStyle(Palette.warn)
             HStack(spacing: 8) {
                 Button("Usar Automático") { choose(.auto) }
-                Button("Só leitura") { choose(.readOnly) }
+                Button("Usar Só leitura") { choose(.readOnly) }
             }
             .buttonStyle(SecondaryPillStyle())
             .controlSize(.small)

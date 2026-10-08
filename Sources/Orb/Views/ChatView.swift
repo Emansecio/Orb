@@ -37,7 +37,7 @@ struct ChatView: View {
                 Button("Nova conversa", systemImage: "square.and.pencil") {
                     model.newConversation(botID)
                 }
-                .help("\(CommandName.newConversation) (\(AppShortcut.newConversation.label)). A atual fica guardada em Conversas.")
+                .help("\(CommandName.newConversation) (\(AppShortcut.newConversation.label)). A atual fica em Conversas anteriores.")
                 Button("Painel do Orb", systemImage: "sidebar.right") {
                     model.showInspector.toggle()
                 }

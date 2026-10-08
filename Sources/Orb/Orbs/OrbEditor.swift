@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Full Orb customizer: a big live stage (with activity preview, "Aleatório" and undo), categories grouped by
+/// Full Orb customizer: a big live stage (with activity preview, "Sortear" and undo), categories grouped by
 /// body, face and style, option grids whose thumbnails frame what they change, and named tint swatches.
 ///
 /// A short editor (the "Novo Orb" sheet, or a sheet over a short window) uses a compact stage: a smaller Orb, the
@@ -203,7 +203,7 @@ struct OrbEditor: View {
     }
 
     private var randomButton: some View {
-        Button("Aleatório", systemImage: "dice") {
+        Button("Sortear", systemImage: "dice") {
             // A new look that hangs together; the temperament stays.
             edit { config in
                 let temperament = config.temperament

@@ -18,7 +18,7 @@ enum OrbActivity: String, CaseIterable, Identifiable, Sendable {
         case .browsing: "Navegando"
         case .reading: "Lendo"
         case .searching: "Buscando"
-        case .waiting: "Esperando você"
+        case .waiting: "Precisa de você"
         case .happy: "Feliz"
         case .error: "Erro"
         case .sleepy: "Dormindo"
