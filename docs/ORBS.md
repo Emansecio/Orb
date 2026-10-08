@@ -1,6 +1,6 @@
 # Orbs
 
-Cada bot do OpenBot é um **Orb**: uma esfera de gel translúcido e brilhante, renderizada em 3D
+No app Orb, cada assistente é um **Orb**: uma esfera de gel translúcido e brilhante, renderizada em 3D
 no Blender e animada ao vivo no app. Todos os Orbs têm o mesmo formato redondo; a identidade
 vem da cor, do rosto e dos acessórios.
 
@@ -14,8 +14,8 @@ vem da cor, do rosto e dos acessórios.
 art/orbs.py + art/orbkit/          Blender 5.2 (Cycles, headless)
         │  orbs.py layers
         ▼
-Sources/OpenBotMac/Resources/Orbs/  98 PNGs 640 px em camadas + options.json
-        │  scripts/bundle.sh copia para OpenBot.app/Contents/Resources/Orbs
+Sources/Orb/Resources/Orbs/  98 PNGs 640 px em camadas + options.json
+        │  scripts/bundle.sh copia para Orb.app/Contents/Resources/Orbs
         ▼
 OrbCatalog / OrbImages             lê options.json, carrega e reduz as camadas (com cache)
         │
@@ -45,7 +45,7 @@ Cores livres (sRGB) para **cabelo**, **bigode** e **acessórios tingíveis** (bo
 fones, chifres, flor, orelhas de gato). `nil` = cor automática (cabelo puxa um tom escuro da
 cor do Orb, bigode é branco e cada acessório tem o seu padrão).
 
-Modelo: `OrbConfig` em [`Orbs/OrbModel.swift`](../Sources/OpenBotMac/Orbs/OrbModel.swift), salvo em `Bot.orb`.
+Modelo: `OrbConfig` em [`Orbs/OrbModel.swift`](../Sources/Orb/Orbs/OrbModel.swift), salvo em `Bot.orb`.
 
 ```swift
 var orb = OrbConfig()
@@ -54,44 +54,44 @@ orb.hair = "tufinho"; orb.accessories = ["laco"]; orb.accentColor = 0xFF4F8B
 ```
 
 ### Onde o usuário edita
-- **Novo bot** (⌘N): editor completo à esquerda, nome/função/modelo/permissões à direita.
-- **Painel do bot → Orb → “Personalizar Orb…”**: o mesmo editor numa folha.
+- **Novo Orb** (⌘N): editor completo à esquerda, nome/função/modelo/permissões à direita.
+- **Painel do Orb → Orb → “Personalizar Orb…”**: o mesmo editor numa folha.
 - O editor (`OrbEditor`) tem palco ao vivo (clicável, com prévia de cada atividade), abas por
   categoria, grade de miniaturas renderizadas (animam ao passar o mouse), seletor de cor e **Sortear**.
 
-## 3. Atividades: o Orb mostra o que o bot está fazendo
+## 3. Atividades: o Orb mostra o que está fazendo
 
-`AppModel.activity(for:)` decide a atividade de cada bot, e o Orb muda expressão, olhar,
-corpo e balão. Definições em [`Orbs/OrbActivity.swift`](../Sources/OpenBotMac/Orbs/OrbActivity.swift).
+`AppModel.activity(for:)` decide a atividade de cada Orb, e o Orb muda expressão, olhar,
+corpo e balão. Definições em [`Orbs/OrbActivity.swift`](../Sources/Orb/Orbs/OrbActivity.swift).
 
 | Situação no app | Atividade | Olhos / boca / sobrancelhas | Olhar | Corpo | Balão |
 |---|---|---|---|---|---|
-| Nada acontecendo | `idle` | do bot | passeia devagar; segue o mouse | respira e flutua | — |
-| A resposta está chegando | `speaking` | do bot; a boca **fala** | para você, com pequenas sacadas | balança no ritmo da fala | — |
-| Você acabou de enviar um prompt | `listening` (1,4 s) + **pulo** | do bot | olha para baixo (para o texto) | pulo com amassa-e-estica | — |
+| Nada acontecendo | `idle` | do Orb | passeia devagar; segue o mouse | respira e flutua | — |
+| A resposta está chegando | `speaking` | do Orb; a boca **fala** | para você, com pequenas sacadas | balança no ritmo da fala | — |
+| Você acabou de enviar um prompt | `listening` (1,4 s) + **pulo** | do Orb | olha para baixo (para o texto) | pulo com amassa-e-estica | — |
 | Pensando / conectores / memória | `thinking` | boca “assobio” | para cima e para o lado | balança | … |
 | Ferramenta de terminal | `typing` | olhos “fendas”, boca neutra, sobrancelhas retas | para baixo, tremendo | vibra (digitando) | — |
-| Navegador / controlar o Mac | `browsing` | do bot | varre esquerda ↔ direita | balança | — |
-| Lendo arquivos | `reading` | do bot | lê linha por linha | balança | — |
+| Navegador / controlar o Mac | `browsing` | do Orb | varre esquerda ↔ direita | balança | — |
+| Lendo arquivos | `reading` | do Orb | lê linha por linha | balança | — |
 | Buscando | `searching` | olhos “ovais” | círculos | balança | — |
 | Pedindo aprovação | `waiting` | “grandes”, boca “surpresa”, “preocupadas” | para você | pulinhos | ? |
 | Terminou o turno | `happy` (3 s) | “felizes”, “sorrisão” | para você | pula e gira | — |
 | Você parou / deu erro | `error` (2,5 s) | “tontos”, “triste”, “preocupadas” | treme | chacoalha | ! |
 | Rotina pausada | `sleepy` | “sono” | baixo | inclinado, respirando | z |
 
-O brilho (aura e sombra no chão) pulsa enquanto o bot trabalha.
+O brilho (aura e sombra no chão) pulsa enquanto o Orb trabalha.
 
 Prioridade em `activity(for:)`: esperando > erro > feliz > ferramenta > falando > ouvindo/pensando.
 
 ### Falando
 
-`AppModel` marca o bot como falando (`speaking: Set<UUID>`) quando chega um trecho de texto da resposta e
+`AppModel` marca o Orb como falando (`speaking: Set<UUID>`) quando chega um trecho de texto da resposta e
 desmarca depois de 0,6 s sem texto novo, ao começar uma ferramenta, ao pedir aprovação ou ao terminar. O
-conjunto só muda no começo e no fim de cada rajada de texto (um prazo por bot, conferido por uma única
+conjunto só muda no começo e no fim de cada rajada de texto (um prazo por Orb, conferido por uma única
 `Task`), então o streaming não ganha nenhuma invalidação de SwiftUI por token.
 
 No Orb, tudo acontece em `OrbAnimationView`:
-- **Sílabas procedurais** (`Syllables`, em [`Orbs/OrbSpeech.swift`](../Sources/OpenBotMac/Orbs/OrbSpeech.swift)):
+- **Sílabas procedurais** (`Syllables`, em [`Orbs/OrbSpeech.swift`](../Sources/Orb/Orbs/OrbSpeech.swift)):
   formas abertas `fala-a` / `fala-e` / `fala-o` a ~4–7 trocas por segundo, em “palavras” de 1–4 sílabas
   separadas por pausas curtas com a boca fechada (`fala-m`) e, às vezes, uma pausa de vírgula. A boca fechada
   só aparece nas pausas: em corpos escuros ela é uma linha clara e alternar com as aberturas escuras piscaria.
@@ -99,7 +99,7 @@ No Orb, tudo acontece em `OrbAnimationView`:
   plano junto com as expressões). Uma mola de “mandíbula” faz cada forma nova começar com a abertura da
   anterior e esticar até o lugar (escala vertical a partir do lábio de cima, `OrbGeometry.mouthLine`), então não
   parece um flipbook. Trocas entre aberta e fechada/normal ganham um crossfade de 0,06 s.
-- Quando a fala para, a boca fecha (`fala-m`) e volta para a boca do bot.
+- Quando a fala para, a boca fecha (`fala-m`) e volta para a boca normal do Orb.
 - **Sem boca** (`nenhuma`): não aparece boca falando; os olhos apertam e sobem um pouquinho no ritmo das sílabas.
 - **Sem as imagens** `visemes/`: usa as bocas normais (surpresa ≈ o, sorrisão ≈ a, sorriso ≈ e, neutra ≈ m).
   Paletas claras usam a variante `-dark`, como as bocas.
@@ -107,10 +107,10 @@ No Orb, tudo acontece em `OrbAnimationView`:
 
 ## 3a. Jeito (personalidade)
 
-Cada bot tem um **jeito** (`OrbConfig.temperament`, aba **Jeito** do editor). Ele não muda o que o Orb faz,
+Cada Orb tem um **jeito** (`OrbConfig.temperament`, aba **Jeito** do editor). Ele não muda o que o Orb faz,
 só *como*: o ritmo das piscadas e sacadas, a rapidez do olhar, a altura dos pulos, como reage ao ponteiro e
 pequenos gestos espontâneos. Tudo passa pelo mesmo pipeline de movimento (`OrbTemperament.Traits` em
-[`Orbs/OrbTemperament.swift`](../Sources/OpenBotMac/Orbs/OrbTemperament.swift) alimenta `Blinker`, `Saccades`,
+[`Orbs/OrbTemperament.swift`](../Sources/Orb/Orbs/OrbTemperament.swift) alimenta `Blinker`, `Saccades`,
 as molas e `OrbActivity.motion`). Ao escolher um jeito, o Orb faz o seu gesto característico.
 
 | Jeito | Piscadas | Sacadas | Molas | Pulos / balanço | Ponteiro | Gestos espontâneos | Ao escolher |
@@ -121,7 +121,7 @@ as molas e `OrbActivity.motion`). Ao escolher um jeito, o Orb faz o seu gesto ca
 | Tímido | 1,8–6 s, duplas nervosas | curtas | um pouco mais lentas | 0,65× | **desvia o olhar** para baixo e para o lado quando o ponteiro chega perto, espia de volta por 0,4–0,7 s a cada 1,6–3,8 s; inclina-se para trás no hover e cresce menos | — | olha para baixo e espia |
 | Curioso | 2–6,5 s | mais frequentes | mais rápidas | 1,1× | nota o ponteiro de 1,7× mais longe, com mais vontade, **inclina a cabeça** para ele e cresce mais no hover | olha em volta (10–24 s) | olha em volta |
 
-`Equilibrado` reproduz exatamente o comportamento anterior. Bots salvos antes desta versão (sem a chave
+`Equilibrado` reproduz exatamente o comportamento anterior. Orbs salvos antes desta versão (sem a chave
 `temperament`) carregam como equilibrados: `OrbConfig` decodifica de forma tolerante.
 
 ## 4. Interação com o mouse
@@ -133,11 +133,11 @@ as molas e `OrbActivity.motion`). Ao escolher um jeito, o Orb faz o seu gesto ca
   totalmente; digitando no terminal quase não tira o olho do trabalho; com erro ou dormindo, ignora.
 - **Passar o mouse por cima**: o Orb cresce um pouco (com uma leve sobra de mola), encara o ponteiro e,
   enquanto o ponteiro se mexe, roda a 60 fps (grandes) ou 30 fps (pequenos).
-- **Clicar** (Orbs interativos: painel do bot, estado vazio do chat, editor): pula e fica feliz por 1,4 s.
+- **Clicar** (Orbs interativos: painel do Orb, estado vazio do chat, editor): pula e fica feliz por 1,4 s.
 
 ### Movimento natural
 
-Tudo em [`Orbs/OrbMotion.swift`](../Sources/OpenBotMac/Orbs/OrbMotion.swift) (funções puras, testadas em `OrbTests`):
+Tudo em [`Orbs/OrbMotion.swift`](../Sources/Orb/Orbs/OrbMotion.swift) (funções puras, testadas em `OrbTests`):
 
 - **Molas** (`Spring`, `SpringPoint`) no lugar de suavização exponencial: olhar, hover, balão e “gelatina”.
   Integradas em passos fixos de 1/240 s, então o resultado é o mesmo a 10 ou a 60 fps.
@@ -147,13 +147,22 @@ Tudo em [`Orbs/OrbMotion.swift`](../Sources/OpenBotMac/Orbs/OrbMotion.swift) (fu
   perto do centro, às vezes uma olhada mais longe) e tem uma deriva mínima durante a fixação. Ouvindo,
   esperando e feliz usam 30 % disso; as demais atividades seguem só o próprio padrão.
 - **Piscadas** (`Blinker`): intervalo irregular de 2–7 s, fecha em 0,06 s e abre em 0,14 s, e 12 % das
-  vezes pisca duas vezes. Também pisca quando a expressão muda (esconde a troca de camadas).
+  vezes pisca duas vezes. Também pisca quando a expressão muda (esconde a troca de camadas) e, parado,
+  em ~35 % das olhadas largas (`Saccades.isGlance`), como as pessoas fazem.
+- **Sombra no chão** (`OrbShadow`): fica mais estreita, mais achatada e mais fraca conforme o Orb sobe, e mais
+  larga quando ele amassa no pouso ou cresce no hover. Em repouso é igual à de antes; o Orb estático usa a mesma.
 - **Troca de atividade sem saltos**: corpo, olhar, brilho e peso do ponteiro misturam a atividade anterior e
   a nova por 0,35 s (`OrbBodyMotion.mix`), a expressão faz crossfade de 0,18 s e o corpo dá um balanço leve.
 - **Movimento secundário**: cabelo e acessórios de cabeça (não os óculos, `OrbLayer.isLoose`) atrasam um
   pouco nas viradas e nos pulos; o pouso do pulo vira uma mola subamortecida (amassa, estica, assenta).
   Nos pulinhos de `waiting`/`happy` o amassado no chão passa suave para o esticado no ar (`bounce`).
-- **Balão** entra e sai com escala e opacidade em mola, em vez de aparecer de uma vez.
+- **Balão** entra e sai com escala e opacidade em mola, em vez de aparecer de uma vez. Trocar de símbolo com
+  ele aberto (… → ?) dá um pulinho de escala em vez de só trocar o texto.
+- **Pausar e voltar sem salto**: um Orb animado que deve ficar quieto (`OrbView(paused:)`, ou janela inativa)
+  não é mais trocado pelo `OrbFrame` estático: ele desliza até a pose de repouso (a mesma do estático, mola de
+  0,45 s, `OrbPose.mix`), para o display link e volta deslizando ao retomar. Um Orb novo também começa em
+  repouso e entra em movimento suavemente. Antes, trocar de app ou de Orb na barra lateral fazia os olhos e o
+  corpo pularem para o centro e recriava a view.
 - **Reduzir movimento** continua mostrando o Orb estático.
 - Orbs pequenos não interativos deixam o clique passar (selecionar a linha da barra lateral continua funcionando).
 
@@ -164,11 +173,11 @@ Tudo em [`Orbs/OrbMotion.swift`](../Sources/OpenBotMac/Orbs/OrbMotion.swift) (fu
 
 | Lugar | Tamanho | Animado |
 |---|---|---|
-| Barra lateral | 30 | o selecionado e os que estão trabalhando |
+| Barra lateral | 30 | o selecionado e os que estão trabalhando; os outros ficam pausados em repouso (sem frames) |
 | Estado vazio do chat | 96 | sim, interativo |
 | Linha “trabalhando” | 30 | sim |
-| Mensagens do bot | 30 | não (estático) |
-| Painel do bot | 60 | sim, interativo |
+| Mensagens do Orb | 30 | não (estático) |
+| Painel do Orb | 60 | sim, interativo |
 | Editor | 132 palco / 40 miniaturas | palco sempre (com prévia de “Falando” e do jeito); miniaturas ao passar o mouse |
 | Rotinas | 26 | não; `sleepy` se a rotina está pausada |
 | Pergunta rápida (barra de menus) | 28 seletor / 18 status | sim, segue a atividade |
@@ -195,10 +204,15 @@ atual:
 - **Frames sem mudança visível não são enviados**: se a pose mudou menos de 0,25 px desde o último frame
   desenhado, nada é tocado (sem `CATransaction`).
 - **Pausa quando ninguém vê**: o display link para com a janela coberta ou minimizada
-  (`NSWindow.occlusionState`) ou a view escondida, além de virar estático com a janela inativa
-  (`appearsActive`). Respeita **Reduzir movimento**.
-- **Imagens**: `OrbImages` decodifica com ImageIO direto no tamanho do balde (96/128/192/256/384/512/640 px;
-  sem guardar o PNG inteiro decodificado), assa a tinta e guarda num cache thread-safe. Ao montar um Orb,
+  (`NSWindow.occlusionState`) ou a view escondida. Com a janela inativa (`appearsActive`) ou `paused`, o Orb
+  assenta na pose de repouso e para (0 % de CPU medido, a mesma view continua montada). Respeita **Reduzir movimento**.
+- **Imagens**: `OrbImages` decodifica com ImageIO direto no tamanho exato em pixels em que a camada é desenhada
+  (`bitmapSide`, até 640 px; sem guardar o PNG inteiro decodificado), assa a tinta e guarda num `NSCache`
+  limitado a 96 MB (o editor gera muitas variantes: cada tinta do seletor de cor, cada opção no palco). O lado
+  das imagens (`OrbGeometry.imageSide`) é um número inteiro de pixels, centrado no Orb com deslocamento inteiro,
+  então um Orb parado mapeia 1:1 na tela, com filtro linear e sem mipmaps: bem mais nítido que o balde
+  anterior (ex.: 640 → 518 px no palco do editor, 128 → 118 px na barra lateral). Mudar a janela para uma tela
+  com outra escala reconstrói bitmaps e texto. Ao montar um Orb,
   todas as expressões das atividades são pré-decodificadas em segundo plano, então trocar de atividade
   não decodifica nada na thread principal. O `OrbFrame` estático usa os mesmos bitmaps (sem filtro de cor).
 
@@ -228,32 +242,32 @@ e a mola da mandíbula não contam como velocidade (assim como as piscadas) e a 
 isso a mandíbula mantinha o Orb grande a 60 fps (110 frames/s somados). CPU com a tela ligada (uma rodada,
 janela invisível): parado ~0,9 % antes → ~0,75 % equilibrado (ruído; a tela apagou antes das demais rodadas).
 
-`OPENBOT_STATIC_ORBS=1` desliga toda a animação. `OPENBOT_ANIMATE_INACTIVE=1` mantém os Orbs animando com a
+`ORB_STATIC=1` desliga toda a animação. `ORB_ANIMATE_INACTIVE=1` mantém os Orbs animando com a
 janela inativa ou coberta, só para medir CPU sem trazer o app para a frente.
 
 ## 7. Ferramentas de desenvolvimento
 
 ```bash
-./scripts/bundle.sh && open build/OpenBot.app
+./scripts/bundle.sh && open build/Orb.app
 
 # Folha de referência: Orbs de exemplo × atividades (usa o renderizador estático)
-./build/OpenBot.app/Contents/MacOS/OpenBot --render-orbs docs/orbs-activities.png
+./build/Orb.app/Contents/MacOS/Orb --render-orbs docs/orbs-activities.png
 
 # Envia um prompt ao abrir, para ver ouvir → tarefas → aprovação → feliz (use com scripts/fake-llm.py)
-open -n build/OpenBot.app --env OPENBOT_SEND="Como está meu Mac?"
+open -n build/Orb.app --env ORB_SEND="Como está meu Mac?"
 
 # Sem animação (comparar CPU)
-OPENBOT_STATIC_ORBS=1 ./build/OpenBot.app/Contents/MacOS/OpenBot
+ORB_STATIC=1 ./build/Orb.app/Contents/MacOS/Orb
 
 # Medir CPU sem roubar o foco: anima mesmo com a janela inativa/coberta
-open -g -n build/OpenBot.app --env OPENBOT_ANIMATE_INACTIVE=1 --env OPENBOT_DATA_DIR=/tmp/openbot-perf
+open -g -n build/Orb.app --env ORB_ANIMATE_INACTIVE=1 --env ORB_DATA_DIR=/tmp/orb-perf
 ps -o %cpu= -p <pid>; sample <pid> 5
 ```
 
 O display link só dispara com a tela ligada: com o monitor em repouso o custo é zero e a medição não
 diz nada. `open -g` pode não criar a janela principal enquanto o app não é ativado; nesse caso, hospede
 os Orbs numa janela própria sem borda, `alphaValue = 0`, `ignoresMouseEvents = true` e
-`orderFrontRegardless()` (não ativa o app), com `OPENBOT_ANIMATE_INACTIVE=1`.
+`orderFrontRegardless()` (não ativa o app), com `ORB_ANIMATE_INACTIVE=1`.
 
 ## 8. Arte: gerar e adicionar opções (Blender)
 

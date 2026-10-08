@@ -2,18 +2,18 @@
 import PackageDescription
 
 let package = Package(
-    name: "OpenBotMac",
+    name: "Orb",
     platforms: [.macOS(.v14)],
     targets: [
         .executableTarget(
-            name: "OpenBotMac",
-            path: "Sources/OpenBotMac",
+            name: "Orb",
+            path: "Sources/Orb",
             exclude: ["Resources"]
         ),
         .testTarget(
-            name: "OpenBotMacTests",
-            dependencies: ["OpenBotMac"],
-            path: "Tests/OpenBotMacTests"
+            name: "OrbAppTests",
+            dependencies: ["Orb"],
+            path: "Tests/OrbAppTests"
         )
     ]
 )

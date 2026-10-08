@@ -1,4 +1,4 @@
-"""OpenBot Orbs: render customizable glowing-gel orbs in Blender (headless).
+"""Orbs (app Orb): render customizable glowing-gel orbs in Blender (headless).
 
     Blender -b --python art/orbs.py -- <command> [options]
 
@@ -7,7 +7,7 @@ Commands:
             --name rosa-dj        -> art/renders/<name>.png (+ -dark/-light previews)
     catalog [--category eyes]     -> one labeled tile per option + a contact sheet per category
                                      (--category visemes: the talking mouths, not user options)
-    layers [--category mouth]     -> app layers in Sources/OpenBotMac/Resources/Orbs (+ options.json)
+    layers [--category mouth]     -> app layers in Sources/Orb/Resources/Orbs (+ options.json)
                                      (--category visemes -> visemes/<id>.png and <id>-dark.png)
     manifest                      -> art/orb_options.json (ids + labels for the app editor)
 """
@@ -213,7 +213,7 @@ def main():
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=["render", "catalog", "manifest", "personas", "layers"])
-    parser.add_argument("--out", default=os.path.join(os.path.dirname(ART), "Sources", "OpenBotMac", "Resources", "Orbs"))
+    parser.add_argument("--out", default=os.path.join(os.path.dirname(ART), "Sources", "Orb", "Resources", "Orbs"))
     parser.add_argument("--config", default="{}")
     parser.add_argument("--name", default="orb")
     parser.add_argument("--category", default=None)

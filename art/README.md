@@ -1,4 +1,4 @@
-# Orbs: personagens 3D do OpenBot
+# Orbs: personagens 3D do app Orb
 
 Esferas de gel translúcido, modeladas e renderizadas no **Blender (Cycles)** por script.
 O visual foi calibrado lado a lado com `reference/orb-ref.png`.
@@ -7,7 +7,7 @@ O visual foi calibrado lado a lado com `reference/orb-ref.png`.
 B=/caminho/para/Blender.app/Contents/MacOS/Blender
 
 # Um orb sob medida
-$B -b --python art/orbs.py -- render --name meu-bot \
+$B -b --python art/orbs.py -- render --name meu-orb \
   --config '{"color": "rosa", "eyes": "ovais", "mouth": "sorriso", "hair": "tufinho", "accessories": ["fones"]}'
 
 # Catálogo com legendas (uma categoria ou todas) e personagens de exemplo
@@ -38,7 +38,7 @@ As cores claras (Pérola e Algodão-doce) trocam os olhos e a boca para escuros 
 
 ## Visemas (boca falando)
 
-Quatro formas de boca para o Orb "falar" enquanto o bot transmite a resposta: `fala-a` (aberta média),
+Quatro formas de boca para o Orb "falar" enquanto a resposta chega: `fala-a` (aberta média),
 `fala-o` (o redondo), `fala-e` (fenda larga sorrindo) e `fala-m` (lábios fechados, linha suave).
 Não são opções do usuário: ficam em `VISEMES` (`orbkit/features.py`), fora de `MOUTHS`.
 Mesmo material, traço e posição das bocas (`ctx.mouth_z`), todas centradas em x = 0 e com os cantos de
