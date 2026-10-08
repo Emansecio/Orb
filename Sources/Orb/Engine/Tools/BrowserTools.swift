@@ -89,17 +89,15 @@ struct BrowserTabTool: AgentTool {
     let spec = ToolSpec(
         name: "browser_tab",
         description: """
-        Get the address and title of the tab the user is looking at in Safari, Google Chrome, Arc, Microsoft Edge \
-        or Brave, and optionally the visible text of that page. Use it when the user says "essa página", "o site \
-        que estou vendo" or asks about what is open in their browser; it works in their logged-in session, \
-        which web_fetch cannot see. Only browsers that are already open are queried. Page text needs the \
-        browser's "Permitir JavaScript de Eventos da Apple" setting; without it you still get the address and \
-        title, plus instructions for the user.
+        Get the address and title of the tab the user is looking at in Safari, Chrome, Arc, Edge or Brave, \
+        optionally with the page's visible text. Use it for "essa página" or "o site que estou vendo": it sees \
+        their logged-in session, which web_fetch cannot. Page text needs the browser's "Permitir JavaScript de \
+        Eventos da Apple"; the result says if it is off.
         """,
         parameters: .schema([
-            "browser": .property("string", "Safari, Chrome, Arc, Edge or Brave. Default: every one that is open."),
-            "include_text": .property("boolean", "Also return the page's visible text (default false)."),
-            "max_chars": .property("integer", "Limit for the page text (default 6000, max 30000)."),
+            "browser": .property("string", "Safari, Chrome, Arc, Edge or Brave (default: every one open)."),
+            "include_text": .property("boolean"),
+            "max_chars": .property("integer", "Text limit (default 6000, max 12000)."),
         ]))
 
     var kind: ToolCall.Kind { .browser }
@@ -129,7 +127,7 @@ struct BrowserTabTool: AgentTool {
         }
 
         let includeText = arguments["include_text"]?.bool ?? false
-        let limit = arguments.integer("max_chars", default: 6000, in: 100...30_000)
+        let limit = arguments.integer("max_chars", default: 6000, in: 100...12_000)
         var sections: [String] = []
         for browser in running {
             do {

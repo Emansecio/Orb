@@ -36,9 +36,9 @@ struct PrefacedHistoryTests {
             conversation.messages.append(.tool("c\(index)", String(repeating: "x", count: 25_000)))
             conversation.messages.append(ChatMessage(role: .assistant, content: "ok \(index)"))
         }
-        let prepared = conversation.prepareHistory(budget: ContextBudget(tokens: 10_000))
+        let prepared = conversation.prepareHistory(budget: ContextBudget(tokens: 2_000))
         let summary = try #require(ContextSummary.leading(in: prepared.history))
-        #expect(summary.contains("- pedido 0"))
+        #expect(summary.contains("- pedido 7") && summary.contains("- pedido 8"))
         #expect(!summary.contains(TurnPreface.openTag))
     }
 

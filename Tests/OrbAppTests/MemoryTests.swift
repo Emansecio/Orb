@@ -233,10 +233,28 @@ import Testing
                                              context: context) == nil)
     }
 
-    private func call(_ method: String, _ params: JSONValue? = nil, id: Int = 1, mac: Bool, context: ToolContext) async throws -> JSONValue {
+    private func call(_ method: String, _ params: JSONValue? = nil, id: Int = 1, mac: Bool, accessibility: Bool = true,
+                      context: ToolContext) async throws -> JSONValue {
         var request: [String: JSONValue] = ["jsonrpc": .string("2.0"), "id": .number(Double(id)), "method": .string(method)]
         if let params { request["params"] = params }
-        return try #require(await OrbToolsMCPServer.handle(.object(request), context: context, mac: mac))
+        return try #require(await OrbToolsMCPServer.handle(.object(request), context: context, mac: mac, accessibilityGranted: accessibility))
+    }
+
+    @Test func theInterfaceToolsAreListedOnlyWhileAccessibilityIsAllowed() async throws {
+        let context = ToolContext(workingDirectory: root, memory: bank())
+        func names(_ accessibility: Bool) async throws -> [String] {
+            let reply = try await call("tools/list", mac: true, accessibility: accessibility, context: context)
+            return try #require(reply["result"]?["tools"]?.array).compactMap { $0["name"]?.string }
+        }
+        let allowed = try await names(true)
+        let held = try await names(false)
+        #expect(allowed.contains("ui_read") && allowed.contains("ui_act"))
+        #expect(!held.contains("ui_read") && !held.contains("ui_act"))
+        #expect(held == allowed.filter { !ToolBox.accessibilityToolNames.contains($0) })
+        // Calling one still works when the client asks anyway (it explains what to turn on).
+        let called = try await call("tools/call", .object(["name": .string("ui_read"), "arguments": .object([:])]), mac: true,
+                                    accessibility: false, context: context)
+        #expect(called["error"] == nil)
     }
 
     @Test func macToolsAreListedOnlyForAnOrbThatMayUseTheMac() async throws {
@@ -304,6 +322,12 @@ import Testing
         #expect(OrbToolsMCPServer.Options(arguments: ["Orb", "--memory-mcp", root.path]) == .init(memoryDirectory: root))
         #expect(OrbToolsMCPServer.Options(arguments: ["Orb", "--memory-mcp", root.path, "--mac"])?.mac == true)
         // Anything else starts the app; a flag without its folder is not the server either.
+        // The app tells the server about Accessibility; without the flag the server asks macOS.
+        let granted = OrbToolsMCPServer.config(directory: root, mac: true, accessibilityGranted: true)
+        #expect(OrbToolsMCPServer.Options(arguments: [granted.command] + granted.arguments)?.accessibilityGranted == true)
+        let denied = OrbToolsMCPServer.config(directory: root, mac: true, accessibilityGranted: false)
+        #expect(OrbToolsMCPServer.Options(arguments: [denied.command] + denied.arguments)?.accessibilityGranted == false)
+        #expect(OrbToolsMCPServer.Options(arguments: [config.command] + config.arguments)?.accessibilityGranted == nil)
         #expect(OrbToolsMCPServer.Options(arguments: ["Orb"]) == nil)
         #expect(OrbToolsMCPServer.Options(arguments: ["Orb", "--tools-mcp"]) == nil)
         #expect(OrbToolsMCPServer.Options(arguments: ["Orb", "--tools-mcp", root.path, "--folder"])?.folder == nil)

@@ -4,15 +4,13 @@ struct OpenTool: AgentTool {
     let spec = ToolSpec(
         name: "open",
         description: """
-        Open a URL in the default browser, a file or folder in its default app, or launch an application by \
-        name (e.g. "Safari", "Notes") or bundle identifier. Local servers work too ("localhost:3000" opens \
-        http://localhost:3000). Set `app` to open the target with a specific app instead of the default one \
-        (e.g. target "~/Desktop/a.png" with app "Preview"). Apps are found anywhere on the Mac, not only in \
-        /Applications. It only opens things: to read a page or file use web_fetch or read_file.
+        Open a URL in the default browser, a file or folder in its default app, or launch an app by name or \
+        bundle identifier. "localhost:3000" works. Set `app` to open the target with a specific app. It only \
+        opens things: to read a page or file use web_fetch or read_file.
         """,
         parameters: .schema([
-            "target": .property("string", "A URL (https://…, localhost:3000, mailto:…), a file or folder path, or an application name."),
-            "app": .property("string", "Optional: application name or bundle identifier to open the target with."),
+            "target": .property("string", "URL (https://…, localhost:3000, mailto:…), file or folder path, or app name."),
+            "app": .property("string"),
         ], required: ["target"]))
 
     var kind: ToolCall.Kind { .computer }
@@ -174,24 +172,20 @@ struct AppleScriptTool: AgentTool {
     let spec = ToolSpec(
         name: "applescript",
         description: """
-        Run an AppleScript (or JavaScript for Automation) with osascript and return its result. Use it to \
-        automate Mac apps such as Mail, Calendar, Notes, Reminders, Contacts, Messages, Finder, Music, Safari \
-        and System Events. Set language "javascript" for JXA, and output "structured" to get lists and records \
-        in a form that keeps strings and numbers apart. Stops after 60 seconds (timeout_seconds up to 300). \
-        The first use of each app makes macOS ask the user for Automation permission (for apps that are already \
-        open, the call waits for the answer); if a script fails with a permission error, the message says what the user must enable: pass it on \
-        instead of retrying. Prefer a dedicated tool (open, \
+        Run an AppleScript (or JavaScript for Automation, language "javascript") with osascript and return its \
+        result, to automate Mac apps (Mail, Calendar, Notes, Finder, Safari, System Events…). Output \
+        "structured" keeps strings and numbers apart. Stops after 60 seconds (timeout_seconds up to 300). The \
+        first use of each app makes macOS ask the user for Automation permission and the call waits for the \
+        answer; on a permission error, pass the message on instead of retrying. Prefer a dedicated tool (open, \
         browser_tab, clipboard_read, screenshot…) when one exists.
         """,
         parameters: .schema([
-            "script": .property("string", "Script source; may span several lines."),
+            "script": .property("string"),
             "language": .object(["type": .string("string"),
-                                 "enum": .array(["applescript", "javascript"].map(JSONValue.string)),
-                                 "description": .string("applescript (default) or javascript (JXA).")]),
+                                 "enum": .array(["applescript", "javascript"].map(JSONValue.string))]),
             "output": .object(["type": .string("string"),
-                               "enum": .array(["text", "structured"].map(JSONValue.string)),
-                               "description": .string("text (default): human-readable result. structured: recompilable form, e.g. {\"a\", 1}.")]),
-            "timeout_seconds": .property("integer", "Seconds before the script is stopped (default 60, max 300)."),
+                               "enum": .array(["text", "structured"].map(JSONValue.string))]),
+            "timeout_seconds": .property("integer"),
         ], required: ["script"]))
 
     var kind: ToolCall.Kind { .computer }
@@ -224,18 +218,16 @@ struct RememberTool: AgentTool {
     let spec = ToolSpec(
         name: "remember",
         description: """
-        Save something worth keeping to your long-term memory (yours only, used in every future conversation): \
-        a fact about the user or their work, one of their preferences, a procedure they want followed, or a note \
-        about how they want you to work. One short, self-contained item per call; near-duplicates refresh the \
-        existing memory instead of adding another.
+        Save something worth keeping to your long-term memory (used in every future conversation): a fact about \
+        the user or their work, a preference, a procedure they want followed, or how they want you to work. One \
+        short, self-contained item per call; near-duplicates refresh the existing memory.
         """,
         parameters: .schema([
-            "fact": .property("string", "What to remember, written as a complete sentence."),
+            "fact": .property("string", "What to remember, as a complete sentence."),
             "tipo": .object(["type": .string("string"),
                              "enum": .array(["fato", "preferencia", "procedimento", "identidade"].map(JSONValue.string)),
-                             "description": .string("fato (default): about the user or their work. preferencia: how they like things. "
-                                                    + "procedimento: how to do a recurring task. identidade: how you should work and behave.")]),
-            "titulo": .property("string", "Optional short title."),
+                             "description": .string("Default fato. identidade: how you should work and behave.")]),
+            "titulo": .property("string"),
         ], required: ["fact"]))
 
     var kind: ToolCall.Kind { .memory }
@@ -270,13 +262,13 @@ struct RecallTool: AgentTool {
     let spec = ToolSpec(
         name: "recall",
         description: """
-        Search your long-term memory: facts, preferences and procedures the user shared, and summaries of earlier \
-        conversations (what was asked, done, which files and links, what was left open). Use it before asking the \
-        user something they may have told you before, and when they refer to past work.
+        Search your long-term memory: facts, preferences and procedures the user shared, and summaries of \
+        earlier conversations. Use it before asking something they may have told you, and when they refer to \
+        past work.
         """,
         parameters: .schema([
-            "query": .property("string", "Words to look for (any language; accents don't matter)."),
-            "limite": .property("integer", "How many results (default 5, max 10)."),
+            "query": .property("string"),
+            "limite": .property("integer", "Results (default 5, max 10)."),
         ], required: ["query"]))
 
     var kind: ToolCall.Kind { .memory }

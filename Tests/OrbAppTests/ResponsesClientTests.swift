@@ -195,19 +195,19 @@ struct ResponsesClientTests {
 
     @Test func streamsReasoningCallsAndFinishWithTheCacheKey() async throws {
         let sse = reasoningStream.map { "data: \($0)\n\n" }.joined()
-        StubProtocol.queue(host: "responses-stream.test", [.init(body: sse)])
-        let client = ResponsesClient(baseURL: URL(string: "https://responses-stream.test/v1")!, apiKey: "k", conversationID: "bot-9",
+        StubProtocol.queue(host: "chatgpt.com", [.init(body: sse)])
+        let client = ResponsesClient(baseURL: URL(string: "https://chatgpt.com/v1")!, apiKey: "k", conversationID: "bot-9",
                                      session: StubProtocol.session)
         var events: [LLMEvent] = []
         for try await event in client.stream(model: "gpt-x", messages: [.user("oi")], tools: []) { events.append(event) }
-        let trace = ReasoningTrace(format: .responses, provider: "responses-stream.test", model: "gpt-x",
+        let trace = ReasoningTrace(format: .responses, provider: "chatgpt.com", model: "gpt-x",
                                    parts: [ReasoningPart(kind: .encrypted, text: "Vou listar.", data: "gAAAA==", id: "rs_1", callsBefore: 0)])
         #expect(events == [
             .reasoning(trace),
             .toolCalls([ToolCallRequest(id: "call_7", name: "list_directory", arguments: #"{"path":"~"}"#)]),
             .finished(.toolUse, TokenUsage(input: 50, output: 30, cacheRead: 150, cacheWrite: nil)),
         ])
-        let sent = try #require(StubProtocol.sent(to: "responses-stream.test").first)
+        let sent = try #require(StubProtocol.sent(to: "chatgpt.com").first)
         #expect(sent.body?["prompt_cache_key"] == .string("bot-9"))
         #expect(sent.request.value(forHTTPHeaderField: "Authorization") == "Bearer k")
     }

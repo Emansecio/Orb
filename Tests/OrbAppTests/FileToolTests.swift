@@ -89,13 +89,15 @@ final class FileToolTests {
         let line = String(repeating: "y", count: 1_000)
         try workspace.write("big.txt", (1...300).map { _ in line }.joined(separator: "\n") + "\n")
         let page = try await run(ReadFileTool(), ["path": .string("big.txt")])
-        #expect(page.count < 52_000)
+        // A page stays under the cap that would cut its middle (see ToolOutputBudget).
+        #expect(page.count < ToolOutputCap.limit)
+        #expect(page.count < ToolOutputBudget.pageCharacters + 200)
         let next = try #require(page.range(of: #"offset=(\d+)"#, options: .regularExpression)).lowerBound
         let offset = Int(page[next...].dropFirst(7).prefix { $0.isNumber }) ?? 0
         #expect(offset > 1 && offset < 301)
         let rest = try await run(ReadFileTool(), ["path": .string("big.txt"), "offset": .number(Double(offset))])
         #expect(rest.hasPrefix(String(repeating: " ", count: 6 - String(offset).count) + "\(offset)\t"))
-        #expect(page.contains("mais \(300 - offset + 1) linhas"))
+        #expect(page.hasSuffix("[linhas 1–\(offset - 1) de 300; continue com offset=\(offset)]"))
     }
 
     @Test func readReportsOffsetsPastTheEnd() async throws {

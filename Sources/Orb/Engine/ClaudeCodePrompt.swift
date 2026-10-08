@@ -2,9 +2,10 @@ import Foundation
 
 // MARK: - System prompt
 
-/// Text appended to Claude Code's own system prompt. No clock or other per-turn values: Claude Code records the
-/// prompt on a session's first request and reuses it when resuming, so what changes goes in the turn's context
-/// (`TurnPreface`, `memoryUpdate`, `standingUpdate`).
+/// Text appended to Claude Code's own system prompt. No clock or other per-turn values. A session sends the same text on
+/// every resume (`TurnPrompt.claudeCode`), byte for byte, so Claude Code's own prompt cache holds from one turn to the next;
+/// the text is rebuilt (one cache miss) only when the identity, the preferences or the standing rules change, and then the
+/// change also goes in the turn's context (`TurnPreface`, `memoryUpdate`, `standingUpdate`), as everything else that varies.
 enum ClaudeCodePrompt {
     /// Conversation turns this Claude Code session has not seen (other models answered in Orb), as a compact
     /// preface for its next prompt. Empty when there is nothing to catch up on.
@@ -38,9 +39,8 @@ enum ClaudeCodePrompt {
     static let memoryTools = MemoryToolNames(remember: ClaudeCodeTools.memoryPrefix + "remember",
                                              recall: ClaudeCodeTools.memoryPrefix + "recall")
 
-    /// Claude Code records a session's system prompt on its first request and reuses it on every resume, so on
-    /// later turns the memory that changes goes with the message instead: what relates to this message, and the
-    /// identity and preferences again if they changed since the session started.
+    /// On resumed turns the memory that changes goes with the message, not in the system prompt (which stays the same for
+    /// the cache): what relates to this message, and the identity and preferences again if they changed.
     static func memoryUpdate(_ brief: MemoryBrief, pinnedChanged: Bool) -> String {
         var parts: [String] = []
         if pinnedChanged, !brief.pinned.isEmpty {
@@ -50,11 +50,24 @@ enum ClaudeCodePrompt {
         return parts.isEmpty ? "" : "[Memory]\n" + parts.joined(separator: "\n\n")
     }
 
-    /// What a resumed session must be told again when the permissions or the folder's instructions changed since its
-    /// system prompt was frozen.
-    static func standingUpdate(permissions: String, folder: String) -> String {
+    /// What a resumed session must be told again when the sections of `standing` changed since its system prompt was built
+    /// (in case the system prompt of a session is not read again, or Claude Code compacts the session).
+    static func standingUpdate(_ sections: [String]) -> String {
         "[Updated rules]\nThese replace the earlier version of the same sections in your instructions:\n\n"
-            + [permissions, folder].filter { !$0.isEmpty }.joined(separator: "\n\n")
+            + sections.filter { !$0.isEmpty }.joined(separator: "\n\n")
+    }
+
+    /// The parts of the system prompt that can change while a session runs (the Orb is renamed or given another mode,
+    /// skills are added, the folder's instructions are edited), in prompt order. They are compared by hash, and sent
+    /// again with the message when they differ from what the session started with.
+    static func standing(bot: Bot, skills: [Skill], folder: String) -> [String] {
+        [opening(bot), standingPermissions(bot), PromptParts.skills(skills, engine: .claudeCode), folder].filter { !$0.isEmpty }
+    }
+
+    /// Who the Orb is and how it talks: the first lines of the prompt.
+    static func opening(_ bot: Bot) -> String {
+        [PromptParts.identity(bot, engine: .claudeCode), PromptParts.roaming(bot), PromptParts.language, PromptParts.announce]
+            .joined(separator: "\n")
     }
 
     /// `memory` is the stable part of the Orb's memory brief (`MemoryBrief.stable`); its tools come from the
@@ -62,8 +75,7 @@ enum ClaudeCodePrompt {
     /// reads CLAUDE.md by itself, so the caller leaves that one out.
     static func make(bot: Bot, skills: [Skill], memory: String = "", environment: MacEnvironment = .current(), folder: String = "") -> String {
         var sections = [
-            ([PromptParts.identity(bot, engine: .claudeCode), PromptParts.roaming(bot), PromptParts.language]
-                + [PromptParts.announce]).joined(separator: "\n"),
+            opening(bot),
             PromptParts.environment(environment, engine: .claudeCode),
             standingPermissions(bot),
             PromptParts.untrustedContent,
@@ -76,6 +88,6 @@ enum ClaudeCodePrompt {
         return sections.joined(separator: "\n\n")
     }
 
-    /// The permissions section as the (frozen) system prompt has it.
+    /// The permissions section as the system prompt has it.
     static func standingPermissions(_ bot: Bot) -> String { PromptParts.permissions(bot, engine: .claudeCode) }
 }

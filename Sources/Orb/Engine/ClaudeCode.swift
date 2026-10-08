@@ -54,7 +54,10 @@ extension Conversation {
     mutating func claudeSessionReported(_ id: String, folder: String?) {
         claudeSessionID = id.isEmpty ? nil : id
         claudeSessionFolder = id.isEmpty ? nil : folder
-        if id.isEmpty { claudeSeenCount = nil }
+        if id.isEmpty {
+            claudeSeenCount = nil
+            claudeRelatedSent = nil // the next session has seen none of it
+        }
     }
 
     /// A Claude Code turn in `folder` ended. Everything so far went through (or was handed to) its session, unless

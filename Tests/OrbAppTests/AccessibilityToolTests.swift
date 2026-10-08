@@ -915,7 +915,8 @@ struct UIToolWiringTests {
     @Test func claudeCodeGetsBothToolsThroughTheToolsServerOnlyWithMacAccess() async throws {
         func listed(mac: Bool) async throws -> [String] {
             let request = JSONValue.object(["jsonrpc": .string("2.0"), "id": .number(1), "method": .string("tools/list")])
-            let reply = try #require(await OrbToolsMCPServer.handle(request, context: ToolContext(workingDirectory: FileManager.default.temporaryDirectory), mac: mac))
+            let reply = try #require(await OrbToolsMCPServer.handle(request, context: ToolContext(workingDirectory: FileManager.default.temporaryDirectory), mac: mac,
+                                                                          accessibilityGranted: true))
             return reply["result"]?["tools"]?.array?.compactMap { $0["name"]?.string } ?? []
         }
         let withMac = try await listed(mac: true)

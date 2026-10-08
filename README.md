@@ -53,8 +53,16 @@ Views (SwiftUI)  ──►  AppModel (@MainActor @Observable)
   portão: o que muda o Mac ou roda código, e também o que pode **mandar dados para fora** (`web_fetch`, `open`) ou ficar no
   prompt de todas as conversas (`remember`). Assim, um texto malicioso numa página não consegue ler um segredo e enviá-lo
   sem você aprovar. “Só leitura” vale mesmo para ferramentas marcadas como “Sempre permitir”.
-- **Contexto**: o modelo recebe as últimas 60 mensagens (começando numa mensagem sua), com saídas antigas de ferramentas
-  encurtadas; chamadas interrompidas recebem um resultado “não executado” para o histórico continuar válido.
+- **Contexto** (`ContextBudget`, `ContextWindow`): o histórico enviado ao modelo cabe num orçamento de 90% da janela menos o
+  prompt de sistema, as especificações das ferramentas e o espaço da resposta, com teto escolhido em “Memória da conversa”
+  (40 mil tokens, 80 mil, ou até 60% da janela). Passou do orçamento, o começo vira resumo **em lote**, até a metade dele
+  (cada mudança no começo do pedido reescreve o cache do provedor, então mexe-se pouco e de uma vez). Saídas antigas de
+  ferramentas, prefácios `<orb_context>` e raciocínio criptografado de trechos velhos são condensados na cópia enviada (as
+  mensagens guardadas ficam inteiras); numa tarefa maior que a janela, as saídas mais novas ficam inteiras e os passos mais
+  velhos viram uma linha cada. Uma tarefa que para no limite de passos deixa um registro de progresso para o “continua”.
+  Saídas grandes demais vão para `saidas/<id do Orb>/` (apagadas após 14 dias ou acima de 200 MB por Orb). Uma recusa do
+  provedor por tamanho ensina a janela real do modelo. Chamadas interrompidas recebem um resultado “não executado” para o
+  histórico continuar válido.
 - **Claude Code**: Orbs com modelo `claudeCode/…` não passam pelo `AgentEngine`; o `ClaudeCodeEngine` roda um
   `claude -p` por turno (veja abaixo).
 - **Dados**: `state.json` (Orbs, rotinas, skills, conectores, provedor) e `conversations/<id do Orb>.json` (o que a tela mostra e

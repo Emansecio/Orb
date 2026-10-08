@@ -2,52 +2,32 @@ import Foundation
 
 // What part of a conversation the model is sent, so a long task neither overflows the model's window nor
 // silently loses the request: sizes are estimated, old outputs and arguments shortened, and whole old turns
-// folded into a summary instead of being cut.
+// folded into a summary instead of being cut. The budget is in `ContextBudget`.
+//
+// Every provider caches the start of a request, so what is sent changes in batches: nothing is touched while the
+// history fits, and when it no longer does it is brought down to a low-water mark (half the budget), not just
+// under the limit. The next compaction then comes many messages later instead of at the very next one.
 
-// MARK: - Budget
+// MARK: - Cut
 
-/// How much conversation history one request may carry, estimated in tokens (characters / 3.5).
-struct ContextBudget: Sendable, Equatable {
-    static let charactersPerToken = 3.5
-    /// Share of the model's window given to history; the rest is for the system prompt, tool specs, the new
-    /// message and the reply.
-    static let historyShare = 0.6
+/// What successive fits of one growing conversation remember, so that the cut moves only when it must: the part
+/// already folded into the summary, how hard old outputs have been shortened, the steps already set aside. A
+/// fit without memory (`ContextWindow.fit(_:budget:summary:)`) starts from an empty cut.
+struct ContextCut: Sendable, Equatable {
+    /// Messages at the start of the input already folded into `summary` (a leading summary pair counts).
+    var covered = 0
+    var summary: String?
+    /// The task all the fields below belong to starts at this index of the input; a new task starts them over.
+    var anchor = -1
+    /// Shortening level reached in a task too big for the window (see `ContextWindow.rungs`); it only goes up.
+    var rung = 0
+    /// Messages after the task's request set aside so far (they live on as lines in the summary pair).
+    var skipped = 0
+    /// Tool outputs of the task, oldest first, already past their fresh period (shortened).
+    var settled = 0
 
-    /// Tokens of history.
-    var tokens: Int
-
-    var characters: Int { Int(Double(tokens) * Self.charactersPerToken) }
-
-    /// Used when nothing is known about the model (and by callers that don't care, like the Claude Code catch-up).
-    static let fallback = ContextBudget(modelWindow: 128_000)
-
-    init(tokens: Int) {
-        self.tokens = max(tokens, 500)
-    }
-
-    /// `modelWindow`: the model's whole context window in tokens.
-    init(modelWindow: Int) {
-        self.init(tokens: Int(Double(modelWindow) * Self.historyShare))
-    }
-
-    /// The model's reported window when known, else a default for its wire format (local servers run small windows).
-    /// `format`: the account's own wire format, used when the model is not in its catalog (custom gateways).
-    init(model: ProviderModel?, provider: ProviderKind, format: APIFormat? = nil) {
-        if let known = model?.contextLength, known > 0 {
-            self.init(modelWindow: known)
-        } else if provider == .ollama || provider == .lmstudio {
-            self.init(modelWindow: 16_000)
-        } else {
-            let wire = model?.format ?? format ?? (provider == .anthropic ? .messages : provider == .claudeCode ? .claudeCode : .chat)
-            switch wire {
-            case .chat, .responses: self.init(modelWindow: 128_000)
-            case .messages, .claudeCode: self.init(modelWindow: 200_000)
-            }
-        }
-    }
-
-    func scaled(by factor: Double) -> ContextBudget {
-        ContextBudget(tokens: Int(Double(tokens) * factor))
+    init(summary: String? = nil) {
+        self.summary = summary
     }
 }
 
@@ -61,40 +41,164 @@ struct ContextWindow: Sendable, Equatable {
     var droppedCount: Int
     /// Summary of those messages (nil when nothing was folded away); kept by `Conversation` between turns.
     var summary: String?
+    /// How many messages after the request of a task too big for the window were set aside (digested in the pair).
+    var skippedCount = 0
 
+    /// Old tool outputs (those of earlier turns, and the task's own once past their fresh period), in characters.
     static let toolOutputPreview = 4_000
     static let argumentLimit = 1_000
-    /// Tool outputs of the latest steps of a task in progress stay whole: the model is still working on them.
+    /// Tool outputs of a task in progress stay whole while the model is working on them, and changing them would
+    /// start the provider's cache over at every step: so they become previews in batches (see `freshShare`) or when
+    /// the task crowds the window, but this many of the newest always stay whole.
     static let freshToolOutputs = 3
+    /// Share of the budget the whole outputs of a task in progress may take before the oldest become previews, and
+    /// how many outputs beyond the newest few it takes for that to happen (so it comes in batches).
+    static let freshShare = 0.4
+    static let freshBatch = 3
+
+    /// How hard a task that alone outgrows the window is shortened, from the first level up: the previews of old outputs
+    /// first, then the whole outputs of the task are capped, and only as a last resort the oldest steps are set aside.
+    /// Levels only apply to what is already in the request or is added at its end, so after a level is reached the
+    /// request grows at its end again.
+    struct Rung: Sendable {
+        var oldOutputs: Int
+        var arguments: Int
+        /// Cap on the outputs of the task that are still whole (nil: no cap).
+        var wholeOutputs: Int?
+    }
+
+    static let rungs: [Rung] = [
+        Rung(oldOutputs: toolOutputPreview, arguments: argumentLimit, wholeOutputs: nil),
+        Rung(oldOutputs: 1_500, arguments: 300, wholeOutputs: nil),
+        Rung(oldOutputs: 800, arguments: 300, wholeOutputs: nil),
+        // Even the newest output keeps this much, never less.
+        Rung(oldOutputs: 800, arguments: 300, wholeOutputs: 8_000),
+    ]
+
+    /// Fits `input` (no system message) to `budget` with no memory of earlier fits.
+    /// `previousSummary` stands for messages already left out of `input`.
+    static func fit(_ input: [ChatMessage], budget: ContextBudget, summary previousSummary: String? = nil, condensing: Int = 0,
+                    continuing: Bool = false) -> ContextWindow {
+        var cut = ContextCut(summary: previousSummary)
+        return fit(input, budget: budget, cut: &cut, condensing: condensing, continuing: continuing)
+    }
 
     /// Fits `input` (no system message) to `budget`:
     /// 1. starts at a user message (never an assistant or tool message);
-    /// 2. keeps the last 3 tool outputs of a task in progress whole and shortens all other outputs and
+    /// 2. keeps the outputs of a task in progress whole while they are fresh and shortens all other outputs and
     ///    tool-call arguments;
-    /// 3. drops the oldest whole turns until it fits, folding them into a summary;
-    /// 4. if the latest turn alone is still too big, shortens harder and sets aside its oldest steps, but it
-    ///    always keeps the user message that started it.
-    /// `previousSummary` stands for messages already left out of `input`.
-    static func fit(_ input: [ChatMessage], budget: ContextBudget, summary previousSummary: String? = nil) -> ContextWindow {
-        var work = input
-        var previous = previousSummary
-        if let inherited = ContextSummary.leading(in: work) {
+    /// 3. when over the budget, drops the oldest whole turns, down to the low-water mark, folding them into a summary;
+    /// 4. if the latest turn alone is still too big, shortens it harder step by step and sets aside its oldest steps
+    ///    (down to the low-water mark as well, leaving a line for each), but it always keeps the user message that
+    ///    started it and its newest step.
+    ///
+    /// `cut` is what the caller's earlier fits of this same conversation decided: it is applied again before
+    /// anything else, so the start of the request stays the same until the history is over the budget again, and it is
+    /// updated with what this fit decided. The input may only grow at its end between calls.
+    /// `condensing`: the first `condensing` messages of the input are sent condensed (see `ContextCondensing`).
+    /// `continuing`: the last user message of the input only picks up the task before it (a task that stopped at
+    /// the step limit), so that task's outputs are the fresh ones and its turn is not dropped from under it.
+    /// `paused`: the input ends with such a task, before the message that picks it up: it still counts as in progress.
+    static func fit(_ input: [ChatMessage], budget: ContextBudget, cut: inout ContextCut, condensing: Int = 0,
+                    continuing: Bool = false, paused: Bool = false) -> ContextWindow {
+        let limit = budget.characters
+        let covered = min(max(cut.covered, 0), input.count)
+        var work = Array(input[covered...])
+        var previous = cut.summary
+        var pairLength = 0
+        if covered == 0, let inherited = ContextSummary.leading(in: work) {
             previous = inherited
             work.removeFirst(2)
+            pairLength = 2
         }
         work = work.elidingOldImages()
         let start = work.firstIndex { $0.role == .user } ?? work.firstIndex { $0.role != .tool } ?? work.count
-        var body = Array(work[start...])
-        shorten(&body, keepFull: freshToolOutputs, outputLimit: toolOutputPreview, argumentLimit: argumentLimit)
+        let raw = Array(work[start...])
+        /// Index in `input` of `raw[0]`.
+        let origin = covered + pairLength + start
 
+        // The task in progress: the latest request, or, for a task picked up again, the one before it.
+        let users = raw.indices.filter { raw[$0].role == .user }
+        let pickedUp = continuing && users.count >= 2
+        let taskStart = pickedUp ? users[users.count - 2] : (users.last ?? -1)
+        let inProgress = pickedUp || paused || (raw.last.map { $0.role == .tool || !$0.toolCalls.isEmpty } ?? false)
+        let anchor = origin + max(taskStart, 0)
+        if cut.anchor != anchor {
+            cut.anchor = anchor
+            cut.rung = 0
+            cut.skipped = 0
+            cut.settled = 0
+        }
+
+        // Which outputs of the task are still whole: all of them, until the task is crowding the window.
+        let taskOutputs = inProgress ? raw.indices.filter { $0 > taskStart && raw[$0].role == .tool } : []
+        var settled = min(cut.settled, taskOutputs.count)
+        // Whole outputs take at most `freshShare` of the budget: past it, and once there are `freshBatch` more than the
+        // newest few, the oldest become previews in one go, down to half of that. (One at every step would change
+        // the middle of the request every time, and the provider's cache would start over from there.)
+        let argumentSizes = raw.reduce(into: [String: Int]()) { sizes, message in
+            for call in message.toolCalls { sizes[call.id] = call.arguments.count }
+        }
+        let costs = taskOutputs.map { raw[$0].content.count + (raw[$0].toolCallID.flatMap { argumentSizes[$0] } ?? 0) }
+        var freshCost = costs[settled...].reduce(0, +)
+        let freshLimit = Int(Double(limit) * freshShare)
+        if taskOutputs.count - settled >= freshToolOutputs + freshBatch, freshCost > freshLimit {
+            while taskOutputs.count - settled > freshToolOutputs, freshCost > freshLimit / 2 {
+                freshCost -= costs[settled]
+                settled += 1
+            }
+        }
+
+        let condensedUpTo = max(0, condensing - origin)
+        let newestSnapshot = ContextCondensing.snapshotIndex(in: raw)
+
+        /// `raw` shortened at level `rung`.
+        func prepared(_ rung: Int) -> [ChatMessage] {
+            let level = rungs[rung]
+            let fresh = Set(taskOutputs[settled...])
+            let freshCalls = Set(fresh.compactMap { raw[$0].toolCallID })
+            var messages = raw
+            for index in messages.indices {
+                let condensed = index < condensedUpTo
+                switch messages[index].role {
+                case .user where condensed:
+                    messages[index] = ContextCondensing.condensed(messages[index], keepingSnapshot: index == newestSnapshot,
+                                                                  keepingChanges: newestSnapshot.map { index > $0 } ?? false)
+                case .tool where fresh.contains(index):
+                    if let cap = level.wholeOutputs {
+                        messages[index].content = ContextText.preview(messages[index].content, limit: cap)
+                    }
+                case .tool:
+                    var allowed = level.oldOutputs
+                    if condensed { allowed = min(allowed, ContextCondensing.outputLimit) }
+                    allowed = max(allowed, messages[index].isError ? ContextCondensing.errorLimit : 0)
+                    messages[index].content = ContextText.preview(messages[index].content, limit: allowed)
+                case .assistant:
+                    if condensed { messages[index] = ContextCondensing.condensed(messages[index], keepingSnapshot: false) }
+                    for call in messages[index].toolCalls.indices where !freshCalls.contains(messages[index].toolCalls[call].id) {
+                        messages[index].toolCalls[call].arguments =
+                            ContextText.shortenArguments(messages[index].toolCalls[call].arguments, stringLimit: level.arguments)
+                    }
+                default:
+                    break
+                }
+            }
+            return messages
+        }
+
+        var rung = min(cut.rung, rungs.count - 1)
+        var body = prepared(rung)
         let sizes = body.map(\.contextCharacters)
         var total = sizes.reduce(0, +)
-        let turnStarts = body.indices.filter { body[$0].role == .user }
+        // A task picked up again is one turn with its predecessor: its own request is not a place to cut.
+        let turnStarts = users.filter { !(pickedUp && $0 == users.last) }
         var dropped = 0
         func reserve() -> Int { previous != nil || dropped > 0 ? ContextSummary.reserve : 0 }
 
+        // Over the limit: fold whole old turns away, down to the low-water mark.
         var turn = 0
-        while total + reserve() > budget.characters, turn + 1 < turnStarts.count {
+        let target = total + reserve() > limit ? Int(Double(limit) * budget.lowWater) : limit
+        while total + reserve() > target, turn + 1 < turnStarts.count {
             let end = turnStarts[turn + 1]
             total -= sizes[dropped..<end].reduce(0, +)
             dropped = end
@@ -102,63 +206,73 @@ struct ContextWindow: Sendable, Equatable {
         }
         body.removeFirst(dropped)
 
-        var skippedSteps: [ChatMessage] = []
-        if total + reserve() > budget.characters {
-            // Only the latest turn is left and it alone is too big.
-            for (outputLimit, argumentLimit) in [(toolOutputPreview, argumentLimit), (1_200, 300)] {
-                shorten(&body, keepFull: 0, outputLimit: outputLimit, argumentLimit: argumentLimit)
-                total = body.reduce(0) { $0 + $1.contextCharacters }
-                if total + reserve() <= budget.characters { break }
+        // What is left of the latest turn alone. Steps already set aside stay set aside.
+        let canSkip = body.first?.role == .user
+        var skipped = canSkip ? min(cut.skipped, max(body.count - 2, 0)) : 0
+        func view(_ rung: Int) -> [ChatMessage] {
+            var messages = Array(prepared(rung).dropFirst(dropped))
+            if skipped > 0 { messages.removeSubrange(1..<(1 + skipped)) }
+            return messages
+        }
+        func measure(_ messages: [ChatMessage]) -> Int { messages.reduce(0) { $0 + $1.contextCharacters } }
+        // Steps set aside leave a digest in the summary pair; a small window can spare fewer lines of it.
+        let digestLines = ToolDigest.lines(forLimit: limit)
+        let digestRoom = ToolDigest.maxCharacters(lines: digestLines)
+        func crowded() -> Bool { total + reserve() + (skipped > 0 ? digestRoom : 0) > limit }
+        if skipped > 0 {
+            body = view(rung)
+            total = measure(body)
+        }
+        if crowded() {
+            // Over the limit: bring the task down to the low-water mark, so this does not happen again at the very
+            // next step (every change rewrites the provider's cache). The gentlest cuts come first.
+            let goal = Int(Double(limit) * budget.stepsLowWater)
+            func relieved() -> Bool { total + reserve() + (skipped > 0 ? digestRoom : 0) <= goal }
+            // 1. The task's oldest whole outputs become previews (the newest few stay whole): until now nothing of
+            //    the task changed, so the cache held from step to step.
+            var estimate = total, next = settled
+            while taskOutputs.count - next > freshToolOutputs, estimate + reserve() > goal {
+                estimate -= max(0, sizes[taskOutputs[next]] - (toolOutputPreview + 120))
+                next += 1
             }
-            if total + reserve() > budget.characters {
-                skippedSteps = dropOldestSteps(of: &body, whileOver: budget.characters - ContextSummary.reserve)
+            if next > settled {
+                settled = next
+                body = view(rung)
+                total = measure(body)
+            }
+            // 2. Previews get shorter, then the whole outputs are capped, then only the newest stays long.
+            while !relieved(), rung + 1 < rungs.count {
+                rung += 1
+                body = view(rung)
+                total = measure(body)
+            }
+            // 3. The oldest steps are set aside, one line each in the summary; the newest step always stays.
+            if crowded(), canSkip {
+                while !relieved() {
+                    // One step at a time: from the message after the request to the next model reply.
+                    guard let next = body.indices.dropFirst(2).first(where: { body[$0].role == .assistant }) else { break }
+                    total -= measure(Array(body[1..<next]))
+                    skipped += next - 1
+                    body.removeSubrange(1..<next)
+                }
             }
         }
+        cut.rung = rung
+        cut.skipped = skipped
+        cut.settled = settled
+        let skippedSteps = skipped > 0 ? Array(raw[(dropped + 1)..<(dropped + 1 + skipped)]) : []
 
         // Messages before the first user message (a slice that began mid-turn) are just left out, not summarized.
         let folded = Array(work[start..<(start + dropped)])
         let summary: String? = folded.isEmpty ? previous : ContextSummary.make(from: folded, previous: previous)
-        let shown = [summary, ContextSummary.stepsNote(skippedSteps)].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
+        let shown = [summary, ContextSummary.stepsNote(skippedSteps, maxLines: digestLines)].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
         let messages = shown.isEmpty ? [] : ContextSummary.pair(shown, foldedTurns: summary != nil)
-        return ContextWindow(messages: (messages + body).answeringDanglingToolCalls(), droppedCount: start + dropped, summary: summary)
-    }
-
-    /// Sets aside the oldest model/tool steps after the leading user message, never the newest one.
-    private static func dropOldestSteps(of body: inout [ChatMessage], whileOver limit: Int) -> [ChatMessage] {
-        guard let first = body.firstIndex(where: { $0.role == .user }) else { return [] }
-        var skipped: [ChatMessage] = []
-        while body.reduce(0, { $0 + $1.contextCharacters }) > limit {
-            let steps = body.indices.dropFirst(first + 1)
-            guard let next = steps.dropFirst().first(where: { body[$0].role == .assistant }) else { break }
-            skipped += body[(first + 1)..<next]
-            body.removeSubrange((first + 1)..<next)
+        if dropped > 0 {
+            cut.covered = covered + pairLength + start + dropped
+            cut.summary = summary
         }
-        return skipped
-    }
-
-    /// Shortens tool outputs, and the long strings inside tool-call arguments, except the newest `keepFull`
-    /// outputs of a task still in progress (the conversation ends with a tool result or a pending call) and the
-    /// calls they answer. Once the assistant has answered, every output of that task counts as old, so a huge
-    /// output is not re-sent whole on every later message.
-    static func shorten(_ messages: inout [ChatMessage], keepFull: Int, outputLimit: Int, argumentLimit: Int) {
-        let inProgress = messages.last.map { $0.role == .tool || !$0.toolCalls.isEmpty } ?? false
-        let taskStart = messages.lastIndex { $0.role == .user } ?? -1
-        let fresh = inProgress
-            ? Set(messages.indices.filter { $0 > taskStart && messages[$0].role == .tool }.suffix(keepFull)) : []
-        let freshCalls = Set(fresh.compactMap { messages[$0].toolCallID })
-        for index in messages.indices {
-            switch messages[index].role {
-            case .tool where !fresh.contains(index):
-                messages[index].content = ContextText.preview(messages[index].content, limit: outputLimit)
-            case .assistant:
-                for call in messages[index].toolCalls.indices where !freshCalls.contains(messages[index].toolCalls[call].id) {
-                    messages[index].toolCalls[call].arguments =
-                        ContextText.shortenArguments(messages[index].toolCalls[call].arguments, stringLimit: argumentLimit)
-                }
-            default:
-                break
-            }
-        }
+        return ContextWindow(messages: (messages + body).answeringDanglingToolCalls(), droppedCount: start + dropped,
+                             summary: summary, skippedCount: skipped)
     }
 }
 
@@ -167,10 +281,12 @@ extension ChatMessage {
     /// which is about this).
     static let imageTokens = 1_600
 
-    /// Rough size for budgeting: text, tool calls, pictures and a little per-message overhead.
+    /// Rough size for budgeting: text, tool calls, reasoning kept for the provider, pictures and a little
+    /// per-message overhead.
     var contextCharacters: Int {
         content.count + toolCalls.reduce(0) { $0 + $1.id.count + $1.name.count + $1.arguments.count } + 16
             + images.count * Int(Double(Self.imageTokens) * ContextBudget.charactersPerToken)
+            + (reasoning?.parts.reduce(0) { $0 + $1.text.count + ($1.data?.count ?? 0) + ($1.signature?.count ?? 0) } ?? 0)
     }
 }
 
@@ -196,12 +312,19 @@ extension [ChatMessage] {
 enum ContextText {
     private static let omissionOpen = "\n[… "
     private static let omissionClose = " characters omitted from the middle …]\n"
+    private static let savedNoteOpen = "\n[full output saved at "
+    private static let maxSavedNote = 600
 
     /// The start and end of `text` with a marker for what is left out, `limit` characters in all (plus the marker).
     /// Text that already carries such a marker keeps its count: what it left out is added to what is cut now, and
     /// whatever follows the marker (like the path of a saved output) stays at the end.
     static func preview(_ text: String, limit: Int) -> String {
         guard text.count > limit + 80 else { return text }
+        // The note of a saved output (its path) is the way back to the whole text: it always stays, whole.
+        if text.hasSuffix("]"), let note = text.range(of: savedNoteOpen, options: .backwards),
+           text[note.lowerBound...].count <= maxSavedNote {
+            return preview(String(text[..<note.lowerBound]), limit: limit) + String(text[note.lowerBound...])
+        }
         let head = limit * 5 / 8, tail = limit - head
         if let close = text.range(of: omissionClose, options: .backwards),
            let open = text.range(of: omissionOpen, options: .backwards, range: text.startIndex..<close.lowerBound),
@@ -307,10 +430,11 @@ enum ContextSummary {
         return MemoryText.clip(sections.joined(separator: "\n"), maxLength)
     }
 
-    /// A line about steps of the current request that were set aside to make room.
-    static func stepsNote(_ skipped: [ChatMessage]) -> String {
-        guard let work = work(in: skipped) else { return "" }
-        return "Neste pedido, os primeiros passos foram omitidos.\n" + work
+    /// Lines about steps of the current request that were set aside to make room: one for each (see `ToolDigest`).
+    static func stepsNote(_ skipped: [ChatMessage], maxLines: Int = ToolDigest.maxLines) -> String {
+        let lines = ToolDigest.lines(for: skipped, maxLines: maxLines)
+        guard !lines.isEmpty else { return "" }
+        return "Neste pedido, os primeiros passos foram omitidos; o que cada um fez:\n" + lines.joined(separator: "\n")
     }
 
     /// Tools used and the files and links they touched.
@@ -351,10 +475,32 @@ extension Conversation {
     /// messages it covers (the messages themselves stay, for the transcript and for Claude Code). Compaction is
     /// permanent by design: it uses the budget of the model active at that moment, and a later switch to a model
     /// with a larger window keeps working from the summary.
+    ///
+    /// The history only changes in batches, because every change rewrites the provider's prompt cache from the
+    /// first message touched: turns are folded away when the history passes the budget (down to its low-water mark,
+    /// see `ContextBudget`), and the older stretch is condensed (see `ContextCondensing`) at that same moment, or
+    /// when that alone would save enough. Between batches the history only grows at its end.
     /// `firstCompaction` is true the first time this conversation gets a summary.
     mutating func prepareHistory(budget: ContextBudget) -> (history: [ChatMessage], firstCompaction: Bool) {
         let covered = summary == nil ? 0 : min(max(summaryCoveredCount ?? 0, 0), messages.count)
-        let window = ContextWindow.fit(Array(messages[covered...]), budget: budget, summary: summary)
+        let slice = Array(messages[covered...])
+        let stored = max((condensedCount ?? 0) - covered, 0)
+        var condensing = stored
+        let paused = isTaskPaused
+        var cut = ContextCut(summary: summary)
+        var window = ContextWindow.fit(slice, budget: budget, cut: &cut, condensing: condensing, paused: paused)
+
+        let frontier = ContextCondensing.frontier(in: slice)
+        if frontier > stored {
+            let saving = ContextCondensing.savings(in: slice, from: stored, to: frontier)
+            if cut.covered > 0 || saving >= Int(Double(budget.characters) * ContextBudget.condenseShare) {
+                condensing = frontier
+                cut = ContextCut(summary: summary)
+                window = ContextWindow.fit(slice, budget: budget, cut: &cut, condensing: condensing, paused: paused)
+            }
+        }
+        if condensing > 0 { condensedCount = covered + condensing }
+
         let first = summary == nil && window.summary != nil
         if window.summary != nil {
             summary = window.summary
@@ -372,7 +518,7 @@ enum ToolOutputCap {
     private static let head = 10_000
     private static let tail = 5_000
     /// Without a way to read files back, a saved copy would be useless, so the output stays inline up to a larger
-    /// size (above `web_fetch`'s own 30,000 characters) and only the extremes are cut.
+    /// size (above the 24,000 characters of a page, `ToolOutputBudget.pageCharacters`) and only the extremes are cut.
     static let limitWithoutFiles = 40_000
     private static let headWithoutFiles = 28_000
     private static let tailWithoutFiles = 8_000

@@ -10,11 +10,11 @@ struct ShortcutsListTool: AgentTool {
     let spec = ToolSpec(
         name: "shortcuts_list",
         description: """
-        List the user's Shortcuts (the Shortcuts app), by name. Use it to see which automations the user already \
-        has before building something with applescript; run one with shortcuts_run.
+        List the user's Shortcuts by name. See which automations exist before building something with \
+        applescript; run one with shortcuts_run.
         """,
         parameters: .schema([
-            "filter": .property("string", "Optional text the name must contain (ignores case and accents)."),
+            "filter": .property("string"),
         ]))
 
     var kind: ToolCall.Kind { .computer }
@@ -38,15 +38,15 @@ struct ShortcutsRunTool: AgentTool {
     let spec = ToolSpec(
         name: "shortcuts_run",
         description: """
-        Run one of the user's Shortcuts by exact name (see shortcuts_list), optionally giving it text as input, \
-        and return the text it produces. A Shortcut can do anything the user built into it, so run only the \
-        ones that match the request. Waits up to timeout_seconds (default 60, max 300); a Shortcut that asks \
-        the user a question on screen will wait for the answer.
+        Run a Shortcut by exact name (see shortcuts_list), optionally with text input, and return the text it \
+        produces. A Shortcut can do anything its author built in, so run only ones that match the request. Waits \
+        up to timeout_seconds (default 60, max 300); a Shortcut that asks something on screen waits for the \
+        answer.
         """,
         parameters: .schema([
-            "name": .property("string", "Exact name of the Shortcut."),
-            "input": .property("string", "Optional text passed to the Shortcut as its input."),
-            "timeout_seconds": .property("integer", "Seconds to wait (default 60, max 300)."),
+            "name": .property("string"),
+            "input": .property("string", "Text input for the Shortcut."),
+            "timeout_seconds": .property("integer"),
         ], required: ["name"]))
 
     var kind: ToolCall.Kind { .computer }
@@ -128,9 +128,8 @@ struct ClipboardReadTool: AgentTool {
     let spec = ToolSpec(
         name: "clipboard_read",
         description: """
-        Read what the user last copied (⌘C): the text, and the paths of any files copied in Finder. Use it \
-        when the user says "isso que copiei" or "o que está na área de transferência". Long text is cut at \
-        20,000 characters. Images are only reported, not read.
+        Read what the user last copied (⌘C): the text, and the paths of files copied in Finder. Text is cut at \
+        20,000 characters; images are only reported.
         """,
         parameters: .schema([:]))
 
@@ -150,11 +149,10 @@ struct ClipboardWriteTool: AgentTool {
     let spec = ToolSpec(
         name: "clipboard_write",
         description: """
-        Put text on the clipboard, replacing whatever the user had copied, so they can paste it with ⌘V. Use it \
-        to hand over something short to paste (a command, an address, a draft), not to save work: it is lost \
-        when the user copies something else.
+        Put text on the clipboard, replacing what the user copied, to hand over something short to paste (a \
+        command, an address, a draft). It is lost when they copy something else.
         """,
-        parameters: .schema(["text": .property("string", "The text to copy.")], required: ["text"]))
+        parameters: .schema(["text": .property("string")], required: ["text"]))
 
     var kind: ToolCall.Kind { .computer }
     var capability: Capability? { .computerUse }
@@ -217,13 +215,12 @@ struct NotifyTool: AgentTool {
     let spec = ToolSpec(
         name: "notify",
         description: """
-        Show a macOS notification banner to the user. Use it to call their attention when a long task finishes \
-        or something needs them, not for ordinary replies (they read those in the chat). Keep title short \
-        and body to a sentence or two.
+        Show a macOS notification banner, to get the user's attention when a long task finishes or something \
+        needs them; not for ordinary replies.
         """,
         parameters: .schema([
-            "title": .property("string", "Short headline."),
-            "body": .property("string", "Message text."),
+            "title": .property("string"),
+            "body": .property("string"),
         ], required: ["title"]))
 
     var kind: ToolCall.Kind { .computer }
@@ -323,12 +320,12 @@ struct AppsListTool: AgentTool {
     let spec = ToolSpec(
         name: "apps_list",
         description: """
-        List the apps running now, with bundle identifier, which one is in front and which are hidden. Use it \
-        to see what the user has open, or to get the exact name for app_quit and open. Set \
-        include_background to also list menu bar apps and helper agents.
+        List the running apps with bundle identifier, which is in front and which are hidden. Use it to see what \
+        is open or to get the exact name for app_quit and open. `include_background` adds menu bar apps and \
+        helper agents.
         """,
         parameters: .schema([
-            "include_background": .property("boolean", "Also list apps without a Dock icon (default false)."),
+            "include_background": .property("boolean"),
         ]))
 
     var kind: ToolCall.Kind { .computer }
@@ -386,15 +383,13 @@ struct ProcessesTool: AgentTool {
     let spec = ToolSpec(
         name: "processes",
         description: """
-        Show the processes using the most CPU or memory right now (PID, CPU %, memory, name). Use it when the \
-        Mac is slow, hot or low on memory, to find out which app is responsible. Quit a culprit with \
-        app_quit; one-off numbers only, not a history.
+        Show the processes using the most CPU or memory now (PID, CPU %, memory, name), to find what slows or \
+        heats the Mac. Quit a culprit with app_quit. A snapshot, not a history.
         """,
         parameters: .schema([
             "sort": .object(["type": .string("string"),
-                             "enum": .array(["cpu", "memory"].map(JSONValue.string)),
-                             "description": .string("cpu (default) or memory.")]),
-            "limit": .property("integer", "How many processes (default 15, max 50)."),
+                             "enum": .array(["cpu", "memory"].map(JSONValue.string))]),
+            "limit": .property("integer", "Processes (default 15, max 50)."),
         ]))
 
     var kind: ToolCall.Kind { .computer }
@@ -418,14 +413,14 @@ struct AppQuitTool: AgentTool {
     let spec = ToolSpec(
         name: "app_quit",
         description: """
-        Quit a running app, by exact name or bundle identifier (see apps_list). It asks the app to quit normally, so \
-        apps with unsaved documents may show a Save dialog and stay open; then tell the user. Set force only if \
-        the app is frozen or ignored a normal quit: it kills the app at once and unsaved work is lost, so the \
-        user is always asked to confirm. Cannot quit the Orb app itself.
+        Quit a running app by exact name or bundle identifier (see apps_list), asking it to quit normally: with \
+        unsaved documents it may show a Save dialog and stay open, so tell the user. `force` kills it at once \
+        and loses unsaved work (the user is always asked to confirm); only for a frozen app. Cannot quit the Orb \
+        itself.
         """,
         parameters: .schema([
-            "app": .property("string", "App name (e.g. \"Safari\") or bundle identifier."),
-            "force": .property("boolean", "Kill the app immediately without letting it save (default false)."),
+            "app": .property("string"),
+            "force": .property("boolean"),
         ], required: ["app"]))
 
     var kind: ToolCall.Kind { .computer }
@@ -494,13 +489,11 @@ struct TrashTool: AgentTool {
     let spec = ToolSpec(
         name: "trash",
         description: """
-        Move files or folders to the Trash instead of deleting them, and say where each one went. Prefer this \
-        over `rm`: the user can put things back from the Trash (Finder's "Colocar de volta"). Up to 50 paths \
-        per call. Refuses the home folder, its standard folders (Documents, Desktop…) and system folders.
+        Move files or folders to the Trash (recoverable) and say where each went. Prefer it over `rm`. Up to 50 \
+        paths per call. Refuses the home folder, its standard folders and system folders.
         """,
         parameters: .schema([
-            "paths": .object(["type": .string("array"), "items": .object(["type": .string("string")]),
-                              "description": .string("Absolute, ~/... or working-directory-relative paths.")]),
+            "paths": .object(["type": .string("array"), "items": .object(["type": .string("string")])]),
         ], required: ["paths"]))
 
     /// Moves one item to the Trash and returns where it ended up; replaceable so tests never touch the real Trash.

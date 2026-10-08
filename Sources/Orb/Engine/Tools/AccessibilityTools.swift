@@ -126,24 +126,18 @@ struct UIReadTool: AgentTool {
     let spec = ToolSpec(
         name: "ui_read",
         description: """
-        Read the interface of a Mac app through the Accessibility API, for apps that have no AppleScript or Shortcuts \
-        support (prefer applescript or shortcuts_run when the app has them). Returns an indented outline of one \
-        window, one line per element: an id (w1.3.2 is window 1, its 3rd child, that one's 2nd child; m2 is the \
-        2nd menu of the menu bar), the role (button, field, checkbox, menuitem, text…), the title or description, \
-        value="…" (cut at 80 characters; password fields are never read) and flags [desativado, foco, selecionado]. \
-        Invisible elements and plain layout groups are left out. app is a name or bundle identifier (default: the \
-        frontmost app, never the Orb itself); window is a number or part of a title (default: the focused window); \
-        query keeps only elements whose role, title or value contain the text, with the elements around them; \
-        max_depth goes up to 12; include_menus also lists the menu bar's top-level menus. The output stops at 400 \
-        lines and says so. The ids belong to this reading: read again after the screen changes, then act with \
-        ui_act. Needs the Accessibility permission.
+        Read an app's interface through Accessibility, for apps without AppleScript or Shortcuts support. \
+        Returns an indented outline of one window, a line per element: id (w1.3.2 = window 1, 3rd child, its 2nd \
+        child; m2 = 2nd menu), role, title, value (cut at 80 characters; passwords never read) and flags \
+        [desativado, foco, selecionado]. Layout-only and invisible elements are left out; stops at 400 lines. \
+        Ids are valid for this reading only. Needs Accessibility.
         """,
         parameters: .schema([
-            "app": .property("string", "App name or bundle identifier. Default: the frontmost app."),
-            "window": .property("string", "Window number (1 = frontmost) or part of its title. Default: the focused window."),
-            "query": .property("string", "Only elements whose role, title, description or value contain this text (ignores case and accents)."),
-            "max_depth": .property("integer", "How deep to go in the element tree (1 to 12, default 12)."),
-            "include_menus": .property("boolean", "Also list the menu bar's top-level menus (ids m1, m2…)."),
+            "app": .property("string", "Name or bundle identifier (default: the frontmost)."),
+            "window": .property("string", "Window number (1 = frontmost) or part of its title (default: focused)."),
+            "query": .property("string", "Only elements whose role, title or value contain this text."),
+            "max_depth": .property("integer", "Tree depth (1-12, default 12)."),
+            "include_menus": .property("boolean", "Also the menu bar's top-level menus (ids m1, m2…)."),
         ]))
 
     let system: any AccessibilitySystem
@@ -488,24 +482,19 @@ struct UIActTool: AgentTool {
     let spec = ToolSpec(
         name: "ui_act",
         description: """
-        Operate one element of a Mac app's interface, found with ui_read: press (click a button, checkbox, menu \
-        item, tab or link), focus, set_value (the text of a field, the number of a slider), increment, decrement, \
-        show_menu (open a menu bar menu or an element's menu and list its items) or pick_menu (menu_path such as \
-        ["Arquivo", "Exportar…"] clicks menu bar items by title, no id needed). Use ids from the latest ui_read of \
-        that app: if the screen changed since, the call fails with "a interface mudou" and you must read again. \
-        After acting it waits a moment and says in one line what changed (new window, focus, value), so you rarely \
-        need to read everything again. Anything that deletes, sends, buys or discards (Excluir, Enviar, Comprar, \
-        Não Salvar…) always asks the user first. Prefer applescript or shortcuts_run when the app supports them. \
-        Needs the Accessibility permission.
+        Operate one element found with ui_read: press (click), focus, set_value (field text, slider number), \
+        increment, decrement, show_menu (open a menu and list its items) or pick_menu (menu_path such as \
+        ["Arquivo", "Exportar…"] clicks menu bar items by title, no id). Use ids from the latest ui_read of that \
+        app; if the screen changed the call fails with "a interface mudou" and you read again. It then says in \
+        one line what changed. Anything that deletes, sends, buys or discards always asks the user first. Needs \
+        Accessibility.
         """,
         parameters: .schema([
-            "app": .property("string", "App name or bundle identifier, as in ui_read. Default: the frontmost app."),
-            "action": .object(["type": .string("string"), "enum": .array(Action.allCases.map { JSONValue.string($0.rawValue) }),
-                               "description": .string("What to do.")]),
-            "id": .property("string", "Element id from ui_read (w1.3.2, m2). Not needed for pick_menu."),
-            "value": .property("string", "set_value: the text (or number) to put in the element."),
-            "menu_path": .object(["type": .string("array"), "items": .object(["type": .string("string")]),
-                                  "description": .string("pick_menu: menu titles from the menu bar down, e.g. [\"Arquivo\", \"Exportar…\"]. Accents and … versus ... do not matter.")]),
+            "app": .property("string"),
+            "action": .object(["type": .string("string"), "enum": .array(Action.allCases.map { JSONValue.string($0.rawValue) })]),
+            "id": .property("string", "Element id from ui_read (w1.3.2, m2); not for pick_menu."),
+            "value": .property("string"),
+            "menu_path": .object(["type": .string("array"), "items": .object(["type": .string("string")])]),
         ], required: ["action"]))
 
     let system: any AccessibilitySystem

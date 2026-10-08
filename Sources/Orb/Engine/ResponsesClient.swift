@@ -9,9 +9,16 @@ struct ResponsesClient: LLMClient {
     var extraHeaders: [String: String] = [:]
     /// Send tools as an `additional_tools` input item (required by Sign in with ChatGPT) instead of top-level `tools`.
     var toolsAsInputItem = false
-    /// Sent as `prompt_cache_key`, so turns of one conversation land on the same cache.
+    /// Sent as `prompt_cache_key`, so turns of one conversation land on the same cache (only to hosts that take it).
     var conversationID: String?
     let session: URLSession
+
+    /// Hosts known to accept `prompt_cache_key`. A gateway that checks the body strictly rejects the whole request
+    /// over a field it does not know, which costs the turn; a host outside the list just loses a routing hint (the
+    /// cache itself works on the prompt prefix).
+    static let cacheKeyHosts: Set<String> = ["api.openai.com", "chatgpt.com"]
+    var sendsCacheKey: Bool { baseURL.host().map(Self.cacheKeyHosts.contains) ?? false }
+    var arrangesPromptCache: Bool { sendsCacheKey }
 
     init(baseURL: URL, credentials: @escaping CredentialsProvider, extraHeaders: [String: String] = [:],
          toolsAsInputItem: Bool = false, conversationID: String? = nil, session: URLSession = .shared) {
@@ -36,9 +43,9 @@ struct ResponsesClient: LLMClient {
             let task = Task {
                 do {
                     let provider = baseURL.host() ?? ""
-                    let body = try JSONEncoder().encode(Self.requestBody(
+                    let body = try WireEncoder.encode(Self.requestBody(
                         model: model, messages: messages, tools: tools, toolsAsInputItem: toolsAsInputItem,
-                        promptCacheKey: conversationID, provider: provider, toolChoice: toolChoice))
+                        promptCacheKey: sendsCacheKey ? conversationID : nil, provider: provider, toolChoice: toolChoice), trailing: Self.trailingKeys)
                     let (bytes, response) = try await OpenAIClient.open(session, credentials: credentials) { key in
                         var request = OpenAIClient.authorizedRequest(baseURL.appending(path: "responses"), apiKey: key,
                                                                      headers: extraHeaders)
@@ -74,6 +81,9 @@ struct ResponsesClient: LLMClient {
             continuation.onTermination = { _ in task.cancel() }
         }
     }
+
+    /// Last in the body, so the part that repeats comes first (see `WireEncoder`).
+    static let trailingKeys = ["input", "tool_choice"]
 
     /// System messages become `instructions`; tool calls and results become `function_call` /
     /// `function_call_output` items. Reasoning recorded by the same endpoint and model goes back as `reasoning`

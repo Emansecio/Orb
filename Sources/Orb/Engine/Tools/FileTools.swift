@@ -1,7 +1,5 @@
 import Foundation
 
-let filePathDescription = "Absolute path, ~/..., or relative to the working directory."
-
 /// Text files above this are refused (the model should grep or page with the shell instead).
 private let maxTextFileBytes = 20_000_000
 /// PDFs, documents and images may be bigger than source files.
@@ -14,19 +12,16 @@ struct ReadFileTool: AgentTool {
     let spec = ToolSpec(
         name: "read_file",
         description: """
-        Read a file and return its contents. Text files come back as numbered lines (`<number><tab><text>`, like \
-        `cat -n`); the number prefix is NOT part of the file, never include it when editing. The encoding (UTF-8, \
-        UTF-16, Windows-1252) is detected automatically. Lines longer than 2000 characters are clipped, and one \
-        call returns at most ~50,000 characters or `limit` lines, whichever comes first: when it stops early a \
-        note gives the `offset` to continue from. Also reads PDFs (text, optional `pages` range), Word/RTF/ODT \
-        documents (as text) and images (size plus text found by OCR). Fails on directories and other binaries. \
-        HTML is returned as source.
+        Read a file as numbered lines (`<number><tab><text>`); the number prefix is not file content, never \
+        include it in edits. One call returns up to ~24,000 characters or `limit` lines; a note at the end gives \
+        the `offset` to continue. Also reads PDFs (`pages`), Word/RTF/ODT (as text) and images (size plus OCR \
+        text). HTML is returned as source.
         """,
         parameters: .schema([
-            "path": .property("string", filePathDescription),
-            "offset": .property("integer", "Text files and documents: 1-based line to start at (default 1)."),
-            "limit": .property("integer", "Text files and documents: maximum number of lines to return (default 2000)."),
-            "pages": .property("string", "PDFs only: page or range such as \"3\", \"2-5\" or \"4-\" (default: from page 1)."),
+            "path": .property("string"),
+            "offset": .property("integer", "1-based first line (default 1)."),
+            "limit": .property("integer", "Maximum lines (default 2000)."),
+            "pages": .property("string", "PDFs: page or range, \"3\", \"2-5\" or \"4-\" (default: from page 1)."),
         ], required: ["path"]))
 
     var kind: ToolCall.Kind { .file }
@@ -93,7 +88,7 @@ struct ReadFileTool: AgentTool {
         }
         var text = (note.map { "(\($0))\n" } ?? "") + entries.joined(separator: "\n")
         if number <= lines.count {
-            text += "\n[... mais \(lines.count - number + 1) linhas; use offset=\(number) para continuar ...]"
+            text += "\n[linhas \(offset)–\(number - 1) de \(lines.count); continue com offset=\(number)]"
         }
         return text
     }
@@ -108,14 +103,14 @@ struct WriteFileTool: AgentTool {
     let spec = ToolSpec(
         name: "write_file",
         description: """
-        Write text (always UTF-8) to a file, creating the file and any missing parent directories. Replaces the \
-        whole existing content unless `append` is true; to change part of an existing file use edit_file, which \
-        keeps its encoding and line endings. If the path is a symbolic link the link's target is written.
+        Write text (UTF-8) to a file, creating it and any missing parent directories. Replaces the whole file \
+        unless `append` is true; to change part of a file use edit_file. Writing to a symbolic link writes its \
+        target.
         """,
         parameters: .schema([
-            "path": .property("string", filePathDescription),
-            "content": .property("string", "Text to write."),
-            "append": .property("boolean", "Add to the end of the file instead of replacing it (default false)."),
+            "path": .property("string"),
+            "content": .property("string"),
+            "append": .property("boolean", "Add to the end instead of replacing."),
         ], required: ["path", "content"]))
 
     var kind: ToolCall.Kind { .file }
@@ -196,17 +191,15 @@ struct EditFileTool: AgentTool {
     let spec = ToolSpec(
         name: "edit_file",
         description: """
-        Replace an exact piece of text in an existing file. `old_text` must match the file exactly (indentation, \
-        spaces, line breaks) and appear once, unless `replace_all` is true; include a few surrounding lines to make \
-        it unique. Read the file first, and copy the text without the line-number prefix read_file shows. Keeps the \
-        file's encoding, line endings (CRLF) and permissions, and follows symbolic links to the real file. Prefer \
-        this over write_file for changes to existing files.
+        Replace an exact piece of text in a file. `old_text` must match exactly (indentation, line breaks) and \
+        be unique unless `replace_all` is true; add surrounding lines to make it unique. Read the file first; \
+        copy the text without read_file's line-number prefix. Prefer it over write_file for existing files.
         """,
         parameters: .schema([
-            "path": .property("string", filePathDescription),
-            "old_text": .property("string", "The exact text to replace (must not be empty)."),
-            "new_text": .property("string", "The replacement; empty deletes the old text."),
-            "replace_all": .property("boolean", "Replace every occurrence instead of requiring exactly one (default false)."),
+            "path": .property("string"),
+            "old_text": .property("string", "Exact text to replace (not empty)."),
+            "new_text": .property("string", "Replacement; empty deletes."),
+            "replace_all": .property("boolean"),
         ], required: ["path", "old_text", "new_text"]))
 
     var kind: ToolCall.Kind { .file }
@@ -312,21 +305,23 @@ struct EditFileTool: AgentTool {
 
 struct ListDirectoryTool: AgentTool {
     static let maxEntries = 500
+    static let defaultEntries = 200
     static let maxDepth = 3
 
     let spec = ToolSpec(
         name: "list_directory",
         description: """
-        List a directory's entries sorted by name. Subdirectories (and symlinks to folders) end with "/"; every \
-        entry shows its modification date and files their size. With `depth` above 1 the listing is recursive \
-        (up to 3 levels; .git, node_modules and similar folders are not entered). `pattern` filters by name \
-        (glob, e.g. "*.swift"). Returns at most 500 entries.
+        List a directory sorted by name; folders end with "/". Files show their size, and at depth 1 every entry \
+        also shows its modification date. `depth` up to 3 lists recursively (skipping .git, node_modules and the \
+        like). `pattern` filters names (glob, e.g. "*.swift"). Returns up to `limit` entries (default 200, max \
+        500).
         """,
         parameters: .schema([
-            "path": .property("string", filePathDescription + " Defaults to the working directory."),
-            "show_hidden": .property("boolean", "Include hidden entries such as dotfiles (default false)."),
-            "pattern": .property("string", "Glob on entry names, e.g. \"*.md\" or \"test_*\"."),
-            "depth": .property("integer", "Levels to list (default 1, max 3)."),
+            "path": .property("string", "Default: the working directory."),
+            "show_hidden": .property("boolean"),
+            "pattern": .property("string"),
+            "depth": .property("integer"),
+            "limit": .property("integer"),
         ]))
 
     var kind: ToolCall.Kind { .file }
@@ -343,6 +338,7 @@ struct ListDirectoryTool: AgentTool {
         let depth = arguments.integer("depth", default: 1, in: 1...Self.maxDepth)
         let showHidden = arguments.flag("show_hidden")
         let pattern = try arguments.nonEmptyString("pattern").map { try GlobPattern($0) }
+        let maxEntries = arguments.integer("limit", default: Self.defaultEntries, in: 1...Self.maxEntries)
 
         var lines: [String] = []
         var total = 0
@@ -373,8 +369,9 @@ struct ListDirectoryTool: AgentTool {
                 let name = entry.lastPathComponent
                 if pattern?.matches(name: name) ?? true {
                     total += 1
-                    if lines.count < Self.maxEntries {
-                        let date = values?.contentModificationDate.map(dates.string(from:))
+                    if lines.count < maxEntries {
+                        // Dates are most of a line's length and rarely matter for a tree: they come with a single level.
+                        let date = depth == 1 ? values?.contentModificationDate.map(dates.string(from:)) : nil
                         let details: String
                         if isFolder {
                             details = date ?? ""
@@ -396,7 +393,14 @@ struct ListDirectoryTool: AgentTool {
         guard total > 0 else {
             return (pattern == nil ? "\(url.path) está vazia." : "Nenhuma entrada de \(url.path) combina com o padrão.") + skipped
         }
-        if total > Self.maxEntries { lines.append("[... mais \(total - Self.maxEntries) itens ...]") }
+        let fitted = ToolOutputBudget.fit(lines)
+        lines = fitted.kept
+        let more = total - lines.count
+        if more > 0 {
+            // `limit` only helps when it was the limit that cut the list; a list cut by the character budget has no use for it.
+            let how = fitted.omitted > 0 ? "use pattern ou um subcaminho" : "use pattern, um subcaminho ou limit (máx. \(Self.maxEntries))"
+            lines.append("[... mais \(more) itens; \(how) ...]")
+        }
         return url.path + "\n" + lines.joined(separator: "\n") + skipped
     }
 }
@@ -405,15 +409,15 @@ struct SearchFilesTool: AgentTool {
     let spec = ToolSpec(
         name: "search_files",
         description: """
-        Search the Mac with Spotlight and return matching file paths. A filename-like query (e.g. "budget.xlsx") \
-        matches file names; any other text matches names and contents. Spotlight has blind spots: it does not \
-        index every folder (hidden or system folders, node_modules, external or network volumes, files too new to \
-        be indexed), so an empty result does not prove the file is absent; fall back to glob (names) or grep (contents).
+        Search the Mac with Spotlight and return matching paths. A file-name-like query ("budget.xlsx") matches \
+        names; other text matches names and contents. Spotlight skips some places (hidden and system folders, \
+        node_modules, external volumes, very new files), so an empty result proves nothing: fall back to glob or \
+        grep.
         """,
         parameters: .schema([
-            "query": .property("string", "File name or words to look for."),
-            "directory": .property("string", "Only search inside this directory. " + filePathDescription),
-            "limit": .property("integer", "Maximum number of results (default 50, max 500)."),
+            "query": .property("string"),
+            "directory": .property("string", "Search only inside this directory."),
+            "limit": .property("integer", "Results (default 50, max 500)."),
         ], required: ["query"]))
 
     var kind: ToolCall.Kind { .search }

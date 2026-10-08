@@ -5,8 +5,9 @@ import Vision
 
 /// Turns files that are not plain text (PDF, word-processor documents, images) into text the model can read.
 enum DocumentReader {
-    /// What one `read_file` call may return, so a huge file never floods the conversation.
-    static let maxCharacters = 50_000
+    /// What one `read_file` call may return, so a huge file never floods the conversation. Kept under
+    /// `ToolOutputCap.limit`, so the page arrives whole with its note on where to continue, instead of cut in the middle.
+    static let maxCharacters = ToolOutputBudget.pageCharacters
 
     /// Formats `NSAttributedString` can read without WebKit. HTML is left out on purpose: it is read as source,
     /// which is what editing it needs (and the HTML importer must run on the main thread).

@@ -16,6 +16,11 @@ enum TurnEvent: Sendable {
     case session(String)
     /// Tokens the turn has used so far, summed over its model calls (the last one is the turn's total).
     case usage(TokenUsage)
+    /// Tokens of the model call that just ended, alone (`.usage` follows with the new total): the size of the prompt
+    /// the model reads now, and how much of it the provider served from its cache.
+    case requestUsage(TokenUsage)
+    /// The task stopped at the step limit and left a progress record: the next message picks it up.
+    case taskPaused
 }
 
 /// Everything one turn needs, captured up front so the turn never reads UI state.
@@ -44,6 +49,18 @@ struct TurnRequest: Sendable {
     var supportsImages: Bool?
     /// Called when the provider rejected the pictures, so the app can remember it for this model.
     var onImagesRejected: (@Sendable () -> Void)?
+    /// Where outputs too big for the conversation are saved for the model to read back (`ToolOutputCap`). The app
+    /// points it into its data folder; by default the system's temporary folder.
+    var outputsDirectory = ToolOutputCap.defaultDirectory
+    /// Called with the window the model really has when a refusal for size taught it (and the smaller history then
+    /// worked), so the app can remember it for this model.
+    /// `stated`: the refusal named the window (otherwise it is only inferred from the refusal, and less certain).
+    var onContextLearned: (@Sendable (_ tokens: Int, _ stated: Bool) -> Void)?
+    /// Called with the tokens the system prompt and tool specs really take, so the next turn plans its history with
+    /// them (planned with a guess, the history would be cut again inside every turn).
+    var onOverheadMeasured: (@Sendable (Int) -> Void)?
+    /// The last task stopped at the step limit and this message picks it up (nil: judge by the history itself).
+    var picksUpTask: Bool?
 
     func currentPermissions() async -> PermissionState {
         if let permissions { return await permissions() }
@@ -100,12 +117,22 @@ actor AgentEngine {
         out.yield(.message(user))
         let specs = request.tools.map(\.spec)
         var allowed = request.turnGrants
-        var budget = request.budget
+        // The request carries the system prompt and the tool specs besides the history: the budget accounts for them.
+        let overhead = ContextBudget.overheadTokens(system: request.system, specs: specs)
+        var budget = request.budget.refined(overheadTokens: overhead)
+        request.onOverheadMeasured?(overhead)
+        // Where the fits of this turn cut the history, so the start of the request holds still between compactions.
+        var cut = ContextCut()
+        // The last task stopped at the step limit and this message picks it up.
+        let picksUpTask = request.picksUpTask ?? ProgressRecord.endsHistory(request.history)
+        var learnedWindow: (tokens: Int, stated: Bool)?
         // History that already starts with a summary was announced when it was compacted (`AppModel.send`).
         var announcedCompaction = ContextSummary.leading(in: request.history) != nil
         let toolNames = Set(request.tools.map(\.spec.name))
         let maxSteps = max(2, request.maxSteps)
         var usage: TokenUsage?
+        var requestsWithUsage = 0
+        var warnedAboutCache = false
         var continuedAfterCut = false
         var sendImages = request.supportsImages != false
         if !sendImages, !request.images.isEmpty { out.yield(.notice(ImageRejection.notice)) }
@@ -120,7 +147,7 @@ actor AgentEngine {
                 while true {
                     var windowHasImages = false
                     do {
-                        let window = Self.fitted(messages, to: budget, sendImages: sendImages)
+                        let window = Self.fitted(messages, to: budget, cut: &cut, continuing: picksUpTask, sendImages: sendImages)
                         windowHasImages = window.contains { !$0.images.isEmpty }
                         if !announcedCompaction, window.contains(where: { $0.role == .user && $0.content.hasPrefix(ContextSummary.marker) }) {
                             announcedCompaction = true
@@ -128,11 +155,30 @@ actor AgentEngine {
                         }
                         reply = try await respond(to: window, request: request, specs: specs,
                                                   toolChoice: isLastStep ? .none : .auto, out: out)
+                        // The smaller history worked: that is what this model's window really is.
+                        if let learned = learnedWindow {
+                            learnedWindow = nil
+                            request.onContextLearned?(learned.tokens, learned.stated)
+                        }
                         break
                     } catch let error where !contextRetried && ContextOverflow.matches(error) {
-                        // The window was smaller than estimated: try once more with half the history.
+                        // The window was smaller than estimated: try once more with less history. A refusal that
+                        // states a window smaller than the one assumed sets the budget by it; otherwise the
+                        // history is halved (and, when the window is only guessed, the guess is lowered).
+                        // Either way the retry is smaller than the request that failed: when the memory level
+                        // already capped the history below what the stated window allows, resizing alone would
+                        // send the same request again.
                         contextRetried = true
-                        budget = budget.scaled(by: 0.5)
+                        let reported = ContextOverflow.reportedWindow(error)
+                        if let stated = reported, let window = budget.window, stated < window {
+                            var resized = budget.resized(window: stated)
+                            resized.tokens = min(resized.tokens, budget.scaled(by: 0.5).tokens)
+                            budget = resized
+                            learnedWindow = (stated, true)
+                        } else {
+                            budget = budget.scaled(by: 0.5)
+                            learnedWindow = reported == nil ? budget.window.map { (Int(Double($0) * Self.unstatedWindowShare), false) } : nil
+                        }
                     } catch let error where windowHasImages && ImageRejection.matches(error) {
                         // The model cannot read pictures: say so once, remember it, and go on with their paths.
                         sendImages = false
@@ -151,7 +197,14 @@ actor AgentEngine {
                     var total = usage ?? TokenUsage()
                     total.add(reported)
                     usage = total
+                    requestsWithUsage += 1
+                    if CacheHealth.logsUsage { FileHandle.standardError.write(Data((CacheHealth.logLine(step: step, usage: reported) + "\n").utf8)) }
+                    out.yield(.requestUsage(reported))
                     out.yield(.usage(total))
+                    if !warnedAboutCache, request.client.arrangesPromptCache, CacheHealth.isFailing(total, requests: requestsWithUsage) {
+                        warnedAboutCache = true
+                        out.yield(.notice(CacheHealth.notice))
+                    }
                 }
 
                 let said = reply.text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -199,11 +252,28 @@ actor AgentEngine {
 
                 if calls.isEmpty && said.isEmpty {
                     // On the last step the model may have only tried to call tools: that is the limit, not silence.
-                    out.yield(isLastStep && !reply.calls.isEmpty ? .notice(Self.pausedNotice(after: maxSteps))
-                              : .failed("O modelo não respondeu."))
+                    if isLastStep && !reply.calls.isEmpty {
+                        // Nothing else says where the task stands: leave a record for the "continua" that follows.
+                        if let progress = Self.progress(in: messages, pickedUp: picksUpTask) {
+                            record(ChatMessage(role: .assistant, content: progress), in: &messages, out: out)
+                            out.yield(.taskPaused)
+                        }
+                        out.yield(.notice(Self.pausedNotice(after: maxSteps)))
+                    } else {
+                        out.yield(.failed("O modelo não respondeu."))
+                    }
                     return
                 }
-                record(assistant, in: &messages, out: out)
+                if calls.isEmpty && isLastStep, let progress = Self.progress(in: messages, pickedUp: picksUpTask) {
+                    // The model's closing words, with the record of the steps after them (one message, so the roles
+                    // keep alternating; the transcript shows only what the model wrote).
+                    var closing = assistant
+                    closing.content += "\n\n" + progress
+                    record(closing, in: &messages, out: out)
+                    out.yield(.taskPaused)
+                } else {
+                    record(assistant, in: &messages, out: out)
+                }
                 if calls.isEmpty {
                     if isLastStep { out.yield(.notice(Self.pausedNotice(after: maxSteps))) }
                     return
@@ -282,6 +352,11 @@ actor AgentEngine {
         return reply
     }
 
+    /// A refusal for size that names no window, answered by a request with half the history: the window is taken to be
+    /// this share of the one assumed (a second refusal at the next turn lowers it again). The window may well have
+    /// been right and only the estimate of the history wrong, so the share is mild.
+    static let unstatedWindowShare = 0.85
+
     static let interruptedMarker = "\n\n[resposta interrompida]"
     static let continueNudge = "continue"
     static let cutOffResult = "Error: your reply hit the output limit while writing this call, so it was NOT run. Split the work into "
@@ -292,6 +367,14 @@ actor AgentEngine {
 
     static func stepWarning(remaining: Int) -> String {
         "[Orb: restam \(remaining) chamadas de ferramenta neste turno; priorize e termine com um resumo do que fez e do que falta]"
+    }
+
+    /// The steps of the task `messages` end with, written as a progress record (nil when it made no tool calls).
+    /// `pickedUp`: the turn's request only picks up the task before it.
+    private static func progress(in messages: [ChatMessage], pickedUp: Bool) -> String? {
+        let users = messages.indices.filter { messages[$0].role == .user && !messages[$0].content.hasPrefix(ContextSummary.marker) }
+        guard let start = pickedUp && users.count >= 2 ? users[users.count - 2] : users.last else { return nil }
+        return ProgressRecord.text(task: Array(messages[start...]))
     }
 
     static func pausedNotice(after steps: Int) -> String {
@@ -307,7 +390,8 @@ actor AgentEngine {
                           toolNames: Set<String>, note: String?, messages: inout [ChatMessage],
                           out: AsyncStream<TurnEvent>.Continuation) async {
         func append(_ outcome: ToolOutcome, for call: ToolCallRequest) {
-            var text = ToolOutputCap.apply(outcome.text, botID: request.bot.id, callID: call.id, toolNames: toolNames)
+            var text = ToolOutputCap.apply(outcome.text, botID: request.bot.id, callID: call.id, toolNames: toolNames,
+                                           directory: request.outputsDirectory)
             if let note, call == calls.last { text += "\n\n" + note }
             let message = ChatMessage.tool(call.id, text, isError: outcome.isError, images: outcome.images)
             messages.append(message)
@@ -393,9 +477,13 @@ actor AgentEngine {
 
     /// What the model is sent: the system prompt and the turn so far, fitted to the budget. `messages` itself stays
     /// whole, so trimming is recomputed from the full record before every call.
-    private static func fitted(_ messages: [ChatMessage], to budget: ContextBudget, sendImages: Bool = true) -> [ChatMessage] {
+    /// `cut` is what earlier calls of this turn decided to leave out: it holds still until the history is over the
+    /// budget again, and then moves in one go (see `ContextWindow.fit`), so most calls extend the previous request
+    /// and the provider's cache keeps working.
+    private static func fitted(_ messages: [ChatMessage], to budget: ContextBudget, cut: inout ContextCut, continuing: Bool = false,
+                               sendImages: Bool = true) -> [ChatMessage] {
         guard let system = messages.first, system.role == .system else { return messages }
-        let window = [system] + ContextWindow.fit(Array(messages.dropFirst()), budget: budget).messages
+        let window = [system] + ContextWindow.fit(Array(messages.dropFirst()), budget: budget, cut: &cut, continuing: continuing).messages
         return sendImages ? window : window.strippingImages()
     }
 

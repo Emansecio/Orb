@@ -110,20 +110,21 @@ final class WebToolTests {
         let long = String(repeating: text + "\n", count: 4)
         let stub = WebStubProtocol.Stub(headers: ["Content-Type": "text/plain; charset=utf-8"], body: Data(long.utf8))
         let first = try await fetch("long.test", stub)
-        #expect(first.contains("[caracteres 1–30000 de \(long.count)]"))
-        #expect(first.contains("use offset=30000 para continuar"))
+        #expect(first.contains("[caracteres 1–12000 de \(long.count)]"))
+        #expect(first.contains("use offset=12000 para continuar"))
 
-        let second = try await fetch("long.test", stub, ["offset": .string("30000"), "max_chars": .number(100)])
-        #expect(second.contains("[caracteres 30001–30100 de"))
-        #expect(second.contains("use offset=30100"))
+        let second = try await fetch("long.test", stub, ["offset": .string("12000"), "max_chars": .number(100)])
+        #expect(second.contains("[caracteres 12001–12100 de"))
+        #expect(second.contains("use offset=12100"))
 
         let rest = try await fetch("long.test", stub, ["offset": .number(Double(long.count - 10))])
         #expect(!rest.contains("para continuar"))
         #expect(try await fetch("long.test", stub, ["offset": .number(1_000_000)]).contains("além do fim"))
 
-        // max_chars is capped at 30,000.
+        // max_chars is capped at 24,000, and a page that big still fits under ToolOutputCap (it would lose its middle above).
         let capped = try await fetch("long.test", stub, ["max_chars": .number(500_000)])
-        #expect(capped.contains("1–30000"))
+        #expect(capped.contains("1–24000"))
+        #expect(capped.count < ToolOutputCap.limit)
     }
 
     @Test func fetchChecksTheStatusAndTheURL() async throws {

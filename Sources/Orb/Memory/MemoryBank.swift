@@ -56,6 +56,9 @@ struct MemoryBrief: Equatable, Sendable {
     var notes = ""
     /// Only the memories related to this message.
     var related = ""
+    /// The beginning of each line of `related` (`- [Fato, 07/10/2026 14:32 #a1b2] `): what a conversation remembers of
+    /// what it already sent, so the same memory is not sent again with the next message (see `MemoryBank.brief`).
+    var relatedHeaders: [String] = []
     var footer = ""
 
     var full: String { Self.heading + [pinned, notes, footer].filter { !$0.isEmpty }.joined(separator: "\n\n") }
@@ -92,7 +95,10 @@ actor MemoryBank {
     /// Characters of memory in the system prompt (~1 500 tokens), whatever the memory's size.
     static let briefBudget = 6_000
     /// Share of the brief each part can take at most.
-    static let identityShare = 1_500, preferencesShare = 1_500, relatedShare = 1_500, leftOffShare = 900
+    static let identityShare = 1_500, preferencesShare = 1_500, leftOffShare = 900
+    /// What the memories related to one message may take: up to `relatedLimit` of them, each cut to `relatedSnippet`
+    /// characters (the rest is one `recall` away).
+    static let relatedShare = 900, relatedLimit = 3, relatedSnippet = 220
     /// How often hand edits to the pages are picked up while the app runs.
     static let reconcileInterval: TimeInterval = 20
     /// ai-memory's defaults: ~35-day half-life, access reinforcement, cold below 0.2; sessions younger than
@@ -212,8 +218,21 @@ actor MemoryBank {
     /// with a boost for facts and procedures over session notes. Hits count as uses (they age slower).
     func recall(_ query: String, limit: Int = 5, excluding: Set<String> = [], now: Date = .now) -> [MemoryHit] {
         prepare(now: now)
-        guard let index, let match = MemoryText.ftsQuery(query) else { return [] }
-        let words = Set(MemoryText.words(query).map(MemoryText.stem))
+        guard let match = MemoryText.ftsQuery(query) else { return [] }
+        let hits = search(match: match, words: Set(MemoryText.words(query).map(MemoryText.stem)), rows: limit + excluding.count,
+                          excluding: excluding).prefix(limit).map(\.hit)
+        bump(hits.map(\.path), now: now)
+        return Array(hits)
+    }
+
+    private struct Candidate {
+        var hit: MemoryHit
+        /// Title and body, for telling how many of the message's words a page really has.
+        var text: String
+    }
+
+    private func search(match: String, words: Set<String>, rows limit: Int, excluding: Set<String>) -> [Candidate] {
+        guard let index else { return [] }
         let rows = index.rows("""
             SELECT p.path, p.kind, p.title, p.body, p.updated FROM pages_fts JOIN pages p ON p.id = pages_fts.rowid
             WHERE pages_fts MATCH ? AND p.kind != 'identidade'
@@ -221,12 +240,29 @@ actor MemoryBank {
                 WHEN p.kind IN ('fato', 'procedimento') THEN 1.3 WHEN p.kind = 'preferencia' THEN 1.2
                 WHEN p.compacted = 1 THEN 0.8 ELSE 1.0 END
             LIMIT ?
-            """, [.text(match), .int(limit + excluding.count)])
-        let hits = rows.compactMap { row -> MemoryHit? in
+            """, [.text(match), .int(limit)])
+        return rows.compactMap { row -> Candidate? in
             guard !excluding.contains(row.text(0)), let kind = MemoryKind(rawValue: row.text(1)) else { return nil }
-            return MemoryHit(path: row.text(0), kind: kind, title: row.text(2), snippet: Self.snippet(row.text(3), words: words),
-                             date: Date(timeIntervalSince1970: row.double(4) ?? 0))
-        }.prefix(limit)
+            return Candidate(hit: MemoryHit(path: row.text(0), kind: kind, title: row.text(2), snippet: Self.snippet(row.text(3), words: words),
+                                            date: Date(timeIntervalSince1970: row.double(4) ?? 0)),
+                             text: row.text(2) + " " + row.text(3))
+        }
+    }
+
+    /// The memories worth putting in front of the model with `message`, best first, at most `limit`. Unlike `recall` (the
+    /// model asking), this runs on every message, so it is picky: a message that only greets or confirms searches
+    /// nothing; a page must have at least two of the message's distinct words when it has three or more (one when
+    /// fewer); and `isSent` leaves out what the conversation already carries.
+    func related(to message: String, limit: Int = MemoryBank.relatedLimit, excluding: Set<String> = [],
+                 isSent: (MemoryHit) -> Bool = { _ in false }, now: Date = .now) -> [MemoryHit] {
+        prepare(now: now)
+        let terms = MemoryText.topicTerms(message)
+        guard !terms.isEmpty, let match = MemoryText.ftsQuery(terms.joined(separator: " ")) else { return [] }
+        let required = terms.count >= 3 ? 2 : 1
+        // Wider than `limit`: what the filters drop must not leave the message with fewer memories than it deserves.
+        let candidates = search(match: match, words: Set(terms.map(MemoryText.stem)), rows: 4 * limit + excluding.count, excluding: excluding)
+        let hits = candidates.filter { MemoryText.matchCount(of: terms, in: $0.text) >= required && !isSent($0.hit) }
+            .prefix(limit).map(\.hit)
         bump(hits.map(\.path), now: now)
         return Array(hits)
     }
@@ -240,8 +276,12 @@ actor MemoryBank {
     ///   memories related to the message, and the titles of other facts. They were written from conversations that
     ///   may have contained text from web pages or files, so they are flattened to plain lines (no fake sections)
     ///   and marked as facts about the past, not instructions.
+    ///
+    /// The memories related to the message are only those that fit it (see `related(to:)`), and not the ones the
+    /// conversation carries already: `alreadySent` holds the related lines (or just their `relatedHeaders`) of its
+    /// latest messages, and a memory is sent again only when it changed.
     func brief(for message: String, conversationIsNew: Bool, userTurns: Int = 1, tools: MemoryToolNames = .init(),
-               canSave: Bool = true, budget: Int = MemoryBank.briefBudget, now: Date = .now) -> MemoryBrief {
+               canSave: Bool = true, alreadySent: [String] = [], budget: Int = MemoryBank.briefBudget, now: Date = .now) -> MemoryBrief {
         prepare(now: now)
         sweep(now: now)
         var brief = MemoryBrief()
@@ -278,12 +318,18 @@ actor MemoryBank {
         var notes: [String] = []
         var shown: Set<String> = [Self.identityPath]
         shown.formUnion(preferences.map(\.path))
-        let related = recall(message, limit: 5, excluding: shown, now: now)
-        if !related.isEmpty {
-            shown.formUnion(related.map(\.path))
-            brief.related = MemoryText.clip(related.map {
-                "- [\($0.kind.label), \(Self.dayFormat.string(from: $0.date))] \(Self.untrusted($0.title)): \(Self.untrusted(MemoryText.clip($0.snippet, 300)))"
-            }.joined(separator: "\n"), Self.relatedShare)
+        let related = related(to: message, excluding: shown,
+                              isSent: { hit in Self.isSent(Self.relatedHeader(hit), in: alreadySent) }, now: now)
+        var relatedLines: [String] = []
+        for hit in related {
+            let line = Self.relatedLine(hit)
+            guard relatedLines.reduce(0, { $0 + $1.count + 1 }) + line.count <= Self.relatedShare else { break }
+            relatedLines.append(line)
+            brief.relatedHeaders.append(Self.relatedHeader(hit))
+            shown.insert(hit.path)
+        }
+        if !relatedLines.isEmpty {
+            brief.related = relatedLines.joined(separator: "\n")
             take("### Related to the user's message\n" + brief.related, into: &notes)
         }
         if conversationIsNew, let last = items(.sessao, limit: 1).first, !shown.contains(last.path) {
@@ -442,8 +488,10 @@ actor MemoryBank {
         return nil
     }
 
+    /// Newest first; pages saved in the same instant keep one order (by path), because the pinned memory is part of the
+    /// system prompt and its order must not change between two messages.
     private func items(_ kind: MemoryKind, limit: Int) -> [MemorySnapshot.Item] {
-        index?.rows("SELECT path, title, body, updated, compacted FROM pages WHERE kind = ? ORDER BY updated DESC LIMIT ?",
+        index?.rows("SELECT path, title, body, updated, compacted FROM pages WHERE kind = ? ORDER BY updated DESC, path LIMIT ?",
                     [.text(kind.rawValue), .int(limit)]).map { row in
             MemorySnapshot.Item(path: row.text(0), kind: kind, title: row.text(1), body: row.text(2),
                                 date: Date(timeIntervalSince1970: row.double(3) ?? 0), compacted: row.int(4) == 1)
@@ -536,6 +584,41 @@ actor MemoryBank {
             !CharacterSet.controlCharacters.contains($0) || $0 == "\n" || $0 == "\t"
         }))
         return String(visible.trimmingCharacters(in: .whitespacesAndNewlines).prefix(maximumLength))
+    }
+
+    /// One related memory as the prompt has it: `- [Fato, 07/10/2026 14:32 #a1b2] text`. Pages saved without a title of their
+    /// own are titled by their first line, so the title is left out when the text already starts with it.
+    static func relatedLine(_ hit: MemoryHit) -> String {
+        let title = untrusted(hit.title), text = untrusted(MemoryText.clip(hit.snippet, relatedSnippet))
+        let core = title.hasSuffix("…") ? String(title.dropLast()) : title
+        let body = MemoryText.fold(text).hasPrefix(MemoryText.fold(core)) ? text : title + ": " + text
+        return relatedHeaderPrefix(hit) + body
+    }
+
+    /// What every line of a memory starts with: its kind, when it was last changed (to the minute: an edited page reads as
+    /// a new one) and a short id of the page itself. The id tells two pages apart that share a kind, a minute and the
+    /// start of a title (the model often saves several facts in one turn).
+    private static func relatedHeaderPrefix(_ hit: MemoryHit) -> String {
+        "- [\(hit.kind.label), \(dayFormat.string(from: hit.date)) #\(pageID(hit.path))] "
+    }
+
+    /// Four hex digits of the page's path: stable for as long as the page exists.
+    static func pageID(_ path: String) -> String { String(ShortHash.of(path).prefix(4)) }
+
+    /// What tells a related memory's line apart from the others, and from an older version of the same page: every form
+    /// of its line (`relatedLine`) begins with it.
+    static func relatedHeader(_ hit: MemoryHit) -> String { relatedHeaderPrefix(hit) }
+
+    /// Whether one of `lines` (whole related lines, or just their headers) starts with `header`.
+    static func isSent(_ header: String, in lines: [String]) -> Bool {
+        lines.contains { $0.hasPrefix(header) }
+    }
+
+    /// The related-memory lines inside a preface or message: `- [Kind, dd/MM/yyyy HH:mm #id] ...`.
+    static func relatedLines(in text: String) -> [String] {
+        text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init).filter {
+            $0.range(of: #"^- \[[^\],]+, \d{2}/\d{2}/\d{4} \d{2}:\d{2}( #[0-9a-f]{4})?\] "#, options: .regularExpression) != nil
+        }
     }
 
     /// Conversation-derived text for the prompt: one line, no fake sections, no fence breaking.

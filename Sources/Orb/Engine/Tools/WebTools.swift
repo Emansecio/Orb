@@ -2,8 +2,10 @@ import Foundation
 
 struct WebFetchTool: AgentTool {
     static let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
-    /// Text returned by one call; longer pages are read in pieces with `offset`.
-    static let maxCharacters = 30_000
+    /// The most one call returns (`max_chars` can ask for up to this), and what it returns by default. Both stay under
+    /// `ToolOutputCap.limit`: longer pages are read in pieces with `offset`, which the note at the end spells out.
+    static let maxCharacters = ToolOutputBudget.pageCharacters
+    static let defaultCharacters = ToolOutputBudget.webPageDefault
     /// Pages larger than this are cut (keeps memory bounded on huge downloads).
     static let maxBytes = 5_000_000
     /// PDFs are often bigger and cannot be opened when cut (the index sits at the end), so they get more room.
@@ -23,17 +25,16 @@ struct WebFetchTool: AgentTool {
     let spec = ToolSpec(
         name: "web_fetch",
         description: """
-        Fetch a web page over http(s) and return its readable text (scripts, styles and navigation removed; links \
-        kept as "text (url)") with the final URL and title. JSON, XML and plain text come back as is; PDFs as \
-        text. One call returns at most 30,000 characters (reads at most the first 5 MB of the response, 25 MB for PDFs): when the \
-        text is longer a note gives the `offset` to continue from. Fails on HTTP errors. To keep a file (image, \
-        archive, PDF…) instead of reading it, pass `save_to`.
+        Fetch a web page over http(s) and return its readable text (scripts and navigation removed, links as \
+        "text (url)") with the final URL and title. JSON, XML and plain text come back as is, PDFs as text. One \
+        call returns 12,000 characters by default (`max_chars` up to 24,000); a note at the end gives the \
+        `offset` to continue. To keep a file (image, archive, PDF…) pass `save_to` instead.
         """,
         parameters: .schema([
-            "url": .property("string", "Full http:// or https:// URL."),
-            "offset": .property("integer", "Character to start at, to continue a long page (default 0)."),
-            "max_chars": .property("integer", "Characters to return (default and max 30000)."),
-            "save_to": .property("string", "Download the response to this file path instead of returning it (up to 100 MB; replaces an existing file)."),
+            "url": .property("string"),
+            "offset": .property("integer", "First character, to continue a long page (default 0)."),
+            "max_chars": .property("integer"),
+            "save_to": .property("string", "Download to this path instead (up to 100 MB; replaces a file)."),
         ], required: ["url"]))
 
     var kind: ToolCall.Kind { .browser }
@@ -105,7 +106,7 @@ struct WebFetchTool: AgentTool {
     static func page(of text: String, arguments: JSONValue, truncatedDownload: Int?) -> String {
         let total = text.count
         let offset = arguments.integer("offset", default: 0, in: 0...Int.max)
-        let length = arguments.integer("max_chars", default: maxCharacters, in: 1...maxCharacters)
+        let length = arguments.integer("max_chars", default: defaultCharacters, in: 1...maxCharacters)
         if total == 0 { return "(sem texto)" }
         guard offset < total else { return "O texto tem só \(total) caracteres; offset=\(offset) está além do fim." }
         let start = text.index(text.startIndex, offsetBy: offset)

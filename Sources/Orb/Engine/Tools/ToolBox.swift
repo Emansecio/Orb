@@ -4,6 +4,51 @@ import Foundation
 /// FileTools.swift, `shellTools` in ShellTool.swift, …), so adding a tool touches only its family's file.
 enum ToolBox {
     static let all: [any AgentTool] = shellTools + fileTools + webTools + macTools + memoryTools
+
+    /// The tools that read or act on another app's interface through Accessibility. Without that permission both
+    /// only fail with instructions, so they are not offered (their descriptions are about 950 tokens in every request).
+    static let accessibilityToolNames: Set<String> = ["ui_read", "ui_act"]
+
+    /// The tools an Orb with these capabilities is offered. `accessibilityGranted` is whether macOS trusts the app
+    /// for Accessibility; when it does not, `ui_read` and `ui_act` stay out of the list (it only changes when the
+    /// permission does, which is rare, so the provider's cache of the tool list is not disturbed).
+    static func offered(for capabilities: Set<Capability>, accessibilityGranted: Bool) -> [any AgentTool] {
+        all.filter { tool in
+            guard tool.capability.map(capabilities.contains) ?? true else { return false }
+            return accessibilityGranted || !accessibilityToolNames.contains(tool.spec.name)
+        }
+    }
+
+    /// Said in the system prompt in place of the two tools, when they are held back, so a request to drive another
+    /// app gets the way to allow it instead of a made-up workaround.
+    static let accessibilityUnavailableNote = "Controlling other apps' interfaces (ui_read, ui_act) is off: Orb is not allowed in "
+        + "Ajustes do Sistema → Privacidade e Segurança → Acessibilidade. If the task needs it, tell the user to allow it there; "
+        + "meanwhile use AppleScript or Shortcuts."
+}
+
+/// How much text one call of a tool that pages returns. Those tools say how to continue (`offset`, `pages`), so a
+/// page that fits under `ToolOutputCap.limit` reaches the model whole; one above would lose its middle to the cap
+/// without the model being told which part to ask for.
+enum ToolOutputBudget {
+    /// A page of `read_file`, a PDF, a listing or a search: about 6,700 tokens.
+    static let pageCharacters = 24_000
+    /// What `web_fetch` returns when `max_chars` is not given: about 3,300 tokens. Most pages answer in their first
+    /// screens; `offset` continues for the rest.
+    static let webPageDefault = 12_000
+
+    /// The lines that fit in `budget` characters (newlines counted), and how many were left out. The first line is
+    /// always kept, so a single huge line cannot empty the result.
+    static func fit(_ lines: [String], budget: Int = pageCharacters) -> (kept: [String], omitted: Int) {
+        var used = 0
+        var kept = 0
+        for line in lines {
+            let cost = line.count + 1
+            if used + cost > budget, kept > 0 { break }
+            used += cost
+            kept += 1
+        }
+        return (Array(lines.prefix(kept)), lines.count - kept)
+    }
 }
 
 // MARK: - Helpers shared by the tools

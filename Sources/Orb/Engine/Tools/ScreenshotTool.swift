@@ -6,19 +6,16 @@ struct ScreenshotTool: AgentTool {
     let spec = ToolSpec(
         name: "screenshot",
         description: """
-        Take a screenshot of a display or of the front window of another app, save it as a PNG and return its \
-        path, size and the text found on it (OCR, Portuguese and English). If your model can see images, the \
-        picture itself comes with the result; otherwise you only get that text. Use it to see what is on the \
-        user's screen (an error dialog, a page, a document in another app). \
-        With target "window" the Orb's own window is skipped; add `app` to pick that app's window. Needs the \
-        Screen Recording permission: if it is missing, the message says how the user enables it.
+        Capture a display or the front window of another app (PNG); returns its path, size and the text on it \
+        (OCR), plus the picture itself if your model sees images. target "window" skips the Orb's own window; \
+        `app` picks that app's window. Needs Screen Recording (the error says how to allow it).
         """,
         parameters: .schema([
             "target": .object(["type": .string("string"),
                                "enum": .array(["display", "window"].map(JSONValue.string)),
-                               "description": .string("display (default): the whole screen. window: the front window of another app.")]),
-            "display": .property("integer", "Which display for target \"display\" (1 = main, default)."),
-            "app": .property("string", "With target \"window\": app name or bundle identifier whose front window to capture."),
+                               "description": .string("Default display.")]),
+            "display": .property("integer", "Display number (1 = main, default)."),
+            "app": .property("string", "With window: app name or bundle identifier."),
         ]))
 
     var kind: ToolCall.Kind { .computer }
@@ -30,8 +27,13 @@ struct ScreenshotTool: AgentTool {
             : ("Capturando a tela", "")
     }
 
+    /// Text found on a capture the model also gets to see, which says most of it already: just enough for exact
+    /// strings (error codes, file names). Without the picture the text is all there is, so it gets more room.
+    static let ocrLimitWithPicture = 1_500
+    static let ocrLimitTextOnly = 8_000
+
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
-        try await capture(arguments).report
+        try await capture(arguments).report(ocrLimit: Self.ocrLimitTextOnly)
     }
 
     /// The report as `run` gives it, plus the picture (shrunk) when the model can look at it. A picture that
@@ -39,18 +41,30 @@ struct ScreenshotTool: AgentTool {
     func runWithImages(_ arguments: JSONValue, context: ToolContext) async throws -> ToolResult {
         let captured = try await capture(arguments)
         guard context.acceptsImages, let store = context.imageStore, let botID = context.botID else {
-            return ToolResult(text: captured.report)
+            return ToolResult(text: captured.report(ocrLimit: Self.ocrLimitTextOnly))
         }
         // A capture of a large display can pass the size limit meant for attachments; it is shrunk all the same.
         do {
             let image = try await store.attach(fileAt: captured.file, botID: botID, enforcingLimit: false)
-            return ToolResult(text: captured.report, images: [image])
+            return ToolResult(text: captured.report(ocrLimit: Self.ocrLimitWithPicture), images: [image])
         } catch {
-            return ToolResult(text: captured.report + "\nNão consegui anexar a imagem para você ver (\(error.localizedDescription)); só o texto acima foi enviado.")
+            return ToolResult(text: captured.report(ocrLimit: Self.ocrLimitTextOnly)
+                + "\nNão consegui anexar a imagem para você ver (\(error.localizedDescription)); só o texto acima foi enviado.")
         }
     }
 
-    private func capture(_ arguments: JSONValue) async throws -> (report: String, file: URL) {
+    /// What a capture found: the text before the OCR (path, size, warnings), the OCR itself, and the file.
+    struct Capture {
+        var header: String
+        var ocr: String
+        var file: URL
+
+        func report(ocrLimit: Int) -> String {
+            header + (ocr.isEmpty ? "\nNão achei texto legível na imagem." : "\nTexto na imagem (OCR):\n" + ocr.truncated(to: ocrLimit))
+        }
+    }
+
+    private func capture(_ arguments: JSONValue) async throws -> Capture {
         let wantsWindow = arguments["target"]?.string == "window"
         var captureArguments = ["-x", "-t", "png"]
         if wantsWindow {
@@ -83,9 +97,7 @@ struct ScreenshotTool: AgentTool {
             report += "\nWarning: Orb does not have Screen Recording yet, so the capture may show only the wallpaper, without "
                 + "windows. " + ScreenshotImage.permissionAdvice
         }
-        report += text.isEmpty ? "\nNão achei texto legível na imagem."
-            : "\nTexto na imagem (OCR):\n" + text.truncated(to: 8000)
-        return (report, file)
+        return Capture(header: report, ocr: text, file: file)
     }
 
     /// The front window of `app`, or the front-most ordinary window that is not the Orb's.

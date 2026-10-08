@@ -156,21 +156,19 @@ struct GrepTool: AgentTool {
     let spec = ToolSpec(
         name: "grep",
         description: """
-        Search file contents with a regular expression (ICU syntax) and return `path:line: text` matches. Searches \
-        a folder recursively (or one file), skipping .git, node_modules, .build, DerivedData, Pods, .venv and \
-        binary or huge (>5 MB) files. `mode` is "content" (matching lines, default), "files" (only the paths) or \
-        "count" (matches per file). Lines are clipped to 300 characters; results stop at `max_results` with a note, \
-        so narrow the search with `path` or `include` rather than raising the limit. Use this instead of \
-        run_command with grep; for file names use glob.
+        Search file contents with a regex (ICU) and return `path:line: text` (a file with many matches is \
+        grouped under a `path:` header, `  line: text` below it). Searches a folder recursively or one file; \
+        skips .git, node_modules, build folders, binaries and files over 5 MB. Narrow with `path` or `include` \
+        rather than raising `max_results`. Prefer it over run_command grep; for file names use glob.
         """,
         parameters: .schema([
-            "pattern": .property("string", "Regular expression to look for, matched against each line."),
-            "path": .property("string", filePathDescription + " Folder or file to search; defaults to the working directory."),
-            "include": .property("string", "Only search files whose name matches this glob, e.g. \"*.swift\" or \"src/**/*.ts\"."),
-            "case_insensitive": .property("boolean", "Ignore letter case (default false)."),
-            "context": .property("integer", "Lines of context around each match in content mode (0-10, default 0)."),
-            "mode": .property("string", "\"content\" (default), \"files\" or \"count\"."),
-            "max_results": .property("integer", "Maximum matches (content) or files (files/count); default 100, max 1000."),
+            "pattern": .property("string"),
+            "path": .property("string", "Folder or file (default: the working directory)."),
+            "include": .property("string", "Glob on file names, e.g. \"*.swift\"."),
+            "case_insensitive": .property("boolean"),
+            "context": .property("integer", "Context lines around matches (0-10, default 0)."),
+            "mode": .property("string", "content (default), files or count."),
+            "max_results": .property("integer", "Matches or files (default 100, max 1000)."),
         ], required: ["pattern"]))
 
     var kind: ToolCall.Kind { .search }
@@ -283,6 +281,11 @@ struct GrepTool: AgentTool {
             }
         }
 
+        // However many results the limit allows, one call stays a page the model gets whole (see `ToolOutputBudget`).
+        let fitted = ToolOutputBudget.fit(output)
+        let cutBySize = fitted.omitted > 0
+        output = fitted.kept
+
         guard !output.isEmpty else {
             return "Nenhum resultado para \"\(patternText)\" em \(FileWalker.display(root, "", workingDirectory: workingDirectory)) (\(searched) arquivos de texto pesquisados)."
                 + (truncated ? " A busca parou antes de varrer tudo (tempo ou número de arquivos); restrinja path ou include." : "")
@@ -290,6 +293,9 @@ struct GrepTool: AgentTool {
         if mode == "count" { output.append("Total: \(totalLines) linhas em \(matchedFiles) arquivos.") }
         if limitReached {
             output.append("[... resultados truncados em \(limit); refine o padrão, use path ou include, ou aumente max_results ...]")
+        }
+        if cutBySize {
+            output.append("[... saída cortada por tamanho; refine o padrão, use path ou include ...]")
         }
         if truncated {
             output.append("[... a busca parou antes de varrer tudo (tempo ou número de arquivos); restrinja path ou include ...]")
@@ -317,8 +323,15 @@ struct GrepTool: AgentTool {
         return found
     }
 
+    /// A file with more matches than this is listed under a single `path:` header (`  line: text` below it), which
+    /// spares repeating the path on every line.
+    static let groupedAbove = 5
+
     /// `path:line: text` for matches and `path-line- text` for context lines, grep style.
     private static func contentLines(name: String, lines: [String], hits: [(index: Int, column: Int)], context: Int) -> [String] {
+        if context == 0, hits.count > groupedAbove {
+            return ["\(name):"] + hits.map { "  \($0.index + 1): \(clip(lines[$0.index], around: $0.column))" }
+        }
         var output: [String] = []
         var nextToShow = 0
         let columns = Dictionary(hits.map { ($0.index, $0.column) }, uniquingKeysWith: { first, _ in first })
@@ -355,15 +368,14 @@ struct GlobTool: AgentTool {
     let spec = ToolSpec(
         name: "glob",
         description: """
-        Find files by name pattern, newest first. `**` crosses folders: "**/*.md" is every Markdown file below \
-        `path`, "src/**/*.swift" restricts to src. A pattern without "/" (like "*.md") matches names at any depth. \
-        Skips .git, node_modules, .build, DerivedData, Pods and .venv. Returns at most `max_results` paths \
-        (default 200, max 1000), then says how many more matched. To search inside files use grep.
+        Find files by name pattern, newest first. `**` crosses folders ("**/*.md", "src/**/*.swift"); a pattern \
+        without "/" matches names at any depth. Skips .git, node_modules and build folders. Returns up to \
+        `max_results` paths (default 200, max 1000). To search inside files use grep.
         """,
         parameters: .schema([
-            "pattern": .property("string", "Glob such as \"**/*.md\" or \"*.{png,jpg}\"."),
-            "path": .property("string", filePathDescription + " Folder to search; defaults to the working directory."),
-            "max_results": .property("integer", "Maximum paths to return (default 200, max 1000)."),
+            "pattern": .property("string"),
+            "path": .property("string", "Folder (default: the working directory)."),
+            "max_results": .property("integer"),
         ], required: ["pattern"]))
 
     var kind: ToolCall.Kind { .search }
@@ -390,8 +402,11 @@ struct GlobTool: AgentTool {
             return "Nenhum arquivo combina com \"\(arguments["pattern"]?.string ?? "")\" em \(root.path)."
                 + (walked.truncated ? " (A busca parou antes de varrer tudo.)" : "")
         }
-        var lines = matches.prefix(limit).map { FileWalker.display(root, $0.relativePath, workingDirectory: context.workingDirectory) }
-        if matches.count > limit { lines.append("[... mais \(matches.count - limit) arquivos; refine o padrão ou o path ...]") }
+        let fitted = ToolOutputBudget.fit(matches.prefix(limit).map {
+            FileWalker.display(root, $0.relativePath, workingDirectory: context.workingDirectory)
+        })
+        var lines = fitted.kept
+        if matches.count > lines.count { lines.append("[... mais \(matches.count - lines.count) arquivos; refine o padrão ou o path ...]") }
         if walked.truncated { lines.append("[... a busca parou antes de varrer tudo; restrinja o path ...]") }
         return lines.joined(separator: "\n")
     }

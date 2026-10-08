@@ -14,6 +14,9 @@ struct AnthropicClient: LLMClient {
 
     static let apiVersion = "2023-06-01"
 
+    /// The Messages format carries the cache markers itself (see `requestBody`).
+    var arrangesPromptCache: Bool { true }
+
     init(baseURL: URL, credentials: @escaping CredentialsProvider, extraHeaders: [String: String] = [:],
          session: URLSession = .shared) {
         self.baseURL = baseURL
@@ -33,8 +36,9 @@ struct AnthropicClient: LLMClient {
             let task = Task {
                 do {
                     let provider = baseURL.host() ?? ""
-                    let body = try JSONEncoder().encode(Self.requestBody(
-                        model: model, messages: messages, tools: tools, maxTokens: maxTokens, provider: provider, toolChoice: toolChoice))
+                    let body = try WireEncoder.encode(Self.requestBody(
+                        model: model, messages: messages, tools: tools, maxTokens: maxTokens, provider: provider, toolChoice: toolChoice,
+                        stablePrefixTTL: Self.stablePrefixTTL(host: provider)), trailing: Self.trailingKeys)
                     let (bytes, response) = try await OpenAIClient.open(session, credentials: credentials) { key in
                         var request = makeRequest("messages", key: key)
                         request.httpMethod = "POST"
@@ -105,16 +109,47 @@ struct AnthropicClient: LLMClient {
 // MARK: - Wire format
 
 extension AnthropicClient {
-    static let ephemeral = JSONValue.object(["type": .string("ephemeral")])
+    /// How long a cache entry lives after it was written or last read.
+    enum CacheTTL: Sendable, Equatable {
+        /// The API's default. Sent without a `ttl` field, so gateways that only know the plain marker accept it.
+        case fiveMinutes
+        /// `"ttl": "1h"`: costs twice the base price to write (1.25 times for five minutes), reads are the same.
+        case oneHour
+
+        var control: JSONValue {
+            switch self {
+            case .fiveMinutes: .object(["type": .string("ephemeral")])
+            case .oneHour: .object(["type": .string("ephemeral"), "ttl": .string("1h")])
+            }
+        }
+    }
+
+    /// Last in the body, so the part that repeats comes first (see `WireEncoder`).
+    static let trailingKeys = ["messages", "tool_choice"]
+
+    /// The marker for the conversation's growing tail. It always lives five minutes: a step of a tool loop comes
+    /// seconds after the previous one and renews it, and a longer life would double every write for nothing.
+    static let ephemeral = CacheTTL.fiveMinutes.control
+
+    /// How long the part that does not change between turns (the tools and the system prompt, thousands of tokens
+    /// that every request repeats) is kept. People come back to a conversation after more than five minutes much more
+    /// often than after more than an hour, so on Anthropic's own API this part is written once for an hour instead
+    /// of again at every return. The tail keeps five minutes, which the API allows (the longer life must come first
+    /// in the prompt, and the tools and the system prompt do). Other hosts get the plain marker.
+    static func stablePrefixTTL(host: String) -> CacheTTL {
+        host == "api.anthropic.com" ? .oneHour : .fiveMinutes
+    }
 
     /// System messages become the top-level `system`; tool results travel as `tool_result` blocks in a user turn;
     /// consecutive turns of the same role are merged (the API expects user/assistant alternation).
     ///
     /// Prompt caching uses explicit markers (the API allows four): the last tool, the system prompt and the last
     /// block of the last message, so each step of a tool loop reads the previous step's prefix from the cache.
+    /// The first two live `stablePrefixTTL`, the last five minutes (see `stablePrefixTTL(host:)`).
     /// `provider` is the endpoint's host: reasoning recorded by another endpoint or model is not sent back.
     static func requestBody(model: String, messages: [ChatMessage], tools: [ToolSpec], maxTokens: Int,
-                            provider: String = "", toolChoice: ToolChoice = .auto) -> JSONValue {
+                            provider: String = "", toolChoice: ToolChoice = .auto,
+                            stablePrefixTTL: CacheTTL = .fiveMinutes) -> JSONValue {
         let system = messages.filter { $0.role == .system }.map(\.content).joined(separator: "\n\n")
         var turns: [(role: String, blocks: [JSONValue])] = []
         let lastIndex = messages.lastIndex { $0.role != .system }
@@ -168,14 +203,14 @@ extension AnthropicClient {
             "messages": .array(turns.map { .object(["role": .string($0.role), "content": .array($0.blocks)]) }),
         ]
         if !system.isEmpty {
-            body["system"] = .array([.object(["type": .string("text"), "text": .string(system), "cache_control": ephemeral])])
+            body["system"] = .array([.object(["type": .string("text"), "text": .string(system), "cache_control": stablePrefixTTL.control])])
         }
         if !tools.isEmpty {
             var specs = tools.map {
                 JSONValue.object(["name": .string($0.name), "description": .string($0.description), "input_schema": $0.parameters])
             }
             if case .object(var last)? = specs.last {
-                last["cache_control"] = ephemeral
+                last["cache_control"] = stablePrefixTTL.control
                 specs[specs.count - 1] = .object(last)
             }
             body["tools"] = .array(specs)

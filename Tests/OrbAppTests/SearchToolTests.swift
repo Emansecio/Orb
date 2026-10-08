@@ -115,9 +115,10 @@ final class SearchToolTests {
         try workspace.write("zlast.txt", "hit\n")
         let output = try await run(GrepTool(), ["pattern": .string("hit"), "max_results": .string("10")])
         let all = lines(output)
-        #expect(all.count == 11)
+        // A file with many matches is grouped under one header.
+        #expect(all.count == 12)
         #expect(all.last?.contains("resultados truncados em 10") == true)
-        #expect(all.first == "many.txt:1: hit 1")
+        #expect(all.prefix(2) == ["many.txt:", "  1: hit 1"])
 
         let exact = try await run(GrepTool(), ["pattern": .string("hit 1$"), "max_results": .number(1)])
         #expect(!exact.contains("truncados"), "exactly as many matches as the limit is not truncation")

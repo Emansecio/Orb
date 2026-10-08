@@ -55,15 +55,20 @@ enum JSONValue: Codable, Hashable, Sendable {
 
     /// Compact JSON text.
     var jsonString: String {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        return (try? encoder.encode(self)).flatMap { String(data: $0, encoding: .utf8) } ?? "null"
+        (try? WireEncoder.encode(self)).flatMap { String(data: $0, encoding: .utf8) } ?? "null"
     }
 
-    /// Shorthand for a JSON Schema object with string-keyed properties.
+    /// Shorthand for a JSON Schema object with string-keyed properties. `required` is left out when empty (an empty
+    /// list is the default, and the provider is charged for every character of it in every request).
     static func schema(_ properties: [String: JSONValue], required: [String] = []) -> JSONValue {
-        .object(["type": .string("object"), "properties": .object(properties),
-                 "required": .array(required.map(JSONValue.string))])
+        var schema: [String: JSONValue] = ["type": .string("object"), "properties": .object(properties)]
+        if !required.isEmpty { schema["required"] = .array(required.map(JSONValue.string)) }
+        return .object(schema)
+    }
+
+    /// A typed property with no description, for one the name says everything about (every word is billed per request).
+    static func property(_ type: String) -> JSONValue {
+        .object(["type": .string(type)])
     }
 
     /// Shorthand for a typed JSON Schema property.
@@ -290,6 +295,58 @@ struct TokenUsage: Sendable, Equatable {
         cacheRead = sum(cacheRead, other.cacheRead)
         cacheWrite = sum(cacheWrite, other.cacheWrite)
     }
+
+    /// The whole prompt: what was read from the cache, written to it and charged in full. nil when no count is known.
+    var promptTokens: Int? {
+        guard input != nil || cacheRead != nil || cacheWrite != nil else { return nil }
+        return (input ?? 0) + (cacheRead ?? 0) + (cacheWrite ?? 0)
+    }
+
+    /// Whether the provider says anything about its cache. Servers that have none (or do not report it) leave both
+    /// counts out; one that has a cache and missed reports 0.
+    var reportsCache: Bool { cacheRead != nil || cacheWrite != nil }
+
+    /// The share of the prompt served from the cache, 0...1 (nil without a cache report or a prompt). On a sum over
+    /// the requests of a turn the first one is always a miss, so a turn of several steps works when this is high.
+    var cacheHitRatio: Double? {
+        guard reportsCache, let prompt = promptTokens, prompt > 0 else { return nil }
+        return Double(cacheRead ?? 0) / Double(prompt)
+    }
+}
+
+/// Whether the provider's prompt cache is doing its job, judged on what a turn used. A request whose prefix is not
+/// byte-identical to the one before (an unsorted key, a timestamp in the prompt, a tool list that moves) is charged
+/// in full every time and nothing else says so; this is what makes it visible.
+enum CacheHealth {
+    /// Model calls of a turn needed before judging: the first one is a miss by nature.
+    static let minimumRequests = 3
+    /// Below this the provider would not cache anyway (OpenAI starts at 1,024 tokens, Anthropic at 1,024 to 4,096).
+    static let minimumPromptTokens = 4_096
+    /// A turn whose prompts were read from the cache less than this is not caching.
+    static let healthyRatio = 0.2
+
+    static let notice = "O cache de prompt do provedor não está pegando, o que encarece cada passo. "
+        + "Se o problema continuar, confira o modelo e o provedor em Ajustes → Modelos."
+
+    /// `total` is the turn's usage summed over `requests` model calls.
+    static func isFailing(_ total: TokenUsage, requests: Int) -> Bool {
+        guard requests >= minimumRequests, let ratio = total.cacheHitRatio, let prompt = total.promptTokens,
+              prompt / requests >= minimumPromptTokens else { return false }
+        return ratio < healthyRatio
+    }
+
+    /// One line per request for the developer log (`ORB_DEBUG_USAGE=1`): "step 3: prompt 8120, cache 7900 (97%), out 45".
+    static func logLine(step: Int, usage: TokenUsage) -> String {
+        var line = "step \(step): prompt \(usage.promptTokens.map(String.init) ?? "?")"
+        if let ratio = usage.cacheHitRatio {
+            line += ", cache read \(usage.cacheRead ?? 0) write \(usage.cacheWrite ?? 0) (\(Int((ratio * 100).rounded()))%)"
+        } else {
+            line += ", cache not reported"
+        }
+        return line + ", out \(usage.output.map(String.init) ?? "?")"
+    }
+
+    static var logsUsage: Bool { ProcessInfo.processInfo.environment["ORB_DEBUG_USAGE"] != nil }
 }
 
 /// Whether the model may call tools in a response. `.none` keeps the tool list (and so the provider's cache) but
@@ -313,9 +370,15 @@ enum LLMEvent: Sendable, Equatable {
 protocol LLMClient: Sendable {
     /// Streams one assistant response. Throws `LLMError` for HTTP/protocol failures; honors task cancellation.
     func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error>
+    /// Whether this client arranges the provider's prompt cache (a marker, a key, or a provider that caches by
+    /// itself), so a miss is the app's concern. A client that sends nothing for it (chat completions to a gateway
+    /// that wants explicit markers) must not be blamed by `CacheHealth`.
+    var arrangesPromptCache: Bool { get }
 }
 
 extension LLMClient {
+    var arrangesPromptCache: Bool { false }
+
     func stream(model: String, messages: [ChatMessage], tools: [ToolSpec]) -> AsyncThrowingStream<LLMEvent, Error> {
         stream(model: model, messages: messages, tools: tools, toolChoice: .auto)
     }

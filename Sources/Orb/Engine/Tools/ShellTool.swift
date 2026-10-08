@@ -8,23 +8,21 @@ struct RunCommandTool: AgentTool {
     let spec = ToolSpec(
         name: "run_command",
         description: """
-        Run a shell command on the user's Mac the way their own Terminal would (their PATH and tools such as \
-        npm, adb or java are available) and return its exit code and combined stdout/stderr. Use it for git, \
-        builds, scripts, package managers and anything without a dedicated tool. Commands are non-interactive \
-        (stdin is empty).
-        Every call starts a fresh shell: cd, export and aliases do NOT carry over to the next call. Set the \
-        directory with the cwd argument and chain related steps in one command (cd x && make).
-        The command is killed after timeout_seconds (default 120, max 600). Output longer than about 20 KB \
-        keeps its start and end and drops the middle.
-        For servers, watchers and anything that must keep running, pass background: true. The process then \
-        outlives the call: you get a job id and its first output. Read it later with job_output, list jobs with \
-        job_list, stop one with job_stop. A plain `cmd &` does not survive the call.
+        Run a shell command the way the user's own Terminal would (their PATH and tools such as npm, adb, java) \
+        and return the exit code and combined stdout/stderr. For git, builds, scripts and anything without a \
+        dedicated tool. Non-interactive (stdin is empty).
+        Every call is a fresh shell: cd, export and aliases do NOT persist. Use cwd, and chain related steps in \
+        one command (cd x && make).
+        Killed after timeout_seconds (default 120, max 600). Output over ~20 KB keeps its start and end.
+        For servers and watchers pass background: true: you get a job id and the first output; read it later \
+        with job_output, list jobs with job_list, stop one with job_stop. A plain `cmd &` does not survive the \
+        call.
         """,
         parameters: .schema([
-            "command": .property("string", "The command line to run."),
-            "cwd": .property("string", "Directory to run in, absolute or relative to the working directory. Defaults to the working directory."),
-            "timeout_seconds": .property("integer", "Seconds before the command is killed (default 120, max 600). Ignored with background."),
-            "background": .property("boolean", "Start the command and return right away, leaving it running (dev servers, watchers). Default false."),
+            "command": .property("string"),
+            "cwd": .property("string", "Directory to run in (default: the working directory)."),
+            "timeout_seconds": .property("integer", "Seconds before the kill (default 120, max 600); ignored with background."),
+            "background": .property("boolean", "Leave it running and return at once (servers, watchers)."),
         ], required: ["command"]))
 
     var kind: ToolCall.Kind { .shell }
@@ -103,10 +101,10 @@ private extension ToolContext {
 struct JobOutputTool: AgentTool {
     let spec = ToolSpec(
         name: "job_output",
-        description: "Show the latest output of a process started with run_command(background: true), plus whether it is still running.",
+        description: "Latest output of a background process (run_command with background: true) and whether it still runs.",
         parameters: .schema([
-            "id": .property("string", "The job id returned by run_command or listed by job_list."),
-            "lines": .property("integer", "How many of the last lines to show (default 50, max 500)."),
+            "id": .property("string"),
+            "lines": .property("integer", "Last lines to show (default 50, max 500)."),
         ], required: ["id"]))
 
     var kind: ToolCall.Kind { .shell }
@@ -130,7 +128,7 @@ struct JobOutputTool: AgentTool {
 struct JobListTool: AgentTool {
     let spec = ToolSpec(
         name: "job_list",
-        description: "List the processes this Orb started with run_command(background: true), running or finished.",
+        description: "List the background processes (run_command with background: true), running or finished.",
         parameters: .schema([:]))
 
     var kind: ToolCall.Kind { .shell }
@@ -152,9 +150,9 @@ struct JobListTool: AgentTool {
 struct JobStopTool: AgentTool {
     let spec = ToolSpec(
         name: "job_stop",
-        description: "Stop a process started with run_command(background: true) and everything it launched.",
+        description: "Stop a background process (run_command with background: true) and all it launched.",
         parameters: .schema([
-            "id": .property("string", "The job id returned by run_command or listed by job_list."),
+            "id": .property("string"),
         ], required: ["id"]))
 
     var kind: ToolCall.Kind { .shell }

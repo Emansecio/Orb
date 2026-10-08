@@ -30,6 +30,9 @@ struct OpenAIClient: LLMClient {
     /// OpenAI itself, which accepts `prompt_cache_key`; other compatible servers may reject unknown fields.
     var isOpenAI: Bool { baseURL.host() == "api.openai.com" }
     private static let usageHosts: Set<String> = ["openrouter.ai", "api.commandcode.ai", "opencode.ai"]
+    /// Only OpenAI itself caches the chat format without markers; elsewhere (OpenRouter with Anthropic models) the
+    /// request would need `cache_control`, which this format does not send.
+    var arrangesPromptCache: Bool { isOpenAI }
     /// Servers known to take `stream_options` (local ones may reject it): OpenAI, OpenRouter, Command Code (its docs
     /// show `include_usage`) and OpenCode (whose own client sends it to every OpenAI-compatible endpoint).
     var reportsUsage: Bool {
@@ -40,9 +43,9 @@ struct OpenAIClient: LLMClient {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    let body = try JSONEncoder().encode(Self.requestBody(
+                    let body = try WireEncoder.encode(Self.requestBody(
                         model: model, messages: messages, tools: tools, includeUsage: reportsUsage,
-                        promptCacheKey: isOpenAI ? conversationID : nil, toolChoice: toolChoice))
+                        promptCacheKey: isOpenAI ? conversationID : nil, toolChoice: toolChoice), trailing: Self.trailingKeys)
                     let (bytes, response) = try await Self.open(session, credentials: credentials) { key in
                         var request = Self.authorizedRequest(baseURL.appending(path: "chat/completions"), apiKey: key,
                                                              headers: extraHeaders)
@@ -130,6 +133,9 @@ struct OpenAIClient: LLMClient {
 // MARK: - Wire format
 
 extension OpenAIClient {
+    /// Last in the body, so the part that repeats comes first (see `WireEncoder`).
+    static let trailingKeys = ["messages", "tool_choice"]
+
     static func requestBody(model: String, messages: [ChatMessage], tools: [ToolSpec], includeUsage: Bool = false,
                             promptCacheKey: String? = nil, toolChoice: ToolChoice = .auto) -> JSONValue {
         var body: [String: JSONValue] = [

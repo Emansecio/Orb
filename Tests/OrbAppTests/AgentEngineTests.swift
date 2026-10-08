@@ -462,7 +462,11 @@ extension AgentEngineTests {
         #expect(failures(events).isEmpty)
         // No call is left without an answer in the history.
         #expect(messages(events).filter { $0.role == .tool }.count == 2)
-        #expect(messages(events).last?.role == .tool)
+        // The task leaves a record of where it stands for the "continua" that follows (roles keep alternating).
+        let last = messages(events).last
+        #expect(last?.role == .assistant)
+        #expect(last?.content.hasPrefix(ProgressRecord.marker) == true)
+        #expect(last?.content.contains("[passo 1] touch") == true)
     }
 
     @Test func aTurnThatFinishesEarlyNeverSeesTheLimit() async {

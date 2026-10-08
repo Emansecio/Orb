@@ -15,6 +15,8 @@ final class AppModel {
     var providers: [ProviderAccount] { didSet { scheduleStateSave() } }
     /// "provider/model" for bots without a model of their own.
     var defaultModel: String { didSet { scheduleStateSave() } }
+    /// How much conversation the Orbs remember word for word before the start is folded into a summary.
+    var contextMemory: ContextMemoryLevel { didSet { scheduleStateSave() } }
     /// Conversations in memory. At launch only the selected Orb's is read (off the main thread, `beginLoading`);
     /// the others are read when they are needed (`unloadedConversations`): when you switch to the Orb, or something
     /// has to change its conversation (`ensureLoaded`). One nobody has looked at for a while and that has nothing
@@ -40,6 +42,9 @@ final class AppModel {
     var connectorStatus: [UUID: MCPStatus] = [:]
     /// Tokens each Orb's last turn used, summed over its model calls (for a context meter; nothing shows it yet).
     private(set) var usage: [UUID: TokenUsage] = [:]
+    /// Tokens of each Orb's latest model call alone: `promptTokens` is how full the context is now and
+    /// `cacheHitRatio` how much of it the provider's cache served (native engine only; for the context meter).
+    private(set) var requestUsage: [UUID: TokenUsage] = [:]
     /// Providers with a key in the Keychain (or, for ChatGPT and Claude Code, a sign-in).
     private(set) var connected: Set<ProviderKind> = []
     /// What the local Claude Code reports (checked while that provider is set up).
@@ -77,6 +82,12 @@ final class AppModel {
     @ObservationIgnored let images: ImageStore
     /// Models ("provider/model") that answered that they cannot read pictures, so later turns do not try again.
     @ObservationIgnored private var visionRejected: Set<String> = []
+    /// Context windows learned from refusals ("provider/model"); they shrink the history budget of that model.
+    @ObservationIgnored private(set) var learnedContexts: [String: LearnedContext]
+    /// Tokens of system prompt and tool specs the engine measured on each Orb's last turn (not kept across launches).
+    @ObservationIgnored private var measuredOverhead: [UUID: Int] = [:]
+    /// Where outputs too big for a conversation are saved for the model to read back (`saidas/<id>/` in the data folder).
+    @ObservationIgnored let outputsDirectory: URL
     /// Every Orb's own memory bank (`memoria/<id>/` in the data folder).
     @ObservationIgnored let memory: MemoryLibrary
     /// Saves a conversation stretch to memory once the user has been away for `SessionSummary.idleGap`.
@@ -106,6 +117,8 @@ final class AppModel {
     /// Where "the home folder" is, for deciding whether an Orb's folder is its own (tests point it elsewhere).
     @ObservationIgnored var homeFolder = FileManager.default.homeDirectoryForCurrentUser
     @ObservationIgnored var clientOverride: (@MainActor () -> (any LLMClient)?)?
+    /// Whether macOS trusts the app for Accessibility, read when a turn starts (tests replace it).
+    @ObservationIgnored var accessibilityProbe: @Sendable () -> Bool = { LiveMacPermissionSystem().isAccessibilityTrusted() }
     @ObservationIgnored private var stateSave: Task<Void, Never>?
     @ObservationIgnored private var conversationSaves: [UUID: Task<Void, Never>] = [:]
     /// Orbs whose conversation changed since it was last written; quitting saves only these.
@@ -162,6 +175,9 @@ final class AppModel {
         connectors = state.connectors
         providers = state.providers
         defaultModel = state.defaultModel
+        contextMemory = state.contextMemory
+        learnedContexts = state.learnedContexts
+        outputsDirectory = ToolOutputCap.directory(inDataFolder: store.directory)
         // Only the Orb shown first is read at launch, and the window does not wait for it (`beginLoading` below).
         let readsFirstLater = asyncLoading ?? runsBackgroundWork
         var firstConversations: [UUID: Conversation] = [:]
@@ -186,6 +202,8 @@ final class AppModel {
         syncConnectors()
         if readsFirstLater, let first = state.bots.first { beginLoading(first.id) }
         guard runsBackgroundWork else { return }
+        let outputs = outputsDirectory
+        Task.detached(priority: .utility) { ToolOutputCap.cleanUp(directory: outputs) }
         ApprovalNotifications.clearStale()
         ApprovalNotifications.install { [weak self] route in self?.handle(route) }
         Task { [weak self] in await self?.prepareMemory() }
@@ -733,8 +751,11 @@ final class AppModel {
         stop(botID)
         let jobs = jobs
         Task { await jobs.forget(botID: botID) }
-        let pictures = images
-        Task.detached(priority: .utility) { pictures.deleteAll(for: botID) }
+        let pictures = images, outputs = outputsDirectory
+        Task.detached(priority: .utility) {
+            pictures.deleteAll(for: botID)
+            ToolOutputCap.removeAll(for: botID, in: outputs)
+        }
         memoryIdle.removeValue(forKey: botID)?.cancel()
         let library = memory
         if keepMemory {
@@ -1090,7 +1111,9 @@ final class AppModel {
             return true
         }
         let skills = enabledSkills
-        let budget = ContextBudget(model: modelInfo, provider: ref.provider, format: ref.provider == .custom ? account.format : nil)
+        let budget = contextBudget(ref: ref, account: account, botID: botID)
+        // Read before this turn's own messages are recorded: it is whether the last task is waiting for "continua".
+        let paused = conversations[botID]?.isTaskPaused ?? false
         let prepared = conversations[botID, default: Conversation()].prepareHistory(budget: budget)
         let history = prepared.history
         if prepared.firstCompaction { append(.notice("Conversa compactada: o começo virou um resumo."), to: botID) }
@@ -1101,15 +1124,17 @@ final class AppModel {
         let maxSteps = routineTurns[botID] != nil ? AgentEngine.routineMaxSteps : AgentEngine.defaultMaxSteps
         let lastWorkspaceHash = conversations[botID]?.workspaceHash
         let sessionID = gatewaySessionID(for: botID)
+        let lastWorkspace = conversations[botID]?.workspaceSeen
+        let sentMemories = TurnPreface.relatedLines(in: history)
 
         let turn = beginTurn(botID)
         turns[botID] = Task {
             guard !Task.isCancelled else { return } // stopped before it began
             let brief = await bank.brief(for: typed, conversationIsNew: history.isEmpty, userTurns: userTurns,
-                                         canSave: bot.permissionMode != .readOnly)
+                                         canSave: bot.permissionMode != .readOnly, alreadySent: sentMemories)
             let inputs = await TurnPromptInputs.gather(bot: bot, skills: skills, brief: brief)
             guard isCurrent(turn, of: botID) else { return } // stopped while preparing
-            let built = TurnPrompt.native(inputs, history: history, lastWorkspaceHash: lastWorkspaceHash)
+            let built = TurnPrompt.native(inputs, history: history, lastWorkspaceHash: lastWorkspaceHash, lastWorkspace: lastWorkspace)
             let client: any LLMClient
             do {
                 guard let made = clientOverride?() ?? account.client(for: modelInfo, credentials: Self.credentials(for: ref.provider),
@@ -1119,20 +1144,74 @@ final class AppModel {
                 failSetup(error, of: botID, turn: turn)
                 return
             }
-            var tools = ToolBox.all.filter { $0.capability.map(bot.capabilities.contains) ?? true }
+            let accessibilityGranted = !bot.capabilities.contains(.computerUse) || accessibilityProbe()
+            var tools = ToolBox.offered(for: bot.capabilities, accessibilityGranted: accessibilityGranted)
             if bot.capabilities.contains(.connectors) { tools += await mcp.tools() }
             guard isCurrent(turn, of: botID) else { return }
             // Recorded when the prompt with the snapshot is stored (see `apply`), not before.
             pendingMarks[botID] = built.marks
-            let request = TurnRequest(bot: bot, model: ref.model, system: built.system, history: history,
+            // The system prompt tells the Orb when the interface tools are held back (see `ToolBox.offered`).
+            let system = accessibilityGranted ? built.system : built.system + "\n\n" + ToolBox.accessibilityUnavailableNote
+            let request = TurnRequest(bot: bot, model: ref.model, system: system, history: history,
                                       prompt: TurnPreface.prepend(built.preface, to: prompt),
                                       client: client, tools: tools, context: context, budget: budget, maxSteps: maxSteps,
                                       turnGrants: turnGrants, permissions: permissionSource(for: bot),
                                       images: pictures, supportsImages: sees,
-                                      onImagesRejected: { [weak self] in Task { @MainActor in self?.visionRejected.insert(ref.text) } })
+                                      onImagesRejected: { [weak self] in Task { @MainActor in self?.visionRejected.insert(ref.text) } },
+                                      outputsDirectory: outputsDirectory,
+                                      onContextLearned: { [weak self] tokens, stated in
+                                          Task { @MainActor in self?.learnContextWindow(tokens, of: ref.text, stated: stated) }
+                                      },
+                                      onOverheadMeasured: { [weak self] tokens in
+                                          Task { @MainActor in self?.noteMeasuredOverhead(tokens, of: botID) }
+                                      },
+                                      picksUpTask: paused)
             await play(engine.run(request), for: botID, turn: turn)
         }
         return true
+    }
+
+    // MARK: Context
+
+    /// The history budget of the model `bot` uses, the memory level and what a refusal once taught about the model's
+    /// window included. nil for Claude Code, which manages its own context.
+    func contextBudget(for bot: Bot) -> ContextBudget? {
+        guard let ref = modelRef(for: bot), ref.provider != .claudeCode, let account = account(ref.provider) else { return nil }
+        return contextBudget(ref: ref, account: account, botID: bot.id)
+    }
+
+    /// With the overhead (system prompt and tool specs) the engine measured on this Orb's last turn, so the history
+    /// prepared here is the one the engine will fit: planned with a guess, the engine would cut it again every turn.
+    private func contextBudget(ref: ModelRef, account: ProviderAccount, botID: UUID) -> ContextBudget {
+        let learned = learnedContexts[ref.text].flatMap { $0.isFresh() ? $0.tokens : nil }
+        let budget = ContextBudget(model: account.models.first { $0.id == ref.model }, provider: ref.provider,
+                                   format: ref.provider == .custom ? account.format : nil, level: contextMemory, learnedWindow: learned)
+        return measuredOverhead[botID].map { budget.refined(overheadTokens: $0) } ?? budget
+    }
+
+    /// How full the context of the Orb's conversation is, for the meter. nil for Claude Code or while the Orb has no
+    /// usable model.
+    func contextFill(for botID: UUID) -> ContextFill? {
+        guard let bot = bot(botID), let budget = contextBudget(for: bot) else { return nil }
+        return (conversations[botID] ?? Conversation()).contextFill(budget: budget)
+    }
+
+    /// Remembers what the system prompt and tool specs of the Orb's last turn took, to plan the next history by.
+    func noteMeasuredOverhead(_ tokens: Int, of botID: UUID) {
+        measuredOverhead[botID] = tokens
+    }
+
+    /// Remembers that a model's window is `tokens` (a request was refused for its size and worked with less).
+    func learnContextWindow(_ tokens: Int, of model: String, stated: Bool = true) {
+        guard tokens > 0 else { return }
+        learnedContexts[model] = LearnedContext(tokens: tokens, date: .now, inferred: stated ? nil : true)
+        scheduleStateSave()
+    }
+
+    /// Forgets what was learned about a model's window (after raising the server's limit, for instance).
+    func forgetLearnedContext(of model: String) {
+        guard learnedContexts.removeValue(forKey: model) != nil else { return }
+        scheduleStateSave()
     }
 
     /// What the prompt says about the pictures of a message. Claude Code cannot be handed pictures, but its Read tool
@@ -1161,8 +1240,10 @@ final class AppModel {
         let catchUp = ClaudeCodePrompt.catchUp(Array(conversation.messages[seen...]).modelContext())
         let skills = enabledSkills
         let bank = memory.bank(for: botID)
-        let servers = [OrbToolsMCPServer.config(directory: bank.directory, mac: bot.capabilities.contains(.computerUse),
-                                                folder: bot.workingURL)]
+        // The app knows whether it has Accessibility; the server (a child process) is told rather than left to ask.
+        let usesMac = bot.capabilities.contains(.computerUse)
+        let servers = [OrbToolsMCPServer.config(directory: bank.directory, mac: usesMac, folder: bot.workingURL,
+                                                accessibilityGranted: usesMac ? accessibilityProbe() : nil)]
             + (bot.capabilities.contains(.connectors) ? connectors.filter(\.isEnabled) : [])
         let isNew = conversation.messages.isEmpty
         let userTurns = userTurnCount(botID)
@@ -1172,14 +1253,17 @@ final class AppModel {
         turns[botID] = Task {
             guard !Task.isCancelled else { return } // stopped before it began
             let brief = await bank.brief(for: message, conversationIsNew: isNew, userTurns: userTurns,
-                                         tools: ClaudeCodePrompt.memoryTools, canSave: bot.permissionMode != .readOnly)
-            // A resumed session keeps the system prompt of its first request: whatever changed since rides along.
+                                         tools: ClaudeCodePrompt.memoryTools, canSave: bot.permissionMode != .readOnly,
+                                         alreadySent: sessionID == nil ? [] : (conversation.claudeRelatedSent ?? []).flatMap { $0 })
+            // A resumed session sends the same system prompt again (rebuilt only when its identity, preferences or rules change); the rest rides with the message.
             let inputs = await TurnPromptInputs.gather(bot: bot, skills: skills, brief: brief)
             guard isCurrent(turn, of: botID) else { return } // stopped while preparing
             let built = TurnPrompt.claudeCode(inputs, session: .init(isNewSession: sessionID == nil,
                                                                      workspaceHash: conversation.claudeWorkspaceHash,
                                                                      pinned: conversation.claudeMemoryPinned,
-                                                                     standingHash: conversation.claudeStandingHash))
+                                                                     standingHash: conversation.claudeStandingHash,
+                                                                     workspace: conversation.claudeWorkspaceSeen,
+                                                                     system: conversation.claudeSystem))
             let context = [built.context, catchUp].filter { !$0.isEmpty }.joined(separator: "\n\n")
             let found = await ClaudeCode.shared.installation()
             guard isCurrent(turn, of: botID) else { return }
@@ -1359,16 +1443,27 @@ final class AppModel {
         case .message(let message):
             ensureLoaded(botID)
             conversations[botID, default: Conversation()].messages.append(message)
-            if message.role == .user { recordMarks(botID, native: true) }
+            if message.role == .user {
+                conversations[botID]?.taskPaused = false
+                recordMarks(botID, native: true)
+            }
             scheduleConversationSave(botID, delay: Self.streamingSaveInterval)
         case .failed(let message):
             closeStreaming(botID)
             append(.notice("Não deu certo: \(message)"), to: botID)
         case .notice(let text):
+            // The cache warning is said once per conversation, not at every turn that still has the problem.
+            if text == CacheHealth.notice, conversations[botID]?.items.contains(where: { $0.kind == .notice(text) }) == true { break }
             closeStreaming(botID)
             append(.notice(text), to: botID)
         case .usage(let total):
             writeIfChanged(total, at: botID, in: \.usage)
+        case .requestUsage(let used):
+            writeIfChanged(used, at: botID, in: \.requestUsage)
+        case .taskPaused:
+            ensureLoaded(botID)
+            conversations[botID, default: Conversation()].taskPaused = true
+            scheduleConversationSave(botID, delay: Self.streamingSaveInterval)
         case .session(let id):
             ensureLoaded(botID)
             conversations[botID, default: Conversation()].claudeSessionReported(id, folder: claudeTurnFolders[botID])
@@ -1733,7 +1828,8 @@ final class AppModel {
         var unread: [String: Int] = [:]
         for (id, live) in lives where live.unread > 0 { unread[id.uuidString] = live.unread }
         return AppState(bots: bots, routines: routines, skills: skills, connectors: connectors, providers: providers,
-                        defaultModel: defaultModel, unread: unread)
+                        defaultModel: defaultModel, unread: unread, contextMemory: contextMemory,
+                        learnedContexts: learnedContexts)
     }
 
     private func scheduleStateSave() {

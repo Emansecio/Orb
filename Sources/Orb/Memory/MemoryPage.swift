@@ -185,6 +185,50 @@ enum MemoryText {
         return terms.isEmpty ? nil : terms.prefix(limit).joined(separator: " OR ")
     }
 
+    /// Acknowledgements and pleasantries (folded): a message made only of these, with `greetings`, says nothing to look up.
+    private static let chatter: Set<String> = [
+        "oi", "ola", "obrigado", "obrigada", "valeu", "vlw", "blz", "beleza", "ok", "okay", "certo", "sim", "nao", "tchau", "perfeito",
+        "otimo", "otima", "legal", "show", "entendi", "entendido", "combinado", "fechado", "massa", "top", "maravilha", "excelente",
+        "thanks", "thank", "thx", "yes", "nope", "sure", "great", "cool", "nice", "hello", "hi", "hey", "bye", "please", "pls",
+    ]
+    private static let greetings: Set<String> = ["bom", "boa", "dia", "tarde", "noite", "tudo", "bem", "morning", "afternoon", "evening"]
+
+    /// The verbs, quantifiers and question words of everyday requests ("você lembra…", "pode me dizer…", "quantos…"):
+    /// they say how the user asks, not what about, and a memory page rarely has them. They count for nothing when
+    /// looking for related memories, or a natural question would need pages with words that are not its topic.
+    private static let fillers: Set<String> = [
+        "lembra", "lembrar", "lembro", "lembrou", "lembrando", "sabe", "saber", "sei", "sabia", "pode", "posso", "podia", "poderia",
+        "dizer", "diz", "diga", "disse", "fala", "falar", "fale", "conta", "contar", "conte", "quero", "queria", "preciso", "precisa",
+        "precisava", "gostaria", "fazer", "faz", "faca", "fez", "ver", "veja", "mostra", "mostrar", "mostre", "ajuda", "ajudar",
+        "pergunta", "perguntar", "quantos", "quantas", "quanto", "quanta", "quem", "algo", "alguma", "algum", "coisa", "coisas",
+        "tipo", "tudo", "nada", "todo", "toda", "todos", "todas", "agora", "sempre", "vez", "favor", "ser", "esta", "estou", "vou", "vai",
+        "remember", "know", "tell", "say", "can", "could", "would", "will", "want", "need", "what", "how", "who", "does", "did",
+        "many", "much", "about", "my", "your", "something", "anything",
+    ]
+    /// Nouns that often only complete a question ("o nome do meu cachorro", "quantos anos"): left out unless they are all
+    /// the message has ("qual é o meu nome?").
+    private static let weak: Set<String> = ["nome", "anos", "ano", "name", "years", "year"]
+
+    /// The distinct words (by stem) of `text` that say what it is about, for finding related memories: without the
+    /// pleasantries ("obrigado", "ok", "valeu"), the fillers of a question (see `fillers`) and a lone greeting or a lone
+    /// two-letter word. Empty when the message has nothing to look up.
+    static func topicTerms(_ text: String) -> [String] {
+        let spoken = words(text).filter { !chatter.contains($0) }
+        guard !spoken.allSatisfy(greetings.contains) else { return [] }
+        let base = spoken.filter { !fillers.contains($0) }
+        let strong = base.filter { !weak.contains($0) }
+        let topic = strong.isEmpty ? base : strong
+        if topic.count == 1, let only = topic.first, only.count < 3, !only.contains(where: \.isNumber) { return [] }
+        var seen = Set<String>()
+        return topic.filter { seen.insert(stem($0)).inserted }
+    }
+
+    /// How many of `terms` appear in `text` (as a word, or the start of one, singular or plural).
+    static func matchCount(of terms: [String], in text: String) -> Int {
+        let tokens = Set(words(text))
+        return terms.filter { term in variants(term).contains { form in tokens.contains { $0.hasPrefix(form) } } }.count
+    }
+
     /// Light Portuguese stem used for comparing: plural and "-ão/-ões/-ães" endings removed.
     static func stem(_ word: String) -> String {
         for (suffix, keep) in [("oes", 2), ("aes", 2), ("ao", 2), ("ais", 3), ("eis", 3), ("es", 4), ("s", 3)]

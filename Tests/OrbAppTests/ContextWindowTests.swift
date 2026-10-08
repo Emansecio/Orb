@@ -105,35 +105,127 @@ private func failures(_ events: [TurnEvent]) -> [String] {
 // MARK: - Budget
 
 struct ContextBudgetTests {
-    @Test func historyIsSixtyPercentOfTheWindowEstimatedAtThreePointFiveCharactersPerToken() {
+    @Test func historyIsTheWindowMinusWhatEveryRequestCarriesEstimatedAtThreePointFiveCharactersPerToken() {
+        // 90% of 100,000, minus the typical system prompt and tool specs (8,000) and room for the reply (4,000).
         let budget = ContextBudget(modelWindow: 100_000)
-        #expect(budget.tokens == 60_000)
-        #expect(budget.characters == 210_000)
+        #expect(budget.tokens == 78_000)
+        #expect(budget.characters == 273_000)
+    }
+
+    @Test func aHugeWindowIsNotFilledJustBecauseItExists() {
+        #expect(ContextBudget(modelWindow: 1_000_000).tokens == 80_000)
+        #expect(ContextBudget(modelWindow: 1_000_000, level: .economical).tokens == 40_000)
+        // "Ampla" takes up to 60% of the window.
+        #expect(ContextBudget(modelWindow: 1_000_000, level: .wide).tokens == 600_000)
+        #expect(ContextBudget(modelWindow: 100_000, level: .wide).tokens == 60_000)
+        // ...but never more than what is free after the fixed part.
+        #expect(ContextBudget(modelWindow: 30_000, level: .wide).tokens == 15_250)
+    }
+
+    @Test func aSmallWindowKeepsRoomForThePromptToolsAndReply() {
+        // 16k window: 14,400 usable - 8,000 fixed - 2,000 reply (an eighth of the window at most).
+        #expect(ContextBudget(modelWindow: 16_000).tokens == 4_400)
+        // It never goes below the minimum, whatever the window.
+        #expect(ContextBudget(modelWindow: 8_000).tokens == ContextBudget.minimumTokens)
+        #expect(ContextBudget(modelWindow: 4_000).tokens == ContextBudget.minimumTokens)
+    }
+
+    @Test func theRealOverheadReplacesTheTypicalOne() {
+        let typical = ContextBudget(modelWindow: 100_000)
+        #expect(typical.tokens == 78_000)
+        // 90,000 - 30,000 (a lot of connector tools) - 4,000
+        let heavy = typical.refined(overheadTokens: 30_000)
+        #expect(heavy.tokens == 56_000)
+        #expect(heavy.overheadTokens == 30_000)
+        // Less overhead never lifts the cap of the memory level.
+        #expect(ContextBudget(modelWindow: 400_000).refined(overheadTokens: 500).tokens == 80_000)
+        // A budget of plain tokens has no window to refine against.
+        #expect(ContextBudget(tokens: 5_000).refined(overheadTokens: 20_000).tokens == 5_000)
     }
 
     @Test func knownContextLengthWins() {
         let model = ProviderModel(id: "m", name: "m", format: .chat, contextLength: 32_000)
-        #expect(ContextBudget(model: model, provider: .openai).tokens == 19_200)
-        #expect(ContextBudget(model: model, provider: .ollama).tokens == 19_200)
+        // 28,800 - 8,000 - 4,000
+        #expect(ContextBudget(model: model, provider: .openai).tokens == 16_800)
+        #expect(ContextBudget(model: model, provider: .ollama).tokens == 16_800)
     }
 
     @Test func unknownContextLengthFallsBackPerWireFormat() {
         func tokens(_ format: APIFormat, _ provider: ProviderKind) -> Int {
             ContextBudget(model: ProviderModel(id: "m", name: "m", format: format), provider: provider).tokens
         }
-        #expect(tokens(.chat, .openrouter) == 76_800)
-        #expect(tokens(.responses, .openai) == 76_800)
-        #expect(tokens(.messages, .anthropic) == 120_000)
-        #expect(tokens(.chat, .ollama) == 9_600)
-        #expect(tokens(.chat, .lmstudio) == 9_600)
-        #expect(ContextBudget(model: nil, provider: .xai).tokens == 76_800)
+        #expect(tokens(.chat, .openrouter) == 80_000)
+        #expect(tokens(.responses, .openai) == 80_000)
+        #expect(tokens(.messages, .anthropic) == 80_000)
+        #expect(tokens(.chat, .ollama) == 4_400)
+        #expect(tokens(.chat, .lmstudio) == 4_400)
+        #expect(ContextBudget(model: nil, provider: .xai).tokens == 80_000)
+        #expect(ContextBudget(model: nil, provider: .xai).window == 128_000)
+        #expect(ContextBudget(model: nil, provider: .anthropic).window == 200_000)
     }
 
     @Test func aModelMissingFromTheCatalogFollowsTheProvidersWireFormat() {
-        #expect(ContextBudget(model: nil, provider: .anthropic).tokens == 120_000)
-        #expect(ContextBudget(model: nil, provider: .custom, format: .messages).tokens == 120_000)
-        #expect(ContextBudget(model: nil, provider: .custom, format: .chat).tokens == 76_800)
-        #expect(ContextBudget(model: nil, provider: .ollama, format: .chat).tokens == 9_600)
+        #expect(ContextBudget(model: nil, provider: .anthropic).window == 200_000)
+        #expect(ContextBudget(model: nil, provider: .custom, format: .messages).window == 200_000)
+        #expect(ContextBudget(model: nil, provider: .custom, format: .chat).window == 128_000)
+        #expect(ContextBudget(model: nil, provider: .ollama, format: .chat).tokens == 4_400)
+    }
+
+    @Test func anthropicKeepsRoomForItsLargerReply() {
+        let messages = ContextBudget(model: ProviderModel(id: "m", name: "m", format: .messages, contextLength: 40_000), provider: .anthropic)
+        let chat = ContextBudget(model: ProviderModel(id: "m", name: "m", format: .chat, contextLength: 40_000), provider: .openai)
+        #expect(messages.replyTokens == 5_000)   // an eighth of a small window
+        #expect(chat.replyTokens == 4_000)
+        let big = ContextBudget(model: ProviderModel(id: "m", name: "m", format: .messages, contextLength: 400_000), provider: .anthropic)
+        #expect(big.replyTokens == 16_000)
+    }
+
+    @Test func aLearnedWindowWinsOnlyWhenSmaller() {
+        let model = ProviderModel(id: "m", name: "m", format: .chat, contextLength: 128_000)
+        #expect(ContextBudget(model: model, provider: .openai, learnedWindow: 32_000).window == 32_000)
+        #expect(ContextBudget(model: model, provider: .openai, learnedWindow: 500_000).window == 128_000)
+        #expect(ContextBudget(model: nil, provider: .ollama, learnedWindow: 4_096).window == 4_096)
+        #expect(ContextBudget(model: model, provider: .openai, learnedWindow: nil).window == 128_000)
+    }
+
+    @Test func theLowWaterMarkIsHigherForSmallBudgets() {
+        #expect(ContextBudget(modelWindow: 128_000).lowWater == 0.5)
+        #expect(ContextBudget(modelWindow: 16_000).lowWater == 0.75)
+        var manual = ContextBudget(modelWindow: 128_000)
+        manual.lowWaterShare = 0.3
+        #expect(manual.lowWater == 0.3)
+    }
+
+    @Test func scalingAndResizingKeepTheRest() {
+        let budget = ContextBudget(modelWindow: 128_000)
+        let half = budget.scaled(by: 0.5)
+        #expect(half.tokens == 40_000 && half.window == 128_000)
+        let learned = budget.resized(window: 32_000)
+        #expect(learned.window == 32_000)
+        #expect(learned.tokens == 16_800)
+        #expect(learned.overheadTokens == budget.overheadTokens)
+    }
+
+    @Test func overheadIsEstimatedFromThePromptAndSpecs() {
+        let spec = ToolSpec(name: "read_file", description: String(repeating: "d", count: 100), parameters: .schema(["path": .property("string", "p")]))
+        let tokens = ContextBudget.overheadTokens(system: String(repeating: "s", count: 350), specs: [spec])
+        let characters = 350 + "read_file".count + 100 + spec.parameters.jsonString.count
+        #expect(tokens == Int((Double(characters) / 3.5).rounded(.up)))
+    }
+}
+
+struct ContextMemoryLevelTests {
+    @Test func unknownLevelsDecodeAsBalanced() throws {
+        let level = try JSONDecoder().decode(ContextMemoryLevel.self, from: Data(#""enorme""#.utf8))
+        #expect(level == .balanced)
+        let known = try JSONDecoder().decode(ContextMemoryLevel.self, from: Data(#""wide""#.utf8))
+        #expect(known == .wide)
+    }
+
+    @Test func everyLevelHasALabelAndASummary() {
+        for level in ContextMemoryLevel.allCases {
+            #expect(!level.label.isEmpty && !level.summary.isEmpty)
+        }
     }
 }
 
@@ -182,15 +274,19 @@ struct ContextWindowTests {
         #expect(slice.modelContext().first?.role == .user)
     }
 
-    @Test func lastThreeOutputsOfATaskInProgressStayWhole() {
+    @Test func theNewestOutputsOfATaskInProgressStayWholeAndTheOldestBecomePreviewsTogether() {
         var messages = [ChatMessage.user("pedido")]
-        for step in 0..<5 {
+        for step in 0..<8 {
             messages.append(ChatMessage(role: .assistant, content: "", toolCalls: [call("c\(step)")]))
             messages.append(.tool("c\(step)", String(repeating: "o", count: 10_000)))
         }
-        let sent = messages.modelContext()
+        // Room for all eight whole: none is touched.
+        #expect(messages.modelContext().filter { $0.role == .tool }.allSatisfy { $0.content.count == 10_000 })
+        // 8 x 10,000 characters is more than 40% of this budget (60,000 characters), and there are 3 more than the
+        // newest three: the oldest five become previews at once.
+        let sent = messages.modelContext(budget: ContextBudget(tokens: 17_000))
         let outputs = sent.filter { $0.role == .tool }.map(\.content.count)
-        #expect(outputs.prefix(2).allSatisfy { $0 < 5_000 })
+        #expect(outputs.prefix(5).allSatisfy { $0 < 5_000 })
         #expect(outputs.suffix(3).allSatisfy { $0 == 10_000 })
     }
 
@@ -335,14 +431,14 @@ struct ConversationCompactionTests {
     @Test func compactingStoresTheSummaryAndAnnouncesItOnlyTheFirstTime() throws {
         var conversation = longConversation()
         let before = conversation.messages
-        let budget = ContextBudget(tokens: 10_000)
+        let budget = ContextBudget(tokens: 5_000)
 
         let first = conversation.prepareHistory(budget: budget)
         #expect(first.firstCompaction)
         #expect(first.history[0].content.hasPrefix(ContextSummary.marker))
         let covered = try #require(conversation.summaryCoveredCount)
         #expect(covered > 0)
-        #expect(conversation.summary?.contains("pedido 0") == true)
+        #expect(conversation.summary?.contains("- pedido ") == true)
         #expect(conversation.messages == before)
 
         conversation.messages += turn("pedido 10", steps: 2, output: 25_000, tag: "q10")
@@ -539,10 +635,10 @@ struct ContextEngineTests {
 
     @Test func aWindowOverflowErrorIsRetriedOnceWithHalfTheBudget() async {
         var history: [ChatMessage] = []
-        for index in 0..<8 { history += turn("pedido \(index)", steps: 1, output: 3_000, tag: "h\(index)") }
+        for index in 0..<30 { history += turn("pedido \(index)", steps: 1, output: 600, tag: "h\(index)") }
         let overflow = LLMError.http(status: 400, message: "This model's maximum context length is 128000 tokens")
         let recorder = Recorder([[.text("ok")]], failures: [overflow])
-        let events = await collect(engineRequest(recorder, history: history, budget: ContextBudget(tokens: 4_000)))
+        let events = await collect(engineRequest(recorder, history: history, budget: ContextBudget(tokens: 6_000)))
 
         let received = await recorder.received
         #expect(received.count == 2)
