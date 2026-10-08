@@ -14,14 +14,17 @@ enum ClaudeCodePrompt {
             case .system:
                 return nil
             case .user:
-                return "User: \(TurnPreface.stripped(message.content))"
+                // Pictures cannot travel in a prompt; Claude Code's Read tool opens the files.
+                let pictures = message.images.isEmpty ? "" : "\n[images: " + message.images.map(\.path).joined(separator: ", ") + "]"
+                return "User: \(TurnPreface.stripped(message.content))" + pictures
             case .assistant:
                 var text = message.content
                 let calls = message.toolCalls.map { "\($0.name)(\($0.arguments.prefix(200)))" }
                 if !calls.isEmpty { text += (text.isEmpty ? "" : "\n") + "[called: " + calls.joined(separator: "; ") + "]" }
                 return text.isEmpty ? nil : "Assistant: \(text)"
             case .tool:
-                return "Tool result: \(message.content.prefix(500))"
+                let pictures = message.images.isEmpty ? "" : " [images: " + message.images.map(\.path).joined(separator: ", ") + "]"
+                return "Tool result: \(message.content.prefix(500))" + pictures
             }
         }
         guard !lines.isEmpty else { return "" }

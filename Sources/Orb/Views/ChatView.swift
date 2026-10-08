@@ -20,10 +20,11 @@ struct ChatView: View {
         .navigationSubtitle(model.modelName(for: bot))
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
+                ConversationsMenuButton(botID: bot.id)
                 Button("Nova conversa", systemImage: "square.and.pencil") {
                     model.newConversation(bot.id)
                 }
-                .help("Nova conversa (⇧⌘N)")
+                .help("Nova conversa (⇧⌘N). A atual fica guardada em Conversas.")
                 Button("Painel do Orb", systemImage: "sidebar.right") {
                     model.showInspector.toggle()
                 }

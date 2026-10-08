@@ -10,6 +10,9 @@ struct ClaudeCodeTurn: Sendable {
     /// Appended to Claude Code's system prompt (persona, memory, skills).
     var system: String
     var prompt: String
+    /// The user's pictures, recorded with the message so a later turn by another model still has them as pictures
+    /// (Claude Code itself opens the files named in `prompt`).
+    var images: [ImageAttachment] = []
     /// What happened in the conversation that this Claude Code session has not seen; sent before the prompt.
     var context = ""
     /// Claude Code session to resume; nil starts a new one.
@@ -105,7 +108,7 @@ actor ClaudeCodeEngine {
 
     private func play(_ turn: ClaudeCodeTurn, out: AsyncStream<TurnEvent>.Continuation) async {
         defer { out.finish() }
-        out.yield(.message(.user(turn.prompt)))
+        out.yield(.message(.user(turn.prompt, images: turn.images)))
         out.yield(.status("Pensando"))
         // Connector secrets go in a private temporary file, not on the command line.
         let mcpFile = ClaudeCodeTurn.mcpConfig(turn.connectors).flatMap(Self.writePrivate)
@@ -237,16 +240,18 @@ actor ClaudeCodeEngine {
             toolName: request.toolName, title: summary.title, command: summary.detail,
             reason: why.explanation ?? request.reason ?? fallback,
             suggestions: PermissionPolicy.suggestions(for: call, existing: live.rules + granted, workspace: workspace,
-                                                      extra: request.suggestions))
+                                                      extra: request.suggestions),
+            isDangerous: why.isDangerous)
         await gate.open(approval.id, botID: turn.bot.id, alwaysAsks: why != .needsPermission)
         out.yield(.approval(approval))
         out.yield(.status("Esperando sua resposta"))
         let answer = await gate.wait(for: approval.id)
         let rule = answer.rule ?? approval.suggestions.first
         switch answer.decision {
-        case .deny:
+        case .deny, .review:
             // Switching to read-only answers open cards with a denial.
-            return .deny(await turn.currentPermissions().mode == .readOnly ? ClaudeCodePolicy.readOnlyDenial : ClaudeCodePolicy.userDenial)
+            return .deny(await turn.currentPermissions().mode == .readOnly ? ClaudeCodePolicy.readOnlyDenial
+                         : ClaudeCodePolicy.userDenial(note: answer.note))
         case .task:
             if let rule { granted.append(rule) }
         case .always:

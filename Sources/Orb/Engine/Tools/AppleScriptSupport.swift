@@ -10,8 +10,14 @@ enum AppleScript {
 
     /// `structured` asks osascript for recompilable output (`-s s`): strings are quoted and lists/records keep their
     /// shape, so the model can tell `"1"` from `1`. Throws a `ToolError` whose text already explains the likely fix.
+    /// Before the script starts, apps it addresses that macOS has never asked about get their consent dialog (the user may
+    /// take a while to answer, and that wait must not count against `timeout`); a refused app fails the call at once.
     static func run(_ script: String, language: Language = .applescript, structured: Bool = false,
-                    timeout: Duration = .seconds(60), outputLimit: Int = 20_000) async throws -> String {
+                    timeout: Duration = .seconds(60), outputLimit: Int = 20_000,
+                    permissions: MacPermissionChecker = .live) async throws -> String {
+        if let problem = await AutomationPreflight.blockingProblem(for: script, language: language, checker: permissions) {
+            throw ToolError(problem.modelMessage)
+        }
         let arguments = language.arguments + (structured ? ["-s", "s"] : []) + ["-e", script]
         let result = try await ProcessRunner.run("/usr/bin/osascript", arguments, timeout: timeout, outputLimit: outputLimit)
         let output = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -33,32 +39,18 @@ enum AppleScript {
         return Int(text[range].filter { $0 == "-" || $0.isNumber })
     }
 
-    /// Adds Portuguese guidance for the errors that need a human step; the system's own message stays as detail.
+    /// Adds guidance for the errors that need a human step; the system's own message stays as detail.
     static func explain(_ message: String, status: Int32 = 1) -> String {
         guard !message.isEmpty else { return "O script falhou (código \(status))." }
-        guard let code = errorCode(in: message), let advice = advice(for: code, message: message) else { return message }
+        if let problem = MacPermissionProblem.detect(in: message) {
+            return problem.modelMessage + "\n\nmacOS said: " + message
+        }
+        guard let code = errorCode(in: message), let advice = advice(for: code) else { return message }
         return advice + "\n\nDetalhe do macOS: " + message
     }
 
-    /// -1719 is "Invalid index" (a window or element that does not exist) as well as the old "assistive access" code,
-    /// so it only gets permission advice when the system's message talks about assistive access.
-    private static func mentionsAssistiveAccess(_ message: String) -> Bool {
-        ["assistive", "assistiva", "acessibilidade", "accessibility"].contains {
-            message.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive]) != nil
-        }
-    }
-
-    private static func advice(for code: Int, message: String) -> String? {
+    private static func advice(for code: Int) -> String? {
         switch code {
-        case -1743:
-            "O macOS bloqueou o controle desse app: o Orb não tem permissão de Automação para ele. Peça ao usuário para "
-                + "ativar em Ajustes do Sistema → Privacidade e Segurança → Automação (marcar o app abaixo de Orb) e "
-                + "tente de novo."
-        case -1719 where !mentionsAssistiveAccess(message):
-            nil
-        case -1719, -25211:
-            "O macOS bloqueou o controle da interface: o Orb não tem permissão de Acessibilidade. Peça ao usuário para "
-                + "ativar em Ajustes do Sistema → Privacidade e Segurança → Acessibilidade (marcar o Orb) e tente de novo."
         case -600, -609:
             "O app não está aberto (ou fechou durante o script). Abra-o com a ferramenta open e tente de novo."
         case -1712:

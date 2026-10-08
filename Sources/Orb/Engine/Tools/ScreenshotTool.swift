@@ -7,8 +7,9 @@ struct ScreenshotTool: AgentTool {
         name: "screenshot",
         description: """
         Take a screenshot of a display or of the front window of another app, save it as a PNG and return its \
-        path, size and the text found on it (OCR, Portuguese and English). You cannot see the pixels, only that \
-        text: use it to read what is on the user's screen (an error dialog, a page, a document in another app). \
+        path, size and the text found on it (OCR, Portuguese and English). If your model can see images, the \
+        picture itself comes with the result; otherwise you only get that text. Use it to see what is on the \
+        user's screen (an error dialog, a page, a document in another app). \
         With target "window" the Orb's own window is skipped; add `app` to pick that app's window. Needs the \
         Screen Recording permission: if it is missing, the message says how the user enables it.
         """,
@@ -30,6 +31,26 @@ struct ScreenshotTool: AgentTool {
     }
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
+        try await capture(arguments).report
+    }
+
+    /// The report as `run` gives it, plus the picture (shrunk) when the model can look at it. A picture that
+    /// cannot be prepared or saved leaves the text-only result.
+    func runWithImages(_ arguments: JSONValue, context: ToolContext) async throws -> ToolResult {
+        let captured = try await capture(arguments)
+        guard context.acceptsImages, let store = context.imageStore, let botID = context.botID else {
+            return ToolResult(text: captured.report)
+        }
+        // A capture of a large display can pass the size limit meant for attachments; it is shrunk all the same.
+        do {
+            let image = try await store.attach(fileAt: captured.file, botID: botID, enforcingLimit: false)
+            return ToolResult(text: captured.report, images: [image])
+        } catch {
+            return ToolResult(text: captured.report + "\nNão consegui anexar a imagem para você ver (\(error.localizedDescription)); só o texto acima foi enviado.")
+        }
+    }
+
+    private func capture(_ arguments: JSONValue) async throws -> (report: String, file: URL) {
         let wantsWindow = arguments["target"]?.string == "window"
         var captureArguments = ["-x", "-t", "png"]
         if wantsWindow {
@@ -59,12 +80,12 @@ struct ScreenshotTool: AgentTool {
         let text = await Task.detached { (try? TextRecognizer.recognize(imageAt: file)) ?? "" }.value
         var report = "Captura salva em \(file.path) (\(size.width)×\(size.height) px)."
         if !hadAccess {
-            report += "\nAtenção: o Orb ainda não tem Gravação de Tela liberada; a captura pode mostrar só o fundo de tela, "
-                + "sem as janelas. " + ScreenshotImage.permissionAdvice
+            report += "\nWarning: Orb does not have Screen Recording yet, so the capture may show only the wallpaper, without "
+                + "windows. " + ScreenshotImage.permissionAdvice
         }
         report += text.isEmpty ? "\nNão achei texto legível na imagem."
             : "\nTexto na imagem (OCR):\n" + text.truncated(to: 8000)
-        return report
+        return (report, file)
     }
 
     /// The front window of `app`, or the front-most ordinary window that is not the Orb's.
@@ -133,20 +154,22 @@ struct WindowCandidate: Equatable, Sendable {
 }
 
 enum ScreenshotImage {
-    static let permissionAdvice = "Peça ao usuário para ativar em Ajustes do Sistema → Privacidade e Segurança → "
-        + "Gravação de Tela (marcar o Orb) e reabrir o Orb."
+    /// What to tell the user when Screen Recording is the problem (the model-facing instruction, English).
+    static let permissionAdvice = MacPermissionProblem.screenRecording.instruction
 
-    /// Blames the permission only when it is missing; otherwise the system's own message is the best clue.
+    /// Blames the permission when it is missing, or when a display capture fails with "could not create image" even
+    /// though the check passed. A window capture trusts the check: the window may simply have closed since it was listed
+    /// (screencapture prints the same words then), and the system's own message is the best clue.
     static func failureAdvice(captureOutput: String, hasPermission: Bool = false) -> String {
         let detail = captureOutput.trimmingCharacters(in: .whitespacesAndNewlines)
-        let suffix = detail.isEmpty ? "" : "\n\nDetalhe do macOS: " + detail
-        if hasPermission { return "Não consegui capturar a tela." + suffix }
-        return "Não consegui capturar a tela: o Orb provavelmente não tem a permissão de Gravação de Tela. "
-            + permissionAdvice + suffix
+        let suffix = detail.isEmpty ? "" : "\n\nmacOS said: " + detail
+        if hasPermission, MacPermissionProblem.detect(in: detail) != .screenRecording { return "Could not capture the screen." + suffix }
+        return "Could not capture the screen. " + MacPermissionProblem.screenRecording.modelMessage + suffix
     }
 
-    static let blankAdvice = "A captura saiu em branco (toda de uma cor só). Isso costuma ser a falta da permissão de "
-        + "Gravação de Tela. " + permissionAdvice + " Se a tela está mesmo vazia ou a janela é toda de uma cor, tente de novo."
+    static let blankAdvice = "The capture came out blank (a single flat colour). That usually means Orb lacks the Screen Recording "
+        + "permission. " + MacPermissionProblem.screenRecording.instruction
+        + " (If the screen or window really is a single colour, it is not a permission problem.)"
 
     static func pixelSize(of url: URL) -> (width: Int, height: Int)? {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),

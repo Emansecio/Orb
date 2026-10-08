@@ -14,7 +14,8 @@ struct SidebarView: View {
                         model.selection = .bot(bot.id)
                     } content: {
                         BotRowContent(bot: bot, status: model.statusLine[bot.id], activity: model.activity(for: bot.id),
-                                      isSelected: model.selection == .bot(bot.id), poke: model.pokes[bot.id, default: 0])
+                                      isSelected: model.selection == .bot(bot.id), poke: model.pokes[bot.id, default: 0],
+                                      needsYou: model.needsYou(bot.id))
                     }
                     .contextMenu {
                         Button("Nova conversa") { model.newConversation(bot.id) }
@@ -140,6 +141,8 @@ private struct BotRowContent: View {
     let activity: OrbActivity
     let isSelected: Bool
     let poke: Int
+    /// An approval card is open: the Orb is stopped until the user answers.
+    var needsYou = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -150,7 +153,9 @@ private struct BotRowContent: View {
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Palette.ink)
                 Group {
-                    if let status {
+                    if needsYou {
+                        Text("Precisa de você").foregroundStyle(Palette.warn)
+                    } else if let status {
                         Text("\(status)…").shimmer()
                     } else {
                         Text(bot.role).foregroundStyle(Palette.faint)
@@ -160,9 +165,16 @@ private struct BotRowContent: View {
                 .lineLimit(1)
             }
             .animateChanges(of: status)
+            .animateChanges(of: needsYou)
             Spacer(minLength: 4)
             ZStack {
-                if bot.unread > 0 {
+                if needsYou {
+                    Image(systemName: "exclamationmark.bubble.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.warn)
+                        .transition(.scale.combined(with: .opacity))
+                        .accessibilityLabel("Aguardando sua permissão")
+                } else if bot.unread > 0 {
                     Circle()
                         .fill(Palette.accentText)
                         .frame(width: 7, height: 7)
@@ -170,7 +182,7 @@ private struct BotRowContent: View {
                         .accessibilityLabel("\(bot.unread) não lidas")
                 }
             }
-            .animateChanges(of: bot.unread > 0)
+            .animateChanges(of: needsYou || bot.unread > 0)
         }
         .accessibilityElement(children: .combine)
     }

@@ -237,33 +237,18 @@ struct NotifyTool: AgentTool {
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
         let title = String(try arguments.requiredString("title").prefix(120))
         let body = String((arguments["body"]?.string ?? "").prefix(500))
-        // UNUserNotificationCenter needs a real app bundle; `swift run` and tests have none and would crash.
-        guard Bundle.main.bundleURL.pathExtension == "app", Bundle.main.bundleIdentifier != nil else {
+        guard ApprovalNotifications.isAvailable else {
             throw ToolError("Notificações só funcionam no app Orb instalado (não em uma execução de desenvolvimento).")
         }
-        try await Self.post(title: title, body: body)
-        return "Notificação enviada."
-    }
-
-    @MainActor private static func post(title: String, body: String) async throws {
-        let center = UNUserNotificationCenter.current()
-        center.delegate = NotificationPresenter.shared
-        var status = await center.notificationSettings().authorizationStatus
-        if status == .notDetermined {
-            _ = try? await center.requestAuthorization(options: [.alert, .sound])
-            status = await center.notificationSettings().authorizationStatus
-        }
-        guard status == .authorized || status == .provisional else {
+        guard await ApprovalNotifications.send(ApprovalNotifications.plainContent(title: title, body: body)) else {
             throw ToolError("As notificações do Orb estão desligadas. Peça ao usuário para ativar em Ajustes do Sistema → Notificações → Orb.")
         }
-        let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = body
-        try await center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+        return "Notificação enviada."
     }
 }
 
-/// Without a delegate macOS hides banners while the app is in front, which is exactly when the user is chatting.
+/// The app's one notification delegate: it shows banners while the app is in front (without a delegate macOS hides
+/// them, which is exactly when the user is chatting) and routes taps (`ApprovalNotifications`).
 final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
     @MainActor static let shared = NotificationPresenter()
 

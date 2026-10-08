@@ -82,12 +82,12 @@ struct ResponsesClient: LLMClient {
                             promptCacheKey: String? = nil, provider: String = "", toolChoice: ToolChoice = .auto) -> JSONValue {
         let instructions = messages.filter { $0.role == .system }.map(\.content).joined(separator: "\n\n")
         var input: [JSONValue] = []
-        for message in messages {
+        for message in messages.movingToolImagesToUserMessages() {
             switch message.role {
             case .system:
                 continue
             case .user:
-                input.append(.object(["role": .string("user"), "content": .string(message.content)]))
+                input.append(.object(["role": .string("user"), "content": userContent(message)]))
             case .assistant:
                 // Reasoning items by the number of calls that preceded them; each goes right before the output it
                 // produced. Items that would end up with nothing after them are left out.
@@ -142,6 +142,19 @@ struct ResponsesClient: LLMClient {
             }
         }
         return .object(body)
+    }
+
+    /// Plain text, or for a message with pictures a list of `input_text` and `input_image` parts.
+    private static func userContent(_ message: ChatMessage) -> JSONValue {
+        guard !message.images.isEmpty else { return .string(message.content) }
+        let payload = ImageWire.payload(of: message)
+        var parts: [JSONValue] = []
+        if !payload.text.isEmpty { parts.append(.object(["type": .string("input_text"), "text": .string(payload.text)])) }
+        for image in payload.images {
+            parts.append(.object(["type": .string("input_image"),
+                                  "image_url": .string(ImageWire.dataURL(mediaType: image.mediaType, base64: image.base64))]))
+        }
+        return .array(parts)
     }
 
     static let noToolsInstruction = "Do not call any tool in your next reply: answer in text with a summary of what was done and what is left."

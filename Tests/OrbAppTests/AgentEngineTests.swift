@@ -1026,3 +1026,257 @@ struct TurnOrchestrationTests {
         #expect(AgentEngine.defaultMaxSteps == 30 && AgentEngine.routineMaxSteps == 60)
     }
 }
+
+/// A sensitive file tool whose result and card say which file it was for, so order and grouping can be seen.
+private struct StampTool: AgentTool {
+    let runs: Counter
+    /// Runs after the first stamp is done (the user changing something while the step is under way).
+    var afterFirst: (@Sendable () async -> Void)?
+    var spec: ToolSpec { ToolSpec(name: "stamp", description: "Stamps a file", parameters: .schema([:])) }
+    var kind: ToolCall.Kind { .file }
+    var capability: Capability? { nil }
+    func risk(_ arguments: JSONValue) -> ToolRisk { .sensitive }
+    func summary(_ arguments: JSONValue) -> (title: String, detail: String) { ("Gravando", arguments["name"]?.string ?? "?") }
+    func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
+        await runs.increment()
+        if await runs.value == 1 { await afterFirst?() }
+        return "did \(arguments["name"]?.string ?? "?")"
+    }
+}
+
+/// One card for several actions of the same step.
+struct ApprovalBatchTests {
+    private func stamp(_ name: String, id: String? = nil) -> ToolCallRequest {
+        ToolCallRequest(id: id ?? "s-\(name)", name: "stamp", arguments: #"{"name":"\#(name)"}"#)
+    }
+
+    private func look(_ id: String = "look") -> ToolCallRequest {
+        ToolCallRequest(id: id, name: "look", arguments: #"{"ms":0,"name":"x"}"#)
+    }
+
+    /// `touch` with a destructive command: always its own card.
+    private func risky(_ id: String) -> ToolCallRequest {
+        ToolCallRequest(id: id, name: "touch", arguments: #"{"command":"rm -rf ~/Projetos"}"#)
+    }
+
+    private func request(_ script: Script, mode: PermissionMode = .ask, box: PermissionBox? = nil, runs: Counter,
+                         grants: [PermissionRule] = [], afterFirstStamp: (@Sendable () async -> Void)? = nil) -> TurnRequest {
+        let bot = Bot(name: "Teste", role: "", orb: OrbConfig(), permissionMode: mode)
+        let tools: [any AgentTool] = [StampTool(runs: runs, afterFirst: afterFirstStamp), TouchTool(runs: runs), LookTool(gauge: Gauge())]
+        var turn = TurnRequest(bot: bot, model: "fake", system: "sys", history: [], prompt: "oi", client: ScriptedLLM(script: script),
+                               tools: tools, context: ToolContext(workingDirectory: URL(fileURLWithPath: NSTemporaryDirectory())),
+                               turnGrants: grants)
+        if let box { turn.permissions = { await box.state } }
+        return turn
+    }
+
+    /// Plays the user: `answer` decides each card.
+    private func drive(_ engine: AgentEngine, _ request: TurnRequest,
+                       answer: @Sendable (ApprovalRequest) -> ApprovalAnswer) async -> [TurnEvent] {
+        var events: [TurnEvent] = []
+        for await event in engine.run(request) {
+            events.append(event)
+            if case .approval(let approval) = event { await engine.gate.resolve(approvalID: approval.id, answer: answer(approval)) }
+        }
+        return events
+    }
+
+    private func approvals(_ events: [TurnEvent]) -> [ApprovalRequest] {
+        events.compactMap { if case .approval(let approval) = $0 { approval } else { nil } }
+    }
+
+    private func results(_ events: [TurnEvent]) -> [ChatMessage] {
+        events.compactMap { if case .message(let message) = $0, message.role == .tool { message } else { nil } }
+    }
+
+    @Test func twoSensitiveCallsAndASafeOneMakeOneCardAndTheSafeOneRuns() async {
+        let runs = Counter()
+        let script = Script([[.toolCalls([stamp("a"), look(), stamp("b")])], [.text("Pronto")]])
+        let events = await drive(AgentEngine(), request(script, runs: runs)) { _ in .once }
+        let cards = approvals(events)
+        #expect(cards.count == 1)
+        #expect(cards[0].isBatch && cards[0].items.map(\.command) == ["a", "b"] && cards[0].items.map(\.toolName) == ["stamp", "stamp"])
+        #expect(await runs.value == 2)
+        // Results go back in the order of the calls.
+        #expect(results(events).map(\.content) == ["did a", "viu x", "did b"])
+        #expect(results(events).map(\.isError) == [false, false, false])
+    }
+
+    @Test func aSingleSensitiveCallIsNotGrouped() async {
+        let runs = Counter()
+        let events = await drive(AgentEngine(), request(Script([[.toolCalls([stamp("a"), look()])], [.text("Pronto")]]), runs: runs)) { _ in .once }
+        #expect(approvals(events).count == 1 && !approvals(events)[0].isBatch && approvals(events)[0].items.isEmpty)
+        #expect(await runs.value == 1)
+    }
+
+    @Test func denyingTheGroupRefusesEveryCallInItAndTheSafeOneStillRuns() async {
+        let runs = Counter()
+        let script = Script([[.toolCalls([stamp("a"), look(), stamp("b")])], [.text("Ok")]])
+        let events = await drive(AgentEngine(), request(script, runs: runs)) { _ in .deny }
+        #expect(approvals(events).count == 1)
+        #expect(await runs.value == 0)
+        let shown = results(events)
+        #expect(shown.map(\.isError) == [true, false, true])
+        #expect(shown[0].content == PermissionPolicy.userDenial && shown[2].content == PermissionPolicy.userDenial)
+        #expect(shown[1].content == "viu x")
+    }
+
+    @Test func theNoteOnADenialReachesTheModel() async {
+        let runs = Counter()
+        let script = Script([[.toolCalls([stamp("a"), stamp("b")])], [.text("Ok")]])
+        let events = await drive(AgentEngine(), request(script, runs: runs)) { _ in ApprovalAnswer(decision: .deny, note: "  use a pasta tmp  ") }
+        let expected = PermissionPolicy.userDenial + " The user said: use a pasta tmp"
+        #expect(results(events).map(\.content) == [expected, expected])
+        // The same for a card about one action.
+        let single = await drive(AgentEngine(), request(Script([[.toolCalls([stamp("a")])], [.text("Ok")]]), runs: runs)) { _ in
+            ApprovalAnswer(decision: .deny, note: "não")
+        }
+        #expect(results(single).first?.content == PermissionPolicy.userDenial + " The user said: não")
+        // Nothing to say leaves the usual text.
+        let silent = await drive(AgentEngine(), request(Script([[.toolCalls([stamp("a")])], [.text("Ok")]]), runs: runs)) { _ in
+            ApprovalAnswer(decision: .deny, note: "   ")
+        }
+        #expect(results(silent).first?.content == PermissionPolicy.userDenial)
+    }
+
+    @Test func dangerousCallsNeverJoinTheGroup() async {
+        let runs = Counter()
+        let script = Script([[.toolCalls([risky("r1"), stamp("a"), stamp("b"), risky("r2")])], [.text("Ok")]])
+        let events = await drive(AgentEngine(), request(script, runs: runs)) { _ in .once }
+        let cards = approvals(events)
+        // The group of two comes first (asked before anything runs); each destructive call asks for itself.
+        #expect(cards.count == 3)
+        #expect(cards[0].isBatch && cards[0].items.count == 2)
+        #expect(cards.dropFirst().allSatisfy { !$0.isBatch && $0.isDangerous && $0.suggestions.isEmpty })
+        #expect(await runs.value == 4)
+        #expect(results(events).map(\.content) == ["ok", "did a", "did b", "ok"])
+    }
+
+    @Test func onlyDangerousCallsMeanOneCardEach() async {
+        let runs = Counter()
+        let script = Script([[.toolCalls([risky("r1"), risky("r2"), stamp("a")])], [.text("Ok")]])
+        let events = await drive(AgentEngine(), request(script, runs: runs)) { _ in .deny }
+        #expect(approvals(events).count == 3)
+        #expect(approvals(events).allSatisfy { !$0.isBatch })
+    }
+
+    @Test func reviewingOneByOneAsksForEachCall() async {
+        let runs = Counter()
+        let script = Script([[.toolCalls([stamp("a"), stamp("b")])], [.text("Ok")]])
+        let events = await drive(AgentEngine(), request(script, runs: runs)) { card in
+            card.isBatch ? ApprovalAnswer(decision: .review) : (card.command == "a" ? .once : .deny)
+        }
+        let cards = approvals(events)
+        #expect(cards.count == 3 && cards[0].isBatch && cards[1].command == "a" && cards[2].command == "b")
+        #expect(results(events).map(\.content) == ["did a", PermissionPolicy.userDenial])
+        #expect(await runs.value == 1)
+    }
+
+    @Test func onlyThisTaskOnAGroupGrantsEverythingItOffered() async {
+        let runs = Counter()
+        // A third call in the next step is covered by what the group granted.
+        let script = Script([[.toolCalls([stamp("a"), stamp("b")])], [.toolCalls([stamp("c")])], [.text("Ok")]])
+        let events = await drive(AgentEngine(), request(script, runs: runs)) { _ in ApprovalAnswer(decision: .task) }
+        #expect(approvals(events).count == 1)
+        #expect(await runs.value == 3)
+    }
+
+    @Test func switchingToReadOnlyWhileTheGroupIsOpenBlocksEachCall() async {
+        let runs = Counter()
+        let box = PermissionBox(mode: .ask)
+        let engine = AgentEngine()
+        let req = request(Script([[.toolCalls([stamp("a"), stamp("b")])], [.text("Ok")]]), box: box, runs: runs)
+        var events: [TurnEvent] = []
+        for await event in engine.run(req) {
+            events.append(event)
+            if case .approval = event {
+                await box.set(mode: .readOnly)
+                await engine.gate.applyModeChange(to: .readOnly, for: req.bot.id)
+            }
+        }
+        #expect(approvals(events).count == 1)
+        #expect(await runs.value == 0)
+        #expect(results(events).allSatisfy { $0.isError && $0.content == PermissionPolicy.readOnlyDenial })
+    }
+
+    @Test func switchingToReadOnlyAfterTheGroupWasApprovedBlocksTheCallsThatHaveNotRunYet() async {
+        let runs = Counter()
+        let box = PermissionBox(mode: .ask)
+        let script = Script([[.toolCalls([stamp("a"), stamp("b"), stamp("c")])], [.text("Ok")]])
+        // The user taps "Permitir as 3"; while the first one runs they switch the Orb to read-only.
+        let req = request(script, box: box, runs: runs, afterFirstStamp: { await box.set(mode: .readOnly) })
+        let events = await drive(AgentEngine(), req) { _ in .once }
+        #expect(approvals(events).count == 1)
+        #expect(await runs.value == 1)
+        #expect(results(events).map(\.content) == ["did a", PermissionPolicy.readOnlyDenial, PermissionPolicy.readOnlyDenial])
+        #expect(results(events).map(\.isError) == [false, true, true])
+    }
+
+    @Test func alwaysOnAGroupSavesTheChosenRuleAndEveryCallRuns() async {
+        let runs = Counter()
+        let box = PermissionBox(mode: .ask)
+        let rule = PermissionRule(family: .writeFiles)
+        // The next step's call is covered by the saved rule: no second card.
+        let script = Script([[.toolCalls([stamp("a"), stamp("b")])], [.toolCalls([stamp("c")])], [.text("Ok")]])
+        let engine = AgentEngine()
+        var events: [TurnEvent] = []
+        for await event in engine.run(request(script, box: box, runs: runs)) {
+            events.append(event)
+            if case .approval(let card) = event {
+                await box.add(rule) // what the app does before answering the engine
+                await engine.gate.resolve(approvalID: card.id, answer: ApprovalAnswer(decision: .always, rule: rule))
+            }
+        }
+        #expect(approvals(events).count == 1 && approvals(events)[0].isBatch)
+        #expect(await box.state.rules == [rule])
+        #expect(await runs.value == 3)
+        #expect(results(events).map(\.content) == ["did a", "did b", "did c"])
+    }
+
+    @Test func alwaysOnAGroupWithoutALiveSourceIsKeptForTheTurn() async {
+        let runs = Counter()
+        let rule = PermissionRule(family: .writeFiles)
+        let script = Script([[.toolCalls([stamp("a"), stamp("b")])], [.toolCalls([stamp("c")])], [.text("Ok")]])
+        let events = await drive(AgentEngine(), request(script, runs: runs)) { _ in ApprovalAnswer(decision: .always, rule: rule) }
+        #expect(approvals(events).count == 1)
+        #expect(await runs.value == 3)
+    }
+
+    @Test func grantsAlreadyHeldKeepACallOutOfTheGroup() async {
+        let runs = Counter()
+        let script = Script([[.toolCalls([stamp("a"), stamp("b")])], [.text("Ok")]])
+        let events = await drive(AgentEngine(), request(script, runs: runs, grants: [PermissionRule(family: .writeFiles)])) { _ in .once }
+        #expect(approvals(events).isEmpty)
+        #expect(await runs.value == 2)
+    }
+
+    @Test func theGroupedCardOffersTheUnionOfTheRulesWithoutRepeats() {
+        let calls = [
+            ToolCallRequest(id: "1", name: "run_command", arguments: #"{"command":"git status"}"#),
+            ToolCallRequest(id: "2", name: "run_command", arguments: #"{"command":"git push"}"#),
+            ToolCallRequest(id: "3", name: "run_command", arguments: #"{"command":"npm run build"}"#),
+            ToolCallRequest(id: "4", name: "run_command", arguments: #"{"command":"swift test"}"#),
+        ]
+        let context = ToolContext(workingDirectory: URL(fileURLWithPath: NSTemporaryDirectory()))
+        let batch = ApprovalBatch.plan(calls: calls, tools: [RunCommandTool()], context: context,
+                                       state: PermissionState(mode: .ask, rules: []), grants: [])
+        let rules = batch?.suggestions ?? []
+        #expect(batch?.members.count == 4)
+        #expect(rules.count == 3 && Set(rules).count == 3)
+        let all = (batch?.members ?? []).flatMap { $0.suggestions }
+        #expect(rules == Array(PermissionPolicy.unique(all).prefix(3)))
+        // What a rule already covers is left out of the offer.
+        let covered = ApprovalBatch.plan(calls: calls, tools: [RunCommandTool()], context: context,
+                                         state: PermissionState(mode: .ask, rules: [.shell("git")]), grants: [])
+        #expect(covered?.members.count == 2)
+        #expect(covered?.suggestions.contains(.shell("git")) == false)
+    }
+
+    @Test func aGroupNeedsAtLeastTwoCalls() {
+        let context = ToolContext(workingDirectory: URL(fileURLWithPath: NSTemporaryDirectory()))
+        let tools: [any AgentTool] = [StampTool(runs: Counter())]
+        #expect(ApprovalBatch.plan(calls: [stamp("a")], tools: tools, context: context, state: PermissionState(mode: .ask, rules: []), grants: []) == nil)
+        #expect(ApprovalBatch.plan(calls: [stamp("a"), stamp("b")], tools: tools, context: context, state: PermissionState(mode: .auto, rules: []), grants: []) == nil)
+        #expect(ApprovalBatch.plan(calls: [stamp("a"), stamp("b")], tools: tools, context: context, state: PermissionState(mode: .ask, rules: []), grants: []) != nil)
+    }
+}

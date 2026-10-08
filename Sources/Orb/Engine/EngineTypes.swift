@@ -89,18 +89,64 @@ struct ChatMessage: Codable, Hashable, Sendable {
     /// Tool messages: the call failed (an error, an unknown tool, a refusal), which providers that have the notion
     /// (Anthropic's `is_error`) are told.
     var isError = false
+    /// User messages: pictures the user attached. Tool messages: pictures the tool returned. Only the paths are
+    /// kept here; the bytes are read from the files when a request is built (see `ImageAttachment`).
+    var images: [ImageAttachment] = []
 
     static func system(_ text: String) -> ChatMessage { ChatMessage(role: .system, content: text) }
-    static func user(_ text: String) -> ChatMessage { ChatMessage(role: .user, content: text) }
-    static func tool(_ id: String, _ output: String, isError: Bool = false) -> ChatMessage {
-        ChatMessage(role: .tool, content: output, toolCallID: id, isError: isError)
+    static func user(_ text: String, images: [ImageAttachment] = []) -> ChatMessage {
+        ChatMessage(role: .user, content: text, images: images)
+    }
+    static func tool(_ id: String, _ output: String, isError: Bool = false, images: [ImageAttachment] = []) -> ChatMessage {
+        ChatMessage(role: .tool, content: output, toolCallID: id, isError: isError, images: images)
+    }
+}
+
+/// A picture the model can be shown. The file is a copy under the app's data folder (`ImageStore`), already
+/// downscaled; the conversation keeps this description, never the bytes.
+struct ImageAttachment: Codable, Hashable, Sendable {
+    var path: String
+    /// "image/jpeg" or "image/png".
+    var mediaType: String
+    var width: Int
+    var height: Int
+
+    init(path: String, mediaType: String, width: Int, height: Int) {
+        self.path = path
+        self.mediaType = mediaType
+        self.width = width
+        self.height = height
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        path = try c.decode(String.self, forKey: .path)
+        mediaType = try c.value(.mediaType, default: "image/jpeg")
+        width = try c.value(.width, default: 0)
+        height = try c.value(.height, default: 0)
     }
 }
 
 extension ChatMessage {
+    private enum CodingKeys: String, CodingKey {
+        case role, content, toolCalls, toolCallID, reasoning, isError, images
+    }
+
+    /// `images` is left out when there are none, so conversations without pictures are written as before.
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(role, forKey: .role)
+        try c.encode(content, forKey: .content)
+        try c.encode(toolCalls, forKey: .toolCalls)
+        try c.encodeIfPresent(toolCallID, forKey: .toolCallID)
+        try c.encodeIfPresent(reasoning, forKey: .reasoning)
+        try c.encode(isError, forKey: .isError)
+        if !images.isEmpty { try c.encode(images, forKey: .images) }
+    }
+
     /// Tolerant decoding (see Store.swift): conversations saved before `reasoning` existed still load, a trace this
     /// version cannot read is dropped instead of losing the message, and a message with an unknown role is skipped by
-    /// the lossy list around it.
+    /// the lossy list around it. A picture entry this version cannot read is skipped.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         role = try c.decode(Role.self, forKey: .role)
@@ -109,6 +155,7 @@ extension ChatMessage {
         toolCallID = try c.decodeIfPresent(String.self, forKey: .toolCallID)
         reasoning = try? c.decodeIfPresent(ReasoningTrace.self, forKey: .reasoning)
         isError = try c.value(.isError, default: false)
+        images = try c.lossyArray(.images)
     }
 }
 
@@ -378,6 +425,10 @@ struct ToolContext: Sendable {
     var jobs: BackgroundJobs?
     /// The user's Terminal environment that commands run in.
     var shell: ShellEnvironment = .shared
+    /// Where pictures a tool returns are saved (nil: tools return text only).
+    var imageStore: ImageStore?
+    /// The model may be shown pictures, so a tool that can return one should.
+    var acceptsImages = false
 }
 
 protocol AgentTool: Sendable {
@@ -396,9 +447,21 @@ protocol AgentTool: Sendable {
     func summary(_ arguments: JSONValue, context: ToolContext) -> (title: String, detail: String)
     /// Runs the tool and returns text for the model. Throw `ToolError` for user-facing failures.
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String
+    /// Same, for tools that can also hand the model a picture. The engine calls this one.
+    func runWithImages(_ arguments: JSONValue, context: ToolContext) async throws -> ToolResult
+}
+
+/// What a tool gives back: the text, and pictures the model may look at.
+struct ToolResult: Sendable {
+    var text: String
+    var images: [ImageAttachment] = []
 }
 
 extension AgentTool {
+    func runWithImages(_ arguments: JSONValue, context: ToolContext) async throws -> ToolResult {
+        ToolResult(text: try await run(arguments, context: context))
+    }
+
     func summary(_ arguments: JSONValue, context: ToolContext) -> (title: String, detail: String) { summary(arguments) }
     func danger(_ arguments: JSONValue) -> String? { nil }
 }

@@ -8,7 +8,7 @@ final class AppModel {
     // MARK: Persisted state
 
     var bots: [Bot] { didSet { scheduleStateSave() } }
-    var routines: [Routine] { didSet { scheduleStateSave() } }
+    var routines: [Routine] { didSet { scheduleStateSave(); queueFollowsEdits(from: oldValue) } }
     var skills: [Skill] { didSet { scheduleStateSave() } }
     var connectors: [MCPServerConfig] { didSet { scheduleStateSave(); syncConnectors() } }
     /// Providers the user set up, with their last fetched model lists.
@@ -18,6 +18,14 @@ final class AppModel {
     /// Conversations loaded so far. At launch only the selected Orb's is; the rest follow in the background
     /// (`unloadedConversations`), and anything that needs one earlier loads it on demand (`ensureLoaded`).
     private(set) var conversations: [UUID: Conversation]
+    /// While a routine runs, `conversations[botID]` is the routine's own conversation (the turn machinery works on
+    /// it) and the user's chat waits here, untouched. Every turn of an Orb works on one conversation at a time, so
+    /// a routine and a chat turn of the same Orb cannot run together yet (the routine waits in `queuedRoutines`).
+    private(set) var parkedChats: [UUID: Conversation] = [:]
+    /// Earlier conversations of each Orb as last listed (see `loadArchive`).
+    private(set) var archives: [UUID: [ConversationSummary]] = [:]
+    /// Routines that came due while their Orb was busy; each runs when the Orb is free. One entry per routine.
+    private(set) var queuedRoutines: [UUID] = []
     /// Things the user should hear about the data files (an unreadable file and where its copy is, a failed save).
     /// The first one is shown as an alert; `dismissDataNotice` moves on to the next.
     private(set) var dataNotices: [StoreNotice] = []
@@ -46,7 +54,7 @@ final class AppModel {
     /// What each working bot's current tool does, and bots waiting for an approval. Kept apart from the
     /// transcript so the Orbs (sidebar, inspector) don't re-render on every streamed token.
     private var runningTool: [UUID: ToolCall.Kind] = [:]
-    private var awaitingApproval: Set<UUID> = []
+    private(set) var awaitingApproval: Set<UUID> = []
     /// What the local Claude Code reports (checked while that provider is set up).
     private(set) var claudeCode = ClaudeCodeStatus()
     /// Bots whose reply text is arriving right now (the Orb talks). Changes only when a burst of text starts
@@ -67,6 +75,10 @@ final class AppModel {
     // MARK: Services
 
     @ObservationIgnored private var store: Store
+    /// Pictures attached to messages and returned by tools (`anexos/<id>/` in the data folder).
+    @ObservationIgnored let images: ImageStore
+    /// Models ("provider/model") that answered that they cannot read pictures, so later turns do not try again.
+    @ObservationIgnored private var visionRejected: Set<String> = []
     /// Every Orb's own memory bank (`memoria/<id>/` in the data folder).
     @ObservationIgnored let memory: MemoryLibrary
     /// What each Orb's memory panel shows, refreshed after changes.
@@ -91,7 +103,13 @@ final class AppModel {
     /// events while the next one runs; only the current id may change the Orb's state.
     @ObservationIgnored private(set) var turnIDs: [UUID: UUID] = [:]
     /// Bot id → routine id, for turns started by a routine.
-    @ObservationIgnored private var routineTurns: [UUID: UUID] = [:]
+    private var routineTurns: [UUID: UUID] = [:]
+    /// When each running routine's run began.
+    @ObservationIgnored private var routineStarts: [UUID: Date] = [:]
+    /// Stands in for the provider's client (tests).
+    /// Where "the home folder" is, for deciding whether an Orb's folder is its own (tests point it elsewhere).
+    @ObservationIgnored var homeFolder = FileManager.default.homeDirectoryForCurrentUser
+    @ObservationIgnored var clientOverride: (@MainActor () -> (any LLMClient)?)?
     @ObservationIgnored private var stateSave: Task<Void, Never>?
     @ObservationIgnored private var conversationSaves: [UUID: Task<Void, Never>] = [:]
     /// Orbs whose conversation changed since it was last written; quitting saves only these.
@@ -110,6 +128,7 @@ final class AppModel {
     /// `runsBackgroundWork: false` skips the scheduler, Keychain checks and app-wide observers (tests).
     init(store: Store = .standard, runsBackgroundWork: Bool = true) {
         self.store = store
+        images = ImageStore(dataFolder: store.directory)
         let gate = ApprovalGate()
         self.gate = gate
         engine = AgentEngine(gate: gate)
@@ -142,6 +161,8 @@ final class AppModel {
 
         syncConnectors()
         guard runsBackgroundWork else { return }
+        ApprovalNotifications.clearStale()
+        ApprovalNotifications.install { [weak self] route in self?.handle(route) }
         Task { [weak self] in
             await self?.loadRemainingConversations()
             await self?.prepareMemory()
@@ -156,6 +177,7 @@ final class AppModel {
         }
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
+                ApprovalNotifications.clear(self?.pendingApprovals.map(\.id) ?? [])
                 self?.saveNow()
                 self?.jobs.killAllNow()
             }
@@ -238,7 +260,8 @@ final class AppModel {
         if case .bot(let id) = selection { bot(id) } else { nil }
     }
 
-    func transcript(_ botID: UUID) -> [TranscriptItem] { conversations[botID]?.items ?? [] }
+    /// The user's chat (not a running routine's conversation, which `conversations` holds meanwhile).
+    func transcript(_ botID: UUID) -> [TranscriptItem] { (parkedChats[botID] ?? conversations[botID])?.items ?? [] }
 
     /// Observable (the status line is set for exactly as long as a turn runs).
     func isWorking(_ botID: UUID) -> Bool { statusLine[botID] != nil }
@@ -413,18 +436,38 @@ final class AppModel {
     // MARK: Bots
 
     /// A new Orb comes with its own memory. `identity` (how it should work, written by you) starts it; with
-    /// `interview` it also asks about you in its first conversation and keeps the answers.
+    /// `interview` it also asks about you in its first conversation and keeps the answers. Unless `folder` says
+    /// otherwise it gets a folder of its own in `base` (`~/Orbs`); if that cannot be made it works in the home
+    /// folder and says so in its conversation.
+    @discardableResult
     func createBot(name: String, role: String, orb: OrbConfig, model: String, mode: PermissionMode,
-                   identity: String = "", interview: Bool = true) {
-        let bot = Bot(name: name, role: role, orb: orb, model: model, permissionMode: mode)
+                   identity: String = "", interview: Bool = true, folder: OrbFolderChoice = .own,
+                   base: URL = OrbFolder.defaultBase) -> Bot {
+        let name = Self.clippedName(name)
+        var bot = Bot(name: name, role: role, orb: orb, model: model, permissionMode: mode)
+        var folderProblem: String?
+        switch folder {
+        case .own:
+            do {
+                bot.workingDirectory = OrbFolder.storedPath(try OrbFolder.create(for: name, in: base))
+            } catch {
+                folderProblem = error.localizedDescription
+            }
+        case .home:
+            break
+        case .existing(let url):
+            bot.workingDirectory = OrbFolder.storedPath(url)
+        }
         conversations[bot.id] = Conversation()
         bots.append(bot)
         selection = .bot(bot.id)
+        if let folderProblem { append(.notice("\(folderProblem). \(bot.name) vai trabalhar na pasta pessoal."), to: bot.id) }
         let bank = memory.bank(for: bot.id)
         Task {
             await bank.ensureIdentity(notes: identity, interview: interview)
             await refreshMemory(bot.id)
         }
+        return bot
     }
 
     func update(_ botID: UUID, _ change: (inout Bot) -> Void) {
@@ -439,7 +482,19 @@ final class AppModel {
     /// The mode and "Sempre permitir" rules of an Orb as they are now; the engines read this at every tool call,
     /// so a change (or a revoked grant) applies to the turn already running.
     func permissionState(of botID: UUID) -> PermissionState? {
-        bot(botID).map { PermissionState(mode: $0.permissionMode, rules: $0.permissionRules) }
+        effectiveBot(botID).map { PermissionState(mode: $0.permissionMode, rules: $0.permissionRules) }
+    }
+
+    /// The permission mode the running routine asked for, if it asked for one.
+    private func routineModeOverride(_ botID: UUID) -> PermissionMode? {
+        routineTurns[botID].flatMap { id in routines.first { $0.id == id }?.permissionMode }
+    }
+
+    /// The Orb as its running turn sees it: a routine's run may have a permission mode of its own.
+    private func effectiveBot(_ botID: UUID) -> Bot? {
+        guard var bot = bot(botID) else { return nil }
+        if let mode = routineModeOverride(botID) { bot.permissionMode = mode }
+        return bot
     }
 
     private func permissionSource(for bot: Bot) -> PermissionSource {
@@ -450,7 +505,7 @@ final class AppModel {
     /// Changing the mode while the Orb waits for an answer answers the open cards: "Sem pedir permissão" allows
     /// them, "Automático" the ones it would not have asked about, "Só leitura" denies them. Claude Code is told too.
     private func permissionModeChanged(_ botID: UUID, to mode: PermissionMode) {
-        guard turns[botID] != nil else { return }
+        guard turns[botID] != nil, routineModeOverride(botID) == nil else { return } // the routine's own mode stands
         let isClaudeCode = claudeTurns.contains(botID)
         Task {
             let answered = await gate.applyModeChange(to: mode, for: botID)
@@ -470,6 +525,12 @@ final class AppModel {
                 }
             }
         }
+        ApprovalNotifications.clear(answered.map(\.approvalID))
+        updateAwaitingApproval(botID)
+    }
+
+    /// The Orb waits for you exactly while one of its cards is open.
+    private func updateAwaitingApproval(_ botID: UUID) {
         let stillOpen = (conversations[botID]?.items ?? []).contains {
             if case .approval(let request) = $0.kind { request.decision == nil } else { false }
         }
@@ -481,9 +542,15 @@ final class AppModel {
     func deleteBot(_ botID: UUID, keepMemory: Bool = false) {
         let name = bot(botID)?.name ?? "Orb"
         memoryRequests[botID] = nil
+        // First, so that stopping a running routine does not start the next one waiting for this Orb.
+        let ownRoutines = routines.filter { $0.botID == botID }.map(\.id)
+        queuedRoutines.removeAll { ownRoutines.contains($0) }
+        routines.removeAll { $0.botID == botID }
         stop(botID)
         let jobs = jobs
         Task { await jobs.forget(botID: botID) }
+        let pictures = images
+        Task.detached(priority: .utility) { pictures.deleteAll(for: botID) }
         memoryIdle.removeValue(forKey: botID)?.cancel()
         let library = memory
         if keepMemory {
@@ -498,12 +565,14 @@ final class AppModel {
         }
         memories[botID] = nil
         bots.removeAll { $0.id == botID }
-        routines.removeAll { $0.botID == botID }
         conversations[botID] = nil
+        parkedChats[botID] = nil
+        archives[botID] = nil
         unloadedConversations.remove(botID)
         dirtyConversations.remove(botID)
         conversationSaves.removeValue(forKey: botID)?.cancel()
         store.deleteConversation(botID)
+        store.deleteArchive(botID) // the earlier conversations and the routines' ones
         if selection == .bot(botID) { selection = bots.first.map { .bot($0.id) } }
     }
 
@@ -514,14 +583,89 @@ final class AppModel {
         selection = .bot(bots[next].id)
     }
 
+    // MARK: Conversation history
+
+    /// Starts a new conversation. The current one is archived (when you said anything in it), not thrown away.
     func newConversation(_ botID: UUID) {
-        stop(botID)
-        memoryIdle.removeValue(forKey: botID)?.cancel()
-        saveMemory(of: botID)
-        unloadedConversations.remove(botID)
-        conversations[botID] = Conversation()
+        guard bot(botID) != nil else { return }
+        leaveChat(botID)
+        archiveChat(botID)
+        installChat(Conversation(), for: botID)
         drafts[botID] = ""
-        scheduleConversationSave(botID, delay: 0)
+    }
+
+    /// Makes an archived conversation the current one. The current one is archived first (if you said anything in
+    /// it), so nothing is lost either way. The conversation keeps its Claude Code session and its memory
+    /// bookkeeping (how much of it is already saved as memory), so reopening it saves nothing twice.
+    @discardableResult
+    func reopenConversation(_ id: UUID, of botID: UUID) -> Bool {
+        guard let owner = bot(botID) else { return false }
+        let read = store.readArchived(id, for: botID)
+        addNotice(Self.labeled(read.notice, for: owner))
+        guard let chosen = read.value else {
+            archives[botID]?.removeAll { $0.id == id }
+            return false
+        }
+        leaveChat(botID)
+        archiveChat(botID)
+        installChat(chosen.closingInterruptedTurn(), for: botID)
+        drafts[botID] = ""
+        store.deleteArchived(id, for: botID) // after the reopened chat is written (`installChat`, same queue): a crash in between keeps both
+        archives[botID]?.removeAll { $0.id == id }
+        return true
+    }
+
+    /// Permanently deletes an archived conversation.
+    func deleteArchivedConversation(_ id: UUID, of botID: UUID) {
+        store.deleteArchived(id, for: botID)
+        archives[botID]?.removeAll { $0.id == id }
+    }
+
+    /// Reads the Orb's archive (the conversations menu does this when it opens).
+    func loadArchive(_ botID: UUID) async {
+        let list = await store.readArchiveAsync(botID)
+        guard bot(botID) != nil else { return }
+        archives[botID] = list
+    }
+
+    /// Before the chat is replaced: a turn of the chat stops (a running routine does not: it has its own
+    /// conversation), the pending memory save is dropped (archiving saves it) and the conversation is read if it
+    /// was not yet.
+    private func leaveChat(_ botID: UUID) {
+        if routineTurns[botID] == nil { stop(botID) }
+        memoryIdle.removeValue(forKey: botID)?.cancel()
+        ensureLoaded(botID)
+    }
+
+    /// Archives the chat if you said anything in it. Whatever of it is not yet in memory is saved first, once: the
+    /// mark of how much is saved goes into the archive with the conversation.
+    private func archiveChat(_ botID: UUID) {
+        guard var chat = parkedChats[botID] ?? conversations[botID] else { return }
+        let start = min(chat.memorySavedCount ?? 0, chat.items.count)
+        let stretch = Array(chat.items[start...])
+        if !stretch.isEmpty {
+            chat.memorySavedCount = chat.items.count
+            persistStretch(stretch, of: botID)
+        }
+        guard chat.hasUserMessages else { return }
+        let summary = store.archive(chat, for: botID)
+        if archives[botID] != nil {
+            archives[botID]?.append(summary)
+            archives[botID]?.sort { $0.updatedAt > $1.updatedAt }
+        }
+    }
+
+    /// Replaces the chat (which a running routine may have parked) and writes it at once, on the store's queue,
+    /// so whatever is queued after it (deleting the archived copy of a reopened conversation) comes after it.
+    private func installChat(_ chat: Conversation, for botID: UUID) {
+        if parkedChats[botID] != nil {
+            parkedChats[botID] = chat
+        } else {
+            conversations[botID] = chat
+            conversationSaves.removeValue(forKey: botID)?.cancel()
+            dirtyConversations.remove(botID)
+        }
+        store.save(chat, for: botID)
     }
 
     // MARK: Memory
@@ -607,12 +751,16 @@ final class AppModel {
     @discardableResult
     private func saveMemory(of botID: UUID, ifIdleFor gap: TimeInterval? = nil) -> Bool {
         guard let stretch = pendingStretch(of: botID, ifIdleFor: gap) else { return false }
+        persistStretch(stretch, of: botID)
+        return true
+    }
+
+    private func persistStretch(_ stretch: [TranscriptItem], of botID: UUID) {
         let bank = memory.bank(for: botID)
         Task.detached(priority: .utility) { [weak self] in
             if let page = SessionSummary.page(from: stretch) { await bank.saveSession(page) }
             await self?.refreshMemory(botID)
         }
-        return true
     }
 
     /// When you asked the Orb to remember something and the turn ended without it saving, the app keeps what you
@@ -643,6 +791,10 @@ final class AppModel {
             try? await Task.sleep(for: .seconds(SessionSummary.idleGap))
             guard !Task.isCancelled else { return }
             self?.memoryIdle[botID] = nil
+            if self?.turns[botID] != nil { // a routine is running: the chat is saved once the Orb is free
+                self?.scheduleMemorySave(botID)
+                return
+            }
             self?.saveMemory(of: botID)
         }
     }
@@ -670,24 +822,27 @@ final class AppModel {
     /// so the composer keeps what you wrote. Only a message typed in the composer (`fromUser`) clears its draft:
     /// routines and quick ask must not wipe what you are typing for that Orb.
     @discardableResult
-    func send(_ text: String, attachments: [URL] = [], to botID: UUID, fromUser: Bool = false) -> Bool {
+    func send(_ text: String, attachments: [URL] = [], images pictures: [ImageAttachment] = [], to botID: UUID,
+              fromUser: Bool = false) -> Bool {
         let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !typed.isEmpty, turns[botID] == nil, let bot = bot(botID) else { return false }
+        guard !typed.isEmpty || !pictures.isEmpty, turns[botID] == nil, let bot = effectiveBot(botID) else { return false }
         ensureLoaded(botID)
         guard let ref = modelRef(for: bot), let account = account(ref.provider), account.isEnabled, isUsable(account) else {
             append(.notice("Conecte um modelo em Ajustes → Modelos para começar."), to: botID)
             return false
         }
         let modelInfo = account.models.first { $0.id == ref.model }
+        let sees: Bool? = visionRejected.contains(ref.text) ? false : modelInfo?.supportsImages
 
         memoryIdle.removeValue(forKey: botID)?.cancel()
-        append(.user(text: typed, attachments: attachments.map(\.lastPathComponent)), to: botID)
+        // Full paths: the bubble shows thumbnails of the pictures (a name alone, as older conversations have, still renders).
+        append(.user(text: typed, attachments: attachments.map(\.path) + pictures.map(\.path)), to: botID)
         if fromUser { drafts[botID] = "" }
         statusLine[botID] = "Pensando"
         pokes[botID, default: 0] += 1
         flash(\.listening, botID, seconds: 1.4)
 
-        let intent = MemoryIntent.detect(typed)
+        let intent = routineTurns[botID] == nil ? MemoryIntent.detect(typed) : nil // a routine's prompt is not a request to remember
         memoryRequests[botID] = intent.map { ($0, max(0, (conversations[botID]?.items.count ?? 1) - 1)) }
         // Your request is the approval: this turn saves to memory without asking (the Orb's saved settings don't change).
         let rememberTool = ref.provider == .claudeCode ? ClaudeCodeTools.memoryPrefix + "remember" : "remember"
@@ -701,12 +856,16 @@ final class AppModel {
         if !attachments.isEmpty {
             prompt += "\n\nAttached files (read them with your tools):\n" + attachments.map { "- \($0.path)" }.joined(separator: "\n")
         }
+        if !pictures.isEmpty {
+            prompt += Self.pictureNote(pictures, forClaudeCode: ref.provider == .claudeCode, modelSees: sees)
+        }
+        prompt = unattendedPrompt(prompt, for: botID)
         if intent != nil {
             prompt += "\n\n(The user is asking you to remember something. Save it now with the \(rememberTool) tool, picking the "
                 + "right tipo; if it refers to something said earlier, save that. Then confirm in one short sentence.)"
         }
         if ref.provider == .claudeCode {
-            runClaudeCode(bot, model: ref.model, prompt: prompt, message: typed, turnGrants: turnGrants)
+            runClaudeCode(bot, model: ref.model, prompt: prompt, images: pictures, message: typed, turnGrants: turnGrants)
             return true
         }
         let skills = enabledSkills
@@ -715,7 +874,8 @@ final class AppModel {
         let history = prepared.history
         if prepared.firstCompaction { append(.notice("Conversa compactada: o começo virou um resumo."), to: botID) }
         let bank = memory.bank(for: botID)
-        let context = ToolContext(workingDirectory: bot.workingURL, memory: bank, botID: botID, jobs: jobs)
+        let context = ToolContext(workingDirectory: bot.workingURL, memory: bank, botID: botID, jobs: jobs,
+                                  imageStore: images, acceptsImages: sees != false)
         let userTurns = userTurnCount(botID)
         let maxSteps = routineTurns[botID] != nil ? AgentEngine.routineMaxSteps : AgentEngine.defaultMaxSteps
         let lastWorkspaceHash = conversations[botID]?.workspaceHash
@@ -730,8 +890,8 @@ final class AppModel {
             let built = TurnPrompt.native(inputs, history: history, lastWorkspaceHash: lastWorkspaceHash)
             let client: any LLMClient
             do {
-                guard let made = account.client(for: modelInfo, credentials: Self.credentials(for: ref.provider),
-                                                 conversationID: botID.uuidString) else { throw LLMError.notConfigured }
+                guard let made = clientOverride?() ?? account.client(for: modelInfo, credentials: Self.credentials(for: ref.provider),
+                                                                      conversationID: botID.uuidString) else { throw LLMError.notConfigured }
                 client = made
             } catch {
                 failSetup(error, of: botID, turn: turn)
@@ -745,14 +905,28 @@ final class AppModel {
             let request = TurnRequest(bot: bot, model: ref.model, system: built.system, history: history,
                                       prompt: TurnPreface.prepend(built.preface, to: prompt),
                                       client: client, tools: tools, context: context, budget: budget, maxSteps: maxSteps,
-                                      turnGrants: turnGrants, permissions: permissionSource(for: bot))
+                                      turnGrants: turnGrants, permissions: permissionSource(for: bot),
+                                      images: pictures, supportsImages: sees,
+                                      onImagesRejected: { [weak self] in Task { @MainActor in self?.visionRejected.insert(ref.text) } })
             await play(engine.run(request), for: botID, turn: turn)
         }
         return true
     }
 
+    /// What the prompt says about the pictures of a message. Claude Code cannot be handed pictures, but its Read tool
+    /// opens image files; Orb's own engine sends them with the message (the paths are for tools that need a file).
+    nonisolated static func pictureNote(_ pictures: [ImageAttachment], forClaudeCode: Bool, modelSees: Bool?) -> String {
+        let list = pictures.map { "- \($0.path)" }.joined(separator: "\n")
+        if forClaudeCode { return "\n\nImagens anexadas — use a ferramenta Read para vê-las:\n" + list }
+        // A model that cannot see them gets the paths from the engine; one that can gets them for tools. When it is
+        // not known whether it sees (`modelSees` nil), the engine decides and adds its own line if it sent paths only.
+        guard modelSees != false else { return "" }
+        return (modelSees == true ? "\n\nAttached images (resized copies, shown to you with this message):\n"
+                : "\n\nAttached images (resized copies):\n") + list
+    }
+
     /// A turn run by the user's Claude Code, continuing the conversation's Claude Code session.
-    private func runClaudeCode(_ bot: Bot, model: String, prompt: String, message: String, turnGrants: [PermissionRule]) {
+    private func runClaudeCode(_ bot: Bot, model: String, prompt: String, images pictures: [ImageAttachment], message: String, turnGrants: [PermissionRule]) {
         let botID = bot.id
         let conversation = conversations[botID] ?? Conversation()
         let folder = bot.workingURL.standardizedFileURL.path
@@ -794,7 +968,7 @@ final class AppModel {
             let environment = await ClaudeCode.shared.environment(for: installation)
             guard isCurrent(turn, of: botID) else { return }
             let claudeTurn = ClaudeCodeTurn(bot: bot, executable: installation.executable, model: model, system: built.system,
-                                            prompt: prompt, context: context, sessionID: sessionID, connectors: servers,
+                                            prompt: prompt, images: pictures, context: context, sessionID: sessionID, connectors: servers,
                                             environment: environment, turnGrants: turnGrants,
                                             permissions: permissionSource(for: bot))
             // Recorded when the session answers (see `apply`): a turn that fails before that sent nothing.
@@ -805,7 +979,8 @@ final class AppModel {
 
     /// Your messages in the current conversation (the interview lasts the first few).
     private func userTurnCount(_ botID: UUID) -> Int {
-        (conversations[botID]?.items ?? []).reduce(0) { count, item in
+        if routineTurns[botID] != nil { return 99 } // a routine's run is not the first conversation: no interview
+        return (conversations[botID]?.items ?? []).reduce(0) { count, item in
             if case .user = item.kind { return count + 1 }
             return count
         }
@@ -849,6 +1024,7 @@ final class AppModel {
     func stop(_ botID: UUID) {
         guard let task = turns[botID], let turn = turnIDs[botID] else { return }
         task.cancel()
+        ApprovalNotifications.clear(pendingApprovals(of: botID).map(\.id))
         Task { await gate.cancelApprovals(for: botID) }
         closeStreaming(botID)
         awaitingApproval.remove(botID)
@@ -865,24 +1041,35 @@ final class AppModel {
     }
 
     /// Your answer to an approval card. `rule` is the standing rule picked under "Sempre…"; "Sempre" without one
-    /// takes the card's first suggestion, and "Só nesta tarefa" grants that rule until the turn ends.
-    func decide(_ decision: ApprovalDecision, rule: PermissionRule? = nil, approvalID: UUID, botID: UUID) {
+    /// takes the card's first suggestion, and "Só nesta tarefa" grants that rule until the turn ends. `note` is what
+    /// you told the Orb to do instead of what it asked, on a denial. A card already answered stays as it was (a
+    /// banner can be tapped after the card was answered in the app or the app was closed).
+    func decide(_ decision: ApprovalDecision, rule: PermissionRule? = nil, note: String? = nil, approvalID: UUID, botID: UUID) {
+        // Loaded first: a banner can arrive before this Orb's conversation was read, and a card left open by a run that
+        // closed is already denied once it is. Only an open card is answered.
+        guard bot(botID) != nil else { return }
+        ensureLoaded(botID)
+        guard isPending(approvalID, of: botID) else { return }
         var chosen = rule
+        let note = decision == .deny ? ApprovalNote.clean(note) : nil
         mutateItems(of: botID) { items in
             for index in items.indices {
                 if case .approval(var request) = items[index].kind, request.id == approvalID {
                     request.decision = decision
-                    if decision == .always || decision == .task { chosen = chosen ?? request.suggestions.first }
+                    request.note = note
+                    // A grouped card's "Só nesta tarefa" grants every rule it offered (the engine reads them from the card).
+                    if decision == .always || (decision == .task && !request.isBatch) { chosen = chosen ?? request.suggestions.first }
                     items[index].kind = .approval(request)
                 }
             }
         }
-        awaitingApproval.remove(botID)
+        updateAwaitingApproval(botID)
+        ApprovalNotifications.clear([approvalID])
         // Saved before the engine is answered, so its next tool call already sees the rule.
         if decision == .always, let chosen, chosen.isValid {
             update(botID) { if !$0.permissionRules.contains(chosen) { $0.permissionRules.append(chosen) } }
         }
-        let answer = ApprovalAnswer(decision: decision, rule: chosen)
+        let answer = ApprovalAnswer(decision: decision, rule: chosen, note: note)
         Task { await gate.resolve(approvalID: approvalID, answer: answer) }
     }
 
@@ -897,7 +1084,7 @@ final class AppModel {
     func apply(_ event: TurnEvent, to botID: UUID) { // internal for tests
         switch event {
         case .status(let text):
-            statusLine[botID] = text
+            statusLine[botID] = routineStatus(text, for: botID)
         case .text(let delta):
             // Shown by `flushText`; anything that adds to the transcript flushes first (`closeStreaming`).
             pendingText[botID, default: ""] += delta
@@ -930,7 +1117,7 @@ final class AppModel {
             closeStreaming(botID)
             append(.approval(request), to: botID)
             awaitingApproval.insert(botID)
-            if let bot = bot(botID) { notify(bot.name, "Precisa da sua permissão: \(request.title.lowercased())") }
+            announceApproval(request, of: botID)
         case .message(let message):
             ensureLoaded(botID)
             conversations[botID, default: Conversation()].messages.append(message)
@@ -977,10 +1164,8 @@ final class AppModel {
         runningTool[botID] = nil
         awaitingApproval.remove(botID)
         let reply = lastReply(botID)
-        if let routineID = routineTurns.removeValue(forKey: botID),
-           let index = routines.firstIndex(where: { $0.id == routineID }) {
-            routines[index].lastResult = succeeded ? reply.map { String($0.prefix(160)) } : "Não terminou: veja a conversa."
-        }
+        let routineID = routineTurns.removeValue(forKey: botID)
+        if let routineID { finishRoutineRun(botID, routineID: routineID, succeeded: succeeded, reply: reply) }
         if succeeded {
             flash(\.celebrating, botID, seconds: 3)
             if let bot = bot(botID), let reply { notify(bot.name, String(reply.prefix(180))) }
@@ -990,11 +1175,13 @@ final class AppModel {
         if selection != .bot(botID) || !(NSApp?.isActive ?? false) {
             update(botID) { $0.unread += 1 }
         }
-        scheduleConversationSave(botID, delay: 0)
+        if routineID == nil { scheduleConversationSave(botID, delay: 0) } // a routine's was written by `finishRoutineRun`
+        startNextQueuedRoutine(for: botID)
     }
 
+    /// The last thing the turn's conversation says (a routine's, while it runs; `transcript` is always the chat).
     private func lastReply(_ botID: UUID) -> String? {
-        for item in transcript(botID).reversed() {
+        for item in (conversations[botID]?.items ?? []).reversed() {
             if case .bot(let text, _) = item.kind { return text }
             if case .user = item.kind { return nil }
         }
@@ -1044,19 +1231,167 @@ final class AppModel {
 
     // MARK: Routines
 
+    /// Runs the routine now, or, when its Orb is busy, as soon as the Orb is free (a routine waits at most once).
+    /// A run has a conversation of its own (`conversations/<Orb>/routine-<routine>.json`): your chat gets one line
+    /// when it ends, nothing else.
     func runRoutine(_ routineID: UUID) {
-        guard let index = routines.firstIndex(where: { $0.id == routineID }) else { return }
-        let routine = routines[index]
-        guard !isWorking(routine.botID), bot(routine.botID) != nil else { return }
-        routines[index].lastRun = .now
-        saveMemory(of: routine.botID) // your conversation so far is its own session
-        append(.notice("Rotina “\(routine.name)”"), to: routine.botID)
-        routineTurns[routine.botID] = routine.id
-        send(routine.prompt, to: routine.botID)
-        if !isWorking(routine.botID) {
-            routineTurns[routine.botID] = nil
-            routines[index].lastResult = "Não rodou: conecte um modelo em Ajustes."
+        guard let routine = routines.first(where: { $0.id == routineID }), bot(routine.botID) != nil else { return }
+        guard routineTurns[routine.botID] != routineID else { return }
+        guard !queuedRoutines.contains(routineID) else {
+            startIdleQueuedRoutines() // waiting, but its Orb may be free by now (the routine was moved to another Orb)
+            return
         }
+        guard !isWorking(routine.botID) else {
+            queuedRoutines.append(routineID)
+            return
+        }
+        startRoutine(routine)
+    }
+
+    func isRoutineRunning(_ routineID: UUID) -> Bool { routineTurns.values.contains(routineID) }
+
+    func isRoutineQueued(_ routineID: UUID) -> Bool { queuedRoutines.contains(routineID) }
+
+    /// The transcript of a routine that is running right now (nil when it is not).
+    func liveRoutineItems(_ routineID: UUID) -> [TranscriptItem]? {
+        guard let botID = routineTurns.first(where: { $0.value == routineID })?.key else { return nil }
+        return conversations[botID]?.items
+    }
+
+    /// The routine's conversation as saved: its last runs.
+    func routineTranscript(_ routineID: UUID) async -> [TranscriptItem] {
+        guard let routine = routines.first(where: { $0.id == routineID }) else { return [] }
+        let read = await store.readRoutineConversationAsync(routine: routineID, for: routine.botID)
+        addNotice(Self.labeled(read.notice, for: bot(routine.botID)))
+        return read.value?.items ?? []
+    }
+
+    func deleteRoutine(_ routineID: UUID) {
+        guard let routine = routines.first(where: { $0.id == routineID }) else { return }
+        queuedRoutines.removeAll { $0 == routineID }
+        routines.removeAll { $0.id == routineID }
+        if routineTurns[routine.botID] == routineID { stop(routine.botID) }
+        store.deleteRoutineConversation(routine: routineID, for: routine.botID)
+    }
+
+    private func startRoutine(_ routine: Routine) {
+        let botID = routine.botID
+        guard turns[botID] == nil, bot(botID) != nil, let index = routines.firstIndex(where: { $0.id == routine.id }) else { return }
+        ensureLoaded(botID)
+        let started = Date.now
+        routines[index].lastRun = started
+        let read = store.readRoutineConversation(routine: routine.id, for: botID)
+        addNotice(Self.labeled(read.notice, for: bot(botID)))
+
+        // The turn machinery works on `conversations[botID]`: the routine's own goes there, the chat waits. The chat is
+        // written first (its pending save would otherwise write the routine's conversation in its place): while the
+        // routine runs, only the routine's file changes.
+        let chat = conversations[botID] ?? Conversation()
+        conversationSaves.removeValue(forKey: botID)?.cancel()
+        dirtyConversations.remove(botID)
+        if !chat.items.isEmpty { store.save(chat, for: botID) }
+        parkedChats[botID] = chat
+        conversations[botID] = (read.value?.closingInterruptedTurn() ?? Conversation()).startingRoutineRun(at: started)
+        routineTurns[botID] = routine.id
+        routineStarts[botID] = started
+        let hasPrompt = !routine.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if hasPrompt, send(routine.prompt, to: botID) {
+            statusLine[botID] = routineStatus("Pensando", for: botID)
+            return
+        }
+        // Nothing was sent (no model connected, nothing to do): the run did not happen. It is only in the history.
+        routineTurns[botID] = nil
+        routineStarts[botID] = nil
+        if let chat = parkedChats.removeValue(forKey: botID) { conversations[botID] = chat }
+        let reason = hasPrompt ? "Não rodou: conecte um modelo em Ajustes." : "Não rodou: a rotina está sem instruções."
+        routines[index].lastResult = reason
+        recordRun(RoutineRun(date: started, finishedAt: started, succeeded: false, summary: reason), routineID: routine.id)
+    }
+
+    /// Runs the routines that were waiting for this Orb, one at a time, as it becomes free.
+    private func startNextQueuedRoutine(for botID: UUID) {
+        while turns[botID] == nil,
+              let next = queuedRoutines.first(where: { id in routines.first { $0.id == id }?.botID == botID }) {
+            queuedRoutines.removeAll { $0 == next }
+            if let routine = routines.first(where: { $0.id == next }) { startRoutine(routine) }
+        }
+    }
+
+    /// Starts the queued routines whose Orb is free (see `runRoutine`, `queueFollowsEdits`).
+    private func startIdleQueuedRoutines() {
+        for id in queuedRoutines {
+            guard let botID = routines.first(where: { $0.id == id })?.botID, turns[botID] == nil, !isWorking(botID) else { continue }
+            startNextQueuedRoutine(for: botID)
+        }
+    }
+
+    /// A routine that waits follows its edits: switched off, it does not run; moved to another Orb, it runs when
+    /// that one is free (the old Orb finishing would not start it any more).
+    private func queueFollowsEdits(from old: [Routine]) {
+        guard !queuedRoutines.isEmpty else { return }
+        var moved = false
+        for id in queuedRoutines {
+            guard let before = old.first(where: { $0.id == id }), let now = routines.first(where: { $0.id == id }) else { continue }
+            if before.isEnabled && !now.isEnabled { queuedRoutines.removeAll { $0 == id } }
+            else if before.botID != now.botID { moved = true }
+        }
+        if moved { Task { startIdleQueuedRoutines() } }
+    }
+
+    /// The end of a routine's run: its conversation is saved, the chat comes back, the run goes into the routine's
+    /// history (and, for an Orb with a folder of its own, its report into `Rotinas/`), and the chat gets one line.
+    private func finishRoutineRun(_ botID: UUID, routineID: UUID, succeeded: Bool, reply: String?) {
+        let finished = Date.now
+        let started = routineStarts.removeValue(forKey: botID) ?? finished
+        let own = conversations[botID] ?? Conversation()
+        let routine = routines.first { $0.id == routineID }
+        if routine != nil { store.saveRoutineConversation(own, routine: routineID, for: botID) }
+        if let chat = parkedChats.removeValue(forKey: botID) { conversations[botID] = chat }
+        if hasUnsavedStretch(botID) { scheduleMemorySave(botID) } // the run cancelled the chat's pending save
+        guard let routine, let bot = bot(botID) else { return }
+
+        var run = RoutineRun(date: started, finishedAt: finished, succeeded: succeeded, summary: "")
+        if succeeded {
+            run.summary = RoutineRun.firstLine(of: reply) ?? "Terminou sem relatório."
+            run.report = reply.map { Conversation.clipped($0, to: RoutineRun.reportLimit) }
+            if let reply, let folder = PermissionPolicy.ownFolder(bot.workingURL, home: homeFolder), Self.isFolder(folder) {
+                run.reportFile = RoutineReport.write(reply, routine: routine.name, orb: bot.name, date: started, in: folder)
+            }
+        } else {
+            let why = own.items.reversed().lazy.compactMap { item -> String? in
+                if case .notice(let text) = item.kind, !text.hasPrefix(Conversation.routineRunMarker) { text } else { nil }
+            }.first
+            run.summary = Conversation.clipped(why ?? "Não terminou.", to: RoutineRun.summaryLimit)
+        }
+        recordRun(run, routineID: routineID)
+        if let index = routines.firstIndex(where: { $0.id == routineID }) {
+            routines[index].lastResult = succeeded ? reply.map { String($0.prefix(160)) } : "Não terminou: veja a conversa."
+        }
+        let outcome = succeeded ? "terminou: \(run.summary)" : "não terminou: \(run.summary)"
+        append(.notice("Rotina “\(routine.name)” \(outcome)" + (run.reportFile.map { " (relatório em \($0))" } ?? "")), to: botID)
+    }
+
+    private func recordRun(_ run: RoutineRun, routineID: UUID) {
+        guard let index = routines.firstIndex(where: { $0.id == routineID }) else { return }
+        routines[index].runs.insert(run, at: 0)
+        if routines[index].runs.count > Routine.keptRuns { routines[index].runs.removeLast(routines[index].runs.count - Routine.keptRuns) }
+    }
+
+    private static func isFolder(_ url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
+    }
+
+    /// What the model gets for a turn: a routine's run is told that nobody is there.
+    private func unattendedPrompt(_ prompt: String, for botID: UUID) -> String {
+        guard let routineID = routineTurns[botID], let routine = routines.first(where: { $0.id == routineID }) else { return prompt }
+        return RoutinePrompt.unattended(prompt, routine: routine.name, previous: routine.runs.first { $0.report != nil })
+    }
+
+    /// The status line says which routine the Orb is busy with.
+    private func routineStatus(_ text: String, for botID: UUID) -> String {
+        guard let routineID = routineTurns[botID], let routine = routines.first(where: { $0.id == routineID }) else { return text }
+        return "Rotina “\(routine.name)”: \(text)"
     }
 
     private func runDueRoutines(now: Date = .now) {
@@ -1106,16 +1441,9 @@ final class AppModel {
 
     /// Posts a banner when the app is in the background (bundled app only).
     private func notify(_ title: String, _ body: String) {
-        guard !(NSApp?.isActive ?? false), Self.notificationsEnabled, Bundle.main.bundleIdentifier != nil else { return }
-        let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = body
-        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
-        Task {
-            let center = UNUserNotificationCenter.current()
-            guard (try? await center.requestAuthorization(options: [.alert, .sound])) == true else { return }
-            try? await center.add(request)
-        }
+        guard !(NSApp?.isActive ?? false), Self.notificationsEnabled, ApprovalNotifications.isAvailable else { return }
+        let content = ApprovalNotifications.plainContent(title: title, body: body)
+        Task { await ApprovalNotifications.send(content) }
     }
 
     // MARK: Saving
@@ -1153,13 +1481,19 @@ final class AppModel {
     private func writeConversation(_ botID: UUID) {
         guard let conversation = conversations[botID] else { return }
         dirtyConversations.remove(botID)
-        store.save(conversation, for: botID)
+        guard let routineID = routineTurns[botID] else { return store.save(conversation, for: botID) }
+        // A running routine's conversation goes to its own file, never over the chat's.
+        if routines.contains(where: { $0.id == routineID }) {
+            store.saveRoutineConversation(conversation, routine: routineID, for: botID)
+        }
     }
 
     /// Writes everything that changed and waits for the disk (on quit).
     func saveNow() {
         store.save(state)
         for botID in dirtyConversations { writeConversation(botID) }
+        // A chat parked by a running routine is not `conversations[botID]`, so nothing above writes it.
+        for (botID, chat) in parkedChats where !chat.items.isEmpty { store.save(chat, for: botID) }
         store.flush()
     }
 }

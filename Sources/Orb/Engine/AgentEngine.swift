@@ -37,6 +37,13 @@ struct TurnRequest: Sendable {
     /// The permission mode and rules as they are now, read at every tool call. nil keeps the ones in `bot` as
     /// they were when the turn started.
     var permissions: PermissionSource?
+    /// Pictures the user attached to this message.
+    var images: [ImageAttachment] = []
+    /// Whether the model takes pictures: false never sends them (their paths go instead), nil is unknown (they are
+    /// sent, and dropped for the rest of the turn if the provider says it cannot read them).
+    var supportsImages: Bool?
+    /// Called when the provider rejected the pictures, so the app can remember it for this model.
+    var onImagesRejected: (@Sendable () -> Void)?
 
     func currentPermissions() async -> PermissionState {
         if let permissions { return await permissions() }
@@ -49,10 +56,13 @@ struct ToolOutcome: Sendable {
     var text: String
     /// The call failed (an error, an unknown tool, a refusal): the model is told so.
     var isError = false
+    /// Pictures the tool returned.
+    var images: [ImageAttachment] = []
 
-    init(_ text: String, isError: Bool = false) {
+    init(_ text: String, isError: Bool = false, images: [ImageAttachment] = []) {
         self.text = text
         self.isError = isError
+        self.images = images
     }
 }
 
@@ -85,7 +95,7 @@ actor AgentEngine {
 
     private func play(_ request: TurnRequest, out: AsyncStream<TurnEvent>.Continuation) async {
         defer { out.finish() }
-        let user = ChatMessage.user(request.prompt)
+        let user = ChatMessage.user(request.prompt, images: request.images)
         var messages = [ChatMessage.system(request.system)] + request.history + [user]
         out.yield(.message(user))
         let specs = request.tools.map(\.spec)
@@ -97,6 +107,8 @@ actor AgentEngine {
         let maxSteps = max(2, request.maxSteps)
         var usage: TokenUsage?
         var continuedAfterCut = false
+        var sendImages = request.supportsImages != false
+        if !sendImages, !request.images.isEmpty { out.yield(.notice(ImageRejection.notice)) }
 
         do {
             for step in 1...maxSteps {
@@ -106,8 +118,10 @@ actor AgentEngine {
                 var reply = Reply()
                 var contextRetried = false
                 while true {
+                    var windowHasImages = false
                     do {
-                        let window = Self.fitted(messages, to: budget)
+                        let window = Self.fitted(messages, to: budget, sendImages: sendImages)
+                        windowHasImages = window.contains { !$0.images.isEmpty }
                         if !announcedCompaction, window.contains(where: { $0.role == .user && $0.content.hasPrefix(ContextSummary.marker) }) {
                             announcedCompaction = true
                             out.yield(.notice("Conversa compactada: o começo virou um resumo."))
@@ -119,6 +133,11 @@ actor AgentEngine {
                         // The window was smaller than estimated: try once more with half the history.
                         contextRetried = true
                         budget = budget.scaled(by: 0.5)
+                    } catch let error where windowHasImages && ImageRejection.matches(error) {
+                        // The model cannot read pictures: say so once, remember it, and go on with their paths.
+                        sendImages = false
+                        request.onImagesRejected?()
+                        out.yield(.notice(ImageRejection.notice))
                     } catch let interrupted as StreamInterrupted {
                         // What the user already read is part of the conversation, so the next turn must know it.
                         record(ChatMessage(role: .assistant, content: interrupted.partialText + Self.interruptedMarker),
@@ -290,17 +309,23 @@ actor AgentEngine {
         func append(_ outcome: ToolOutcome, for call: ToolCallRequest) {
             var text = ToolOutputCap.apply(outcome.text, botID: request.bot.id, callID: call.id, toolNames: toolNames)
             if let note, call == calls.last { text += "\n\n" + note }
-            let message = ChatMessage.tool(call.id, text, isError: outcome.isError)
+            let message = ChatMessage.tool(call.id, text, isError: outcome.isError, images: outcome.images)
             messages.append(message)
             out.yield(.message(message))
         }
 
+        let confirmed = await confirmBatch(calls, request: request, reason: reason, allowed: &allowed, out: out)
         var index = 0
         while index < calls.count, !Task.isCancelled {
+            if let refused = confirmed.refused[index] {
+                append(refused, for: calls[index])
+                index += 1
+                continue
+            }
             var end = index
             while end < calls.count, Self.runsWithoutAsking(calls[end], request: request) { end += 1 }
             guard end - index > 1 else {
-                let outcome = await execute(calls[index], request: request, reason: reason, allowed: &allowed, out: out)
+                let outcome = await execute(calls[index], request: request, reason: reason, allowed: &allowed, approved: confirmed.approved.contains(index), out: out)
                 append(outcome, for: calls[index])
                 index += 1
                 continue
@@ -325,6 +350,40 @@ actor AgentEngine {
         }
     }
 
+    /// Asks once for the step's calls that would each ask for ordinary permission (see `ApprovalBatch`). Returns the
+    /// calls the user allowed (they run without asking again) and the ones refused. "Revisar uma a uma", and a switch
+    /// to read-only while the card was open, leave both empty: every call then asks for itself, as without batching.
+    private func confirmBatch(_ calls: [ToolCallRequest], request: TurnRequest, reason: String, allowed: inout [PermissionRule],
+                              out: AsyncStream<TurnEvent>.Continuation) async -> (approved: Set<Int>, refused: [Int: ToolOutcome]) {
+        let live = await request.currentPermissions()
+        guard let batch = ApprovalBatch.plan(calls: calls, tools: request.tools, context: request.context, state: live, grants: allowed)
+        else { return ([], [:]) }
+        let approval = batch.request(botName: request.bot.name, reason: reason)
+        await gate.open(approval.id, botID: request.bot.id)
+        out.yield(.approval(approval))
+        out.yield(.status("Esperando sua resposta"))
+        let answer = await gate.wait(for: approval.id)
+        let indices = Set(batch.members.map(\.index))
+        let rules = answer.rule.map { [$0] } ?? approval.suggestions
+        switch answer.decision {
+        case .review:
+            return ([], [:])
+        case .deny:
+            if await request.currentPermissions().mode == .readOnly { return ([], [:]) }
+            return ([], Dictionary(uniqueKeysWithValues: indices.map {
+                ($0, ToolOutcome(PermissionPolicy.userDenial(note: answer.note), isError: true))
+            }))
+        case .task:
+            allowed.append(contentsOf: rules)
+        case .always:
+            // The app saves the rule in the Orb; without a live source (nothing saves it) it is kept for this turn.
+            if request.permissions == nil { allowed.append(contentsOf: rules) }
+        case .once:
+            break
+        }
+        return (indices, [:])
+    }
+
     /// Whether the call is a known tool with valid arguments whose risk is `.safe`, so it never waits for the user.
     private static func runsWithoutAsking(_ call: ToolCallRequest, request: TurnRequest) -> Bool {
         guard let tool = request.tools.first(where: { $0.spec.name == call.name }),
@@ -334,15 +393,16 @@ actor AgentEngine {
 
     /// What the model is sent: the system prompt and the turn so far, fitted to the budget. `messages` itself stays
     /// whole, so trimming is recomputed from the full record before every call.
-    private static func fitted(_ messages: [ChatMessage], to budget: ContextBudget) -> [ChatMessage] {
+    private static func fitted(_ messages: [ChatMessage], to budget: ContextBudget, sendImages: Bool = true) -> [ChatMessage] {
         guard let system = messages.first, system.role == .system else { return messages }
-        return [system] + ContextWindow.fit(Array(messages.dropFirst()), budget: budget).messages
+        let window = [system] + ContextWindow.fit(Array(messages.dropFirst()), budget: budget).messages
+        return sendImages ? window : window.strippingImages()
     }
 
     /// Runs one tool call (asking first when needed) and returns the text the model receives. `allowed` holds the
-    /// grants of this turn ("Só nesta tarefa").
+    /// grants of this turn ("Só nesta tarefa"). `approved`: the user already allowed it on a card that grouped it.
     private func execute(_ call: ToolCallRequest, request: TurnRequest, reason: String, allowed: inout [PermissionRule],
-                         out: AsyncStream<TurnEvent>.Continuation) async -> ToolOutcome {
+                         approved: Bool = false, out: AsyncStream<TurnEvent>.Continuation) async -> ToolOutcome {
         guard let tool = request.tools.first(where: { $0.spec.name == call.name }) else {
             return ToolOutcome("Error: unknown tool \(call.name).", isError: true)
         }
@@ -354,8 +414,11 @@ actor AgentEngine {
         // The mode and rules as they are at this moment: the user may have changed them while the Orb worked.
         let live = await request.currentPermissions()
         let permission = PermissionPolicy.call(for: tool, arguments: arguments, context: request.context)
-        switch PermissionPolicy.evaluate(mode: live.mode, call: permission, rules: live.rules, turnGrants: allowed,
-                                         workspace: request.context.workingDirectory) {
+        var verdict = PermissionPolicy.evaluate(mode: live.mode, call: permission, rules: live.rules, turnGrants: allowed,
+                                                workspace: request.context.workingDirectory)
+        // The card already answered "ask": only that. A mode that blocks (read-only) still does, even for a call approved before.
+        if approved, case .ask(.needsPermission) = verdict { verdict = .allow }
+        switch verdict {
         case .allow:
             break
         case .deny(let message):
@@ -366,19 +429,20 @@ actor AgentEngine {
                 toolName: call.name, title: summary.title, command: summary.detail,
                 reason: why.explanation ?? (reason.isEmpty ? "\(request.bot.name) precisa da sua permissão para continuar." : ""),
                 suggestions: PermissionPolicy.suggestions(for: permission, existing: live.rules + allowed,
-                                                          workspace: request.context.workingDirectory))
+                                                          workspace: request.context.workingDirectory),
+                isDangerous: why.isDangerous)
             await gate.open(approval.id, botID: request.bot.id, alwaysAsks: why != .needsPermission)
             out.yield(.approval(approval))
             out.yield(.status("Esperando sua resposta"))
             let answer = await gate.wait(for: approval.id)
             let rule = answer.rule ?? approval.suggestions.first
             switch answer.decision {
-            case .deny:
+            case .deny, .review:
                 // Switching to read-only answers open cards with a denial: say why.
                 if await request.currentPermissions().mode == .readOnly {
                     return Self.block(tool, summary, PermissionPolicy.readOnlyDenial, out)
                 }
-                return ToolOutcome(PermissionPolicy.userDenial, isError: true)
+                return ToolOutcome(PermissionPolicy.userDenial(note: answer.note), isError: true)
             case .task:
                 if let rule { allowed.append(rule) }
             case .always:
@@ -394,9 +458,9 @@ actor AgentEngine {
         out.yield(.toolStarted(started))
         out.yield(.status(summary.title))
         do {
-            let output = try await tool.run(arguments, context: request.context)
-            out.yield(.toolFinished(id: started.id, state: .done, output: Self.preview(output)))
-            return ToolOutcome(output)
+            let result = try await tool.runWithImages(arguments, context: request.context)
+            out.yield(.toolFinished(id: started.id, state: .done, output: Self.preview(result.text)))
+            return ToolOutcome(result.text, images: result.images)
         } catch {
             let message = error.localizedDescription
             out.yield(.toolFinished(id: started.id, state: .failed, output: message))

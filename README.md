@@ -96,6 +96,27 @@ Claude Code e nunca chama a Anthropic com eles:
 - Limites: ao trocar de outro provedor para o Claude Code no meio da conversa, o Claude Code
   começa sem o histórico anterior.
 
+## Permissões do macOS
+
+Os Ajustes têm a aba **Permissões do Mac**: Automação por app (Mail, Calendário, Notas, Lembretes, Finder, System Events,
+Mensagens, Safari, Música), Acessibilidade, Gravação de Tela e Acesso Total ao Disco, cada uma com o estado atual,
+**Pedir agora** (onde o macOS mostra o aviso) e **Abrir Ajustes** (leva ao painel certo). A aba atualiza ao voltar ao app e
+nunca pede nada sozinha. O Acesso Total ao Disco é uma estimativa: o macOS não informa, então o Orb tenta abrir uma pasta
+protegida (`~/Library/Mail` ou `~/Library/Safari/Bookmarks.plist`).
+
+- Antes de rodar um AppleScript/JXA, o Orb olha quais apps o script usa e, para os que estão abertos e ainda sem resposta do
+  macOS, mostra o aviso de Automação primeiro e espera você responder; só então o script começa a contar o tempo. App recusado
+  falha na hora, sem rodar.
+- Quando uma ferramenta falha por falta de permissão (`-1743`, `-25211`, "Operation not permitted" em pastas protegidas da
+  Biblioteca, captura de tela sem imagem), o modelo recebe uma mensagem que diz o que falta e onde o usuário liga, em vez de
+  tentar de novo, e a linha da ferramenta na conversa ganha o botão **Abrir Ajustes**.
+- **Assinatura estável (opcional).** O build padrão é assinado de forma temporária (ad-hoc): a identidade é um hash do binário,
+  então a cada compilação o macOS esquece Automação, Acessibilidade e Acesso Total ao Disco. Rode **uma vez**
+  `scripts/make-signing-identity.sh`: ele cria o certificado autoassinado "Orb Local" no chaveiro de login (e pede sua senha
+  para confiar nele). Dali em diante `scripts/bundle.sh` assina com ele sozinho; outra identidade pode ser escolhida com
+  `ORB_SIGN_IDENTITY="Nome do certificado"`. Sem nenhuma das duas, o script mantém a assinatura temporária e avisa. Libere as
+  permissões mais uma vez depois da primeira compilação assinada.
+
 ## Desenvolvimento
 
 ```bash
@@ -112,7 +133,7 @@ open -n build/Orb.app --env ORB_SEND="Como está meu Mac?"   # envia um prompt a
 | `ORB_STATIC` | Desliga a animação dos Orbs |
 | `ORB_MEMORY_IDLE=3` | Segundos de pausa até a conversa virar uma página de sessão na memória (padrão: 30 min) |
 | `--render-orbs arquivo.png` / `--render-icon arquivo.png` | Gera a folha de Orbs / o ícone e sai |
-| `--snapshot <tela> arquivo.png` | Desenha uma tela fora da vista (`app`, `chat`, `skills`, `connectors`, `inspector`, `new-orb`…) e sai; respeita `ORB_SEND` e `ORB_SNAPSHOT_HEIGHT` |
+| `--snapshot <tela> arquivo.png` | Desenha uma tela fora da vista (`app`, `chat`, `skills`, `connectors`, `inspector`, `new-orb`, `approvals`…) e sai; respeita `ORB_SEND` e `ORB_SNAPSHOT_HEIGHT` |
 | `ORB_LIVE_TESTS=1 swift test --filter LiveCatalogTests` | Testa os catálogos e um conector remoto de verdade (precisa de internet) |
 | `ORB_CLAUDE_PATH=/caminho/claude` | Usa outro executável como Claude Code (ex.: um `claude` falso para testes) |
 | `ORB_LIVE_TESTS=1 swift test --filter ClaudeCodeLiveTests` | Roda o `claude` de verdade **deslogado** (pasta de config vazia): confere flags, handshake e lista de modelos, sem usar conta |

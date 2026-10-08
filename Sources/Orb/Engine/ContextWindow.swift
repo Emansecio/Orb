@@ -82,6 +82,7 @@ struct ContextWindow: Sendable, Equatable {
             previous = inherited
             work.removeFirst(2)
         }
+        work = work.elidingOldImages()
         let start = work.firstIndex { $0.role == .user } ?? work.firstIndex { $0.role != .tool } ?? work.count
         var body = Array(work[start...])
         shorten(&body, keepFull: freshToolOutputs, outputLimit: toolOutputPreview, argumentLimit: argumentLimit)
@@ -162,9 +163,31 @@ struct ContextWindow: Sendable, Equatable {
 }
 
 extension ChatMessage {
-    /// Rough size for budgeting: text, tool calls and a little per-message overhead.
+    /// Tokens a picture costs, whatever its size (providers charge by area; ours are at most 1568 px on a side,
+    /// which is about this).
+    static let imageTokens = 1_600
+
+    /// Rough size for budgeting: text, tool calls, pictures and a little per-message overhead.
     var contextCharacters: Int {
         content.count + toolCalls.reduce(0) { $0 + $1.id.count + $1.name.count + $1.arguments.count } + 16
+            + images.count * Int(Double(Self.imageTokens) * ContextBudget.charactersPerToken)
+    }
+}
+
+extension [ChatMessage] {
+    /// Pictures in the last `turns` user turns stay; older ones become a line with their path (the conversation
+    /// itself keeps them). A task that takes many screenshots keeps only the newest `maxToolImages` of them, so one
+    /// long turn cannot fill the window with pictures.
+    func elidingOldImages(turns: Int = 3, maxToolImages: Int = 6) -> [ChatMessage] {
+        guard contains(where: { !$0.images.isEmpty }) else { return self }
+        let userTurns = indices.filter { self[$0].role == .user && !self[$0].content.hasPrefix(ContextSummary.marker) }
+        let oldest = userTurns.count > turns ? userTurns[userTurns.count - turns] : 0
+        let recentToolImages = Set(indices.filter { self[$0].role == .tool && !self[$0].images.isEmpty && $0 >= oldest }
+            .suffix(maxToolImages))
+        return enumerated().map { index, message in
+            let keep = index >= oldest && (message.role != .tool || recentToolImages.contains(index))
+            return keep ? message : message.replacingImages { "[imagem anexada: \($0.path)]" }
+        }
     }
 }
 

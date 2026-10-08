@@ -5,9 +5,47 @@ struct ApprovalAnswer: Sendable, Equatable {
     var decision: ApprovalDecision
     /// For "Sempre…" and "Só nesta tarefa": the rule chosen from the card's suggestions.
     var rule: PermissionRule?
+    /// For a denial: what the user wants the Orb to do instead (cleaned by `ApprovalNote.clean`).
+    var note: String?
+
+    init(decision: ApprovalDecision, rule: PermissionRule? = nil, note: String? = nil) {
+        self.decision = decision
+        self.rule = rule
+        self.note = ApprovalNote.clean(note)
+    }
 
     static let deny = ApprovalAnswer(decision: .deny)
     static let once = ApprovalAnswer(decision: .once)
+}
+
+/// The user's words on a denial, and how each engine tells the model.
+enum ApprovalNote {
+    static let maxLength = 500
+
+    /// Trimmed and capped; nil when nothing is left.
+    static func clean(_ note: String?) -> String? {
+        guard let text = note?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+        return String(text.prefix(maxLength))
+    }
+
+    static func append(_ note: String?, to denial: String) -> String {
+        guard let note = clean(note) else { return denial }
+        return denial + " The user said: " + note
+    }
+}
+
+extension PermissionVerdict.AskReason {
+    /// A destructive action: it never joins a grouped card and its notification asks for the Mac to be unlocked.
+    var isDangerous: Bool { if case .dangerous = self { true } else { false } }
+}
+
+extension PermissionPolicy {
+    /// `userDenial`, with what the user said to do instead.
+    static func userDenial(note: String?) -> String { ApprovalNote.append(note, to: userDenial) }
+}
+
+extension ClaudeCodePolicy {
+    static func userDenial(note: String?) -> String { ApprovalNote.append(note, to: userDenial) }
 }
 
 /// The open approval cards of every Orb, shared by both engines: a turn opens one, shows it and waits; the UI

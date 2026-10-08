@@ -1,7 +1,7 @@
 import Foundation
 import Security
 
-/// Everything the app keeps between launches, except conversations (one file per bot) and API keys (Keychain).
+/// Everything the app keeps between launches, except conversations (see `Store`) and API keys (Keychain).
 struct AppState: Codable, Sendable {
     var bots: [Bot]
     var routines: [Routine] = []
@@ -33,6 +33,10 @@ struct StoreRead<Value: Sendable>: Sendable {
 
 /// JSON files in ~/Library/Application Support/Orb (override with `ORB_DATA_DIR`).
 /// Encoding and disk I/O run in order on one background queue, off the main thread.
+///
+/// Conversations: an Orb's current one is `conversations/<botID>.json`. Its earlier ones are archived in the folder
+/// beside it, `conversations/<botID>/`: `<conversationID>.json` each, `index.json` listing them (a cache that is
+/// corrected from the files whenever it disagrees) and `routine-<routineID>.json` for the conversation of each routine.
 ///
 /// A file that can't be read is never overwritten: it is set aside as `<name>.corrupt-<yyyyMMdd-HHmmss>` (or,
 /// if that fails, left alone and blocked from writes for the rest of the session).
@@ -98,6 +102,122 @@ struct Store: Sendable {
     func deleteConversation(_ botID: UUID) {
         let url = conversationURL(botID)
         Self.queue.async { try? FileManager.default.removeItem(at: url) }
+    }
+
+    // MARK: Archive
+
+    private func archiveFolder(_ botID: UUID) -> URL {
+        directory.appendingPathComponent("conversations/\(botID.uuidString)", isDirectory: true)
+    }
+
+    private func archivedURL(_ botID: UUID, _ id: UUID) -> URL {
+        archiveFolder(botID).appendingPathComponent("\(id.uuidString).json")
+    }
+
+    private func routineConversationURL(_ botID: UUID, _ routineID: UUID) -> URL {
+        archiveFolder(botID).appendingPathComponent("routine-\(routineID.uuidString).json")
+    }
+
+    private func archiveIndexURL(_ botID: UUID) -> URL { archiveFolder(botID).appendingPathComponent("index.json") }
+
+    /// Puts the conversation in the archive and returns its entry at once; the files follow on the store's queue.
+    /// The conversation file goes first: a crash before the index is written leaves a file the next listing finds.
+    @discardableResult
+    func archive(_ conversation: Conversation, for botID: UUID) -> ConversationSummary {
+        let summary = ConversationSummary(of: conversation)
+        Self.queue.async {
+            var entries = reconciledArchive(botID).entries
+            write(conversation.pruningOldToolOutputs(), to: archivedURL(botID, summary.id))
+            entries.append(summary)
+            write(ConversationIndex(entries: entries), to: archiveIndexURL(botID))
+        }
+        return summary
+    }
+
+    /// The archived conversations of an Orb, newest first. A file that can't be read is left out of the list.
+    func readArchive(_ botID: UUID) -> [ConversationSummary] {
+        Self.queue.sync { listArchive(botID) }
+    }
+
+    func readArchiveAsync(_ botID: UUID) async -> [ConversationSummary] {
+        await withCheckedContinuation { continuation in
+            Self.queue.async { continuation.resume(returning: listArchive(botID)) }
+        }
+    }
+
+    func readArchived(_ id: UUID, for botID: UUID) -> StoreRead<Conversation> {
+        Self.queue.sync {
+            read(Conversation.self, from: archivedURL(botID, id), ifUnreadable: "ela saiu da lista de conversas")
+        }
+    }
+
+    func deleteArchived(_ id: UUID, for botID: UUID) {
+        Self.queue.async {
+            try? FileManager.default.removeItem(at: archivedURL(botID, id))
+            let (entries, changed) = reconciledArchive(botID)
+            if changed { write(ConversationIndex(entries: entries), to: archiveIndexURL(botID)) }
+        }
+    }
+
+    /// Everything archived for the Orb, its routines' conversations included (the Orb is being deleted).
+    func deleteArchive(_ botID: UUID) {
+        let folder = archiveFolder(botID)
+        Self.queue.async { try? FileManager.default.removeItem(at: folder) }
+    }
+
+    func saveRoutineConversation(_ conversation: Conversation, routine routineID: UUID, for botID: UUID) {
+        Self.queue.async { write(conversation.pruningOldToolOutputs(), to: routineConversationURL(botID, routineID)) }
+    }
+
+    func readRoutineConversation(routine routineID: UUID, for botID: UUID) -> StoreRead<Conversation> {
+        Self.queue.sync {
+            read(Conversation.self, from: routineConversationURL(botID, routineID),
+                 ifUnreadable: "o histórico da rotina começou vazio")
+        }
+    }
+
+    func readRoutineConversationAsync(routine routineID: UUID, for botID: UUID) async -> StoreRead<Conversation> {
+        await withCheckedContinuation { continuation in
+            Self.queue.async {
+                continuation.resume(returning: read(Conversation.self, from: routineConversationURL(botID, routineID),
+                                                     ifUnreadable: "o histórico da rotina começou vazio"))
+            }
+        }
+    }
+
+    func deleteRoutineConversation(routine routineID: UUID, for botID: UUID) {
+        let url = routineConversationURL(botID, routineID)
+        Self.queue.async { try? FileManager.default.removeItem(at: url) }
+    }
+
+    private func listArchive(_ botID: UUID) -> [ConversationSummary] {
+        let (entries, changed) = reconciledArchive(botID)
+        if changed { write(ConversationIndex(entries: entries), to: archiveIndexURL(botID)) }
+        return entries.sorted { ($0.updatedAt, $0.id.uuidString) > ($1.updatedAt, $1.id.uuidString) }
+    }
+
+    /// The index corrected by the folder: entries whose file is gone are dropped, and files the index does not know
+    /// (it was lost, or the app quit before writing it) are added. A file that can't be decoded is skipped and left
+    /// where it is. `changed` says the index file needs rewriting. Runs on `queue`.
+    private func reconciledArchive(_ botID: UUID) -> (entries: [ConversationSummary], changed: Bool) {
+        let folder = archiveFolder(botID)
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else { return ([], false) }
+        let files = Set(names.compactMap { name -> UUID? in
+            name.hasSuffix(".json") ? UUID(uuidString: String(name.dropLast(".json".count))) : nil
+        })
+        let indexed = (try? Data(contentsOf: archiveIndexURL(botID)))
+            .flatMap { try? JSONDecoder().decode(ConversationIndex.self, from: $0) }?.entries
+        var entries: [ConversationSummary] = []
+        var seen: Set<UUID> = []
+        for entry in indexed ?? [] where files.contains(entry.id) && seen.insert(entry.id).inserted { entries.append(entry) }
+        var changed = indexed == nil ? !files.isEmpty : entries.count != indexed?.count
+        for id in files.subtracting(seen).sorted(by: { $0.uuidString < $1.uuidString }) {
+            guard let data = try? Data(contentsOf: archivedURL(botID, id)),
+                  let conversation = try? JSONDecoder().decode(Conversation.self, from: data) else { continue }
+            entries.append(ConversationSummary(of: conversation, id: id))
+            changed = true
+        }
+        return (entries, changed)
     }
 
     /// Waits for pending writes.

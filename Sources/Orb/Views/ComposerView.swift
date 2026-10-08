@@ -8,6 +8,10 @@ struct ComposerView: View {
     @FocusState private var isFocused: Bool
     @State private var isImporting = false
     @State private var attachments: [URL] = []
+    /// Pictures already decoded, shrunk and saved (see `ImageStore`); they go with the message as images.
+    @State private var images: [ImageAttachment] = []
+    @State private var attachmentError: String?
+    @State private var pasteMonitor: Any?
 
     private var draft: Binding<String> {
         Binding(
@@ -18,22 +22,35 @@ struct ComposerView: View {
 
     private var isWorking: Bool { model.isWorking(bot.id) }
     private var canSend: Bool {
-        !isWorking && !draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !isWorking && (!draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if !attachments.isEmpty {
+            if !attachments.isEmpty || !images.isEmpty {
                 ScrollView(.horizontal) {
                     HStack(spacing: 6) {
+                        ForEach(images, id: \.path) { image in
+                            PictureChip(image: image) {
+                                images.removeAll { $0 == image }
+                                model.images.remove(image)
+                            }
+                        }
                         ForEach(attachments, id: \.self) { url in
                             AttachmentChip(name: url.lastPathComponent) {
                                 attachments.removeAll { $0 == url }
                             }
                         }
                     }
+                    .padding(.top, 6)
                 }
                 .scrollIndicators(.never)
+            }
+            if let attachmentError {
+                Text(attachmentError)
+                    .font(.caption)
+                    .foregroundStyle(Palette.warn)
+                    .padding(.horizontal, 4)
             }
 
             TextField("Pergunte qualquer coisa ou solte um arquivo", text: draft, axis: .vertical)
@@ -83,20 +100,79 @@ struct ComposerView: View {
             LinearGradient(colors: [Palette.canvas.opacity(0), Palette.canvas], startPoint: .top, endPoint: .init(x: 0.5, y: 0.35))
         }
         .dropDestination(for: URL.self) { urls, _ in
-            attachments.append(contentsOf: urls.filter(\.isFileURL))
+            attach(urls)
             return true
         }
         .fileImporter(isPresented: $isImporting, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
-            if case .success(let urls) = result { attachments.append(contentsOf: urls) }
+            if case .success(let urls) = result { attach(urls) }
         }
-        .onAppear { isFocused = true }
+        .onAppear {
+            isFocused = true
+            installPasteMonitor()
+        }
+        .onDisappear { removePasteMonitor() }
+    }
+
+    /// Pictures become image attachments (shrunk and saved in the background); other files keep being listed by path.
+    private func attach(_ urls: [URL]) {
+        for url in urls where url.isFileURL {
+            if ImageProcessing.isImageFile(url) {
+                attachPicture { try await $0.attach(fileAt: url, botID: $1) }
+            } else if !attachments.contains(url) {
+                attachments.append(url)
+            }
+        }
+    }
+
+    private func attachPicture(_ load: @escaping @Sendable (ImageStore, UUID) async throws -> ImageAttachment) {
+        attachmentError = nil
+        let store = model.images, botID = bot.id
+        Task {
+            do { images.append(try await load(store, botID)) }
+            catch { attachmentError = error.localizedDescription }
+        }
+    }
+
+    /// ⌘V with a picture on the clipboard (a screenshot, an image copied from Preview) or with picture files copied in
+    /// Finder attaches them; anything with text on the clipboard pastes as text, as before. The text field cannot
+    /// take a picture, so the key is looked at before it gets there.
+    private func installPasteMonitor() {
+        guard pasteMonitor == nil else { return }
+        pasteMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+                  event.charactersIgnoringModifiers == "v" else { return event }
+            let taken = MainActor.assumeIsolated { pasteImages() }
+            return taken ? nil : event
+        }
+    }
+
+    private func removePasteMonitor() {
+        if let pasteMonitor { NSEvent.removeMonitor(pasteMonitor) }
+        pasteMonitor = nil
+    }
+
+    /// Whether the clipboard held pictures and they were taken.
+    private func pasteImages() -> Bool {
+        guard isFocused else { return false }
+        let board = NSPasteboard.general
+        let files = (board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+        if files.contains(where: ImageProcessing.isImageFile) {
+            attach(files)
+            return true
+        }
+        let hasText = board.types?.contains { [.string, .rtf].contains($0) } ?? false
+        guard files.isEmpty, !hasText, let data = board.data(forType: .png) ?? board.data(forType: .tiff) else { return false }
+        attachPicture { try await $0.attach(data, name: "imagem colada", botID: $1) }
+        return true
     }
 
     private func send() {
         guard canSend else { return }
         // If the message wasn't sent (no model connected), the attachments stay with the draft.
-        if model.send(draft.wrappedValue, attachments: attachments, to: bot.id, fromUser: true) {
+        if model.send(draft.wrappedValue, attachments: attachments, images: images, to: bot.id, fromUser: true) {
             attachments.removeAll()
+            images.removeAll()
+            attachmentError = nil
         }
     }
 
@@ -104,6 +180,24 @@ struct ComposerView: View {
         let current = draft.wrappedValue
         draft.wrappedValue = current.isEmpty || current.hasSuffix(" ") ? current + token : current + " " + token
         isFocused = true
+    }
+}
+
+/// A picture waiting to be sent: its thumbnail with a remove button.
+private struct PictureChip: View {
+    let image: ImageAttachment
+    let onRemove: () -> Void
+
+    var body: some View {
+        ImageThumbnail(path: image.path)
+            .overlay(alignment: .topTrailing) {
+                Button("Remover", systemImage: "xmark.circle.fill", action: onRemove)
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Palette.ink, Palette.canvas)
+                    .offset(x: 5, y: -5)
+            }
+            .help(URL(fileURLWithPath: image.path).lastPathComponent)
     }
 }
 

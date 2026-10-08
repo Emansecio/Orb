@@ -131,6 +131,17 @@ struct ClaudeCodeEngineTests {
         #expect(sent.contains("liste os arquivos"))
     }
 
+    @Test func theUsersPicturesAreRecordedWithTheMessage() async throws {
+        let fake = try FakeClaude()
+        defer { fake.remove() }
+        let image = ImageAttachment(path: "/d/anexos/x/1.jpg", mediaType: "image/jpeg", width: 1, height: 1)
+        var turn = fake.turn(mode: .auto, sessionID: "sess-1")
+        turn.images = [image]
+        let events = await run(ClaudeCodeEngine(), turn)
+        guard case .message(let user) = events.first else { Issue.record("no user message"); return }
+        #expect(user == .user("liste os arquivos", images: [image]))
+    }
+
     @Test func approvedToolRunsEndToEnd() async throws {
         let fake = try FakeClaude()
         defer { fake.remove() }
@@ -171,6 +182,31 @@ struct ClaudeCodeEngineTests {
         #expect(finished.count == 1 && finished[0].0 == .failed && finished[0].1 == "Você negou esta ação.")
         let lines = await fake.logLines(waitingFor: "eof")
         #expect(lines.contains { $0.contains(#""behavior":"deny""#) })
+    }
+
+    @Test func theNoteOnADenialIsInTheMessageClaudeCodeGets() async throws {
+        let fake = try FakeClaude()
+        defer { fake.remove() }
+        let engine = ClaudeCodeEngine()
+        for await event in engine.run(fake.turn(mode: .ask)) {
+            if case .approval(let approval) = event {
+                await engine.gate.resolve(approvalID: approval.id, answer: ApprovalAnswer(decision: .deny, note: "  liste só os .swift  "))
+            }
+        }
+        let lines = await fake.logLines(waitingFor: "eof")
+        let answer = try #require(lines.compactMap { JSONValue.parse($0) }.first { $0["type"] == .string("control_response") && $0["response"]?["request_id"] == .string("perm_1") })
+        let reply = answer["response"]?["response"]
+        #expect(reply?["behavior"] == .string("deny"))
+        #expect(reply?["message"] == .string(ClaudeCodePolicy.userDenial + " The user said: liste só os .swift"))
+    }
+
+    @Test func aDenialWithoutANoteKeepsTheUsualMessage() async throws {
+        let fake = try FakeClaude()
+        defer { fake.remove() }
+        _ = await run(ClaudeCodeEngine(), fake.turn(mode: .ask), decision: .deny)
+        let lines = await fake.logLines(waitingFor: "eof")
+        let answer = try #require(lines.compactMap { JSONValue.parse($0) }.first { $0["type"] == .string("control_response") && $0["response"]?["request_id"] == .string("perm_1") })
+        #expect(answer["response"]?["response"]?["message"] == .string(ClaudeCodePolicy.userDenial))
     }
 
     @Test func automaticModeNeverAsks() async throws {

@@ -38,23 +38,34 @@ private struct UserBubble: View {
             VStack(alignment: .trailing, spacing: 6) {
                 if !attachments.isEmpty {
                     HStack(spacing: 6) {
-                        ForEach(attachments, id: \.self) { name in
-                            Label(name, systemImage: "doc")
-                                .font(.system(size: 12))
-                                .foregroundStyle(Palette.secondary)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .card(radius: 10)
+                        ForEach(attachments, id: \.self) { attachment in
+                            if attachment.hasPrefix("/"), ImageProcessing.isImageFile(URL(fileURLWithPath: attachment)) {
+                                // Conversations from before this stored only the file name, which shows as a chip below.
+                                Button { NSWorkspace.shared.open(URL(fileURLWithPath: attachment)) } label: {
+                                    ImageThumbnail(path: attachment, side: 96)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Abrir " + URL(fileURLWithPath: attachment).lastPathComponent)
+                            } else {
+                                Label((attachment as NSString).lastPathComponent, systemImage: "doc")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(Palette.secondary)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .card(radius: 10)
+                            }
                         }
                     }
                 }
-                Text(text)
-                    .font(Palette.conversationFont)
-                    .foregroundStyle(Palette.ink)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 9)
-                    .background(Palette.userBubble, in: .rect(cornerRadius: 18))
+                if !text.isEmpty {
+                    Text(text)
+                        .font(Palette.conversationFont)
+                        .foregroundStyle(Palette.ink)
+                        .textSelection(.enabled)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .background(Palette.userBubble, in: .rect(cornerRadius: 18))
+                }
             }
         }
     }
@@ -113,6 +124,8 @@ private struct MarkdownText: View, Equatable {
 struct ToolCallLine: View {
     let call: ToolCall
     @State private var isExpanded = false
+    /// Found once per output, not on every render.
+    @State private var permissionProblem: MacPermissionProblem?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -144,6 +157,10 @@ struct ToolCallLine: View {
             .disabled(call.output == nil)
             .animateChanges(of: call.state)
 
+            if call.state == .failed, let problem = permissionProblem {
+                OpenPrivacySettingsButton(problem: problem).padding(.leading, 22)
+            }
+
             if isExpanded, let output = call.output {
                 Text(output)
                     .font(.system(size: 12, design: .monospaced))
@@ -156,6 +173,9 @@ struct ToolCallLine: View {
             }
         }
         .padding(.leading, gutter)
+        .task(id: call.state == .failed ? call.output : nil) {
+            permissionProblem = call.state == .failed ? call.output.flatMap(MacPermissionProblem.detect(in:)) : nil
+        }
     }
 
     @ViewBuilder private var stateMark: some View {
@@ -178,14 +198,23 @@ struct ToolCallLine: View {
     }
 }
 
-/// Approval prompt: allow, allow for this task, always allow (by a rule picked from the suggestions), or deny.
-/// Destructive commands and changes to the Orb's instructions offer only allow and deny.
+/// Approval prompt: allow, allow for this task, always allow (by a rule picked from the suggestions), or deny, with
+/// a line to tell the Orb what to do instead. A card for several actions lists them and adds "Revisar uma a uma".
+/// Destructive commands and changes to the Orb's instructions offer only allow and deny. ⌘↩ allows and Esc denies
+/// on the Orb's newest open card.
 struct ApprovalCard: View {
     @Environment(AppModel.self) private var model
     let request: ApprovalRequest
     let bot: Bot
 
+    @State private var note = ""
+    @FocusState private var noteFocused: Bool
+    /// `noteFocused` as the key handler needs it (a focus state is only meant to be read while drawing).
+    @State private var isEditingNote = false
+
     private var isPending: Bool { request.decision == nil }
+    private var allowTitle: String { request.isBatch ? "Permitir as \(request.items.count)" : "Permitir" }
+    private static let visibleItems = 8
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -205,49 +234,38 @@ struct ApprovalCard: View {
                     .font(.system(size: 13))
                     .foregroundStyle(Palette.muted)
             }
-            Text(request.command)
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(Palette.secondary)
-                .textSelection(.enabled)
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Palette.raised, in: .rect(cornerRadius: 8))
+            if request.isBatch {
+                batchList
+            } else {
+                Text(request.command)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(Palette.secondary)
+                    .textSelection(.enabled)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Palette.raised, in: .rect(cornerRadius: 8))
+            }
+            if let note = request.note {
+                Text("Você disse: \(note)")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.muted)
+            }
             if isPending {
-                HStack(spacing: 6) {
-                    Button("Não permitir") {
-                        model.decide(.deny, approvalID: request.id, botID: bot.id)
+                TextField("Diga o que fazer em vez disso…", text: $note)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .focused($noteFocused)
+                    .onSubmit(deny)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: 8))
+                    .accessibilityLabel("Instrução ao negar")
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) { denyButtons; Spacer(); allowButtons }
+                    VStack(alignment: .trailing, spacing: 8) {
+                        HStack(spacing: 6) { denyButtons; Spacer() }
+                        HStack(spacing: 6) { Spacer(); allowButtons }
                     }
-                    .buttonStyle(GhostStyle())
-                    Spacer()
-                    if let suggestion = request.suggestions.first {
-                        Menu {
-                            ForEach(request.suggestions, id: \.self) { rule in
-                                Button(rule.menuTitle) {
-                                    model.decide(.always, rule: rule, approvalID: request.id, botID: bot.id)
-                                }
-                            }
-                        } label: {
-                            Text("Sempre…")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(Palette.ink)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 7)
-                                .background(Color.white.opacity(0.1), in: .capsule)
-                        }
-                        .menuStyle(.borderlessButton)
-                        .menuIndicator(.hidden)
-                        .fixedSize()
-                        .help("Deixa de perguntar daqui para frente. Você pode revogar em Trabalho, no painel do Orb.")
-                        Button("Só nesta tarefa") {
-                            model.decide(.task, rule: suggestion, approvalID: request.id, botID: bot.id)
-                        }
-                        .buttonStyle(SecondaryPillStyle())
-                        .help("Vale até o Orb terminar esta tarefa: \(suggestion.title.lowercased()).")
-                    }
-                    Button("Permitir") {
-                        model.decide(.once, approvalID: request.id, botID: bot.id)
-                    }
-                    .buttonStyle(PrimaryPillStyle())
                 }
             }
         }
@@ -257,5 +275,103 @@ struct ApprovalCard: View {
         .padding(.leading, gutter)
         .frame(maxWidth: 560, alignment: .leading)
         .animateChanges(of: request.decision)
+        .onChange(of: noteFocused) { isEditingNote = noteFocused }
+        .background {
+            if isPending { ApprovalKeyMonitor(handler: handleKey) }
+        }
+    }
+
+    private var batchList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(request.items.prefix(Self.visibleItems).enumerated()), id: \.offset) { _, item in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.title)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Palette.secondary)
+                    if !item.command.isEmpty {
+                        Text(item.command)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(Palette.muted)
+                            .lineLimit(2)
+                    }
+                }
+            }
+            if request.items.count > Self.visibleItems {
+                Text("e mais \(request.items.count - Self.visibleItems)")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.faint)
+            }
+        }
+        .textSelection(.enabled)
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Palette.raised, in: .rect(cornerRadius: 8))
+    }
+
+    @ViewBuilder private var denyButtons: some View {
+        Button("Não permitir", action: deny)
+            .buttonStyle(GhostStyle())
+            .help("Não permitir (esc)")
+        if request.isBatch {
+            Button("Revisar uma a uma") {
+                model.decide(.review, approvalID: request.id, botID: bot.id)
+            }
+            .buttonStyle(GhostStyle())
+            .help("Uma pergunta para cada ação")
+        }
+    }
+
+    @ViewBuilder private var allowButtons: some View {
+        if let suggestion = request.suggestions.first {
+            Menu {
+                ForEach(request.suggestions, id: \.self) { rule in
+                    Button(rule.menuTitle) {
+                        model.decide(.always, rule: rule, approvalID: request.id, botID: bot.id)
+                    }
+                }
+            } label: {
+                Text("Sempre…")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Palette.ink)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .background(Color.white.opacity(0.1), in: .capsule)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Deixa de perguntar daqui para frente. Você pode revogar em Trabalho, no painel do Orb.")
+            Button("Só nesta tarefa") {
+                // A single card grants its first rule; a grouped one, everything it offered.
+                model.decide(.task, rule: request.isBatch ? nil : suggestion, approvalID: request.id, botID: bot.id)
+            }
+            .buttonStyle(SecondaryPillStyle())
+            .help(request.isBatch
+                  ? "Vale até o Orb terminar esta tarefa: \(request.suggestions.map { $0.title.lowercased() }.joined(separator: "; "))."
+                  : "Vale até o Orb terminar esta tarefa: \(suggestion.title.lowercased()).")
+        }
+        Button(allowTitle) {
+            model.decide(.once, approvalID: request.id, botID: bot.id)
+        }
+        .buttonStyle(PrimaryPillStyle())
+        .help("\(allowTitle) (⌘↩)")
+    }
+
+    private func deny() {
+        model.decide(.deny, note: note, approvalID: request.id, botID: bot.id)
+    }
+
+    /// ⌘↩ and Esc answer this card when it is the newest open one of the Orb being shown.
+    private func handleKey(_ event: NSEvent, in window: NSWindow) -> Bool {
+        guard model.selectedBot?.id == bot.id, model.newestPendingApprovalID(of: bot.id) == request.id else { return false }
+        let field = window.firstResponder as? NSTextView
+        let editing = ApprovalShortcut.isEditing(responderIsText: field != nil, hasText: field.map { !$0.string.isEmpty } ?? false,
+                                                 hasMarkedText: field?.hasMarkedText() ?? false, noteFocused: isEditingNote)
+        switch ApprovalShortcut.resolve(keyCode: event.keyCode, modifiers: event.modifierFlags, isEditingText: editing) {
+        case .allow: model.decide(.once, approvalID: request.id, botID: bot.id)
+        case .deny: deny()
+        case nil: return false
+        }
+        return true
     }
 }

@@ -423,10 +423,11 @@ final class BackgroundJobsTests {
     }
 
     @Test func noticesWhenTheLeftoverChildrenFinish() async throws {
-        _ = try await start("sleep 1 &")
+        // Long enough that a loaded machine still sees the child running at the first look.
+        _ = try await start("sleep 3 &")
         try await Task.sleep(for: .milliseconds(300))
         #expect(try #require(await jobs.list(botID: bot).first).leftoverRunning)
-        for _ in 0..<60 where try #require(await jobs.list(botID: bot).first).leftoverRunning {
+        for _ in 0..<100 where try #require(await jobs.list(botID: bot).first).leftoverRunning {
             try await Task.sleep(for: .milliseconds(100))
         }
         let listed = try #require(await jobs.list(botID: bot).first)

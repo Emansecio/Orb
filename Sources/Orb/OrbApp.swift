@@ -77,6 +77,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             OrbSheet.renderIcon(to: URL(fileURLWithPath: arguments[flag + 1]))
             exit(0)
         }
+        // So a tap on a banner reaches the app even when that tap is what launched it.
+        ApprovalNotifications.prepareAtLaunch()
         // Needed when launched as a bare SwiftPM executable (no .app bundle).
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
@@ -193,6 +195,7 @@ enum Snapshot {
         case "routines": AnyView(RoutinesView())
         case "models": AnyView(ProviderSettings())
         case "inspector": AnyView(model.bots.first.map { BotInspector(botID: $0.id).frame(width: 360) })
+        case "approvals": AnyView(model.bots.first.map { ApprovalCardsSample(bot: $0) })
         case "new-orb": AnyView(NewBotSheet())
         case "editor": AnyView(OrbEditor(config: .constant(AppState.initial.bots[0].orb), name: "Atlas", category: .temperament))
         default: AnyView(model.bots.first.map { ChatView(bot: $0) })
@@ -214,5 +217,27 @@ enum Snapshot {
             }
             exit(0)
         }
+    }
+}
+
+/// `--snapshot approvals`: a single card, a grouped one and an answered one, for visual review.
+private struct ApprovalCardsSample: View {
+    let bot: Bot
+
+    var body: some View {
+        let items = [ApprovalItem(toolName: "write_file", title: "Gravando arquivo", command: "~/Projetos/app/README.md"),
+                     ApprovalItem(toolName: "write_file", title: "Gravando arquivo", command: "~/Projetos/app/notas.txt"),
+                     ApprovalItem(toolName: "run_command", title: "Rodando no Terminal", command: "git commit -am \"Atualiza notas\"")]
+        VStack(alignment: .leading, spacing: 12) {
+            ApprovalCard(request: ApprovalRequest(toolName: "run_command", title: "Rodando no Terminal", command: "brew upgrade",
+                                                  reason: "", suggestions: [.shell("brew", "upgrade"), .shell("brew")]), bot: bot)
+            ApprovalCard(request: ApprovalRequest(toolName: "batch", title: "3 ações precisam da sua permissão",
+                                                  command: "", reason: "\(bot.name) precisa da sua permissão para continuar.",
+                                                  suggestions: [.shell("git"), .folder("/Users/x/Projetos/app")], items: items), bot: bot)
+            ApprovalCard(request: ApprovalRequest(toolName: "run_command", title: "Rodando no Terminal", command: "rm -rf build",
+                                                  reason: "", decision: .deny, note: "use a lixeira"), bot: bot)
+        }
+        .padding(24)
+        .background(Palette.canvas)
     }
 }

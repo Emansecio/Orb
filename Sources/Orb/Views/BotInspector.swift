@@ -12,6 +12,12 @@ struct BotInspector: View {
     @State private var identityDraft = ""
     /// The instruction file in the Orb's folder, if any (read off the main thread when the folder changes).
     @State private var instructionFile: FolderInstructions?
+    /// The folder's state and its recent and changed files (read off the main thread, see `WorkspaceFiles`).
+    @State private var listing: WorkspaceFiles.Listing?
+    /// Bumped to read the folder again (after a turn, a folder change, or the refresh button).
+    @State private var filesRefresh = 0
+    @State private var folderProblem: String?
+    @State private var editingRoutine: Routine?
 
     var body: some View {
         if let bot = model.bot(botID) {
@@ -20,13 +26,8 @@ struct BotInspector: View {
                     HStack(spacing: 14) {
                         BotAvatar(bot: bot, size: 60, activity: model.activity(for: bot.id), poke: model.pokes[bot.id, default: 0],
                                   interactive: true)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(bot.name)
-                                .font(.system(size: 15, weight: .semibold))
-                            Text(bot.role)
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                        }
+                        InspectorHeader(bot: bot)
+                            .id(bot.id)
                     }
                     .padding(.vertical, 4)
                     ModelPicker(selection: binding(\.model, of: bot))
@@ -66,13 +67,13 @@ struct BotInspector: View {
 
                 Section {
                     LabeledContent("Pasta") {
-                        Text(bot.workingURL.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+                        Text(OrbFolder.display(bot.workingURL))
                             .font(.caption.monospaced())
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.head)
                     }
-                    Button("Escolher pasta…", systemImage: "folder") { isPickingFolder = true }
+                    folderControls(bot)
                     if let file = instructionFile {
                         // Claude Code loads CLAUDE.md by itself as the project's instructions: trusting it here would change nothing.
                         if !InstructionsText.claudeCodeReadsItself(file, usesClaudeCode: usesClaudeCode(bot)) {
@@ -100,6 +101,9 @@ struct BotInspector: View {
                     Text("Trabalho")
                 } footer: {
                     VStack(alignment: .leading, spacing: 4) {
+                        if let folderProblem {
+                            Text(folderProblem).foregroundStyle(Palette.warn)
+                        }
                         if let file = instructionFile {
                             Text(InstructionsText.footer(for: file, name: bot.name, trustedHash: bot.trustedInstructionsHash,
                                                          usesClaudeCode: usesClaudeCode(bot)))
@@ -110,18 +114,11 @@ struct BotInspector: View {
                     }
                 }
 
+                filesSection(bot)
+
                 memorySection(bot)
 
-                Section("Rotinas") {
-                    let routines = model.routines(for: bot.id)
-                    if routines.isEmpty {
-                        Text("Nenhuma rotina.")
-                            .foregroundStyle(.secondary)
-                    }
-                    ForEach(routines) { routine in
-                        LabeledContent(routine.name, value: routine.schedule.label)
-                    }
-                }
+                routinesSection(bot)
 
                 Section {
                     Button("Apagar \(bot.name)…", role: .destructive) { isConfirmingDelete = true }
@@ -132,12 +129,28 @@ struct BotInspector: View {
             .task(id: bot.workingDirectory) {
                 instructionFile = await FolderInstructions.loadInBackground(from: bot.workingURL)
             }
+            .task(id: FilesKey(bot: bot.id, folder: bot.workingDirectory, refresh: filesRefresh)) {
+                // Always read the folder again: the cached snapshot (up to a minute old) may not show what changed
+                // outside the app while the panel was closed.
+                let result = await WorkspaceFiles.load(botID: bot.id, folder: bot.workingURL, refresh: true)
+                if !Task.isCancelled { listing = result }
+            }
+            // The turn may have created or changed files.
+            .onChange(of: model.isWorking(bot.id)) { wasWorking, isWorking in
+                if wasWorking && !isWorking { filesRefresh += 1 }
+            }
             // The file may have been edited while the panel stayed open: read it again on coming back to the app.
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                 Task { instructionFile = await FolderInstructions.loadInBackground(from: bot.workingURL) }
             }
             .fileImporter(isPresented: $isPickingFolder, allowedContentTypes: [.folder]) { result in
-                if case .success(let url) = result { model.update(bot.id) { $0.workingDirectory = url.path } }
+                if case .success(let url) = result {
+                    model.chooseFolder(url, for: bot.id)
+                    folderChanged()
+                }
+            }
+            .sheet(item: $editingRoutine) { routine in
+                RoutineEditor(routine: routine)
             }
             .confirmationDialog("Apagar \(bot.name)?", isPresented: $isConfirmingDelete) {
                 Button("Apagar o Orb e a memória", role: .destructive) { model.deleteBot(bot.id) }
@@ -168,6 +181,115 @@ struct BotInspector: View {
                 .frame(width: 560, height: 720)
             }
             .background(Palette.chrome)
+        }
+    }
+
+    private struct FilesKey: Hashable {
+        var bot: UUID
+        var folder: String
+        var refresh: Int
+    }
+
+    /// The folder was replaced: what the panel knew about the old one no longer applies.
+    private func folderChanged() {
+        listing = nil
+        folderProblem = nil
+        filesRefresh += 1
+    }
+
+    private func attempt(_ action: () throws -> Void) {
+        do {
+            try action()
+            folderChanged()
+        } catch {
+            folderProblem = error.localizedDescription
+        }
+    }
+
+    /// Where the Orb works and what can be done with it: open it, move it, give the Orb a folder of its own.
+    @ViewBuilder
+    private func folderControls(_ bot: Bot) -> some View {
+        let state = listing?.folder
+        if state == .missing {
+            Label("Pasta não encontrada", systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(Palette.warn)
+            Text("Ela foi apagada, renomeada ou está em um disco desconectado. \(bot.name) não consegue rodar comandos até você escolher outra pasta ou recriar esta.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Button("Recriar", systemImage: "folder.badge.plus") { attempt { try model.recreateFolder(of: bot.id) } }
+        } else {
+            Button("Abrir no Finder", systemImage: "folder") { OrbFolder.showInFinder(bot.workingURL) }
+            Button("Abrir no Terminal", systemImage: "terminal") { OrbFolder.openInTerminal(bot.workingURL) }
+        }
+        Button("Escolher pasta…", systemImage: "folder.badge.gearshape") { isPickingFolder = true }
+        if state == .ownFolder {
+            Button("Usar a pasta pessoal", systemImage: "house") {
+                model.useHomeFolder(of: bot.id)
+                folderChanged()
+            }
+            .help("O Orb volta a trabalhar na sua pasta pessoal. A pasta atual e o que há nela ficam como estão.")
+        } else if state == .noOwnFolder {
+            Button("Criar pasta própria", systemImage: "folder.badge.plus") { attempt { try model.createOwnFolder(for: bot.id) } }
+            Text("Em uma pasta própria (\(OrbFolder.display(OrbFolder.availableURL(for: bot.name, in: OrbFolder.defaultBase)))), \(bot.name) escreve sem perguntar em “Perguntar antes”.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Changed (git) and recently modified files of the Orb's folder. Not shown for the home folder, which is not scanned.
+    @ViewBuilder
+    private func filesSection(_ bot: Bot) -> some View {
+        if let listing, listing.folder != .missing, listing.snapshot != .home {
+            Section {
+                if listing.snapshot == .unreadable {
+                    Text("Sem acesso à pasta. O macOS pode estar bloqueando: libere em Ajustes do Sistema → Privacidade e Segurança.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                } else if listing.files.isEmpty {
+                    Text("Nada por aqui ainda.")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(listing.files) { file in
+                    WorkspaceFileRow(file: file)
+                }
+            } header: {
+                HStack {
+                    Text("Arquivos")
+                    Spacer()
+                    Button("Atualizar", systemImage: "arrow.clockwise") { filesRefresh += 1 }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.borderless)
+                        .help("Ler a pasta de novo")
+                }
+            } footer: {
+                if !listing.files.isEmpty {
+                    Text("Alterados no git primeiro, depois os mais recentes. Clique para mostrar no Finder, duas vezes para abrir.")
+                }
+            }
+        }
+    }
+
+    private func routinesSection(_ bot: Bot) -> some View {
+        Section {
+            let routines = model.routines(for: bot.id)
+            if routines.isEmpty {
+                Text("Nenhuma rotina.")
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(routines) { routine in
+                RoutineRow(routine: routine, isBusy: model.isWorking(bot.id)) {
+                    editingRoutine = routine
+                }
+            }
+            Button("Nova rotina", systemImage: "plus") {
+                editingRoutine = Routine(name: "", botID: bot.id, prompt: "", schedule: .daily(hour: 9, minute: 0))
+            }
+        } header: {
+            Text("Rotinas")
+        } footer: {
+            if !model.routines(for: bot.id).isEmpty {
+                Text("\(bot.name) faz isso sozinho, no horário, enquanto o app está aberto.")
+            }
         }
     }
 
@@ -273,6 +395,176 @@ struct BotInspector: View {
                 }
             }
         )
+    }
+}
+
+/// The Orb's name and role, edited in place. A name with only blanks is not accepted: the old one comes back.
+private struct InspectorHeader: View {
+    @Environment(AppModel.self) private var model
+    let bot: Bot
+    @State private var name: String
+    @State private var role: String
+    @FocusState private var focus: Field?
+
+    private enum Field { case name, role }
+
+    init(bot: Bot) {
+        self.bot = bot
+        _name = State(initialValue: bot.name)
+        _role = State(initialValue: bot.role)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            TextField("Nome", text: $name, prompt: Text("Nome"))
+                .font(.system(size: 15, weight: .semibold))
+                .focused($focus, equals: .name)
+                .onSubmit(commitName)
+            TextField("Papel", text: $role, prompt: Text("Papel"))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .focused($focus, equals: .role)
+                .onSubmit(commitRole)
+        }
+        .textFieldStyle(.plain)
+        .labelsHidden() // in a Form a field shows its title beside the text
+        .help("Clique para mudar o nome ou o papel. A pasta do Orb não muda de lugar.")
+        .onChange(of: focus) { old, _ in
+            if old == .name { commitName() } else if old == .role { commitRole() }
+        }
+        .onChange(of: bot.name) { _, new in if focus != .name { name = new } }
+        .onChange(of: bot.role) { _, new in if focus != .role { role = new } }
+        // The view can go away with a field still focused (panel closed, another Orb chosen): nothing else saves it then.
+        .onDisappear {
+            if name != bot.name { commitName() }
+            if role != bot.role { commitRole() }
+        }
+    }
+
+    private func commitName() {
+        if !model.rename(bot.id, to: name) { name = bot.name }
+        else if let current = model.bot(bot.id) { name = current.name }
+    }
+
+    private func commitRole() {
+        model.setRole(bot.id, to: role)
+        if let current = model.bot(bot.id) { role = current.role }
+    }
+}
+
+/// A file of the folder: a git marker (or nothing for a recent file), its name and when it changed.
+private struct WorkspaceFileRow: View {
+    let file: WorkspaceFile
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(file.marker?.rawValue ?? "")
+                .font(.caption2.monospaced().weight(.semibold))
+                .foregroundStyle(color)
+                .frame(width: 22)
+                .help(file.marker?.help ?? "")
+            Text(file.path)
+                .lineLimit(1)
+                .truncationMode(.head)
+            Spacer(minLength: 4)
+            if let modified = file.modified {
+                Text(RelativeTime.text(modified))
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2, perform: open)
+        .onTapGesture(perform: reveal)
+        .contextMenu {
+            Button("Mostrar no Finder", action: reveal)
+            Button("Abrir", action: open)
+        }
+        .help("Clique para mostrar no Finder; duas vezes para abrir")
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction(named: "Mostrar no Finder", reveal)
+        .accessibilityAction(named: "Abrir", open)
+    }
+
+    private var color: Color {
+        switch file.marker {
+        case .added, .untracked: Palette.ok
+        case .deleted, .conflict: Palette.warn
+        default: .secondary
+        }
+    }
+
+    private func reveal() {
+        guard file.marker != .deleted else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([file.url])
+    }
+
+    private func open() {
+        guard file.marker != .deleted else { return }
+        NSWorkspace.shared.open(file.url)
+    }
+}
+
+/// One of the Orb's routines in its panel: on/off, when it runs next, how the last run went.
+private struct RoutineRow: View {
+    @Environment(AppModel.self) private var model
+    let routine: Routine
+    let isBusy: Bool
+    let edit: () -> Void
+
+    var body: some View {
+        // The routine as it is now (the toggle and the runs change it in the model, not in this copy).
+        let current = model.routines.first { $0.id == routine.id } ?? routine
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(current.name)
+                    Text(current.schedule.label)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Toggle("Ativa", isOn: Binding(
+                    get: { model.routines.first { $0.id == routine.id }?.isEnabled ?? current.isEnabled },
+                    set: { isOn in
+                        if let index = model.routines.firstIndex(where: { $0.id == routine.id }) {
+                            model.routines[index].setEnabled(isOn)
+                        }
+                    }))
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                    .controlSize(.small)
+            }
+            if current.isEnabled {
+                (Text("Próxima: ") + Text(current.nextRun, style: .relative))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Text(current.lastResult ?? "Ainda não rodou.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .lineLimit(2)
+            HStack {
+                Button("Editar", action: edit)
+                Spacer()
+                Button("Rodar agora", systemImage: "play.fill") { model.runRoutine(routine.id) }
+                    .disabled(isBusy)
+            }
+            .controlSize(.small)
+        }
+        .opacity(current.isEnabled ? 1 : 0.6)
+    }
+}
+
+enum RelativeTime {
+    /// "há 5 min", "em 2 h": for dates a little before or after now.
+    static func text(_ date: Date, now: Date = .now) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.locale = Locale(identifier: "pt_BR")
+        formatter.unitsStyle = .short
+        return formatter.localizedString(for: date, relativeTo: now)
     }
 }
 

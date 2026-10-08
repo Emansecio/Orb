@@ -1,5 +1,8 @@
 #!/bin/zsh
-# Builds Orb.app from the SwiftPM executable (ad-hoc signed, local use only).
+# Builds Orb.app from the SwiftPM executable, for local use.
+# Signing: with ORB_SIGN_IDENTITY, or the self-signed "Orb Local" identity when the keychain has it
+# (scripts/make-signing-identity.sh), the app keeps the same identity across rebuilds and macOS keeps its
+# Automation / Accessibility / Full Disk Access grants. Otherwise it is ad-hoc signed and macOS asks again each build.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -40,10 +43,21 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
   <key>NSHighResolutionCapable</key><true/>
-  <key>NSAppleEventsUsageDescription</key><string>O Orb usa apps como Mail, Calendário, Notas, Safari e Chrome quando você pede.</string>
+  <key>NSAppleEventsUsageDescription</key><string>O Orb controla outros apps quando você pede, como Mail, Calendário, Notas, Finder e navegadores.</string>
 </dict>
 </plist>
 PLIST
 
-codesign --force --sign - "$APP" >/dev/null
+SIGN_IDENTITY="${ORB_SIGN_IDENTITY:-}"
+if [[ -z "$SIGN_IDENTITY" ]]; then
+  IDENTITIES="$(security find-identity -v -p codesigning 2>/dev/null || true)"
+  [[ "$IDENTITIES" == *'"Orb Local"'* ]] && SIGN_IDENTITY="Orb Local"
+fi
+if [[ -n "$SIGN_IDENTITY" ]]; then
+  codesign --force --sign "$SIGN_IDENTITY" "$APP" >/dev/null
+  echo "Assinado com \"$SIGN_IDENTITY\": as permissões do macOS sobrevivem a novas compilações."
+else
+  codesign --force --sign - "$APP" >/dev/null
+  echo "Dica: assinatura temporária (ad-hoc); o macOS esquece as permissões a cada compilação. Rode scripts/make-signing-identity.sh uma vez para manter."
+fi
 echo "Pronto: $APP"

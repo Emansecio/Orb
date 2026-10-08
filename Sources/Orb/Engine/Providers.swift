@@ -16,6 +16,8 @@ struct ProviderModel: Codable, Hashable, Identifiable, Sendable {
     var name: String
     var format: APIFormat
     var contextLength: Int?
+    /// Whether the model takes pictures, as its catalog says (nil: the catalog does not say).
+    var supportsImages: Bool?
 }
 
 enum ProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
@@ -153,7 +155,7 @@ enum ModelCatalog {
             return chatGPTModels(try await getJSON(base.appending(path: "models"), token: token, session: session))
         case .anthropic:
             return try await AnthropicClient(baseURL: base, apiKey: token, session: session).models()
-                .map { ProviderModel(id: $0, name: $0, format: .messages) }
+                .map { ProviderModel(id: $0, name: $0, format: .messages, supportsImages: true) }
         case .openai:
             return openAIModels(try await OpenAIClient(baseURL: base, apiKey: token, session: session).models())
         case .commandCode:
@@ -170,7 +172,9 @@ enum ModelCatalog {
                 ? try await AnthropicClient(baseURL: base, apiKey: token, extraHeaders: account.headers, session: session).models()
                 : try await OpenAIClient(baseURL: base, apiKey: token, extraHeaders: account.headers, session: session).models()
             return ids.map { ProviderModel(id: $0, name: $0, format: account.format) }
-        case .claudeCode, .xai, .openrouter, .ollama, .lmstudio:
+        case .openrouter:
+            return openRouterModels(try await OpenAIClient(baseURL: base, apiKey: token, session: session).modelEntries())
+        case .claudeCode, .xai, .ollama, .lmstudio:
             return try await OpenAIClient(baseURL: base, apiKey: token, session: session).models()
                 .map { ProviderModel(id: $0, name: $0, format: .chat) }
         }
@@ -182,8 +186,38 @@ enum ModelCatalog {
     static func chatGPTModels(_ json: JSONValue) -> [ProviderModel] {
         (json["models"]?.array ?? []).compactMap { entry in
             guard entry["visibility"]?.string == "list", let slug = entry["slug"]?.string else { return nil }
-            return ProviderModel(id: slug, name: entry["display_name"]?.string ?? slug, format: .responses)
+            return ProviderModel(id: slug, name: entry["display_name"]?.string ?? slug, format: .responses,
+                                 supportsImages: supportsImages(in: entry) ?? openAIFamilySupportsImages(slug))
         }
+    }
+
+    /// Whether a catalog entry says the model takes pictures: its input modalities (models.dev `modalities.input`,
+    /// OpenRouter `architecture.input_modalities`, `input_modalities`) include "image", or models.dev marks it
+    /// `attachment: true`. A list without "image" says no; an entry that says nothing about it gives nil.
+    static func supportsImages(in entry: JSONValue?) -> Bool? {
+        guard let entry else { return nil }
+        let lists = [entry["modalities"]?["input"], entry["input_modalities"], entry["architecture"]?["input_modalities"]]
+            .compactMap { $0?.array }
+        if lists.contains(where: { $0.contains(.string("image")) }) || entry["attachment"]?.bool == true { return true }
+        return lists.isEmpty ? nil : false
+    }
+
+    /// OpenAI's own list says nothing about pictures: the families known to take them (GPT-4o, 4.1, 5, o3, o4)
+    /// say yes; anything else is unknown.
+    static func openAIFamilySupportsImages(_ id: String) -> Bool? {
+        let id = id.lowercased()
+        if id.hasPrefix("o3-mini") { return false }
+        return ["gpt-4o", "chatgpt-4o", "gpt-4.1", "gpt-5", "o3", "o4"].contains { id.hasPrefix($0) } ? true : nil
+    }
+
+    /// OpenRouter lists each model's input modalities.
+    static func openRouterModels(_ entries: [JSONValue]) -> [ProviderModel] {
+        var seen: Set<String> = []
+        return entries.compactMap { entry -> ProviderModel? in
+            guard let id = entry["id"]?.string, seen.insert(id).inserted else { return nil }
+            return ProviderModel(id: id, name: id, format: .chat, supportsImages: supportsImages(in: entry))
+        }
+        .sorted { $0.id < $1.id }
     }
 
     /// The API also lists embeddings, audio, image and moderation models; keep the ones that chat.
@@ -194,7 +228,7 @@ enum ModelCatalog {
             (id.hasPrefix("gpt-") || id.hasPrefix("o") || id.hasPrefix("chatgpt") || id.contains("codex"))
                 && !excluded.contains { id.contains($0) }
         }
-        .map { ProviderModel(id: $0, name: $0, format: .responses) }
+        .map { ProviderModel(id: $0, name: $0, format: .responses, supportsImages: openAIFamilySupportsImages($0)) }
     }
 
     /// `supported_endpoints` says what each model speaks; chat completions is preferred when offered.
@@ -208,7 +242,7 @@ enum ModelCatalog {
             else if endpoints.contains("/responses") { format = .responses }
             else { return nil }
             return ProviderModel(id: id, name: entry["name"]?.string ?? id, format: format,
-                                 contextLength: entry["context_length"]?.int)
+                                 contextLength: entry["context_length"]?.int, supportsImages: supportsImages(in: entry))
         }
     }
 
@@ -228,7 +262,7 @@ enum ModelCatalog {
             default: return nil
             }
             return ProviderModel(id: id, name: info["name"]?.string ?? id, format: format,
-                                 contextLength: info["limit"]?["context"]?.int)
+                                 contextLength: info["limit"]?["context"]?.int, supportsImages: supportsImages(in: info))
         }
     }
 

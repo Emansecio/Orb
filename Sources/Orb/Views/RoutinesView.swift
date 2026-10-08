@@ -5,6 +5,7 @@ import SwiftUI
 struct RoutinesView: View {
     @Environment(AppModel.self) private var model
     @State private var editing: Routine?
+    @State private var viewing: Routine?
 
     var body: some View {
         @Bindable var model = model
@@ -12,10 +13,13 @@ struct RoutinesView: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 14)], spacing: 14) {
                 ForEach($model.routines) { $routine in
                     if let bot = model.bot(routine.botID) {
-                        RoutineCard(routine: $routine, bot: bot, isRunning: model.isWorking(bot.id)) {
+                        RoutineCard(routine: $routine, bot: bot, isRunning: model.isRoutineRunning(routine.id),
+                                    isQueued: model.isRoutineQueued(routine.id)) {
                             model.runRoutine(routine.id)
                         } onEdit: {
                             editing = routine
+                        } onOpen: {
+                            viewing = routine
                         }
                     }
                 }
@@ -42,15 +46,21 @@ struct RoutinesView: View {
         .sheet(item: $editing) { routine in
             RoutineEditor(routine: routine)
         }
+        .sheet(item: $viewing) { routine in
+            RoutineConversationSheet(routineID: routine.id)
+        }
     }
 }
 
 private struct RoutineCard: View {
     @Binding var routine: Routine
     let bot: Bot
+    /// This routine is running now / is waiting for its Orb to be free.
     let isRunning: Bool
+    let isQueued: Bool
     let onRun: () -> Void
     let onEdit: () -> Void
+    let onOpen: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -75,15 +85,26 @@ private struct RoutineCard: View {
                     .foregroundStyle(Palette.muted)
             }
             Divider()
-            Text(routine.lastResult ?? "Ainda não rodou.")
-                .font(.caption)
-                .foregroundStyle(Palette.muted)
-                .lineLimit(3)
+            if routine.runs.isEmpty {
+                Text(routine.lastResult ?? "Ainda não rodou.")
+                    .font(.caption)
+                    .foregroundStyle(Palette.muted)
+                    .lineLimit(3)
+            } else {
+                RunHistory(runs: routine.runs)
+            }
             HStack {
                 Button("Editar", action: onEdit)
+                Button("Ver conversa", systemImage: "text.bubble", action: onOpen)
                 Spacer()
-                Button("Rodar agora", systemImage: "play.fill", action: onRun)
-                    .disabled(isRunning)
+                if isRunning {
+                    Label("Rodando…", systemImage: "hourglass").foregroundStyle(Palette.muted)
+                } else if isQueued {
+                    Label("Na fila", systemImage: "clock").foregroundStyle(Palette.muted)
+                        .help("Roda assim que o Orb terminar o que está fazendo")
+                } else {
+                    Button("Rodar agora", systemImage: "play.fill", action: onRun)
+                }
             }
             .controlSize(.small)
         }
@@ -93,7 +114,111 @@ private struct RoutineCard: View {
     }
 }
 
-private struct RoutineEditor: View {
+/// The routine's recent runs, newest first: the latest in full, the others behind a disclosure.
+private struct RunHistory: View {
+    let runs: [RoutineRun]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let latest = runs.first { RunLine(run: latest, lineLimit: 3) }
+            if runs.count > 1 {
+                DisclosureGroup("Execuções anteriores (\(runs.count - 1))") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(runs.dropFirst()) { RunLine(run: $0, lineLimit: 1) }
+                    }
+                    .padding(.top, 4)
+                }
+                .font(.caption)
+                .foregroundStyle(Palette.muted)
+            }
+        }
+    }
+}
+
+private struct RunLine: View {
+    let run: RoutineRun
+    let lineLimit: Int
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: run.succeeded ? "checkmark.circle.fill" : "xmark.circle.fill")
+                .foregroundStyle(run.succeeded ? Palette.ok : Palette.danger)
+                .font(.caption)
+                .accessibilityLabel(run.succeeded ? "Deu certo" : "Não deu certo")
+            VStack(alignment: .leading, spacing: 1) {
+                Text(run.date.formatted(date: .abbreviated, time: .shortened))
+                    .font(.caption2)
+                    .foregroundStyle(Palette.faint)
+                Text(run.summary)
+                    .font(.caption)
+                    .foregroundStyle(Palette.muted)
+                    .lineLimit(lineLimit)
+                if let file = run.reportFile {
+                    Label(file, systemImage: "doc.text")
+                        .font(.caption2)
+                        .foregroundStyle(Palette.faint)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+        }
+    }
+}
+
+/// A routine's own conversation, read-only: the last runs, live while one is running.
+private struct RoutineConversationSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    let routineID: UUID
+    @State private var saved: [TranscriptItem] = []
+    @State private var isLoading = true
+
+    private var routine: Routine? { model.routines.first { $0.id == routineID } }
+
+    var body: some View {
+        let live = model.liveRoutineItems(routineID)
+        let items = live ?? saved
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(routine?.name ?? "Rotina").font(.headline)
+                    Text(live == nil ? "Conversa da rotina, só para ler" : "Rodando agora")
+                        .font(.caption)
+                        .foregroundStyle(Palette.muted)
+                }
+                Spacer()
+                Button("Fechar") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(16)
+            Divider()
+            if let routine, let bot = model.bot(routine.botID) {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        ForEach(items) { item in
+                            TranscriptRow(item: item, bot: bot).equatable()
+                        }
+                    }
+                    .padding(20)
+                }
+                .overlay {
+                    if items.isEmpty {
+                        ContentUnavailableView(isLoading ? "Carregando…" : "Ainda não rodou", systemImage: "text.bubble")
+                    }
+                }
+            }
+        }
+        .frame(width: 640, height: 560)
+        .background(Palette.canvas)
+        .task(id: live == nil) {
+            saved = await model.routineTranscript(routineID)
+            isLoading = false
+        }
+    }
+}
+
+/// Also opened from an Orb's panel (`BotInspector`), prefilled with that Orb.
+struct RoutineEditor: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State var routine: Routine
@@ -113,6 +238,15 @@ private struct RoutineEditor: View {
                 TextField("Nome", text: $routine.name, prompt: Text("Ex.: Resumo da manhã"))
                 Picker("Orb", selection: $routine.botID) {
                     ForEach(model.bots) { Text($0.name).tag($0.id) }
+                }
+                Section {
+                    Picker("Permissões da rotina", selection: $routine.permissionMode) {
+                        Text("Igual ao Orb").tag(PermissionMode?.none)
+                        Text(PermissionMode.auto.label).tag(PermissionMode?.some(.auto))
+                        Text(PermissionMode.readOnly.label).tag(PermissionMode?.some(.readOnly))
+                    }
+                } footer: {
+                    Text("Ninguém está presente quando a rotina roda: com “Perguntar antes” ela espera sua aprovação.")
                 }
                 Section("O que fazer") {
                     TextEditor(text: $routine.prompt)
@@ -141,7 +275,7 @@ private struct RoutineEditor: View {
             HStack {
                 if !isNew {
                     Button("Apagar", role: .destructive) {
-                        model.routines.removeAll { $0.id == routine.id }
+                        model.deleteRoutine(routine.id)
                         dismiss()
                     }
                 }
@@ -190,6 +324,11 @@ private struct RoutineEditor: View {
             routine.lastRun = nil
         }
         if let index = model.routines.firstIndex(where: { $0.id == routine.id }) {
+            // A run may have ended while the editor was open: its history is not the editor's to overwrite.
+            let current = model.routines[index]
+            routine.runs = current.runs
+            routine.lastResult = current.lastResult
+            if routine.schedule == current.schedule { routine.lastRun = current.lastRun }
             model.routines[index] = routine
         } else {
             model.routines.append(routine)

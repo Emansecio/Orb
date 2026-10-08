@@ -16,6 +16,7 @@ struct NewBotSheet: View {
     @State private var interview = true
     @State private var mode: PermissionMode = .ask
     @State private var isConfirmingBypass = false
+    @State private var folder = OrbFolderChoice.own
 
     var body: some View {
         HStack(spacing: 0) {
@@ -39,6 +40,7 @@ struct NewBotSheet: View {
                     } footer: {
                         Text("Fica na memória deste Orb, que começa a crescer a partir da primeira conversa. Dá para editar depois no painel.")
                     }
+                    NewBotFolderSection(name: name, choice: $folder)
                     Section("Inteligência") {
                         ModelPicker(selection: $modelName)
                         Picker("Antes de agir", selection: $mode.confirmingBypass { isConfirmingBypass = true }) {
@@ -57,7 +59,8 @@ struct NewBotSheet: View {
                     Button("Criar Orb") {
                         model.createBot(name: name.trimmingCharacters(in: .whitespaces),
                                         role: role.isEmpty ? "Assistente pessoal" : role,
-                                        orb: orb, model: modelName, mode: mode, identity: identity, interview: interview)
+                                        orb: orb, model: modelName, mode: mode, identity: identity, interview: interview,
+                                        folder: folder)
                         dismiss()
                     }
                     .keyboardShortcut(.defaultAction)
@@ -73,6 +76,59 @@ struct NewBotSheet: View {
     }
 }
 
+/// Where the new Orb will work: by default a folder of its own in ~/Orbs, named after it.
+private struct NewBotFolderSection: View {
+    let name: String
+    @Binding var choice: OrbFolderChoice
+    @State private var isPicking = false
+
+    var body: some View {
+        Section {
+            LabeledContent("Vai morar em") {
+                Text(shownPath)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+            }
+            Button("Escolher outra pasta…", systemImage: "folder") { isPicking = true }
+            if choice != .home {
+                Button("Usar a pasta pessoal", systemImage: "house") { choice = .home }
+            }
+            if choice != .own {
+                Button("Criar pasta própria em ~/Orbs", systemImage: "folder.badge.plus") { choice = .own }
+            }
+        } header: {
+            Text("Pasta de trabalho")
+        } footer: {
+            Text(footer)
+        }
+        .fileImporter(isPresented: $isPicking, allowedContentTypes: [.folder]) { result in
+            if case .success(let url) = result { choice = .existing(url) }
+        }
+    }
+
+    private var shownPath: String {
+        switch choice {
+        case .own:
+            name.trimmingCharacters(in: .whitespaces).isEmpty
+                ? "~/Orbs/…"
+                : OrbFolder.display(OrbFolder.availableURL(for: name, in: OrbFolder.defaultBase))
+        case .home: "~ (pasta pessoal)"
+        case .existing(let url): OrbFolder.display(url)
+        }
+    }
+
+    private var footer: String {
+        switch choice {
+        case .own: "A pasta é criada com o Orb. Dentro dela ele escreve sem perguntar em “Perguntar antes”; ele pode usar o Mac todo quando a tarefa pedir."
+        case .home: "Sem pasta própria, em “Perguntar antes” ele pergunta antes de escrever. Dá para criar uma depois, no painel."
+        case .existing: "Esta pasta é usada como está: nada é criado nem apagado nela."
+        }
+    }
+}
+
 // MARK: Menu bar quick ask
 
 struct QuickAskView: View {
@@ -84,6 +140,7 @@ struct QuickAskView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            PendingApprovalsSection()
             HStack(spacing: 6) {
                 ForEach(model.bots) { bot in
                     Button {
@@ -146,6 +203,62 @@ struct QuickAskView: View {
     }
 }
 
+/// Every Orb's open approval cards, answerable from the menu bar without opening the app.
+private struct PendingApprovalsSection: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let pending = model.pendingApprovals
+        if !pending.isEmpty {
+            // Scrolls past a height, so several waiting Orbs do not push the question field off the panel.
+            ViewThatFits(in: .vertical) {
+                cards(pending)
+                ScrollView { cards(pending) }
+                    .frame(maxHeight: 280)
+            }
+        }
+    }
+
+    private func cards(_ pending: [PendingApproval]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(pending) { entry in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        BotAvatar(bot: entry.bot, size: 18, activity: model.activity(for: entry.bot.id))
+                        Text(entry.bot.name)
+                            .font(.system(size: 12, weight: .semibold))
+                        Text("precisa de você")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(entry.request.title)
+                        .font(.system(size: 13, weight: .medium))
+                    Text(entry.request.command)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(spacing: 6) {
+                        Button("Não permitir") {
+                            model.decide(.deny, approvalID: entry.request.id, botID: entry.bot.id)
+                        }
+                        .buttonStyle(GhostStyle())
+                        Spacer()
+                        Button(entry.request.isBatch ? "Permitir as \(entry.request.items.count)" : "Permitir") {
+                            model.decide(.once, approvalID: entry.request.id, botID: entry.bot.id)
+                        }
+                        .buttonStyle(PrimaryPillStyle())
+                    }
+                }
+                .padding(10)
+                .card(radius: 10, stroke: Palette.lineStrong)
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("\(entry.bot.name) precisa da sua permissão")
+            }
+        }
+    }
+}
+
 // MARK: Settings
 
 struct SettingsView: View {
@@ -155,7 +268,7 @@ struct SettingsView: View {
                 .tabItem { Label("Modelos", systemImage: "cpu") }
             GeneralSettings()
                 .tabItem { Label("Geral", systemImage: "gearshape") }
-            PermissionSettings()
+            MacPermissionsView()
                 .tabItem { Label("Permissões do Mac", systemImage: "lock.shield") }
         }
         .frame(width: 620, height: 600)
@@ -189,43 +302,5 @@ private struct GeneralSettings: View {
             loginError = "Não foi possível mudar: \(error.localizedDescription)"
         }
         launchAtLogin = SMAppService.mainApp.status == .enabled
-    }
-}
-
-private struct PermissionSettings: View {
-    var body: some View {
-        Form {
-            Section {
-                PermissionRow(title: "Automação", detail: "Para usar Mail, Calendário, Notas e outros apps (AppleScript)",
-                              pane: "Privacy_Automation")
-                PermissionRow(title: "Acesso Total ao Disco", detail: "Opcional: para ler pastas protegidas como Mail e Mensagens",
-                              pane: "Privacy_AllFiles")
-            } footer: {
-                Text("O macOS pede cada permissão no primeiro uso. Você pode revisar ou revogar aqui.")
-            }
-        }
-        .formStyle(.grouped)
-    }
-}
-
-private struct PermissionRow: View {
-    let title: String
-    let detail: String
-    let pane: String
-
-    var body: some View {
-        LabeledContent {
-            Button("Abrir Ajustes") {
-                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") {
-                    NSWorkspace.shared.open(url)
-                }
-            }
-            .controlSize(.small)
-        } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                Text(detail).font(.caption).foregroundStyle(.secondary)
-            }
-        }
     }
 }

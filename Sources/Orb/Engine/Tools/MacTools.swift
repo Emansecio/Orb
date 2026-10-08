@@ -178,8 +178,9 @@ struct AppleScriptTool: AgentTool {
         automate Mac apps such as Mail, Calendar, Notes, Reminders, Contacts, Messages, Finder, Music, Safari \
         and System Events. Set language "javascript" for JXA, and output "structured" to get lists and records \
         in a form that keeps strings and numbers apart. Stops after 60 seconds (timeout_seconds up to 300). \
-        The first use of each app makes macOS ask the user for Automation permission; if a script fails with a \
-        permission error, the message says what the user must enable. Prefer a dedicated tool (open, \
+        The first use of each app makes macOS ask the user for Automation permission (for apps that are already \
+        open, the call waits for the answer); if a script fails with a permission error, the message says what the user must enable: pass it on \
+        instead of retrying. Prefer a dedicated tool (open, \
         browser_tab, clipboard_read, screenshot…) when one exists.
         """,
         parameters: .schema([

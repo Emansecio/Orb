@@ -94,13 +94,18 @@ struct OpenAIClient: LLMClient {
     }
 
     func models() async throws -> [String] {
+        Set(try await modelEntries().compactMap { $0["id"]?.string }).sorted()
+    }
+
+    /// The `data` entries of the model list, whole (some servers say more about each model than its id).
+    func modelEntries() async throws -> [JSONValue] {
         let (data, response) = try await session.data(for: Self.authorizedRequest(
             baseURL.appending(path: "models"), apiKey: try await credentials(false), headers: extraHeaders))
         try await Self.check(response, body: { data.prefix(Self.errorBodyLimit) })
         guard let entries = JSONValue.parse(String(decoding: data, as: UTF8.self))?["data"]?.array else {
             throw LLMError.invalidResponse("lista de modelos ausente")
         }
-        return Set(entries.compactMap { $0["id"]?.string }).sorted()
+        return entries
     }
 
     /// Identifies the app (some gateways reject generic HTTP-library user agents).
@@ -126,7 +131,7 @@ extension OpenAIClient {
         var body: [String: JSONValue] = [
             "model": .string(model),
             "stream": .bool(true),
-            "messages": .array(messages.map(wire)),
+            "messages": .array(messages.movingToolImagesToUserMessages().map(wire)),
         ]
         if includeUsage { body["stream_options"] = .object(["include_usage": .bool(true)]) }
         if let promptCacheKey, !promptCacheKey.isEmpty { body["prompt_cache_key"] = .string(promptCacheKey) }
@@ -147,7 +152,7 @@ extension OpenAIClient {
         let onlyCalls = message.role == .assistant && message.content.isEmpty && !message.toolCalls.isEmpty
         var object: [String: JSONValue] = [
             "role": .string(message.role.rawValue),
-            "content": onlyCalls ? JSONValue.null : .string(message.content),
+            "content": onlyCalls ? JSONValue.null : content(of: message),
         ]
         if !message.toolCalls.isEmpty {
             object["tool_calls"] = .array(message.toolCalls.map { call in
@@ -162,6 +167,21 @@ extension OpenAIClient {
             object["tool_call_id"] = .string(id)
         }
         return .object(object)
+    }
+
+    /// A message's content: plain text, or for a user message with pictures a list of parts (text, then one
+    /// `image_url` data URL per picture). Tool messages never carry pictures here (`movingToolImagesToUserMessages`).
+    private static func content(of message: ChatMessage) -> JSONValue {
+        guard message.role == .user, !message.images.isEmpty else { return .string(message.content) }
+        let payload = ImageWire.payload(of: message)
+        var parts: [JSONValue] = []
+        if !payload.text.isEmpty { parts.append(.object(["type": .string("text"), "text": .string(payload.text)])) }
+        for image in payload.images {
+            parts.append(.object(["type": .string("image_url"), "image_url": .object([
+                "url": .string(ImageWire.dataURL(mediaType: image.mediaType, base64: image.base64)),
+            ])]))
+        }
+        return .array(parts)
     }
 
     // MARK: Requests and errors

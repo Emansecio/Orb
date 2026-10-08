@@ -13,7 +13,7 @@ enum SessionSummary {
         func line(_ text: String, _ limit: Int) -> String { MemoryText.clip(MemoryText.flatten(MemorySanitizer.scrub(text)), limit) }
         let requests = items.compactMap { item -> (Date, String)? in
             guard case .user(let text, let attachments) = item.kind else { return nil }
-            let files = attachments.isEmpty ? "" : " (anexos: \(attachments.joined(separator: ", ")))"
+            let files = attachments.isEmpty ? "" : " (anexos: \(attachments.map { ($0 as NSString).lastPathComponent }.joined(separator: ", ")))"
             return (item.date, text + files)
         }
         guard let first = requests.first else { return nil }

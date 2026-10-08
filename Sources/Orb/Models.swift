@@ -266,7 +266,8 @@ extension ToolCall {
 
 enum ApprovalDecision: String, Codable, Sendable, Equatable {
     /// `task`: allowed until this turn ends. `always`: allowed from now on, by the rule chosen on the card.
-    case deny, once, always, task
+    /// `review`: only on a card that groups several actions: "Revisar uma a uma" hands each one its own card.
+    case deny, once, always, task, review
 
     /// A decision from a newer version counts as a refusal.
     init(from decoder: Decoder) throws { self = try decoder.rawValue(Self.self, fallback: .deny) }
@@ -277,7 +278,28 @@ enum ApprovalDecision: String, Codable, Sendable, Equatable {
         case .once: "Permitido uma vez"
         case .task: "Permitido nesta tarefa"
         case .always: "Sempre permitido"
+        case .review: "Revisão uma a uma"
         }
+    }
+}
+
+/// One action on a card that groups several (`ApprovalRequest.items`).
+struct ApprovalItem: Codable, Sendable, Equatable, Hashable {
+    var toolName: String
+    var title: String
+    var command: String
+
+    init(toolName: String, title: String, command: String) {
+        self.toolName = toolName
+        self.title = title
+        self.command = command
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        toolName = try c.value(.toolName, default: "")
+        title = try c.value(.title, default: "")
+        command = try c.value(.command, default: "")
     }
 }
 
@@ -292,6 +314,14 @@ struct ApprovalRequest: Identifiable, Codable, Sendable, Equatable {
     /// Standing rules the card offers under "Sempre…" (also what "Só nesta tarefa" grants, the first one).
     /// Empty for calls that must always ask.
     var suggestions: [PermissionRule] = []
+    /// The actions behind a card that groups several (two or more); empty for a card about one action.
+    var items: [ApprovalItem] = []
+    /// A destructive action: its notification asks for the Mac to be unlocked before "Permitir" works.
+    var isDangerous = false
+    /// What the user told the Orb to do instead when denying.
+    var note: String?
+
+    var isBatch: Bool { items.count > 1 }
 }
 
 extension ApprovalRequest {
@@ -304,6 +334,9 @@ extension ApprovalRequest {
         reason = try c.value(.reason, default: "")
         decision = try c.decodeIfPresent(ApprovalDecision.self, forKey: .decision)
         suggestions = try c.lossyArray(.suggestions)
+        items = try c.lossyArray(.items)
+        isDangerous = try c.value(.isDangerous, default: false)
+        note = try c.decodeIfPresent(String.self, forKey: .note)
     }
 }
 
@@ -319,6 +352,13 @@ struct Routine: Identifiable, Codable, Sendable {
     var createdAt = Date.now
     var lastRun: Date?
     var lastResult: String?
+    /// Permission mode for this routine's runs; nil means the Orb's own. Nobody is there to answer cards during a
+    /// run, so "Automático" or "Só leitura" usually fits better than "Perguntar antes".
+    var permissionMode: PermissionMode?
+    /// The most recent runs, newest first (`Routine.keptRuns` of them).
+    var runs: [RoutineRun] = []
+
+    static let keptRuns = 10
 
     var nextRun: Date { schedule.next(after: lastRun ?? createdAt) }
 
@@ -341,6 +381,36 @@ extension Routine {
         createdAt = try c.value(.createdAt, default: Date.now)
         lastRun = try c.decodeIfPresent(Date.self, forKey: .lastRun)
         lastResult = try c.decodeIfPresent(String.self, forKey: .lastResult)
+        permissionMode = try c.decodeIfPresent(PermissionMode.self, forKey: .permissionMode)
+        runs = try c.lossyArray(.runs)
+    }
+}
+
+/// What one run of a routine left behind: shown in the routine's history. The whole run is in the routine's
+/// own conversation.
+struct RoutineRun: Identifiable, Codable, Sendable, Equatable {
+    var id = UUID()
+    var date: Date
+    var finishedAt: Date?
+    var succeeded: Bool
+    /// First line of the report (or why the run did not happen or finish).
+    var summary: String
+    /// The final report, shortened; the next run is told what the last one found.
+    var report: String?
+    /// Where the report was saved inside the Orb's folder (only Orbs with a folder of their own get one).
+    var reportFile: String?
+}
+
+extension RoutineRun {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.value(.id, default: UUID())
+        date = try c.value(.date, default: Date.now)
+        finishedAt = try c.decodeIfPresent(Date.self, forKey: .finishedAt)
+        succeeded = try c.value(.succeeded, default: false)
+        summary = try c.value(.summary, default: "")
+        report = try c.decodeIfPresent(String.self, forKey: .report)
+        reportFile = try c.decodeIfPresent(String.self, forKey: .reportFile)
     }
 }
 

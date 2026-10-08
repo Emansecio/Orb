@@ -119,7 +119,7 @@ extension AnthropicClient {
             switch message.role {
             case .tool:
                 var result: [String: JSONValue] = ["type": .string("tool_result"), "tool_use_id": .string(message.toolCallID ?? ""),
-                                                   "content": .string(message.content.isEmpty ? "(sem saída)" : message.content)]
+                                                   "content": toolResultContent(message)]
                 if message.isError { result["is_error"] = .bool(true) }
                 blocks.append(.object(result))
             case .assistant:
@@ -139,7 +139,13 @@ extension AnthropicClient {
                                            "input": input]))
                 }
             default:
-                blocks.append(.object(["type": .string("text"), "text": .string(message.content)]))
+                if message.images.isEmpty {
+                    blocks.append(.object(["type": .string("text"), "text": .string(message.content)]))
+                } else {
+                    let payload = ImageWire.payload(of: message)
+                    blocks += payload.images.map(imageBlock)
+                    if !payload.text.isEmpty { blocks.append(.object(["type": .string("text"), "text": .string(payload.text)])) }
+                }
             }
             guard !blocks.isEmpty else { continue }
             if turns.last?.role == role { turns[turns.count - 1].blocks += blocks } else { turns.append((role, blocks)) }
@@ -171,6 +177,20 @@ extension AnthropicClient {
             if toolChoice == .none { body["tool_choice"] = .object(["type": .string("none")]) }
         }
         return .object(body)
+    }
+
+    /// The output of a tool: text, or text followed by the pictures it returned.
+    private static func toolResultContent(_ message: ChatMessage) -> JSONValue {
+        let text = message.content.isEmpty ? "(sem saída)" : message.content
+        guard !message.images.isEmpty else { return .string(text) }
+        let payload = ImageWire.payload(of: ChatMessage(role: .tool, content: text, images: message.images))
+        return .array([.object(["type": .string("text"), "text": .string(payload.text)])] + payload.images.map(imageBlock))
+    }
+
+    private static func imageBlock(_ image: (mediaType: String, base64: String)) -> JSONValue {
+        .object(["type": .string("image"), "source": .object([
+            "type": .string("base64"), "media_type": .string(image.mediaType), "data": .string(image.base64),
+        ])])
     }
 
     /// A recorded reasoning part as a request block; nil for parts of another kind or without the signature the API checks.
