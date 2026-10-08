@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Everything one Claude Code turn needs, captured up front.
 struct ClaudeCodeTurn: Sendable {
@@ -13,10 +14,27 @@ struct ClaudeCodeTurn: Sendable {
     var context = ""
     /// Claude Code session to resume; nil starts a new one.
     var sessionID: String?
-    /// MCP servers for `--mcp-config`: the Orb's memory server, plus the enabled connectors when the bot may use
-    /// them. With "Conectores" off, `--strict-mcp-config` keeps the user's own Claude Code MCP servers out.
+    /// MCP servers for `--mcp-config`: the Orb's tools server (memory, and the Mac tools with "Apps do Mac"), plus
+    /// the enabled connectors when the bot may use them. With "Conectores" off, `--strict-mcp-config` keeps the
+    /// user's own Claude Code MCP servers out.
     var connectors: [MCPServerConfig] = []
     var environment: [String: String] = [:]
+    /// Grants for this turn only that the user's own request already gave (saving to memory when asked to remember).
+    var turnGrants: [PermissionRule] = []
+    /// The permission mode and rules as they are now, read at every permission request. nil keeps the ones in
+    /// `bot` as they were when the turn started.
+    var permissions: PermissionSource?
+    /// Folder that gets `--add-dir` when the Orb works somewhere else, so reading across the user's files does not
+    /// prompt for every folder (Claude Code only trusts the folder it starts in).
+    var homeDirectory = FileManager.default.homeDirectoryForCurrentUser
+    /// How long Claude Code has to answer `initialize` before the turn is given up. Generous: a cold first launch
+    /// may be starting the Orb's tools server and the user's connectors (some remote) before it answers.
+    var initializeTimeout: TimeInterval = 60
+
+    func currentPermissions() async -> PermissionState {
+        if let permissions { return await permissions() }
+        return PermissionState(mode: bot.permissionMode, rules: bot.permissionRules)
+    }
 
     /// Command line for this turn. Values use the `--flag=value` form so text starting with "-" is never read
     /// as a flag (as the SDK does for `--resume`).
@@ -30,6 +48,9 @@ struct ClaudeCodeTurn: Sendable {
         if let model, !model.isEmpty, model != ClaudeCodeModels.defaultID { arguments.append("--model=\(model)") }
         arguments.append(sessionID.map { "--resume=\($0)" } ?? "--session-id=\(newSessionID)")
         var removed: [String] = []
+        if bot.workingURL.standardizedFileURL.path != homeDirectory.standardizedFileURL.path {
+            arguments.append("--add-dir=\(homeDirectory.path)")
+        }
         if !bot.capabilities.contains(.terminal) { removed += ClaudeCodeTools.terminal }
         if !bot.capabilities.contains(.browser) { removed += ClaudeCodeTools.web }
         if !removed.isEmpty { arguments.append("--disallowedTools=\(removed.joined(separator: ","))") }
@@ -59,7 +80,12 @@ struct ClaudeCodeTurn: Sendable {
 /// Runs bot turns through the user's Claude Code: one `claude -p` process per turn, resuming the bot's
 /// session. Same shape as `AgentEngine`; Claude Code's permission prompts become Orb approval cards.
 actor ClaudeCodeEngine {
-    private var pending: [UUID: (botID: UUID, continuation: CheckedContinuation<ApprovalDecision, Never>)] = [:]
+    /// Open approval cards; shared with the other engine by passing the same gate.
+    let gate: ApprovalGate
+    /// The running process of each Orb's turn, to tell it when the permission mode changes.
+    private var running: [UUID: LineProcess] = [:]
+
+    init(gate: ApprovalGate = ApprovalGate()) { self.gate = gate }
 
     nonisolated func run(_ turn: ClaudeCodeTurn) -> AsyncStream<TurnEvent> {
         AsyncStream { continuation in
@@ -68,16 +94,11 @@ actor ClaudeCodeEngine {
         }
     }
 
-    func resolve(approvalID: UUID, decision: ApprovalDecision) {
-        pending.removeValue(forKey: approvalID)?.continuation.resume(returning: decision)
-    }
-
-    /// Denies the bot's open approvals (used when the user stops its turn).
-    func cancelApprovals(for botID: UUID) {
-        for (id, entry) in pending where entry.botID == botID {
-            pending[id] = nil
-            entry.continuation.resume(returning: .deny)
-        }
+    /// The Orb's permission mode changed during its turn: Claude Code decides some things itself (a session
+    /// started in `bypassPermissions` never asks Orb), so it is told too. Orb's own check runs on every request
+    /// either way; a CLI that refuses the switch is ignored.
+    func modeChanged(for botID: UUID, to mode: PermissionMode) {
+        running[botID]?.send(ClaudeCodeWire.setPermissionMode(id: ClaudeCodeWire.newRequestID(), mode: ClaudeCodePolicy.cliMode(mode)))
     }
 
     // MARK: Turn
@@ -98,6 +119,8 @@ actor ClaudeCodeEngine {
             out.yield(.failed("Não consegui abrir o Claude Code: \(error.localizedDescription)"))
             return
         }
+        running[turn.bot.id] = process
+        defer { running[turn.bot.id] = nil }
         await withTaskCancellationHandler {
             await converse(turn, process: process, out: out)
         } onCancel: {
@@ -113,16 +136,32 @@ actor ClaudeCodeEngine {
         process.send(ClaudeCodeWire.controlRequest(id: initializeID, subtype: "initialize"))
         var parser = ClaudeCodeParser()
         var transcript = ClaudeCodeTranscript(isResuming: turn.sessionID != nil)
-        var allowed = turn.bot.allowedTools
+        var granted = turn.turnGrants
+        // A CLI that never answers `initialize` (stuck on a prompt, a broken install) would hold the turn forever.
+        let handshake = Handshake()
+        let watchdog = Task {
+            try? await Task.sleep(for: .seconds(turn.initializeTimeout))
+            guard !Task.isCancelled, handshake.expire() else { return }
+            process.closeInput()
+            process.terminate(after: 0)
+        }
+        defer { watchdog.cancel() }
 
         for await line in process.lines {
             for message in parser.parse(line) {
                 switch message {
-                case .controlResponse(let id, _) where id == initializeID:
+                case .controlResponse(let id, let error) where id == initializeID:
+                    guard handshake.answer() else { continue }
+                    if let error {
+                        out.yield(.failed("O Claude Code recusou iniciar a conversa: \(error)"))
+                        process.closeInput()
+                        process.terminate(after: 3)
+                        return
+                    }
                     process.send(ClaudeCodeWire.userMessage(turn.context.isEmpty ? turn.prompt : turn.context + "\n\n" + turn.prompt))
                 case .permission(let request):
-                    let answer = await permission(request, turn: turn, hasText: transcript.hasText, allowed: &allowed, out: out)
-                    if case .deny = answer { transcript.noteDenied(request.toolUseID, mode: turn.bot.permissionMode) }
+                    let answer = await permission(request, turn: turn, hasText: transcript.hasText, granted: &granted, out: out)
+                    if case .deny = answer { transcript.noteDenied(request.toolUseID, mode: await turn.currentPermissions().mode) }
                     process.send(ClaudeCodeWire.permissionResponse(requestID: request.requestID, answer: answer, input: request.input))
                 case .unsupportedRequest(let id, let subtype):
                     process.send(ClaudeCodeWire.errorResponse(requestID: id, message: "Unsupported control request: \(subtype)"))
@@ -138,29 +177,84 @@ actor ClaudeCodeEngine {
             }
         }
         guard !Task.isCancelled else { return }
-        for event in transcript.endedEarly(details: process.errorOutput) { out.yield(event) }
+        switch handshake.state {
+        case .expired:
+            out.yield(.failed("O Claude Code não respondeu em \(Int(turn.initializeTimeout)) segundos e foi encerrado. "
+                              + "Tente de novo; se continuar, confira o Claude Code em Ajustes → Modelos." + Self.details(process.errorOutput)))
+        case .waiting:
+            out.yield(.failed("O Claude Code fechou antes de começar a conversa." + Self.details(process.errorOutput)))
+        case .answered:
+            for event in transcript.endedEarly(details: process.errorOutput) { out.yield(event) }
+        }
     }
 
-    /// Answers a `can_use_tool` request: by the bot's mode and "Sempre permitir" list, or by asking the user.
+    private static func details(_ errorOutput: String) -> String {
+        let tail = ClaudeCodeTranscript.tail(errorOutput)
+        return tail.isEmpty ? "" : "\n" + tail
+    }
+
+    /// Whether Claude Code has answered `initialize`; the watchdog and the message loop race to settle it.
+    private final class Handshake: Sendable {
+        enum State { case waiting, answered, expired }
+        private let current = OSAllocatedUnfairLock(initialState: State.waiting)
+        var state: State { current.withLock { $0 } }
+
+        /// False when the time already ran out.
+        func answer() -> Bool {
+            current.withLock { state in
+                if state == .waiting { state = .answered }
+                return state == .answered
+            }
+        }
+
+        /// True when this call is the one that gave up (the answer had not come).
+        func expire() -> Bool {
+            current.withLock { state in
+                guard state == .waiting else { return false }
+                state = .expired
+                return true
+            }
+        }
+    }
+
+    /// Answers a `can_use_tool` request: by the Orb's mode and rules as they are now, or by asking the user.
+    /// `granted` holds the grants of this turn ("Só nesta tarefa").
     private func permission(_ request: ClaudeCodePermissionRequest, turn: ClaudeCodeTurn, hasText: Bool,
-                            allowed: inout Set<String>, out: AsyncStream<TurnEvent>.Continuation) async -> ClaudeCodePermissionAnswer {
-        if let answer = ClaudeCodePolicy.answer(mode: turn.bot.permissionMode, toolName: request.toolName,
-                                                input: request.input, allowed: allowed) {
-            return answer
+                            granted: inout [PermissionRule], out: AsyncStream<TurnEvent>.Continuation) async -> ClaudeCodePermissionAnswer {
+        let live = await turn.currentPermissions()
+        let workspace = turn.bot.workingURL
+        let call = PermissionPolicy.call(claudeCodeTool: request.toolName, input: request.input, workspace: workspace)
+        let why: PermissionVerdict.AskReason
+        switch PermissionPolicy.evaluate(mode: live.mode, call: call, rules: live.rules, turnGrants: granted, workspace: workspace) {
+        case .allow: return .allow
+        case .deny(let message): return .deny(message)
+        case .ask(let reason): why = reason
         }
         guard !Task.isCancelled else { return .deny(ClaudeCodePolicy.userDenial) }
         let summary = ClaudeCodeTools.summary(request.toolName, request.input)
         let fallback = hasText ? "" : "\(turn.bot.name) precisa da sua permissão para continuar."
-        let danger = request.input["command"]?.string.flatMap(DangerousCommand.reason).map { "Comando arriscado: \($0)." }
-        let approval = ApprovalRequest(toolName: request.toolName, title: summary.title, command: summary.detail,
-                                       reason: danger ?? request.reason ?? fallback)
+        let approval = ApprovalRequest(
+            toolName: request.toolName, title: summary.title, command: summary.detail,
+            reason: why.explanation ?? request.reason ?? fallback,
+            suggestions: PermissionPolicy.suggestions(for: call, existing: live.rules + granted, workspace: workspace,
+                                                      extra: request.suggestions))
+        await gate.open(approval.id, botID: turn.bot.id, alwaysAsks: why != .needsPermission)
         out.yield(.approval(approval))
         out.yield(.status("Esperando sua resposta"))
-        let decision = await withCheckedContinuation { pending[approval.id] = (turn.bot.id, $0) }
-        switch decision {
-        case .deny: return .deny(ClaudeCodePolicy.userDenial)
-        case .always: allowed.insert(request.toolName)
-        case .once: break
+        let answer = await gate.wait(for: approval.id)
+        let rule = answer.rule ?? approval.suggestions.first
+        switch answer.decision {
+        case .deny:
+            // Switching to read-only answers open cards with a denial.
+            return .deny(await turn.currentPermissions().mode == .readOnly ? ClaudeCodePolicy.readOnlyDenial : ClaudeCodePolicy.userDenial)
+        case .task:
+            if let rule { granted.append(rule) }
+        case .always:
+            // The app saves the rule in the Orb, which the next request reads; without a live source (nothing
+            // saves it) it is kept for this turn.
+            if turn.permissions == nil, let rule { granted.append(rule) }
+        case .once:
+            break
         }
         out.yield(.status("Pensando"))
         return .allow
@@ -179,6 +273,10 @@ actor ClaudeCodeEngine {
 struct ClaudeCodeTranscript {
     let isResuming: Bool
     private(set) var isFinished = false
+    /// What the turn used and cost, from the CLI's result message (nil until it arrives, or if it reports none).
+    /// The usage also goes out as a `.usage` event, like the native engine's.
+    private(set) var usage: TokenUsage?
+    private(set) var costUSD: Double?
     private var didStart = false
     private var segments: [String] = []
     private var isWriting = false
@@ -223,7 +321,10 @@ struct ClaudeCodeTranscript {
             return []
         case .result(let result):
             isFinished = true
+            usage = result.usage
+            costUSD = result.costUSD
             var events = closeRunningTools()
+            if let used = result.usage { events.insert(.usage(used), at: 0) }
             if !result.isError {
                 let reply = segments.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
                 var content = reply.joined(separator: "\n\n")
@@ -251,10 +352,15 @@ struct ClaudeCodeTranscript {
         denials[toolUseID] = mode == .readOnly ? "Bloqueado: o Orb está em modo Só leitura." : "Você negou esta ação."
     }
 
+    /// The last 600 characters of the CLI's stderr, enough to show why it stopped.
+    static func tail(_ errorOutput: String) -> String {
+        errorOutput.count > 600 ? "…" + errorOutput.suffix(600) : errorOutput
+    }
+
     /// The CLI closed its output without a result (crash, bad flag, killed).
     mutating func endedEarly(details: String) -> [TurnEvent] {
         isFinished = true
-        let tail = details.count > 600 ? "…" + details.suffix(600) : details
+        let tail = Self.tail(details)
         return closeRunningTools() + [.failed("O Claude Code parou sem terminar a resposta." + (tail.isEmpty ? "" : "\n\(tail)"))]
     }
 

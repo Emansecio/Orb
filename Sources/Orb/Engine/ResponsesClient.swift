@@ -31,14 +31,14 @@ struct ResponsesClient: LLMClient {
                   conversationID: conversationID, session: session)
     }
 
-    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec]) -> AsyncThrowingStream<LLMEvent, Error> {
+    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
                     let provider = baseURL.host() ?? ""
                     let body = try JSONEncoder().encode(Self.requestBody(
                         model: model, messages: messages, tools: tools, toolsAsInputItem: toolsAsInputItem,
-                        promptCacheKey: conversationID, provider: provider))
+                        promptCacheKey: conversationID, provider: provider, toolChoice: toolChoice))
                     let (bytes, response) = try await OpenAIClient.open(session, credentials: credentials) { key in
                         var request = OpenAIClient.authorizedRequest(baseURL.appending(path: "responses"), apiKey: key,
                                                                      headers: extraHeaders)
@@ -79,7 +79,7 @@ struct ResponsesClient: LLMClient {
     /// `function_call_output` items. Reasoning recorded by the same endpoint and model goes back as `reasoning`
     /// items right before what it produced (the API rejects one that is not followed by its output).
     static func requestBody(model: String, messages: [ChatMessage], tools: [ToolSpec], toolsAsInputItem: Bool = false,
-                            promptCacheKey: String? = nil, provider: String = "") -> JSONValue {
+                            promptCacheKey: String? = nil, provider: String = "", toolChoice: ToolChoice = .auto) -> JSONValue {
         let instructions = messages.filter { $0.role == .system }.map(\.content).joined(separator: "\n\n")
         var input: [JSONValue] = []
         for message in messages {
@@ -128,7 +128,13 @@ struct ResponsesClient: LLMClient {
                      "parameters": $0.parameters, "strict": .bool(false)])
         })
         if !tools.isEmpty {
+            if toolChoice == .none && !toolsAsInputItem { body["tool_choice"] = .string("none") }
             if toolsAsInputItem {
+                // The ChatGPT backend takes its tools as an input item and is not known to accept `tool_choice`
+                // without a top-level `tools`: the instruction travels as text instead.
+                if toolChoice == .none {
+                    input.append(.object(["role": .string("developer"), "content": .string(noToolsInstruction)]))
+                }
                 input.insert(.object(["type": .string("additional_tools"), "role": .string("developer"), "tools": functions]), at: 0)
                 body["input"] = .array(input)
             } else {
@@ -137,6 +143,8 @@ struct ResponsesClient: LLMClient {
         }
         return .object(body)
     }
+
+    static let noToolsInstruction = "Do not call any tool in your next reply: answer in text with a summary of what was done and what is left."
 
     /// The item exactly as received: the API requires its `id` (and the encrypted content stands in for the stored
     /// state). A part saved without an id cannot be sent back and is dropped.

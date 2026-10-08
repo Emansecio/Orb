@@ -41,6 +41,30 @@ struct ClaudeCodeStatus: Equatable, Sendable {
     }
 }
 
+extension Conversation {
+    /// The Claude Code session a turn in `folder` can resume: nil when there is none, or when it was started in
+    /// another folder (Claude Code stores sessions per folder, so resuming it there would fail). A session saved
+    /// before its folder was tracked counts as being in `folder`.
+    func claudeSession(forFolder folder: String) -> String? {
+        guard let id = claudeSessionID else { return nil }
+        return claudeSessionFolder.map { $0 == folder } ?? true ? id : nil
+    }
+
+    /// The CLI reported its session id for a turn run in `folder`; an empty id means the session is gone.
+    mutating func claudeSessionReported(_ id: String, folder: String?) {
+        claudeSessionID = id.isEmpty ? nil : id
+        claudeSessionFolder = id.isEmpty ? nil : folder
+        if id.isEmpty { claudeSeenCount = nil }
+    }
+
+    /// A Claude Code turn in `folder` ended. Everything so far went through (or was handed to) its session, unless
+    /// the session left over is another folder's (this turn's new one never started), which has seen nothing of it.
+    mutating func claudeTurnFinished(folder: String?) {
+        guard claudeSessionID != nil, claudeSessionFolder.map({ $0 == folder }) ?? true else { return }
+        claudeSeenCount = messages.count
+    }
+}
+
 actor ClaudeCode {
     static let shared = ClaudeCode()
     static let setupPage = URL(string: "https://code.claude.com/docs/en/setup")

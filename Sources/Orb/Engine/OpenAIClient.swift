@@ -32,13 +32,13 @@ struct OpenAIClient: LLMClient {
     /// Servers known to take `stream_options` (local ones may reject it).
     var reportsUsage: Bool { isOpenAI || baseURL.host() == "openrouter.ai" }
 
-    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec]) -> AsyncThrowingStream<LLMEvent, Error> {
+    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
                     let body = try JSONEncoder().encode(Self.requestBody(
                         model: model, messages: messages, tools: tools, includeUsage: reportsUsage,
-                        promptCacheKey: isOpenAI ? conversationID : nil))
+                        promptCacheKey: isOpenAI ? conversationID : nil, toolChoice: toolChoice))
                     let (bytes, response) = try await Self.open(session, credentials: credentials) { key in
                         var request = Self.authorizedRequest(baseURL.appending(path: "chat/completions"), apiKey: key,
                                                              headers: extraHeaders)
@@ -122,7 +122,7 @@ struct OpenAIClient: LLMClient {
 
 extension OpenAIClient {
     static func requestBody(model: String, messages: [ChatMessage], tools: [ToolSpec], includeUsage: Bool = false,
-                            promptCacheKey: String? = nil) -> JSONValue {
+                            promptCacheKey: String? = nil, toolChoice: ToolChoice = .auto) -> JSONValue {
         var body: [String: JSONValue] = [
             "model": .string(model),
             "stream": .bool(true),
@@ -138,6 +138,7 @@ extension OpenAIClient {
                     "parameters": tool.parameters,
                 ])])
             })
+            if toolChoice == .none { body["tool_choice"] = .string("none") }
         }
         return .object(body)
     }

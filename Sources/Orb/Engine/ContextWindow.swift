@@ -269,7 +269,7 @@ enum ContextSummary {
         func line(_ text: String, _ limit: Int) -> String { MemoryText.clip(MemoryText.flatten(text), limit) }
         var sections: [String] = []
 
-        let requests = dropped.filter { $0.role == .user }.map { line($0.content, 200) }.filter { !$0.isEmpty }
+        let requests = dropped.filter { $0.role == .user }.map { line(TurnPreface.stripped($0.content), 200) }.filter { !$0.isEmpty }
         if !requests.isEmpty {
             let older = requests.count > 8 ? ["(+\(requests.count - 8) pedidos anteriores)"] : []
             sections.append("Pedidos do usuário:\n" + (older + requests.suffix(8).map { "- " + $0 }).joined(separator: "\n"))

@@ -26,13 +26,13 @@ struct AnthropicClient: LLMClient {
         self.init(baseURL: baseURL, credentials: { _ in key }, extraHeaders: extraHeaders, session: session)
     }
 
-    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec]) -> AsyncThrowingStream<LLMEvent, Error> {
+    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
                     let provider = baseURL.host() ?? ""
                     let body = try JSONEncoder().encode(Self.requestBody(
-                        model: model, messages: messages, tools: tools, maxTokens: maxTokens, provider: provider))
+                        model: model, messages: messages, tools: tools, maxTokens: maxTokens, provider: provider, toolChoice: toolChoice))
                     let (bytes, response) = try await OpenAIClient.open(session, credentials: credentials) { key in
                         var request = makeRequest("messages", key: key)
                         request.httpMethod = "POST"
@@ -109,7 +109,7 @@ extension AnthropicClient {
     /// block of the last message, so each step of a tool loop reads the previous step's prefix from the cache.
     /// `provider` is the endpoint's host: reasoning recorded by another endpoint or model is not sent back.
     static func requestBody(model: String, messages: [ChatMessage], tools: [ToolSpec], maxTokens: Int,
-                            provider: String = "") -> JSONValue {
+                            provider: String = "", toolChoice: ToolChoice = .auto) -> JSONValue {
         let system = messages.filter { $0.role == .system }.map(\.content).joined(separator: "\n\n")
         var turns: [(role: String, blocks: [JSONValue])] = []
         let lastIndex = messages.lastIndex { $0.role != .system }
@@ -118,8 +118,10 @@ extension AnthropicClient {
             var blocks: [JSONValue] = []
             switch message.role {
             case .tool:
-                blocks.append(.object(["type": .string("tool_result"), "tool_use_id": .string(message.toolCallID ?? ""),
-                                       "content": .string(message.content.isEmpty ? "(sem saída)" : message.content)]))
+                var result: [String: JSONValue] = ["type": .string("tool_result"), "tool_use_id": .string(message.toolCallID ?? ""),
+                                                   "content": .string(message.content.isEmpty ? "(sem saída)" : message.content)]
+                if message.isError { result["is_error"] = .bool(true) }
+                blocks.append(.object(result))
             case .assistant:
                 // Thinking must come back unchanged and first, or the API rejects the turn. This client never turns
                 // thinking on, so blocks only exist when the endpoint produced them unasked; with thinking off the
@@ -166,6 +168,7 @@ extension AnthropicClient {
                 specs[specs.count - 1] = .object(last)
             }
             body["tools"] = .array(specs)
+            if toolChoice == .none { body["tool_choice"] = .object(["type": .string("none")]) }
         }
         return .object(body)
     }

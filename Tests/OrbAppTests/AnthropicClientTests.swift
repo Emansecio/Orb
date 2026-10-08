@@ -262,3 +262,27 @@ struct AnthropicClientTests {
         }
     }
 }
+
+extension AnthropicClientTests {
+    @Test func flagsFailedToolResultsAsErrors() throws {
+        let call = ToolCallRequest(id: "t1", name: "read_file", arguments: "{}")
+        let body = AnthropicClient.requestBody(model: "claude-x", messages: [
+            .user("oi"), ChatMessage(role: .assistant, content: "", toolCalls: [call, ToolCallRequest(id: "t2", name: "x", arguments: "{}")]),
+            .tool("t1", "Error: não achei", isError: true), .tool("t2", "ok"),
+        ], tools: [], maxTokens: 10)
+        let results = try #require(body["messages"]?.array?.last?["content"]?.array)
+        #expect(results[0]["is_error"] == .bool(true))
+        #expect(results[1]["is_error"] == nil)
+    }
+
+    @Test func toolChoiceNoneKeepsTheToolsAndForbidsCalls() {
+        let tools = [ToolSpec(name: "a", description: "A", parameters: .schema([:]))]
+        let auto = AnthropicClient.requestBody(model: "m", messages: [.user("oi")], tools: tools, maxTokens: 10)
+        let none = AnthropicClient.requestBody(model: "m", messages: [.user("oi")], tools: tools, maxTokens: 10, toolChoice: .none)
+        #expect(auto["tool_choice"] == nil)
+        #expect(none["tool_choice"] == .object(["type": .string("none")]))
+        #expect(none["tools"] == auto["tools"]) // same prefix, so the provider's cache still applies
+        // Nothing to forbid without tools (the API rejects tool_choice then).
+        #expect(AnthropicClient.requestBody(model: "m", messages: [.user("oi")], tools: [], maxTokens: 10, toolChoice: .none)["tool_choice"] == nil)
+    }
+}

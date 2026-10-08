@@ -69,10 +69,15 @@ struct Bot: Identifiable, Hashable, Codable, Sendable {
     var model = ""
     var permissionMode = PermissionMode.ask
     var capabilities: Set<Capability> = [.terminal, .browser, .computerUse]
-    /// Tools the user chose "Sempre permitir" for.
-    var allowedTools: Set<String> = []
+    /// What the user chose "Sempre permitir" for, each grant narrowed by a scope (`PermissionRule`). Grants saved
+    /// before scopes existed (`allowedTools`, tool names of either engine) are converted when the Orb loads.
+    var permissionRules: [PermissionRule] = []
     /// Where commands run and relative paths resolve; empty means the home folder.
     var workingDirectory = ""
+    /// Hash (see `FolderInstructions.hash`) of the folder's instruction file the user chose to trust. While the file
+    /// still has this hash its text is given to the Orb as instructions; when it changes it is reference material
+    /// again until the user trusts it anew.
+    var trustedInstructionsHash: String?
     var unread = 0
     /// Memory list of versions before each Orb had its own memory bank; moved into the bank at launch.
     var memory: [MemoryFact] = []
@@ -85,6 +90,8 @@ struct Bot: Identifiable, Hashable, Codable, Sendable {
 
 /// Tolerant decoding (see `KeyedDecodingContainer.value(_:default:)` in Store.swift).
 extension Bot {
+    private enum LegacyKeys: String, CodingKey { case allowedTools }
+
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
@@ -94,8 +101,12 @@ extension Bot {
         model = try c.value(.model, default: "")
         permissionMode = try c.value(.permissionMode, default: .ask)
         capabilities = Set(try c.lossyArray(.capabilities, default: [.terminal, .browser]))
-        allowedTools = try c.value(.allowedTools, default: [])
+        permissionRules = try c.lossyArray(.permissionRules)
+        if let old = try? decoder.container(keyedBy: LegacyKeys.self).decodeIfPresent([String].self, forKey: .allowedTools) {
+            permissionRules = PermissionPolicy.unique(permissionRules + PermissionPolicy.legacyRules(fromToolNames: old))
+        }
         workingDirectory = try c.value(.workingDirectory, default: "")
+        trustedInstructionsHash = try c.decodeIfPresent(String.self, forKey: .trustedInstructionsHash)
         unread = try c.value(.unread, default: 0)
         memory = try c.value(.memory, default: [])
     }
@@ -137,6 +148,9 @@ struct Conversation: Codable, Sendable {
     var messages: [ChatMessage] = []
     /// Claude Code keeps its own history; turns run through it resume this session.
     var claudeSessionID: String?
+    /// The folder that session runs in. Claude Code stores sessions per folder, so after the Orb's folder
+    /// changes the session can't be resumed and a new one starts (nil = recorded before this was tracked).
+    var claudeSessionFolder: String?
     /// How many of `messages` that Claude Code session has seen; later ones (other models' turns) are
     /// handed to it as context on its next turn.
     var claudeSeenCount: Int?
@@ -148,6 +162,12 @@ struct Conversation: Codable, Sendable {
     /// window (see `ContextWindow`). The messages themselves stay.
     var summary: String?
     var summaryCoveredCount: Int?
+    /// Hash of the workspace snapshot the model last got in this conversation (it is sent again only when it changes).
+    var workspaceHash: String?
+    /// The same for the current Claude Code session, which never sees the snapshots other models were given.
+    var claudeWorkspaceHash: String?
+    /// Hash of the permissions and folder instructions in the current Claude Code session's (frozen) system prompt.
+    var claudeStandingHash: String?
 
     /// After a quit or crash mid-turn: nothing is streaming, running or waiting anymore.
     func closingInterruptedTurn() -> Conversation {
@@ -172,6 +192,8 @@ struct Conversation: Codable, Sendable {
 }
 
 extension Conversation {
+    mutating func record(_ marks: DeliveryMarks) { marks.record(in: &self) }
+
     /// Tolerant decoding: an item or message this version can't read (an unknown case after a downgrade) is
     /// skipped instead of sending the whole conversation to `.corrupt`.
     init(from decoder: Decoder) throws {
@@ -179,11 +201,15 @@ extension Conversation {
         items = try c.lossyArray(.items)
         messages = try c.lossyArray(.messages)
         claudeSessionID = try c.decodeIfPresent(String.self, forKey: .claudeSessionID)
+        claudeSessionFolder = try c.decodeIfPresent(String.self, forKey: .claudeSessionFolder)
         claudeSeenCount = try c.decodeIfPresent(Int.self, forKey: .claudeSeenCount)
         memorySavedCount = try c.decodeIfPresent(Int.self, forKey: .memorySavedCount)
         claudeMemoryPinned = try c.decodeIfPresent(String.self, forKey: .claudeMemoryPinned)
         summary = try c.decodeIfPresent(String.self, forKey: .summary)
         summaryCoveredCount = try c.decodeIfPresent(Int.self, forKey: .summaryCoveredCount)
+        workspaceHash = try c.decodeIfPresent(String.self, forKey: .workspaceHash)
+        claudeWorkspaceHash = try c.decodeIfPresent(String.self, forKey: .claudeWorkspaceHash)
+        claudeStandingHash = try c.decodeIfPresent(String.self, forKey: .claudeStandingHash)
     }
 }
 
@@ -239,7 +265,8 @@ extension ToolCall {
 }
 
 enum ApprovalDecision: String, Codable, Sendable, Equatable {
-    case deny, once, always
+    /// `task`: allowed until this turn ends. `always`: allowed from now on, by the rule chosen on the card.
+    case deny, once, always, task
 
     /// A decision from a newer version counts as a refusal.
     init(from decoder: Decoder) throws { self = try decoder.rawValue(Self.self, fallback: .deny) }
@@ -248,6 +275,7 @@ enum ApprovalDecision: String, Codable, Sendable, Equatable {
         switch self {
         case .deny: "Negado"
         case .once: "Permitido uma vez"
+        case .task: "Permitido nesta tarefa"
         case .always: "Sempre permitido"
         }
     }
@@ -255,12 +283,15 @@ enum ApprovalDecision: String, Codable, Sendable, Equatable {
 
 struct ApprovalRequest: Identifiable, Codable, Sendable, Equatable {
     var id = UUID()
-    /// Model-facing tool name ("Sempre permitir" remembers it per bot).
+    /// Model-facing tool name.
     var toolName: String
     var title: String
     var command: String
     var reason: String
     var decision: ApprovalDecision?
+    /// Standing rules the card offers under "Sempre…" (also what "Só nesta tarefa" grants, the first one).
+    /// Empty for calls that must always ask.
+    var suggestions: [PermissionRule] = []
 }
 
 extension ApprovalRequest {
@@ -272,6 +303,7 @@ extension ApprovalRequest {
         command = try c.value(.command, default: "")
         reason = try c.value(.reason, default: "")
         decision = try c.decodeIfPresent(ApprovalDecision.self, forKey: .decision)
+        suggestions = try c.lossyArray(.suggestions)
     }
 }
 

@@ -19,7 +19,8 @@ enum ClaudeCodeMessage: Equatable, Sendable {
     case permission(ClaudeCodePermissionRequest)
     /// Any other control request (hooks, SDK MCP); answered with an error so the CLI never waits on us.
     case unsupportedRequest(requestID: String, subtype: String)
-    case controlResponse(requestID: String, isError: Bool)
+    /// The answer to one of our control requests; `error` is the CLI's text when it refused (nil = success).
+    case controlResponse(requestID: String, error: String?)
     case result(ClaudeCodeResult)
 }
 
@@ -30,6 +31,9 @@ struct ClaudeCodePermissionRequest: Equatable, Sendable {
     var toolUseID: String?
     /// Claude Code's own explanation, when it sends one.
     var reason: String?
+    /// Standing rules Claude Code suggests for this request (`permission_suggestions`), as far as Orb has an
+    /// equivalent: command prefixes, sites, folders and connector tools.
+    var suggestions: [PermissionRule] = []
 }
 
 struct ClaudeCodeResult: Equatable, Sendable {
@@ -37,6 +41,10 @@ struct ClaudeCodeResult: Equatable, Sendable {
     /// Final text, or the most informative error text (`errors[]`, then `result`, then `subtype`).
     var message: String
     var sessionID: String?
+    /// What the whole turn used (every model call in it added up), when the CLI reports it.
+    var usage: TokenUsage?
+    /// What the turn cost at API prices (`total_cost_usd`); on a subscription this is an estimate, not a charge.
+    var costUSD: Double?
 }
 
 /// Turns stdout lines into `ClaudeCodeMessage`s. Remembers which assistant messages were streamed so their
@@ -66,7 +74,9 @@ struct ClaudeCodeParser {
             return controlRequest(json)
         case "control_response":
             guard let id = json["response"]?["request_id"]?.string else { return [] }
-            return [.controlResponse(requestID: id, isError: json["response"]?["subtype"]?.string == "error")]
+            let failed = json["response"]?["subtype"]?.string == "error"
+            let reason = json["response"]?["error"]?.string.flatMap { $0.isEmpty ? nil : $0 }
+            return [.controlResponse(requestID: id, error: failed ? reason ?? "erro desconhecido" : nil)]
         case "result":
             return [.result(Self.result(json))]
         default:
@@ -114,7 +124,44 @@ struct ClaudeCodeParser {
         let reason = [request["decision_reason"], request["description"], request["title"]]
             .compactMap { $0?.string }.first { !$0.isEmpty }
         return [.permission(ClaudeCodePermissionRequest(requestID: id, toolName: tool, input: request["input"] ?? .object([:]),
-                                                         toolUseID: request["tool_use_id"]?.string, reason: reason))]
+                                                         toolUseID: request["tool_use_id"]?.string, reason: reason,
+                                                         suggestions: Self.rules(fromSuggestions: request["permission_suggestions"])))]
+    }
+
+    /// `permission_suggestions` are Claude Code's own permission updates: `addRules` (`toolName` + `ruleContent`
+    /// such as `git status:*` or `domain:github.com`), `addDirectories`, `setMode`… Only the "allow" ones that
+    /// map to an Orb rule are kept; anything else is ignored.
+    static func rules(fromSuggestions suggestions: JSONValue?) -> [PermissionRule] {
+        var rules: [PermissionRule] = []
+        for update in suggestions?.array ?? [] {
+            switch update["type"]?.string {
+            case "addRules" where update["behavior"]?.string == "allow":
+                for rule in update["rules"]?.array ?? [] {
+                    guard let tool = rule["toolName"]?.string else { continue }
+                    let content = rule["ruleContent"]?.string ?? ""
+                    switch tool {
+                    case "Bash":
+                        // `git status:*` and `git status *` are prefix rules; a bare command is one exact command.
+                        let prefix = content.hasSuffix(":*") ? String(content.dropLast(2)) : content.hasSuffix(" *") ? String(content.dropLast(2)) : ""
+                        let words = prefix.split(whereSeparator: \.isWhitespace).map(String.init)
+                        if !words.isEmpty { rules.append(PermissionRule(family: .shell, scope: .commandPrefix(words))) }
+                    case "WebFetch":
+                        if content.hasPrefix("domain:"), content.count > 7 { rules.append(.host(String(content.dropFirst(7)))) }
+                    case let name where name.hasPrefix("mcp__") && content.isEmpty:
+                        rules.append(.connector(name))
+                    default:
+                        break
+                    }
+                }
+            case "addDirectories":
+                for directory in update["directories"]?.array?.compactMap(\.string) ?? [] where directory.hasPrefix("/") && directory != "/" {
+                    rules.append(.folder(directory))
+                }
+            default:
+                break
+            }
+        }
+        return rules.filter(\.isValid)
     }
 
     /// Mirrors the SDK's `_error_result_text`: `errors[]`, then `result`, then a non-success `subtype`.
@@ -127,7 +174,17 @@ struct ClaudeCodeParser {
             let subtype = json["subtype"]?.string.flatMap { $0 == "success" ? nil : $0 }
             message = errors.isEmpty ? (text.isEmpty ? subtype ?? "erro desconhecido" : text) : errors.joined(separator: "; ")
         }
-        return ClaudeCodeResult(isError: isError, message: message, sessionID: json["session_id"]?.string)
+        return ClaudeCodeResult(isError: isError, message: message, sessionID: json["session_id"]?.string,
+                                usage: usage(in: json["usage"]), costUSD: json["total_cost_usd"]?.number)
+    }
+
+    /// Anthropic's counting, like `TokenUsage` itself: `input_tokens` leaves out what the cache served or stored.
+    static func usage(in usage: JSONValue?) -> TokenUsage? {
+        guard let usage, case .object = usage else { return nil }
+        let result = TokenUsage(input: usage["input_tokens"]?.int, output: usage["output_tokens"]?.int,
+                                cacheRead: usage["cache_read_input_tokens"]?.int,
+                                cacheWrite: usage["cache_creation_input_tokens"]?.int)
+        return result == TokenUsage() ? nil : result
     }
 
     /// Tool result content is a string or a list of content blocks.
@@ -148,6 +205,12 @@ enum ClaudeCodeWire {
     static func userMessage(_ text: String) -> String {
         JSONValue.object(["type": .string("user"), "session_id": .string(""), "parent_tool_use_id": .null,
                           "message": .object(["role": .string("user"), "content": .string(text)])]).jsonString
+    }
+
+    /// `set_permission_mode`: switches the running session's `--permission-mode` (SDK `set_permission_mode`).
+    static func setPermissionMode(id: String, mode: String) -> String {
+        JSONValue.object(["type": .string("control_request"), "request_id": .string(id),
+                          "request": .object(["subtype": .string("set_permission_mode"), "mode": .string(mode)])]).jsonString
     }
 
     /// `initialize` (sent first, before any user message) or `interrupt`.
@@ -217,8 +280,9 @@ enum ClaudeCodeModels {
 // MARK: - Tools and permissions
 
 enum ClaudeCodeTools {
-    /// Tools of the Orb's memory server (`mcp__memoria__remember`, `mcp__memoria__recall`).
-    static let memoryPrefix = "mcp__\(MemoryMCPServer.name)__"
+    /// Tools of the Orb's own MCP server: memory (`mcp__orb_memoria__remember`, `__recall`) and, for an Orb with
+    /// "Apps do Mac", the Mac tools (`mcp__orb_memoria__open`, `__applescript`…). The server keeps its first name.
+    static let memoryPrefix = "mcp__\(OrbToolsMCPServer.name)__"
     /// Removed when the bot's "Terminal e arquivos" capability is off.
     static let terminal = ["Bash", "Edit", "Write", "MultiEdit", "NotebookEdit"]
     /// Removed when "Ler páginas da web" is off.
@@ -230,12 +294,16 @@ enum ClaudeCodeTools {
         case "Read", "LS", "Edit", "Write", "MultiEdit", "NotebookEdit": .file
         case "Glob", "Grep": .search
         case "WebFetch", "WebSearch": .browser
-        default: name.hasPrefix(memoryPrefix) ? .memory : name.hasPrefix("mcp__") ? .connector : .computer
+        default:
+            if name.hasPrefix(memoryPrefix) { OrbToolsMCPServer.tool(claudeCodeName: name)?.kind ?? .memory }
+            else { name.hasPrefix("mcp__") ? .connector : .computer }
         }
     }
 
     /// Transcript and approval-card text, in Portuguese.
     static func summary(_ name: String, _ input: JSONValue) -> (title: String, detail: String) {
+        // The Orb's own tools (memory, Mac) describe their calls themselves, as they do outside Claude Code.
+        if let tool = OrbToolsMCPServer.tool(claudeCodeName: name) { return tool.summary(input) }
         let path = input["file_path"]?.string ?? input["notebook_path"]?.string ?? input["path"]?.string ?? ""
         switch name {
         case "Bash": return ("Rodando no Terminal", input["command"]?.string ?? "")
@@ -246,8 +314,6 @@ enum ClaudeCodeTools {
         case "Glob", "Grep": return ("Procurando arquivos", input["pattern"]?.string ?? "")
         case "WebFetch": return ("Lendo página", input["url"]?.string ?? "")
         case "WebSearch": return ("Pesquisando na web", input["query"]?.string ?? "")
-        case memoryPrefix + "remember", memoryPrefix + "recall":
-            return MemoryMCPServer.tools.first { memoryPrefix + $0.spec.name == name }?.summary(input) ?? ("Usando a memória", "")
         default:
             let arguments = input == .object([:]) ? "" : " " + input.jsonString
             if name.hasPrefix("mcp__") {
@@ -274,24 +340,20 @@ enum ClaudeCodePolicy {
         }
     }
 
-    static let readOnlyDenial = "Not run: the user set you to read-only mode. Explain what you would do instead."
+    static let readOnlyDenial = PermissionPolicy.readOnlyDenial
     static let userDenial = "The user denied this action. Do not retry it; ask or suggest an alternative."
 
-    /// The answer when no one needs to be asked; nil means show an approval card. Destructive shell commands
-    /// always ask in "Perguntar antes" and "Automático", even for tools marked "Sempre permitir".
-    static func answer(mode: PermissionMode, toolName: String, input: JSONValue = .null,
-                       allowed: Set<String>) -> ClaudeCodePermissionAnswer? {
-        // Searching the Orb's own memory only reads it, like `recall` outside Claude Code.
-        if toolName == ClaudeCodeTools.memoryPrefix + "recall" { return .allow }
-        // Saving identity or preferences changes the Orb's standing instructions: ask unless "Sem pedir permissão".
-        if toolName == ClaudeCodeTools.memoryPrefix + "remember",
-           RememberTool().risk(input) == .instructs, mode == .ask || mode == .auto { return nil }
-        let isDangerous = input["command"]?.string.flatMap(DangerousCommand.reason) != nil
-        switch mode {
-        case .readOnly: return .deny(readOnlyDenial)
-        case .bypass: return .allow
-        case .auto: return isDangerous ? nil : .allow
-        case .ask: return allowed.contains(toolName) && !isDangerous ? .allow : nil
+    /// The answer when no one needs to be asked; nil means show an approval card. The decision is
+    /// `PermissionPolicy`'s, the same as for the built-in tools.
+    static func answer(mode: PermissionMode, toolName: String, input: JSONValue = .null, rules: [PermissionRule] = [],
+                       turnGrants: [PermissionRule] = [], workspace: URL? = nil) -> ClaudeCodePermissionAnswer? {
+        let call = PermissionPolicy.call(claudeCodeTool: toolName, input: input, workspace: workspace)
+        let verdict = PermissionPolicy.evaluate(mode: mode, call: call, rules: rules,
+                                                turnGrants: turnGrants, workspace: workspace)
+        switch verdict {
+        case .allow: return .allow
+        case .deny(let message): return .deny(message)
+        case .ask: return nil
         }
     }
 }

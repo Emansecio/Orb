@@ -10,6 +10,8 @@ struct BotInspector: View {
     @State private var isConfirmingBypass = false
     @State private var isEditingIdentity = false
     @State private var identityDraft = ""
+    /// The instruction file in the Orb's folder, if any (read off the main thread when the folder changes).
+    @State private var instructionFile: FolderInstructions?
 
     var body: some View {
         if let bot = model.bot(botID) {
@@ -71,17 +73,40 @@ struct BotInspector: View {
                             .truncationMode(.head)
                     }
                     Button("Escolher pasta…", systemImage: "folder") { isPickingFolder = true }
-                    ForEach(bot.allowedTools.sorted(), id: \.self) { tool in
-                        LabeledContent(tool) {
-                            Button("Revogar") { model.update(bot.id) { $0.allowedTools.remove(tool) } }
-                                .controlSize(.small)
+                    if let file = instructionFile {
+                        // Claude Code loads CLAUDE.md by itself as the project's instructions: trusting it here would change nothing.
+                        if !InstructionsText.claudeCodeReadsItself(file, usesClaudeCode: usesClaudeCode(bot)) {
+                            Toggle(isOn: instructionsTrustBinding(file, of: bot)) {
+                                Label("Confiar nas instruções desta pasta", systemImage: "checkmark.shield")
+                            }
                         }
+                        Button("Ver \(file.fileName) no Finder", systemImage: "doc.text.magnifyingglass") {
+                            NSWorkspace.shared.activateFileViewerSelecting([bot.workingURL.appending(path: file.fileName)])
+                        }
+                    }
+                    ForEach(bot.permissionRules, id: \.self) { rule in
+                        LabeledContent {
+                            Button("Revogar") { model.update(bot.id) { $0.permissionRules.removeAll { $0 == rule } } }
+                                .controlSize(.small)
+                        } label: {
+                            Text(rule.title)
+                        }
+                    }
+                    if bot.permissionRules.count > 1 {
+                        Button("Revogar tudo", role: .destructive) { model.update(bot.id) { $0.permissionRules = [] } }
+                            .controlSize(.small)
                     }
                 } header: {
                     Text("Trabalho")
                 } footer: {
-                    if !bot.allowedTools.isEmpty {
-                        Text("Ações acima rodam sem perguntar (“Sempre permitir”).")
+                    VStack(alignment: .leading, spacing: 4) {
+                        if let file = instructionFile {
+                            Text(InstructionsText.footer(for: file, name: bot.name, trustedHash: bot.trustedInstructionsHash,
+                                                         usesClaudeCode: usesClaudeCode(bot)))
+                        }
+                        if !bot.permissionRules.isEmpty {
+                            Text("Estas ações rodam sem perguntar em “Perguntar antes” (“Sempre permitir”). Comandos arriscados sempre perguntam.")
+                        }
                     }
                 }
 
@@ -104,6 +129,13 @@ struct BotInspector: View {
             }
             .formStyle(.grouped)
             .scrollContentBackground(.hidden)
+            .task(id: bot.workingDirectory) {
+                instructionFile = await FolderInstructions.loadInBackground(from: bot.workingURL)
+            }
+            // The file may have been edited while the panel stayed open: read it again on coming back to the app.
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                Task { instructionFile = await FolderInstructions.loadInBackground(from: bot.workingURL) }
+            }
             .fileImporter(isPresented: $isPickingFolder, allowedContentTypes: [.folder]) { result in
                 if case .success(let url) = result { model.update(bot.id) { $0.workingDirectory = url.path } }
             }
@@ -217,6 +249,21 @@ struct BotInspector: View {
         )
     }
 
+    private func usesClaudeCode(_ bot: Bot) -> Bool { model.modelRef(for: bot)?.provider == .claudeCode }
+
+    /// On remembers the hash of the file as it is on disk right now, not as the panel last showed it: what the user
+    /// trusts is what the next turn will read. If the file changed, the toggle shows off again.
+    private func instructionsTrustBinding(_ file: FolderInstructions, of bot: Bot) -> Binding<Bool> {
+        Binding(
+            get: { file.isTrusted(by: model.bot(botID)?.trustedInstructionsHash) },
+            set: { isOn in
+                let current = FolderInstructions.load(from: bot.workingURL)
+                instructionFile = current
+                model.update(bot.id) { $0.trustedInstructionsHash = isOn ? current?.hash : nil }
+            }
+        )
+    }
+
     private func capabilityBinding(_ capability: Capability, of bot: Bot) -> Binding<Bool> {
         Binding(
             get: { bot.capabilities.contains(capability) },
@@ -226,6 +273,24 @@ struct BotInspector: View {
                 }
             }
         )
+    }
+}
+
+enum InstructionsText {
+    /// CLAUDE.md in the folder of an Orb that runs on Claude Code: Claude Code reads it as instructions on its own.
+    static func claudeCodeReadsItself(_ file: FolderInstructions, usesClaudeCode: Bool) -> Bool {
+        usesClaudeCode && file.fileName == "CLAUDE.md"
+    }
+
+    static func footer(for file: FolderInstructions, name: String, trustedHash: String?, usesClaudeCode: Bool = false) -> String {
+        if claudeCodeReadsItself(file, usesClaudeCode: usesClaudeCode) {
+            return "\(file.fileName) é lido pelo próprio Claude Code como instruções do projeto."
+        }
+        if file.isTrusted(by: trustedHash) { return "\(file.fileName) vale como instruções de \(name) nesta pasta." }
+        if trustedHash != nil {
+            return "\(file.fileName) mudou desde que você confiou nele: \(name) o lê só como referência, até você confiar de novo."
+        }
+        return "\(file.fileName) é lido por \(name) como material de referência, não como ordens. Confie para valer como instruções."
     }
 }
 

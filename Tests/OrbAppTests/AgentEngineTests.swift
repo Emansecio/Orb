@@ -2,27 +2,37 @@ import Foundation
 import Testing
 @testable import Orb
 
+/// One scripted model response: its events, then (optionally) a failure.
+private struct Response {
+    var events: [LLMEvent]
+    var failure: Error?
+}
+
 /// Plays back one scripted response per model call and records what the model was sent.
 private actor Script {
-    private var responses: [[LLMEvent]]
+    private var responses: [Response]
     private(set) var received: [[ChatMessage]] = []
+    private(set) var choices: [ToolChoice] = []
 
-    init(_ responses: [[LLMEvent]]) { self.responses = responses }
+    init(_ responses: [[LLMEvent]]) { self.responses = responses.map { Response(events: $0) } }
+    init(responses: [Response]) { self.responses = responses }
 
-    func next(_ messages: [ChatMessage]) -> [LLMEvent] {
+    func next(_ messages: [ChatMessage], _ choice: ToolChoice) -> Response {
         received.append(messages)
-        return responses.isEmpty ? [.text("fim")] : responses.removeFirst()
+        choices.append(choice)
+        return responses.isEmpty ? Response(events: [.text("fim")]) : responses.removeFirst()
     }
 }
 
 private struct ScriptedLLM: LLMClient {
     let script: Script
 
-    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec]) -> AsyncThrowingStream<LLMEvent, Error> {
+    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
         AsyncThrowingStream { continuation in
             Task {
-                for event in await script.next(messages) { continuation.yield(event) }
-                continuation.finish()
+                let response = await script.next(messages, toolChoice)
+                for event in response.events { continuation.yield(event) }
+                continuation.finish(throwing: response.failure)
             }
         }
     }
@@ -49,13 +59,51 @@ private struct TouchTool: AgentTool {
     }
 }
 
+/// A read-only tool that takes `ms` to run, so overlapping runs can be seen.
+private struct LookTool: AgentTool {
+    let gauge: Gauge
+    var spec: ToolSpec { ToolSpec(name: "look", description: "Looks", parameters: .schema([:])) }
+    var kind: ToolCall.Kind { .file }
+    var capability: Capability? { nil }
+    func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
+    func summary(_ arguments: JSONValue) -> (title: String, detail: String) { ("Olhando", "arquivo") }
+    func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
+        await gauge.enter()
+        defer { Task { await gauge.leave() } }
+        try await Task.sleep(for: .milliseconds(arguments["ms"]?.int ?? 0))
+        return "viu \(arguments["name"]?.string ?? "?")"
+    }
+}
+
+/// Counts how many runs overlap.
+private actor Gauge {
+    private var current = 0
+    private(set) var peak = 0
+    func enter() { current += 1; peak = max(peak, current) }
+    func leave() { current -= 1 }
+}
+
+private struct BrokenTool: AgentTool {
+    var spec: ToolSpec { ToolSpec(name: "broken", description: "Always fails", parameters: .schema([:])) }
+    var kind: ToolCall.Kind { .file }
+    var capability: Capability? { nil }
+    func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
+    func summary(_ arguments: JSONValue) -> (title: String, detail: String) { ("Quebrando", "") }
+    func run(_ arguments: JSONValue, context: ToolContext) async throws -> String { throw ToolError("não deu") }
+}
+
 struct AgentEngineTests {
-    private func request(_ script: Script, mode: PermissionMode, allowed: Set<String> = [], runs: Counter) -> TurnRequest {
+    /// What "Sempre permitir" on the `touch` test tool (a file tool) used to be, now a rule for its family.
+    private let touchRule = PermissionRule(family: .writeFiles)
+
+    private func request(_ script: Script, mode: PermissionMode, allowed: [PermissionRule] = [], runs: Counter,
+                         tools: [any AgentTool]? = nil, maxSteps: Int = AgentEngine.defaultMaxSteps) -> TurnRequest {
         var bot = Bot(name: "Teste", role: "", orb: OrbConfig(), permissionMode: mode)
-        bot.allowedTools = allowed
+        bot.permissionRules = allowed
         return TurnRequest(bot: bot, model: "fake", system: "sys", history: [], prompt: "oi",
-                           client: ScriptedLLM(script: script), tools: [TouchTool(runs: runs)],
-                           context: ToolContext(workingDirectory: URL(fileURLWithPath: NSTemporaryDirectory())))
+                           client: ScriptedLLM(script: script), tools: tools ?? [TouchTool(runs: runs)],
+                           context: ToolContext(workingDirectory: URL(fileURLWithPath: NSTemporaryDirectory())),
+                           maxSteps: maxSteps)
     }
 
     private let touchCall = LLMEvent.toolCalls([ToolCallRequest(id: "c1", name: "touch", arguments: "{}")])
@@ -66,7 +114,7 @@ struct AgentEngineTests {
         for await event in engine.run(request) {
             events.append(event)
             if case .approval(let approval) = event {
-                await engine.resolve(approvalID: approval.id, decision: decision)
+                await engine.gate.resolve(approvalID: approval.id, decision: decision)
             }
         }
         return events
@@ -115,7 +163,7 @@ struct AgentEngineTests {
     @Test func previouslyAllowedToolRunsWithoutAsking() async {
         let runs = Counter()
         let script = Script([[touchCall], [.text("Pronto")]])
-        let events = await run(AgentEngine(), request(script, mode: .ask, allowed: ["touch"], runs: runs))
+        let events = await run(AgentEngine(), request(script, mode: .ask, allowed: [touchRule], runs: runs))
         #expect(!events.contains { if case .approval = $0 { true } else { false } })
         #expect(await runs.value == 1)
     }
@@ -149,7 +197,7 @@ struct AgentEngineTests {
     }
 
     @Test func alwaysAllowDoesNotCoverDestructiveCommands() async {
-        let events = await run(AgentEngine(), request(Script([[dangerousCall], [.text("Ok")]]), mode: .ask, allowed: ["touch"],
+        let events = await run(AgentEngine(), request(Script([[dangerousCall], [.text("Ok")]]), mode: .ask, allowed: [touchRule],
                                                       runs: Counter()), decision: .deny)
         #expect(approvals(events).count == 1)
     }
@@ -157,7 +205,7 @@ struct AgentEngineTests {
     @Test func readOnlyWinsOverAlwaysAllow() async {
         let runs = Counter()
         let script = Script([[touchCall], [.text("Ok")]])
-        _ = await run(AgentEngine(), request(script, mode: .readOnly, allowed: ["touch"], runs: runs))
+        _ = await run(AgentEngine(), request(script, mode: .readOnly, allowed: [touchRule], runs: runs))
         #expect(await runs.value == 0)
     }
 
@@ -170,6 +218,606 @@ struct AgentEngineTests {
         #expect(results.count == 2)
         #expect(results[0].contains("unknown tool"))
         #expect(results[1].contains("not valid JSON"))
+    }
+}
+
+extension AgentEngineTests {
+    private func lookCall(_ id: String, ms: Int = 0, name: String = "x") -> ToolCallRequest {
+        ToolCallRequest(id: id, name: "look", arguments: #"{"ms":\#(ms),"name":"\#(name)"}"#)
+    }
+
+    private func statuses(_ events: [TurnEvent]) -> [String] {
+        events.compactMap { if case .status(let text) = $0 { text } else { nil } }
+    }
+
+    private func failures(_ events: [TurnEvent]) -> [String] {
+        events.compactMap { if case .failed(let text) = $0 { text } else { nil } }
+    }
+
+    private func notices(_ events: [TurnEvent]) -> [String] {
+        events.compactMap { if case .notice(let text) = $0 { text } else { nil } }
+    }
+
+    /// An engine that does not really wait between retries, and the waits it was asked for.
+    private func quickEngine() -> (AgentEngine, Counter) {
+        let waits = Counter()
+        return (AgentEngine(retrySleep: { _ in await waits.increment() }), waits)
+    }
+
+    // MARK: Retries
+
+    @Test func aTransientFailureBeforeAnyOutputIsRetried() async {
+        let (engine, waits) = quickEngine()
+        let script = Script(responses: [Response(events: [], failure: LLMError.http(status: 529, message: "Overloaded")),
+                                        Response(events: [.text("Oi!")])])
+        let events = await run(engine, request(script, mode: .ask, runs: Counter()))
+        #expect(await script.received.count == 2)
+        #expect(await waits.value == 1)
+        #expect(statuses(events).contains { $0.hasPrefix("Provedor ocupado, tentando de novo em ") })
+        #expect(failures(events).isEmpty)
+        #expect(messages(events).map(\.role) == [.user, .assistant])
+        #expect(messages(events).last?.content == "Oi!")
+    }
+
+    @Test func anOverflowReportedAsATransientErrorSkipsTheRetries() async {
+        let (engine, waits) = quickEngine()
+        let script = Script(responses: [Response(events: [], failure: LLMError.stream(type: "overloaded_error", message: "prompt is too long")),
+                                        Response(events: [.text("ok")])])
+        let events = await run(engine, request(script, mode: .ask, runs: Counter()))
+        #expect(await waits.value == 0)
+        #expect(await script.received.count == 2)
+        #expect(failures(events).isEmpty)
+        #expect(messages(events).last?.content == "ok")
+    }
+
+    @Test func aFailureAfterTextWasShownIsNotRetriedAndKeepsTheText() async {
+        let (engine, waits) = quickEngine()
+        let script = Script(responses: [Response(events: [.text("Vou começar")], failure: LLMError.http(status: 529, message: "Overloaded")),
+                                        Response(events: [.text("não deveria chegar")])])
+        let events = await run(engine, request(script, mode: .ask, runs: Counter()))
+        #expect(await script.received.count == 1)
+        #expect(await waits.value == 0)
+        #expect(failures(events).count == 1)
+        let recorded = messages(events)
+        #expect(recorded.map(\.role) == [.user, .assistant])
+        #expect(recorded.last?.content == "Vou começar\n\n[resposta interrompida]")
+    }
+
+    @Test func aFailureThatCannotBeRetriedEndsTheTurn() async {
+        let (engine, waits) = quickEngine()
+        let script = Script(responses: [Response(events: [], failure: LLMError.http(status: 401, message: "no"))])
+        let events = await run(engine, request(script, mode: .ask, runs: Counter()))
+        #expect(await script.received.count == 1)
+        #expect(await waits.value == 0)
+        #expect(failures(events).count == 1)
+        #expect(messages(events).map(\.role) == [.user])
+    }
+
+    @Test func retriesGiveUpAfterTheLastAttempt() async {
+        let (engine, waits) = quickEngine()
+        let down = Response(events: [], failure: LLMError.http(status: 503, message: "down"))
+        let script = Script(responses: [down, down, down, down, down])
+        let events = await run(engine, request(script, mode: .ask, runs: Counter()))
+        #expect(await script.received.count == 4)
+        #expect(await waits.value == 3)
+        #expect(failures(events).count == 1)
+    }
+
+    @Test func aContextOverflowStillRetriesWithLessHistory() async {
+        let (engine, waits) = quickEngine()
+        let script = Script(responses: [Response(events: [], failure: LLMError.contextExceeded("too long")),
+                                        Response(events: [.text("ok")])])
+        let events = await run(engine, request(script, mode: .ask, runs: Counter()))
+        #expect(await script.received.count == 2)
+        #expect(await waits.value == 0) // not a transient failure: no waiting
+        #expect(failures(events).isEmpty)
+        #expect(messages(events).last?.content == "ok")
+    }
+
+    // MARK: Stop reasons
+
+    @Test func aCutOffToolCallIsNotRunAndTheModelIsToldToSplitTheWork() async {
+        let runs = Counter()
+        let script = Script([[touchCall, .finished(.maxTokens, nil)], [.text("Dividi"), .finished(.done, nil)]])
+        let events = await run(AgentEngine(), request(script, mode: .bypass, runs: runs))
+        #expect(await runs.value == 0)
+        let result = messages(events).first { $0.role == .tool }
+        #expect(result?.toolCallID == "c1")
+        #expect(result?.isError == true)
+        #expect(result?.content.contains("NOT run") == true)
+        #expect(result?.content.contains("append") == true)
+        #expect(await script.received[1].last?.role == .tool)
+        #expect(failures(events).isEmpty)
+        #expect(messages(events).last?.content == "Dividi")
+    }
+
+    @Test func aReplyCutOffInTextContinuesOnceWithoutShowingTheNudge() async {
+        let script = Script([[.text("primeira parte"), .finished(.maxTokens, nil)], [.text(" e o resto"), .finished(.done, nil)]])
+        let events = await run(AgentEngine(), request(script, mode: .ask, runs: Counter()))
+        #expect(await script.received.count == 2)
+        #expect(await script.received[1].last == .user(AgentEngine.continueNudge))
+        #expect(messages(events).map(\.role) == [.user, .assistant, .assistant])
+        #expect(!messages(events).contains { $0.content == AgentEngine.continueNudge })
+        #expect(failures(events).isEmpty)
+    }
+
+    @Test func aCutOffWithNoTextRecordsNoEmptyAssistantMessage() async {
+        let script = Script([[.finished(.maxTokens, nil)], [.text("ok"), .finished(.done, nil)]])
+        let events = await run(AgentEngine(), request(script, mode: .ask, runs: Counter()))
+        #expect(await script.received.count == 2)
+        #expect(await script.received[1].last == .user(AgentEngine.continueNudge))
+        #expect(!messages(events).contains { $0.role == .assistant && $0.content.isEmpty && $0.toolCalls.isEmpty })
+        #expect(messages(events).map(\.role) == [.user, .assistant])
+        #expect(failures(events).isEmpty)
+    }
+
+    @Test func aCutOffToolCallOnTheWarningStepStillCarriesTheWarning() async {
+        let script = Script([[touchCall, .finished(.maxTokens, nil)], [.text("Dividi"), .finished(.done, nil)]])
+        let events = await run(AgentEngine(), request(script, mode: .bypass, runs: Counter(), maxSteps: 4))
+        let result = messages(events).first { $0.role == .tool }
+        #expect(result?.content.hasSuffix(AgentEngine.stepWarning(remaining: 3)) == true)
+        #expect(result?.content.hasPrefix(AgentEngine.cutOffResult) == true)
+    }
+
+    @Test func aSecondCutOffEndsWithANotice() async {
+        let cut = [LLMEvent.text("texto"), .finished(.maxTokens, nil)]
+        let script = Script([cut, cut, cut])
+        let events = await run(AgentEngine(), request(script, mode: .ask, runs: Counter()))
+        #expect(await script.received.count == 2)
+        #expect(notices(events).count == 1)
+        #expect(failures(events).isEmpty)
+    }
+
+    @Test func aRefusalEndsAsAFailure() async {
+        let script = Script([[.text("Não posso ajudar com isso."), .finished(.refusal, nil)]])
+        let events = await run(AgentEngine(), request(script, mode: .ask, runs: Counter()))
+        #expect(failures(events).first?.hasPrefix("O modelo recusou") == true)
+        #expect(messages(events).last?.content == "Não posso ajudar com isso.")
+    }
+
+    @Test func anEmptyReplyIsAFailureNotASuccess() async {
+        for reply in [[LLMEvent.finished(.done, nil)], [.text("  \n"), .finished(.done, nil)], []] {
+            let events = await run(AgentEngine(), request(Script([reply]), mode: .ask, runs: Counter()))
+            #expect(failures(events) == ["O modelo não respondeu."])
+            #expect(messages(events).map(\.role) == [.user])
+        }
+    }
+
+    @Test func anEmptyReplyAfterToolsIsAlsoAFailure() async {
+        let script = Script([[touchCall], [.finished(.done, nil)]])
+        let events = await run(AgentEngine(), request(script, mode: .auto, runs: Counter()))
+        #expect(failures(events) == ["O modelo não respondeu."])
+    }
+
+    @Test func anIncompleteReplyIsAFailureThatKeepsWhatWasShown() async {
+        let script = Script([[.text("quase"), .finished(.incomplete, nil)]])
+        let events = await run(AgentEngine(), request(script, mode: .ask, runs: Counter()))
+        #expect(failures(events).count == 1)
+        #expect(messages(events).last?.content == "quase" + AgentEngine.interruptedMarker)
+    }
+
+    @Test func aContextLimitStopWithNothingShownRetriesWithLessHistory() async {
+        let script = Script([[.finished(.contextExceeded, nil)], [.text("ok"), .finished(.done, nil)]])
+        let events = await run(AgentEngine(), request(script, mode: .ask, runs: Counter()))
+        #expect(await script.received.count == 2)
+        #expect(failures(events).isEmpty)
+    }
+
+    // MARK: Usage
+
+    @Test func usageIsSummedOverTheTurn() async {
+        let script = Script([[touchCall, .finished(.toolUse, TokenUsage(input: 100, output: 10, cacheRead: nil, cacheWrite: 5))],
+                             [.text("ok"), .finished(.done, TokenUsage(input: 20, output: 7, cacheRead: 100, cacheWrite: nil))]])
+        let events = await run(AgentEngine(), request(script, mode: .auto, runs: Counter()))
+        let reported = events.compactMap { if case .usage(let usage) = $0 { usage } else { nil } }
+        #expect(reported.count == 2)
+        #expect(reported.last == TokenUsage(input: 120, output: 17, cacheRead: 100, cacheWrite: 5))
+    }
+
+    @Test func noUsageEventWhenTheProviderReportsNone() async {
+        let events = await run(AgentEngine(), request(Script([[.text("oi")]]), mode: .ask, runs: Counter()))
+        #expect(!events.contains { if case .usage = $0 { true } else { false } })
+    }
+
+    // MARK: Step budget
+
+    @Test func theModelIsWarnedWhenThreeStepsRemainAndTheLastStepHasNoTools() async {
+        let looks = [LLMEvent.toolCalls([lookCall("a")])]
+        let script = Script([looks, looks, looks, looks, [.text("Resumo"), .finished(.done, nil)]])
+        let tools: [any AgentTool] = [LookTool(gauge: Gauge())]
+        let events = await run(AgentEngine(), request(script, mode: .ask, runs: Counter(), tools: tools, maxSteps: 5))
+        #expect(await script.choices == [.auto, .auto, .auto, .auto, .none])
+        let results = messages(events).filter { $0.role == .tool }.map(\.content)
+        #expect(results.count == 4)
+        let warning = AgentEngine.stepWarning(remaining: 3)
+        #expect(warning.hasPrefix("[Orb: restam 3 chamadas de ferramenta neste turno;"))
+        // Only the result of the step after which 3 remain carries it, at the end.
+        #expect(results.map { $0.hasSuffix(warning) } == [false, true, false, false])
+        #expect(results[1] == "viu x\n\n" + warning)
+        #expect(notices(events) == [AgentEngine.pausedNotice(after: 5)])
+        #expect(failures(events).isEmpty)
+    }
+
+    @Test func toolCallsOnTheLastStepAreNotRunAndTheTurnPauses() async {
+        let runs = Counter()
+        let script = Script([[touchCall], [touchCall], [touchCall]])
+        let events = await run(AgentEngine(), request(script, mode: .bypass, runs: runs, maxSteps: 3))
+        #expect(await runs.value == 2)
+        #expect(await script.choices.last == ToolChoice.none)
+        #expect(notices(events) == [AgentEngine.pausedNotice(after: 3)])
+        #expect(failures(events).isEmpty)
+        // No call is left without an answer in the history.
+        #expect(messages(events).filter { $0.role == .tool }.count == 2)
+        #expect(messages(events).last?.role == .tool)
+    }
+
+    @Test func aTurnThatFinishesEarlyNeverSeesTheLimit() async {
+        let script = Script([[touchCall], [.text("Feito")]])
+        let events = await run(AgentEngine(), request(script, mode: .auto, runs: Counter(), maxSteps: 5))
+        #expect(await script.choices == [.auto, .auto])
+        #expect(notices(events).isEmpty)
+        #expect(!messages(events).contains { $0.content.contains("[Orb:") })
+    }
+
+    // MARK: Parallel tools
+
+    @Test func readOnlyCallsRunAtTheSameTimeAndKeepTheirOrder() async {
+        let gauge = Gauge()
+        let calls = [lookCall("a", ms: 300, name: "A"), lookCall("b", ms: 200, name: "B"), lookCall("c", ms: 100, name: "C")]
+        let script = Script([[.toolCalls(calls)], [.text("Pronto")]])
+        let tools: [any AgentTool] = [LookTool(gauge: gauge)]
+        let events = await run(AgentEngine(), request(script, mode: .ask, runs: Counter(), tools: tools))
+        #expect(await gauge.peak == 3)
+        let results = messages(events).filter { $0.role == .tool }
+        #expect(results.map(\.toolCallID) == ["a", "b", "c"])
+        #expect(results.map(\.content) == ["viu A", "viu B", "viu C"])
+        #expect(approvals(events).isEmpty)
+    }
+
+    @Test func callsThatChangeThingsStayInOrderBetweenParallelReads() async {
+        let gauge = Gauge()
+        let runs = Counter()
+        let calls = [lookCall("a", ms: 100), lookCall("b", ms: 100), ToolCallRequest(id: "c", name: "touch", arguments: "{}"),
+                     lookCall("d", ms: 100)]
+        let script = Script([[.toolCalls(calls)], [.text("Pronto")]])
+        let tools: [any AgentTool] = [LookTool(gauge: gauge), TouchTool(runs: runs)]
+        let events = await run(AgentEngine(), request(script, mode: .auto, runs: runs, tools: tools))
+        #expect(await gauge.peak == 2) // a and b together; d waits for the touch
+        #expect(await runs.value == 1)
+        #expect(messages(events).filter { $0.role == .tool }.map(\.toolCallID) == ["a", "b", "c", "d"])
+    }
+
+    // MARK: Errors flagged
+
+    @Test func failedToolCallsAreFlaggedAsErrors() async {
+        let calls = [ToolCallRequest(id: "a", name: "nope", arguments: "{}"),
+                     ToolCallRequest(id: "b", name: "broken", arguments: "{bad"),
+                     ToolCallRequest(id: "c", name: "broken", arguments: "{}"),
+                     ToolCallRequest(id: "d", name: "look", arguments: "{}")]
+        let script = Script([[.toolCalls(calls)], [.text("Ok")]])
+        let tools: [any AgentTool] = [BrokenTool(), LookTool(gauge: Gauge())]
+        let events = await run(AgentEngine(), request(script, mode: .auto, runs: Counter(), tools: tools))
+        let results = messages(events).filter { $0.role == .tool }
+        #expect(results.map(\.isError) == [true, true, true, false])
+        #expect(results[2].content == "Error: não deu")
+    }
+
+    @Test func aDeniedOrBlockedCallIsFlaggedAsAnError() async {
+        let denied = await run(AgentEngine(), request(Script([[touchCall], [.text("ok")]]), mode: .ask, runs: Counter()), decision: .deny)
+        #expect(messages(denied).first { $0.role == .tool }?.isError == true)
+        let blocked = await run(AgentEngine(), request(Script([[touchCall], [.text("ok")]]), mode: .readOnly, runs: Counter()))
+        #expect(messages(blocked).first { $0.role == .tool }?.isError == true)
+        let ran = await run(AgentEngine(), request(Script([[touchCall], [.text("ok")]]), mode: .auto, runs: Counter()))
+        #expect(messages(ran).first { $0.role == .tool }?.isError == false)
+    }
+}
+
+/// Mode and rules the way the app keeps them: changed from outside while a turn runs.
+private actor PermissionBox {
+    private(set) var state: PermissionState
+    init(mode: PermissionMode, rules: [PermissionRule] = []) { state = PermissionState(mode: mode, rules: rules) }
+    func set(mode: PermissionMode) { state.mode = mode }
+    func set(rules: [PermissionRule]) { state.rules = rules }
+    func add(_ rule: PermissionRule) { state.rules.append(rule) }
+}
+
+/// Like `ScriptedLLM`, with a hook that runs before each model call (the user changing something between steps).
+private struct HookedLLM: LLMClient {
+    let script: Script
+    let before: @Sendable (Int) async -> Void
+
+    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                await before(await script.received.count)
+                let response = await script.next(messages, toolChoice)
+                for event in response.events { continuation.yield(event) }
+                continuation.finish(throwing: response.failure)
+            }
+        }
+    }
+}
+
+struct AgentEngineGatingTests {
+    private let touchRule = PermissionRule(family: .writeFiles)
+    private let touchCall = LLMEvent.toolCalls([ToolCallRequest(id: "c1", name: "touch", arguments: "{}")])
+    private let dangerousCall = LLMEvent.toolCalls([ToolCallRequest(id: "c1", name: "touch", arguments: #"{"command":"rm -rf ~/Projetos"}"#)])
+
+    private func request(_ client: any LLMClient, box: PermissionBox, tools: [any AgentTool], mode: PermissionMode = .ask,
+                         directory: URL = URL(fileURLWithPath: NSTemporaryDirectory()), grants: [PermissionRule] = []) -> TurnRequest {
+        let bot = Bot(name: "Teste", role: "", orb: OrbConfig(), permissionMode: mode)
+        return TurnRequest(bot: bot, model: "fake", system: "sys", history: [], prompt: "oi", client: client, tools: tools,
+                           context: ToolContext(workingDirectory: directory), turnGrants: grants, permissions: { await box.state })
+    }
+
+    /// Collects the events; `onApproval` plays the user (or the app).
+    private func drive(_ engine: AgentEngine, _ request: TurnRequest,
+                       onApproval: @Sendable (ApprovalRequest) async -> Void) async -> [TurnEvent] {
+        var events: [TurnEvent] = []
+        for await event in engine.run(request) {
+            events.append(event)
+            if case .approval(let approval) = event { await onApproval(approval) }
+        }
+        return events
+    }
+
+    private func approvals(_ events: [TurnEvent]) -> [ApprovalRequest] {
+        events.compactMap { if case .approval(let approval) = $0 { approval } else { nil } }
+    }
+
+    private func toolMessages(_ events: [TurnEvent]) -> [String] {
+        events.compactMap { if case .message(let message) = $0, message.role == .tool { message.content } else { nil } }
+    }
+
+    @Test func aReadOnlyBlockStartsAndFinishesTheToolRow() async {
+        let runs = Counter()
+        let box = PermissionBox(mode: .readOnly)
+        let events = await drive(AgentEngine(), request(ScriptedLLM(script: Script([[touchCall], [.text("Ok")]])), box: box,
+                                                        tools: [TouchTool(runs: runs)]), onApproval: { _ in })
+        var started: [UUID] = [], finished: [(UUID, ToolCall.State)] = []
+        for event in events {
+            if case .toolStarted(let call) = event { started.append(call.id) }
+            if case .toolFinished(let id, let state, _) = event { finished.append((id, state)) }
+        }
+        #expect(started.count == 1 && finished.count == 1)
+        #expect(finished.first?.0 == started.first && finished.first?.1 == .failed)
+        #expect(await runs.value == 0)
+        #expect(toolMessages(events).first?.contains("read-only") == true)
+    }
+
+    @Test func switchingToReadOnlyWhileACardIsOpenDeniesIt() async {
+        let runs = Counter()
+        let box = PermissionBox(mode: .ask)
+        let engine = AgentEngine()
+        let req = request(ScriptedLLM(script: Script([[touchCall], [.text("Ok")]])), box: box, tools: [TouchTool(runs: runs)])
+        let events = await drive(engine, req) { approval in
+            await box.set(mode: .readOnly)
+            let answered = await engine.gate.applyModeChange(to: .readOnly, for: req.bot.id)
+            #expect(answered.map(\.approvalID) == [approval.id] && answered.map(\.decision) == [.deny])
+        }
+        #expect(await runs.value == 0)
+        #expect(toolMessages(events).first?.contains("read-only") == true)
+        #expect(events.contains { if case .toolFinished(_, .failed, let output) = $0 { output?.contains("Só leitura") == true } else { false } })
+    }
+
+    @Test func switchingToNoQuestionsWhileACardIsOpenAllowsIt() async {
+        let runs = Counter()
+        let box = PermissionBox(mode: .ask)
+        let engine = AgentEngine()
+        let req = request(ScriptedLLM(script: Script([[touchCall], [.text("Ok")]])), box: box, tools: [TouchTool(runs: runs)])
+        _ = await drive(engine, req) { _ in
+            await box.set(mode: .bypass)
+            await engine.gate.applyModeChange(to: .bypass, for: req.bot.id)
+        }
+        #expect(await runs.value == 1)
+    }
+
+    @Test func automaticLeavesDangerousCardsOpenAndAnswersTheOthers() async {
+        let engine = AgentEngine()
+        let box = PermissionBox(mode: .ask)
+
+        let dangerRuns = Counter()
+        let dangerReq = request(ScriptedLLM(script: Script([[dangerousCall], [.text("Ok")]])), box: box, tools: [TouchTool(runs: dangerRuns)])
+        _ = await drive(engine, dangerReq) { approval in
+            await box.set(mode: .auto)
+            let answered = await engine.gate.applyModeChange(to: .auto, for: dangerReq.bot.id)
+            #expect(answered.isEmpty)
+            #expect(await engine.gate.openIDs(for: dangerReq.bot.id) == [approval.id])
+            await engine.gate.resolve(approvalID: approval.id, decision: .deny)
+        }
+        #expect(await dangerRuns.value == 0)
+
+        let runs = Counter()
+        let plain = request(ScriptedLLM(script: Script([[touchCall], [.text("Ok")]])), box: PermissionBox(mode: .ask), tools: [TouchTool(runs: runs)])
+        _ = await drive(engine, plain) { _ in await engine.gate.applyModeChange(to: .auto, for: plain.bot.id) }
+        #expect(await runs.value == 1)
+    }
+
+    @Test func aModeChangeBetweenStepsAppliesToTheNextCall() async {
+        let runs = Counter()
+        let box = PermissionBox(mode: .auto)
+        let client = HookedLLM(script: Script([[touchCall], [touchCall], [.text("Pronto")]])) { index in
+            if index == 1 { await box.set(mode: .readOnly) }
+        }
+        let events = await drive(AgentEngine(), request(client, box: box, tools: [TouchTool(runs: runs)]), onApproval: { _ in })
+        #expect(await runs.value == 1)
+        #expect(toolMessages(events).count == 2 && toolMessages(events)[1].contains("read-only"))
+    }
+
+    @Test func aRevokedGrantAsksAgainOnTheNextCall() async {
+        let runs = Counter()
+        let box = PermissionBox(mode: .ask, rules: [touchRule])
+        let client = HookedLLM(script: Script([[touchCall], [touchCall], [.text("Pronto")]])) { index in
+            if index == 1 { await box.set(rules: []) }
+        }
+        let engine = AgentEngine()
+        let events = await drive(engine, request(client, box: box, tools: [TouchTool(runs: runs)])) { approval in
+            await engine.gate.resolve(approvalID: approval.id, decision: .deny)
+        }
+        #expect(approvals(events).count == 1)
+        #expect(await runs.value == 1)
+    }
+
+    @Test func onlyThisTaskCoversTheRestOfTheTurnAndNoMore() async {
+        let runs = Counter()
+        let engine = AgentEngine()
+        let box = PermissionBox(mode: .ask)
+        let first = request(ScriptedLLM(script: Script([[touchCall], [touchCall], [.text("Pronto")]])), box: box, tools: [TouchTool(runs: runs)])
+        let events = await drive(engine, first) { approval in
+            #expect(approval.suggestions == [touchRule])
+            await engine.gate.resolve(approvalID: approval.id, decision: .task)
+        }
+        #expect(approvals(events).count == 1)
+        #expect(await runs.value == 2)
+        // The next turn starts from the saved rules again.
+        let second = request(ScriptedLLM(script: Script([[touchCall], [.text("Pronto")]])), box: box, tools: [TouchTool(runs: runs)])
+        let again = await drive(engine, second) { approval in await engine.gate.resolve(approvalID: approval.id, decision: .deny) }
+        #expect(approvals(again).count == 1)
+        #expect(await runs.value == 2)
+    }
+
+    @Test func aTaskGrantNeverCoversADangerousCall() async {
+        let runs = Counter()
+        let engine = AgentEngine()
+        let req = request(ScriptedLLM(script: Script([[dangerousCall], [dangerousCall], [.text("Pronto")]])), box: PermissionBox(mode: .ask),
+                          tools: [TouchTool(runs: runs)], grants: [touchRule])
+        let events = await drive(engine, req) { approval in
+            #expect(approval.suggestions.isEmpty)
+            #expect(approval.reason.hasPrefix("Comando arriscado"))
+            await engine.gate.resolve(approvalID: approval.id, decision: .task)
+        }
+        #expect(approvals(events).count == 2)
+        #expect(await runs.value == 2)
+    }
+
+    @Test func alwaysSavesTheChosenRuleWhereTheEngineReadsIt() async {
+        let runs = Counter()
+        let engine = AgentEngine()
+        let box = PermissionBox(mode: .ask)
+        let req = request(ScriptedLLM(script: Script([[touchCall], [touchCall], [.text("Pronto")]])), box: box, tools: [TouchTool(runs: runs)])
+        let events = await drive(engine, req) { approval in
+            // What `AppModel.decide` does: save the rule, then answer.
+            await box.add(touchRule)
+            await engine.gate.resolve(approvalID: approval.id, answer: ApprovalAnswer(decision: .always, rule: touchRule))
+        }
+        #expect(approvals(events).count == 1)
+        #expect(await runs.value == 2)
+    }
+
+    @Test func grantsGivenWithTheRequestSkipTheCardForThatTurn() async {
+        let runs = Counter()
+        let req = request(ScriptedLLM(script: Script([[touchCall], [.text("Pronto")]])), box: PermissionBox(mode: .ask),
+                          tools: [TouchTool(runs: runs)], grants: [touchRule])
+        let events = await drive(AgentEngine(), req, onApproval: { _ in })
+        #expect(approvals(events).isEmpty)
+        #expect(await runs.value == 1)
+    }
+
+    @Test func stoppingTheTurnWhileACardIsOpenEndsTheWait() async {
+        let runs = Counter()
+        let engine = AgentEngine()
+        let req = request(ScriptedLLM(script: Script([[touchCall], [.text("Ok")]])), box: PermissionBox(mode: .ask), tools: [TouchTool(runs: runs)])
+        let consumer = Task {
+            for await event in engine.run(req) {
+                if case .approval = event { return true }
+            }
+            return false
+        }
+        #expect(await consumer.value)
+        // Leaving the stream cancels the turn; its wait must not stay behind.
+        for _ in 0..<100 where !(await engine.gate.openIDs(for: req.bot.id)).isEmpty { try? await Task.sleep(for: .milliseconds(20)) }
+        #expect(await engine.gate.openIDs(for: req.bot.id).isEmpty)
+        #expect(await runs.value == 0)
+    }
+
+    @Test func writesInsideTheOrbsFolderRunWithoutACardOutsideItAsk() async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "OrbGate-\(UUID().uuidString)")
+        let other = FileManager.default.temporaryDirectory.appending(path: "OrbGateOther-\(UUID().uuidString)")
+        for url in [folder, other] { try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true) }
+        defer { try? FileManager.default.removeItem(at: folder); try? FileManager.default.removeItem(at: other) }
+        let engine = AgentEngine()
+        func call(_ path: String) -> LLMEvent {
+            .toolCalls([ToolCallRequest(id: "w", name: "write_file", arguments: JSONValue.object(["path": .string(path), "content": .string("oi")]).jsonString)])
+        }
+
+        let inside = request(ScriptedLLM(script: Script([[call("nota.txt")], [.text("Ok")]])), box: PermissionBox(mode: .ask),
+                             tools: [WriteFileTool()], directory: folder)
+        let insideEvents = await drive(engine, inside, onApproval: { _ in })
+        #expect(approvals(insideEvents).isEmpty)
+        #expect(try String(contentsOf: folder.appending(path: "nota.txt"), encoding: .utf8) == "oi")
+
+        let outside = request(ScriptedLLM(script: Script([[call(other.appending(path: "x.txt").path)], [.text("Ok")]])), box: PermissionBox(mode: .ask),
+                              tools: [WriteFileTool()], directory: folder)
+        let outsideEvents = await drive(engine, outside) { approval in await engine.gate.resolve(approvalID: approval.id, decision: .deny) }
+        #expect(approvals(outsideEvents).count == 1)
+        #expect(!FileManager.default.fileExists(atPath: other.appending(path: "x.txt").path))
+    }
+}
+
+struct ApprovalGateTests {
+    @Test func anAnswerBeforeTheWaitIsKept() async {
+        let gate = ApprovalGate()
+        let id = UUID(), bot = UUID()
+        await gate.open(id, botID: bot)
+        await gate.resolve(approvalID: id, decision: .once)
+        #expect(await gate.wait(for: id) == .once)
+        // A card is answered once, then it is gone.
+        await gate.resolve(approvalID: id, decision: .deny)
+        #expect(await gate.wait(for: id) == .deny)
+    }
+
+    @Test func aWaitEndsWhenTheTaskIsCancelled() async {
+        let gate = ApprovalGate()
+        let id = UUID()
+        await gate.open(id, botID: UUID())
+        let waiter = Task { await gate.wait(for: id) }
+        try? await Task.sleep(for: .milliseconds(50))
+        waiter.cancel()
+        #expect(await waiter.value == .deny)
+    }
+
+    @Test func aTaskCancelledBeforeWaitingDoesNotHang() async {
+        let gate = ApprovalGate()
+        let id = UUID()
+        await gate.open(id, botID: UUID())
+        let waiter = Task {
+            while !Task.isCancelled { try? await Task.sleep(for: .milliseconds(5)) }
+            return await gate.wait(for: id)
+        }
+        waiter.cancel()
+        #expect(await waiter.value == .deny)
+    }
+
+    @Test func stoppingAnOrbDeniesOnlyItsCards() async {
+        let gate = ApprovalGate()
+        let mine = UUID(), theirs = UUID(), botA = UUID(), botB = UUID()
+        await gate.open(mine, botID: botA)
+        await gate.open(theirs, botID: botB)
+        let waiting = Task { await gate.wait(for: mine) }
+        await gate.cancelApprovals(for: botA)
+        #expect(await waiting.value == .deny)
+        #expect(await gate.openIDs(for: botB) == [theirs])
+    }
+
+    @Test func modeChangesAnswerWhatTheNewModeWouldNotAsk() async {
+        let gate = ApprovalGate()
+        let bot = UUID(), plain = UUID(), risky = UUID()
+        await gate.open(plain, botID: bot)
+        await gate.open(risky, botID: bot, alwaysAsks: true)
+        #expect(await gate.applyModeChange(to: .ask, for: bot).isEmpty)
+        let auto = await gate.applyModeChange(to: .auto, for: bot)
+        #expect(auto.map(\.approvalID) == [plain] && auto.map(\.decision) == [.once])
+        #expect(await gate.openIDs(for: bot) == [risky])
+        let bypass = await gate.applyModeChange(to: .bypass, for: bot)
+        #expect(bypass.map(\.approvalID) == [risky])
+        await gate.open(plain, botID: bot)
+        #expect(await gate.applyModeChange(to: .readOnly, for: bot).map(\.decision) == [.deny])
+    }
+
+    @Test func oneGateServesBothEngines() async {
+        let gate = ApprovalGate()
+        #expect(await AgentEngine(gate: gate).gate === gate)
+        #expect(await ClaudeCodeEngine(gate: gate).gate === gate)
     }
 }
 
@@ -229,11 +877,11 @@ struct ModelTests {
         let rm = JSONValue.object(["command": .string("rm -rf ~/x")])
         let ls = JSONValue.object(["command": .string("ls")])
         #expect(ClaudeCodePolicy.cliMode(.bypass) == "bypassPermissions")
-        #expect(ClaudeCodePolicy.answer(mode: .bypass, toolName: "Bash", input: rm, allowed: []) == .allow)
-        #expect(ClaudeCodePolicy.answer(mode: .auto, toolName: "Bash", input: ls, allowed: []) == .allow)
-        #expect(ClaudeCodePolicy.answer(mode: .auto, toolName: "Bash", input: rm, allowed: []) == nil)
-        #expect(ClaudeCodePolicy.answer(mode: .ask, toolName: "Bash", input: rm, allowed: ["Bash"]) == nil)
-        #expect(ClaudeCodePolicy.answer(mode: .ask, toolName: "Bash", input: ls, allowed: ["Bash"]) == .allow)
+        #expect(ClaudeCodePolicy.answer(mode: .bypass, toolName: "Bash", input: rm) == .allow)
+        #expect(ClaudeCodePolicy.answer(mode: .auto, toolName: "Bash", input: ls) == .allow)
+        #expect(ClaudeCodePolicy.answer(mode: .auto, toolName: "Bash", input: rm) == nil)
+        #expect(ClaudeCodePolicy.answer(mode: .ask, toolName: "Bash", input: rm, rules: PermissionPolicy.legacyRules(fromToolNames: ["Bash"])) == nil)
+        #expect(ClaudeCodePolicy.answer(mode: .ask, toolName: "Bash", input: ls, rules: PermissionPolicy.legacyRules(fromToolNames: ["Bash"])) == .allow)
     }
 
     @Test func skillExpansion() throws {
@@ -279,5 +927,102 @@ struct ModelTests {
         let conversation = Conversation(items: [TranscriptItem(.user(text: "oi", attachments: []))], messages: [.user("oi")])
         store.save(conversation, for: botID)
         #expect(store.loadConversation(botID)?.messages == [.user("oi")])
+    }
+}
+
+struct TurnTypesTests {
+    @Test func toolErrorFlagRoundTripsAndOldMessagesDecodeAsNotErrors() throws {
+        let failed = ChatMessage.tool("c1", "Error: x", isError: true)
+        #expect(try JSONDecoder().decode(ChatMessage.self, from: JSONEncoder().encode(failed)) == failed)
+        let old = try JSONDecoder().decode(ChatMessage.self, from: Data(#"{"role":"tool","content":"ok","toolCallID":"c1"}"#.utf8))
+        #expect(old.isError == false)
+        let wrongType = try JSONDecoder().decode(ChatMessage.self, from: Data(#"{"role":"tool","content":"ok","isError":null}"#.utf8))
+        #expect(wrongType.isError == false)
+    }
+
+    @Test func usageAddsWhatWasReportedAndKeepsTheRestUnknown() {
+        var total = TokenUsage(input: 10, output: nil, cacheRead: nil, cacheWrite: 1)
+        total.add(TokenUsage(input: 5, output: 2, cacheRead: nil, cacheWrite: nil))
+        #expect(total == TokenUsage(input: 15, output: 2, cacheRead: nil, cacheWrite: 1))
+    }
+
+    @Test func theDefaultToolChoiceIsAuto() async throws {
+        let script = Script([[.text("oi")]])
+        for try await _ in ScriptedLLM(script: script).stream(model: "m", messages: [], tools: []) {}
+        #expect(await script.choices == [.auto])
+    }
+}
+
+/// How `AppModel` tells a stopped turn from the one that replaced it.
+@MainActor
+struct TurnOrchestrationTests {
+    private func modelWithAProvider() -> (AppModel, Bot, URL) {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
+        let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)
+        // A gateway without an address is "usable" but has no client: the turn fails before any network call.
+        model.providers = [ProviderAccount(kind: .custom)]
+        model.defaultModel = "custom/modelo"
+        return (model, model.bots[0], root)
+    }
+
+    @Test func aStoppedTurnCannotCloseTheNextOne() throws {
+        let (model, bot, root) = modelWithAProvider()
+        defer { try? FileManager.default.removeItem(at: root) }
+        #expect(model.send("um", to: bot.id))
+        let first = try #require(model.turnIDs[bot.id])
+        model.stop(bot.id)
+        #expect(model.turnIDs[bot.id] == nil)
+
+        #expect(model.send("dois", to: bot.id))
+        let second = try #require(model.turnIDs[bot.id])
+        #expect(first != second)
+
+        // The first turn's task finishing late (its setup, its last events) must not touch the second turn.
+        model.failed.remove(bot.id) // the first stop flashed it
+        model.finishTurn(bot.id, turn: first, succeeded: false)
+        #expect(model.turnIDs[bot.id] == second)
+        #expect(model.isWorking(bot.id))
+        #expect(!model.failed.contains(bot.id))
+
+        model.finishTurn(bot.id, turn: second)
+        #expect(model.turnIDs[bot.id] == nil)
+        #expect(!model.isWorking(bot.id))
+    }
+
+    @Test func stoppingWhileThePromptIsBeingPreparedReportsNoFailure() async throws {
+        let (model, bot, root) = modelWithAProvider()
+        defer { try? FileManager.default.removeItem(at: root) }
+        // Stop at different moments of the setup (before it starts, while it runs, after it failed on its own).
+        for yields in 0..<4 {
+            model.newConversation(bot.id)
+            #expect(model.send("oi", to: bot.id))
+            for _ in 0..<yields { await Task.yield() }
+            model.stop(bot.id)
+            try await Task.sleep(for: .milliseconds(150))
+            let notices = model.transcript(bot.id).compactMap { item -> String? in
+                if case .notice(let text) = item.kind { text } else { nil }
+            }
+            // Either the user's stop or the turn's own failure, never the failure of a stopped turn on top of the stop.
+            #expect(notices.count == 1, "\(notices)")
+            #expect(model.turnIDs[bot.id] == nil)
+        }
+    }
+
+    @Test func aTurnThatCannotStartFailsOnce() async throws {
+        let (model, bot, root) = modelWithAProvider()
+        defer { try? FileManager.default.removeItem(at: root) }
+        #expect(model.send("oi", to: bot.id))
+        try await Task.sleep(for: .milliseconds(300))
+        let notices = model.transcript(bot.id).compactMap { item -> String? in
+            if case .notice(let text) = item.kind { text } else { nil }
+        }
+        #expect(notices.count == 1 && notices[0].hasPrefix("Não deu certo"))
+        #expect(!model.isWorking(bot.id))
+        #expect(model.turnIDs[bot.id] == nil)
+    }
+
+    @Test func routinesGetMoreStepsThanConversations() {
+        #expect(AgentEngine.routineMaxSteps > AgentEngine.defaultMaxSteps)
+        #expect(AgentEngine.defaultMaxSteps == 30 && AgentEngine.routineMaxSteps == 60)
     }
 }

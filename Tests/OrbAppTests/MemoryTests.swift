@@ -213,43 +213,160 @@ import Testing
 
     @Test func memoryServerSpeaksMCP() async throws {
         let context = ToolContext(workingDirectory: root, memory: bank())
-        let initialize = try #require(await MemoryMCPServer.handle(
+        let initialize = try #require(await OrbToolsMCPServer.handle(
             .object(["jsonrpc": .string("2.0"), "id": .number(1), "method": .string("initialize"),
                      "params": .object(["protocolVersion": .string("2025-06-18")])]), context: context))
         #expect(initialize["result"]?["protocolVersion"] == .string("2025-06-18"))
-        let list = try #require(await MemoryMCPServer.handle(
+        let list = try #require(await OrbToolsMCPServer.handle(
             .object(["jsonrpc": .string("2.0"), "id": .number(2), "method": .string("tools/list")]), context: context))
-        #expect(list["result"]?["tools"]?.array?.compactMap { $0["name"]?.string } == ["remember", "recall"])
-        _ = await MemoryMCPServer.handle(.object([
+        #expect(list["result"]?["tools"]?.array?.compactMap { $0["name"]?.string } == ["remember", "recall", "open", "notify"])
+        _ = await OrbToolsMCPServer.handle(.object([
             "jsonrpc": .string("2.0"), "id": .number(3), "method": .string("tools/call"),
             "params": .object(["name": .string("remember"), "arguments": .object(["fact": .string("Usa o Claude Code.")])]),
         ]), context: context)
-        let recall = try #require(await MemoryMCPServer.handle(.object([
+        let recall = try #require(await OrbToolsMCPServer.handle(.object([
             "jsonrpc": .string("2.0"), "id": .number(4), "method": .string("tools/call"),
             "params": .object(["name": .string("recall"), "arguments": .object(["query": .string("claude code")])]),
         ]), context: context))
         #expect(recall["result"]?["content"]?.array?.first?["text"]?.string?.contains("Usa o Claude Code.") == true)
-        #expect(await MemoryMCPServer.handle(.object(["jsonrpc": .string("2.0"), "method": .string("notifications/initialized")]),
+        #expect(await OrbToolsMCPServer.handle(.object(["jsonrpc": .string("2.0"), "method": .string("notifications/initialized")]),
                                              context: context) == nil)
+    }
+
+    private func call(_ method: String, _ params: JSONValue? = nil, id: Int = 1, mac: Bool, context: ToolContext) async throws -> JSONValue {
+        var request: [String: JSONValue] = ["jsonrpc": .string("2.0"), "id": .number(Double(id)), "method": .string(method)]
+        if let params { request["params"] = params }
+        return try #require(await OrbToolsMCPServer.handle(.object(request), context: context, mac: mac))
+    }
+
+    @Test func macToolsAreListedOnlyForAnOrbThatMayUseTheMac() async throws {
+        let context = ToolContext(workingDirectory: root, memory: bank())
+        let plain = try await call("tools/list", mac: false, context: context)
+        // Without "Apps do Mac" the tools that need no capability stay, as they do for a native Orb.
+        #expect(plain["result"]?["tools"]?.array?.compactMap { $0["name"]?.string } == ["remember", "recall", "open", "notify"])
+
+        let mac = try await call("tools/list", mac: true, context: context)
+        let tools = try #require(mac["result"]?["tools"]?.array)
+        // Memory first, then every Mac tool, under the names Claude Code will show as mcp__orb_memoria__<name>.
+        #expect(tools.compactMap { $0["name"]?.string } == (ToolBox.memoryTools + ToolBox.macTools).map(\.spec.name))
+        for name in ["open", "applescript", "shortcuts_list", "shortcuts_run", "clipboard_read", "clipboard_write", "screenshot",
+                     "notify", "apps_list", "processes", "app_quit", "trash", "browser_tab"] {
+            #expect(tools.contains { $0["name"]?.string == name }, "\(name)")
+        }
+        // Schemas, descriptions and read-only hints are the native tools' own.
+        for tool in ToolBox.macTools {
+            let listed = try #require(tools.first { $0["name"]?.string == tool.spec.name })
+            #expect(listed["description"]?.string == tool.spec.description)
+            #expect(listed["inputSchema"] == tool.spec.parameters)
+            #expect(listed["annotations"]?["readOnlyHint"] == .bool(tool.risk(.object([:])) == .safe), "\(tool.spec.name)")
+        }
+        let hint = { (name: String) in tools.first { $0["name"]?.string == name }?["annotations"]?["readOnlyHint"] }
+        #expect(hint("processes") == .bool(true) && hint("apps_list") == .bool(true))
+        #expect(hint("applescript") == .bool(false) && hint("trash") == .bool(false))
+    }
+
+    @Test func aMacToolRunsThroughTheServerInTheOrbsFolder() async throws {
+        let folder = root.appending(path: "pasta-do-orb")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let context = ToolContext(workingDirectory: folder, memory: bank())
+        let processes = try await call("tools/call", .object(["name": .string("processes"), "arguments": .object(["limit": .number(3)])]),
+                                       mac: true, context: context)
+        #expect(processes["result"]?["isError"] == .bool(false))
+        let table = try #require(processes["result"]?["content"]?.array?.first?["text"]?.string)
+        #expect(table.hasPrefix("Maiores consumidores de CPU"))
+        #expect(table.split(separator: "\n").count == 4) // header + the 3 asked for
+
+        // Relative paths start in the Orb's folder (nothing exists there, so nothing is moved to the Trash).
+        let trash = try await call("tools/call", .object(["name": .string("trash"), "arguments": .object(["paths": .array([.string("nao-existe.txt")])])]),
+                                   mac: true, context: context)
+        #expect(trash["result"]?["isError"] == .bool(true))
+        #expect(trash["result"]?["content"]?.array?.first?["text"]?.string?.contains(folder.appending(path: "nao-existe.txt").path) == true)
+
+        // Without "Apps do Mac" the Mac tools do not exist for that server.
+        let refused = try await call("tools/call", .object(["name": .string("processes"), "arguments": .object([:])]), mac: false, context: context)
+        #expect(refused["error"]?["code"] == .number(-32602))
+        // Memory works the same either way.
+        let recall = try await call("tools/call", .object(["name": .string("recall"), "arguments": .object(["query": .string("nada")])]),
+                                    mac: true, context: context)
+        #expect(recall["result"]?["isError"] == .bool(false))
+    }
+
+    @Test func serverOptionsRoundTripThroughTheConfigAndAcceptTheOldFlag() throws {
+        let folder = root.appending(path: "trabalho")
+        let config = OrbToolsMCPServer.config(directory: root, mac: true, folder: folder)
+        #expect(config.name == "orb_memoria")
+        #expect(config.arguments == ["--tools-mcp", root.path, "--mac", "--folder", folder.path])
+        #expect(OrbToolsMCPServer.Options(arguments: [config.command] + config.arguments)
+                == .init(memoryDirectory: root, mac: true, folder: folder))
+        // Memory only: no extra arguments.
+        #expect(OrbToolsMCPServer.config(directory: root).arguments == ["--tools-mcp", root.path])
+        // The earlier name keeps working (configs written by an older build, scripts).
+        #expect(OrbToolsMCPServer.Options(arguments: ["Orb", "--memory-mcp", root.path]) == .init(memoryDirectory: root))
+        #expect(OrbToolsMCPServer.Options(arguments: ["Orb", "--memory-mcp", root.path, "--mac"])?.mac == true)
+        // Anything else starts the app; a flag without its folder is not the server either.
+        #expect(OrbToolsMCPServer.Options(arguments: ["Orb"]) == nil)
+        #expect(OrbToolsMCPServer.Options(arguments: ["Orb", "--tools-mcp"]) == nil)
+        #expect(OrbToolsMCPServer.Options(arguments: ["Orb", "--tools-mcp", root.path, "--folder"])?.folder == nil)
+        // The server's tools run in the Orb's folder, or in home without one.
+        #expect(OrbToolsMCPServer.Options(memoryDirectory: root, folder: folder).context.workingDirectory == folder)
+        #expect(OrbToolsMCPServer.Options(memoryDirectory: root).context.workingDirectory == FileManager.default.homeDirectoryForCurrentUser)
+    }
+
+    /// The real binary, as Claude Code starts it (only when the build left it next to the test bundle): nothing but
+    /// the stdio server runs, and a tool that needs the main actor still answers.
+    @Test(.enabled(if: orbBinary != nil))
+    func theHelperProcessServesMacToolsWithoutStartingTheApp() async throws {
+        let binary = try #require(Self.orbBinary)
+        let output = try await Self.exchange(binary, ["--tools-mcp", root.path, "--mac", "--folder", root.path], lines: [
+            #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}"#,
+            #"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+            #"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
+            #"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"apps_list","arguments":{}}}"#,
+        ])
+        let replies = output.compactMap { JSONValue.parse($0) }
+        #expect(replies.map { $0["id"] } == [.number(1), .number(2), .number(3)])
+        #expect(replies[1]["result"]?["tools"]?.array?.contains { $0["name"] == .string("apps_list") } == true)
+        #expect(replies[2]["result"]?["isError"] == .bool(false))
+    }
+
+    static var orbBinary: URL? {
+        let binary = Bundle(for: MemoryTests.self).bundleURL.deletingLastPathComponent().appending(path: "Orb")
+        return FileManager.default.isExecutableFile(atPath: binary.path) ? binary : nil
+    }
+
+    /// Starts `binary`, writes `lines`, waits for one answer per request, then closes its input and waits for it to exit.
+    static func exchange(_ binary: URL, _ arguments: [String], lines: [String]) async throws -> [String] {
+        let process = try LineProcess(executable: binary, arguments: arguments,
+                                      directory: FileManager.default.temporaryDirectory, environment: ["PATH": "/usr/bin:/bin"])
+        process.terminate(after: 30)
+        let expected = lines.filter { JSONValue.parse($0)?["id"] != nil }.count
+        var answers: [String] = []
+        for line in lines { process.send(line) }
+        for await answer in process.lines {
+            answers.append(answer)
+            if answers.count == expected { break }
+        }
+        process.closeInput()
+        return answers
     }
 
     @Test func claudeCodeSearchesMemoryFreelyButAsksToSave() {
         let recall = ClaudeCodeTools.memoryPrefix + "recall", remember = ClaudeCodeTools.memoryPrefix + "remember"
-        #expect(ClaudeCodePolicy.answer(mode: .readOnly, toolName: recall, allowed: []) == .allow)
-        #expect(ClaudeCodePolicy.answer(mode: .ask, toolName: recall, allowed: []) == .allow)
-        #expect(ClaudeCodePolicy.answer(mode: .ask, toolName: remember, allowed: []) == nil)
-        #expect(ClaudeCodePolicy.answer(mode: .readOnly, toolName: remember, allowed: []) != .allow)
+        #expect(ClaudeCodePolicy.answer(mode: .readOnly, toolName: recall) == .allow)
+        #expect(ClaudeCodePolicy.answer(mode: .ask, toolName: recall) == .allow)
+        #expect(ClaudeCodePolicy.answer(mode: .ask, toolName: remember) == nil)
+        #expect(ClaudeCodePolicy.answer(mode: .readOnly, toolName: remember) != .allow)
         #expect(ClaudeCodeTools.kind(remember) == .memory)
         #expect(ClaudeCodeTools.summary(recall, .object(["query": .string("agenda")])) == ("Buscando na memória", "agenda"))
-        let config = MemoryMCPServer.config(directory: root)
-        #expect(config.arguments == [MemoryMCPServer.flag, root.path])
+        let config = OrbToolsMCPServer.config(directory: root)
+        #expect(config.arguments == [OrbToolsMCPServer.flag, root.path])
         #expect(ClaudeCodeTurn.mcpConfig([config])?["mcpServers"]?["orb_memoria"]?["type"] == .string("stdio"))
         // Identity and preferences are standing instructions: they ask even in Automático and after "Sempre permitir".
         let preference = JSONValue.object(["fact": .string("x"), "tipo": .string("preferencia")])
-        #expect(ClaudeCodePolicy.answer(mode: .auto, toolName: remember, input: preference, allowed: [remember]) == nil)
-        #expect(ClaudeCodePolicy.answer(mode: .ask, toolName: remember, input: preference, allowed: [remember]) == nil)
-        #expect(ClaudeCodePolicy.answer(mode: .bypass, toolName: remember, input: preference, allowed: []) == .allow)
-        #expect(ClaudeCodePolicy.answer(mode: .auto, toolName: remember, input: .object(["fact": .string("x")]), allowed: []) == .allow)
+        #expect(ClaudeCodePolicy.answer(mode: .auto, toolName: remember, input: preference, rules: PermissionPolicy.legacyRules(fromToolNames: [remember])) == nil)
+        #expect(ClaudeCodePolicy.answer(mode: .ask, toolName: remember, input: preference, rules: PermissionPolicy.legacyRules(fromToolNames: [remember])) == nil)
+        #expect(ClaudeCodePolicy.answer(mode: .bypass, toolName: remember, input: preference) == .allow)
+        #expect(ClaudeCodePolicy.answer(mode: .auto, toolName: remember, input: .object(["fact": .string("x")])) == .allow)
         #expect(RememberTool().risk(preference) == .instructs)
         #expect(RememberTool().risk(.object(["fact": .string("x"), "tipo": .string("identidade")])) == .instructs)
         #expect(RememberTool().risk(.object(["fact": .string("x")])) == .sensitive)
@@ -465,11 +582,11 @@ struct MemoryIntentTests {
 
     @Test func mcpParseErrorsGetAReply() async {
         let context = ToolContext(workingDirectory: root, memory: bank())
-        let reply = await MemoryMCPServer.respond(to: "{nao é json", context: context)
+        let reply = await OrbToolsMCPServer.respond(to: "{nao é json", context: context)
         #expect(reply?["error"]?["code"] == .number(-32700))
         // Raw U+2028 inside a JSON string is part of the message, not a line break.
         let line = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"remember\",\"arguments\":{\"fact\":\"Linha\u{2028}colada\"}}}"
-        let saved = await MemoryMCPServer.respond(to: line, context: context)
+        let saved = await OrbToolsMCPServer.respond(to: line, context: context)
         #expect(saved?["result"]?["isError"] == .bool(false))
     }
 }

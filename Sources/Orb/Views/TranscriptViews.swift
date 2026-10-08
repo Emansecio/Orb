@@ -178,7 +178,8 @@ struct ToolCallLine: View {
     }
 }
 
-/// Approval prompt. Three outcomes: deny, allow once, always allow for this Orb.
+/// Approval prompt: allow, allow for this task, always allow (by a rule picked from the suggestions), or deny.
+/// Destructive commands and changes to the Orb's instructions offer only allow and deny.
 struct ApprovalCard: View {
     @Environment(AppModel.self) private var model
     let request: ApprovalRequest
@@ -218,11 +219,32 @@ struct ApprovalCard: View {
                     }
                     .buttonStyle(GhostStyle())
                     Spacer()
-                    Button("Sempre permitir") {
-                        model.decide(.always, approvalID: request.id, botID: bot.id)
+                    if let suggestion = request.suggestions.first {
+                        Menu {
+                            ForEach(request.suggestions, id: \.self) { rule in
+                                Button(rule.menuTitle) {
+                                    model.decide(.always, rule: rule, approvalID: request.id, botID: bot.id)
+                                }
+                            }
+                        } label: {
+                            Text("Sempre…")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(Palette.ink)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 7)
+                                .background(Color.white.opacity(0.1), in: .capsule)
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .help("Deixa de perguntar daqui para frente. Você pode revogar em Trabalho, no painel do Orb.")
+                        Button("Só nesta tarefa") {
+                            model.decide(.task, rule: suggestion, approvalID: request.id, botID: bot.id)
+                        }
+                        .buttonStyle(SecondaryPillStyle())
+                        .help("Vale até o Orb terminar esta tarefa: \(suggestion.title.lowercased()).")
                     }
-                    .buttonStyle(SecondaryPillStyle())
-                    Button("Permitir uma vez") {
+                    Button("Permitir") {
                         model.decide(.once, approvalID: request.id, botID: bot.id)
                     }
                     .buttonStyle(PrimaryPillStyle())

@@ -39,6 +39,8 @@ final class AppModel {
     /// Incremented when a prompt is sent; Orbs jump when it changes.
     var pokes: [UUID: Int] = [:]
     var connectorStatus: [UUID: MCPStatus] = [:]
+    /// Tokens each Orb's last turn used, summed over its model calls (for a context meter; nothing shows it yet).
+    private(set) var usage: [UUID: TokenUsage] = [:]
     /// Providers with a key in the Keychain (or, for ChatGPT and Claude Code, a sign-in).
     private(set) var connected: Set<ProviderKind> = []
     /// What each working bot's current tool does, and bots waiting for an approval. Kept apart from the
@@ -73,14 +75,21 @@ final class AppModel {
     @ObservationIgnored private var memoryIdle: [UUID: Task<Void, Never>] = [:]
     /// Turns where you asked the Orb to remember something, and where that turn's transcript starts.
     @ObservationIgnored private var memoryRequests: [UUID: (intent: MemoryIntent, from: Int)] = [:]
-    @ObservationIgnored private let engine = AgentEngine()
-    @ObservationIgnored private let claudeEngine = ClaudeCodeEngine()
+    /// The approval cards open in any turn, whichever engine runs it (internal so tests can open cards).
+    @ObservationIgnored let gate: ApprovalGate
+    @ObservationIgnored private let engine: AgentEngine
+    @ObservationIgnored private let claudeEngine: ClaudeCodeEngine
     /// Bots whose running turn belongs to `claudeEngine` (stop and approvals go there).
     @ObservationIgnored private var claudeTurns: Set<UUID> = []
+    /// The folder each running Claude Code turn started in; its session belongs to that folder.
+    @ObservationIgnored private var claudeTurnFolders: [UUID: String] = [:]
     @ObservationIgnored private let mcp = MCPManager()
     /// Processes the Orbs left running with `run_command(background: true)`.
     @ObservationIgnored private let jobs = BackgroundJobs()
-    @ObservationIgnored private var turns: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored var turns: [UUID: Task<Void, Never>] = [:] // internal for tests
+    /// Each Orb's running turn has an id. A turn that was stopped can still be finishing its setup or draining
+    /// events while the next one runs; only the current id may change the Orb's state.
+    @ObservationIgnored private(set) var turnIDs: [UUID: UUID] = [:]
     /// Bot id → routine id, for turns started by a routine.
     @ObservationIgnored private var routineTurns: [UUID: UUID] = [:]
     @ObservationIgnored private var stateSave: Task<Void, Never>?
@@ -101,6 +110,10 @@ final class AppModel {
     /// `runsBackgroundWork: false` skips the scheduler, Keychain checks and app-wide observers (tests).
     init(store: Store = .standard, runsBackgroundWork: Bool = true) {
         self.store = store
+        let gate = ApprovalGate()
+        self.gate = gate
+        engine = AgentEngine(gate: gate)
+        claudeEngine = ClaudeCodeEngine(gate: gate)
         memory = MemoryLibrary.at(store.directory.appending(path: "memoria"))
         var notices: [StoreNotice] = []
         let stateRead = store.readState()
@@ -417,8 +430,50 @@ final class AppModel {
     func update(_ botID: UUID, _ change: (inout Bot) -> Void) {
         guard let index = bots.firstIndex(where: { $0.id == botID }) else { return }
         var bot = bots[index]
+        let mode = bot.permissionMode
         change(&bot)
         if bot != bots[index] { bots[index] = bot }
+        if bot.permissionMode != mode { permissionModeChanged(botID, to: bot.permissionMode) }
+    }
+
+    /// The mode and "Sempre permitir" rules of an Orb as they are now; the engines read this at every tool call,
+    /// so a change (or a revoked grant) applies to the turn already running.
+    func permissionState(of botID: UUID) -> PermissionState? {
+        bot(botID).map { PermissionState(mode: $0.permissionMode, rules: $0.permissionRules) }
+    }
+
+    private func permissionSource(for bot: Bot) -> PermissionSource {
+        let botID = bot.id, fallback = PermissionState(mode: bot.permissionMode, rules: bot.permissionRules)
+        return { [weak self] in await self?.permissionState(of: botID) ?? fallback }
+    }
+
+    /// Changing the mode while the Orb waits for an answer answers the open cards: "Sem pedir permissão" allows
+    /// them, "Automático" the ones it would not have asked about, "Só leitura" denies them. Claude Code is told too.
+    private func permissionModeChanged(_ botID: UUID, to mode: PermissionMode) {
+        guard turns[botID] != nil else { return }
+        let isClaudeCode = claudeTurns.contains(botID)
+        Task {
+            let answered = await gate.applyModeChange(to: mode, for: botID)
+            if isClaudeCode { await claudeEngine.modeChanged(for: botID, to: mode) }
+            markDecided(answered, of: botID)
+        }
+    }
+
+    private func markDecided(_ answered: [(approvalID: UUID, decision: ApprovalDecision)], of botID: UUID) {
+        guard !answered.isEmpty else { return }
+        mutateItems(of: botID) { items in
+            for index in items.indices {
+                if case .approval(var request) = items[index].kind, request.decision == nil,
+                   let match = answered.first(where: { $0.approvalID == request.id }) {
+                    request.decision = match.decision
+                    items[index].kind = .approval(request)
+                }
+            }
+        }
+        let stillOpen = (conversations[botID]?.items ?? []).contains {
+            if case .approval(let request) = $0.kind { request.decision == nil } else { false }
+        }
+        if !stillOpen { awaitingApproval.remove(botID) }
     }
 
     /// Deletes the Orb with its conversation and routines. Its memory goes too, unless `keepMemory`: then the
@@ -596,6 +651,9 @@ final class AppModel {
 
     @ObservationIgnored private var didSendLaunchPrompt = false
 
+    /// The snapshot and rules marks of each running turn, recorded on its conversation once the model has been given them.
+    @ObservationIgnored var pendingMarks: [UUID: DeliveryMarks] = [:]
+
     /// Dev aid for scripted end-to-end checks: `ORB_SEND="texto"` sends it to the selected bot once,
     /// after the provider connections are known.
     func sendLaunchPrompt() {
@@ -614,7 +672,7 @@ final class AppModel {
     @discardableResult
     func send(_ text: String, attachments: [URL] = [], to botID: UUID, fromUser: Bool = false) -> Bool {
         let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !typed.isEmpty, turns[botID] == nil, var bot = bot(botID) else { return false }
+        guard !typed.isEmpty, turns[botID] == nil, let bot = bot(botID) else { return false }
         ensureLoaded(botID)
         guard let ref = modelRef(for: bot), let account = account(ref.provider), account.isEnabled, isUsable(account) else {
             append(.notice("Conecte um modelo em Ajustes → Modelos para começar."), to: botID)
@@ -633,7 +691,7 @@ final class AppModel {
         memoryRequests[botID] = intent.map { ($0, max(0, (conversations[botID]?.items.count ?? 1) - 1)) }
         // Your request is the approval: this turn saves to memory without asking (the Orb's saved settings don't change).
         let rememberTool = ref.provider == .claudeCode ? ClaudeCodeTools.memoryPrefix + "remember" : "remember"
-        if intent != nil { bot.allowedTools.insert(rememberTool) }
+        let turnGrants = intent == nil ? [] : [PermissionRule(family: .memory)]
 
         var prompt = typed
         if let expansion = SystemPrompt.expandSkill(in: typed, skills: enabledSkills) {
@@ -648,7 +706,7 @@ final class AppModel {
                 + "right tipo; if it refers to something said earlier, save that. Then confirm in one short sentence.)"
         }
         if ref.provider == .claudeCode {
-            runClaudeCode(bot, model: ref.model, prompt: prompt, message: typed)
+            runClaudeCode(bot, model: ref.model, prompt: prompt, message: typed, turnGrants: turnGrants)
             return true
         }
         let skills = enabledSkills
@@ -659,66 +717,89 @@ final class AppModel {
         let bank = memory.bank(for: botID)
         let context = ToolContext(workingDirectory: bot.workingURL, memory: bank, botID: botID, jobs: jobs)
         let userTurns = userTurnCount(botID)
+        let maxSteps = routineTurns[botID] != nil ? AgentEngine.routineMaxSteps : AgentEngine.defaultMaxSteps
+        let lastWorkspaceHash = conversations[botID]?.workspaceHash
 
+        let turn = beginTurn(botID)
         turns[botID] = Task {
             guard !Task.isCancelled else { return } // stopped before it began
             let brief = await bank.brief(for: typed, conversationIsNew: history.isEmpty, userTurns: userTurns,
                                          canSave: bot.permissionMode != .readOnly)
-            let system = SystemPrompt.make(bot: bot, skills: skills, memory: brief.full)
+            let inputs = await TurnPromptInputs.gather(bot: bot, skills: skills, brief: brief)
+            guard isCurrent(turn, of: botID) else { return } // stopped while preparing
+            let built = TurnPrompt.native(inputs, history: history, lastWorkspaceHash: lastWorkspaceHash)
             let client: any LLMClient
             do {
                 guard let made = account.client(for: modelInfo, credentials: Self.credentials(for: ref.provider),
                                                  conversationID: botID.uuidString) else { throw LLMError.notConfigured }
                 client = made
             } catch {
-                apply(.failed(error.localizedDescription), to: botID)
-                finishTurn(botID, succeeded: false)
+                failSetup(error, of: botID, turn: turn)
                 return
             }
             var tools = ToolBox.all.filter { $0.capability.map(bot.capabilities.contains) ?? true }
             if bot.capabilities.contains(.connectors) { tools += await mcp.tools() }
-            let request = TurnRequest(bot: bot, model: ref.model, system: system, history: history, prompt: prompt,
-                                      client: client, tools: tools, context: context, budget: budget)
-            await play(engine.run(request), for: botID)
+            guard isCurrent(turn, of: botID) else { return }
+            // Recorded when the prompt with the snapshot is stored (see `apply`), not before.
+            pendingMarks[botID] = built.marks
+            let request = TurnRequest(bot: bot, model: ref.model, system: built.system, history: history,
+                                      prompt: TurnPreface.prepend(built.preface, to: prompt),
+                                      client: client, tools: tools, context: context, budget: budget, maxSteps: maxSteps,
+                                      turnGrants: turnGrants, permissions: permissionSource(for: bot))
+            await play(engine.run(request), for: botID, turn: turn)
         }
         return true
     }
 
     /// A turn run by the user's Claude Code, continuing the conversation's Claude Code session.
-    private func runClaudeCode(_ bot: Bot, model: String, prompt: String, message: String) {
+    private func runClaudeCode(_ bot: Bot, model: String, prompt: String, message: String, turnGrants: [PermissionRule]) {
         let botID = bot.id
         let conversation = conversations[botID] ?? Conversation()
-        let sessionID = conversation.claudeSessionID
+        let folder = bot.workingURL.standardizedFileURL.path
+        // Claude Code keeps sessions per folder: once the Orb's folder changed, the old one can't be resumed, so a
+        // new session starts and gets the conversation so far as catch-up.
+        let sessionID = conversation.claudeSession(forFolder: folder)
         // New session: hand it the whole conversation so far. Resumed: only what other models did since.
         // (Sessions from before this was tracked count as up to date.)
         let seen = sessionID == nil ? 0 : min(conversation.claudeSeenCount ?? conversation.messages.count, conversation.messages.count)
         let catchUp = ClaudeCodePrompt.catchUp(Array(conversation.messages[seen...]).modelContext())
         let skills = enabledSkills
         let bank = memory.bank(for: botID)
-        let servers = [MemoryMCPServer.config(directory: bank.directory)]
+        let servers = [OrbToolsMCPServer.config(directory: bank.directory, mac: bot.capabilities.contains(.computerUse),
+                                                folder: bot.workingURL)]
             + (bot.capabilities.contains(.connectors) ? connectors.filter(\.isEnabled) : [])
         let isNew = conversation.messages.isEmpty
         let userTurns = userTurnCount(botID)
         claudeTurns.insert(botID)
+        claudeTurnFolders[botID] = folder
+        let turn = beginTurn(botID)
         turns[botID] = Task {
             guard !Task.isCancelled else { return } // stopped before it began
             let brief = await bank.brief(for: message, conversationIsNew: isNew, userTurns: userTurns,
                                          tools: ClaudeCodePrompt.memoryTools, canSave: bot.permissionMode != .readOnly)
-            let system = ClaudeCodePrompt.make(bot: bot, skills: skills, memory: brief.full)
-            // A resumed session keeps the system prompt of its first request: the memory that changed rides along.
-            let update = sessionID == nil ? ""
-                : ClaudeCodePrompt.memoryUpdate(brief, pinnedChanged: brief.pinned != conversation.claudeMemoryPinned)
-            conversations[botID]?.claudeMemoryPinned = brief.pinned
-            let context = [update, catchUp].filter { !$0.isEmpty }.joined(separator: "\n\n")
-            guard let installation = await ClaudeCode.shared.installation() else {
-                apply(.failed("O Claude Code não foi encontrado neste Mac. Veja Ajustes → Modelos."), to: botID)
-                finishTurn(botID, succeeded: false)
+            // A resumed session keeps the system prompt of its first request: whatever changed since rides along.
+            let inputs = await TurnPromptInputs.gather(bot: bot, skills: skills, brief: brief)
+            guard isCurrent(turn, of: botID) else { return } // stopped while preparing
+            let built = TurnPrompt.claudeCode(inputs, session: .init(isNewSession: sessionID == nil,
+                                                                     workspaceHash: conversation.claudeWorkspaceHash,
+                                                                     pinned: conversation.claudeMemoryPinned,
+                                                                     standingHash: conversation.claudeStandingHash))
+            let context = [built.context, catchUp].filter { !$0.isEmpty }.joined(separator: "\n\n")
+            let found = await ClaudeCode.shared.installation()
+            guard isCurrent(turn, of: botID) else { return }
+            guard let installation = found else {
+                failSetup("O Claude Code não foi encontrado neste Mac. Veja Ajustes → Modelos.", of: botID, turn: turn)
                 return
             }
-            let turn = ClaudeCodeTurn(bot: bot, executable: installation.executable, model: model, system: system,
-                                      prompt: prompt, context: context, sessionID: sessionID, connectors: servers,
-                                      environment: await ClaudeCode.shared.environment(for: installation))
-            await play(claudeEngine.run(turn), for: botID)
+            let environment = await ClaudeCode.shared.environment(for: installation)
+            guard isCurrent(turn, of: botID) else { return }
+            let claudeTurn = ClaudeCodeTurn(bot: bot, executable: installation.executable, model: model, system: built.system,
+                                            prompt: prompt, context: context, sessionID: sessionID, connectors: servers,
+                                            environment: environment, turnGrants: turnGrants,
+                                            permissions: permissionSource(for: bot))
+            // Recorded when the session answers (see `apply`): a turn that fails before that sent nothing.
+            pendingMarks[botID] = built.marks
+            await play(claudeEngine.run(claudeTurn), for: botID, turn: turn)
         }
     }
 
@@ -730,25 +811,45 @@ final class AppModel {
         }
     }
 
-    private func play(_ events: AsyncStream<TurnEvent>, for botID: UUID) async {
+    /// Registers a new turn of the Orb and returns its id.
+    private func beginTurn(_ botID: UUID) -> UUID {
+        let turn = UUID()
+        turnIDs[botID] = turn
+        return turn
+    }
+
+    /// Whether `turn` is still the Orb's running turn (not stopped, not replaced by a newer one).
+    private func isCurrent(_ turn: UUID, of botID: UUID) -> Bool {
+        !Task.isCancelled && turnIDs[botID] == turn
+    }
+
+    /// A turn that could not even start (no client, no Claude Code). A stopped turn says nothing: the failure
+    /// would be its own cancellation, or belong to a turn the user already left.
+    private func failSetup(_ error: Error, of botID: UUID, turn: UUID) {
+        failSetup(error is CancellationError ? nil : error.localizedDescription, of: botID, turn: turn)
+    }
+
+    private func failSetup(_ message: String?, of botID: UUID, turn: UUID) {
+        guard isCurrent(turn, of: botID), let message else { return }
+        apply(.failed(message), to: botID)
+        finishTurn(botID, turn: turn, succeeded: false)
+    }
+
+    private func play(_ events: AsyncStream<TurnEvent>, for botID: UUID, turn: UUID) async {
         var succeeded = true
         for await event in events {
             // A stopped stream still delivers queued events; `stop` already closed the turn.
-            guard !Task.isCancelled else { break }
+            guard isCurrent(turn, of: botID) else { break }
             if case .failed = event { succeeded = false }
             apply(event, to: botID)
         }
-        if !Task.isCancelled { finishTurn(botID, succeeded: succeeded) }
+        if !Task.isCancelled { finishTurn(botID, turn: turn, succeeded: succeeded) }
     }
 
     func stop(_ botID: UUID) {
-        guard let task = turns[botID] else { return }
+        guard let task = turns[botID], let turn = turnIDs[botID] else { return }
         task.cancel()
-        if claudeTurns.contains(botID) {
-            Task { await claudeEngine.cancelApprovals(for: botID) }
-        } else {
-            Task { await engine.cancelApprovals(for: botID) }
-        }
+        Task { await gate.cancelApprovals(for: botID) }
         closeStreaming(botID)
         awaitingApproval.remove(botID)
         mutateItems(of: botID) { items in
@@ -760,32 +861,40 @@ final class AppModel {
             }
         }
         append(.notice("Você interrompeu esta resposta"), to: botID)
-        finishTurn(botID, succeeded: false)
+        finishTurn(botID, turn: turn, succeeded: false)
     }
 
-    func decide(_ decision: ApprovalDecision, approvalID: UUID, botID: UUID) {
-        var toolName: String?
+    /// Your answer to an approval card. `rule` is the standing rule picked under "Sempre…"; "Sempre" without one
+    /// takes the card's first suggestion, and "Só nesta tarefa" grants that rule until the turn ends.
+    func decide(_ decision: ApprovalDecision, rule: PermissionRule? = nil, approvalID: UUID, botID: UUID) {
+        var chosen = rule
         mutateItems(of: botID) { items in
             for index in items.indices {
                 if case .approval(var request) = items[index].kind, request.id == approvalID {
                     request.decision = decision
-                    toolName = request.toolName
+                    if decision == .always || decision == .task { chosen = chosen ?? request.suggestions.first }
                     items[index].kind = .approval(request)
                 }
             }
         }
         awaitingApproval.remove(botID)
-        if decision == .always, let toolName {
-            update(botID) { $0.allowedTools.insert(toolName) }
+        // Saved before the engine is answered, so its next tool call already sees the rule.
+        if decision == .always, let chosen, chosen.isValid {
+            update(botID) { if !$0.permissionRules.contains(chosen) { $0.permissionRules.append(chosen) } }
         }
-        if claudeTurns.contains(botID) {
-            Task { await claudeEngine.resolve(approvalID: approvalID, decision: decision) }
-        } else {
-            Task { await engine.resolve(approvalID: approvalID, decision: decision) }
-        }
+        let answer = ApprovalAnswer(decision: decision, rule: chosen)
+        Task { await gate.resolve(approvalID: approvalID, answer: answer) }
     }
 
-    private func apply(_ event: TurnEvent, to botID: UUID) {
+    /// Records the marks of the turn's prompt when it has been delivered: for Orb's own engine, when the user message (with
+    /// the snapshot) is stored; for Claude Code, when its session answers.
+    private func recordMarks(_ botID: UUID, native: Bool) {
+        guard let marks = pendingMarks[botID], marks.isNative == native else { return }
+        pendingMarks[botID] = nil
+        conversations[botID]?.record(marks)
+    }
+
+    func apply(_ event: TurnEvent, to botID: UUID) { // internal for tests
         switch event {
         case .status(let text):
             statusLine[botID] = text
@@ -825,6 +934,7 @@ final class AppModel {
         case .message(let message):
             ensureLoaded(botID)
             conversations[botID, default: Conversation()].messages.append(message)
+            if message.role == .user { recordMarks(botID, native: true) }
             scheduleConversationSave(botID, delay: Self.streamingSaveInterval)
         case .failed(let message):
             closeStreaming(botID)
@@ -832,22 +942,26 @@ final class AppModel {
         case .notice(let text):
             closeStreaming(botID)
             append(.notice(text), to: botID)
+        case .usage(let total):
+            usage[botID] = total
         case .session(let id):
             ensureLoaded(botID)
-            conversations[botID, default: Conversation()].claudeSessionID = id.isEmpty ? nil : id
-            if id.isEmpty { conversations[botID]?.claudeSeenCount = nil }
+            conversations[botID, default: Conversation()].claudeSessionReported(id, folder: claudeTurnFolders[botID])
+            if !id.isEmpty { recordMarks(botID, native: false) }
             scheduleConversationSave(botID, delay: Self.streamingSaveInterval)
         }
     }
 
-    private func finishTurn(_ botID: UUID, succeeded: Bool = true) {
-        guard turns[botID] != nil else { return }
+    /// Closes the turn `turn`; a turn that is no longer the Orb's current one (stopped, then replaced) is ignored.
+    func finishTurn(_ botID: UUID, turn: UUID, succeeded: Bool = true) {
+        guard turnIDs[botID] == turn, turns[botID] != nil else { return }
         turns[botID] = nil
-        if claudeTurns.remove(botID) != nil, conversations[botID]?.claudeSessionID != nil {
-            // Everything so far went through (or was handed to) this Claude Code session.
-            let count = conversations[botID]?.messages.count // read first: reading inside the write below traps
-            conversations[botID]?.claudeSeenCount = count
-        }
+        turnIDs[botID] = nil
+        pendingMarks[botID] = nil
+        // The turn may have changed files: the next message reads the folder again.
+        Task { await WorkspaceSnapshots.shared.invalidate(botID) }
+        let turnFolder = claudeTurnFolders.removeValue(forKey: botID)
+        if claudeTurns.remove(botID) != nil { conversations[botID]?.claudeTurnFinished(folder: turnFolder) }
         stopSpeaking(botID)
         closeStreaming(botID)
         statusLine[botID] = nil

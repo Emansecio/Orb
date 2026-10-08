@@ -495,3 +495,15 @@ final class StubProtocol: URLProtocol {
         return data
     }
 }
+
+extension OpenAIClientTests {
+    @Test func toolChoiceNoneKeepsTheToolsAndForbidsCalls() {
+        let tools = [ToolSpec(name: "a", description: "A", parameters: .schema([:]))]
+        let auto = OpenAIClient.requestBody(model: "m", messages: [.user("oi")], tools: tools)
+        let none = OpenAIClient.requestBody(model: "m", messages: [.user("oi")], tools: tools, toolChoice: .none)
+        #expect(auto["tool_choice"] == nil)
+        #expect(none["tool_choice"] == .string("none"))
+        #expect(none["tools"] == auto["tools"])
+        #expect(OpenAIClient.requestBody(model: "m", messages: [.user("oi")], tools: [], toolChoice: .none)["tool_choice"] == nil)
+    }
+}

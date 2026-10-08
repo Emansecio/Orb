@@ -59,7 +59,7 @@ private actor Recorder {
 private struct RecordingLLM: LLMClient {
     let recorder: Recorder
 
-    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec]) -> AsyncThrowingStream<LLMEvent, Error> {
+    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
         AsyncThrowingStream { continuation in
             Task {
                 do {

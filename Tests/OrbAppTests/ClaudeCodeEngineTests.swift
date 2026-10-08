@@ -6,7 +6,7 @@ import Testing
 /// message streams text, asks permission for a Bash call and reports the result. Logs argv and stdin lines.
 private let fakeClaude = #"""
 #!/usr/bin/python3
-import json, os, sys
+import json, os, sys, time
 
 log = open(os.environ["FAKE_CLAUDE_LOG"], "a")
 def note(text):
@@ -15,6 +15,8 @@ def emit(obj):
     sys.stdout.write(json.dumps(obj) + "\n"); sys.stdout.flush()
 
 note(json.dumps({"args": sys.argv[1:]}))
+if "FAKE_CLAUDE_PID" in os.environ:
+    open(os.environ["FAKE_CLAUDE_PID"], "w").write(str(os.getpid()))
 session = next((a.split("=", 1)[1] for a in sys.argv if a.startswith(("--session-id=", "--resume="))), "none")
 scenario = os.environ.get("FAKE_CLAUDE_SCENARIO", "tool")
 for raw in sys.stdin:
@@ -22,11 +24,20 @@ for raw in sys.stdin:
     msg = json.loads(raw)
     kind = msg.get("type")
     if kind == "control_request" and msg["request"]["subtype"] == "initialize":
+        if scenario == "init_silent":
+            time.sleep(120)  # never answers, and ignores its stdin closing
+        if scenario == "init_error":
+            emit({"type": "control_response", "response": {"subtype": "error", "request_id": msg["request_id"], "error": "boom: config invalida"}})
+            continue
         emit({"type": "control_response", "response": {"subtype": "success", "request_id": msg["request_id"], "response": {"models": []}}})
     elif kind == "user":
         emit({"type": "system", "subtype": "init", "session_id": session, "model": "claude-test"})
         if scenario == "hang":
             continue
+        if scenario == "no_result":
+            emit({"type": "assistant", "parent_tool_use_id": None, "session_id": session,
+                  "message": {"id": "msg_9", "model": "claude-test", "content": [{"type": "text", "text": "Comecei, mas"}]}})
+            break
         emit({"type": "stream_event", "parent_tool_use_id": None, "session_id": session, "uuid": "1",
               "event": {"type": "message_start", "message": {"id": "msg_1"}}})
         emit({"type": "stream_event", "parent_tool_use_id": None, "session_id": session, "uuid": "2",
@@ -52,6 +63,11 @@ for raw in sys.stdin:
 note("eof")
 """#
 
+private actor SessionFlag {
+    private(set) var isRaised = false
+    func raise() { isRaised = true }
+}
+
 private struct FakeClaude {
     let directory: URL
     var executable: URL { directory.appendingPathComponent("claude") }
@@ -64,12 +80,14 @@ private struct FakeClaude {
                                        attributes: [.posixPermissions: 0o755])
     }
 
+    var pidFile: URL { directory.appendingPathComponent("pid.txt") }
+
     func turn(mode: PermissionMode, scenario: String = "tool", sessionID: String? = nil) -> ClaudeCodeTurn {
         var bot = Bot(name: "Atlas", role: "", orb: OrbConfig(), permissionMode: mode)
         bot.workingDirectory = directory.path
         return ClaudeCodeTurn(bot: bot, executable: executable, model: "sonnet", system: "persona", prompt: "liste os arquivos",
                               sessionID: sessionID, environment: ["PATH": "/usr/bin:/bin", "FAKE_CLAUDE_LOG": log.path,
-                                                                  "FAKE_CLAUDE_SCENARIO": scenario])
+                                                                  "FAKE_CLAUDE_SCENARIO": scenario, "FAKE_CLAUDE_PID": pidFile.path])
     }
 
     /// Logged lines, waiting up to `timeout` seconds for one containing `marker`.
@@ -91,7 +109,7 @@ struct ClaudeCodeEngineTests {
         var events: [TurnEvent] = []
         for await event in engine.run(turn) {
             events.append(event)
-            if case .approval(let approval) = event { await engine.resolve(approvalID: approval.id, decision: decision) }
+            if case .approval(let approval) = event { await engine.gate.resolve(approvalID: approval.id, decision: decision) }
         }
         return events
     }
@@ -133,6 +151,8 @@ struct ClaudeCodeEngineTests {
         let logged = lines.first.flatMap { JSONValue.parse($0) }
         let args = logged?["args"]?.array?.compactMap(\.string) ?? []
         #expect(args.contains("--resume=sess-1") && args.contains("--model=sonnet") && args.contains("--append-system-prompt=persona"))
+        // The Orb works outside the home folder (here a temporary one), so reading the user's files does not prompt.
+        #expect(args.contains("--add-dir=\(FileManager.default.homeDirectoryForCurrentUser.path)"))
         let sent = lines.dropFirst().compactMap { JSONValue.parse($0) }
         #expect(sent.first?["request"]?["subtype"] == .string("initialize"))
         #expect(sent.dropFirst().first?["type"] == .string("user"))
@@ -161,6 +181,113 @@ struct ClaudeCodeEngineTests {
         let lines = await fake.logLines(waitingFor: "eof")
         let args = lines.first ?? ""
         #expect(args.contains("acceptEdits") && args.contains("--session-id="))
+    }
+
+    @Test func theCardOffersRulesForWhatWasAsked() async throws {
+        let fake = try FakeClaude()
+        defer { fake.remove() }
+        let events = await run(ClaudeCodeEngine(), fake.turn(mode: .ask), decision: .deny)
+        let approvals = events.compactMap { if case .approval(let request) = $0 { request } else { nil } }
+        #expect(approvals.first?.suggestions == [.shell("ls")])
+    }
+
+    @Test func rulesAreReadWhenTheRequestArrivesNotWhenTheTurnStarts() async throws {
+        let fake = try FakeClaude()
+        defer { fake.remove() }
+        // The turn started with no grants; the app has one by the time Claude Code asks.
+        var turn = fake.turn(mode: .ask)
+        turn.permissions = { PermissionState(mode: .ask, rules: [.shell("ls")]) }
+        let events = await run(ClaudeCodeEngine(), turn, decision: .deny)
+        #expect(!events.contains { if case .approval = $0 { true } else { false } })
+        let finished = events.compactMap { if case .toolFinished(_, let state, _) = $0 { state } else { nil } }
+        #expect(finished == [.done])
+    }
+
+    @Test func aModeChosenAfterTheTurnStartedWins() async throws {
+        let fake = try FakeClaude()
+        defer { fake.remove() }
+        var turn = fake.turn(mode: .bypass)
+        turn.permissions = { PermissionState(mode: .readOnly, rules: [.shell("ls")]) }
+        let events = await run(ClaudeCodeEngine(), turn)
+        let finished = events.compactMap { if case .toolFinished(_, let state, let output) = $0 { (state, output) } else { nil } }
+        #expect(finished.count == 1 && finished[0].0 == .failed && finished[0].1 == "Bloqueado: o Orb está em modo Só leitura.")
+        let lines = await fake.logLines(waitingFor: "eof")
+        #expect(lines.contains { $0.contains(#""behavior":"deny""#) })
+    }
+
+    @Test func aGrantFromTheOtherEngineStillApplies() async throws {
+        let fake = try FakeClaude()
+        defer { fake.remove() }
+        var turn = fake.turn(mode: .ask)
+        turn.bot.permissionRules = PermissionPolicy.legacyRules(fromToolNames: ["run_command"])
+        let events = await run(ClaudeCodeEngine(), turn, decision: .deny)
+        #expect(!events.contains { if case .approval = $0 { true } else { false } })
+    }
+
+    @Test func changingTheModeDuringTheTurnTellsClaudeCode() async throws {
+        let fake = try FakeClaude()
+        defer { fake.remove() }
+        let engine = ClaudeCodeEngine()
+        let turn = fake.turn(mode: .bypass, scenario: "hang")
+        let started = SessionFlag()
+        let consumer = Task {
+            for await event in engine.run(turn) {
+                if case .session = event { await started.raise() }
+            }
+        }
+        for _ in 0..<200 where !(await started.isRaised) { try await Task.sleep(for: .milliseconds(25)) }
+        #expect(await started.isRaised)
+        // Another Orb's change reaches nobody; this Orb's reaches the running session.
+        await engine.modeChanged(for: UUID(), to: .ask)
+        await engine.modeChanged(for: turn.bot.id, to: .readOnly)
+        let lines = await fake.logLines(waitingFor: "set_permission_mode")
+        let requests = lines.compactMap { JSONValue.parse($0) }.filter { $0["request"]?["subtype"] == .string("set_permission_mode") }
+        #expect(requests.count == 1)
+        #expect(requests.first?["request"]?["mode"] == .string("plan"))
+        consumer.cancel()
+    }
+
+    /// Whether the process whose pid the fake CLI wrote is still alive.
+    private func isRunning(_ fake: FakeClaude) -> Bool? {
+        guard let text = try? String(contentsOf: fake.pidFile, encoding: .utf8), let pid = pid_t(text) else { return nil }
+        return kill(pid, 0) == 0
+    }
+
+    @Test func aCLIThatNeverAnswersInitializeIsGivenUpOnAndKilled() async throws {
+        let fake = try FakeClaude()
+        defer { fake.remove() }
+        var turn = fake.turn(mode: .ask, scenario: "init_silent")
+        turn.initializeTimeout = 3 // long enough for the fake's interpreter to start and note its pid
+        let started = Date.now
+        let events = await run(ClaudeCodeEngine(), turn)
+
+        #expect(Date.now.timeIntervalSince(started) < 10)
+        guard case .failed(let message) = events.last else { Issue.record("expected a failure, got \(events)"); return }
+        #expect(message.contains("não respondeu") && message.contains("encerrado"))
+        // The silent process is really gone, not left running.
+        let deadline = Date.now.addingTimeInterval(8)
+        while isRunning(fake) != false, Date.now < deadline { try await Task.sleep(for: .milliseconds(100)) }
+        #expect(isRunning(fake) == false)
+    }
+
+    @Test func anErrorAnswerToInitializeIsReported() async throws {
+        let fake = try FakeClaude()
+        defer { fake.remove() }
+        let events = await run(ClaudeCodeEngine(), fake.turn(mode: .ask, scenario: "init_error"))
+        guard case .failed(let message) = events.last else { Issue.record("expected a failure, got \(events)"); return }
+        #expect(message.contains("boom: config invalida"))
+        // The prompt was never sent to a CLI that refused to start.
+        let lines = await fake.logLines(waitingFor: "eof")
+        #expect(!lines.dropFirst().compactMap { JSONValue.parse($0) }.contains { $0["type"] == .string("user") })
+        #expect(!events.contains { if case .message(let m) = $0, m.role == .assistant { true } else { false } })
+    }
+
+    @Test func aStreamThatEndsWithoutAResultIsReported() async throws {
+        let fake = try FakeClaude()
+        defer { fake.remove() }
+        let events = await run(ClaudeCodeEngine(), fake.turn(mode: .ask, scenario: "no_result"))
+        guard case .failed(let message) = events.last else { Issue.record("expected a failure, got \(events)"); return }
+        #expect(message.contains("parou sem terminar"))
     }
 
     @Test func stoppingInterruptsAndEndsTheProcess() async throws {

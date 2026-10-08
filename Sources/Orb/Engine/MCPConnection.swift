@@ -1,5 +1,28 @@
 import Foundation
 
+/// What a server says about one of its tools (`annotations` in `tools/list`). Hints, not guarantees: they only
+/// decide whether Orb asks, never what the tool can really do.
+struct MCPToolAnnotations: Sendable, Equatable {
+    var readOnly: Bool?
+    var destructive: Bool?
+    var openWorld: Bool?
+
+    static let none = MCPToolAnnotations()
+
+    init(readOnly: Bool? = nil, destructive: Bool? = nil, openWorld: Bool? = nil) {
+        self.readOnly = readOnly
+        self.destructive = destructive
+        self.openWorld = openWorld
+    }
+
+    /// Reads the `annotations` object of a tool; wrong types are ignored.
+    init(json: JSONValue?) {
+        readOnly = json?["readOnlyHint"]?.bool
+        destructive = json?["destructiveHint"]?.bool
+        openWorld = json?["openWorldHint"]?.bool
+    }
+}
+
 /// One MCP server, local (stdio) or remote (HTTP), spoken to with JSON-RPC 2.0.
 /// Single use: after `stop()` (or a crash) create a new connection to restart.
 actor MCPConnection {
@@ -15,6 +38,8 @@ actor MCPConnection {
     private var transport: (any MCPTransport)?
     private var pending: [Int: Pending] = [:]
     private var nextID = 1
+    /// The annotations of each tool from the last `tools/list`, by the server's own tool name.
+    private(set) var toolAnnotations: [String: MCPToolAnnotations] = [:]
 
     init(config: MCPServerConfig) { self.config = config }
 
@@ -65,6 +90,7 @@ actor MCPConnection {
 
     private func listTools() async throws -> [ToolSpec] {
         var specs: [ToolSpec] = []
+        var annotations: [String: MCPToolAnnotations] = [:]
         var cursor: String?
         for _ in 0..<100 {
             let params: JSONValue = cursor.map { .object(["cursor": .string($0)]) } ?? .object([:])
@@ -74,10 +100,12 @@ actor MCPConnection {
                 let schema = if case .object = tool["inputSchema"] { tool["inputSchema"] } else { JSONValue?.none }
                 specs.append(ToolSpec(name: name, description: tool["description"]?.string ?? "",
                                       parameters: schema ?? .schema([:])))
+                annotations[name] = MCPToolAnnotations(json: tool["annotations"])
             }
             cursor = result["nextCursor"]?.string
             if cursor == nil { break }
         }
+        toolAnnotations = annotations
         return specs
     }
 

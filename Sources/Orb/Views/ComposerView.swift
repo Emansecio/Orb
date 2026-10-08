@@ -149,6 +149,18 @@ private struct PermissionMenu: View {
     let bot: Bot
     @State private var isConfirmingBypass = false
 
+    /// "Perguntar antes · 2 liberações": the grants only apply where the Orb asks.
+    private var modeLabel: String {
+        let count = bot.permissionRules.count
+        guard bot.permissionMode == .ask, count > 0 else { return bot.permissionMode.label }
+        return "\(bot.permissionMode.label) · \(count) \(count == 1 ? "liberação" : "liberações")"
+    }
+
+    private var grantsHelp: String {
+        guard bot.permissionMode == .ask, !bot.permissionRules.isEmpty else { return "" }
+        return "\n\nLiberado:\n" + bot.permissionRules.map { "• " + $0.title }.joined(separator: "\n")
+    }
+
     var body: some View {
         Menu {
             Picker("Permissões", selection: Binding(
@@ -161,12 +173,12 @@ private struct PermissionMenu: View {
             }
             .pickerStyle(.inline)
         } label: {
-            Label(bot.permissionMode.label, systemImage: bot.permissionMode.symbol)
+            Label(modeLabel, systemImage: bot.permissionMode.symbol)
                 .foregroundStyle(bot.permissionMode == .bypass ? Palette.warn : Palette.muted)
         }
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Permissões: \(bot.permissionMode.label). \(bot.permissionMode.summary)")
+        .help("Permissões: \(bot.permissionMode.label). \(bot.permissionMode.summary)" + grantsHelp)
         .bypassConfirmation(isPresented: $isConfirmingBypass) {
             model.update(bot.id) { $0.permissionMode = .bypass }
         }

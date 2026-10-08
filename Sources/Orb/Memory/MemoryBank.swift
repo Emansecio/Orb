@@ -58,9 +58,13 @@ struct MemoryBrief: Equatable, Sendable {
     var related = ""
     var footer = ""
 
-    var full: String {
-        "# Your memory (only yours, kept by the Orb app)\n\n" + [pinned, notes, footer].filter { !$0.isEmpty }.joined(separator: "\n\n")
-    }
+    var full: String { Self.heading + [pinned, notes, footer].filter { !$0.isEmpty }.joined(separator: "\n\n") }
+
+    /// Only what stays the same from one message to the next (identity, preferences, footer): the system prompt.
+    /// The notes depend on the message and travel with it (`TurnPreface`), so the prompt cache survives the turns.
+    var stable: String { Self.heading + [pinned, footer].filter { !$0.isEmpty }.joined(separator: "\n\n") }
+
+    private static let heading = "# Your memory (only yours, kept by the Orb app)\n\n"
 }
 
 /// One Orb's memory: markdown pages in its own folder plus the search index. Every Orb gets one when it is

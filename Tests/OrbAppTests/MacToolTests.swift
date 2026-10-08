@@ -565,7 +565,7 @@ struct MacToolTests {
 
     private struct OneCallLLM: LLMClient {
         let call: ToolCallRequest
-        func stream(model: String, messages: [ChatMessage], tools: [ToolSpec]) -> AsyncThrowingStream<LLMEvent, Error> {
+        func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
             let answered = messages.contains { $0.role == .tool }
             return AsyncThrowingStream { continuation in
                 continuation.yield(answered ? .text("fim") : .toolCalls([call]))
@@ -586,7 +586,7 @@ struct MacToolTests {
         for await event in engine.run(request) {
             if case .approval(let approval) = event {
                 asked = true
-                await engine.resolve(approvalID: approval.id, decision: .deny)
+                await engine.gate.resolve(approvalID: approval.id, decision: .deny)
             }
         }
         return asked

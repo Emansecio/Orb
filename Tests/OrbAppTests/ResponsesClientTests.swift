@@ -229,3 +229,27 @@ struct ResponsesClientTests {
         #expect(StubProtocol.sent(to: "responses-401.test").map { $0.request.value(forHTTPHeaderField: "Authorization") } == ["Bearer old", "Bearer new"])
     }
 }
+
+extension ResponsesClientTests {
+    @Test func toolChoiceNoneKeepsTheToolsAndForbidsCalls() {
+        let tools = [ToolSpec(name: "a", description: "A", parameters: .schema([:]))]
+        for asInputItem in [false, true] {
+            let auto = ResponsesClient.requestBody(model: "m", messages: [.user("oi")], tools: tools, toolsAsInputItem: asInputItem)
+            let none = ResponsesClient.requestBody(model: "m", messages: [.user("oi")], tools: tools, toolsAsInputItem: asInputItem,
+                                                   toolChoice: .none)
+            #expect(auto["tool_choice"] == nil)
+            if asInputItem {
+                // No `tool_choice` without top-level tools: the instruction is a final developer message instead.
+                #expect(none["tool_choice"] == nil && none["tools"] == nil)
+                let sent = none["input"]?.array ?? []
+                #expect(sent.count == (auto["input"]?.array ?? []).count + 1)
+                #expect(sent.last?["content"] == .string(ResponsesClient.noToolsInstruction))
+                #expect(sent.last?["role"] == .string("developer"))
+            } else {
+                #expect(none["tool_choice"] == .string("none"))
+                #expect(none["tools"] == auto["tools"] && none["input"] == auto["input"])
+            }
+        }
+        #expect(ResponsesClient.requestBody(model: "m", messages: [.user("oi")], tools: [], toolChoice: .none)["tool_choice"] == nil)
+    }
+}

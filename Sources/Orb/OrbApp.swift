@@ -1,14 +1,13 @@
 import SwiftUI
 import AppKit
 
-/// `Orb --memory-mcp <folder>` runs only the memory tools for Claude Code (no window); anything else is the app.
+/// `Orb --tools-mcp <folder>` runs only the Orb's tools for Claude Code (no window, and none of the app's
+/// AppKit/SwiftUI setup: `OrbApp.main()` is never reached); anything else is the app.
 @main
 enum Launcher {
     static func main() {
-        let arguments = CommandLine.arguments
-        if let flag = arguments.firstIndex(of: MemoryMCPServer.flag), arguments.indices.contains(flag + 1) {
-            MemoryMCPServer.serve(directory: URL(fileURLWithPath: arguments[flag + 1]))
-            exit(0)
+        if let options = OrbToolsMCPServer.Options(arguments: CommandLine.arguments) {
+            OrbToolsMCPServer.run(options)
         }
         OrbApp.main()
     }

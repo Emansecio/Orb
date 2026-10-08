@@ -6,11 +6,13 @@ struct MCPTool: AgentTool {
     let toolName: String
     let spec: ToolSpec
     let connection: MCPConnection
+    let annotations: MCPToolAnnotations
 
-    init(serverName: String, remote: ToolSpec, connection: MCPConnection) {
+    init(serverName: String, remote: ToolSpec, connection: MCPConnection, annotations: MCPToolAnnotations = .none) {
         self.serverName = serverName
         toolName = remote.name
         self.connection = connection
+        self.annotations = annotations
         let description = remote.description.isEmpty ? remote.name : remote.description
         spec = ToolSpec(name: Self.modelName(server: serverName, tool: remote.name),
                         description: "[\(serverName)] \(description)", parameters: remote.parameters)
@@ -28,8 +30,17 @@ struct MCPTool: AgentTool {
     var kind: ToolCall.Kind { .connector }
     var capability: Capability? { .connectors }
 
-    /// Third-party code: always confirm according to the bot's permission mode.
-    func risk(_ arguments: JSONValue) -> ToolRisk { .sensitive }
+    /// Third-party code: confirm according to the bot's permission mode, unless the server declares the tool
+    /// read-only and closed-world (it only reads what the server itself holds). A tool that declares itself
+    /// destructive stays sensitive, whatever else it claims.
+    func risk(_ arguments: JSONValue) -> ToolRisk {
+        annotations.readOnly == true && annotations.openWorld != true && annotations.destructive != true ? .safe : .sensitive
+    }
+
+    /// A tool the server marks destructive asks even in "Automático" and is never covered by "Sempre permitir".
+    func danger(_ arguments: JSONValue) -> String? {
+        annotations.destructive == true ? "o conector marcou esta ferramenta como destrutiva" : nil
+    }
 
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) {
         let args = arguments == .object([:]) || arguments == .null ? "" : " " + arguments.jsonString
@@ -92,7 +103,10 @@ actor MCPManager {
                 guard var entry = entries[id], entry.connection === connection else { continue }
                 switch result {
                 case .success(let specs):
-                    entry.tools = specs.map { MCPTool(serverName: entry.config.name, remote: $0, connection: connection) }
+                    let annotations = await connection.toolAnnotations
+                    entry.tools = specs.map {
+                        MCPTool(serverName: entry.config.name, remote: $0, connection: connection, annotations: annotations[$0.name] ?? .none)
+                    }
                     entry.status = .ready(toolCount: specs.count)
                 case .failure(let error):
                     entry.status = .failed(error.localizedDescription)

@@ -49,13 +49,35 @@ struct ClaudeCodeParserTests {
         #expect(parser.parse(#"{"type":"control_request","request_id":"req_8","request":{"subtype":"hook_callback","callback_id":"hook_0"}}"#)
                 == [.unsupportedRequest(requestID: "req_8", subtype: "hook_callback")])
         #expect(parser.parse(#"{"type":"control_response","response":{"subtype":"success","request_id":"req_1_abcd","response":{}}}"#)
-                == [.controlResponse(requestID: "req_1_abcd", isError: false)])
+                == [.controlResponse(requestID: "req_1_abcd", error: nil)])
+    }
+
+    @Test func errorAnswersCarryTheirReason() {
+        var parser = ClaudeCodeParser()
+        let refused = #"{"type":"control_response","response":{"subtype":"error","request_id":"req_1_abcd","error":"bad config"}}"#
+        #expect(parser.parse(refused) == [.controlResponse(requestID: "req_1_abcd", error: "bad config")])
+        let bare = #"{"type":"control_response","response":{"subtype":"error","request_id":"req_2"}}"#
+        #expect(parser.parse(bare) == [.controlResponse(requestID: "req_2", error: "erro desconhecido")])
+    }
+
+    @Test func resultsReportUsageAndCost() {
+        var parser = ClaudeCodeParser()
+        let line = #"{"type":"result","subtype":"success","is_error":false,"session_id":"s1","result":"Pronto.","total_cost_usd":0.0421,"usage":{"input_tokens":12,"output_tokens":340,"cache_read_input_tokens":9000,"cache_creation_input_tokens":150,"service_tier":"standard"}}"#
+        #expect(parser.parse(line) == [.result(ClaudeCodeResult(
+            isError: false, message: "Pronto.", sessionID: "s1",
+            usage: TokenUsage(input: 12, output: 340, cacheRead: 9000, cacheWrite: 150), costUSD: 0.0421))])
+        // Missing, empty or malformed usage never fails the turn.
+        #expect(ClaudeCodeParser.result(.object(["usage": .object([:])])).usage == nil)
+        #expect(ClaudeCodeParser.result(.object(["usage": .string("x")])).usage == nil)
+        let partial = ClaudeCodeParser.result(.object(["usage": .object(["output_tokens": .number(5)])]))
+        #expect(partial.usage == TokenUsage(output: 5))
+        #expect(partial.costUSD == nil)
     }
 
     @Test func resultsPickTheMostInformativeText() {
         var parser = ClaudeCodeParser()
         let success = #"{"type":"result","subtype":"success","is_error":false,"num_turns":2,"session_id":"s1","result":"Pronto.","total_cost_usd":0.01}"#
-        #expect(parser.parse(success) == [.result(ClaudeCodeResult(isError: false, message: "Pronto.", sessionID: "s1"))])
+        #expect(parser.parse(success) == [.result(ClaudeCodeResult(isError: false, message: "Pronto.", sessionID: "s1", costUSD: 0.01))])
         let missing = #"{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":0,"session_id":"1111","errors":["No conversation found with session ID: 1111"]}"#
         #expect(parser.parse(missing) == [.result(ClaudeCodeResult(isError: true, message: "No conversation found with session ID: 1111", sessionID: "1111"))])
         let apiFailure = #"{"type":"result","subtype":"success","is_error":true,"session_id":"s","result":"API Error: 529 overloaded"}"#
@@ -111,11 +133,44 @@ struct ClaudeCodePolicyTests {
         #expect(ClaudeCodePolicy.cliMode(.readOnly) == "plan")
         #expect(ClaudeCodePolicy.cliMode(.ask) == "default")
         #expect(ClaudeCodePolicy.cliMode(.auto) == "acceptEdits")
-        #expect(ClaudeCodePolicy.answer(mode: .auto, toolName: "Bash", allowed: []) == .allow)
-        #expect(ClaudeCodePolicy.answer(mode: .ask, toolName: "Bash", allowed: []) == nil)
-        #expect(ClaudeCodePolicy.answer(mode: .ask, toolName: "Bash", allowed: ["Bash"]) == .allow)
+        #expect(ClaudeCodePolicy.answer(mode: .auto, toolName: "Bash") == .allow)
+        #expect(ClaudeCodePolicy.answer(mode: .ask, toolName: "Bash") == nil)
+        #expect(ClaudeCodePolicy.answer(mode: .ask, toolName: "Bash", rules: PermissionPolicy.legacyRules(fromToolNames: ["Bash"])) == .allow)
         // Read-only wins over an earlier "Sempre permitir".
-        #expect(ClaudeCodePolicy.answer(mode: .readOnly, toolName: "Bash", allowed: ["Bash"]) == .deny(ClaudeCodePolicy.readOnlyDenial))
+        #expect(ClaudeCodePolicy.answer(mode: .readOnly, toolName: "Bash", rules: PermissionPolicy.legacyRules(fromToolNames: ["Bash"])) == .deny(ClaudeCodePolicy.readOnlyDenial))
+    }
+
+    @Test func theMacToolsAskLikeTheNativeOnes() {
+        let prefix = ClaudeCodeTools.memoryPrefix
+        let quitForced = JSONValue.object(["app": .string("Pages"), "force": .bool(true)])
+        let quit = JSONValue.object(["app": .string("Pages")])
+        let rm = JSONValue.object(["script": .string(#"do shell script "rm -rf ~/Documents/x""#)])
+        let harmless = JSONValue.object(["script": .string(#"tell application "Finder" to activate"#)])
+        // A forced quit and a destructive `do shell script` ask in "Automático" and after "Sempre permitir".
+        for (name, input) in [("app_quit", quitForced), ("applescript", rm)] {
+            let tool = prefix + name
+            #expect(ClaudeCodePolicy.answer(mode: .auto, toolName: tool, input: input) == nil, "\(name)")
+            #expect(ClaudeCodePolicy.answer(mode: .ask, toolName: tool, input: input, rules: PermissionPolicy.legacyRules(fromToolNames: [tool])) == nil, "\(name)")
+            #expect(ClaudeCodePolicy.answer(mode: .bypass, toolName: tool, input: input) == .allow, "\(name)")
+            #expect(ClaudeCodePolicy.answer(mode: .readOnly, toolName: tool, input: input, rules: PermissionPolicy.legacyRules(fromToolNames: [tool])) == .deny(ClaudeCodePolicy.readOnlyDenial), "\(name)")
+            #expect(PermissionPolicy.call(claudeCodeTool: tool, input: input, workspace: nil).danger != nil, "\(name)")
+        }
+        // The same tools without the danger behave as sensitive ones.
+        let applescript = prefix + "applescript", appQuit = prefix + "app_quit"
+        #expect(ClaudeCodePolicy.answer(mode: .auto, toolName: applescript, input: harmless) == .allow)
+        #expect(ClaudeCodePolicy.answer(mode: .ask, toolName: applescript, input: harmless) == nil)
+        #expect(ClaudeCodePolicy.answer(mode: .ask, toolName: applescript, input: harmless, rules: PermissionPolicy.legacyRules(fromToolNames: [applescript])) == .allow)
+        #expect(ClaudeCodePolicy.answer(mode: .auto, toolName: appQuit, input: quit) == .allow)
+        #expect(PermissionPolicy.call(claudeCodeTool: applescript, input: harmless, workspace: nil).danger == nil)
+        // Read-only tools run in every mode, "Só leitura" included.
+        for name in ["apps_list", "processes", "screenshot", "clipboard_read", "shortcuts_list"] {
+            for mode in PermissionMode.allCases {
+                #expect(ClaudeCodePolicy.answer(mode: mode, toolName: prefix + name) == .allow, "\(name) \(mode)")
+            }
+        }
+        // Claude Code's own tools keep checking `command` only.
+        #expect(PermissionPolicy.call(claudeCodeTool: "Bash", input: .object(["command": .string("rm -rf ~")]), workspace: nil).danger != nil)
+        #expect(PermissionPolicy.call(claudeCodeTool: "mcp__outro__run", input: rm, workspace: nil).danger == nil)
     }
 
     @Test func toolPresentation() {
@@ -130,6 +185,86 @@ struct ClaudeCodePolicyTests {
         let mcp = ClaudeCodeTools.summary("mcp__my_server__get_issue", .object(["id": .number(3)]))
         #expect(mcp.title == "Usando my_server")
         #expect(mcp.detail == #"get_issue {"id":3}"#)
+    }
+
+    @Test func macToolsOfTheOrbServerGetPortugueseTitles() {
+        let prefix = ClaudeCodeTools.memoryPrefix
+        // Same titles as the native tools; the kind comes from the tool itself.
+        for tool in ToolBox.macTools {
+            let name = prefix + tool.spec.name
+            #expect(ClaudeCodeTools.kind(name) == tool.kind, "\(tool.spec.name)")
+            let expected = tool.summary(.object([:]))
+            #expect(ClaudeCodeTools.summary(name, .object([:])) == expected, "\(tool.spec.name)")
+            #expect(!expected.title.isEmpty, "\(tool.spec.name)")
+        }
+        #expect(ClaudeCodeTools.summary(prefix + "processes", .object([:])) == ("Vendo os processos", ""))
+        #expect(ClaudeCodeTools.summary(prefix + "trash", .object(["paths": .array([.string("/tmp/a")])])).title == "Movendo para a Lixeira")
+        // A tool this version doesn't know under the Orb's server keeps the memory icon and a generic title.
+        #expect(ClaudeCodeTools.kind(prefix + "futuro") == .memory)
+        #expect(ClaudeCodeTools.summary(prefix + "futuro", .object([:])).title == "Usando orb_memoria")
+    }
+
+    @Test func theOrbReadsTheHomeFolderWithoutAskingUnlessItWorksThere() {
+        let home = URL(fileURLWithPath: "/Users/ana")
+        var bot = Bot(name: "Atlas", role: "", orb: OrbConfig())
+        bot.workingDirectory = "/Users/ana/Projetos/site"
+        var turn = ClaudeCodeTurn(bot: bot, executable: URL(fileURLWithPath: "/bin/claude"), model: "default",
+                                  system: "s", prompt: "oi", sessionID: nil)
+        turn.homeDirectory = home
+        #expect(turn.arguments(newSessionID: "a", mcpConfig: nil).contains("--add-dir=/Users/ana"))
+        // Already starting in the home folder (an empty folder means home): nothing to add.
+        turn.bot.workingDirectory = "/Users/ana/"
+        #expect(!turn.arguments(newSessionID: "a", mcpConfig: nil).contains { $0.hasPrefix("--add-dir") })
+        turn.bot.workingDirectory = ""
+        turn.homeDirectory = FileManager.default.homeDirectoryForCurrentUser
+        #expect(!turn.arguments(newSessionID: "a", mcpConfig: nil).contains { $0.hasPrefix("--add-dir") })
+    }
+
+    @Test func aSessionIsResumedOnlyInTheFolderItStartedIn() throws {
+        var conversation = Conversation()
+        #expect(conversation.claudeSession(forFolder: "/a") == nil)
+        conversation.claudeSessionID = "s-1"
+        // Saved before the folder was tracked: still resumed.
+        #expect(conversation.claudeSession(forFolder: "/a") == "s-1")
+        conversation.claudeSessionFolder = "/a"
+        #expect(conversation.claudeSession(forFolder: "/a") == "s-1")
+        #expect(conversation.claudeSession(forFolder: "/b") == nil)
+
+        // Persisted with the conversation, and an older file without the field still loads.
+        let saved = try JSONDecoder().decode(Conversation.self, from: JSONEncoder().encode(conversation))
+        #expect(saved.claudeSessionID == "s-1" && saved.claudeSessionFolder == "/a")
+        let old = try JSONDecoder().decode(Conversation.self, from: Data(#"{"items":[],"messages":[],"claudeSessionID":"s-0"}"#.utf8))
+        #expect(old.claudeSessionID == "s-0" && old.claudeSessionFolder == nil)
+    }
+
+    @Test func changingTheFolderStartsANewSessionThatGetsTheFullCatchUp() {
+        var conversation = Conversation()
+        conversation.messages = [ChatMessage(role: .user, content: "oi"), ChatMessage(role: .assistant, content: "olá")]
+        // Turn in /a: its session is reported, and the turn ends having seen everything.
+        conversation.claudeSessionReported("s-a", folder: "/a")
+        conversation.claudeTurnFinished(folder: "/a")
+        #expect(conversation.claudeSessionID == "s-a" && conversation.claudeSessionFolder == "/a" && conversation.claudeSeenCount == 2)
+
+        // The folder changes: no session to resume, so the next turn is sent the whole conversation.
+        conversation.messages.append(ChatMessage(role: .user, content: "e agora?"))
+        let sessionID = conversation.claudeSession(forFolder: "/b")
+        #expect(sessionID == nil)
+        // The new session never starts (the turn failed): the leftover /a session has not seen this turn, so the
+        // count stays where it was and nothing is marked as seen.
+        conversation.claudeTurnFinished(folder: "/b")
+        #expect(conversation.claudeSeenCount == 2)
+        let seen = sessionID == nil ? 0 : min(conversation.claudeSeenCount ?? 0, conversation.messages.count)
+        #expect(seen == 0)
+
+        // A retry in /b whose session does start is stamped with /b and counts everything as seen.
+        conversation.claudeSessionReported("s-b", folder: "/b")
+        conversation.claudeTurnFinished(folder: "/b")
+        #expect(conversation.claudeSession(forFolder: "/b") == "s-b" && conversation.claudeSession(forFolder: "/a") == nil)
+        #expect(conversation.claudeSeenCount == 3)
+
+        // A session the CLI says is gone clears its folder and count.
+        conversation.claudeSessionReported("", folder: "/b")
+        #expect(conversation.claudeSessionID == nil && conversation.claudeSessionFolder == nil && conversation.claudeSeenCount == nil)
     }
 
     @Test func argumentsFollowTheBot() {
@@ -234,6 +369,17 @@ struct ClaudeCodeTranscriptTests {
         // The reply plus a short note of what was done, so other models taking over know.
         #expect(reply.content.hasPrefix("Vou olhar.\n\nPronto.\n\n(Actions taken in this turn: "))
         #expect(reply.content.contains("ls"))
+    }
+
+    @Test func theResultsUsageIsKeptForTheEngine() {
+        var transcript = ClaudeCodeTranscript(isResuming: false)
+        #expect(transcript.usage == nil && transcript.costUSD == nil)
+        _ = transcript.apply(.started(sessionID: "s"))
+        let events = transcript.apply(.result(ClaudeCodeResult(isError: false, message: "Oi", sessionID: "s",
+                                                               usage: TokenUsage(input: 1, output: 2), costUSD: 0.5)))
+        #expect(transcript.usage == TokenUsage(input: 1, output: 2) && transcript.costUSD == 0.5)
+        // The usage reaches the app like the native engine's, so the meter shows Claude Code turns too.
+        #expect(events.contains { if case .usage(let used) = $0 { used == TokenUsage(input: 1, output: 2) } else { false } })
     }
 
     @Test func replyWithoutToolsHasNoActionNote() {

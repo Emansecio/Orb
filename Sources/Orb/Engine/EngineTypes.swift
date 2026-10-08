@@ -86,10 +86,15 @@ struct ChatMessage: Codable, Hashable, Sendable {
     var toolCallID: String?
     /// Assistant messages: the model's reasoning for this reply, kept so it can be sent back unchanged.
     var reasoning: ReasoningTrace?
+    /// Tool messages: the call failed (an error, an unknown tool, a refusal), which providers that have the notion
+    /// (Anthropic's `is_error`) are told.
+    var isError = false
 
     static func system(_ text: String) -> ChatMessage { ChatMessage(role: .system, content: text) }
     static func user(_ text: String) -> ChatMessage { ChatMessage(role: .user, content: text) }
-    static func tool(_ id: String, _ output: String) -> ChatMessage { ChatMessage(role: .tool, content: output, toolCallID: id) }
+    static func tool(_ id: String, _ output: String, isError: Bool = false) -> ChatMessage {
+        ChatMessage(role: .tool, content: output, toolCallID: id, isError: isError)
+    }
 }
 
 extension ChatMessage {
@@ -103,6 +108,7 @@ extension ChatMessage {
         toolCalls = try c.lossyArray(.toolCalls)
         toolCallID = try c.decodeIfPresent(String.self, forKey: .toolCallID)
         reasoning = try? c.decodeIfPresent(ReasoningTrace.self, forKey: .reasoning)
+        isError = try c.value(.isError, default: false)
     }
 }
 
@@ -228,6 +234,22 @@ struct TokenUsage: Sendable, Equatable {
     var output: Int?
     var cacheRead: Int?
     var cacheWrite: Int?
+
+    /// Adds another response's counts (a count nobody reported stays unknown).
+    mutating func add(_ other: TokenUsage) {
+        func sum(_ a: Int?, _ b: Int?) -> Int? { a == nil && b == nil ? nil : (a ?? 0) + (b ?? 0) }
+        input = sum(input, other.input)
+        output = sum(output, other.output)
+        cacheRead = sum(cacheRead, other.cacheRead)
+        cacheWrite = sum(cacheWrite, other.cacheWrite)
+    }
+}
+
+/// Whether the model may call tools in a response. `.none` keeps the tool list (and so the provider's cache) but
+/// makes the model answer in text, which is how the last step of a turn gets its summary.
+enum ToolChoice: Sendable, Equatable {
+    case auto
+    case none
 }
 
 enum LLMEvent: Sendable, Equatable {
@@ -243,7 +265,13 @@ enum LLMEvent: Sendable, Equatable {
 
 protocol LLMClient: Sendable {
     /// Streams one assistant response. Throws `LLMError` for HTTP/protocol failures; honors task cancellation.
-    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec]) -> AsyncThrowingStream<LLMEvent, Error>
+    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error>
+}
+
+extension LLMClient {
+    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec]) -> AsyncThrowingStream<LLMEvent, Error> {
+        stream(model: model, messages: messages, tools: tools, toolChoice: .auto)
+    }
 }
 
 /// Supplies the key or token for one request. `forceRefresh` asks for a new one after the provider rejected the
