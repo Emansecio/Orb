@@ -162,7 +162,7 @@ private struct SidebarBotRow: View {
         SidebarRow(isSelected: isSelected, selectionSpace: selectionSpace) {
             model.selection = .bot(botID)
         } content: { isHovering in
-            BotRowContent(row: BotRow(look: live.look, status: live.status, activity: live.activity, isSelected: isSelected,
+            BotRowContent(row: BotRow(look: live.look, workText: live.shownWork?.text, shimmers: live.shownWork?.shimmers ?? false, activity: live.activity, isSelected: isSelected,
                                       poke: live.poke, glance: live.glance, needsYou: live.needsYou, unread: live.unread,
                                       hint: isHovering && index < 9 ? "⌘\(index + 1)" : nil))
                 .equatable()
@@ -214,7 +214,10 @@ private struct NavLabel: View {
 /// What a row shows, as one small value: a row whose value did not change is not rendered again.
 private struct BotRow: Equatable {
     let look: BotLook
-    let status: String?
+    /// What the Orb is doing ("Rodando swift build", "Pensando…"); nil when no turn runs.
+    let workText: String?
+    /// The text shimmers: the Orb works, it is not waiting (for you or to try again).
+    let shimmers: Bool
     let activity: OrbActivity
     let isSelected: Bool
     let poke: Int
@@ -231,7 +234,7 @@ private struct BotRowContent: View, Equatable {
     let row: BotRow
 
     var body: some View {
-        let (look, status, activity, needsYou) = (row.look, row.status, row.activity, row.needsYou)
+        let (look, workText, activity, needsYou) = (row.look, row.workText, row.activity, row.needsYou)
         HStack(spacing: 8) {
             // Only the selected bot and bots with something going on move; the rest rest (no frames at all).
             BotAvatar(orb: look.orb, size: 30, activity: activity, paused: !row.isSelected && activity == .idle, poke: row.poke,
@@ -243,8 +246,12 @@ private struct BotRowContent: View, Equatable {
                 Group {
                     if needsYou {
                         Text("Precisa de você").foregroundStyle(Palette.warn)
-                    } else if let status {
-                        Text("\(status)…").shimmer()
+                    } else if let workText {
+                        if row.shimmers {
+                            Text(workText).shimmer()
+                        } else {
+                            Text(workText).foregroundStyle(Palette.faint)
+                        }
                     } else {
                         Text(look.role).foregroundStyle(Palette.faint)
                     }
@@ -252,7 +259,7 @@ private struct BotRowContent: View, Equatable {
                 .font(.system(size: 11))
                 .lineLimit(1)
             }
-            .animateChanges(of: status)
+            .animateChanges(of: workText)
             .animateChanges(of: needsYou)
             Spacer(minLength: 4)
             if let hint = row.hint {

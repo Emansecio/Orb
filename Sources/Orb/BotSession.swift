@@ -99,6 +99,11 @@ final class BotSession {
     /// Until when the Orb keeps talking (it stops when no text arrived for `speakingQuiet`).
     @ObservationIgnored var speakingUntil: ContinuousClock.Instant?
     @ObservationIgnored var speakingWatch: Task<Void, Never>?
+    /// The tool calls of the running turn that have not finished: a status line that repeats one's title is that call's
+    /// phrase, which already says its target.
+    @ObservationIgnored var runningCalls: [UUID: ToolCall] = [:]
+    /// How many tool calls the running turn has made (the working line's "3 ações").
+    @ObservationIgnored var actionsThisTurn = 0
 
     // MARK: Turn
 

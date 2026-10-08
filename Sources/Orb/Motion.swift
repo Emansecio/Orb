@@ -41,6 +41,18 @@ extension AnyTransition {
         .asymmetric(insertion: .opacity.combined(with: .offset(y: 6)), removal: .opacity)
     }
 
+    /// A phrase replaced by another in place (the working line): the new one rises 4 pt and appears, the old one just
+    /// fades, quickly, so the two never fight for the eye.
+    static var swap: AnyTransition {
+        .asymmetric(insertion: .opacity.combined(with: .offset(y: 4)), removal: .opacity.animation(Motion.exit))
+    }
+
+    /// A line that arrives with the turn (the working line): rises 6 pt and appears with the entrance curve; leaves by
+    /// fading only, with the exit one.
+    static var arrive: AnyTransition {
+        .asymmetric(insertion: AnyTransition.rise.animation(Motion.enter), removal: .opacity.animation(Motion.exit))
+    }
+
     /// Comes down from the item above (details that open); leaves by fading only.
     static var unfold: AnyTransition {
         .asymmetric(insertion: .opacity.combined(with: .offset(y: -4)), removal: .opacity)

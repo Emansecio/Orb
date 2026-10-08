@@ -25,7 +25,17 @@ enum Retry {
         case LLMError.http(429, _, _), LLMError.stream("rate_limit_error", _), LLMError.stream("rate_limit_exceeded", _): "Limite do provedor"
         default: "Provedor ocupado"
         }
-        return "\(cause), tentando de novo em \(Int(seconds.rounded(.up))) s"
+        return "\(cause)\(waitMarker)\(Int(seconds.rounded(.up))) s"
+    }
+
+    private static let waitMarker = ", tentando de novo em "
+
+    /// The two parts of a `waitStatus` (why, and how many seconds), so the working line can say it with a countdown.
+    /// nil for any other status.
+    static func parseWaitStatus(_ status: String) -> (cause: String, seconds: Int)? {
+        guard let marker = status.range(of: waitMarker), status.hasSuffix(" s"),
+              let seconds = Int(status[marker.upperBound...].dropLast(2)) else { return nil }
+        return (String(status[..<marker.lowerBound]), seconds)
     }
 
     /// Seconds to wait after `attempt` (1-based) failed: the provider's `Retry-After` when given, else exponential

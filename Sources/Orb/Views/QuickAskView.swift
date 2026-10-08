@@ -294,9 +294,13 @@ private struct QuickAskWorkingRow: View {
         let live = model.live(botID)
         HStack(spacing: 8) {
             BotAvatar(orb: live.look.orb, size: 18, activity: live.activity)
-            Text("\(live.look.name): \(live.status ?? "")…")
+            let work = live.shownWork
+            Text("\(live.look.name): \(work?.text ?? "")")
                 .font(.caption)
-                .foregroundStyle(Palette.secondary)
+                .foregroundStyle(work?.tone == .waiting ? Palette.warn : work?.shimmers == false ? Palette.faint : Palette.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .animateChanges(of: work?.text)
         }
     }
 }
@@ -317,9 +321,13 @@ struct QuickAskReply: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 BotAvatar(orb: live.look.orb, size: 18, activity: live.activity)
-                if let status = live.status, reply == nil || reply?.isStreaming == true {
-                    Text("\(live.look.name): \(status)…").shimmer()
+                if let work = live.shownWork, reply == nil || reply?.isStreaming == true {
+                    Text("\(live.look.name): \(work.text)")
+                        .shimmer(active: work.shimmers)
                         .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(work.tone == .waiting ? Palette.warn : Palette.faint)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 } else {
                     Text(reply == nil ? "\(live.look.name) não respondeu" : "\(live.look.name) respondeu")
                         .font(.system(size: 12, weight: .medium))

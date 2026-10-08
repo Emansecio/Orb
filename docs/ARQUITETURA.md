@@ -46,6 +46,7 @@ Tudo em `Sources/Orb/`.
 | `AppModel+Approvals / +Commands / +ContextUI / +MemoryUI / +RoutinesUI / +Steering / +Transcript` | o que cada área pede ao modelo: `decide` e banners; comandos, paleta e barra de menus; dados do medidor; esquecer/desfazer; modelos de rotina e listas; fila "enquanto trabalha"; "Tentar de novo"/"Continuar" |
 | `BotSession.swift`, `BotSession+Turn.swift`, `BotSession+Conversation.swift` | a maquinaria de um Orb: conversa em memória (carregar, descarregar, salvar, estacionar durante rotina), turno (id, eventos, texto em stream, cartões), uso de tokens, trechos para a memória |
 | `BotLive.swift` | o que as telas leem de um Orb: configurações, `status`, `activity` (com "digitando" e a olhada ao ser escolhido), `needsYou`, não lidas, memória, medidor. `WritesOnlyChanges` (`assign`, `writeIfChanged`) |
+| `WorkLine.swift` | o que o Orb diz que está fazendo: `WorkLine` (verbo, alvo, tom, rotina, ações), `WorkPhrase` (a frase de cada ferramenta e dos status dos motores), `WorkMeter` ("16 s · 3 ações", "em 8 s"), `StatusDwell` (tempo mínimo de 0,7 s por frase) e `WorkAnnouncer` (anúncios ao VoiceOver, no máximo um a cada 8 s). `BotLive.work` é a frase; `status` continua o texto cru dos motores |
 | `LiveText.swift` | `ReplyParagraphs` (parágrafos incrementais), `LiveText` (a resposta que está chegando), `OrbTranscript` (os itens que a conversa mostra) |
 | `Models.swift` | `Bot`, `PermissionMode`, `Capability`, `Conversation`, `TranscriptItem`, `ToolCall`, `ApprovalRequest`, `Routine`, `Schedule`, `Skill` |
 | `Store.swift`, `StoreCoordination.swift`, `ConversationCoding.swift`, `ConversationHistory.swift` | `AppState`, `Store` (leitura/escrita com filas), `Keychain`, decodificação tolerante, `FileGate`, codificação incremental da conversa, arquivo de conversas, relatórios de rotina |
@@ -175,7 +176,8 @@ ComposerView ── AppModel.submit ─┬─ Orb livre ─► AppModel.send ─
    modelo), `notice`, `failed`, `usage`/`requestUsage`, `compacted`, `taskPaused`, `steered`, `session`.
 7. **Aplicação** (`BotSession.apply`, na thread principal): o texto vai para `pendingText` e é publicado em `LiveText` a cada
    33 ms, **sem tocar na lista de itens**; ferramentas e cartões viram itens da conversa; `message` entra em
-   `Conversation.messages`; o `BotLive` recebe status, ferramenta em uso, "falando" e "esperando você".
+   `Conversation.messages`; o `BotLive` recebe status, ferramenta em uso, "falando" e "esperando você", e a frase da linha de trabalho (`work`,
+   uma por passo, nunca por token, cada uma por ao menos 0,7 s).
 8. **Fim** (`finishTurn`): zera status; agenda a página de sessão da memória (30 min depois); fecha a execução da rotina;
    notifica (se o app está em segundo plano) e conta não lidas; o Orb comemora (`happy`) ou erra (`error`); entrega a fila que
    ficou; grava a conversa de uma vez; começa a próxima rotina que esperava por este Orb.
@@ -406,7 +408,7 @@ Modos (qualquer outro nome mostra o chat do primeiro Orb):
 | Área | Modos |
 |---|---|
 | Janela e painéis | `app`, `sidebar`, `inspector` (= `inspector-general`), `inspector-memory`, `inspector-folder`, `inspector-routines`, `memory-sheet`, `new-orb`, `new-orb-kept` (com memórias guardadas, uma escolhida), `editor`, `delete-orb`, `palette`, `shortcuts`, `menubar-icons` |
-| Conversa | `chat-working`, `chat-typed`, `chat-slash`, `popover-permissions`, `popover-model`, `popover-skills`, `approvals`, `transcript`, `transcript-approvals`, `transcript-notices`, `transcript-failed`, `transcript-retry` |
+| Conversa | `chat-working`, `chat-working-wait`, `chat-working-retry`, `chat-typed`, `chat-slash`, `popover-permissions`, `popover-model`, `popover-skills`, `approvals`, `transcript`, `transcript-approvals`, `transcript-notices`, `transcript-failed`, `transcript-retry` |
 | Contexto | `context-meter`, `context-nudge`, `context-popover`, `context-popover-result`, `context-popover-short`, `context-popover-claude`, `settings-context` |
 | Ajustes | `settings-general`, `settings-reset` (a folha "Redefinir o Orb?"), `settings-models`, `settings-perms`, `first-run-banner`, `models` |
 | Barra de menus | `quickask`, `quickask-approvals`, `quickask-reply` |

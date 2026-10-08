@@ -60,6 +60,8 @@ final class AppModel {
     var routineToShow: UUID?
     /// The "Esqueceu isso. Desfazer" of the memory screens: here so it outlives the panel being rebuilt (switching Orbs).
     @ObservationIgnored let memoryUndo = MemoryUndo()
+    /// Which phrases of the working line VoiceOver is told (not more often than every 8 s).
+    @ObservationIgnored var workAnnouncer = WorkAnnouncer()
     var connectorStatus: [UUID: MCPStatus] = [:]
     /// Providers with a key in the Keychain (or, for ChatGPT and Claude Code, a sign-in).
     private(set) var connected: Set<ProviderKind> = []
@@ -1122,6 +1124,8 @@ final class AppModel {
         append(.user(text: typed, attachments: attachments.map(\.path) + pictures.map(\.path)), to: botID)
         if fromUser { setDraft("", for: botID) }
         setStatus("Pensando", of: botID)
+        session.resetWork()
+        session.showWork(WorkPhrase.line(status: "Pensando"))
         live(botID).poked()
         session.flash(\.isListening, seconds: 1.4)
 
@@ -1588,8 +1592,14 @@ final class AppModel {
 
     /// The status line says which routine the Orb is busy with.
     func routineStatus(_ text: String, for botID: UUID) -> String {
-        guard let routineID = sessions[botID]?.routineID, let routine = routines.first(where: { $0.id == routineID }) else { return text }
-        return "Rotina “\(routine.name)”: \(text)"
+        guard let name = routineName(for: botID) else { return text }
+        return "Rotina “\(name)”: \(text)"
+    }
+
+    /// The name of the routine whose run is the Orb's turn, if it is one.
+    func routineName(for botID: UUID) -> String? {
+        guard let routineID = sessions[botID]?.routineID else { return nil }
+        return routines.first(where: { $0.id == routineID })?.name
     }
 
     private func runDueRoutines(now: Date = .now) {

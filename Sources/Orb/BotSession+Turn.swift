@@ -20,7 +20,35 @@ extension BotSession {
     func beginTurn() -> UUID {
         let turn = UUID()
         turnID = turn
+        resetWork()
+        model?.workAnnouncer.reset()
         return turn
+    }
+
+    // MARK: What the working line says
+
+    /// A new turn starts with no calls and no actions counted.
+    func resetWork() {
+        runningCalls = [:]
+        actionsThisTurn = 0
+    }
+
+    /// Publishes a phrase of the working line, with this turn's routine and count of actions. Changed once per step of
+    /// the turn (a tool, a status), never per token.
+    func showWork(_ phrase: WorkLine, announcing: Bool = false) {
+        guard let model else { return }
+        var line = phrase
+        line.routine = model.routineName(for: id)
+        line.actions = actionsThisTurn
+        model.live(id).setWork(line)
+        if announcing { model.announceWork(line, of: id) }
+    }
+
+    /// The phrase for a status line of the engine. One that repeats the title of a call that is running is that call's,
+    /// shown already with its target.
+    func showWork(forStatus text: String) {
+        if runningCalls.values.contains(where: { $0.title == text }) { return }
+        showWork(WorkPhrase.line(status: text))
     }
 
     /// Whether `turn` is still the Orb's running turn (not stopped, not replaced by a newer one).
@@ -95,6 +123,7 @@ extension BotSession {
         switch event {
         case .status(let text):
             model.setStatus(model.routineStatus(text, for: id), of: id)
+            showWork(forStatus: text)
         case .text(let delta):
             // Shown by `flushText`; anything that adds to the transcript flushes first (`closeStreaming`).
             pendingText = (pendingText ?? "") + delta
@@ -110,8 +139,12 @@ extension BotSession {
             closeStreaming()
             append(.tool(call))
             model.live(id).runningTool = call.kind
+            runningCalls[call.id] = call
+            actionsThisTurn += 1
+            showWork(WorkPhrase.line(for: call), announcing: true)
         case .toolFinished(let id, let state, let output):
             model.live(self.id).runningTool = nil
+            runningCalls[id] = nil
             mutateItems { items in
                 for index in items.indices {
                     if case .tool(var call) = items[index].kind, call.id == id {
@@ -201,6 +234,7 @@ extension BotSession {
         stopSpeaking()
         closeStreaming()
         model.setStatus(nil, of: id)
+        resetWork()
         if routineID != nil {
             // A routine's run isn't a conversation with you: it stays out of the memory's sessions.
             let count = conversation?.items.count

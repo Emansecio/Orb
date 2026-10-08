@@ -72,7 +72,7 @@ private struct TranscriptList: View {
         let transcript = model.orbTranscript(look.id)
         let items = transcript.items
         let live = model.live(look.id)
-        let status = live.status
+        let isWorking = live.isWorking
         let isLoading = model.isLoadingConversation(look.id)
         // Looked at before the rows are made, as many times as this is evaluated: the same items say the same thing.
         let generation = entrances.observe(items, isLoading: isLoading, swaps: transcript.swaps)
@@ -80,7 +80,7 @@ private struct TranscriptList: View {
         // A conversation swapped for another (a new one, one reopened from Conversas) cross-fades; the scroll view is
         // a new one then, as it was when the whole chat was rebuilt.
         ZStack {
-            conversation(items: items, status: status, isLoading: isLoading, live: live, transcript: transcript)
+            conversation(items: items, isWorking: isWorking, isLoading: isLoading, live: live, transcript: transcript)
                 .id(generation)
                 .transition(.opacity)
         }
@@ -88,7 +88,7 @@ private struct TranscriptList: View {
         .onChange(of: generation) { followsBottom = true; follower.follows = true }
     }
 
-    private func conversation(items: [TranscriptItem], status: String?, isLoading: Bool, live: BotLive,
+    private func conversation(items: [TranscriptItem], isWorking: Bool, isLoading: Bool, live: BotLive,
                               transcript: OrbTranscript) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -109,14 +109,15 @@ private struct TranscriptList: View {
                             .transition(.identity)
                     }
                     QueuedMessages(botID: look.id)
-                    if let status {
-                        WorkingLine(look: look, text: status)
+                    if isWorking {
+                        WorkingLine(look: look)
+                            .transition(.adapted(.arrive, reduceMotion: reduceMotion))
                     }
                     Color.clear.frame(height: 1).id(BottomAnchor.id)
                 }
                 // Only what changes rarely animates at the list: the Orb starting or ending a turn (its working line), and
                 // the empty state leaving with the first message. Never the count of messages, never a streamed token.
-                .motion(Motion.content, value: status == nil)
+                .motion(Motion.content, value: isWorking)
                 .motion(Motion.exit, value: items.isEmpty)
                 .padding(.horizontal, 28)
                 .padding(.top, 20)
@@ -438,29 +439,43 @@ private struct SuggestionButton: View {
     }
 }
 
-/// Live status of a working bot: shimmering activity text next to its spinning orb, and how long the turn has
-/// lasted. The clock ticks once a second, and only while this line exists (a turn is running).
+/// What the Orb is doing, at the end of the chat: its avatar, the phrase (a verb and what it works on, "Rodando
+/// `swift build`") and a small meter (how long the turn has gone on, how many actions it made). The one place of
+/// the "now": the transcript above only keeps the history. The phrase shimmers while the Orb works, stands still in
+/// the warning color while it waits for you and in the quiet one while it waits to try again; when it changes
+/// the new one rises into place and the old one fades (`Motion`, a step at a time, never a token). The clock ticks
+/// once a second, and only while this line exists (a turn is running).
 private struct WorkingLine: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let look: BotLook
-    let text: String
+    /// The last phrase there was: when the turn ends the line is still fading out for a moment, and must say the
+    /// same words until it is gone instead of falling back to "Pensando".
+    @State private var lastWork = WorkPhrase.line(status: "Pensando")
 
     var body: some View {
         let live = model.live(look.id)
+        let work = live.shownWork ?? lastWork
         HStack(spacing: 10) {
             HStack(spacing: 10) {
                 LiveBotAvatar(botID: look.id, orb: look.orb, size: 30)
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text("\(text)…")
-                        .font(.system(size: 13))
-                        .shimmer()
-                    if let since = live.workingSince {
-                        ElapsedClock(since: since)
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    ZStack(alignment: .leading) {
+                        WorkPhraseView(work: work)
+                            .id(work.phraseKey)
+                            .transition(.adapted(.swap, reduceMotion: reduceMotion))
                     }
+                    .animation(Motion.adapted(Motion.enter, reduceMotion: reduceMotion), value: work.phraseKey)
+                    WorkMeterView(work: work, since: live.workingSince)
                 }
+                // The meter slides along with the width of the phrase.
+                .animation(reduceMotion ? nil : Motion.content, value: work.phraseKey)
             }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("\(look.name): \(text)")
+            .onChange(of: live.shownWork, initial: true) { _, new in if let new { lastWork = new } }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(work.tone == .waiting ? "\(look.name) precisa de você" : "\(look.name) está trabalhando")
+            .accessibilityValue(work.text)
+            .accessibilityAddTraits(.updatesFrequently)
             if model.routineWaitingForYou(look.id) != nil {
                 // The card is in the routine's conversation, not in this chat.
                 Button("Ver pedido") { model.showRoutineRequest(of: look.id) }
@@ -472,19 +487,81 @@ private struct WorkingLine: View {
     }
 }
 
-/// "12 s" next to the status, redrawn once a second. Hidden from VoiceOver, which would otherwise read every tick.
-private struct ElapsedClock: View {
-    let since: Date
+/// The words of a phrase: the verb, then what it works on (code in a monospaced face, cut in the middle when the
+/// line is short of room), after the routine's name when it is a routine's run. The shimmer covers the whole
+/// phrase (one mask), and only while the Orb works.
+private struct WorkPhraseView: View {
+    let work: WorkLine
 
     var body: some View {
-        TimelineView(.periodic(from: since, by: 1)) { context in
-            let text = ElapsedFormat.working(since: since, now: context.date)
-            Text(text)
-                .font(.system(size: 12).monospacedDigit())
-                .foregroundStyle(Palette.faint)
-                // Plain text, no animation: a clock that ticks every second must not be a recurring animation outside
-                // Core Animation (MOVIMENTO.md, principle 7). Rolling digits are for counters that change once.
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            if let routine = work.routine {
+                Text("\(routine) ·")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Palette.faint)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            phrase
+                .shimmer(active: work.shimmers)
         }
-        .accessibilityHidden(true)
+    }
+
+    private var phrase: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            Text(work.shownTarget == nil ? work.phrase : work.verb)
+                .font(.system(size: 13))
+                .lineLimit(1)
+                .fixedSize()
+            if let target = work.shownTarget {
+                Text(target)
+                    .font(work.style == .code ? .system(size: 12, design: .monospaced) : .system(size: 13))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .layoutPriority(-1)
+            }
+        }
+        .foregroundStyle(tint)
+    }
+
+    private var tint: Color {
+        switch work.tone {
+        // The shimmer paints the working phrase (its mask only reads the alpha); under Reduce Motion it paints it
+        // `Palette.muted`, and a color set inside would win over that, so the working tone sets the same one.
+        case .working: Palette.muted
+        case .waiting: Palette.warn
+        case .retrying: Palette.secondary
+        }
+    }
+}
+
+/// "16 s · 3 ações" next to the phrase (or "em 8 s" counting down to a new try), redrawn once a second. Hidden from
+/// VoiceOver, which would otherwise read every tick. The count rolls when it changes, which is once per tool.
+private struct WorkMeterView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let work: WorkLine
+    let since: Date?
+
+    var body: some View {
+        if since != nil || work.tone != .working {
+            TimelineView(.periodic(from: since ?? .now, by: 1)) { context in
+                Text(text(at: context.date))
+                    .font(.system(size: 12).monospacedDigit())
+                    .foregroundStyle(Palette.faint)
+                    .lineLimit(1)
+                    .fixedSize()
+                    // Plain text on every tick: a clock that ticks every second must not be a recurring animation outside
+                    // Core Animation (MOVIMENTO.md, principle 7). Rolling digits are for the count, which changes once.
+                    .contentTransition(reduceMotion ? .identity : .numericText())
+                    .animation(reduceMotion ? nil : Motion.content, value: work.actions)
+            }
+            .accessibilityHidden(true)
+        }
+    }
+
+    private func text(at now: Date) -> String {
+        if case .retrying(let until) = work.tone { return WorkMeter.countdown(until: until, now: now) }
+        let elapsed = since.map { ElapsedFormat.working(since: $0, now: now) } ?? ""
+        return WorkMeter.text(elapsed: elapsed, actions: work.actions)
     }
 }

@@ -131,8 +131,14 @@ AppleScript, Atalhos, área de transferência, captura de tela nem controla outr
   passo dele (no Claude Code, assim que a resposta termina). **⌘↩ para e envia agora**; com um pedido de permissão aberto,
   isso recusa o pedido (parar sempre recusa) e envia. Se o Orb espera sua resposta a um pedido, a fila só anda depois dela.
   Dá para tirar uma mensagem da fila ("Editar"). Se o turno falhar ou for parado, o que estava na fila volta para o campo.
-- **Parar.** O botão Parar ou **⌘.**; o Orb avisa "Você interrompeu esta resposta". Uma linha mostra o que ele faz e quanto
-  tempo faz ("Pensando… 12 s").
+- **Parar.** O botão Parar ou **⌘.**; o Orb avisa "Você interrompeu esta resposta".
+- **O que o Orb está fazendo.** Uma linha no fim da conversa, ao lado dele, diz o verbo e o alvo ("Rodando `swift build`",
+  "Lendo README.md", "Procurando “TODO”", "Abrindo github.com") com o tempo do turno e, a partir da segunda ferramenta,
+  quantas ações ele já fez ("16 s · 3 ações"). Entre um passo e outro ela diz "Pensando…". Quando espera por você, ela fica
+  parada em laranja ("Esperando sua resposta"); quando espera para tentar de novo, mostra a contagem ("Conexão caiu ·
+  tentando de novo", "em 8 s"). A barra lateral e o painel da barra de menus dizem a mesma coisa. As linhas de ferramenta
+  acima dela são o histórico do turno. Cada frase fica ao menos 0,7 s na tela, e com o VoiceOver ligado ela é anunciada
+  com educação (no máximo uma vez a cada 8 s). Com "Reduzir movimento" as frases só trocam de opacidade.
 - **Quando algo dá errado**, a mensagem vem com a ação: "Tentar de novo" (reenvia, se nada tinha sido feito; se já tinha
   respondido, pede para continuar), "Continuar", "Abrir Ajustes" (chave inválida, sem modelo) ou, numa conversa grande demais, "Compactar
   e tentar de novo" (resume o começo e reenvia; só aparece quando há o que resumir) e "Nova conversa". Limite de uso (429) e instabilidade do provedor são tentados de novo sozinhos algumas vezes, com a espera à vista.

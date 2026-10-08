@@ -179,9 +179,19 @@ extension AppModel {
     }
 
     /// Tells VoiceOver something that just happened in the window (an Orb asking for permission).
-    func announceForAccessibility(_ text: String) {
+    func announceForAccessibility(_ text: String, priority: NSAccessibilityPriorityLevel = .high) {
         guard let app = NSApp else { return }
         NSAccessibility.post(element: app, notification: .announcementRequested,
-                             userInfo: [.announcement: text, .priority: NSAccessibilityPriorityLevel.high.rawValue])
+                             userInfo: [.announcement: text, .priority: priority.rawValue])
+    }
+
+    /// Tells VoiceOver what the Orb has started doing ("Lia: Rodando swift build"), politely: at low priority, only to
+    /// someone who has VoiceOver on, in the window they are looking at, for the Orb they are talking to, and
+    /// (`WorkAnnouncer`) for phrases that name something, not more often than every 8 s. The wait for an answer has
+    /// its own, urgent announcement (`announceApproval`).
+    func announceWork(_ line: WorkLine, of botID: UUID) {
+        guard NSWorkspace.shared.isVoiceOverEnabled, NSApp?.isActive == true, selectedBot?.id == botID,
+              let name = bot(botID)?.name, workAnnouncer.shouldAnnounce(line, at: .now) else { return }
+        announceForAccessibility("\(name): \(line.text)", priority: .low)
     }
 }

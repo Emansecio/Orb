@@ -46,6 +46,14 @@ extension AnyTransition {
     static var rise: AnyTransition {
         .asymmetric(insertion: .opacity.combined(with: .offset(y: 6)), removal: .opacity)
     }
+    /// Uma frase trocada por outra no lugar (linha de trabalho): a nova sobe 4 pt e aparece; a antiga só apaga, em 0,16 s.
+    static var swap: AnyTransition {
+        .asymmetric(insertion: .opacity.combined(with: .offset(y: 4)), removal: .opacity.animation(Motion.exit))
+    }
+    /// Uma linha que chega com o turno (linha de trabalho): sobe 6 pt em `Motion.enter`; sai só apagando, em `Motion.exit`.
+    static var arrive: AnyTransition {
+        .asymmetric(insertion: AnyTransition.rise.animation(Motion.enter), removal: .opacity.animation(Motion.exit))
+    }
     /// Desce do item de cima (detalhes que abrem).
     static var unfold: AnyTransition {
         .asymmetric(insertion: .opacity.combined(with: .offset(y: -4)), removal: .opacity)
@@ -86,7 +94,7 @@ extension AnyTransition {
 
 - **Expandir/recolher:** já existe (`.snappy(0.2)`, divisa gira 90°). Ajustar a saída do texto para `.unfold`
   (entra descendo 4 pt, sai só apagando) e trocar a curva por `Motion.content` para a altura não "quicar".
-- **Rodando → feita:** o brilho para (já existe) e a marca de estado entra com `.transition(.scale(0.6).combined(with: .opacity))`
+- **Rodando → feita:** enquanto roda, a linha fica parada em `Palette.faint` (o brilho é só da linha de trabalho, §2.10); ao terminar, o título volta a `Palette.muted` e a marca de estado entra com `.transition(.scale(0.6).combined(with: .opacity))`
   em `Motion.enter`. Falha: a marca vermelha entra igual, sem tremer (o Orb já mostra o erro).
 - **Contadores** ("3 ações", tempos): `.contentTransition(.numericText())` com `Motion.content`.
 - **Reduzir movimento:** marca troca por opacidade; expandir sem deslocamento.
@@ -149,6 +157,41 @@ extension AnyTransition {
 - O conteúdo do chat troca com `.opacity` em 0,18 s (sem deslizar: navegação lateral não tem direção espacial
   clara aqui). O compositor não pisca (fica fora da troca).
 
+### 2.10 Linha de trabalho (o que o Orb está fazendo)
+
+Implementado em `WorkLine.swift` e `ChatView.swift` (`WorkingLine`). Existe **um só lugar para o "agora"**: a linha no fim
+do chat, ao lado do Orb. O transcript acima dela é o histórico (a linha de uma ferramenta que roda fica parada, em
+`Palette.faint`, sem brilho; ao terminar, o título volta a `Palette.muted` e a duração entra como em §2.3).
+
+- **O que ela diz.** Verbo e alvo ("Rodando" `swift build`, "Lendo" README.md, "Procurando" “TODO”, "Abrindo"
+  github.com), tirados do título e da 1ª linha do detalhe da chamada (`WorkPhrase`); sem alvo, o verbo com reticências
+  ("Pensando…"). Um passo por vez: a frase muda quando uma ferramenta começa ou termina, nunca por token. Do alvo, o
+  comando e o nome do arquivo vão em fonte monoespaçada de 12 pt, cortados no meio quando falta espaço (e acima de
+  56 caracteres).
+- **Tempo mínimo.** Cada frase fica ao menos 0,7 s (`StatusDwell`, `BotLive.workDwell`): uma que chega antes espera, e
+  de várias só a mais nova entra (uma `Task` por Orb, que só existe enquanto há frase esperando). Entram na hora: o fim
+  do turno, a espera por você (e a saída dela) e a primeira frase do turno. É legibilidade, não movimento: **vale
+  também com Reduzir movimento**. O Orb (atividade) segue o evento real, sem esse ritmo.
+- **Troca de frase.** Um `ZStack` com a frase marcada por `.id(phraseKey)` e `AnyTransition.swap` em `Motion.enter`:
+  a nova sobe 4 pt e aparece, a antiga só apaga em `Motion.exit` (0,16 s). O medidor ao lado desliza junto com a largura
+  da frase (`Motion.content`). A frase nova não reinicia o brilho: a varredura é um relógio global.
+- **Entrada e saída da linha.** `AnyTransition.arrive`: sobe 6 pt em `Motion.enter`; sai só apagando em `Motion.exit`.
+  A lista continua animando só o início e o fim do turno (`isWorking`), nunca a contagem de itens.
+- **Um brilho só**, na frase inteira (uma máscara), e só no tom de trabalho. Espera por você: parada em `Palette.warn`,
+  sem reticências. Espera para tentar de novo: parada em `Palette.secondary`, e a contagem regressiva ("em 8 s") ocupa o
+  lugar do relógio, no mesmo `TimelineView` de 1 s.
+- **Medidor.** "16 s · 3 ações" em 12 pt, `Palette.faint`. A contagem de ações aparece da 2ª ferramenta em diante e muda
+  uma vez por ferramenta, com `.contentTransition(.numericText())` em `Motion.content`. O relógio troca a cada segundo
+  sem animação (nada de animação contínua fora do Core Animation).
+- **Desempenho.** `BotLive.work` é um valor pequeno e `Equatable`, escrito só quando muda; o texto em stream não passa
+  por ele (`LiveText` continua à parte). Barra lateral e painel da barra de menus leem o mesmo `work.text`.
+- **Reduzir movimento.** Brilho vira texto parado em `Palette.muted`; a troca de frase vira opacidade em `Motion.fade`
+  (sem deslocamento); o medidor não desliza; o contador não rola (`.identity`); a linha entra só com opacidade.
+- **VoiceOver.** A linha é um elemento ("Lia está trabalhando", valor = frase, sem o relógio; "Lia precisa de você" na
+  espera), com o traço `updatesFrequently`. As mudanças são anunciadas com prioridade baixa (`WorkAnnouncer`): só com o
+  VoiceOver ligado, o app ativo e o Orb escolhido, só frases com alvo, no máximo uma a cada 8 s. A espera já é
+  anunciada pelo cartão de aprovação (prioridade alta); o fim do turno não ganha anúncio novo.
+
 ## 3. O Orb reagindo à interface (sistema do Orb)
 
 > **Implementado** em design-orbs: `OrbActivity.attentive`, `BotLive.noteComposing` (com `ComposingDeadline`;
@@ -182,6 +225,7 @@ A atividade "atento" seria um caso novo em `OrbActivity` (`attentive`: olhar par
 | Compositor | borda/fundo animados, símbolo troca com efeito | troca direta |
 | Folhas | seções em cascata | tudo junto |
 | Chat vazio | Orb cai e amassa, cascata | tudo junto, Orb parado |
+| Linha de trabalho | frase sobe 4 pt, medidor desliza, contador rola | frase troca por opacidade (0,15 s), sem deslizar nem rolar |
 | Orb | vivo | estático (já é assim) |
 
 ## 5. Ordem de implementação sugerida

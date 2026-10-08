@@ -371,7 +371,9 @@ enum MarkdownCache {
 
 // MARK: - Tool lines
 
-/// Quiet one-line activity entry (shimmers while running); expands to show output.
+/// Quiet one-line activity entry; expands to show output. While it runs it is still, in the quietest ink: the "now"
+/// is the working line at the end of the chat, which says the same with the Orb next to it, so the transcript does not
+/// shimmer a second time. When it ends the title comes back to its ink and the mark of the result comes in.
 struct ToolCallLine: View {
     let call: ToolCall
     @State private var isExpanded = false
@@ -391,11 +393,10 @@ struct ToolCallLine: View {
                         .font(.system(size: 11))
                         .foregroundStyle(Palette.faint)
                         .frame(width: 14)
-                    (Text(call.title).foregroundColor(Palette.muted)
+                    (Text(call.title).foregroundColor(call.state == .running ? Palette.faint : Palette.muted)
                         + Text("  \(call.detail)").foregroundColor(Palette.faint))
                         .font(.system(size: 12))
                         .lineLimit(1)
-                        .shimmer(active: call.state == .running, keepsColors: true)
                     stateMark
                     if call.output != nil {
                         Image(systemName: "chevron.right")

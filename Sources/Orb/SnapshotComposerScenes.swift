@@ -10,17 +10,8 @@ extension Snapshot {
     static func composerScene(_ screen: String, model: AppModel) -> AnyView? {
         guard let bot = model.bots.first else { return nil }
         switch screen {
-        case "chat-working":
-            // Mid-turn: a tool ran, the Orb is working for 12 s and two messages wait their turn.
-            seedConversation(model, bot: bot)
-            model.apply(.status("Rodando no Terminal"), to: bot.id)
-            model.session(bot.id).turnTask = Task { try? await Task.sleep(for: .seconds(3600)) }
-            model.live(bot.id).backdateWork(to: .now.addingTimeInterval(-12))
-            let lane = model.composerLane(bot.id)
-            lane.enqueue(SteeredMessage(text: "Na verdade, ignore a pasta node_modules.", prompt: ""))
-            lane.enqueue(SteeredMessage(text: "E me mande um resumo no fim.", files: [URL(fileURLWithPath: "/Users/x/Documentos/relatório.pdf")], prompt: ""))
-            model.setDraft("Depois disso, rode os testes", for: bot.id)
-            return AnyView(ChatView(botID: bot.id))
+        case "chat-working", "chat-working-wait", "chat-working-retry":
+            return workingTurn(screen, model: model, bot: bot)
         case "chat-typed":
             seedConversation(model, bot: bot)
             model.setDraft("Resuma o relatório e destaque os riscos", for: bot.id)
@@ -74,6 +65,59 @@ extension Snapshot {
         openrouter.models = models((1...60).map { "Modelo \($0)" })
         model.providers = [openai, xai, openrouter]
         model.defaultModel = "ollama/gpt-5"
+    }
+
+    /// Mid-turn, 16 s in, after two steps that are done: `chat-working` runs `swift build --jobs 6` (the phrase with its
+    /// target, "3 ações"; two messages wait their turn), `chat-working-wait` waits for your answer to a card (the phrase
+    /// stands still in the warning color) and `chat-working-retry` waits to try again (the countdown takes the
+    /// clock's place). The phrases come in at once (no minimum time), as in a turn that has been going on a while.
+    @MainActor
+    private static func workingTurn(_ screen: String, model: AppModel, bot: Bot) -> AnyView {
+        let id = bot.id
+        let live = model.live(id)
+        live.setWorkDwell(.zero)
+        let read = ToolCall(kind: .file, title: "Lendo arquivo", detail: "/Users/x/Projetos/app/README.md", state: .done,
+                            output: "# App\n\nTODO: escrever docs", startedAt: .now - 9, finishedAt: .now - 8.6)
+        let search = ToolCall(kind: .search, title: "Buscando no conteúdo", detail: "TODO", state: .done,
+                              output: "README.md:3: TODO: escrever docs", startedAt: .now - 8, finishedAt: .now - 7.7)
+        var items = [TranscriptItem(.user(text: "Compile o projeto e me diga se há erros", attachments: [])),
+                     TranscriptItem(.bot(text: "Vou olhar o projeto antes de compilar.", isStreaming: false)),
+                     TranscriptItem(.tool(read)), TranscriptItem(.tool(search))]
+        model.apply(.status("Pensando"), to: id)
+        for done in [read, search] {
+            model.apply(.toolStarted(done), to: id)
+            model.apply(.toolFinished(id: done.id, state: .done, output: done.output ?? ""), to: id)
+            model.apply(.status("Pensando"), to: id)
+        }
+        switch screen {
+        case "chat-working-wait":
+            let card = ApprovalRequest(toolName: "run_command", title: "Rodando no Terminal", command: "git push origin main",
+                                       reason: "", suggestions: [.shell("git", "push"), .shell("git")])
+            items.append(TranscriptItem(.approval(card)))
+            model.apply(.status("Esperando sua resposta"), to: id)
+            model.setAwaitingApproval(true, of: id)
+        case "chat-working-retry":
+            // Long enough that the countdown still has a number when the picture is taken.
+            model.apply(.status(Retry.waitStatus(seconds: 40, after: LLMError.network(code: -1009, message: "offline"))), to: id)
+        default:
+            let build = ToolCall(kind: .shell, title: "Rodando no Terminal", detail: "swift build --jobs 6")
+            items.append(TranscriptItem(.tool(build)))
+            model.apply(.toolStarted(build), to: id)
+            model.apply(.status("Rodando no Terminal"), to: id)
+        }
+        model.session(id).turnTask = Task { try? await Task.sleep(for: .seconds(3600)) }
+        live.backdateWork(to: .now.addingTimeInterval(-16))
+        if screen == "chat-working" {
+            let lane = model.composerLane(id)
+            lane.enqueue(SteeredMessage(text: "Na verdade, ignore a pasta node_modules.", prompt: ""))
+            lane.enqueue(SteeredMessage(text: "E me mande um resumo no fim.", files: [URL(fileURLWithPath: "/Users/x/Documentos/relatório.pdf")], prompt: ""))
+            model.setDraft("Depois disso, rode os testes", for: id)
+        }
+        // After the Orb's own conversation has been read from disk, which would replace this one.
+        return AnyView(ChatView(botID: id).task {
+            try? await Task.sleep(for: .seconds(1))
+            model.seedConversation(Conversation(items: items), for: id)
+        })
     }
 
     @MainActor

@@ -45,6 +45,10 @@ final class BotLive {
     private(set) var modelID: String
     /// The line under the Orb's name while a turn runs; nil exactly when no turn runs.
     private(set) var status: String?
+    /// What the working line, the sidebar row and the menu bar panel say the Orb is doing: a verb and its target. It
+    /// follows `status` step by step (never per token), each phrase staying at least `workDwell` so none flickers;
+    /// nil exactly when `status` is.
+    private(set) var work: WorkLine?
     /// `status != nil`, kept apart so the composer does not re-render with every new status line.
     private(set) var isWorking = false
     /// When the running turn began (nil exactly when none runs); the working line counts from it.
@@ -88,6 +92,10 @@ final class BotLive {
     @ObservationIgnored private var composing = ComposingDeadline(quiet: BotLive.composingQuiet)
     @ObservationIgnored private var composingWatch: Task<Void, Never>?
     static let composingQuiet = Duration.milliseconds(1500)
+    /// How long each phrase of `work` stays before the next one replaces it.
+    static let workDwell = Duration.milliseconds(700)
+    @ObservationIgnored private var dwell = StatusDwell(minDwell: BotLive.workDwell)
+    @ObservationIgnored private var dwellWatch: Task<Void, Never>?
 
     init(_ bot: Bot) {
         id = bot.id
@@ -108,11 +116,44 @@ final class BotLive {
     }
 
     func setStatus(_ text: String?) {
+        if text == nil { setWork(nil) } // the end of a turn does not wait for the phrase on screen
         guard text != status else { return }
         status = text
         assign(\.workingSince, to: text == nil ? nil : (workingSince ?? .now))
         refresh()
     }
+
+    /// The phrase for the working line. The first of a turn, a wait for you and the end of the turn (nil) show at once;
+    /// any other waits until the one on screen has had `workDwell`, and only the newest of those that arrive meanwhile
+    /// comes in (one task per Orb, alive only while a phrase waits).
+    func setWork(_ line: WorkLine?, at now: ContinuousClock.Instant = .now) {
+        switch dwell.offer(line, at: now) {
+        case .now:
+            dwellWatch?.cancel()
+            dwellWatch = nil
+            assign(\.work, to: line)
+        case .at:
+            guard dwellWatch == nil else { return }
+            dwellWatch = Task { [weak self] in
+                while !Task.isCancelled, let due = self?.dwell.due {
+                    try? await Task.sleep(until: due)
+                    if Task.isCancelled { return }
+                    if let line = self?.dwell.release(at: .now) { self?.assign(\.work, to: line) }
+                }
+                // A task cancelled before it ran must not clear the reference to a newer one.
+                if !Task.isCancelled { self?.dwellWatch = nil }
+            }
+        case .unchanged:
+            break
+        }
+    }
+
+    /// What views say the Orb is doing: its phrase, or (for a status no step gave a phrase to) the plain status. nil when
+    /// no turn runs.
+    var shownWork: WorkLine? { work ?? status.map { WorkPhrase.line(status: $0) } }
+
+    /// Tests shorten the time a phrase stays.
+    func setWorkDwell(_ duration: Duration) { dwell.minDwell = duration }
 
     /// Moves the start of the running turn (tests and review snapshots show a turn that has gone on a while).
     func backdateWork(to date: Date) {
