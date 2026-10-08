@@ -67,8 +67,23 @@ actor BackgroundJobs {
     /// them synchronously from `willTerminate`.
     private let liveGroups = OSAllocatedUnfairLock(initialState: Set<pid_t>())
 
-    init(directory: URL = FileManager.default.temporaryDirectory.appending(path: "orb-jobs")) {
+    /// How long `start` looks at the log for the first output.
+    private let firstOutputWindow: Duration
+    /// Stop looking as soon as the log has something in it, instead of for the whole window.
+    private let endsAtFirstOutput: Bool
+
+    /// How often `watchGroup` looks at whether the job's process group is empty.
+    private let watchInterval: Duration
+
+    /// The last three parameters exist for tests. With a long first-output window that ends at the first output,
+    /// "the first output is in the result" does not depend on how fast the machine starts a shell; with a short
+    /// watch interval, `stop` meets the group watcher between its kill and its final check every time.
+    init(directory: URL = FileManager.default.temporaryDirectory.appending(path: "orb-jobs"),
+         firstOutputWindow: Duration = .seconds(1), endsAtFirstOutput: Bool = false, watchInterval: Duration = .seconds(1)) {
         self.directory = directory
+        self.firstOutputWindow = firstOutputWindow
+        self.endsAtFirstOutput = endsAtFirstOutput
+        self.watchInterval = watchInterval
     }
 
     // MARK: Starting
@@ -113,7 +128,9 @@ actor BackgroundJobs {
         job.logWatch = Task { [weak self] in await self?.watchGroup(botID: botID, id: id, pid: pid, log: log) }
         jobs[botID, default: [:]][id] = job
 
-        for _ in 0..<20 where jobs[botID]?[id]?.snapshot.isRunning == true && !Task.isCancelled {
+        let deadline = ContinuousClock.now + firstOutputWindow
+        while jobs[botID]?[id]?.snapshot.isRunning == true, !Task.isCancelled, ContinuousClock.now < deadline,
+              !(endsAtFirstOutput && Self.hasOutput(log)) {
             try? await Task.sleep(for: .milliseconds(50))
         }
         return (jobs[botID]?[id]?.snapshot ?? snapshot, Self.tail(of: log, lines: 40))
@@ -173,8 +190,11 @@ actor BackgroundJobs {
         await waitUntilGone(targets.map(\.pid), seconds: 1)
         for target in targets {
             forgetGroupIfGone(target.pid)
-            // The termination handler normally got here first; if it is late, record the stop now.
-            if var job = jobs[botID]?[target.id], job.snapshot.isActive, !groupExists(target.pid) {
+            // The termination handler normally got here first; if it is late, record the stop now. A job whose shell had
+            // ended and left children behind has no handler to wait for, and `watchGroup` may have noticed the empty
+            // group first and cleared `leftoverRunning`: the stop that emptied it is still a stop.
+            if var job = jobs[botID]?[target.id], !groupExists(target.pid),
+               job.snapshot.isActive || (job.stopRequested && job.snapshot.state != .stopped) {
                 job.snapshot.state = .stopped
                 job.snapshot.leftoverRunning = false
                 job.snapshot.endedAt = job.snapshot.endedAt ?? .now
@@ -227,7 +247,7 @@ actor BackgroundJobs {
     private func watchGroup(botID: UUID, id: String, pid: pid_t, log: URL) async {
         var ticks = 0
         while !Task.isCancelled, groupExists(pid) {
-            try? await Task.sleep(for: .seconds(1))
+            try? await Task.sleep(for: watchInterval)
             ticks += 1
             guard ticks % 10 == 0 else { continue }
             let size = (try? FileManager.default.attributesOfItem(atPath: log.path)[.size] as? Int) ?? 0
@@ -243,6 +263,10 @@ actor BackgroundJobs {
     }
 
     // MARK: Reading logs
+
+    private static func hasOutput(_ log: URL) -> Bool {
+        ((try? FileManager.default.attributesOfItem(atPath: log.path)[.size] as? Int) ?? 0) > 0
+    }
 
     /// The last `lines` lines of a log (at most the last 64 KB read, 20 000 characters shown), cut on
     /// character boundaries.

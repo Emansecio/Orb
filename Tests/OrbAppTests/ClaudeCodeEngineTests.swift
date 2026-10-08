@@ -15,8 +15,6 @@ def emit(obj):
     sys.stdout.write(json.dumps(obj) + "\n"); sys.stdout.flush()
 
 note(json.dumps({"args": sys.argv[1:]}))
-if "FAKE_CLAUDE_PID" in os.environ:
-    open(os.environ["FAKE_CLAUDE_PID"], "w").write(str(os.getpid()))
 session = next((a.split("=", 1)[1] for a in sys.argv if a.startswith(("--session-id=", "--resume="))), "none")
 scenario = os.environ.get("FAKE_CLAUDE_SCENARIO", "tool")
 for raw in sys.stdin:
@@ -80,24 +78,23 @@ private struct FakeClaude {
                                        attributes: [.posixPermissions: 0o755])
     }
 
-    var pidFile: URL { directory.appendingPathComponent("pid.txt") }
-
     func turn(mode: PermissionMode, scenario: String = "tool", sessionID: String? = nil) -> ClaudeCodeTurn {
         var bot = Bot(name: "Atlas", role: "", orb: OrbConfig(), permissionMode: mode)
         bot.workingDirectory = directory.path
         return ClaudeCodeTurn(bot: bot, executable: executable, model: "sonnet", system: "persona", prompt: "liste os arquivos",
                               sessionID: sessionID, environment: ["PATH": "/usr/bin:/bin", "FAKE_CLAUDE_LOG": log.path,
-                                                                  "FAKE_CLAUDE_SCENARIO": scenario, "FAKE_CLAUDE_PID": pidFile.path])
+                                                                  "FAKE_CLAUDE_SCENARIO": scenario])
     }
 
-    /// Logged lines, waiting up to `timeout` seconds for one containing `marker`.
-    func logLines(waitingFor marker: String, timeout: Double = 5) async -> [String] {
-        let deadline = Date.now.addingTimeInterval(timeout)
-        while true {
-            let text = (try? String(contentsOf: log, encoding: .utf8)) ?? ""
-            if text.contains(marker) || Date.now > deadline { return text.split(separator: "\n").map(String.init) }
-            try? await Task.sleep(for: .milliseconds(50))
+    /// Logged lines, once one contains `marker`. The marker is something the fake always logs, so the wait is
+    /// generous (an interpreter on a busy machine can take seconds to start) and ends as soon as it appears.
+    func logLines(waitingFor marker: String, timeout: Duration = .seconds(30)) async -> [String] {
+        var text = ""
+        await waitUntil("the fake CLI to log \"\(marker)\"", timeout: timeout) {
+            text = (try? String(contentsOf: log, encoding: .utf8)) ?? ""
+            return text.contains(marker)
         }
+        return text.split(separator: "\n").map(String.init)
     }
 
     func remove() { try? FileManager.default.removeItem(at: directory) }
@@ -271,7 +268,7 @@ struct ClaudeCodeEngineTests {
                 if case .session = event { await started.raise() }
             }
         }
-        for _ in 0..<200 where !(await started.isRaised) { try await Task.sleep(for: .milliseconds(25)) }
+        await waitUntil("the session to start") { await started.isRaised }
         #expect(await started.isRaised)
         // Another Orb's change reaches nobody; this Orb's reaches the running session.
         await engine.modeChanged(for: UUID(), to: .ask)
@@ -283,27 +280,41 @@ struct ClaudeCodeEngineTests {
         consumer.cancel()
     }
 
-    /// Whether the process whose pid the fake CLI wrote is still alive.
-    private func isRunning(_ fake: FakeClaude) -> Bool? {
-        guard let text = try? String(contentsOf: fake.pidFile, encoding: .utf8), let pid = pid_t(text) else { return nil }
-        return kill(pid, 0) == 0
+    /// The pids of the processes started from this fake's folder (its interpreter shows the script path in its
+    /// command line). Found by path rather than by a pid the fake writes: a freshly written script can take seconds
+    /// to start on a busy Mac, and one killed before it ran would never have written anything.
+    private func processes(of fake: FakeClaude) -> [pid_t] {
+        let pgrep = Process()
+        pgrep.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+        pgrep.arguments = ["-f", fake.directory.path]
+        let output = Pipe()
+        pgrep.standardOutput = output
+        do { try pgrep.run() } catch {
+            // Without pgrep "no process found" would be a vacuous answer, so the test must not pass on it.
+            Issue.record("pgrep could not run: \(error)")
+            return []
+        }
+        let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        pgrep.waitUntilExit()
+        // 0: some matched, 1: none did. Anything else is pgrep failing.
+        if pgrep.terminationStatus > 1 { Issue.record("pgrep failed with status \(pgrep.terminationStatus)") }
+        return text.split(whereSeparator: \.isNewline).compactMap { pid_t($0) }
     }
 
     @Test func aCLIThatNeverAnswersInitializeIsGivenUpOnAndKilled() async throws {
         let fake = try FakeClaude()
         defer { fake.remove() }
         var turn = fake.turn(mode: .ask, scenario: "init_silent")
-        turn.initializeTimeout = 3 // long enough for the fake's interpreter to start and note its pid
+        turn.initializeTimeout = 3
         let started = Date.now
         let events = await run(ClaudeCodeEngine(), turn)
 
-        #expect(Date.now.timeIntervalSince(started) < 10)
+        // Given up on at the timeout, not when the fake's two minutes of silence are over.
+        #expect(Date.now.timeIntervalSince(started) < 60)
         guard case .failed(let message) = events.last else { Issue.record("expected a failure, got \(events)"); return }
         #expect(message.contains("não respondeu") && message.contains("encerrado"))
         // The silent process is really gone, not left running.
-        let deadline = Date.now.addingTimeInterval(8)
-        while isRunning(fake) != false, Date.now < deadline { try await Task.sleep(for: .milliseconds(100)) }
-        #expect(isRunning(fake) == false)
+        await waitUntil("the silent CLI process to be gone") { processes(of: fake).isEmpty }
     }
 
     @Test func anErrorAnswerToInitializeIsReported() async throws {

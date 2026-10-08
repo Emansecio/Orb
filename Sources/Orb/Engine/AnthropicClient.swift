@@ -9,6 +9,8 @@ struct AnthropicClient: LLMClient {
     let session: URLSession
     /// Upper bound on the reply length (the API requires one).
     var maxTokens = 16_000
+    /// Also sends the key as `Authorization: Bearer` (gateways that document that header on every route).
+    var sendsBearer = false
 
     static let apiVersion = "2023-06-01"
 
@@ -92,7 +94,10 @@ struct AnthropicClient: LLMClient {
         // Anthropic takes the key in `x-api-key`; gateways accept it there too.
         var request = OpenAIClient.authorizedRequest(baseURL.appending(path: path), apiKey: nil, headers: extraHeaders)
         request.setValue(Self.apiVersion, forHTTPHeaderField: "anthropic-version")
-        if let key, !key.isEmpty { request.setValue(key, forHTTPHeaderField: "x-api-key") }
+        if let key, !key.isEmpty {
+            request.setValue(key, forHTTPHeaderField: "x-api-key")
+            if sendsBearer { request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+        }
         return request
     }
 }

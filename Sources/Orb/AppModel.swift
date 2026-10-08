@@ -879,6 +879,7 @@ final class AppModel {
         let userTurns = userTurnCount(botID)
         let maxSteps = routineTurns[botID] != nil ? AgentEngine.routineMaxSteps : AgentEngine.defaultMaxSteps
         let lastWorkspaceHash = conversations[botID]?.workspaceHash
+        let sessionID = gatewaySessionID(for: botID)
 
         let turn = beginTurn(botID)
         turns[botID] = Task {
@@ -891,7 +892,7 @@ final class AppModel {
             let client: any LLMClient
             do {
                 guard let made = clientOverride?() ?? account.client(for: modelInfo, credentials: Self.credentials(for: ref.provider),
-                                                                      conversationID: botID.uuidString) else { throw LLMError.notConfigured }
+                                                                      conversationID: sessionID) else { throw LLMError.notConfigured }
                 client = made
             } catch {
                 failSetup(error, of: botID, turn: turn)
@@ -991,6 +992,15 @@ final class AppModel {
         let turn = UUID()
         turnIDs[botID] = turn
         return turn
+    }
+
+    /// The id this conversation sends gateways that key routing and caching to a session; made on first use and
+    /// kept with the conversation (a cleared chat or a routine run starts from a new `Conversation`).
+    private func gatewaySessionID(for botID: UUID) -> String {
+        if let id = conversations[botID]?.gatewaySessionID { return id }
+        let id = UUID().uuidString
+        conversations[botID]?.gatewaySessionID = id
+        return id
     }
 
     /// Whether `turn` is still the Orb's running turn (not stopped, not replaced by a newer one).

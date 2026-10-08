@@ -129,7 +129,10 @@ enum PromptParts {
             uses.append("Prefer read_file, grep, glob and list_directory over cat, grep and ls in run_command")
             uses.append("edit_file for small changes (write_file for new files or full rewrites)")
         }
-        if bot.capabilities.contains(.computerUse) { uses.append("applescript and shortcuts_run to work with apps") }
+        if bot.capabilities.contains(.computerUse) {
+            uses.append("applescript and shortcuts_run to work with apps")
+            uses.append("ui_read then ui_act for apps with no AppleScript or Shortcuts support (read the screen before acting, read again after it changes)")
+        }
         uses.append("open to open files and links")
         let background = hasFiles ? " Long commands can run in the background and be followed with job_output." : ""
         return "## Tools\n" + uses.joined(separator: "; ") + "." + background

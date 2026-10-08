@@ -9,6 +9,9 @@ import Foundation
 /// both `shell`), so a grant keeps working after the Orb switches model.
 enum PermissionFamily: String, CaseIterable, Codable, Sendable {
     case shell, writeFiles, web, open, appleScript, macApps, connector, memory, jobs
+    /// Clicking and typing in other apps' interface (ui_act): its own family, so an earlier grant for Shortcuts or the
+    /// clipboard never extends to driving any app.
+    case appInterface
 }
 
 /// A standing "Sempre permitir": a family of tools, narrowed by a scope.
@@ -102,6 +105,7 @@ extension PermissionRule {
             case .open: "Abrir arquivos, apps e links"
             case .appleScript: "Controlar apps com AppleScript"
             case .macApps: "Usar Atalhos, a área de transferência e encerrar apps"
+            case .appInterface: "Clicar e digitar na interface de outros apps"
             case .connector: "Usar qualquer ferramenta dos conectores"
             case .memory: "Guardar na memória"
             case .jobs: "Gerenciar processos em segundo plano"
@@ -232,7 +236,7 @@ enum PermissionPolicy {
         case .connector:
             guard let key = call.connector else { return false }
             return relevant.contains { if case .connectorTool(let allowed) = $0.scope { allowed == key } else { false } }
-        case .open, .appleScript, .macApps, .memory, .jobs:
+        case .open, .appleScript, .macApps, .appInterface, .memory, .jobs:
             return false
         }
     }
@@ -403,6 +407,7 @@ enum PermissionPolicy {
         case "open": return .open
         case "applescript": return .appleScript
         case "shortcuts_run", "clipboard_write", "app_quit": return .macApps
+        case "ui_read", "ui_act": return .appInterface
         case "remember", "recall": return .memory
         case "job_output", "job_list", "job_stop": return .jobs
         default: break
@@ -461,7 +466,7 @@ enum PermissionPolicy {
             if call.savesFile { found = [] }
         case .connector:
             found = call.connector.map { [PermissionRule(family: .connector, scope: .connectorTool($0))] } ?? []
-        case .open, .appleScript, .macApps, .memory, .jobs:
+        case .open, .appleScript, .macApps, .appInterface, .memory, .jobs:
             found = [PermissionRule(family: family)]
         }
         // Suggestions from Claude Code come after Orb's own, and only where they fit the call's family.
@@ -550,6 +555,7 @@ enum PermissionPolicy {
         case "open": return PermissionRule(family: .open)
         case "applescript": return PermissionRule(family: .appleScript)
         case "shortcuts_run", "clipboard_write", "app_quit": return PermissionRule(family: .macApps)
+        case "ui_act": return PermissionRule(family: .appInterface)
         case "remember": return PermissionRule(family: .memory)
         case "job_stop", "KillShell", "KillBash": return PermissionRule(family: .jobs)
         default: break

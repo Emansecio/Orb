@@ -110,7 +110,7 @@ struct RetryTests {
                 }
             ) { () -> String in throw LLMError.http(status: 503, message: "busy") }
         }
-        while !entered.value { await Task.yield() }
+        await waitUntil("the retry wait to begin") { entered.value }
         task.cancel()
         await #expect(throws: CancellationError.self) { try await task.value }
     }

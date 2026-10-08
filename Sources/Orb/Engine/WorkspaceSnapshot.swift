@@ -127,8 +127,10 @@ struct WorkspaceSnapshot: Sendable, Equatable {
     // MARK: Capturing
 
     /// Reads the folder (off the caller's thread). Every git call has `gitTimeout`; a slow or broken git leaves a note
-    /// instead of holding the message back. Environment and `gitPath` can be replaced for tests.
+    /// instead of holding the message back, and so does the wait for the user's shell environment (`environmentTimeout`,
+    /// `gitTimeout` unless given). Environment and `gitPath` can be replaced for tests.
     static func capture(folder: URL, shell: ShellEnvironment = .shared, gitPath: String? = nil, gitTimeout: Duration = .seconds(2),
+                        environmentTimeout: Duration? = nil,
                         home: URL = FileManager.default.homeDirectoryForCurrentUser) async -> WorkspaceSnapshot {
         let folder = folder.standardizedFileURL
         var snapshot = WorkspaceSnapshot(path: folder.path)
@@ -138,7 +140,8 @@ struct WorkspaceSnapshot: Sendable, Equatable {
             return snapshot
         }
 
-        async let gitState: Git? = hasRepository(folder) ? await readGit(folder, shell: shell, gitPath: gitPath, timeout: gitTimeout) : nil
+        async let gitState: Git? = hasRepository(folder) ? await readGit(folder, shell: shell, gitPath: gitPath, timeout: gitTimeout,
+                                                                       environmentTimeout: environmentTimeout ?? gitTimeout) : nil
         let files = try? await runDetached { scan(folder) }
         snapshot.git = await gitState
         guard let files else { snapshot.state = .unreadable; return snapshot }
@@ -222,8 +225,9 @@ struct WorkspaceSnapshot: Sendable, Equatable {
         return false
     }
 
-    private static func readGit(_ folder: URL, shell: ShellEnvironment, gitPath: String?, timeout: Duration) async -> Git {
-        var gitEnvironment = await environment(from: shell, within: timeout)
+    private static func readGit(_ folder: URL, shell: ShellEnvironment, gitPath: String?, timeout: Duration,
+                                environmentTimeout: Duration) async -> Git {
+        var gitEnvironment = await environment(from: shell, within: environmentTimeout)
         gitEnvironment["GIT_OPTIONAL_LOCKS"] = "0"
         let executable = gitPath ?? findGit(in: gitEnvironment)
         if executable == systemGit && !developerToolsAreInstalled() {

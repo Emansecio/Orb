@@ -235,7 +235,7 @@ struct ImageStoreTests {
         let bot = model.bots[0]
         let image = try model.images.add(try Pictures.data(width: 40, height: 40), name: "x", botID: bot.id)
         model.deleteBot(bot.id)
-        for _ in 0..<50 where FileManager.default.fileExists(atPath: image.path) { try await Task.sleep(for: .milliseconds(20)) }
+        await waitUntil("the Orb's pictures to be deleted") { !FileManager.default.fileExists(atPath: image.path) }
         #expect(!FileManager.default.fileExists(atPath: image.path))
     }
 }

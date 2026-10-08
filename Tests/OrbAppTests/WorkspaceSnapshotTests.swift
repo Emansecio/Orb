@@ -36,9 +36,10 @@ private func quickShell() -> ShellEnvironment {
     ShellEnvironment(shell: "/nonexistent/shell", base: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()])
 }
 
-private func capture(_ folder: Folder, home: URL? = nil, gitPath: String? = nil, gitTimeout: Duration = .seconds(5),
-                     shell: ShellEnvironment? = nil) async -> WorkspaceSnapshot {
+private func capture(_ folder: Folder, home: URL? = nil, gitPath: String? = nil, gitTimeout: Duration = .seconds(20),
+                     environmentTimeout: Duration? = nil, shell: ShellEnvironment? = nil) async -> WorkspaceSnapshot {
     await WorkspaceSnapshot.capture(folder: folder.url, shell: shell ?? quickShell(), gitPath: gitPath, gitTimeout: gitTimeout,
+                                    environmentTimeout: environmentTimeout,
                                     home: home ?? FileManager.default.temporaryDirectory.appending(path: "not-the-home"))
 }
 
@@ -190,7 +191,7 @@ struct WorkspaceSnapshotTests {
 
         let start = ContinuousClock.now
         let snapshot = await capture(folder, gitPath: script.path, gitTimeout: .milliseconds(300))
-        #expect(ContinuousClock.now - start < .seconds(6))
+        #expect(ContinuousClock.now - start < .seconds(25)) // the timeout, not the thirty seconds of the script
         #expect(snapshot.git?.note?.contains("did not answer in time") == true)
         // The rest of the snapshot is still there.
         #expect(snapshot.entries.contains("a.txt"))
@@ -202,11 +203,13 @@ struct WorkspaceSnapshotTests {
         try await folder.git(["init", "-q", "-b", "main"])
         try folder.write("a.txt")
         let slow = try FakeShell.make(in: folder.url.deletingLastPathComponent(), preamble: "sleep 20")
-        let shell = ShellEnvironment(shell: slow, base: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()], timeout: .seconds(10))
+        let shell = ShellEnvironment(shell: slow, base: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()], timeout: .seconds(60))
 
+        // The wait for the shell is short, while git itself gets time to answer however busy the machine is.
         let start = ContinuousClock.now
-        let snapshot = await capture(folder, gitTimeout: .milliseconds(400), shell: shell)
-        #expect(ContinuousClock.now - start < .seconds(6))
+        let snapshot = await capture(folder, environmentTimeout: .milliseconds(300), shell: shell)
+        #expect(ContinuousClock.now - start < .seconds(15)) // not the twenty seconds the shell takes
+        #expect(snapshot.git?.note == nil)
         #expect(snapshot.git?.branch.contains("main") == true)
     }
 

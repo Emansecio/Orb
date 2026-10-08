@@ -499,6 +499,6 @@ final class FileToolTests {
         let start = ContinuousClock.now
         let output = try await run(RunCommandTool(), ["command": .string("sleep 30"), "timeout_seconds": .string("1")])
         #expect(output.contains("tempo esgotado após 1 s"))
-        #expect(ContinuousClock.now - start < .seconds(5))
+        #expect(ContinuousClock.now - start < .seconds(20)) // ended by the timeout, not by the thirty seconds of the command
     }
 }

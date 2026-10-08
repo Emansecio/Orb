@@ -301,7 +301,7 @@ struct RecallTool: AgentTool {
 }
 
 extension ToolBox {
-    static let macTools: [any AgentTool] = [OpenTool(), AppleScriptTool()] + macAppTools + browserTools
+    static let macTools: [any AgentTool] = [OpenTool(), AppleScriptTool()] + macAppTools + browserTools + accessibilityTools
 }
 
 extension ToolBox {

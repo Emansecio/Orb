@@ -36,6 +36,9 @@ actor MCPConnection {
 
     private var started = false
     private var transport: (any MCPTransport)?
+    /// Why the connection closed. Requests made afterwards report it: a fire-and-forget message (the reply to a ping, a
+    /// cancellation) can be the one that finds out the session expired, with no request pending to tell.
+    private var closedError: Error?
     private var pending: [Int: Pending] = [:]
     private var nextID = 1
     /// The annotations of each tool from the last `tools/list`, by the server's own tool name.
@@ -110,7 +113,7 @@ actor MCPConnection {
     }
 
     private func request(_ method: String, _ params: JSONValue, timeout: Duration = .seconds(60)) async throws -> JSONValue {
-        guard let transport else { throw ToolError("O conector \(config.name) não está em execução.") }
+        guard let transport else { throw closedError ?? ToolError("O conector \(config.name) não está em execução.") }
         let id = nextID
         nextID += 1
         let message = JSONValue.object(["jsonrpc": .string("2.0"), "id": .number(Double(id)),
@@ -181,6 +184,7 @@ actor MCPConnection {
     private func shutdown(_ error: Error) {
         if let transport { Task { await transport.close() } }
         transport = nil
+        closedError = closedError ?? error
         let entries = pending.values
         pending = [:]
         for entry in entries {

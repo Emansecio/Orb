@@ -22,6 +22,10 @@ private func temporaryDirectory() throws -> URL {
 
 private let basicEnvironment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": NSHomeDirectory()]
 
+/// How long a fake shell that is expected to answer may take. Production gives the user's shell 5 seconds, which a
+/// machine running many tests at once can exceed just starting a script; only tests of the timeout use a short one.
+private let patientShell = Duration.seconds(60)
+
 // MARK: - ShellEnvironment
 
 struct ShellEnvironmentTests {
@@ -89,7 +93,8 @@ struct ShellEnvironmentTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let shell = try FakeShell.make(in: directory, exports: ["JAVA_HOME": "/opt/java", "PATH": "/opt/npm/bin:/usr/bin:/bin"],
                                        preamble: "echo 'noisy rc output'")
-        let resolved = await ShellEnvironment(shell: shell, base: basicEnvironment.merging(["CLAUDE_CODE_ENTRYPOINT": "x"]) { $1 }).resolved()
+        let resolved = await ShellEnvironment(shell: shell, base: basicEnvironment.merging(["CLAUDE_CODE_ENTRYPOINT": "x"]) { $1 },
+                                          timeout: patientShell).resolved()
         #expect(resolved.isFromUserShell)
         #expect(resolved.shell == "/bin/zsh")
         #expect(resolved.environment["JAVA_HOME"] == "/opt/java")
@@ -103,7 +108,7 @@ struct ShellEnvironmentTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let counter = directory.appending(path: "count")
         let shell = try FakeShell.make(in: directory, preamble: "echo x >> '\(counter.path)'")
-        let environment = ShellEnvironment(shell: shell, base: basicEnvironment)
+        let environment = ShellEnvironment(shell: shell, base: basicEnvironment, timeout: patientShell)
         async let first = environment.resolved()
         async let second = environment.resolved()
         _ = await (first, second, environment.resolved())
@@ -131,7 +136,8 @@ struct ShellEnvironmentTests {
     }
 
     @Test func theRealShellGivesACompleteEnvironment() async {
-        let resolved = await ShellEnvironment().resolved()
+        // Patient: a timeout would fall back to the app's own environment and this would stop testing the real shell.
+        let resolved = await ShellEnvironment(timeout: patientShell).resolved()
         #expect(resolved.environment["PATH"]?.isEmpty == false)
         #expect(resolved.environment["TERM"] == "dumb")
         #expect(resolved.environment["GIT_CONFIG_KEY_\((Int(resolved.environment["GIT_CONFIG_COUNT"] ?? "") ?? 1) - 1)"] == "core.quotepath")
@@ -148,8 +154,9 @@ final class RunCommandTests {
     init() throws {
         directory = try temporaryDirectory()
         let shell = try FakeShell.make(in: directory, exports: ["FROM_PROFILE": "ok-\u{00E7}"])
-        context = ToolContext(workingDirectory: directory, botID: UUID(), jobs: BackgroundJobs(directory: directory.appending(path: "jobs")),
-                              shell: ShellEnvironment(shell: shell, base: basicEnvironment))
+        context = ToolContext(workingDirectory: directory, botID: UUID(),
+                              jobs: BackgroundJobs(directory: directory.appending(path: "jobs"), firstOutputWindow: patientShell, endsAtFirstOutput: true),
+                              shell: ShellEnvironment(shell: shell, base: basicEnvironment, timeout: patientShell))
     }
 
     deinit { try? FileManager.default.removeItem(at: directory) }
@@ -216,7 +223,9 @@ final class RunCommandTests {
     }
 
     @Test func warnsWhenABackgroundChildHoldsTheOutput() async throws {
-        let output = try await run("sleep 3 & echo started")
+        // The child must outlive the one second the tool waits for the output to close, however slowly the shell starts.
+        let output = try await run("sleep 30 & echo started=$!")
+        defer { if let child = pids(in: output).first { kill(child, SIGKILL) } }
         #expect(output.contains("started"))
         #expect(output.contains("background: true"))
     }
@@ -334,37 +343,60 @@ final class BackgroundJobsTests {
     }
 
     private func isGone(_ pid: pid_t) async -> Bool {
-        for _ in 0..<60 {
-            if kill(pid, 0) != 0 { return true }
-            try? await Task.sleep(for: .milliseconds(50))
+        await waitUntil("process \(pid) to be gone") { !processIsAlive(pid) }
+    }
+
+    /// The job's log once it has a line with `marker`. `start` only looks at the log for about a second, which a
+    /// machine running other work may spend before the shell has printed anything.
+    private func output(of job: BackgroundJobs.Snapshot, as owner: UUID? = nil, containing marker: String, lines: Int = 10) async throws -> String {
+        var text = ""
+        await waitUntil("job \(job.id) to print \"\(marker)\"") {
+            text = (try? await jobs.output(botID: owner ?? bot, id: job.id, lines: lines).text) ?? ""
+            return text.contains(marker)
         }
-        return false
+        return text
+    }
+
+    /// Waits for the job to be in the state `matches` describes and returns it.
+    @discardableResult
+    private func waitForJob(_ id: String, as bot: UUID? = nil, _ what: String,
+                            where matches: (BackgroundJobs.Snapshot) -> Bool) async -> BackgroundJobs.Snapshot? {
+        var found: BackgroundJobs.Snapshot?
+        await waitUntil("job \(id) to be \(what)") {
+            found = await jobs.list(botID: bot ?? self.bot).first { $0.id == id }
+            return found.map(matches) ?? false
+        }
+        return found
     }
 
     @Test func startReportsTheFirstOutputAndKeepsRunning() async throws {
+        // A window that ends at the first output: how fast this machine starts a shell cannot empty the result.
+        let patient = BackgroundJobs(directory: directory.appending(path: "patient"), firstOutputWindow: patientShell, endsAtFirstOutput: true)
+        defer { patient.killAllNow() }
         let began = ContinuousClock.now
-        let (job, first) = try await start("echo pid=$$; echo oi >&2; sleep 60")
-        #expect(ContinuousClock.now - began < .seconds(3))
+        let (job, first) = try await patient.start(botID: bot, command: "echo pid=$$; echo oi >&2; sleep 60", directory: directory,
+                                                   shell: "/bin/zsh", environment: basicEnvironment)
+        // It returns with the first output, not when the sixty seconds of the command are over.
+        #expect(ContinuousClock.now - began < .seconds(30))
         #expect(job.isRunning && job.id == "1")
-        #expect(first.contains("oi"))
+        #expect(first.contains("pid="))
         let pid = try #require(numbers(in: first).first)
-        #expect(job.logPath == directory.appending(path: "jobs/\(bot.uuidString)/1.log").path)
+        #expect(job.logPath == directory.appending(path: "patient/\(bot.uuidString)/1.log").path)
         #expect(FileManager.default.fileExists(atPath: job.logPath))
 
         // It outlives the call that started it.
-        try await Task.sleep(for: .seconds(1))
         #expect(kill(pid, 0) == 0)
-        #expect(await jobs.list(botID: bot).map(\.isRunning) == [true])
+        #expect(await patient.list(botID: bot).map(\.isRunning) == [true])
 
-        let stopped = try await jobs.stop(botID: bot, id: "1")
+        let stopped = try await patient.stop(botID: bot, id: "1")
         #expect(stopped.state == .stopped)
         #expect(await isGone(pid))
-        #expect(try await jobs.output(botID: bot, id: "1", lines: 10).text.contains("oi"))
+        #expect(try await patient.output(botID: bot, id: "1", lines: 10).text.contains("oi"))
     }
 
     @Test func stoppingKillsTheWholeProcessGroup() async throws {
-        let (job, first) = try await start("sleep 300 & echo child=$!; echo shell=$$; wait")
-        let found = numbers(in: first)
+        let (job, _) = try await start("sleep 300 & echo child=$!; echo shell=$$; wait")
+        let found = numbers(in: try await output(of: job, containing: "shell="))
         let (child, shell) = try (#require(found.first), #require(found.last))
         #expect(getpgid(child) == shell)
         #expect(kill(child, 0) == 0)
@@ -374,27 +406,47 @@ final class BackgroundJobsTests {
         #expect(await isGone(shell))
     }
 
+    @Test func stoppingAJobWhoseShellEndedIsRecordedAsAStopEvenWhenTheWatcherNoticedFirst() async throws {
+        // The group watcher looks every few milliseconds, so it sees the group empty between the kill and the end of
+        // `stop`'s wait on almost every run, which is the order that used to leave the job reported as finished.
+        let quick = BackgroundJobs(directory: directory.appending(path: "quick"), firstOutputWindow: patientShell,
+                                   endsAtFirstOutput: true, watchInterval: .milliseconds(2))
+        defer { quick.killAllNow() }
+        for attempt in 1...5 {
+            let (job, first) = try await quick.start(botID: bot, command: "sleep 300 & echo child=$!", directory: directory,
+                                                     shell: "/bin/zsh", environment: basicEnvironment)
+            let child = try #require(numbers(in: first).first)
+            await waitUntil("job \(job.id) to finish with its child left running") {
+                await quick.list(botID: bot).first { $0.id == job.id }.map { $0.state != .running && $0.leftoverRunning } ?? false
+            }
+            let stopped = try await quick.stop(botID: bot, id: job.id)
+            #expect(stopped.state == .stopped && !stopped.leftoverRunning, "attempt \(attempt): \(stopped.statusText)")
+            #expect(stopped.statusText == "parado")
+            #expect(await isGone(child))
+        }
+    }
+
     @Test func aStubbornJobIsKilledAfterTheGracePeriod() async throws {
-        let (job, first) = try await start("trap '' TERM; echo pid=$$; while true; do sleep 1; done")
-        let pid = try #require(numbers(in: first).first)
+        let (job, _) = try await start("trap '' TERM; echo pid=$$; while true; do sleep 1; done")
+        let pid = try #require(numbers(in: try await output(of: job, containing: "pid=")).first)
         let began = ContinuousClock.now
         let stopped = try await jobs.stop(botID: bot, id: job.id)
-        #expect(ContinuousClock.now - began < .seconds(5))
+        // Killed after the two seconds of grace, not left running forever.
+        #expect(ContinuousClock.now - began < .seconds(30))
         #expect(stopped.state == .stopped)
         #expect(await isGone(pid))
     }
 
     @Test func aJobThatEndsReportsHowItEnded() async throws {
-        let (job, first) = try await start("echo feito; exit 3")
-        #expect(first.contains("feito"))
-        try await Task.sleep(for: .milliseconds(200))
-        let listed = try #require(await jobs.list(botID: bot).first)
+        let (job, _) = try await start("echo feito; exit 3")
+        #expect(try await output(of: job, containing: "feito").contains("feito"))
+        let listed = try #require(await waitForJob(job.id, "finished") { $0.state != .running })
         #expect(listed.id == job.id)
         #expect(listed.state == .exited(3))
         #expect(listed.statusText == "terminou com código 3")
 
         let crashed = try await start("kill -SEGV $$")
-        try await Task.sleep(for: .milliseconds(200))
+        await waitForJob(crashed.job.id, "finished") { $0.state != .running }
         let state = try await jobs.output(botID: bot, id: crashed.job.id, lines: 5).job.state
         #expect(state == .signaled(SIGSEGV))
 
@@ -403,10 +455,9 @@ final class BackgroundJobsTests {
     }
 
     @Test func aJobWhoseShellEndedButChildrenRunIsNotReportedAsFinished() async throws {
-        let (_, first) = try await start("sleep 300 & echo child=$!")
-        let child = try #require(numbers(in: first).first)
-        try await Task.sleep(for: .milliseconds(300))
-        let listed = try #require(await jobs.list(botID: bot).first)
+        let (job, _) = try await start("sleep 300 & echo child=$!")
+        let child = try #require(numbers(in: try await output(of: job, containing: "child=")).first)
+        let listed = try #require(await waitForJob(job.id, "finished") { $0.state != .running })
         #expect(listed.state == .exited(0))
         #expect(listed.leftoverRunning && listed.isActive && !listed.isRunning)
         #expect(listed.statusText.contains("continuam rodando"))
@@ -418,18 +469,22 @@ final class BackgroundJobsTests {
 
     @Test func leftoverChildrenCountAgainstTheLimit() async throws {
         for _ in 0..<BackgroundJobs.maxRunningPerOrb { _ = try await start("sleep 300 &") }
-        try await Task.sleep(for: .milliseconds(300))
+        // Every shell is gone and only its child is left; those are the jobs that must still count.
+        await waitUntil("every shell to end with its child left running") {
+            let all = await jobs.list(botID: bot)
+            return all.count == BackgroundJobs.maxRunningPerOrb && all.allSatisfy { $0.state != .running && $0.leftoverRunning }
+        }
         await #expect(throws: ToolError.self) { try await self.start("sleep 60") }
     }
 
     @Test func noticesWhenTheLeftoverChildrenFinish() async throws {
-        // Long enough that a loaded machine still sees the child running at the first look.
-        _ = try await start("sleep 3 &")
-        try await Task.sleep(for: .milliseconds(300))
-        #expect(try #require(await jobs.list(botID: bot).first).leftoverRunning)
-        for _ in 0..<100 where try #require(await jobs.list(botID: bot).first).leftoverRunning {
-            try await Task.sleep(for: .milliseconds(100))
-        }
+        // The child lives until the test ends it, so how fast the machine is cannot make it finish early.
+        let (job, _) = try await start("sleep 300 & echo child=$!")
+        let child = try #require(numbers(in: try await output(of: job, containing: "child=")).first)
+        let before = try #require(await waitForJob(job.id, "finished with its child left running") { $0.state != .running })
+        #expect(before.leftoverRunning)
+        kill(child, SIGKILL)
+        await waitForJob(job.id, "free of leftover children") { !$0.leftoverRunning }
         let listed = try #require(await jobs.list(botID: bot).first)
         #expect(!listed.leftoverRunning && listed.state == .exited(0))
         #expect(listed.statusText == "terminou com código 0")
@@ -439,17 +494,16 @@ final class BackgroundJobsTests {
 
     @Test func aCrashedJobIsReportedAsASignal() async throws {
         let crashed = try await start("sh -c 'kill -SEGV $$'")
-        try await Task.sleep(for: .milliseconds(300))
+        await waitForJob(crashed.job.id, "finished") { $0.state != .running }
         let job = try await jobs.output(botID: bot, id: crashed.job.id, lines: 5).job
         #expect(job.state == .signaled(SIGSEGV))
         #expect(job.statusText == "encerrado pelo sinal 11 (SIGSEGV)")
     }
 
     @Test func accentedEnvironmentAndArgumentsReachAJobUnchanged() async throws {
-        _ = try await jobs.start(botID: bot, command: "printf '%s|caf\u{00E9}' \"$NOME\" | xxd -p", directory: directory,
-                                             shell: "/bin/zsh", environment: basicEnvironment.merging(["NOME": "Jo\u{00E3}o"]) { $1 })
-        try await Task.sleep(for: .milliseconds(300))
-        let text = try await jobs.output(botID: bot, id: "1", lines: 5).text
+        let (job, _) = try await jobs.start(botID: bot, command: "printf '%s|caf\u{00E9}' \"$NOME\" | xxd -p", directory: directory,
+                                            shell: "/bin/zsh", environment: basicEnvironment.merging(["NOME": "Jo\u{00E3}o"]) { $1 })
+        let text = try await output(of: job, containing: "4a6fc3a36f7c636166c3a9", lines: 5)
         #expect(text.contains("4a6fc3a36f7c636166c3a9"), "\(text)")
     }
 
@@ -465,8 +519,8 @@ final class BackgroundJobsTests {
     }
 
     @Test func deletingTheOrbEndsItsJobsAndLogs() async throws {
-        let (job, first) = try await start("echo pid=$$; sleep 60")
-        let pid = try #require(numbers(in: first).first)
+        let (job, _) = try await start("echo pid=$$; sleep 60")
+        let pid = try #require(numbers(in: try await output(of: job, containing: "pid=")).first)
         await jobs.forget(botID: bot)
         #expect(await isGone(pid))
         #expect(await jobs.list(botID: bot).isEmpty)
@@ -474,8 +528,11 @@ final class BackgroundJobsTests {
     }
 
     @Test func quittingKillsEveryGroup() async throws {
-        let (_, first) = try await start("sleep 300 & echo child=$!; echo shell=$$; wait")
-        let (_, second) = try await start("echo pid=$$; sleep 300", as: UUID())
+        let other = UUID()
+        let (firstJob, _) = try await start("sleep 300 & echo child=$!; echo shell=$$; wait")
+        let (secondJob, _) = try await start("echo pid=$$; sleep 300", as: other)
+        let first = try await output(of: firstJob, containing: "shell=")
+        let second = try await output(of: secondJob, as: other, containing: "pid=")
         let pids = numbers(in: first) + numbers(in: second)
         #expect(pids.count == 3)
         jobs.killAllNow()

@@ -163,7 +163,7 @@ struct CapabilityPromptTests {
     }
 
     @MainActor private func waitUntilIdle(_ model: AppModel, _ botID: UUID) async {
-        for _ in 0..<200 where model.isWorking(botID) { try? await Task.sleep(for: .milliseconds(50)) }
+        await waitUntil("the turn to end") { !model.isWorking(botID) }
     }
 
     @Test @MainActor func aNativeTurnRecordsTheSnapshotOnlyWhenItsMessageIsStored() {
@@ -202,8 +202,9 @@ struct CapabilityPromptTests {
     @Test @MainActor func aTurnStoppedWhileTheFolderIsBeingReadStoresNothing() async {
         let (model, bot) = model()
         #expect(model.send("oi", to: bot.id))
+        let task = model.turns[bot.id]
         model.stop(bot.id)
-        try? await Task.sleep(for: .milliseconds(600))
+        await task?.value // the cancelled setup has ended: whatever it would still have stored has been stored
         #expect(model.conversations[bot.id]?.workspaceHash == nil)
         #expect(model.conversations[bot.id]?.messages.isEmpty == true)
         #expect(model.pendingMarks[bot.id] == nil)

@@ -380,13 +380,37 @@ enum LLMError: LocalizedError, Equatable {
     }
 
     private static func describe(status: Int, message: String) -> String {
-        switch status {
+        let lowered = message.lowercased()
+        let isAboutMoney = billingHints.contains { lowered.contains($0) }
+        return switch status {
+        case 403 where lowered.contains("upgrade_required"):
+            // Command Code: the Go plan is the only one without API access.
+            "O seu plano não inclui acesso à API (403). Na Command Code só o plano Go não tem: troque para Provider, GOAT, Pro, Max ou Team. Detalhe do provedor: \(message)"
+        case 401 where isModelRefused(lowered), 403 where isModelRefused(lowered):
+            // OpenCode: a model the workspace turned off, the gateway does not serve, that needs a data-use
+            // opt-in (Muse Spark Contributor, DeepSeek in the Go plan) or that is closed to the country.
+            "O provedor recusou este modelo (\(status)), mas a chave está certa. Ele pode estar desativado no workspace, exigir aceite de uso de dados no console da OpenCode ou não estar liberado no seu país. Escolha outro modelo ou confira o console. Detalhe do provedor: \(message)"
+        case 401 where isAboutMoney, 403 where isAboutMoney:
+            // OpenCode answers a missing balance or a spent monthly limit with 401, which is not a bad key.
+            "Sem saldo ou limite de gasto liberado no provedor (\(status)). Confira o saldo e o plano no console do provedor. Detalhe do provedor: \(message)"
         case 401, 403: "Chave ou login inválido (\(status)). Confira em Ajustes → Modelos. Detalhe do provedor: \(message)"
+        case 402: "O provedor pede pagamento ou mais saldo (402). Confira seu plano. Detalhe do provedor: \(message)"
         case 429: "Você atingiu o limite de uso do provedor (429); espere um pouco ou confira seu plano. Detalhe do provedor: \(message)"
         case 500...599: "O provedor está sobrecarregado ou instável (\(status)); tente de novo em instantes. Detalhe do provedor: \(message)"
         default: "O provedor respondeu \(status): \(message)"
         }
     }
+
+    /// 401/403 bodies that say the model, not the credentials, was refused (OpenCode's `ModelError`, `DataPolicyError`
+    /// and `RegionError`). Checked on the lowercased message.
+    private static func isModelRefused(_ lowered: String) -> Bool {
+        ["is disabled", "is not supported", "requires explicit opt in", "not available in your country"]
+            .contains { lowered.contains($0) }
+    }
+
+    /// Words of a 401/403 body that say money or a spending cap, not credentials, is the problem.
+    private static let billingHints = ["insufficient balance", "no payment method", "billing", "monthly limit", "spend limit",
+                                       "spending limit", "usage exceeded"]
 
     /// Whether an HTTP 400 message says the prompt did not fit (providers word it differently).
     static func isContextOverflow(_ message: String) -> Bool {

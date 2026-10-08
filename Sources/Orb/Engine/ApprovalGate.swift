@@ -85,6 +85,9 @@ actor ApprovalGate {
         }
     }
 
+    /// Whether a task is suspended in `wait(for:)` on this card right now.
+    func isWaiting(for approvalID: UUID) -> Bool { entries[approvalID]?.continuation != nil }
+
     /// Answers a card. Unknown or already answered cards are ignored.
     func resolve(approvalID: UUID, answer: ApprovalAnswer) {
         guard var entry = entries[approvalID], entry.answer == nil else { return }

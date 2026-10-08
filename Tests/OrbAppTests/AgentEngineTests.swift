@@ -59,7 +59,8 @@ private struct TouchTool: AgentTool {
     }
 }
 
-/// A read-only tool that takes `ms` to run, so overlapping runs can be seen.
+/// A read-only tool that takes `ms` to run and, with `together`, waits until that many runs are in progress at once
+/// (so overlapping runs are seen however the machine schedules them, not by hoping the sleeps overlap).
 private struct LookTool: AgentTool {
     let gauge: Gauge
     var spec: ToolSpec { ToolSpec(name: "look", description: "Looks", parameters: .schema([:])) }
@@ -69,8 +70,14 @@ private struct LookTool: AgentTool {
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) { ("Olhando", "arquivo") }
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
         await gauge.enter()
-        defer { Task { await gauge.leave() } }
-        try await Task.sleep(for: .milliseconds(arguments["ms"]?.int ?? 0))
+        do {
+            if let peers = arguments["together"]?.int { await gauge.waitForPeers(peers) }
+            try await Task.sleep(for: .milliseconds(arguments["ms"]?.int ?? 0))
+        } catch {
+            await gauge.leave()
+            throw error
+        }
+        await gauge.leave()
         return "viu \(arguments["name"]?.string ?? "?")"
     }
 }
@@ -81,6 +88,13 @@ private actor Gauge {
     private(set) var peak = 0
     func enter() { current += 1; peak = max(peak, current) }
     func leave() { current -= 1 }
+
+    /// Returns once `count` runs have been in progress together (a latch: the first to be released may leave before
+    /// the others look), or after a generous wait, so a missing overlap fails the test on `peak` instead of hanging it.
+    func waitForPeers(_ count: Int) async {
+        let deadline = ContinuousClock.now + .seconds(10)
+        while peak < count, ContinuousClock.now < deadline { try? await Task.sleep(for: .milliseconds(5)) }
+    }
 }
 
 private struct BrokenTool: AgentTool {
@@ -222,8 +236,8 @@ struct AgentEngineTests {
 }
 
 extension AgentEngineTests {
-    private func lookCall(_ id: String, ms: Int = 0, name: String = "x") -> ToolCallRequest {
-        ToolCallRequest(id: id, name: "look", arguments: #"{"ms":\#(ms),"name":"\#(name)"}"#)
+    private func lookCall(_ id: String, ms: Int = 0, name: String = "x", together: Int? = nil) -> ToolCallRequest {
+        ToolCallRequest(id: id, name: "look", arguments: #"{"ms":\#(ms),"name":"\#(name)"\#(together.map { ",\"together\":\($0)" } ?? "")}"#)
     }
 
     private func statuses(_ events: [TurnEvent]) -> [String] {
@@ -463,7 +477,8 @@ extension AgentEngineTests {
 
     @Test func readOnlyCallsRunAtTheSameTimeAndKeepTheirOrder() async {
         let gauge = Gauge()
-        let calls = [lookCall("a", ms: 300, name: "A"), lookCall("b", ms: 200, name: "B"), lookCall("c", ms: 100, name: "C")]
+        let calls = [lookCall("a", ms: 300, name: "A", together: 3), lookCall("b", ms: 200, name: "B", together: 3),
+                     lookCall("c", ms: 100, name: "C", together: 3)]
         let script = Script([[.toolCalls(calls)], [.text("Pronto")]])
         let tools: [any AgentTool] = [LookTool(gauge: gauge)]
         let events = await run(AgentEngine(), request(script, mode: .ask, runs: Counter(), tools: tools))
@@ -477,7 +492,7 @@ extension AgentEngineTests {
     @Test func callsThatChangeThingsStayInOrderBetweenParallelReads() async {
         let gauge = Gauge()
         let runs = Counter()
-        let calls = [lookCall("a", ms: 100), lookCall("b", ms: 100), ToolCallRequest(id: "c", name: "touch", arguments: "{}"),
+        let calls = [lookCall("a", ms: 100, together: 2), lookCall("b", ms: 100, together: 2), ToolCallRequest(id: "c", name: "touch", arguments: "{}"),
                      lookCall("d", ms: 100)]
         let script = Script([[.toolCalls(calls)], [.text("Pronto")]])
         let tools: [any AgentTool] = [LookTool(gauge: gauge), TouchTool(runs: runs)]
@@ -725,7 +740,7 @@ struct AgentEngineGatingTests {
         }
         #expect(await consumer.value)
         // Leaving the stream cancels the turn; its wait must not stay behind.
-        for _ in 0..<100 where !(await engine.gate.openIDs(for: req.bot.id)).isEmpty { try? await Task.sleep(for: .milliseconds(20)) }
+        await waitUntil("the stopped turn's wait to close") { await engine.gate.openIDs(for: req.bot.id).isEmpty }
         #expect(await engine.gate.openIDs(for: req.bot.id).isEmpty)
         #expect(await runs.value == 0)
     }
@@ -771,7 +786,8 @@ struct ApprovalGateTests {
         let id = UUID()
         await gate.open(id, botID: UUID())
         let waiter = Task { await gate.wait(for: id) }
-        try? await Task.sleep(for: .milliseconds(50))
+        // Cancelled while it is really suspended in the wait (the other order is the next test).
+        await waitUntil("the waiter to be suspended in the gate") { await gate.isWaiting(for: id) }
         waiter.cancel()
         #expect(await waiter.value == .deny)
     }
@@ -997,8 +1013,10 @@ struct TurnOrchestrationTests {
             model.newConversation(bot.id)
             #expect(model.send("oi", to: bot.id))
             for _ in 0..<yields { await Task.yield() }
+            let task = model.turns[bot.id] // nil when the setup already failed on its own
             model.stop(bot.id)
-            try await Task.sleep(for: .milliseconds(150))
+            // The cancelled setup has really ended, so a failure it would still report has been reported.
+            await task?.value
             let notices = model.transcript(bot.id).compactMap { item -> String? in
                 if case .notice(let text) = item.kind { text } else { nil }
             }
@@ -1012,7 +1030,10 @@ struct TurnOrchestrationTests {
         let (model, bot, root) = modelWithAProvider()
         defer { try? FileManager.default.removeItem(at: root) }
         #expect(model.send("oi", to: bot.id))
-        try await Task.sleep(for: .milliseconds(300))
+        let task = try #require(model.turns[bot.id])
+        // Setup runs (and fails) in the turn's task; it finishing is the signal that the one notice is there.
+        await task.value
+        await waitUntil("the failed turn to be closed") { !model.isWorking(bot.id) }
         let notices = model.transcript(bot.id).compactMap { item -> String? in
             if case .notice(let text) = item.kind { text } else { nil }
         }

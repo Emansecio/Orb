@@ -168,6 +168,9 @@ struct Conversation: Codable, Sendable {
     var claudeWorkspaceHash: String?
     /// Hash of the permissions and folder instructions in the current Claude Code session's (frozen) system prompt.
     var claudeStandingHash: String?
+    /// Id this conversation sends gateways that key routing and prompt caching to a session (OpenCode's
+    /// `x-opencode-session`). Born with the conversation, so a cleared chat or a routine run gets a new one.
+    var gatewaySessionID: String?
 
     /// After a quit or crash mid-turn: nothing is streaming, running or waiting anymore.
     func closingInterruptedTurn() -> Conversation {
@@ -210,6 +213,7 @@ extension Conversation {
         workspaceHash = try c.decodeIfPresent(String.self, forKey: .workspaceHash)
         claudeWorkspaceHash = try c.decodeIfPresent(String.self, forKey: .claudeWorkspaceHash)
         claudeStandingHash = try c.decodeIfPresent(String.self, forKey: .claudeStandingHash)
+        gatewaySessionID = try c.decodeIfPresent(String.self, forKey: .gatewaySessionID)
     }
 }
 

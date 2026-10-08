@@ -12,7 +12,7 @@ import json, queue, sys, threading, time, uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 LEGACY = sys.argv[1] == "legacy"
-state = {"session": None, "deleted": False, "cancelled": [], "replies": []}
+state = {"session": None, "deleted": False, "cancelled": [], "replies": [], "calls": []}
 streams = {}
 
 def handle(msg):
@@ -31,6 +31,7 @@ def handle(msg):
                             {"name": "slow"}, {"name": "expire"}]}
     elif method == "tools/call":
         name, args = msg["params"]["name"], msg["params"]["arguments"]
+        state["calls"].append(name)
         if name == "fail":
             result = {"content": [{"type": "text", "text": "deu ruim"}], "isError": True}
         elif name == "slow":
@@ -105,7 +106,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, json.dumps(response).encode())
         self.start_stream()
         self.wfile.write(event(json.dumps({"jsonrpc": "2.0", "method": "notifications/progress", "params": {}})))
-        self.wfile.write(event(json.dumps({"jsonrpc": "2.0", "id": "srv-1", "method": "ping"})))
+        # Not for "expire": the client's reply to a ping goes out on its own, and after the session expired it would be
+        # the request that finds it out, racing the call the test wants to see fail.
+        if msg["params"]["name"] != "expire":
+            self.wfile.write(event(json.dumps({"jsonrpc": "2.0", "id": "srv-1", "method": "ping"})))
         self.wfile.write(b"id: 7\r\n" + event(json.dumps(response, indent=1)).replace(b"\n", b"\r\n"))
         time.sleep(0.2)
 
@@ -157,11 +161,10 @@ private struct FakeHTTPServer {
     func state(until condition: (JSONValue) -> Bool = { _ in true }) async throws -> JSONValue {
         let url = try #require(URL(string: "http://127.0.0.1:\(port)/state"))
         var state = JSONValue.null
-        for _ in 0..<40 {
+        try await waitUntil("the fake server to report the expected state") {
             let (data, _) = try await URLSession.shared.data(from: url)
             state = try #require(JSONValue.parse(String(decoding: data, as: UTF8.self)))
-            if condition(state) { break }
-            try await Task.sleep(for: .milliseconds(50))
+            return condition(state)
         }
         return state
     }
@@ -191,7 +194,7 @@ struct MCPRemoteTests {
         try await Task.sleep(for: .milliseconds(300))
         slow.cancel()
         await #expect(throws: CancellationError.self) { try await slow.value }
-        var state = try await server.state { $0["cancelled"]?.array?.isEmpty == false }
+        var state = try await server.state { $0["cancelled"]?.array?.isEmpty == false && $0["replies"]?.array?.isEmpty == false }
         #expect(state["cancelled"]?.array?.count == 1)
         #expect(state["replies"]?.array?.first?["id"]?.string == "srv-1")
 
@@ -235,6 +238,29 @@ struct MCPRemoteTests {
             #expect(message(error).contains("expirou"))
         }
         #expect(await !connection.isRunning)
+    }
+
+    @Test func aCancellationThatFindsTheSessionExpiredStillExplainsWhyTheNextCallFails() async throws {
+        let server = try FakeHTTPServer(mode: "streamable")
+        defer { server.stop() }
+        let connection = MCPConnection(config: server.config(path: "/mcp"))
+        _ = try await connection.start()
+
+        // "slow" is already at the server when the session expires, so the first request to meet the 404 is the
+        // cancellation sent in the background, with nothing pending to carry the error.
+        let slow = Task { try await connection.call("slow", arguments: .object([:])) }
+        _ = try await server.state { $0["calls"]?.array?.contains(.string("slow")) == true }
+        #expect(try await connection.call("expire", arguments: .object([:])) == "ok")
+        slow.cancel()
+        await #expect(throws: CancellationError.self) { try await slow.value }
+        await waitUntil("the connection to close") { await !connection.isRunning }
+
+        do {
+            _ = try await connection.call("echo", arguments: .object(["text": .string("x")]))
+            Issue.record("expected an error")
+        } catch {
+            #expect(message(error).contains("expirou"), "\(message(error))")
+        }
     }
 
     @Test func legacySSEFallback() async throws {

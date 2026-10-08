@@ -96,6 +96,7 @@ extension Conversation {
         copy.workspaceHash = nil
         copy.claudeWorkspaceHash = nil
         copy.claudeStandingHash = nil
+        copy.gatewaySessionID = nil
         copy.memorySavedCount = nil
 
         let starts = copy.items.indices.filter { index in

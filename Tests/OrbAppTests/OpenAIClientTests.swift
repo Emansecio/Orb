@@ -377,7 +377,7 @@ struct OpenAIReliabilityTests {
         let asked = Box<[Bool]>([])
         let client = client(host: "denied.test") { force in
             asked.update { $0.append(force) }
-            return "nope"
+            return force ? "still-nope" : "nope" // a renewed credential is tried once; an unchanged key is not resent
         }
         StubProtocol.queue(host: "denied.test", [.init(status: 401, body: #"{"error":{"message":"bad key"}}"#),
                                                  .init(status: 401, body: #"{"error":{"message":"bad key"}}"#),

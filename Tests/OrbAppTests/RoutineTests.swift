@@ -50,20 +50,19 @@ private struct StubModel: LLMClient {
     }
 }
 
+/// Returns when the stub model has been asked `count` times, i.e. the turn is under way and parked at its gate.
+private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
+    await waitUntil("the model to be called \(count) time(s)") { await stub.calls.count >= count }
+}
+
 /// Routines run in a conversation of their own, unattended, one at a time per Orb.
 @Suite final class RoutineTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbRoutines-\(UUID().uuidString)")
-    private var savedNotify: Any?
 
-    init() {
-        // No banner from the test process.
-        savedNotify = UserDefaults.standard.object(forKey: "notifyWhenDone")
-        UserDefaults.standard.set(false, forKey: "notifyWhenDone")
-    }
+    init() { QuietNotifications.hold() } // no banner from the test process
 
     deinit {
-        if let savedNotify { UserDefaults.standard.set(savedNotify, forKey: "notifyWhenDone") }
-        else { UserDefaults.standard.removeObject(forKey: "notifyWhenDone") }
+        QuietNotifications.release()
         try? FileManager.default.removeItem(at: root)
     }
 
@@ -95,11 +94,10 @@ private struct StubModel: LLMClient {
         return (model, model.bots[0], routine)
     }
 
+    /// Returns when the Orb has no turn: closing a turn starts the next queued routine in the same step, so there
+    /// is no moment in between where it looks idle.
     @MainActor private func waitUntilIdle(_ model: AppModel, _ botID: UUID) async {
-        try? await Task.sleep(for: .milliseconds(20))
-        for _ in 0..<400 where model.isWorking(botID) || model.turns[botID] != nil {
-            try? await Task.sleep(for: .milliseconds(20))
-        }
+        await waitUntil("the Orb to finish its turn") { !model.isWorking(botID) && model.turns[botID] == nil }
     }
 
     private func notices(_ items: [TranscriptItem]) -> [String] {
@@ -308,12 +306,14 @@ private struct StubModel: LLMClient {
         let gate = Gate()
         let (model, bot, routine) = setUp(StubModel(gate: gate))
         #expect(model.send("pergunta", to: bot.id))
+        let question = try #require(model.turns[bot.id])
         model.runRoutine(routine.id)
         #expect(model.queuedRoutines.count == 1)
 
         model.deleteBot(bot.id)
         await gate.open()
-        try await Task.sleep(for: .milliseconds(100))
+        await question.value // the question's turn is over: nothing is left that could start the routine
+        try await Task.sleep(for: .milliseconds(20))
         #expect(model.queuedRoutines.isEmpty && model.routines.isEmpty)
     }
 
@@ -332,10 +332,11 @@ private struct StubModel: LLMClient {
 
     @Test @MainActor func stoppingARoutineGivesTheChatBackAndRecordsAFailedRun() async throws {
         let gate = Gate()
-        let (model, bot, routine) = setUp(StubModel(gate: gate))
+        let stub = StubModel(gate: gate)
+        let (model, bot, routine) = setUp(stub)
         model.runRoutine(routine.id)
         #expect(model.isRoutineRunning(routine.id))
-        try await Task.sleep(for: .milliseconds(50))
+        await waitForModelCalls(stub)
 
         model.stop(bot.id)
 
@@ -377,9 +378,10 @@ private struct StubModel: LLMClient {
 
     @Test @MainActor func newConversationDuringARoutineArchivesTheChatAndLetsTheRoutineFinish() async throws {
         let gate = Gate()
-        let (model, bot, routine) = setUp(StubModel(gate: gate))
+        let stub = StubModel(gate: gate)
+        let (model, bot, routine) = setUp(stub)
         model.runRoutine(routine.id)
-        try await Task.sleep(for: .milliseconds(50))
+        await waitForModelCalls(stub)
 
         model.newConversation(bot.id)
         #expect(model.isRoutineRunning(routine.id)) // not stopped
@@ -396,9 +398,10 @@ private struct StubModel: LLMClient {
 
     @Test @MainActor func whileARoutineRunsTheChatOnDiskIsNotTouched() async throws {
         let gate = Gate()
-        let (model, bot, routine) = setUp(StubModel(gate: gate))
+        let stub = StubModel(gate: gate)
+        let (model, bot, routine) = setUp(stub)
         model.runRoutine(routine.id)
-        try await Task.sleep(for: .milliseconds(80))
+        await waitForModelCalls(stub)
         model.saveNow() // as on quit
         store.flush()
 
@@ -417,7 +420,7 @@ private struct StubModel: LLMClient {
         #expect(model.send("pergunta do usuário", to: bot.id))
         model.runRoutine(routine.id)
         await first.open()
-        for _ in 0..<200 where !model.isRoutineRunning(routine.id) { try await Task.sleep(for: .milliseconds(10)) }
+        await waitUntil("the routine to take the Orb") { model.isRoutineRunning(routine.id) }
         #expect(model.isRoutineRunning(routine.id)) // the routine took the Orb the moment the question was answered
 
         model.saveNow() // as on quit, in the middle of the run
@@ -443,7 +446,7 @@ private struct StubModel: LLMClient {
         #expect(model.queuedRoutines == [routine.id])
 
         model.routines[0].botID = other.id
-        for _ in 0..<200 where !model.isRoutineRunning(routine.id) { try await Task.sleep(for: .milliseconds(10)) }
+        await waitUntil("the moved routine to start on its new Orb") { model.isRoutineRunning(routine.id) }
         #expect(model.isRoutineRunning(routine.id) && model.queuedRoutines.isEmpty)
 
         await gate.open()
@@ -465,7 +468,7 @@ private struct StubModel: LLMClient {
         #expect(model.queuedRoutines.isEmpty)
         await gate.open()
         await waitUntilIdle(model, bot.id)
-        try await Task.sleep(for: .milliseconds(50))
+        try await Task.sleep(for: .milliseconds(20)) // finishing the question is what would have started it, and that is synchronous
         #expect(model.routines[0].runs.isEmpty)
         #expect(await stub.calls.count == 1)
     }

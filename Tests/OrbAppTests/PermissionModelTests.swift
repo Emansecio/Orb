@@ -19,9 +19,8 @@ import Testing
         Store(directory: root).save(state)
         let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)
         // No banner from the test process.
-        let defaults = UserDefaults.standard, previous = defaults.object(forKey: "notifyWhenDone")
-        defaults.set(false, forKey: "notifyWhenDone")
-        defer { if let previous { defaults.set(previous, forKey: "notifyWhenDone") } else { defaults.removeObject(forKey: "notifyWhenDone") } }
+        QuietNotifications.hold()
+        defer { QuietNotifications.release() }
         await model.gate.open(request.id, botID: botID)
         model.apply(.approval(request), to: botID)
         // A turn is running (it is waiting on the card).
@@ -46,7 +45,7 @@ import Testing
 
         let answer = await waiting.value
         #expect(answer.decision == .deny)
-        for _ in 0..<200 where decision(in: model, of: request, botID: botID) == nil { try await Task.sleep(for: .milliseconds(10)) }
+        await waitUntil("the card to be marked in the transcript") { decision(in: model, of: request, botID: botID) != nil }
         #expect(decision(in: model, of: request, botID: botID) == .deny)
     }
 
@@ -58,7 +57,7 @@ import Testing
         model.update(botID) { $0.permissionMode = .bypass }
 
         #expect(await waiting.value.decision == .once)
-        for _ in 0..<200 where decision(in: model, of: request, botID: botID) == nil { try await Task.sleep(for: .milliseconds(10)) }
+        await waitUntil("the card to be marked in the transcript") { decision(in: model, of: request, botID: botID) != nil }
         #expect(decision(in: model, of: request, botID: botID) == .once)
     }
 
@@ -67,7 +66,8 @@ import Testing
         model.turns[botID]?.cancel()
         model.turns[botID] = nil
         model.update(botID) { $0.permissionMode = .readOnly }
-        try await Task.sleep(for: .milliseconds(50))
+        // Without a running turn the change returns before it spawns anything; the short settle covers a regression that does.
+        try await Task.sleep(for: .milliseconds(20))
         #expect(decision(in: model, of: request, botID: botID) == nil)
         #expect(await model.gate.openIDs(for: botID) == [request.id])
     }

@@ -83,7 +83,13 @@ struct MCPConnectionTests {
 
         #expect(try await connection.call("echo", arguments: .object(["text": .string("olá")])) == "olá\n[imagem]")
 
-        let info = try #require(JSONValue.parse(try await connection.call("info", arguments: .null)))
+        // The client's reply to the server's request travels on its own, so it may reach the server after this call does:
+        // ask until the server has seen it.
+        var info = JSONValue.null
+        try await waitUntil("the server to receive the client's reply to its request") {
+            info = try #require(JSONValue.parse(try await connection.call("info", arguments: .null)))
+            return info["replies"]?.array?.isEmpty == false
+        }
         #expect(info["argv"]?.array == [.string("a b"), .string("$HOME"), .string("'; echo x")])
         #expect(info["env"]?.string == "ok")
         #expect(info["replies"]?.array?.first?["error"]?["code"]?.int == -32601)

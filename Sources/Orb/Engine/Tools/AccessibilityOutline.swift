@@ -1,0 +1,398 @@
+import Foundation
+
+// What `ui_read` shows and what `ui_act` can rely on: the outline of one window, the ids in it, and the snapshot that
+// remembers what each id was so a later action can tell the interface changed.
+
+// MARK: - Text helpers
+
+enum UIText {
+    /// Compares titles the way a person would: no case, no accents, "..." is "…", a curly apostrophe is a straight one.
+    static func fold(_ text: String) -> String {
+        text.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
+            .replacingOccurrences(of: "...", with: "…")
+            .replacingOccurrences(of: "’", with: "'")
+            .split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
+    /// A menu title without its trailing "…", for matching "Exportar" against "Exportar…".
+    static func foldedWithoutEllipsis(_ text: String) -> String {
+        var folded = fold(text)
+        while folded.hasSuffix("…") || folded.hasSuffix(" ") { folded.removeLast() }
+        return folded
+    }
+
+    /// One line, at most `limit` characters: the way a value or title is shown in the outline.
+    static func clean(_ text: String, limit: Int = 80) -> String {
+        let flat = text.split(whereSeparator: \.isWhitespace).joined(separator: " ").replacingOccurrences(of: "\"", with: "'")
+        return flat.count > limit ? flat.prefix(limit - 1) + "…" : flat
+    }
+
+    static func quoted(_ text: String) -> String { "“\(text)”" }
+}
+
+// MARK: - Roles
+
+enum UIRole {
+    private static let names: [String: String] = [
+        "AXButton": "button", "AXCheckBox": "checkbox", "AXRadioButton": "radio", "AXPopUpButton": "popup",
+        "AXMenuButton": "menubutton", "AXComboBox": "combobox", "AXTextField": "field", "AXTextArea": "textarea",
+        "AXSearchField": "searchfield", "AXStaticText": "text", "AXLink": "link", "AXImage": "image", "AXSlider": "slider",
+        "AXIncrementor": "stepper", "AXDisclosureTriangle": "disclosure", "AXTabGroup": "tabs", "AXTable": "table",
+        "AXOutline": "outline", "AXRow": "row", "AXColumn": "column", "AXCell": "cell", "AXList": "list",
+        "AXScrollArea": "scroll", "AXScrollBar": "scrollbar", "AXSplitGroup": "split", "AXSplitter": "splitter",
+        "AXGroup": "group", "AXRadioGroup": "radiogroup", "AXToolbar": "toolbar", "AXWindow": "window", "AXSheet": "sheet",
+        "AXDrawer": "drawer", "AXMenuBar": "menubar", "AXMenuBarItem": "menubaritem", "AXMenu": "menu", "AXMenuItem": "menuitem",
+        "AXWebArea": "web", "AXProgressIndicator": "progress", "AXBusyIndicator": "busy", "AXLevelIndicator": "level",
+        "AXValueIndicator": "indicator", "AXColorWell": "colorwell", "AXSeparator": "separator", "AXHeading": "heading",
+        "AXPopover": "popover", "AXDockItem": "dockitem", "AXGrowArea": "handle", "AXHandle": "handle",
+        "AXLayoutArea": "layout", "AXLayoutItem": "layout", "AXUnknown": "element",
+    ]
+
+    /// "AXButton" → "button". Roles this list does not know lose their "AX" prefix and are lowercased.
+    static func short(_ raw: String) -> String {
+        if let name = names[raw] { return name }
+        let bare = raw.hasPrefix("AX") ? String(raw.dropFirst(2)) : raw
+        return bare.isEmpty ? "element" : bare.lowercased()
+    }
+
+    /// Containers that only arrange other elements: left out of the outline unless they carry text.
+    static let layoutOnly: Set<String> = ["group", "scroll", "split", "radiogroup", "layout", "cell", "element"]
+    /// Leaves with nothing to say when they have no text.
+    static let emptyIsNoise: Set<String> = ["text", "image", "separator", "scrollbar", "splitter", "indicator", "handle", "busy"]
+    /// Roles whose AXValue is worth reading (others carry layout or huge text, like a web area's whole page).
+    static let carriesValue: Set<String> = [
+        "text", "field", "searchfield", "textarea", "combobox", "popup", "menubutton", "checkbox", "radio", "slider", "stepper",
+        "progress", "level", "disclosure", "colorwell",
+    ]
+}
+
+// MARK: - One element
+
+struct UIElementInfo: Equatable {
+    var rawRole = ""
+    var role = "element"
+    var title: String?
+    var description: String?
+    var help: String?
+    var placeholder: String?
+    var value: String?
+    var enabled = true
+    var focused = false
+    var selected = false
+    var hidden = false
+    var size: CGSize?
+    var secure = false
+
+    /// The AX attributes read for every element, in one round trip. AXValue is not among them: a password field's value
+    /// must never be requested.
+    static let attributeNames = [
+        "AXRole", "AXSubrole", "AXRoleDescription", "AXTitle", "AXDescription", "AXHelp", "AXPlaceholderValue",
+        "AXEnabled", "AXFocused", "AXSelected", "AXHidden", "AXSize",
+    ]
+
+    init() {}
+
+    init(attributes: [String: AXAttributeValue]) {
+        func text(_ name: String) -> String? {
+            guard let value = attributes[name]?.string?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
+            return UIText.clean(value)
+        }
+        rawRole = attributes["AXRole"]?.string ?? ""
+        role = UIRole.short(rawRole)
+        title = text("AXTitle")
+        description = text("AXDescription")
+        help = text("AXHelp")
+        placeholder = text("AXPlaceholderValue")
+        enabled = attributes["AXEnabled"]?.bool ?? true
+        focused = attributes["AXFocused"]?.bool ?? false
+        selected = attributes["AXSelected"]?.bool ?? false
+        hidden = attributes["AXHidden"]?.bool ?? false
+        if case .size(let size)? = attributes["AXSize"] { self.size = size }
+        let kind = UIText.fold(attributes["AXRoleDescription"]?.string ?? "")
+        secure = attributes["AXSubrole"]?.string == "AXSecureTextField" || kind.contains("secure") || kind.contains("seguro")
+    }
+
+    /// Zero-size elements exist in the tree but nobody sees them.
+    var isInvisible: Bool { hidden || (size.map { $0.width <= 0 || $0.height <= 0 } ?? false) }
+
+    /// What a later `ui_act` compares to know it found the same element: the title, else the description. The value
+    /// is left out because it changes as the user works.
+    var identity: String { title ?? description ?? "" }
+
+    var hasText: Bool { title != nil || description != nil || help != nil || !(value ?? "").isEmpty }
+
+    /// The words that `query` is matched against.
+    var searchText: String {
+        UIText.fold([role, rawRole, title, description, help, placeholder, value].compactMap { $0 }.joined(separator: " "))
+    }
+
+    static func format(value number: Double) -> String {
+        number.rounded() == number && abs(number) < 1e15 ? String(Int(number)) : String(number)
+    }
+
+    /// Reads the value of an element that is not a password field.
+    static func readValue(of element: any AccessibilityElement, info: UIElementInfo) -> String? {
+        guard !info.secure, UIRole.carriesValue.contains(info.role) else { return nil }
+        switch element.attribute("AXValue") {
+        case .string(let text)?: return UIText.clean(text).isEmpty ? nil : UIText.clean(text)
+        case .number(let number)?: return format(value: number)
+        case .bool(let flag)?: return flag ? "1" : "0"
+        default: return nil
+        }
+    }
+
+    /// The outline line, without the id.
+    var line: String {
+        var parts = [role]
+        let primary = title ?? description ?? (role == "text" ? value : nil)
+        if let primary { parts.append(UIText.quoted(primary)) }
+        if title != nil, let description, description != title { parts.append("desc=\"\(description)\"") }
+        if primary == nil, let help { parts.append("help=\"\(help)\"") }
+        if let value, value != primary { parts.append("value=\"\(value)\"") }
+        if secure { parts.append("value=<oculto>") }
+        if let placeholder, (value ?? "").isEmpty { parts.append("placeholder=\"\(placeholder)\"") }
+        var flags: [String] = []
+        if !enabled { flags.append("desativado") }
+        if focused { flags.append("foco") }
+        if selected { flags.append("selecionado") }
+        if !flags.isEmpty { parts.append("[" + flags.joined(separator: ", ") + "]") }
+        return parts.joined(separator: " ")
+    }
+}
+
+// MARK: - The outline
+
+enum UIOutlineCut: String, Hashable, Sendable {
+    case lines, depth, visited, time
+}
+
+struct UIOutlineLimits: Sendable {
+    var maxLines = 400
+    var maxDepth = 12
+    /// Elements examined at most; every one costs a round trip to the app.
+    var maxVisited = 3000
+    /// Seconds the walk may take before it stops and says so.
+    var seconds: Double = 20
+}
+
+struct UIOutline {
+    var lines: [String] = []
+    var entries: [String: UISnapshot.Entry] = [:]
+    /// Elements that would have been listed without the line cap.
+    var total = 0
+    var matched = 0
+    var cuts: Set<UIOutlineCut> = []
+    var cancelled = false
+}
+
+enum UIOutlineBuilder {
+    private final class Node {
+        let id: String
+        let info: UIElementInfo
+        var children: [Node] = []
+        let matches: Bool
+        /// It matches the query, or something under it does.
+        var keep: Bool
+
+        init(id: String, info: UIElementInfo, matches: Bool) {
+            self.id = id
+            self.info = info
+            self.matches = matches
+            keep = matches
+        }
+    }
+
+    private struct Walk {
+        var visited = 0
+        var cuts: Set<UIOutlineCut> = []
+        let started = Date()
+        var cancelled = false
+    }
+
+    /// The outline of one window. Elements get ids `<prefix>.<position among its parent's children>`, counting every
+    /// child (also the ones left out), so an id does not move when something beside it appears or disappears.
+    static func outline(of window: any AccessibilityElement, prefix: String, query: String?, limits: UIOutlineLimits) -> UIOutline {
+        let wanted = query.map(UIText.fold).flatMap { $0.isEmpty ? nil : $0 }
+        var walk = Walk()
+        let roots = visit(window, id: prefix, depth: 0, wanted: wanted, limits: limits, walk: &walk)
+        var outline = UIOutline(cuts: walk.cuts, cancelled: walk.cancelled)
+        let listed = roots.filter(\.keep)
+        outline.total = listed.reduce(0) { $0 + count($1) }
+        outline.matched = wanted == nil ? 0 : listed.reduce(0) { $0 + countMatches($1) }
+        for node in listed { emit(node, depth: 0, limits: limits, into: &outline) }
+        if outline.total > outline.lines.count { outline.cuts.insert(.lines) }
+        return outline
+    }
+
+    private static func visit(_ element: any AccessibilityElement, id: String, depth: Int, wanted: String?,
+                              limits: UIOutlineLimits, walk: inout Walk) -> [Node] {
+        if Task.isCancelled { walk.cancelled = true; return [] }
+        if walk.visited >= limits.maxVisited { walk.cuts.insert(.visited); return [] }
+        if Date().timeIntervalSince(walk.started) >= limits.seconds { walk.cuts.insert(.time); return [] }
+        walk.visited += 1
+
+        var info = UIElementInfo(attributes: element.attributes(UIElementInfo.attributeNames))
+        if info.isInvisible { return [] }
+        info.value = UIElementInfo.readValue(of: element, info: info)
+
+        var children: [Node] = []
+        let list = element.elements("AXChildren") ?? []
+        if depth < limits.maxDepth {
+            for (index, child) in list.enumerated() {
+                children += visit(child, id: "\(id).\(index + 1)", depth: depth + 1, wanted: wanted, limits: limits, walk: &walk)
+            }
+        } else if !list.isEmpty {
+            walk.cuts.insert(.depth)
+        }
+
+        if depth > 0, !info.hasText, UIRole.layoutOnly.contains(info.role) || UIRole.emptyIsNoise.contains(info.role) {
+            return children
+        }
+        let node = Node(id: id, info: info, matches: wanted.map { info.searchText.contains($0) } ?? true)
+        node.children = children
+        node.keep = node.matches || children.contains(where: \.keep)
+        return [node]
+    }
+
+    private static func count(_ node: Node) -> Int { 1 + node.children.filter(\.keep).reduce(0) { $0 + count($1) } }
+    private static func countMatches(_ node: Node) -> Int {
+        (node.matches ? 1 : 0) + node.children.filter(\.keep).reduce(0) { $0 + countMatches($1) }
+    }
+
+    private static func emit(_ node: Node, depth: Int, limits: UIOutlineLimits, into outline: inout UIOutline) {
+        guard outline.lines.count < limits.maxLines else { return }
+        outline.lines.append(String(repeating: "  ", count: depth) + node.id + " " + node.info.line)
+        outline.entries[node.id] = UISnapshot.Entry(rawRole: node.info.rawRole, label: node.info.identity, secure: node.info.secure)
+        for child in node.children where child.keep { emit(child, depth: depth + 1, limits: limits, into: &outline) }
+    }
+
+    /// The menu bar's top-level menus, ids `m1`, `m2`…
+    static func menuBar(of root: any AccessibilityElement) -> (lines: [String], entries: [String: UISnapshot.Entry])? {
+        guard let bar = root.element("AXMenuBar"), let items = bar.elements("AXChildren"), !items.isEmpty else { return nil }
+        var lines: [String] = []
+        var entries: [String: UISnapshot.Entry] = [:]
+        for (index, item) in items.enumerated() {
+            let info = UIElementInfo(attributes: item.attributes(UIElementInfo.attributeNames))
+            guard !info.isInvisible else { continue }
+            let id = "m\(index + 1)"
+            lines.append(id + " " + info.line)
+            entries[id] = UISnapshot.Entry(rawRole: info.rawRole, label: info.identity, secure: false)
+        }
+        return lines.isEmpty ? nil : (lines, entries)
+    }
+}
+
+// MARK: - Snapshot
+
+/// What one `ui_read` showed: for each id its role and name, and which window it came from. `ui_act` finds the element
+/// again from the id and refuses to act when the live element no longer looks like this.
+struct UISnapshot: Codable, Sendable, Equatable {
+    struct Entry: Codable, Sendable, Equatable {
+        /// The AX role ("AXButton").
+        var rawRole: String
+        /// Title, else description, as shown in the outline.
+        var label: String
+        var secure: Bool
+
+        init(rawRole: String, label: String, secure: Bool) {
+            self.rawRole = rawRole
+            self.label = label
+            self.secure = secure
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            rawRole = try c.value(.rawRole, default: "")
+            label = try c.value(.label, default: "")
+            secure = try c.value(.secure, default: false)
+        }
+    }
+
+    var app: AccessibilityApp
+    /// Position of the window among the app's windows when it was read; nil when only the menus were read.
+    var windowIndex: Int?
+    var windowTitle: String
+    var entries: [String: Entry]
+    var takenAt: Date
+
+    init(app: AccessibilityApp, windowIndex: Int?, windowTitle: String, entries: [String: Entry], takenAt: Date = .now) {
+        self.app = app
+        self.windowIndex = windowIndex
+        self.windowTitle = windowTitle
+        self.entries = entries
+        self.takenAt = takenAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        app = try c.decode(AccessibilityApp.self, forKey: .app)
+        windowIndex = try c.decodeIfPresent(Int.self, forKey: .windowIndex)
+        windowTitle = try c.value(.windowTitle, default: "")
+        entries = (try? c.decodeIfPresent([String: Entry].self, forKey: .entries)) ?? [:]
+        takenAt = try c.value(.takenAt, default: .distantPast)
+    }
+
+    /// Whether a call naming `name` may be about this app: the same test that finds the app (`RunningAppMatcher`),
+    /// an exact name or bundle identifier, or a name that contains the text.
+    func isFor(_ name: String) -> Bool {
+        let wanted = UIText.fold(name)
+        guard !wanted.isEmpty else { return false }
+        return UIText.fold(app.name).contains(wanted) || app.bundleID.map { UIText.fold($0) == wanted } ?? false
+    }
+}
+
+/// The last snapshot per Orb and app. Kept in memory, and mirrored to a small file per app so the approval check (which
+/// runs in the Orb app) can see a snapshot taken by the tools server that Claude Code started (another process).
+final class UISnapshotStore: @unchecked Sendable {
+    static let shared = UISnapshotStore()
+
+    private struct Key: Hashable {
+        var bot: UUID?
+        var app: String
+    }
+
+    private let lock = NSLock()
+    private var snapshots: [Key: UISnapshot] = [:]
+    private let directory: URL?
+
+    init(directory: URL? = FileManager.default.temporaryDirectory.appending(path: "OrbAccessibility")) {
+        self.directory = directory
+    }
+
+    private static func key(_ app: AccessibilityApp, bot: UUID?) -> Key {
+        Key(bot: bot, app: UIText.fold(app.bundleID ?? app.name))
+    }
+
+    func save(_ snapshot: UISnapshot, bot: UUID?) {
+        lock.withLock { snapshots[Self.key(snapshot.app, bot: bot)] = snapshot }
+        guard let directory, let data = try? JSONEncoder().encode(snapshot) else { return }
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try? data.write(to: file(for: snapshot.app, in: directory), options: .atomic)
+    }
+
+    /// The Orb's own last reading of the app, else the last one anybody made (another process's, from the file).
+    func snapshot(bot: UUID?, app: AccessibilityApp) -> UISnapshot? {
+        if let own = lock.withLock({ snapshots[Self.key(app, bot: bot)] }) { return own }
+        guard let directory, let data = try? Data(contentsOf: file(for: app, in: directory)) else { return nil }
+        return try? JSONDecoder().decode(UISnapshot.self, from: data)
+    }
+
+    /// Every snapshot that may be what a call is about, for judging a call before it runs: those of the named app (a
+    /// name or bundle identifier), or all of them when no app is named, newest first.
+    func candidates(matching app: String?) -> [UISnapshot] {
+        var found = lock.withLock { Array(snapshots.values) }
+        if let directory, let names = try? FileManager.default.contentsOfDirectory(atPath: directory.path) {
+            for name in names where name.hasPrefix("ax-") && name.hasSuffix(".json") {
+                if let data = try? Data(contentsOf: directory.appending(path: name)),
+                   let snapshot = try? JSONDecoder().decode(UISnapshot.self, from: data) { found.append(snapshot) }
+            }
+        }
+        if let app = app?.trimmingCharacters(in: .whitespacesAndNewlines), !app.isEmpty { found = found.filter { $0.isFor(app) } }
+        return found.sorted { $0.takenAt > $1.takenAt }
+    }
+
+    private func file(for app: AccessibilityApp, in directory: URL) -> URL {
+        let safe = UIText.fold(app.bundleID ?? app.name).map { $0.isLetter || $0.isNumber || $0 == "." ? String($0) : "_" }.joined()
+        return directory.appending(path: "ax-\(safe).json")
+    }
+}

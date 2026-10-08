@@ -48,9 +48,9 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .claudeCode: "Usa o Claude Code instalado no seu Mac, com o login da própria Anthropic (Pro ou Max). O app só abre o Claude Code; nunca vê nem guarda a sua sessão."
         case .openai: "Modelos GPT pela API da OpenAI, cobrados por uso."
         case .anthropic: "Modelos Claude pela API da Anthropic, cobrados por uso."
-        case .opencodeZen: "Gateway da OpenCode com modelos selecionados para agentes, cobrado por uso."
-        case .opencodeGo: "Assinatura da OpenCode com modelos abertos (GLM, Kimi, DeepSeek…)."
-        case .commandCode: "API de modelos da Command Code (plano com acesso à API)."
+        case .opencodeZen: "Gateway da OpenCode com modelos testados em agentes (Claude, GPT, Grok e abertos; os modelos Gemini, que usam outro formato, ainda não aparecem). Pré-pago: cobra do seu saldo pelo uso, sem margem sobre o preço do modelo. Os modelos gratuitos, que podem usar seus dados, ficam fora da lista."
+        case .opencodeGo: "Assinatura da OpenCode (Go US$ 10/mês, Go Plus US$ 40/mês) com modelos abertos como GLM, Kimi, DeepSeek e Qwen. O uso tem limite por modelo em janelas de 5 horas, semana e mês; passando do limite, os modelos gratuitos seguem funcionando, e o saldo do Zen cobre se você ativar \"Use balance\" no console."
+        case .commandCode: "Modelos de vários laboratórios (Claude, GPT, DeepSeek, Kimi, GLM…) pela API da Command Code. Precisa de um plano com acesso à API: Provider (pago por uso), GOAT, Pro, Max ou Team. O plano Go não inclui a API. Os modelos gratuitos ou promocionais, que podem rodar sob outros termos, ficam fora da lista."
         case .xai: "Modelos Grok pela API da xAI."
         case .openrouter: "Centenas de modelos com uma chave só."
         case .ollama: "Modelos rodando no seu Mac com o Ollama."
@@ -86,6 +86,10 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .chatgpt, .claudeCode, .ollama, .lmstudio, .custom: nil
         }
     }
+
+    /// Gateways whose docs say to authenticate every route with `Authorization: Bearer` (the Messages route included,
+    /// where Anthropic's own SDKs would send `x-api-key`).
+    var takesBearerOnMessages: Bool { [.opencodeZen, .opencodeGo, .commandCode].contains(self) }
 
     var usesSignIn: Bool { self == .chatgpt || self == .claudeCode }
     var needsKey: Bool { ![.chatgpt, .claudeCode, .ollama, .lmstudio, .custom].contains(self) }
@@ -159,13 +163,14 @@ enum ModelCatalog {
         case .openai:
             return openAIModels(try await OpenAIClient(baseURL: base, apiKey: token, session: session).models())
         case .commandCode:
-            return commandCodeModels(try await getJSON(base.appending(path: "models"), token: nil, session: session))
+            // The list is public (no key needed); the key goes along anyway.
+            return commandCodeModels(try await getJSON(base.appending(path: "models"), token: token, session: session))
         case .opencodeZen, .opencodeGo:
             // The gateway lists what is live; models.dev (what OpenCode itself uses) says which format each one needs.
             async let live = OpenAIClient(baseURL: base, apiKey: nil, session: session).models()
             async let metadata = getJSON(modelsDevURL, token: nil, session: session)
             let key = account.kind == .opencodeZen ? "opencode" : "opencode-go"
-            return openCodeModels(live: try await live, metadata: (try? await metadata)?[key]?["models"])
+            return openCodeModels(live: try await live, metadata: (try? await metadata)?[key]?["models"], provider: account.kind)
         case .custom:
             // The gateway speaks one chosen format; list via the matching endpoint, with the user's headers.
             let ids = account.format == .messages
@@ -234,7 +239,7 @@ enum ModelCatalog {
     /// `supported_endpoints` says what each model speaks; chat completions is preferred when offered.
     static func commandCodeModels(_ json: JSONValue) -> [ProviderModel] {
         (json["data"]?.array ?? []).compactMap { entry in
-            guard let id = entry["id"]?.string else { return nil }
+            guard let id = entry["id"]?.string, !isCommandCodePromotional(id) else { return nil }
             let endpoints = entry["supported_endpoints"]?.array?.compactMap(\.string) ?? ["/chat/completions"]
             let format: APIFormat
             if endpoints.contains("/chat/completions") { format = .chat }
@@ -246,14 +251,34 @@ enum ModelCatalog {
         }
     }
 
+    /// Free and stealth models run "under different provider terms" (Command Code docs), possibly training on the
+    /// prompts: left out, as Zen's free ones are.
+    static func isCommandCodePromotional(_ id: String) -> Bool {
+        let id = id.lowercased()
+        return id.contains(":free") || id.hasSuffix("-free") || id.hasPrefix("stealth/")
+    }
+
     /// Live ids filtered and typed with models.dev: `provider.npm` @ai-sdk/anthropic → Messages, @ai-sdk/openai →
-    /// Responses, absent → chat; Google-format, deprecated, tool-less and free (OpenCode-only) models are left out.
-    static func openCodeModels(live: [String], metadata: JSONValue?) -> [ProviderModel] {
-        live.compactMap { id in
-            guard let info = metadata?[id] else { return nil }
-            guard info["status"]?.string != "deprecated", info["tool_call"]?.bool != false else { return nil }
+    /// Responses, absent → chat (the same mapping the OpenCode docs give per endpoint); Google-format (a per-model
+    /// path), deprecated, alpha, tool-less and, for Zen, free models are left out. The free models of Zen may train
+    /// on the prompts during their free period; the one in the Go plan (zero retention) is part of the subscription
+    /// and the only thing that keeps working past its limits, so Go keeps it. Without metadata (models.dev
+    /// unreachable) the formats come from the endpoint tables of the docs instead.
+    static func openCodeModels(live: [String], metadata: JSONValue?, provider: ProviderKind = .opencodeZen,
+                               now: Date = .now) -> [ProviderModel] {
+        let keepsFree = provider == .opencodeGo
+        return live.compactMap { id in
+            guard !isOpenCodeDeprecated(id, now: now) else { return nil }
+            guard let metadata else {
+                guard !id.contains("alpha"), provider != .opencodeGo || openCodeGoDocumentedIDs.contains(id),
+                      let format = documentedOpenCodeFormat(id, provider: provider),
+                      keepsFree || !isOpenCodeFree(id) else { return nil }
+                return ProviderModel(id: id, name: id, format: format)
+            }
+            guard let info = metadata[id] else { return nil }
+            guard !["deprecated", "alpha"].contains(info["status"]?.string ?? ""), info["tool_call"]?.bool != false else { return nil }
             let cost = info["cost"]
-            if cost?["input"]?.number == 0 && cost?["output"]?.number == 0 { return nil }
+            if !keepsFree && cost?["input"]?.number == 0 && cost?["output"]?.number == 0 { return nil }
             let format: APIFormat
             switch info["provider"]?["npm"]?.string {
             case nil, "@ai-sdk/openai-compatible": format = .chat
@@ -264,6 +289,48 @@ enum ModelCatalog {
             return ProviderModel(id: id, name: info["name"]?.string ?? id, format: format,
                                  contextLength: info["limit"]?["context"]?.int, supportsImages: supportsImages(in: info))
         }
+    }
+
+    /// Models the Zen docs (Deprecations table) retired, with the day: the gateway still lists some of them and
+    /// models.dev does not always mark them.
+    static let openCodeDeprecations: [String: String] = [
+        "gpt-5.2-codex": "2026-07-23", "gpt-5.1-codex": "2026-07-23", "gpt-5.1-codex-max": "2026-07-23",
+        "gpt-5.1-codex-mini": "2026-07-23", "gpt-5-codex": "2026-07-23",
+        "claude-opus-4-1": "2026-08-05", "claude-sonnet-4": "2026-06-15", "claude-3-5-haiku": "2026-02-16",
+        "gemini-3-pro": "2026-03-09", "minimax-m2.5": "2026-08-05", "minimax-m2.1": "2026-03-15",
+        "glm-5": "2026-05-14", "glm-4.7": "2026-03-15", "glm-4.6": "2026-03-15",
+        "kimi-k2.5": "2026-08-05", "kimi-k2-thinking": "2026-03-06", "kimi-k2": "2026-03-06",
+        "qwen3-coder": "2026-02-06",
+    ]
+
+    /// The models the Go docs list (opencode.ai/docs/go). The gateway's own list also carries retired and test ids
+    /// (omen-alpha, hy3-preview, glm-5.1…), so without models.dev only these are offered.
+    static let openCodeGoDocumentedIDs: Set<String> = [
+        "glm-5.3-flash", "glm-5.3", "glm-5.2", "gpt-6-luna", "gpt-5.6-luna", "claude-haiku-5-5", "kimi-k3", "kimi-k2.7-code",
+        "longcat-2.0", "longcat-2.5-preview-free", "mimo-v2.6-flash", "mimo-v2.6-pro", "mimo-v2.5", "mimo-v2.5-pro",
+        "minimax-m3", "minimax-m2.7", "muse-spark-1.3-contributor", "muse-spark-1.2-contributor", "qwen3.8-max",
+        "qwen3.8-flash", "qwen3.7-plus", "deepseek-v4.1-flash", "deepseek-v4-pro", "deepseek-v4-flash",
+        "deepseek-v4-flash-vision-exp", "hy4-preview", "hy3", "space-bunny",
+    ]
+
+    static func isOpenCodeDeprecated(_ id: String, now: Date) -> Bool {
+        guard let day = openCodeDeprecations[id] else { return false }
+        return day <= now.formatted(.iso8601.year().month().day()) // ISO days sort as text
+    }
+
+    /// Free ids carry "free" (and Zen's first free model, "big-pickle", does not).
+    private static func isOpenCodeFree(_ id: String) -> Bool { id.contains("free") || id == "big-pickle" }
+
+    /// The wire format the OpenCode docs list for a model id (Zen and Go share the paths): Claude on `/messages`,
+    /// GPT, Grok and Muse Spark on `/responses`, the rest on `/chat/completions`, except the Qwen models and, on
+    /// Go, MiniMax, which are on `/messages`. Gemini (a per-model path) and Jev (System One) are not chat models.
+    static func documentedOpenCodeFormat(_ id: String, provider: ProviderKind) -> APIFormat? {
+        if id.hasPrefix("gemini") || id.hasPrefix("jev") { return nil }
+        if id.hasPrefix("claude") { return .messages }
+        if ["gpt-", "grok-", "muse-spark-"].contains(where: id.hasPrefix) { return .responses }
+        if id.hasPrefix("qwen") { return provider == .opencodeGo || id != "qwen3.8-max" ? .messages : .chat }
+        if provider == .opencodeGo && id.hasPrefix("minimax") { return .messages }
+        return .chat
     }
 
     private static func getJSON(_ url: URL, token: String?, session: URLSession) async throws -> JSONValue {
@@ -289,7 +356,9 @@ extension ProviderAccount {
         case .chat:
             return OpenAIClient(baseURL: base, credentials: credentials, extraHeaders: headers, conversationID: conversationID)
         case .messages:
-            return AnthropicClient(baseURL: base, credentials: credentials, extraHeaders: headers)
+            var client = AnthropicClient(baseURL: base, credentials: credentials, extraHeaders: headers)
+            client.sendsBearer = kind.takesBearerOnMessages
+            return client
         case .responses:
             // Sign in with ChatGPT takes tools as an `additional_tools` input item, not top-level `tools`.
             return ResponsesClient(baseURL: base, credentials: credentials, extraHeaders: headers,

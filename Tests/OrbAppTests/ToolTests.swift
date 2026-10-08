@@ -32,17 +32,14 @@ final class ToolTests {
 
     @Test func runCommandKillsTheProcessTreeOnTimeout() async throws {
         let start = ContinuousClock.now
-        let output = try await run(RunCommandTool(), ["command": .string("sleep 30 & echo $!; wait"), "timeout_seconds": .number(1)])
-        #expect(ContinuousClock.now - start < .seconds(4))
+        let output = try await run(RunCommandTool(), ["command": .string("sleep 30 & echo $!; wait"), "timeout_seconds": .number(2)])
+        // Ended by the timeout, not by the thirty seconds of the child. Long enough for the shell to print the child's
+        // pid first on a busy machine.
+        #expect(ContinuousClock.now - start < .seconds(20))
         #expect(output.contains("tempo esgotado"))
 
         let child = try #require(output.split(separator: "\n").compactMap { pid_t($0) }.first)
-        var alive = true
-        for _ in 0..<30 where alive {
-            try await Task.sleep(for: .milliseconds(100))
-            alive = kill(child, 0) == 0
-        }
-        #expect(!alive)
+        await waitUntil("the timed-out command's child to be gone") { !processIsAlive(child) }
     }
 
     @Test func longOutputKeepsHeadAndTail() async throws {
@@ -59,7 +56,8 @@ final class ToolTests {
         try await Task.sleep(for: .milliseconds(200))
         task.cancel()
         await #expect(throws: CancellationError.self) { try await task.value }
-        #expect(ContinuousClock.now - start < .seconds(3))
+        // Stopped by the cancellation, not by the thirty seconds of the child.
+        #expect(ContinuousClock.now - start < .seconds(20))
     }
 
     // MARK: Files
@@ -128,12 +126,12 @@ final class ToolTests {
 
     /// Anything that can change the Mac or send data out (web, open, saving to memory) must go through the
     /// approval gate. Searching the Orb's own memory, looking at the Mac (apps, processes, clipboard, screen, the
-    /// browser's front tab, Shortcuts names) and showing a notification only read or notify.
+    /// browser's front tab, Shortcuts names, another app's interface through ui_read) and showing a notification only read or notify.
     @Test func onlyLocalReadsRunWithoutAsking() {
         let safe = ToolBox.all.filter { $0.risk(.object(["target": .string("https://example.com")])) == .safe }
         #expect(Set(safe.map(\.spec.name)) == [
             "read_file", "list_directory", "search_files", "grep", "glob", "recall", "job_output", "job_list", "job_stop",
-            "shortcuts_list", "clipboard_read", "screenshot", "notify", "apps_list", "processes", "browser_tab",
+            "shortcuts_list", "clipboard_read", "screenshot", "notify", "apps_list", "processes", "browser_tab", "ui_read",
         ])
     }
 

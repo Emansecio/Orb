@@ -29,8 +29,12 @@ struct OpenAIClient: LLMClient {
 
     /// OpenAI itself, which accepts `prompt_cache_key`; other compatible servers may reject unknown fields.
     var isOpenAI: Bool { baseURL.host() == "api.openai.com" }
-    /// Servers known to take `stream_options` (local ones may reject it).
-    var reportsUsage: Bool { isOpenAI || baseURL.host() == "openrouter.ai" }
+    private static let usageHosts: Set<String> = ["openrouter.ai", "api.commandcode.ai", "opencode.ai"]
+    /// Servers known to take `stream_options` (local ones may reject it): OpenAI, OpenRouter, Command Code (its docs
+    /// show `include_usage`) and OpenCode (whose own client sends it to every OpenAI-compatible endpoint).
+    var reportsUsage: Bool {
+        isOpenAI || (baseURL.host().map(Self.usageHosts.contains) ?? false)
+    }
 
     func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
         AsyncThrowingStream { continuation in
@@ -190,9 +194,14 @@ extension OpenAIClient {
     /// sign-in): it asks for a fresh one once and sends the request again.
     static func open(_ session: URLSession, credentials: CredentialsProvider,
                      request build: (String?) -> URLRequest) async throws -> (URLSession.AsyncBytes, URLResponse) {
-        let first = try await session.bytes(for: build(try await credentials(false)))
+        let token = try await credentials(false)
+        let first = try await session.bytes(for: build(token))
         guard (first.1 as? HTTPURLResponse)?.statusCode == 401 else { return first }
-        return try await session.bytes(for: build(try await credentials(true)))
+        // An API key comes back unchanged: asking again would repeat a request that failed for a reason the key
+        // does not fix (OpenCode answers a missing balance or a disabled model with 401 too).
+        let renewed = try await credentials(true)
+        guard renewed != token else { return first }
+        return try await session.bytes(for: build(renewed))
     }
 
     static let errorBodyLimit = 2048
@@ -204,7 +213,7 @@ extension OpenAIClient {
         }
         guard !(200..<300).contains(http.statusCode) else { return }
         let data = try await body()
-        let message = errorMessage(from: data, status: http.statusCode)
+        let message = errorMessage(from: data, status: http.statusCode, host: http.url?.host())
         if http.statusCode == 400 || http.statusCode == 413,
            LLMError.isContextOverflow(message) || LLMError.isContextOverflow(String(decoding: data, as: UTF8.self)) {
             throw LLMError.contextExceeded(message)
@@ -253,10 +262,27 @@ extension OpenAIClient {
                           output: usage["completion_tokens"]?.int, cacheRead: cacheRead, cacheWrite: cacheWrite)
     }
 
-    /// `error.message` (OpenAI), `error` as a string (Ollama) or `message`; otherwise the raw text.
-    static func errorMessage(from data: Data, status: Int) -> String {
+    /// Error codes that tell the user what to do (Command Code's Go plan has no API); kept with the message,
+    /// which does not always repeat them.
+    static let actionableErrorCodes: Set<String> = ["upgrade_required", "cmd_zdr_no_providers", "unsupported_model"]
+
+    /// `error.message` (OpenAI), `error` as a string (Ollama) or `message`; otherwise the raw text. An actionable
+    /// `error.code` (see `actionableErrorCodes`) is added in brackets when the message lacks it.
+    static func errorMessage(from data: Data, status: Int, host: String? = nil) -> String {
+        let message = rawErrorMessage(from: data, status: status)
+        // Command Code's only 403 is the Go plan; /messages answers in Anthropic's envelope, which has no `code`.
+        if status == 403, host?.hasSuffix("commandcode.ai") == true, !message.contains("upgrade_required") {
+            return "\(message) [upgrade_required]"
+        }
+        return message
+    }
+
+    private static func rawErrorMessage(from data: Data, status: Int) -> String {
         let text = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
         if let json = JSONValue.parse(text), let message = message(in: json["error"] ?? json) {
+            if let code = json["error"]?["code"]?.string, actionableErrorCodes.contains(code), !message.contains(code) {
+                return "\(message) [\(code)]"
+            }
             return message
         }
         return text.isEmpty ? HTTPURLResponse.localizedString(forStatusCode: status) : text
