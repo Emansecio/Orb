@@ -126,7 +126,8 @@ enum PaletteBuilder {
         if let current {
             for entry in archive.prefix(40) {
                 list.append(PaletteEntry(id: "conversation-\(entry.id)", title: entry.title.isEmpty ? "Conversa sem título" : entry.title,
-                                         subtitle: dayLabel(entry.updatedAt, now: now), symbol: "bubble.left",
+                                         subtitle: [name, dayLabel(entry.updatedAt, now: now)].compactMap { $0 }.joined(separator: " · "),
+                                         symbol: "bubble.left",
                                          section: .conversations, action: .reopen(conversation: entry.id, bot: current)))
             }
         }
@@ -275,7 +276,7 @@ struct CommandPalette: View {
         case .page(let page): model.selection = page
         case .reopen(let conversation, let bot):
             model.selection = .bot(bot)
-            _ = model.reopenConversation(conversation, of: bot)
+            Task { await model.reopenConversation(conversation, of: bot) }
         case .newBot: model.showNewBot = true
         case .newConversation: if let id = model.commandBotID { model.selection = .bot(id); model.newConversation(id) }
         case .focusComposer: model.focusComposer()

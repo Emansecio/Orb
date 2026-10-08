@@ -113,6 +113,8 @@ final class OrbAnimationView: NSView {
     /// For tests: the timer that waits for the orb to come back into view, and the layers on screen.
     var isWatchingForReturn: Bool { outOfViewTimer != nil }
     var placedLayerCount: Int { placed.count }
+    /// For tests: the status bubble is on screen.
+    var isBubbleShown: Bool { !bubble.isHidden }
     /// For tests: a selection glance is playing.
     var isGlancing: Bool { glanceStart != nil }
     /// For tests: the placed layers, back to front, with what they show.
@@ -144,12 +146,12 @@ final class OrbAnimationView: NSView {
     /// Body motion time, advancing at the temperament's pace (continuous when the temperament changes).
     private var bodyClock = 0.0
     /// Activity on screen (the bot's, or `happy` for a moment after a click) and the one it is blending from.
-    private var shown: OrbActivity = .idle
-    private var previous: OrbActivity = .idle
-    private var transitionStart = -Double.infinity
-    /// When `previous` started (one-shot reactions like `happy` keep their timing while they fade out).
-    private var previousStart = -Double.infinity
-    private static let transition = 0.35
+    private var crossover = OrbActivityBlend()
+    private var shown: OrbActivity { crossover.shown }
+    private var previous: OrbActivity { crossover.previous }
+    private var transitionStart: Double { crossover.start }
+    private var previousStart: Double { crossover.previousStart }
+    private static let transition = OrbActivityBlend.duration
     private var hoverPoint: CGPoint?
     private var pokeStart: Double?
     private var glanceStart: Double?
@@ -186,7 +188,8 @@ final class OrbAnimationView: NSView {
         aura.locations = [0, 0.4, 1]
         bubble.alignmentMode = .center
         bubble.masksToBounds = true
-        bubble.backgroundColor = NSColor.white.withAlphaComponent(0.14).cgColor
+        // Nearly opaque, so it reads as in front of the orb: the bow and the hat brim sit right behind it.
+        bubble.backgroundColor = NSColor(Palette.chrome).withAlphaComponent(OrbGeometry.bubbleFill).cgColor
         bubble.borderColor = NSColor.white.withAlphaComponent(0.2).cgColor
         bubble.borderWidth = 0.5
         bubble.isHidden = true
@@ -273,14 +276,10 @@ final class OrbAnimationView: NSView {
         let sameFace = target.hasSameFace(as: shown, mouth: config.mouth)
         if window == nil {
             // Not on screen yet: start in the right state instead of animating into it.
-            shown = target
-            previous = target
+            crossover.jump(to: target)
             bubbleIn.value = target.bubble == nil ? 0 : 1
         } else {
-            previous = shown
-            shown = target
-            previousStart = transitionStart
-            transitionStart = time
+            crossover.change(to: target, at: time, body: bodyClock + phase, traits: traits)
             // At rest nothing moves, so a kick would pile up and burst out on resume.
             if !isResting {
                 if !sameFace || target == .attentive { blinker.trigger(at: time) }
@@ -289,7 +288,17 @@ final class OrbAnimationView: NSView {
             if !sameFace { liven(at: time) }
         }
         blinker.gap = shown.blinkGap(traits.blinkGap)
-        if !sameFace { rebuild() }
+        // A resting orb runs no frames to move its bubble or open its mouth: it gets the new rest pose right here.
+        let resting = window != nil && isResting
+        if resting {
+            bubbleIn.value = shown.bubble == nil || size < 26 ? 0 : 1
+            lastPose = restPose
+        }
+        if !sameFace {
+            rebuild()
+        } else if resting {
+            apply(lastPose)
+        }
     }
 
     /// Builds the layer tree for the current config, activity and size. Only on screen: bitmaps depend on the
@@ -304,9 +313,7 @@ final class OrbAnimationView: NSView {
         let resize = resize || needsResize || scale != builtScale
         let layers = config.layers(eyes: shown.eyes, mouth: shown.mouth(base: config.mouth), brows: shown.brows)
         imageRequest += 1
-        // A resize with layers on screen (another display, another size) decodes in place: the old layers
-        // cannot stand in for the new geometry.
-        if !waited, !(resize && !placed.isEmpty) {
+        if !waited {
             let reusable = resize ? [] : Set(placed.map(\.layer))
             let missing = layers.filter { !reusable.contains($0) && OrbImages.cached($0.path, pixels: side * scale, tint: $0.tint) == nil }
             if !missing.isEmpty {
@@ -316,24 +323,23 @@ final class OrbAnimationView: NSView {
                     guard let self, request == self.imageRequest else { return }
                     self.rebuild(waited: true)
                 }
+                // A resize with layers on screen (another display, another size): until the new bitmaps are
+                // there, the old ones stand in, stretched to the new geometry (never a decode on this thread).
+                if resize, !placed.isEmpty { fitPlacedToGeometry() }
                 return
             }
         }
         needsResize = false
         builtScale = scale
         builtPixels = side * scale
+        // Frames that ran while the new bitmaps were decoding filled this with the old resolution.
+        if resize { visemeImages = [:] }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
 
         if resize {
-            // Geometry that only depends on the size: set here, never per frame.
-            stage.frame = stageFrame
-            ground.bounds = CGRect(x: 0, y: 0, width: size, height: size)
-            ground.position = CGPoint(x: side / 2, y: side / 2 - size * 0.5)
-            aura.bounds = CGRect(x: 0, y: 0, width: size * 1.5, height: size * 1.5)
-            orb.bounds = CGRect(x: 0, y: 0, width: side, height: side)
-            orb.anchorPoint = CGPoint(x: 0.5, y: 1 - OrbGeometry.orbBottom)
+            fitGeometry()
             bubble.contentsScale = scale
             shownBubble = nil
         }
@@ -392,6 +398,31 @@ final class OrbAnimationView: NSView {
             bubble.bounds = CGRect(x: 0, y: 0, width: textSize.width + fontSize * 0.9, height: textSize.height + fontSize * 0.2)
             bubble.cornerRadius = bubble.bounds.height / 2
         }
+        apply(lastPose)
+    }
+
+    /// Geometry that only depends on the size: set on a rebuild, never per frame.
+    private func fitGeometry() {
+        let side = side
+        stage.frame = stageFrame
+        ground.bounds = CGRect(x: 0, y: 0, width: size, height: size)
+        ground.position = CGPoint(x: side / 2, y: side / 2 - size * 0.5)
+        aura.bounds = CGRect(x: 0, y: 0, width: size * 1.5, height: size * 1.5)
+        orb.bounds = CGRect(x: 0, y: 0, width: side, height: side)
+        orb.anchorPoint = CGPoint(x: 0.5, y: 1 - OrbGeometry.orbBottom)
+    }
+
+    /// The layers on screen, resized to the current size while their new bitmaps are being decoded (a little soft
+    /// for a moment, in place of a pause on the main thread).
+    private func fitPlacedToGeometry() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        fitGeometry()
+        let box = CGRect(x: 0, y: 0, width: side, height: side)
+        for item in placed { item.view.bounds = box }
+        freshLayers = true      // the body is placed again, at the new center
+        appliedSwing = .infinity
         apply(lastPose)
     }
 
@@ -646,12 +677,11 @@ final class OrbAnimationView: NSView {
     private func pose(at time: Double, dt: Double) -> OrbPose {
         let t = time + phase
         let body = bodyClock + phase
-        let blend = OrbMath.smoothstep((time - transitionStart) / Self.transition)
+        let blend = crossover.progress(at: time)
         let springs = traits.springResponse
         var pose = OrbPose()
 
-        let motion = OrbBodyMotion.mix(previous.motion(at: body, elapsed: time - previousStart, traits: traits),
-                                       shown.motion(at: body, elapsed: time - transitionStart, traits: traits), blend)
+        let motion = crossover.motion(at: time, body: body, traits: traits, blend: blend)
         pose.lift = motion.lift
         pose.squash = motion.squash
         pose.tilt = motion.tilt
@@ -874,7 +904,12 @@ final class OrbAnimationView: NSView {
     private func loadVisemes() {
         guard !visemesLoading, let layers = config.visemeLayers() else { return }
         visemesLoading = true
-        OrbImages.load(Array(layers.values), pixels: builtPixels) { [weak self] in self?.visemesLoading = false }
+        OrbImages.load(Array(layers.values), pixels: builtPixels) { [weak self] in
+            guard let self else { return }
+            visemesLoading = false
+            // A resting orb runs no frames: it picks the shapes up here (the open mouth of "speaking").
+            if isResting { apply(lastPose) }
+        }
     }
 
     // MARK: Pointer

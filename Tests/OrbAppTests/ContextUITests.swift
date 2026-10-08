@@ -45,14 +45,25 @@ struct ContextWordsTests {
         #expect(ContextWords.compaction(before: 60_000, after: 18_000) == "De ~60 mil para ~18 mil tokens")
         #expect(ContextWords.cache(0.82) == "82% veio do cache do provedor")
         #expect(ContextWords.cache(0) == "Nada veio do cache do provedor")
-        #expect(ContextWords.wouldFree(messages: 1, tokens: 3_000).contains("1 mensagem e"))
+        #expect(ContextWords.wouldFree(requests: 1, alreadySummarized: false, tokens: 3_000)
+                == "Compactar agora resumiria o primeiro pedido e liberaria cerca de 3 mil tokens.")
+        #expect(ContextWords.wouldFree(requests: 5, alreadySummarized: false, tokens: 3_000).contains("os 5 primeiros pedidos e"))
+        #expect(ContextWords.wouldFree(requests: 3, alreadySummarized: true, tokens: 3_000).contains("mais 3 pedidos e"))
+    }
+
+    @Test func theCardOffersCompactingOnlyWhenThereIsSomethingToFold() {
+        #expect(ContextWords.nudgeQuestion(canCompact: true) == "Esta conversa está ficando longa. Compactar agora ou começar uma nova?")
+        #expect(ContextWords.nudgeQuestion(canCompact: false) == "Esta conversa já ocupa quase todo o espaço do modelo. Começar uma nova?")
+        #expect(!ContextWords.nudgeQuestion(canCompact: false).contains("Compactar"))
+        #expect(!ContextWords.nothingToFold.contains("curta"))
     }
 
     @Test func whatIsKept() {
-        #expect(ContextWords.kept(totalMessages: 12, foldedMessages: 0) == "Todas as 12 mensagens, palavra por palavra.")
-        #expect(ContextWords.kept(totalMessages: 1, foldedMessages: 0) == "A mensagem inteira, palavra por palavra.")
-        #expect(ContextWords.kept(totalMessages: 30, foldedMessages: 24) == "Um resumo das 24 primeiras mensagens e as últimas 6, palavra por palavra.")
-        #expect(ContextWords.kept(totalMessages: 5, foldedMessages: 4) == "Um resumo das 4 primeiras mensagens e a última, palavra por palavra.")
+        #expect(ContextWords.kept(totalRequests: 12, foldedRequests: 0) == "Todos os 12 pedidos, palavra por palavra.")
+        #expect(ContextWords.kept(totalRequests: 1, foldedRequests: 0) == "O pedido inteiro, palavra por palavra.")
+        #expect(ContextWords.kept(totalRequests: 8, foldedRequests: 5) == "Um resumo dos 5 primeiros pedidos e os últimos 3, palavra por palavra.")
+        #expect(ContextWords.kept(totalRequests: 5, foldedRequests: 4) == "Um resumo dos 4 primeiros pedidos e o último, palavra por palavra.")
+        #expect(ContextWords.kept(totalRequests: 5, foldedRequests: 1) == "Um resumo do primeiro pedido e os últimos 4, palavra por palavra.")
     }
 }
 
@@ -133,7 +144,56 @@ struct ContextReadingTests {
         folded.summaryCoveredCount = 6
         let reading = try #require(ContextReading.make(input(folded)))
         #expect(reading.foldedMessages == 6)
-        #expect(ContextWords.kept(totalMessages: reading.messageCount, foldedMessages: reading.foldedMessages).hasPrefix("Um resumo das 6 primeiras"))
+        // The words count your requests (one per two messages here), not the model's messages.
+        #expect(reading.requestCount == 6 && reading.foldedRequests == 3)
+        #expect(ContextWords.kept(totalRequests: reading.requestCount, foldedRequests: reading.foldedRequests)
+                == "Um resumo dos 3 primeiros pedidos e os últimos 3, palavra por palavra.")
+    }
+
+    @Test func requestsAreCountedNotTheMessagesOfTheToolSteps() throws {
+        var chat = conversation(turns: 2)
+        chat.messages.insert(contentsOf: [ChatMessage(role: .assistant, content: "", toolCalls: [ToolCallRequest(id: "c", name: "read_file", arguments: "{}")]),
+                                          .tool("c", "ok")], at: 1)
+        let reading = try #require(ContextReading.make(input(chat)))
+        #expect(reading.messageCount == 6 && reading.requestCount == 2)
+    }
+
+    @Test func aSingleHugeRequestWarnsButHasNothingToCompact() throws {
+        let chat = conversation(turns: 1, characters: 12_000)
+        let reading = try #require(ContextReading.make(input(chat, window: 16_000)))
+        #expect(reading.isGettingLong)
+        #expect(!reading.canCompact)
+        #expect(reading.fill?.compaction == nil)
+    }
+
+    /// The offer promises what the compaction really leaves, measured as the app measures it afterwards.
+    @Test func theTokensItWouldFreeAreWhatCompactingFrees() throws {
+        var chat = conversation(turns: 1)
+        // The latest request is huge: 25 tool outputs of 4,000 characters.
+        chat.messages.append(.user("agora leia tudo"))
+        for index in 0..<25 {
+            let id = "c\(index)"
+            chat.messages += [ChatMessage(role: .assistant, content: "", toolCalls: [ToolCallRequest(id: id, name: "read_file", arguments: #"{"path":"/p/a\#(index).txt"}"#)]),
+                              .tool(id, String(repeating: "dado ", count: 800))]
+        }
+        chat.messages.append(ChatMessage(role: .assistant, content: "pronto"))
+        let budget = ContextBudget(modelWindow: 128_000)
+        let offered = try #require(chat.contextFill(budget: budget).compaction)
+        let before = chat.contextFill(budget: budget).historyTokens
+        let report = chat.compact(budget: budget)
+        #expect(report != nil)
+        let freed = before - chat.contextFill(budget: budget).historyTokens
+        #expect(freed > 0)
+        #expect(abs(Double(offered.tokensFreed - freed)) <= Double(freed) * 0.01 + 1, "\(offered.tokensFreed) vs \(freed)")
+    }
+
+    @Test func aCompactionThatFreesNothingIsNotOffered() throws {
+        // One short request and one giant: summarizing the short one frees less than `minimumFreed`.
+        var chat = Conversation()
+        chat.messages = [.user("oi"), ChatMessage(role: .assistant, content: "olá"),
+                         .user("pedido " + String(repeating: "x", count: 300_000)), ChatMessage(role: .assistant, content: "ok")]
+        let fill = chat.contextFill(budget: ContextBudget(modelWindow: 128_000))
+        #expect(fill.compaction == nil)
     }
 }
 
@@ -160,6 +220,17 @@ struct ContextNudgeTests {
         let relaunched = ContextGauge(nudges: store)
         relaunched.show(long)
         #expect(!relaunched.showsNudge)
+    }
+
+    /// A first message with a lot of text, or a small local model: the card is due at the first turn, and only offers a new chat.
+    @Test func aSingleHugeRequestShowsTheCardWithoutCompacting() throws {
+        let gauge = ContextGauge(nudges: ContextNudgeStore(defaults: defaults()))
+        let reading = try #require(ContextReading.make(input(conversation(turns: 1, characters: 12_000), window: 16_000)))
+        gauge.show(reading)
+        #expect(gauge.showsNudge)
+        #expect(gauge.reading?.canCompact == false)
+        let question = ContextWords.nudgeQuestion(canCompact: gauge.reading?.canCompact ?? true)
+        #expect(!question.contains("Compactar"))
     }
 
     @Test func aNewConversationGetsItsOwnCard() throws {
@@ -271,6 +342,19 @@ struct ContextModelTests {
         let result = model.compactFromMeter(id, focus: "  ")
         #expect(result.status == .nothingToCompact)
         #expect(!result.didCompact)
+        #expect(result.message == ContextWords.nothingToFold)
+    }
+
+    @Test func severalShortRequestsAreNotSaidToBeASingleOne() {
+        let (model, id, root) = makeModel()
+        defer { try? FileManager.default.removeItem(at: root) }
+        model.seedConversation(conversation(turns: 3, characters: 100), for: id)
+        let result = model.compactFromMeter(id, focus: nil)
+        #expect(result.status == .nothingToCompact)
+        #expect(result.message == ContextWords.nothingToCompact(requests: 3, alreadySummarized: false))
+        #expect(!result.message.contains("um pedido"))
+        #expect(ContextWords.nothingToCompact(requests: 1, alreadySummarized: false) == ContextWords.nothingToFold)
+        #expect(!ContextWords.nothingToCompact(requests: 2, alreadySummarized: true).contains("um pedido"))
     }
 
     @Test func compactingALongChatFoldsItAndTellsTheNumbers() throws {

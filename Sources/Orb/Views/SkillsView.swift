@@ -122,7 +122,18 @@ private struct InstalledSkills: View {
                 if let id = deleting?.id { model.skills.removeAll { $0.id == id } }
             }
         } message: {
-            Text("Você pode instalar de novo pelo catálogo depois.")
+            Text(deleting.map(SkillDeleteCopy.message) ?? "")
+        }
+    }
+}
+
+/// What the delete dialog of a skill promises: only what is true for where the skill came from.
+enum SkillDeleteCopy {
+    static func message(for skill: Skill) -> String {
+        switch skill.source {
+        case nil: "As instruções que você escreveu serão apagadas. Não dá para desfazer."
+        case Skill.builtInSource?: "Ela vem com o app e não volta sozinha depois de apagada. Você pode escrever outra com o mesmo atalho."
+        default: "Você pode instalar de novo pelo catálogo depois."
         }
     }
 }

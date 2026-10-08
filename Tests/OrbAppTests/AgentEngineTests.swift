@@ -273,6 +273,15 @@ extension AgentEngineTests {
         #expect(messages(events).last?.content == "Oi!")
     }
 
+    @Test func aDroppedConnectionIsNotBlamedOnTheProvider() async {
+        let (engine, _) = quickEngine()
+        let script = Script(responses: [Response(events: [], failure: LLMError.network(code: URLError.timedOut.rawValue, message: "timeout")),
+                                        Response(events: [.text("Oi!")])])
+        let events = await run(engine, request(script, mode: .ask, runs: Counter()))
+        #expect(statuses(events).contains { $0.hasPrefix("Conexão caiu, tentando de novo em ") })
+        #expect(!statuses(events).contains { $0.hasPrefix("Provedor ocupado") })
+    }
+
     @Test func anOverflowReportedAsATransientErrorSkipsTheRetries() async {
         let (engine, waits) = quickEngine()
         let script = Script(responses: [Response(events: [], failure: LLMError.stream(type: "overloaded_error", message: "prompt is too long")),

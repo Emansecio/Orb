@@ -110,6 +110,9 @@ final class BotSession {
     @ObservationIgnored var isClaudeTurn = false
     /// The folder the running Claude Code turn started in; its session belongs to that folder.
     @ObservationIgnored var claudeTurnFolder: String?
+    /// The running Claude Code turn reached the CLI (its session answered). One that failed before that, or was stopped
+    /// while preparing, handed the session nothing: what other models said stays to be caught up on.
+    @ObservationIgnored var claudeTurnDelivered = false
     /// The routine whose run is the running turn.
     var routineID: UUID?
     /// When the running routine's run began.

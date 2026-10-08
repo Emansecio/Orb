@@ -50,7 +50,7 @@ Tudo em `Sources/Orb/`.
 | `Models.swift` | `Bot`, `PermissionMode`, `Capability`, `Conversation`, `TranscriptItem`, `ToolCall`, `ApprovalRequest`, `Routine`, `Schedule`, `Skill` |
 | `Store.swift`, `StoreCoordination.swift`, `ConversationCoding.swift`, `ConversationHistory.swift` | `AppState`, `Store` (leitura/escrita com filas), `Keychain`, decodificação tolerante, `FileGate`, codificação incremental da conversa, arquivo de conversas, relatórios de rotina |
 | `DevRun.swift` | os modos de desenho (`--snapshot`, `--render-*`): decide a pasta de dados (temporária, a menos que `ORB_DATA_DIR`) e bloqueia o Keychain e a migração neles; apaga a pasta temporária ao sair |
-| `LegacyMigration.swift` | migração do app que se chamava OpenBot (dados e preferências; as chaves do Keychain passam uma a uma quando usadas) |
+| `LegacyMigration.swift` | migração do app que se chamava OpenBot (dados e preferências; as chaves do Keychain são copiadas uma a uma quando usadas; as contas já copiadas, ou removidas no Orb, ficam anotadas em `UserDefaults` (`keychainAccountsFromOpenBot`) e o item do OpenBot, mantido como backup, não é mais consultado para elas) |
 | `OrbFolder.swift` | pasta própria `~/Orbs/<Nome>`, estado da pasta, arquivos recentes e alterados do painel |
 | `MacPermissions.swift` | permissões do macOS (TCC), pré-voo de Automação (abre escondido o app conhecido que está fechado), tradução de erros |
 | `ImageAttachments.swift` | imagens do usuário e de ferramentas: reduzir, guardar em `anexos/`, formato de cada API |
@@ -72,7 +72,7 @@ Tudo em `Sources/Orb/`.
 | `PermissionPolicy.swift`, `ApprovalGate.swift`, `ApprovalBatch.swift`, `DangerousCommand.swift`, `ShellCommandLine.swift` | permissões: veja [PERMISSOES.md](PERMISSOES.md) |
 | `Steering.swift` | a fila de mensagens enviadas durante um turno (`SteeringQueue`) |
 | `ClaudeCode.swift`, `ClaudeCodeEngine.swift`, `ClaudeCodePrompt.swift`, `ClaudeCodeProtocol.swift` | provedor Claude Code: achar o `claude`, login/status, um processo `claude -p` por turno, protocolo `stream-json` e `can_use_tool`, prompt anexado e catch-up |
-| `MCPConnection.swift`, `MCPTransport.swift`, `MCPTool.swift` | conectores MCP: stdio e HTTP (Streamable HTTP com recuo para SSE), `MCPManager`, ferramentas `Servidor__ferramenta` |
+| `MCPConnection.swift`, `MCPTransport.swift`, `MCPTool.swift` | conectores MCP: stdio (com o ambiente do Terminal da usuária, de `ShellEnvironment`, para achar `npx`/`uvx` do `.zshrc`) e HTTP (Streamable HTTP com recuo para SSE), `MCPManager`, ferramentas `Servidor__ferramenta` |
 
 ### Ferramentas (`Engine/Tools/`)
 
@@ -165,8 +165,8 @@ ComposerView ── AppModel.submit ─┬─ Orb livre ─► AppModel.send ─
    por mensagem), o cliente (`ProviderAccount.client` pelo formato do modelo), as ferramentas (`ToolBox.offered` + as dos
    conectores permitidos) e o `TurnRequest` (`Sendable`). Se o turno foi parado nesse meio-tempo (`isCurrent`), nada segue.
 5. **Laço** (`AgentEngine.play`, até 30 passos): entrega mensagens da fila; ajusta a janela (`ContextWindow.fit` com o
-   `ContextCut` do turno); chama o modelo com até 4 tentativas e recuo (`withRetries`, status "Provedor ocupado, tentando de
-   novo em N s"); trata o motivo de parada (recusa, resposta cortada, estouro de contexto); roda as chamadas
+   `ContextCut` do turno); chama o modelo com até 4 tentativas e recuo (`withRetries`, status "Provedor ocupado", "Limite do provedor" ou
+   "Conexão caiu, tentando de novo em N s", conforme o erro); trata o motivo de parada (recusa, resposta cortada, estouro de contexto); roda as chamadas
    (`runCalls`: um cartão para o que pergunta junto, leituras em paralelo, o resto em ordem); registra cada mensagem. O
    Claude Code faz o análogo num processo `claude -p`, com os pedidos `can_use_tool` vindo para o mesmo `ApprovalGate`.
 6. **Eventos.** `TurnEvent`: `status`, `text`, `toolStarted`/`toolFinished`, `approval`, `message` (vai para o histórico do
@@ -198,8 +198,12 @@ saidas/<Orb>/*.txt               saídas grandes de ferramentas; limpas por idad
 
 Fora dela: o **Keychain** (serviço `app.orb.mac`; uma conta por provedor com chave, `chatgpt` com o JSON do login e
 `mcp.<id do conector>.<NOME>` para segredos de conectores), as **preferências** (`UserDefaults`: `notifyWhenDone`,
-`quickAskGlobalShortcut`, aba de Ajustes e do painel de cada Orb, modelos recentes…) e a **pasta de cada Orb**
-(`~/Orbs/<Nome>/`, com `Rotinas/<nome>/…md`), que o app não apaga ao apagar o Orb.
+`quickAskGlobalShortcut`, `keychainAccountsFromOpenBot`, aba de Ajustes e do painel de cada Orb, modelos recentes…) e a **pasta de cada Orb**
+(`~/Orbs/<Nome>/`, com `Rotinas/<nome>/…md`), que o app não apaga ao apagar o Orb. Há ainda um arquivo temporário por turno do
+Claude Code, `$TMPDIR/orb-mcp-p<pid>-<uuid>.json` (0600), com a configuração dos conectores já com os segredos: o fim do turno o apaga, e
+na abertura o app apaga os que sobraram de uma saída no meio do turno (`ClaudeCodeEngine.removeStaleMCPConfigs`): os que levam o
+`pid` de um processo que não existe mais, e os de versões antigas (sem `pid`) parados há mais de 2 minutos. O `$TMPDIR` é o mesmo
+do app real, então os modos de desenvolvedor (`--snapshot`…) não fazem essa limpeza.
 
 ### Decodificação tolerante
 
@@ -208,7 +212,10 @@ derruba a lista) e enums de texto com `Decoder.rawValue(_:fallback:)`. O que se 
 pulados e o `Store` guarda uma cópia do original (`.corrupt-…`) antes de regravar. Um arquivo que não decodifica é **movido**
 para essa cópia (nunca fica no caminho de uma escrita); se nem isso dá, o `FileGate` bloqueia as gravações naquele arquivo até
 o app abrir de novo. Falha ao gravar avisa uma vez. Os avisos aparecem no alerta "Atenção com seus dados"
-(`AppModel.dataNotices`). A gravação incremental da conversa mantém o formato do arquivo, legível por versões anteriores.
+(`AppModel.dataNotices`), que trocam o nome do arquivo pelo que ele guarda ("a conversa de Lia", "os ajustes do app";
+`StoreNotice.file` + `AppModel.described`); falha ao gravar o `.meta.json` não avisa (ele se refaz da conversa). Enums de
+texto de versões novas (`OrbTemperament`, `APIFormat`, modo de permissão…) caem no padrão em vez de derrubar o Orb; um
+modelo de provedor com formato desconhecido sai da lista. A gravação incremental da conversa mantém o formato do arquivo, legível por versões anteriores.
 
 ### Filas e gravação
 
@@ -221,7 +228,9 @@ o app abrir de novo. Falha ao gravar avisa uma vez. Os avisos aparecem no alerta
   arquivo (cache por arquivo, no máximo 4 arquivos e 48 MB) e não grava quando nada mudou. Ao gravar, saídas antigas de
   ferramentas (anteriores à penúltima mensagem do usuário) ficam com começo e fim (~4 000 caracteres).
 - Só a conversa do Orb aberto é lida na abertura (`beginLoading`, com marcador de carregamento); as outras, ao trocar de Orb ou
-  quando algo precisa delas (`ensureLoaded`, na thread principal, só quando não dá para esperar). Uma conversa parada há mais
+  quando algo precisa delas (`ensureLoaded`, na thread principal, só quando não dá para esperar). Reabrir uma conversa
+  arquivada (`reopenConversation`) e começar uma rotina (a leitura da conversa dela, `startRoutine`) também leem fora da thread
+  principal e conferem depois que o Orb, a rotina e a conversa ainda existem e que nenhum turno começou. Uma conversa parada há mais
   de 5 min, sem nada para gravar, volta ao disco (`unloadIdleConversations`, a cada 30 s), o que a nota `.meta.json` ao lado
   permite verificar sem reler.
 
@@ -283,7 +292,7 @@ São mais de 1.700 testes em `Tests/OrbAppTests`, em Swift Testing (`@Test`, `@S
   espera uma **condição** (com limite generoso e `Issue` descritiva se estourar). Para afirmações negativas, espere primeiro
   um sinal positivo de que o sistema assentou. Os testes do modelo chamam `flushText` direto em vez de esperar os 33 ms.
 - **Isolamento.** Cada suíte usa pastas temporárias próprias (`Store(directory:)` tem a sua fila de escrita), e
-  `AppModel(store:runsBackgroundWork: false, asyncLoading:, secretVault:)` não inicia agendador, Keychain nem observadores
+  `AppModel(store:runsBackgroundWork: false, asyncLoading:, secretVault:)` (e `devRun: true`, que também pula os conectores) não inicia agendador, Keychain nem observadores
   do app (o cofre de segredos é um `MemoryVault`). `QuietNotifications.hold()` impede banners do processo de teste.
 - **Modelo falso.** Os testes injetam um `LLMClient` próprio: `AppModel.clientOverride`, ou um `ScriptedLLM`/`RecordingLLM`
   passado direto ao `AgentEngine.run`. Cada arquivo define o seu, pequeno (respostas roteirizadas, portas que só abrem quando
@@ -319,7 +328,9 @@ open -n build/Orb.app --env ORB_DATA_DIR=/tmp/orb-teste --env ORB_SEND="Como est
 
 Os três modos de desenho (`--snapshot`, `--render-orbs`, `--render-icon`) usam uma pasta de dados temporária nova, nunca a sua
 (`DevRun.dataFolder`), a menos que você defina `ORB_DATA_DIR` de propósito. Neles o Keychain não é lido, gravado nem migrado do
-OpenBot, e a migração de dados do OpenBot não roda. A pasta temporária é apagada ao terminar.
+OpenBot, e a migração de dados do OpenBot não roda. Também não há trabalho de fundo com efeito fora do processo, mesmo com
+`ORB_DATA_DIR` apontando para uma cópia de dados reais: nada de agendador de rotinas, servidores dos conectores (MCP) nem
+verificação do Claude Code (`AppModel(devRun:)`); `ORB_SEND` continua funcionando. A pasta temporária é apagada ao terminar.
 
 ### Variáveis de ambiente
 

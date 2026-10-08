@@ -7,6 +7,9 @@ enum APIFormat: String, Codable, Sendable {
     case chat, responses, messages
     /// Not an HTTP API: the turn runs through the local Claude Code CLI (`ClaudeCodeEngine`).
     case claudeCode
+
+    /// A format from a newer build reads as chat completions (and the file is kept, see `DecodeLoss`).
+    init(from decoder: Decoder) throws { self = try decoder.rawValue(Self.self, fallback: .chat) }
 }
 
 /// One model offered by a provider, as fetched from its live catalog.
@@ -18,6 +21,22 @@ struct ProviderModel: Codable, Hashable, Identifiable, Sendable {
     var contextLength: Int?
     /// Whether the model takes pictures, as its catalog says (nil: the catalog does not say).
     var supportsImages: Bool?
+}
+
+extension ProviderModel {
+    /// A model whose format this build doesn't speak can't be used here: it is left out of the list (which the
+    /// provider's live catalog refills) instead of being called in the wrong format.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        guard let known = APIFormat(rawValue: try c.decode(String.self, forKey: .format)) else {
+            throw DecodingError.dataCorruptedError(forKey: .format, in: c, debugDescription: "Unknown API format")
+        }
+        format = known
+        contextLength = try c.decodeIfPresent(Int.self, forKey: .contextLength)
+        supportsImages = try c.decodeIfPresent(Bool.self, forKey: .supportsImages)
+    }
 }
 
 enum ProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
@@ -120,7 +139,7 @@ struct ProviderAccount: Codable, Hashable, Identifiable, Sendable {
         kind = try c.decode(ProviderKind.self, forKey: .kind)
         baseURL = try c.value(.baseURL, default: kind.defaultBaseURL)
         isEnabled = try c.value(.isEnabled, default: true)
-        models = try c.value(.models, default: [])
+        models = try c.lossyArray(.models)
         modelsUpdatedAt = try c.decodeIfPresent(Date.self, forKey: .modelsUpdatedAt)
         format = try c.value(.format, default: .chat)
         headers = try c.value(.headers, default: [:])

@@ -44,6 +44,108 @@ extension OrbDriverTests {
         }
     }
 
+    @Test func aResizeKeepsTheLayersOnScreenAndNeverDecodesOnTheMainThread() async throws {
+        try #require(NSScreen.main != nil)
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 300))
+        let view = OrbAnimationView(frame: NSRect(x: 40, y: 40, width: 120, height: 120))
+        let look = OrbConfig(hair: "franja")
+        view.configure(config: look, activity: .idle, size: 31, followsPointer: false, interactive: false, live: false)
+        content.addSubview(view)
+        let win = placementWindow(content)
+        defer { closePlacement(win) }
+        await waitUntil("the first layers") { view.placedLayerCount > 0 }
+        let scale = win.backingScaleFactor
+        // A size nothing else draws, so its bitmaps start out missing (when a test running alongside warmed them
+        // up, they show at once: the main thread still must not decode).
+        for size: CGFloat in [57, 34] {
+            let decoded = OrbImages.mainThreadDecodes
+            let before = layers(view, .body).first
+            view.configure(config: look, activity: .idle, size: size, followsPointer: false, interactive: false, live: false)
+            let side = OrbGeometry.imageSide(for: size, scale: scale)
+            #expect(OrbImages.mainThreadDecodes == decoded, "\(size) pt")
+            // The old bitmaps stand in, already at the new geometry...
+            #expect(view.placedLayerCount > 0)
+            #expect(layers(view, .body).first?.bounds.width == side, "\(size) pt")
+            // ...until the new ones arrive.
+            await waitUntil("the layers at \(size) pt") { OrbImages.isCached(view.placedLayersForTesting.map(\.layer), pixels: side * scale) }
+            // ...and then they replace the old ones.
+            await waitUntil("the new layers to be swapped in") { layers(view, .body).first !== before }
+            #expect(layers(view, .body).first?.bounds.width == side)
+        }
+    }
+
+    @Test func aTalkingMouthIsRedrawnAtTheNewSizeAfterAResizeWhileTalking() async throws {
+        try #require(NSScreen.main != nil)
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 300))
+        let view = OrbAnimationView(frame: NSRect(x: 40, y: 40, width: 120, height: 120))
+        let look = OrbConfig(mouth: "sorriso")
+        view.configure(config: look, activity: .speaking, size: 29, followsPointer: false, interactive: false, live: true)
+        content.addSubview(view)
+        let win = placementWindow(content)
+        defer { closePlacement(win) }
+        await waitUntil("the first layers") { view.placedLayerCount > 0 }
+        let narrow = OrbGeometry.imageSide(for: 29, scale: win.backingScaleFactor) * win.backingScaleFactor
+        await waitUntil("the talking mouth shapes") { OrbImages.isCached(Array(look.visemeLayers()!.values), pixels: narrow) }
+        var time = CACurrentMediaTime()
+        func step(_ frames: Int) {
+            for _ in 0..<frames {
+                time += 1.0 / 30
+                view.stepIfDue(at: time)
+            }
+        }
+        step(20)
+        // Frames keep running while the new bitmaps are decoded: they must not leave old-size mouth shapes behind.
+        let size: CGFloat = 63
+        let wide = OrbImages.bitmapSide(for: OrbGeometry.imageSide(for: size, scale: win.backingScaleFactor) * win.backingScaleFactor)
+        let before = layers(view, .body).first
+        view.configure(config: look, activity: .speaking, size: size, followsPointer: false, interactive: false, live: true)
+        step(30)   // before the new bitmaps can arrive: the main thread has not yet yielded
+        await waitUntil("the new layers to be swapped in") {
+            step(1)
+            return layers(view, .body).first !== before
+        }
+        // Whatever mouth shape shows from now on has the new size.
+        for _ in 0..<60 {
+            step(1)
+            let width = (layers(view, .mouth).first?.contents as! CGImage?)?.width
+            #expect(width == wide)
+        }
+    }
+
+    @Test func aRestingOrbShowsTheBubbleOfItsNewActivity() async throws {
+        try #require(NSScreen.main != nil)
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 300))
+        let view = OrbAnimationView(frame: NSRect(x: 40, y: 40, width: 60, height: 60))
+        func configure(_ activity: OrbActivity, live: Bool) {
+            view.configure(config: OrbConfig(), activity: activity, size: 30, followsPointer: false, interactive: false, live: live)
+        }
+        configure(.thinking, live: true)
+        content.addSubview(view)
+        let win = placementWindow(content)
+        defer { closePlacement(win) }
+        await waitUntil("the layers") { view.placedLayerCount > 0 }
+        var time = CACurrentMediaTime()
+        func step(_ frames: Int) {
+            for _ in 0..<frames {
+                time += 1.0 / 30
+                view.stepIfDue(at: time)
+            }
+        }
+        step(30)
+        // The window loses focus: the orb eases into its resting pose, thinking, and stops.
+        configure(.thinking, live: false)
+        step(150)
+        try #require(!view.isRunning)
+        #expect(view.isBubbleShown)
+        // The turn ends while it rests: the face changes, and so must the bubble.
+        configure(.idle, live: false)
+        await waitUntil("the bubble to go") { !view.isBubbleShown }
+        // ...and the next one asks for approval.
+        configure(.waiting, live: false)
+        await waitUntil("the question mark") { view.isBubbleShown }
+        #expect(!view.isRunning)
+    }
+
     @Test func aSelectedOrbGlancesOnlyWhileLiveAndThenSettles() async throws {
         try #require(NSScreen.main != nil)
         let content = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 300))

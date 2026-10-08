@@ -218,7 +218,7 @@ private struct OrbPainter {
         var bubble = context
         bubble.opacity = pose.bubbleOpacity
         let capsule = Path(roundedRect: rect, cornerRadius: rect.height / 2)
-        bubble.fill(capsule, with: .color(.white.opacity(0.14)))
+        bubble.fill(capsule, with: .color(Palette.chrome.opacity(OrbGeometry.bubbleFill)))
         bubble.stroke(capsule, with: .color(.white.opacity(0.2)), lineWidth: 0.5)
         bubble.draw(resolved, at: CGPoint(x: center.x, y: center.y + bob))
     }

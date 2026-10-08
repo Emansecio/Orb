@@ -41,13 +41,13 @@ O certificado vale só neste Mac (não serve para distribuir o app). Outra ident
 ./scripts/bundle.sh`. Depois da primeira compilação assinada, libere as permissões do macOS mais uma vez.
 
 > Veio do OpenBot? Na primeira abertura do Orb (app instalado, `app.orb.mac`), os dados e as preferências de
-> `~/Library/Application Support/OpenBot` são copiados (os originais ficam onde estavam) e as chaves do Keychain passam uma
-> a uma quando usadas. Como o identificador mudou, o macOS pede de novo as permissões e "Abrir ao iniciar sessão" precisa ser ligado de novo.
+> `~/Library/Application Support/OpenBot` são copiados (os originais ficam onde estavam) e as chaves do Keychain são copiadas uma
+> a uma quando usadas (as do OpenBot ficam como backup e, se você remover uma chave no Orb, ela não volta de lá). Como o identificador mudou, o macOS pede de novo as permissões e "Abrir ao iniciar sessão" precisa ser ligado de novo.
 
 ## Primeiro uso: conectar um modelo
 
-Na primeira abertura já existe um Orb, o **Atlas**. Sem modelo conectado, o chat mostra o cartão "Vamos deixar o Atlas
-pronto" com os caminhos mais curtos (se você escrever antes, o texto fica no campo e o cartão pisca):
+Na primeira abertura já existe um Orb, o **Atlas**. Sem modelo conectado, o chat mostra o cartão "Vamos preparar Atlas"
+com os caminhos mais curtos (se você escrever antes, o texto fica no campo e o cartão pisca):
 
 | Opção | O que faz |
 |---|---|
@@ -93,7 +93,7 @@ rotinas, apagar). No meio fica o chat; à direita, o painel do Orb.
   base de trabalho dele e onde ele escreve **sem perguntar** quando está em "Perguntar antes". Em "Mudar…" dá para escolher
   outra pasta, usar a pasta pessoal ou criar a própria depois. A pasta **não confina** o Orb: ele continua podendo ler e agir
   no resto do Mac dentro das permissões. Apagar o Orb não apaga a pasta.
-- **Opções avançadas**: as permissões (veja abaixo), "Como deve funcionar" (as instruções dele, que vão em toda conversa) e
+- **Opções avançadas**: as permissões (veja abaixo), "Como funciona" (as instruções dele, que vão em toda conversa) e
   "Na primeira conversa, me fazer perguntas" (ligado por padrão: o Orb se apresenta e conhece você).
 - O **editor de aparência** ao lado: Cor (18), Jeito (calmo, equilibrado, animado, tímido, curioso: como ele se mexe e reage
   ao mouse, não o que faz), Olhos, Boca, Sobrancelhas, Bochechas, Bigode, Cabelo e Acessórios (vários ao mesmo tempo), com
@@ -122,17 +122,18 @@ AppleScript, Atalhos, área de transferência, captura de tela nem controla outr
 - **Respostas** vêm em Markdown de verdade: títulos, listas (inclusive de tarefas), tabelas, citações e blocos de código com
   botão "Copiar". Passe o mouse sobre uma resposta para "Copiar" ou "Copiar como Markdown".
 - **Anexos.** O botão `+` (ou arrastar para a janela, ou ⌘V) anexa. Imagens (PNG, JPEG, HEIC, GIF, WebP, TIFF; até 20 MB cada)
-  são reduzidas e enviadas ao modelo se ele enxerga; se ele não enxerga, só o caminho vai e o app avisa. Outros arquivos
+  são reduzidas (um chip "Preparando imagem…" aparece e o envio espera) e enviadas ao modelo se ele enxerga; se ele não enxerga, só o caminho vai e o app avisa. Outros arquivos
   vão como caminho: o Orb os lê com as ferramentas (precisa de "Terminal e arquivos"). A captura de tela que o Orb tira
   também chega a ele como imagem, quando o modelo enxerga.
 - **Escrever com o Orb trabalhando.** O compositor continua livre: a mensagem entra como "Na fila" e chega ao Orb no próximo
-  passo dele (no Claude Code, assim que a resposta termina). **⌘↩ para e envia agora**. Dá para tirar uma mensagem da fila
-  ("Editar"). Se o turno falhar ou for parado, o que estava na fila volta para o campo.
+  passo dele (no Claude Code, assim que a resposta termina). **⌘↩ para e envia agora**; com um pedido de permissão aberto,
+  isso recusa o pedido (parar sempre recusa) e envia. Se o Orb espera sua resposta a um pedido, a fila só anda depois dela.
+  Dá para tirar uma mensagem da fila ("Editar"). Se o turno falhar ou for parado, o que estava na fila volta para o campo.
 - **Parar.** O botão Parar ou **⌘.**; o Orb avisa "Você interrompeu esta resposta". Uma linha mostra o que ele faz e quanto
   tempo faz ("Pensando… 12 s").
 - **Quando algo dá errado**, a mensagem vem com a ação: "Tentar de novo" (reenvia, se nada tinha sido feito; se já tinha
-  respondido, pede para continuar), "Continuar", "Abrir Ajustes" (chave inválida, sem modelo) ou "Nova conversa" (conversa grande
-  demais). Limite de uso (429) e instabilidade do provedor são tentados de novo sozinhos algumas vezes, com a espera à vista.
+  respondido, pede para continuar), "Continuar", "Abrir Ajustes" (chave inválida, sem modelo) ou, numa conversa grande demais, "Compactar
+  e tentar de novo" (resume o começo e reenvia; só aparece quando há o que resumir) e "Nova conversa". Limite de uso (429) e instabilidade do provedor são tentados de novo sozinhos algumas vezes, com a espera à vista.
 - **Tarefas longas.** Um turno tem até 30 passos (60 numa rotina). Ao chegar lá o Orb deixa um registro do que fez e avisa
   "Pausei depois de 30 passos…": diga **"continua"**.
 - **Skills.** `/resumir`, `/organizar` e `/revisar` vêm prontas; veja [Conectores e skills](#conectores-e-skills).
@@ -224,7 +225,8 @@ Cada Orb tem a **sua** memória, que nasce com ele e cresce a cada conversa: nad
 
 - **Pedir para guardar.** Diga "memorize que…", "lembra que…", "guarda na memória…", "anota aí que…" ou "não esquece que…".
   O pedido vale como a sua aprovação para fatos e procedimentos; identidade e preferências ainda pedem o cartão. Se o
-  Orb não guardar, o app guarda o que você disse e avisa na conversa. "Memorize isso" sozinho guarda o que veio antes.
+  Orb não guardar, o app guarda o que você disse e avisa na conversa, com "Ver na memória" para abrir a página (e esquecê-la, se
+  o pedido foi entendido errado). Se você negou o cartão, o app respeita o "não". "Memorize isso" sozinho guarda o que veio antes.
 - **Primeira conversa.** Com a entrevista ligada, ele se apresenta e faz 2 a 4 perguntas; o chat vazio também oferece "Me
   conheça". Na aba Memória, o menu "Mais opções" tem "Fazer a entrevista de novo".
 - **A aba Memória** do painel mostra as páginas por tipo (com busca, quando há muitas). **Editar…** muda a identidade.
@@ -247,7 +249,7 @@ Detalhes: [docs/MEMORIA.md](docs/MEMORIA.md).
 
 ### Conversas
 
-**Nova conversa** (⇧⌘N) guarda a atual e começa outra, sem perder nada (uma conversa em que você não disse nada não é guardada).
+**Nova conversa** (⇧⌘N) guarda a atual e começa outra, sem perder nada (uma conversa em que você não disse nada não é guardada). O que está escrito no campo (e as mensagens que estavam na fila) segue para a conversa nova.
 **Conversas** (botão da barra do chat, **⌘Y**) lista as anteriores deste Orb, agrupadas em Hoje, Ontem, Esta semana e Mais
 antigas, com busca a partir de 5. ↩ reabre (a atual é arquivada antes); Delete pede para apagar ("Apagar de vez? Não dá para
 desfazer."; ↩ confirma, Esc cancela). Apagar uma conversa apaga também as imagens que só ela usava; uma imagem que outra conversa
@@ -266,7 +268,7 @@ Uma **rotina** é uma tarefa que um Orb faz sozinho, no horário, **enquanto o a
 - **Permissões.** Ninguém está lá para responder, então uma rotina em "Perguntar antes" **espera por você** (o editor avisa e
   oferece "Usar Automático" e "Só leitura"). Em Avançado: "Permissões da rotina" (Igual ao Orb, Automático ou Só leitura).
 - Se o Orb está ocupado, a rotina entra na fila ("Na fila") e roda quando ele terminar. "Rodar agora" e "Rodar uma vez
-  agora, para testar" ao criar. Rotina desativada fica "Pausada".
+  agora, para testar" ao criar. O mesmo vale para "Rodar agora" no painel do Orb. Rotina desativada fica "Pausada".
 
 ## Contexto da conversa
 
@@ -275,11 +277,11 @@ esquecer: o pedido original, as decisões, os arquivos mexidos, os erros em aber
 janela vai antes para a memória do Orb. As mensagens continuam salvas na conversa.
 
 - **O anel** no compositor mostra a porcentagem da janela (some quando não há histórico). Clique para o painel "Contexto desta
-  conversa": quanto está em uso, o que é mantido palavra por palavra, quanto veio do cache do provedor e quanto "Compactar
+  conversa": quanto está em uso, o que é mantido palavra por palavra (contado em pedidos seus), quanto veio do cache do provedor e quanto "Compactar
   agora" liberaria.
 - **Compactar agora** (ou `/compactar` e, se quiser, um foco: `/compactar decisões sobre o banco`) resume já. Não roda com o
-  Orb respondendo. O resultado vira um aviso na conversa: "Compactei a conversa: 14 mensagens antigas viraram um resumo (≈ 58 mil
-  → 19 mil tokens)."
+  Orb respondendo. O resultado vira um aviso na conversa: "Compactei a conversa: os 5 primeiros pedidos viraram um resumo (≈ 58
+  mil → 19 mil tokens)."
 - Quando a conversa passa de 85% do que cabe, aparece uma vez "Esta conversa está ficando longa. Compactar agora ou começar uma
   nova?".
 - **Ajustes → Geral → Memória das conversas**: *Econômica* (cerca de 40 mil tokens palavra por palavra, gasta menos por
@@ -325,11 +327,11 @@ Páginas **Conectores** (⌥⌘C) e **Skills** (⌥⌘K) na barra lateral, cada 
 | ⌥⌘R / ⌥⌘C / ⌥⌘K | Rotinas / Conectores / Skills |
 | ⌘, | Ajustes |
 | ↩ / ⌥↩ | Enviar / nova linha |
-| ⌘↩ | Com o Orb trabalhando e algo escrito: parar e enviar agora. Num cartão de aprovação: permitir. No painel de contexto: compactar |
+| ⌘↩ | Com o Orb trabalhando e algo escrito: parar e enviar agora (recusa o pedido aberto, se houver). Num cartão de aprovação, com o campo de mensagem vazio: permitir. No painel de contexto: compactar |
 | Esc | Num cartão de aprovação: não permitir (não vale enquanto você digita). Também fecha a paleta e a lista de skills |
 | ⇧⌘M | Escolher o modelo do Orb |
 | ⌘Z | Desfazer "Esquecer" da memória (enquanto o aviso está na tela) |
-| ⌘F | Buscar, em Skills e Conectores |
+| ⌘F | Buscar, em Skills e Conectores (na aba Instaladas leva ao catálogo, em Explorar) |
 | ⌃⌥Espaço | De **qualquer app**: abre o painel da barra de menus. Opcional, desligado por padrão |
 
 A mesma lista, completa, está em **Ajuda → Atalhos do teclado** e em Ajustes → Geral (as duas leem o mesmo catálogo, `Shortcuts.swift`).
@@ -340,7 +342,8 @@ já usa essas teclas, o Orb avisa e deixa desligado. **Ajuda → Atalhos do tecl
 
 O ícone do Orb na barra de menus muda quando algum Orb trabalha (cheio) e ganha um ponto quando algum espera por você. O
 painel dele deixa **perguntar a um Orb sem abrir o app** (escolha o Orb, escreva, ↩ envia, ⌥↩ pula de linha), ler o fim da
-resposta e **responder pedidos de permissão** de todos os Orbs. "Abrir conversa" continua no app. A conversa é a mesma do chat.
+resposta e **responder pedidos de permissão** de todos os Orbs. Se o Orb escolhido já está trabalhando, a mensagem entra na fila,
+como no chat (numa rotina, o painel avisa que ela precisa terminar). "Abrir conversa" continua no app. A conversa é a mesma do chat.
 
 Em Ajustes → Geral: **Abrir ao iniciar sessão**, **Me avisar quando um Orb terminar ou precisar de mim** (banners só aparecem com o
 app em segundo plano), a **Pasta de dados** e a **Pasta dos Orbs** com "Mostrar no Finder".

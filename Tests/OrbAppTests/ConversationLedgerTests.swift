@@ -97,6 +97,50 @@ struct LedgerOriginalTests {
     }
 }
 
+// MARK: - What the app adds around the user's words
+
+struct LedgerUserWordsTests {
+    private let preface = TurnPreface.make(now: .now, timeZone: "America/Sao_Paulo", snapshot: nil, notes: "")
+    private let review = Skill(slug: "revisar", name: "Revisar", summary: "Revisa código",
+                               instructions: String(repeating: "Sempre confira os testes e nunca apague arquivos. Use o git diff. ", count: 25))
+
+    @Test func aSkillRequestKeepsTheRealRequestNotTheSkillsInstructions() throws {
+        let expanded = try #require(SystemPrompt.expandSkill(in: "/revisar corrigir o login", skills: [review])).prompt
+        #expect(expanded.count > 1_500)
+        let ledger = ledger(of: [.user(TurnPreface.prepend(preface, to: expanded)), assistant("feito")])
+        #expect(ledger.original == "/Revisar corrigir o login")
+        #expect(ledger.goal == "/Revisar corrigir o login")
+        #expect(!ledger.entries.contains { $0.isDecision })
+        // The same on a later request: the instructions never become "decisions".
+        var later = ledger
+        later.absorb([.user(TurnPreface.prepend(preface, to: SystemPrompt.expandSkill(in: "/revisar o cadastro também", skills: [review])!.prompt)),
+                      assistant("feito")])
+        #expect(later.entries.map(\.text) == ["/Revisar o cadastro também"] && !later.entries.contains { $0.isDecision })
+    }
+
+    @Test func theMemoryInstructionAndTheFileListsAreNotPartOfTheRequest() {
+        let remember = TurnPreface.prepend(preface, to: "memorize que uso tabs" + MemoryIntent.instruction(tool: "remember"))
+        #expect(TurnPreface.userWords(remember) == "memorize que uso tabs")
+        let files = "veja isto\n\nAttached files (read them with your tools):\n- /Users/x/relatorio.pdf\n- /tmp/dados.csv"
+            + MemoryIntent.instruction(tool: "remember")
+        #expect(TurnPreface.userWords(files) == "veja isto (anexos: relatorio.pdf, dados.csv)")
+        let picture = "o que é isso?\n\nAttached images (resized copies, shown to you with this message):\n- /tmp/foto.jpg"
+        #expect(TurnPreface.userWords(picture) == "o que é isso? (anexos: foto.jpg)")
+        #expect(TurnPreface.userWords("texto normal") == "texto normal")
+    }
+
+    @Test func aSkillWithoutARequestIsJustItsName() throws {
+        let expanded = try #require(SystemPrompt.expandSkill(in: "/revisar", skills: [review])).prompt
+        #expect(TurnPreface.userWords(expanded) == "/Revisar")
+    }
+
+    @Test func theToolDigestSaysWhatTheUserAskedToo() throws {
+        let expanded = try #require(SystemPrompt.expandSkill(in: "/revisar corrigir o login", skills: [review])).prompt
+        let lines = ToolDigest.lines(for: [.user(TurnPreface.prepend(preface, to: expanded))])
+        #expect(lines == ["[usuário] «/Revisar corrigir o login»"])
+    }
+}
+
 // MARK: - Decisions
 
 struct LedgerDecisionTests {
@@ -682,6 +726,14 @@ struct CompactionReportTests {
             == "Compactei a conversa: 1 mensagem antiga virou um resumo (≈ 900 → 500 tokens).")
         #expect(CompactionReport(kind: .manual, foldedMessages: 3, tokensBefore: nil, tokensAfter: nil).notice
             == "Compactei a conversa: 3 mensagens antigas viraram um resumo.")
+    }
+
+    @Test func aFoldCountsYourRequestsWhenItKnowsThem() {
+        var report = CompactionReport(kind: .turns, foldedMessages: 40, tokensBefore: 58_400, tokensAfter: 19_100)
+        report.foldedRequests = 5
+        #expect(report.notice == "Compactei a conversa: os 5 primeiros pedidos viraram um resumo (≈ 58 mil → 19 mil tokens).")
+        report.foldedRequests = 1
+        #expect(report.notice == "Compactei a conversa: o primeiro pedido virou um resumo (≈ 58 mil → 19 mil tokens).")
     }
 
     @Test func aFoldOfStepsSaysItIsAboutThisRequest() {

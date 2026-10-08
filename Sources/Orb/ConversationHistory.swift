@@ -154,11 +154,20 @@ extension RoutineRun {
     static func firstLine(of report: String?) -> String? {
         guard let report else { return nil }
         for line in report.split(whereSeparator: \.isNewline) {
-            let cleaned = line.replacingOccurrences(of: "**", with: "")
-                .trimmingCharacters(in: CharacterSet(charactersIn: "#*>-_` \t"))
+            let cleaned = plain(line)
             if !cleaned.isEmpty { return Conversation.clipped(cleaned, to: summaryLimit) }
         }
         return nil
+    }
+
+    /// The start of a reply for a banner: its lines without Markdown decoration, on one line, shortened to `limit`.
+    static func preview(of reply: String, limit: Int = 180) -> String {
+        let text = reply.split(whereSeparator: \.isNewline).map { plain($0) }.filter { !$0.isEmpty }.joined(separator: " ")
+        return Conversation.clipped(text, to: limit)
+    }
+
+    private static func plain(_ line: Substring) -> String {
+        line.replacingOccurrences(of: "**", with: "").trimmingCharacters(in: CharacterSet(charactersIn: "#*>-_` \t"))
     }
 }
 

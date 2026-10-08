@@ -177,6 +177,21 @@ import Testing
         #expect(ApprovalPreview(rows: [], extra: 1).extraLabel == "+ 1 ação")
     }
 
+    @Test func returnInThePanelFollowsTheComposersRule() {
+        func action(working: Bool, steer: Bool = false, ready: Bool = true, text: Bool = true) -> QuickAskSend {
+            QuickAskSend.action(isWorking: working, canSteer: steer, isReady: ready, hasText: text)
+        }
+        #expect(action(working: false) == .send)
+        #expect(action(working: true, steer: true) == .queue) // it was silent before
+        #expect(action(working: true, steer: false) == .blocked) // a routine holds the Orb
+        #expect(action(working: false, text: false) == .nothing && action(working: true, steer: true, text: false) == .nothing)
+        #expect(action(working: false, ready: false) == .nothing)
+        #expect(QuickAskSend.blockedNote(name: "Atlas") == "Atlas está rodando uma rotina. Envie quando terminar.")
+        #expect(QuickAskSend.hint(isWorking: false, canSteer: false).hasPrefix("↩ envia"))
+        #expect(QuickAskSend.hint(isWorking: true, canSteer: true).hasPrefix("↩ entra na fila"))
+        #expect(QuickAskSend.hint(isWorking: true, canSteer: false).hasPrefix("Rotina rodando"))
+    }
+
     @Test func replyIsTheNewestBotMessageAfterTheLastUserOne() {
         let user = TranscriptItem(.user(text: "oi", attachments: []))
         let old = TranscriptItem(.bot(text: "antiga", isStreaming: false))
@@ -300,6 +315,34 @@ import Testing
         let luna = model.botIDs[1]
         // Luna has not spoken and has no memory folder: nothing was kept, so nothing says it was.
         model.confirmDelete(luna, keepMemory: true)
+        #expect(model.keptMemoryNotice == nil)
+    }
+
+    @Test @MainActor func theKeptMemoryNoticePointsAtTheExactFolderOnceItHasMoved() async throws {
+        let model = model()
+        let luna = model.botIDs[1]
+        await model.memory.bank(for: luna).remember("Algo para guardar")
+
+        model.confirmDelete(luna, keepMemory: true)
+        // Until the move is done there is no folder to show, and the notice does not claim it was kept.
+        let notice = try #require(model.keptMemoryNotice)
+        #expect(!notice.isKept && notice.folder == nil && notice.message == "Guardando a memória de Luna…")
+
+        await waitUntil("the memory to be kept") { model.keptMemoryNotice?.isKept == true }
+        let kept = try #require(model.keptMemoryNotice)
+        let folder = try #require(kept.folder)
+        #expect(kept.message == "Memória de Luna guardada")
+        #expect(folder.deletingLastPathComponent().lastPathComponent == "_guardadas" && folder.lastPathComponent.hasPrefix("Luna – "))
+        #expect(FileManager.default.fileExists(atPath: folder.appending(path: "fatos").path))
+    }
+
+    @Test @MainActor func aNoticeThatWasClosedIsNotBroughtBackByTheMove() async throws {
+        let model = model()
+        let luna = model.botIDs[1]
+        await model.memory.bank(for: luna).remember("Algo para guardar")
+        model.confirmDelete(luna, keepMemory: true)
+        model.dismissKeptMemoryNotice()
+        try await Task.sleep(for: .milliseconds(300)) // long enough for the move to finish
         #expect(model.keptMemoryNotice == nil)
     }
 }

@@ -114,6 +114,9 @@ private struct ProviderRow: View {
     @State private var email: String?
     @State private var isReplacingKey = false
     @State private var isConfirmingRemoval = false
+    @State private var isConfirmingSignOut = false
+    /// The browser sign-in under way, so it can be cancelled when the tab was closed or the login went wrong.
+    @State private var signInTask: Task<Void, Never>?
     @FocusState private var keyFocused: Bool
     @AppStorage(ProviderExpansion.storageKey) private var expansion = ""
 
@@ -260,18 +263,28 @@ private struct ProviderRow: View {
             LabeledContent("Conta") {
                 HStack {
                     Text(email ?? "ChatGPT").foregroundStyle(.secondary)
-                    Button("Sair") { model.signOut(kind) }
+                    Button("Sair") { isConfirmingSignOut = true }
                 }
+            }
+            .confirmationDialog("Sair do ChatGPT?", isPresented: $isConfirmingSignOut) {
+                Button("Sair", role: .destructive) { model.signOut(kind) }
+            } message: {
+                Text("Os Orbs que usam estes modelos passam a usar o modelo padrão até você entrar de novo.")
             }
         } else {
             LabeledContent {
-                Button(isWorking ? "Aguardando o navegador…" : "Entrar com ChatGPT") {
-                    run {
-                        try await model.signIn(kind)
-                        email = await ChatGPTAuth.shared.credential?.email
+                HStack(spacing: 10) {
+                    if isWorking {
+                        Button("Cancelar") { signInTask?.cancel() }.buttonStyle(GhostStyle())
                     }
+                    Button(isWorking ? "Aguardando o navegador…" : "Entrar com ChatGPT") {
+                        signInTask = run {
+                            try await model.signIn(kind)
+                            email = await ChatGPTAuth.shared.credential?.email
+                        }
+                    }
+                    .disabled(isWorking)
                 }
-                .disabled(isWorking)
             } label: {
                 Text("Abre o navegador para você entrar. Precisa de ChatGPT Plus ou Pro.")
                     .font(.caption)
@@ -284,7 +297,11 @@ private struct ProviderRow: View {
         LabeledContent(kind == .custom ? "Chave (opcional)" : "Chave de API") {
             if hasKey && !isReplacingKey {
                 HStack(spacing: 10) {
-                    Label("Chave salva", systemImage: "checkmark.circle.fill").foregroundStyle(Palette.ok)
+                    if case .rejected = health.failure(of: kind) {
+                        Label("Chave recusada", systemImage: "exclamationmark.circle").foregroundStyle(Palette.warn)
+                    } else {
+                        Label("Chave salva", systemImage: "checkmark.circle.fill").foregroundStyle(Palette.ok)
+                    }
                     Button("Trocar") {
                         isReplacingKey = true
                         keyFocused = true
@@ -321,13 +338,16 @@ private struct ProviderRow: View {
 
     /// Runs `work`. A failure of loading models goes to the status line (`inStatus`); any other (a sign-in) is said
     /// under the row.
-    private func run(inStatus: Bool = false, _ work: @escaping @MainActor () async throws -> Void) {
+    @discardableResult
+    private func run(inStatus: Bool = false, _ work: @escaping @MainActor () async throws -> Void) -> Task<Void, Never> {
         isWorking = true
         error = nil
-        Task {
+        return Task {
             do {
                 try await work()
                 if inStatus { health.record(nil, for: kind) }
+            } catch where error is CancellationError || Task.isCancelled {
+                // Cancelled by the person (the browser sign-in): nothing to report.
             } catch {
                 if inStatus { health.record(error, for: kind) } else { self.error = error.localizedDescription }
             }

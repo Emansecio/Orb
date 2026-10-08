@@ -200,7 +200,7 @@ struct SteeringEngineTests {
     }
 
     @MainActor private func waitUntilIdle(_ model: AppModel, _ id: UUID) async {
-        await waitUntil("the Orb to finish") { !model.isWorking(id) && model.turns[id] == nil }
+        await waitUntil("the Orb to finish") { !model.isWorking(id) && model.turns[id] == nil && !model.isStartingRoutine }
     }
 
     @Test @MainActor func aMessageSentDuringATurnIsQueuedAndShownAsWaiting() async throws {
@@ -274,6 +274,56 @@ struct SteeringEngineTests {
         await gate.open()
     }
 
+    @Test @MainActor func aNewConversationKeepsWhatWasQueuedAndItsAttachmentsInTheComposer() async throws {
+        let gate = Latch()
+        let client = HeldModel(gate: gate)
+        let (model, bot) = setUp(client)
+        let file = root.appending(path: "nota.txt")
+        try "oi".write(to: file, atomically: true, encoding: .utf8)
+        model.submit("primeiro", to: bot.id)
+        await waitUntil("the model call") { await client.seen.count >= 1 }
+        let lane = model.composerLane(bot.id)
+        lane.files = [AttachedFile(url: file)]
+        model.submit("analise isso também", to: bot.id)
+        #expect(lane.queued.count == 1 && lane.files.isEmpty)
+
+        model.newConversation(bot.id) // stops the turn: the queued message goes back to the composer
+        #expect(!model.isWorking(bot.id))
+        #expect(model.drafts[bot.id] == "analise isso também") // the text is not lost with its attachment
+        #expect(lane.files.map(\.url) == [file])
+        #expect(lane.queued.isEmpty && model.transcript(bot.id).isEmpty)
+        await gate.open()
+    }
+
+    @Test @MainActor func aNewConversationKeepsTheDraftOfTheOrb() async throws {
+        let (model, bot) = setUp(HeldModel())
+        model.setDraft("ainda escrevendo", for: bot.id)
+        model.newConversation(bot.id)
+        #expect(model.drafts[bot.id] == "ainda escrevendo")
+    }
+
+    @Test @MainActor func theCompactCommandTypedDuringATurnIsNotQueuedForTheModel() async throws {
+        let gate = Latch()
+        let client = HeldModel(gate: gate)
+        let (model, bot) = setUp(client)
+        model.submit("primeiro", to: bot.id)
+        await waitUntil("the model call") { await client.seen.count >= 1 }
+        model.setDraft("/compactar foco X", for: bot.id)
+
+        #expect(!model.submit("/compactar foco X", to: bot.id))
+        #expect(model.composerLane(bot.id).queued.isEmpty)
+        #expect(model.drafts[bot.id] == "/compactar foco X") // kept in the composer for when the turn ends
+        let notices = model.transcript(bot.id).compactMap { item -> String? in if case .notice(let text) = item.kind { text } else { nil } }
+        #expect(notices == [AppModel.compactionBusyMessage])
+
+        // "Parar e enviar" with it typed only stops: the command is not sent to the model as a message.
+        model.stopAndSend(bot.id, draft: "/compactar")
+        #expect(!model.isWorking(bot.id))
+        #expect(userTexts(model, bot.id) == ["primeiro"])
+        await gate.open()
+        #expect(await client.seen.count == 1)
+    }
+
     @Test @MainActor func stopAndSendEndsTheTurnAndSendsTheQueuedMessageNow() async throws {
         let gate = Latch()
         let client = HeldModel(gate: gate)
@@ -289,6 +339,51 @@ struct SteeringEngineTests {
         await waitUntilIdle(model, bot.id)
         #expect(await client.seen.count == 2)
         #expect(model.drafts[bot.id, default: ""] == "")
+    }
+
+    @Test @MainActor func stopAndSendGoesBeforeARoutineWaitingForTheOrb() async throws {
+        let gate = Latch()
+        let client = HeldModel(gate: gate)
+        let (model, bot) = setUp(client)
+        let routine = Routine(name: "R", botID: bot.id, prompt: "faça", schedule: .everyHours(1))
+        model.routines = [routine]
+        model.submit("primeiro", to: bot.id)
+        await waitUntil("the model call") { await client.seen.count >= 1 }
+        model.runRoutine(routine.id)
+        await model.routineStarted()
+        #expect(model.isRoutineQueued(routine.id)) // the Orb is busy with your chat
+        model.submit("corrija", to: bot.id)
+
+        model.stopAndSend(bot.id)
+        // The correction took the Orb, not the routine that was next in line.
+        #expect(model.session(bot.id).routineID == nil)
+        #expect(userTexts(model, bot.id) == ["primeiro", "corrija"])
+        #expect(model.isRoutineQueued(routine.id) && model.composerLane(bot.id).queued.isEmpty)
+        #expect(model.drafts[bot.id, default: ""] == "")
+        await gate.open()
+        // It runs once that turn is over, as it always did.
+        await waitUntil("the routine to run after the correction") { model.routines.first?.runs.count == 1 }
+        await waitUntilIdle(model, bot.id)
+        #expect(!model.isRoutineQueued(routine.id))
+    }
+
+    @Test @MainActor func stopAndSendWithNothingToSendLetsTheQueuedRoutineStart() async throws {
+        let gate = Latch()
+        let client = HeldModel(gate: gate)
+        let (model, bot) = setUp(client)
+        let routine = Routine(name: "R", botID: bot.id, prompt: "faça", schedule: .everyHours(1))
+        model.routines = [routine]
+        model.submit("primeiro", to: bot.id)
+        await waitUntil("the model call") { await client.seen.count >= 1 }
+        model.runRoutine(routine.id)
+        await model.routineStarted()
+
+        model.stopAndSend(bot.id) // nothing queued, nothing typed: it is just a stop
+        await model.routineStarted()
+        #expect(model.session(bot.id).routineID == routine.id)
+        await gate.open()
+        await waitUntil("the routine to run") { model.routines.first?.runs.count == 1 }
+        await waitUntilIdle(model, bot.id)
     }
 
     @Test @MainActor func stopAndSendTakesWhatIsTypedToo() async throws {
@@ -415,6 +510,69 @@ struct SteeringEngineTests {
         await waitUntilIdle(model, bot.id)
     }
 
+    @Test @MainActor func nothingIsSentWhileAPictureIsStillBeingPrepared() async throws {
+        let client = HeldModel()
+        let (model, bot) = setUp(client)
+        let lane = model.composerLane(bot.id)
+        lane.pendingPictures = 1
+        #expect(!model.submit("o que tem nesta tela?", to: bot.id))
+        #expect(!model.isWorking(bot.id) && userTexts(model, bot.id).isEmpty)
+        lane.pendingPictures = 0 // the picture arrived
+        #expect(model.submit("o que tem nesta tela?", to: bot.id))
+        await waitUntilIdle(model, bot.id)
+    }
+
+    @Test @MainActor func aMessageIsNotQueuedWhileAPictureIsStillBeingPrepared() async throws {
+        let gate = Latch()
+        let client = HeldModel(gate: gate)
+        let (model, bot) = setUp(client)
+        model.submit("primeiro", to: bot.id)
+        await waitUntil("the model call") { await client.seen.count >= 1 }
+        let lane = model.composerLane(bot.id)
+        lane.pendingPictures = 1
+        #expect(!model.submit("e isto", to: bot.id) && lane.queued.isEmpty)
+        lane.pendingPictures = 0
+        #expect(model.submit("e isto", to: bot.id) && lane.queued.count == 1)
+        await gate.open()
+        await waitUntilIdle(model, bot.id)
+    }
+
+    @Test @MainActor func aMessageFromThePanelIsQueuedWithoutTouchingTheComposer() async throws {
+        let gate = Latch()
+        let client = HeldModel(gate: gate)
+        let (model, bot) = setUp(client)
+        #expect(!model.queueOutsideComposer("cedo demais", to: bot.id)) // the Orb is free: nothing to queue behind
+        model.submit("primeiro", to: bot.id)
+        await waitUntil("the model call") { await client.seen.count >= 1 }
+        let lane = model.composerLane(bot.id)
+        let file = root.appending(path: "nota.txt")
+        lane.files = [AttachedFile(url: file)]
+        model.setDraft("rascunho no app", for: bot.id)
+        #expect(model.queueOutsideComposer("  me lembra de ligar pro João  ", to: bot.id))
+        #expect(!model.queueOutsideComposer("   ", to: bot.id))
+        #expect(lane.queued.map(\.text) == ["me lembra de ligar pro João"])
+        #expect(lane.queued[0].files.isEmpty) // the composer's attachment is not the panel's
+        #expect(model.drafts[bot.id] == "rascunho no app" && lane.files.map(\.url) == [file])
+        await gate.open()
+        await waitUntilIdle(model, bot.id)
+        #expect(userTexts(model, bot.id).contains("me lembra de ligar pro João"))
+    }
+
+    @Test @MainActor func theRunningRoutineIsNamedForTheComposer() async throws {
+        let gate = Latch()
+        let client = HeldModel(gate: gate)
+        let (model, bot) = setUp(client)
+        #expect(model.runningRoutineName(bot.id) == nil)
+        let routine = Routine(name: "Resumo diário", botID: bot.id, prompt: "faça", schedule: .everyHours(1))
+        model.routines = [routine]
+        model.runRoutine(routine.id)
+        // The routine's conversation is read off the main thread before it starts.
+        await waitUntil("the routine starts") { model.runningRoutineName(bot.id) == "Resumo diário" }
+        await gate.open()
+        await waitUntilIdle(model, bot.id)
+        #expect(model.runningRoutineName(bot.id) == nil)
+    }
+
     @Test @MainActor func aRoutineRunCannotTakeYourMessages() async throws {
         let gate = Latch()
         let client = HeldModel(gate: gate)
@@ -422,6 +580,7 @@ struct SteeringEngineTests {
         let routine = Routine(name: "R", botID: bot.id, prompt: "faça", schedule: .everyHours(1))
         model.routines = [routine]
         model.runRoutine(routine.id)
+        await model.routineStarted()
         #expect(model.isWorking(bot.id))
         #expect(!model.canSteer(bot.id))
         model.setDraft("oi", for: bot.id)

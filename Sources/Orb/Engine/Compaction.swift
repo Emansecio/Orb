@@ -32,6 +32,10 @@ struct CompactionReport: Sendable, Equatable {
     var kind: Kind
     /// Messages that became part of the summary; for `.steps`, the number of model steps set aside.
     var foldedMessages: Int
+    /// Your requests the summary stands for now (all of them, the ones folded before included): what the notice counts,
+    /// since the chat shows your requests and not the model's messages. nil when not known (it is filled in by the
+    /// conversation that keeps the fold).
+    var foldedRequests: Int?
     /// Estimated tokens the history would take without the compaction and with it; nil when not known.
     var tokensBefore: Int?
     var tokensAfter: Int?
@@ -52,7 +56,12 @@ struct CompactionReport: Sendable, Equatable {
     var notice: String {
         switch kind {
         case .turns, .manual:
-            let what = foldedMessages == 1 ? "1 mensagem antiga virou um resumo" : "\(foldedMessages) mensagens antigas viraram um resumo"
+            let what: String
+            if let requests = foldedRequests, requests > 0 {
+                what = requests == 1 ? "o primeiro pedido virou um resumo" : "os \(requests) primeiros pedidos viraram um resumo"
+            } else {
+                what = foldedMessages == 1 ? "1 mensagem antiga virou um resumo" : "\(foldedMessages) mensagens antigas viraram um resumo"
+            }
             return "Compactei a conversa: \(what)\(range)."
         case .steps:
             let what = foldedMessages == 1 ? "o primeiro passo" : "os \(foldedMessages) primeiros passos"

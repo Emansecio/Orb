@@ -185,6 +185,29 @@ import Testing
         #expect(read.notice?.copy != nil)
     }
 
+    @Test func aTemperamentOrAPIFormatFromANewerBuildKeepsTheOrbAndTheProvider() throws {
+        var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(AppState.initial)) as? [String: Any])
+        var bots = try #require(json["bots"] as? [[String: Any]])
+        var look = try #require(bots[0]["orb"] as? [String: Any])
+        look["temperament"] = "sonolento"
+        bots[0]["orb"] = look
+        json["bots"] = bots
+        let models: [[String: Any]] = [["id": "g1", "name": "Gemini", "format": "gemini"], ["id": "m1", "name": "Modelo", "format": "chat"]]
+        json["providers"] = [["kind": "custom", "baseURL": "https://gateway.exemplo/v1", "format": "grpc", "headers": ["X-Chave": "1"],
+                              "models": models]]
+        try put(String(decoding: try JSONSerialization.data(withJSONObject: json), as: UTF8.self), at: stateURL)
+
+        let read = Store(directory: root).readState()
+        let loaded = try #require(read.value)
+        #expect(loaded.bots.map(\.name) == ["Atlas"])
+        #expect(loaded.bots[0].orb.temperament == .equilibrado)
+        let account = try #require(loaded.providers.first)
+        #expect(account.baseURL == "https://gateway.exemplo/v1" && account.headers == ["X-Chave": "1"])
+        #expect(account.format == .chat)
+        #expect(account.models.map(\.id) == ["m1"]) // the model nobody here can call is left out, not the provider
+        #expect(read.notice?.copy != nil) // what was replaced is kept in a copy of the file
+    }
+
     @Test func aCleanFileProducesNoNoticeAndNoCopy() throws {
         let store = Store(directory: root)
         store.save(AppState.initial)
@@ -344,13 +367,14 @@ import Testing
         return (model, model.bots[0])
     }
 
-    @Test @MainActor func aRoutineDoesNotWipeWhatYouAreTyping() {
+    @Test @MainActor func aRoutineDoesNotWipeWhatYouAreTyping() async {
         let (model, bot) = modelWithAProvider()
         let routine = Routine(name: "Resumo", botID: bot.id, prompt: "resuma o dia", schedule: .daily(hour: 9, minute: 0))
         model.routines = [routine]
         model.drafts[bot.id] = "rascunho em andamento"
 
         model.runRoutine(routine.id)
+        await model.routineStarted()
         #expect(model.isWorking(bot.id))
         #expect(model.drafts[bot.id] == "rascunho em andamento")
         model.stop(bot.id)

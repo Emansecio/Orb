@@ -168,9 +168,18 @@ struct ChatStreamMapper: SSEMapper {
     let isFinished = false
 
     mutating func ingest(_ chunk: JSONValue) throws -> [LLMEvent] {
-        if let error = chunk["error"] {
+        // `"error": null` rides along on normal chunks of some gateways.
+        if let error = chunk["error"], error != .null {
             let message = ProviderTransport.message(in: error) ?? error.jsonString
-            throw LLMError.isContextOverflow(message) ? LLMError.contextExceeded(message) : LLMError.invalidResponse(message)
+            if LLMError.isContextOverflow(message) { throw LLMError.contextExceeded(message) }
+            // OpenRouter and friends report the upstream failure after the 200 already went out: a numeric `code`
+            // is the HTTP status (429/5xx get retried), a string one the same kind of type Anthropic and Responses use.
+            // Only a real HTTP status counts: a gateway's JSON-RPC style `-32000` or `0` is not one.
+            if let status = error["code"]?.int ?? error["code"]?.string.flatMap({ Int($0) }), (400...599).contains(status) {
+                throw LLMError.http(status: status, message: message)
+            }
+            let code = error["code"]?.string ?? error["code"]?.int.map(String.init)
+            throw LLMError.stream(type: code ?? error["type"]?.string ?? "error", message: message)
         }
         if let reported = OpenAIClient.usage(in: chunk["usage"]) { usage = reported }
         let choice = chunk["choices"]?.array?.first

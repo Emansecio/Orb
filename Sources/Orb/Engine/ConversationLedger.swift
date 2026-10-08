@@ -228,7 +228,7 @@ struct ConversationLedger: Codable, Sendable, Equatable {
     }
 
     private mutating func absorbUser(_ message: ChatMessage) {
-        var text = MemoryText.flatten(TurnPreface.stripped(message.content))
+        var text = MemoryText.flatten(TurnPreface.userWords(message.content))
         if text.isEmpty, !message.images.isEmpty { text = "(imagem anexada)" }
         let question = openQuestion
         openQuestion = nil

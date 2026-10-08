@@ -73,11 +73,31 @@ private struct OrbSheetFrame<Footer: View>: ViewModifier {
         }
         .frame(minWidth: size.width, idealWidth: size.width, maxWidth: size.width, maxHeight: maxHeight)
         .background(Palette.chrome)
+        .registersOpenSheet()
+    }
+}
+
+extension View {
+    /// Tells the model a sheet is open while this view is on screen, so the menu's navigation commands wait (see
+    /// `AppModel.hasOpenSheet`). `orbSheet` does it already; a sheet drawn another way adds it itself.
+    func registersOpenSheet() -> some View { modifier(OpenSheetRegistration()) }
+}
+
+private struct OpenSheetRegistration: ViewModifier {
+    // Optional: a sheet drawn outside the app (a snapshot) has no model and nothing to tell.
+    @Environment(AppModel.self) private var model: AppModel?
+    @State private var token = UUID()
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { model?.sheetDidOpen(token) }
+            .onDisappear { model?.sheetDidClose(token) }
     }
 }
 
 /// The bottom row of a sheet: an optional destructive action and a validation message on the left, Cancel and the
-/// primary action on the right (Return and Esc work as usual).
+/// primary action on the right (Return and Esc work as usual; a destructive sheet takes Return away from the primary
+/// action with `primaryIsDefault: false`, so a reflex Return does nothing).
 struct SheetFooter: View {
     var message: String?
     var destructiveTitle: String?
@@ -86,7 +106,11 @@ struct SheetFooter: View {
     let cancel: () -> Void
     let primaryTitle: String
     var isPrimaryDisabled = false
+    var primaryIsDefault = true
     let primary: () -> Void
+
+    /// Return's shortcut for the primary button, or none when the sheet keeps it from being the default.
+    static func primaryShortcut(isDefault: Bool) -> KeyboardShortcut? { isDefault ? .defaultAction : nil }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -106,7 +130,7 @@ struct SheetFooter: View {
                 .keyboardShortcut(.cancelAction)
             Button(primaryTitle, action: primary)
                 .buttonStyle(PrimaryPillStyle())
-                .keyboardShortcut(.defaultAction)
+                .keyboardShortcut(SheetFooter.primaryShortcut(isDefault: primaryIsDefault))
                 .disabled(isPrimaryDisabled)
         }
         .padding(.horizontal, 20)

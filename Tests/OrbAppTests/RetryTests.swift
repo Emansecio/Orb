@@ -17,7 +17,7 @@ struct RetryTests {
                 maxAttempts: maxAttempts,
                 sleep: { seconds in sleeps.update { $0.append(seconds) } },
                 jitter: { jitter },
-                onWait: { _, attempt in waits.update { $0.append(attempt) } }
+                onWait: { _, attempt, _ in waits.update { $0.append(attempt) } }
             ) { () -> String in
                 let number = attempts.value
                 attempts.update { $0 += 1 }
@@ -123,6 +123,29 @@ struct RetryTests {
         }
         await #expect(throws: CancellationError.self) { try await task.value }
         #expect(attempts.value == 0)
+    }
+}
+
+struct RetryStatusTests {
+    @Test func theStatusNamesWhatWentWrong() {
+        let status = { (error: Error) in Retry.waitStatus(seconds: 1.2, after: error) }
+        #expect(status(LLMError.http(status: 503, message: "")) == "Provedor ocupado, tentando de novo em 2 s")
+        #expect(status(LLMError.stream(type: "overloaded_error", message: "")) == "Provedor ocupado, tentando de novo em 2 s")
+        #expect(status(LLMError.network(code: URLError.timedOut.rawValue, message: "")) == "Conexão caiu, tentando de novo em 2 s")
+        #expect(status(URLError(.networkConnectionLost)) == "Conexão caiu, tentando de novo em 2 s")
+        #expect(status(LLMError.http(status: 429, message: "slow")) == "Limite do provedor, tentando de novo em 2 s")
+        #expect(status(LLMError.stream(type: "rate_limit_error", message: "")) == "Limite do provedor, tentando de novo em 2 s")
+    }
+
+    @Test func onWaitReceivesTheErrorThatCausedIt() async throws {
+        let seen = Box<[LLMError]>([])
+        let attempts = Box<Int>(0)
+        _ = try await withRetries(sleep: { _ in }, onWait: { _, _, error in seen.update { $0.append(error as! LLMError) } }) { () -> Int in
+            attempts.update { $0 += 1 }
+            if attempts.value == 1 { throw LLMError.network(code: URLError.timedOut.rawValue, message: "t") }
+            return 1
+        }
+        #expect(seen.value == [.network(code: URLError.timedOut.rawValue, message: "t")])
     }
 }
 

@@ -8,9 +8,10 @@ struct PendingApproval: Identifiable {
 }
 
 extension AppModel {
-    /// The open cards of one Orb, oldest first.
+    /// The open cards of one Orb, oldest first. They are in the conversation the turn runs on: the chat itself, or a
+    /// running routine's own conversation (the chat view shows the parked chat meanwhile, which has none).
     func pendingApprovals(of botID: UUID) -> [ApprovalRequest] {
-        transcript(botID).compactMap { item in
+        (sessions[botID]?.conversation?.items ?? transcript(botID)).compactMap { item in
             if case .approval(let request) = item.kind, request.decision == nil { request } else { nil }
         }
     }
@@ -29,6 +30,26 @@ extension AppModel {
 
     /// The Orb is stopped on a question: the sidebar says so, from whichever Orb is open.
     func needsYou(_ botID: UUID) -> Bool { live(botID).needsYou }
+
+    /// The routine this Orb is running and has stopped on a question: its card is in the routine's conversation, not in
+    /// the chat.
+    func routineWaitingForYou(_ botID: UUID) -> UUID? {
+        guard live(botID).needsYou else { return nil }
+        return sessions[botID]?.routineID
+    }
+
+    /// What a tap on a banner opens: the Orb's chat, or, for a routine waiting for an answer, its conversation.
+    func showApprovalOwner(_ botID: UUID) {
+        guard bot(botID) != nil else { return }
+        if routineWaitingForYou(botID) != nil { showRoutineRequest(of: botID) } else { selection = .bot(botID) }
+    }
+
+    /// Opens the routine's conversation, where its card is (Rotinas page, conversation sheet).
+    func showRoutineRequest(of botID: UUID) {
+        guard let routineID = routineWaitingForYou(botID) else { return }
+        routineToShow = routineID
+        selection = .routines
+    }
 
     /// A banner with "Permitir" and "Não permitir" when the user is not looking at this card.
     func announceApproval(_ request: ApprovalRequest, of botID: UUID) {
@@ -52,7 +73,7 @@ extension AppModel {
         case .decide(let decision, let botID, let approvalID):
             decide(decision, approvalID: approvalID, botID: botID)
         case .open(let botID):
-            if let botID, bot(botID) != nil { selection = .bot(botID) }
+            if let botID { showApprovalOwner(botID) }
             ApprovalNotifications.bringAppToFront()
         case .ignore:
             break

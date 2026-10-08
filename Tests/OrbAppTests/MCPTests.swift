@@ -134,6 +134,28 @@ struct MCPConnectionTests {
         }
     }
 
+    @Test func localServersFindCommandsOnThePathOfTheUsersShell() async throws {
+        // `fake-mcp` lives in a folder only the user's `.zshrc` would put on the PATH (nvm, fnm, Volta…).
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("mcp-path-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let command = directory.appendingPathComponent("fake-mcp")
+        try ("#!/usr/bin/python3\n" + fakeServer).write(to: command, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: command.path)
+        let base = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": NSHomeDirectory()]
+        let userShell = try FakeShell.make(in: directory, exports: ["PATH": "\(directory.path):/usr/bin:/bin"])
+        let config = MCPServerConfig(name: "Arquivos", command: "fake-mcp", environment: ["ORB_TEST": "ok"])
+
+        let connection = MCPConnection(config: config, shell: ShellEnvironment(shell: userShell, base: base, timeout: .seconds(60)))
+        let tools = try await connection.start()
+        #expect(tools.map(\.name).first == "echo")
+        await connection.stop()
+
+        // Without the user's PATH the same connector cannot start, which is what happened before.
+        let bare = MCPConnection(config: config, shell: ShellEnvironment(shell: "/nonexistent/shell", base: base))
+        await #expect(throws: ToolError.self) { _ = try await bare.start() }
+    }
+
     @Test func managerSyncsConnections() async throws {
         let manager = MCPManager()
         var config = try fakeConfig()

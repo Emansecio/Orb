@@ -97,6 +97,13 @@ enum ModelSearch {
         let haystack = model.name + " " + model.id
         return words.allSatisfy { haystack.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
     }
+
+    /// What Return picks in the search field: the first model shown, or the app's default (tag "") when nothing was typed
+    /// and the list offers one. Nil when there is nothing to pick.
+    static func submitted(_ shown: [(account: ProviderAccount, models: [ProviderModel])], query: String, allowsDefault: Bool) -> String? {
+        if query.isEmpty { return allowsDefault ? "" : nil }
+        return shown.first.flatMap { choice in choice.models.first.map { ModelRef(provider: choice.account.kind, model: $0.id).text } }
+    }
 }
 
 /// Search field above a lazily built list of every enabled provider's models.
@@ -116,35 +123,50 @@ private struct ModelChooser: View {
             TextField("Buscar modelo", text: $query)
                 .textFieldStyle(.roundedBorder)
                 .focused($isSearching)
+                .onSubmit {
+                    if let tag = ModelSearch.submitted(shown, query: query, allowsDefault: allowsDefault) {
+                        selection = tag
+                        done()
+                    }
+                }
                 .padding(10)
             Divider()
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                    if allowsDefault && query.isEmpty {
-                        row(defaultLabel, tag: "", help: "")
-                    }
-                    ForEach(shown, id: \.account.kind) { choice in
-                        Section {
-                            ForEach(choice.models) { item in
-                                row(item.name, tag: ModelRef(provider: choice.account.kind, model: item.id).text, help: item.id)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                        if allowsDefault && query.isEmpty {
+                            row(defaultLabel, tag: "", help: "")
+                        }
+                        ForEach(shown, id: \.account.kind) { choice in
+                            Section {
+                                ForEach(choice.models) { item in
+                                    row(item.name, tag: ModelRef(provider: choice.account.kind, model: item.id).text, help: item.id)
+                                }
+                            } header: {
+                                Text(choice.account.kind.label)
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 5)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(.regularMaterial)
                             }
-                        } header: {
-                            Text(choice.account.kind.label)
-                                .font(.caption.weight(.medium))
+                        }
+                        if shown.isEmpty {
+                            Text("Nenhum modelo encontrado.")
+                                .font(.callout)
                                 .foregroundStyle(.secondary)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 5)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(.regularMaterial)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 24)
                         }
                     }
-                    if shown.isEmpty {
-                        Text("Nenhum modelo encontrado.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 24)
-                    }
+                }
+                // With hundreds of models the current one can be far below the first screen. The lazy stack has not laid
+                // its rows out when the task starts, so scrolling waits a cycle to find the row.
+                .task {
+                    guard !selection.isEmpty else { return }
+                    await Task.yield()
+                    proxy.scrollTo(selection, anchor: .center)
                 }
             }
         }
@@ -157,6 +179,7 @@ private struct ModelChooser: View {
             selection = tag
             done()
         }
+        .id(tag)
     }
 }
 

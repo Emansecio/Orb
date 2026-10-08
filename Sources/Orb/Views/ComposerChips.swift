@@ -75,7 +75,7 @@ struct PermissionChip: View {
 
     private func manage() {
         isOpen = false
-        model.showInspector = true
+        model.showPermissions(of: botID)
     }
 }
 

@@ -24,7 +24,7 @@ art/orbgen (Swift, CPU)            orbgen all: corpo iluminado (18 cores), cabel
 Sources/Orb/Resources/Orbs/     PNGs de 640 px em camadas (corpo, traços, cabelo, acessórios, visemas) + options.json (~4 MB)
         │  scripts/bundle.sh copia para Orb.app/Contents/Resources/Orbs
         ▼
-OrbCatalog / OrbImages          lê options.json; decodifica, reduz e tinge as camadas (cache limitado), fora da thread principal
+OrbCatalog / OrbImages          lê options.json; decodifica, reduz e tinge as camadas (cache limitado), fora da thread principal (inclusive ao mudar de tela ou de tamanho: as camadas antigas ficam esticadas até as novas chegarem)
         │
         ├─ OrbFrame (Canvas)                        Orb estático: listas, miniaturas, ImageRenderer
         └─ AnimatedOrb → OrbAnimationView           Orb vivo: Core Animation, passos dados por um OrbDriver por tela
@@ -94,8 +94,8 @@ orb.hair = "tufinho"; orb.accessories = ["laco"]; orb.accentColor = 0xFF4F8B
   Bochechas, Bigode; **Estilo**: Cabelo, Acessórios), miniaturas que enquadram o que mudam (close do rosto para
   os traços, cabeça com espaço em cima para cabelo e chapéus; animam ao passar o mouse), cores com nome (anel
   visível em cores claras e escuras, cor personalizada aparece como amostra, bigode pode ser branco),
-  **Aleatório** (sorteio harmonioso que mantém o jeito, `OrbConfig.random(using:)`, sem antena sob chapéu nem
-  cartola afundada no black power), **Pular** e **Desfazer** pelo gerenciador de desfazer da janela
+  **Aleatório** (sorteio harmonioso que mantém o jeito, `OrbConfig.random(using:)`, sem antena sob chapéu, cartola
+  afundada no black power nem tufinho atravessando boné, gorro ou coroa), **Pular** e **Desfazer** pelo gerenciador de desfazer da janela
   (`OrbEditUndo`: ⌘Z, ⇧⌘Z e Editar ▸ Desfazer). As categorias quebram em duas linhas quando o editor é estreito.
   O VoiceOver lê o visual inteiro do palco (`OrbConfig.summary`).
 - **Palco compacto** (folha Novo Orb, ou o editor com menos de 680 pt de altura): Orb de 112 pt, Aleatório,
@@ -227,6 +227,8 @@ Tudo em [`Orbs/OrbMotion.swift`](../Sources/Orb/Orbs/OrbMotion.swift) (funções
   larga quando ele amassa no pouso ou cresce no hover. Em repouso é igual à de antes; o Orb estático usa a mesma.
 - **Troca de atividade sem saltos**: corpo, olhar, brilho e peso do ponteiro misturam a atividade anterior e
   a nova por 0,35 s (`OrbBodyMotion.mix`), a expressão faz crossfade de 0,18 s e o corpo dá um balanço leve.
+  Uma troca que chega no meio de outra parte do corpo que estava na tela naquele instante (`OrbActivityBlend`),
+  não da atividade que pesava pouco: ferramentas rápidas entre dois pensamentos não dão salto.
 - **Movimento secundário**: cabelo e acessórios de cabeça (não os óculos, `OrbLayer.isLoose`) atrasam um
   pouco nas viradas e nos pulos e **giram atrás da inclinação do corpo** em torno do alto da cabeça
   (`OrbGeometry.crownLine`), como cabelo pendurado: rabo de cavalo, chiquinhas e chapéus balançam (mola com sobra,
@@ -239,7 +241,9 @@ Tudo em [`Orbs/OrbMotion.swift`](../Sources/Orb/Orbs/OrbMotion.swift) (funções
   (`minFrameRate(elapsed:)`): a prévia do editor não fica a 30 fps para sempre.
   Nos pulinhos de `waiting`/`happy` o amassado no chão passa suave para o esticado no ar (`bounce`).
 - **Balão** entra e sai com escala e opacidade em mola, em vez de aparecer de uma vez. Trocar de símbolo com
-  ele aberto (… → ?) dá um pulinho de escala em vez de só trocar o texto.
+  ele aberto (… → ?) dá um pulinho de escala em vez de só trocar o texto. O fundo é quase opaco (cor do chrome,
+  `OrbGeometry.bubbleFill`), para o laço e a aba dos chapéus não aparecerem através dele. Um Orb em repouso
+  (janela inativa) recebe o balão e a boca da nova atividade na hora, sem esperar quadros.
 - **Pausar e voltar sem salto**: um Orb animado que deve ficar quieto (`OrbView(paused:)`, ou janela inativa)
   não é mais trocado pelo `OrbFrame` estático: ele desliza até a pose de repouso (a mesma do estático, mola de
   0,45 s, `OrbPose.mix`), para o display link e volta deslizando ao retomar. Um Orb novo também começa em

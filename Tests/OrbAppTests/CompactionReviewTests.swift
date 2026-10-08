@@ -184,8 +184,9 @@ struct InTurnFoldTests {
         // Everything before the new message is covered, exactly: the cut is the start of the turn in progress.
         #expect(kept.summaryCoveredCount == conversation.messages.count - 1)
         #expect(kept.ledger?.foldedMessages ?? .max <= conversation.messages.count - 1)
-        // The notice counts the conversation's messages, not the engine's.
-        #expect(harness.notices(startingWith: "Compactei a conversa: \(conversation.messages.count - 1 - coveredByThen) mensagens").count == 1)
+        // The notice counts your requests in the conversation, not the engine's messages.
+        let requests = kept.requestCount(in: 0..<kept.coveredMessageCount)
+        #expect(harness.notices(startingWith: "Compactei a conversa: os \(requests) primeiros pedidos").count == 1)
 
         // The next message starts from that summary: nothing is folded a second time.
         var next = kept
@@ -391,7 +392,7 @@ struct CatchUpLatestRequestTests {
         seeded.messages = work(firstRequest, steps: 1, tag: "d")
         let app = harness(seeded)
         #expect(app.model.send("/compactar", to: app.botID, fromUser: true))
-        #expect(app.notices().last == "A conversa ainda é curta: não há o que compactar.")
+        #expect(app.notices().last == ContextWords.nothingToFold)
         #expect(app.model.conversations[app.botID]?.summary == nil)
     }
 

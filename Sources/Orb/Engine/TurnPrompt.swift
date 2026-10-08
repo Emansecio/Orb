@@ -61,6 +61,27 @@ enum TurnPreface {
         return String(content[end.upperBound...].drop { $0.isNewline })
     }
 
+    /// What the user typed in a stored message, for the summaries (`ConversationLedger`, `ToolDigest`): without the
+    /// preface and without what the app adds around it. A skill's instructions give way to "/Name request", the file and
+    /// picture lists to their names, and the instruction to save a memory goes.
+    static func userWords(_ content: String) -> String {
+        var text = stripped(content)
+        var attached: [String] = []
+        let additions = ["\n\nAttached files (", "\n\nAttached images (", "\n\nImagens anexadas", MemoryIntent.instructionMarker]
+        if let cut = additions.compactMap({ text.range(of: $0) }).min(by: { $0.lowerBound < $1.lowerBound }) {
+            attached = text[cut.lowerBound...].split(separator: "\n").filter { $0.hasPrefix("- ") }
+                .map { URL(fileURLWithPath: String($0.dropFirst(2))).lastPathComponent }
+            text = String(text[..<cut.lowerBound])
+        }
+        let skillOpening = "Skill \""
+        if text.hasPrefix(skillOpening), let nameEnd = text.range(of: "\":\n"),
+           let request = text.range(of: "\n\nUser request: ", options: .backwards), nameEnd.upperBound <= request.lowerBound {
+            let asked = String(text[request.upperBound...])
+            text = "/" + text[text.index(text.startIndex, offsetBy: skillOpening.count)..<nameEnd.lowerBound] + (asked == "(none)" ? "" : " " + asked)
+        }
+        return attached.isEmpty ? text : (text.isEmpty ? "" : text + " ") + "(anexos: \(attached.joined(separator: ", ")))"
+    }
+
     /// Whether `history` already holds a whole workspace snapshot the model can read (a block of changes does not count:
     /// it says what differs from a snapshot, so it means nothing without one).
     static func hasSnapshot(in history: [ChatMessage]) -> Bool {

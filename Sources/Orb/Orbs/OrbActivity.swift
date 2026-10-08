@@ -246,3 +246,60 @@ struct OrbBodyMotion: Equatable {
                       glow: OrbMath.mix(a.glow, b.glow, t))
     }
 }
+
+/// The activity on screen and the one it is blending from. Body motion, gaze and glow cross over `duration`
+/// seconds; a change that arrives in the middle of a crossover starts from what was on screen at that moment, not
+/// from the activity that weighed only a little by then (a quick tool between two thoughts would otherwise
+/// snap the body to it for a frame).
+struct OrbActivityBlend {
+    static let duration = 0.35
+
+    private(set) var shown: OrbActivity
+    private(set) var previous: OrbActivity
+    /// When `shown` started.
+    private(set) var start = -Double.infinity
+    /// When `previous` started (one-shot reactions like `happy` keep their timing while they fade out).
+    private(set) var previousStart = -Double.infinity
+    /// The body motion on screen when a crossover was interrupted: the origin of the next one.
+    private var origin: OrbBodyMotion?
+
+    init(_ activity: OrbActivity = .idle) {
+        shown = activity
+        previous = activity
+    }
+
+    /// 0...1 (eased) through the crossover.
+    func progress(at time: Double) -> Double {
+        OrbMath.smoothstep((time - start) / Self.duration)
+    }
+
+    func isBlending(at time: Double) -> Bool { time - start < Self.duration }
+
+    /// Starts blending to `target`. `body` is the body clock the motions are read at.
+    mutating func change(to target: OrbActivity, at time: Double, body: Double, traits: OrbTemperament.Traits) {
+        origin = isBlending(at: time) ? motion(at: time, body: body, traits: traits) : nil
+        previous = shown
+        previousStart = start
+        shown = target
+        start = time
+    }
+
+    /// Starts in `activity` with nothing to blend (not on screen yet).
+    mutating func jump(to activity: OrbActivity) {
+        shown = activity
+        previous = activity
+        origin = nil
+    }
+
+    func motion(at time: Double, body: Double, traits: OrbTemperament.Traits) -> OrbBodyMotion {
+        motion(at: time, body: body, traits: traits, blend: progress(at: time))
+    }
+
+    /// Same, with the blend already computed (once per frame).
+    func motion(at time: Double, body: Double, traits: OrbTemperament.Traits, blend: Double) -> OrbBodyMotion {
+        let target = shown.motion(at: body, elapsed: time - start, traits: traits)
+        guard blend < 1 else { return target }
+        let from = origin ?? previous.motion(at: body, elapsed: time - previousStart, traits: traits)
+        return OrbBodyMotion.mix(from, target, blend)
+    }
+}

@@ -351,8 +351,8 @@ actor AgentEngine {
     private func respond(to window: [ChatMessage], request: TurnRequest, specs: [ToolSpec], toolChoice: ToolChoice,
                          out: AsyncStream<TurnEvent>.Continuation) async throws -> Reply {
         var reply = Reply()
-        try await withRetries(sleep: retrySleep, onWait: { seconds, _ in
-            out.yield(.status("Provedor ocupado, tentando de novo em \(Int(seconds.rounded(.up))) s"))
+        try await withRetries(sleep: retrySleep, onWait: { seconds, _, error in
+            out.yield(.status(Retry.waitStatus(seconds: seconds, after: error)))
         }, operation: {
             reply = Reply() // an attempt that failed before showing anything leaves nothing behind
             out.yield(.status("Pensando"))

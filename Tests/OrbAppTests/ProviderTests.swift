@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Testing
 @testable import Orb
 
@@ -240,8 +241,68 @@ struct ChatGPTAuthTests {
         #expect(try await auth.accessToken() == "access-2")
     }
 
+    @Test func signingOutDuringARefreshKeepsTheLoginGone() async throws {
+        let disk = Disk(credential(expiresIn: 30))
+        let auth = ChatGPTAuth(storage: disk.storage, tokenURL: URL(string: "https://auth-race.test/oauth/token")!, session: HeldProtocol.session)
+        let token = Task { try await auth.accessToken() }
+        await waitUntil("the refresh to reach the token endpoint") { HeldProtocol.pending > 0 }
+        await auth.signOut()
+        HeldProtocol.release(body: Self.tokenReply)
+        // The turn that was waiting for the token is told the login is gone, not handed a raw cancellation.
+        let outcome = await token.result
+        #expect({ if case .failure(let error) = outcome { error as? LLMError == .notConfigured } else { false } }())
+        #expect(await auth.credential == nil)
+        #expect(disk.saved == nil)
+        await #expect(throws: LLMError.notConfigured) { try await auth.accessToken() }
+    }
+
+    @Test func cancellingTheSignInEndsTheWaitForTheBrowser() async throws {
+        // The "Cancelar" button cancels the sign-in task; the loopback wait must end at once, not after its 5 minutes.
+        let callback = try LoopbackCallback(path: "/auth/callback")
+        defer { callback.stop() }
+        let waiting = Task { try await callback.wait(timeout: .seconds(300)) }
+        try await Task.sleep(for: .milliseconds(100))
+        waiting.cancel()
+        await #expect(throws: CancellationError.self) { _ = try await waiting.value }
+    }
+
     @Test func signedOutThrowsNotConfigured() async {
         let auth = auth(host: "auth-none.test", disk: Disk(nil))
         await #expect(throws: LLMError.notConfigured) { try await auth.accessToken() }
     }
+}
+
+/// A token endpoint that answers only when the test lets it, to sign out while a refresh is in flight.
+private final class HeldProtocol: URLProtocol {
+    /// The loading protocol objects are not Sendable; they are only touched under the lock or to answer.
+    private struct Held: @unchecked Sendable { var request: HeldProtocol }
+    private static let held = OSAllocatedUnfairLock<[Held]>(initialState: [])
+
+    static var session: URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HeldProtocol.self]
+        return URLSession(configuration: configuration)
+    }
+
+    static var pending: Int { held.withLock { $0.count } }
+
+    static func release(body: String) {
+        let requests = held.withLock { list in
+            let all = list
+            list.removeAll()
+            return all
+        }
+        for held in requests {
+            let request = held.request
+            guard let url = request.request.url, let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil) else { continue }
+            request.client?.urlProtocol(request, didReceive: response, cacheStoragePolicy: .notAllowed)
+            request.client?.urlProtocol(request, didLoad: Data(body.utf8))
+            request.client?.urlProtocolDidFinishLoading(request)
+        }
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() { let me = Held(request: self); Self.held.withLock { $0.append(me) } }
+    override func stopLoading() { let me = Held(request: self); Self.held.withLock { list in list.removeAll { $0.request === me.request } } }
 }

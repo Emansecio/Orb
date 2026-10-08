@@ -31,6 +31,9 @@ struct StoreNotice: Sendable, Equatable {
     var message: String
     /// The untouched copy of the file that was set aside, when there is one.
     var copy: URL?
+    /// The data file the notice is about, so the app can name what it holds (an Orb's conversation) instead of its
+    /// file name. `message` always names the file too, as `“name”`, which is what the app replaces.
+    var file: URL?
 }
 
 /// What reading a file produced: the value (nil when the file is missing or unreadable) and anything worth telling.
@@ -96,7 +99,7 @@ struct Store: Sendable {
     // MARK: Reading
 
     func readState() -> StoreRead<AppState> {
-        Self.gate.reading(stateURL) { read(AppState.self, from: stateURL, ifUnreadable: "O Orb começou do zero") }
+        Self.gate.reading(stateURL) { read(AppState.self, from: stateURL, ifUnreadable: "o Orb começou do zero") }
     }
 
     /// Reads (and decodes) on the calling thread. The main thread uses this only when it cannot wait for
@@ -249,6 +252,13 @@ struct Store: Sendable {
         }
     }
 
+    /// Like `readArchived`, on a thread of the store's own: reopening a long conversation does not freeze the window.
+    func readArchivedAsync(_ id: UUID, for botID: UUID) async -> StoreRead<Conversation> {
+        await withCheckedContinuation { continuation in
+            Self.readQueue.async { continuation.resume(returning: readArchived(id, for: botID)) }
+        }
+    }
+
     /// Deletes an archived conversation. With `unlessUsedBy` (the file names of the pictures the app holds in memory
     /// for this Orb: its open conversation, unsent attachments, queued messages) the pictures only this conversation
     /// pointed to go with it; one that another conversation of the same Orb (the current one, another archived one,
@@ -394,26 +404,28 @@ struct Store: Sendable {
             // It exists but can't be read right now: treating that as "empty" would overwrite it on the next save.
             Self.gate.block(url)
             return StoreRead(notice: StoreNotice(message: "Não foi possível ler “\(name)” (\(error.localizedDescription)). "
-                + "Para não perder nada, o Orb não vai gravar nesse arquivo até você abrir o app de novo."))
+                + "Para não perder nada, o Orb não vai gravar nesse arquivo até você abrir o app de novo.", file: url))
         }
         do {
             let (value, skipped) = try DecodeLoss.measure { try JSONDecoder().decode(type, from: data) }
             guard skipped > 0 else { return StoreRead(value: value, fingerprint: fingerprint) }
             // Whatever was skipped disappears from the file on the next save: keep the original beside it.
             guard let copy = keepAside(url, moving: false) else { return StoreRead(value: value, fingerprint: fingerprint) }
+            let lost = skipped == 1 ? "1 item não pôde ser lido" : "\(skipped) itens não puderam ser lidos"
             return StoreRead(value: value, notice: StoreNotice(
-                message: "\(skipped) item(ns) de “\(name)” não puderam ser lidos (talvez de uma versão mais nova do Orb) "
-                    + "e ficaram de fora. O arquivo original foi guardado como “\(copy.lastPathComponent)”.", copy: copy),
+                message: "Ao ler “\(name)”, \(lost) (talvez de uma versão mais nova do Orb) "
+                    + "e \(skipped == 1 ? "ficou" : "ficaram") de fora. O arquivo original foi guardado como “\(copy.lastPathComponent)”.",
+                copy: copy, file: url),
                 fingerprint: fingerprint)
         } catch {
             guard let copy = keepAside(url, moving: true) else {
                 Self.gate.block(url)
-                return StoreRead(notice: StoreNotice(message: "Não foi possível ler “\(name)” nem guardar uma cópia dele. "
-                    + "Para não perder nada, o Orb não vai gravar nesse arquivo até você abrir o app de novo."))
+                return StoreRead(notice: StoreNotice(message: "Não foi possível ler “\(name)” nem guardar uma cópia do arquivo. "
+                    + "Para não perder nada, o Orb não vai gravar nesse arquivo até você abrir o app de novo.", file: url))
             }
             return StoreRead(notice: StoreNotice(
-                message: "Não foi possível ler “\(name)”. Ele foi guardado, sem mudanças, como “\(copy.lastPathComponent)” "
-                    + "na mesma pasta (\(copy.deletingLastPathComponent().path)), e \(outcome).", copy: copy))
+                message: "Não foi possível ler “\(name)”. O arquivo foi guardado, sem mudanças, como “\(copy.lastPathComponent)” "
+                    + "na mesma pasta (\(copy.deletingLastPathComponent().path)), e \(outcome).", copy: copy, file: url))
         }
     }
 
@@ -493,8 +505,8 @@ struct Store: Sendable {
     private func writeFile(to url: URL, _ content: () throws -> Data?) -> WriteResult {
         let name = url.lastPathComponent
         guard !Self.gate.isBlocked(url) else {
-            onSaveFailure?(StoreNotice(message: "“\(name)” não pôde ser lido ao abrir o app e não foi sobrescrito: "
-                + "o que você mudou desde então não está sendo salvo. Feche e abra o Orb de novo."))
+            onSaveFailure?(StoreNotice(message: "Ao abrir o app, não foi possível ler “\(name)”, e por isso nada é gravado por cima: "
+                + "o que você mudou desde então não está sendo salvo. Feche e abra o Orb de novo.", file: url))
             return .failed
         }
         Self.gate.waitForReaders(of: url)
@@ -505,8 +517,11 @@ struct Store: Sendable {
             return .wrote
         } catch {
             NSLog("Orb: não foi possível salvar \(name): \(error)")
-            onSaveFailure?(StoreNotice(message: "Não foi possível salvar “\(name)”: \(error.localizedDescription). "
-                + "As últimas mudanças podem não estar no disco."))
+            // The note beside a conversation is made again from it: not worth alarming anyone.
+            if !name.hasSuffix(".meta.json") {
+                onSaveFailure?(StoreNotice(message: "Não foi possível salvar “\(name)”: \(error.localizedDescription). "
+                    + "As últimas mudanças podem não estar no disco.", file: url))
+            }
             return .failed
         }
     }
@@ -578,25 +593,17 @@ final class EncoderCache: @unchecked Sendable {
     }
 }
 
-/// Secrets in the login Keychain (API keys per provider, sign-in tokens), one item per account name.
-enum Keychain {
-    static let service = "app.orb.mac"
-    /// Where OpenBot kept its items; each one moves here the first time it is read.
-    static let legacyService = "app.openbot.mac"
+/// The Keychain operations `Keychain` needs, so the fallback to OpenBot's items runs in tests on a dictionary.
+protocol KeychainItems {
+    func read(_ account: String, service: String) -> String?
+    /// Replaces the item with `value` (an empty value only deletes it) and says whether it is stored.
+    func replace(_ value: String, account: String, service: String) -> Bool
+}
 
-    /// The item, or, for the app's own service, OpenBot's item of the same name (copied over on the way, so
-    /// macOS asks at most once per key and only when it's needed).
-    static func get(_ account: String, service: String = Keychain.service) -> String? {
-        guard DevRun.allowsKeychain(arguments: CommandLine.arguments) else { return nil }
-        if let value = read(account, service: service) { return value }
-        guard service == Keychain.service, LegacyMigration.shouldRun,
-              let legacy = read(account, service: legacyService) else { return nil }
-        set(legacy, account: account)
-        return legacy
-    }
-
-    private static func read(_ account: String, service: String) -> String? {
-        var query = baseQuery(account, service: service)
+/// The login Keychain itself.
+struct SystemKeychainItems: KeychainItems {
+    func read(_ account: String, service: String) -> String? {
+        var query = Self.baseQuery(account, service: service)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
@@ -605,24 +612,10 @@ enum Keychain {
         return String(data: data, encoding: .utf8)
     }
 
-    /// Stores `value`; an empty value deletes the item.
-    static func set(_ value: String, account: String, service: String = Keychain.service) {
-        guard DevRun.allowsKeychain(arguments: CommandLine.arguments) else { return }
-        SecItemDelete(baseQuery(account, service: service) as CFDictionary)
-        guard !value.isEmpty else { return }
-        var item = baseQuery(account, service: service)
-        item[kSecValueData as String] = Data(value.utf8)
-        SecItemAdd(item as CFDictionary, nil)
-    }
-
-
-    /// Like `set`, and says whether the item is stored: a caller that is about to remove the only other copy of a
-    /// secret (the data file) must know the Keychain has it.
-    static func store(_ value: String, account: String, service: String = Keychain.service) -> Bool {
-        guard DevRun.allowsKeychain(arguments: CommandLine.arguments) else { return false }
-        SecItemDelete(baseQuery(account, service: service) as CFDictionary)
+    func replace(_ value: String, account: String, service: String) -> Bool {
+        SecItemDelete(Self.baseQuery(account, service: service) as CFDictionary)
         guard !value.isEmpty else { return true }
-        var item = baseQuery(account, service: service)
+        var item = Self.baseQuery(account, service: service)
         item[kSecValueData as String] = Data(value.utf8)
         return SecItemAdd(item as CFDictionary, nil) == errSecSuccess
     }
@@ -631,6 +624,78 @@ enum Keychain {
         [kSecClass as String: kSecClassGenericPassword,
          kSecAttrService as String: service,
          kSecAttrAccount as String: account]
+    }
+}
+
+/// The accounts whose OpenBot item has been dealt with: copied over, or removed or replaced in Orb on purpose. The
+/// OpenBot item stays in the Keychain as a backup, so without this a key the user removed would come back from it.
+/// Kept in the preferences (not in the Keychain, where reading it could ask for a password).
+struct LegacyKeychainLedger {
+    static let key = "keychainAccountsFromOpenBot"
+    private static let lock = NSLock()
+    let preferences: any PreferenceStore
+
+    /// For the bundled app on a normal launch; nil elsewhere (tests, developer modes), where OpenBot's items are not looked at.
+    static var current: LegacyKeychainLedger? {
+        LegacyMigration.shouldRun ? LegacyKeychainLedger(preferences: UserDefaults.standard) : nil
+    }
+
+    func handled(_ account: String) -> Bool {
+        (preferences.object(forKey: Self.key) as? [String])?.contains(account) ?? false
+    }
+
+    func record(_ account: String) {
+        Self.lock.withLock {
+            var accounts = preferences.object(forKey: Self.key) as? [String] ?? []
+            guard !accounts.contains(account) else { return }
+            accounts.append(account)
+            preferences.set(accounts, forKey: Self.key)
+        }
+    }
+}
+
+/// Secrets in the login Keychain (API keys per provider, sign-in tokens), one item per account name.
+enum Keychain {
+    static let service = "app.orb.mac"
+    /// Where OpenBot kept its items; each one is copied here the first time it is read, once per account.
+    static let legacyService = "app.openbot.mac"
+
+    /// The item, or, for the app's own service, OpenBot's item of the same name (copied over on the way, so
+    /// macOS asks at most once per key and only when it's needed).
+    static func get(_ account: String, service: String = Keychain.service) -> String? {
+        guard DevRun.allowsKeychain(arguments: CommandLine.arguments) else { return nil }
+        return lookup(account, service: service, items: SystemKeychainItems(), ledger: .current)
+    }
+
+    /// OpenBot's item is consulted for an account only until Orb has dealt with it: once it was copied, or once
+    /// the user removed or replaced the key in Orb (`write`), the item OpenBot left as a backup stays untouched and
+    /// is not looked at again.
+    static func lookup(_ account: String, service: String, items: any KeychainItems, ledger: LegacyKeychainLedger?) -> String? {
+        if let value = items.read(account, service: service) { return value }
+        guard service == Keychain.service, let ledger, !ledger.handled(account),
+              let legacy = items.read(account, service: legacyService) else { return nil }
+        if items.replace(legacy, account: account, service: service) { ledger.record(account) }
+        return legacy
+    }
+
+    /// Stores `value`; an empty value deletes the item.
+    static func set(_ value: String, account: String, service: String = Keychain.service) {
+        _ = store(value, account: account, service: service)
+    }
+
+    /// Like `set`, and says whether the item is stored: a caller that is about to remove the only other copy of a
+    /// secret (the data file) must know the Keychain has it.
+    static func store(_ value: String, account: String, service: String = Keychain.service) -> Bool {
+        guard DevRun.allowsKeychain(arguments: CommandLine.arguments) else { return false }
+        return write(value, account: account, service: service, items: SystemKeychainItems(), ledger: .current)
+    }
+
+    /// A write to the app's own service settles the account: OpenBot's item no longer stands in for it.
+    static func write(_ value: String, account: String, service: String, items: any KeychainItems,
+                      ledger: LegacyKeychainLedger?) -> Bool {
+        let stored = items.replace(value, account: account, service: service)
+        if service == Keychain.service { ledger?.record(account) }
+        return stored
     }
 }
 
@@ -728,7 +793,9 @@ extension AppState {
             }
             enum CodingKeys: CodingKey { case id, unread }
         }
-        for orb in try c.lossyArray(.bots) as [Counted] where orb.unread > 0 && unread[orb.id.uuidString] == nil {
+        // The same Orbs again: the ones it can't read were already counted as lost by `bots` above.
+        let counted = try DecodeLoss.measure { try c.lossyArray(.bots) as [Counted] }.value
+        for orb in counted where orb.unread > 0 && unread[orb.id.uuidString] == nil {
             unread[orb.id.uuidString] = orb.unread
         }
         contextMemory = try c.value(.contextMemory, default: .balanced)

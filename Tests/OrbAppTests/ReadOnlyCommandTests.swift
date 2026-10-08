@@ -132,6 +132,67 @@ struct ReadOnlyCommandTests {
         _ = try await git(["config", "user.name", "foo", "--get"])
     }
 
+    /// getopt_long and git's parse-options accept any unique prefix of a long option and groups of short ones.
+    @Test func abbreviatedAndGroupedOptionsAreJudgedLikeTheWholeOnes() {
+        for command in [
+            // git grep: the pager runs through `sh -c`
+            "git grep -iO'touch x' foo", "git grep -nOvim foo", "git grep --open=vim foo", "git grep --open-f foo", "git grep --no-ind x",
+            "git -C ~ grep --no-ind -e aws_secret", "git diff --ext=x", "git log --outp=x.txt", "git log --pag",
+            // sort and uniq write where they are told
+            "sort --out=x a.txt", "sort --o=x a.txt", "sort --compress=sh a.txt", "echo a | uniq - out.txt", "uniq -c - out.txt", "uniq -- a.txt b.txt",
+            // a `--` can be the value of the option before it, and what follows is an option again
+            "git grep -e -- -iO'touch x'", "sort -T -- -o x a.txt", "grep -e -- -r x .", "grep -e -- -R x .", "sort -t -- --output=x a.txt",
+            // grep recursion under a shorter name
+            "grep --recur x .", "grep --dir=recurse x .", "grep --derefer x .", "grep --rec x .",
+        ] {
+            #expect(!readOnly(command), Comment(rawValue: command))
+        }
+        for command in ["git grep -n foo", "git grep -e foo -- src", "git grep --count foo", "git log --oneline --no-merges", "git diff --stat",
+                        "sort -n a.txt", "sort --reverse a.txt", "uniq a.txt", "uniq -c a.txt", "cat a | uniq -", "grep -n --color=never x a.txt"] {
+            #expect(readOnly(command), Comment(rawValue: command))
+        }
+    }
+
+    @Test func abbreviationHelperAcceptsAnyPrefixOfThreeCharactersOrMore() {
+        #expect(ReadOnlyCommand.abbreviates("--out=x", anyOf: ["--output"]))
+        #expect(ReadOnlyCommand.abbreviates("--output", anyOf: ["--output"]))
+        #expect(ReadOnlyCommand.abbreviates("--o", anyOf: ["--output"]))
+        #expect(!ReadOnlyCommand.abbreviates("--", anyOf: ["--output"]))
+        #expect(!ReadOnlyCommand.abbreviates("--outputs", anyOf: ["--output"]))
+        #expect(!ReadOnlyCommand.abbreviates("-o", anyOf: ["--output"]))
+        #expect(!ReadOnlyCommand.abbreviates("out", anyOf: ["--output"]))
+    }
+
+    @Test func commonLookupsAreReadOnly() {
+        for command in ["command -v node", "command -V swift", "type swift", "printf '%s\\n' oi", "diff a.txt b.txt", "diff -u a.txt b.txt", "cmp a.bin b.bin",
+                        "shasum -a 256 x.zip", "md5 x.zip", "md5 -q x.zip"] {
+            #expect(readOnly(command), Comment(rawValue: command))
+        }
+        for command in ["command node", "command -p ls", "command", "command -v", "printf -v x oi", "printf -vx oi", "diff -r a b", "diff --recursive a b",
+                        "diff --to-file=x a b", "diff --from-file=a.txt b", "diff --from=a b", "diff -l a b", "shasum -c sums.txt", "md5 -c x", "cmp ~/.ssh/id_rsa a", "diff .env .env.example",
+                        "shasum ~/.aws/credentials", "md5 ~/.netrc", "diff a.txt $(pwd)"] {
+            #expect(!readOnly(command), Comment(rawValue: command))
+        }
+    }
+
+    /// `diff a.txt folder` compares with `folder/a.txt`, so a folder operand reads a file of that name from it.
+    @Test func diffWithAFolderOperandIsNotReadOnly() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "OrbDiffFolder-\(UUID().uuidString)")
+        let folder = root.appending(path: "dir")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        func readOnly(_ command: String) -> Bool {
+            ReadOnlyCommand.isReadOnly(ShellCommandLine.parse(command), directory: root, home: home)
+        }
+        for command in ["diff .npmrc ~", "diff ~ .", "diff .netrc /Users/teste", "diff ~ /tmp/d", "diff a.txt dir", "diff a.txt dir/", "diff . a.txt",
+                        "diff a.txt /tmp", "diff -u a.txt ..", "diff a.txt -- dir", "diff * a.txt", "diff a.txt ~outro"] {
+            #expect(!readOnly(command), Comment(rawValue: command))
+        }
+        for command in ["diff a.txt b.txt", "diff -u a.txt b.txt", "diff a.txt /tmp/nao-existe.txt", "diff -u dir/a.txt dir/b.txt"] {
+            #expect(readOnly(command), Comment(rawValue: command))
+        }
+    }
+
     @Test func gitRemoteNeverAsksTheNetwork() {
         #expect(readOnly("git remote"))
         #expect(readOnly("git remote -v"))
@@ -192,6 +253,24 @@ struct ReadOnlyThroughThePolicyTests {
             for mode in PermissionMode.allCases {
                 #expect(folders.verdict(mode, call) == .allow, Comment(rawValue: "\(command) in \(mode)"))
             }
+        }
+    }
+
+    @Test func aPagerHiddenInAnOptionGroupIsNotReadOnlyInAnyMode() {
+        for command in ["git grep -iO'touch x' -e .", "git grep --open='touch x' -e .", "sort --out=x a.txt", "echo a | uniq - out.txt",
+                        "git grep -e -- -iO'touch x'", "sort -T -- -o x a.txt", "diff .npmrc ~"] {
+            let call = folders.shell(command)
+            #expect(call.risk == .sensitive, Comment(rawValue: command))
+            #expect(folders.verdict(.readOnly, call) == .deny(PermissionPolicy.readOnlyDenial), Comment(rawValue: command))
+            #expect(folders.verdict(.ask, call) == .ask(.needsPermission), Comment(rawValue: command))
+        }
+    }
+
+    @Test func recursiveGrepByAnAbbreviatedNameStillSeesTheHomeFolderAsOpen() {
+        for command in ["grep --recur -e 'PRIVATE KEY' .", "git -C ~ grep --no-ind -e aws_secret_access_key", "grep -e -- -r x ."] {
+            let call = folders.shell(command)
+            #expect(call.risk == .sensitive, Comment(rawValue: command))
+            #expect(folders.verdict(.readOnly, call) == .deny(PermissionPolicy.readOnlyDenial), Comment(rawValue: command))
         }
     }
 

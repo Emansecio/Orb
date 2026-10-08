@@ -10,7 +10,7 @@ struct QueuedMessages: View {
         let lane = model.composerLane(botID)
         ForEach(lane.queued) { message in
             // The state line and "Parar e enviar" speak for the whole queue: they show once, under the last bubble.
-            QueuedBubble(message: message, whenText: whenText, canInterrupt: model.canSteer(botID),
+            QueuedBubble(message: message, whenText: whenText, canInterrupt: model.canSteer(botID), needsYou: needsYou,
                          isLast: message.id == lane.queued.last?.id,
                          edit: { model.unqueue(message.id, botID: botID) },
                          interrupt: { model.stopAndSend(botID) })
@@ -18,9 +18,17 @@ struct QueuedMessages: View {
         }
     }
 
-    /// When it will be read: at the next step for Orb's own engine, after the answer for Claude Code.
+    private var needsYou: Bool { model.live(botID).needsYou }
+
+    /// When it will be read: at the next step for Orb's own engine, after the answer for Claude Code; after your
+    /// answer to the open permission request when the engine is waiting for one.
     private var whenText: String {
-        model.steersMidTurn(botID) ? "Na fila · entra no próximo passo" : "Na fila · segue quando a resposta terminar"
+        QueuedMessages.whenText(needsYou: needsYou, steersMidTurn: model.steersMidTurn(botID))
+    }
+
+    nonisolated static func whenText(needsYou: Bool, steersMidTurn: Bool) -> String {
+        if needsYou { return "Na fila · entra depois que você responder ao pedido" }
+        return steersMidTurn ? "Na fila · entra no próximo passo" : "Na fila · segue quando a resposta terminar"
     }
 }
 
@@ -28,6 +36,7 @@ private struct QueuedBubble: View {
     let message: SteeredMessage
     let whenText: String
     let canInterrupt: Bool
+    let needsYou: Bool
     let isLast: Bool
     let edit: () -> Void
     let interrupt: () -> Void
@@ -64,7 +73,9 @@ private struct QueuedBubble: View {
                         .help("Tirar da fila e voltar ao campo de mensagem para editar")
                     if isLast, canInterrupt {
                         Button("Parar e enviar", action: interrupt)
-                            .help("Interrompe o que o Orb está fazendo e envia o que está na fila agora (\(AppShortcut.commandReturn.label))")
+                            .help(needsYou
+                                  ? "Interrompe o que o Orb está fazendo, recusa o pedido aberto e envia o que está na fila agora"
+                                  : "Interrompe o que o Orb está fazendo e envia o que está na fila agora (\(AppShortcut.commandReturn.label))")
                     }
                 }
                 .buttonStyle(.link)

@@ -1,10 +1,5 @@
 import SwiftUI
 
-extension Notification.Name {
-    /// Posted (by a menu command) to open or close the conversations popover of the Orb on screen.
-    static let orbToggleConversations = Notification.Name("app.orb.toggleConversations")
-}
-
 /// Toolbar button of the chat: the Orb's earlier conversations, to reopen or delete.
 struct ConversationsMenuButton: View {
     @Environment(AppModel.self) private var model
@@ -15,7 +10,6 @@ struct ConversationsMenuButton: View {
         Button("Conversas", systemImage: "clock.arrow.circlepath") { isOpen.toggle() }
             .keyboardShortcut(AppShortcut.conversations)
             .help("Conversas anteriores deste Orb (\(AppShortcut.conversations.label))")
-            .onReceive(NotificationCenter.default.publisher(for: .orbToggleConversations)) { _ in isOpen.toggle() }
             .popover(isPresented: $isOpen, arrowEdge: .bottom) {
                 ConversationsMenu(botID: botID) { isOpen = false }
             }
@@ -28,7 +22,9 @@ struct ConversationsMenuButton: View {
 
 extension ConversationsMenuButton {
     private func takeRequest() {
-        if model.takeChatRequest(.showConversations, of: botID) { isOpen = true }
+        // A toggle: with the popover open it is the key window, so ⌘Y reaches the menu command, not the button, and the
+        // key that opened the list also has to close it.
+        if model.takeChatRequest(.showConversations, of: botID) { isOpen.toggle() }
     }
 }
 
@@ -159,7 +155,7 @@ struct ConversationsMenu: View {
     }
 
     private func reopen(_ id: UUID) {
-        if model.reopenConversation(id, of: botID) { onClose() }
+        Task { if await model.reopenConversation(id, of: botID) { onClose() } }
     }
 
     private func delete(_ id: UUID) {

@@ -307,7 +307,7 @@ struct SessionDecisionsTests {
         let (model, botID) = model(conversation(turns: 1))
         let result = model.compactNow(botID: botID)
         #expect(result.status == .nothingToCompact && !result.didCompact)
-        #expect(result.message == "A conversa ainda é curta: não há o que compactar.")
+        #expect(result.message == ContextWords.nothingToFold)
         #expect(lastNotice(model, botID) == nil)
         #expect(model.lastCompaction[botID] == nil)
         #expect(model.conversations[botID]?.summary == nil)
@@ -373,8 +373,11 @@ struct SessionDecisionsTests {
         var conversation = try #require(model.conversations[botID])
         #expect(conversation.summary == ledger.render() && conversation.ledger == ledger)
         #expect(conversation.summaryCoveredCount == 8 && conversation.compactions == 1)
-        #expect(lastNotice(model, botID) == "Compactei a conversa: 8 mensagens antigas viraram um resumo (≈ 60 mil → 30 mil tokens).")
-        #expect(model.lastCompaction[botID] == first)
+        // The notice counts your requests (two here, four messages each), not the model's messages.
+        #expect(lastNotice(model, botID) == "Compactei a conversa: os 2 primeiros pedidos viraram um resumo (≈ 60 mil → 30 mil tokens).")
+        var told = first
+        told.foldedRequests = 2
+        #expect(model.lastCompaction[botID] == told)
 
         // A later fold in the same turn adds to it.
         let more = CompactionReport(kind: .turns, foldedMessages: 4, tokensBefore: 50_000, tokensAfter: 30_000,
@@ -455,7 +458,7 @@ struct SessionDecisionsTests {
             if case .notice(let text) = item.kind, text.hasPrefix("Compactei a conversa:") { text } else { nil }
         }
         #expect(notices.count == 1)
-        #expect(notices.first?.contains("mensagens antigas viraram um resumo (≈ ") == true)
+        #expect(notices.first?.contains("primeiros pedidos viraram um resumo (≈ ") == true)
         let conversation = try #require(model.conversations[botID])
         #expect(conversation.summary?.contains("Pedido original: " + firstRequest) == true)
         // The stretch before the message just sent was saved; that message and the notice were not.

@@ -144,7 +144,7 @@ enum ShortcutCatalog {
             ShortcutItem(.openFolder, AppShortcut.openFolder, CommandName.openFolder),
             ShortcutItem(command: .send, keys: "↩", title: "Enviar a mensagem"),
             ShortcutItem(command: .newLine, keys: CommandName.newLineKeys, title: "Nova linha na mensagem"),
-            ShortcutItem(.stopAndSend, AppShortcut.commandReturn, "Parar e enviar agora (com o Orb trabalhando e algo escrito)"),
+            ShortcutItem(.stopAndSend, AppShortcut.commandReturn, "Parar e enviar agora (Orb trabalhando e algo escrito; recusa o pedido aberto)"),
             ShortcutItem(.chooseModel, AppShortcut.chooseModel, "Escolher o modelo do Orb"),
         ]),
         ShortcutGroup(title: "Navegar", items: [
@@ -156,11 +156,11 @@ enum ShortcutCatalog {
             ShortcutItem(.skills, AppShortcut.skills, CommandName.skills),
         ]),
         ShortcutGroup(title: "Pedidos de permissão", items: [
-            ShortcutItem(command: .allowApproval, keys: AppShortcut.commandReturn.label, title: "Permitir (quando há um pedido aberto)"),
+            ShortcutItem(command: .allowApproval, keys: AppShortcut.commandReturn.label, title: "Permitir (pedido aberto e campo de mensagem vazio)"),
             ShortcutItem(command: .denyApproval, keys: "esc", title: "Não permitir (com o campo de mensagem vazio)"),
         ]),
         ShortcutGroup(title: "Em painéis e avisos", items: [
-            ShortcutItem(command: .compactOrSave, keys: AppShortcut.commandReturn.label, title: "Compactar agora (painel de contexto) ou salvar (“Como funciona”)"),
+            ShortcutItem(command: .compactOrSave, keys: AppShortcut.commandReturn.label, title: "Compactar agora (painel de contexto) ou salvar (editor “Como o Orb funciona”)"),
             ShortcutItem(.undoForget, AppShortcut.undoForget, "Desfazer “Esquecer” da memória (enquanto o aviso está na tela)"),
             ShortcutItem(.find, AppShortcut.find, "Buscar (em Skills e Conectores)"),
         ]),

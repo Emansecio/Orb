@@ -448,18 +448,27 @@ private struct WorkingLine: View {
     var body: some View {
         let live = model.live(look.id)
         HStack(spacing: 10) {
-            LiveBotAvatar(botID: look.id, orb: look.orb, size: 30)
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text("\(text)…")
-                    .font(.system(size: 13))
-                    .shimmer()
-                if let since = live.workingSince {
-                    ElapsedClock(since: since)
+            HStack(spacing: 10) {
+                LiveBotAvatar(botID: look.id, orb: look.orb, size: 30)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("\(text)…")
+                        .font(.system(size: 13))
+                        .shimmer()
+                    if let since = live.workingSince {
+                        ElapsedClock(since: since)
+                    }
                 }
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(look.name): \(text)")
+            if model.routineWaitingForYou(look.id) != nil {
+                // The card is in the routine's conversation, not in this chat.
+                Button("Ver pedido") { model.showRoutineRequest(of: look.id) }
+                    .buttonStyle(.link)
+                    .font(.system(size: 12))
+                    .help("Abrir a conversa da rotina, onde está o pedido de permissão")
+            }
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(look.name): \(text)")
     }
 }
 

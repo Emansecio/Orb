@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import ImageIO
+import os
 
 // MARK: - Configuration
 
@@ -75,6 +76,8 @@ struct OrbConfig: Hashable, Codable, Sendable {
         switch hair {
         case "antena": return !hats.contains(accessory)
         case "black-power": return !["cartola", "coroa", "chapeu-festa"].contains(accessory)
+        // Its sprout has no hat version: it would cross the cap and the beanie's pompom and sit behind the crown.
+        case "tufinho": return !["bone", "gorro", "coroa"].contains(accessory)
         default: return true
         }
     }
@@ -440,12 +443,16 @@ enum OrbImages {
         gate.lock()
         defer { gate.unlock() }
         if let cached = cache.object(forKey: key) { return cached }
+        if Thread.isMainThread { mainDecodes.withLock { $0 += 1 } }
         guard let image = render(relativePath, side: side, tint: tint) else { return nil }
         cache.setObject(image, forKey: key, cost: image.bytesPerRow * image.height)
         return image
     }
 
     private static let gates = (0..<8).map { _ in NSLock() }
+    /// For tests: bitmaps decoded on the main thread so far (the app never should, outside snapshots).
+    private static let mainDecodes = OSAllocatedUnfairLock(initialState: 0)
+    static var mainThreadDecodes: Int { mainDecodes.withLock { $0 } }
 
     /// How urgently a batch of bitmaps is needed.
     enum Priority {
@@ -597,6 +604,8 @@ enum OrbGeometry {
     /// Upper lip: talking mouths open downward from here.
     static let mouthLine: CGFloat = 0.533
     static let orbBottom: CGFloat = 0.755
+    /// Opacity of the status bubble's fill (the chrome's color), live and static.
+    static let bubbleFill: Double = 0.92
 
     /// Side of the layer images (points) for an orb of `size` points at `scale`: about `imageScale × size`, but a
     /// whole number of device pixels and centered on the orb's frame at a whole-pixel offset, so a resting orb's

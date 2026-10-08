@@ -146,6 +146,7 @@ struct AppCommands: Commands {
         CommandGroup(after: .sidebar) {
             Button(CommandName.toggleInspector) { model.showInspector.toggle() }
                 .keyboardShortcut(AppShortcut.toggleInspector)
+                .disabled(sheetOpen)
         }
         CommandGroup(replacing: .help) {
             Button(CommandName.shortcuts) { showMain(); model.showShortcuts = true }
@@ -171,22 +172,30 @@ struct AppCommands: Commands {
             .keyboardShortcut(AppShortcut.openFolder)
             .disabled(model.commandBotID == nil)
             Divider()
+            // Disabled (not just ignored) with a sheet open: an enabled item would keep ⌥↓ and the like from the sheet's
+            // text field, and switching the screen would close the sheet along with what was typed in it.
             Button(CommandName.previousBot) { model.selectAdjacentBot(offset: -1) }
                 .keyboardShortcut(AppShortcut.previousBot)
+                .disabled(sheetOpen)
             Button(CommandName.nextBot) { model.selectAdjacentBot(offset: 1) }
                 .keyboardShortcut(AppShortcut.nextBot)
+                .disabled(sheetOpen)
             Divider()
             Button(CommandName.routines) { showMain(); model.selection = .routines }
                 .keyboardShortcut(AppShortcut.routines)
+                .disabled(sheetOpen)
             Button(CommandName.connectors) { showMain(); model.selection = .connectors }
                 .keyboardShortcut(AppShortcut.connectors)
+                .disabled(sheetOpen)
             Button(CommandName.skills) { showMain(); model.selection = .skills }
                 .keyboardShortcut(AppShortcut.skills)
+                .disabled(sheetOpen)
             Divider()
             // Only the names and the order are read, so a status or a new unread message does not rebuild the menu.
             ForEach(Array(model.botIDs.prefix(9).enumerated()), id: \.element) { index, id in
                 Button(model.live(id).look.name) { showMain(); model.selection = .bot(id) }
                     .keyboardShortcut(AppShortcut.bot(at: index))
+                    .disabled(sheetOpen)
             }
             Divider()
             Toggle(CommandName.globalShortcut, isOn: Binding(

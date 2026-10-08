@@ -28,8 +28,10 @@ enum DangerousCommand {
     /// Why writing to this file is dangerous (shell startup files, SSH keys, login items), or nil. Symbolic
     /// links are followed by the caller.
     static func reason(forWritingTo url: URL, home: URL = FileManager.default.homeDirectoryForCurrentUser) -> String? {
-        let path = url.standardizedFileURL.path
-        let homePaths = Set([home.standardizedFileURL.path, home.standardizedFileURL.resolvingSymlinksInPath().path])
+        // The Mac's usual file systems ignore case, and a file that does not exist yet keeps the case it was written
+        // with: `~/.ZPROFILE` is the file zsh opens for `.zprofile`.
+        let path = url.standardizedFileURL.path.lowercased()
+        let homePaths = Set([home.standardizedFileURL.path, home.standardizedFileURL.resolvingSymlinksInPath().path].map { $0.lowercased() })
         for homePath in homePaths {
             for name in startupFiles where path == homePath + "/" + name {
                 return "muda um arquivo que o Terminal lê ao abrir, e roda em toda sessão"
@@ -37,11 +39,11 @@ enum DangerousCommand {
             if path.hasPrefix(homePath + "/.ssh/") || path == homePath + "/.ssh" {
                 return "mexe nas chaves e na configuração do SSH"
             }
-            if path.hasPrefix(homePath + "/Library/LaunchAgents/") {
+            if path.hasPrefix(homePath + "/library/launchagents/") {
                 return "cria ou muda um programa que abre sozinho ao entrar no Mac"
             }
         }
-        for folder in ["/Library/LaunchAgents/", "/Library/LaunchDaemons/", "/etc/"] where path.hasPrefix(folder) {
+        for folder in ["/library/launchagents/", "/library/launchdaemons/", "/etc/", "/private/etc/"] where path.hasPrefix(folder) {
             return "muda a configuração do sistema"
         }
         return nil
@@ -143,33 +145,59 @@ enum DangerousCommand {
         "/users", "/system", "/library", "/usr", "/etc", "/var", "/bin", "/sbin", "/private", "/applications", "/opt",
     ]
 
-    private static func check(_ command: String, scope: Scope?, home: URL, depth: Int) -> String? {
+    /// Where the shell may be as a line goes on: the folder it started in and, after each `cd`, the folders that `cd` could
+    /// have led to (one that fails leaves it where it was, so the old ones stay). `known` turns false after a `cd` whose
+    /// target cannot be told from the text (`cd $DIR`, `cd -`), and relative words then stand for any folder at all.
+    private struct Place {
+        var directories: [URL]
+        var known = true
+
+        init(_ scope: Scope?) { directories = scope.map { [$0.directory.standardizedFileURL] } ?? [] }
+
+        mutating func move(_ command: (name: String, arguments: [String]), home: URL) {
+            switch command.name {
+            case "cd", "chdir", "pushd":
+                // Without a target `cd` goes home; `-P`, `-L` and `--` only change how the path is followed.
+                let words = command.arguments.drop { $0.hasPrefix("-") && $0 != "-" }
+                if let target = words.first {
+                    if let moved = directory(afterCD: target, from: directories, home: home) { directories += moved } else { known = false }
+                } else {
+                    directories.append(home.standardizedFileURL)
+                }
+            case "popd":
+                known = false
+            default:
+                break
+            }
+        }
+    }
+
+    private static func check(_ command: String, scope: Scope?, home: URL, depth: Int, place start: Place? = nil) -> String? {
         guard depth < maxDepth else { return "usa comandos aninhados demais para conferir" }
         if command.range(of: #":\(\)\s*\{\s*:\|:&\s*\};:"#, options: .regularExpression) != nil { return "trava o sistema (fork bomb)" }
         if command.range(of: #">\s*/dev/(r?disk|sd)\w*"#, options: .regularExpression) != nil { return "grava direto num disco" }
 
         let line = ShellCommandLine.parse(command)
-        for body in line.substitutions {
-            if let reason = check(body, scope: scope, home: home, depth: depth + 1) { return reason }
-        }
+        var place = start ?? Place(scope)
         var downloadInChain = false
-        var directories = scope.map { [$0.directory.standardizedFileURL] } ?? []
         for segment in line.segments {
             if segment.separator != .pipe { downloadInChain = false }
-            let command = effective(segment.words)
-            if let command, shells.contains(command.name), segment.separator == .pipe, downloadInChain {
+            // A word like `()` makes the line read as a function definition too; the line as written still runs, so both count.
+            let commands = readings(of: segment.words)
+            if let reason = unverifiable(segment.words, commands) { return reason }
+            if segment.separator == .pipe, downloadInChain, commands.contains(where: { shells.contains($0.name) }) {
                 return "baixa e executa um script da internet"
             }
-            if let command, downloaders.contains(command.name) { downloadInChain = true }
-            if let reason = checkWords(segment.words, scope: scope, home: home, depth: depth, viaXargs: false) { return reason }
-            if let command, !namesOnly.contains(command.name),
-               let reason = secretReason(in: command.arguments, directories: directories, home: home) {
-                return reason
+            if commands.contains(where: { downloaders.contains($0.name) }) { downloadInChain = true }
+            if let reason = checkWords(segment.words, scope: scope, home: home, depth: depth, place: place, viaXargs: false) { return reason }
+            for command in commands where !namesOnly.contains(command.name) {
+                if let reason = secretReason(in: command.arguments, directories: place.directories, home: home) { return reason }
             }
-            if let command, command.name == "cd", let target = command.arguments.first,
-               let moved = directory(afterCD: target, from: directories, home: home) {
-                directories += moved
-            }
+            for command in commands { place.move(command, home: home) }
+        }
+        // A `$( )` runs where the shell is by then, after the `cd` of an earlier segment: `place` now holds every folder it may be in.
+        for body in line.substitutions {
+            if let reason = check(body, scope: scope, home: home, depth: depth + 1, place: place) { return reason }
         }
         return nil
     }
@@ -190,32 +218,40 @@ enum DangerousCommand {
         return nil
     }
 
-    private static func checkWords(_ words: [String], scope: Scope?, home: URL, depth: Int, viaXargs: Bool) -> String? {
-        guard let command = effective(words) else { return nil }
+    private static func checkWords(_ words: [String], scope: Scope?, home: URL, depth: Int, place: Place, viaXargs: Bool) -> String? {
+        for command in readings(of: words) {
+            if let reason = checkCommand(command, scope: scope, home: home, depth: depth, place: place, viaXargs: viaXargs) { return reason }
+        }
+        return nil
+    }
+
+    private static func checkCommand(_ command: (name: String, arguments: [String]), scope: Scope?, home: URL, depth: Int, place: Place,
+                                     viaXargs: Bool) -> String? {
         let args = Arguments(command.arguments)
         switch command.name {
         case "sudo", "doas":
             return "roda como administrador"
         case "rm", "unlink":
             if viaXargs { return "apaga vários arquivos de uma vez (xargs rm)" }
-            if command.name == "rm", args.hasShort("rRf") || args.hasLong(["--recursive", "--force"]) {
-                if let scope, isBuildOutput(args.operands, in: scope) { return nil }
+            // A lone `-f` only silences "no such file": it follows the rule of the plain `rm` below.
+            if command.name == "rm", args.hasShort("rR") || args.hasLongAbbreviation("--recursive") {
+                if let scope, isBuildOutput(args.operands, in: scope, place: place) { return nil }
                 return "apaga arquivos de forma recursiva ou forçada"
             }
             // A plain `rm file` skips the Trash too: fine for what the Orb made in its own folder or in a temporary
             // one, a loss with no way back anywhere else.
-            guard !args.operands.isEmpty, !args.operands.allSatisfy({ isDisposable($0, scope: scope, home: home) }) else { return nil }
+            guard !args.operands.isEmpty, !args.operands.allSatisfy({ isDisposable($0, scope: scope, place: place, home: home) }) else { return nil }
             return "apaga arquivos de forma definitiva (sem passar pela Lixeira) fora da pasta do Orb"
         case "find":
             if command.arguments.contains("-delete") { return "apaga os arquivos encontrados" }
             if let exec = command.arguments.firstIndex(where: { ["-exec", "-execdir", "-ok", "-okdir"].contains($0) }) {
                 let inner = command.arguments[(exec + 1)...].prefix { $0 != ";" && $0 != "+" }
-                return checkWords(Array(inner), scope: scope, home: home, depth: depth, viaXargs: true)
+                return checkWords(Array(inner), scope: scope, home: home, depth: depth, place: place, viaXargs: true)
             }
             return nil
         case "xargs":
             guard let inner = xargsCommand(command.arguments) else { return nil }
-            return checkWords(inner, scope: scope, home: home, depth: depth, viaXargs: true)
+            return checkWords(inner, scope: scope, home: home, depth: depth, place: place, viaXargs: true)
         case "git":
             return gitReason(command.arguments)
         case "rsync":
@@ -257,11 +293,11 @@ enum DangerousCommand {
             }
             return nil
         case "eval":
-            return evalReason(command.arguments, scope: scope, home: home, depth: depth)
+            return evalReason(command.arguments, scope: scope, home: home, depth: depth, place: place)
         case "source", ".":
             return command.arguments.contains(where: downloadsCode) ? "baixa e executa um script da internet" : nil
         case let name where shells.contains(name):
-            return shellReason(command.arguments, scope: scope, home: home, depth: depth)
+            return shellReason(command.arguments, scope: scope, home: home, depth: depth, place: place)
         case let name where name == "mkfs" || name.hasPrefix("mkfs.") || name.hasPrefix("newfs"):
             return "formata ou apaga um disco"
         default:
@@ -271,17 +307,40 @@ enum DangerousCommand {
 
     // MARK: Command words
 
-    private static let wrappers: Set<String> = ["env", "nohup", "command", "exec", "builtin", "time", "nice", "caffeinate", "stdbuf", "ionice"]
+    /// Programs that only run another command given in their arguments. The detector looks through them, and
+    /// `PermissionPolicy` never offers a standing rule for one (it would cover whatever they wrap).
+    static let wrappers: Set<String> = [
+        "env", "nohup", "command", "exec", "builtin", "time", "nice", "caffeinate", "stdbuf", "ionice",
+        // zsh's precommand modifiers (`noglob rm -rf *`, `- rm`), `arch -arm64 cmd`, `xcrun cmd` and `timeout 5 cmd`
+        "noglob", "nocorrect", "-", "arch", "xcrun", "timeout", "gtimeout",
+    ]
     private static let keywords: Set<String> = ["if", "then", "else", "elif", "do", "while", "until", "!", "{", "(", "}", ")"]
     /// Options of each wrapper that take a value as the next word. Anything else starting with `-` is a flag
     /// (`env -i`, `caffeinate -i`), so the word after it is still the command.
     private static let wrapperValueOptions: [String: Set<String>] = [
-        "env": ["-u", "-C", "-S"], "stdbuf": ["-i", "-o", "-e"], "nice": ["-n"], "caffeinate": ["-t"],
-        "exec": ["-a"], "ionice": ["-c", "-n", "-p"],
+        "env": ["-u", "-C", "-P"], "stdbuf": ["-i", "-o", "-e"], "nice": ["-n"], "caffeinate": ["-t"],
+        "exec": ["-a"], "ionice": ["-c", "-n", "-p"], "arch": ["-arch", "-e"], "xcrun": ["-sdk", "--sdk", "-toolchain", "--toolchain"],
+        "timeout": ["-s", "-k", "--signal", "--kill-after"], "gtimeout": ["-s", "-k", "--signal", "--kill-after"],
     ]
+    /// Plain words a wrapper takes before the command (the duration of `timeout 5 cmd`).
+    private static let wrapperOperands: [String: Int] = ["timeout": 1, "gtimeout": 1]
 
-    /// The command a list of words runs, after environment assignments and wrappers (`FOO=1 nohup rm …`).
-    private static func effective(_ words: [String]) -> (name: String, arguments: [String])? {
+    /// The commands a list of words may run: what it says read as a command, and, when it could also be a function
+    /// definition, what its body runs. Both are judged, since a word such as `()` is not enough to tell them apart
+    /// (`rm '()' ~/Documents/x` is an `rm`).
+    private static func readings(of words: [String]) -> [(name: String, arguments: [String])] {
+        var result: [(name: String, arguments: [String])] = []
+        for definition in [false, true] {
+            guard let command = effective(words, definition: definition),
+                  !result.contains(where: { $0.name == command.name && $0.arguments == command.arguments }) else { continue }
+            result.append(command)
+        }
+        return result
+    }
+
+    /// The command a list of words runs, after environment assignments and wrappers (`FOO=1 nohup rm …`). With
+    /// `definition`, a function definition is skipped to reach its body.
+    private static func effective(_ words: [String], definition: Bool = false) -> (name: String, arguments: [String])? {
         var rest = words[...]
         for _ in 0..<12 {
             guard let first = rest.first else { return nil }
@@ -290,14 +349,65 @@ enum DangerousCommand {
                 rest = rest.dropFirst()
                 continue
             }
+            // A function definition (`f(){ rm -rf x; }`, `f () {`, `function f {`) runs its body only when called, but
+            // the body is what the line is about: skip the name and look at what follows.
+            if definition, word.hasSuffix("()") || word == "function" || rest.dropFirst().first?.hasPrefix("()") == true {
+                rest = rest.dropFirst(word == "function" || !word.hasSuffix("()") ? 2 : 1)
+                continue
+            }
             let name = word.contains("/") ? URL(fileURLWithPath: word).lastPathComponent : word
             guard wrappers.contains(name) else { return (name, Array(rest.dropFirst())) }
             rest = rest.dropFirst()
             if name == "command", rest.first.map({ $0 == "-v" || $0 == "-V" }) == true { return nil }
             let valueOptions = wrapperValueOptions[name] ?? []
-            while let option = rest.first, option.hasPrefix("-") || isAssignment(option) {
+            while let option = rest.first, option.hasPrefix("-") && option != "-" || isAssignment(option) {
+                // `env -S 'rm -rf x'` (also `-iS`, `-Sx`, `--split-string=x`) splits its value into the command to run.
+                if name == "env", let split = splitString(option, next: rest.dropFirst().first) {
+                    rest = split.consumed == 2 ? rest.dropFirst(2) : rest.dropFirst()
+                    rest = split.words[...] + rest
+                    break
+                }
                 rest = rest.dropFirst(valueOptions.contains(option) ? 2 : 1)
             }
+            rest = rest.dropFirst(wrapperOperands[name] ?? 0)
+        }
+        return nil
+    }
+
+    /// The command words in an `env` option that carries them (`-S`), and how many words the option used.
+    private static func splitString(_ option: String, next: String?) -> (words: [String], consumed: Int)? {
+        // The value is split the way a shell does (quotes group words): `sh -c "rm -rf x"` is three words.
+        splitStringValue(option, next: next).map { (ShellCommandLine.parse($0.value).segments.flatMap(\.words), $0.consumed) }
+    }
+
+    /// The raw value of an `env` option that carries a command line (`-S`, `-iS`, `-Sx`, `--split-string=x`).
+    private static func splitStringValue(_ option: String, next: String?) -> (value: String, consumed: Int)? {
+        if option.hasPrefix("--") {
+            if option == "--split-string" { return next.map { ($0, 2) } }
+            return option.hasPrefix("--split-string=") ? (String(option.dropFirst("--split-string=".count)), 1) : nil
+        }
+        // In a group of letters the `S` takes the rest of the word, or the next word; `u`, `C` and `P` take a value first.
+        guard let index = option.dropFirst().firstIndex(where: { "SuCP".contains($0) }), option[index] == "S" else { return nil }
+        let attached = String(option[option.index(after: index)...])
+        return attached.isEmpty ? next.map { ($0, 2) } : (attached, 1)
+    }
+
+    /// Lines whose command the detector cannot read, so they count as dangerous: `env -S` has its own escapes and
+    /// expansions (`rm\_-rf\_x`, `${SHELL} -c …`), and a shell named by a variable (`$SHELL -c 'rm -rf x'`) runs a
+    /// command line it cannot see.
+    private static func unverifiable(_ words: [String], _ commands: [(name: String, arguments: [String])]) -> String? {
+        for (index, word) in words.enumerated() where URL(fileURLWithPath: word).lastPathComponent == "env" {
+            for (offset, option) in words.dropFirst(index + 1).enumerated() {
+                guard option.hasPrefix("-"), option != "-" else { break }
+                let next = words.dropFirst(index + 2 + offset).first
+                if let value = splitStringValue(option, next: next)?.value, value.contains("\\") || value.contains("$") {
+                    return "monta o comando com env -S de um jeito que não dá para conferir"
+                }
+            }
+        }
+        let runsALine = { (arguments: [String]) in arguments.contains { $0.hasPrefix("-") && !$0.hasPrefix("--") && $0.contains("c") } }
+        if commands.contains(where: { $0.name.hasPrefix("$") && runsALine($0.arguments) }) {
+            return "roda um shell que vem de uma variável, sem dar para conferir o comando"
         }
         return nil
     }
@@ -335,6 +445,9 @@ enum DangerousCommand {
         }
 
         func hasLongPrefix(_ prefix: String) -> Bool { options.contains { $0.hasPrefix(prefix) } }
+
+        /// A long option under any unambiguous shorter spelling (`--recur`), as GNU tools accept.
+        func hasLongAbbreviation(_ name: String) -> Bool { options.contains { ReadOnlyCommand.abbreviates($0, anyOf: [name]) } }
 
         var operands: [String] {
             var result: [String] = []
@@ -396,17 +509,17 @@ enum DangerousCommand {
         }
     }
 
-    private static func shellReason(_ arguments: [String], scope: Scope?, home: URL, depth: Int) -> String? {
+    private static func shellReason(_ arguments: [String], scope: Scope?, home: URL, depth: Int, place: Place) -> String? {
         if arguments.contains(where: downloadsCode) { return "baixa e executa um script da internet" }
         // `sh -c 'script'`, also `-lc` and `-ic`: the script is a command line of its own.
         guard let flag = arguments.firstIndex(where: { $0.hasPrefix("-") && !$0.hasPrefix("--") && $0.contains("c") }),
               flag + 1 < arguments.count else { return nil }
-        return check(arguments[flag + 1], scope: scope, home: home, depth: depth + 1)
+        return check(arguments[flag + 1], scope: scope, home: home, depth: depth + 1, place: place)
     }
 
-    private static func evalReason(_ arguments: [String], scope: Scope?, home: URL, depth: Int) -> String? {
+    private static func evalReason(_ arguments: [String], scope: Scope?, home: URL, depth: Int, place: Place) -> String? {
         if arguments.contains(where: downloadsCode) { return "baixa e executa um script da internet" }
-        return check(arguments.joined(separator: " "), scope: scope, home: home, depth: depth + 1)
+        return check(arguments.joined(separator: " "), scope: scope, home: home, depth: depth + 1, place: place)
     }
 
     /// `$(curl …)`, `<(curl …)` or backticks around a download: the output runs as code.
@@ -414,7 +527,7 @@ enum DangerousCommand {
         guard word.hasPrefix("$(") || word.hasPrefix("<(") || word.hasPrefix("`") else { return false }
         return ShellCommandLine.parse(word).substitutions.contains { body in
             ShellCommandLine.parse(body).segments.contains { segment in
-                effective(segment.words).map { downloaders.contains($0.name) } ?? false
+                readings(of: segment.words).contains { downloaders.contains($0.name) }
             }
         }
     }
@@ -432,32 +545,45 @@ enum DangerousCommand {
 
     /// Whether deleting this operand loses nothing that belongs to the user: it is inside the Orb's own folder or in a
     /// temporary one. Anything that cannot be told from the text (`$VAR`, `$(…)`, `~user`) counts as not.
-    private static func isDisposable(_ operand: String, scope: Scope?, home: URL) -> Bool {
+    private static func isDisposable(_ operand: String, scope: Scope?, place: Place, home: URL) -> Bool {
         guard !operand.contains(where: { "$`".contains($0) }), !operand.hasPrefix("~") || operand == "~" || operand.hasPrefix("~/") else {
             return false
         }
         let expanded = operand.hasPrefix("~") ? home.path + operand.dropFirst() : operand
-        let base = expanded.hasPrefix("/") ? nil : scope?.directory
-        guard expanded.hasPrefix("/") || base != nil else { return false }
-        let url = (base.map { $0.appending(path: expanded) } ?? URL(fileURLWithPath: expanded)).standardizedFileURL
-        // A link in the way (`ws/escape -> ~/Documents`) must not make the outside look inside.
-        let path = PermissionPolicy.resolved(url).path
-        if let scope {
-            let workspace = PermissionPolicy.resolved(scope.workspace).path
-            if path.hasPrefix(workspace + "/") { return true }
+        // A relative operand names a different file in each folder the shell may be in (after `cd ~/Documents && rm x`).
+        let urls: [URL]
+        if expanded.hasPrefix("/") {
+            urls = [URL(fileURLWithPath: expanded)]
+        } else if scope != nil, place.known {
+            urls = place.directories.map { $0.appending(path: expanded) }
+        } else {
+            return false
         }
-        return temporaryFolders.contains { path.hasPrefix($0 + "/") }
+        return urls.allSatisfy { url in
+            // A link in the way (`ws/escape -> ~/Documents`) must not make the outside look inside.
+            let path = PermissionPolicy.resolved(url.standardizedFileURL).path
+            if let scope {
+                let workspace = PermissionPolicy.resolved(scope.workspace).path
+                if path.hasPrefix(workspace + "/") { return true }
+            }
+            return temporaryFolders.contains { path.hasPrefix($0 + "/") }
+        }
     }
 
     /// `rm -rf node_modules dist` inside the Orb's folder only clears what a build recreates.
-    private static func isBuildOutput(_ operands: [String], in scope: Scope) -> Bool {
+    private static func isBuildOutput(_ operands: [String], in scope: Scope, place: Place) -> Bool {
         guard !operands.isEmpty else { return false }
         let workspace = scope.workspace.standardizedFileURL.resolvingSymlinksInPath().path
         return operands.allSatisfy { operand in
             guard !operand.contains(where: { "*?[]{}$~`".contains($0) }) else { return false }
-            let url = operand.hasPrefix("/") ? URL(fileURLWithPath: operand) : scope.directory.appending(path: operand)
-            let resolved = url.standardizedFileURL.resolvingSymlinksInPath()
-            return benignBuildFolders.contains(resolved.lastPathComponent.lowercased()) && resolved.path.hasPrefix(workspace + "/")
+            let urls: [URL]
+            if operand.hasPrefix("/") { urls = [URL(fileURLWithPath: operand)] }
+            else if place.known { urls = place.directories.map { $0.appending(path: operand) } }
+            else { return false }
+            return urls.allSatisfy { url in
+                let resolved = url.standardizedFileURL.resolvingSymlinksInPath()
+                return benignBuildFolders.contains(resolved.lastPathComponent.lowercased()) && resolved.path.hasPrefix(workspace + "/")
+            }
         }
     }
 

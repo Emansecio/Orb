@@ -54,6 +54,24 @@ private struct GatedModel: LLMClient {
     }
 }
 
+/// Asks to write a file outside the Orb's folder (which needs permission), then reports once the tool answered.
+private struct WritingModel: LLMClient {
+    let path: String
+
+    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
+        AsyncThrowingStream { continuation in
+            if messages.last?.role == .tool {
+                continuation.yield(.text("anotei"))
+            } else {
+                let arguments = JSONValue.object(["path": .string(path), "content": .string("oi")]).jsonString
+                continuation.yield(.toolCalls([ToolCallRequest(id: "w", name: "write_file", arguments: arguments)]))
+            }
+            continuation.yield(.finished(.done, nil))
+            continuation.finish()
+        }
+    }
+}
+
 @Suite final class BotSessionTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbSession-\(UUID().uuidString)")
 
@@ -104,7 +122,7 @@ private struct GatedModel: LLMClient {
     }
 
     @MainActor private func waitUntilIdle(_ model: AppModel, _ botID: UUID) async {
-        await waitUntil("the Orb to finish its turn") { !model.isWorking(botID) && model.session(botID).turnTask == nil }
+        await waitUntil("the Orb to finish its turn") { !model.isWorking(botID) && model.session(botID).turnTask == nil && !model.isStartingRoutine }
     }
 
     @MainActor private func modelCalls(_ gates: Gates, _ count: Int) async {
@@ -202,6 +220,28 @@ private struct GatedModel: LLMClient {
         #expect(messages.filter { $0.role == .assistant }.map(\.content) == ["resposta PEDIDO-2"])
     }
 
+    @Test @MainActor func stoppingLeavesNoToolRunning() async throws {
+        let model = AppModel(store: Store(directory: root.appending(path: "ferramenta")), runsBackgroundWork: false)
+        let botID = model.bots[0].id
+        let session = model.session(botID)
+        _ = session.beginTurn()
+        session.turnTask = Task { try? await Task.sleep(for: .seconds(30)) }
+        let running = ToolCall(kind: .shell, title: "Rodando um comando", detail: "sleep 60")
+        var finished = ToolCall(kind: .file, title: "Lendo", detail: "a.txt")
+        finished.state = .done
+        finished.output = "ok"
+        model.apply(.toolStarted(finished), to: botID)
+        model.apply(.toolFinished(id: finished.id, state: .done, output: "ok"), to: botID)
+        model.apply(.toolStarted(running), to: botID)
+
+        model.stop(botID)
+        let calls = model.transcript(botID).compactMap { item -> ToolCall? in if case .tool(let call) = item.kind { call } else { nil } }
+        #expect(calls.map(\.state) == [.done, .failed]) // the one that finished is left as it was
+        #expect(calls[1].output == "Interrompido." && calls[1].finishedAt != nil)
+        #expect(calls[0].output == "ok")
+        #expect(model.live(botID).runningTool == nil)
+    }
+
     @Test @MainActor func eventsPlayedForATurnThatIsNoLongerCurrentAreDropped() async {
         let model = AppModel(store: Store(directory: root.appending(path: "tarde")), runsBackgroundWork: false)
         let session = model.session(model.bots[0].id)
@@ -227,17 +267,20 @@ private struct GatedModel: LLMClient {
         let (model, a, b, routines) = setUp(gates)
         await model.loadRemainingConversations()
         defer { Task { await gates.openAll(allKeys) } }
-        await gates.openAll(["PEDIDO-RA", "PEDIDO-RB"]) // the routines answer at once
+        await gates.open("PEDIDO-RA") // Atlas's routine answers at once; Luna's when the test says
         let (ofA, ofB) = (routines[0].id, routines[1].id)
 
         #expect(model.send("PEDIDO-A", to: a))
         await modelCalls(gates, 1)
         model.runRoutine(ofA)
+        await model.routineStarted()
         #expect(model.isRoutineQueued(ofA) && !model.isRoutineRunning(ofA)) // Atlas is busy
 
         model.runRoutine(ofB) // Luna is free: it runs now, not behind Atlas's routine
+        await model.routineStarted()
         #expect(model.isRoutineRunning(ofB) && !model.isRoutineQueued(ofB))
         #expect(model.session(b).routineID == ofB && model.session(a).routineID == nil)
+        await gates.open("PEDIDO-RB")
         await waitUntil("Luna's routine to finish") { model.routines.first { $0.id == ofB }?.runs.count == 1 }
         await waitUntilIdle(model, b)
         #expect(model.isRoutineQueued(ofA)) // still waiting for Atlas
@@ -266,6 +309,7 @@ private struct GatedModel: LLMClient {
         let chat = try #require(model.session(a).conversation)
 
         model.runRoutine(routines[0].id)
+        await model.routineStarted()
         await modelCalls(gates, 1)
         let session = model.session(a)
         #expect(session.parkedChat?.items == chat.items) // the chat waits, untouched
@@ -277,6 +321,89 @@ private struct GatedModel: LLMClient {
         await waitUntilIdle(model, a)
         #expect(session.parkedChat == nil)
         #expect(Array(model.transcript(a).prefix(chat.items.count)).map(\.id) == chat.items.map(\.id))
+    }
+
+    @Test @MainActor func aRoutineWaitingForPermissionCanBeAnsweredFromTheApp() async throws {
+        let gates = Gates()
+        let (model, a, _, routines) = setUp(gates)
+        await model.loadRemainingConversations()
+        let target = root.appending(path: "fora/nota.txt") // outside the Orb's folder: ask
+        model.clientOverride = { WritingModel(path: target.path) }
+        model.update(a) { $0.permissionMode = .ask }
+        let routineID = routines[0].id
+
+        model.runRoutine(routineID)
+        await model.routineStarted()
+        await waitUntil("the routine to wait for you") { model.live(a).needsYou }
+        // The card is in the routine's conversation; the open chat (parked) has none, but the answer still finds it.
+        let card = try #require(model.liveRoutineItems(routineID)?.compactMap { item -> ApprovalRequest? in
+            if case .approval(let request) = item.kind, request.decision == nil { request } else { nil }
+        }.first)
+        #expect(model.pendingApprovals(of: a).map(\.id) == [card.id])
+        #expect(model.isPending(card.id, of: a) && model.newestPendingApprovalID(of: a) == card.id)
+        #expect(model.pendingApprovals.map(\.id) == [card.id]) // the menu bar lists it too
+        // The chat only says it waits; "Ver pedido" and the banner lead to the routine's conversation, where the card is.
+        #expect(model.routineWaitingForYou(a) == routineID)
+        model.selection = .bot(a)
+        model.showApprovalOwner(a)
+        #expect(model.selection == .routines && model.routineToShow == routineID)
+
+        model.decide(.once, approvalID: card.id, botID: a)
+        await waitUntil("the routine to finish") { !model.isRoutineRunning(routineID) && model.routines.first { $0.id == routineID }?.runs.count == 1 }
+        #expect(model.routines.first { $0.id == routineID }?.runs.first?.succeeded == true)
+        #expect(!model.live(a).needsYou && model.pendingApprovals.isEmpty && model.routineWaitingForYou(a) == nil)
+        #expect(FileManager.default.fileExists(atPath: target.path))
+        model.showApprovalOwner(a) // nothing waits for you any more: the banner opens the chat
+        #expect(model.selection == .bot(a))
+    }
+
+    // MARK: Claude Code catch-up
+
+    /// A resumed Claude Code session (folder /x) that had seen 2 messages, then two more from another model.
+    @MainActor private func resumedClaudeChat(_ model: AppModel, _ botID: UUID) -> BotSession {
+        model.editConversation(botID) {
+            $0.messages = [.user("um"), ChatMessage(role: .assistant, content: "dois"), .user("três"), ChatMessage(role: .assistant, content: "quatro")]
+            $0.claudeSessionReported("s", folder: "/x")
+            $0.claudeSeenCount = 2
+        }
+        let session = model.session(botID)
+        session.isClaudeTurn = true
+        session.claudeTurnFolder = "/x"
+        _ = session.beginTurn()
+        session.turnTask = Task {}
+        return session
+    }
+
+    @Test @MainActor func aClaudeCodeTurnThatNeverReachedTheCLIKeepsTheCatchUpPending() async throws {
+        let model = AppModel(store: Store(directory: root.appending(path: "claude")), runsBackgroundWork: false)
+        let botID = model.bots[0].id
+        let session = resumedClaudeChat(model, botID)
+        let turn = try #require(session.turnID)
+
+        model.apply(.message(.user("e agora?")), to: botID)
+        model.apply(.failed("O Claude Code não respondeu em 60 segundos."), to: botID)
+        model.finishTurn(botID, turn: turn, succeeded: false) // no .session came: the CLI got nothing
+
+        let conversation = try #require(session.conversation)
+        #expect(conversation.claudeSeenCount == 2)
+        let catchUp = ClaudeCodePrompt.catchUp(conversation, seen: 2)
+        #expect(catchUp.contains("três") && catchUp.contains("quatro"))
+        #expect(!session.isClaudeTurn && !session.claudeTurnDelivered)
+    }
+
+    @Test @MainActor func aClaudeCodeTurnThatReachedTheCLICountsEverythingAsSeen() async throws {
+        let model = AppModel(store: Store(directory: root.appending(path: "claude-ok")), runsBackgroundWork: false)
+        let botID = model.bots[0].id
+        let session = resumedClaudeChat(model, botID)
+        let turn = try #require(session.turnID)
+
+        model.apply(.message(.user("e agora?")), to: botID)
+        model.apply(.session("s"), to: botID) // the CLI answered: it has the catch-up and the message
+        model.apply(.message(ChatMessage(role: .assistant, content: "feito")), to: botID)
+        model.finishTurn(botID, turn: turn)
+
+        #expect(session.conversation?.claudeSeenCount == 6)
+        #expect(!session.claudeTurnDelivered)
     }
 
     // MARK: Reading and writing the conversation

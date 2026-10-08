@@ -14,7 +14,9 @@ def note(text):
 def emit(obj):
     sys.stdout.write(json.dumps(obj) + "\n"); sys.stdout.flush()
 
-note(json.dumps({"args": sys.argv[1:]}))
+note(json.dumps({"args": sys.argv[1:], "bashKeepsFolder": os.environ.get("CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR")}))
+if os.environ.get("FAKE_CLAUDE_SCENARIO") == "hang_linger":
+    note("pid:%d" % os.getpid())
 session = next((a.split("=", 1)[1] for a in sys.argv if a.startswith(("--session-id=", "--resume="))), "none")
 scenario = os.environ.get("FAKE_CLAUDE_SCENARIO", "tool")
 tool_name = os.environ.get("FAKE_CLAUDE_TOOL", "Bash")
@@ -30,9 +32,12 @@ for raw in sys.stdin:
             emit({"type": "control_response", "response": {"subtype": "error", "request_id": msg["request_id"], "error": "boom: config invalida"}})
             continue
         emit({"type": "control_response", "response": {"subtype": "success", "request_id": msg["request_id"], "response": {"models": []}}})
+    elif kind == "control_request" and msg["request"]["subtype"] == "interrupt" and scenario == "hang_linger":
+        time.sleep(2)  # slow to leave, like a CLI finishing what it was doing
+        note("linger-end")
     elif kind == "user":
         emit({"type": "system", "subtype": "init", "session_id": session, "model": "claude-test"})
-        if scenario == "hang":
+        if scenario in ("hang", "hang_linger"):
             continue
         if scenario == "no_result":
             emit({"type": "assistant", "parent_tool_use_id": None, "session_id": session,
@@ -47,7 +52,8 @@ for raw in sys.stdin:
         emit({"type": "assistant", "parent_tool_use_id": None, "session_id": session,
               "message": {"id": "msg_1", "model": "claude-test", "content": [{"type": "tool_use", "id": "toolu_1", "name": tool_name, "input": tool_input}]}})
         emit({"type": "control_request", "request_id": "perm_1", "request": {"subtype": "can_use_tool", "tool_name": tool_name,
-              "input": tool_input, "tool_use_id": "toolu_1", "permission_suggestions": None, "blocked_path": None}})
+              "input": tool_input, "tool_use_id": os.environ.get("FAKE_CLAUDE_PERMISSION_ID", "toolu_1"), "permission_suggestions": None, "blocked_path": None,
+              "decision_reason": os.environ.get("FAKE_CLAUDE_REASON")}})
         answer = sys.stdin.readline()
         note(answer)
         response = json.loads(answer)["response"]["response"]
@@ -292,8 +298,7 @@ struct ClaudeCodeEngineTests {
                 if case .session = event { await started.raise() }
             }
         }
-        await waitUntil("the session to start") { await started.isRaised }
-        #expect(await started.isRaised)
+        try #require(await waitUntil("the session to start", timeout: .seconds(30)) { await started.isRaised })
         // Another Orb's change reaches nobody; this Orb's reaches the running session.
         await engine.modeChanged(for: UUID(), to: .ask)
         await engine.modeChanged(for: turn.bot.id, to: .readOnly)
@@ -302,6 +307,112 @@ struct ClaudeCodeEngineTests {
         #expect(requests.count == 1)
         #expect(requests.first?["request"]?["mode"] == .string("plan"))
         consumer.cancel()
+    }
+
+    /// Claude Code's English reason for asking never reaches the card (the Orb's own words, or none, are shown).
+    @Test func theCardDoesNotShowTheCLIsEnglishReason() async throws {
+        let fake = try FakeClaude()
+        defer { fake.remove() }
+        var turn = fake.turn(mode: .ask)
+        turn.environment["FAKE_CLAUDE_REASON"] = "Command requires approval"
+        let events = await run(ClaudeCodeEngine(), turn, decision: .deny)
+        let approval = try #require(events.compactMap { if case .approval(let request) = $0 { request } else { nil } }.first)
+        #expect(approval.reason.isEmpty) // the model already said something, so there is nothing to add
+    }
+
+    /// The CLI's Bash tool keeps `cd` between calls; each call is brought back to the Orb's folder, where it is judged.
+    @Test func theCLIsBashReturnsToTheProjectFolderAfterEachCall() async throws {
+        let fake = try FakeClaude()
+        defer { fake.remove() }
+        _ = await run(ClaudeCodeEngine(), fake.turn(mode: .auto))
+        let lines = await fake.logLines(waitingFor: "eof")
+        #expect((lines.first ?? "").contains(#""bashKeepsFolder": "1""#))
+    }
+
+    /// A connector tool the connector marks destructive asks in "Automático", like the native engine does.
+    @Test func aDestructiveConnectorToolAsksInAutomaticMode() async throws {
+        let fake = try FakeClaude()
+        defer { fake.remove() }
+        let tool = (name: "mcp__github__delete_repository", input: "{}")
+        let reason = "o conector marcou esta ferramenta como destrutiva"
+        var turn = fake.turn(mode: .auto, tool: tool)
+        turn.destructiveConnectors = ["github__delete_repository": reason]
+        let events = await run(ClaudeCodeEngine(), turn, decision: .deny)
+        let approval = try #require(events.compactMap { if case .approval(let request) = $0 { request } else { nil } }.first)
+        #expect(approval.isDangerous && approval.reason == "Comando arriscado: \(reason)." && approval.suggestions.isEmpty)
+        // Another tool of the same connector, and the same tool when nothing marks it, run as before.
+        var other = fake.turn(mode: .auto, tool: (name: "mcp__github__list_issues", input: "{}"))
+        other.destructiveConnectors = turn.destructiveConnectors
+        for calm in [other, fake.turn(mode: .auto, tool: tool)] {
+            let events = await run(ClaudeCodeEngine(), calm)
+            #expect(!events.contains { if case .approval = $0 { true } else { false } })
+        }
+    }
+
+    /// A connector the app could not list gets a card in "Automático" for every tool, with its own reason.
+    @Test func anUnverifiedConnectorsToolsAskInAutomaticMode() async throws {
+        let fake = try FakeClaude()
+        defer { fake.remove() }
+        var turn = fake.turn(mode: .auto, tool: (name: "mcp__calend-rio__apagar_evento", input: "{}"))
+        turn.unverifiedConnectors = [PermissionPolicy.connectorKey("calend-rio") + "__"]
+        let events = await run(ClaudeCodeEngine(), turn, decision: .deny)
+        let approval = try #require(events.compactMap { if case .approval(let request) = $0 { request } else { nil } }.first)
+        #expect(approval.isDangerous && approval.reason == "Comando arriscado: \(ClaudeCodeTurn.unverifiedReason).")
+        // Another connector is not affected.
+        var other = fake.turn(mode: .auto, tool: (name: "mcp__github__list_issues", input: "{}"))
+        other.unverifiedConnectors = turn.unverifiedConnectors
+        let calm = await run(ClaudeCodeEngine(), other)
+        #expect(!calm.contains { if case .approval = $0 { true } else { false } })
+    }
+
+    /// A request whose tool call the main session never showed comes from a subagent, whose Bash keeps its `cd`: a
+    /// relative `rm` asks, where the same command from the main session (judged in the Orb's folder) does not.
+    @Test func aSubagentsRelativeRmAsksInAutomaticMode() async throws {
+        let fake = try FakeClaude()
+        defer { fake.remove() }
+        let rm = (name: "Bash", input: JSONValue.object(["command": .string("rm x.txt")]).jsonString)
+        let main = await run(ClaudeCodeEngine(), fake.turn(mode: .auto, tool: rm))
+        #expect(!main.contains { if case .approval = $0 { true } else { false } })
+        var sub = fake.turn(mode: .auto, tool: rm)
+        sub.environment["FAKE_CLAUDE_PERMISSION_ID"] = "toolu_do_subagente"
+        let events = await run(ClaudeCodeEngine(), sub, decision: .deny)
+        let approval = try #require(events.compactMap { if case .approval(let request) = $0 { request } else { nil } }.first)
+        #expect(approval.isDangerous && approval.command == "rm x.txt")
+    }
+
+    /// Stopping and sending again starts a new process while the old one is still leaving; the old turn finishing must
+    /// not erase the new one's entry, or a later change of mode would never reach the CLI.
+    @Test func anOldTurnLeavingDoesNotForgetTheNewOne() async throws {
+        let fake = try FakeClaude()
+        defer { fake.remove() }
+        let engine = ClaudeCodeEngine()
+        let first = fake.turn(mode: .bypass, scenario: "hang_linger")
+        let started = SessionFlag()
+        let consumer = Task {
+            for await event in engine.run(first) {
+                if case .session = event { await started.raise() }
+            }
+        }
+        try #require(await waitUntil("the first session to start", timeout: .seconds(30)) { await started.isRaised })
+        consumer.cancel()
+        var second = first
+        second.environment["FAKE_CLAUDE_SCENARIO"] = "hang"
+        let restarted = SessionFlag()
+        let next = Task {
+            for await event in engine.run(second) {
+                if case .session = event { await restarted.raise() }
+            }
+        }
+        try #require(await waitUntil("the second session to start", timeout: .seconds(30)) { await restarted.isRaised })
+        // The old process is really gone (it ended its input after the slow interrupt); only then does its turn clean up.
+        let logged = await fake.logLines(waitingFor: "linger-end")
+        let oldPID = try #require(logged.compactMap { $0.hasPrefix("pid:") ? pid_t($0.dropFirst(4)) : nil }.first)
+        try #require(await waitUntil("the old process to leave") { !processIsAlive(oldPID) })
+        try await Task.sleep(for: .milliseconds(300)) // its turn's cleanup follows the exit
+        await engine.modeChanged(for: first.bot.id, to: .readOnly)
+        let lines = await fake.logLines(waitingFor: "set_permission_mode")
+        #expect(lines.contains { $0.contains("set_permission_mode") })
+        next.cancel()
     }
 
     /// The pids of the processes started from this fake's folder (its interpreter shows the script path in its

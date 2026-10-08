@@ -52,7 +52,9 @@ A ordem de `evaluate`:
 Uma rotina pode ter modo próprio (`Routine.permissionMode`: "Igual ao Orb", "Automático" ou "Só leitura"; "Sem pedir
 permissão" não é oferecido). Enquanto ela roda, `AppModel.effectiveBot` troca o modo do Orb pelo da rotina, e mudar o modo
 do Orb não mexe nos cartões dela. Como não há ninguém para responder, uma rotina em "Perguntar antes" espera pelo usuário;
-o editor avisa e oferece "Usar Automático" / "Só leitura".
+o editor avisa e oferece "Usar Automático" / "Só leitura". O cartão fica na conversa da rotina (Rotinas → a rotina → conversa,
+com "Ver pedido" no chat do Orb): é de lá que se responde, e os banners e a barra de menus também o enxergam
+(`AppModel.pendingApprovals(of:)` lê a conversa em que o turno roda, não o chat estacionado).
 
 ## Risco, família e perigo
 
@@ -94,7 +96,8 @@ Detalhes que costumam surpreender:
   arquivos de passagem: deixa-os de fora e diz quantos. Comandos de shell também perguntam no "Automático" quando uma palavra
   deles aponta para um segredo em `~` (`cat ~/.ssh/id_rsa`, `tar … ~/.aws`), com exceção dos que só mostram nomes e tamanhos
   (`ls`, `stat`, `file`, `du`, `wc`, `find`). (2) **Comandos que só olham**: uma linha de `run_command` (ou `Bash`) feita só de
-  `ls`, `cat`/`head`/`tail`, `grep` (sem `-r`), `wc`, `file`, `stat`, `du`, `df`, `which`, `echo`, `pwd`, `find` (sem
+  `ls`, `cat`/`head`/`tail`, `grep` (sem `-r`), `wc`, `file`, `stat`, `du`, `df`, `which`, `echo`, `printf` (sem `-v`), `pwd`,
+  `command -v`/`type`, `diff`/`cmp`/`shasum`/`md5` (sem `-r`, `-l`, `-c`), `find` (sem
   `-exec`/`-delete`/`-fprint`), `sort`/`uniq` (sem arquivo de saída) e `git status`/`log`/`diff`/`show`/`blame`/`branch`
   (listar)/`remote -v`/`config --get` (a opção de leitura vem antes de qualquer chave)…, ligadas por `;`, `&&`, `||` ou `|`, sem redirecionamento, substituição, variável,
   `-c`/`--output`/`--ext-diff` do git nem segundo plano, é tratada como `.safe` (`ReadOnlyCommand`): não pede cartão em "Perguntar
@@ -103,13 +106,27 @@ Detalhes que costumam surpreender:
   as palavras como texto, mas o zsh expande mais do que isso (qualificadores de glob como `*(e:'cmd':)`, `=(cmd)`, `=cmd`,
   chaves `{a,b}`): qualquer palavra com `(`, `)`, `{`, `}` ou começando com `=` volta ao cartão, mesmo entre aspas. Nenhum
   desses comandos acessa a rede (`git remote show <url>`, `fetch`, `ls-remote` ficam de fora), então não abrem canal de saída
-  de dados; `ps` com `e`/`E`/`-e` (que mostra o ambiente dos processos) também pede cartão.
+  de dados; `ps` com `e`/`E`/`-e` (que mostra o ambiente dos processos) também pede cartão. As opções que escrevem ou rodam
+  outro programa são conferidas por **abreviação** e por **grupo**, porque o `getopt_long` do macOS e o `parse-options` do git aceitam
+  qualquer prefixo de uma opção longa e letras coladas: `sort --out=x`, `grep --recur`, `git grep --no-ind` e `git grep --open=cmd`
+  valem como a opção inteira, e `git grep -iOcmd` como `-O` (`ReadOnlyCommand.abbreviates`). `uniq` conta o `-` (entrada) como operando:
+  `uniq - saida` grava. As opções são procuradas em **todas** as palavras, também depois de um `--`, porque ele pode ser o valor da
+  opção anterior (`sort -T -- -o x`, `grep -e -- -r x .`, `git grep -e -- -iO'cmd'`). O `diff` com um operando que é pasta (ou pode
+  ser: `~`, `.`, curinga, `~usuario`) ou com `--from-file` volta ao cartão, porque compara com o arquivo de mesmo nome dentro da
+  pasta (`diff .npmrc ~` mostraria `~/.npmrc`). Na dúvida a linha só vai ao cartão.
 - `web_fetch`, `open` e `remember` são `.sensitive` de propósito: são o caminho de **saída** de dados (ou o que fica no
   prompt de toda conversa). Um texto malicioso numa página não consegue ler um segredo e mandá-lo sem você aprovar.
 - `remember` com `tipo` `identidade` ou `preferencia` é `.instructs`. Com `fato` ou `procedimento` é `.sensitive`.
 - Ferramentas de conectores (`MCPTool`) são `.sensitive`, **exceto** quando o servidor as anuncia como somente leitura
   (`readOnlyHint`), de mundo fechado (`openWorldHint` não verdadeiro) e não destrutivas. Uma ferramenta anunciada como
-  destrutiva (`destructiveHint`) tem perigo: pergunta até no "Automático".
+  destrutiva (`destructiveHint`) tem perigo: pergunta até no "Automático". No Claude Code o mapa dessas ferramentas vem das
+  conexões do próprio app (`ClaudeCodeTurn.destructiveConnectors`, montado ao preparar o turno), porque as anotações que o CLI
+  recebe dos seus próprios servidores não chegam ao Orb; assim as duas engines perguntam igual. A chave é a que o CLI usa de
+  verdade (`mcp__<nome na configuração>__<ferramenta>` por `connectorKey`), e o nome na configuração (`ClaudeCodeTurn.mcpNames`)
+  é só ASCII, com `-2`, `-3` para nomes repetidos: "Calendário" vira `calend-rio`. Antes de montar o mapa o app espera até 5 s
+  os conectores do Orb que ainda estão subindo. Um conector que a conexão do app não conseguiu listar (ainda subindo depois
+  do prazo, ou com falha) fica sem anotações conhecidas (`unverifiedConnectors`): no Claude Code todas as ferramentas dele
+  perguntam, com o motivo "não deu para conferir se o conector marca esta ferramenta como destrutiva".
 - `ui_act` tem perigo quando o rótulo do elemento (ou o item de menu) fala em excluir, enviar, comprar ou descartar, ou
   quando preenche um campo de senha. `app_quit` com `force` tem perigo ("encerra o app à força").
 - A família `appInterface` é só do `ui_act`: uma liberação antiga de Atalhos ou da área de transferência (`macApps`) não passa a
@@ -151,8 +168,10 @@ escopo inválido ou desconhecido é **descartada**, nunca ampliada.
 
 **Sugestões do cartão.** `PermissionPolicy.suggestions` oferece até 3 regras, da mais estreita para a mais larga:
 `git push` antes de `git`; a pasta do projeto (a mais próxima com `.git`) antes da pasta do arquivo; o site. Nunca sugere
-regra para interpretadores (`sh`, `bash`, `python3`, `node`, `env`, `xargs`, `sudo`, `find`, `awk`, `sed`, `ssh`, `open`…),
-porque liberaria qualquer coisa. Chamadas perigosas e as que mudam instruções não têm sugestões. No Claude Code, as
+regra para interpretadores e embrulhos (`sh`, `bash`, `python3`, `node`, `xargs`, `sudo`, `find`, `awk`, `sed`, `ssh`, `open` e os
+mesmos embrulhos que o detector de perigo atravessa: `env`, `nice`, `caffeinate`, `arch`, `xcrun`, `timeout`…; a lista é
+`DangerousCommand.wrappers`), porque liberaria qualquer coisa. Uma regra de uma palavra só para um embrulho, já salva por uma versão
+antiga, deixa de valer: o cartão volta a aparecer. Chamadas perigosas e as que mudam instruções não têm sugestões. No Claude Code, as
 sugestões que o próprio CLI manda (`permission_suggestions`) entram depois, filtradas pelas mesmas regras.
 
 **Migração.** Orbs antigos tinham `allowedTools` (nomes de ferramenta dos dois motores). `Bot.init(from:)` converte cada
@@ -182,14 +201,18 @@ No "Sem pedir permissão" não pergunta.
 
 O analisador (`ShellCommandLine`) separa a linha em trechos (`;`, `&&`, `||`, `|`, `&`, quebras de linha), expande
 `sh -c '…'`, `bash -lc`, `eval`, `$( )`, crases e `osascript -e`, até 4 níveis (mais que isso é perigoso por si:
-"usa comandos aninhados demais para conferir"). Atravessa `env`, `nohup`, `command`, `exec`, `time`, `nice`, `caffeinate`,
-`stdbuf` e `ionice`, sabendo quais opções de cada um levam valor (`env -i rm -rf x` ainda é `rm -rf`).
+"usa comandos aninhados demais para conferir"). Atravessa `env` (inclusive `env -S 'rm -rf x'`, cujo valor é separado como o shell faz, com aspas: `env -S 'sh -c "rm -rf x"'`), `nohup`, `command`, `exec`, `time`, `nice`, `caffeinate`,
+`stdbuf`, `ionice`, `noglob`, `nocorrect`, `arch`, `xcrun`, `timeout`/`gtimeout` e o `-` do zsh, sabendo quais opções de cada um levam
+valor (`env -i rm -rf x` ainda é `rm -rf`, `timeout --kill-after 5 10 rm -rf x` também), e olha o corpo de uma definição de função
+(`f(){ rm -rf x; }; f`). Uma linha que pode ser lida como definição (`rm '()' x`) é julgada **nas duas leituras**, a do corpo e a do
+comando como foi escrito, e vale o primeiro motivo achado. Uma substituição `$( )` é julgada onde o shell estará depois dos `cd`
+da linha (`cd ~/Documents && echo $(rm x)`).
 
 | Padrão reconhecido | Motivo mostrado |
 |---|---|
 | `sudo`, `doas` | roda como administrador |
-| `rm -r`, `rm -f` (e `--recursive`/`--force`); `xargs rm`; `find -delete` | apaga arquivos de forma recursiva ou forçada |
-| `rm`/`unlink` simples com algum alvo fora da pasta própria e fora de `/tmp`/`/var/folders` (ou sem pasta própria, ou alvo que não dá para saber, como `$VAR`) | apaga de forma definitiva (sem passar pela Lixeira) fora da pasta do Orb |
+| `rm -r`/`-R` (e `--recursive`, também abreviado); `xargs rm`; `find -delete` | apaga arquivos de forma recursiva ou forçada |
+| `rm`/`unlink` simples (também `rm -f` sem `-r`: o `-f` só cala o erro de arquivo que não existe) com algum alvo fora da pasta própria e fora de `/tmp`/`/var/folders` (ou sem pasta própria, ou alvo que não dá para saber, como `$VAR`) | apaga de forma definitiva (sem passar pela Lixeira) fora da pasta do Orb |
 | `git push --force`/`-f`/`--mirror`/`+ref`; `reset --hard`; `clean -f`; `checkout .`/`-f`; `restore .`; `branch -D` | sobrescreve o histórico remoto / descarta mudanças |
 | `curl`/`wget` em pipe para um shell; `sh <(curl …)` | baixa e executa um script da internet |
 | `rsync --delete` com destino na pasta pessoal ou `/` | apaga no destino |
@@ -202,6 +225,10 @@ O analisador (`ShellCommandLine`) separa a linha em trechos (`;`, `&&`, `||`, `|
 
 Exceção: `rm -rf node_modules .build dist DerivedData` **dentro da pasta própria** limpa saída de build e não é perigoso
 (só caminhos literais, sem `*`, `$`, `~` ou crase).
+
+**`cd` antes do `rm`.** Os operandos relativos são julgados em todas as pastas onde o shell pode estar: a de partida e as que cada
+`cd` poderia ter alcançado (um `cd` que falha deixa o shell onde estava). `cd ~/Documents && rm x.docx` e `cd ~ && rm -rf dist`
+perguntam; um `cd` de destino desconhecido (`cd $DIR`, `cd -`, `popd`) faz o operando relativo deixar de ser descartável.
 
 **AppleScript/JXA** (`applescript`, `osascript`): o texto dentro de `do shell script "…"` / `doShellScript('…')` passa pelo
 mesmo analisador (aspas duplas, simples e crases). O script é lido na linguagem dele, nunca por palpite: o parâmetro
@@ -223,7 +250,8 @@ vale), um arquivo executável sem extensão (abre no Terminal e roda) ou um link
 **Escritas**: `write_file`/`edit_file`/`trash` (e `Write`/`Edit`/`MultiEdit`/`NotebookEdit` do Claude Code, também no
 "Automático") em arquivos de inicialização do shell
 (`.zshrc`, `.zprofile`, `.bashrc`…), em `~/.ssh`, em `~/Library/LaunchAgents`, em `/Library/LaunchAgents`,
-`/Library/LaunchDaemons` e `/etc` são perigosas.
+`/Library/LaunchDaemons` e `/etc` (que o sistema resolve para `/private/etc`) são perigosas. A comparação ignora maiúsculas e minúsculas, como o sistema de arquivos do Mac:
+gravar `~/.ZPROFILE` (arquivo que ainda não existe) vale como `.zprofile`.
 
 O detector é conservador sobre o que reconhece e **nunca afirma que um comando é seguro**: o que ele não conhece cai na regra
 normal do modo.
@@ -260,6 +288,9 @@ bloqueando o que ainda não rodou. Chamadas só de leitura do mesmo passo rodam 
 
 ⌘↩ permite e Esc nega o cartão **mais novo** do Orb aberto (`ApprovalKeyboard`). Esc não conta enquanto você edita texto
 (campo com algo digitado, texto sendo composto ou o campo "Diga o que fazer em vez disso"): ali ele pertence ao campo.
+⌘↩ também vale a partir do campo "Diga o que fazer em vez disso", mas **não** com texto no compositor principal: ali ele é
+"Parar e enviar", que recusa o pedido aberto (parar sempre recusa) e envia o que foi escrito. Com o compositor vazio ou
+sem foco, ⌘↩ permite.
 
 ### Fora da janela
 
@@ -309,6 +340,15 @@ lista de `--help` mostra `manual`, que o próprio CLI converte em `default`).
   `JAVA_HOME` etc.) e com a pasta do `claude` na frente do PATH, menos as variáveis do provedor (`ANTHROPIC_*`, como
   `ANTHROPIC_API_KEY`), que trocariam em silêncio o login do claude.ai por cobrança da API; o Bash dele e os conectores MCP que ele inicia herdam isso.
   Os argumentos (persona e memória em português) chegam byte a byte (`LineProcess` usa `posix_spawn`).
+- O Bash do CLI mantém o `cd` entre uma chamada e outra, mas a política julga cada comando na pasta do Orb. Por isso o
+  processo sobe com `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1` (`ClaudeCodeTurn.processEnvironment`), que faz cada chamada do Bash
+  **da sessão principal** voltar à pasta do projeto (https://code.claude.com/docs/en/env-vars). O Bash de um subagente (`Task`/`Agent`)
+  continua guardando o `cd`. O Orb reconhece esses pedidos (o `tool_use_id` não apareceu nas mensagens da sessão principal) e
+  não presume pasta: um `rm x.txt` relativo pergunta e um comando só é "somente leitura" sem depender da pasta
+  (`PermissionPolicy.call(claudeCodeTool:…fromSubagent:)`).
+- O motivo que o CLI manda junto do pedido (`decision_reason`) vem em inglês e não aparece no cartão: vale o motivo do próprio
+  Orb ou, sem ele, a frase "<Orb> precisa da sua permissão para continuar." quando o modelo ainda não escreveu nada. Os nomes
+  das ferramentas próprias do CLI (`TodoWrite`, `Task`, `ExitPlanMode`, `Skill`…) também aparecem em português (`ClaudeCodeTools.summary`).
 - As ferramentas do próprio Orb (memória e Mac), que o Claude Code vê como `mcp__orb_memoria__…`, passam pela mesma política
   que as gêmeas nativas: risco, perigo (`app_quit` forçado, `do shell script`) e família. As seguras rodam em todos os modos.
 - Uma negação aparece na linha da ferramenta em português ("Você negou esta ação." / "Bloqueado: o Orb está em modo Só

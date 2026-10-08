@@ -41,6 +41,8 @@ struct ContextFill: Sendable, Equatable {
 enum ContextMeter {
     /// Where a manual compaction ("Compactar agora") brings the history: this share of the budget.
     static let compactingShare = 0.3
+    /// A compaction that would free fewer tokens than this is not offered.
+    static let minimumFreed = 100
 
     /// `conversation`'s history as the next message would find it, measured against `budget`. Nothing is changed.
     static func fill(of conversation: Conversation, budget: ContextBudget, compactingShare: Double = compactingShare) -> ContextFill {
@@ -65,8 +67,18 @@ enum ContextMeter {
         let compacted = ContextWindow.fit(slice, budget: smaller, cut: &folding, condensing: frontier, paused: paused)
         if folding.covered > 0 {
             let foldedMessages = Array(slice.prefix(compacted.droppedCount))
-            compaction = .init(turns: foldedMessages.filter { $0.role == .user }.count, messages: compacted.foldedCount,
-                               tokensFreed: max(history - tokens(compacted.messages), 0))
+            // What the compaction leaves is measured as the app measures it afterwards (`Conversation.compact`): the
+            // summary and what follows it, whole (the rungs and steps set aside to fit the smaller budget are only for
+            // that one request), not the window that fit just produced.
+            var kept = ContextCut(summary: folding.summary, ledger: folding.ledger)
+            let remaining = ContextWindow.fit(Array(slice.dropFirst(compacted.droppedCount)), budget: unlimited, cut: &kept,
+                                              condensing: max(frontier - compacted.droppedCount, 0), paused: paused)
+            let freed = max(history - tokens(remaining.messages), 0)
+            // A summary that frees next to nothing (the latest turn is the whole history) is not worth offering.
+            if freed >= minimumFreed {
+                compaction = .init(turns: foldedMessages.filter { $0.role == .user }.count, messages: compacted.foldedCount,
+                                   tokensFreed: freed)
+            }
         }
 
         let window = budget.window ?? budget.tokens + budget.overheadTokens + budget.replyTokens
@@ -106,4 +118,9 @@ enum ContextMeter {
 extension Conversation {
     /// How full the context is (see `ContextMeter`).
     func contextFill(budget: ContextBudget) -> ContextFill { ContextMeter.fill(of: self, budget: budget) }
+
+    /// The user's requests among `messages[range]`: what the chat shows as your bubbles, not the model's steps between them.
+    func requestCount(in range: Range<Int>) -> Int {
+        messages[range.clamped(to: messages.indices)].reduce(0) { $0 + ($1.role == .user && !$1.content.hasPrefix(ContextSummary.marker) ? 1 : 0) }
+    }
 }

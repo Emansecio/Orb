@@ -80,8 +80,8 @@ struct BotInspector: View {
                 RoutineEditor(routine: routine)
             }
             // "Personalizar…" in the sidebar's menu: the panel opens (or already is) and so does the appearance editor.
-            .onAppear { if model.takeChatRequest(.editLook, of: botID) { isEditingOrb = true } }
-            .onChange(of: model.pendingChatRequest) { if model.takeChatRequest(.editLook, of: botID) { isEditingOrb = true } }
+            .onAppear { takeRequests() }
+            .onChange(of: model.pendingChatRequest) { takeRequests() }
             .sheet(isPresented: $isEditingIdentity) {
                 IdentityEditor(name: bot.name, text: $identityDraft) {
                     model.setIdentity(identityDraft, of: bot.id)
@@ -106,9 +106,17 @@ struct BotInspector: View {
                     .background(Palette.chrome)
                 }
                 .frame(width: 560, height: editorHeight)
+                .registersOpenSheet()
             }
             .background(Palette.chrome)
         }
+    }
+
+    /// What a command asked of this panel: the appearance editor ("Personalizar…"), or a tab ("Gerenciar" in the
+    /// permissions chip opens "Pasta e acessos", where the grants are).
+    private func takeRequests() {
+        if model.takeChatRequest(.editLook, of: botID) { isEditingOrb = true }
+        if let requested = model.takeTabRequest(of: botID) { tab = requested }
     }
 
     private struct FilesKey: Hashable {
@@ -438,7 +446,7 @@ struct BotInspector: View {
                     .foregroundStyle(.secondary)
             }
             ForEach(routines) { routine in
-                RoutineRow(routine: routine, isBusy: model.isWorking(bot.id)) {
+                RoutineRow(routine: routine) {
                     editingRoutine = routine
                 }
             }
@@ -668,7 +676,6 @@ private struct WorkspaceFileRow: View {
 private struct RoutineRow: View {
     @Environment(AppModel.self) private var model
     let routine: Routine
-    let isBusy: Bool
     let edit: () -> Void
 
     var body: some View {
@@ -709,8 +716,15 @@ private struct RoutineRow: View {
             HStack {
                 Button("Editar", action: edit)
                 Spacer()
-                Button("Rodar agora", systemImage: "play.fill") { model.runRoutine(routine.id) }
-                    .disabled(isBusy)
+                // Like the Rotinas page: with the Orb busy the run waits for it (`runRoutine` queues it).
+                if model.isRoutineRunning(routine.id) {
+                    Label("Rodando…", systemImage: "hourglass").foregroundStyle(.secondary)
+                } else if model.isRoutineQueued(routine.id) {
+                    Label("Na fila", systemImage: "clock").foregroundStyle(.secondary)
+                        .help("Roda assim que o Orb terminar o que está fazendo")
+                } else {
+                    Button("Rodar agora", systemImage: "play.fill") { model.runRoutine(routine.id) }
+                }
             }
             .controlSize(.small)
         }
@@ -763,7 +777,7 @@ private struct IdentityEditor: View {
             .padding(.horizontal, 20)
             .padding(.bottom, 12)
             .orbSheet("Como \(name) funciona",
-                      subtitle: "Vai em toda conversa. O que \(name) aprender na entrevista entra em “Como funcionar”. ⌘↩ salva.",
+                      subtitle: "Vai em toda conversa. O que \(name) aprender na entrevista entra no fim destas notas. ⌘↩ salva.",
                       size: .medium) {
                 SheetFooter(cancel: cancel, primaryTitle: "Salvar", primary: save)
             }

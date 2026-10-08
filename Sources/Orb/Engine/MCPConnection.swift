@@ -44,7 +44,12 @@ actor MCPConnection {
     /// The annotations of each tool from the last `tools/list`, by the server's own tool name.
     private(set) var toolAnnotations: [String: MCPToolAnnotations] = [:]
 
-    init(config: MCPServerConfig) { self.config = config }
+    private let shell: ShellEnvironment
+
+    init(config: MCPServerConfig, shell: ShellEnvironment = .shared) {
+        self.config = config
+        self.shell = shell
+    }
 
     var isRunning: Bool { transport != nil }
 
@@ -53,7 +58,7 @@ actor MCPConnection {
         guard !started else { throw ToolError("O conector \(config.name) já foi iniciado.") }
         started = true
 
-        let transport: any MCPTransport = config.isRemote ? try HTTPTransport(config: config) : StdioTransport(config: config)
+        let transport: any MCPTransport = config.isRemote ? try HTTPTransport(config: config) : StdioTransport(config: config, shell: shell)
         self.transport = transport
         do {
             try await transport.open(receive: { [weak self] in await self?.handle($0) },

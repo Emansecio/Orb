@@ -3,6 +3,70 @@ import Testing
 @testable import Orb
 
 struct ComposerSupportTests {
+    // MARK: Keys and pictures
+
+    @Test func theHintNeverPromisesStopAndSendWhereCommandReturnAllows() {
+        let key = AppShortcut.commandReturn.label
+        // No request open: the line is the usual one.
+        #expect(ComposerHint.queueing(steersMidTurn: true, needsYou: false, typesInComposer: true).contains("\(key) para e envia agora"))
+        #expect(ComposerHint.queueing(steersMidTurn: false, needsYou: false, typesInComposer: true).contains("segue quando a resposta terminar"))
+        // A request open and text in the focused composer: ⌘↩ stops (refusing the request) and sends.
+        let typing = ComposerHint.queueing(steersMidTurn: true, needsYou: true, typesInComposer: true)
+        #expect(typing.contains("\(key) recusa o pedido e envia agora") && typing.hasPrefix("↩ entra na fila"))
+        // Elsewhere ⌘↩ still allows the request, and the line says that instead.
+        let elsewhere = ComposerHint.queueing(steersMidTurn: true, needsYou: true, typesInComposer: false)
+        #expect(elsewhere.contains("\(key) permite o pedido") && !elsewhere.contains("para e envia"))
+    }
+
+    @Test func aMessageWaitsForThePicturesStillBeingPrepared() {
+        func canSend(content: Bool = true, working: Bool = false, steer: Bool = false, pending: Int = 0) -> Bool {
+            ComposerAction.canSend(hasContent: content, isWorking: working, canSteer: steer, pendingPictures: pending)
+        }
+        #expect(canSend())
+        #expect(!canSend(pending: 1)) // text typed, the picture not in yet
+        #expect(!canSend(pending: 2))
+        #expect(!canSend(content: false))
+        #expect(canSend(working: true, steer: true)) // queued
+        #expect(!canSend(working: true, steer: true, pending: 1))
+        #expect(!canSend(working: true, steer: false)) // a routine's run
+        #expect(ComposerLane.preparingText(1) == "Preparando imagem…" && ComposerLane.preparingText(3) == "Preparando 3 imagens…")
+    }
+
+    @Test func stopAndSendWorksWithAnEmptyFieldWhenSomethingIsQueued() {
+        #expect(ComposerAction.stopAndSendEnabled(isQueueing: true, canSend: true, queuedCount: 0))
+        #expect(ComposerAction.stopAndSendEnabled(isQueueing: true, canSend: false, queuedCount: 1)) // the queue bubble's key
+        #expect(!ComposerAction.stopAndSendEnabled(isQueueing: true, canSend: false, queuedCount: 0))
+        #expect(!ComposerAction.stopAndSendEnabled(isQueueing: false, canSend: true, queuedCount: 1))
+        #expect(!ComposerAction.stopAndSendEnabled(isQueueing: true, canSend: false, queuedCount: 1, pendingPictures: 1))
+    }
+
+    @Test func theComposerNamesTheRoutineThatHoldsTheOrb() {
+        #expect(ComposerAction.routinePlaceholder(routineName: "Resumo diário") == "A rotina “Resumo diário” está rodando. Envie quando ela terminar.")
+        #expect(ComposerAction.routinePlaceholder(routineName: nil) == "Uma rotina está rodando. Envie quando ela terminar.")
+        #expect(ComposerAction.stop.title(isRoutine: false) == "Parar" && ComposerAction.stop.title(isRoutine: true) == "Parar a rotina")
+        #expect(ComposerAction.stop.help(isRoutine: true) == "Parar a rotina (\(AppShortcut.stop.label))")
+        #expect(ComposerAction.stop.help(isRoutine: false) == "\(CommandName.stop) (\(AppShortcut.stop.label))")
+        #expect(ComposerAction.send.title(isRoutine: true) == "Enviar") // only Stop changes
+    }
+
+    @Test func theQueueSaysItWaitsForYourAnswerWhenARequestIsOpen() {
+        #expect(QueuedMessages.whenText(needsYou: true, steersMidTurn: true) == "Na fila · entra depois que você responder ao pedido")
+        #expect(QueuedMessages.whenText(needsYou: true, steersMidTurn: false).contains("responder ao pedido"))
+        #expect(QueuedMessages.whenText(needsYou: false, steersMidTurn: true) == "Na fila · entra no próximo passo")
+        #expect(QueuedMessages.whenText(needsYou: false, steersMidTurn: false) == "Na fila · segue quando a resposta terminar")
+    }
+
+    @Test func pasteIsTakenOnlyInTheComposersOwnKeyWindowWithoutASheet() {
+        func takes(window: Bool = true, key: Bool = true, sheet: Bool = false, focused: Bool = true) -> Bool {
+            PasteGate.takes(eventIsInComposerWindow: window, isKey: key, hasSheet: sheet, isFocused: focused)
+        }
+        #expect(takes())
+        #expect(!takes(window: false)) // the menu bar panel, Settings, a popover
+        #expect(!takes(key: false))
+        #expect(!takes(sheet: true)) // a sheet over the chat keeps its own ⌘V
+        #expect(!takes(focused: false))
+    }
+
     // MARK: Permission chip
 
     @Test func theChipSaysTheModeAndCountsGrantsOnlyWhereTheOrbAsks() {

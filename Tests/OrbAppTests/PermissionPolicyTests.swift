@@ -220,6 +220,32 @@ struct CommandPrefixTests {
         #expect(suggestions("rm -rf ~/x").isEmpty)
         #expect(suggestions("git push origin main")[1].menuTitle == "Sempre permitir comandos git")
     }
+
+    /// A rule for a program that only wraps another would cover whatever it wraps.
+    @Test func wrappersNeverGetARule() {
+        func suggestions(_ command: String, extra: [PermissionRule] = []) -> [PermissionRule] {
+            PermissionPolicy.suggestions(for: shell(command, context: folders.context, home: folders.home), home: folders.home, extra: extra)
+        }
+        for command in ["caffeinate -i swift build", "nice -n 5 make", "xcrun simctl list", "arch -arm64 brew install x", "timeout 5 make",
+                        "gtimeout 5 make", "stdbuf -o L make", "ionice -c 3 make", "builtin cd x", "noglob ls", "watch -n 5 ls"] {
+            let program = command.split(separator: " ")[0]
+            #expect(!suggestions(command).contains(.shell(String(program))), Comment(rawValue: command))
+            // Nor when the CLI offers it.
+            #expect(!suggestions(command, extra: [.shell(String(program))]).contains(.shell(String(program))), Comment(rawValue: command))
+        }
+        #expect(suggestions("git push origin main") == [.shell("git", "push"), .shell("git")])
+    }
+
+    /// A rule saved before wrappers stopped being offered must not keep covering whatever they wrap.
+    @Test func aSavedRuleForAWrapperAloneCoversNothing() {
+        for program in ["caffeinate", "xcrun", "env", "nice", "timeout"] {
+            #expect(!covered("\(program) -i rm -rf ~/x", by: [.shell(program)]), Comment(rawValue: program))
+            #expect(!covered("\(program) make", by: [.shell(program)]), Comment(rawValue: program))
+        }
+        // A rule that names what is wrapped still works.
+        #expect(covered("xcrun simctl list", by: [.shell("xcrun", "simctl")]))
+        #expect(covered("git status", by: [.shell("git"), .shell("caffeinate")]))
+    }
 }
 
 // MARK: - Folders
@@ -543,6 +569,22 @@ struct ClaudeCodePermissionBridgeTests {
         PermissionPolicy.call(claudeCodeTool: tool, input: .object(input), workspace: folders.orb, home: folders.home)
     }
 
+    /// The Bash of a subagent keeps the folder a `cd` left it in, so its commands are not judged in the Orb's folder.
+    @Test func aSubagentsRelativeCommandsAreNotJudgedInTheOrbsFolder() {
+        func call(_ command: String, fromSubagent: Bool) -> PermissionCall {
+            PermissionPolicy.call(claudeCodeTool: "Bash", input: .object(["command": .string(command)]), workspace: folders.orb,
+                                  fromSubagent: fromSubagent, home: folders.home)
+        }
+        // In the main session `rm x.txt` is in the Orb's own folder; in a subagent nobody knows where it is.
+        #expect(call("rm x.txt", fromSubagent: false).danger == nil)
+        #expect(call("rm x.txt", fromSubagent: true).danger != nil)
+        // A listing is read-only only where the folder is known.
+        #expect(call("ls", fromSubagent: false).risk == .safe)
+        #expect(call("ls", fromSubagent: true).risk == .sensitive)
+        // Absolute paths are judged the same.
+        #expect(call("rm -rf ~", fromSubagent: true).danger != nil)
+    }
+
     @Test func toolsMapToTheSameFamiliesAsTheNativeOnes() {
         #expect(call("Bash", ["command": .string("git status")]).family == .shell)
         #expect(call("Write", ["file_path": .string("a.txt")]).family == .writeFiles)
@@ -796,5 +838,14 @@ struct ReadOnlyCommandPolicyTests {
         let looking = shell("git status && ls -la", context: folders.context, home: folders.home)
         #expect(looking.risk == .safe)
         #expect(PermissionPolicy.evaluate(mode: .readOnly, call: looking, rules: [], workspace: folders.orb, home: folders.home) == .allow)
+    }
+}
+
+
+struct PermissionModeTextTests {
+    @Test func autoModeSaysThatReadingSecretsAsksToo() {
+        #expect(PermissionMode.auto.summary.contains("Ler senhas e chaves"))
+        // The short line under the picker stays short.
+        #expect(!PermissionMode.auto.shortSummary.contains("senhas"))
     }
 }

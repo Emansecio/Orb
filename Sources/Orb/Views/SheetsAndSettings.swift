@@ -84,7 +84,7 @@ struct NewBotSheet: View {
                     Text(mode.summary)
                         .font(.caption)
                         .foregroundStyle(mode == .bypass ? Palette.warn : .secondary)
-                    TextField("Como deve funcionar", text: $identity,
+                    TextField("Como funciona", text: $identity,
                               prompt: Text("Ex.: Seja direto e me lembre de fazer pausas"), axis: .vertical)
                         .lineLimit(3...6)
                     Toggle("Na primeira conversa, me fazer perguntas", isOn: $interview)

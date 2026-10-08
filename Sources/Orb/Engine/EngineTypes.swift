@@ -425,11 +425,19 @@ enum LLMError: LocalizedError, Equatable {
     /// Whether trying the same request again can succeed: rate limits, overload, timeouts, dropped connections.
     var isRetryable: Bool {
         switch self {
-        case .http(let status, _, _): Self.retryableStatuses.contains(status)
+        // A 429 about money (OpenAI's `insufficient_quota`) is not a busy provider: waiting does not pay the bill.
+        case .http(let status, let message, _): Self.retryableStatuses.contains(status) && !(status == 429 && Self.isAboutMoney(message, status: 429))
         case .stream(let type, _): Self.retryableStreamErrors.contains(type)
         case .network(let code, _): Self.retryableNetworkCodes.contains(URLError.Code(rawValue: code))
         case .notConfigured, .contextExceeded, .invalidResponse: false
         }
+    }
+
+    /// Whether the provider turned down the key or login itself (401/403), not the model, the plan or the balance.
+    var isCredentialRefusal: Bool {
+        guard case .http(let status, let message, _) = self, status == 401 || status == 403 else { return false }
+        let lowered = message.lowercased()
+        return !Self.isAboutMoney(message, status: status) && !Self.isModelRefused(lowered) && !lowered.contains("upgrade_required")
     }
 
     static let retryableStatuses: Set<Int> = [408, 409, 429, 500, 502, 503, 504, 529]
@@ -447,7 +455,7 @@ enum LLMError: LocalizedError, Equatable {
 
     private static func describe(status: Int, message: String) -> String {
         let lowered = message.lowercased()
-        let isAboutMoney = billingHints.contains { lowered.contains($0) }
+        let isAboutMoney = Self.isAboutMoney(message, status: status)
         return switch status {
         case 403 where lowered.contains("upgrade_required"):
             // Command Code: the Go plan is the only one without API access.
@@ -459,6 +467,9 @@ enum LLMError: LocalizedError, Equatable {
         case 401 where isAboutMoney, 403 where isAboutMoney:
             // OpenCode answers a missing balance or a spent monthly limit with 401, which is not a bad key.
             "Sem saldo ou limite de gasto liberado no provedor (\(status)). Confira o saldo e o plano no console do provedor. Detalhe do provedor: \(message)"
+        case 429 where isAboutMoney:
+            // OpenAI answers an account without credit with 429 `insufficient_quota`; waiting does not help.
+            "Sem saldo ou limite de gasto liberado no provedor (429). Confira o saldo e o plano no console do provedor. Detalhe do provedor: \(message)"
         case 401, 403: "Chave ou login inválido (\(status)). Confira em Ajustes → Modelos. Detalhe do provedor: \(message)"
         case 402: "O provedor pede pagamento ou mais saldo (402). Confira seu plano. Detalhe do provedor: \(message)"
         case 429: "Você atingiu o limite de uso do provedor (429); espere um pouco ou confira seu plano. Detalhe do provedor: \(message)"
@@ -475,8 +486,18 @@ enum LLMError: LocalizedError, Equatable {
     }
 
     /// Words of a 401/403 body that say money or a spending cap, not credentials, is the problem.
-    private static let billingHints = ["insufficient balance", "no payment method", "billing", "monthly limit", "spend limit",
-                                       "spending limit", "usage exceeded"]
+    private static let billingHints = ["insufficient balance", "insufficient_quota", "exceeded your current quota", "no payment method",
+                                       "billing", "monthly limit", "spend limit", "spending limit", "usage exceeded"]
+
+    /// The narrower list for a 429. A per-minute rate limit often mentions billing too (OpenAI on an account without a
+    /// card: "add a payment method at .../billing"; Gemini: "exceeded your current quota, check your plan and billing
+    /// details" with a retry delay of seconds), and waiting is the cure there; only a spent balance or cap is not.
+    private static let billingHintsFor429 = ["insufficient_quota", "insufficient balance", "spend limit", "spending limit", "monthly limit"]
+
+    private static func isAboutMoney(_ message: String, status: Int) -> Bool {
+        let lowered = message.lowercased()
+        return (status == 429 ? billingHintsFor429 : billingHints).contains { lowered.contains($0) }
+    }
 
     /// Whether an HTTP 400 message says the prompt did not fit (providers word it differently).
     static func isContextOverflow(_ message: String) -> Bool {

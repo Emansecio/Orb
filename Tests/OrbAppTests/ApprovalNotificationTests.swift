@@ -133,8 +133,24 @@ struct ApprovalNotificationTests {
 
     @Test func escapeBelongsToATextFieldBeingEdited() {
         #expect(ApprovalShortcut.resolve(keyCode: ApprovalShortcut.escapeKey, modifiers: [], isEditingText: true) == nil)
-        // ⌘↩ answers the card even from the note field.
+        // ⌘↩ answers the card from its note field (editing, but not in the composer).
         #expect(ApprovalShortcut.resolve(keyCode: ApprovalShortcut.returnKey, modifiers: .command, isEditingText: true) == .allow)
+    }
+
+    /// With text in the main composer ⌘↩ means "stop and send" (the stop refuses the card): the card does not take it.
+    @Test func commandReturnTypedInTheComposerIsNotAnAllow() {
+        for key in [ApprovalShortcut.returnKey, ApprovalShortcut.enterKey] {
+            #expect(ApprovalShortcut.resolve(keyCode: key, modifiers: .command, isEditingText: true, isTypingInComposer: true) == nil)
+        }
+        // An empty or unfocused composer is not typing: ⌘↩ allows, and so it does from the card's note.
+        #expect(ApprovalShortcut.resolve(keyCode: ApprovalShortcut.returnKey, modifiers: .command, isEditingText: false, isTypingInComposer: false) == .allow)
+        #expect(ApprovalShortcut.resolve(keyCode: ApprovalShortcut.returnKey, modifiers: .command, isEditingText: true, isTypingInComposer: false) == .allow)
+        // Esc is unaffected by it.
+        #expect(ApprovalShortcut.resolve(keyCode: ApprovalShortcut.escapeKey, modifiers: [], isEditingText: false, isTypingInComposer: true) == .deny)
+        // Typing in the composer is editing a field that is not the note.
+        #expect(ApprovalShortcut.isTypingInComposer(isEditing: true, noteFocused: false))
+        #expect(!ApprovalShortcut.isTypingInComposer(isEditing: true, noteFocused: true))
+        #expect(!ApprovalShortcut.isTypingInComposer(isEditing: false, noteFocused: false))
     }
 
     @Test func anEmptyFocusedComposerIsNotEditingButTextOrCompositionIs() {

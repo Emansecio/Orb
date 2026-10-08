@@ -107,6 +107,27 @@ enum QuickAskReplyText {
     }
 }
 
+/// What ↩ does in the panel, by the state of the chosen Orb: the same rule as the composer's (queue while it works on
+/// your chat), and a line instead of silence when it cannot take a message (a routine holds it).
+enum QuickAskSend: Equatable {
+    case send, queue, blocked, nothing
+
+    static func action(isWorking: Bool, canSteer: Bool, isReady: Bool, hasText: Bool) -> QuickAskSend {
+        guard isReady, hasText else { return .nothing }
+        if !isWorking { return .send }
+        return canSteer ? .queue : .blocked
+    }
+
+    static func blockedNote(name: String) -> String { "\(name) está rodando uma rotina. Envie quando terminar." }
+
+    /// The panel's key hint.
+    static func hint(isWorking: Bool, canSteer: Bool) -> String {
+        let newLine = "\(CommandName.newLineKeys) nova linha"
+        if !isWorking { return "↩ envia · \(newLine)" }
+        return canSteer ? "↩ entra na fila · \(newLine)" : "Rotina rodando · \(newLine)"
+    }
+}
+
 // MARK: The panel
 
 struct QuickAskView: View {
@@ -117,6 +138,8 @@ struct QuickAskView: View {
     @State private var text = ""
     /// The Orb whose reply the panel shows (the one asked last).
     @State private var replyBotID: UUID?
+    /// Why the last ↩ did nothing (the chosen Orb is in a routine).
+    @State private var note: String?
     @FocusState private var isFocused: Bool
 
     var body: some View {
@@ -149,6 +172,13 @@ struct QuickAskView: View {
                 .padding(10)
                 .card(radius: 10)
                 .accessibilityLabel("Mensagem para \(selected?.name ?? "um Orb")")
+                .onChange(of: text) { note = nil }
+                .onChange(of: selectedID) { note = nil }
+            if let note {
+                Text(note)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.warn)
+            }
 
             if !model.isProviderReady {
                 HStack(spacing: 8) {
@@ -180,7 +210,8 @@ struct QuickAskView: View {
             HStack {
                 Button("Abrir o app") { open() }
                 Spacer()
-                Text("↩ envia · \(CommandName.newLineKeys) nova linha")
+                Text(QuickAskSend.hint(isWorking: selectedID.map(model.isWorking) ?? false,
+                                       canSteer: selectedID.map(model.canSteer) ?? false))
                     .font(.caption)
                     .foregroundStyle(Palette.muted)
             }
@@ -198,9 +229,16 @@ struct QuickAskView: View {
     }
 
     private func send() {
-        guard let id = selectedID, !model.isWorking(id), model.isProviderReady,
-              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        model.sendWhenLoaded(text, to: id)
+        guard let id = selectedID else { return }
+        switch QuickAskSend.action(isWorking: model.isWorking(id), canSteer: model.canSteer(id), isReady: model.isProviderReady,
+                                   hasText: !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
+        case .nothing: return
+        case .blocked:
+            note = QuickAskSend.blockedNote(name: model.liveBot(id)?.look.name ?? "O Orb")
+            return
+        case .queue: model.queueOutsideComposer(text, to: id)
+        case .send: model.sendWhenLoaded(text, to: id)
+        }
         model.selection = .bot(id)
         replyBotID = id
         text = ""

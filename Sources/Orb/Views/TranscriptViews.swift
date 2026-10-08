@@ -478,9 +478,11 @@ private struct NoticeLine: View {
     let id: UUID
     let text: String
     let botID: UUID
+    /// Whether the conversation has something older to summarize, read once for a notice that offers to compact.
+    @State private var canCompact = false
 
     var body: some View {
-        let actions = NoticeAction.actions(for: text)
+        let actions = NoticeAction.actions(for: text, canCompact: canCompact)
         let failure = NoticeAction.failureDetail(of: text)
         VStack(spacing: 8) {
             if let failure {
@@ -517,6 +519,10 @@ private struct NoticeLine: View {
         .padding(.horizontal, 24)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(TranscriptSpeech.notice(failure.map { "não deu certo. " + $0 } ?? text))
+        .task(id: id) {
+            guard NoticeAction.actions(for: text).contains(.compact), let input = model.contextInput(for: botID) else { return }
+            canCompact = await Task.detached { ContextReading.make(input)?.canCompact ?? false }.value
+        }
     }
 
     /// The last item of the chat, with nothing running. (Read only by notices that have an action.)
@@ -530,6 +536,8 @@ private struct NoticeLine: View {
         case .continueTurn: model.continueTurn(botID)
         case .openSettings: SettingsRouter.open(.models, using: openSettings)
         case .newConversation: model.newConversation(botID)
+        case .compact: model.compactAndRetry(botID)
+        case .openMemory: model.showMemory(of: botID)
         }
     }
 }
@@ -923,8 +931,9 @@ struct ApprovalCard: View {
         let field = window.firstResponder as? NSTextView
         let editing = ApprovalShortcut.isEditing(responderIsText: field != nil, hasText: field.map { !$0.string.isEmpty } ?? false,
                                                  hasMarkedText: field?.hasMarkedText() ?? false, noteFocused: isEditingNote)
+        let typingInComposer = ApprovalShortcut.isTypingInComposer(isEditing: editing, noteFocused: isEditingNote)
         guard let shortcut = ApprovalShortcut.resolve(keyCode: event.keyCode, modifiers: event.modifierFlags,
-                                                      isEditingText: editing) else { return false }
+                                                      isEditingText: editing, isTypingInComposer: typingInComposer) else { return false }
         press(shortcut)
         return true
     }

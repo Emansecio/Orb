@@ -5,6 +5,13 @@ import SwiftUI
 
 enum CatalogTab: Hashable {
     case installed, explore
+
+    /// ⌘F: only the catalog has a search field, so from the installed tab the page goes there (the field takes focus
+    /// when it appears).
+    static func afterFind(_ tab: CatalogTab) -> CatalogTab { .explore }
+
+    /// What VoiceOver says about a tab of the switch besides its name: the selected one is announced as such.
+    static func traits(isSelected: Bool) -> AccessibilityTraits { isSelected ? .isSelected : [] }
 }
 
 /// Pill switch at the top of a catalog screen.
@@ -20,6 +27,16 @@ struct CatalogTabBar: View {
         }
         .padding(3)
         .background(Color.white.opacity(0.06), in: .capsule)
+        .background {
+            // ⌘F on the installed tab (the explore tab's header has its own button for it).
+            if tab == .installed {
+                Button("Buscar no catálogo") { withAnimation(.snappy(duration: 0.2)) { tab = CatalogTab.afterFind(tab) } }
+                    .keyboardShortcut(AppShortcut.find)
+                    .opacity(0)
+                    .frame(width: 0, height: 0)
+                    .accessibilityHidden(true)
+            }
+        }
     }
 
     private func pill(_ value: CatalogTab, title: String, symbol: String, count: Int?) -> some View {
@@ -43,6 +60,7 @@ struct CatalogTabBar: View {
             .contentShape(.capsule)
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(CatalogTab.traits(isSelected: tab == value))
     }
 }
 

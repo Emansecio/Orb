@@ -1,7 +1,8 @@
 import SwiftUI
 import AppKit
 
-/// Keyboard answers for the newest open approval card: ⌘↩ allows, Esc denies.
+/// Keyboard answers for the newest open approval card: ⌘↩ allows, Esc denies. ⌘↩ typed in the main composer is not
+/// ours: there it stops the turn (which denies the card) and sends what was written (see `ComposerView`).
 enum ApprovalShortcut: Equatable {
     case allow, deny
 
@@ -10,12 +11,14 @@ enum ApprovalShortcut: Equatable {
     static let escapeKey: UInt16 = 53
 
     /// What a key press means for the card, or nil when it is not ours. Esc never counts while the user is editing
-    /// text: it belongs to the field (cancelling an input method's composition, leaving the note).
-    static func resolve(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, isEditingText: Bool) -> ApprovalShortcut? {
+    /// text: it belongs to the field (cancelling an input method's composition, leaving the note). ⌘↩ answers from
+    /// the card's own note field but not while something is typed in the composer (`isTypingInComposer`).
+    static func resolve(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, isEditingText: Bool,
+                        isTypingInComposer: Bool = false) -> ApprovalShortcut? {
         let held = modifiers.intersection(.deviceIndependentFlagsMask).subtracting([.numericPad, .function, .capsLock])
         switch keyCode {
         case returnKey, enterKey:
-            return held == .command ? .allow : nil
+            return held == .command && !isTypingInComposer ? .allow : nil
         case escapeKey:
             return held.isEmpty && !isEditingText ? .deny : nil
         default:
@@ -41,6 +44,9 @@ enum ApprovalShortcut: Equatable {
     static func isEditing(responderIsText: Bool, hasText: Bool, hasMarkedText: Bool, noteFocused: Bool) -> Bool {
         noteFocused || (responderIsText && (hasText || hasMarkedText))
     }
+
+    /// Whether the editing is in the main composer: a text field is being edited and it is not the card's note.
+    static func isTypingInComposer(isEditing: Bool, noteFocused: Bool) -> Bool { isEditing && !noteFocused }
 }
 
 /// Listens for keys in its window while it is on screen. `handler` returns true when it used the key.

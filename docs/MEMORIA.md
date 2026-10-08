@@ -62,14 +62,14 @@ No painel os grupos se chamam Preferências, Fatos, Procedimentos e "Conversas g
 
 | Momento | O que acontece |
 |---|---|
-| Criar o Orb | Nasce a pasta com `identidade.md` (o texto de "Como deve funcionar", se você escreveu). Com "Na primeira conversa, me fazer perguntas" (ligado por padrão), a identidade fica com `entrevista: pendente` |
+| Criar o Orb | Nasce a pasta com `identidade.md` (o texto de "Como funciona", se você escreveu). Com "Na primeira conversa, me fazer perguntas" (ligado por padrão), a identidade fica com `entrevista: pendente` |
 | Primeira conversa | Nas primeiras mensagens (até a 4ª sua) o Orb se apresenta, faz 2–4 perguntas (ou ajuda primeiro, se você já chegou pedindo algo) e guarda as respostas com `remember` (`identidade` ou `preferencia`). O chat vazio mostra o atalho "Me conheça"; o menu "Mais opções" da aba Memória tem "Fazer a entrevista de novo". A entrevista termina quando uma identidade ou preferência é guardada, ou quando uma página de sessão com resposta do Orb é salva. Uma primeira conversa sem resposta (sem rede, chave errada) não gasta a entrevista |
 | Cada mensagem | `MemoryBank.brief` monta o resumo de memória (abaixo) e o app o entrega ao modelo; uma busca por mensagem, sem processo extra |
 | Durante a conversa | `remember` guarda e `recall` busca (veja "Ferramentas") |
 | Você pede para guardar | "memorize…", "lembra que…" etc. (`MemoryIntent`, abaixo) |
 | 30 min sem mensagens, "Nova conversa", reabrir outra conversa, abrir o app, **ou quando a conversa é compactada** | O trecho ainda não salvo (`Conversation.memorySavedCount`) vira uma página em `sessoes/`. Quando o começo da conversa vira resumo para caber na janela do modelo (sozinho ou em "Compactar agora"), o que ele continha é gravado **antes**, uma vez. Execuções de rotinas não viram sessões |
 | Uma vez por dia (durante o uso) | Varredura de envelhecimento (`MemoryBank.sweep`): sessões frias são compactadas (abaixo) |
-| Apagar o Orb | O diálogo oferece **Apagar com a memória** ou **Apagar e guardar a memória** (grava o último trecho e move a pasta para `_guardadas/`; a barra lateral avisa "Memória de <Orb> guardada" com "Mostrar no Finder") |
+| Apagar o Orb | O diálogo oferece **Apagar com a memória** ou **Apagar e guardar a memória** (grava o último trecho e move a pasta para `_guardadas/`; a barra lateral avisa "Guardando a memória de <Orb>…" e, quando a pasta já foi movida, "Memória de <Orb> guardada" com "Mostrar no Finder", que abre a pasta exata) |
 
 `ORB_MEMORY_IDLE=<segundos>` troca os 30 minutos (testes ponta a ponta).
 
@@ -125,10 +125,17 @@ notas sob "## Como funcionar" e segue a mesma regra por linha. Cada texto guarda
 
 ## Pedir para guardar
 
-"Memorize…", "lembra que…", "guarda na memória…", "anota aí que…", "não esquece que…", "remember that…" (`MemoryIntent`, sem
-ligar para acentos ou caixa). O pedido precisa abrir a mensagem ou ser a última frase: um pedido no meio de um texto colado
-("Resuma este e-mail: … remember that…") é do texto, não seu. Não contam: perguntas ("você lembra que…?") e lembretes ("me
-lembra de ligar…", "não esqueça de trazer…").
+"Memorize…", "lembra que…", "lembre-se:", "guarda na memória…", "guarda aí:", "anota aí que…", "não esquece que…", "não
+esqueça:", "grava isso: …", "remember that…", "remember:", "keep this in mind", "don't forget that…" (`MemoryIntent`, sem
+ligar para acentos, caixa ou apóstrofo tipográfico). O pedido precisa abrir a mensagem ou ser a última frase: um pedido no
+meio de um texto colado ("Resuma este e-mail: … remember that…") é do texto, não seu. O verbo também precisa abrir a frase
+ou a oração (só cortesias e cumprimentos antes: "por favor", "pode", "oi", "can you"), então negação, terceira pessoa e
+infinitivo não contam ("o app não lembra que…", "função para memorizar…"). Não contam: perguntas ("você lembra que…?") e
+lembretes ("me lembra de ligar…", "não esqueça de trazer…"). Frases soltas como "guarda isso", "keep this in mind" e "salva
+isso" só valem quando terminam ali ou vêm com "na memória" ("salva isso" precisa de ":" e do conteúdo), porque "guarda isso
+no cache" e "salva isso no arquivo" são tarefas. E um "lembra que…" ou "keep in mind that…" seguido de outra frase, de ";" ou
+de ", então…" é contexto de uma tarefa, não um pedido (um "obrigada" no fim não conta como outra frase; "lembre que…" e
+"lembre-se…" não têm essa dúvida).
 
 Quando conta:
 
@@ -137,10 +144,11 @@ Quando conta:
 2. o prompt acrescenta a instrução de salvar com `remember` (no tipo certo) e confirmar em uma frase;
 3. "memorize isso" sem dizer o quê faz o modelo salvar o que veio antes; "Meu cachorro se chama Thor, memorize isso" guarda o
    que veio antes do pedido (8 caracteres ou mais);
-4. se o turno terminou bem e o modelo não salvou, o app guarda o que você disse (`O usuário pediu para lembrar: …`, como
-   fato) e escreve na conversa "Guardado na memória: …"; se não deu para saber o quê, avisa "Não deu para saber o que
-   guardar na memória. Diga, por exemplo: "memorize que …"". Isso vale também em "Só leitura", onde o `remember` do modelo
-   seria recusado: o pedido é seu.
+4. se o turno terminou bem e o modelo não salvou, o app guarda o que você disse (só o conteúdo, como fato com origem
+   "você", para que o mesmo fato salvo depois pelo modelo seja reconhecido) e escreve na conversa "Guardado na memória: …" (com o botão "Ver na memória", que abre a aba Memória do painel);
+   se não deu para saber o quê, avisa "Não deu para saber o que guardar na memória. Diga, por exemplo: "memorize que …"".
+   Isso vale também em "Só leitura", onde o `remember` do modelo seria recusado: o pedido é seu. Se você negou o cartão do
+   `remember`, o app respeita o "não" e só avisa "Não guardei na memória: você negou.".
 
 O prompt de uma rotina nunca é lido como pedido para guardar. Uma mensagem que você escreve com o Orb trabalhando e que
 contém o pedido leva a mesma instrução (e o app a trata como mensagem própria se ela só for enviada depois do turno).

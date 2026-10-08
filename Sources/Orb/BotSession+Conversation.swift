@@ -250,14 +250,25 @@ extension BotSession {
             return false
         }
         guard !saved else { return }
+        // You said no to the card for it ("remember" asks before keeping preferences): the app doesn't keep it anyway.
+        let denied = items.dropFirst(request.from).contains { item in
+            guard case .approval(let card) = item.kind, card.decision == .deny else { return false }
+            return card.toolName.hasSuffix("remember") || card.items.contains { $0.toolName.hasSuffix("remember") }
+        }
+        if denied {
+            append(.notice("Não guardei na memória: você negou."))
+            return
+        }
         guard let content = request.intent.content else {
             append(.notice("Não deu para saber o que guardar na memória. Diga, por exemplo: “memorize que …”."))
             return
         }
-        append(.notice("Guardado na memória: \(MemoryText.clip(content, 160))"))
+        append(.notice("\(NoticeAction.keptMemoryPrefix) \(MemoryText.clip(content, 160))"))
         let bank = model.memory.bank(for: id), botID = id
         Task {
-            await bank.remember("O usuário pediu para lembrar: \(content)", kind: .fato, title: content, origin: .voce)
+            // The body is what you said, as when the model saves it (who asked stays in the origin), so the same fact
+            // saved later is recognized as this one.
+            await bank.remember(content, kind: .fato, title: content, origin: .voce)
             await model.refreshMemory(botID)
         }
     }

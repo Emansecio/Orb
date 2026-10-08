@@ -33,10 +33,12 @@ enum ReadOnlyCommand {
     /// Commands that never write or run anything, whatever their options. They show names, sizes and dates only.
     private static let listing: Set<String> = [
         "pwd", "ls", "wc", "file", "stat", "du", "df", "which", "whoami", "id", "uname", "uptime", "sw_vers", "date", "basename",
-        "dirname", "realpath", "readlink", "mdfind", "mdls", "pgrep", "ps", "echo",
+        "dirname", "realpath", "readlink", "mdfind", "mdls", "pgrep", "ps", "echo", "type",
     ]
     /// Commands that print file contents: also refuse wildcards that could reach hidden or private files.
-    private static let readers: Set<String> = ["cat", "head", "tail", "grep", "egrep", "fgrep", "sort", "uniq", "cut", "nl"]
+    private static let readers: Set<String> = [
+        "cat", "head", "tail", "grep", "egrep", "fgrep", "sort", "uniq", "cut", "nl", "diff", "cmp", "shasum", "md5",
+    ]
     private static let gitSubcommands: Set<String> = [
         "status", "log", "diff", "show", "rev-parse", "blame", "ls-files", "ls-tree", "describe", "shortlog", "cat-file", "merge-base",
         "name-rev", "diff-tree", "count-objects", "grep", "remote", "branch", "tag", "stash", "config", "reflog",
@@ -44,6 +46,20 @@ enum ReadOnlyCommand {
     /// Options of git (or any command) that write a result to a file or hand it to another program.
     private static let writingOptions = ["--output", "--open-files-in-pager", "--ext-diff", "--no-index", "--upload-pack", "--exec",
                                          "--pager", "--paginate", "-O"]
+
+    /// Whether `word` is one of the long `names`, spelled out or abbreviated, with or without a value (`--out=x` for
+    /// `--output`). getopt_long and git's parse-options accept any unique prefix, so comparing exact names is not enough.
+    /// Deliberately wide: a prefix that merely could be the option is enough, since doubt only sends the line to the card.
+    static func abbreviates(_ word: String, anyOf names: [String]) -> Bool {
+        guard word.hasPrefix("--") else { return false }
+        let name = word.prefix { $0 != "=" }
+        return name.count > 2 && names.contains { $0.hasPrefix(name) }
+    }
+
+    /// Whether a group of short options (`-iO`, `-nr`) holds one of `letters`. Operands and long options are not groups.
+    private static func hasShortOption(_ words: [String], _ letters: String) -> Bool {
+        words.contains { $0.hasPrefix("-") && !$0.hasPrefix("--") && $0.dropFirst().contains { letters.contains($0) } }
+    }
 
     private static func isReadOnly(_ words: [String], directories: [URL], home: URL, sensitive: DangerousCommand.SensitiveFiles) -> Bool {
         guard let name = words.first, !name.contains("/") else { return false }
@@ -67,6 +83,12 @@ enum ReadOnlyCommand {
             return arguments.count == 1 && !arguments[0].contains(where: { "*?[".contains($0) })
         case "date":
             return !arguments.contains { $0.hasPrefix("-s") || $0 == "--set" }
+        case "command":
+            // Only the lookup (`command -v node`); otherwise it runs what follows.
+            return arguments.count > 1 && (arguments[0] == "-v" || arguments[0] == "-V")
+        case "printf":
+            // `printf -v name` assigns a shell variable.
+            return !arguments.contains { $0.hasPrefix("-v") }
         case "ps":
             // `ps eww`, `ps -E` and (on macOS) `ps -e` print the environment of every process, tokens included.
             return !arguments.contains { $0.range(of: #"^-?[A-Za-z]+$"#, options: .regularExpression) != nil && $0.contains(where: { "eE".contains($0) }) }
@@ -76,6 +98,7 @@ enum ReadOnlyCommand {
         case _ where listing.contains(name):
             return true
         case _ where readers.contains(name):
+            if name == "diff", diffMayReadFolder(arguments, directories: directories, home: home) { return false }
             return readerIsSafe(name, arguments)
         case "find":
             let writes = ["-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprint0", "-fprintf", "-fls"]
@@ -88,19 +111,31 @@ enum ReadOnlyCommand {
     }
 
     private static func readerIsSafe(_ name: String, _ arguments: [String]) -> Bool {
-        let options = arguments.prefix { $0 != "--" }.filter { $0.hasPrefix("-") && $0.count > 1 }
-        func shortCluster(_ letters: String) -> Bool { options.contains { !$0.hasPrefix("--") && $0.dropFirst().contains { letters.contains($0) } } }
+        // Every word, also after a `--`: it can be the value of the option before it (`sort -T -- -o x`), and an option after it.
+        let options = arguments.filter { $0.hasPrefix("-") && $0.count > 1 }
+        func shortCluster(_ letters: String) -> Bool { hasShortOption(options, letters) }
+        func long(_ names: [String]) -> Bool { options.contains { abbreviates($0, anyOf: names) } }
         switch name {
         case "grep", "egrep", "fgrep":
             // Recursion would walk into folders this check never looked at.
-            let recursive = options.contains(where: { $0.hasPrefix("--recursive") || $0.hasPrefix("--directories") || $0.hasPrefix("--dereference-recursive") })
-            if shortCluster("rRd") || recursive { return false }
+            if shortCluster("rRd") || long(["--recursive", "--directories", "--dereference-recursive"]) { return false }
         case "sort":
-            if shortCluster("o") || options.contains(where: { $0.hasPrefix("--output") || $0.hasPrefix("--compress-program") }) { return false }
+            if shortCluster("o") || long(["--output", "--compress-program"]) { return false }
         case "uniq":
-            // A second file operand is where uniq writes.
-            let operands = arguments.filter { !$0.hasPrefix("-") }
-            if operands.count > 1 { return false }
+            // A second operand is where uniq writes, and a lone `-` (the input) counts as one.
+            var literal = false, operands = 0
+            for word in arguments {
+                if !literal, word == "--" { literal = true; continue }
+                if literal || !word.hasPrefix("-") || word == "-" { operands += 1 }
+            }
+            if operands > 1 { return false }
+        case "diff":
+            // `-r` walks folders, `-l` and `--paginate` hand the result to `pr`, `--to-file` and `--from-file` compare
+            // a file with every operand (a folder among them).
+            if shortCluster("rl") || long(["--recursive", "--paginate", "--to-file", "--from-file"]) { return false }
+        case "shasum", "md5":
+            // `-c` reads the list of files to check from a file.
+            if shortCluster("c") || long(["--check"]) { return false }
         default:
             break
         }
@@ -114,16 +149,39 @@ enum ReadOnlyCommand {
         return true
     }
 
+    /// `diff a.txt dir` compares with `dir/a.txt`, so an operand that is a folder (or may be one: a wildcard, `~user`, the
+    /// home folder) reads a file of another name, `.netrc` or `.npmrc` among them, that no word shows.
+    private static func diffMayReadFolder(_ arguments: [String], directories: [URL], home: URL) -> Bool {
+        let homePaths = Set([home.standardizedFileURL.path, home.standardizedFileURL.resolvingSymlinksInPath().path])
+        var literal = false
+        for word in arguments {
+            if !literal, word == "--" { literal = true; continue }
+            if !literal, word.hasPrefix("-") { continue }
+            if word == "-" { continue }
+            if word.contains(where: { "*?[".contains($0) }) { return true }
+            guard let urls = DangerousCommand.directory(afterCD: word, from: directories, home: home) else { return true }
+            for url in urls {
+                var isFolder: ObjCBool = false
+                if homePaths.contains(url.path) || (FileManager.default.fileExists(atPath: url.path, isDirectory: &isFolder) && isFolder.boolValue) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
     private static func gitIsReadOnly(_ arguments: [String]) -> Bool {
         var rest = arguments[...]
         // `git -C dir status` is the one global option worth allowing; `-c` could set a pager or a hook.
         if rest.first == "-C", rest.count >= 2 { rest = rest.dropFirst(2) }
         guard let sub = rest.first, gitSubcommands.contains(sub) else { return false }
         let tail = Array(rest.dropFirst())
-        if tail.contains(where: { word in writingOptions.contains { word == $0 || word.hasPrefix($0 + "=") || ($0 == "-O" && word.hasPrefix("-O")) } }) {
+        if tail.contains(where: { word in writingOptions.contains { $0 == "-O" ? word.hasPrefix("-O") : abbreviates(word, anyOf: [$0]) } }) {
             return false
         }
         let options = tail.prefix { $0 != "--" }.filter { $0.hasPrefix("-") }
+        // `git grep -iOcmd` is `-O` too: the pager runs through `sh -c`. Also after a `--` that is the value of `-e`.
+        if sub == "grep", hasShortOption(tail.filter { $0.hasPrefix("-") }, "O") { return false }
         switch sub {
         case "remote":
             // Never `remote show <url>`: it asks that address over the network, a way to send data out.

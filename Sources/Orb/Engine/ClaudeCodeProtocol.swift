@@ -32,8 +32,6 @@ struct ClaudeCodePermissionRequest: Equatable, Sendable {
     var toolName: String
     var input: JSONValue
     var toolUseID: String?
-    /// Claude Code's own explanation, when it sends one.
-    var reason: String?
     /// Standing rules Claude Code suggests for this request (`permission_suggestions`), as far as Orb has an
     /// equivalent: command prefixes, sites, folders and connector tools.
     var suggestions: [PermissionRule] = []
@@ -133,10 +131,8 @@ struct ClaudeCodeParser {
         guard subtype == "can_use_tool", let tool = request["tool_name"]?.string else {
             return [.unsupportedRequest(requestID: id, subtype: subtype)]
         }
-        let reason = [request["decision_reason"], request["description"], request["title"]]
-            .compactMap { $0?.string }.first { !$0.isEmpty }
         return [.permission(ClaudeCodePermissionRequest(requestID: id, toolName: tool, input: request["input"] ?? .object([:]),
-                                                         toolUseID: request["tool_use_id"]?.string, reason: reason,
+                                                         toolUseID: request["tool_use_id"]?.string,
                                                          suggestions: Self.rules(fromSuggestions: request["permission_suggestions"])))]
     }
 
@@ -313,7 +309,7 @@ enum ClaudeCodeTools {
     static func kind(_ name: String) -> ToolCall.Kind {
         switch name {
         case "Bash": .shell
-        case "Read", "LS", "Edit", "Write", "MultiEdit", "NotebookEdit": .file
+        case "Read", "LS", "Edit", "Write", "MultiEdit", "NotebookEdit", "NotebookRead": .file
         case "Glob", "Grep": .search
         case "WebFetch", "WebSearch": .browser
         default:
@@ -336,6 +332,15 @@ enum ClaudeCodeTools {
         case "Glob", "Grep": return ("Procurando arquivos", input["pattern"]?.string ?? "")
         case "WebFetch": return ("Lendo página", input["url"]?.string ?? "")
         case "WebSearch": return ("Pesquisando na web", input["query"]?.string ?? "")
+        case "NotebookRead": return ("Lendo caderno", path)
+        case "TodoWrite":
+            // The step under way, not the whole list as JSON.
+            let todos = input["todos"]?.array ?? []
+            let current = todos.first { $0["status"]?.string == "in_progress" }
+            return ("Atualizando a lista de tarefas", current?["activeForm"]?.string ?? current?["content"]?.string ?? "")
+        case "Task", "Agent": return ("Delegando a um subagente", input["description"]?.string ?? "")
+        case "ExitPlanMode": return ("Apresentando o plano", String((input["plan"]?.string ?? "").prefix(300)))
+        case "Skill": return ("Usando uma habilidade", input["skill"]?.string ?? input["command"]?.string ?? "")
         default:
             let arguments = input == .object([:]) ? "" : " " + input.jsonString
             if name.hasPrefix("mcp__") {
@@ -344,7 +349,7 @@ enum ClaudeCodeTools {
                 let tool = parts.dropFirst().joined(separator: "__")
                 return ("Usando \(parts[0])", String((tool + arguments).prefix(300)))
             }
-            return (name, String(arguments.dropFirst().prefix(300)))
+            return ("Usando \(name)", String(arguments.dropFirst().prefix(300)))
         }
     }
 }

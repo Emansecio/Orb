@@ -45,7 +45,7 @@ struct ClaudeCodeParserTests {
         let ask = #"{"type":"control_request","request_id":"req_7","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"rm -rf build"},"permission_suggestions":null,"blocked_path":null,"tool_use_id":"toolu_3","decision_reason":"Comando que apaga arquivos"}}"#
         #expect(parser.parse(ask) == [.permission(ClaudeCodePermissionRequest(
             requestID: "req_7", toolName: "Bash", input: .object(["command": .string("rm -rf build")]),
-            toolUseID: "toolu_3", reason: "Comando que apaga arquivos"))])
+            toolUseID: "toolu_3"))])
         #expect(parser.parse(#"{"type":"control_request","request_id":"req_8","request":{"subtype":"hook_callback","callback_id":"hook_0"}}"#)
                 == [.unsupportedRequest(requestID: "req_8", subtype: "hook_callback")])
         #expect(parser.parse(#"{"type":"control_response","response":{"subtype":"success","request_id":"req_1_abcd","response":{}}}"#)
@@ -201,6 +201,24 @@ struct ClaudeCodePolicyTests {
         #expect(mcp.detail == #"get_issue {"id":3}"#)
     }
 
+    @Test func claudeCodesOwnToolsGetPortugueseTitles() {
+        let todos = JSONValue.object(["todos": .array([
+            .object(["content": .string("Escrever testes"), "status": .string("completed"), "activeForm": .string("Escrevendo testes")]),
+            .object(["content": .string("Rodar a suíte"), "status": .string("in_progress"), "activeForm": .string("Rodando a suíte")]),
+        ])])
+        #expect(ClaudeCodeTools.summary("TodoWrite", todos) == ("Atualizando a lista de tarefas", "Rodando a suíte"))
+        #expect(ClaudeCodeTools.summary("TodoWrite", .object([:])).title == "Atualizando a lista de tarefas")
+        for name in ["Task", "Agent"] {
+            #expect(ClaudeCodeTools.summary(name, .object(["description": .string("Procurar usos")])) == ("Delegando a um subagente", "Procurar usos"))
+        }
+        #expect(ClaudeCodeTools.summary("ExitPlanMode", .object(["plan": .string("1. Fazer")])) == ("Apresentando o plano", "1. Fazer"))
+        #expect(ClaudeCodeTools.summary("Skill", .object(["skill": .string("pdf")])) == ("Usando uma habilidade", "pdf"))
+        #expect(ClaudeCodeTools.summary("NotebookRead", .object(["notebook_path": .string("/a.ipynb")])) == ("Lendo caderno", "/a.ipynb"))
+        #expect(ClaudeCodeTools.kind("NotebookRead") == .file)
+        // A tool this version does not know is named in Portuguese context, not shown bare.
+        #expect(ClaudeCodeTools.summary("FuturoTool", .object(["a": .number(1)])) == ("Usando FuturoTool", #"{"a":1}"#))
+    }
+
     @Test func macToolsOfTheOrbServerGetPortugueseTitles() {
         let prefix = ClaudeCodeTools.memoryPrefix
         // Same titles as the native tools; the kind comes from the tool itself.
@@ -337,6 +355,98 @@ struct ClaudeCodePolicyTests {
             #expect(disallowed(mode).contains("Read(~/.aws/**)"))
         }
         #expect(disallowed(.bypass).isEmpty)
+    }
+
+    @Test func theProcessKeepsBashInTheProjectFolderAndTheTurnKeepsItsEnvironment() {
+        var turn = ClaudeCodeTurn(bot: Bot(name: "Atlas", role: "", orb: OrbConfig()), executable: URL(fileURLWithPath: "/bin/claude"),
+                                  model: nil, system: "s", prompt: "oi", sessionID: nil, environment: ["PATH": "/p"])
+        #expect(turn.processEnvironment == ["PATH": "/p", "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1"])
+        turn.environment["CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR"] = "0" // the policy depends on it: ours wins
+        #expect(turn.processEnvironment["CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR"] == "1")
+    }
+
+    private func mcpTool(_ config: MCPServerConfig, _ name: String, _ annotations: MCPToolAnnotations) -> MCPTool {
+        var tool = MCPTool(serverName: config.name, remote: ToolSpec(name: name, description: "", parameters: .schema([:])),
+                           connection: MCPConnection(config: config), annotations: annotations)
+        tool.serverID = config.id
+        return tool
+    }
+
+    @Test func destructiveConnectorToolsAreKeyedLikeTheCLIsNames() {
+        let github = MCPServerConfig(name: "GitHub", command: "x"), meu = MCPServerConfig(name: "Meu Server", command: "x")
+        let found = ClaudeCodeTurn.destructiveConnectors([
+            mcpTool(github, "delete_repository", MCPToolAnnotations(destructive: true)),
+            mcpTool(meu, "apagar-tudo", MCPToolAnnotations(destructive: true)),
+            mcpTool(github, "list_issues", MCPToolAnnotations(readOnly: true)),
+        ], cliNames: ClaudeCodeTurn.mcpNames([github, meu]))
+        #expect(Set(found.keys) == ["github__delete_repository", "meu_server__apagar_tudo"])
+        // The key is what the policy derives from the CLI's tool name.
+        #expect(PermissionPolicy.connectorKey("mcp__meu-server__apagar-tudo") == "meu_server__apagar_tudo")
+        #expect(found["github__delete_repository"] == "o conector marcou esta ferramenta como destrutiva")
+    }
+
+    /// The map is keyed by the name the CLI is given in `--mcp-config` (ASCII, with `-2` for a repeated name), not by the
+    /// connector's own, or the tool of an accented or repeated connector would run without a card.
+    @Test func destructiveToolsAreKeyedByTheNameInTheConfigForAccentedAndRepeatedConnectors() throws {
+        let agenda = MCPServerConfig(name: "Calendário", command: "x")
+        let first = MCPServerConfig(name: "GitHub", command: "x"), second = MCPServerConfig(name: "github", command: "y")
+        let servers = [agenda, first, second]
+        let names = ClaudeCodeTurn.mcpNames(servers)
+        #expect(names[agenda.id] == "calend-rio" && names[first.id] == "github" && names[second.id] == "github-2")
+        let config = try #require(ClaudeCodeTurn.mcpConfig(servers))
+        guard case .object(let entries)? = config["mcpServers"] else { Issue.record("no servers"); return }
+        #expect(Set(entries.keys) == ["calend-rio", "github", "github-2"])
+
+        let destructive = MCPToolAnnotations(destructive: true)
+        let found = ClaudeCodeTurn.destructiveConnectors([
+            mcpTool(agenda, "apagar_evento", destructive), mcpTool(first, "x", destructive), mcpTool(second, "x", destructive),
+        ], cliNames: names)
+        // What the policy derives from the tool names the CLI really uses.
+        for cli in ["mcp__calend-rio__apagar_evento", "mcp__github__x", "mcp__github-2__x"] {
+            #expect(found[PermissionPolicy.connectorKey(cli)] != nil, Comment(rawValue: cli))
+        }
+        #expect(found.count == 3)
+    }
+
+    @Test func connectorsWithNoToolsInTheAppAreUnverified() {
+        let listed = MCPServerConfig(name: "GitHub", command: "x"), silent = MCPServerConfig(name: "Calendário", command: "x")
+        let names = ClaudeCodeTurn.mcpNames([listed, silent])
+        let tools: [any AgentTool] = [mcpTool(listed, "list_issues", MCPToolAnnotations(readOnly: true))]
+        let unverified = ClaudeCodeTurn.unverifiedConnectors([listed.id, silent.id], tools: tools, cliNames: names)
+        #expect(unverified == [PermissionPolicy.connectorKey("calend-rio") + "__"])
+        #expect(PermissionPolicy.connectorKey("mcp__calend-rio__apagar_evento").hasPrefix(try! #require(unverified.first)))
+    }
+
+    @Test func aDeadOwnersConnectorConfigGoesAndALiveOwnersStays() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("owned-mcp-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let me = ProcessInfo.processInfo.processIdentifier
+        let alive = folder.appendingPathComponent("orb-mcp-p\(me)-A.json"), dead = folder.appendingPathComponent("orb-mcp-p2000000000-B.json")
+        let nameless = folder.appendingPathComponent("orb-mcp-C.json")
+        for url in [alive, dead, nameless] { try Data("{}".utf8).write(to: url) }
+        // Old enough to be stale by age: only the one with no owner in its name goes by it.
+        let long = Date(timeIntervalSinceNow: -3600)
+        for url in [alive, dead, nameless] { try FileManager.default.setAttributes([.modificationDate: long], ofItemAtPath: url.path) }
+        #expect(ClaudeCodeEngine.removeStaleMCPConfigs(in: folder) == 2)
+        #expect(Set(try FileManager.default.contentsOfDirectory(atPath: folder.path)) == [alive.lastPathComponent])
+    }
+
+    @Test func staleConnectorConfigsAreRemovedOnlyWhenOld() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("stale-mcp-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        // Names without a process (older versions) go by age.
+        let old = folder.appendingPathComponent("orb-mcp-A.json"), fresh = folder.appendingPathComponent("orb-mcp-B.json")
+        let other = folder.appendingPathComponent("outro.json"), notes = folder.appendingPathComponent("orb-mcp-notes.txt")
+        for url in [old, fresh, other, notes] { try Data("{}".utf8).write(to: url) }
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -3600)], ofItemAtPath: old.path)
+        #expect(ClaudeCodeEngine.removeStaleMCPConfigs(in: folder) == 1)
+        let left = Set(try FileManager.default.contentsOfDirectory(atPath: folder.path))
+        #expect(left == ["orb-mcp-B.json", "outro.json", "orb-mcp-notes.txt"])
+        // Everything of ours goes once it is old enough, whatever its name after the prefix.
+        #expect(ClaudeCodeEngine.removeStaleMCPConfigs(in: folder, now: .now.addingTimeInterval(600)) == 1)
+        #expect(ClaudeCodeEngine.removeStaleMCPConfigs(in: folder.appendingPathComponent("nao-existe")) == 0)
     }
 
     @Test func connectorsBecomeAnMCPConfig() throws {
@@ -490,6 +600,63 @@ struct ClaudeCodeTranscriptTests {
         let ended = crashed.endedEarly(details: "error: unknown option")
         guard case .toolFinished(_, .failed, _) = ended.first, case .failed(let why) = ended.last else { Issue.record("expected close + failure"); return }
         #expect(why.contains("unknown option"))
+    }
+
+    /// Errors people hit most with a plan (the limit, the overload, billing) are told in Portuguese, the CLI's words last.
+    @Test func commonFailuresAreToldInPortuguese() throws {
+        func failure(_ message: String, apiError: String? = nil) -> String {
+            var transcript = ClaudeCodeTranscript(isResuming: false)
+            _ = transcript.apply(.started(sessionID: "s"))
+            if let apiError { _ = transcript.apply(.apiError(apiError)) }
+            guard case .failed(let text) = transcript.apply(.result(ClaudeCodeResult(isError: true, message: message, sessionID: "s"))).last
+            else { Issue.record("expected failure"); return "" }
+            return text
+        }
+        let limit = failure("Claude AI usage limit reached|1759874400", apiError: "rate_limit")
+        #expect(limit.hasPrefix("Você chegou ao limite de uso do seu plano Claude."))
+        #expect(!limit.contains("|1759874400") && limit.contains("por volta de") && limit.hasSuffix("Detalhe do Claude Code: Claude AI usage limit reached"))
+        // A limit of the conversation is not the plan's, but "5-hour limit reached" is.
+        #expect(failure("Context limit reached") == "Context limit reached")
+        #expect(failure("Prompt is too long: token limit reached") == "Prompt is too long: token limit reached")
+        #expect(failure("5-hour limit reached").hasPrefix("Você chegou ao limite de uso do seu plano Claude."))
+        // Without the epoch, or recognised only by its words.
+        let plain = failure("You've hit your limit")
+        #expect(plain.hasPrefix("Você chegou ao limite") && !plain.contains("por volta de"))
+        #expect(failure(#"API Error: 529 {"type":"error","error":{"type":"overloaded_error"}}"#).hasPrefix("O serviço da Anthropic está instável"))
+        #expect(failure("Internal error", apiError: "server_error").hasPrefix("O serviço da Anthropic está instável"))
+        #expect(failure("Credit balance too low", apiError: "billing_error").hasPrefix("Há um problema de cobrança"))
+        #expect(failure("error_during_execution") == "O Claude Code encerrou com erro (error_during_execution).")
+        // Anything else is still shown as the CLI said it.
+        #expect(failure("Something odd happened") == "Something odd happened")
+        // The notice's actions only look at the app's own sentence, so a limit offers "Tentar de novo", not Ajustes.
+        #expect(NoticeAction.actions(for: NoticeAction.failurePrefix + limit) == [.retry])
+    }
+
+    /// An error that passed (the CLI went on after it) does not describe a later, different failure.
+    @Test func aPassingAPIErrorDoesNotColourTheFinalFailure() {
+        func final(_ events: [ClaudeCodeMessage]) -> String {
+            var transcript = ClaudeCodeTranscript(isResuming: false)
+            for event in events { _ = transcript.apply(event) }
+            guard case .failed(let text) = transcript.apply(.result(ClaudeCodeResult(isError: true, message: "error_max_turns", sessionID: "s"))).last
+            else { Issue.record("expected failure"); return "" }
+            return text
+        }
+        #expect(final([.started(sessionID: "s"), .apiError("server_error"), .text("Voltei."), .toolUse(id: "t", name: "Bash", input: .object([:]))])
+            == "O Claude Code encerrou com erro (error_max_turns).")
+        #expect(final([.started(sessionID: "s"), .text("Vou."), .apiError("server_error")]).hasPrefix("O serviço da Anthropic está instável"))
+    }
+
+    @Test func theResetTimeIsShownInLocalTime() throws {
+        let utc = try #require(TimeZone(identifier: "UTC"))
+        let resets = 1759874400.0 // 2025-10-07 22:00 UTC
+        let now = Date(timeIntervalSince1970: resets - 3600)
+        let sameDay = ClaudeCodeTranscript.failureText("usage limit reached|1759874400", apiError: nil, now: now, timeZone: utc)
+        #expect(sameDay.contains("por volta de 22:00."))
+        let later = ClaudeCodeTranscript.failureText("usage limit reached|1759874400", apiError: nil, now: now.addingTimeInterval(-86_400 * 3), timeZone: utc)
+        #expect(later.contains("por volta de 07/10 às 22:00."))
+        let saoPaulo = try #require(TimeZone(identifier: "America/Sao_Paulo"))
+        #expect(ClaudeCodeTranscript.failureText("usage limit reached|1759874400", apiError: nil, now: now, timeZone: saoPaulo)
+            .contains("por volta de 19:00."))
     }
 
     @Test func claudeCodeLearnsWhenTheInterfaceToolsAreHeldBack() {

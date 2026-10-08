@@ -97,7 +97,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
     /// Returns when the Orb has no turn: closing a turn starts the next queued routine in the same step, so there
     /// is no moment in between where it looks idle.
     @MainActor private func waitUntilIdle(_ model: AppModel, _ botID: UUID) async {
-        await waitUntil("the Orb to finish its turn") { !model.isWorking(botID) && model.turns[botID] == nil }
+        await waitUntil("the Orb to finish its turn") { !model.isWorking(botID) && model.turns[botID] == nil && !model.isStartingRoutine }
     }
 
     private func notices(_ items: [TranscriptItem]) -> [String] {
@@ -113,6 +113,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         let before = model.transcript(bot.id)
 
         model.runRoutine(routine.id)
+        await model.routineStarted()
         #expect(model.isWorking(bot.id))
         #expect(model.transcript(bot.id).count == before.count) // the chat shows your conversation while it runs
         await waitUntilIdle(model, bot.id)
@@ -145,6 +146,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
     @Test @MainActor func theRunIsRecordedInTheRoutinesHistory() async throws {
         let (model, bot, routine) = setUp()
         model.runRoutine(routine.id)
+        await model.routineStarted()
         await waitUntilIdle(model, bot.id)
 
         let saved = try #require(model.routines.first)
@@ -161,6 +163,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         let (model, bot, routine) = setUp(stub)
         for _ in 0..<(Routine.keptRuns + 2) {
             model.runRoutine(routine.id)
+            await model.routineStarted()
             await waitUntilIdle(model, bot.id)
         }
         #expect(model.routines[0].runs.count == Routine.keptRuns)
@@ -185,6 +188,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         let stub = StubModel()
         let (model, bot, routine) = setUp(stub)
         model.runRoutine(routine.id)
+        await model.routineStarted()
         await waitUntilIdle(model, bot.id)
 
         let sent = try #require(await stub.calls.received.first)
@@ -213,6 +217,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(chatCall.contains { text($0).contains("Getting to know the user") })
 
         model.runRoutine(routine.id)
+        await model.routineStarted()
         await waitUntilIdle(model, bot.id)
         let routineCall = try #require(await stub.calls.received.last)
         #expect(!routineCall.contains { text($0).contains("Getting to know the user") })
@@ -235,6 +240,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(model.permissionState(of: bot.id)?.mode == .ask)
 
         model.runRoutine(routine.id)
+        await model.routineStarted()
         #expect(model.permissionState(of: bot.id)?.mode == .readOnly) // what the engine reads at every tool call
         await waitUntilIdle(model, bot.id)
 
@@ -246,6 +252,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         let (model, bot, routine) = setUp()
         model.update(bot.id) { $0.permissionMode = .auto }
         model.runRoutine(routine.id)
+        await model.routineStarted()
         #expect(model.permissionState(of: bot.id)?.mode == .auto)
         await waitUntilIdle(model, bot.id)
     }
@@ -271,7 +278,9 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(model.send("pergunta", to: bot.id))
 
         model.runRoutine(routine.id)
+        await model.routineStarted()
         model.runRoutine(routine.id) // due again on the next check: still one
+        await model.routineStarted()
         #expect(model.queuedRoutines == [routine.id])
         #expect(model.isRoutineQueued(routine.id) && !model.isRoutineRunning(routine.id))
         #expect(model.routines[0].runs.isEmpty)
@@ -294,7 +303,9 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         model.routines.append(second)
 
         model.runRoutine(first.id)
+        await model.routineStarted()
         model.runRoutine(second.id)
+        await model.routineStarted()
         #expect(model.queuedRoutines == [second.id])
         await waitUntilIdle(model, bot.id)
 
@@ -308,6 +319,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(model.send("pergunta", to: bot.id))
         let question = try #require(model.turns[bot.id])
         model.runRoutine(routine.id)
+        await model.routineStarted()
         #expect(model.queuedRoutines.count == 1)
 
         model.deleteBot(bot.id)
@@ -320,12 +332,75 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
     @Test @MainActor func deletingARoutineRemovesItFromTheQueueAndItsConversation() async throws {
         let (model, bot, routine) = setUp()
         model.runRoutine(routine.id)
+        await model.routineStarted()
         await waitUntilIdle(model, bot.id)
         #expect(store.readRoutineConversation(routine: routine.id, for: bot.id).value != nil)
 
         model.deleteRoutine(routine.id)
         #expect(model.routines.isEmpty)
         #expect(store.readRoutineConversation(routine: routine.id, for: bot.id).value == nil)
+    }
+
+    // MARK: Reading its conversation
+
+    /// Holds the writer with a save of the routine's conversation behind it, so reading that conversation has to wait.
+    @MainActor private func holdRoutineConversation(_ model: AppModel, _ bot: Bot, _ routine: Routine) -> DispatchSemaphore {
+        let release = DispatchSemaphore(value: 0)
+        store.stallWriter(until: release)
+        store.saveRoutineConversation(chatWith("antiga"), routine: routine.id, for: bot.id)
+        return release
+    }
+
+    @Test @MainActor func aRoutineWaitsForItsConversationWithoutBlockingTheMainThread() async throws {
+        let gate = Gate()
+        let (model, bot, routine) = setUp(StubModel(gate: gate))
+        let release = holdRoutineConversation(model, bot, routine)
+        defer { release.signal() }
+
+        model.runRoutine(routine.id)
+        try await Task.sleep(for: .milliseconds(100)) // the main thread kept running while the read waited
+        #expect(model.isStartingRoutine && !model.isWorking(bot.id) && model.session(bot.id).routineID == nil)
+        // A message sent meanwhile gets the Orb; the routine, as one that came due while it was busy, waits for it.
+        #expect(model.send("pergunta", to: bot.id))
+        release.signal()
+        await model.routineStarted()
+        #expect(model.isRoutineQueued(routine.id) && !model.isRoutineRunning(routine.id))
+        #expect(model.session(bot.id).routineID == nil)
+
+        await gate.open()
+        await waitUntilIdle(model, bot.id)
+        #expect(model.routines[0].runs.count == 1 && model.queuedRoutines.isEmpty)
+    }
+
+    @Test @MainActor func aRoutineAskedTwiceWhileItsConversationIsReadRunsOnce() async throws {
+        let stub = StubModel()
+        let (model, bot, routine) = setUp(stub)
+        let release = holdRoutineConversation(model, bot, routine)
+        defer { release.signal() }
+
+        model.runRoutine(routine.id)
+        model.runRoutine(routine.id) // "Rodar agora" twice
+        #expect(model.queuedRoutines.isEmpty)
+        release.signal()
+        await model.routineStarted()
+        await waitUntilIdle(model, bot.id)
+        #expect(model.routines[0].runs.count == 1)
+        #expect(await stub.calls.count == 1)
+    }
+
+    @Test @MainActor func aRoutineDeletedWhileItsConversationIsReadNeverRuns() async throws {
+        let stub = StubModel()
+        let (model, bot, routine) = setUp(stub)
+        let release = holdRoutineConversation(model, bot, routine)
+        defer { release.signal() }
+
+        model.runRoutine(routine.id)
+        model.deleteRoutine(routine.id)
+        release.signal()
+        await model.routineStarted()
+        #expect(model.routines.isEmpty && !model.isWorking(bot.id) && model.session(bot.id).routineID == nil)
+        #expect(model.session(bot.id).parkedChat == nil)
+        #expect(await stub.calls.count == 0)
     }
 
     // MARK: Your chat is safe
@@ -335,6 +410,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         let stub = StubModel(gate: gate)
         let (model, bot, routine) = setUp(stub)
         model.runRoutine(routine.id)
+        await model.routineStarted()
         #expect(model.isRoutineRunning(routine.id))
         await waitForModelCalls(stub)
 
@@ -352,6 +428,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
     @Test @MainActor func aRoutineThatFailsIsReportedWithItsReason() async throws {
         let (model, bot, routine) = setUp(StubModel(failure: LLMError.notConfigured))
         model.runRoutine(routine.id)
+        await model.routineStarted()
         await waitUntilIdle(model, bot.id)
 
         let run = try #require(model.routines[0].runs.first)
@@ -360,13 +437,14 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(model.transcript(bot.id).count == 3)
     }
 
-    @Test @MainActor func aRoutineWithoutAModelDoesNotRunAndLeavesTheChatAlone() throws {
+    @Test @MainActor func aRoutineWithoutAModelDoesNotRunAndLeavesTheChatAlone() async throws {
         let (model, bot, routine) = setUp()
         model.providers = []
         model.defaultModel = ""
         let before = model.transcript(bot.id)
 
         model.runRoutine(routine.id)
+        await model.routineStarted()
 
         #expect(!model.isWorking(bot.id) && model.turns[bot.id] == nil)
         #expect(model.transcript(bot.id).count == before.count)
@@ -381,6 +459,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         let stub = StubModel(gate: gate)
         let (model, bot, routine) = setUp(stub)
         model.runRoutine(routine.id)
+        await model.routineStarted()
         await waitForModelCalls(stub)
 
         model.newConversation(bot.id)
@@ -401,6 +480,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         let stub = StubModel(gate: gate)
         let (model, bot, routine) = setUp(stub)
         model.runRoutine(routine.id)
+        await model.routineStarted()
         await waitForModelCalls(stub)
         model.saveNow() // as on quit
         store.flush()
@@ -419,6 +499,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         let (model, bot, routine) = setUp(StubModel(gate: first, laterGate: later))
         #expect(model.send("pergunta do usuário", to: bot.id))
         model.runRoutine(routine.id)
+        await model.routineStarted()
         await first.open()
         await waitUntil("the routine to take the Orb") { model.isRoutineRunning(routine.id) }
         #expect(model.isRoutineRunning(routine.id)) // the routine took the Orb the moment the question was answered
@@ -443,6 +524,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         model.bots.append(other)
         #expect(model.send("pergunta", to: bot.id))
         model.runRoutine(routine.id)
+        await model.routineStarted()
         #expect(model.queuedRoutines == [routine.id])
 
         model.routines[0].botID = other.id
@@ -462,6 +544,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         let (model, bot, routine) = setUp(stub)
         #expect(model.send("pergunta", to: bot.id))
         model.runRoutine(routine.id)
+        await model.routineStarted()
         #expect(model.isRoutineQueued(routine.id))
 
         model.routines[0].setEnabled(false)
@@ -481,6 +564,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         let (model, bot, routine) = setUp(folder: folder)
 
         model.runRoutine(routine.id)
+        await model.routineStarted()
         await waitUntilIdle(model, bot.id)
 
         let run = try #require(model.routines[0].runs.first)
@@ -503,6 +587,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         model.homeFolder = home
 
         model.runRoutine(routine.id)
+        await model.routineStarted()
         await waitUntilIdle(model, bot.id)
 
         #expect(model.routines[0].runs.first?.succeeded == true)
@@ -532,6 +617,13 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(RoutineRun.firstLine(of: "**Tudo certo** hoje\nmais") == "Tudo certo hoje")
         #expect(RoutineRun.firstLine(of: "   \n\n") == nil && RoutineRun.firstLine(of: nil) == nil)
         #expect((RoutineRun.firstLine(of: String(repeating: "a", count: 500))?.count ?? 0) <= RoutineRun.summaryLimit)
+    }
+
+    @Test func aBannerShowsTheStartOfAReplyOnOneLineWithoutMarkdown() {
+        #expect(RoutineRun.preview(of: "## Resumo\n\n**Tudo certo** hoje\n- item um") == "Resumo Tudo certo hoje item um")
+        #expect(RoutineRun.preview(of: "Feito.") == "Feito.")
+        let long = RoutineRun.preview(of: String(repeating: "palavra ", count: 100))
+        #expect(long.count <= 180 && long.hasSuffix("…") && !long.contains("\n"))
     }
 
     @Test func aNewRunKeepsTheTranscriptButStartsTheModelFromScratch() {

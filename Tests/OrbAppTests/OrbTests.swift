@@ -130,6 +130,44 @@ struct OrbTests {
         }
     }
 
+    @Test func anInterruptedBlendContinuesFromWhatWasOnScreen() {
+        let traits = OrbTemperament.Traits()
+        // A quick tool between two thoughts, a short sentence, a reaction cut by the next change: whenever the
+        // second change lands inside the first one's crossover, the body must not jump.
+        let chains: [[OrbActivity]] = [[.thinking, .reading, .thinking], [.idle, .speaking, .idle], [.thinking, .typing, .happy],
+                                       [.sleepy, .waiting, .searching, .idle]]
+        let eps = 1e-4
+        for chain in chains {
+            for gap in [0.03, 0.1, 0.2, 0.34] {
+                var blend = OrbActivityBlend(chain[0])
+                var time = 5.0
+                for next in chain.dropFirst() {
+                    let before = blend.motion(at: time - eps, body: time - eps, traits: traits)
+                    blend.change(to: next, at: time, body: time, traits: traits)
+                    let after = blend.motion(at: time + eps, body: time + eps, traits: traits)
+                    let label = "\(chain) at \(gap) s, into \(next)"
+                    #expect(abs(after.tilt - before.tilt) < 0.3, "tilt, \(label)")
+                    #expect(abs(after.lift - before.lift) < 0.003, "lift, \(label)")
+                    #expect(abs(after.squash - before.squash) < 0.005, "squash, \(label)")
+                    #expect(abs(after.shake - before.shake) < 0.003, "shake, \(label)")
+                    #expect(abs(after.glow - before.glow) < 0.02, "glow, \(label)")
+                    time += gap
+                }
+            }
+        }
+    }
+
+    @Test func aFinishedBlendLandsOnTheShownActivity() {
+        let traits = OrbTemperament.Traits()
+        var blend = OrbActivityBlend(.thinking)
+        blend.change(to: .reading, at: 1, body: 1, traits: traits)
+        blend.change(to: .thinking, at: 1.1, body: 1.1, traits: traits)
+        let end = 1.1 + OrbActivityBlend.duration
+        #expect(!blend.isBlending(at: end))
+        #expect(blend.motion(at: end, body: end, traits: traits) == OrbActivity.thinking.motion(at: end, elapsed: end - 1.1, traits: traits))
+        #expect(blend.progress(at: 1.1) == 0 && blend.progress(at: end) == 1)
+    }
+
     @Test func bounceBlendsSquashIntoStretch() {
         #expect(abs(OrbActivity.bounce(0, squash: 0.06, stretch: 0.02) - 0.06) < 1e-9)
         #expect(abs(OrbActivity.bounce(0.3, squash: 0.06, stretch: 0.02) + 0.02) < 1e-9)

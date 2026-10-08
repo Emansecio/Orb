@@ -24,18 +24,28 @@ actor StdioTransport: MCPTransport {
     private var buffer = Data()
     private var stderrTail = Data()
 
-    init(config: MCPServerConfig) { self.config = config }
+    private let shell: ShellEnvironment
+
+    init(config: MCPServerConfig, shell: ShellEnvironment = .shared) {
+        self.config = config
+        self.shell = shell
+    }
 
     deinit { process?.terminate() }
 
     func open(receive: @escaping @Sendable (JSONValue) async -> Void,
-              closed: @escaping @Sendable (Error) async -> Void) throws {
+              closed: @escaping @Sendable (Error) async -> Void) async throws {
         self.closed = closed
+        // The user's Terminal environment, so `npx`/`uvx` installed through `.zshrc` (nvm, fnm, Volta) are found
+        // when the app is opened from the Finder, as for commands and for Claude Code.
+        let resolved = await shell.resolved()
+        guard self.closed != nil else { throw ToolError("O conector \(config.name) foi desligado.") } // stopped while asking
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        // Login shell so Finder-launched apps still find the user's PATH; command and arguments stay argv, never script text.
-        process.arguments = ["-lc", #"exec "$0" "$@""#, config.command] + config.arguments
-        process.environment = ProcessInfo.processInfo.environment.merging(config.environment) { $1 }
+        process.executableURL = URL(fileURLWithPath: resolved.shell)
+        // Command and arguments stay argv, never script text. The resolved environment already carries the profile files'
+        // PATH; when the user's shell could not be asked, a login shell stands in so the system paths are still found.
+        process.arguments = [resolved.isFromUserShell ? "-c" : "-lc", #"exec "$0" "$@""#, config.command] + config.arguments
+        process.environment = resolved.environment.merging(config.environment) { $1 }
         let stdin = Pipe(), stdout = Pipe(), stderr = Pipe()
         process.standardInput = stdin
         process.standardOutput = stdout

@@ -254,6 +254,26 @@ struct ConnectorToolFilteringTests {
         guard case .failed? = await model.connectAndWait(broken.id) else { Issue.record("expected failure"); return }
     }
 
+    /// The CLI starts its own connections, so a connector the app's own failed to list (or has not finished starting)
+    /// must come out as "unverified" rather than as "nothing destructive".
+    @Test @MainActor func connectorsTheAppCouldNotListAreUnverifiedForClaudeCode() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "OrbScope-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)
+        let good = try fakeServer(name: "Bom", count: 2)
+        let broken = MCPServerConfig(name: "Calendário", command: "orb-no-such-command-xyz")
+        let slow = try fakeServer(name: "Lento", count: 1, delay: 5)
+        model.connectors = [good, broken, slow]
+        let names = ClaudeCodeTurn.mcpNames([good, broken, slow])
+        // The quick ones have settled (listed, failed); only the slow one is still starting when the turn asks.
+        #expect(await model.connectAndWait(good.id) == .ready(toolCount: 2))
+        guard case .failed? = await model.connectAndWait(broken.id) else { Issue.record("expected failure"); return }
+        let found = await model.connectorAnnotations(for: [good.id, broken.id, slow.id], cliNames: names, timeout: .seconds(1))
+        #expect(found.unverified == ["calend_rio__", "lento__"])
+        #expect(found.destructive.isEmpty)
+        #expect(await model.connectorAnnotations(for: [], cliNames: names).unverified.isEmpty)
+    }
+
     @Test @MainActor func connectAndWaitDoesNotWaitForASlowNeighbour() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "OrbScope-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }

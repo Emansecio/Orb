@@ -165,7 +165,7 @@ enum ProviderTransport {
 
     /// Error codes that tell the user what to do (Command Code's Go plan has no API); kept with the message,
     /// which does not always repeat them.
-    static let actionableErrorCodes: Set<String> = ["upgrade_required", "cmd_zdr_no_providers", "unsupported_model"]
+    static let actionableErrorCodes: Set<String> = ["upgrade_required", "cmd_zdr_no_providers", "unsupported_model", "insufficient_quota"]
 
     /// `error.message` (OpenAI), `error` as a string (Ollama) or `message`; otherwise the raw text. An actionable
     /// `error.code` (see `actionableErrorCodes`) is added in brackets when the message lacks it.

@@ -214,22 +214,39 @@ private struct AllModelsSheet: View {
                 Text(shown.count == models.count ? "\(models.count) modelos" : "\(shown.count) de \(models.count)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Button("OK") { dismiss() }
-                    .keyboardShortcut(.defaultAction)
             }
-            .padding(12)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 12)
             Divider()
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(shown) { item in
                         ModelIDRow(item: item) { remove(item) }
-                            .padding(.horizontal, 14)
+                            .padding(.horizontal, 20)
                             .padding(.vertical, 6)
                     }
                 }
             }
+            .frame(minHeight: 260, idealHeight: 330, maxHeight: .infinity)
         }
-        .frame(width: 460, height: 460)
-        .background(Palette.chrome)
+        .orbSheet("Modelos do gateway", subtitle: "\(models.count) modelos · remova os que não usa", size: .small) {
+            HStack {
+                Spacer()
+                // Esc closes; Return does too, as the old "OK" did.
+                Button("Fechar") { dismiss() }
+                    .buttonStyle(PrimaryPillStyle())
+                    .keyboardShortcut(.cancelAction)
+                    .background {
+                        Button("Fechar") { dismiss() }
+                            .keyboardShortcut(.defaultAction)
+                            .frame(width: 0, height: 0)
+                            .opacity(0)
+                            .accessibilityHidden(true)
+                    }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+            .overlay(alignment: .top) { Divider().opacity(0.6) }
+        }
     }
 }

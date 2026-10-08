@@ -32,7 +32,7 @@ enum ToolDigest {
                 for call in message.toolCalls { lines.append(line(call: call, result: results[call.id], step: step)) }
             case .user:
                 // The user's own words are never dropped silently.
-                let said = oneLine(TurnPreface.stripped(message.content), 120)
+                let said = oneLine(TurnPreface.userWords(message.content), 120)
                 if !said.isEmpty { lines.append(clip("[usuário] «\(said)»")) }
             default:
                 break

@@ -105,7 +105,9 @@ turno nem entra na linha do tempo.
 O resumo não é um texto resumido de novo a cada vez: é um modelo de dados ao qual cada mensagem que sai da janela é
 **absorvida uma única vez**, com teto por seção, e o texto que o modelo lê é *renderizado* dele (`render`, determinístico:
 o mesmo ledger dá o mesmo texto, então o cache continua valendo). Nunca aninha ("Resumo anterior" dentro de "Resumo
-anterior").
+anterior"). O ledger absorve **o que a usuária escreveu** (`TurnPreface.userWords`), não o que o app acrescenta à mensagem: o
+prefácio sai, a instrução de uma skill vira `/Nome pedido`, as listas de arquivos e imagens viram os nomes (`(anexos: …)`) e a
+instrução de salvar na memória sai. O mesmo vale para as linhas `[usuário]` do `ToolDigest`.
 
 | Seção | Conteúdo | Limite |
 |---|---|---|
@@ -155,17 +157,23 @@ processo em segundo plano): um comando que não para de imprimir (`yes`) não en
 - **Medidor** (`ContextMeter.fill`, `ContextReading.make`): função pura da conversa e do orçamento, medida **fora da thread
   principal** com debounce (`ContextGaugeDriver`). O anel no compositor mostra a fração da **janela do modelo** (a cor
   esquenta a partir de 70% e fica "cheia" a partir de 85%); fica oculto sem histórico. O popover "Contexto desta conversa"
-  diz em palavras quanto, o que é mantido palavra por palavra (resumo + últimas mensagens), quanto do último pedido veio do
-  cache do provedor e quanto "Compactar agora" liberaria.
+  diz em palavras quanto, o que é mantido palavra por palavra (resumo + últimos pedidos: o medidor conta os **pedidos da
+  usuária**, os balões que ela vê, e não as mensagens internas com chamadas e saídas de ferramentas), quanto do último
+  pedido veio do cache do provedor e quanto "Compactar agora" liberaria. Esse número é o que a compactação deixa de fato
+  (o histórico inteiro depois do resumo, sem os degraus e passos postos de lado só para caber num envio); se for menos de
+  100 tokens, a oferta some.
 - **Aviso** "Esta conversa está ficando longa. Compactar agora ou começar uma nova?": aparece uma vez por conversa quando o
   histórico passa de 85% da janela **ou** do orçamento do nível (`ContextReading.pressure`, o maior dos dois), porque com uma
-  janela grande o nível dobra o começo muito antes de a janela encher.
+  janela grande o nível dobra o começo muito antes de a janela encher. Se não há o que dobrar (um pedido só, com um texto
+  grande ou um modelo de janela pequena), o aviso não oferece "Compactar agora": "Esta conversa já ocupa quase todo o espaço
+  do modelo. Começar uma nova?".
 - **Compactar agora** (`AppModel.compactNow`, também por `/compactar [foco]`): `Conversation.compact` leva o histórico a 30%
   do orçamento (`ContextMeter.compactingShare`), ou à metade do que o histórico já condensado ocupa, o que for menor, para
   uma conversa ainda curta também dobrar turnos. O último turno fica inteiro. O foco (até 300 caracteres) entra no resumo
-  como "Dar atenção a" até ser trocado. Não roda com o Orb respondendo ("Espere o Orb terminar…"); com uma conversa de um
-  turno só diz "não há o que compactar". O resultado (`CompactionResult`) traz os números antes/depois, os mesmos do medidor,
-  e vira também um aviso na conversa: "Compactei a conversa: N mensagens antigas viraram um resumo (≈ 58 mil → 19 mil tokens)."
+  como "Dar atenção a" até ser trocado. Não roda com o Orb respondendo ("Espere o Orb terminar…"); sem nada para dobrar
+  diz o que é verdade: "Só há um pedido nesta conversa: não há mensagens antigas para resumir", "A conversa ainda é curta: não há
+  o que compactar" (vários pedidos curtos) ou "O começo já está resumido; não há mais o que compactar agora". O resultado (`CompactionResult`) traz os números antes/depois, os mesmos do medidor,
+  e vira também um aviso na conversa: "Compactei a conversa: os 5 primeiros pedidos viraram um resumo (≈ 58 mil → 19 mil tokens)."
 - **Claude Code**: não há medida do Orb. "Compactar agora" dobra tudo menos o último turno no resumo
   (`compactAllButLatestTurn`), zera a sessão (`claudeSessionReported("")`) e a **próxima mensagem começa uma sessão nova** a
   partir do resumo. Os números são estimativas da cópia do Orb.

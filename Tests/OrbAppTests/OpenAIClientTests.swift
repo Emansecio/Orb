@@ -289,6 +289,46 @@ struct OpenAIReliabilityTests {
         }
     }
 
+    @Test func anExhaustedQuotaIsNotRetriedAndPointsToTheBalance() async {
+        let body = #"{"error":{"message":"You exceeded your current quota, please check your plan and billing details.","type":"insufficient_quota","code":"insufficient_quota"}}"#
+        let client = StubProtocol.client(host: "quota.test", apiKey: nil, status: 429, body: body)
+        StubProtocol.queue(host: "quota.test", [.init(status: 429, body: body), .init(status: 429, body: body)])
+        let attempts = Box<Int>(0)
+        do {
+            try await withRetries(sleep: { _ in }) {
+                attempts.update { $0 += 1 }
+                for try await _ in client.stream(model: "m", messages: [], tools: []) {}
+            }
+            Issue.record("should have thrown")
+        } catch let error as LLMError {
+            #expect(!error.isRetryable)
+            #expect(error.errorDescription?.contains("saldo") == true)
+            #expect(error.errorDescription?.contains("espere um pouco") == false)
+            #expect(error.errorDescription?.contains("insufficient_quota") == true)
+        } catch {
+            Issue.record("unexpected \(error)")
+        }
+        #expect(attempts.value == 1)
+        #expect(StubProtocol.sent(to: "quota.test").count == 1)
+        // A plain rate limit is still a wait-and-retry.
+        #expect(LLMError.http(status: 429, message: "Rate limit reached for requests").isRetryable)
+        // Per-minute limits that mention billing or the quota are a wait, not a missing balance.
+        let perMinute = [
+            "Rate limit reached for gpt-4o in organization org-x on requests per min (RPM): Limit 3, Used 3. Please try again in 20s. Visit https://platform.openai.com/account/billing to add a payment method to increase your rate limits.",
+            "You exceeded your current quota, please check your plan and billing details. Please retry in 12s.",
+        ]
+        for message in perMinute {
+            let error = LLMError.http(status: 429, message: message, retryAfter: 12)
+            #expect(error.isRetryable)
+            #expect(error.errorDescription?.contains("limite de uso") == true)
+            #expect(error.errorDescription?.contains("Sem saldo") == false)
+        }
+        // A spent cap is not, whatever the wording.
+        for message in ["Insufficient balance", "Monthly limit reached", "You hit your spending limit"] {
+            #expect(!LLMError.http(status: 429, message: message).isRetryable)
+        }
+    }
+
     @Test func contextOverflowIsDistinguishable() async {
         let bodies = [
             #"{"error":{"message":"This model's maximum context length is 128000 tokens.","code":"context_length_exceeded"}}"#,

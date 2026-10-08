@@ -14,6 +14,10 @@ enum NoticeAction: Equatable, Sendable {
     case openSettings
     /// The conversation is too long for the model.
     case newConversation
+    /// The conversation is too long for the model: summarize its start and send the last message again.
+    case compact
+    /// The app kept something in memory by itself: look at it in the Memória tab.
+    case openMemory
 
     var title: String {
         switch self {
@@ -21,6 +25,8 @@ enum NoticeAction: Equatable, Sendable {
         case .continueTurn: "Continuar"
         case .openSettings: "Abrir Ajustes"
         case .newConversation: "Nova conversa"
+        case .compact: "Compactar e tentar de novo"
+        case .openMemory: "Ver na memória"
         }
     }
 
@@ -30,6 +36,8 @@ enum NoticeAction: Equatable, Sendable {
         case .continueTurn: "play.fill"
         case .openSettings: "gearshape"
         case .newConversation: "square.and.pencil"
+        case .compact: "arrow.triangle.merge"
+        case .openMemory: "brain"
         }
     }
 
@@ -37,23 +45,32 @@ enum NoticeAction: Equatable, Sendable {
     static let continueMessage = "continua"
 
     static let failurePrefix = "Não deu certo: "
+    /// How the notice for a fact the app kept by itself (not the model) starts.
+    static let keptMemoryPrefix = "Guardado na memória:"
 
     /// The actions that fit a notice, most useful first; none for the notices that only inform.
     static func actions(for notice: String) -> [NoticeAction] {
         if notice.hasPrefix("Conecte um modelo") { return [.openSettings] }
         if notice.hasPrefix("Pausei depois de") || notice.hasPrefix("A resposta passou do limite") { return [.continueTurn] }
+        // Wrongly detected, it is one click to the page to forget.
+        if notice.hasPrefix(keptMemoryPrefix) { return [.openMemory] }
         guard notice.hasPrefix(failurePrefix) else { return [] }
-        // Only the app's own sentence decides: what follows "Detalhe do provedor:" is the provider's free text.
+        // Only the app's own sentence decides: what follows "Detalhe do provedor:" (or "Detalhe do Claude Code:") is free text.
         let reason = ourSentence(of: notice.dropFirst(failurePrefix.count).lowercased())
-        if reason.contains("grande demais") { return [.newConversation] }
+        if reason.contains("grande demais") { return [.compact, .newConversation] }
         // Out of balance: trying again is right once the balance is topped up; Ajustes only if another model is wanted.
         if reason.contains("sem saldo") || reason.contains("pede pagamento") { return [.retry, .openSettings] }
         return isSettingsProblem(reason) ? [.openSettings, .retry] : [.retry]
     }
 
+    /// `actions(for:)` without "Compactar e tentar de novo" when the conversation has nothing older to summarize.
+    static func actions(for notice: String, canCompact: Bool) -> [NoticeAction] {
+        actions(for: notice).filter { $0 != .compact || canCompact }
+    }
+
     /// The part of a failure the app wrote, before the provider's own words.
     static func ourSentence(of reason: String) -> String {
-        reason.components(separatedBy: "detalhe do provedor:").first ?? reason
+        ["detalhe do provedor:", "detalhe do claude code:"].reduce(reason) { $0.components(separatedBy: $1).first ?? $0 }
     }
 
     /// A failure that Ajustes can fix: no model, a bad key or login, Claude Code missing or not signed in. A usage
@@ -136,6 +153,29 @@ extension AppModel {
             }
             return false
         }
+    }
+
+    /// "Compactar e tentar de novo": the provider refused the conversation as too big, so its start becomes a summary
+    /// and the last message is sent again. False when there was nothing to summarize (the message is not resent).
+    /// The notice about the compaction stays in the transcript, above the message sent again.
+    @discardableResult
+    func compactAndRetry(_ botID: UUID) -> Bool {
+        let before = loadedConversation(botID)?.items.count ?? 0
+        guard compactFromMeter(botID, focus: nil).didCompact else { return false }
+        // What the compaction added to the transcript (the retry takes back everything after the failed message).
+        let notices = loadedConversation(botID).map { Array($0.items.dropFirst(before)) } ?? []
+        guard retryLastTurn(botID) else { return false }
+        editConversation(botID) { conversation in
+            guard let resent = conversation.items.lastIndex(where: { if case .user = $0.kind { true } else { false } }) else { return }
+            conversation.items.insert(contentsOf: notices, at: resent)
+        }
+        return true
+    }
+
+    /// "Ver na memória": the panel opens on the Orb's Memória tab.
+    func showMemory(of botID: UUID) {
+        showInspector = true
+        request(.showTab(.memory), of: botID)
     }
 
     /// Tells VoiceOver something that just happened in the window (an Orb asking for permission).

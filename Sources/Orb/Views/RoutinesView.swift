@@ -73,6 +73,8 @@ struct RoutinesView: View {
                 .help("Nova rotina")
             }
         }
+        .onAppear(perform: takeRequest)
+        .onChange(of: model.routineToShow) { takeRequest() }
         .sheet(item: $sheet) { sheet in
             switch sheet {
             case .edit(let routine):
@@ -88,6 +90,13 @@ struct RoutinesView: View {
 
     private func newRoutine(_ template: RoutineTemplate?) {
         if let draft = model.draftRoutine(from: template) { sheet = .edit(draft) }
+    }
+
+    /// A routine waiting for an answer was asked for ("Ver pedido", its banner): its conversation opens.
+    private func takeRequest() {
+        guard let id = model.routineToShow else { return }
+        model.routineToShow = nil
+        sheet = .conversation(id)
     }
 }
 
@@ -539,7 +548,8 @@ private struct RoutineConversationSheet: View {
         .frame(height: 400)
         .background(Palette.canvas)
         .orbSheet(routine?.name ?? "Rotina",
-                  subtitle: live == nil ? "Conversa da rotina, só para ler" : "Rodando agora",
+                  subtitle: live == nil ? "Conversa da rotina, só para ler"
+                      : routine.map { model.needsYou($0.botID) } == true ? "Esperando sua resposta" : "Rodando agora",
                   size: .large) {
             HStack {
                 Spacer()

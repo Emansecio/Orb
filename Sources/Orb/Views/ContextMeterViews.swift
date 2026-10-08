@@ -217,7 +217,7 @@ struct ContextPopover: View {
             if reading.isClaudeCode {
                 row("sparkles", "O Claude Code cuida do próprio contexto: ele resume a sessão sozinho quando ela enche.")
             } else {
-                row("text.quote", ContextWords.kept(totalMessages: reading.messageCount, foldedMessages: reading.foldedMessages))
+                row("text.quote", ContextWords.kept(totalRequests: reading.requestCount, foldedRequests: reading.foldedRequests))
                 if let fill = reading.fill, fill.budgetFraction > fill.fraction, fill.budgetFraction >= ContextReading.warmsAt {
                     row("arrow.triangle.merge", "Memória \(reading.memory.label.lowercased()): perto de ~\(ContextWords.approx(fill.budgetTokens)) tokens de conversa, o começo vira resumo sozinho.")
                 }
@@ -294,9 +294,10 @@ struct ContextPopover: View {
             return "Compactar agora faz um resumo desta conversa e encerra a sessão atual do Claude Code: a próxima mensagem começa uma sessão nova, a partir desse resumo."
         }
         if let compaction = reading.fill?.compaction {
-            return ContextWords.wouldFree(messages: compaction.messages, tokens: compaction.tokensFreed)
+            return ContextWords.wouldFree(requests: compaction.turns, alreadySummarized: reading.foldedRequests > 0,
+                                          tokens: compaction.tokensFreed)
         }
-        return "A conversa ainda é curta: não há o que compactar."
+        return ContextWords.nothingToCompact(requests: reading.requestCount - reading.foldedRequests, alreadySummarized: reading.foldedRequests > 0)
     }
 
     private func run() {
@@ -385,7 +386,9 @@ struct ContextNudge: View {
         .onChange(of: gauge.reading?.conversationKey) { note = nil }
     }
 
-    private var question: String { note ?? "Esta conversa está ficando longa. Compactar agora ou começar uma nova?" }
+    private var canCompact: Bool { gauge.reading?.canCompact ?? false }
+
+    private var question: String { note ?? ContextWords.nudgeQuestion(canCompact: canCompact) }
 
     private var card: some View {
         content
@@ -427,15 +430,18 @@ struct ContextNudge: View {
     }
 
     @ViewBuilder private var primaryButtons: some View {
-        Button("Compactar agora", action: compact)
-            .buttonStyle(CardButtonStyle(isProminent: true))
-            .disabled(model.live(botID).isWorking)
-            .help(model.live(botID).isWorking ? "Espere o Orb terminar para compactar" : "Resumir o começo da conversa para liberar espaço")
+        // With one request there is nothing older to summarize: only a new conversation helps.
+        if canCompact {
+            Button("Compactar agora", action: compact)
+                .buttonStyle(CardButtonStyle(isProminent: true))
+                .disabled(model.live(botID).isWorking)
+                .help(model.live(botID).isWorking ? "Espere o Orb terminar para compactar" : "Resumir o começo da conversa para liberar espaço")
+        }
         Button("Nova conversa") {
             gauge.handleNudge()
             model.newConversation(botID)
         }
-        .buttonStyle(CardButtonStyle(isProminent: false))
+        .buttonStyle(CardButtonStyle(isProminent: !canCompact))
         .help("Guardar esta conversa em Conversas e começar outra")
     }
 

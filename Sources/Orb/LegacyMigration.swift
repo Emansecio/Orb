@@ -2,8 +2,9 @@ import Foundation
 
 /// The app used to be called OpenBot. When the real app (bundle `app.orb.mac`, not a dev run) opens as Orb, it copies
 /// OpenBot's data folder (Orbs, conversations, routines, skills) and preferences over. Keychain items (API keys,
-/// sign-ins) move one by one when first used (`Keychain.get`), so there is no burst of password prompts at launch.
-/// The originals stay where they were, as a backup.
+/// sign-ins) are copied one by one when first used (`Keychain.get`), so there is no burst of password prompts at launch.
+/// The originals stay where they were, as a backup; an account that was copied, or whose key was removed or replaced
+/// in Orb, is noted (`LegacyKeychainLedger`) and its original is not looked at again.
 enum LegacyMigration {
     static let oldFolder = "OpenBot"
     static let oldIdentifier = "app.openbot.mac"

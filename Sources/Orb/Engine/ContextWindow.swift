@@ -559,9 +559,10 @@ extension Conversation {
         ledger = cut.ledger
         summaryCoveredCount = covered + window.droppedCount
         compactions = (compactions ?? 0) + 1
-        let report = CompactionReport(kind: .turns, foldedMessages: window.foldedCount,
+        var report = CompactionReport(kind: .turns, foldedMessages: window.foldedCount,
                                       tokensBefore: ContextBudget.tokens(forCharacters: before),
                                       tokensAfter: ContextBudget.tokens(forCharacters: window.charactersAfter))
+        report.foldedRequests = requestCount(in: 0..<coveredMessageCount)
         return (window.messages, first, report)
     }
 

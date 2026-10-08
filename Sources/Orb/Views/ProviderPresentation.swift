@@ -112,7 +112,7 @@ enum ProviderStatus: Equatable {
         if isChecking { return .checking }
         switch lastError {
         case .unreachable: return .offline(host: ProviderCheck.hostLabel(account.baseURL))
-        case .other(let message): return .failed(message)
+        case .other(let message), .rejected(let message): return .failed(message)
         case nil: break
         }
         return kind == .custom ? .unverified : .noModels
@@ -145,7 +145,9 @@ enum ProviderStatus: Equatable {
             case .lmstudio: "Não encontrei o LM Studio em \(host). Ele está aberto, com o servidor local ligado?"
             default: "Não consegui falar com \(host). O endereço está certo e o servidor está no ar?"
             }
-        case .failed(let message): message
+        // The row already shows the key and the message is read right there, so "Confira em Ajustes → Modelos" would point
+        // to the screen the person is on (it stays in chat notices, where it opens the settings).
+        case .failed(let message): message.replacingOccurrences(of: " Confira em Ajustes → Modelos.", with: "")
         case .noModels where kind == .ollama: "O Ollama está aberto, mas sem modelos. Baixe um pelo próprio Ollama e atualize."
         case .noModels where kind == .lmstudio: "O LM Studio respondeu, mas sem modelos carregados."
         case .needsURL: "Informe o endereço do gateway para começar."
@@ -177,6 +179,8 @@ enum ProviderStatus: Equatable {
 /// Why the last model refresh failed.
 enum ProviderCheckFailure: Equatable {
     case unreachable
+    /// The provider turned the key or login down (401/403): the key row says so instead of "Chave salva".
+    case rejected(String)
     case other(String)
 }
 
@@ -192,6 +196,7 @@ enum ProviderCheck {
                                                 .notConnectedToInternet, .dnsLookupFailed]
         if let url = error as? URLError, unreachable.contains(url.code) { return .unreachable }
         if case LLMError.network(let code, _) = error, unreachable.contains(URLError.Code(rawValue: code)) { return .unreachable }
+        if (error as? LLMError)?.isCredentialRefusal == true { return .rejected(error.localizedDescription) }
         return .other(error.localizedDescription)
     }
 }

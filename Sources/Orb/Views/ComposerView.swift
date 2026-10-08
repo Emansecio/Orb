@@ -20,7 +20,6 @@ struct ComposerView: View {
     @State private var gauge = ContextGauge()
     /// The composer is too narrow for words on its chips: only their icons show.
     @State private var isCompact = false
-    @State private var pasteMonitor: Any?
     /// The skill highlighted in the `/` suggestions.
     @State private var slashIndex = 0
     /// Esc closed the suggestions; any change to the draft brings them back.
@@ -38,11 +37,14 @@ struct ComposerView: View {
 
     private var lane: ComposerLane { model.composerLane(botID) }
     private var isWorking: Bool { model.live(botID).isWorking }
-    private var hasContent: Bool {
-        !draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !lane.pictures.isEmpty
+    private var hasText: Bool { !draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var hasContent: Bool { hasText || !lane.pictures.isEmpty }
+    /// A message can be sent: any time the Orb is free, and while it works on your chat (it is queued). Not while a
+    /// picture is still being prepared: it would miss this message and ride along with the next one.
+    private var canSend: Bool {
+        ComposerAction.canSend(hasContent: hasContent, isWorking: isWorking, canSteer: model.canSteer(botID),
+                               pendingPictures: lane.pendingPictures)
     }
-    /// A message can be sent: any time the Orb is free, and while it works on your chat (it is queued).
-    private var canSend: Bool { hasContent && (!isWorking || model.canSteer(botID)) }
     private var isQueueing: Bool { isWorking && model.canSteer(botID) }
 
     var body: some View {
@@ -68,16 +70,15 @@ struct ComposerView: View {
             LinearGradient(colors: [Palette.canvas.opacity(0), Palette.canvas], startPoint: .top, endPoint: .init(x: 0.5, y: 0.35))
         }
         .background { shortcuts }
+        .background { ApprovalKeyMonitor(handler: handlePasteKey) }
         .background { ContextGaugeDriver(botID: botID, gauge: gauge) }
         .fileImporter(isPresented: $isImporting, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { attach(urls) }
         }
         .onAppear {
             isFocused = true
-            installPasteMonitor()
             _ = model.takeChatRequest(.focusComposer, of: botID) // ⌘L that opened this chat: it already has the focus
         }
-        .onDisappear { removePasteMonitor() }
         // ⌘L, from the sidebar, the panel or another page, with this chat already open.
         .onChange(of: model.pendingChatRequest) {
             if model.takeChatRequest(.focusComposer, of: botID) { isFocused = true }
@@ -88,7 +89,7 @@ struct ComposerView: View {
 
     private func card(_ lane: ComposerLane) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            if lane.hasAttachments { attachmentStrip(lane) }
+            if lane.hasAttachments || lane.pendingPictures > 0 { attachmentStrip(lane) }
             if let error = lane.error {
                 Text(error)
                     .font(.caption)
@@ -139,16 +140,15 @@ struct ComposerView: View {
 
     private var placeholder: LocalizedStringKey {
         if isQueueing { return "Escreva para orientar o Orb enquanto ele trabalha" }
-        if isWorking { return "Uma rotina está rodando. Envie quando ela terminar." }
+        if isWorking { return LocalizedStringKey(ComposerAction.routinePlaceholder(routineName: model.runningRoutineName(botID))) }
         return "Pergunte qualquer coisa ou solte um arquivo"
     }
 
     /// The line under the card: how the keys work, shown only when it helps and nothing else is being said.
     private func hint(_ lane: ComposerLane) -> String {
         if isQueueing, hasContent {
-            return model.steersMidTurn(botID)
-                ? "↩ entra na fila e chega ao Orb no próximo passo · \(AppShortcut.commandReturn.label) para e envia agora"
-                : "↩ entra na fila e segue quando a resposta terminar · \(AppShortcut.commandReturn.label) para e envia agora"
+            return ComposerHint.queueing(steersMidTurn: model.steersMidTurn(botID), needsYou: model.live(botID).needsYou,
+                                         typesInComposer: isFocused && hasText)
         }
         if isWorking { return "" }
         if isFocused, !hasContent, !lane.hasAttachments { return "↩ envia · \(CommandName.newLineKeys) nova linha" }
@@ -169,6 +169,7 @@ struct ComposerView: View {
                 ForEach(lane.files) { file in
                     AttachmentChip(file: file) { lane.files.removeAll { $0.id == file.id } }
                 }
+                if lane.pendingPictures > 0 { PreparingChip(count: lane.pendingPictures) }
             }
             .padding(.top, 6)
         }
@@ -198,6 +199,7 @@ struct ComposerView: View {
     /// button and the main one queues the message.
     @ViewBuilder private var actionButtons: some View {
         let action = ComposerAction.current(isWorking: isWorking, canSend: canSend)
+        let routine = model.runningRoutineName(botID)
         HStack(spacing: 6) {
             if action.showsSecondaryStop {
                 Button("Parar", systemImage: "stop.fill") { model.stop(botID) }
@@ -205,12 +207,12 @@ struct ComposerView: View {
                     .help("\(CommandName.stop) (\(AppShortcut.stop.label))")
                     .transition(.opacity)
             }
-            mainButton(action)
+            mainButton(action, routine: routine)
         }
         .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: action.showsSecondaryStop)
     }
 
-    private func mainButton(_ action: ComposerAction) -> some View {
+    private func mainButton(_ action: ComposerAction, routine: String?) -> some View {
         Button {
             if action == .stop { model.stop(botID) } else { send() }
         } label: {
@@ -220,8 +222,8 @@ struct ComposerView: View {
         }
         .buttonStyle(RoundActionStyle(isEnabled: action == .stop || canSend))
         .disabled(action != .stop && !canSend)
-        .accessibilityLabel(action.title)
-        .help(action.help)
+        .accessibilityLabel(action.title(isRoutine: routine != nil))
+        .help(action.help(isRoutine: routine != nil))
         // ⌘↩ sends when the Orb is free; while it works ⌘↩ means "stop and send" (see `shortcuts`).
         .keyboardShortcut(action == .send ? AppShortcut.commandReturn : nil)
     }
@@ -231,7 +233,8 @@ struct ComposerView: View {
         ZStack {
             Button("Parar e enviar") { model.stopAndSend(botID, draft: draft.wrappedValue) }
                 .keyboardShortcut(AppShortcut.commandReturn)
-                .disabled(!(isQueueing && canSend))
+                .disabled(!ComposerAction.stopAndSendEnabled(isQueueing: isQueueing, canSend: canSend, queuedCount: lane.queued.count,
+                                                             pendingPictures: lane.pendingPictures))
             Button("Escolher modelo") { isModelOpen.toggle() }
                 .keyboardShortcut(AppShortcut.chooseModel)
         }
@@ -307,7 +310,9 @@ struct ComposerView: View {
         let lane = lane
         lane.error = nil
         let store = model.images, botID = botID
+        lane.pendingPictures += 1 // sending waits until the picture is in (see `canSend`)
         Task {
+            defer { lane.pendingPictures -= 1 }
             do { lane.pictures.append(try await load(store, botID)) }
             catch { lane.error = error.localizedDescription }
         }
@@ -315,25 +320,18 @@ struct ComposerView: View {
 
     /// ⌘V with a picture on the clipboard (a screenshot, an image copied from Preview) or with picture files copied in
     /// Finder attaches them; anything with text on the clipboard pastes as text, as before. The text field cannot
-    /// take a picture, so the key is looked at before it gets there.
-    private func installPasteMonitor() {
-        guard pasteMonitor == nil else { return }
-        pasteMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
-                  event.charactersIgnoringModifiers == "v" else { return event }
-            let taken = MainActor.assumeIsolated { pasteImages() }
-            return taken ? nil : event
-        }
-    }
-
-    private func removePasteMonitor() {
-        if let pasteMonitor { NSEvent.removeMonitor(pasteMonitor) }
-        pasteMonitor = nil
+    /// take a picture, so the key is looked at before it gets there. Only the composer's own window counts: the menu
+    /// bar panel, Settings and the sheets over the chat keep their ⌘V.
+    private func handlePasteKey(_ event: NSEvent, in window: NSWindow) -> Bool {
+        guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+              event.charactersIgnoringModifiers == "v",
+              PasteGate.takes(eventIsInComposerWindow: event.window === window, isKey: window.isKeyWindow,
+                              hasSheet: window.attachedSheet != nil, isFocused: isFocused) else { return false }
+        return pasteImages()
     }
 
     /// Whether the clipboard held pictures and they were taken.
     private func pasteImages() -> Bool {
-        guard isFocused else { return false }
         let board = NSPasteboard.general
         let files = (board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
         if files.contains(where: ImageProcessing.isImageFile) {
@@ -412,6 +410,24 @@ private struct AttachmentChip: View {
     }
 }
 
+/// Pictures still being shrunk and saved: a placeholder in the strip, so the paste or drop is seen to have worked.
+private struct PreparingChip: View {
+    let count: Int
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ProgressView().controlSize(.small)
+            Text(ComposerLane.preparingText(count))
+        }
+        .font(.caption)
+        .foregroundStyle(Palette.muted)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Palette.raised, in: .capsule)
+        .accessibilityElement(children: .combine)
+    }
+}
+
 /// White circular send/stop button. Stepping back (`isSecondary`) when Send is next to it: a dark button.
 /// Enabling fades the fill (`Motion.content`); pressing scales it to 0.92 (`Motion.press`). Reduce Motion: the
 /// state changes at once and a press dims instead of shrinking.
@@ -452,6 +468,23 @@ enum ComposerAction: Equatable {
         return reduceMotion ? (1, 0.8) : (pressedScale, 1)
     }
 
+    /// A message can be sent: something is written, the Orb is free or working on your chat (the message is queued),
+    /// and no picture is still being prepared.
+    static func canSend(hasContent: Bool, isWorking: Bool, canSteer: Bool, pendingPictures: Int) -> Bool {
+        hasContent && pendingPictures == 0 && (!isWorking || canSteer)
+    }
+
+    /// ⌘↩ "stop and send" works with something to send: what is typed, or what already waits in the queue (the
+    /// queue bubble's own "Parar e enviar" offers that key with an empty field).
+    static func stopAndSendEnabled(isQueueing: Bool, canSend: Bool, queuedCount: Int, pendingPictures: Int = 0) -> Bool {
+        isQueueing && pendingPictures == 0 && (canSend || queuedCount > 0)
+    }
+
+    /// The field's placeholder while a routine runs (which a message cannot join).
+    static func routinePlaceholder(routineName: String?) -> String {
+        routineName.map { "A rotina “\($0)” está rodando. Envie quando ela terminar." } ?? "Uma rotina está rodando. Envie quando ela terminar."
+    }
+
     static func current(isWorking: Bool, canSend: Bool) -> ComposerAction {
         if !isWorking { return .send }
         return canSend ? .queue : .stop
@@ -476,8 +509,36 @@ enum ComposerAction: Equatable {
         }
     }
 
+    /// Stopping during a routine says so: it ends the routine's run.
+    func title(isRoutine: Bool) -> String { self == .stop && isRoutine ? "Parar a rotina" : title }
+
+    func help(isRoutine: Bool) -> String { self == .stop && isRoutine ? "Parar a rotina (\(AppShortcut.stop.label))" : help }
+
     /// Stop keeps its own (dark) button next to the queueing one, so a turn can still be ended with a message typed.
     var showsSecondaryStop: Bool { self == .queue }
+}
+
+/// The line under the composer while a message can be queued. Pure, so the tests can read it.
+enum ComposerHint {
+    /// With a permission request open, ⌘↩ typed in the composer stops the turn (which refuses the request) and sends;
+    /// from anywhere else it still allows the request (see `ApprovalShortcut`), and the line says so.
+    static func queueing(steersMidTurn: Bool, needsYou: Bool, typesInComposer: Bool) -> String {
+        let command = AppShortcut.commandReturn.label
+        if needsYou {
+            return typesInComposer ? "↩ entra na fila · \(command) recusa o pedido e envia agora" : "↩ entra na fila · \(command) permite o pedido"
+        }
+        return steersMidTurn
+            ? "↩ entra na fila e chega ao Orb no próximo passo · \(command) para e envia agora"
+            : "↩ entra na fila e segue quando a resposta terminar · \(command) para e envia agora"
+    }
+}
+
+/// Whether the composer's ⌘V monitor takes a key press. The monitor sees every key of the app, so it must be sure the
+/// press is for the composer's window (not the menu bar panel, Settings or a sheet over the chat) and its field.
+enum PasteGate {
+    static func takes(eventIsInComposerWindow: Bool, isKey: Bool, hasSheet: Bool, isFocused: Bool) -> Bool {
+        eventIsInComposerWindow && isKey && !hasSheet && isFocused
+    }
 }
 
 /// The card around the message field: its border and background answer the focus like a hover does (in 0.10 s, out

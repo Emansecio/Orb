@@ -51,7 +51,9 @@ extension BotSession {
         if !Task.isCancelled { finishTurn(turn, succeeded: succeeded) }
     }
 
-    func stop() {
+    /// Stops the running turn. `startsQueuedRoutines: false` keeps a routine that was waiting for the Orb from taking it
+    /// at once: the caller has something to send first and starts the queue itself if it does not.
+    func stop(startsQueuedRoutines: Bool = true) {
         guard let task = turnTask, let turn = turnID, let model else { return }
         task.cancel()
         ApprovalNotifications.clear(model.pendingApprovals(of: id).map(\.id))
@@ -61,14 +63,23 @@ extension BotSession {
         model.setAwaitingApproval(false, of: id)
         mutateItems { items in
             for index in items.indices {
-                if case .approval(var request) = items[index].kind, request.decision == nil {
+                switch items[index].kind {
+                case .approval(var request) where request.decision == nil:
                     request.decision = .deny
                     items[index].kind = .approval(request)
+                case .tool(var call) where call.state == .running:
+                    // Its result is dropped (the turn is no longer current): it would stay "running" for good.
+                    call.state = .failed
+                    call.output = call.output ?? "Interrompido."
+                    call.finishedAt = .now
+                    items[index].kind = .tool(call)
+                default:
+                    break
                 }
             }
         }
         append(.notice("Você interrompeu esta resposta"))
-        finishTurn(turn, succeeded: false)
+        finishTurn(turn, succeeded: false, startsQueuedRoutines: startsQueuedRoutines)
     }
 
     /// Records the marks of the turn's prompt when it has been delivered: for Orb's own engine, when the user message (with
@@ -141,7 +152,10 @@ extension BotSession {
         case .compacted(var report):
             closeStreaming()
             // A fold of older turns is kept (the next turn starts from it), counted in the conversation's own messages.
-            if let fold = report.fold { report.foldedMessages = keepFold(fold) }
+            if let fold = report.fold {
+                report.foldedMessages = keepFold(fold)
+                report.foldedRequests = conversation.map { $0.requestCount(in: 0..<$0.coveredMessageCount) }
+            }
             // Claude Code compacting its own session forgets details too: the memory is brought up to date after the turn.
             if report.kind == .claudeCode { compactedInTurn = true }
             guard report.fold == nil || report.foldedMessages > 0 else { break }
@@ -158,13 +172,16 @@ extension BotSession {
             ensureLoaded()
             let folder = claudeTurnFolder
             changeConversation { $0.claudeSessionReported(sessionID, folder: folder) }
-            if !sessionID.isEmpty { recordMarks(native: false) }
+            if !sessionID.isEmpty {
+                claudeTurnDelivered = true
+                recordMarks(native: false)
+            }
             scheduleSave(delay: Self.streamingSaveInterval)
         }
     }
 
     /// Closes the turn `turn`; a turn that is no longer the Orb's current one (stopped, then replaced) is ignored.
-    func finishTurn(_ turn: UUID, succeeded: Bool = true) {
+    func finishTurn(_ turn: UUID, succeeded: Bool = true, startsQueuedRoutines: Bool = true) {
         guard turnID == turn, turnTask != nil, let model else { return }
         let botID = id
         turnTask = nil
@@ -178,7 +195,8 @@ extension BotSession {
         claudeTurnFolder = nil
         if isClaudeTurn {
             isClaudeTurn = false
-            conversation?.claudeTurnFinished(folder: turnFolder)
+            if claudeTurnDelivered { conversation?.claudeTurnFinished(folder: turnFolder) }
+            claudeTurnDelivered = false
         }
         stopSpeaking()
         closeStreaming()
@@ -202,7 +220,7 @@ extension BotSession {
         if let routineID { model.finishRoutineRun(id, routineID: routineID, succeeded: succeeded, reply: reply) }
         if succeeded {
             flash(\.isCelebrating, seconds: 3)
-            if let bot = model.bot(id), let reply { model.notify(bot.name, String(reply.prefix(180))) }
+            if let bot = model.bot(id), let reply { model.notify(bot.name, RoutineRun.preview(of: reply)) }
         } else {
             flash(\.hasFailed, seconds: 2.5)
         }
@@ -211,7 +229,7 @@ extension BotSession {
         }
         if routineID == nil { scheduleSave(delay: 0) } // a routine's was written by `finishRoutineRun`
         if routineID == nil { model.settleSteering(id, succeeded: succeeded) } // what you said during the turn, if anything
-        model.startNextQueuedRoutine(for: id)
+        if startsQueuedRoutines { model.startNextQueuedRoutine(for: id) }
     }
 
     /// The last thing the turn's conversation says (a routine's, while it runs; the transcript is always the chat).

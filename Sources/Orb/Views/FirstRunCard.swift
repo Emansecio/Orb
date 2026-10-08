@@ -214,14 +214,14 @@ enum FirstRunStyle {
 
     var title: String {
         switch self {
-        case .chat(let name): "Vamos deixar \(name.isEmpty ? "seu Orb" : "o \(name)") pronto"
+        case .chat(let name): "Vamos preparar \(name.isEmpty ? "seu Orb" : name)"
         case .settings: "Conecte um modelo"
         }
     }
 
     var subtitle: String {
         switch self {
-        case .chat: "Escolha de onde vem a inteligência dele. Você pode mudar quando quiser em Ajustes."
+        case .chat: "Escolha de onde vem a inteligência do Orb. Você pode mudar quando quiser em Ajustes."
         case .settings: "Escolha de onde vem a inteligência dos seus Orbs. Você pode mudar quando quiser."
         }
     }

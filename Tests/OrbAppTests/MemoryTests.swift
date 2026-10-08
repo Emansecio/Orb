@@ -487,6 +487,41 @@ struct MemoryIntentTests {
             ("Please remember that I use Swift at work", "I use Swift at work"),
             ("salva na memoria que eu uso vim", "eu uso vim"),
             ("nao esquece que moro em Recife", "moro em Recife"),
+            // What the message points at when it says "isso" and where to keep it.
+            ("Meu CPF fica no 1Password. Guarda isso na memória", "Meu CPF fica no 1Password"),
+            ("Guarda isso na memória", nil),
+            ("guarde isto na sua memória", nil),
+            ("Prefiro tabs. Memorize isso, por favor", "Prefiro tabs"),
+            ("Memorize isto: uso tabs", "uso tabs"),
+            ("Memoriza aí: o wifi é abc123", "o wifi é abc123"),
+            ("Guarda isso na memória: eu prefiro tabs", "eu prefiro tabs"),
+            // Natural forms: colon, typographic apostrophe, "keep in mind", "guarda aí", "grava isso".
+            ("Lembre-se: eu uso tabs", "eu uso tabs"),
+            ("Não esqueça: a reunião é terça", "a reunião é terça"),
+            ("remember: I use tabs", "I use tabs"),
+            ("Don’t forget that my flight is Tuesday", "my flight is Tuesday"),
+            ("Don‘t forget that my flight is Tuesday", "my flight is Tuesday"),
+            ("Please do not forget that I use tabs", "I use tabs"),
+            ("Keep this in mind: I use tabs", "I use tabs"),
+            ("guarda aí: o wifi é abc123", "o wifi é abc123"),
+            ("grava isso: o wifi é abc123", "o wifi é abc123"),
+            ("Pode memorizar que eu uso vim", "eu uso vim"),
+            ("Por favor, memorize que eu uso zsh", "eu uso zsh"),
+            ("Can you remember that I use zsh", "I use zsh"),
+            // A courtesy after "também" still points back; greetings and connectors may open the sentence.
+            ("Prefiro tabs. Memorize isso também, por favor", "Prefiro tabs"),
+            ("Prefiro tabs. Memorize isso tbm pfv", "Prefiro tabs"),
+            ("Oi memorize que eu uso vim", "eu uso vim"),
+            ("Mas lembre-se: eu uso tabs", "eu uso tabs"),
+            // "this"/"that" after the verb are not eaten when they start the content.
+            ("Keep in mind that this function is slow", "this function is slow"),
+            ("Remember that this API is rate limited", "this API is rate limited"),
+            ("Keep in mind that the API is rate limited", "the API is rate limited"),
+            ("Keep it in mind, please", nil),
+            ("Guarda isso, por favor", nil),
+            ("Lembre que eu uso tabs. Obrigada", "eu uso tabs"),
+            ("Lembra que o Dr. Silva é meu médico", "o Dr. Silva é meu médico"),
+            ("Lembra que eu uso tabs. Valeu!", "eu uso tabs"),
         ]
         for (message, content) in cases {
             #expect(MemoryIntent.detect(message) == MemoryIntent(content: content), "\(message)")
@@ -499,7 +534,21 @@ struct MemoryIntentTests {
         for message in ["Você lembra que eu moro em SP?", "Do you remember that file?", "Organize minha pasta Downloads",
                         "Qual é a memória RAM do meu Mac?", "relembrar o passado é bom", "Lembrete: comprar pão",
                         "me lembra de ligar pro João amanhã", "Traduza: não esquece de trazer o documento",
-                        "Remember to run the tests", "Anota aí no Notas: comprar leite", email] {
+                        "Remember to run the tests", "Anota aí no Notas: comprar leite", email,
+                        // Negation, third person and infinitive: bug reports and code requests, not requests to remember.
+                        "O app não lembra que eu já fiz login, corrige isso",
+                        "o navegador não guarda que eu aceitei os cookies, investiga",
+                        "A função não memoriza o resultado, deixa ela com cache",
+                        "I can't remember that command, find it in my shell history",
+                        "I don’t remember that function. Look it up in the repo",
+                        "Write a function to memorize the fibonacci results",
+                        "lembra que ontem a gente mexeu no build; agora o deploy quebrou, investiga",
+                        "Salva isso no arquivo notas.txt", "Do not forget to call mom",
+                        // Task context and files, not memories.
+                        "Keep in mind that the API is rate limited. Add retries to the client.",
+                        "Keep in mind that the API is rate limited, so add retries to the client",
+                        "Keep this in mind when refactoring the parser", "Ficou bom o texto do README. Salva isso.",
+                        "Pronto, grava isso.", "Guarda isso no arquivo notas.txt", "Se puder, guarda isso no cache"] {
             #expect(MemoryIntent.detect(message) == nil, "\(message)")
         }
     }

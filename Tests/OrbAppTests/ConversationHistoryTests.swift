@@ -124,7 +124,7 @@ import Testing
         let (model, botID) = model(current: conversation("segunda"))
         let first = store.archive(conversation("primeira"), for: botID)
 
-        #expect(model.reopenConversation(first.id, of: botID))
+        #expect(await model.reopenConversation(first.id, of: botID))
 
         #expect(model.transcript(botID).first.map { if case .user(let text, _) = $0.kind { text } else { "" } } == "primeira")
         #expect(store.readArchive(botID).map(\.title) == ["segunda"]) // the reopened one left, the one it replaced joined
@@ -135,22 +135,56 @@ import Testing
     @Test @MainActor func theReopenedConversationIsWrittenBeforeItsArchivedCopyIsDeleted() async throws {
         let (model, botID) = model(current: conversation("segunda"))
         let first = store.archive(conversation("primeira"), for: botID)
-        #expect(model.reopenConversation(first.id, of: botID))
+        #expect(await model.reopenConversation(first.id, of: botID))
         store.flush() // the queue as it stands right after the call, no save of the model's own in between
         #expect(store.loadConversation(botID)?.archiveTitle == "primeira")
         #expect(store.readArchived(first.id, for: botID).value == nil)
     }
 
-    @Test @MainActor func reopeningWhenTheCurrentOneIsEmptyArchivesNothing() throws {
+    @Test @MainActor func reopeningReadsTheFileWithoutBlockingTheMainThread() async throws {
+        let (model, botID) = model(current: conversation("primeira"))
+        await model.loadArchive(botID)
+        model.setDraft("rascunho", for: botID)
+
+        // "Nova conversa" and, at once, back: the archived file is still waiting in the writer's queue, and so is the read.
+        let release = DispatchSemaphore(value: 0)
+        store.stallWriter(until: release)
+        model.newConversation(botID)
+        let entry = try #require(model.archives[botID]?.first)
+        let reopened = Task { await model.reopenConversation(entry.id, of: botID) }
+        try await Task.sleep(for: .milliseconds(100)) // the main thread kept running while the read waited
+        #expect(model.transcript(botID).isEmpty) // nothing replaced yet
+        release.signal()
+
+        #expect(await reopened.value)
+        #expect(model.transcript(botID).count == 2 && model.drafts[botID] == "rascunho") // the draft stays with the Orb
+    }
+
+    @Test @MainActor func aConversationDeletedWhileItIsReadIsNotReopened() async throws {
+        let (model, botID) = model(current: conversation("primeira"))
+        await model.loadArchive(botID)
+        let release = DispatchSemaphore(value: 0)
+        store.stallWriter(until: release)
+        model.newConversation(botID)
+        let entry = try #require(model.archives[botID]?.first)
+
+        let reopened = Task { await model.reopenConversation(entry.id, of: botID) }
+        model.deleteArchivedConversation(entry.id, of: botID) // gone from the list before the read comes back
+        release.signal()
+        #expect(await reopened.value == false)
+        #expect(model.transcript(botID).isEmpty) // the chat stayed as it was
+    }
+
+    @Test @MainActor func reopeningWhenTheCurrentOneIsEmptyArchivesNothing() async throws {
         let (model, botID) = model(current: conversation("primeira"))
         model.newConversation(botID)
         let first = try #require(store.readArchive(botID).first)
-        #expect(model.reopenConversation(first.id, of: botID))
+        #expect(await model.reopenConversation(first.id, of: botID))
         #expect(store.readArchive(botID).isEmpty)
         #expect(model.transcript(botID).count == 2)
     }
 
-    @Test @MainActor func reopeningKeepsTheClaudeCodeSessionAndTheMemoryBookkeeping() throws {
+    @Test @MainActor func reopeningKeepsTheClaudeCodeSessionAndTheMemoryBookkeeping() async throws {
         var original = conversation("um", "dois")
         original.claudeSessionID = "sessao-abc"
         original.claudeSessionFolder = "/tmp/pasta"
@@ -161,7 +195,7 @@ import Testing
         model.newConversation(botID)
         let entry = try #require(store.readArchive(botID).first)
 
-        #expect(model.reopenConversation(entry.id, of: botID))
+        #expect(await model.reopenConversation(entry.id, of: botID))
         let reopened = try #require(model.conversations[botID])
         #expect(reopened.claudeSessionID == "sessao-abc" && reopened.claudeSessionFolder == "/tmp/pasta")
         #expect(reopened.claudeSeenCount == 4 && reopened.summary == "resumo")
@@ -172,12 +206,12 @@ import Testing
         #expect(store.readArchived(again.id, for: botID).value?.memorySavedCount == 4)
     }
 
-    @Test @MainActor func reopeningAConversationThatCannotBeReadChangesNothingAndSaysSo() throws {
+    @Test @MainActor func reopeningAConversationThatCannotBeReadChangesNothingAndSaysSo() async throws {
         let (model, botID) = model(current: conversation("atual"))
         let broken = UUID()
         try put("{ not json", at: archiveFolder(botID).appending(path: "\(broken.uuidString).json"))
 
-        #expect(model.reopenConversation(broken, of: botID) == false)
+        #expect(await model.reopenConversation(broken, of: botID) == false)
 
         #expect(model.transcript(botID).count == 2)
         #expect(model.dataNotices.count == 1)
@@ -298,13 +332,13 @@ import Testing
         #expect(exists(otherOrbsCopy)) // another Orb's folder: never touched
     }
 
-    @Test @MainActor func reopeningAConversationKeepsItsPictures() throws {
+    @Test @MainActor func reopeningAConversationKeepsItsPictures() async throws {
         let (model, botID) = model(current: conversation("atual"))
         let shot = try picture(for: botID)
         let archived = store.archive(conversation(showing: [shot]), for: botID)
         store.flush()
 
-        #expect(model.reopenConversation(archived.id, of: botID))
+        #expect(await model.reopenConversation(archived.id, of: botID))
         store.flush()
 
         #expect(exists(shot))

@@ -28,6 +28,11 @@ final class AppModel {
     private(set) var archives: [UUID: [ConversationSummary]] = [:]
     /// Routines that came due while their Orb was busy; each runs when the Orb is free. One entry per routine.
     private(set) var queuedRoutines: [UUID] = []
+    /// Archived conversations being read to be reopened, and the routine each Orb is reading its conversation for
+    /// before starting it (at most one per Orb): a second request for either waits for that one.
+    @ObservationIgnored private var reopening: Set<UUID> = []
+    @ObservationIgnored private var startingRoutines: [UUID: UUID] = [:]
+    var isStartingRoutine: Bool { !startingRoutines.isEmpty } // internal for tests
     /// Things the user should hear about the data files (an unreadable file and where its copy is, a failed save).
     /// The first one is shown as an alert; `dismissDataNotice` moves on to the next.
     private(set) var dataNotices: [StoreNotice] = []
@@ -42,10 +47,16 @@ final class AppModel {
     var showShortcuts = false
     /// The Orb whose "Apagar…" sheet is open (one dialog for the sidebar and the inspector).
     var deletingBotID: UUID?
+    /// The edit sheets that are on screen right now (each registers itself, see `registersOpenSheet`). Tokens rather
+    /// than a bare count: a sheet that reports twice still counts once, and one that goes away takes its entry along.
+    var openSheetTokens: Set<UUID> = []
     /// "Memória de X guardada", shown in the sidebar for a few seconds after deleting an Orb and keeping its memory.
     var keptMemoryNotice: KeptMemoryNotice?
     /// Something a command asked of an Orb's chat that the chat takes when it is on screen (see `PendingChatRequest`).
     var pendingChatRequest: PendingChatRequest?
+    /// The routine whose conversation the Routines page opens when it appears (a routine waiting for an answer: "Ver pedido",
+    /// a tap on its banner). Taken by the page, like `pendingChatRequest`.
+    var routineToShow: UUID?
     /// The "Esqueceu isso. Desfazer" of the memory screens: here so it outlives the panel being rebuilt (switching Orbs).
     @ObservationIgnored let memoryUndo = MemoryUndo()
     var connectorStatus: [UUID: MCPStatus] = [:]
@@ -124,15 +135,22 @@ final class AppModel {
     /// (`keychainGeneration` changes when the app itself changes a key).
     @ObservationIgnored private var keyReads: (generation: Int, task: Task<Set<ProviderKind>, Never>)?
     @ObservationIgnored private var keychainGeneration = 0
-    @ObservationIgnored private var scheduler: Task<Void, Never>?
+    @ObservationIgnored private(set) var scheduler: Task<Void, Never>?
+    /// Whether this is a developer mode (`--snapshot`, `--render-*`): it draws and exits, so nothing with an effect
+    /// outside the process runs in it, not even over a data folder with routines or connectors (see `DevRun`).
+    @ObservationIgnored private let isDevRun: Bool
 
     /// `runsBackgroundWork: false` skips the scheduler, Keychain checks and app-wide observers (tests).
+    /// `devRun` (the process's own mode unless given) also skips the scheduler, the connectors' servers and the
+    /// Claude Code check, whatever `runsBackgroundWork` says.
     /// `asyncLoading` says whether the first Orb's conversation is read off the main thread after `init` returns
     /// (the window does not wait for it; the app) or before it returns (what tests rely on); it follows
     /// `runsBackgroundWork` unless given.
-    init(store: Store = .standard, runsBackgroundWork: Bool = true, asyncLoading: Bool? = nil, secretVault: (any SecretVault)? = nil) {
+    init(store: Store = .standard, runsBackgroundWork: Bool = true, asyncLoading: Bool? = nil, secretVault: (any SecretVault)? = nil,
+         devRun: Bool = DevRun.isActive) {
         self.store = store
-        let secrets = ConnectorSecrets(vault: secretVault ?? (runsBackgroundWork && !DevRun.isActive ? KeychainVault() : MemoryVault()))
+        isDevRun = devRun
+        let secrets = ConnectorSecrets(vault: secretVault ?? (runsBackgroundWork && !devRun ? KeychainVault() : MemoryVault()))
         connectorSecrets = secrets
         images = ImageStore(dataFolder: store.directory)
         let gate = ApprovalGate()
@@ -142,7 +160,7 @@ final class AppModel {
         memory = MemoryLibrary.at(store.directory.appending(path: "memoria"))
         var notices: [StoreNotice] = []
         let stateRead = store.readState()
-        notices += stateRead.notice.map { [$0] } ?? []
+        notices += stateRead.notice.map { [Self.described($0, bots: [], routines: [])] } ?? []
         let state = stateRead.value ?? .initial
         bots = state.bots
         routines = state.routines
@@ -180,17 +198,25 @@ final class AppModel {
         if readsFirstLater, let first = state.bots.first { beginLoading(first.id) }
         guard runsBackgroundWork else { return }
         let outputs = outputsDirectory
-        Task.detached(priority: .utility) { ToolOutputCap.cleanUp(directory: outputs) }
+        // A developer run shares the user's $TMPDIR (`ORB_DATA_DIR` only moves the data), so it leaves alone what a running app wrote.
+        let cleansTemporaryFiles = !DevRun.isActive
+        Task.detached(priority: .utility) {
+            ToolOutputCap.cleanUp(directory: outputs)
+            if cleansTemporaryFiles { ClaudeCodeEngine.removeStaleMCPConfigs() }
+        }
         ApprovalNotifications.clearStale()
         ApprovalNotifications.install { [weak self] route in self?.handle(route) }
         Task { [weak self] in await self?.prepareMemory() }
-        scheduler = Task { [weak self] in
-            await self?.refreshConnections()
-            while !Task.isCancelled {
-                self?.runDueRoutines()
-                await self?.refreshAllModels()
-                await self?.unloadIdleConversations()
-                try? await Task.sleep(for: .seconds(30))
+        // No routines, connections or model lists in a developer mode: a copy of real data must not set real work going.
+        if !devRun {
+            scheduler = Task { [weak self] in
+                await self?.refreshConnections()
+                while !Task.isCancelled {
+                    self?.runDueRoutines()
+                    await self?.refreshAllModels()
+                    await self?.unloadIdleConversations()
+                    try? await Task.sleep(for: .seconds(30))
+                }
             }
         }
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
@@ -219,7 +245,33 @@ final class AppModel {
     private func reportSaveFailure(_ notice: StoreNotice) {
         guard !didReportSaveFailure else { return } // once: a full disk would otherwise repeat on every save
         didReportSaveFailure = true
-        dataNotices.append(notice)
+        dataNotices.append(Self.described(notice, bots: bots, routines: routines))
+    }
+
+    /// The notice with its file named for the user: what the file holds (a conversation, the app's settings) instead
+    /// of `<UUID>.json` or `state.json`. A file it can't place keeps its name.
+    nonisolated static func described(_ notice: StoreNotice, bots: [Bot], routines: [Routine]) -> StoreNotice {
+        guard let file = notice.file, let subject = subject(of: file, bots: bots, routines: routines) else { return notice }
+        var notice = notice
+        notice.message = notice.message.replacingOccurrences(of: "“\(file.lastPathComponent)”", with: subject)
+        return notice
+    }
+
+    private nonisolated static func subject(of file: URL, bots: [Bot], routines: [Routine]) -> String? {
+        let name = file.lastPathComponent, folder = file.deletingLastPathComponent().lastPathComponent
+        guard name.hasSuffix(".json") else { return nil }
+        if name == "state.json" { return "os ajustes do app (Orbs, rotinas, provedores)" }
+        let stem = String(name.dropLast(".json".count))
+        if folder == "conversations", let id = UUID(uuidString: stem) {
+            return bots.first { $0.id == id }.map { "a conversa de \($0.name)" }
+        }
+        // Inside an Orb's folder of earlier conversations: `<conversationID>`, `routine-<routineID>` or `index`.
+        guard let owner = UUID(uuidString: folder).flatMap({ id in bots.first { $0.id == id } }) else { return nil }
+        if stem == "index" { return "a lista de conversas antigas de \(owner.name)" }
+        if stem.hasPrefix("routine-"), let id = UUID(uuidString: String(stem.dropFirst("routine-".count))) {
+            return routines.first { $0.id == id }.map { "o histórico da rotina \($0.name)" } ?? "o histórico de uma rotina de \(owner.name)"
+        }
+        return UUID(uuidString: stem) == nil ? nil : "uma conversa antiga de \(owner.name)"
     }
 
     /// Reads the Orb's conversation now if it isn't in memory (see `BotSession.ensureLoaded`).
@@ -497,7 +549,7 @@ final class AppModel {
     func refreshConnections() async {
         var found = await keyedProviders()
         if await ChatGPTAuth.shared.credential != nil { found.insert(.chatgpt) }
-        if account(.claudeCode) != nil {
+        if !isDevRun, account(.claudeCode) != nil { // the status runs the real `claude`
             claudeCode = await ClaudeCode.shared.status()
             if claudeCode.isLoggedIn { found.insert(.claudeCode) }
         }
@@ -648,7 +700,9 @@ final class AppModel {
 
     /// Deletes the Orb with its conversation and routines. Its memory goes too, unless `keepMemory`: then the
     /// last conversation stretch is saved and the folder moves to `memoria/_guardadas/`.
-    func deleteBot(_ botID: UUID, keepMemory: Bool = false) {
+    /// With `keepMemory`, returns the move of the memory, which ends with the folder it went to (nil: it did not move).
+    @discardableResult
+    func deleteBot(_ botID: UUID, keepMemory: Bool = false) -> Task<URL?, Never>? {
         let name = bot(botID)?.name ?? "Orb"
         let session = session(botID)
         liveBot(botID)?.stopComposing() // its watcher task ends with it
@@ -670,12 +724,13 @@ final class AppModel {
         session.memoryIdle?.cancel()
         session.memoryIdle = nil
         let library = memory
+        var keeping: Task<URL?, Never>?
         if keepMemory {
             let stretch = session.pendingStretch()
             let bank = library.bank(for: botID)
-            Task.detached(priority: .utility) {
+            keeping = Task.detached(priority: .utility) {
                 if let stretch, let page = SessionSummary.page(from: stretch) { await bank.saveSession(page) }
-                library.keep(botID, name: name)
+                return library.keep(botID, name: name)
             }
         } else {
             library.delete(botID)
@@ -688,6 +743,7 @@ final class AppModel {
         store.deleteArchive(botID) // the earlier conversations and the routines' ones
         if selection == .bot(botID) { selection = bots.first.map { .bot($0.id) } }
         if lastSelectedBotID == botID { lastSelectedBotID = nil } // a catalog sheet must not default to an Orb that is gone
+        return keeping
     }
 
     func selectAdjacentBot(offset: Int) {
@@ -699,22 +755,28 @@ final class AppModel {
 
     // MARK: Conversation history
 
-    /// Starts a new conversation. The current one is archived (when you said anything in it), not thrown away.
+    /// Starts a new conversation. The current one is archived (when you said anything in it), not thrown away. The
+    /// draft belongs to the Orb, not to the conversation: it stays in the composer, with what was queued during a
+    /// stopped turn (which `leaveChat` gave back to it, attachments and all).
     func newConversation(_ botID: UUID) {
         guard bot(botID) != nil else { return }
         leaveChat(botID)
         archiveChat(botID)
         session(botID).installChat(Conversation())
-        setDraft("", for: botID)
     }
 
     /// Makes an archived conversation the current one. The current one is archived first (if you said anything in
     /// it), so nothing is lost either way. The conversation keeps its Claude Code session and its memory
-    /// bookkeeping (how much of it is already saved as memory), so reopening it saves nothing twice.
+    /// bookkeeping (how much of it is already saved as memory), so reopening it saves nothing twice. The file is read
+    /// off the main thread; what changed meanwhile is looked at again before the chat is replaced.
     @discardableResult
-    func reopenConversation(_ id: UUID, of botID: UUID) -> Bool {
-        guard let owner = bot(botID) else { return false }
-        let read = store.readArchived(id, for: botID)
+    func reopenConversation(_ id: UUID, of botID: UUID) async -> Bool {
+        guard bot(botID) != nil, !reopening.contains(id) else { return false }
+        reopening.insert(id)
+        defer { reopening.remove(id) }
+        let read = await store.readArchivedAsync(id, for: botID)
+        // The Orb was deleted, or the conversation was deleted from the list, while it was being read.
+        guard let owner = bot(botID), archives[botID]?.contains(where: { $0.id == id }) ?? true else { return false }
         addNotice(Self.labeled(read.notice, for: owner))
         guard let chosen = read.value else {
             archives[botID]?.removeAll { $0.id == id }
@@ -723,7 +785,6 @@ final class AppModel {
         leaveChat(botID)
         archiveChat(botID)
         session(botID).installChat(chosen.closingInterruptedTurn())
-        setDraft("", for: botID)
         store.deleteArchived(id, for: botID) // after the reopened chat is written (`installChat`, same queue): a crash in between keeps both
         archives[botID]?.removeAll { $0.id == id }
         return true
@@ -859,6 +920,8 @@ final class AppModel {
 
     // MARK: Compaction
 
+    static let compactionBusyMessage = "Espere o Orb terminar o que está fazendo para compactar a conversa."
+
     /// "Compactar agora": folds the older part of the Orb's conversation into the summary right away, with the same
     /// machinery as an automatic compaction but down to `ContextMeter.compactingShare` of the budget, after saving to the
     /// Orb's memory what it held. `focus` is something the summary should pay attention to. The result carries the
@@ -874,11 +937,17 @@ final class AppModel {
         }
         let session = session(botID)
         guard session.turnTask == nil else {
-            return CompactionResult(status: .busy, message: "Espere o Orb terminar o que está fazendo para compactar a conversa.")
+            return CompactionResult(status: .busy, message: Self.compactionBusyMessage)
         }
         ensureLoaded(botID)
-        let tooShort = CompactionResult(status: .nothingToCompact, message: "A conversa ainda é curta: não há o que compactar.")
-        guard var conversation = session.conversation, conversation.messages.count > 1 else { return tooShort }
+        guard var conversation = session.conversation else {
+            return CompactionResult(status: .nothingToCompact, message: ContextWords.nothingToFold)
+        }
+        let tooShort = CompactionResult(
+            status: .nothingToCompact,
+            message: ContextWords.nothingToCompact(requests: conversation.requestCount(in: conversation.coveredMessageCount..<conversation.messages.count),
+                                                   alreadySummarized: conversation.summary != nil))
+        guard conversation.messages.count > 1 else { return tooShort }
 
         let claudeCode = modelRef(for: bot)?.provider == .claudeCode
         let budget = contextBudget(for: bot) ?? .fallback
@@ -1013,8 +1082,7 @@ final class AppModel {
         }
         prompt = unattendedPrompt(prompt, for: botID)
         if intent != nil {
-            prompt += "\n\n(The user is asking you to remember something. Save it now with the \(rememberTool) tool, picking the "
-                + "right tipo; if it refers to something said earlier, save that. Then confirm in one short sentence.)"
+            prompt += MemoryIntent.instruction(tool: rememberTool)
         }
         if ref.provider == .claudeCode {
             runClaudeCode(bot, model: ref.model, prompt: prompt, images: pictures, message: typed, turnGrants: turnGrants)
@@ -1168,12 +1236,16 @@ final class AppModel {
         // The app knows whether it has Accessibility; the server (a child process) is told rather than left to ask.
         let usesMac = bot.capabilities.contains(.computerUse)
         let accessibility = usesMac ? accessibilityProbe() : nil
+        let connectors = connectorServers(for: bot)
         let servers = [OrbToolsMCPServer.config(directory: bank.directory, mac: usesMac, files: bot.capabilities.contains(.terminal),
                                                 folder: bot.workingURL, accessibilityGranted: accessibility)]
-            + connectorServers(for: bot)
+            + connectors
+        let connectorIDs = Set(connectors.map(\.id))
+        let cliNames = ClaudeCodeTurn.mcpNames(servers) // what the CLI will call each server
         let isNew = conversation.messages.isEmpty
         let userTurns = session.userTurnCount()
         session.isClaudeTurn = true
+        session.claudeTurnDelivered = false
         session.claudeTurnFolder = folder
         let turn = session.beginTurn()
         session.turnTask = Task {
@@ -1198,11 +1270,15 @@ final class AppModel {
                 return
             }
             let environment = await ClaudeCode.shared.environment(for: installation)
+            // What the connectors mark destructive, from the app's own connections: the CLI's never reach the Orb. A
+            // connector still starting gets a few seconds; one the app could not list is asked about tool by tool.
+            let (destructive, unverified) = await connectorAnnotations(for: connectorIDs, cliNames: cliNames)
             guard session.isCurrent(turn) else { return }
             let claudeTurn = ClaudeCodeTurn(bot: bot, executable: installation.executable, model: model,
                                             system: ClaudeCodePrompt.withAccessibilityNote(built.system, accessibilityGranted: accessibility),
                                             prompt: prompt, images: pictures, context: context, sessionID: sessionID, connectors: servers,
-                                            environment: environment, turnGrants: turnGrants,
+                                            environment: environment, destructiveConnectors: destructive,
+                                            unverifiedConnectors: unverified, turnGrants: turnGrants,
                                             permissions: permissionSource(for: bot))
             // Recorded when the session answers (see `apply`): a turn that fails before that sent nothing.
             session.pendingMarks = built.marks
@@ -1210,7 +1286,18 @@ final class AppModel {
         }
     }
 
-    func stop(_ botID: UUID) { sessions[botID]?.stop() }
+    /// The tools of `ids` that the connectors mark destructive, and the connectors whose tools the app's own connection
+    /// could not list (so nothing is known about them), for a Claude Code turn.
+    func connectorAnnotations(for ids: Set<UUID>, cliNames: [UUID: String], timeout: Duration = .seconds(5)) async
+        -> (destructive: [String: String], unverified: Set<String>) {
+        guard !ids.isEmpty else { return ([:], []) }
+        await waitForConnectors(ids, timeout: timeout)
+        let tools = await mcp.tools(allowing: ids)
+        return (ClaudeCodeTurn.destructiveConnectors(tools, cliNames: cliNames),
+                ClaudeCodeTurn.unverifiedConnectors(ids, tools: tools, cliNames: cliNames))
+    }
+
+    func stop(_ botID: UUID, startsQueuedRoutines: Bool = true) { sessions[botID]?.stop(startsQueuedRoutines: startsQueuedRoutines) }
 
     func apply(_ event: TurnEvent, to botID: UUID) { session(botID).apply(event) } // internal for tests
 
@@ -1261,12 +1348,12 @@ final class AppModel {
             }
             return
         }
-        guard sessions[routine.botID]?.routineID != routineID else { return }
+        guard sessions[routine.botID]?.routineID != routineID, !startingRoutines.values.contains(routineID) else { return }
         guard !queuedRoutines.contains(routineID) else {
             startIdleQueuedRoutines() // waiting, but its Orb may be free by now (the routine was moved to another Orb)
             return
         }
-        guard !isWorking(routine.botID) else {
+        guard !isWorking(routine.botID), startingRoutines[routine.botID] == nil else {
             queuedRoutines.append(routineID)
             return
         }
@@ -1303,14 +1390,39 @@ final class AppModel {
         store.deleteRoutineConversation(routine: routineID, for: routine.botID)
     }
 
+    /// Starts the routine once its own conversation (the last runs) has been read, off the main thread. Until then the
+    /// Orb takes no other routine (`startingRoutines`); a message sent meanwhile gets the Orb first.
     private func startRoutine(_ routine: Routine) {
         let botID = routine.botID
+        guard session(botID).turnTask == nil, startingRoutines[botID] == nil, bot(botID) != nil,
+              routines.contains(where: { $0.id == routine.id }) else { return }
+        ensureLoaded(botID)
+        startingRoutines[botID] = routine.id
+        Task {
+            let read = await store.readRoutineConversationAsync(routine: routine.id, for: botID)
+            startingRoutines[botID] = nil
+            beginRoutine(routine.id, of: botID, read: read)
+        }
+    }
+
+    private func beginRoutine(_ routineID: UUID, of botID: UUID, read: StoreRead<Conversation>) {
+        // The Orb or the routine is gone, or the routine was moved to another Orb: its file here is not the one to run.
+        guard bot(botID) != nil, let index = routines.firstIndex(where: { $0.id == routineID }) else { return }
+        guard routines[index].botID == botID else {
+            if !queuedRoutines.contains(routineID) { queuedRoutines.append(routineID) }
+            startIdleQueuedRoutines() // it runs when its new Orb is free
+            return
+        }
         let session = session(botID)
-        guard session.turnTask == nil, bot(botID) != nil, let index = routines.firstIndex(where: { $0.id == routine.id }) else { return }
+        // A message (or a routine of its own) took the Orb meanwhile: this one waits for the turn to end, as any other.
+        guard session.turnTask == nil else {
+            if !queuedRoutines.contains(routineID) { queuedRoutines.append(routineID) }
+            return
+        }
+        let routine = routines[index]
         ensureLoaded(botID)
         let started = Date.now
         routines[index].lastRun = started
-        let read = store.readRoutineConversation(routine: routine.id, for: botID)
         addNotice(Self.labeled(read.notice, for: bot(botID)))
 
         // The routine's own conversation takes the chat's place while it runs (the chat is written and parked).
@@ -1332,7 +1444,7 @@ final class AppModel {
 
     /// Runs the routines that were waiting for this Orb, one at a time, as it becomes free.
     func startNextQueuedRoutine(for botID: UUID) {
-        while sessions[botID]?.turnTask == nil,
+        while sessions[botID]?.turnTask == nil, startingRoutines[botID] == nil,
               let next = queuedRoutines.first(where: { id in routines.first { $0.id == id }?.botID == botID }) {
             queuedRoutines.removeAll { $0 == next }
             if let routine = routines.first(where: { $0.id == next }) { startRoutine(routine) }
@@ -1449,6 +1561,7 @@ final class AppModel {
     // MARK: Connectors
 
     func syncConnectors() {
+        guard !isDevRun else { return } // their servers are programs (`npx …`) of whoever wrote the data folder
         let configs = connectors
         let previous = connectorSync
         connectorSyncGeneration += 1
@@ -1485,6 +1598,16 @@ final class AppModel {
             try? await Task.sleep(for: .milliseconds(60))
         }
         return settledConnectors[id] ?? connectorStatus[id]
+    }
+
+    /// Waits until every connector in `ids` has started or failed in the sync under way, but no longer than `timeout`
+    /// (an `npx` server can take many seconds).
+    func waitForConnectors(_ ids: Set<UUID>, timeout: Duration) async {
+        let deadline = ContinuousClock.now + timeout
+        while pendingConnectorSyncs > 0, ids.contains(where: { settledConnectors[$0] == nil }),
+              ContinuousClock.now < deadline, !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(60))
+        }
     }
 
     // MARK: Notifications

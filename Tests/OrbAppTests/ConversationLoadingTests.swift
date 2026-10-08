@@ -183,6 +183,7 @@ import Testing
         #expect(model.conversations[bots[1].id] == nil)
 
         model.runRoutine(routine.id)
+        await model.routineStarted()
         #expect(!model.isWorking(bots[1].id))
         for _ in 0..<300 where model.conversations[bots[1].id] == nil || !model.isRoutineRunning(routine.id) && model.routines[0].runs.isEmpty {
             try await Task.sleep(for: .milliseconds(10))

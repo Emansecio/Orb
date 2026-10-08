@@ -53,6 +53,8 @@ actor ChatGPTAuth {
     /// the same token would make the second fail and sign the user out.
     private var refreshing: Task<ChatGPTCredential, Error>?
     private var lastRefresh: Date?
+    /// Bumped by `signOut`, so a refresh that was already waiting on the network does not bring the login back.
+    private var generation = 0
 
     init(storage: Storage = .keychain, tokenURL: URL = ChatGPTAuth.defaultTokenURL, session: URLSession = .shared) {
         self.storage = storage
@@ -68,6 +70,9 @@ actor ChatGPTAuth {
     }
 
     func signOut() {
+        generation += 1
+        refreshing?.cancel()
+        refreshing = nil
         cached = nil
         storage.save("")
     }
@@ -86,17 +91,27 @@ actor ChatGPTAuth {
     /// Joins the refresh in progress or starts one.
     private func refresh(_ current: ChatGPTCredential) async throws -> ChatGPTCredential {
         if let refreshing { return try await refreshing.value }
+        let started = generation
         let task = Task {
-            let fresh = try await exchange([
-                "grant_type": "refresh_token", "client_id": current.clientID,
-                "refresh_token": current.refreshToken, "resource": Self.resource,
-            ], clientID: current.clientID, previous: current)
+            let fresh: ChatGPTCredential
+            do {
+                fresh = try await exchange([
+                    "grant_type": "refresh_token", "client_id": current.clientID,
+                    "refresh_token": current.refreshToken, "resource": Self.resource,
+                ], clientID: current.clientID, previous: current)
+            } catch {
+                // Signing out cancels this task: whoever awaits it is told the login is gone, not a raw cancellation.
+                if generation != started { throw LLMError.notConfigured }
+                throw error
+            }
+            // Signed out while the token endpoint was answering: keep the credential gone.
+            guard generation == started else { throw LLMError.notConfigured }
             save(fresh)
             lastRefresh = .now
             return fresh
         }
         refreshing = task
-        defer { refreshing = nil }
+        defer { if generation == started { refreshing = nil } }
         return try await task.value
     }
 

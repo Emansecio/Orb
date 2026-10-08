@@ -17,6 +17,17 @@ enum Retry {
         return false
     }
 
+    /// What the status line says while waiting `seconds` to try again: a dropped connection and a rate limit are not
+    /// "busy", and blaming the provider for the user's Wi-Fi sends them looking in the wrong place.
+    static func waitStatus(seconds: TimeInterval, after error: Error) -> String {
+        let cause = switch error {
+        case LLMError.network, is URLError: "Conexão caiu"
+        case LLMError.http(429, _, _), LLMError.stream("rate_limit_error", _), LLMError.stream("rate_limit_exceeded", _): "Limite do provedor"
+        default: "Provedor ocupado"
+        }
+        return "\(cause), tentando de novo em \(Int(seconds.rounded(.up))) s"
+    }
+
     /// Seconds to wait after `attempt` (1-based) failed: the provider's `Retry-After` when given, else exponential
     /// backoff with jitter, never above `maxBackoff`. nil when the provider asks for more than we will wait.
     static func delay(afterAttempt attempt: Int, retryAfter: TimeInterval?, jitter: Double) -> TimeInterval? {
@@ -30,7 +41,7 @@ enum Retry {
 }
 
 /// Runs `operation`, retrying retryable failures up to `maxAttempts` times in total. `onWait` is told how long
-/// it will wait and which attempt (1-based) just failed, so the UI can say "tentando de novo". Cancellation
+/// it will wait, which attempt (1-based) just failed and why, so the UI can say "tentando de novo". Cancellation
 /// (also while waiting) ends it at once; a non-retryable error is thrown as it is. A provider that asks for a wait
 /// longer than `Retry.maxServerDelay` (a quota, not a hiccup) is not retried: its error is thrown at once and its
 /// description tells how long the provider asked to wait.
@@ -38,7 +49,7 @@ func withRetries<T>(
     maxAttempts: Int = 4,
     sleep: (TimeInterval) async throws -> Void = { try await Task.sleep(for: .seconds($0)) },
     jitter: () -> Double = { Double.random(in: 0...1) },
-    onWait: (_ seconds: TimeInterval, _ attempt: Int) -> Void = { _, _ in },
+    onWait: (_ seconds: TimeInterval, _ attempt: Int, _ error: Error) -> Void = { _, _, _ in },
     isolation: isolated (any Actor)? = #isolation,
     operation: () async throws -> T
 ) async throws -> T {
@@ -51,7 +62,7 @@ func withRetries<T>(
             guard attempt < maxAttempts, Retry.isRetryable(error),
                   let seconds = Retry.delay(afterAttempt: attempt, retryAfter: (error as? LLMError)?.retryAfter, jitter: jitter())
             else { throw error }
-            onWait(seconds, attempt)
+            onWait(seconds, attempt, error)
             try await sleep(seconds)
             attempt += 1
         }

@@ -118,13 +118,33 @@ struct ProviderPresentationTests {
     @Test func connectionFailuresAreToldFromOtherErrors() {
         #expect(ProviderCheck.failure(from: URLError(.cannotConnectToHost)) == .unreachable)
         #expect(ProviderCheck.failure(from: LLMError.network(code: URLError.Code.timedOut.rawValue, message: "x")) == .unreachable)
-        if case .other(let message) = ProviderCheck.failure(from: LLMError.http(status: 401, message: "no")) {
+        if case .other(let message) = ProviderCheck.failure(from: LLMError.http(status: 500, message: "no")) {
             #expect(!message.isEmpty)
         } else {
             Issue.record("an HTTP error is not 'unreachable'")
         }
         #expect(ProviderCheck.hostLabel("http://localhost:11434/v1") == "localhost:11434")
         #expect(ProviderCheck.hostLabel("https://gw.example/v1") == "gw.example")
+    }
+
+    @Test func aRefusedKeyIsToldFromOtherHTTPErrors() {
+        for status in [401, 403] {
+            if case .rejected(let message) = ProviderCheck.failure(from: LLMError.http(status: status, message: "Invalid API key")) {
+                #expect(message.contains("Chave ou login inválido"))
+            } else {
+                Issue.record("\(status) with a bad key is a refused credential")
+            }
+        }
+        // A spent balance, a model the workspace turned off or a plan without API are not a bad key.
+        for message in ["Insufficient balance", "Model x is disabled", "upgrade_required"] {
+            #expect(ProviderCheck.failure(from: LLMError.http(status: 401, message: message)) == .other(LLMError.http(status: 401, message: message).localizedDescription))
+        }
+        #expect(ProviderCheck.failure(from: LLMError.http(status: 429, message: "slow")) != .rejected("x"))
+        let refused = ProviderStatus.make(kind: .openai, account: account(.openai, models: 2), isConnected: true,
+                                          lastError: .rejected("Chave ou login inválido (401). Confira em Ajustes → Modelos. Detalhe do provedor: x"),
+                                          isChecking: false)
+        #expect(refused.isProblem)
+        #expect(refused.explanation(for: .openai) == "Chave ou login inválido (401). Detalhe do provedor: x")
     }
 
     @Test func removingSaysWhatItDoes() {
@@ -305,8 +325,9 @@ struct LocalServerProbeTests {
 @MainActor
 struct FirstRunStyleTests {
     @Test func theCardSpeaksAboutTheOrbInTheChatAndAboutModelsInAjustes() {
-        #expect(FirstRunStyle.chat(botName: "Atlas").title == "Vamos deixar o Atlas pronto")
-        #expect(FirstRunStyle.chat(botName: "").title == "Vamos deixar seu Orb pronto")
+        #expect(FirstRunStyle.chat(botName: "Atlas").title == "Vamos preparar Atlas")
+        #expect(FirstRunStyle.chat(botName: "Lia").title == "Vamos preparar Lia")
+        #expect(FirstRunStyle.chat(botName: "").title == "Vamos preparar seu Orb")
         #expect(FirstRunStyle.settings.title == "Conecte um modelo")
     }
 
@@ -529,5 +550,33 @@ struct EmptyChatContentTests {
         #expect(EmptyChatContent.folderText(for: bot(.init([.browser]))) == nil, "no Terminal, no folder to speak of")
         #expect(EmptyChatContent.capabilityNames(for: bot()) == ["Terminal e arquivos", "Navegar na web", "Controlar apps do Mac"])
         #expect(EmptyChatContent.capabilityNames(for: bot(.init())) == [])
+    }
+}
+
+struct ModelSearchTests {
+    private func choices(_ query: String) -> [(account: ProviderAccount, models: [ProviderModel])] {
+        let openrouter = ProviderAccount(kind: .openrouter)
+        let xai = ProviderAccount(kind: .xai)
+        let all = [
+            (account: openrouter, models: [ProviderModel(id: "meta/llama-4", name: "Llama 4", format: .chat),
+                                           ProviderModel(id: "openai/gpt-5", name: "GPT-5", format: .chat)]),
+            (account: xai, models: [ProviderModel(id: "grok-4", name: "Grok 4", format: .chat)]),
+        ]
+        return all.map { (account: $0.account, models: $0.models.filter { ModelSearch.matches($0, query) }) }.filter { !$0.models.isEmpty }
+    }
+
+    @Test func returnPicksTheFirstModelShown() {
+        #expect(ModelSearch.submitted(choices("gpt"), query: "gpt", allowsDefault: true) == "openrouter/openai/gpt-5")
+        #expect(ModelSearch.submitted(choices("4"), query: "4", allowsDefault: false) == "openrouter/meta/llama-4")
+        #expect(ModelSearch.submitted(choices("grok"), query: "grok", allowsDefault: true) == "xai/grok-4")
+    }
+
+    @Test func returnWithNothingTypedPicksTheDefaultWhenThereIsOne() {
+        #expect(ModelSearch.submitted(choices(""), query: "", allowsDefault: true) == "")
+        #expect(ModelSearch.submitted(choices(""), query: "", allowsDefault: false) == nil)
+    }
+
+    @Test func returnWithNoMatchDoesNothing() {
+        #expect(ModelSearch.submitted(choices("zzz"), query: "zzz", allowsDefault: true) == nil)
     }
 }

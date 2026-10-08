@@ -35,6 +35,12 @@ struct OrbDesignTests {
         #expect(again == config)
     }
 
+    @Test func aTemperamentFromANewerBuildReadsAsTheDefault() throws {
+        let config = try JSONDecoder().decode(OrbConfig.self, from: Data(#"{"color":"rosa","temperament":"dorminhoco"}"#.utf8))
+        #expect(config.color == "rosa" && config.temperament == .equilibrado)
+        let known = try JSONDecoder().decode(OrbConfig.self, from: Data(#"{"temperament":"timido"}"#.utf8))
+        #expect(known.temperament == .timido)
+    }
 
     @Test func renamedOptionsMapToTheirSuccessor() {
         var old = OrbConfig()
@@ -157,6 +163,17 @@ struct OrbDesignTests {
     }
 
     // MARK: Aleatório
+
+    @Test func aRandomLookKeepsTheSproutAwayFromCapsAndCrowns() {
+        for accessory in ["bone", "gorro", "coroa"] { #expect(!OrbConfig.goesWith(hair: "tufinho", accessory: accessory)) }
+        // The sprout may still pair with what it does not cross, and a choice made by hand is never limited.
+        #expect(OrbConfig.goesWith(hair: "tufinho", accessory: "laco"))
+        var rng = SeededRandom(seed: 7)
+        for _ in 0..<1_000 {
+            let config = OrbConfig.random(using: &rng)
+            if config.hair == "tufinho" { #expect(Set(config.accessories).isDisjoint(with: ["bone", "gorro", "coroa"])) }
+        }
+    }
 
     @Test func randomLooksHangTogether() {
         var rng = SeededRandom(seed: 42)

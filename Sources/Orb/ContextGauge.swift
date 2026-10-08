@@ -38,15 +38,16 @@ enum ContextWords {
         "De ~\(approx(before)) para ~\(approx(after)) tokens"
     }
 
-    /// What is kept word for word: the whole conversation, or a summary and the latest messages.
-    static func kept(totalMessages total: Int, foldedMessages folded: Int) -> String {
+    /// What is kept word for word: the whole conversation, or a summary and the latest requests. It counts your
+    /// requests, which the chat shows, and not the model's messages (calls and outputs of tools included).
+    static func kept(totalRequests total: Int, foldedRequests folded: Int) -> String {
         guard folded > 0, folded < total else {
-            if folded >= total, total > 0 { return "Só o resumo da conversa; as mensagens recentes ainda não chegaram." }
-            return total == 1 ? "A mensagem inteira, palavra por palavra." : "Todas as \(total) mensagens, palavra por palavra."
+            if folded >= total, total > 0 { return "Só o resumo da conversa; os pedidos recentes ainda não chegaram." }
+            return total == 1 ? "O pedido inteiro, palavra por palavra." : "Todos os \(total) pedidos, palavra por palavra."
         }
         let recent = total - folded
-        let summary = folded == 1 ? "Um resumo da primeira mensagem" : "Um resumo das \(folded) primeiras mensagens"
-        let rest = recent == 1 ? "a última, palavra por palavra" : "as últimas \(recent), palavra por palavra"
+        let summary = folded == 1 ? "Um resumo do primeiro pedido" : "Um resumo dos \(folded) primeiros pedidos"
+        let rest = recent == 1 ? "o último, palavra por palavra" : "os últimos \(recent), palavra por palavra"
         return "\(summary) e \(rest)."
     }
 
@@ -56,10 +57,33 @@ enum ContextWords {
         return percent == 0 ? "Nada veio do cache do provedor" : "\(percent)% veio do cache do provedor"
     }
 
-    /// What "Compactar agora" would do to a conversation that has something to fold.
-    static func wouldFree(messages: Int, tokens: Int) -> String {
-        let what = messages == 1 ? "1 mensagem" : "\(messages) mensagens"
+    /// What "Compactar agora" would do to a conversation that has something to fold: `requests` more of your requests
+    /// become part of the summary (`alreadySummarized`: there is one already).
+    static func wouldFree(requests: Int, alreadySummarized: Bool, tokens: Int) -> String {
+        let what: String
+        switch (requests, alreadySummarized) {
+        case (1, false): what = "o primeiro pedido"
+        case (_, false): what = "os \(requests) primeiros pedidos"
+        case (1, true): what = "mais 1 pedido"
+        default: what = "mais \(requests) pedidos"
+        }
         return "Compactar agora resumiria \(what) e liberaria cerca de \(approx(tokens)) tokens."
+    }
+
+    /// Said when there is nothing older to fold into a summary (a single request, however long its answer).
+    static let nothingToFold = "Só há um pedido nesta conversa: não há mensagens antigas para resumir."
+
+    /// Said when "Compactar agora" has nothing to do, by what is true of the conversation: `requests` are yours that the
+    /// summary does not stand for yet (a single one is `nothingToFold`; several short ones are just a short chat).
+    static func nothingToCompact(requests: Int, alreadySummarized: Bool) -> String {
+        if alreadySummarized { return "O começo já está resumido; não há mais o que compactar agora." }
+        return requests > 1 ? "A conversa ainda é curta: não há o que compactar." : nothingToFold
+    }
+
+    /// The card above the composer. Without anything to fold, compacting is not offered: only a new conversation.
+    static func nudgeQuestion(canCompact: Bool) -> String {
+        canCompact ? "Esta conversa está ficando longa. Compactar agora ou começar uma nova?"
+            : "Esta conversa já ocupa quase todo o espaço do modelo. Começar uma nova?"
     }
 }
 
@@ -105,6 +129,9 @@ struct ContextReading: Equatable, Sendable {
     var fill: ContextFill?
     var windowIsStated: Bool
     var messageCount: Int
+    /// Your requests in the conversation, and the ones the summary stands for.
+    var requestCount: Int
+    var foldedRequests: Int
     var memory: ContextMemoryLevel
     /// Share of the latest request served by the provider's cache, when it said.
     var cacheHit: Double?
@@ -120,6 +147,8 @@ struct ContextReading: Equatable, Sendable {
         }
         return ContextReading(botID: input.botID, conversationKey: conversation.items.first?.id, isClaudeCode: input.isClaudeCode,
                               fill: fill, windowIsStated: input.windowIsStated, messageCount: conversation.messages.count,
+                              requestCount: conversation.requestCount(in: 0..<conversation.messages.count),
+                              foldedRequests: conversation.requestCount(in: 0..<conversation.coveredMessageCount),
                               memory: input.memory, cacheHit: input.isClaudeCode ? nil : input.usage?.cacheHitRatio)
     }
 

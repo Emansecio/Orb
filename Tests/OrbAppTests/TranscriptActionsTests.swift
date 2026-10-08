@@ -61,14 +61,24 @@ private struct EchoModel: LLMClient {
         #expect(NoticeAction.actions(for: "A resposta passou do limite do modelo e foi cortada. Diga “continua” para seguir.") == [.continueTurn])
     }
 
-    @Test func aConversationThatIsTooLongOffersANewOne() {
-        #expect(NoticeAction.actions(for: "Não deu certo: A conversa ficou grande demais para este modelo. Comece uma conversa nova ou apague o que não precisa.") == [.newConversation])
+    @Test func aConversationThatIsTooLongOffersToCompactAndANewOne() {
+        let tooLong = "Não deu certo: A conversa ficou grande demais para este modelo. Comece uma conversa nova ou apague o que não precisa."
+        #expect(NoticeAction.actions(for: tooLong) == [.compact, .newConversation])
+        #expect(NoticeAction.actions(for: tooLong, canCompact: true) == [.compact, .newConversation])
+        // A single request has nothing older to summarize: only the new conversation is offered.
+        #expect(NoticeAction.actions(for: tooLong, canCompact: false) == [.newConversation])
+        #expect(NoticeAction.actions(for: "Não deu certo: O modelo não respondeu.", canCompact: false) == [.retry])
+    }
+
+    @Test func aFactTheAppKeptItselfOffersToShowItInMemory() {
+        #expect(NoticeAction.actions(for: "Guardado na memória: gosto de café") == [.openMemory])
+        #expect(NoticeAction.actions(for: "Não guardei na memória: você negou.").isEmpty)
+        #expect(NoticeAction.actions(for: "Não deu para saber o que guardar na memória. Diga, por exemplo: “memorize que …”.").isEmpty)
     }
 
     @Test func noticesThatOnlyInformOfferNothing() {
         #expect(NoticeAction.actions(for: "Você interrompeu esta resposta").isEmpty)
         #expect(NoticeAction.actions(for: "Conversa compactada: o começo virou um resumo.").isEmpty)
-        #expect(NoticeAction.actions(for: "Guardado na memória: gosto de café").isEmpty)
         #expect(NoticeAction.failureDetail(of: "Não deu certo: X") == "X")
         #expect(NoticeAction.failureDetail(of: "Outro aviso") == nil)
     }
@@ -141,6 +151,57 @@ private struct EchoModel: LLMClient {
         let items = model.transcript(id)
         #expect(items.contains { if case .user(let text, _) = $0.kind { text == "faça isso" } else { false } })
         #expect(model.conversations[id]?.messages.count == 1)
+    }
+
+    @MainActor @Test func compactingAndTryingAgainSummarizesTheStartAndResendsTheLastMessage() async {
+        defer { try? FileManager.default.removeItem(at: root) }
+        var chat = Conversation()
+        for turn in 0..<6 {
+            chat.messages += [.user("pedido \(turn) " + String(repeating: "a", count: 3_500)),
+                              ChatMessage(role: .assistant, content: "resposta \(turn) " + String(repeating: "b", count: 3_500))]
+            chat.items += [user("pedido \(turn)"), TranscriptItem(.bot(text: "resposta \(turn)", isStreaming: false))]
+        }
+        chat.messages.append(.user("a pergunta que não coube"))
+        chat.items += [user("a pergunta que não coube"), notice("Não deu certo: A conversa ficou grande demais para este modelo.")]
+        let (model, id) = model(with: chat)
+        await model.loadedConversation(id)
+
+        #expect(model.compactAndRetry(id))
+        await waitUntil("the Orb to finish") { !model.isWorking(id) && model.turns[id] == nil }
+        let kept = model.conversations[id]
+        #expect(kept?.summary != nil && kept?.compactions == 1)
+        let users = model.transcript(id).compactMap { item -> String? in if case .user(let text, _) = item.kind { text } else { nil } }
+        #expect(users.last == "a pergunta que não coube" && users.filter { $0 == "a pergunta que não coube" }.count == 1)
+        #expect(model.transcript(id).contains { if case .bot(let text, _) = $0.kind { text == "Pronto." } else { false } })
+        #expect(!model.transcript(id).contains { if case .notice(let text) = $0.kind { text.hasPrefix("Não deu certo") } else { false } })
+        // The notice about the compaction stays, right above the message sent again.
+        let items = model.transcript(id)
+        let resent = items.lastIndex { if case .user(let text, _) = $0.kind { text == "a pergunta que não coube" } else { false } }
+        let compacted = items.lastIndex { if case .notice(let text) = $0.kind { text.hasPrefix("Compactei a conversa") } else { false } }
+        #expect(compacted != nil && resent != nil && compacted! < resent!)
+        #expect(items.filter { if case .notice(let text) = $0.kind { text.hasPrefix("Compactei a conversa") } else { false } }.count == 1)
+    }
+
+    @MainActor @Test func compactingAndTryingAgainDoesNothingWithASingleRequest() async {
+        defer { try? FileManager.default.removeItem(at: root) }
+        let failed = Conversation(items: [user("só isto"), notice("Não deu certo: A conversa ficou grande demais para este modelo.")],
+                                  messages: [.user("só isto")])
+        let (model, id) = model(with: failed)
+        await model.loadedConversation(id)
+
+        #expect(!model.compactAndRetry(id))
+        #expect(model.conversations[id]?.messages.count == 1 && model.conversations[id]?.summary == nil)
+        #expect(!model.isWorking(id))
+    }
+
+    @MainActor @Test func showingTheMemoryOpensThePanelOnItsTab() {
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (model, id) = model(with: Conversation())
+        model.showInspector = false
+        model.showMemory(of: id)
+        #expect(model.showInspector)
+        #expect(model.takeTabRequest(of: id) == .memory)
+        #expect(model.takeTabRequest(of: id) == nil)
     }
 
     @MainActor @Test func continuingSaysContinua() async {

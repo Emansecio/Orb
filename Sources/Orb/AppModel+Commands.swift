@@ -11,18 +11,23 @@ import AppKit
 /// when the command runs, so a notification would be sent before anyone listens. The chat takes it in `onAppear` (it
 /// has just been created) and in `onChange` (it was already open).
 struct PendingChatRequest: Equatable {
-    enum Kind: Equatable { case focusComposer, showConversations, editLook }
+    enum Kind: Equatable { case focusComposer, showConversations, editLook, showTab(InspectorTab) }
     let kind: Kind
     let botID: UUID
 }
 
 /// "Memória de Atlas guardada · Mostrar no Finder": what the sidebar says for a few seconds after an Orb was
-/// deleted with its memory kept.
+/// deleted with its memory kept. It says "Guardando…" until the memory has moved (the last stretch of a long
+/// conversation is written first), and then points at the folder it went to.
 struct KeptMemoryNotice: Identifiable, Equatable {
     let id = UUID()
     let botName: String
     let date: Date
-    var message: String { "Memória de \(botName) guardada" }
+    /// False while the memory is still being moved.
+    var isKept = false
+    /// Where it went; nil while it is being moved, or if that did not work out.
+    var folder: URL?
+    var message: String { isKept ? "Memória de \(botName) guardada" : "Guardando a memória de \(botName)…" }
 }
 
 /// What the menu bar icon says: nothing going on, an Orb working, or Orbs waiting for a permission.
@@ -61,8 +66,17 @@ extension AppModel {
     /// The Orb the commands act on: the open one, or the first when a workspace page is open.
     var commandBotID: UUID? { selectedBotID ?? botIDs.first }
 
-    /// A sheet of the app is open: the commands that would open another one wait.
-    var hasOpenSheet: Bool { showNewBot || showCommandPalette || showShortcuts || deletingBotID != nil }
+    /// Sheets of the editors (identity, memory, routine, skill, connector, appearance…) that are open.
+    var openSheets: Int { openSheetTokens.count }
+
+    func sheetDidOpen(_ token: UUID) { openSheetTokens.insert(token) }
+    func sheetDidClose(_ token: UUID) { openSheetTokens.remove(token) }
+
+    /// A sheet of the app is open: the commands that would open another one, or swap the screen behind it (and take
+    /// the sheet's draft along), wait.
+    var hasOpenSheet: Bool {
+        showNewBot || showCommandPalette || showShortcuts || deletingBotID != nil || openSheets > 0
+    }
 
     /// Opens the Orb's chat (a command on the routines page, or on another Orb, still has to land somewhere) and
     /// leaves the request for it.
@@ -76,6 +90,17 @@ extension AppModel {
         guard pendingChatRequest == PendingChatRequest(kind: kind, botID: botID) else { return false }
         pendingChatRequest = nil
         return true
+    }
+
+    /// The panel of `botID` takes a request to open on a tab, if one is waiting.
+    func takeTabRequest(of botID: UUID) -> InspectorTab? {
+        InspectorTab.allCases.first { takeChatRequest(.showTab($0), of: botID) }
+    }
+
+    /// "Gerenciar" in the permissions chip: the panel opens on "Pasta e acessos", where the grants (Liberações) are.
+    func showPermissions(of botID: UUID) {
+        showInspector = true
+        request(.showTab(.folder), of: botID)
     }
 
     /// ⌘L: the cursor goes to the composer, from the sidebar, the panel or another page.
@@ -125,11 +150,29 @@ extension AppModel {
         let hasMemory = FileManager.default.fileExists(atPath: memory.directory(for: botID).path)
             || !(sessions[botID]?.conversation?.items.isEmpty ?? true)
         deletingBotID = nil
-        deleteBot(botID, keepMemory: keepMemory)
-        keptMemoryNotice = keepMemory && hasMemory ? KeptMemoryNotice(botName: name, date: .now) : nil
+        let keeping = deleteBot(botID, keepMemory: keepMemory)
+        guard let keeping, hasMemory else {
+            keptMemoryNotice = nil
+            return
+        }
+        let notice = KeptMemoryNotice(botName: name, date: .now)
+        keptMemoryNotice = notice
+        Task {
+            let folder = await keeping.value
+            guard keptMemoryNotice?.id == notice.id else { return } // closed, or another Orb was deleted meanwhile
+            keptMemoryNotice?.folder = folder
+            keptMemoryNotice?.isKept = true
+        }
     }
 
     func dismissKeptMemoryNotice() { keptMemoryNotice = nil }
+
+    /// Shows the memory the notice is about: the folder it went to, or, when that is not known, what
+    /// `revealKeptMemory(named:)` can find.
+    func revealKeptMemory(_ notice: KeptMemoryNotice) {
+        guard let folder = notice.folder else { return revealKeptMemory(named: notice.botName) }
+        NSWorkspace.shared.activateFileViewerSelecting([folder])
+    }
 
     /// Shows the memory kept for `name` in the Finder: its own folder when it can be found (the newest one with
     /// that name), otherwise the folder of kept memories.

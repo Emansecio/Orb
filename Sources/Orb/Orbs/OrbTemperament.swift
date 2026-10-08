@@ -8,6 +8,9 @@ enum OrbTemperament: String, Codable, CaseIterable, Identifiable, Sendable {
 
     var id: String { rawValue }
 
+    /// A temperament from a newer build reads as the default (and the file is kept, see `DecodeLoss`): the Orb stays.
+    init(from decoder: Decoder) throws { self = try decoder.rawValue(Self.self, fallback: .equilibrado) }
+
     var label: String {
         switch self {
         case .calmo: "Calmo"

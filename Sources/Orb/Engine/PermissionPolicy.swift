@@ -246,7 +246,8 @@ enum PermissionPolicy {
         switch family {
         case .shell:
             let prefixes: [[String]] = relevant.compactMap { if case .commandPrefix(let words) = $0.scope { words } else { nil } }
-            return commandIsCovered(call.command, by: prefixes)
+            // A rule saved before wrappers stopped being offered (`caffeinate`, `xcrun`) would cover whatever they wrap.
+            return commandIsCovered(call.command, by: prefixes.filter { !($0.count == 1 && DangerousCommand.wrappers.contains($0[0])) })
         case .writeFiles:
             let folders: [URL] = relevant.compactMap { if case .folder(let path) = $0.scope { resolved(URL(fileURLWithPath: path)) } else { nil } }
             return !call.paths.isEmpty && call.paths.allSatisfy { path in folders.contains { isInside(path, folder: $0) } }
@@ -397,8 +398,11 @@ enum PermissionPolicy {
         return sensitive.reason(for: path.standardizedFileURL.path) ?? sensitive.reason(for: resolved(path).path)
     }
 
-    /// A tool call from Claude Code (`Bash`, `Write`, `mcp__server__tool`…).
-    static func call(claudeCodeTool name: String, input: JSONValue, workspace: URL?,
+    /// A tool call from Claude Code (`Bash`, `Write`, `mcp__server__tool`…). The Bash of the main session returns to the
+    /// Orb's folder after each call (`CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR`), but a subagent's keeps the folder a
+    /// `cd` left it in, so with `fromSubagent` a command is not judged as if it ran in the Orb's folder: relative paths
+    /// are unknown (`rm x.txt` asks) and nothing is taken as read-only from them.
+    static func call(claudeCodeTool name: String, input: JSONValue, workspace: URL?, fromSubagent: Bool = false,
                      home: URL = FileManager.default.homeDirectoryForCurrentUser) -> PermissionCall {
         // The Orb's own tools (memory, Mac) are judged exactly like their native twins: risk, `danger` (a forced
         // quit, AppleScript's `do shell script`, standing instructions) and families.
@@ -424,14 +428,14 @@ enum PermissionPolicy {
             }
         }
         var call = PermissionCall(toolName: name, family: nil, risk: risk(name))
-        let scope = dangerScope(workspace: workspace, directory: workspace, home: home)
+        let scope = fromSubagent ? nil : dangerScope(workspace: workspace, directory: workspace, home: home)
         switch name {
         case "Bash":
             call.family = .shell
             if let text = input["command"]?.string {
                 call.command = ShellCommandLine.parse(text)
                 call.danger = DangerousCommand.reason(for: text, in: scope, home: home)
-                if call.danger == nil, !input.flag("run_in_background"), let line = call.command,
+                if call.danger == nil, !fromSubagent, !input.flag("run_in_background"), let line = call.command,
                    ReadOnlyCommand.isReadOnly(line, directory: base, home: home) {
                     call.risk = .safe
                 }
@@ -506,12 +510,12 @@ enum PermissionPolicy {
     private static let subcommandPrograms: Set<String> = [
         "git", "npm", "pnpm", "yarn", "brew", "docker", "swift", "cargo", "go", "pip", "pip3", "gh", "kubectl", "make",
     ]
-    /// Programs that run whatever they are handed: a rule for one of them would allow everything.
-    private static let interpreters: Set<String> = [
+    /// Programs that run whatever they are handed: a rule for one of them would allow everything. That includes the
+    /// wrappers the danger check looks through (`caffeinate -i swift build`: a rule for `caffeinate` covers any command).
+    private static let interpreters: Set<String> = DangerousCommand.wrappers.union([
         "sh", "bash", "zsh", "dash", "ksh", "fish", "python", "python2", "python3", "ruby", "perl", "node", "deno", "bun",
-        "osascript", "env", "xargs", "eval", "exec", "sudo", "doas", "nohup", "time", "command", "find", "awk", "gawk", "sed",
-        "ssh", "source", "open",
-    ]
+        "osascript", "xargs", "eval", "sudo", "doas", "find", "awk", "gawk", "sed", "ssh", "source", "open", "watch",
+    ])
 
     /// Up to three standing rules that would cover this call, narrowest sensible first. Empty for calls that must
     /// always ask (destructive ones, changes to the Orb's instructions) and for anything that already runs.

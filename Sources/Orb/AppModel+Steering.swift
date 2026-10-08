@@ -33,12 +33,17 @@ final class ComposerLane {
     /// Pictures already decoded, shrunk and saved (see `ImageStore`); they go with the message as images.
     var pictures: [ImageAttachment] = []
     var error: String?
+    /// Pictures pasted or dropped that are still being shrunk and saved off the main thread. Sending waits for 0.
+    var pendingPictures = 0
     /// Messages sent during a turn that are not in the transcript yet, oldest first. This list is what the chat
     /// shows as "na fila"; `queue` is the copy the engine drains.
     private(set) var queued: [SteeredMessage] = []
     @ObservationIgnored let queue = SteeringQueue()
 
     var hasAttachments: Bool { !files.isEmpty || !pictures.isEmpty }
+
+    /// The chip's text while pictures are prepared.
+    nonisolated static func preparingText(_ count: Int) -> String { count == 1 ? "Preparando imagem…" : "Preparando \(count) imagens…" }
 
     func enqueue(_ message: SteeredMessage) {
         queued.append(message)
@@ -89,6 +94,11 @@ extension AppModel {
         return session.turnTask != nil && session.routineID == nil
     }
 
+    /// The name of the routine whose run holds this Orb, if one does.
+    func runningRoutineName(_ botID: UUID) -> String? {
+        sessions[botID]?.routineID.flatMap { id in routines.first { $0.id == id }?.name }
+    }
+
     /// Whether a queued message reaches the model before the turn ends (Orb's own engine) and not only after it
     /// (Claude Code takes one prompt per process).
     func steersMidTurn(_ botID: UUID) -> Bool { canSteer(botID) && sessions[botID]?.isClaudeTurn != true }
@@ -98,6 +108,7 @@ extension AppModel {
     @discardableResult
     func submit(_ text: String, to botID: UUID) -> Bool {
         let lane = composerLane(botID)
+        guard lane.pendingPictures == 0 else { return false } // a picture still on its way would miss this message
         if !canSteer(botID) {
             let sent = send(text, attachments: lane.files.map(\.url), images: lane.pictures, to: botID, fromUser: true)
             if sent {
@@ -106,6 +117,12 @@ extension AppModel {
                 lane.error = nil
             }
             return sent
+        }
+        // "/compactar" is a command of the composer, not a message: queued, it would reach the model as one. It waits in
+        // the composer for the end of the turn, as `send` runs it (which it does only without attachments).
+        if lane.files.isEmpty, lane.pictures.isEmpty, CompactionCommand.parse(text) != nil {
+            append(.notice(Self.compactionBusyMessage), to: botID)
+            return false
         }
         return queueMessage(text, to: botID)
     }
@@ -117,7 +134,26 @@ extension AppModel {
         let lane = composerLane(botID)
         let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSteer(botID), !typed.isEmpty || !lane.pictures.isEmpty else { return false }
-        let files = lane.files.map(\.url), pictures = lane.pictures
+        enqueue(typed, files: lane.files.map(\.url), pictures: lane.pictures, to: botID)
+        setDraft("", for: botID)
+        lane.files.removeAll()
+        lane.pictures.removeAll()
+        lane.error = nil
+        return true
+    }
+
+    /// Queues a message that does not come from the composer (the menu bar panel): the composer's draft and
+    /// attachments are not part of it and stay where they are.
+    @discardableResult
+    func queueOutsideComposer(_ text: String, to botID: UUID) -> Bool {
+        let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard canSteer(botID), !typed.isEmpty else { return false }
+        enqueue(typed, files: [], pictures: [], to: botID)
+        return true
+    }
+
+    private func enqueue(_ typed: String, files: [URL], pictures: [ImageAttachment], to botID: UUID) {
+        let lane = composerLane(botID)
         // The skill's use is counted when the message is delivered (here or by `send`, which expands it again), not
         // now: a queued message may be delivered by either path and must count once.
         var prompt = SystemPrompt.expandSkill(in: typed, skills: skills(for: botID))?.prompt ?? typed
@@ -128,16 +164,10 @@ extension AppModel {
         // Asking to remember something mid-turn: the model is told to save it (the turn's grants were fixed when it
         // began, so saving may still ask for approval). Sent after the turn, `send` handles it as a message of its own.
         if steersMidTurn(botID), MemoryIntent.detect(typed) != nil {
-            prompt += "\n\n(The user is asking you to remember something. Save it now with the remember tool, picking the "
-                + "right tipo; if it refers to something said earlier, save that. Then confirm in one short sentence.)"
+            prompt += MemoryIntent.instruction(tool: "remember")
         }
         lane.enqueue(SteeredMessage(text: typed, files: files, pictures: pictures, prompt: prompt))
         live(botID).poked() // scrolls the chat down to the "na fila" bubble, which changes no transcript revision
-        setDraft("", for: botID)
-        lane.files.removeAll()
-        lane.pictures.removeAll()
-        lane.error = nil
-        return true
     }
 
     /// Takes a queued message back into the composer (its text before what is typed now, its attachments with the
@@ -155,11 +185,16 @@ extension AppModel {
             return
         }
         let lane = composerLane(botID)
-        if !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || lane.hasAttachments { queueMessage(draft, to: botID) }
+        let isCommand = lane.files.isEmpty && lane.pictures.isEmpty && CompactionCommand.parse(draft) != nil // stays in the composer
+        if !isCommand, !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || lane.hasAttachments { queueMessage(draft, to: botID) }
         let waiting = lane.takeAll()
-        stop(botID)
-        guard let message = SteeredMessage.merged(waiting) else { return }
-        if !send(message.text, attachments: message.files, images: message.pictures, to: botID) { giveBack(waiting, to: botID) }
+        // A routine waiting for this Orb must not take it between the stop and the send: the message goes first, and
+        // the routine starts when that turn ends (or now, when nothing was sent).
+        stop(botID, startsQueuedRoutines: false)
+        if let message = SteeredMessage.merged(waiting),
+           send(message.text, attachments: message.files, images: message.pictures, to: botID) { return }
+        giveBack(waiting, to: botID)
+        startNextQueuedRoutine(for: botID)
     }
 
     /// A queued message reached the model: the chat shows it as sent, at the point where the model got it.
