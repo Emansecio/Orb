@@ -47,7 +47,8 @@ struct OrbView: View {
         || CommandLine.arguments.contains("--snapshot")
     /// Dev aid for profiling without focusing the app: `ORB_ANIMATE_INACTIVE=1` keeps orbs animating
     /// while the window is inactive or hidden.
-    static let animateInactive = ProcessInfo.processInfo.environment["ORB_ANIMATE_INACTIVE"] != nil
+    /// (A `var` so tests, which have no visible window, can turn it on.)
+    nonisolated(unsafe) static var animateInactive = ProcessInfo.processInfo.environment["ORB_ANIMATE_INACTIVE"] != nil
 }
 
 /// Draws one frame of the Orb from its layers in a single Canvas (no per-frame layout work).
@@ -59,6 +60,26 @@ struct OrbFrame: View {
     let pose: OrbPose
 
     @Environment(\.displayScale) private var displayScale
+    /// Counts bitmap batches that finished decoding: the canvas draws again when one arrives.
+    @State private var decodedBatches = 0
+    /// The last set of layers that was entirely decoded: drawn while the wanted set is still loading, so the
+    /// orb never shows up half made (without eyes or mouth) and keeps its old face until the new one is ready.
+    @State private var complete: Bitmaps?
+
+    /// What the canvas needs decoded: the same layers at the same pixel size draw the same bitmaps.
+    struct Bitmaps: Hashable {
+        let layers: [OrbLayer]
+        let pixels: CGFloat
+    }
+
+    /// The layers to draw now: the wanted ones when they are all decoded, else the last complete set (if its
+    /// bitmaps are still around and match the pixel size), else nothing. Never a part of a set.
+    static func drawable(wanted: Bitmaps, complete: Bitmaps?) -> [OrbLayer] {
+        if OrbImages.decodesSynchronously || OrbImages.isCached(wanted.layers, pixels: wanted.pixels) { return wanted.layers }
+        guard let complete, complete.pixels == wanted.pixels, OrbImages.isCached(complete.layers, pixels: complete.pixels)
+        else { return [] }
+        return complete.layers
+    }
 
     /// The activity's expression; a talking Orb shows an open mouth shape.
     private var layers: [OrbLayer] {
@@ -71,16 +92,31 @@ struct OrbFrame: View {
         let layers = layers
         let scale = displayScale
         let side = OrbGeometry.imageSide(for: size, scale: scale)
+        let batches = decodedBatches
+        let wanted = Bitmaps(layers: layers, pixels: side * scale)
+        let drawn = Self.drawable(wanted: wanted, complete: complete)
         Color.clear
             .frame(width: size, height: size)
             .overlay {
                 Canvas(rendersAsynchronously: true) { context, _ in
-                    OrbPainter(config: config, activity: activity, layers: layers, size: size, side: side, scale: scale,
-                               pose: pose)
+                    OrbPainter(config: config, activity: activity, layers: drawn, size: size, side: side, scale: scale,
+                               pose: pose, decodedBatches: batches)
                         .draw(in: &context)
                 }
                 .frame(width: side, height: side)
                 .allowsHitTesting(false)
+            }
+            // The canvas draws on the main thread, so it never decodes: missing bitmaps are decoded in the
+            // background and the orb appears when they are ready.
+            .task(id: wanted) {
+                guard !OrbImages.decodesSynchronously else { return }
+                if !OrbImages.isCached(wanted.layers, pixels: wanted.pixels) {
+                    await OrbImages.load(wanted.layers, pixels: wanted.pixels)
+                    // A newer set was asked for meanwhile (this task was cancelled): it takes over.
+                    guard !Task.isCancelled else { return }
+                    decodedBatches += 1
+                }
+                if OrbImages.isCached(wanted.layers, pixels: wanted.pixels) { complete = wanted }
             }
     }
 }
@@ -95,6 +131,8 @@ private struct OrbPainter {
     /// Display scale: bitmaps are decoded at exactly the drawn pixel size.
     let scale: CGFloat
     let pose: OrbPose
+    /// Not used by the drawing: it makes the canvas redraw when more bitmaps are decoded.
+    var decodedBatches = 0
 
     @MainActor
     func draw(in context: inout GraphicsContext) {
@@ -128,7 +166,10 @@ private struct OrbPainter {
         orb.translateBy(x: -anchor.x, y: -anchor.y)
 
         for layer in layers {
-            guard let image = OrbImages.cgImage(layer.path, pixels: side * scale, tint: layer.tint) else { continue }
+            let image = OrbImages.decodesSynchronously
+                ? OrbImages.cgImage(layer.path, pixels: side * scale, tint: layer.tint)
+                : OrbImages.cached(layer.path, pixels: side * scale, tint: layer.tint)
+            guard let image else { continue }
             var layerContext = orb
             let shift = parallax(layer)
             layerContext.translateBy(x: shift.width, y: shift.height)
@@ -173,8 +214,10 @@ private struct OrbPainter {
 
 // MARK: - Bot avatar
 
+/// An Orb's avatar. Takes the Orb's look, not the whole `Bot`, so a change to its permissions or folder does not
+/// re-render it.
 struct BotAvatar: View {
-    let bot: Bot
+    let orb: OrbConfig
     var size: CGFloat = 28
     var activity: OrbActivity = .idle
     var animated = true
@@ -183,7 +226,15 @@ struct BotAvatar: View {
     var interactive = false
 
     var body: some View {
-        OrbView(config: bot.orb, activity: activity, size: size, animated: animated, paused: paused, poke: poke,
+        OrbView(config: orb, activity: activity, size: size, animated: animated, paused: paused, poke: poke,
                 interactive: interactive)
+    }
+}
+
+extension BotAvatar {
+    init(bot: Bot, size: CGFloat = 28, activity: OrbActivity = .idle, animated: Bool = true, paused: Bool = false,
+         poke: Int = 0, interactive: Bool = false) {
+        self.init(orb: bot.orb, size: size, activity: activity, animated: animated, paused: paused, poke: poke,
+                  interactive: interactive)
     }
 }

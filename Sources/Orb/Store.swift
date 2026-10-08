@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import Darwin.malloc
 
 /// Everything the app keeps between launches, except conversations (see `Store`) and API keys (Keychain).
 struct AppState: Codable, Sendable {
@@ -10,6 +11,9 @@ struct AppState: Codable, Sendable {
     var providers: [ProviderAccount] = []
     /// "provider/model" for bots without a model of their own.
     var defaultModel = ""
+    /// Messages each Orb has not seen yet (by Orb id; Orbs with none are left out). Older files kept the count
+    /// inside each Orb, and still load (see `init(from:)`).
+    var unread: [String: Int] = [:]
 
     static let initial = AppState(bots: [
         Bot(name: "Atlas", role: "Assistente do seu Mac",
@@ -29,14 +33,19 @@ struct StoreNotice: Sendable, Equatable {
 struct StoreRead<Value: Sendable>: Sendable {
     var value: Value?
     var notice: StoreNotice?
+    /// How the file looked just before it was read: what a note made from `value` is valid for.
+    var fingerprint: FileFingerprint?
 }
 
 /// JSON files in ~/Library/Application Support/Orb (override with `ORB_DATA_DIR`).
-/// Encoding and disk I/O run in order on one background queue, off the main thread.
+/// Encoding and disk writes run in order on one background queue, off the main thread. Reads do not use that queue:
+/// they run on the caller's thread or on a concurrent queue of their own, so a conversation being opened never waits
+/// behind another one being saved (`FileGate` keeps a read from overtaking a write to the same file).
 ///
-/// Conversations: an Orb's current one is `conversations/<botID>.json`. Its earlier ones are archived in the folder
-/// beside it, `conversations/<botID>/`: `<conversationID>.json` each, `index.json` listing them (a cache that is
-/// corrected from the files whenever it disagrees) and `routine-<routineID>.json` for the conversation of each routine.
+/// Conversations: an Orb's current one is `conversations/<botID>.json`, with `conversations/<botID>.meta.json` beside
+/// it (see `ConversationMeta`). Its earlier ones are archived in the folder beside it, `conversations/<botID>/`:
+/// `<conversationID>.json` each, `index.json` listing them (a cache that is corrected from the files whenever it
+/// disagrees) and `routine-<routineID>.json` for the conversation of each routine.
 ///
 /// A file that can't be read is never overwritten: it is set aside as `<name>.corrupt-<yyyyMMdd-HHmmss>` (or,
 /// if that fails, left alone and blocked from writes for the rest of the session).
@@ -50,9 +59,15 @@ struct Store: Sendable {
         self.onSaveFailure = onSaveFailure
     }
 
-    private static let queue = DispatchQueue(label: "app.orb.store", qos: .utility)
-    /// Files that couldn't be read nor set aside: writes to them are refused. Touched only on `queue`.
-    nonisolated(unsafe) private static var blocked: Set<URL> = []
+    /// Every write, in order. One queue per data folder (the app has one; tests have one each, so a test that holds
+    /// the writer cannot stall the others).
+    private var queue: DispatchQueue { WriterQueues.queue(for: directory) }
+    /// Reads of conversations and the state: concurrent, and at the priority of something the user is waiting for.
+    private static let readQueue = DispatchQueue(label: "app.orb.store.read", qos: .userInitiated, attributes: .concurrent)
+    private static let gate = FileGate()
+    /// The encoders of the conversation files saved most recently (the ones being streamed into), so a save redoes
+    /// only what changed. One cache per data folder; touched only on `queue`.
+    private var encoders: EncoderCache { EncoderCache.shared(for: directory) }
 
     static let standard: Store = {
         if let custom = ProcessInfo.processInfo.environment["ORB_DATA_DIR"] { return Store(directory: URL(fileURLWithPath: custom)) }
@@ -74,34 +89,115 @@ struct Store: Sendable {
         directory.appendingPathComponent("conversations/\(botID.uuidString).json")
     }
 
+    private func metaURL(_ botID: UUID) -> URL {
+        directory.appendingPathComponent("conversations/\(botID.uuidString).meta.json")
+    }
+
+    // MARK: Reading
+
     func readState() -> StoreRead<AppState> {
-        Self.queue.sync { read(AppState.self, from: stateURL, ifUnreadable: "O Orb começou do zero") }
+        Self.gate.reading(stateURL) { read(AppState.self, from: stateURL, ifUnreadable: "O Orb começou do zero") }
     }
 
+    /// Reads (and decodes) on the calling thread. The main thread uses this only when it cannot wait for
+    /// `readConversationAsync`.
     func readConversation(_ botID: UUID) -> StoreRead<Conversation> {
-        Self.queue.sync { read(Conversation.self, from: conversationURL(botID), ifUnreadable: "a conversa começou vazia") }
+        loadConversation(botID)
     }
 
-    /// Like `readConversation`, without blocking the caller's thread while the store works through earlier writes.
+    /// Like `readConversation`, on a thread of the store's own: the caller is not blocked, and nothing is waited for
+    /// but the writes still queued for this very file.
     func readConversationAsync(_ botID: UUID) async -> StoreRead<Conversation> {
         await withCheckedContinuation { continuation in
-            Self.queue.async {
-                continuation.resume(returning: read(Conversation.self, from: conversationURL(botID),
-                                                     ifUnreadable: "a conversa começou vazia"))
-            }
+            Self.readQueue.async { continuation.resume(returning: loadConversation(botID)) }
         }
     }
 
-    func save(_ state: AppState) { Self.queue.async { write(state, to: stateURL) } }
+    private func loadConversation(_ botID: UUID) -> StoreRead<Conversation> {
+        let url = conversationURL(botID)
+        let result = Self.gate.reading(url) {
+            read(Conversation.self, from: url, ifUnreadable: "a conversa começou vazia")
+        }
+        // The decode of a long conversation leaves megabytes of freed memory the process would keep: give it back.
+        if let size = result.fingerprint?.size, size > 1 << 20 { malloc_zone_pressure_relief(nil, 0) }
+        // A conversation read without a valid note about it gets one, so the next launch can tell what is unsaved
+        // in it without reading it again.
+        if let conversation = result.value, let fingerprint = result.fingerprint, result.notice == nil,
+           readMeta(botID)?.file != fingerprint {
+            recordMeta(ConversationMeta(of: conversation, file: fingerprint), for: botID, ifFileStill: fingerprint)
+        }
+        return result
+    }
+
+    /// What is known about the conversation without reading it: nil when no valid note exists, `.empty` when there is
+    /// no conversation file.
+    func readMeta(_ botID: UUID) -> ConversationMeta? {
+        let url = conversationURL(botID)
+        return Self.gate.reading([url, metaURL(botID)]) {
+            guard let current = FileFingerprint(of: url) else { return ConversationMeta.empty }
+            guard let data = try? Data(contentsOf: metaURL(botID)),
+                  let meta = try? JSONDecoder().decode(ConversationMeta.self, from: data), meta.file == current else { return nil }
+            return meta
+        }
+    }
+
+    func readMetaAsync(_ botID: UUID) async -> ConversationMeta? {
+        await withCheckedContinuation { continuation in
+            Self.readQueue.async { continuation.resume(returning: readMeta(botID)) }
+        }
+    }
+
+    /// Writes a note about a conversation just read, unless the file changed since (a save in between wrote a
+    /// better note).
+    private func recordMeta(_ meta: ConversationMeta, for botID: UUID, ifFileStill fingerprint: FileFingerprint) {
+        let conversation = conversationURL(botID), note = metaURL(botID)
+        enqueue(touching: [note]) {
+            guard FileFingerprint(of: conversation) == fingerprint else { return }
+            write(meta, to: note)
+        }
+    }
+
+    // MARK: Writing
+
+    /// Queues `work` on the writer, registering the files it touches first so that reads of them wait.
+    private func enqueue(touching urls: [URL], _ work: @escaping @Sendable () -> Void) {
+        Self.gate.willWrite(urls)
+        queue.async {
+            work()
+            Self.gate.didWrite(urls)
+        }
+    }
+
+    func save(_ state: AppState) {
+        enqueue(touching: [stateURL]) { write(state, to: stateURL) }
+    }
 
     /// Old tool outputs are stored shortened (`Conversation.pruningOldToolOutputs`); the caller's copy is untouched.
+    /// The file is the same document either way; what is cheaper is that only items that changed since the last
+    /// save of this file are encoded again, and a save that changes nothing writes nothing.
     func save(_ conversation: Conversation, for botID: UUID) {
-        Self.queue.async { write(conversation.pruningOldToolOutputs(), to: conversationURL(botID)) }
+        let url = conversationURL(botID), note = metaURL(botID)
+        enqueue(touching: [url, note]) {
+            // A save that wrote nothing (nothing changed) leaves the note as it is.
+            guard writeConversation(conversation, to: url, cached: true) == .wrote else { return }
+            write(ConversationMeta(of: conversation, file: FileFingerprint(of: url)), to: note)
+        }
+    }
+
+    /// Lets go of what is kept for saving this Orb's conversation faster (it was unloaded).
+    func releaseCache(for botID: UUID) {
+        let url = conversationURL(botID)
+        queue.async { encoders.remove(url) }
     }
 
     func deleteConversation(_ botID: UUID) {
-        let url = conversationURL(botID)
-        Self.queue.async { try? FileManager.default.removeItem(at: url) }
+        let url = conversationURL(botID), note = metaURL(botID)
+        enqueue(touching: [url, note]) {
+            Self.gate.waitForReaders(of: url)
+            try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: note)
+            encoders.remove(url)
+        }
     }
 
     // MARK: Archive
@@ -125,9 +221,10 @@ struct Store: Sendable {
     @discardableResult
     func archive(_ conversation: Conversation, for botID: UUID) -> ConversationSummary {
         let summary = ConversationSummary(of: conversation)
-        Self.queue.async {
+        let file = archivedURL(botID, summary.id)
+        enqueue(touching: [file, archiveIndexURL(botID)]) {
             var entries = reconciledArchive(botID).entries
-            write(conversation.pruningOldToolOutputs(), to: archivedURL(botID, summary.id))
+            writeConversation(conversation, to: file, cached: false)
             entries.append(summary)
             write(ConversationIndex(entries: entries), to: archiveIndexURL(botID))
         }
@@ -136,24 +233,27 @@ struct Store: Sendable {
 
     /// The archived conversations of an Orb, newest first. A file that can't be read is left out of the list.
     func readArchive(_ botID: UUID) -> [ConversationSummary] {
-        Self.queue.sync { listArchive(botID) }
+        queue.sync { listArchive(botID) }
     }
 
     func readArchiveAsync(_ botID: UUID) async -> [ConversationSummary] {
         await withCheckedContinuation { continuation in
-            Self.queue.async { continuation.resume(returning: listArchive(botID)) }
+            queue.async { continuation.resume(returning: listArchive(botID)) }
         }
     }
 
     func readArchived(_ id: UUID, for botID: UUID) -> StoreRead<Conversation> {
-        Self.queue.sync {
-            read(Conversation.self, from: archivedURL(botID, id), ifUnreadable: "ela saiu da lista de conversas")
+        let url = archivedURL(botID, id)
+        return Self.gate.reading(url) {
+            read(Conversation.self, from: url, ifUnreadable: "ela saiu da lista de conversas")
         }
     }
 
     func deleteArchived(_ id: UUID, for botID: UUID) {
-        Self.queue.async {
-            try? FileManager.default.removeItem(at: archivedURL(botID, id))
+        let file = archivedURL(botID, id)
+        enqueue(touching: [file, archiveIndexURL(botID)]) {
+            Self.gate.waitForReaders(of: file)
+            try? FileManager.default.removeItem(at: file)
             let (entries, changed) = reconciledArchive(botID)
             if changed { write(ConversationIndex(entries: entries), to: archiveIndexURL(botID)) }
         }
@@ -162,32 +262,40 @@ struct Store: Sendable {
     /// Everything archived for the Orb, its routines' conversations included (the Orb is being deleted).
     func deleteArchive(_ botID: UUID) {
         let folder = archiveFolder(botID)
-        Self.queue.async { try? FileManager.default.removeItem(at: folder) }
+        enqueue(touching: []) {
+            // Reads of those files run outside this queue: one under way finishes before the folder goes.
+            for name in (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [] {
+                Self.gate.waitForReaders(of: folder.appendingPathComponent(name))
+            }
+            try? FileManager.default.removeItem(at: folder)
+        }
     }
 
     func saveRoutineConversation(_ conversation: Conversation, routine routineID: UUID, for botID: UUID) {
-        Self.queue.async { write(conversation.pruningOldToolOutputs(), to: routineConversationURL(botID, routineID)) }
+        let url = routineConversationURL(botID, routineID)
+        enqueue(touching: [url]) { writeConversation(conversation, to: url, cached: true) }
     }
 
     func readRoutineConversation(routine routineID: UUID, for botID: UUID) -> StoreRead<Conversation> {
-        Self.queue.sync {
-            read(Conversation.self, from: routineConversationURL(botID, routineID),
-                 ifUnreadable: "o histórico da rotina começou vazio")
+        let url = routineConversationURL(botID, routineID)
+        return Self.gate.reading(url) {
+            read(Conversation.self, from: url, ifUnreadable: "o histórico da rotina começou vazio")
         }
     }
 
     func readRoutineConversationAsync(routine routineID: UUID, for botID: UUID) async -> StoreRead<Conversation> {
         await withCheckedContinuation { continuation in
-            Self.queue.async {
-                continuation.resume(returning: read(Conversation.self, from: routineConversationURL(botID, routineID),
-                                                     ifUnreadable: "o histórico da rotina começou vazio"))
-            }
+            Self.readQueue.async { continuation.resume(returning: readRoutineConversation(routine: routineID, for: botID)) }
         }
     }
 
     func deleteRoutineConversation(routine routineID: UUID, for botID: UUID) {
         let url = routineConversationURL(botID, routineID)
-        Self.queue.async { try? FileManager.default.removeItem(at: url) }
+        enqueue(touching: [url]) {
+            Self.gate.waitForReaders(of: url)
+            try? FileManager.default.removeItem(at: url)
+            encoders.remove(url)
+        }
     }
 
     private func listArchive(_ botID: UUID) -> [ConversationSummary] {
@@ -221,31 +329,34 @@ struct Store: Sendable {
     }
 
     /// Waits for pending writes.
-    func flush() { Self.queue.sync {} }
+    func flush() { queue.sync {} }
 
     private func read<T: Decodable & Sendable>(_ type: T.Type, from url: URL, ifUnreadable outcome: String) -> StoreRead<T> {
         guard FileManager.default.fileExists(atPath: url.path) else { return StoreRead() }
         let name = url.lastPathComponent
+        // Taken before the bytes are: a note made from what is read can only be older than the file, never newer.
+        let fingerprint = FileFingerprint(of: url)
         let data: Data
         do {
             data = try Data(contentsOf: url)
         } catch {
             // It exists but can't be read right now: treating that as "empty" would overwrite it on the next save.
-            Self.blocked.insert(url.standardizedFileURL)
+            Self.gate.block(url)
             return StoreRead(notice: StoreNotice(message: "Não foi possível ler “\(name)” (\(error.localizedDescription)). "
                 + "Para não perder nada, o Orb não vai gravar nesse arquivo até você abrir o app de novo."))
         }
         do {
             let (value, skipped) = try DecodeLoss.measure { try JSONDecoder().decode(type, from: data) }
-            guard skipped > 0 else { return StoreRead(value: value) }
+            guard skipped > 0 else { return StoreRead(value: value, fingerprint: fingerprint) }
             // Whatever was skipped disappears from the file on the next save: keep the original beside it.
-            guard let copy = keepAside(url, moving: false) else { return StoreRead(value: value) }
+            guard let copy = keepAside(url, moving: false) else { return StoreRead(value: value, fingerprint: fingerprint) }
             return StoreRead(value: value, notice: StoreNotice(
                 message: "\(skipped) item(ns) de “\(name)” não puderam ser lidos (talvez de uma versão mais nova do Orb) "
-                    + "e ficaram de fora. O arquivo original foi guardado como “\(copy.lastPathComponent)”.", copy: copy))
+                    + "e ficaram de fora. O arquivo original foi guardado como “\(copy.lastPathComponent)”.", copy: copy),
+                fingerprint: fingerprint)
         } catch {
             guard let copy = keepAside(url, moving: true) else {
-                Self.blocked.insert(url.standardizedFileURL)
+                Self.gate.block(url)
                 return StoreRead(notice: StoreNotice(message: "Não foi possível ler “\(name)” nem guardar uma cópia dele. "
                     + "Para não perder nada, o Orb não vai gravar nesse arquivo até você abrir o app de novo."))
             }
@@ -292,19 +403,126 @@ struct Store: Sendable {
     }
 
     private func write<T: Encodable>(_ value: T, to url: URL) {
+        writeFile(to: url) { try JSONEncoder().encode(value) }
+    }
+
+    /// A conversation file: pruned and encoded as `ConversationEncoder` does. With `cached`, what the last save of
+    /// this file encoded is reused, and a save that would leave the file exactly as it is writes nothing.
+    @discardableResult
+    private func writeConversation(_ conversation: Conversation, to url: URL, cached: Bool) -> WriteResult {
+        guard cached else {
+            return writeFile(to: url) { try JSONEncoder().encode(conversation.pruningOldToolOutputs()) }
+        }
+        let encoder = encoders.encoder(for: url)
+        var output: ConversationEncoder.Output?
+        let result = writeFile(to: url) {
+            output = try encoder.encode(conversation)
+            guard let output else { return try JSONEncoder().encode(conversation.pruningOldToolOutputs()) }
+            // Nothing changed and the file is as we left it: nothing to write.
+            if output.isUnchanged, encoder.fileIsAsWeLeftIt(url) { return nil }
+            return encoder.data(for: output)
+        }
+        switch result {
+        case .wrote:
+            if let output { encoder.commit(output, fingerprint: FileFingerprint(of: url)) } else { encoder.invalidateCommit() }
+        case .skipped:
+            break
+        case .failed:
+            encoder.invalidateCommit() // the next save must write, whatever it finds unchanged
+        }
+        encoders.trim(keeping: url)
+        return result
+    }
+
+    private enum WriteResult { case wrote, skipped, failed }
+
+    /// Writes what `content` produces atomically (`nil`: nothing to write). Refuses a file that could not be read
+    /// when the app opened, and reports a failure instead of throwing.
+    @discardableResult
+    private func writeFile(to url: URL, _ content: () throws -> Data?) -> WriteResult {
         let name = url.lastPathComponent
-        guard !Self.blocked.contains(url.standardizedFileURL) else {
+        guard !Self.gate.isBlocked(url) else {
             onSaveFailure?(StoreNotice(message: "“\(name)” não pôde ser lido ao abrir o app e não foi sobrescrito: "
                 + "o que você mudou desde então não está sendo salvo. Feche e abra o Orb de novo."))
-            return
+            return .failed
         }
+        Self.gate.waitForReaders(of: url)
         do {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try JSONEncoder().encode(value).write(to: url, options: .atomic)
+            guard let data = try content() else { return .skipped }
+            try data.write(to: url, options: .atomic)
+            return .wrote
         } catch {
             NSLog("Orb: não foi possível salvar \(name): \(error)")
             onSaveFailure?(StoreNotice(message: "Não foi possível salvar “\(name)”: \(error.localizedDescription). "
                 + "As últimas mudanças podem não estar no disco."))
+            return .failed
+        }
+    }
+}
+
+/// The serial writer queue of each data folder.
+enum WriterQueues {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var queues: [String: DispatchQueue] = [:]
+
+    static func queue(for directory: URL) -> DispatchQueue {
+        lock.withLock {
+            let key = directory.standardizedFileURL.path
+            if let existing = queues[key] { return existing }
+            let made = DispatchQueue(label: "app.orb.store", qos: .utility)
+            queues[key] = made
+            return made
+        }
+    }
+}
+
+/// The conversation encoders kept between saves: the few files being written lately, within a budget of bytes.
+final class EncoderCache: @unchecked Sendable {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var caches: [String: EncoderCache] = [:]
+
+    static func shared(for directory: URL) -> EncoderCache {
+        lock.withLock {
+            let key = directory.standardizedFileURL.path
+            if let existing = caches[key] { return existing }
+            let made = EncoderCache()
+            caches[key] = made
+            return made
+        }
+    }
+
+    private var encoders: [String: ConversationEncoder] = [:]
+    /// Most recently used last.
+    private var order: [String] = []
+    static let maxFiles = 4
+    static let maxBytes = 48 << 20
+
+    private static func key(_ url: URL) -> String { url.standardizedFileURL.path }
+
+    func encoder(for url: URL) -> ConversationEncoder {
+        let key = Self.key(url)
+        order.removeAll { $0 == key }
+        order.append(key)
+        if let existing = encoders[key] { return existing }
+        let made = ConversationEncoder()
+        encoders[key] = made
+        return made
+    }
+
+    func remove(_ url: URL) {
+        let key = Self.key(url)
+        encoders[key] = nil
+        order.removeAll { $0 == key }
+    }
+
+    /// Drops the encoders used longest ago while there are too many or they hold too much (never the one in use).
+    func trim(keeping url: URL) {
+        let keep = Self.key(url)
+        while order.count > 1, order.count > Self.maxFiles || encoders.values.reduce(0, { $0 + $1.byteCount }) > Self.maxBytes {
+            guard let oldest = order.first(where: { $0 != keep }) else { return }
+            encoders[oldest] = nil
+            order.removeAll { $0 == oldest }
         }
     }
 }
@@ -420,40 +638,6 @@ extension Decoder {
     }
 }
 
-extension Conversation {
-    /// What is written to disk: tool outputs older than the second-to-last user message keep only a head and a
-    /// tail (the model sees no more than that of old outputs anyway). `self` is not changed.
-    func pruningOldToolOutputs(limit: Int = 4_000) -> Conversation {
-        var copy = self
-        let itemCutoff = Self.secondToLastUser(items.map { if case .user = $0.kind { true } else { false } })
-        for index in copy.items.indices where index < itemCutoff {
-            guard case .tool(var call) = copy.items[index].kind, let output = call.output else { continue }
-            let short = Self.preview(output, limit: limit)
-            guard short != output else { continue }
-            call.output = short
-            copy.items[index].kind = .tool(call)
-        }
-        let messageCutoff = Self.secondToLastUser(messages.map { $0.role == .user })
-        for index in copy.messages.indices where index < messageCutoff && copy.messages[index].role == .tool {
-            copy.messages[index].content = Self.preview(copy.messages[index].content, limit: limit)
-        }
-        return copy
-    }
-
-    /// Index of the second-to-last `true` (0 when there are fewer than two: nothing is old yet).
-    private static func secondToLastUser(_ isUser: [Bool]) -> Int {
-        isUser.indices.reversed().lazy.filter { isUser[$0] }.dropFirst().first ?? 0
-    }
-
-    /// `text` as is when it fits in `limit`, otherwise its head and tail around a marker (about `limit` in all).
-    static func preview(_ text: String, limit: Int) -> String {
-        guard text.utf8.count > limit, text.count > limit else { return text }
-        let keep = max(0, (limit - 100) / 2)
-        let omitted = text.count - 2 * keep
-        return String(text.prefix(keep)) + "\n[… \(omitted) caracteres omitidos de uma saída antiga …]\n" + String(text.suffix(keep))
-    }
-}
-
 extension AppState {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -463,6 +647,26 @@ extension AppState {
         connectors = try c.lossyArray(.connectors)
         providers = try c.lossyArray(.providers)
         defaultModel = try c.value(.defaultModel, default: "")
+        // A bad count never loses the file, nor the good counts beside it.
+        struct Count: Decodable {
+            var value: Int?
+            init(from decoder: Decoder) throws { value = try? decoder.singleValueContainer().decode(Int.self) }
+        }
+        unread = ((try? c.decodeIfPresent([String: Count].self, forKey: .unread)) ?? nil)?.compactMapValues(\.value) ?? [:]
+        // Before the count lived apart from the Orbs it was saved inside each one.
+        struct Counted: Decodable {
+            var id: UUID
+            var unread: Int
+            init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                id = try c.decode(UUID.self, forKey: .id)
+                unread = (try? c.decodeIfPresent(Int.self, forKey: .unread)) ?? 0
+            }
+            enum CodingKeys: CodingKey { case id, unread }
+        }
+        for orb in try c.lossyArray(.bots) as [Counted] where orb.unread > 0 && unread[orb.id.uuidString] == nil {
+            unread[orb.id.uuidString] = orb.unread
+        }
         try migrateSingleProvider(from: decoder)
     }
 

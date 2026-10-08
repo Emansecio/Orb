@@ -3,25 +3,14 @@ import SwiftUI
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openSettings) private var openSettings
-    @State private var deleting: Bot?
+    @State private var deleting: BotLook?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 1) {
                 SectionTitle("Orbs")
-                ForEach(model.bots) { bot in
-                    SidebarRow(isSelected: model.selection == .bot(bot.id)) {
-                        model.selection = .bot(bot.id)
-                    } content: {
-                        BotRowContent(bot: bot, status: model.statusLine[bot.id], activity: model.activity(for: bot.id),
-                                      isSelected: model.selection == .bot(bot.id), poke: model.pokes[bot.id, default: 0],
-                                      needsYou: model.needsYou(bot.id))
-                    }
-                    .contextMenu {
-                        Button("Nova conversa") { model.newConversation(bot.id) }
-                        Divider()
-                        Button("Apagar \(bot.name)…", role: .destructive) { deleting = bot }
-                    }
+                ForEach(model.botIDs, id: \.self) { id in
+                    SidebarBotRow(botID: id, deleting: $deleting)
                 }
 
                 SectionTitle("Espaço de trabalho")
@@ -117,6 +106,31 @@ private struct SidebarRow<Content: View>: View {
     }
 }
 
+/// One Orb's row. Reads only its own Orb's state, so a tool call, a status or a new unread message in another Orb
+/// re-renders that Orb's row and nothing here.
+private struct SidebarBotRow: View {
+    @Environment(AppModel.self) private var model
+    let botID: UUID
+    @Binding var deleting: BotLook?
+
+    var body: some View {
+        let live = model.live(botID)
+        let isSelected = model.selection == .bot(botID)
+        SidebarRow(isSelected: isSelected) {
+            model.selection = .bot(botID)
+        } content: {
+            BotRowContent(row: BotRow(look: live.look, status: live.status, activity: live.activity, isSelected: isSelected,
+                                      poke: live.poke, needsYou: live.needsYou, unread: live.unread))
+                .equatable()
+        }
+        .contextMenu {
+            Button("Nova conversa") { model.newConversation(botID) }
+            Divider()
+            Button("Apagar \(live.look.name)…", role: .destructive) { deleting = live.look }
+        }
+    }
+}
+
 private struct NavLabel: View {
     let title: String
     let symbol: String
@@ -135,21 +149,28 @@ private struct NavLabel: View {
     }
 }
 
-private struct BotRowContent: View {
-    let bot: Bot
+/// What a row shows, as one small value: a row whose value did not change is not rendered again.
+private struct BotRow: Equatable {
+    let look: BotLook
     let status: String?
     let activity: OrbActivity
     let isSelected: Bool
     let poke: Int
     /// An approval card is open: the Orb is stopped until the user answers.
-    var needsYou = false
+    let needsYou: Bool
+    let unread: Int
+}
+
+private struct BotRowContent: View, Equatable {
+    let row: BotRow
 
     var body: some View {
+        let (look, status, activity, needsYou) = (row.look, row.status, row.activity, row.needsYou)
         HStack(spacing: 8) {
             // Only the selected bot and bots with something going on move; the rest rest (no frames at all).
-            BotAvatar(bot: bot, size: 30, activity: activity, paused: !isSelected && activity == .idle, poke: poke)
+            BotAvatar(orb: look.orb, size: 30, activity: activity, paused: !row.isSelected && activity == .idle, poke: row.poke)
             VStack(alignment: .leading, spacing: 1) {
-                Text(bot.name)
+                Text(look.name)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Palette.ink)
                 Group {
@@ -158,7 +179,7 @@ private struct BotRowContent: View {
                     } else if let status {
                         Text("\(status)…").shimmer()
                     } else {
-                        Text(bot.role).foregroundStyle(Palette.faint)
+                        Text(look.role).foregroundStyle(Palette.faint)
                     }
                 }
                 .font(.system(size: 11))
@@ -174,15 +195,15 @@ private struct BotRowContent: View {
                         .foregroundStyle(Palette.warn)
                         .transition(.scale.combined(with: .opacity))
                         .accessibilityLabel("Aguardando sua permissão")
-                } else if bot.unread > 0 {
+                } else if row.unread > 0 {
                     Circle()
                         .fill(Palette.accentText)
                         .frame(width: 7, height: 7)
                         .transition(.scale.combined(with: .opacity))
-                        .accessibilityLabel("\(bot.unread) não lidas")
+                        .accessibilityLabel("\(row.unread) não lidas")
                 }
             }
-            .animateChanges(of: needsYou || bot.unread > 0)
+            .animateChanges(of: needsYou || row.unread > 0)
         }
         .accessibilityElement(children: .combine)
     }

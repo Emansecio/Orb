@@ -142,18 +142,11 @@ struct QuickAskView: View {
         VStack(alignment: .leading, spacing: 12) {
             PendingApprovalsSection()
             HStack(spacing: 6) {
-                ForEach(model.bots) { bot in
-                    Button {
-                        botID = bot.id
-                    } label: {
-                        BotAvatar(bot: bot, size: 28, activity: model.activity(for: bot.id))
-                            .opacity(selectedID == bot.id ? 1 : 0.45)
-                    }
-                    .buttonStyle(.plain)
-                    .help(bot.name)
+                ForEach(model.botIDs, id: \.self) { id in
+                    QuickAskOrbButton(botID: id, selectedID: selectedID, chosen: $botID)
                 }
             }
-            TextField("Pergunte a \(model.bot(selectedID ?? UUID())?.name ?? "um Orb")…", text: $text, axis: .vertical)
+            TextField("Pergunte a \(selectedID.flatMap { model.liveBot($0)?.look.name } ?? "um Orb")…", text: $text, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(1...4)
                 .focused($isFocused)
@@ -161,16 +154,10 @@ struct QuickAskView: View {
                 .padding(10)
                 .card(radius: 10)
 
-            let working = model.bots.filter { model.isWorking($0.id) }
-            if !working.isEmpty {
+            if !model.workingIDs.isEmpty {
                 Divider()
-                ForEach(working) { bot in
-                    HStack(spacing: 8) {
-                        BotAvatar(bot: bot, size: 18, activity: model.activity(for: bot.id))
-                        Text("\(bot.name): \(model.statusLine[bot.id] ?? "")…")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                ForEach(model.workingIDs, id: \.self) { id in
+                    QuickAskWorkingRow(botID: id)
                 }
             }
             HStack {
@@ -187,11 +174,15 @@ struct QuickAskView: View {
         .onAppear { isFocused = true }
     }
 
-    private var selectedID: UUID? { botID ?? model.selectedBot?.id ?? model.bots.first?.id }
+    private var selectedID: UUID? {
+        if let botID { return botID }
+        if case .bot(let id) = model.selection, model.botIDs.contains(id) { return id }
+        return model.botIDs.first
+    }
 
     private func send() {
         guard let id = selectedID, !model.isWorking(id), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        model.send(text, to: id)
+        model.sendWhenLoaded(text, to: id)
         model.selection = .bot(id)
         text = ""
         openMain()
@@ -200,6 +191,42 @@ struct QuickAskView: View {
     private func openMain() {
         openWindow(id: "main")
         NSApp.activate()
+    }
+}
+
+/// One Orb's avatar in the menu bar panel. Reads its own Orb only: another Orb's status does not redraw it.
+private struct QuickAskOrbButton: View {
+    @Environment(AppModel.self) private var model
+    let botID: UUID
+    let selectedID: UUID?
+    @Binding var chosen: UUID?
+
+    var body: some View {
+        let live = model.live(botID)
+        Button { chosen = botID } label: {
+            // Only the chosen Orb and those with something going on move; the rest rest (no frames).
+            BotAvatar(orb: live.look.orb, size: 28, activity: live.activity,
+                      paused: selectedID != botID && live.activity == .idle)
+                .opacity(selectedID == botID ? 1 : 0.45)
+        }
+        .buttonStyle(.plain)
+        .help(live.look.name)
+    }
+}
+
+/// A working Orb's line in the menu bar panel: its avatar and what it is doing.
+private struct QuickAskWorkingRow: View {
+    @Environment(AppModel.self) private var model
+    let botID: UUID
+
+    var body: some View {
+        let live = model.live(botID)
+        HStack(spacing: 8) {
+            BotAvatar(orb: live.look.orb, size: 18, activity: live.activity)
+            Text("\(live.look.name): \(live.status ?? "")…")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 }
 
@@ -224,7 +251,7 @@ private struct PendingApprovalsSection: View {
             ForEach(pending) { entry in
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
-                        BotAvatar(bot: entry.bot, size: 18, activity: model.activity(for: entry.bot.id))
+                        BotAvatar(orb: entry.bot.orb, size: 18, activity: model.live(entry.bot.id).activity)
                         Text(entry.bot.name)
                             .font(.system(size: 12, weight: .semibold))
                         Text("precisa de você")

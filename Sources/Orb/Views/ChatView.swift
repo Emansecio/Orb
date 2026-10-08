@@ -1,28 +1,32 @@
 import SwiftUI
 
+/// The chat of one Orb. Takes the Orb's id and reads only that Orb's state (`BotLive`), so what happens in
+/// another Orb, or to this Orb's settings that the chat does not show, does not re-render it.
 struct ChatView: View {
     @Environment(AppModel.self) private var model
-    let bot: Bot
+    let botID: UUID
 
     var body: some View {
         @Bindable var model = model
-        TranscriptList(bot: bot)
+        let live = model.live(botID)
+        let look = live.look
+        TranscriptList(look: look)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
                 if !model.isProviderReady {
                     SetupBanner()
                 }
-                ComposerView(bot: bot)
+                ComposerView(botID: botID)
             }
         }
         .background(Palette.canvas)
-        .navigationTitle(bot.name)
-        .navigationSubtitle(model.modelName(for: bot))
+        .navigationTitle(look.name)
+        .navigationSubtitle(model.modelName(forModel: live.modelID))
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
-                ConversationsMenuButton(botID: bot.id)
+                ConversationsMenuButton(botID: botID)
                 Button("Nova conversa", systemImage: "square.and.pencil") {
-                    model.newConversation(bot.id)
+                    model.newConversation(botID)
                 }
                 .help("Nova conversa (⇧⌘N). A atual fica guardada em Conversas.")
                 Button("Painel do Orb", systemImage: "sidebar.right") {
@@ -32,36 +36,45 @@ struct ChatView: View {
             }
         }
         .inspector(isPresented: $model.showInspector) {
-            BotInspector(botID: bot.id)
+            BotInspector(botID: botID)
                 .inspectorColumnWidth(min: 244, ideal: 320, max: 420)
         }
     }
 }
 
 /// The conversation. Its own view so streaming re-renders only this list, not the toolbar, composer or
-/// inspector; rows are `Equatable`, so only the row that changed re-renders.
+/// inspector. It reads the Orb's `OrbTranscript` and nothing of the streamed text (that is a `LiveText` the reply's
+/// own views read), so it is redrawn when an item is added or changes, not on every flush, and not at all for
+/// another Orb's work; rows are `Equatable`, so only the row that changed re-renders.
 private struct TranscriptList: View {
     @Environment(AppModel.self) private var model
-    let bot: Bot
+    let look: BotLook
     /// Off while the user has scrolled up to read, so new content doesn't pull the view down.
     @State private var followsBottom = true
+    /// Scrolls for the lists that cannot keep the bottom in view themselves (macOS 14).
+    @State private var follower = BottomFollower()
 
     var body: some View {
-        let items = model.transcript(bot.id)
-        let status = model.statusLine[bot.id]
+        let transcript = model.orbTranscript(look.id)
+        let items = transcript.items
+        let live = model.live(look.id)
+        let status = live.status
+        let isLoading = model.isLoadingConversation(look.id)
 
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
-                    if items.isEmpty {
-                        EmptyChatView(bot: bot)
+                    if isLoading {
+                        LoadingTranscript()
+                    } else if items.isEmpty {
+                        EmptyChatView(look: look)
                     }
                     ForEach(items) { item in
-                        TranscriptRow(item: item, bot: bot)
+                        TranscriptRow(item: item, botID: look.id, orb: look.orb)
                             .equatable()
                     }
                     if let status {
-                        WorkingLine(bot: bot, text: status)
+                        WorkingLine(look: look, text: status)
                     }
                     Color.clear.frame(height: 1).id(BottomAnchor.id)
                 }
@@ -72,22 +85,146 @@ private struct TranscriptList: View {
                 .padding(.bottom, 12)
                 .frame(maxWidth: 760)
                 .frame(maxWidth: .infinity)
+                // A new identity once the conversation arrives, so its rows appear as they did when it was there from
+                // the start, not as an animated insertion of every one of them.
+                .id(isLoading)
             }
             .scrollIndicators(.automatic)
             .modifier(BottomFollowing(isFollowing: $followsBottom))
-            .onChange(of: model.scrollTick[bot.id]) {
-                if followsBottom { proxy.scrollTo(BottomAnchor.id, anchor: .bottom) }
+            .modifier(KeepsBottom(follows: followsBottom))
+            .environment(\.replyGrew, replyGrew(proxy))
+            .onChange(of: followsBottom) { follower.follows = followsBottom }
+            .onChange(of: transcript.revision) {
+                if !BottomFollower.anchorsItself { follower.follow { scrollToBottom(proxy) } }
             }
-            .onChange(of: model.pokes[bot.id]) {
+            .onChange(of: live.poke) {
                 // The user just sent a message: always show it.
                 followsBottom = true
-                proxy.scrollTo(BottomAnchor.id, anchor: .bottom)
+                scrollToBottom(proxy)
             }
-            .onAppear { proxy.scrollTo(BottomAnchor.id, anchor: .bottom) }
+            .onAppear {
+                guard !BottomFollower.anchorsItself else { return }
+                scrollToBottom(proxy)
+                // The first scroll goes by estimated row heights; once the rows near the end are laid out it can fall short.
+                Task {
+                    try? await Task.sleep(for: .milliseconds(150))
+                    if follower.follows { scrollToBottom(proxy) }
+                }
+            }
+            .onChange(of: isLoading) {
+                // The conversation just arrived from disk: start at its end, as when it was there from the first frame.
+                guard !isLoading else { return }
+                proxy.scrollTo(BottomAnchor.id, anchor: .bottom)
+                // Again after the new rows have been laid out: the bottom of a long lazy list is not measured yet now.
+                Task {
+                    await Task.yield()
+                    if followsBottom { proxy.scrollTo(BottomAnchor.id, anchor: .bottom) }
+                }
+            }
         }
     }
 
+    /// What a growing reply calls: nothing where the scroll view keeps the bottom itself.
+    private func replyGrew(_ proxy: ScrollViewProxy) -> (@MainActor () -> Void)? {
+        guard !BottomFollower.anchorsItself else { return nil }
+        let follower = follower
+        return { follower.follow { proxy.scrollTo(BottomAnchor.id, anchor: .bottom) } }
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+        proxy.scrollTo(BottomAnchor.id, anchor: .bottom)
+    }
+
     private enum BottomAnchor { static let id = "bottom" }
+}
+
+/// Keeps the end of the conversation in view where the scroll view can do it itself (macOS 15): it opens at the
+/// bottom, and stays there while content grows and the user has not scrolled up. A scroll to an id after every
+/// change instead costs as much as the conversation is long, and on a long one it stops short of the end.
+private struct KeepsBottom: ViewModifier {
+    let follows: Bool
+
+    func body(content: Content) -> some View {
+        if #available(macOS 15, *) {
+            content
+                .defaultScrollAnchor(.bottom, for: .initialOffset)
+                .defaultScrollAnchor(follows ? .bottom : nil, for: .sizeChanges)
+        } else {
+            content
+        }
+    }
+}
+
+/// Follows a growing conversation with scrolls to its end, at most one every 200 ms (the scroll is slow in a long
+/// list), for the macOS versions whose scroll view cannot keep the bottom in view itself.
+@MainActor
+final class BottomFollower {
+    /// Whether the scroll view keeps the bottom itself (`KeepsBottom`).
+    static var anchorsItself: Bool {
+        if #available(macOS 15, *) { true } else { false }
+    }
+
+    /// Mirrors the list's "the user has not scrolled up".
+    var follows = true
+    private var throttle = ScrollThrottle(interval: .milliseconds(200))
+    private var scheduled: Task<Void, Never>?
+    private var latest: (@MainActor () -> Void)?
+
+    func follow(_ scroll: @escaping @MainActor () -> Void) {
+        guard follows else { return }
+        latest = scroll
+        switch throttle.request(at: .now) {
+        case .now:
+            scheduled?.cancel()
+            scheduled = nil
+            scroll()
+        case .after(let delay):
+            scheduled = Task {
+                try? await Task.sleep(for: delay)
+                guard !Task.isCancelled else { return }
+                scheduled = nil
+                throttle.ranScheduled(at: .now)
+                if follows { latest?() }
+            }
+        case .wait:
+            break
+        }
+    }
+}
+
+/// At most one run per `interval`: the first request runs at once; requests while the interval lasts become one
+/// run when it ends.
+struct ScrollThrottle {
+    enum Decision: Equatable {
+        case now
+        case after(Duration)
+        /// A run is already scheduled and will do.
+        case wait
+    }
+
+    let interval: Duration
+    private var lastRun: ContinuousClock.Instant?
+    private var isScheduled = false
+
+    init(interval: Duration) {
+        self.interval = interval
+    }
+
+    mutating func request(at now: ContinuousClock.Instant) -> Decision {
+        if isScheduled { return .wait }
+        guard let lastRun, now - lastRun < interval else {
+            lastRun = now
+            return .now
+        }
+        isScheduled = true
+        return .after(interval - (now - lastRun))
+    }
+
+    /// The scheduled run happened.
+    mutating func ranScheduled(at now: ContinuousClock.Instant) {
+        isScheduled = false
+        lastRun = now
+    }
 }
 
 /// Stops following new content while the user scrolls away from the bottom and resumes once they
@@ -113,9 +250,28 @@ private struct BottomFollowing: ViewModifier {
     }
 }
 
+/// Stands in for the conversation while it is read from disk (a fraction of a second even for a long one). Blank at
+/// first, so a quick read shows nothing at all, then a small spinner.
+private struct LoadingTranscript: View {
+    @State private var isVisible = false
+
+    var body: some View {
+        ProgressView()
+            .controlSize(.small)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 72)
+            .opacity(isVisible ? 1 : 0)
+            .accessibilityLabel("Carregando a conversa")
+            .task {
+                try? await Task.sleep(for: .milliseconds(150))
+                withAnimation(.easeIn(duration: 0.2)) { isVisible = true }
+            }
+    }
+}
+
 private struct EmptyChatView: View {
     @Environment(AppModel.self) private var model
-    let bot: Bot
+    let look: BotLook
 
     private let suggestions = [
         ("folder", "Organize minha pasta Downloads"),
@@ -125,28 +281,28 @@ private struct EmptyChatView: View {
     ]
 
     var body: some View {
+        let live = model.live(look.id)
         VStack(spacing: 16) {
-            BotAvatar(bot: bot, size: 96, activity: model.activity(for: bot.id), poke: model.pokes[bot.id, default: 0],
-                      interactive: true)
+            BotAvatar(orb: look.orb, size: 96, activity: live.activity, poke: live.poke, interactive: true)
                 .padding(.top, 72)
             VStack(spacing: 4) {
-                Text(bot.name)
+                Text(look.name)
                     .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(Palette.ink)
-                Text(bot.role)
+                Text(look.role)
                     .font(.system(size: 13))
                     .foregroundStyle(Palette.muted)
             }
             VStack(spacing: 6) {
-                if model.memories[bot.id]?.interviewPending == true {
+                if live.memory.interviewPending {
                     SuggestionButton(symbol: "questionmark.bubble", text: "Me conheça: faça perguntas para entender como me ajudar") {
                         model.send("Oi! Antes de começarmos, me faça algumas perguntas para entender como você pode me ajudar.",
-                                   to: bot.id)
+                                   to: look.id)
                     }
                 }
                 ForEach(suggestions, id: \.1) { symbol, text in
                     SuggestionButton(symbol: symbol, text: text) {
-                        model.send(text, to: bot.id)
+                        model.send(text, to: look.id)
                     }
                 }
             }
@@ -215,17 +371,18 @@ private struct SetupBanner: View {
 /// Live status of a working bot: shimmering activity text next to its spinning orb.
 private struct WorkingLine: View {
     @Environment(AppModel.self) private var model
-    let bot: Bot
+    let look: BotLook
     let text: String
 
     var body: some View {
+        let live = model.live(look.id)
         HStack(spacing: 10) {
-            BotAvatar(bot: bot, size: 30, activity: model.activity(for: bot.id), poke: model.pokes[bot.id, default: 0])
+            BotAvatar(orb: look.orb, size: 30, activity: live.activity, poke: live.poke)
             Text("\(text)…")
                 .font(.system(size: 13))
                 .shimmer()
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(bot.name): \(text)")
+        .accessibilityLabel("\(look.name): \(text)")
     }
 }

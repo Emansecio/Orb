@@ -1,20 +1,29 @@
 import SwiftUI
 
-/// Equatable: while a reply streams, only the row whose item changed re-renders.
+/// Equatable: while a reply streams, the list does not redraw at all (the text is a `LiveText` its own views read);
+/// when the transcript changes, only the row whose item changed re-renders.
 struct TranscriptRow: View, Equatable {
+    @Environment(AppModel.self) private var model
     let item: TranscriptItem
-    let bot: Bot
+    /// Only what a row shows of its Orb (its avatar, and whose card an approval is), not the whole `Bot`: changing
+    /// the Orb's permissions or folder does not re-render the visible rows.
+    let botID: UUID
+    let orb: OrbConfig
+
+    nonisolated static func == (lhs: TranscriptRow, rhs: TranscriptRow) -> Bool {
+        lhs.item == rhs.item && lhs.botID == rhs.botID && lhs.orb == rhs.orb
+    }
 
     var body: some View {
         switch item.kind {
         case .user(let text, let attachments):
             UserBubble(text: text, attachments: attachments)
         case .bot(let text, let isStreaming):
-            BotMessage(bot: bot, text: text, isStreaming: isStreaming)
+            BotMessage(orb: orb, text: text, live: isStreaming ? model.liveText(for: item.id, of: botID) : nil)
         case .tool(let call):
             ToolCallLine(call: call)
         case .approval(let request):
-            ApprovalCard(request: request, bot: bot)
+            ApprovalCard(request: request, botID: botID)
         case .notice(let text):
             Text(text)
                 .font(.system(size: 12))
@@ -71,52 +80,152 @@ private struct UserBubble: View {
     }
 }
 
+/// A reply of the Orb. While it streams, `live` has its text and the views below read it; the row itself is not
+/// redrawn per flush. Once it is done it is one text again, which can be selected from the first word to the last
+/// (and is cheaper to keep on screen: every text on screen is asked its size at each frame of an animation).
 private struct BotMessage: View {
-    let bot: Bot
+    let orb: OrbConfig
     let text: String
-    let isStreaming: Bool
+    let live: LiveText?
 
+    // The bubble is padded and given the row's width instead of sharing an HStack with the avatar and a Spacer:
+    // the text then gets one definite width to wrap to (an HStack asks for several sizes, and each one lays the
+    // whole text out). The avatar floats over the left padding; the right one is 80 and the HStack's spacing, 10.
     var body: some View {
-        HStack(alignment: .bottom, spacing: 10) {
-            BotAvatar(bot: bot, size: 30, animated: false)
-            content
-                .font(Palette.conversationFont)
-                .foregroundStyle(Palette.ink)
-                .lineSpacing(Palette.conversationLineSpacing)
-                .textSelection(.enabled)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .background(Palette.agentBubble, in: .rect(cornerRadius: 18))
-            Spacer(minLength: 80)
-        }
+        content
+            .font(Palette.conversationFont)
+            .foregroundStyle(Palette.ink)
+            .lineSpacing(Palette.conversationLineSpacing)
+            .textSelection(.enabled)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .background(Palette.agentBubble, in: .rect(cornerRadius: 18))
+            .padding(.leading, 40)
+            .padding(.trailing, 90)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .bottomLeading) {
+                BotAvatar(orb: orb, size: 30, animated: false)
+            }
     }
 
-    /// While streaming, the finished paragraphs and the one being written are two texts (rendered
-    /// pixel-identical to one), so each update re-parses and re-lays out only the last paragraph.
     @ViewBuilder private var content: some View {
-        if isStreaming, let lastBreak = text.range(of: "\n\n", options: .backwards) {
-            VStack(alignment: .leading, spacing: Palette.conversationLineSpacing) {
-                MarkdownText(source: text[..<lastBreak.lowerBound] + "\n")
-                MarkdownText(source: String(text[lastBreak.upperBound...]), showsCursor: true)
-            }
+        if let live {
+            ParagraphStack(live: live)
         } else {
-            MarkdownText(source: text, showsCursor: isStreaming)
+            MarkdownText(source: text)
         }
     }
 }
 
-/// Inline Markdown. Equatable on its source, so unchanged text is neither re-parsed nor re-measured.
-private struct MarkdownText: View, Equatable {
-    let source: String
-    var showsCursor = false
+/// The reply being streamed as paragraphs: the finished ones keep their identity and text (so they are neither
+/// parsed nor measured again) and only the last, the one being written, changes. Rendered pixel-identical to one text.
+private struct ParagraphStack: View {
+    let live: LiveText
 
     var body: some View {
-        Text(Self.parse(source)) + Text(showsCursor ? " ●" : "").foregroundColor(Palette.faint)
+        VStack(alignment: .leading, spacing: Palette.conversationLineSpacing) {
+            ClosedParagraphs(live: live)
+            LastParagraph(live: live)
+        }
+    }
+}
+
+/// Reads only the finished paragraphs, so it is redrawn when a paragraph ends, not on every flush.
+private struct ClosedParagraphs: View {
+    let live: LiveText
+
+    var body: some View {
+        ForEach(Array(live.closed.enumerated()), id: \.offset) { _, paragraph in
+            MarkdownText(source: paragraph, endsParagraph: true, streaming: true).equatable()
+        }
+    }
+}
+
+/// Reads only the paragraph being written.
+private struct LastParagraph: View {
+    let live: LiveText
+    @Environment(\.replyGrew) private var replyGrew
+
+    var body: some View {
+        MarkdownText(source: live.tail, streaming: true)
+            .onChange(of: live.tail.utf8.count) { replyGrew?() }
+    }
+}
+
+extension EnvironmentValues {
+    /// Called when the reply being streamed grows, by a list that has to scroll to follow it itself.
+    @Entry var replyGrew: (@MainActor () -> Void)?
+}
+
+/// Inline Markdown. Equatable on its source, so unchanged text is neither re-parsed nor re-measured. `endsParagraph`
+/// is a paragraph followed by another: the blank line between them is part of its text (as it is in the whole reply).
+/// `streaming` is a piece of the reply being written (it is not kept in `MarkdownCache`, the finished text is); the
+/// cursor follows the last one.
+private struct MarkdownText: View, Equatable {
+    let source: String
+    var endsParagraph = false
+    var streaming = false
+
+    var body: some View {
+        Text(MarkdownCache.attributed(source, endsParagraph: endsParagraph, cached: !streaming))
+            + Text(streaming && !endsParagraph ? " ●" : "").foregroundColor(Palette.faint)
+    }
+}
+
+/// The parsed Markdown of text that is done changing, so a row the LazyVStack recreates while scrolling (or a
+/// paragraph that moves from "being written" to "finished") is not parsed again. Two generations: when the newer one
+/// is full the older is dropped, so memory stays bounded and what was used lately survives.
+@MainActor
+enum MarkdownCache {
+    private struct Key: Hashable {
+        let source: String
+        let endsParagraph: Bool
     }
 
-    private static func parse(_ text: String) -> AttributedString {
+    private static var recent: [Key: AttributedString] = [:]
+    private static var older: [Key: AttributedString] = [:]
+    private static var recentBytes = 0
+    /// UTF-8 bytes of source text a generation holds, and the longest text worth keeping.
+    private static let generationBytes = 512 * 1024
+    private static let longestText = 64 * 1024
+
+    static func attributed(_ source: String, endsParagraph: Bool = false, cached: Bool = true) -> AttributedString {
+        let size = source.utf8.count
+        guard cached, size <= longestText else { return parse(source, endsParagraph: endsParagraph) }
+        let key = Key(source: source, endsParagraph: endsParagraph)
+        if let hit = recent[key] { return hit }
+        if let hit = older[key] {
+            remember(hit, for: key, size: size)
+            return hit
+        }
+        let parsed = parse(source, endsParagraph: endsParagraph)
+        remember(parsed, for: key, size: size)
+        return parsed
+    }
+
+    private static func remember(_ value: AttributedString, for key: Key, size: Int) {
+        if recentBytes + size > generationBytes {
+            older = recent
+            recent = [:]
+            recentBytes = 0
+        }
+        recent[key] = value
+        recentBytes += size
+    }
+
+    /// Empties the cache (tests).
+    static func removeAll() {
+        recent = [:]
+        older = [:]
+        recentBytes = 0
+    }
+
+    static var count: Int { recent.count + older.count }
+
+    private static func parse(_ text: String, endsParagraph: Bool) -> AttributedString {
         let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+        let source = endsParagraph ? text + "\n" : text
+        return (try? AttributedString(markdown: source, options: options)) ?? AttributedString(source)
     }
 }
 
@@ -141,7 +250,7 @@ struct ToolCallLine: View {
                         + Text("  \(call.detail)").foregroundColor(Palette.faint))
                         .font(.system(size: 12))
                         .lineLimit(1)
-                        .shimmer(active: call.state == .running)
+                        .shimmer(active: call.state == .running, keepsColors: true)
                     stateMark
                     if call.output != nil {
                         Image(systemName: "chevron.right")
@@ -205,7 +314,7 @@ struct ToolCallLine: View {
 struct ApprovalCard: View {
     @Environment(AppModel.self) private var model
     let request: ApprovalRequest
-    let bot: Bot
+    let botID: UUID
 
     @State private var note = ""
     @FocusState private var noteFocused: Bool
@@ -314,7 +423,7 @@ struct ApprovalCard: View {
             .help("Não permitir (esc)")
         if request.isBatch {
             Button("Revisar uma a uma") {
-                model.decide(.review, approvalID: request.id, botID: bot.id)
+                model.decide(.review, approvalID: request.id, botID: botID)
             }
             .buttonStyle(GhostStyle())
             .help("Uma pergunta para cada ação")
@@ -326,7 +435,7 @@ struct ApprovalCard: View {
             Menu {
                 ForEach(request.suggestions, id: \.self) { rule in
                     Button(rule.menuTitle) {
-                        model.decide(.always, rule: rule, approvalID: request.id, botID: bot.id)
+                        model.decide(.always, rule: rule, approvalID: request.id, botID: botID)
                     }
                 }
             } label: {
@@ -343,7 +452,7 @@ struct ApprovalCard: View {
             .help("Deixa de perguntar daqui para frente. Você pode revogar em Trabalho, no painel do Orb.")
             Button("Só nesta tarefa") {
                 // A single card grants its first rule; a grouped one, everything it offered.
-                model.decide(.task, rule: request.isBatch ? nil : suggestion, approvalID: request.id, botID: bot.id)
+                model.decide(.task, rule: request.isBatch ? nil : suggestion, approvalID: request.id, botID: botID)
             }
             .buttonStyle(SecondaryPillStyle())
             .help(request.isBatch
@@ -351,24 +460,24 @@ struct ApprovalCard: View {
                   : "Vale até o Orb terminar esta tarefa: \(suggestion.title.lowercased()).")
         }
         Button(allowTitle) {
-            model.decide(.once, approvalID: request.id, botID: bot.id)
+            model.decide(.once, approvalID: request.id, botID: botID)
         }
         .buttonStyle(PrimaryPillStyle())
         .help("\(allowTitle) (⌘↩)")
     }
 
     private func deny() {
-        model.decide(.deny, note: note, approvalID: request.id, botID: bot.id)
+        model.decide(.deny, note: note, approvalID: request.id, botID: botID)
     }
 
     /// ⌘↩ and Esc answer this card when it is the newest open one of the Orb being shown.
     private func handleKey(_ event: NSEvent, in window: NSWindow) -> Bool {
-        guard model.selectedBot?.id == bot.id, model.newestPendingApprovalID(of: bot.id) == request.id else { return false }
+        guard model.selectedBot?.id == botID, model.newestPendingApprovalID(of: botID) == request.id else { return false }
         let field = window.firstResponder as? NSTextView
         let editing = ApprovalShortcut.isEditing(responderIsText: field != nil, hasText: field.map { !$0.string.isEmpty } ?? false,
                                                  hasMarkedText: field?.hasMarkedText() ?? false, noteFocused: isEditingNote)
         switch ApprovalShortcut.resolve(keyCode: event.keyCode, modifiers: event.modifierFlags, isEditingText: editing) {
-        case .allow: model.decide(.once, approvalID: request.id, botID: bot.id)
+        case .allow: model.decide(.once, approvalID: request.id, botID: botID)
         case .deny: deny()
         case nil: return false
         }

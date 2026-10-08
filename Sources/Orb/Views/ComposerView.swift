@@ -1,9 +1,11 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// The message field of one Orb's chat. Takes the Orb's id: it shows nothing of the `Bot` itself (its menus read
+/// their own parts), so changes to the Orb's settings do not re-render it.
 struct ComposerView: View {
     @Environment(AppModel.self) private var model
-    let bot: Bot
+    let botID: UUID
 
     @FocusState private var isFocused: Bool
     @State private var isImporting = false
@@ -15,12 +17,12 @@ struct ComposerView: View {
 
     private var draft: Binding<String> {
         Binding(
-            get: { model.drafts[bot.id, default: ""] },
-            set: { model.drafts[bot.id] = $0 }
+            get: { model.drafts[botID, default: ""] },
+            set: { model.setDraft($0, for: botID) }
         )
     }
 
-    private var isWorking: Bool { model.isWorking(bot.id) }
+    private var isWorking: Bool { model.live(botID).isWorking }
     private var canSend: Bool {
         !isWorking && (!draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty)
     }
@@ -66,11 +68,11 @@ struct ComposerView: View {
                 Button("Anexar", systemImage: "plus") { isImporting = true }
                     .help("Anexar arquivos")
                 SkillMenu { insert("/\($0) ") }
-                PermissionMenu(bot: bot)
+                PermissionMenu(botID: botID)
                 Spacer()
-                ModelMenu(bot: bot)
+                ModelMenu(botID: botID)
                 if isWorking {
-                    Button("Parar", systemImage: "stop.fill") { model.stop(bot.id) }
+                    Button("Parar", systemImage: "stop.fill") { model.stop(botID) }
                         .buttonStyle(RoundActionStyle(isEnabled: true))
                         .help("Parar resposta")
                 } else {
@@ -126,7 +128,7 @@ struct ComposerView: View {
 
     private func attachPicture(_ load: @escaping @Sendable (ImageStore, UUID) async throws -> ImageAttachment) {
         attachmentError = nil
-        let store = model.images, botID = bot.id
+        let store = model.images, botID = botID
         Task {
             do { images.append(try await load(store, botID)) }
             catch { attachmentError = error.localizedDescription }
@@ -168,8 +170,17 @@ struct ComposerView: View {
 
     private func send() {
         guard canSend else { return }
+        if model.isLoadingConversation(botID) {
+            // The history is still being read: send once it is in memory (checked again then, so a second Return
+            // while waiting finds the draft already gone) instead of making the window wait for the file.
+            Task {
+                await model.loadedConversation(botID)
+                send()
+            }
+            return
+        }
         // If the message wasn't sent (no model connected), the attachments stay with the draft.
-        if model.send(draft.wrappedValue, attachments: attachments, images: images, to: bot.id, fromUser: true) {
+        if model.send(draft.wrappedValue, attachments: attachments, images: images, to: botID, fromUser: true) {
             attachments.removeAll()
             images.removeAll()
             attachmentError = nil
@@ -240,26 +251,27 @@ private struct SkillMenu: View {
 
 private struct PermissionMenu: View {
     @Environment(AppModel.self) private var model
-    let bot: Bot
+    let botID: UUID
     @State private var isConfirmingBypass = false
 
     /// "Perguntar antes · 2 liberações": the grants only apply where the Orb asks.
-    private var modeLabel: String {
-        let count = bot.permissionRules.count
-        guard bot.permissionMode == .ask, count > 0 else { return bot.permissionMode.label }
-        return "\(bot.permissionMode.label) · \(count) \(count == 1 ? "liberação" : "liberações")"
+    private func modeLabel(_ permission: PermissionState) -> String {
+        let count = permission.rules.count
+        guard permission.mode == .ask, count > 0 else { return permission.mode.label }
+        return "\(permission.mode.label) · \(count) \(count == 1 ? "liberação" : "liberações")"
     }
 
-    private var grantsHelp: String {
-        guard bot.permissionMode == .ask, !bot.permissionRules.isEmpty else { return "" }
-        return "\n\nLiberado:\n" + bot.permissionRules.map { "• " + $0.title }.joined(separator: "\n")
+    private func grantsHelp(_ permission: PermissionState) -> String {
+        guard permission.mode == .ask, !permission.rules.isEmpty else { return "" }
+        return "\n\nLiberado:\n" + permission.rules.map { "• " + $0.title }.joined(separator: "\n")
     }
 
     var body: some View {
+        let permission = model.live(botID).permission
         Menu {
             Picker("Permissões", selection: Binding(
-                get: { bot.permissionMode },
-                set: { mode in model.update(bot.id) { $0.permissionMode = mode } }
+                get: { model.live(botID).permission.mode },
+                set: { mode in model.update(botID) { $0.permissionMode = mode } }
             ).confirmingBypass { isConfirmingBypass = true }) {
                 ForEach(PermissionMode.allCases) { mode in
                     Label(mode.label, systemImage: mode.symbol).tag(mode)
@@ -267,31 +279,32 @@ private struct PermissionMenu: View {
             }
             .pickerStyle(.inline)
         } label: {
-            Label(modeLabel, systemImage: bot.permissionMode.symbol)
-                .foregroundStyle(bot.permissionMode == .bypass ? Palette.warn : Palette.muted)
+            Label(modeLabel(permission), systemImage: permission.mode.symbol)
+                .foregroundStyle(permission.mode == .bypass ? Palette.warn : Palette.muted)
         }
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Permissões: \(bot.permissionMode.label). \(bot.permissionMode.summary)" + grantsHelp)
+        .help("Permissões: \(permission.mode.label). \(permission.mode.summary)" + grantsHelp(permission))
         .bypassConfirmation(isPresented: $isConfirmingBypass) {
-            model.update(bot.id) { $0.permissionMode = .bypass }
+            model.update(botID) { $0.permissionMode = .bypass }
         }
     }
 }
 
 private struct ModelMenu: View {
     @Environment(AppModel.self) private var model
-    let bot: Bot
+    let botID: UUID
 
     var body: some View {
+        let name = model.modelName(forModel: model.live(botID).modelID)
         Menu {
             ModelPicker(selection: Binding(
-                get: { bot.model },
-                set: { name in model.update(bot.id) { $0.model = name } }
-            ))
+                get: { model.live(botID).modelID },
+                set: { name in model.update(botID) { $0.model = name } }
+            ), inMenu: true)
             .pickerStyle(.inline)
         } label: {
-            Text(model.modelName(for: bot).isEmpty ? "Sem modelo" : model.modelName(for: bot))
+            Text(name.isEmpty ? "Sem modelo" : name)
                 .font(.caption.weight(.medium))
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)

@@ -7,7 +7,7 @@ import UserNotifications
 final class AppModel {
     // MARK: Persisted state
 
-    var bots: [Bot] { didSet { scheduleStateSave() } }
+    var bots: [Bot] { didSet { scheduleStateSave(); syncLives() } }
     var routines: [Routine] { didSet { scheduleStateSave(); queueFollowsEdits(from: oldValue) } }
     var skills: [Skill] { didSet { scheduleStateSave() } }
     var connectors: [MCPServerConfig] { didSet { scheduleStateSave(); syncConnectors() } }
@@ -15,13 +15,15 @@ final class AppModel {
     var providers: [ProviderAccount] { didSet { scheduleStateSave() } }
     /// "provider/model" for bots without a model of their own.
     var defaultModel: String { didSet { scheduleStateSave() } }
-    /// Conversations loaded so far. At launch only the selected Orb's is; the rest follow in the background
-    /// (`unloadedConversations`), and anything that needs one earlier loads it on demand (`ensureLoaded`).
-    private(set) var conversations: [UUID: Conversation]
+    /// Conversations in memory. At launch only the selected Orb's is read (off the main thread, `beginLoading`);
+    /// the others are read when they are needed (`unloadedConversations`): when you switch to the Orb, or something
+    /// has to change its conversation (`ensureLoaded`). One nobody has looked at for a while and that has nothing
+    /// left to save goes back to disk (`unloadIdleConversations`).
+    private(set) var conversations: [UUID: Conversation] { didSet { showTranscripts() } }
     /// While a routine runs, `conversations[botID]` is the routine's own conversation (the turn machinery works on
     /// it) and the user's chat waits here, untouched. Every turn of an Orb works on one conversation at a time, so
     /// a routine and a chat turn of the same Orb cannot run together yet (the routine waits in `queuedRoutines`).
-    private(set) var parkedChats: [UUID: Conversation] = [:]
+    private(set) var parkedChats: [UUID: Conversation] = [:] { didSet { showTranscripts() } }
     /// Earlier conversations of each Orb as last listed (see `loadArchive`).
     private(set) var archives: [UUID: [ConversationSummary]] = [:]
     /// Routines that came due while their Orb was busy; each runs when the Orb is free. One entry per routine.
@@ -33,41 +35,37 @@ final class AppModel {
     // MARK: UI state
 
     var drafts: [UUID: String] = [:]
-    var statusLine: [UUID: String] = [:]
-    /// Bumped on every transcript mutation so chat views can keep the bottom in view.
-    var scrollTick: [UUID: Int] = [:]
     var showInspector = true
     var showNewBot = false
-    /// Bots that just finished a turn; their Orb celebrates for a moment.
-    var celebrating: Set<UUID> = []
-    /// Bots that just received a prompt (short "listening" beat before thinking).
-    var listening: Set<UUID> = []
-    /// Bots whose last turn was interrupted or failed (brief "error" expression).
-    var failed: Set<UUID> = []
-    /// Incremented when a prompt is sent; Orbs jump when it changes.
-    var pokes: [UUID: Int] = [:]
     var connectorStatus: [UUID: MCPStatus] = [:]
     /// Tokens each Orb's last turn used, summed over its model calls (for a context meter; nothing shows it yet).
     private(set) var usage: [UUID: TokenUsage] = [:]
     /// Providers with a key in the Keychain (or, for ChatGPT and Claude Code, a sign-in).
     private(set) var connected: Set<ProviderKind> = []
-    /// What each working bot's current tool does, and bots waiting for an approval. Kept apart from the
-    /// transcript so the Orbs (sidebar, inspector) don't re-render on every streamed token.
-    private var runningTool: [UUID: ToolCall.Kind] = [:]
-    private(set) var awaitingApproval: Set<UUID> = []
     /// What the local Claude Code reports (checked while that provider is set up).
     private(set) var claudeCode = ClaudeCodeStatus()
-    /// Bots whose reply text is arriving right now (the Orb talks). Changes only when a burst of text starts
-    /// or ends, not per token.
-    private var speaking: Set<UUID> = []
+
+    // MARK: Per-Orb live state
+
+    /// The Orbs in sidebar order. Changes only when an Orb is added, deleted or moved, so a list that shows one
+    /// view per Orb (sidebar, menu bar, Orbs menu) re-renders then and not when an Orb's own state changes.
+    private(set) var botIDs: [UUID] = []
+    /// The Orbs working right now and the ones waiting for an answer, in sidebar order (the menu bar lists them).
+    private(set) var workingIDs: [UUID] = []
+    private(set) var waitingIDs: [UUID] = []
+    /// One observable object per Orb (see `BotLive`). Not observed itself: the Orbs it holds change with `bots`.
+    @ObservationIgnored private var lives: [UUID: BotLive] = [:]
+    /// Until when each Orb keeps talking (it stops when no text arrived for `speakingQuiet`).
     @ObservationIgnored private var speakingUntil: [UUID: ContinuousClock.Instant] = [:]
     @ObservationIgnored private var speakingWatch: [UUID: Task<Void, Never>] = [:]
     private static let speakingQuiet = Duration.milliseconds(600)
     var selection: SidebarItem? {
         didSet {
+            if case .bot(let old) = oldValue, conversations[old] != nil { lastUsed[old] = .now } // leaving it: the clock starts now
             if case .bot(let id) = selection {
-                ensureLoaded(id)
-                update(id) { $0.unread = 0 }
+                beginLoading(id)
+                lastUsed[id] = .now
+                setUnread(0, for: id)
             }
         }
     }
@@ -81,8 +79,6 @@ final class AppModel {
     @ObservationIgnored private var visionRejected: Set<String> = []
     /// Every Orb's own memory bank (`memoria/<id>/` in the data folder).
     @ObservationIgnored let memory: MemoryLibrary
-    /// What each Orb's memory panel shows, refreshed after changes.
-    private(set) var memories: [UUID: MemorySnapshot] = [:]
     /// Saves a conversation stretch to memory once the user has been away for `SessionSummary.idleGap`.
     @ObservationIgnored private var memoryIdle: [UUID: Task<Void, Never>] = [:]
     /// Turns where you asked the Orb to remember something, and where that turn's transcript starts.
@@ -114,11 +110,30 @@ final class AppModel {
     @ObservationIgnored private var conversationSaves: [UUID: Task<Void, Never>] = [:]
     /// Orbs whose conversation changed since it was last written; quitting saves only these.
     @ObservationIgnored private var dirtyConversations: Set<UUID> = []
-    /// Orbs whose conversation file hasn't been read yet (never in `conversations`).
+    /// Orbs whose conversation isn't in memory (never in `conversations`): not read yet, or let go of again.
     @ObservationIgnored private var unloadedConversations: Set<UUID> = []
+    /// Orbs whose conversation is being read off the main thread right now: the chat shows a placeholder.
+    private(set) var loadingConversations: Set<UUID> = []
+    @ObservationIgnored private var conversationLoads: [UUID: Task<Void, Never>] = [:]
+    /// Bumped when an Orb's conversation is read synchronously or let go of, so a read that was already under way
+    /// (and may be older than what is in memory now) is not installed.
+    @ObservationIgnored private var loadEpoch: [UUID: Int] = [:]
+    /// When each conversation in memory was last shown, read or changed.
+    @ObservationIgnored private var lastUsed: [UUID: ContinuousClock.Instant] = [:]
+    /// How long a conversation nobody is looking at stays in memory (tests shorten it).
+    @ObservationIgnored var conversationKeepAlive = Duration.seconds(300)
     @ObservationIgnored private var didReportSaveFailure = false
+    /// The Keychain reads of a `refreshConnections` under way, and which state of the Keychain they started from
+    /// (`keychainGeneration` changes when the app itself changes a key).
+    @ObservationIgnored private var keyReads: (generation: Int, task: Task<Set<ProviderKind>, Never>)?
+    @ObservationIgnored private var keychainGeneration = 0
     /// A conversation that keeps changing (a streaming reply) is written at most this often.
     private static let streamingSaveInterval = 5.0
+    /// What each Orb's chat view reads (see `transcript(_:)`), made when first asked for.
+    @ObservationIgnored private var transcripts: [UUID: OrbTranscript] = [:]
+    /// The reply each Orb is streaming right now. Its text lives here, not in the conversation, until the reply
+    /// is closed (`closeStreaming`), so a flush does not touch the list of items.
+    @ObservationIgnored private var liveTexts: [UUID: LiveText] = [:]
     /// Streamed text not shown yet: deltas are published at most every `textFlushInterval`.
     @ObservationIgnored private var pendingText: [UUID: String] = [:]
     @ObservationIgnored private var textFlushes: [UUID: Task<Void, Never>] = [:]
@@ -126,7 +141,10 @@ final class AppModel {
     @ObservationIgnored private var scheduler: Task<Void, Never>?
 
     /// `runsBackgroundWork: false` skips the scheduler, Keychain checks and app-wide observers (tests).
-    init(store: Store = .standard, runsBackgroundWork: Bool = true) {
+    /// `asyncLoading` says whether the first Orb's conversation is read off the main thread after `init` returns
+    /// (the window does not wait for it; the app) or before it returns (what tests rely on); it follows
+    /// `runsBackgroundWork` unless given.
+    init(store: Store = .standard, runsBackgroundWork: Bool = true, asyncLoading: Bool? = nil) {
         self.store = store
         images = ImageStore(dataFolder: store.directory)
         let gate = ApprovalGate()
@@ -144,34 +162,39 @@ final class AppModel {
         connectors = state.connectors
         providers = state.providers
         defaultModel = state.defaultModel
-        // Only the Orb shown first is read before the first frame.
+        // Only the Orb shown first is read at launch, and the window does not wait for it (`beginLoading` below).
+        let readsFirstLater = asyncLoading ?? runsBackgroundWork
         var firstConversations: [UUID: Conversation] = [:]
-        if let first = state.bots.first {
+        if !readsFirstLater, let first = state.bots.first {
             let read = store.readConversation(first.id)
             notices += Self.labeled(read.notice, for: first).map { [$0] } ?? []
             firstConversations[first.id] = read.value?.closingInterruptedTurn() ?? Conversation()
+            lastUsed[first.id] = .now
         }
         conversations = firstConversations
-        unloadedConversations = Set(state.bots.dropFirst().map(\.id))
+        unloadedConversations = Set(state.bots.map(\.id)).subtracting(firstConversations.keys)
         dataNotices = notices
         selection = state.bots.first.map { .bot($0.id) }
         self.store.onSaveFailure = { [weak self] notice in
             Task { @MainActor in self?.reportSaveFailure(notice) }
         }
 
+        syncLives()
+        for (id, count) in state.unread {
+            if let id = UUID(uuidString: id) { live(id).setUnread(count) }
+        }
         syncConnectors()
+        if readsFirstLater, let first = state.bots.first { beginLoading(first.id) }
         guard runsBackgroundWork else { return }
         ApprovalNotifications.clearStale()
         ApprovalNotifications.install { [weak self] route in self?.handle(route) }
-        Task { [weak self] in
-            await self?.loadRemainingConversations()
-            await self?.prepareMemory()
-        }
+        Task { [weak self] in await self?.prepareMemory() }
         scheduler = Task { [weak self] in
             await self?.refreshConnections()
             while !Task.isCancelled {
                 self?.runDueRoutines()
                 await self?.refreshAllModels()
+                await self?.unloadIdleConversations()
                 try? await Task.sleep(for: .seconds(30))
             }
         }
@@ -185,7 +208,7 @@ final class AppModel {
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 if let self, case .bot(let id) = self.selection {
-                    self.update(id) { $0.unread = 0 }
+                    self.setUnread(0, for: id)
                     Task { await self.refreshMemory(id) } // picks up pages edited by hand meanwhile
                 }
             }
@@ -204,15 +227,104 @@ final class AppModel {
         dataNotices.append(notice)
     }
 
-    /// Reads the conversation of an Orb that hasn't been loaded yet, right now. Everything that reads or changes
-    /// a conversation outside a running turn goes through here first, so an unloaded one is never mistaken for an
-    /// empty one (and then saved over its file).
+    /// Reads the conversation of an Orb that isn't in memory, right now, on the main thread. The way in for anything
+    /// that has to read or change a conversation and cannot wait (a message sent, a card answered from a banner), so
+    /// an unloaded one is never mistaken for an empty one (and then saved over its file). What can wait goes through
+    /// `beginLoading` or `loadedConversation` instead (the composer and the approval banners wait for a read that is
+    /// already under way rather than come here: this one cannot use that read, so it would wait for it and then read
+    /// the file again, on the main thread).
     private func ensureLoaded(_ botID: UUID) {
         guard unloadedConversations.remove(botID) != nil else { return }
+        loadingConversations.remove(botID)
+        conversationLoads.removeValue(forKey: botID)?.cancel() // superseded: it must not be handed out again if this one is let go
+        loadEpoch[botID, default: 0] += 1 // a read under way is older than this one
         let read = store.readConversation(botID)
         addNotice(Self.labeled(read.notice, for: bot(botID)))
+        install(read, for: botID)
+    }
+
+    /// Starts reading the conversation of an Orb that isn't in memory, off the main thread, unless that is already
+    /// under way. Until it arrives the Orb counts as `loadingConversations` (the chat shows a placeholder) and
+    /// nothing may change its conversation: whatever needs it earlier goes through `ensureLoaded`, which wins.
+    @discardableResult
+    private func beginLoading(_ botID: UUID) -> Task<Void, Never>? {
+        guard unloadedConversations.contains(botID) else { return nil }
+        if let running = conversationLoads[botID] { return running }
+        loadingConversations.insert(botID)
+        let epoch = loadEpoch[botID, default: 0], store = store
+        let task = Task { [weak self] in
+            let read = await store.readConversationAsync(botID)
+            self?.finishLoading(botID, epoch: epoch, read)
+        }
+        conversationLoads[botID] = task
+        return task
+    }
+
+    private func finishLoading(_ botID: UUID, epoch: Int, _ read: StoreRead<Conversation>) {
+        // A read that `ensureLoaded` superseded leaves the bookkeeping alone: it may belong to a newer read by now.
+        if loadEpoch[botID, default: 0] == epoch {
+            conversationLoads[botID] = nil
+            loadingConversations.remove(botID)
+        }
+        guard let owner = bot(botID) else { // deleted meanwhile
+            unloadedConversations.remove(botID)
+            return
+        }
+        // Loaded on demand (`ensureLoaded`) while this was reading: that result wins. Its notice still stands when the
+        // file was moved aside (the on-demand read then found nothing), but not when the on-demand read already
+        // reported the same lost items.
+        guard loadEpoch[botID, default: 0] == epoch, unloadedConversations.remove(botID) != nil else {
+            if read.value == nil { addNotice(Self.labeled(read.notice, for: owner)) }
+            return
+        }
+        addNotice(Self.labeled(read.notice, for: owner))
+        install(read, for: botID) // the chat scrolls to the end of what just arrived when loading ends
+    }
+
+    private func install(_ read: StoreRead<Conversation>, for botID: UUID) {
         conversations[botID] = read.value?.closingInterruptedTurn() ?? Conversation()
+        lastUsed[botID] = .now
         rewriteIfItLostItems(botID, read)
+    }
+
+    /// Waits until the Orb's conversation is in memory, reading it off the main thread if it is not.
+    func loadedConversation(_ botID: UUID) async {
+        guard bot(botID) != nil, let task = beginLoading(botID) ?? conversationLoads[botID] else { return }
+        await task.value
+    }
+
+    /// Whether the chat should show that the conversation is still on its way.
+    func isLoadingConversation(_ botID: UUID) -> Bool { loadingConversations.contains(botID) }
+
+    /// Reads every conversation not in memory now. Testing only: the app reads them when they are needed.
+    func loadRemainingConversations() async {
+        for bot in bots where unloadedConversations.contains(bot.id) { await loadedConversation(bot.id) }
+    }
+
+    /// Lets go of conversations nobody is looking at: not the selected Orb's, not one that is working, parked by a
+    /// routine, or waiting to be saved, and not one used within `conversationKeepAlive`. Only when the file on disk
+    /// is known to hold what is in memory (the note beside it says so), and never after a failed save, when memory
+    /// may be the only copy. A conversation that comes back is read again from its file, off the main thread.
+    func unloadIdleConversations(now: ContinuousClock.Instant = .now, only: UUID? = nil) async {
+        guard !didReportSaveFailure else { return }
+        let candidates = conversations.keys.filter { (only == nil || $0 == only) && isIdle($0, now: now) }
+        for botID in candidates {
+            guard let meta = await store.readMetaAsync(botID) else { continue }
+            // Looked at again after waiting: it may have been used, changed or started a turn meanwhile.
+            guard isIdle(botID, now: now), let conversation = conversations[botID], meta.matches(conversation) else { continue }
+            conversations[botID] = nil
+            unloadedConversations.insert(botID)
+            loadEpoch[botID, default: 0] += 1
+            lastUsed[botID] = nil
+            store.releaseCache(for: botID)
+        }
+    }
+
+    private func isIdle(_ botID: UUID, now: ContinuousClock.Instant) -> Bool {
+        guard conversations[botID] != nil, selection != .bot(botID), turns[botID] == nil, routineTurns[botID] == nil,
+              parkedChats[botID] == nil, live(botID).status == nil, !live(botID).isAwaitingApproval,
+              !dirtyConversations.contains(botID), conversationSaves[botID] == nil else { return false }
+        return lastUsed[botID].map { $0.duration(to: now) >= conversationKeepAlive } ?? true
     }
 
     /// A file that lost items while decoding is rewritten once (its original is kept aside), so the loss is
@@ -235,23 +347,6 @@ final class AppModel {
         return notice
     }
 
-    /// Reads the other Orbs' conversations one by one, decoding on the store's queue instead of the main thread.
-    func loadRemainingConversations() async {
-        for bot in bots where unloadedConversations.contains(bot.id) {
-            let read = await store.readConversationAsync(bot.id)
-            // Loaded on demand, or the Orb deleted, while this was reading: that result wins. Its notice still
-            // stands when the file was moved aside (the on-demand read then found nothing), but not when the
-            // on-demand read already reported the same lost items.
-            let stillUnloaded = unloadedConversations.remove(bot.id) != nil
-            if stillUnloaded || read.value == nil {
-                addNotice(Self.labeled(read.notice, for: bot))
-            }
-            guard stillUnloaded, self.bot(bot.id) != nil else { continue }
-            conversations[bot.id] = read.value?.closingInterruptedTurn() ?? Conversation()
-            rewriteIfItLostItems(bot.id, read)
-        }
-    }
-
     // MARK: Queries
 
     func bot(_ id: UUID) -> Bot? { bots.first { $0.id == id } }
@@ -260,11 +355,37 @@ final class AppModel {
         if case .bot(let id) = selection { bot(id) } else { nil }
     }
 
-    /// The user's chat (not a running routine's conversation, which `conversations` holds meanwhile).
-    func transcript(_ botID: UUID) -> [TranscriptItem] { (parkedChats[botID] ?? conversations[botID])?.items ?? [] }
+    /// The user's chat (not a running routine's conversation, which `conversations` holds meanwhile). The reply
+    /// being streamed is in it as it began; `liveText(for:of:)` has its text.
+    func transcript(_ botID: UUID) -> [TranscriptItem] { transcripts[botID]?.items ?? shownItems(of: botID) }
 
-    /// Observable (the status line is set for exactly as long as a turn runs).
-    func isWorking(_ botID: UUID) -> Bool { statusLine[botID] != nil }
+    /// The chat of one Orb as its view reads it. Observed on its own: a change in another Orb's conversation, or
+    /// in this one's streamed text, does not touch it.
+    func orbTranscript(_ botID: UUID) -> OrbTranscript {
+        if let transcript = transcripts[botID] { return transcript }
+        let transcript = OrbTranscript(items: shownItems(of: botID))
+        transcripts[botID] = transcript
+        return transcript
+    }
+
+    private func shownItems(of botID: UUID) -> [TranscriptItem] {
+        (parkedChats[botID] ?? conversations[botID])?.items ?? []
+    }
+
+    /// Hands every Orb's chat view its items after `conversations` or `parkedChats` changed. Cheap for the ones
+    /// whose items were not touched (`OrbTranscript.show` compares storage, not elements).
+    private func showTranscripts() {
+        for (botID, transcript) in transcripts { transcript.show(shownItems(of: botID)) }
+    }
+
+    /// The text of `itemID` while it streams (nil for any other item, and once the reply is closed).
+    func liveText(for itemID: UUID, of botID: UUID) -> LiveText? {
+        guard let live = liveTexts[botID], live.itemID == itemID else { return nil }
+        return live
+    }
+
+    /// Observable per Orb (the status line is set for exactly as long as a turn runs).
+    func isWorking(_ botID: UUID) -> Bool { live(botID).isWorking }
 
     func routines(for botID: UUID) -> [Routine] { routines.filter { $0.botID == botID } }
 
@@ -274,8 +395,11 @@ final class AppModel {
     func modelRef(for bot: Bot) -> ModelRef? { ModelRef(bot.model.isEmpty ? defaultModel : bot.model) }
 
     /// Short model name for the UI ("" when none is set).
-    func modelName(for bot: Bot) -> String {
-        guard let ref = modelRef(for: bot) else { return "" }
+    func modelName(for bot: Bot) -> String { modelName(forModel: bot.model) }
+
+    /// The same for a bot's `model` string alone (views that show nothing else of the bot).
+    func modelName(forModel model: String) -> String {
+        guard let ref = ModelRef(model.isEmpty ? defaultModel : model) else { return "" }
         return account(ref.provider)?.models.first { $0.id == ref.model }?.name ?? ref.model
     }
 
@@ -286,29 +410,71 @@ final class AppModel {
     }
 
     /// What the bot's Orb is doing right now (expression, gaze and motion follow this).
-    func activity(for botID: UUID) -> OrbActivity {
-        if awaitingApproval.contains(botID) { return .waiting }
-        if failed.contains(botID) { return .error }
-        if celebrating.contains(botID) { return .happy }
-        guard isWorking(botID) else { return .idle }
-        if let kind = runningTool[botID] {
-            switch kind {
-            case .shell: return .typing
-            case .browser, .computer: return .browsing
-            case .file: return .reading
-            case .search: return .searching
-            case .connector, .memory: return .thinking
-            }
+    func activity(for botID: UUID) -> OrbActivity { live(botID).activity }
+
+    // MARK: Per-Orb live state
+
+    /// The Orb's live state. Views read this (and only this) for the Orb they show. An unknown id (an Orb that was
+    /// just deleted) gets a stand-in nothing is attached to, so a late write or a view still on screen is harmless.
+    func live(_ id: UUID) -> BotLive {
+        lives[id] ?? BotLive(Bot(id: id, name: "", role: "", orb: OrbConfig()))
+    }
+
+    /// The live state of an Orb that exists; nil once it is deleted. Reads the list of Orbs, which changes only
+    /// when one is added or deleted, so a view that checks this still depends on no other Orb's state.
+    func liveBot(_ id: UUID) -> BotLive? { botIDs.contains(id) ? lives[id] : nil }
+
+    /// Brings the per-Orb objects in line with `bots`: new Orbs get one, deleted Orbs lose theirs, and an Orb whose
+    /// settings changed publishes that to its own object only.
+    private func syncLives() {
+        for bot in bots {
+            if let existing = lives[bot.id] { existing.update(bot) } else { lives[bot.id] = BotLive(bot) }
         }
-        if speaking.contains(botID) { return .speaking }
-        return listening.contains(botID) ? .listening : .thinking
+        if lives.count != bots.count { lives = lives.filter { id, _ in bots.contains { $0.id == id } } }
+        assign(\.botIDs, to: bots.map(\.id))
+        refreshPresence()
+    }
+
+    /// The lists of working and waiting Orbs, after a status or an approval card changed.
+    private func refreshPresence() {
+        assign(\.workingIDs, to: botIDs.filter { lives[$0]?.isWorking == true })
+        assign(\.waitingIDs, to: botIDs.filter { lives[$0]?.needsYou == true })
+    }
+
+    private func setStatus(_ text: String?, of botID: UUID) {
+        let live = live(botID)
+        let was = live.isWorking
+        live.setStatus(text)
+        if live.isWorking != was { refreshPresence() }
+    }
+
+    private func setAwaitingApproval(_ isWaiting: Bool, of botID: UUID) {
+        let live = live(botID)
+        let was = live.needsYou
+        live.setAwaitingApproval(isWaiting)
+        if live.needsYou != was { refreshPresence() }
+    }
+
+    /// The unread count is saved with the app's state, so a change schedules a save.
+    private func setUnread(_ count: Int, for botID: UUID) {
+        let live = live(botID)
+        guard live.unread != count else { return }
+        live.setUnread(count)
+        scheduleStateSave()
+    }
+
+    /// The draft in the composer, kept per Orb. Writing what is already there does nothing (no draft counts as "").
+    func setDraft(_ text: String, for botID: UUID) {
+        guard drafts[botID, default: ""] != text else { return }
+        drafts[botID] = text
     }
 
     /// Keeps the bot `speaking` until no text arrived for `speakingQuiet`.
     private func markSpeaking(_ botID: UUID) {
+        guard let live = lives[botID] else { return } // a late event of a deleted Orb starts no watcher
         speakingUntil[botID] = .now + Self.speakingQuiet
-        guard !speaking.contains(botID) else { return }
-        speaking.insert(botID)
+        guard !live.isSpeaking else { return }
+        live.isSpeaking = true
         speakingWatch[botID] = Task { [weak self] in
             while !Task.isCancelled, let deadline = self?.speakingUntil[botID] {
                 if deadline <= .now { self?.stopSpeaking(botID); return }
@@ -320,7 +486,7 @@ final class AppModel {
     private func stopSpeaking(_ botID: UUID) {
         speakingUntil[botID] = nil
         speakingWatch.removeValue(forKey: botID)?.cancel()
-        if speaking.contains(botID) { speaking.remove(botID) }
+        lives[botID]?.isSpeaking = false
     }
 
     // MARK: Providers
@@ -351,9 +517,10 @@ final class AppModel {
     /// Forgets the key or sign-in (the provider stays listed). Claude Code's own login is left alone:
     /// it belongs to the user's Claude Code, not to Orb (see `signOutOfClaudeCode`).
     func signOut(_ kind: ProviderKind) {
+        keychainGeneration += 1
         Keychain.set("", account: kind.rawValue)
         if kind == .chatgpt { Task { await ChatGPTAuth.shared.signOut() } }
-        connected.remove(kind)
+        if connected.contains(kind) { connected.remove(kind) }
         updateProvider(kind) { $0.models = [] }
     }
 
@@ -364,6 +531,7 @@ final class AppModel {
 
     /// Saves (or, when empty, removes) the provider's key and reloads its models.
     func setKey(_ key: String, for kind: ProviderKind) async throws {
+        keychainGeneration += 1
         Keychain.set(key.trimmingCharacters(in: .whitespacesAndNewlines), account: kind.rawValue)
         await refreshConnections()
         try await refreshModels(kind)
@@ -392,13 +560,28 @@ final class AppModel {
     }
 
     func refreshConnections() async {
-        var found = Set(ProviderKind.allCases.filter { $0.needsKey && Keychain.get($0.rawValue) != nil })
+        var found = await keyedProviders()
         if await ChatGPTAuth.shared.credential != nil { found.insert(.chatgpt) }
         if account(.claudeCode) != nil {
             claudeCode = await ClaudeCode.shared.status()
             if claudeCode.isLoggedIn { found.insert(.claudeCode) }
         }
         connected = found
+    }
+
+    /// Providers with a key in the Keychain. Each read takes milliseconds (and the system may ask permission for an
+    /// item another app made), so they run off the main thread; a refresh asked for while another is under way
+    /// (launch asks from more than one place) shares its reads instead of repeating them.
+    private func keyedProviders() async -> Set<ProviderKind> {
+        if let running = keyReads, running.generation == keychainGeneration { return await running.task.value }
+        let generation = keychainGeneration
+        let task = Task.detached(priority: .userInitiated) {
+            Set(ProviderKind.allCases.filter { $0.needsKey && Keychain.get($0.rawValue) != nil })
+        }
+        keyReads = (generation, task)
+        let found = await task.value
+        if keyReads?.task == task { keyReads = nil }
+        return found
     }
 
     /// Reloads the provider's live model list; picks a default model if there is none yet.
@@ -459,6 +642,7 @@ final class AppModel {
             bot.workingDirectory = OrbFolder.storedPath(url)
         }
         conversations[bot.id] = Conversation()
+        lastUsed[bot.id] = .now
         bots.append(bot)
         selection = .bot(bot.id)
         if let folderProblem { append(.notice("\(folderProblem). \(bot.name) vai trabalhar na pasta pessoal."), to: bot.id) }
@@ -534,7 +718,7 @@ final class AppModel {
         let stillOpen = (conversations[botID]?.items ?? []).contains {
             if case .approval(let request) = $0.kind { request.decision == nil } else { false }
         }
-        if !stillOpen { awaitingApproval.remove(botID) }
+        if !stillOpen { setAwaitingApproval(false, of: botID) }
     }
 
     /// Deletes the Orb with its conversation and routines. Its memory goes too, unless `keepMemory`: then the
@@ -563,12 +747,16 @@ final class AppModel {
         } else {
             library.delete(botID)
         }
-        memories[botID] = nil
         bots.removeAll { $0.id == botID }
+        liveTexts[botID] = nil
         conversations[botID] = nil
         parkedChats[botID] = nil
-        archives[botID] = nil
+        transcripts[botID] = nil
+        writeIfChanged(nil, at: botID, in: \.archives)
         unloadedConversations.remove(botID)
+        loadingConversations.remove(botID)
+        conversationLoads.removeValue(forKey: botID)?.cancel()
+        lastUsed[botID] = nil
         dirtyConversations.remove(botID)
         conversationSaves.removeValue(forKey: botID)?.cancel()
         store.deleteConversation(botID)
@@ -591,7 +779,7 @@ final class AppModel {
         leaveChat(botID)
         archiveChat(botID)
         installChat(Conversation(), for: botID)
-        drafts[botID] = ""
+        setDraft("", for: botID)
     }
 
     /// Makes an archived conversation the current one. The current one is archived first (if you said anything in
@@ -609,7 +797,7 @@ final class AppModel {
         leaveChat(botID)
         archiveChat(botID)
         installChat(chosen.closingInterruptedTurn(), for: botID)
-        drafts[botID] = ""
+        setDraft("", for: botID)
         store.deleteArchived(id, for: botID) // after the reopened chat is written (`installChat`, same queue): a crash in between keeps both
         archives[botID]?.removeAll { $0.id == id }
         return true
@@ -625,7 +813,7 @@ final class AppModel {
     func loadArchive(_ botID: UUID) async {
         let list = await store.readArchiveAsync(botID)
         guard bot(botID) != nil else { return }
-        archives[botID] = list
+        writeIfChanged(list, at: botID, in: \.archives)
     }
 
     /// Before the chat is replaced: a turn of the chat stops (a running routine does not: it has its own
@@ -673,7 +861,7 @@ final class AppModel {
     func refreshMemory(_ botID: UUID) async {
         guard bot(botID) != nil else { return }
         let snapshot = await memory.bank(for: botID).snapshot()
-        if bot(botID) != nil, memories[botID] != snapshot { memories[botID] = snapshot }
+        if bot(botID) != nil { live(botID).setMemory(snapshot) }
     }
 
     func forgetMemory(_ path: String, of botID: UUID) {
@@ -707,7 +895,7 @@ final class AppModel {
 
     /// Every Orb has a memory bank: older Orbs get one on the first launch of this version (with their old memory
     /// list moved in), conversation stretches left from the last run are saved and cold sessions age.
-    private func prepareMemory() async {
+    func prepareMemory() async { // internal for tests
         for bot in bots {
             guard self.bot(bot.id) != nil else { continue } // deleted meanwhile
             let bank = memory.bank(for: bot.id)
@@ -718,12 +906,29 @@ final class AppModel {
                 // The old list stays until every item is safely in the bank.
                 if moved { update(bot.id) { $0.memory = [] } }
             }
-            if !saveMemory(of: bot.id, ifIdleFor: SessionSummary.idleGap), hasUnsavedStretch(bot.id) {
-                scheduleMemorySave(bot.id)
+            // The note beside the conversation says whether there is anything to save; only then is it read.
+            if await mayHaveUnsavedStretch(bot.id) {
+                let wasInMemory = conversations[bot.id] != nil
+                await loadedConversation(bot.id)
+                if !saveMemory(of: bot.id, ifIdleFor: SessionSummary.idleGap), hasUnsavedStretch(bot.id) {
+                    scheduleMemorySave(bot.id)
+                }
+                // Read only for this: it goes back to disk now, not after the keep-alive (it may still be waiting to be
+                // written, then it goes with the next sweep).
+                if !wasInMemory { await unloadIdleConversations(now: .now + conversationKeepAlive, only: bot.id) }
             }
             await bank.sweep()
             await refreshMemory(bot.id)
         }
+    }
+
+    /// Whether the Orb's conversation may have a stretch not yet saved to memory, without reading the conversation
+    /// when the note beside it can tell (a conversation with no valid note is read, off the main thread).
+    private func mayHaveUnsavedStretch(_ botID: UUID) async -> Bool {
+        if unloadedConversations.contains(botID), let meta = await store.readMetaAsync(botID) {
+            return meta.hasUnsavedStretch || unloadedConversations.contains(botID) == false
+        }
+        return true
     }
 
     private func hasUnsavedStretch(_ botID: UUID) -> Bool {
@@ -795,6 +1000,8 @@ final class AppModel {
                 self?.scheduleMemorySave(botID)
                 return
             }
+            await self?.loadedConversation(botID) // it may have been let go of while the Orb was idle
+            guard !Task.isCancelled else { return }
             self?.saveMemory(of: botID)
         }
     }
@@ -814,7 +1021,21 @@ final class AppModel {
         didSendLaunchPrompt = true
         Task {
             await refreshConnections()
-            send(text, to: id)
+            sendWhenLoaded(text, to: id)
+        }
+    }
+
+    /// `send` for callers that do not use its result: when the Orb's conversation is not in memory it is read off the
+    /// main thread first, instead of making the window wait for it.
+    func sendWhenLoaded(_ text: String, to botID: UUID) {
+        guard unloadedConversations.contains(botID) else {
+            send(text, to: botID)
+            return
+        }
+        Task {
+            await loadedConversation(botID)
+            ensureLoaded(botID)
+            send(text, to: botID)
         }
     }
 
@@ -837,10 +1058,10 @@ final class AppModel {
         memoryIdle.removeValue(forKey: botID)?.cancel()
         // Full paths: the bubble shows thumbnails of the pictures (a name alone, as older conversations have, still renders).
         append(.user(text: typed, attachments: attachments.map(\.path) + pictures.map(\.path)), to: botID)
-        if fromUser { drafts[botID] = "" }
-        statusLine[botID] = "Pensando"
-        pokes[botID, default: 0] += 1
-        flash(\.listening, botID, seconds: 1.4)
+        if fromUser { setDraft("", for: botID) }
+        setStatus("Pensando", of: botID)
+        live(botID).poked()
+        flash(\.isListening, botID, seconds: 1.4)
 
         let intent = routineTurns[botID] == nil ? MemoryIntent.detect(typed) : nil // a routine's prompt is not a request to remember
         memoryRequests[botID] = intent.map { ($0, max(0, (conversations[botID]?.items.count ?? 1) - 1)) }
@@ -1037,7 +1258,7 @@ final class AppModel {
         ApprovalNotifications.clear(pendingApprovals(of: botID).map(\.id))
         Task { await gate.cancelApprovals(for: botID) }
         closeStreaming(botID)
-        awaitingApproval.remove(botID)
+        setAwaitingApproval(false, of: botID)
         mutateItems(of: botID) { items in
             for index in items.indices {
                 if case .approval(var request) = items[index].kind, request.decision == nil {
@@ -1058,6 +1279,13 @@ final class AppModel {
         // Loaded first: a banner can arrive before this Orb's conversation was read, and a card left open by a run that
         // closed is already denied once it is. Only an open card is answered.
         guard bot(botID) != nil else { return }
+        if loadingConversations.contains(botID) { // a read is under way: wait for it instead of reading the file again here
+            Task {
+                await loadedConversation(botID)
+                decide(decision, rule: rule, note: note, approvalID: approvalID, botID: botID)
+            }
+            return
+        }
         ensureLoaded(botID)
         guard isPending(approvalID, of: botID) else { return }
         var chosen = rule
@@ -1094,7 +1322,7 @@ final class AppModel {
     func apply(_ event: TurnEvent, to botID: UUID) { // internal for tests
         switch event {
         case .status(let text):
-            statusLine[botID] = routineStatus(text, for: botID)
+            setStatus(routineStatus(text, for: botID), of: botID)
         case .text(let delta):
             // Shown by `flushText`; anything that adds to the transcript flushes first (`closeStreaming`).
             pendingText[botID, default: ""] += delta
@@ -1109,9 +1337,9 @@ final class AppModel {
             stopSpeaking(botID)
             closeStreaming(botID)
             append(.tool(call), to: botID)
-            runningTool[botID] = call.kind
+            live(botID).runningTool = call.kind
         case .toolFinished(let id, let state, let output):
-            runningTool[botID] = nil
+            live(botID).runningTool = nil
             mutateItems(of: botID) { items in
                 for index in items.indices {
                     if case .tool(var call) = items[index].kind, call.id == id {
@@ -1126,7 +1354,7 @@ final class AppModel {
             stopSpeaking(botID)
             closeStreaming(botID)
             append(.approval(request), to: botID)
-            awaitingApproval.insert(botID)
+            setAwaitingApproval(true, of: botID)
             announceApproval(request, of: botID)
         case .message(let message):
             ensureLoaded(botID)
@@ -1140,7 +1368,7 @@ final class AppModel {
             closeStreaming(botID)
             append(.notice(text), to: botID)
         case .usage(let total):
-            usage[botID] = total
+            writeIfChanged(total, at: botID, in: \.usage)
         case .session(let id):
             ensureLoaded(botID)
             conversations[botID, default: Conversation()].claudeSessionReported(id, folder: claudeTurnFolders[botID])
@@ -1161,7 +1389,7 @@ final class AppModel {
         if claudeTurns.remove(botID) != nil { conversations[botID]?.claudeTurnFinished(folder: turnFolder) }
         stopSpeaking(botID)
         closeStreaming(botID)
-        statusLine[botID] = nil
+        setStatus(nil, of: botID)
         if routineTurns[botID] != nil {
             // A routine's run isn't a conversation with you: it stays out of the memory's sessions.
             let count = conversations[botID]?.items.count
@@ -1171,19 +1399,19 @@ final class AppModel {
             scheduleMemorySave(botID)
         }
         Task { await refreshMemory(botID) }
-        runningTool[botID] = nil
-        awaitingApproval.remove(botID)
+        live(botID).runningTool = nil
+        setAwaitingApproval(false, of: botID)
         let reply = lastReply(botID)
         let routineID = routineTurns.removeValue(forKey: botID)
         if let routineID { finishRoutineRun(botID, routineID: routineID, succeeded: succeeded, reply: reply) }
         if succeeded {
-            flash(\.celebrating, botID, seconds: 3)
+            flash(\.isCelebrating, botID, seconds: 3)
             if let bot = bot(botID), let reply { notify(bot.name, String(reply.prefix(180))) }
         } else {
-            flash(\.failed, botID, seconds: 2.5)
+            flash(\.hasFailed, botID, seconds: 2.5)
         }
         if selection != .bot(botID) || !(NSApp?.isActive ?? false) {
-            update(botID) { $0.unread += 1 }
+            setUnread(live(botID).unread + 1, for: botID)
         }
         if routineID == nil { scheduleConversationSave(botID, delay: 0) } // a routine's was written by `finishRoutineRun`
         startNextQueuedRoutine(for: botID)
@@ -1199,32 +1427,57 @@ final class AppModel {
     }
 
     /// Puts the bot in a transient state set for a few seconds.
-    private func flash(_ keyPath: ReferenceWritableKeyPath<AppModel, Set<UUID>>, _ botID: UUID, seconds: Double) {
-        self[keyPath: keyPath].insert(botID)
+    private func flash(_ flag: ReferenceWritableKeyPath<BotLive, Bool>, _ botID: UUID, seconds: Double) {
+        let live = live(botID)
+        live[keyPath: flag] = true
         Task {
             try? await Task.sleep(for: .seconds(seconds))
-            self[keyPath: keyPath].remove(botID)
+            live[keyPath: flag] = false
         }
     }
 
-    /// Shows the streamed text received since the last flush (one transcript update for many tokens).
-    private func flushText(_ botID: UUID) {
+    /// Shows the streamed text received since the last flush (one update for many tokens). The reply's item joins
+    /// the transcript with the first flush; after that only its `LiveText` changes, so a flush costs the same
+    /// whatever the length of the reply or of the conversation.
+    func flushText(_ botID: UUID) { // internal for tests (they flush when they want, not after a delay)
         textFlushes.removeValue(forKey: botID)?.cancel()
         guard let delta = pendingText.removeValue(forKey: botID) else { return }
-        mutateItems(of: botID) { items in
-            if let last = items.indices.last, case .bot(let text, true) = items[last].kind {
-                items[last].kind = .bot(text: text + delta, isStreaming: true)
-            } else {
-                items.append(TranscriptItem(.bot(text: delta.trimmingCharacters(in: .newlines), isStreaming: true)))
-            }
+        if let live = liveTexts[botID] {
+            live.append(delta)
+            scheduleConversationSave(botID, delay: Self.streamingSaveInterval)
+            return
         }
+        ensureLoaded(botID)
+        if let last = conversations[botID]?.items.last, case .bot(let text, true) = last.kind {
+            // A streaming message nobody is writing to yet (not expected). Its row was drawn without a `LiveText`
+            // and would not look at one that appears later, so the text carries on in a new item, which gets a new row.
+            let item = TranscriptItem(.bot(text: text, isStreaming: true))
+            let live = LiveText(itemID: item.id, text: text)
+            live.append(delta)
+            liveTexts[botID] = live
+            mutateItems(of: botID) { items in
+                items.removeLast()
+                items.append(item)
+            }
+            return
+        }
+        let item = TranscriptItem(.bot(text: delta.trimmingCharacters(in: .newlines), isStreaming: true))
+        if case .bot(let text, _) = item.kind { liveTexts[botID] = LiveText(itemID: item.id, text: text) } // before the row exists
+        mutateItems(of: botID) { $0.append(item) }
     }
 
     private func closeStreaming(_ botID: UUID) {
         flushText(botID)
-        guard let last = conversations[botID]?.items.last, case .bot(let text, true) = last.kind else { return }
-        mutateItems(of: botID) { items in
-            items[items.count - 1].kind = .bot(text: text.trimmingCharacters(in: .whitespacesAndNewlines), isStreaming: false)
+        if let live = liveTexts.removeValue(forKey: botID) {
+            let text = live.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            mutateItems(of: botID) { items in
+                guard let index = items.lastIndex(where: { $0.id == live.itemID }) else { return }
+                items[index].kind = .bot(text: text, isStreaming: false)
+            }
+        } else if let last = conversations[botID]?.items.last, case .bot(let text, true) = last.kind {
+            mutateItems(of: botID) { items in
+                items[items.count - 1].kind = .bot(text: text.trimmingCharacters(in: .whitespacesAndNewlines), isStreaming: false)
+            }
         }
     }
 
@@ -1235,8 +1488,18 @@ final class AppModel {
     private func mutateItems(of botID: UUID, _ change: (inout [TranscriptItem]) -> Void) {
         ensureLoaded(botID)
         change(&conversations[botID, default: Conversation()].items)
-        scrollTick[botID, default: 0] += 1
         scheduleConversationSave(botID, delay: Self.streamingSaveInterval)
+    }
+
+    /// The conversation as it reads now: the reply being streamed has the text received so far (what is written to
+    /// disk), where `conversations` still has the text the reply began with.
+    private func withLiveText(_ conversation: Conversation, of botID: UUID) -> Conversation {
+        guard let live = liveTexts[botID], let index = conversation.items.lastIndex(where: { $0.id == live.itemID }) else {
+            return conversation
+        }
+        var written = conversation
+        written.items[index].kind = .bot(text: live.text, isStreaming: true)
+        return written
     }
 
     // MARK: Routines
@@ -1246,6 +1509,14 @@ final class AppModel {
     /// when it ends, nothing else.
     func runRoutine(_ routineID: UUID) {
         guard let routine = routines.first(where: { $0.id == routineID }), bot(routine.botID) != nil else { return }
+        if unloadedConversations.contains(routine.botID) { // its chat is read off the main thread first
+            Task {
+                await loadedConversation(routine.botID)
+                ensureLoaded(routine.botID)
+                runRoutine(routineID)
+            }
+            return
+        }
         guard routineTurns[routine.botID] != routineID else { return }
         guard !queuedRoutines.contains(routineID) else {
             startIdleQueuedRoutines() // waiting, but its Orb may be free by now (the routine was moved to another Orb)
@@ -1306,7 +1577,7 @@ final class AppModel {
         routineStarts[botID] = started
         let hasPrompt = !routine.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         if hasPrompt, send(routine.prompt, to: botID) {
-            statusLine[botID] = routineStatus("Pensando", for: botID)
+            setStatus(routineStatus("Pensando", for: botID), of: botID)
             return
         }
         // Nothing was sent (no model connected, nothing to do): the run did not happen. It is only in the history.
@@ -1459,8 +1730,10 @@ final class AppModel {
     // MARK: Saving
 
     private var state: AppState {
-        AppState(bots: bots, routines: routines, skills: skills, connectors: connectors, providers: providers,
-                 defaultModel: defaultModel)
+        var unread: [String: Int] = [:]
+        for (id, live) in lives where live.unread > 0 { unread[id.uuidString] = live.unread }
+        return AppState(bots: bots, routines: routines, skills: skills, connectors: connectors, providers: providers,
+                        defaultModel: defaultModel, unread: unread)
     }
 
     private func scheduleStateSave() {
@@ -1476,12 +1749,15 @@ final class AppModel {
     /// `streamingSaveInterval`, not rescheduled per token); `delay: 0` saves right away (end of a turn, new
     /// conversation). Encoding and pruning happen on the store's queue.
     private func scheduleConversationSave(_ botID: UUID, delay: Double) {
-        guard conversations[botID] != nil else { return } // not loaded: nothing of ours to write
+        guard let conversation = conversations[botID] else { return } // not loaded: nothing of ours to write
         dirtyConversations.insert(botID)
         if delay > 0, conversationSaves[botID] != nil { return }
+        // A long conversation is a big file to replace: the pace of a streaming reply's saves slows with its size
+        // (5 s up to 10 s at 2,000 items), and the turn's end writes at once whatever the pace.
+        let wait = delay > 0 ? delay + min(5, Double(conversation.items.count) / 400) : 0
         conversationSaves[botID]?.cancel()
         conversationSaves[botID] = Task {
-            if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
+            if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
             guard !Task.isCancelled else { return }
             conversationSaves[botID] = nil
             writeConversation(botID)
@@ -1489,7 +1765,8 @@ final class AppModel {
     }
 
     private func writeConversation(_ botID: UUID) {
-        guard let conversation = conversations[botID] else { return }
+        guard let current = conversations[botID] else { return }
+        let conversation = withLiveText(current, of: botID)
         dirtyConversations.remove(botID)
         guard let routineID = routineTurns[botID] else { return store.save(conversation, for: botID) }
         // A running routine's conversation goes to its own file, never over the chat's.
@@ -1501,7 +1778,10 @@ final class AppModel {
     /// Writes everything that changed and waits for the disk (on quit).
     func saveNow() {
         store.save(state)
-        for botID in dirtyConversations { writeConversation(botID) }
+        for botID in dirtyConversations {
+            conversationSaves.removeValue(forKey: botID)?.cancel() // written now: its timer has nothing left to do
+            writeConversation(botID)
+        }
         // A chat parked by a running routine is not `conversations[botID]`, so nothing above writes it.
         for (botID, chat) in parkedChats where !chat.items.isEmpty { store.save(chat, for: botID) }
         store.flush()

@@ -213,14 +213,23 @@ final class OrbCatalog: Sendable {
 
 // MARK: - Layer images
 
-/// Decoded, downsampled and tinted layer bitmaps, cached per pixel size. Thread-safe, so layers can be
-/// prepared off the main thread (`prewarm`) before an orb needs them.
+/// Decoded, downsampled and tinted layer bitmaps, cached per pixel size. Thread-safe. Decoding a 640 px PNG
+/// takes 6-8 ms, so views never decode on the main thread: they ask `cached`, and when something is missing
+/// they `load` it in the background (keeping what they show until it arrives). `cgImage` decodes in place and
+/// is for tests, snapshots and the rare fallback.
 enum OrbImages {
     /// Bounded by bytes: the editor can make many variants (every tint the color picker passes through, every
     /// option at stage size), and layers on screen keep their own bitmap anyway. NSCache is thread-safe.
     nonisolated(unsafe) private static let cache: NSCache<NSString, CGImage> = {
         let cache = NSCache<NSString, CGImage>()
         cache.totalCostLimit = 96 << 20
+        return cache
+    }()
+    /// Untinted bitmaps of layers that are drawn tinted (hair, mustache, accessories): the color picker changes
+    /// a tint many times a second, and re-tinting one of these costs a fraction of a PNG decode.
+    nonisolated(unsafe) private static let untinted: NSCache<NSString, CGImage> = {
+        let cache = NSCache<NSString, CGImage>()
+        cache.totalCostLimit = 24 << 20
         return cache
     }()
     /// Size of the source PNGs.
@@ -232,28 +241,136 @@ enum OrbImages {
         min(sourceSide, max(16, Int(pixels.rounded())))
     }
 
-    /// Bitmap with the multiply tint baked in (Core Animation layers can't multiply cheaply).
+    private static func key(_ relativePath: String, side: Int, tint: UInt32?) -> NSString {
+        "\(relativePath)@\(side)#\(tint.map { String($0, radix: 16) } ?? "-")" as NSString
+    }
+
+    /// The bitmap if it is already decoded; never decodes.
+    static func cached(_ relativePath: String, pixels: CGFloat, tint: UInt32?) -> CGImage? {
+        cache.object(forKey: key(relativePath, side: bitmapSide(for: pixels), tint: tint))
+    }
+
+    /// Whether every layer is decoded for a drawing `pixels` wide.
+    static func isCached(_ layers: [OrbLayer], pixels: CGFloat) -> Bool {
+        layers.allSatisfy { cached($0.path, pixels: pixels, tint: $0.tint) != nil }
+    }
+
+    /// Bitmap with the multiply tint baked in (Core Animation layers can't multiply cheaply). Decodes on the
+    /// calling thread when it is not cached: not for the main thread outside tests and snapshots.
     static func cgImage(_ relativePath: String, pixels: CGFloat, tint: UInt32?) -> CGImage? {
         let side = bitmapSide(for: pixels)
-        let key = "\(relativePath)@\(side)#\(tint.map { String($0, radix: 16) } ?? "-")" as NSString
+        let key = key(relativePath, side: side, tint: tint)
+        if let cached = cache.object(forKey: key) { return cached }
+        // One decode per image at a time: a second caller of the same image waits and then finds it cached.
+        let gate = gates[Int(UInt(bitPattern: key.hash) % UInt(gates.count))]
+        gate.lock()
+        defer { gate.unlock() }
         if let cached = cache.object(forKey: key) { return cached }
         guard let image = render(relativePath, side: side, tint: tint) else { return nil }
         cache.setObject(image, forKey: key, cost: image.bytesPerRow * image.height)
         return image
     }
 
-    /// Decodes `layers` in the background so later expression changes don't decode on the main thread.
-    static func prewarm(_ layers: [OrbLayer], pixels: CGFloat) {
-        Task.detached(priority: .utility) {
-            for layer in layers { _ = cgImage(layer.path, pixels: pixels, tint: layer.tint) }
+    private static let gates = (0..<8).map { _ in NSLock() }
+
+    /// How urgently a batch of bitmaps is needed.
+    enum Priority {
+        /// Something on screen is waiting for these: decoded in parallel at user-initiated priority.
+        case needed
+        /// Nothing waits: decoded one at a time at utility priority, behind everything else.
+        case prewarm
+    }
+
+    private static let prewarmQueue = DispatchQueue(label: "orb.images.prewarm", qos: .utility)
+
+    /// Decodes `layers` (those not cached yet) off the main thread. `completion` runs on the main actor once
+    /// all of them are in the cache, or failed to decode (a missing file does not wait forever).
+    static func load(_ layers: [OrbLayer], pixels: CGFloat, priority: Priority = .needed,
+                     completion: (@MainActor @Sendable () -> Void)? = nil) {
+        let missing = layers.filter { cached($0.path, pixels: pixels, tint: $0.tint) == nil }
+        guard !missing.isEmpty else {
+            if let completion { Task { @MainActor in completion() } }
+            return
+        }
+        let finish: @Sendable () -> Void = {
+            if let completion { Task { @MainActor in completion() } }
+        }
+        switch priority {
+        case .needed:
+            DispatchQueue.global(qos: .userInitiated).async {
+                DispatchQueue.concurrentPerform(iterations: missing.count) { index in
+                    _ = cgImage(missing[index].path, pixels: pixels, tint: missing[index].tint)
+                }
+                finish()
+            }
+        case .prewarm:
+            prewarmQueue.async {
+                for layer in missing { _ = cgImage(layer.path, pixels: pixels, tint: layer.tint) }
+                finish()
+            }
         }
     }
 
+    /// `load`, for views that draw from a `.task`.
+    static func load(_ layers: [OrbLayer], pixels: CGFloat) async {
+        await withCheckedContinuation { continuation in
+            load(layers, pixels: pixels) { continuation.resume() }
+        }
+    }
+
+    /// Decodes `layers` in the background so later expression changes don't decode on the main thread.
+    static func prewarm(_ layers: [OrbLayer], pixels: CGFloat) {
+        load(layers, pixels: pixels, priority: .prewarm)
+    }
+
+    /// Sizes (points) the app draws Orbs at: the sidebar row and the chat's status line, the menu-bar popover,
+    /// then the inspector's and the empty chat's, which only the selected Orb needs.
+    static let launchSizes: (all: [CGFloat], menuBar: CGFloat, selected: [CGFloat]) = ([30], 28, [60, 96])
+
+    /// After launch: decodes the resting layers of every Orb at the sizes the first screens show them at, so the
+    /// window and the popover find them in the cache. Utility priority and in order of need (the selected
+    /// Orb first); nothing waits for it.
+    static func prewarmResting(_ configs: [OrbConfig], selected: OrbConfig?, scale: CGFloat) {
+        let resting = { (config: OrbConfig) in
+            config.layers(eyes: OrbActivity.idle.eyes, mouth: OrbActivity.idle.mouth(base: config.mouth), brows: OrbActivity.idle.brows)
+        }
+        let pixels = { (size: CGFloat) in OrbGeometry.imageSide(for: size, scale: scale) * scale }
+        let ordered = (selected.map { [$0] } ?? []) + configs.filter { $0 != selected }
+        for size in launchSizes.all { for config in ordered { prewarm(resting(config), pixels: pixels(size)) } }
+        if let selected { for size in launchSizes.selected { prewarm(resting(selected), pixels: pixels(size)) } }
+        for config in ordered { prewarm(resting(config), pixels: pixels(launchSizes.menuBar)) }
+    }
+
+    /// Snapshots and the sheet renderers draw once, synchronously, with nothing to wait on.
+    static let decodesSynchronously = CommandLine.arguments.contains { ["--snapshot", "--render-orbs", "--render-icon"].contains($0) }
+
     /// ImageIO decodes straight to the target size (no full-size bitmap is kept around).
     private static func render(_ relativePath: String, side: Int, tint: UInt32?) -> CGImage? {
+        guard let decoded = decode(relativePath, side: side, keepUntinted: tint != nil) else { return nil }
+        guard let tint else { return decoded }
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0, space: space,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        let rect = CGRect(x: 0, y: 0, width: side, height: side)
+        context.interpolationQuality = .high
+        context.draw(decoded, in: rect)
+        context.setBlendMode(.multiply)
+        context.setFillColor(red: CGFloat((tint >> 16) & 0xFF) / 255, green: CGFloat((tint >> 8) & 0xFF) / 255,
+                             blue: CGFloat(tint & 0xFF) / 255, alpha: 1)
+        context.fill(rect)
+        context.setBlendMode(.destinationIn)
+        context.draw(decoded, in: rect)
+        return context.makeImage()
+    }
+
+    /// The untinted bitmap `side` pixels wide: from a cache when this image was decoded before (plain, or to be
+    /// tinted), else from the PNG.
+    private static func decode(_ relativePath: String, side: Int, keepUntinted: Bool) -> CGImage? {
+        let key = key(relativePath, side: side, tint: nil)
+        if let plain = cache.object(forKey: key) ?? untinted.object(forKey: key) { return plain }
         guard let url = OrbCatalog.shared.root?.appendingPathComponent(relativePath + ".png"),
               let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let decoded = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+              let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                   kCGImageSourceCreateThumbnailFromImageAlways: true,
                   kCGImageSourceThumbnailMaxPixelSize: side,
                   kCGImageSourceShouldCacheImmediately: true
@@ -261,18 +378,11 @@ enum OrbImages {
               let space = CGColorSpace(name: CGColorSpace.sRGB),
               let context = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0, space: space,
                                       bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-        let rect = CGRect(x: 0, y: 0, width: side, height: side)
         context.interpolationQuality = .high
-        context.draw(decoded, in: rect)
-        if let tint {
-            context.setBlendMode(.multiply)
-            context.setFillColor(red: CGFloat((tint >> 16) & 0xFF) / 255, green: CGFloat((tint >> 8) & 0xFF) / 255,
-                                 blue: CGFloat(tint & 0xFF) / 255, alpha: 1)
-            context.fill(rect)
-            context.setBlendMode(.destinationIn)
-            context.draw(decoded, in: rect)
-        }
-        return context.makeImage()
+        context.draw(thumbnail, in: CGRect(x: 0, y: 0, width: side, height: side))
+        guard let image = context.makeImage() else { return nil }
+        if keepUntinted { untinted.setObject(image, forKey: key, cost: image.bytesPerRow * image.height) }
+        return image
     }
 }
 

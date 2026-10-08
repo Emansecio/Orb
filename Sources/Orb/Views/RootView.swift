@@ -35,8 +35,11 @@ private struct DetailView: View {
         Group {
             switch model.selection {
             case .bot(let id):
-                if let bot = model.bot(id) {
-                    ChatView(bot: bot)
+                // One chat view per Orb, rebuilt on switching. Keeping it and scoping the `.id` to the transcript was
+                // measured: it made switching to a long conversation about 7x more expensive (the new transcript
+                // realized its rows eagerly) and saved nothing on short ones.
+                if model.botIDs.contains(id) {
+                    ChatView(botID: id)
                         .id(id)
                 }
             case .routines:

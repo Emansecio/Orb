@@ -196,7 +196,7 @@ private struct RoutineConversationSheet: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
                         ForEach(items) { item in
-                            TranscriptRow(item: item, bot: bot).equatable()
+                            TranscriptRow(item: item, botID: bot.id, orb: bot.orb).equatable()
                         }
                     }
                     .padding(20)

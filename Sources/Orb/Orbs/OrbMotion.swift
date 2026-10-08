@@ -195,6 +195,13 @@ enum OrbFrameRate {
     /// Largest step per frame (device pixels) that still reads as smooth motion.
     static let maxStep = 0.8
 
+    /// The fastest rate an orb may ask for. Small orbs never need more than 30. Big ones (the empty chat's,
+    /// the editor's) reach 60 only while something lively happens (click, hover, a hop, a change of
+    /// activity); idle saccades and blinks are fine at 30.
+    static func cap(forSize size: CGFloat, lively: Bool) -> Float {
+        size >= 80 && lively ? 60 : 30
+    }
+
     static func rate(forSpeed pixelsPerSecond: Double, cap: Float) -> Float {
         let needed = Float(pixelsPerSecond / maxStep)
         return min(cap, steps.first { $0 >= needed } ?? cap)

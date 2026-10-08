@@ -24,6 +24,11 @@ struct OrbApp: App {
                 .frame(minWidth: 960, minHeight: 620)
                 .preferredColorScheme(.dark)
                 .task {
+                    // The bots are read when the task runs, not while the scene's body is evaluated (the body must not depend on them).
+                    OrbImages.prewarmResting(model.bots.map(\.orb), selected: model.selectedBot?.orb,
+                                             scale: NSScreen.main?.backingScaleFactor ?? 2)
+                }
+                .task {
                     // Snapshots send their own launch prompt; the regular window must not send it again.
                     if !CommandLine.arguments.contains("--snapshot") { model.sendLaunchPrompt() }
                 }
@@ -107,8 +112,9 @@ struct AppCommands: Commands {
             Button("Próximo Orb") { model.selectAdjacentBot(offset: 1) }
                 .keyboardShortcut(.downArrow, modifiers: .option)
             Divider()
-            ForEach(Array(model.bots.prefix(9).enumerated()), id: \.element.id) { index, bot in
-                Button(bot.name) { model.selection = .bot(bot.id) }
+            // Only the names and the order are read, so a status or a new unread message does not rebuild the menu.
+            ForEach(Array(model.botIDs.prefix(9).enumerated()), id: \.element) { index, id in
+                Button(model.live(id).look.name) { model.selection = .bot(id) }
                     .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: .command)
             }
         }
@@ -198,7 +204,7 @@ enum Snapshot {
         case "approvals": AnyView(model.bots.first.map { ApprovalCardsSample(bot: $0) })
         case "new-orb": AnyView(NewBotSheet())
         case "editor": AnyView(OrbEditor(config: .constant(AppState.initial.bots[0].orb), name: "Atlas", category: .temperament))
-        default: AnyView(model.bots.first.map { ChatView(bot: $0) })
+        default: AnyView(model.bots.first.map { ChatView(botID: $0.id) })
         }
         let size = NSSize(width: 1100, height: ProcessInfo.processInfo.environment["ORB_SNAPSHOT_HEIGHT"].flatMap(Double.init) ?? 760)
         let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: -30_000, y: -30_000), size: size),
@@ -230,12 +236,12 @@ private struct ApprovalCardsSample: View {
                      ApprovalItem(toolName: "run_command", title: "Rodando no Terminal", command: "git commit -am \"Atualiza notas\"")]
         VStack(alignment: .leading, spacing: 12) {
             ApprovalCard(request: ApprovalRequest(toolName: "run_command", title: "Rodando no Terminal", command: "brew upgrade",
-                                                  reason: "", suggestions: [.shell("brew", "upgrade"), .shell("brew")]), bot: bot)
+                                                  reason: "", suggestions: [.shell("brew", "upgrade"), .shell("brew")]), botID: bot.id)
             ApprovalCard(request: ApprovalRequest(toolName: "batch", title: "3 ações precisam da sua permissão",
                                                   command: "", reason: "\(bot.name) precisa da sua permissão para continuar.",
-                                                  suggestions: [.shell("git"), .folder("/Users/x/Projetos/app")], items: items), bot: bot)
+                                                  suggestions: [.shell("git"), .folder("/Users/x/Projetos/app")], items: items), botID: bot.id)
             ApprovalCard(request: ApprovalRequest(toolName: "run_command", title: "Rodando no Terminal", command: "rm -rf build",
-                                                  reason: "", decision: .deny, note: "use a lixeira"), bot: bot)
+                                                  reason: "", decision: .deny, note: "use a lixeira"), botID: bot.id)
         }
         .padding(24)
         .background(Palette.canvas)

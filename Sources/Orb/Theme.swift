@@ -76,8 +76,10 @@ extension View {
     }
 
     /// Sweeping highlight across dim text, used for "working" states (steady text under Reduce Motion).
-    func shimmer(active: Bool = true) -> some View {
-        modifier(Shimmer(active: active))
+    /// `keepsColors`: for text whose runs have colors of their own (some translucent): they stay as they are
+    /// and the band brightens them, instead of the text being redrawn in the shimmer's colors.
+    func shimmer(active: Bool = true, keepsColors: Bool = false) -> some View {
+        modifier(Shimmer(active: active, keepsColors: keepsColors))
     }
 
     /// Animates what changes along with `value` (rows appearing, states settling) with the app's one
@@ -96,34 +98,131 @@ private struct ContentAnimation<Value: Equatable>: ViewModifier {
     }
 }
 
+/// The sweep of the shimmer, in fractions of the text width: a band `bandWidth` wide travels from `from` to
+/// `to` (its leading edge) every `duration` seconds.
+enum ShimmerSweep {
+    static let bandWidth: CGFloat = 0.45
+    static let from: CGFloat = -0.6
+    static let to: CGFloat = 1.1
+    static let duration: CFTimeInterval = 1.6
+}
+
 private struct Shimmer: ViewModifier {
     let active: Bool
+    let keepsColors: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var phase: CGFloat = -0.6
 
     func body(content: Content) -> some View {
         if active && reduceMotion {
             content.foregroundStyle(Palette.muted)
+        } else if active && keepsColors {
+            // The text stays as it is; the band is only a highlight over it, masked by the text, so the
+            // translucent runs gain alpha under the band (as when the text was drawn a second time over itself).
+            content.overlay { ShimmerBand(fillsBackground: false).mask { content.foregroundStyle(.white) } }
         } else if active {
+            // The text is laid out once, invisibly (it keeps the size and the accessibility label), and
+            // drawn through a Core Animation band that sweeps across it: nothing in SwiftUI changes per frame.
             content
-                .foregroundStyle(Palette.faint)
-                .overlay {
-                    content
-                        .foregroundStyle(Palette.ink)
-                        .mask {
-                            GeometryReader { geometry in
-                                LinearGradient(colors: [.clear, .white, .clear], startPoint: .leading, endPoint: .trailing)
-                                    .frame(width: geometry.size.width * 0.45)
-                                    .offset(x: phase * geometry.size.width)
-                            }
-                        }
-                }
-                .onAppear {
-                    withAnimation(.linear(duration: 1.6).repeatForever(autoreverses: false)) { phase = 1.1 }
-                }
+                .opacity(0)
+                .overlay { ShimmerBand().mask { content.foregroundStyle(.white) } }
         } else {
             content
         }
+    }
+}
+
+/// Dim fill with a bright band sweeping across it, animated by Core Animation (the render server does the
+/// work; the app's main thread does none). Used as the fill of the text it is masked with. The sweep stops
+/// while the window is hidden or occluded.
+private struct ShimmerBand: NSViewRepresentable {
+    /// Dim fill under the band (the text takes its color from it), or only the band.
+    var fillsBackground = true
+
+    func makeNSView(context: Context) -> ShimmerBandView { ShimmerBandView(fillsBackground: fillsBackground) }
+    func updateNSView(_ view: ShimmerBandView, context: Context) {}
+}
+
+final class ShimmerBandView: NSView {
+    private let band = CAGradientLayer()
+    private var sweptWidth: CGFloat = 0
+    private static let animationKey = "sweep"
+    /// For tests: whether the band is moving.
+    var isSweeping: Bool { band.animation(forKey: Self.animationKey) != nil }
+
+    init(fillsBackground: Bool) {
+        super.init(frame: .zero)
+        wantsLayer = true
+        if fillsBackground { layer?.backgroundColor = NSColor(Palette.faint).cgColor }
+        let ink = NSColor(Palette.ink)
+        band.colors = [ink.withAlphaComponent(0).cgColor, ink.cgColor, ink.withAlphaComponent(0).cgColor]
+        band.startPoint = CGPoint(x: 0, y: 0.5)
+        band.endPoint = CGPoint(x: 1, y: 0.5)
+        band.anchorPoint = CGPoint(x: 0, y: 0.5)
+        layer?.addSublayer(band)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        band.bounds = CGRect(x: 0, y: 0, width: bounds.width * ShimmerSweep.bandWidth, height: bounds.height)
+        // The model value is the sweep's start (band out of sight): what a snapshot, which cannot show the
+        // animation, draws.
+        band.position = CGPoint(x: bounds.width * ShimmerSweep.from, y: bounds.height / 2)
+        CATransaction.commit()
+        // A new width needs a new sweep; the same width keeps the one running (layout passes are frequent).
+        if bounds.width != sweptWidth {
+            sweptWidth = bounds.width
+            band.removeAnimation(forKey: Self.animationKey)
+        }
+        updateSweep()
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        NotificationCenter.default.removeObserver(self, name: NSWindow.didChangeOcclusionStateNotification, object: nil)
+        if let newWindow {
+            NotificationCenter.default.addObserver(self, selector: #selector(updateSweep),
+                                                   name: NSWindow.didChangeOcclusionStateNotification, object: newWindow)
+        }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateSweep()
+    }
+
+    override func viewDidHide() {
+        super.viewDidHide()
+        updateSweep()
+    }
+
+    override func viewDidUnhide() {
+        super.viewDidUnhide()
+        updateSweep()
+    }
+
+    @objc private func updateSweep() {
+        let visible = window.map { !isHiddenOrHasHiddenAncestor && (OrbView.animateInactive || $0.occlusionState.contains(.visible)) } ?? false
+        guard visible, bounds.width > 0 else {
+            band.removeAnimation(forKey: Self.animationKey)
+            return
+        }
+        guard band.animation(forKey: Self.animationKey) == nil else { return }
+        let sweep = CABasicAnimation(keyPath: "position.x")
+        sweep.fromValue = bounds.width * ShimmerSweep.from
+        sweep.toValue = bounds.width * ShimmerSweep.to
+        sweep.duration = ShimmerSweep.duration
+        sweep.repeatCount = .infinity
+        sweep.timingFunction = CAMediaTimingFunction(name: .linear)
+        // The sweep follows one clock for every band, so a new one (the text changed width) picks up where the
+        // last was instead of restarting at the left.
+        sweep.timeOffset = CACurrentMediaTime().truncatingRemainder(dividingBy: ShimmerSweep.duration)
+        band.add(sweep, forKey: Self.animationKey)
     }
 }
 

@@ -994,11 +994,11 @@ struct TurnOrchestrationTests {
         #expect(first != second)
 
         // The first turn's task finishing late (its setup, its last events) must not touch the second turn.
-        model.failed.remove(bot.id) // the first stop flashed it
+        model.live(bot.id).hasFailed = false // the first stop flashed it
         model.finishTurn(bot.id, turn: first, succeeded: false)
         #expect(model.turnIDs[bot.id] == second)
         #expect(model.isWorking(bot.id))
-        #expect(!model.failed.contains(bot.id))
+        #expect(!model.live(bot.id).hasFailed)
 
         model.finishTurn(bot.id, turn: second)
         #expect(model.turnIDs[bot.id] == nil)

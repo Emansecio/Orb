@@ -21,14 +21,14 @@ extension AppModel {
     /// Every Orb's open cards, for the menu bar. Only reads conversations while some Orb is waiting, so the panel
     /// does not redraw with every streamed token otherwise.
     var pendingApprovals: [PendingApproval] {
-        guard !awaitingApproval.isEmpty else { return [] }
-        return bots.flatMap { bot in
-            awaitingApproval.contains(bot.id) ? pendingApprovals(of: bot.id).map { PendingApproval(bot: bot, request: $0) } : []
+        waitingIDs.flatMap { id in
+            guard let live = liveBot(id) else { return [PendingApproval]() }
+            return pendingApprovals(of: id).map { PendingApproval(bot: live.bot, request: $0) }
         }
     }
 
     /// The Orb is stopped on a question: the sidebar says so, from whichever Orb is open.
-    func needsYou(_ botID: UUID) -> Bool { awaitingApproval.contains(botID) }
+    func needsYou(_ botID: UUID) -> Bool { live(botID).needsYou }
 
     /// A banner with "Permitir" and "Não permitir" when the user is not looking at this card.
     func announceApproval(_ request: ApprovalRequest, of botID: UUID) {

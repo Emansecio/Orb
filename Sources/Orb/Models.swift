@@ -78,7 +78,6 @@ struct Bot: Identifiable, Hashable, Codable, Sendable {
     /// still has this hash its text is given to the Orb as instructions; when it changes it is reference material
     /// again until the user trusts it anew.
     var trustedInstructionsHash: String?
-    var unread = 0
     /// Memory list of versions before each Orb had its own memory bank; moved into the bank at launch.
     var memory: [MemoryFact] = []
 
@@ -107,7 +106,6 @@ extension Bot {
         }
         workingDirectory = try c.value(.workingDirectory, default: "")
         trustedInstructionsHash = try c.decodeIfPresent(String.self, forKey: .trustedInstructionsHash)
-        unread = try c.value(.unread, default: 0)
         memory = try c.value(.memory, default: [])
     }
 }

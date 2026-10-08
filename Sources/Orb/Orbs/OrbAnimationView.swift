@@ -4,8 +4,9 @@ import QuartzCore
 
 // MARK: - SwiftUI bridge
 
-/// Live Orb. Frames are produced by a display link that only moves Core Animation layers, so an
-/// animating orb costs no SwiftUI updates or layout passes (SwiftUI only hears about config changes).
+/// Live Orb. Frames are produced by a display link (shared by all orbs on a screen, see `OrbDriver`) that only
+/// moves Core Animation layers, so an animating orb costs no SwiftUI updates or layout passes (SwiftUI only
+/// hears about config changes).
 struct AnimatedOrb: NSViewRepresentable {
     let config: OrbConfig
     let activity: OrbActivity
@@ -47,7 +48,8 @@ struct AnimatedOrb: NSViewRepresentable {
 /// - the frame rate follows how fast the pose changes on screen (10 fps while just breathing, up to
 ///   30/60 fps for blinks, saccades, hops and hover);
 /// - frames that would move nothing by a visible amount are skipped;
-/// - the display link pauses while the window is occluded or minimized, or the view is hidden;
+/// - frames stop while the window is occluded or minimized, the view is hidden or it is scrolled out of sight;
+/// - bitmaps are decoded in the background: until they arrive the orb keeps showing what it showed;
 /// - a paused orb (`live` false) first eases into the resting pose, then stops; it eases back out when resumed,
 ///   so pausing and resuming never jump.
 final class OrbAnimationView: NSView {
@@ -83,8 +85,25 @@ final class OrbAnimationView: NSView {
     private var visemeImages: [OrbViseme: CGImage] = [:]
     private var shownViseme: OrbViseme?
 
+    /// The bitmap pixel size the layers were built for (viseme bitmaps must match it).
+    private var builtPixels: CGFloat = 0
+    /// A size or scale change is waiting for its bitmaps (see `rebuild`).
+    private var needsResize = false
+    /// Counts bitmap requests: only the latest one rebuilds when it arrives.
+    private var imageRequest = 0
+    private var visemesLoading = false
+
     // Motion state
-    private var displayLink: CADisplayLink?
+    private var driver: OrbDriver?
+    /// Whether the shared clock should step this orb (visible, in view, and not yet settled at rest).
+    private(set) var isRunning = false
+    private var clock = OrbFrameClock()
+    private var steps = 0
+    private weak var clipView: NSClipView?
+    private var outOfViewTimer: Timer?
+    /// For tests: the timer that waits for the orb to come back into view, and the layers on screen.
+    var isWatchingForReturn: Bool { outOfViewTimer != nil }
+    var placedLayerCount: Int { placed.count }
     private var rng = SystemRandomNumberGenerator()
     private let phase = Double.random(in: 0..<10)
     private var lastTime: Double?
@@ -119,14 +138,17 @@ final class OrbAnimationView: NSView {
     // Frame pacing
     private var lastPose = OrbPose()
     private var drawnPose: OrbPose?
-    private var frameRate: Float = 0
+    private(set) var frameRate: Float = 0
     private var motionRate: Float = 0
     private var livelyUntil = 0.0
     private var slowDownAfter = 0.0
 
     private var backingScale: CGFloat { window?.backingScaleFactor ?? 2 }
     private var side: CGFloat { OrbGeometry.imageSide(for: size, scale: backingScale) }
-    private var maxFrameRate: Float { size >= 80 ? 60 : 30 }
+    /// Orbs this large (the empty chat's, the editor's) are short-lived and mostly idle.
+    private static let bigSize: CGFloat = 80
+    private var isBig: Bool { size >= Self.bigSize }
+    private var maxFrameRate: Float { OrbFrameRate.cap(forSize: size, lively: true) }
     private var now: Double { CACurrentMediaTime() }
     private var isResting: Bool { !live && settle.value >= 0.995 }
 
@@ -184,10 +206,13 @@ final class OrbAnimationView: NSView {
         updateRunning()
     }
 
-    /// The view is leaving SwiftUI: stop the display link (it retains its target).
+    /// The view is leaving SwiftUI: leave the shared display link (it would keep stepping a dead view).
     func stop() {
-        displayLink?.invalidate()
-        displayLink = nil
+        isRunning = false
+        watchForReturn(false)
+        driver?.remove(self)
+        driver = nil
+        imageRequest += 1
     }
 
     /// Hands the temperament's rhythm to the motion helpers; `showcase` plays its signature flourish.
@@ -236,12 +261,34 @@ final class OrbAnimationView: NSView {
 
     /// Builds the layer tree for the current config, activity and size. Only on screen: bitmaps depend on the
     /// window's backing scale, and `viewDidMoveToWindow` builds everything once the orb gets one.
-    private func rebuild(resize: Bool = false) {
+    ///
+    /// Bitmaps that are not decoded yet are decoded in the background and the orb keeps showing what it
+    /// showed (nothing, the first time) until they are all there: the main thread never waits for a PNG.
+    /// `waited`: this is the rebuild after that decoding.
+    private func rebuild(resize: Bool = false, waited: Bool = false) {
         guard window != nil else { return }
         let scale = backingScale, side = side
-        let resize = resize || scale != builtScale
-        builtScale = scale
+        let resize = resize || needsResize || scale != builtScale
         let layers = config.layers(eyes: shown.eyes, mouth: shown.mouth(base: config.mouth), brows: shown.brows)
+        imageRequest += 1
+        // A resize with layers on screen (another display, another size) decodes in place: the old layers
+        // cannot stand in for the new geometry.
+        if !waited, !(resize && !placed.isEmpty) {
+            let reusable = resize ? [] : Set(placed.map(\.layer))
+            let missing = layers.filter { !reusable.contains($0) && OrbImages.cached($0.path, pixels: side * scale, tint: $0.tint) == nil }
+            if !missing.isEmpty {
+                needsResize = resize
+                let request = imageRequest
+                OrbImages.load(missing, pixels: side * scale) { [weak self] in
+                    guard let self, request == self.imageRequest else { return }
+                    self.rebuild(waited: true)
+                }
+                return
+            }
+        }
+        needsResize = false
+        builtScale = scale
+        builtPixels = side * scale
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
@@ -267,7 +314,7 @@ final class OrbAnimationView: NSView {
 
         let current = placed.map(\.layer)
         if resize || layers != current {
-            if !current.isEmpty && !resize {
+            if waited || (!current.isEmpty && !resize) {
                 let fade = CATransition()
                 fade.type = .fade
                 fade.duration = 0.18
@@ -321,14 +368,21 @@ final class OrbAnimationView: NSView {
 
     /// Decodes every expression this orb can show in the background, so activity changes never decode on
     /// the main thread. Only for live orbs: a paused sidebar row shows one expression.
+    ///
+    /// Big orbs (the empty chat's, the editor's) are short-lived and their bitmaps are large (a dozen MB for
+    /// every expression), so they only prepare the expressions they are likely to need; whatever else shows up
+    /// is decoded when asked for.
     private func prewarmExpressions() {
         guard window != nil, live else { return }
-        var layers = Set(OrbActivity.allCases.flatMap {
+        let activities = isBig ? OrbActivity.allCases.filter { Self.likelyOnBigOrbs.contains($0) } : OrbActivity.allCases
+        var layers = Set(activities.flatMap {
             config.layers(eyes: $0.eyes, mouth: $0.mouth(base: config.mouth), brows: $0.brows)
         })
-        if let visemes = config.visemeLayers() { layers.formUnion(visemes.values) }
+        if !isBig, let visemes = config.visemeLayers() { layers.formUnion(visemes.values) }
         OrbImages.prewarm(Array(layers), pixels: side * backingScale)
     }
+
+    private static let likelyOnBigOrbs: Set<OrbActivity> = [.idle, .thinking, .speaking, .happy, .waiting]
 
     // MARK: Lifecycle
 
@@ -336,26 +390,86 @@ final class OrbAnimationView: NSView {
         super.viewWillMove(toWindow: newWindow)
         let center = NotificationCenter.default
         center.removeObserver(self, name: NSWindow.didChangeOcclusionStateNotification, object: nil)
+        center.removeObserver(self, name: NSWindow.didChangeScreenNotification, object: nil)
         if let newWindow {
             center.addObserver(self, selector: #selector(updateRunning),
                                name: NSWindow.didChangeOcclusionStateNotification, object: newWindow)
+            center.addObserver(self, selector: #selector(joinDriver), name: NSWindow.didChangeScreenNotification, object: newWindow)
         }
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        displayLink?.invalidate()
-        displayLink = nil
-        guard window != nil else { return }
+        isRunning = false
+        driver?.remove(self)
+        driver = nil
+        observeScrolling()
+        guard window != nil else { return watchForReturn(false) }
         visemeImages = [:]
         rebuild(resize: true)
         prewarmExpressions()
-        let link = displayLink(target: self, selector: #selector(tick(_:)))
-        link.add(to: .main, forMode: .common)
-        displayLink = link
+        joinDriver()
         frameRate = 0
         liven(at: now)
         updateRunning()
+    }
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        observeScrolling()
+    }
+
+    /// Steps on the shared display link of the screen the window is on (and follows it to another screen).
+    @objc private func joinDriver() {
+        let screenDriver = OrbDriver.driver(for: window)
+        guard screenDriver !== driver else { return }
+        driver?.remove(self)
+        driver = screenDriver
+        driver?.add(self)
+        clock.reset()
+    }
+
+    // MARK: Scrolling
+
+    /// Watches the scroll view the orb lives in (the sidebar, the transcript), so an orb scrolled out of sight
+    /// stops animating even when it is the selected or a working one.
+    private func observeScrolling() {
+        let clip = window == nil ? nil : enclosingScrollView?.contentView
+        guard clip !== clipView else { return }
+        let center = NotificationCenter.default
+        if let clipView {
+            center.removeObserver(self, name: NSView.boundsDidChangeNotification, object: clipView)
+            center.removeObserver(self, name: NSView.frameDidChangeNotification, object: clipView)
+        }
+        clipView = clip
+        guard let clip else { return }
+        clip.postsBoundsChangedNotifications = true
+        clip.postsFrameChangedNotifications = true
+        center.addObserver(self, selector: #selector(updateRunning), name: NSView.boundsDidChangeNotification, object: clip)
+        center.addObserver(self, selector: #selector(updateRunning), name: NSView.frameDidChangeNotification, object: clip)
+    }
+
+    /// Scrolling and most layout changes notify, but not all of them: an orb that is out of sight looks again
+    /// twice a second (a timer that costs nothing while orbs are in view).
+    private func watchForReturn(_ away: Bool) {
+        if !away {
+            outOfViewTimer?.invalidate()
+            outOfViewTimer = nil
+        } else if outOfViewTimer == nil {
+            let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.updateRunning() }
+            }
+            timer.tolerance = 0.25
+            RunLoop.main.add(timer, forMode: .common)
+            outOfViewTimer = timer
+        }
+    }
+
+    /// False while the orb is outside the part of its scroll view that shows (`visibleRect` does not account
+    /// for the clip view, which does not clip layers here).
+    private var isInView: Bool {
+        guard let clipView else { return true }
+        return OrbVisibility.isVisible(orb: convert(bounds, to: clipView), in: clipView.bounds, margin: size)
     }
 
     /// Moving to a display with another backing scale: bitmaps and text are rebuilt for it.
@@ -381,8 +495,17 @@ final class OrbAnimationView: NSView {
     /// motion to show: a paused orb runs until it has settled into its resting pose.
     @objc private func updateRunning() {
         let visible = window.map { !isHiddenOrHasHiddenAncestor && (OrbView.animateInactive || $0.occlusionState.contains(.visible)) }
-        let running = visible == true && !isResting
-        displayLink?.isPaused = !running
+        let inView = isInView
+        let wouldRun = visible == true && !isResting
+        // Only an orb that would run if it were in view needs to look again: hidden, covered or settled ones
+        // have nothing to come back to (a change of window or of activity calls this again).
+        watchForReturn(wouldRun && !inView)
+        let running = wouldRun && inView
+        if running != isRunning {
+            isRunning = running
+            if running { clock.reset() }
+            driver?.refresh()
+        }
         if !running { lastTime = nil }
     }
 
@@ -396,8 +519,16 @@ final class OrbAnimationView: NSView {
 
     // MARK: Frames
 
-    @objc private func tick(_ link: CADisplayLink) {
-        let time = link.targetTimestamp
+    /// Called by the driver on every tick of the shared clock: a frame only when this orb's own rate asks for one.
+    func stepIfDue(at time: Double) {
+        guard clock.isDue(at: time, rate: frameRate) else { return }
+        step(at: time)
+        steps += 1
+        // Layout can move the orb without the scroll view noticing.
+        if steps % 30 == 0 { updateRunning() }
+    }
+
+    private func step(at time: Double) {
         let dt = min(0.1, max(0, time - (lastTime ?? time)))
         lastTime = time
         bodyClock += dt * traits.pace
@@ -426,7 +557,10 @@ final class OrbAnimationView: NSView {
     /// The rate the motion needs: raised as soon as it speeds up, lowered only after it stayed slow for a bit.
     /// Blinks and events get the full rate only while they last.
     private func pace(speed: Double, at time: Double) {
-        let wanted = OrbFrameRate.rate(forSpeed: speed, cap: maxFrameRate)
+        let lively = time < livelyUntil || hoverPoint != nil || pokeStart != nil || flourishes.current != nil
+            || time - transitionStart < Self.transition
+        let cap = OrbFrameRate.cap(forSize: size, lively: lively)
+        let wanted = OrbFrameRate.rate(forSpeed: speed, cap: cap)
         if wanted >= motionRate {
             motionRate = wanted
             slowDownAfter = time + 0.3
@@ -438,7 +572,7 @@ final class OrbAnimationView: NSView {
         if blinker.isBlinking || blinker.nextBlink - time < 0.1 { floor = max(floor, 30) }
         if let flourish = flourishes.current { floor = max(floor, flourish.minFrameRate) }
         if time < livelyUntil { floor = maxFrameRate }
-        setFrameRate(min(maxFrameRate, max(floor, motionRate)))
+        setFrameRate(min(cap, max(floor, motionRate)))
     }
 
     /// Full frame rate right away, for events whose motion starts abruptly (click, hover, new activity).
@@ -450,7 +584,8 @@ final class OrbAnimationView: NSView {
     private func setFrameRate(_ rate: Float) {
         guard rate != frameRate else { return }
         frameRate = rate
-        displayLink?.preferredFrameRateRange = CAFrameRateRange(minimum: rate / 2, maximum: rate, preferred: rate)
+        clock.rateChanged(to: rate)
+        driver?.refresh()
     }
 
     /// What a paused orb settles into: the static orb's pose (no bubble unless the activity has one; a talking
@@ -647,10 +782,18 @@ final class OrbAnimationView: NSView {
         }
     }
 
-    /// Swaps the mouth bitmap (no decoding here: viseme bitmaps are prewarmed and then kept). Swaps between
-    /// an opening and a closed or regular mouth get a very short crossfade (they differ most in brightness).
+    /// Swaps the mouth bitmap (no decoding here: viseme bitmaps are prewarmed and then kept, and one that is
+    /// missing is decoded in the background while the mouth keeps its shape). Swaps between an opening and a
+    /// closed or regular mouth get a very short crossfade (they differ most in brightness).
     private func showViseme(_ viseme: OrbViseme?, on view: CALayer) {
         guard viseme != shownViseme else { return }
+        if let viseme, visemeImages[viseme] == nil, let layer = config.visemeLayers()?[viseme] {
+            visemeImages[viseme] = OrbImages.cached(layer.path, pixels: builtPixels, tint: nil)
+            if visemeImages[viseme] == nil {
+                loadVisemes()
+                return
+            }
+        }
         let opened = { (shape: OrbViseme?) in shape.map { $0 != .rest } ?? false }
         if opened(viseme) != opened(shownViseme) {
             let fade = CATransition()
@@ -660,13 +803,17 @@ final class OrbAnimationView: NSView {
         }
         shownViseme = viseme
         if let viseme {
-            if visemeImages[viseme] == nil, let layer = config.visemeLayers()?[viseme] {
-                visemeImages[viseme] = OrbImages.cgImage(layer.path, pixels: side * backingScale, tint: nil)
-            }
             view.contents = visemeImages[viseme]
         } else {
             view.contents = mouthImage
         }
+    }
+
+    /// Decodes the talking mouth shapes (big orbs do not prewarm them); a later frame picks them up.
+    private func loadVisemes() {
+        guard !visemesLoading, let layers = config.visemeLayers() else { return }
+        visemesLoading = true
+        OrbImages.load(Array(layers.values), pixels: builtPixels) { [weak self] in self?.visemesLoading = false }
     }
 
     // MARK: Pointer

@@ -59,7 +59,10 @@ Views (SwiftUI)  ──►  AppModel (@MainActor @Observable)
   `claude -p` por turno (veja abaixo).
 - **Dados**: `state.json` (Orbs, rotinas, skills, conectores, provedor) e `conversations/<id do Orb>.json` (o que a tela mostra e
   o histórico do modelo). Campos novos devem ter valor padrão na decodificação (`value(_:default:)`), para arquivos antigos
-  continuarem abrindo.
+  continuarem abrindo. A conversa é lida fora da thread principal (só a do Orb aberto na abertura; as outras ao trocar de Orb,
+  e as paradas há alguns minutos voltam para o disco), e `conversations/<id>.meta.json` guarda, ao lado, o que o app precisa
+  saber sem ler a conversa (quantos itens, quantos já foram para a memória); só vale enquanto o arquivo da conversa for
+  exatamente o que ele descreve. Cada gravação refaz só os itens que mudaram, e o arquivo continua no formato de antes.
 - **Memória**: `memoria/<id do Orb>/` (páginas `.md` + `index.sqlite`), e `memoria/_guardadas/` para a de Orbs apagados
   com “guardar a memória”. Ver [docs/MEMORIA.md](docs/MEMORIA.md).
 - **Antes se chamava OpenBot**: ao abrir o app de verdade (pacote `app.orb.mac`; nunca nas execuções de

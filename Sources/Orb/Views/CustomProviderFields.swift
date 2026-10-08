@@ -9,6 +9,10 @@ struct CustomProviderFields: View {
 
     @State private var headersText = ""
     @State private var newModel = ""
+    @State private var isListingAll = false
+
+    /// More models than this are not all shown as rows.
+    private static let rowsShown = 8
 
     private var isClaudeGateway: Bool { account.format == .messages }
 
@@ -50,15 +54,14 @@ struct CustomProviderFields: View {
                     .font(.caption)
                     .foregroundStyle(Palette.faint)
             }
-            ForEach(account.models) { item in
-                HStack {
-                    Text(item.id).font(.caption.monospaced())
-                    Spacer()
-                    Button("Remover", systemImage: "minus.circle") { remove(item) }
-                        .labelStyle(.iconOnly)
-                        .buttonStyle(.borderless)
-                        .foregroundStyle(.tertiary)
-                }
+            // A gateway can list hundreds of models: past eight only the first few are rows here (the Form builds
+            // them all at once), and the rest are in a list that builds what is on screen.
+            ForEach(account.models.prefix(Self.rowsShown)) { item in
+                ModelIDRow(item: item) { remove(item) }
+            }
+            if account.models.count > Self.rowsShown {
+                Button("Ver todos os \(account.models.count) modelos…", systemImage: "list.bullet") { isListingAll = true }
+                    .buttonStyle(.borderless)
             }
             HStack {
                 TextField("Adicionar modelo pelo id", text: $newModel, prompt: Text("ex.: claude-fable-5-1"))
@@ -67,6 +70,9 @@ struct CustomProviderFields: View {
             }
         }
         .task(id: account.kind) { headersText = serialize(account.headers) }
+        .sheet(isPresented: $isListingAll) {
+            AllModelsSheet(models: account.models, remove: remove)
+        }
     }
 
     private func serialize(_ headers: [String: String]) -> String {
@@ -95,5 +101,56 @@ struct CustomProviderFields: View {
 
     private func remove(_ item: ProviderModel) {
         model.updateProvider(.custom) { $0.models.removeAll { $0.id == item.id } }
+    }
+}
+
+private struct ModelIDRow: View {
+    let item: ProviderModel
+    let remove: () -> Void
+
+    var body: some View {
+        HStack {
+            Text(item.id).font(.caption.monospaced())
+            Spacer()
+            Button("Remover", systemImage: "minus.circle", action: remove)
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .foregroundStyle(.tertiary)
+        }
+    }
+}
+
+/// Every model of the gateway, searchable, built as it scrolls.
+private struct AllModelsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let models: [ProviderModel]
+    let remove: (ProviderModel) -> Void
+    @State private var query = ""
+
+    var body: some View {
+        let shown = models.filter { ModelSearch.matches($0, query) }
+        VStack(spacing: 0) {
+            HStack {
+                TextField("Buscar modelo", text: $query)
+                    .textFieldStyle(.roundedBorder)
+                Text(shown.count == models.count ? "\(models.count) modelos" : "\(shown.count) de \(models.count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("OK") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(12)
+            Divider()
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(shown) { item in
+                        ModelIDRow(item: item) { remove(item) }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 6)
+                    }
+                }
+            }
+        }
+        .frame(width: 460, height: 460)
     }
 }

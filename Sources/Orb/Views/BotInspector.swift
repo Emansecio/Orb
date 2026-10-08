@@ -20,12 +20,13 @@ struct BotInspector: View {
     @State private var editingRoutine: Routine?
 
     var body: some View {
-        if let bot = model.bot(botID) {
+        // This Orb's own state: what happens in another Orb does not touch the panel.
+        if let live = model.liveBot(botID) {
+            let bot = live.bot
             Form {
                 Section {
                     HStack(spacing: 14) {
-                        BotAvatar(bot: bot, size: 60, activity: model.activity(for: bot.id), poke: model.pokes[bot.id, default: 0],
-                                  interactive: true)
+                        BotAvatar(orb: bot.orb, size: 60, activity: live.activity, poke: live.poke, interactive: true)
                         InspectorHeader(bot: bot)
                             .id(bot.id)
                     }
@@ -136,7 +137,7 @@ struct BotInspector: View {
                 if !Task.isCancelled { listing = result }
             }
             // The turn may have created or changed files.
-            .onChange(of: model.isWorking(bot.id)) { wasWorking, isWorking in
+            .onChange(of: live.isWorking) { wasWorking, isWorking in
                 if wasWorking && !isWorking { filesRefresh += 1 }
             }
             // The file may have been edited while the panel stayed open: read it again on coming back to the app.
@@ -296,7 +297,7 @@ struct BotInspector: View {
     /// The Orb's own memory: identity notes, what it keeps (preferences, facts, procedures) and its conversations.
     @ViewBuilder
     private func memorySection(_ bot: Bot) -> some View {
-        let memory = model.memories[bot.id] ?? MemorySnapshot()
+        let memory = model.live(bot.id).memory
         Section {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
@@ -366,7 +367,7 @@ struct BotInspector: View {
     /// Falls back to the last rendered value, so a sheet closing after deletion never reads a missing bot.
     private func binding<Value>(_ keyPath: WritableKeyPath<Bot, Value>, of bot: Bot) -> Binding<Value> {
         Binding(
-            get: { model.bot(botID)?[keyPath: keyPath] ?? bot[keyPath: keyPath] },
+            get: { model.liveBot(botID)?.bot[keyPath: keyPath] ?? bot[keyPath: keyPath] },
             set: { value in model.update(botID) { $0[keyPath: keyPath] = value } }
         )
     }
@@ -377,7 +378,7 @@ struct BotInspector: View {
     /// trusts is what the next turn will read. If the file changed, the toggle shows off again.
     private func instructionsTrustBinding(_ file: FolderInstructions, of bot: Bot) -> Binding<Bool> {
         Binding(
-            get: { file.isTrusted(by: model.bot(botID)?.trustedInstructionsHash) },
+            get: { file.isTrusted(by: model.liveBot(botID)?.bot.trustedInstructionsHash) },
             set: { isOn in
                 let current = FolderInstructions.load(from: bot.workingURL)
                 instructionFile = current
