@@ -21,7 +21,7 @@ struct OrbApp: App {
         Window("Orb", id: "main") {
             RootView()
                 .environment(model)
-                .frame(minWidth: 960, minHeight: 620)
+                .frame(minWidth: 1000, minHeight: 620)
                 .preferredColorScheme(.dark)
                 .task {
                     // The bots are read when the task runs, not while the scene's body is evaluated (the body must not depend on them).
@@ -42,10 +42,13 @@ struct OrbApp: App {
                 .preferredColorScheme(.dark)
         }
 
-        MenuBarExtra("Orb", systemImage: "circle.hexagongrid.fill") {
+        MenuBarExtra {
             QuickAskView()
                 .environment(model)
                 .preferredColorScheme(.dark)
+        } label: {
+            // Idle, an Orb working, or Orbs waiting for a permission (with an orange dot).
+            MenuBarLabel(model: model)
         }
         .menuBarExtraStyle(.window)
     }
@@ -84,6 +87,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // So a tap on a banner reaches the app even when that tap is what launched it.
         ApprovalNotifications.prepareAtLaunch()
+        // The global shortcut for the menu bar panel, when the user turned it on.
+        GlobalHotKey.shared.restore()
         // Needed when launched as a bare SwiftPM executable (no .app bundle).
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
@@ -92,31 +97,83 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 struct AppCommands: Commands {
     let model: AppModel
+    @Environment(\.openWindow) private var openWindow
+    @AppStorage(GlobalHotKey.defaultsKey) private var globalShortcut = false
+
+    /// Brings the main window forward (it may be closed or behind Settings) before a command that shows something in it.
+    private func showMain() {
+        openWindow(id: "main")
+        NSApp.activate()
+    }
 
     var body: some Commands {
+        // While a sheet is open the commands that would open another one wait for it.
+        let sheetOpen = model.hasOpenSheet
         CommandGroup(replacing: .newItem) {
-            Button("Novo Orb…") { model.showNewBot = true }
-                .keyboardShortcut("n")
-            Button("Nova conversa") {
-                if let id = model.selectedBot?.id { model.newConversation(id) }
+            Button(CommandName.newBot) { showMain(); model.showNewBot = true }
+                .keyboardShortcut(AppShortcut.newBot)
+                .disabled(sheetOpen)
+            Button(CommandName.newConversation) {
+                if let id = model.selectedBotID { model.newConversation(id) }
             }
-            .keyboardShortcut("n", modifiers: [.command, .shift])
+            .keyboardShortcut(AppShortcut.newConversation)
+            .disabled(model.selectedBotID == nil)
         }
         CommandGroup(after: .sidebar) {
-            Button("Mostrar/ocultar detalhes") { model.showInspector.toggle() }
-                .keyboardShortcut("b", modifiers: [.command, .option])
+            Button(CommandName.toggleInspector) { model.showInspector.toggle() }
+                .keyboardShortcut(AppShortcut.toggleInspector)
+        }
+        CommandGroup(replacing: .help) {
+            Button(CommandName.shortcuts) { showMain(); model.showShortcuts = true }
+                .disabled(sheetOpen)
         }
         CommandMenu("Orbs") {
-            Button("Orb anterior") { model.selectAdjacentBot(offset: -1) }
-                .keyboardShortcut(.upArrow, modifiers: .option)
-            Button("Próximo Orb") { model.selectAdjacentBot(offset: 1) }
-                .keyboardShortcut(.downArrow, modifiers: .option)
+            Button(CommandName.goTo) { showMain(); model.showCommandPalette = true }
+                .keyboardShortcut(AppShortcut.goTo)
+                .disabled(sheetOpen)
+            Divider()
+            Button(CommandName.writeMessage) { showMain(); model.focusComposer() }
+                .keyboardShortcut(AppShortcut.writeMessage)
+                .disabled(model.commandBotID == nil || sheetOpen)
+            Button(CommandName.conversations) { showMain(); model.showConversations() }
+                .keyboardShortcut(AppShortcut.conversations)
+                .disabled(model.commandBotID == nil || sheetOpen)
+            Button(CommandName.stop) { model.stopCurrent() }
+                .keyboardShortcut(AppShortcut.stop)
+                .disabled(!model.canStopCurrent)
+            Button(CommandName.openFolder) {
+                if let id = model.commandBotID { model.openFolder(of: id) }
+            }
+            .keyboardShortcut(AppShortcut.openFolder)
+            .disabled(model.commandBotID == nil)
+            Divider()
+            Button(CommandName.previousBot) { model.selectAdjacentBot(offset: -1) }
+                .keyboardShortcut(AppShortcut.previousBot)
+            Button(CommandName.nextBot) { model.selectAdjacentBot(offset: 1) }
+                .keyboardShortcut(AppShortcut.nextBot)
+            Divider()
+            Button(CommandName.routines) { showMain(); model.selection = .routines }
+                .keyboardShortcut(AppShortcut.routines)
+            Button(CommandName.connectors) { showMain(); model.selection = .connectors }
+                .keyboardShortcut(AppShortcut.connectors)
+            Button(CommandName.skills) { showMain(); model.selection = .skills }
+                .keyboardShortcut(AppShortcut.skills)
             Divider()
             // Only the names and the order are read, so a status or a new unread message does not rebuild the menu.
             ForEach(Array(model.botIDs.prefix(9).enumerated()), id: \.element) { index, id in
-                Button(model.live(id).look.name) { model.selection = .bot(id) }
-                    .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: .command)
+                Button(model.live(id).look.name) { showMain(); model.selection = .bot(id) }
+                    .keyboardShortcut(AppShortcut.bot(at: index))
             }
+            Divider()
+            Toggle(CommandName.globalShortcut, isOn: Binding(
+                get: { globalShortcut },
+                set: { wanted in
+                    // Another app may already hold ⌃⌥Espaço: then the switch stays off and the user is told.
+                    let works = GlobalHotKey.shared.apply(wanted)
+                    globalShortcut = wanted && works
+                    if wanted && !works { GlobalHotKey.showUnavailableAlert() }
+                }
+            ))
         }
     }
 }
@@ -189,24 +246,46 @@ enum OrbSheet {
 @MainActor
 enum Snapshot {
     static func render(_ screen: String, to url: URL) {
-        let model = AppModel()
+        // The Keychain stays untouched: a seed with token-looking values would leave orphan items there.
+        let model = AppModel(secretVault: MemoryVault())
         model.showInspector = false // the inspector column does not render offscreen
         model.sendLaunchPrompt()
         let content: AnyView = switch screen {
         case "app": AnyView(RootView())
+        case let other where RoutinesSnapshots.view(other, model: model) != nil: RoutinesSnapshots.view(other, model: model)!
         case "skills": AnyView(SkillsView())
         case "skills-explore": AnyView(SkillsView(tab: .explore))
         case "connectors": AnyView(ConnectorsView())
         case "connectors-explore": AnyView(ConnectorsView(tab: .explore))
         case "routines": AnyView(RoutinesView())
         case "models": AnyView(ProviderSettings())
-        case "inspector": AnyView(model.bots.first.map { BotInspector(botID: $0.id).frame(width: 360) })
+        case "inspector", "inspector-memory", "inspector-folder", "inspector-routines":
+            // The tab after the dash: memory, folder or routines.
+            AnyView(model.bots.first.map { bot in
+                BotInspector(botID: bot.id, tab: InspectorTab.allCases.first { screen == "inspector-" + $0.rawValue } ?? .general)
+                    .frame(width: 360)
+            })
+        case "memory-sheet": AnyView(model.bots.first.map { MemorySheet(botID: $0.id, name: $0.name) })
         case "approvals": AnyView(model.bots.first.map { ApprovalCardsSample(bot: $0) })
         case "new-orb": AnyView(NewBotSheet())
+        case "sidebar": AnyView(SidebarView().frame(width: 280))
+        case "quickask": AnyView(SystemSnapshots.quickAsk(model, approvals: false))
+        case "quickask-approvals": AnyView(SystemSnapshots.quickAsk(model, approvals: true))
+        case "quickask-reply": AnyView(SystemSnapshots.quickAsk(model, approvals: false, reply: true))
+        case "delete-orb": AnyView(model.bots.first.map { DeleteOrbSheet(botID: $0.id) })
+        case "palette": AnyView(CommandPalette())
+        case "shortcuts": AnyView(ShortcutsSheet())
+        case "menubar-icons": AnyView(SystemSnapshots.menuBarIcons())
         case "editor": AnyView(OrbEditor(config: .constant(AppState.initial.bots[0].orb), name: "Atlas", category: .temperament))
-        default: AnyView(model.bots.first.map { ChatView(botID: $0.id) })
+        case let name where name.hasPrefix("transcript"):
+            AnyView(model.bots.first.map { TranscriptSample.view(name, model: model, bot: $0) })
+        default:
+            Snapshot.composerScene(screen, model: model)
+                ?? SettingsSnapshots.view(screen, firstBotID: model.bots.first?.id)
+                ?? CatalogSnapshots.view(screen, model: model)
+                ?? AnyView(model.bots.first.map { ChatView(botID: $0.id) })
         }
-        let size = NSSize(width: 1100, height: ProcessInfo.processInfo.environment["ORB_SNAPSHOT_HEIGHT"].flatMap(Double.init) ?? 760)
+        let size = NSSize(width: ProcessInfo.processInfo.environment["ORB_SNAPSHOT_WIDTH"].flatMap(Double.init) ?? 1100, height: ProcessInfo.processInfo.environment["ORB_SNAPSHOT_HEIGHT"].flatMap(Double.init) ?? 760)
         let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: -30_000, y: -30_000), size: size),
                               styleMask: .borderless, backing: .buffered, defer: false)
         window.contentView = NSHostingView(rootView: NavigationStack { content }

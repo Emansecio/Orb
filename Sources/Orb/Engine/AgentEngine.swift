@@ -21,6 +21,9 @@ enum TurnEvent: Sendable {
     case requestUsage(TokenUsage)
     /// The task stopped at the step limit and left a progress record: the next message picks it up.
     case taskPaused
+    /// A message the user sent during the turn (see `SteeringQueue`) was just handed to the model: the transcript
+    /// shows it now, in its place among the steps, instead of as queued.
+    case steered(UUID)
 }
 
 /// Everything one turn needs, captured up front so the turn never reads UI state.
@@ -61,6 +64,9 @@ struct TurnRequest: Sendable {
     var onOverheadMeasured: (@Sendable (Int) -> Void)?
     /// The last task stopped at the step limit and this message picks it up (nil: judge by the history itself).
     var picksUpTask: Bool?
+    /// Messages the user sends while this turn runs. The engine hands them to the model at the next step boundary;
+    /// nil means the turn takes none (they wait for the turn's end).
+    var steering: SteeringQueue?
 
     func currentPermissions() async -> PermissionState {
         if let permissions { return await permissions() }
@@ -141,6 +147,8 @@ actor AgentEngine {
             for step in 1...maxSteps {
                 // The last step answers in text (the tools stay listed, so the provider's cache still applies).
                 let isLastStep = step == maxSteps
+                // What the user said since the last call goes to the model now: a step boundary.
+                Self.deliverSteering(request.steering, into: &messages, out: out)
                 out.yield(.status("Pensando"))
                 var reply = Reply()
                 var contextRetried = false
@@ -275,6 +283,8 @@ actor AgentEngine {
                     record(assistant, in: &messages, out: out)
                 }
                 if calls.isEmpty {
+                    // The user spoke while this answer was being written: it is one more step, not a new turn.
+                    if !isLastStep, request.steering?.isEmpty == false { continue }
                     if isLastStep { out.yield(.notice(Self.pausedNotice(after: maxSteps))) }
                     return
                 }
@@ -287,6 +297,18 @@ actor AgentEngine {
             // The user stopped the turn; the UI already says so.
         } catch {
             if !Task.isCancelled { out.yield(.failed(error.localizedDescription)) }
+        }
+    }
+
+    /// Hands the messages the user sent during the turn to the model, as user messages after whatever came before
+    /// (tool results included: the providers merge consecutive user turns), and tells the UI each one arrived.
+    static func deliverSteering(_ queue: SteeringQueue?, into messages: inout [ChatMessage], out: AsyncStream<TurnEvent>.Continuation) {
+        guard let queue else { return }
+        for steered in queue.drain() {
+            let message = ChatMessage.user(steered.prompt, images: steered.pictures)
+            messages.append(message)
+            out.yield(.message(message))
+            out.yield(.steered(steered.id))
         }
     }
 

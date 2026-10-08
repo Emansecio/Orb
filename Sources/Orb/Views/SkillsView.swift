@@ -1,6 +1,7 @@
 import SwiftUI
+import AppKit
 
-/// Skills: the installed ones (enable, edit, delete) and the public catalog (search, preview, install).
+/// Skills: the installed ones (use, enable, edit, delete) and the public catalog (search, preview, install).
 struct SkillsView: View {
     @Environment(AppModel.self) private var model
     @State private var tab: CatalogTab
@@ -22,7 +23,7 @@ struct SkillsView: View {
         }
         .background(Palette.canvas)
         .navigationTitle("Skills")
-        .navigationSubtitle("Instruções reutilizáveis: comece a mensagem com /nome")
+        .navigationSubtitle("Instruções prontas: comece a mensagem com /nome")
         .toolbar {
             Button("Nova skill", systemImage: "plus") {
                 editing = Skill(slug: "", name: "", summary: "", instructions: "")
@@ -32,6 +33,50 @@ struct SkillsView: View {
         .sheet(item: $editing) { skill in
             SkillEditor(skill: skill)
         }
+    }
+}
+
+// MARK: Using a skill
+
+/// "Usar": opens the chat of the Orb the user was on with `/atalho ` ready in the composer (one click); with no
+/// such Orb, a menu of the Orbs that may use the skill.
+struct UseSkillButton: View {
+    @Environment(AppModel.self) private var model
+    let skill: Skill
+    var onUsed: () -> Void = {}
+    var title = "Usar"
+
+    private var candidates: [Bot] { model.bots.filter { skill.isAvailable(to: $0.id) } }
+
+    var body: some View {
+        if let preferred = model.preferredBot(for: skill) ?? (candidates.count == 1 ? candidates.first : nil) {
+            Button(title) { use(preferred) }
+                .buttonStyle(SecondaryPillStyle())
+                .help("Abrir a conversa com \(preferred.name) com /\(skill.slug) pronto")
+                .disabled(!skill.isEnabled)
+        } else if candidates.isEmpty {
+            Button(title) {}
+                .buttonStyle(SecondaryPillStyle())
+                .disabled(true)
+                .help("Nenhum Orb pode usar esta skill")
+        } else {
+            Menu(title) {
+                ForEach(candidates) { bot in
+                    Button(bot.name) { use(bot) }
+                }
+            }
+            .menuStyle(.button)
+            .buttonStyle(SecondaryPillStyle())
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .disabled(!skill.isEnabled)
+            .help("Escolher o Orb que vai usar /\(skill.slug)")
+        }
+    }
+
+    private func use(_ bot: Bot) {
+        model.useSkill(skill, with: bot.id)
+        onUsed()
     }
 }
 
@@ -83,20 +128,28 @@ private struct InstalledSkills: View {
 }
 
 private struct InstalledSkillRow: View {
+    @Environment(AppModel.self) private var model
     @Binding var skill: Skill
     let onEdit: () -> Void
     let onDelete: () -> Void
+    @State private var didCopy = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 14) {
+        HStack(alignment: .center, spacing: 14) {
             CatalogIcon(symbol: skill.source == nil || skill.source == Skill.builtInSource ? "wand.and.stars" : "shippingbox")
             VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     Text(skill.name)
                         .font(.system(size: 14, weight: .semibold))
                     Text("/\(skill.slug)")
                         .font(.system(size: 12).monospaced())
-                        .foregroundStyle(Palette.faint)
+                        .foregroundStyle(Palette.muted)
+                    Button(didCopy ? "Copiado" : "Copiar /\(skill.slug)", systemImage: didCopy ? "checkmark" : "doc.on.doc", action: copy)
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11))
+                        .foregroundStyle(didCopy ? Palette.ok : Palette.faint)
+                        .help("Copiar /\(skill.slug)")
                 }
                 if !skill.summary.isEmpty {
                     Text(skill.summary)
@@ -112,12 +165,16 @@ private struct InstalledSkillRow: View {
                     } else {
                         CatalogBadge(text: "Criada por você", symbol: "person")
                     }
+                    if skill.orbIDs != nil {
+                        CatalogBadge(text: OrbScopeText.summary(orbIDs: skill.orbIDs, bots: model.bots), symbol: "person.2")
+                    }
                     if skill.uses > 0 {
                         CatalogBadge(text: skill.uses == 1 ? "1 uso" : "\(skill.uses) usos")
                     }
                 }
             }
             Spacer(minLength: 12)
+            UseSkillButton(skill: skill)
             Toggle("Ativa", isOn: $skill.isEnabled)
                 .toggleStyle(.switch)
                 .labelsHidden()
@@ -138,11 +195,22 @@ private struct InstalledSkillRow: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            .accessibilityLabel("Mais ações de \(skill.name)")
         }
         .padding(14)
         .card(radius: 14)
         .opacity(skill.isEnabled ? 1 : 0.55)
         .animation(.snappy(duration: 0.2), value: skill.isEnabled)
+    }
+
+    private func copy() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString("/\(skill.slug)", forType: .string)
+        didCopy = true
+        Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            didCopy = false
+        }
     }
 }
 
@@ -158,19 +226,20 @@ private struct ExploreSkills: View {
     private static let suggestions = ["pdf", "excel", "slides", "docx", "pesquisa", "escrita", "design", "git",
                                       "marketing", "dados", "testes", "seo"]
 
+    private var isSearching: Bool { query.trimmingCharacters(in: .whitespaces).count >= 2 }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 CatalogSearchHeader(query: $query, prompt: "Buscar no catálogo de skills (Skills.sh)",
                                     suggestions: Self.suggestions)
-                if query.trimmingCharacters(in: .whitespaces).count < 2 {
-                    Text("Escolha um tema acima ou digite o que precisa. As skills vêm do catálogo aberto Skills.sh e o conteúdo, do GitHub de quem publicou.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Palette.faint)
+                if !isSearching {
+                    intro
                 } else if isLoading || error != nil || results.isEmpty {
-                    CatalogStateView(isLoading: isLoading, error: error, isEmpty: results.isEmpty, retry: { Task { await search() } })
+                    CatalogStateView(isLoading: isLoading, error: error, isEmpty: results.isEmpty, skeleton: true,
+                                     retry: { Task { await search() } })
                 } else {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: 12)], spacing: 12) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: 12, alignment: .top)], spacing: 12) {
                         ForEach(results) { entry in
                             CatalogSkillCard(entry: entry) { previewing = entry }
                         }
@@ -190,7 +259,21 @@ private struct ExploreSkills: View {
         .sheet(item: $previewing) { entry in
             SkillPreview(entry: entry)
         }
-        .onAppear { if query.isEmpty { query = Self.suggestions[0] } }
+    }
+
+    /// What the page is for, until the user picks a theme or types (nothing is searched on its own).
+    private var intro: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Escolha um tema ou digite o que você precisa", systemImage: "sparkle.magnifyingglass")
+                .font(.system(size: 14, weight: .semibold))
+            Text("As skills vêm do catálogo aberto Skills.sh e o conteúdo é de quem publicou, no GitHub. Você lê as instruções antes de instalar e depois usa com /atalho no chat.")
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card(radius: 14)
     }
 
     private func search() async {
@@ -269,101 +352,96 @@ private struct CatalogSkillCard: View {
     }
 }
 
-/// Review before installing: who published it, what it says, and the full instructions the bot will follow.
-private struct SkillPreview: View {
+/// Review before installing: who published it, what it says, and the full instructions the Orb will follow.
+/// After installing, the sheet stays to say how to use it.
+struct SkillPreview: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     let entry: CatalogSkill
     @State private var document: SkillDocument?
     @State private var error: String?
 
+    init(entry: CatalogSkill, document: SkillDocument? = nil) {
+        self.entry = entry
+        _document = State(initialValue: document)
+    }
+
     private var installed: Skill? { model.installedSkill(entry.id) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top, spacing: 14) {
-                CatalogIcon(symbol: "wand.and.stars")
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(document?.name ?? entry.name)
-                        .font(.system(size: 17, weight: .semibold))
-                    HStack(spacing: 6) {
-                        if entry.isFromKnownSource {
-                            CatalogBadge(text: "Fonte conhecida", symbol: "checkmark.seal.fill", tint: Palette.accentText)
-                        }
-                        CatalogBadge(text: entry.installs.installsLabel, symbol: "arrow.down.circle")
-                        if let folder = document?.folderURL {
-                            Link(destination: folder) {
-                                CatalogBadge(text: entry.repo, symbol: "arrow.up.right.square")
-                            }
+        content
+            .orbSheet(document?.name ?? entry.name, subtitle: "Revise o que a skill diz antes de instalar.", size: .large) { footer }
+            .task {
+                guard document == nil else { return }
+                do {
+                    document = try await SkillCatalog.shared.document(for: entry)
+                } catch {
+                    self.error = error.localizedDescription
+                }
+            }
+    }
+
+    private var content: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 6) {
+                    if entry.isFromKnownSource {
+                        CatalogBadge(text: "Fonte conhecida", symbol: "checkmark.seal.fill", tint: Palette.accentText)
+                    }
+                    CatalogBadge(text: entry.installs.installsLabel, symbol: "arrow.down.circle")
+                    if let folder = document?.folderURL {
+                        Link(destination: folder) {
+                            CatalogBadge(text: entry.repo, symbol: "arrow.up.right.square")
                         }
                     }
+                }
+                if let document {
+                    if !document.description.isEmpty {
+                        Text(document.description)
+                            .font(.system(size: 13))
+                            .foregroundStyle(Palette.secondary)
+                    }
+                    Text("Instruções que o Orb vai seguir")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Palette.muted)
+                        .textCase(.uppercase)
+                    Text(document.instructions)
+                        .font(.system(size: 12).monospaced())
+                        .foregroundStyle(Palette.secondary)
+                        .textSelection(.enabled)
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Palette.raised, in: .rect(cornerRadius: 10))
+                } else if let error {
+                    Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(Palette.warn)
+                } else {
+                    ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
                 }
             }
             .padding(20)
+        }
+    }
 
-            Divider().overlay(Palette.line)
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    if let document {
-                        if !document.description.isEmpty {
-                            Text(document.description)
-                                .font(.system(size: 13))
-                                .foregroundStyle(Palette.secondary)
-                        }
-                        Text("Instruções que o Orb vai seguir")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Palette.faint)
-                            .textCase(.uppercase)
-                        Text(document.instructions)
-                            .font(.system(size: 12).monospaced())
-                            .foregroundStyle(Palette.secondary)
-                            .textSelection(.enabled)
-                            .padding(12)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Palette.raised, in: .rect(cornerRadius: 10))
-                    } else if let error {
-                        Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(Palette.warn)
-                    } else {
-                        ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
-                    }
-                }
-                .padding(20)
-            }
-
-            Divider().overlay(Palette.line)
-
+    @ViewBuilder private var footer: some View {
+        if let installed {
             HStack(spacing: 10) {
-                Label("Instale só de fontes em que você confia: a skill vira instrução para o Orb.", systemImage: "info.circle")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.faint)
+                Label("Instalada. Use com /\(installed.slug)", systemImage: "checkmark.circle.fill")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Palette.ok)
                 Spacer()
                 Button("Fechar") { dismiss() }
                     .buttonStyle(GhostStyle())
                     .keyboardShortcut(.cancelAction)
-                if installed != nil {
-                    Label("Instalada", systemImage: "checkmark.circle.fill")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Palette.ok)
-                } else {
-                    Button("Instalar skill") {
-                        if let document { model.install(document, from: entry) }
-                        dismiss()
-                    }
-                    .buttonStyle(PrimaryPillStyle())
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(document == nil)
-                }
+                UseSkillButton(skill: installed, onUsed: { dismiss() }, title: "Usar agora")
             }
-            .padding(16)
-        }
-        .frame(width: 620, height: 640)
-        .background(Palette.chrome)
-        .task {
-            do {
-                document = try await SkillCatalog.shared.document(for: entry)
-            } catch {
-                self.error = error.localizedDescription
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+            .overlay(alignment: .top) { Divider().opacity(0.6) }
+        } else {
+            SheetFooter(message: "Instale só de fontes em que você confia: a skill vira instrução para o Orb.",
+                        cancelTitle: "Fechar", cancel: { dismiss() }, primaryTitle: "Instalar skill",
+                        isPrimaryDisabled: document == nil) {
+                if let document { model.install(document, from: entry) }
             }
         }
     }
@@ -371,46 +449,98 @@ private struct SkillPreview: View {
 
 // MARK: Editor
 
-private struct SkillEditor: View {
+struct SkillEditor: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State var skill: Skill
+    /// Whether the shortcut was typed by the user (until then it follows the name).
+    @State private var slugEdited: Bool
 
-    private var slugTaken: Bool { model.skills.contains { $0.slug == skill.slug && $0.id != skill.id } }
+    /// Beyond this many characters the instructions weigh on every conversation that uses the skill.
+    static let longInstructions = 4_000
+
+    init(skill: Skill) {
+        _skill = State(initialValue: skill)
+        _slugEdited = State(initialValue: !skill.slug.isEmpty)
+    }
+
+    private var isNew: Bool { !model.skills.contains { $0.id == skill.id } }
+    private var finalSlug: String { Skill.cleanSlug(skill.slug) }
+    private var slugTaken: Bool { model.skills.contains { $0.slug == finalSlug && $0.id != skill.id } }
+    private var chosenNoOrb: Bool { skill.orbIDs?.isEmpty == true }
+    private var canSave: Bool {
+        !skill.name.trimmingCharacters(in: .whitespaces).isEmpty && !finalSlug.isEmpty
+            && !skill.instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !slugTaken && !chosenNoOrb
+    }
+    private var message: String? {
+        if slugTaken { return "Já existe uma skill com /\(finalSlug)." }
+        if chosenNoOrb { return "Marque ao menos um Orb em “Usar com”." }
+        return nil
+    }
+    private var title: String { isNew ? "Nova skill" : "Editar \(skill.name.isEmpty ? "skill" : skill.name)" }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Form {
-                TextField("Nome", text: $skill.name)
-                TextField("Atalho", text: $skill.slug, prompt: Text("ex.: resumir"))
-                    .onChange(of: skill.slug) { skill.slug = Skill.slugify(skill.slug) }
-                TextField("O que faz", text: $skill.summary)
-                Section {
-                    TextEditor(text: $skill.instructions).font(.body).frame(minHeight: 160)
-                } header: {
-                    Text("Instruções para o Orb")
-                } footer: {
-                    if slugTaken { Text("Já existe uma skill com /\(skill.slug).").foregroundStyle(Palette.warn) }
-                }
-            }
-            .formStyle(.grouped)
-            HStack {
-                Spacer()
-                Button("Cancelar", role: .cancel) { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                Button("Salvar") {
-                    if let index = model.skills.firstIndex(where: { $0.id == skill.id }) {
-                        model.skills[index] = skill
-                    } else {
-                        model.skills.append(skill)
+        Form {
+            Section {
+                TextField("Nome", text: $skill.name, prompt: Text("ex.: Resumir"))
+                    .onChange(of: skill.name) {
+                        skill.slug = Skill.suggestedSlug(forName: skill.name, current: skill.slug, edited: slugEdited)
                     }
-                    dismiss()
+                // The slash sits in the field's text, so the value lines up with the other rows.
+                LabeledContent("Atalho") {
+                    TextField("Atalho", text: Binding(
+                        get: { skill.slug.isEmpty ? "" : "/" + skill.slug },
+                        set: { skill.slug = String($0.drop { $0 == "/" }) }
+                    ), prompt: Text("/resumir"))
+                        .labelsHidden()
+                        .font(.system(size: 13).monospaced())
+                        .multilineTextAlignment(.trailing)
+                        .onChange(of: skill.slug) {
+                            let cleaned = Skill.slugify(skill.slug)
+                            if cleaned != skill.slug { skill.slug = cleaned }
+                            slugEdited = !cleaned.isEmpty && cleaned != Skill.cleanSlug(skill.name)
+                        }
                 }
-                .keyboardShortcut(.defaultAction)
-                .disabled(skill.name.isEmpty || skill.slug.isEmpty || skill.instructions.isEmpty || slugTaken)
+                TextField("O que faz", text: $skill.summary, prompt: Text("ex.: Resume um texto em 5 tópicos"))
+            } footer: {
+                Text(finalSlug.isEmpty ? "O atalho é o que você escreve no chat para usar a skill."
+                     : "Para usar, escreva /\(finalSlug) no começo da mensagem no chat.")
             }
-            .padding(16)
+            Section {
+                PlaceholderTextEditor(placeholder: "Quando eu pedir /\(finalSlug.isEmpty ? "resumir" : finalSlug), leia o texto e responda em 5 tópicos curtos.",
+                                      text: $skill.instructions, minHeight: 100)
+            } header: {
+                Text("Instruções para o Orb")
+            } footer: {
+                HStack(spacing: 0) {
+                    if skill.instructions.count > Self.longInstructions {
+                        Text("Instruções longas gastam contexto em toda conversa que usar a skill. ")
+                            .foregroundStyle(Palette.warn)
+                    }
+                    Spacer(minLength: 8)
+                    Text("\(skill.instructions.count.formatted()) caracteres").monospacedDigit()
+                }
+            }
+            Section {
+                OrbScopePicker(orbIDs: $skill.orbIDs, noun: "esta skill")
+            } header: {
+                Text("Usar com")
+            }
         }
-        .frame(width: 520, height: 560)
+        .formStyle(.grouped)
+        .orbSheet(title, subtitle: "Instruções que o Orb segue quando você começa a mensagem com o atalho.", size: .medium) {
+            SheetFooter(message: message, cancel: { dismiss() }, primaryTitle: "Salvar", isPrimaryDisabled: !canSave, primary: save)
+        }
+    }
+
+    private func save() {
+        skill.slug = finalSlug
+        skill.name = skill.name.trimmingCharacters(in: .whitespaces)
+        if let index = model.skills.firstIndex(where: { $0.id == skill.id }) {
+            model.skills[index] = skill
+        } else {
+            model.skills.append(skill)
+        }
+        dismiss()
     }
 }

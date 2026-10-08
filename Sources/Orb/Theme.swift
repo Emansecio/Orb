@@ -32,7 +32,11 @@ enum Palette {
     static let ink = Color(hex: 0xFCFCFC)
     static let secondary = Color(hex: 0xFCFCFC, opacity: 0.74)
     static let muted = Color(hex: 0xFCFCFC, opacity: 0.6)
-    static let faint = Color(hex: 0xFCFCFC, opacity: 0.36)
+    /// Quietest ink that still reads as text: about 5.3:1 on `canvas` and 4.9:1 on `chrome` (AA for 11-12 pt).
+    /// Use it for details, durations, placeholders and section titles.
+    static let faint = Color(hex: 0xFCFCFC, opacity: 0.52)
+    /// Decorative only (icons that repeat a label, hover hints, dim fills): about 3:1, below what text needs.
+    static let hint = Color(hex: 0xFCFCFC, opacity: 0.36)
     static let onInk = Color(hex: 0x141414)          // text on white pills
 
     // Strokes and fills
@@ -152,7 +156,7 @@ final class ShimmerBandView: NSView {
     init(fillsBackground: Bool) {
         super.init(frame: .zero)
         wantsLayer = true
-        if fillsBackground { layer?.backgroundColor = NSColor(Palette.faint).cgColor }
+        if fillsBackground { layer?.backgroundColor = NSColor(Palette.hint).cgColor }
         let ink = NSColor(Palette.ink)
         band.colors = [ink.withAlphaComponent(0).cgColor, ink.cgColor, ink.withAlphaComponent(0).cgColor]
         band.startPoint = CGPoint(x: 0, y: 0.5)
@@ -244,6 +248,8 @@ struct PrimaryPillStyle: ButtonStyle {
 
 /// Subtle filled pill — secondary action.
 struct SecondaryPillStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 13, weight: .medium))
@@ -251,17 +257,20 @@ struct SecondaryPillStyle: ButtonStyle {
             .padding(.horizontal, 14)
             .padding(.vertical, 7)
             .background(Color.white.opacity(configuration.isPressed ? 0.16 : 0.1), in: .capsule)
+            .opacity(isEnabled ? 1 : 0.4)
     }
 }
 
 /// Text-only ghost button with hover fill.
 struct GhostStyle: ButtonStyle {
+    /// A color for the label instead of the usual gray (red for a destructive action).
+    var tint: Color?
     @State private var isHovering = false
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(Palette.secondary)
+            .foregroundStyle(tint ?? Palette.secondary)
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
             .background(configuration.isPressed || isHovering ? Palette.ghostSelected : .clear, in: .capsule)

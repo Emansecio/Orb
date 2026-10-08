@@ -16,6 +16,8 @@ struct RegistryServer: Identifiable, Hashable, Sendable {
         let summary: String
         let isSecret: Bool
         let isRequired: Bool
+        /// Fixed beginning of the value ("Bearer " in an Authorization header): the user types only what follows.
+        var prefix = ""
     }
 
     var kindLabel: String {
@@ -23,7 +25,8 @@ struct RegistryServer: Identifiable, Hashable, Sendable {
     }
 
     /// The registry's own reference servers.
-    var isOfficial: Bool { id.hasPrefix("io.modelcontextprotocol") || id.hasPrefix("io.github.modelcontextprotocol") }
+    var isOfficial: Bool { Self.isOfficial(id) }
+    static func isOfficial(_ id: String) -> Bool { id.hasPrefix("io.modelcontextprotocol") || id.hasPrefix("io.github.modelcontextprotocol") }
 }
 
 /// Searches https://registry.modelcontextprotocol.io (search is a substring match on the server name).
@@ -68,13 +71,19 @@ struct MCPRegistry: Sendable {
                 guard let input = input(from: variable) else { continue }
                 inputs.append(input)
                 config.environment[input.name] = variable["default"]?.string ?? ""
+                if input.isSecret { config.secretKeys.insert(input.name) }
             }
         } else if let remote = preferredRemote(json["remotes"]?.array ?? []), let url = remote["url"]?.string, !url.contains("{") {
             config = MCPServerConfig(name: title, url: url)
             for header in remote["headers"]?.array ?? [] {
-                guard let input = input(from: header) else { continue }
+                guard var input = input(from: header) else { continue }
+                // "Bearer {token}": the user fills in the token; "Bearer " is kept in front of it.
+                if let template = header["value"]?.string, let brace = template.firstIndex(of: "{") {
+                    input.prefix = String(template[..<brace])
+                }
                 inputs.append(input)
                 config.headers[input.name] = header["value"]?.string.flatMap { $0.contains("{") ? nil : $0 } ?? ""
+                if input.isSecret { config.secretKeys.insert(input.name) }
             }
         } else {
             return nil

@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UserNotifications
 
 // The "Permissões do Mac" settings tab: what macOS lets the Orb do, row by row, with a way to ask and a way to change it.
 
@@ -10,9 +11,19 @@ final class MacPermissionsModel {
     /// Rows whose "Pedir agora" was pressed and changed nothing: macOS shows the Screen Recording prompt only once,
     /// so from then on only System Settings can grant it.
     private(set) var askedInVain: Set<MacPermissionKind> = []
+    /// Whether the Orb may post banners (nil until read).
+    private(set) var notifications: NotificationPermission?
     private let checker: MacPermissionChecker
+    private let readNotifications: @MainActor () async -> NotificationPermission
 
-    init(checker: MacPermissionChecker = .live) { self.checker = checker }
+    init(checker: MacPermissionChecker = .live,
+         notifications: @escaping @MainActor () async -> NotificationPermission = { await NotificationPermission.current() }) {
+        self.checker = checker
+        readNotifications = notifications
+    }
+
+    /// What the tab's header says, from what has been read so far.
+    var summary: MacPermissionsSummary { MacPermissionsSummary.make(statuses: statuses, notifications: notifications) }
 
     func status(of kind: MacPermissionKind) -> MacPermissionStatus? { statuses[kind] }
 
@@ -28,6 +39,31 @@ final class MacPermissionsModel {
         // A request in flight owns its row; its own refresh follows.
         statuses = fresh.merging(statuses.filter { asking.contains($0.key) }) { _, current in current }
         askedInVain = askedInVain.filter { statuses[$0] != .granted }
+        notifications = await readNotifications()
+    }
+
+    /// Asks macOS to allow banners (its dialog shows once; after a refusal only System Settings changes it).
+    func askNotifications() async {
+        notifications = await NotificationPermission.request()
+    }
+
+    /// Opens the app (an Automation row cannot be checked while its app is closed), waits for it to answer, then asks.
+    func openAppAndAsk(_ kind: MacPermissionKind) async {
+        guard case .automation(let target) = kind,
+              let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: target.bundleID) else {
+            kind.pane.open()
+            return
+        }
+        asking.insert(kind)
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = false
+        _ = try? await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+        for _ in 0..<10 {
+            if await checker.status(ofInBackground: kind) != .appNotRunning { break }
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        asking.remove(kind)
+        await ask(kind)
     }
 
     /// Shows the system dialog (where macOS has one) and waits for the answer.
@@ -42,48 +78,196 @@ final class MacPermissionsModel {
     }
 }
 
+
+// MARK: - What the tab says
+
+/// How macOS lets the Orb post banners.
+enum NotificationPermission: Equatable, Sendable {
+    /// Not a bundled app (`swift run`): there is no notification center to ask.
+    case unavailable
+    case notDetermined
+    case denied
+    case allowed
+
+    @MainActor static func current() async -> NotificationPermission {
+        guard ApprovalNotifications.isAvailable else { return .unavailable }
+        return map(await UNUserNotificationCenter.current().notificationSettings().authorizationStatus)
+    }
+
+    /// Shows the system dialog if macOS never asked, then reports the answer.
+    @MainActor static func request() async -> NotificationPermission {
+        guard ApprovalNotifications.isAvailable else { return .unavailable }
+        let center = UNUserNotificationCenter.current()
+        ApprovalNotifications.prepare(center)
+        _ = try? await center.requestAuthorization(options: [.alert, .sound])
+        return await current()
+    }
+
+    static func map(_ status: UNAuthorizationStatus) -> NotificationPermission {
+        switch status {
+        case .authorized, .provisional, .ephemeral: .allowed
+        case .denied: .denied
+        case .notDetermined: .notDetermined
+        @unknown default: .notDetermined
+        }
+    }
+
+    static let settingsURL = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")
+        ?? URL(filePath: "/System/Applications/System Settings.app")
+
+    var status: MacPermissionStatus {
+        switch self {
+        case .allowed: .granted
+        case .denied: .denied
+        case .notDetermined: .notDetermined
+        case .unavailable: .unknown
+        }
+    }
+}
+
+/// The header of the tab: everything ready, or what is missing.
+struct MacPermissionsSummary: Equatable {
+    var isLoaded: Bool
+    /// Names of the essential permissions that are not granted.
+    var missing: [String]
+    var automationGranted: Int
+    var automationTotal: Int
+
+    static func make(statuses: [MacPermissionKind: MacPermissionStatus], notifications: NotificationPermission?) -> MacPermissionsSummary {
+        let essentials: [MacPermissionKind] = [.accessibility, .screenRecording, .fullDiskAccess]
+        let notGranted: Set<MacPermissionStatus> = [.denied, .notGranted, .notDetermined]
+        var missing = essentials.filter { statuses[$0].map(notGranted.contains) ?? false }.map(\.title)
+        if let notifications, notGranted.contains(notifications.status) { missing.append("Notificações") }
+        let automation = AutomationTarget.known.map { statuses[.automation($0)] }
+        return MacPermissionsSummary(isLoaded: !statuses.isEmpty && notifications != nil, missing: missing,
+                                     automationGranted: automation.filter { $0 == .granted }.count,
+                                     automationTotal: automation.count)
+    }
+
+    var title: String {
+        if !isLoaded { return "Verificando…" }
+        switch missing.count {
+        case 0: return "Tudo pronto"
+        case 1: return "Falta 1 permissão"
+        default: return "Faltam \(missing.count) permissões"
+        }
+    }
+
+    var subtitle: String {
+        if !isLoaded { return "Lendo o que o macOS já liberou." }
+        return missing.isEmpty ? "As permissões essenciais estão liberadas." : missing.joined(separator: ", ") + "."
+    }
+
+    var isComplete: Bool { isLoaded && missing.isEmpty }
+    var automationText: String { "\(automationGranted) de \(automationTotal) liberados" }
+}
+
+/// The one button a row offers.
+enum PermissionRowAction: Equatable {
+    case ask
+    case openAppAndAsk(appName: String)
+    case openSystemSettings
+
+    /// Nil while the status is unknown or when nothing is left to do.
+    static func resolve(kind: MacPermissionKind, status: MacPermissionStatus?, canAsk: Bool) -> PermissionRowAction? {
+        guard let status, status != .granted else { return nil }
+        if case .automation(let target) = kind, status == .appNotRunning { return .openAppAndAsk(appName: target.name) }
+        return canAsk ? .ask : .openSystemSettings
+    }
+
+    var title: String {
+        switch self {
+        case .ask: "Pedir agora"
+        case .openAppAndAsk(let name): "Abrir \(name) e pedir"
+        case .openSystemSettings: "Abrir Ajustes do Sistema"
+        }
+    }
+}
+
+// MARK: - The tab
+
 struct MacPermissionsView: View {
     @State private var model = MacPermissionsModel()
+    @State private var showsAutomation = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
+        let summary = model.summary
         Form {
             Section {
-                ForEach(AutomationTarget.known) { target in
-                    MacPermissionRow(kind: .automation(target), model: model)
-                }
-            } header: {
-                Text("Automação")
-            } footer: {
-                Text("Cada app pede a própria permissão, na primeira vez que o Orb o controla. Apps fechados só podem ser verificados depois de abertos.")
+                MacPermissionsHeader(summary: summary) { Task { await model.refresh() } }
             }
             Section {
                 MacPermissionRow(kind: .accessibility, model: model)
                 MacPermissionRow(kind: .screenRecording, model: model)
-            } header: {
-                Text("Interface e tela")
-            } footer: {
-                Text("A Gravação de Tela só vale depois que o Orb é reaberto. O macOS pergunta uma vez só: se já negou, use Abrir Ajustes.")
-            }
-            Section {
                 MacPermissionRow(kind: .fullDiskAccess, model: model)
+                NotificationRow(model: model)
             } header: {
-                Text("Arquivos")
+                Text("Essenciais")
             } footer: {
-                Text("O macOS não informa se o Acesso Total ao Disco está ligado: o Orb tenta abrir uma pasta protegida (Mail ou Safari) e deduz.")
+                Text("A Gravação de Tela só vale depois de reabrir o Orb, e o macOS pergunta uma vez só.")
             }
             Section {
-                Text("As permissões valem para esta cópia do Orb. Se o app é recompilado com a assinatura temporária, o macOS "
-                     + "trata a nova cópia como outro app e pede tudo de novo. Para manter, assine com o certificado local "
-                     + "\"Orb Local\" (scripts/make-signing-identity.sh, descrito no README).")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                DisclosureGroup(isExpanded: $showsAutomation) {
+                    ForEach(AutomationTarget.known) { target in
+                        MacPermissionRow(kind: .automation(target), model: model)
+                    }
+                } label: {
+                    HStack {
+                        Text("Apps que o Orb controla")
+                        Spacer()
+                        Text(summary.isLoaded ? summary.automationText : "")
+                            .font(.caption)
+                            .foregroundStyle(Palette.muted)
+                    }
+                    .contentShape(.rect)
+                    .onTapGesture { withAnimation(reduceMotion ? nil : .snappy(duration: 0.2)) { showsAutomation.toggle() } }
+                }
+            } footer: {
+                Text("Cada app pede a própria permissão, na primeira vez que o Orb o controla.")
+            }
+            Section {
+                DisclosureGroup("Avançado (desenvolvedores)") {
+                    Text("As permissões valem para esta cópia do Orb. Se o app é recompilado com a assinatura temporária, o macOS "
+                         + "trata a nova cópia como outro app e pede tudo de novo. Para manter, assine com o certificado local "
+                         + "\"Orb Local\" (scripts/make-signing-identity.sh, descrito no README).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .formStyle(.grouped)
+        .orbFormBackground()
         .task { await model.refresh() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await model.refresh() }
         }
+    }
+}
+
+private struct MacPermissionsHeader: View {
+    let summary: MacPermissionsSummary
+    let recheck: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: summary.isComplete ? "checkmark.shield.fill" : "lock.shield")
+                .font(.system(size: 24))
+                .foregroundStyle(summary.isComplete ? Palette.ok : (summary.isLoaded ? Palette.warn : Palette.muted))
+                .frame(width: 32)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(summary.title).font(.system(size: 14, weight: .semibold))
+                Text(summary.subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            Button("Verificar de novo", action: recheck)
+                .controlSize(.small)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
     }
 }
 
@@ -93,21 +277,66 @@ private struct MacPermissionRow: View {
 
     var body: some View {
         let status = model.status(of: kind)
+        let isAsking = model.asking.contains(kind)
+        let action = PermissionRowAction.resolve(kind: kind, status: status, canAsk: model.canAsk(kind))
         LabeledContent {
             HStack(spacing: 8) {
-                StatusBadge(status: status, isAsking: model.asking.contains(kind))
-                if model.canAsk(kind) {
-                    Button("Pedir agora") { Task { await model.ask(kind) } }
+                StatusBadge(status: status, isAsking: isAsking)
+                if let action {
+                    Button(action.title) { perform(action) }
                         .controlSize(.small)
-                        .disabled(model.asking.contains(kind))
+                        .disabled(isAsking)
                 }
-                Button("Abrir Ajustes") { kind.pane.open() }
-                    .controlSize(.small)
             }
         } label: {
             VStack(alignment: .leading, spacing: 2) {
                 Text(kind.title)
-                Text(model.askedInVain.contains(kind) ? "O macOS não pergunta de novo: ligue o Orb em Abrir Ajustes." : kind.detail)
+                    .foregroundStyle(status == .appNotRunning ? Palette.muted : Palette.ink)
+                Text(detail(status))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func detail(_ status: MacPermissionStatus?) -> String {
+        if model.askedInVain.contains(kind) { return "O macOS não pergunta de novo: ligue o Orb em Ajustes do Sistema." }
+        if status == .appNotRunning, case .automation = kind { return "Precisa estar aberto para verificar. O botão abre o app e pede a permissão." }
+        return kind.detail
+    }
+
+    private func perform(_ action: PermissionRowAction) {
+        switch action {
+        case .ask: Task { await model.ask(kind) }
+        case .openAppAndAsk: Task { await model.openAppAndAsk(kind) }
+        case .openSystemSettings: kind.pane.open()
+        }
+    }
+}
+
+/// Notifications are not a privacy pane of their own kind: the row reads and asks through the notification center.
+private struct NotificationRow: View {
+    let model: MacPermissionsModel
+
+    var body: some View {
+        let state = model.notifications
+        LabeledContent {
+            HStack(spacing: 8) {
+                StatusBadge(status: state?.status, isAsking: false)
+                switch state {
+                case .notDetermined?:
+                    Button("Pedir agora") { Task { await model.askNotifications() } }.controlSize(.small)
+                case .denied?:
+                    Button("Abrir Ajustes do Sistema") { NSWorkspace.shared.open(NotificationPermission.settingsURL) }
+                        .controlSize(.small)
+                default:
+                    EmptyView()
+                }
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Notificações")
+                Text(state == .unavailable ? "Só funcionam no app instalado, não ao rodar pelo Xcode ou terminal."
+                     : "Avisar quando um Orb terminar ou precisar de você")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -134,19 +363,50 @@ private struct StatusBadge: View {
     }
 }
 
-/// A tiny "Abrir Ajustes" button for a failed tool row whose output names a missing permission.
+/// "Permitir…" on a failed tool row whose output names a missing permission: asks macOS where it can show its
+/// dialog, and otherwise opens the pane of System Settings where the user turns it on.
 struct OpenPrivacySettingsButton: View {
     let problem: MacPermissionProblem
+    @State private var isWorking = false
 
     var body: some View {
         Button {
-            problem.pane.open()
+            Task { await allow() }
         } label: {
-            Label("Abrir Ajustes: \(problem.paneTitle)", systemImage: "lock.shield")
+            Label("Permitir…", systemImage: "lock.shield")
                 .font(.system(size: 11))
         }
         .buttonStyle(.plain)
         .foregroundStyle(Palette.accentText)
+        .disabled(isWorking)
+        .help("Pede a permissão ao macOS ou abre Ajustes do Sistema → \(problem.settingsPath)")
+        .accessibilityLabel("Permitir: \(problem.paneTitle)")
+    }
+
+    private func allow() async {
+        isWorking = true
+        defer { isWorking = false }
+        let checker = MacPermissionChecker.live
+        if let kind = await problem.permissionKind(checker), kind.canBeAskedNow,
+           await checker.status(ofInBackground: kind).canShowSystemPrompt {
+            _ = await checker.requestInBackground(kind)
+            return // macOS showed its own dialog, which offers System Settings when it needs it
+        }
+        problem.pane.open()
+    }
+}
+
+extension MacPermissionProblem {
+    /// The row of the settings tab this failure belongs to, when it can be told.
+    func permissionKind(_ checker: MacPermissionChecker) async -> MacPermissionKind? {
+        switch self {
+        case .accessibility: return .accessibility
+        case .screenRecording: return .screenRecording
+        case .fullDiskAccess: return .fullDiskAccess
+        case .automation(let app):
+            guard let app else { return nil }
+            return await Blocking.run(fallback: nil) { checker.target(forScriptName: app).map(MacPermissionKind.automation) }
+        }
     }
 }
 

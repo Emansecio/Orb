@@ -491,6 +491,8 @@ struct Skill: Identifiable, Codable, Sendable {
     var source: String?
     /// GitHub folder of a catalog skill (its instructions may point to files there).
     var folderURL: URL?
+    /// The Orbs that may use this skill; nil means every Orb (what skills did before they were scoped).
+    var orbIDs: Set<UUID>?
 }
 
 extension Skill {
@@ -505,6 +507,7 @@ extension Skill {
         isEnabled = try c.value(.isEnabled, default: true)
         source = try c.decodeIfPresent(String.self, forKey: .source).map { $0 == Self.legacyBuiltInSource ? Self.builtInSource : $0 }
         folderURL = try c.decodeIfPresent(URL.self, forKey: .folderURL)
+        orbIDs = (try? c.decodeIfPresent(Set<UUID>.self, forKey: .orbIDs)) ?? nil
     }
 
     /// `source` of the skills that ship with the app (`legacyBuiltInSource` in files saved while it was OpenBot).
@@ -515,6 +518,17 @@ extension Skill {
     static func slugify(_ text: String) -> String {
         String(text.lowercased().folding(options: .diacriticInsensitive, locale: nil)
             .map { $0.isLetter || $0.isNumber ? $0 : "-" }.prefix(32))
+    }
+
+    /// A finished slug: `slugify`, without leading, trailing or doubled dashes ("Resumir texto!" -> "resumir-texto").
+    static func cleanSlug(_ text: String) -> String {
+        slugify(text).split(separator: "-", omittingEmptySubsequences: true).joined(separator: "-")
+    }
+
+    /// What the shortcut field should read while the user types the name: it follows the name until they edit the
+    /// shortcut themselves (`edited`); a shortcut already saved never changes on its own.
+    static func suggestedSlug(forName name: String, current: String, edited: Bool) -> String {
+        edited ? current : cleanSlug(name)
     }
 }
 

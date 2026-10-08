@@ -1,0 +1,261 @@
+import Foundation
+import SwiftUI
+import Testing
+@testable import Orb
+
+@Suite struct SystemCommandsTests {
+    // MARK: Menu bar icon
+
+    @Test func waitingOutranksWorkingAndIdle() {
+        #expect(MenuBarState.resolve(waiting: 0, working: 0) == .idle)
+        #expect(MenuBarState.resolve(waiting: 0, working: 2) == .working(2))
+        #expect(MenuBarState.resolve(waiting: 1, working: 2) == .waiting(1))
+        #expect(MenuBarState.waiting(1).hasBadge)
+        #expect(!MenuBarState.working(1).hasBadge)
+    }
+
+    @Test func iconSpeaksInPortuguese() {
+        #expect(MenuBarState.idle.accessibilityLabel == "Orb")
+        #expect(MenuBarState.waiting(1).accessibilityLabel == "Orb: 1 Orb esperando sua permissão")
+        #expect(MenuBarState.waiting(3).accessibilityLabel == "Orb: 3 Orbs esperando sua permissão")
+        #expect(MenuBarState.working(1).accessibilityLabel == "Orb: 1 Orb trabalhando")
+    }
+
+    // MARK: Shortcuts
+
+    @Test func noTwoShortcutsShareAKey() {
+        let keys = ShortcutCatalog.groups.flatMap(\.items).map(\.keys)
+        #expect(Set(keys).count == keys.count)
+    }
+
+    @Test func theKeysTheMenusDeclareAreUniqueAndNotTheSystems() {
+        let all = AppShortcut.all
+        #expect(Set(all).count == all.count)
+        // The ones every Mac app answers to are not taken over.
+        for key in ["c", "v", "x", "z", "a", "q", "w", "h", "m", ","] {
+            #expect(!all.contains(KeyboardShortcut(KeyEquivalent(Character(key)))), "⌘\(key) é do sistema")
+        }
+    }
+
+    @Test func everyKeyOfTheMenusIsInTheCatalog() {
+        let keys = ShortcutCatalog.groups.flatMap(\.items).map(\.keys)
+        for shortcut in AppShortcut.all.prefix(AppShortcut.all.count - 9) {
+            #expect(keys.contains(shortcut.label), "\(shortcut.label) falta no catálogo")
+        }
+        #expect(keys.contains("⌘1 – ⌘9"))
+    }
+
+    @Test func shortcutsAreWrittenLikeTheMenusDo() {
+        #expect(AppShortcut.toggleInspector.label == "⌥⌘B")
+        #expect(AppShortcut.newConversation.label == "⇧⌘N")
+        #expect(AppShortcut.previousBot.label == "⌥↑")
+        #expect(AppShortcut.bot(at: 2).label == "⌘3")
+        #expect(AppShortcut.stop.label == "⌘.")
+    }
+
+    /// In a multi-line field of macOS, Shift-Return sends; the line break is Option-Return. The hints say so.
+    @Test func newLineHintIsOptionReturn() {
+        #expect(CommandName.newLineKeys == "⌥↩")
+        let items = ShortcutCatalog.groups.flatMap(\.items)
+        #expect(items.contains { $0.keys == "⌥↩" && $0.title == "Nova linha na mensagem" })
+        #expect(!items.contains { $0.keys.contains("⇧↩") })
+    }
+
+    @Test func catalogListsTheCommandsOfTheMenus() {
+        let keys = Set(ShortcutCatalog.groups.flatMap(\.items).map(\.keys))
+        for key in ["⌘N", "⇧⌘N", "⌘K", "⌘L", "⌘Y", "⇧⌘O", "⌘.", "⌥⌘B", "⌥⌘R", "⌥⌘C", "⌥⌘K", "⌥↑", "⌥↓"] {
+            #expect(keys.contains(key), "\(key) falta no catálogo")
+        }
+    }
+
+    // MARK: Palette
+
+    private func sample() -> [PaletteEntry] {
+        let atlas = BotLook(Bot(id: UUID(), name: "Atlas", role: "Assistente do seu Mac", orb: OrbConfig()))
+        let luna = BotLook(Bot(id: UUID(), name: "Luna", role: "Agenda", orb: OrbConfig()))
+        let archive = [ConversationSummary(title: "Organizar a pasta Downloads", createdAt: .now, updatedAt: .now, messageCount: 4)]
+        return PaletteBuilder.entries(orbs: [atlas, luna], current: atlas.id, routines: [], skills: [], archive: archive)
+    }
+
+    @Test func emptyQueryKeepsTheGroupsInOrder() {
+        let sections = PaletteSearch.rank(sample(), query: "").map(\.section)
+        #expect(sections == sections.sorted())
+        #expect(sections.first == .orbs)
+    }
+
+    @Test func searchIgnoresCaseAndAccents() {
+        #expect(PaletteSearch.rank(sample(), query: "INTEGRACOES").map(\.id) == ["page-connectors"]) // keyword "integrações"
+        #expect(PaletteSearch.rank(sample(), query: "historico").contains { $0.id == "history" }) // keyword "histórico"
+        #expect(PaletteSearch.rank(sample(), query: "luna").first?.title == "Luna")
+    }
+
+    @Test func titlePrefixBeatsContains() {
+        let ranked = PaletteSearch.rank(sample(), query: "conversa")
+        // "Conversas anteriores" (starts with it) comes before "Nova conversa" (a later word) and the archived one.
+        let titles = ranked.map(\.title)
+        #expect(titles.first == "Conversas anteriores")
+        #expect(titles.contains("Nova conversa"))
+    }
+
+    @Test func everyWordMustMatch() {
+        #expect(PaletteSearch.rank(sample(), query: "pasta finder").map(\.id) == ["folder"])
+        #expect(PaletteSearch.rank(sample(), query: "pasta zzz").isEmpty)
+    }
+
+    @Test func orbsGetTheirNumberShortcut() {
+        let orbs = sample().filter { $0.section == .orbs }
+        #expect(orbs.map(\.shortcut) == ["⌘1", "⌘2"])
+    }
+
+    @Test func noOrbOpenMeansNoOrbActions() {
+        let entries = PaletteBuilder.entries(orbs: [], current: nil, routines: [], skills: [], archive: [])
+        #expect(!entries.contains { $0.id == "new-conversation" })
+        #expect(entries.contains { $0.id == "new-bot" })
+    }
+
+    // MARK: Menu bar panel
+
+    @Test func batchPreviewListsThreeActionsAndCountsTheRest() {
+        let items = (1...5).map { ApprovalItem(toolName: "run_command", title: "Rodando \($0)", command: "cmd \($0)") }
+        let request = ApprovalRequest(toolName: "batch", title: "5 ações", command: "", reason: "", items: items)
+        let preview = ApprovalPreview.of(request)
+        #expect(preview.rows.count == 3)
+        #expect(preview.rows.first == .init(title: "Rodando 1", command: "cmd 1"))
+        #expect(preview.extra == 2)
+        #expect(preview.extraLabel == "+ 2 ações")
+    }
+
+    @Test func singlePreviewIsTheCommand() {
+        let request = ApprovalRequest(toolName: "run_command", title: "Rodando no Terminal", command: "brew upgrade", reason: "")
+        let preview = ApprovalPreview.of(request)
+        #expect(preview.rows == [.init(title: nil, command: "brew upgrade")])
+        #expect(preview.extraLabel == nil)
+        #expect(ApprovalPreview(rows: [], extra: 1).extraLabel == "+ 1 ação")
+    }
+
+    @Test func replyIsTheNewestBotMessageAfterTheLastUserOne() {
+        let user = TranscriptItem(.user(text: "oi", attachments: []))
+        let old = TranscriptItem(.bot(text: "antiga", isStreaming: false))
+        let tool = TranscriptItem(.notice("aviso"))
+        let fresh = TranscriptItem(.bot(text: "nova", isStreaming: true))
+        #expect(QuickAskReplyText.latestReply(in: [old, user, tool]) == nil)
+        #expect(QuickAskReplyText.latestReply(in: [old, user, tool, fresh])?.text == "nova")
+        #expect(QuickAskReplyText.latestReply(in: [old, user, tool, fresh])?.isStreaming == true)
+    }
+
+    @Test func excerptKeepsTheLastLines() {
+        let text = (1...10).map { "linha \($0)" }.joined(separator: "\n\n")
+        let cut = QuickAskReplyText.excerpt(text, maxLines: 3)
+        #expect(cut.text == "linha 8\n\nlinha 9\n\nlinha 10")
+        #expect(cut.isCut)
+        let whole = QuickAskReplyText.excerpt("a\n\n\n\nb\n", maxLines: 6)
+        #expect(whole.text == "a\n\nb")
+        #expect(!whole.isCut)
+    }
+
+    @Test func excerptTurnsListMarkersIntoBullets() {
+        let shown = QuickAskReplyText.excerpt("Pastas:\n- Biblioteca\n* Filmes\n  - Downloads")
+        #expect(shown.text == "Pastas:\n• Biblioteca\n• Filmes\n• Downloads")
+    }
+
+    @Test func streamedExcerptReadsOnlyTheEndAndAgreesWithTheWholeText() {
+        let closed = (1...500).map { "parágrafo \($0)\ncontinua \($0)" }
+        let tail = "ainda escrevendo"
+        let fast = QuickAskReplyText.excerpt(closed: closed, tail: tail, maxLines: 6)
+        let slow = QuickAskReplyText.excerpt((closed + [tail]).joined(separator: "\n\n"), maxLines: 6)
+        #expect(fast.text == slow.text)
+        #expect(fast.isCut && slow.isCut)
+        let short = QuickAskReplyText.excerpt(closed: ["um"], tail: "dois", maxLines: 6)
+        #expect(short.text == "um\n\ndois")
+        #expect(!short.isCut)
+        #expect(QuickAskReplyText.excerpt(closed: [], tail: "", maxLines: 6).text.isEmpty)
+    }
+
+    // MARK: Delete dialog
+
+    @Test func deleteSummaryNamesWhatGoesAndWhatStays() {
+        let summary = DeleteOrbSummary(name: "Atlas", archivedCount: 12, routineCount: 2, folder: "~/Orbs/Atlas")
+        #expect(summary.goes == "Some: a conversa atual, 12 conversas arquivadas e 2 rotinas.")
+        #expect(summary.stays == "Fica: a pasta ~/Orbs/Atlas e, se você quiser, a memória.")
+    }
+
+    @Test func deleteSummaryHandlesSingularsAndNothingElse() {
+        #expect(DeleteOrbSummary(name: "A", archivedCount: 1, routineCount: 1, folder: nil).goes
+                == "Some: a conversa atual, 1 conversa arquivada e 1 rotina.")
+        #expect(DeleteOrbSummary(name: "A", archivedCount: 0, routineCount: 0, folder: nil).goes == "Some: a conversa atual.")
+        #expect(DeleteOrbSummary(name: "A", archivedCount: nil, routineCount: 0, folder: nil).goes
+                == "Some: a conversa atual e as conversas arquivadas.")
+        #expect(DeleteOrbSummary(name: "A", archivedCount: 0, routineCount: 0, folder: nil).stays.hasPrefix("Fica: tudo o que está no seu Mac"))
+    }
+
+    @Test func keptMemoryFolderIsFoundByName() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "kept-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        for name in ["Atlas – 2026-10-01 09.00", "Atlas – 2026-10-07 18.30", "Luna – 2026-10-07 18.30"] {
+            try FileManager.default.createDirectory(at: root.appending(path: name), withIntermediateDirectories: true)
+        }
+        #expect(AppModel.newestKeptFolder(named: "Atlas", in: root)?.lastPathComponent == "Atlas – 2026-10-07 18.30")
+        #expect(AppModel.newestKeptFolder(named: "Zeca", in: root) == nil)
+    }
+}
+
+/// A command that opens an Orb's chat leaves a request the chat takes when it is on screen.
+@Suite final class ChatRequestTests {
+    let root = FileManager.default.temporaryDirectory.appending(path: "OrbRequests-\(UUID().uuidString)")
+
+    deinit { try? FileManager.default.removeItem(at: root) }
+
+    @MainActor private func model() -> AppModel {
+        var state = AppState.initial
+        state.bots.append(Bot(name: "Luna", role: "Agenda", orb: OrbConfig()))
+        Store(directory: root).save(state)
+        return AppModel(store: Store(directory: root), runsBackgroundWork: false)
+    }
+
+    @Test @MainActor func requestForAnotherOrbOpensItAndWaitsForItsChat() {
+        let model = model()
+        let (first, second) = (model.botIDs[0], model.botIDs[1])
+        model.selection = .bot(first)
+        model.showConversations(of: second)
+        #expect(model.selection == .bot(second))
+        #expect(!model.takeChatRequest(.showConversations, of: first))
+        #expect(!model.takeChatRequest(.focusComposer, of: second))
+        #expect(model.takeChatRequest(.showConversations, of: second))
+        #expect(!model.takeChatRequest(.showConversations, of: second)) // taken once
+    }
+
+    @Test @MainActor func commandsFromAWorkspacePageLandOnTheFirstOrb() {
+        let model = model()
+        model.selection = .routines
+        model.focusComposer()
+        #expect(model.selection == .bot(model.botIDs[0]))
+        #expect(model.takeChatRequest(.focusComposer, of: model.botIDs[0]))
+    }
+
+    @Test @MainActor func lookEditorOpensThePanelOfThatOrb() {
+        let model = model()
+        model.showInspector = false
+        model.showLookEditor(of: model.botIDs[1])
+        #expect(model.showInspector)
+        #expect(model.selection == .bot(model.botIDs[1]))
+        #expect(model.takeChatRequest(.editLook, of: model.botIDs[1]))
+    }
+
+    @Test @MainActor func menuCommandsWaitWhileASheetIsOpen() {
+        let model = model()
+        #expect(!model.hasOpenSheet)
+        model.showNewBot = true
+        #expect(model.hasOpenSheet)
+        model.showNewBot = false
+        model.askToDelete(model.botIDs[0])
+        #expect(model.hasOpenSheet)
+    }
+
+    @Test @MainActor func keptMemoryNoticeOnlyForAnOrbWithSomethingToKeep() {
+        let model = model()
+        let luna = model.botIDs[1]
+        // Luna has not spoken and has no memory folder: nothing was kept, so nothing says it was.
+        model.confirmDelete(luna, keepMemory: true)
+        #expect(model.keptMemoryNotice == nil)
+    }
+}

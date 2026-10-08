@@ -13,9 +13,7 @@ struct ChatView: View {
         TranscriptList(look: look)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
-                if !model.isProviderReady {
-                    SetupBanner()
-                }
+                FirstRunBanner(botID: botID)
                 ComposerView(botID: botID)
             }
         }
@@ -28,16 +26,16 @@ struct ChatView: View {
                 Button("Nova conversa", systemImage: "square.and.pencil") {
                     model.newConversation(botID)
                 }
-                .help("Nova conversa (⇧⌘N). A atual fica guardada em Conversas.")
+                .help("\(CommandName.newConversation) (\(AppShortcut.newConversation.label)). A atual fica guardada em Conversas.")
                 Button("Painel do Orb", systemImage: "sidebar.right") {
                     model.showInspector.toggle()
                 }
-                .help("Mostrar/ocultar detalhes (⌥⌘B)")
+                .help("\(CommandName.toggleInspector) (\(AppShortcut.toggleInspector.label))")
             }
         }
         .inspector(isPresented: $model.showInspector) {
             BotInspector(botID: botID)
-                .inspectorColumnWidth(min: 244, ideal: 320, max: 420)
+                .inspectorColumnWidth(min: 244, ideal: 300, max: 420)
         }
     }
 }
@@ -73,6 +71,7 @@ private struct TranscriptList: View {
                         TranscriptRow(item: item, botID: look.id, orb: look.orb)
                             .equatable()
                     }
+                    QueuedMessages(botID: look.id)
                     if let status {
                         WorkingLine(look: look, text: status)
                     }
@@ -269,19 +268,17 @@ private struct LoadingTranscript: View {
     }
 }
 
+/// An empty chat: who this Orb is, and either how to connect a first model (until one is) or what to ask it,
+/// which depends on the folder it works in and what it may use. Everything it shows comes from small values of the
+/// Orb's settings; nothing is read from disk while it draws.
 private struct EmptyChatView: View {
     @Environment(AppModel.self) private var model
     let look: BotLook
-
-    private let suggestions = [
-        ("folder", "Organize minha pasta Downloads"),
-        ("doc.text", "Resuma o arquivo mais recente da minha Mesa"),
-        ("internaldrive", "Quanto espaço livre tenho no disco?"),
-        ("terminal", "Veja o que está desatualizado no brew")
-    ]
+    @State private var firstRun = FirstRunModel()
 
     var body: some View {
         let live = model.live(look.id)
+        let showsFirstRun = !model.isProviderReady || firstRun.connectedName != nil
         VStack(spacing: 16) {
             BotAvatar(orb: look.orb, size: 96, activity: live.activity, poke: live.poke, interactive: true)
                 .padding(.top, 72)
@@ -289,27 +286,51 @@ private struct EmptyChatView: View {
                 Text(look.name)
                     .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(Palette.ink)
-                Text(look.role)
+                Text(look.role.isEmpty ? "Seu assistente" : look.role)
                     .font(.system(size: 13))
                     .foregroundStyle(Palette.muted)
             }
-            VStack(spacing: 6) {
-                if live.memory.interviewPending {
-                    SuggestionButton(symbol: "questionmark.bubble", text: "Me conheça: faça perguntas para entender como me ajudar") {
-                        model.send("Oi! Antes de começarmos, me faça algumas perguntas para entender como você pode me ajudar.",
-                                   to: look.id)
+            if showsFirstRun {
+                FirstRunCard(style: .chat(botName: look.name), run: firstRun)
+                    .padding(.top, 8)
+            } else {
+                let bot = live.bot
+                OrbContextLine(folder: EmptyChatContent.folderText(for: bot),
+                               capabilities: EmptyChatContent.capabilityNames(for: bot))
+                VStack(spacing: 6) {
+                    ForEach(EmptyChatContent.suggestions(for: bot, interviewPending: live.memory.interviewPending)) { suggestion in
+                        SuggestionButton(symbol: suggestion.symbol, text: suggestion.text) {
+                            model.send(suggestion.symbol == "questionmark.bubble"
+                                       ? "Oi! Antes de começarmos, me faça algumas perguntas para entender como você pode me ajudar."
+                                       : suggestion.text, to: look.id)
+                        }
                     }
                 }
-                ForEach(suggestions, id: \.1) { symbol, text in
-                    SuggestionButton(symbol: symbol, text: text) {
-                        model.send(text, to: look.id)
-                    }
-                }
+                .frame(maxWidth: 420)
+                .padding(.top, 4)
             }
-            .frame(maxWidth: 420)
-            .padding(.top, 12)
         }
         .frame(maxWidth: .infinity)
+        .animateChanges(of: showsFirstRun)
+    }
+}
+
+/// Where the Orb works and what it may use, in two quiet lines under its name.
+private struct OrbContextLine: View {
+    let folder: String?
+    let capabilities: [String]
+
+    var body: some View {
+        VStack(spacing: 3) {
+            if let folder { Label(folder, systemImage: "folder") }
+            if !capabilities.isEmpty {
+                Text(capabilities.joined(separator: "  ·  "))
+            }
+        }
+        .font(.system(size: 12))
+        .foregroundStyle(Palette.faint)
+        .multilineTextAlignment(.center)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -327,11 +348,13 @@ private struct SuggestionButton: View {
                     .frame(width: 18)
                 Text(text)
                     .foregroundStyle(Palette.secondary)
+                    .multilineTextAlignment(.leading)
                 Spacer()
                 Image(systemName: "arrow.up.right")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Palette.faint)
+                    .foregroundStyle(Palette.hint)
                     .opacity(isHovering ? 1 : 0)
+                    .accessibilityHidden(true)
             }
             .font(.system(size: 13))
             .padding(.horizontal, 14)
@@ -344,31 +367,8 @@ private struct SuggestionButton: View {
     }
 }
 
-/// Shown until a model provider is configured.
-private struct SetupBanner: View {
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "cpu")
-                .foregroundStyle(Palette.muted)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Conecte um modelo para começar")
-                    .font(.system(size: 13, weight: .semibold))
-                Text("xAI, OpenAI, OpenRouter ou um modelo local (Ollama, LM Studio).")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Palette.muted)
-            }
-            Spacer()
-            SettingsLink { Text("Abrir Ajustes") }
-                .buttonStyle(PrimaryPillStyle())
-        }
-        .padding(14)
-        .card(radius: 14)
-        .frame(maxWidth: 760)
-        .padding(.horizontal, 28)
-    }
-}
-
-/// Live status of a working bot: shimmering activity text next to its spinning orb.
+/// Live status of a working bot: shimmering activity text next to its spinning orb, and how long the turn has
+/// lasted. The clock ticks once a second, and only while this line exists (a turn is running).
 private struct WorkingLine: View {
     @Environment(AppModel.self) private var model
     let look: BotLook
@@ -378,11 +378,31 @@ private struct WorkingLine: View {
         let live = model.live(look.id)
         HStack(spacing: 10) {
             BotAvatar(orb: look.orb, size: 30, activity: live.activity, poke: live.poke)
-            Text("\(text)…")
-                .font(.system(size: 13))
-                .shimmer()
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("\(text)…")
+                    .font(.system(size: 13))
+                    .shimmer()
+                if let since = live.workingSince {
+                    ElapsedClock(since: since)
+                }
+            }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(look.name): \(text)")
+    }
+}
+
+/// "12 s" next to the status, redrawn once a second. Hidden from VoiceOver, which would otherwise read every tick.
+private struct ElapsedClock: View {
+    let since: Date
+
+    var body: some View {
+        TimelineView(.periodic(from: since, by: 1)) { context in
+            let text = ElapsedFormat.working(since: since, now: context.date)
+            Text(text)
+                .font(.system(size: 12).monospacedDigit())
+                .foregroundStyle(Palette.faint)
+        }
+        .accessibilityHidden(true)
     }
 }

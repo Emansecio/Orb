@@ -10,6 +10,10 @@ struct ConnectorsView: View {
         _tab = State(initialValue: tab)
     }
 
+    private var hasProblem: Bool {
+        model.connectorStatus.values.contains { if case .failed = $0 { true } else { false } }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             CatalogTabBar(tab: $tab, installedTitle: "Instalados", installedCount: model.connectors.count)
@@ -22,14 +26,15 @@ struct ConnectorsView: View {
         }
         .background(Palette.canvas)
         .navigationTitle("Conectores")
-        .navigationSubtitle("Servidores MCP que dão novas ferramentas aos Orbs")
+        .navigationSubtitle("Dão novas ferramentas aos Orbs, como GitHub, Notion e arquivos")
         .toolbar {
             Button("Reconectar", systemImage: "arrow.clockwise") { model.syncConnectors() }
-                .help("Reconectar conectores com erro")
+                .help(hasProblem ? "Tentar conectar de novo os conectores com erro" : "Nenhum conector com erro")
+                .disabled(!hasProblem)
             Button("Adicionar manualmente", systemImage: "plus") {
                 editing = ConnectorDraft(config: MCPServerConfig(name: ""))
             }
-            .help("Adicionar um servidor MCP pelo comando ou URL")
+            .help("Adicionar um servidor pelo comando ou pela URL")
         }
         .sheet(item: $editing) { draft in
             ConnectorEditor(draft: draft)
@@ -37,11 +42,52 @@ struct ConnectorsView: View {
     }
 }
 
-/// A connector being added or edited, plus what its registry entry asks the user to fill in.
+/// A connector being added or edited, plus what its catalog entry says about it and asks the user to fill in.
 struct ConnectorDraft: Identifiable {
     var config: MCPServerConfig
     var inputs: [RegistryServer.Input] = []
+    /// What the connector does, in plain words (empty for one typed in by hand).
+    var summary = ""
+    var isOfficial = false
+    /// The argument that holds the folder the server may open (the filesystem server).
+    var folderArgumentIndex: Int?
+    var helpURL: URL?
     var id: UUID { config.id }
+
+    /// Came from the catalog: the sheet asks only for keys, the rest sits under "Avançado".
+    var isGuided: Bool { !summary.isEmpty || !inputs.isEmpty || config.source != nil }
+
+    init(config: MCPServerConfig, inputs: [RegistryServer.Input] = [], summary: String = "", isOfficial: Bool = false,
+         folderArgumentIndex: Int? = nil, helpURL: URL? = nil) {
+        self.config = config
+        self.inputs = inputs
+        self.summary = summary
+        self.isOfficial = isOfficial
+        self.folderArgumentIndex = folderArgumentIndex
+        self.helpURL = helpURL
+    }
+
+    init(template: ConnectorTemplate) {
+        self.init(config: template.config.withNewID(), inputs: template.inputs, summary: template.summary,
+                  folderArgumentIndex: template.folderArgumentIndex, helpURL: template.helpURL)
+    }
+
+    /// An installed connector: the same guided form it was installed with, with "Avançado" open.
+    init(editing config: MCPServerConfig) {
+        if let template = ConnectorTemplate.matching(config) {
+            self.init(config: config, inputs: template.inputs, summary: template.summary,
+                      folderArgumentIndex: template.folderArgumentIndex.flatMap { $0 < config.arguments.count ? $0 : nil },
+                      helpURL: template.helpURL)
+        } else if let source = config.source {
+            self.init(config: config, inputs: ConnectorEditing.inputs(for: config), isOfficial: RegistryServer.isOfficial(source))
+        } else {
+            self.init(config: config)
+        }
+    }
+
+    init(server: RegistryServer) {
+        self.init(config: server.config.withNewID(), inputs: server.inputs, summary: server.summary, isOfficial: server.isOfficial)
+    }
 }
 
 // MARK: Installed
@@ -55,23 +101,36 @@ private struct InstalledConnectors: View {
     var body: some View {
         @Bindable var model = model
         ScrollView {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 12)], spacing: 12) {
-                ForEach($model.connectors) { $connector in
-                    ConnectorCard(connector: $connector, status: model.connectorStatus[connector.id]) {
-                        editing = ConnectorDraft(config: connector)
-                    } onDelete: {
-                        deleting = connector
+            VStack(alignment: .leading, spacing: 16) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 12, alignment: .top)], alignment: .leading, spacing: 12) {
+                    ForEach($model.connectors) { $connector in
+                        ConnectorCard(connector: $connector, status: model.connectorStatus[connector.id],
+                                      usedBy: usedBy(connector)) {
+                            editing = ConnectorDraft(editing: connector)
+                        } onRetry: {
+                            model.syncConnectors()
+                        } onDelete: {
+                            deleting = connector
+                        }
                     }
+                }
+                if let heaviest = ConnectorLoad.heaviest(bots: model.bots, connectors: model.connectors, status: model.connectorStatus) {
+                    Label(ConnectorLoad.warning(for: heaviest), systemImage: "gauge.with.dots.needle.67percent")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.warn)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .padding(24)
+            .frame(maxWidth: 980)
+            .frame(maxWidth: .infinity)
         }
         .overlay {
             if model.connectors.isEmpty {
                 ContentUnavailableView {
                     Label("Nenhum conector", systemImage: "point.3.filled.connected.trianglepath.dotted")
                 } description: {
-                    Text("Conectores dão novas ferramentas aos Orbs que têm “Conectores” ativado no painel.")
+                    Text("Conectores dão aos Orbs novas ferramentas, como ler o GitHub ou o Notion. Instale um do catálogo ou adicione o seu.")
                 } actions: {
                     Button("Explorar catálogo", action: explore).buttonStyle(PrimaryPillStyle())
                 }
@@ -87,13 +146,24 @@ private struct InstalledConnectors: View {
             Text("As chaves e variáveis dele também serão apagadas.")
         }
     }
+
+    /// "Atlas, Lia" for the Orbs that get this connector now; nil for a disabled one.
+    private func usedBy(_ connector: MCPServerConfig) -> String? {
+        guard connector.isEnabled else { return nil }
+        let names = model.orbsUsing(connector).map(\.name)
+        return names.isEmpty ? "" : OrbScopeText.list(names)
+    }
 }
 
 private struct ConnectorCard: View {
     @Binding var connector: MCPServerConfig
     let status: MCPStatus?
+    /// Names of the Orbs that use it; "" when none does; nil when the connector is off.
+    let usedBy: String?
     let onEdit: () -> Void
+    let onRetry: () -> Void
     let onDelete: () -> Void
+    @State private var isShowingDetail = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -108,6 +178,7 @@ private struct ConnectorCard: View {
                         .foregroundStyle(Palette.faint)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .help(connector.source ?? "")
                 }
                 Spacer(minLength: 8)
                 Toggle("Ativo", isOn: $connector.isEnabled)
@@ -116,11 +187,19 @@ private struct ConnectorCard: View {
                     .controlSize(.small)
                     .help(connector.isEnabled ? "Desativar (fica instalado, mas os Orbs não usam)" : "Ativar")
             }
+            if case .failed(let message) = status, connector.isEnabled {
+                failure(message)
+            }
+            if let usedBy {
+                Label(usedBy.isEmpty ? "Nenhum Orb usa" : "Usado por \(usedBy)",
+                      systemImage: usedBy.isEmpty ? "person.crop.circle.badge.exclamationmark" : "person.2")
+                    .font(.system(size: 11))
+                    .foregroundStyle(usedBy.isEmpty ? Palette.warn : Palette.muted)
+                    .lineLimit(1)
+                    .help(usedBy.isEmpty ? "Ligue “Conectores” no painel de um Orb, ou escolha os Orbs em Editar." : "")
+            }
             HStack(spacing: 6) {
                 statusBadge
-                if let source = connector.source {
-                    CatalogBadge(text: source, symbol: "shippingbox")
-                }
                 Spacer(minLength: 0)
                 Menu {
                     Button("Editar…", action: onEdit)
@@ -134,6 +213,7 @@ private struct ConnectorCard: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
+                .accessibilityLabel("Mais ações de \(connector.name)")
             }
         }
         .padding(14)
@@ -142,13 +222,47 @@ private struct ConnectorCard: View {
         .animation(.snappy(duration: 0.2), value: connector.isEnabled)
     }
 
+    /// The reason in words, not in a tooltip, with the two things to do about it.
+    private func failure(_ message: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                isShowingDetail = true
+            } label: {
+                Text("Não conectou: \(ConnectorStatusText.shortError(message))")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.warn)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .help("Ver a mensagem completa")
+            .popover(isPresented: $isShowingDetail, arrowEdge: .bottom) {
+                ScrollView {
+                    Text(message)
+                        .font(.system(size: 11).monospaced())
+                        .foregroundStyle(Palette.secondary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(width: 360, height: 160)
+                .padding(14)
+            }
+            HStack(spacing: 6) {
+                Button("Tentar de novo", action: onRetry).buttonStyle(SecondaryPillStyle())
+                Button("Editar…", action: onEdit).buttonStyle(GhostStyle())
+            }
+            .controlSize(.small)
+        }
+    }
+
     @ViewBuilder private var statusBadge: some View {
         switch status {
         case .ready(let count):
             CatalogBadge(text: count == 1 ? "1 ferramenta" : "\(count) ferramentas", symbol: "checkmark.circle.fill", tint: Palette.ok)
-        case .failed(let message):
+        case .failed:
             CatalogBadge(text: "Erro", symbol: "exclamationmark.triangle.fill", tint: Palette.warn)
-                .help(message)
         case .starting:
             CatalogBadge(text: "Conectando…", symbol: "hourglass")
         case .stopped, nil:
@@ -163,36 +277,34 @@ private struct ExploreConnectors: View {
     @Environment(AppModel.self) private var model
     @Binding var editing: ConnectorDraft?
     @State private var query = ""
+    @State private var category: ConnectorCategory?
     @State private var results: [RegistryServer] = []
     @State private var isLoading = false
     @State private var error: String?
-
-    private static let suggestions = ["github", "slack", "notion", "google", "postgres", "filesystem", "browser",
-                                      "linear", "figma", "stripe"]
 
     private var isSearching: Bool { query.trimmingCharacters(in: .whitespaces).count >= 2 }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                CatalogSearchHeader(query: $query, prompt: "Buscar no registro oficial do MCP", suggestions: Self.suggestions)
+                CatalogSearchHeader(query: $query, prompt: "Buscar no registro oficial de conectores",
+                                    info: "A busca usa o registro oficial do MCP (registry.modelcontextprotocol.io). O nome de cada servidor é verificado pelo registro, mas o código é de quem publicou.")
                 if !isSearching {
-                    Text("Em destaque")
-                        .font(.system(size: 13, weight: .semibold))
+                    categoryChips
                     // Stable template ids keep the cards (and their hover state) across re-renders.
-                    grid(MCPServerConfig.templates) { template in
-                        FeaturedConnectorCard(config: template) { editing = ConnectorDraft(config: template.withNewID()) }
+                    grid(ConnectorTemplate.all.filter { $0.matches(category) }) { template in
+                        FeaturedConnectorCard(template: template, isInstalled: isInstalled(template)) {
+                            editing = ConnectorDraft(template: template)
+                        }
                     }
-                    Text("A busca usa o registro oficial do MCP (registry.modelcontextprotocol.io). O nome de cada servidor é verificado pelo registro, mas o código é de quem publicou.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Palette.faint)
                 } else if isLoading || error != nil || results.isEmpty {
                     CatalogStateView(isLoading: isLoading, error: error, isEmpty: results.isEmpty,
-                                     slowHint: "O registro às vezes demora até um minuto…", retry: { Task { await search() } })
+                                     slowHint: "O registro às vezes demora até um minuto…", skeleton: true,
+                                     retry: { Task { await search() } })
                 } else {
                     grid(results) { server in
                         RegistryServerCard(server: server, isInstalled: model.installedConnector(server.id) != nil) {
-                            editing = ConnectorDraft(config: server.config.withNewID(), inputs: server.inputs)
+                            editing = ConnectorDraft(server: server)
                         }
                     }
                 }
@@ -209,8 +321,30 @@ private struct ExploreConnectors: View {
         }
     }
 
+    private var categoryChips: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Em destaque")
+                .font(.system(size: 13, weight: .semibold))
+            ScrollView(.horizontal) {
+                HStack(spacing: 6) {
+                    Button("Todos") { category = nil }
+                        .buttonStyle(ChipStyle(isSelected: category == nil))
+                    ForEach(ConnectorCategory.allCases) { value in
+                        Button(value.label) { category = value }
+                            .buttonStyle(ChipStyle(isSelected: category == value))
+                    }
+                }
+            }
+            .scrollIndicators(.never)
+        }
+    }
+
+    private func isInstalled(_ template: ConnectorTemplate) -> Bool {
+        model.connectors.contains { $0.name == template.config.name }
+    }
+
     private func grid<Item: Identifiable, Card: View>(_ items: [Item], @ViewBuilder card: @escaping (Item) -> Card) -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: 12)], spacing: 12) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: 12, alignment: .top)], spacing: 12) {
             ForEach(items) { card($0) }
         }
     }
@@ -267,7 +401,7 @@ private struct RegistryServerCard: View {
                         CatalogBadge(text: "Oficial", symbol: "checkmark.seal.fill", tint: Palette.accentText)
                     }
                     CatalogBadge(text: server.kindLabel, symbol: server.config.isRemote ? "cloud" : "desktopcomputer")
-                    let required = server.inputs.filter(\.isRequired).count
+                    let required = server.inputs.filter { $0.isRequired && $0.isSecret }.count
                     if required > 0 {
                         CatalogBadge(text: required == 1 ? "Pede 1 chave" : "Pede \(required) chaves", symbol: "key")
                     }
@@ -280,30 +414,44 @@ private struct RegistryServerCard: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
+        .accessibilityLabel("\(server.title). \(server.summary)")
+        .accessibilityHint("Abre a instalação")
     }
 }
 
+/// A featured connector: what it does and what it asks for, never the command that starts it.
 private struct FeaturedConnectorCard: View {
-    let config: MCPServerConfig
+    let template: ConnectorTemplate
+    let isInstalled: Bool
     let onAdd: () -> Void
     @State private var isHovering = false
 
     var body: some View {
         Button(action: onAdd) {
-            HStack(spacing: 12) {
-                CatalogIcon(symbol: "puzzlepiece.extension")
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(config.name)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .center, spacing: 12) {
+                    CatalogIcon(symbol: template.isRemote ? "cloud" : "puzzlepiece.extension")
+                    Text(template.config.name)
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(Palette.ink)
-                    Text(([config.command] + config.arguments.prefix(2)).joined(separator: " "))
-                        .font(.system(size: 11).monospaced())
-                        .foregroundStyle(Palette.faint)
                         .lineLimit(1)
+                    Spacer(minLength: 0)
+                    if isInstalled {
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(Palette.ok).help("Instalado")
+                    } else {
+                        Image(systemName: "plus.circle").foregroundStyle(Palette.muted)
+                    }
                 }
-                Spacer(minLength: 0)
-                Image(systemName: "plus.circle")
+                Text(template.summary)
+                    .font(.system(size: 12))
                     .foregroundStyle(Palette.muted)
+                    .lineLimit(2, reservesSpace: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 6) {
+                    ForEach(template.badges, id: \.self) { badge in
+                        CatalogBadge(text: badge, symbol: badge.hasPrefix("Pede") ? "key" : badge == "Remoto" ? "cloud" : nil)
+                    }
+                }
             }
             .padding(14)
             .card(radius: 14, fill: isHovering ? Palette.raised : Palette.surface,
@@ -312,23 +460,40 @@ private struct FeaturedConnectorCard: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
+        .accessibilityLabel("\(template.config.name). \(template.summary)")
+        .accessibilityHint("Abre a instalação")
     }
 }
 
 // MARK: Editor
 
-/// Add/edit a connector. Registry entries arrive pre-filled; the user only fills in keys and variables.
-private struct ConnectorEditor: View {
+/// Add/edit a connector. Catalog entries arrive pre-filled and only ask for what they need (keys, a folder); the
+/// command and arguments sit under "Avançado". "Instalar e conectar" saves, connects and says how it went.
+struct ConnectorEditor: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let draft: ConnectorDraft
+    /// Snapshots draw one phase of the sheet.
+    var initialPhase: Phase = .form
+
+    enum Phase: Equatable {
+        case form, connecting, connected(Int), failed(String)
+    }
 
     @State private var config = MCPServerConfig(name: "")
     @State private var isRemote = false
     @State private var arguments = ""
     @State private var values: [KeyValueRow] = []
+    @State private var orbIDs: Set<UUID>?
+    @State private var showsAdvanced = false
+    @State private var phase = Phase.form
+    @State private var didLoad = false
+    /// Whether it was new when the sheet opened: saving adds it to `connectors`, but the sheet keeps saying "Instalar".
+    @State private var openedAsNew: Bool?
 
-    private var isNew: Bool { !model.connectors.contains { $0.id == draft.config.id } }
+    private var isNew: Bool { openedAsNew ?? !model.connectors.contains { $0.id == draft.config.id } }
+    private var isGuided: Bool { draft.isGuided }
     private var inputsByName: [String: RegistryServer.Input] {
         Dictionary(draft.inputs.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
     }
@@ -337,87 +502,319 @@ private struct ConnectorEditor: View {
             values.first { $0.key == name }?.value.trimmingCharacters(in: .whitespaces).isEmpty ?? true
         }
     }
+    /// "Só alguns" with nobody ticked, or only Orbs that no longer exist.
+    private var chosenNoOrb: Bool {
+        guard let orbIDs else { return false }
+        return !model.bots.contains { orbIDs.contains($0.id) }
+    }
+    /// The Orbs that already get this connector, so only the Orbs added now have their "Conectores" switch turned on.
+    private var alreadyUsing: Set<UUID> {
+        model.connectors.first { $0.id == config.id }.map { $0.orbIDs ?? Set(model.bots.map(\.id)) } ?? []
+    }
+    /// Said before saving: turning "Conectores" on for an Orb also gives it the connectors it had not been using.
+    private var extraAccessNote: String? {
+        guard let orbIDs, !chosenNoOrb else { return nil }
+        return OrbScopeText.extraAccess(model.extraConnectorAccess(ifEnabledFor: orbIDs.subtracting(alreadyUsing), besides: config.id))
+    }
     private var canSave: Bool {
-        !config.name.trimmingCharacters(in: .whitespaces).isEmpty && missingRequired.isEmpty
+        !config.name.trimmingCharacters(in: .whitespaces).isEmpty && missingRequired.isEmpty && !chosenNoOrb
             && !(isRemote ? config.url : config.command).trimmingCharacters(in: .whitespaces).isEmpty
+    }
+    private var title: String {
+        let name = draft.config.name
+        if name.isEmpty { return "Novo conector" }
+        return isNew ? "Instalar \(name)" : "Editar \(name)"
+    }
+    private var subtitle: String {
+        if !draft.summary.isEmpty { return draft.summary }
+        if draft.config.source != nil { return "Do registro de conectores. Os Orbs que você escolher passam a usar as ferramentas dele." }
+        return "Diga como iniciar o servidor. Os Orbs que você escolher passam a usar as ferramentas dele."
+    }
+    private var primaryTitle: String {
+        guard config.isEnabled else { return "Salvar" }
+        return isNew ? "Instalar e conectar" : "Salvar e conectar"
+    }
+
+    private var footerMessage: String? {
+        if chosenNoOrb { return "Marque ao menos um Orb em “Usar com”." }
+        if !missingRequired.isEmpty { return "Preencha \(missingRequired.joined(separator: ", "))." }
+        return nil
     }
 
     var body: some View {
+        content
+            .orbSheet(title, subtitle: subtitle, size: .medium) { footer }
+            .onAppear(perform: load)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: phase)
+            .onChange(of: phase) { announce(phase) }
+    }
+
+    /// The result replaces the form, so a screen reader hears it without having to look for it.
+    private func announce(_ phase: Phase) {
+        switch phase {
+        case .connected(let count):
+            AccessibilityNotification.Announcement("Conectado. \(ConnectorStatusText.toolsAvailable(count))").post()
+        case .failed(let message):
+            AccessibilityNotification.Announcement("Não conectou. \(ConnectorStatusText.shortError(message))").post()
+        case .form, .connecting:
+            break
+        }
+    }
+
+    @ViewBuilder private var content: some View {
+        switch phase {
+        case .form: form
+        case .connecting: result(symbol: nil, tint: Palette.muted, title: "Conectando…",
+                                 detail: "Na primeira vez pode levar alguns segundos: o conector às vezes precisa ser baixado.")
+        case .connected(let count): result(symbol: "checkmark.circle.fill", tint: Palette.ok, title: "Conectado",
+                                           detail: ConnectorStatusText.toolsAvailable(count))
+        case .failed(let message): result(symbol: "exclamationmark.triangle.fill", tint: Palette.warn, title: "Não conectou",
+                                          detail: ConnectorStatusText.shortError(message), full: message)
+        }
+    }
+
+    @ViewBuilder private var footer: some View {
+        switch phase {
+        case .form:
+            SheetFooter(message: footerMessage, cancel: { dismiss() }, primaryTitle: primaryTitle,
+                        isPrimaryDisabled: !canSave, primary: save)
+        case .connecting:
+            SheetFooter(cancelTitle: "Fechar", cancel: { dismiss() }, primaryTitle: "Conectando…", isPrimaryDisabled: true, primary: {})
+        case .connected:
+            SheetFooter(cancelTitle: "Fechar", cancel: { dismiss() }, primaryTitle: "Concluir", primary: { dismiss() })
+        case .failed:
+            SheetFooter(message: "O conector foi salvo. Corrija e tente de novo.", cancelTitle: "Fechar", cancel: { dismiss() },
+                        primaryTitle: "Editar", primary: { phase = .form })
+        }
+    }
+
+    // MARK: Form
+
+    private var form: some View {
         VStack(spacing: 0) {
+            if isGuided && (draft.isOfficial || draft.helpURL != nil || isRemote) {
+                HStack(spacing: 8) {
+                    if draft.isOfficial { CatalogBadge(text: "Oficial", symbol: "checkmark.seal.fill", tint: Palette.accentText) }
+                    if isRemote { CatalogBadge(text: "Remoto", symbol: "cloud") }
+                    if let url = draft.helpURL {
+                        Link(destination: url) { CatalogBadge(text: "Onde conseguir a chave", symbol: "arrow.up.right.square") }
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 4)
+            }
             Form {
-                Section {
-                    TextField("Nome", text: $config.name)
-                    if config.source == nil {
-                        Picker("Tipo", selection: $isRemote) {
-                            Text("Local (comando)").tag(false)
-                            Text("Remoto (URL)").tag(true)
-                        }
-                        .pickerStyle(.segmented)
-                    }
-                    if isRemote {
-                        TextField("URL", text: $config.url, prompt: Text("https://exemplo.com/mcp"))
-                    } else {
-                        TextField("Comando", text: $config.command, prompt: Text("npx, uvx, docker, /caminho/do/servidor"))
-                    }
-                } footer: {
-                    if let source = config.source { Text("Do registro: \(source)") }
-                }
-                if !isRemote {
-                    Section("Argumentos (um por linha)") {
-                        TextEditor(text: $arguments).font(.body.monospaced()).frame(minHeight: 54)
-                    }
-                }
-                Section {
-                    ForEach($values) { $row in
-                        KeyValueField(row: $row, input: inputsByName[row.key]) {
-                            values.removeAll { $0.id == row.id }
+                if isGuided {
+                    if !secretRows.isEmpty {
+                        Section {
+                            inputFields(secretRows)
+                        } header: {
+                            Text(secretRows.count == 1 ? "Chave" : "Chaves")
+                        } footer: {
+                            Text("Chaves ficam no Keychain do Mac, não no arquivo de dados do app.")
                         }
                     }
-                    Button(isRemote ? "Adicionar cabeçalho" : "Adicionar variável", systemImage: "plus") {
-                        values.append(KeyValueRow(key: "", value: ""))
+                    if !plainRows.isEmpty {
+                        Section {
+                            inputFields(plainRows)
+                        } header: {
+                            Text("Configuração")
+                        }
                     }
-                    .buttonStyle(.borderless)
+                    if let folderIndex = draft.folderArgumentIndex {
+                        folderSection(index: folderIndex)
+                    }
+                } else {
+                    advancedFields
+                }
+                Section {
+                    OrbScopePicker(orbIDs: $orbIDs, allNote: "Cada Orb precisa estar com “Conectores” ligado no painel dele.")
                 } header: {
-                    Text(isRemote ? "Cabeçalhos HTTP" : "Variáveis de ambiente")
+                    Text("Usar com")
                 } footer: {
-                    Text(isRemote
-                         ? "Enviados só para a URL acima. Ficam no arquivo de dados do app, sem criptografia."
-                         : "O comando roda com o PATH do seu shell de login. Os valores ficam no arquivo de dados do app, sem criptografia.")
+                    VStack(alignment: .leading, spacing: 6) {
+                        if let extraAccessNote {
+                            Label(extraAccessNote, systemImage: "exclamationmark.triangle")
+                                .foregroundStyle(Palette.warn)
+                        }
+                        if let orbIDs, !orbIDs.isEmpty {
+                            Text("“Conectores” é ligado nos Orbs marcados, se ainda não estiver.")
+                        }
+                    }
+                }
+                if isGuided {
+                    Section {
+                        DisclosureGroup("Avançado", isExpanded: $showsAdvanced) { advancedFields }
+                    }
                 }
             }
             .formStyle(.grouped)
-            HStack {
-                if !missingRequired.isEmpty {
-                    Label("Preencha \(missingRequired.joined(separator: ", "))", systemImage: "key")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Palette.warn)
-                        .lineLimit(1)
-                }
-                Spacer()
-                Button("Cancelar", role: .cancel) { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                Button(isNew ? "Adicionar conector" : "Salvar", action: save)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(!canSave)
-            }
-            .padding(16)
         }
-        .frame(width: 540, height: 600)
-        .onAppear(perform: load)
     }
 
+    private var inputRows: [KeyValueRow] { values.filter { inputsByName[$0.key] != nil } }
+    private var secretRows: [KeyValueRow] { inputRows.filter { isSecret($0.key) } }
+    private var plainRows: [KeyValueRow] { inputRows.filter { !isSecret($0.key) } }
+
+    @ViewBuilder private func inputFields(_ rows: [KeyValueRow]) -> some View {
+        ForEach(rows) { row in
+            if let index = values.firstIndex(where: { $0.id == row.id }) {
+                KeyValueField(row: $values[index], input: inputsByName[row.key], secretNames: config.secretKeys) {}
+            }
+        }
+    }
+
+    @ViewBuilder private var advancedFields: some View {
+        Section {
+            TextField("Nome", text: $config.name, prompt: Text("ex.: Meu servidor"))
+            if config.source == nil && !isGuided {
+                Picker("Tipo", selection: $isRemote) {
+                    Text("Local (comando)").tag(false)
+                    Text("Remoto (URL)").tag(true)
+                }
+                .pickerStyle(.segmented)
+            }
+            if isRemote {
+                TextField("URL", text: $config.url, prompt: Text("https://exemplo.com/mcp"))
+            } else {
+                TextField("Comando", text: $config.command, prompt: Text("npx, uvx, docker, /caminho/do/servidor"))
+            }
+        } footer: {
+            if let source = config.source { Text("Do registro: \(source)") }
+        }
+        if !isRemote {
+            Section("Argumentos (um por linha)") {
+                PlaceholderTextEditor(placeholder: "-y\n@exemplo/servidor", text: $arguments, minHeight: 60)
+                    .font(.body.monospaced())
+            }
+        }
+        Section {
+            ForEach(values.filter { inputsByName[$0.key] == nil }) { row in
+                if let index = values.firstIndex(where: { $0.id == row.id }) {
+                    KeyValueField(row: $values[index], input: nil, secretNames: config.secretKeys) {
+                        values.removeAll { $0.id == row.id }
+                    }
+                }
+            }
+            Button(isRemote ? "Adicionar cabeçalho" : "Adicionar variável", systemImage: "plus") {
+                values.append(KeyValueRow(key: "", value: ""))
+            }
+            .buttonStyle(.borderless)
+        } header: {
+            Text(isRemote ? "Cabeçalhos HTTP" : "Variáveis de ambiente")
+        } footer: {
+            Text(isRemote
+                 ? "Enviados só para a URL acima. Valores que parecem chaves (token, senha…) ficam no Keychain do Mac."
+                 : "O comando roda com o PATH do seu shell de login. Valores que parecem chaves (token, senha…) ficam no Keychain do Mac.")
+        }
+    }
+
+    private func isSecret(_ name: String) -> Bool {
+        inputsByName[name]?.isSecret == true || ConnectorSecrets.looksSecret(name) || config.secretKeys.contains(name)
+    }
+
+    private func folderSection(index: Int) -> some View {
+        let path = ConnectorArguments.line(index, in: arguments)
+        let isHome = path == NSHomeDirectory()
+        return Section {
+            HStack(spacing: 10) {
+                Image(systemName: "folder").foregroundStyle(Palette.muted)
+                Text(isHome ? "Pasta pessoal (~)" : (path as NSString).abbreviatingWithTildeInPath)
+                    .font(.system(size: 12).monospaced())
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 8)
+                Button("Escolher pasta…") { chooseFolder(index: index, current: path) }
+            }
+        } header: {
+            Text("Pasta liberada")
+        } footer: {
+            if isHome {
+                Label("É a sua pasta pessoal inteira. Prefira escolher só a pasta de que o Orb precisa.", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(Palette.warn)
+            } else {
+                Text("Os Orbs com este conector podem ler e gravar arquivos nesta pasta e dentro dela.")
+            }
+        }
+    }
+
+    private func chooseFolder(index: Int, current: String) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.prompt = "Liberar pasta"
+        panel.message = "Escolha a pasta que este conector pode abrir."
+        panel.directoryURL = URL(fileURLWithPath: current.isEmpty ? NSHomeDirectory() : current)
+        if panel.runModal() == .OK, let url = panel.url {
+            arguments = ConnectorArguments.replacing(line: index, with: url.path, in: arguments)
+        }
+    }
+
+    // MARK: Result
+
+    private func result(symbol: String?, tint: Color, title: String, detail: String, full: String? = nil) -> some View {
+        VStack(spacing: 12) {
+            if let symbol {
+                Image(systemName: symbol).font(.system(size: 34)).foregroundStyle(tint)
+            } else {
+                ProgressView().controlSize(.large)
+            }
+            Text(title).font(.system(size: 15, weight: .semibold))
+            Text(detail)
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.muted)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 360)
+            if let full, full != detail {
+                Text(full)
+                    .font(.system(size: 11).monospaced())
+                    .foregroundStyle(Palette.faint)
+                    .textSelection(.enabled)
+                    .lineLimit(8)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Palette.raised, in: .rect(cornerRadius: 8))
+                    .padding(.horizontal, 20)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.vertical, 30)
+        .accessibilityElement(children: .combine)
+    }
+
+    // MARK: Loading and saving
+
     private func load() {
+        guard !didLoad else { return }
+        didLoad = true
         config = draft.config
         isRemote = draft.config.isRemote
         arguments = draft.config.arguments.joined(separator: "\n")
         let dictionary = isRemote ? draft.config.headers : draft.config.environment
-        // Registry inputs first, in the publisher's order; then anything else.
+        // Registry inputs first, in the publisher's order; then anything else. Fixed prefixes ("Bearer ") stay out of the field.
         let ordered = draft.inputs.map(\.name) + dictionary.keys.sorted().filter { inputsByName[$0] == nil }
-        values = ordered.map { KeyValueRow(key: $0, value: dictionary[$0] ?? "") }
+        values = ordered.map { name in
+            var value = dictionary[name] ?? ""
+            if let prefix = inputsByName[name]?.prefix, !prefix.isEmpty, value.hasPrefix(prefix) { value.removeFirst(prefix.count) }
+            return KeyValueRow(key: name, value: value)
+        }
+        openedAsNew = !model.connectors.contains { $0.id == draft.config.id }
+        // A new connector from the catalog starts with the Orb the user was talking to, so installing it is enough.
+        orbIDs = draft.config.orbIDs ?? (isNew ? model.defaultScopeForNewConnector() : nil)
+        showsAdvanced = !isNew
+        phase = initialPhase
     }
 
     private func save() {
-        let pairs = values.map { ($0.key.trimmingCharacters(in: .whitespaces), $0.value) }.filter { !$0.0.isEmpty }
+        let pairs = values.map { row -> (String, String) in
+            let key = row.key.trimmingCharacters(in: .whitespaces)
+            var value = row.value
+            if let prefix = inputsByName[key]?.prefix, !prefix.isEmpty, !value.trimmingCharacters(in: .whitespaces).isEmpty {
+                value = prefix + value.trimmingCharacters(in: .whitespaces)
+            }
+            return (key, value)
+        }.filter { !$0.0.isEmpty }
         let dictionary = Dictionary(pairs, uniquingKeysWith: { _, last in last })
         if isRemote {
             config.command = ""
@@ -430,16 +827,37 @@ private struct ConnectorEditor: View {
             config.arguments = arguments.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
             config.environment = dictionary
         }
+        config.secretKeys = Set(dictionary.keys.filter(isSecret))
+        config.orbIDs = orbIDs
+
+        let before = alreadyUsing
         if let index = model.connectors.firstIndex(where: { $0.id == config.id }) {
             model.connectors[index] = config
         } else {
             model.connectors.append(config)
         }
-        dismiss()
+        // Choosing an Orb is enough: its "Conectores" switch follows.
+        model.allowConnectors(for: (orbIDs ?? []).subtracting(before))
+
+        guard config.isEnabled else { dismiss(); return }
+        phase = .connecting
+        let id = config.id
+        Task { @MainActor in
+            switch await model.connectAndWait(id) {
+            case .ready(let count)?:
+                phase = .connected(count)
+                try? await Task.sleep(for: .seconds(1.6))
+                if phase == .connected(count) { dismiss() }
+            case .failed(let message)?:
+                phase = .failed(message)
+            default:
+                phase = .failed("O conector não respondeu.")
+            }
+        }
     }
 }
 
-private struct KeyValueRow: Identifiable {
+struct KeyValueRow: Identifiable {
     let id = UUID()
     var key: String
     var value: String
@@ -449,7 +867,12 @@ private struct KeyValueRow: Identifiable {
 private struct KeyValueField: View {
     @Binding var row: KeyValueRow
     let input: RegistryServer.Input?
+    let secretNames: Set<String>
     let onRemove: () -> Void
+
+    private var isSecret: Bool {
+        input?.isSecret == true || secretNames.contains(row.key) || ConnectorSecrets.looksSecret(row.key)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -465,8 +888,13 @@ private struct KeyValueField: View {
                         .font(.system(size: 12).monospaced())
                         .frame(width: 170)
                 }
+                if let prefix = input?.prefix.trimmingCharacters(in: .whitespaces), !prefix.isEmpty {
+                    Text(prefix)
+                        .font(.system(size: 12).monospaced())
+                        .foregroundStyle(Palette.muted)
+                }
                 Group {
-                    if input?.isSecret == true {
+                    if isSecret {
                         SecureField("valor", text: $row.value)
                     } else {
                         TextField("valor", text: $row.value)
@@ -474,6 +902,7 @@ private struct KeyValueField: View {
                 }
                 .textFieldStyle(.roundedBorder)
                 .labelsHidden()
+                .accessibilityLabel(row.key.isEmpty ? "Valor" : "Valor de \(row.key)")
                 if input == nil {
                     Button("Remover", systemImage: "minus.circle", action: onRemove)
                         .labelStyle(.iconOnly)
@@ -487,23 +916,5 @@ private struct KeyValueField: View {
                     .lineLimit(2)
             }
         }
-    }
-}
-
-extension MCPServerConfig {
-    /// Well-known servers shown under "Em destaque".
-    static let templates: [MCPServerConfig] = [
-        MCPServerConfig(name: "Arquivos", command: "npx",
-                        arguments: ["-y", "@modelcontextprotocol/server-filesystem", NSHomeDirectory()]),
-        MCPServerConfig(name: "Memória (grafo)", command: "npx", arguments: ["-y", "@modelcontextprotocol/server-memory"]),
-        MCPServerConfig(name: "Busca na web (Fetch)", command: "uvx", arguments: ["mcp-server-fetch"]),
-        MCPServerConfig(name: "Pensamento em etapas", command: "npx",
-                        arguments: ["-y", "@modelcontextprotocol/server-sequential-thinking"]),
-    ]
-
-    func withNewID() -> MCPServerConfig {
-        var copy = self
-        copy.id = UUID()
-        return copy
     }
 }

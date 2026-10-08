@@ -4,11 +4,14 @@ import SwiftUI
 struct BotInspector: View {
     @Environment(AppModel.self) private var model
     let botID: UUID
+    @State private var tab: InspectorTab
     @State private var isEditingOrb = false
     @State private var isPickingFolder = false
-    @State private var isConfirmingDelete = false
     @State private var isConfirmingBypass = false
     @State private var isEditingIdentity = false
+    @State private var isShowingMemory = false
+    /// The kind the memory sheet opens on (nil: all of it).
+    @State private var memorySheetKind: MemoryKind?
     @State private var identityDraft = ""
     /// The instruction file in the Orb's folder, if any (read off the main thread when the folder changes).
     @State private var instructionFile: FolderInstructions?
@@ -18,115 +21,37 @@ struct BotInspector: View {
     @State private var filesRefresh = 0
     @State private var folderProblem: String?
     @State private var editingRoutine: Routine?
+    /// Height of the appearance sheet: the window's, less a margin, when the window is short.
+    @State private var editorHeight = NewBotSheetLayout.height(preferred: 720)
+
+    /// `tab` opens the panel on that tab (snapshots); otherwise on the one this Orb was last on.
+    init(botID: UUID, tab: InspectorTab? = nil) {
+        self.botID = botID
+        _tab = State(initialValue: tab ?? InspectorTabMemory.tab(for: botID))
+    }
 
     var body: some View {
         // This Orb's own state: what happens in another Orb does not touch the panel.
         if let live = model.liveBot(botID) {
             let bot = live.bot
-            Form {
-                Section {
-                    HStack(spacing: 14) {
-                        BotAvatar(orb: bot.orb, size: 60, activity: live.activity, poke: live.poke, interactive: true)
-                        InspectorHeader(bot: bot)
-                            .id(bot.id)
-                    }
-                    .padding(.vertical, 4)
-                    ModelPicker(selection: binding(\.model, of: bot))
-                }
-
-                Section("Orb") {
-                    LabeledContent("Cor", value: OrbCatalog.shared.label(.color, bot.orb.color))
-                    LabeledContent("Olhos", value: OrbCatalog.shared.label(.eyes, bot.orb.eyes))
-                    LabeledContent("Jeito", value: bot.orb.temperament.label)
-                    if !bot.orb.accessories.isEmpty {
-                        LabeledContent("Acessórios", value: bot.orb.accessories
-                            .map { OrbCatalog.shared.label(.accessories, $0) }.joined(separator: ", "))
-                    }
-                    Button("Personalizar Orb…", systemImage: "paintpalette") { isEditingOrb = true }
-                }
-
-                Section {
-                    Picker("Antes de agir", selection: binding(\.permissionMode, of: bot).confirmingBypass {
-                        isConfirmingBypass = true
-                    }) {
-                        ForEach(PermissionMode.allCases) { Text($0.label).tag($0) }
-                    }
-                    ForEach(Capability.allCases) { capability in
-                        Toggle(isOn: capabilityBinding(capability, of: bot)) {
-                            Label(capability.label, systemImage: capability.symbol)
-                        }
-                    }
-                } header: {
-                    Text("Permissões")
-                } footer: {
-                    Text(bot.permissionMode.summary)
-                        .foregroundStyle(bot.permissionMode == .bypass ? Palette.warn : .secondary)
-                }
-                .bypassConfirmation(isPresented: $isConfirmingBypass) {
-                    model.update(bot.id) { $0.permissionMode = .bypass }
-                }
-
-                Section {
-                    LabeledContent("Pasta") {
-                        Text(OrbFolder.display(bot.workingURL))
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.head)
-                    }
-                    folderControls(bot)
-                    if let file = instructionFile {
-                        // Claude Code loads CLAUDE.md by itself as the project's instructions: trusting it here would change nothing.
-                        if !InstructionsText.claudeCodeReadsItself(file, usesClaudeCode: usesClaudeCode(bot)) {
-                            Toggle(isOn: instructionsTrustBinding(file, of: bot)) {
-                                Label("Confiar nas instruções desta pasta", systemImage: "checkmark.shield")
-                            }
-                        }
-                        Button("Ver \(file.fileName) no Finder", systemImage: "doc.text.magnifyingglass") {
-                            NSWorkspace.shared.activateFileViewerSelecting([bot.workingURL.appending(path: file.fileName)])
-                        }
-                    }
-                    ForEach(bot.permissionRules, id: \.self) { rule in
-                        LabeledContent {
-                            Button("Revogar") { model.update(bot.id) { $0.permissionRules.removeAll { $0 == rule } } }
-                                .controlSize(.small)
-                        } label: {
-                            Text(rule.title)
-                        }
-                    }
-                    if bot.permissionRules.count > 1 {
-                        Button("Revogar tudo", role: .destructive) { model.update(bot.id) { $0.permissionRules = [] } }
-                            .controlSize(.small)
-                    }
-                } header: {
-                    Text("Trabalho")
-                } footer: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        if let folderProblem {
-                            Text(folderProblem).foregroundStyle(Palette.warn)
-                        }
-                        if let file = instructionFile {
-                            Text(InstructionsText.footer(for: file, name: bot.name, trustedHash: bot.trustedInstructionsHash,
-                                                         usesClaudeCode: usesClaudeCode(bot)))
-                        }
-                        if !bot.permissionRules.isEmpty {
-                            Text("Estas ações rodam sem perguntar em “Perguntar antes” (“Sempre permitir”). Comandos arriscados sempre perguntam.")
-                        }
+            VStack(spacing: 0) {
+                header(bot, live)
+                quickActions(bot)
+                InspectorTabBar(selection: $tab)
+                Form {
+                    switch tab {
+                    case .general: generalTab(bot)
+                    case .memory: memoryTab(bot)
+                    case .folder: folderTab(bot)
+                    case .routines: routinesTab(bot)
                     }
                 }
-
-                filesSection(bot)
-
-                memorySection(bot)
-
-                routinesSection(bot)
-
-                Section {
-                    Button("Apagar \(bot.name)…", role: .destructive) { isConfirmingDelete = true }
-                }
+                .formStyle(.grouped)
+                .scrollContentBackground(.hidden)
             }
-            .formStyle(.grouped)
-            .scrollContentBackground(.hidden)
+            .overlay(alignment: .bottom) { MemoryUndoToast(undo: model.memoryUndo).padding(.bottom, 14) }
+            .onChange(of: tab) { _, new in InspectorTabMemory.remember(new, for: botID) }
+            .onChange(of: botID) { _, new in tab = InspectorTabMemory.tab(for: new) }
             .task(id: bot.workingDirectory) {
                 instructionFile = await FolderInstructions.loadInBackground(from: bot.workingURL)
             }
@@ -153,12 +78,9 @@ struct BotInspector: View {
             .sheet(item: $editingRoutine) { routine in
                 RoutineEditor(routine: routine)
             }
-            .confirmationDialog("Apagar \(bot.name)?", isPresented: $isConfirmingDelete) {
-                Button("Apagar o Orb e a memória", role: .destructive) { model.deleteBot(bot.id) }
-                Button("Apagar o Orb e guardar a memória") { model.deleteBot(bot.id, keepMemory: true) }
-            } message: {
-                Text(DeleteOrbText.message)
-            }
+            // "Personalizar…" in the sidebar's menu: the panel opens (or already is) and so does the appearance editor.
+            .onAppear { if model.takeChatRequest(.editLook, of: botID) { isEditingOrb = true } }
+            .onChange(of: model.pendingChatRequest) { if model.takeChatRequest(.editLook, of: botID) { isEditingOrb = true } }
             .sheet(isPresented: $isEditingIdentity) {
                 IdentityEditor(name: bot.name, text: $identityDraft) {
                     model.setIdentity(identityDraft, of: bot.id)
@@ -166,6 +88,9 @@ struct BotInspector: View {
                 } cancel: {
                     isEditingIdentity = false
                 }
+            }
+            .sheet(isPresented: $isShowingMemory) {
+                MemorySheet(botID: bot.id, name: bot.name, kind: memorySheetKind)
             }
             .sheet(isPresented: $isEditingOrb) {
                 VStack(spacing: 0) {
@@ -179,7 +104,7 @@ struct BotInspector: View {
                     .padding(14)
                     .background(Palette.chrome)
                 }
-                .frame(width: 560, height: 720)
+                .frame(width: 560, height: editorHeight)
             }
             .background(Palette.chrome)
         }
@@ -189,6 +114,80 @@ struct BotInspector: View {
         var bot: UUID
         var folder: String
         var refresh: Int
+    }
+
+    // MARK: Top of the panel
+
+    /// Who the Orb is, always visible: avatar, name and role (editable), its look in one line.
+    private func header(_ bot: Bot, _ live: BotLive) -> some View {
+        let summary = AppearanceSummary.text(for: bot.orb)
+        return HStack(spacing: 12) {
+            BotAvatar(orb: bot.orb, size: 60, activity: live.activity, poke: live.poke, interactive: true)
+            VStack(alignment: .leading, spacing: 3) {
+                InspectorHeader(bot: bot)
+                    .id(bot.id)
+                HStack(spacing: 6) {
+                    Text(summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    Button("Personalizar…") {
+                        editorHeight = NewBotSheetLayout.height(preferred: 720)
+                        isEditingOrb = true
+                    }
+                    .buttonStyle(.link)
+                    .font(.caption)
+                    .fixedSize()
+                    .help("Mudar cor, olhos, jeito e acessórios")
+                }
+                .help(summary)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+        .padding(.bottom, 10)
+    }
+
+    /// The three things people do most with an Orb, one click each from any tab. Icons alone when the panel is narrow.
+    private func quickActions(_ bot: Bot) -> some View {
+        let folderIsMissing = listing?.folder == .missing
+        return ViewThatFits(in: .horizontal) {
+            quickActionRow(bot, showsTitles: true, folderIsMissing: folderIsMissing)
+            quickActionRow(bot, showsTitles: false, folderIsMissing: folderIsMissing)
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 10)
+    }
+
+    private func quickActionRow(_ bot: Bot, showsTitles: Bool, folderIsMissing: Bool) -> some View {
+        HStack(spacing: 6) {
+            quickAction("Abrir pasta", "folder", showsTitle: showsTitles, help: "Abrir a pasta de \(bot.name) no Finder") {
+                OrbFolder.showInFinder(bot.workingURL)
+            }
+            .disabled(folderIsMissing)
+            quickAction("Terminal", "terminal", showsTitle: showsTitles, help: "Abrir o Terminal na pasta de \(bot.name)") {
+                OrbFolder.openInTerminal(bot.workingURL)
+            }
+            .disabled(folderIsMissing)
+            quickAction("Nova conversa", "square.and.pencil", showsTitle: showsTitles, help: "Começar uma conversa nova (⇧⌘N)") {
+                model.newConversation(bot.id)
+            }
+            if !showsTitles { Spacer(minLength: 0) }
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .fixedSize(horizontal: showsTitles, vertical: false)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func quickAction(_ title: String, _ symbol: String, showsTitle: Bool, help: String,
+                             action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            if showsTitle { Label(title, systemImage: symbol) } else { Image(systemName: symbol) }
+        }
+        .help(help)
+        .accessibilityLabel(title)
     }
 
     /// The folder was replaced: what the panel knew about the old one no longer applies.
@@ -207,6 +206,139 @@ struct BotInspector: View {
         }
     }
 
+    // MARK: Geral
+
+    /// The model, what the Orb is allowed to do and what it may use.
+    @ViewBuilder
+    private func generalTab(_ bot: Bot) -> some View {
+        Section {
+            ModelPicker(selection: binding(\.model, of: bot))
+        }
+
+        Section {
+            Picker("Modo", selection: binding(\.permissionMode, of: bot).confirmingBypass {
+                isConfirmingBypass = true
+            }) {
+                ForEach(PermissionMode.allCases) { Text($0.label).tag($0) }
+            }
+        } header: {
+            Text("Permissões")
+        } footer: {
+            Text(bot.permissionMode.summary)
+                .foregroundStyle(bot.permissionMode == .bypass ? Palette.warn : .secondary)
+        }
+        .bypassConfirmation(isPresented: $isConfirmingBypass) {
+            model.update(bot.id) { $0.permissionMode = .bypass }
+        }
+
+        Section {
+            ForEach(Capability.allCases) { capability in
+                capabilityRow(capability, of: bot)
+            }
+        } header: {
+            Text("O que \(bot.name) pode usar")
+        }
+
+        Section {
+            Button("Apagar \(bot.name)…", role: .destructive) { model.askToDelete(bot.id) } // one sheet for the sidebar and here (DeleteOrbDialog.swift)
+                .foregroundStyle(Palette.danger)
+        }
+    }
+
+    @ViewBuilder
+    private func capabilityRow(_ capability: Capability, of bot: Bot) -> some View {
+        let isOn = bot.capabilities.contains(capability)
+        let connectorsLine = capability == .connectors && isOn
+            ? CapabilityCopy.connectorsLine(enabled: model.connectors.filter(\.isEnabled).count, total: model.connectors.count)
+            : nil
+        Toggle(isOn: capabilityBinding(capability, of: bot)) {
+            VStack(alignment: .leading, spacing: 1) {
+                Label(CapabilityCopy.title(capability), systemImage: capability.symbol)
+                Text(connectorsLine ?? CapabilityCopy.subtitle(capability))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        if capability == .connectors && isOn {
+            Button("Gerenciar conectores", systemImage: "arrow.up.right") { model.selection = .connectors }
+                .buttonStyle(.link)
+                .font(.caption)
+        }
+    }
+
+    // MARK: Pasta e acessos
+
+    @ViewBuilder
+    private func folderTab(_ bot: Bot) -> some View {
+        Section {
+            Text(OrbFolder.display(bot.workingURL))
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.head)
+                .textSelection(.enabled)
+                .help(bot.workingURL.path)
+            folderControls(bot)
+        } header: {
+            Text("Pasta")
+        } footer: {
+            if let folderProblem {
+                Text(folderProblem).foregroundStyle(Palette.warn)
+            }
+        }
+
+        if let file = instructionFile {
+            Section {
+                // Claude Code loads CLAUDE.md by itself as the project's instructions: trusting it here would change nothing.
+                if !InstructionsText.claudeCodeReadsItself(file, usesClaudeCode: usesClaudeCode(bot)) {
+                    Toggle(isOn: instructionsTrustBinding(file, of: bot)) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Label("Confiar nas instruções desta pasta", systemImage: "checkmark.shield")
+                            Text("Se ligado, \(bot.name) segue o que está em \(file.fileName) como ordens. Ligue só para pastas suas.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                Button("Ver \(file.fileName) no Finder", systemImage: "doc.text.magnifyingglass") {
+                    NSWorkspace.shared.activateFileViewerSelecting([bot.workingURL.appending(path: file.fileName)])
+                }
+                .controlSize(.small)
+            } header: {
+                Text("Instruções da pasta")
+            } footer: {
+                Text(InstructionsText.footer(for: file, name: bot.name, trustedHash: bot.trustedInstructionsHash,
+                                             usesClaudeCode: usesClaudeCode(bot)))
+            }
+        }
+
+        Section {
+            if bot.permissionRules.isEmpty {
+                Text("Nenhuma ainda. Ao aprovar um pedido, escolha “Sempre permitir…” e ela aparece aqui.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(bot.permissionRules, id: \.self) { rule in
+                LabeledContent {
+                    Button("Remover") { model.update(bot.id) { $0.permissionRules.removeAll { $0 == rule } } }
+                        .controlSize(.small)
+                } label: {
+                    Text(rule.title)
+                }
+            }
+            if bot.permissionRules.count > 1 {
+                Button("Remover todas", role: .destructive) { model.update(bot.id) { $0.permissionRules = [] } }
+                    .controlSize(.small)
+            }
+        } header: {
+            Text("Liberações")
+        } footer: {
+            Text("Estas liberações valem em “Perguntar antes”. Comandos arriscados sempre perguntam.")
+        }
+
+        filesSection(bot)
+    }
+
     /// Where the Orb works and what can be done with it: open it, move it, give the Orb a folder of its own.
     @ViewBuilder
     private func folderControls(_ bot: Bot) -> some View {
@@ -219,18 +351,33 @@ struct BotInspector: View {
                 .foregroundStyle(.secondary)
             Button("Recriar", systemImage: "folder.badge.plus") { attempt { try model.recreateFolder(of: bot.id) } }
         } else {
-            Button("Abrir no Finder", systemImage: "folder") { OrbFolder.showInFinder(bot.workingURL) }
-            Button("Abrir no Terminal", systemImage: "terminal") { OrbFolder.openInTerminal(bot.workingURL) }
-        }
-        Button("Escolher pasta…", systemImage: "folder.badge.gearshape") { isPickingFolder = true }
-        if state == .ownFolder {
-            Button("Usar a pasta pessoal", systemImage: "house") {
-                model.useHomeFolder(of: bot.id)
-                folderChanged()
+            HStack(spacing: 8) {
+                Button("Abrir no Finder", systemImage: "folder") { OrbFolder.showInFinder(bot.workingURL) }
+                Button("Abrir no Terminal", systemImage: "terminal") { OrbFolder.openInTerminal(bot.workingURL) }
             }
-            .help("O Orb volta a trabalhar na sua pasta pessoal. A pasta atual e o que há nela ficam como estão.")
+            .controlSize(.small)
+        }
+        Menu {
+            Button("Escolher pasta…", systemImage: "folder.badge.gearshape") { isPickingFolder = true }
+            if state == .ownFolder {
+                Button("Usar a pasta pessoal", systemImage: "house") {
+                    model.useHomeFolder(of: bot.id)
+                    folderChanged()
+                }
+            } else if state == .noOwnFolder {
+                Button("Criar pasta própria", systemImage: "folder.badge.plus") { attempt { try model.createOwnFolder(for: bot.id) } }
+            }
+        } label: {
+            Text("Mudar pasta")
+        }
+        .menuStyle(.button)
+        .controlSize(.small)
+        .fixedSize()
+        if state == .ownFolder {
+            Text("Se usar a pasta pessoal, \(bot.name) volta a trabalhar nela. A pasta atual e o que há nela ficam como estão.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         } else if state == .noOwnFolder {
-            Button("Criar pasta própria", systemImage: "folder.badge.plus") { attempt { try model.createOwnFolder(for: bot.id) } }
             Text("Em uma pasta própria (\(OrbFolder.display(OrbFolder.availableURL(for: bot.name, in: OrbFolder.defaultBase)))), \(bot.name) escreve sem perguntar em “Perguntar antes”.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -270,11 +417,15 @@ struct BotInspector: View {
         }
     }
 
-    private func routinesSection(_ bot: Bot) -> some View {
+    // MARK: Rotinas
+
+    @ViewBuilder
+    private func routinesTab(_ bot: Bot) -> some View {
+        let routines = model.routines(for: bot.id)
         Section {
-            let routines = model.routines(for: bot.id)
             if routines.isEmpty {
-                Text("Nenhuma rotina.")
+                Text("Nenhuma rotina ainda. Uma rotina faz um pedido a \(bot.name) sozinho, todo dia ou toda semana.")
+                    .font(.callout)
                     .foregroundStyle(.secondary)
             }
             ForEach(routines) { routine in
@@ -282,86 +433,35 @@ struct BotInspector: View {
                     editingRoutine = routine
                 }
             }
-            Button("Nova rotina", systemImage: "plus") {
+            Button("Nova rotina…", systemImage: "plus") {
                 editingRoutine = Routine(name: "", botID: bot.id, prompt: "", schedule: .daily(hour: 9, minute: 0))
             }
         } header: {
             Text("Rotinas")
         } footer: {
-            if !model.routines(for: bot.id).isEmpty {
+            if !routines.isEmpty {
                 Text("\(bot.name) faz isso sozinho, no horário, enquanto o app está aberto.")
             }
         }
+        Section {
+            Button("Ver todas as rotinas", systemImage: "arrow.up.right") { model.selection = .routines }
+                .buttonStyle(.link)
+        }
     }
 
-    /// The Orb's own memory: identity notes, what it keeps (preferences, facts, procedures) and its conversations.
-    @ViewBuilder
-    private func memorySection(_ bot: Bot) -> some View {
-        let memory = model.live(bot.id).memory
-        Section {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text("Identidade")
-                    Spacer()
-                    Button("Editar…") {
-                        Task {
-                            // From the file, not the panel's snapshot: the Orb may have added notes meanwhile.
-                            identityDraft = await model.identityText(of: bot.id)
-                            isEditingIdentity = true
-                        }
-                    }
-                    .controlSize(.small)
-                }
-                Text(memory.identity.isEmpty ? "Ainda sem notas sobre como \(bot.name) deve funcionar."
-                     : memory.identity.replacingOccurrences(of: "## ", with: ""))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(6)
-                    .truncationMode(.middle)
-                if memory.identity.count > MemoryBank.identityShare {
-                    Text("Longa: em cada conversa vão o começo e o fim (cerca de \(MemoryBank.identityShare) caracteres).")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-                if memory.interviewPending {
-                    Label("Vai te fazer perguntas nas primeiras mensagens", systemImage: "questionmark.bubble")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Button("Fazer a entrevista de novo", systemImage: "questionmark.bubble") { model.restartInterview(of: bot.id) }
-                        .buttonStyle(.borderless)
-                        .font(.caption)
-                        .help("Na próxima conversa, \(bot.name) faz algumas perguntas para entender como te ajudar")
-                }
+    // MARK: Memória
+
+    private func memoryTab(_ bot: Bot) -> some View {
+        MemoryTab(botID: bot.id, name: bot.name, editIdentity: {
+            Task {
+                // From the file, not the panel's snapshot: the Orb may have added notes meanwhile.
+                identityDraft = await model.identityText(of: bot.id)
+                isEditingIdentity = true
             }
-            ForEach([MemoryKind.preferencia, .fato, .procedimento], id: \.self) { kind in
-                ForEach(memory.items(kind)) { item in
-                    MemoryRow(item: item) { model.forgetMemory(item.path, of: bot.id) }
-                }
-            }
-            let sessions = memory.items(.sessao)
-            if !sessions.isEmpty {
-                DisclosureGroup("Conversas guardadas (\(sessions.count))") {
-                    ForEach(sessions.prefix(30)) { item in
-                        MemoryRow(item: item) { model.forgetMemory(item.path, of: bot.id) }
-                    }
-                    if sessions.count > 30 {
-                        Text("E mais \(sessions.count - 30) na pasta da memória.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-            Button("Abrir pasta da memória", systemImage: "folder") {
-                NSWorkspace.shared.open(model.memory.directory(for: bot.id))
-            }
-        } header: {
-            Text("Memória")
-        } footer: {
-            Text(memory.items.isEmpty
-                 ? "Memória só de \(bot.name). Começa a crescer na primeira conversa: preferências, fatos, procedimentos e um resumo de cada conversa (salvo depois de 30 minutos sem mensagens ou ao começar outra)."
-                 : "Memória só de \(bot.name). São arquivos .md (dá para abrir no Obsidian); conversas antigas são compactadas, nunca apagadas sem você.")
-        }
+        }, showAll: { kind in
+            memorySheetKind = kind
+            isShowingMemory = true
+        })
     }
 
     /// Falls back to the last rendered value, so a sheet closing after deletion never reads a missing bot.
@@ -396,6 +496,53 @@ struct BotInspector: View {
                 }
             }
         )
+    }
+}
+
+/// The panel's tabs: an icon over a short name, the chosen one lit.
+private struct InspectorTabBar: View {
+    @Binding var selection: InspectorTab
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 2) {
+            ForEach(InspectorTab.allCases) { tab in
+                let isSelected = tab == selection
+                Button {
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { selection = tab }
+                } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: tab.symbol)
+                            .frame(height: 18)
+                            .font(.system(size: 14))
+                        Text(tab.title)
+                            .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                            .lineLimit(2)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .foregroundStyle(isSelected ? Palette.ink : Palette.muted)
+                    .padding(.top, 6)
+                    .frame(maxWidth: .infinity, minHeight: 56, maxHeight: 56, alignment: .top)
+                    .padding(.horizontal, 2)
+                    .background(isSelected ? Palette.ghostSelected : .clear, in: .rect(cornerRadius: 8))
+                    .contentShape(.rect(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(tab.title)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                .help(tab.title)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 4)
+        // For VoiceOver and the keyboard this is one group of tabs, which a segmented picker already is.
+        .accessibilityRepresentation {
+            Picker("Seções do painel", selection: $selection) {
+                ForEach(InspectorTab.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+        }
     }
 }
 
@@ -539,9 +686,12 @@ private struct RoutineRow: View {
                     .controlSize(.small)
             }
             if current.isEnabled {
-                (Text("Próxima: ") + Text(current.nextRun, style: .relative))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                // The same words as the Rotinas page ("Próxima: em 3 h · hoje às 09:00"), kept right as minutes pass.
+                TimelineView(.periodic(from: .now, by: 60)) { context in
+                    Text(RoutineText.nextRun(of: current, now: context.date) ?? "")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             Text(current.lastResult ?? "Ainda não rodou.")
                 .font(.caption)
@@ -562,11 +712,16 @@ private struct RoutineRow: View {
 enum RelativeTime {
     /// "há 5 min", "em 2 h": for dates a little before or after now.
     static func text(_ date: Date, now: Date = .now) -> String {
+        formatter.localizedString(for: date, relativeTo: now)
+    }
+
+    /// One formatter for every row: making one costs more than formatting with it.
+    nonisolated(unsafe) private static let formatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.locale = Locale(identifier: "pt_BR")
         formatter.unitsStyle = .short
-        return formatter.localizedString(for: date, relativeTo: now)
-    }
+        return formatter
+    }()
 }
 
 enum InstructionsText {
@@ -587,37 +742,6 @@ enum InstructionsText {
     }
 }
 
-/// What the delete dialogs say: the choice is whether the Orb's memory goes with it.
-enum DeleteOrbText {
-    static let message = "A conversa e as rotinas deste Orb serão apagadas. A memória dele pode ir junto ou ficar guardada em memoria/_guardadas, na pasta de dados do app (Ajustes → Geral → Mostrar no Finder)."
-}
-
-private struct MemoryRow: View {
-    let item: MemorySnapshot.Item
-    let forget: () -> Void
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.kind == .sessao || item.title == item.body ? item.title : item.body)
-                    .lineLimit(item.kind == .sessao ? 1 : 3)
-                Text(item.kind == .sessao
-                     ? MemoryBank.dayFormat.string(from: item.date) + (item.compacted ? " · compactada" : "")
-                     : item.kind.label)
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-            Spacer()
-            Button("Esquecer", systemImage: "xmark.circle.fill", action: forget)
-                .labelStyle(.iconOnly)
-                .buttonStyle(.borderless)
-                .foregroundStyle(.secondary)
-                .help("Esquecer (apaga de vez)")
-                .accessibilityLabel("Esquecer: \(item.title)")
-        }
-    }
-}
-
 /// Edits the Orb's identity notes: how it should work, in your words.
 private struct IdentityEditor: View {
     let name: String
@@ -626,28 +750,21 @@ private struct IdentityEditor: View {
     let cancel: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Identidade de \(name)")
-                .font(.headline)
-            Text("Como \(name) deve funcionar com você. Vai em toda conversa; o que ele aprender na entrevista entra em “Como funcionar”. ⌘↩ salva.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            TextEditor(text: $text)
-                .font(.body)
-                .frame(minHeight: 220)
-                .scrollContentBackground(.hidden)
-                .padding(6)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.05)))
-            HStack {
-                Spacer()
-                Button("Cancelar", role: .cancel, action: cancel)
-                    .keyboardShortcut(.cancelAction)
-                // Return adds a line in the editor; ⌘↩ saves.
+        PlaceholderTextEditor(placeholder: "Ex.: Seja direto e me lembre de fazer pausas.", text: $text, minHeight: 220)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 12)
+            .orbSheet("Como \(name) funciona",
+                      subtitle: "Vai em toda conversa. O que \(name) aprender na entrevista entra em “Como funcionar”. ⌘↩ salva.",
+                      size: .medium) {
+                SheetFooter(cancel: cancel, primaryTitle: "Salvar", primary: save)
+            }
+            // Return adds a line in the editor; ⌘↩ saves.
+            .background {
                 Button("Salvar", action: save)
                     .keyboardShortcut(.return, modifiers: .command)
+                    .frame(width: 0, height: 0)
+                    .opacity(0)
+                    .accessibilityHidden(true)
             }
-        }
-        .padding(20)
-        .frame(width: 480)
     }
 }

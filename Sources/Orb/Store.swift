@@ -567,6 +567,16 @@ enum Keychain {
     }
 
 
+    /// Like `set`, and says whether the item is stored: a caller that is about to remove the only other copy of a
+    /// secret (the data file) must know the Keychain has it.
+    static func store(_ value: String, account: String, service: String = Keychain.service) -> Bool {
+        SecItemDelete(baseQuery(account, service: service) as CFDictionary)
+        guard !value.isEmpty else { return true }
+        var item = baseQuery(account, service: service)
+        item[kSecValueData as String] = Data(value.utf8)
+        return SecItemAdd(item as CFDictionary, nil) == errSecSuccess
+    }
+
     private static func baseQuery(_ account: String, service: String) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
          kSecAttrService as String: service,

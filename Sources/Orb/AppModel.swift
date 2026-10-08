@@ -39,6 +39,17 @@ final class AppModel {
     var drafts: [UUID: String] = [:]
     var showInspector = true
     var showNewBot = false
+    // Commands and shortcuts (see AppModel+Commands.swift).
+    var showCommandPalette = false
+    var showShortcuts = false
+    /// The Orb whose "Apagar…" sheet is open (one dialog for the sidebar and the inspector).
+    var deletingBotID: UUID?
+    /// "Memória de X guardada", shown in the sidebar for a few seconds after deleting an Orb and keeping its memory.
+    var keptMemoryNotice: KeptMemoryNotice?
+    /// Something a command asked of an Orb's chat that the chat takes when it is on screen (see `PendingChatRequest`).
+    var pendingChatRequest: PendingChatRequest?
+    /// The "Esqueceu isso. Desfazer" of the memory screens: here so it outlives the panel being rebuilt (switching Orbs).
+    @ObservationIgnored let memoryUndo = MemoryUndo()
     var connectorStatus: [UUID: MCPStatus] = [:]
     /// Tokens each Orb's last turn used, summed over its model calls (for a context meter; nothing shows it yet).
     private(set) var usage: [UUID: TokenUsage] = [:]
@@ -49,6 +60,8 @@ final class AppModel {
     private(set) var connected: Set<ProviderKind> = []
     /// What the local Claude Code reports (checked while that provider is set up).
     private(set) var claudeCode = ClaudeCodeStatus()
+    /// Counts the times you tried to send before any model was connected (the first-use card pulses on each).
+    private(set) var setupNudge = 0
 
     // MARK: Per-Orb live state
 
@@ -64,8 +77,11 @@ final class AppModel {
     @ObservationIgnored private var speakingUntil: [UUID: ContinuousClock.Instant] = [:]
     @ObservationIgnored private var speakingWatch: [UUID: Task<Void, Never>] = [:]
     private static let speakingQuiet = Duration.milliseconds(600)
+    /// The Orb the user was last on (what "Usar" on a skill talks to, while a catalog page is open).
+    private(set) var lastSelectedBotID: UUID?
     var selection: SidebarItem? {
         didSet {
+            if case .bot(let id) = selection { lastSelectedBotID = id }
             if case .bot(let old) = oldValue, conversations[old] != nil { lastUsed[old] = .now } // leaving it: the clock starts now
             if case .bot(let id) = selection {
                 beginLoading(id)
@@ -99,18 +115,30 @@ final class AppModel {
     @ObservationIgnored private let engine: AgentEngine
     @ObservationIgnored private let claudeEngine: ClaudeCodeEngine
     /// Bots whose running turn belongs to `claudeEngine` (stop and approvals go there).
-    @ObservationIgnored private var claudeTurns: Set<UUID> = []
+    @ObservationIgnored private(set) var claudeTurns: Set<UUID> = []
     /// The folder each running Claude Code turn started in; its session belongs to that folder.
     @ObservationIgnored private var claudeTurnFolders: [UUID: String] = [:]
-    @ObservationIgnored private let mcp = MCPManager()
+    @ObservationIgnored let mcp = MCPManager()
+    /// Keeps the tokens of connectors in the Keychain instead of the data file.
+    @ObservationIgnored let connectorSecrets: ConnectorSecrets
+    /// The syncs of connectors, one after another: waiting for the last one means every connector has started or failed.
+    @ObservationIgnored private var connectorSync: Task<Void, Never>?
+    /// Syncs started and not yet finished, the newest one's number, and how each connector ended in it: what
+    /// `connectAndWait` reads, so one connector's answer does not wait for the others.
+    @ObservationIgnored private var pendingConnectorSyncs = 0
+    @ObservationIgnored private var connectorSyncGeneration = 0
+    @ObservationIgnored private var settledConnectors: [UUID: MCPStatus] = [:]
     /// Processes the Orbs left running with `run_command(background: true)`.
     @ObservationIgnored private let jobs = BackgroundJobs()
     @ObservationIgnored var turns: [UUID: Task<Void, Never>] = [:] // internal for tests
+    /// Each Orb's composer state that outlives the view (attachments not sent yet, messages queued during a turn);
+    /// see `AppModel+Steering.swift`.
+    @ObservationIgnored var composerLanes: [UUID: ComposerLane] = [:]
     /// Each Orb's running turn has an id. A turn that was stopped can still be finishing its setup or draining
     /// events while the next one runs; only the current id may change the Orb's state.
     @ObservationIgnored private(set) var turnIDs: [UUID: UUID] = [:]
     /// Bot id → routine id, for turns started by a routine.
-    private var routineTurns: [UUID: UUID] = [:]
+    private(set) var routineTurns: [UUID: UUID] = [:]
     /// When each running routine's run began.
     @ObservationIgnored private var routineStarts: [UUID: Date] = [:]
     /// Stands in for the provider's client (tests).
@@ -157,8 +185,10 @@ final class AppModel {
     /// `asyncLoading` says whether the first Orb's conversation is read off the main thread after `init` returns
     /// (the window does not wait for it; the app) or before it returns (what tests rely on); it follows
     /// `runsBackgroundWork` unless given.
-    init(store: Store = .standard, runsBackgroundWork: Bool = true, asyncLoading: Bool? = nil) {
+    init(store: Store = .standard, runsBackgroundWork: Bool = true, asyncLoading: Bool? = nil, secretVault: (any SecretVault)? = nil) {
         self.store = store
+        let secrets = ConnectorSecrets(vault: secretVault ?? (runsBackgroundWork ? KeychainVault() : MemoryVault()))
+        connectorSecrets = secrets
         images = ImageStore(dataFolder: store.directory)
         let gate = ApprovalGate()
         self.gate = gate
@@ -172,7 +202,7 @@ final class AppModel {
         bots = state.bots
         routines = state.routines
         skills = state.skills
-        connectors = state.connectors
+        connectors = secrets.resolve(state.connectors)
         providers = state.providers
         defaultModel = state.defaultModel
         contextMemory = state.contextMemory
@@ -200,6 +230,8 @@ final class AppModel {
             if let id = UUID(uuidString: id) { live(id).setUnread(count) }
         }
         syncConnectors()
+        // Tokens an older version left in the data file move to the Keychain with the next save.
+        if secrets.hasUnprotectedSecrets(connectors) { scheduleStateSave() }
         if readsFirstLater, let first = state.bots.first { beginLoading(first.id) }
         guard runsBackgroundWork else { return }
         let outputs = outputsDirectory
@@ -615,6 +647,18 @@ final class AppModel {
         }
     }
 
+    /// After the user connected `kind` on purpose (the first-use card): when the default model cannot be used
+    /// (its provider is signed out, has no key, or was turned off) the new provider's first model takes its place,
+    /// and the provider is turned on if it was off. `refreshModels` alone only replaces a default whose provider is
+    /// gone from the list, so a stale default would keep the new connection from ever counting as ready.
+    @discardableResult
+    func adoptDefaultModel(from kind: ProviderKind) -> Bool {
+        guard !isProviderReady, let account = account(kind), isUsable(account), let first = account.models.first else { return false }
+        if !account.isEnabled { updateProvider(kind) { $0.isEnabled = true } }
+        defaultModel = ModelRef(provider: kind, model: first.id).text
+        return true
+    }
+
     /// Keeps model lists current: on launch and then every few hours, for every usable provider.
     func refreshAllModels(olderThan age: TimeInterval = 6 * 3600) async {
         for account in providers where account.isEnabled && isUsable(account)
@@ -783,6 +827,7 @@ final class AppModel {
         store.deleteConversation(botID)
         store.deleteArchive(botID) // the earlier conversations and the routines' ones
         if selection == .bot(botID) { selection = bots.first.map { .bot($0.id) } }
+        if lastSelectedBotID == botID { lastSelectedBotID = nil } // a catalog sheet must not default to an Orb that is gone
     }
 
     func selectAdjacentBot(offset: Int) {
@@ -1070,7 +1115,12 @@ final class AppModel {
         guard !typed.isEmpty || !pictures.isEmpty, turns[botID] == nil, let bot = effectiveBot(botID) else { return false }
         ensureLoaded(botID)
         guard let ref = modelRef(for: bot), let account = account(ref.provider), account.isEnabled, isUsable(account) else {
-            append(.notice("Conecte um modelo em Ajustes → Modelos para começar."), to: botID)
+            if fromUser && !isProviderReady {
+                // The first-use card or banner is on screen: it pulses, and what you typed stays in the composer.
+                setupNudge += 1
+            } else {
+                append(.notice("Conecte um modelo em Ajustes → Modelos para começar."), to: botID)
+            }
             return false
         }
         let modelInfo = account.models.first { $0.id == ref.model }
@@ -1091,7 +1141,7 @@ final class AppModel {
         let turnGrants = intent == nil ? [] : [PermissionRule(family: .memory)]
 
         var prompt = typed
-        if let expansion = SystemPrompt.expandSkill(in: typed, skills: enabledSkills) {
+        if let expansion = SystemPrompt.expandSkill(in: typed, skills: skills(for: botID)) {
             prompt = expansion.prompt
             if let index = skills.firstIndex(where: { $0.id == expansion.skill.id }) { skills[index].uses += 1 }
         }
@@ -1110,7 +1160,8 @@ final class AppModel {
             runClaudeCode(bot, model: ref.model, prompt: prompt, images: pictures, message: typed, turnGrants: turnGrants)
             return true
         }
-        let skills = enabledSkills
+        let skills = self.skills(for: botID)
+        let allowedConnectors = connectors(for: botID)
         let budget = contextBudget(ref: ref, account: account, botID: botID)
         // Read before this turn's own messages are recorded: it is whether the last task is waiting for "continua".
         let paused = conversations[botID]?.isTaskPaused ?? false
@@ -1128,6 +1179,7 @@ final class AppModel {
         let sentMemories = TurnPreface.relatedLines(in: history)
 
         let turn = beginTurn(botID)
+        let steering = composerLane(botID).queue // messages sent during the turn reach the model between its steps
         turns[botID] = Task {
             guard !Task.isCancelled else { return } // stopped before it began
             let brief = await bank.brief(for: typed, conversationIsNew: history.isEmpty, userTurns: userTurns,
@@ -1146,7 +1198,7 @@ final class AppModel {
             }
             let accessibilityGranted = !bot.capabilities.contains(.computerUse) || accessibilityProbe()
             var tools = ToolBox.offered(for: bot.capabilities, accessibilityGranted: accessibilityGranted)
-            if bot.capabilities.contains(.connectors) { tools += await mcp.tools() }
+            if bot.capabilities.contains(.connectors) { tools += await mcp.tools(allowing: Set(allowedConnectors.map(\.id))) }
             guard isCurrent(turn, of: botID) else { return }
             // Recorded when the prompt with the snapshot is stored (see `apply`), not before.
             pendingMarks[botID] = built.marks
@@ -1165,7 +1217,8 @@ final class AppModel {
                                       onOverheadMeasured: { [weak self] tokens in
                                           Task { @MainActor in self?.noteMeasuredOverhead(tokens, of: botID) }
                                       },
-                                      picksUpTask: paused)
+                                      picksUpTask: paused,
+                                      steering: steering)
             await play(engine.run(request), for: botID, turn: turn)
         }
         return true
@@ -1238,13 +1291,13 @@ final class AppModel {
         // (Sessions from before this was tracked count as up to date.)
         let seen = sessionID == nil ? 0 : min(conversation.claudeSeenCount ?? conversation.messages.count, conversation.messages.count)
         let catchUp = ClaudeCodePrompt.catchUp(Array(conversation.messages[seen...]).modelContext())
-        let skills = enabledSkills
+        let skills = self.skills(for: botID)
         let bank = memory.bank(for: botID)
         // The app knows whether it has Accessibility; the server (a child process) is told rather than left to ask.
         let usesMac = bot.capabilities.contains(.computerUse)
         let servers = [OrbToolsMCPServer.config(directory: bank.directory, mac: usesMac, folder: bot.workingURL,
                                                 accessibilityGranted: usesMac ? accessibilityProbe() : nil)]
-            + (bot.capabilities.contains(.connectors) ? connectors.filter(\.isEnabled) : [])
+            + connectorServers(for: bot)
         let isNew = conversation.messages.isEmpty
         let userTurns = userTurnCount(botID)
         claudeTurns.insert(botID)
@@ -1464,6 +1517,8 @@ final class AppModel {
             ensureLoaded(botID)
             conversations[botID, default: Conversation()].taskPaused = true
             scheduleConversationSave(botID, delay: Self.streamingSaveInterval)
+        case .steered(let id):
+            deliverSteered(id, to: botID)
         case .session(let id):
             ensureLoaded(botID)
             conversations[botID, default: Conversation()].claudeSessionReported(id, folder: claudeTurnFolders[botID])
@@ -1509,6 +1564,7 @@ final class AppModel {
             setUnread(live(botID).unread + 1, for: botID)
         }
         if routineID == nil { scheduleConversationSave(botID, delay: 0) } // a routine's was written by `finishRoutineRun`
+        if routineID == nil { settleSteering(botID, succeeded: succeeded) } // what you said during the turn, if anything
         startNextQueuedRoutine(for: botID)
     }
 
@@ -1561,7 +1617,7 @@ final class AppModel {
         mutateItems(of: botID) { $0.append(item) }
     }
 
-    private func closeStreaming(_ botID: UUID) {
+    func closeStreaming(_ botID: UUID) {
         flushText(botID)
         if let live = liveTexts.removeValue(forKey: botID) {
             let text = live.text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1576,8 +1632,29 @@ final class AppModel {
         }
     }
 
-    private func append(_ kind: TranscriptItem.Kind, to botID: UUID) {
+    func append(_ kind: TranscriptItem.Kind, to botID: UUID) {
         mutateItems(of: botID) { $0.append(TranscriptItem(kind)) }
+    }
+
+    /// The Orb's conversation, read from disk first if it was not in memory. For the transcript's "Tentar de novo".
+    func loadedConversation(_ botID: UUID) -> Conversation? {
+        ensureLoaded(botID)
+        return conversations[botID]
+    }
+
+    /// Changes an Orb's conversation (read first if needed) and schedules it to be saved. The one way another file
+    /// of the app edits a conversation, so a change is never left unsaved.
+    func editConversation(_ botID: UUID, _ change: (inout Conversation) -> Void) {
+        ensureLoaded(botID)
+        guard var conversation = conversations[botID] else { return }
+        change(&conversation)
+        conversations[botID] = conversation
+        scheduleConversationSave(botID, delay: 0.3)
+    }
+
+    /// Puts a conversation in memory without saving it (`Orb --snapshot transcript…`).
+    func seedConversation(_ conversation: Conversation, for botID: UUID) {
+        conversations[botID] = conversation
     }
 
     private func mutateItems(of botID: UUID, _ change: (inout [TranscriptItem]) -> Void) {
@@ -1781,16 +1858,19 @@ final class AppModel {
     func installedSkill(_ catalogID: String) -> Skill? { skills.first { $0.source == catalogID } }
 
     /// Adds a catalog skill; its slug gets a numeric suffix if one is already taken.
-    func install(_ document: SkillDocument, from entry: CatalogSkill) {
-        guard installedSkill(entry.id) == nil else { return }
+    @discardableResult
+    func install(_ document: SkillDocument, from entry: CatalogSkill) -> Skill? {
+        if let existing = installedSkill(entry.id) { return existing }
         let base = Skill.slugify(entry.skillId)
         var slug = base, suffix = 2
         while skills.contains(where: { $0.slug == slug }) {
             slug = "\(base)-\(suffix)"
             suffix += 1
         }
-        skills.append(Skill(slug: slug, name: document.name, summary: document.description,
-                            instructions: document.instructions, source: entry.id, folderURL: document.folderURL))
+        let skill = Skill(slug: slug, name: document.name, summary: document.description,
+                          instructions: document.instructions, source: entry.id, folderURL: document.folderURL)
+        skills.append(skill)
+        return skill
     }
 
     func installedConnector(_ registryName: String) -> MCPServerConfig? { connectors.first { $0.source == registryName } }
@@ -1799,14 +1879,41 @@ final class AppModel {
 
     func syncConnectors() {
         let configs = connectors
-        Task {
+        let previous = connectorSync
+        connectorSyncGeneration += 1
+        let generation = connectorSyncGeneration
+        pendingConnectorSyncs += 1
+        settledConnectors = [:]
+        connectorSync = Task {
+            await previous?.value
             // `sync` waits for servers to start; show "Conectando…" meanwhile.
-            let syncing = Task { await mcp.sync(configs) }
+            let syncing = Task {
+                await mcp.sync(configs) { [weak self] id, status in await self?.connectorSettled(id, status, generation: generation) }
+            }
             try? await Task.sleep(for: .milliseconds(150))
             connectorStatus = await mcp.status()
             await syncing.value
             connectorStatus = await mcp.status()
+            if generation == connectorSyncGeneration {
+                // Whatever did not need to start (already running, off) is settled too.
+                for (id, status) in connectorStatus where settledConnectors[id] == nil { settledConnectors[id] = status }
+            }
+            pendingConnectorSyncs -= 1
         }
+    }
+
+    private func connectorSettled(_ id: UUID, _ status: MCPStatus, generation: Int) {
+        connectorStatus[id] = status
+        if generation == connectorSyncGeneration { settledConnectors[id] = status }
+    }
+
+    /// Waits until connector `id` has started or failed in the sync that a change to `connectors` began, and gives
+    /// its status. Other connectors that are slow to start or retrying do not hold it back.
+    func connectAndWait(_ id: UUID) async -> MCPStatus? {
+        while settledConnectors[id] == nil, pendingConnectorSyncs > 0, !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(60))
+        }
+        return settledConnectors[id] ?? connectorStatus[id]
     }
 
     // MARK: Notifications
@@ -1827,8 +1934,8 @@ final class AppModel {
     private var state: AppState {
         var unread: [String: Int] = [:]
         for (id, live) in lives where live.unread > 0 { unread[id.uuidString] = live.unread }
-        return AppState(bots: bots, routines: routines, skills: skills, connectors: connectors, providers: providers,
-                        defaultModel: defaultModel, unread: unread, contextMemory: contextMemory,
+        return AppState(bots: bots, routines: routines, skills: skills, connectors: connectorSecrets.redact(connectors),
+                        providers: providers, defaultModel: defaultModel, unread: unread, contextMemory: contextMemory,
                         learnedContexts: learnedContexts)
     }
 

@@ -46,12 +46,15 @@ struct CatalogTabBar: View {
     }
 }
 
-/// Search field plus quick-search chips. Searching starts after a short pause in typing.
+/// Search field plus quick-search chips. Searching starts after a short pause in typing; ⌘F focuses the field.
 struct CatalogSearchHeader: View {
     @Binding var query: String
     let prompt: String
-    let suggestions: [String]
+    var suggestions: [String] = []
+    /// A sentence behind an (i) button next to the field (where the results come from).
+    var info: String?
     @FocusState private var isFocused: Bool
+    @State private var isShowingInfo = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -68,20 +71,44 @@ struct CatalogSearchHeader: View {
                         .buttonStyle(.plain)
                         .foregroundStyle(Palette.faint)
                 }
+                if let info {
+                    Button("Sobre a busca", systemImage: "info.circle") { isShowingInfo.toggle() }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Palette.muted)
+                        .help(info)
+                        .popover(isPresented: $isShowingInfo, arrowEdge: .bottom) {
+                            Text(info)
+                                .font(.system(size: 12))
+                                .foregroundStyle(Palette.secondary)
+                                .frame(width: 260, alignment: .leading)
+                                .padding(14)
+                        }
+                }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .card(radius: 12, stroke: isFocused ? Palette.lineStrong : Palette.line)
+            .background {
+                // ⌘F, like the search of the other pages.
+                Button("Buscar") { isFocused = true }
+                    .keyboardShortcut("f", modifiers: .command)
+                    .opacity(0)
+                    .frame(width: 0, height: 0)
+                    .accessibilityHidden(true)
+            }
 
-            ScrollView(.horizontal) {
-                HStack(spacing: 6) {
-                    ForEach(suggestions, id: \.self) { suggestion in
-                        Button(suggestion) { query = suggestion }
-                            .buttonStyle(ChipStyle(isSelected: query.lowercased() == suggestion.lowercased()))
+            if !suggestions.isEmpty {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 6) {
+                        ForEach(suggestions, id: \.self) { suggestion in
+                            Button(suggestion) { query = suggestion }
+                                .buttonStyle(ChipStyle(isSelected: query.lowercased() == suggestion.lowercased()))
+                        }
                     }
                 }
+                .scrollIndicators(.never)
             }
-            .scrollIndicators(.never)
         }
         .onAppear { isFocused = true }
     }
@@ -138,13 +165,21 @@ struct CatalogStateView: View {
     let error: String?
     let isEmpty: Bool
     var slowHint: String?
+    /// Draw still placeholders for result cards while loading (instead of a spinner alone).
+    var skeleton = false
     let retry: () -> Void
     @State private var isSlow = false
 
     var body: some View {
         Group {
             if isLoading {
-                VStack(spacing: 10) {
+                VStack(spacing: 18) {
+                    if skeleton {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: 12)], spacing: 12) {
+                            ForEach(0..<6, id: \.self) { _ in SkeletonCard() }
+                        }
+                        .accessibilityHidden(true)
+                    }
                     ProgressView().controlSize(.small)
                     if isSlow, let slowHint {
                         Text(slowHint).font(.system(size: 12)).foregroundStyle(Palette.faint)
@@ -167,7 +202,85 @@ struct CatalogStateView: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 40)
+        .padding(.top, skeleton && isLoading ? 0 : 40)
+    }
+}
+
+/// A result card's outline, still: a grid of cards loading at once should not run a shimmer each.
+private struct SkeletonCard: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                RoundedRectangle(cornerRadius: 10).fill(Palette.raised).frame(width: 36, height: 36)
+                VStack(alignment: .leading, spacing: 6) {
+                    RoundedRectangle(cornerRadius: 3).fill(Palette.raised).frame(width: 120, height: 10)
+                    RoundedRectangle(cornerRadius: 3).fill(Palette.raised.opacity(0.6)).frame(width: 80, height: 8)
+                }
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                RoundedRectangle(cornerRadius: 3).fill(Palette.raised.opacity(0.7)).frame(height: 8)
+                RoundedRectangle(cornerRadius: 3).fill(Palette.raised.opacity(0.7)).frame(height: 8)
+                RoundedRectangle(cornerRadius: 3).fill(Palette.raised.opacity(0.7)).frame(width: 150, height: 8)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card(radius: 14)
+    }
+}
+
+/// "Usar com": every Orb (the default) or only the ones ticked. Choosing an Orb is all it takes; the connector or
+/// skill follows the choice (for connectors, the Orb's "Conectores" switch is turned on when the sheet is saved).
+struct OrbScopePicker: View {
+    @Environment(AppModel.self) private var model
+    @Binding var orbIDs: Set<UUID>?
+    /// With its determiner, so the gender agrees ("este conector", "esta skill").
+    var noun = "este conector"
+    /// Added to the explanation while every Orb is chosen.
+    var allNote = ""
+
+    private var isChosen: Binding<Bool> {
+        Binding(
+            get: { orbIDs != nil },
+            set: { chosen in
+                if !chosen { orbIDs = nil; return }
+                let first = model.lastSelectedBotID.flatMap { id in model.bots.first { $0.id == id }?.id } ?? model.bots.first?.id
+                orbIDs = first.map { [$0] } ?? []
+            }
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Picker("Usar com", selection: isChosen) {
+                Text("Todos os Orbs").tag(false)
+                Text("Só alguns").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            if let selected = orbIDs {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(model.bots) { bot in
+                        Toggle(bot.name, isOn: Binding(
+                            get: { selected.contains(bot.id) },
+                            set: { on in
+                                var ids = orbIDs ?? []
+                                if on { ids.insert(bot.id) } else { ids.remove(bot.id) }
+                                orbIDs = ids
+                            }
+                        ))
+                        .toggleStyle(.checkbox)
+                    }
+                }
+                .padding(.top, 2)
+            }
+            Text(orbIDs == nil
+                 ? "Todos os Orbs, inclusive os que você criar depois, podem usar \(noun).\(allNote.isEmpty ? "" : " " + allNote) Você pode mudar depois."
+                 : "Só os Orbs marcados usam \(noun). Você pode mudar depois.")
+                .font(.system(size: 11))
+                .foregroundStyle(Palette.faint)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 

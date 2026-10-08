@@ -7,6 +7,8 @@ struct MCPTool: AgentTool {
     let spec: ToolSpec
     let connection: MCPConnection
     let annotations: MCPToolAnnotations
+    /// The connector this tool belongs to (to offer an Orb only the connectors it may use).
+    var serverID: UUID?
 
     init(serverName: String, remote: ToolSpec, connection: MCPConnection, annotations: MCPToolAnnotations = .none) {
         self.serverName = serverName
@@ -54,6 +56,16 @@ struct MCPTool: AgentTool {
 
 // MARK: - Manager
 
+extension MCPServerConfig {
+    /// The config without what only decides who may use it: two configs that agree here run the same server.
+    var runtimeIdentity: MCPServerConfig {
+        var copy = self
+        copy.orbIDs = nil
+        copy.secretKeys = []
+        return copy
+    }
+}
+
 enum MCPStatus: Sendable, Equatable {
     case starting, ready(toolCount: Int), failed(String), stopped
 }
@@ -70,11 +82,13 @@ actor MCPManager {
     private var entries: [UUID: Entry] = [:]
 
     /// Stops removed, disabled, edited or dead servers and (re)starts the rest concurrently;
-    /// returns once each has started or failed.
-    func sync(_ configs: [MCPServerConfig]) async {
+    /// returns once each has started or failed. `progress` hears about each one the moment it is done, so a caller that
+    /// cares about one connector need not wait for a slow, unrelated one.
+    func sync(_ configs: [MCPServerConfig], progress: (@Sendable (UUID, MCPStatus) async -> Void)? = nil) async {
         let wanted = Dictionary(configs.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for (id, entry) in entries {
-            var stale = wanted[id] != entry.config
+            // Which Orbs may use a connector does not change how it runs: no restart for that.
+            var stale = wanted[id].map { $0.runtimeIdentity != entry.config.runtimeIdentity } ?? true
             if case .failed = entry.status { stale = true }
             if case .ready = entry.status, let connection = entry.connection, await !connection.isRunning { stale = true }
             guard stale else { continue }
@@ -105,21 +119,26 @@ actor MCPManager {
                 case .success(let specs):
                     let annotations = await connection.toolAnnotations
                     entry.tools = specs.map {
-                        MCPTool(serverName: entry.config.name, remote: $0, connection: connection, annotations: annotations[$0.name] ?? .none)
+                        var tool = MCPTool(serverName: entry.config.name, remote: $0, connection: connection,
+                                           annotations: annotations[$0.name] ?? .none)
+                        tool.serverID = id
+                        return tool
                     }
                     entry.status = .ready(toolCount: specs.count)
                 case .failure(let error):
                     entry.status = .failed(error.localizedDescription)
                 }
                 entries[id] = entry
+                await progress?(id, entry.status)
             }
         }
     }
 
-    /// Tools of every server that is ready.
-    func tools() async -> [any AgentTool] {
+    /// Tools of every server that is ready, or only of the servers in `allowing` (the connectors an Orb may use).
+    func tools(allowing: Set<UUID>? = nil) async -> [any AgentTool] {
         var tools: [any AgentTool] = []
         for entry in entries.values.sorted(by: { $0.config.name < $1.config.name }) {
+            if let allowing, !allowing.contains(entry.config.id) { continue }
             if let connection = entry.connection, await connection.isRunning { tools += entry.tools }
         }
         return tools

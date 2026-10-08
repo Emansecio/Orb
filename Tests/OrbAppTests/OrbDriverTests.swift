@@ -224,9 +224,9 @@ struct OrbDriverTests {
         content.addSubview(view)
         let win = window(content)
         defer { close(win) }
-        #expect(view.placedLayerCount == 0)
-        for _ in 0..<100 where view.placedLayerCount == 0 { try await Task.sleep(for: .milliseconds(50)) }
-        #expect(view.placedLayerCount > 0)
+        // Usually nothing is placed yet (cold cache); a test running alongside may have warmed these bitmaps already,
+        // which only means they show at once. Either way they must end up on screen.
+        await waitUntil("the decoded layers to be placed") { view.placedLayerCount > 0 }
     }
 
     @Test func aPendingLoadForAnOrbThatLeftTheWindowIsHarmless() async throws {
@@ -236,9 +236,12 @@ struct OrbDriverTests {
         content.addSubview(view)
         let win = window(content)
         defer { close(win) }
+        // With the bitmaps already cached by a test running alongside, the layers are placed at once and there is no
+        // pending load to test: only the case this test is about is checked.
+        let wasPending = view.placedLayerCount == 0
         view.removeFromSuperview()
         try await Task.sleep(for: .milliseconds(600))
-        #expect(view.placedLayerCount == 0)
+        if wasPending { #expect(view.placedLayerCount == 0) }
         #expect(OrbDriver.driverCount == 0)
     }
 

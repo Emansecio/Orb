@@ -32,6 +32,8 @@ extension AppModel {
 
     /// A banner with "Permitir" and "Não permitir" when the user is not looking at this card.
     func announceApproval(_ request: ApprovalRequest, of botID: UUID) {
+        // For VoiceOver, when the card appears in the chat being shown (the banner covers the other cases).
+        if selectedBot?.id == botID, let name = bot(botID)?.name { announceForAccessibility("\(name) precisa da sua permissão") }
         guard let bot = bot(botID),
               ApprovalNotifications.shouldPost(appIsActive: NSApp?.isActive ?? false, selectedBotID: selectedBot?.id,
                                                botID: botID, enabled: Self.notificationsEnabled),

@@ -22,8 +22,9 @@ extension View {
     /// A sheet with a title, a one-line explanation under it and the app's background; `footer` sits under the
     /// content (usually a `SheetFooter`).
     func orbSheet<Footer: View>(_ title: String, subtitle: String? = nil, size: SheetSize = .medium,
+                                maxHeight: CGFloat = SheetSize.maxHeight,
                                 @ViewBuilder footer: () -> Footer) -> some View {
-        modifier(OrbSheetFrame(title: title, subtitle: subtitle, size: size, footer: footer()))
+        modifier(OrbSheetFrame(title: title, subtitle: subtitle, size: size, maxHeight: maxHeight, footer: footer()))
     }
 
     func orbSheet(_ title: String, subtitle: String? = nil, size: SheetSize = .medium) -> some View {
@@ -40,6 +41,7 @@ private struct OrbSheetFrame<Footer: View>: ViewModifier {
     let title: String
     let subtitle: String?
     let size: SheetSize
+    let maxHeight: CGFloat
     let footer: Footer
 
     func body(content: Content) -> some View {
@@ -64,7 +66,7 @@ private struct OrbSheetFrame<Footer: View>: ViewModifier {
                 .frame(maxHeight: .infinity, alignment: .top)
             footer
         }
-        .frame(minWidth: size.width, idealWidth: size.width, maxWidth: size.width, maxHeight: SheetSize.maxHeight)
+        .frame(minWidth: size.width, idealWidth: size.width, maxWidth: size.width, maxHeight: maxHeight)
         .background(Palette.chrome)
     }
 }
@@ -85,8 +87,7 @@ struct SheetFooter: View {
         HStack(spacing: 8) {
             if let destructiveTitle, let destructive {
                 Button(destructiveTitle, role: .destructive, action: destructive)
-                    .buttonStyle(GhostStyle())
-                    .foregroundStyle(Palette.danger)
+                    .buttonStyle(GhostStyle(tint: Palette.danger))
             }
             if let message {
                 Text(message)

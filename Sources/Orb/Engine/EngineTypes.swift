@@ -575,6 +575,11 @@ struct MCPServerConfig: Codable, Hashable, Identifiable, Sendable {
     var isEnabled = true
     /// Registry name when installed from the catalog (e.g. "io.github.owner/server").
     var source: String?
+    /// The Orbs that may use this connector; nil means every Orb (what connectors did before they were scoped).
+    var orbIDs: Set<UUID>?
+    /// Names of environment variables or headers that hold secrets (kept in the Keychain, see `ConnectorSecrets`),
+    /// besides the ones whose name gives them away.
+    var secretKeys: Set<String> = []
 
     var isRemote: Bool { !url.isEmpty }
 }
@@ -592,5 +597,7 @@ extension MCPServerConfig {
         headers = try c.value(.headers, default: [:])
         isEnabled = try c.value(.isEnabled, default: true)
         source = try c.decodeIfPresent(String.self, forKey: .source)
+        orbIDs = (try? c.decodeIfPresent(Set<UUID>.self, forKey: .orbIDs)) ?? nil
+        secretKeys = (try? c.decodeIfPresent(Set<String>.self, forKey: .secretKeys)) ?? []
     }
 }

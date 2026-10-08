@@ -1,0 +1,198 @@
+import Foundation
+import Testing
+@testable import Orb
+
+/// The words and groupings of the routines page and the conversations menu (see AppModel+RoutinesUI.swift).
+struct RoutinesUITests {
+    private var calendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar
+    }
+
+    /// Thursday, 8 October 2026, 12:00 UTC.
+    private var now: Date { date(2026, 10, 8, 12, 0) }
+
+    private func date(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: Int) -> Date {
+        calendar.date(from: DateComponents(year: year, month: month, day: day, hour: hour, minute: minute))!
+    }
+
+    // MARK: Names
+
+    @Test func aRoutineWithoutANameTakesTheFirstWordsOfItsPrompt() {
+        #expect(RoutineText.defaultName(fromPrompt: "resuma meus e-mails não lidos de hoje") == "Resuma meus e-mails não…")
+        #expect(RoutineText.defaultName(fromPrompt: "  Organize os Downloads. ") == "Organize os Downloads")
+        #expect(RoutineText.defaultName(fromPrompt: "   ") == "Rotina")
+        #expect(RoutineText.resolvedName("  Meu resumo ", prompt: "x") == "Meu resumo")
+        #expect(RoutineText.resolvedName("", prompt: "Faça o backup") == "Faça o backup")
+    }
+
+    // MARK: Time in words
+
+    @Test func timeUntilTheNextRunIsInWords() {
+        #expect(RoutineText.relative(until: now.addingTimeInterval(20), now: now) == "em instantes")
+        #expect(RoutineText.relative(until: now.addingTimeInterval(-500), now: now) == "em instantes")
+        #expect(RoutineText.relative(until: now.addingTimeInterval(25 * 60), now: now) == "em 25 min")
+        #expect(RoutineText.relative(until: now.addingTimeInterval(3 * 3600), now: now) == "em 3 h")
+        #expect(RoutineText.relative(until: now.addingTimeInterval(4 * 3600 + 37 * 60), now: now) == "em 4 h 37 min")
+        #expect(RoutineText.relative(until: now.addingTimeInterval(26 * 3600), now: now) == "em 1 dia")
+        #expect(RoutineText.relative(until: now.addingTimeInterval(3 * 86_400 + 600), now: now) == "em 3 dias")
+    }
+
+    @Test func daysAreTodayTomorrowTheWeekdayOrTheDate() {
+        #expect(RoutineText.dayAndTime(date(2026, 10, 8, 18, 5), now: now, calendar: calendar) == "hoje às 18:05")
+        #expect(RoutineText.dayAndTime(date(2026, 10, 9, 9, 0), now: now, calendar: calendar) == "amanhã às 09:00")
+        #expect(RoutineText.dayAndTime(date(2026, 10, 11, 10, 0), now: now, calendar: calendar) == "domingo às 10:00")
+        #expect(RoutineText.dayAndTime(date(2026, 10, 20, 7, 30), now: now, calendar: calendar) == "20 de out. às 07:30")
+        #expect(RoutineText.dayAndTime(date(2027, 1, 5, 7, 30), now: now, calendar: calendar) == "5 de jan. de 2027 às 07:30")
+    }
+
+    @Test func aRunsDateIsRelativeToToday() {
+        #expect(RoutineText.stamp(date(2026, 10, 8, 9, 0), now: now, calendar: calendar) == "hoje 09:00")
+        #expect(RoutineText.stamp(date(2026, 10, 7, 23, 59), now: now, calendar: calendar) == "ontem 23:59")
+        #expect(RoutineText.stamp(date(2026, 10, 5, 8, 30), now: now, calendar: calendar) == "seg 08:30")
+        #expect(RoutineText.stamp(date(2026, 9, 29, 6, 5), now: now, calendar: calendar) == "29 de set. 06:05")
+        #expect(RoutineText.stamp(date(2025, 12, 31, 6, 5), now: now, calendar: calendar) == "31 de dez. de 2025 06:05")
+    }
+
+    @Test func aRunsDurationIsShort() {
+        func run(_ seconds: TimeInterval?) -> RoutineRun {
+            RoutineRun(date: now, finishedAt: seconds.map { now.addingTimeInterval($0) }, succeeded: true, summary: "")
+        }
+        #expect(RoutineText.duration(of: run(nil)) == nil)
+        #expect(RoutineText.duration(of: run(0.2)) == nil)
+        #expect(RoutineText.duration(of: run(40)) == "40 s")
+        #expect(RoutineText.duration(of: run(150)) == "2 min")
+        #expect(RoutineText.duration(of: run(3600)) == "1 h")
+        #expect(RoutineText.duration(of: run(3900)) == "1 h 5 min")
+    }
+
+    @Test func theCardSaysWhenTheNextRunIsOrThatItIsPaused() {
+        var routine = Routine(name: "Resumo", botID: UUID(), prompt: "x", schedule: .everyHours(4))
+        routine.createdAt = date(2026, 10, 7, 12, 0)
+        routine.lastRun = date(2026, 10, 8, 11, 0)
+        #expect(RoutineText.nextRun(of: routine, now: now, calendar: calendar) == "Próxima: em 3 h · hoje às 15:00")
+        routine.isEnabled = false
+        #expect(RoutineText.nextRun(of: routine, now: now, calendar: calendar) == nil)
+    }
+
+    @Test func theEditorPreviewsTheNextRun() {
+        #expect(RoutineText.preview(of: .daily(hour: 9, minute: 0), now: now, calendar: calendar)
+                == "Próxima execução: amanhã às 09:00 (em 21 h)")
+        #expect(RoutineText.preview(of: .everyHours(4), now: now, calendar: calendar)
+                == "Próxima execução: hoje às 16:00 (em 4 h)")
+        #expect(RoutineText.preview(of: .weekly(weekday: 1, hour: 10, minute: 0), now: now, calendar: calendar)
+                == "Próxima execução: domingo às 10:00 (em 2 dias)")
+    }
+
+    // MARK: Permission warning
+
+    @Test func aRoutineWaitsForAnAnswerOnlyWhenItWouldAsk() {
+        #expect(RoutineText.waitsForAnswer(orbMode: .ask, routineMode: nil))
+        #expect(!RoutineText.waitsForAnswer(orbMode: .ask, routineMode: .auto))
+        #expect(!RoutineText.waitsForAnswer(orbMode: .ask, routineMode: .readOnly))
+        #expect(!RoutineText.waitsForAnswer(orbMode: .auto, routineMode: nil))
+        #expect(!RoutineText.waitsForAnswer(orbMode: .bypass, routineMode: nil))
+    }
+
+    // MARK: Templates
+
+    @Test func templatesFillTheRoutineForTheChosenOrb() throws {
+        let botID = UUID()
+        #expect(RoutineTemplate.all.map(\.title) == ["Resumo da manhã", "Organizar arquivos", "Revisar a semana"])
+        #expect(Set(RoutineTemplate.all.map(\.id)).count == RoutineTemplate.all.count)
+        for template in RoutineTemplate.all {
+            let routine = template.routine(for: botID)
+            #expect(routine.botID == botID)
+            #expect(routine.name == template.title)
+            #expect(!routine.prompt.isEmpty)
+            #expect(routine.schedule == template.schedule)
+            #expect(routine.isEnabled)
+        }
+        let morning = try #require(RoutineTemplate.all.first)
+        #expect(morning.schedule == .daily(hour: 8, minute: 30))
+        #expect(morning.whenText == "Todo dia às 08:30")
+        // A template never gives more permission than the Orb has: only a restriction is prefilled.
+        #expect(RoutineTemplate.all.allSatisfy { $0.permissionMode == nil || $0.permissionMode == .readOnly })
+    }
+
+    @Test @MainActor func aNewRoutineStartsWithTheSelectedOrbOrTheFirst() throws {
+        let model = AppModel(store: Store(directory: FileManager.default.temporaryDirectory.appending(path: "OrbRoutinesUI-\(UUID().uuidString)")),
+                             runsBackgroundWork: false)
+        let first = try #require(model.bots.first)
+        let draft = try #require(model.draftRoutine())
+        #expect(draft.botID == model.routineDefaultBot?.id)
+        #expect(draft.name.isEmpty && draft.prompt.isEmpty)
+        let other = try #require(model.draftRoutine(from: RoutineTemplate.all[1], botID: first.id))
+        #expect(other.botID == first.id)
+        #expect(other.name == "Organizar arquivos")
+    }
+
+    // MARK: Report
+
+    @Test func aReportIsSplitIntoHeadingsBulletsAndParagraphs() {
+        let report = "# Resumo\n\n**3 e-mails**\nimportantes\n\n- Contrato\n* Reunião às 15h\n• Fatura\n\nNada mais.\n"
+        #expect(RoutineText.reportBlocks(report) == [
+            .heading("Resumo"),
+            .paragraph("**3 e-mails**\nimportantes"),
+            .bullet("Contrato"), .bullet("Reunião às 15h"), .bullet("Fatura"),
+            .paragraph("Nada mais."),
+        ])
+        #expect(RoutineText.reportBlocks("").isEmpty)
+        #expect(RoutineText.reportBlocks("   \n\n").isEmpty)
+    }
+
+    // MARK: Earlier conversations
+
+    private func summary(_ title: String, _ updated: Date, messages: Int = 2) -> ConversationSummary {
+        ConversationSummary(title: title, createdAt: updated, updatedAt: updated, messageCount: messages)
+    }
+
+    @Test func conversationsAreGroupedByDayNewestFirst() {
+        let entries = [
+            summary("antiga", date(2026, 8, 1, 10, 0)),
+            summary("ontem", date(2026, 10, 7, 22, 0)),
+            summary("hoje cedo", date(2026, 10, 8, 1, 0)),
+            summary("hoje tarde", date(2026, 10, 8, 11, 0)),
+            summary("semana", date(2026, 10, 3, 9, 0)),
+        ]
+        let groups = ConversationListing.groups(entries, now: now, calendar: calendar)
+        #expect(groups.map(\.title) == ["Hoje", "Ontem", "Esta semana", "Mais antigas"])
+        #expect(groups[0].entries.map(\.title) == ["hoje tarde", "hoje cedo"])
+        #expect(groups[1].entries.map(\.title) == ["ontem"])
+        #expect(groups[3].entries.map(\.title) == ["antiga"])
+        #expect(ConversationListing.groups([], now: now, calendar: calendar).isEmpty)
+        // Empty groups are left out.
+        #expect(ConversationListing.groups([entries[0]], now: now, calendar: calendar).map(\.title) == ["Mais antigas"])
+    }
+
+    @Test func searchIgnoresCaseAndAccents() {
+        let entries = [summary("Planejar a viagem de dezembro", now), summary("Revisar o texto", now)]
+        #expect(ConversationListing.filter(entries, query: "  ").count == 2)
+        #expect(ConversationListing.filter(entries, query: "VIAGEM").map(\.title) == ["Planejar a viagem de dezembro"])
+        #expect(ConversationListing.filter(entries, query: "revisão").isEmpty)
+        #expect(ConversationListing.filter(entries, query: "planejár").count == 1)
+    }
+
+    @Test func aConversationRowSaysHowManyMessagesAndWhen() {
+        #expect(ConversationListing.subtitle(summary("a", date(2026, 10, 7, 14, 32), messages: 4), now: now, calendar: calendar)
+                == "4 mensagens · ontem 14:32")
+        #expect(ConversationListing.subtitle(summary("a", date(2026, 10, 8, 9, 0), messages: 1), now: now, calendar: calendar)
+                == "1 mensagem · hoje 09:00")
+    }
+
+    @Test func arrowKeysMoveTheSelectionAndStopAtTheEnds() {
+        let ids = (0..<3).map { _ in UUID() }
+        #expect(ConversationListing.moved(nil, by: 1, in: ids) == ids[0])
+        #expect(ConversationListing.moved(nil, by: -1, in: ids) == ids[2])
+        #expect(ConversationListing.moved(ids[0], by: 1, in: ids) == ids[1])
+        #expect(ConversationListing.moved(ids[2], by: 1, in: ids) == ids[2])
+        #expect(ConversationListing.moved(ids[0], by: -1, in: ids) == ids[0])
+        #expect(ConversationListing.moved(UUID(), by: 1, in: ids) == ids[0])
+        #expect(ConversationListing.moved(nil, by: 1, in: []) == nil)
+    }
+
+    @Test func theSearchFieldAppearsFromFiveConversations() {
+        #expect(ConversationListing.searchFrom == 5)
+    }
+}

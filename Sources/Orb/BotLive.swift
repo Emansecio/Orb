@@ -47,6 +47,8 @@ final class BotLive {
     private(set) var status: String?
     /// `status != nil`, kept apart so the composer does not re-render with every new status line.
     private(set) var isWorking = false
+    /// When the running turn began (nil exactly when none runs); the working line counts from it.
+    private(set) var workingSince: Date?
     /// What the Orb's avatar does (expression, gaze and motion follow this).
     private(set) var activity = OrbActivity.idle
     /// An approval card is open: the Orb is stopped until you answer.
@@ -96,7 +98,13 @@ final class BotLive {
     func setStatus(_ text: String?) {
         guard text != status else { return }
         status = text
+        assign(\.workingSince, to: text == nil ? nil : (workingSince ?? .now))
         refresh()
+    }
+
+    /// Moves the start of the running turn (tests and review snapshots show a turn that has gone on a while).
+    func backdateWork(to date: Date) {
+        if isWorking { workingSince = date }
     }
 
     func setAwaitingApproval(_ isWaiting: Bool) {

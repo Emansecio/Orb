@@ -1,141 +1,257 @@
 import SwiftUI
 
-/// Ajustes → Modelos: the default model and every provider (sign-in or key, live model list, enable, remove).
+/// What the last model refresh of each provider said, so a row can be honest: a local server that is not running is
+/// "Servidor não encontrado", not "Conectado".
+@MainActor @Observable
+final class ProviderHealth {
+    private(set) var failures: [ProviderKind: ProviderCheckFailure] = [:]
+    private(set) var checking: Set<ProviderKind> = []
+
+    func failure(of kind: ProviderKind) -> ProviderCheckFailure? { failures[kind] }
+    func isChecking(_ kind: ProviderKind) -> Bool { checking.contains(kind) }
+
+    /// Reloads the provider's models and remembers how it went. Rethrows so a caller can show it too.
+    func refresh(_ kind: ProviderKind, model: AppModel) async throws {
+        guard !checking.contains(kind) else { return }
+        checking.insert(kind)
+        defer { checking.remove(kind) }
+        do {
+            try await model.refreshModels(kind)
+            failures[kind] = nil
+        } catch {
+            failures[kind] = ProviderCheck.failure(from: error)
+            throw error
+        }
+    }
+
+    /// Remembers a failure (nil: forgets it).
+    func record(_ error: Error?, for kind: ProviderKind) { failures[kind] = error.map(ProviderCheck.failure(from:)) }
+
+    /// Local servers and gateways are looked at when the tab opens (a request to your own machine takes
+    /// milliseconds), so their rows say what is true. Providers with a remote key are refreshed by the app on its own.
+    func checkServers(model: AppModel) async {
+        for account in model.providers where account.isEnabled && (account.kind.isLocalServer || account.kind == .custom)
+            && (account.kind.isLocalServer || GatewayForm.urlState(account.baseURL) == .valid) {
+            try? await refresh(account.kind, model: model)
+        }
+    }
+}
+
+/// Ajustes → Modelos: the default model and every provider, grouped by how it is paid for or reached.
 struct ProviderSettings: View {
     @Environment(AppModel.self) private var model
-
-    private var available: [ProviderKind] { ProviderKind.allCases.filter { model.account($0) == nil } }
+    @State private var health = ProviderHealth()
+    @State private var firstRun = FirstRunModel()
 
     var body: some View {
         @Bindable var model = model
         Form {
-            Section {
-                ModelPicker(selection: $model.defaultModel, title: "Modelo padrão", allowsDefault: false)
-                    .disabled(model.modelChoices.isEmpty)
-            } footer: {
-                Text(model.modelChoices.isEmpty
-                     ? "Adicione um provedor abaixo para escolher um modelo."
-                     : "Usado pelos Orbs que não têm um modelo próprio. As listas de modelos se atualizam sozinhas.")
-            }
-            Section {
-                ForEach(model.providers) { account in
-                    ProviderRow(kind: account.kind)
+            // The card stays while a connection is under way, failed or just done ("Pronto"), not only while no provider
+            // is listed: connecting adds the provider first, and the card would vanish before saying how it went.
+            if model.providers.isEmpty || firstRun.working != nil || firstRun.failure != nil || firstRun.connectedName != nil {
+                Section { FirstRunCard(style: .settings, run: firstRun) }
+            } else {
+                Section {
+                    if model.modelChoices.isEmpty {
+                        LabeledContent("Modelo padrão") {
+                            Text("Nenhum modelo ainda").foregroundStyle(Palette.muted)
+                        }
+                    } else {
+                        ModelPicker(selection: $model.defaultModel, title: "Modelo padrão", allowsDefault: false)
+                    }
+                } footer: {
+                    Text(model.modelChoices.isEmpty
+                         ? "Conecte um provedor abaixo: os modelos dele aparecem aqui."
+                         : "Usado por Orbs sem modelo próprio.")
                 }
-                Menu("Adicionar provedor", systemImage: "plus") {
-                    ForEach(available) { kind in
-                        Button(kind.label) {
-                            model.addProvider(kind)
-                            ProviderExpansion.set(kind, expanded: true) // a new provider opens for setup
+            }
+            ForEach(ProviderGroup.allCases) { group in
+                let kinds = group.kinds.filter { model.account($0) != nil }
+                if !kinds.isEmpty {
+                    Section(group.title) {
+                        ForEach(kinds) { ProviderRow(kind: $0, health: health) }
+                    }
+                }
+            }
+            Section { addMenu }
+        }
+        .formStyle(.grouped)
+        .orbFormBackground()
+        .task(id: model.providers.map(\.kind)) { await health.checkServers(model: model) }
+    }
+
+    private var addMenu: some View {
+        Menu {
+            ForEach(ProviderGroup.allCases) { group in
+                let kinds = group.kinds.filter { model.account($0) == nil }
+                if !kinds.isEmpty {
+                    Section(group.title) {
+                        ForEach(kinds) { kind in
+                            Button(kind.shortName) {
+                                model.addProvider(kind)
+                                ProviderExpansion.set(kind, expanded: true) // a new provider opens for setup
+                            }
+                            .help(kind.tagline)
                         }
                     }
                 }
-                .disabled(available.isEmpty)
-            } header: {
-                Text("Provedores")
-            } footer: {
-                Text("Clique num provedor para abrir ou recolher. Só o do modelo padrão começa aberto.")
             }
+        } label: {
+            Label(model.providers.isEmpty ? "Outros provedores" : "Adicionar provedor", systemImage: "plus")
         }
-        .formStyle(.grouped)
+        .disabled(ProviderKind.allCases.allSatisfy { model.account($0) != nil })
     }
 }
 
-/// One provider as an expandable row: status at a glance, details (sign-in or key, models, enable, remove) inside.
+/// One provider as an expandable row: status in a line, credential and address inside.
 private struct ProviderRow: View {
     @Environment(AppModel.self) private var model
     let kind: ProviderKind
+    let health: ProviderHealth
     @State private var key = ""
     @State private var isWorking = false
     @State private var error: String?
     @State private var email: String?
+    @State private var isReplacingKey = false
     @State private var isConfirmingRemoval = false
+    @FocusState private var keyFocused: Bool
     @AppStorage(ProviderExpansion.storageKey) private var expansion = ""
 
     private var account: ProviderAccount? { model.account(kind) }
     private var isConnected: Bool { account.map(model.isUsable) ?? false }
+    private var hasKey: Bool { model.connected.contains(kind) }
     private var isDefault: Bool { ModelRef(model.defaultModel)?.provider == kind }
     /// The user's choice, else open only the provider of the default model.
     private var isExpanded: Bool { ProviderExpansion.parse(expansion)[kind] ?? isDefault }
 
+    private func status(_ account: ProviderAccount) -> ProviderStatus {
+        ProviderStatus.make(kind: kind, account: account, isConnected: isConnected, lastError: health.failure(of: kind),
+                            isChecking: health.isChecking(kind) || isWorking)
+    }
+
     var body: some View {
         if let account {
+            let status = status(account)
             DisclosureGroup(isExpanded: Binding(get: { isExpanded }, set: { ProviderExpansion.set(kind, expanded: $0) })) {
-                Text(kind.summary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                details(account)
+                details(account, status: status)
             } label: {
                 HStack(spacing: 8) {
-                    Text(kind.label)
+                    Text(kind.shortName)
                     if isDefault {
                         CatalogBadge(text: "Padrão", tint: Palette.accentText)
                     }
                     Spacer()
-                    status(account)
+                    statusLabel(status)
+                    optionsMenu(account)
                 }
                 .contentShape(.rect)
                 .onTapGesture {
                     withAnimation(.snappy(duration: 0.2)) { ProviderExpansion.set(kind, expanded: !isExpanded) }
                 }
             }
-            .confirmationDialog("Remover \(kind.label)?", isPresented: $isConfirmingRemoval) {
-                Button("Remover e apagar a chave", role: .destructive) { model.removeProvider(kind) }
+            .confirmationDialog("Remover o provedor \(kind.shortName)?", isPresented: $isConfirmingRemoval) {
+                Button(kind.removeButtonTitle, role: .destructive) { model.removeProvider(kind) }
             } message: {
-                Text("Orbs que usam modelos deste provedor passam a usar o modelo padrão.")
+                Text("Orbs que usam estes modelos passam a usar o modelo padrão.")
             }
             .task(id: kind) { email = kind == .chatgpt ? await ChatGPTAuth.shared.credential?.email : nil }
         }
     }
 
-    @ViewBuilder private func details(_ account: ProviderAccount) -> some View {
-                if kind == .claudeCode {
-                    ClaudeCodeAccountRow()
-                } else if kind.usesSignIn {
-                    signInRow
-                } else if kind.needsKey || kind == .custom {
-                    keyRow
-                }
-                if kind.hasEditableURL {
-                    TextField("URL base", text: Binding(get: { account.baseURL },
-                                                       set: { url in model.updateProvider(kind) { $0.baseURL = url } }),
-                              prompt: Text("http://localhost:11434/v1"))
-                }
-                if kind == .custom {
-                    CustomProviderFields(account: account)
-                }
-                Toggle("Usar este provedor", isOn: Binding(get: { account.isEnabled },
-                                                          set: { on in model.updateProvider(kind) { $0.isEnabled = on } }))
-                HStack {
-                    Button(isWorking ? "Atualizando…" : "Atualizar modelos", systemImage: "arrow.clockwise") {
-                        run { try await model.refreshModels(kind) }
-                    }
-                    .disabled(isWorking || !isConnected)
-                    Spacer()
-                    Button("Remover", role: .destructive) { isConfirmingRemoval = true }
-                }
-                .buttonStyle(.borderless)
-                if let error {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
-                        .foregroundStyle(Palette.warn)
-                }
+    // MARK: Collapsed line
+
+    private func statusLabel(_ status: ProviderStatus) -> some View {
+        let symbol: String, tint: Color
+        switch status {
+        case .ready: (symbol, tint) = ("checkmark.circle.fill", Palette.ok)
+        case .checking: (symbol, tint) = ("ellipsis.circle", Palette.muted)
+        case .offline, .failed, .needsKey, .needsSignIn, .needsURL: (symbol, tint) = ("exclamationmark.circle", Palette.warn)
+        case .disabled: (symbol, tint) = ("pause.circle", Palette.muted)
+        case .noModels, .unverified: (symbol, tint) = ("circle.dashed", Palette.muted)
+        }
+        return HStack(spacing: 5) {
+            Image(systemName: symbol).foregroundStyle(tint)
+            Text(status.summary()).foregroundStyle(Palette.muted)
+        }
+        .font(.caption)
+        .lineLimit(1)
+        .accessibilityElement(children: .combine)
     }
 
-    @ViewBuilder private func status(_ account: ProviderAccount) -> some View {
-        if isConnected && !account.models.isEmpty {
-            HStack(spacing: 6) {
-                Label("\(account.models.count) modelos", systemImage: "checkmark.circle.fill").foregroundStyle(Palette.ok)
-                if let updated = account.modelsUpdatedAt {
-                    (Text("· atualizado ") + Text(updated, style: .relative)).foregroundStyle(.secondary)
-                }
+    private func optionsMenu(_ account: ProviderAccount) -> some View {
+        Menu {
+            Button(account.isEnabled ? "Desativar este provedor" : "Usar este provedor") {
+                model.updateProvider(kind) { $0.isEnabled.toggle() }
             }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Mais opções")
+        .accessibilityLabel("Mais opções de \(kind.shortName)")
+    }
+
+    // MARK: Open row
+
+    @ViewBuilder private func details(_ account: ProviderAccount, status: ProviderStatus) -> some View {
+        Text(kind.summary)
             .font(.caption)
-        } else if isConnected {
-            Label("Conectado", systemImage: "checkmark.circle").foregroundStyle(Palette.muted).font(.caption)
-        } else {
-            Label(kind.usesSignIn ? "Não conectado" : "Falta a chave", systemImage: "circle.dashed")
-                .foregroundStyle(Palette.muted).font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        if let text = status.explanation(for: kind) {
+            Label(text, systemImage: status.isProblem ? "exclamationmark.triangle.fill" : "info.circle")
+                .font(.caption)
+                .foregroundStyle(status.isProblem ? Palette.warn : Palette.muted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        if kind == .claudeCode {
+            ClaudeCodeAccountRow()
+        } else if kind.usesSignIn {
+            signInRow
+        }
+        if kind.hasEditableURL { urlField(account) }
+        if kind == .custom {
+            CustomProviderFields(account: account, health: health) { keyRow }
+        } else if kind.needsKey {
+            keyRow
+        }
+        HStack {
+            Button(health.isChecking(kind) ? "Atualizando…" : "Atualizar modelos", systemImage: "arrow.clockwise") {
+                run(inStatus: true) { try await health.refresh(kind, model: model) }
+            }
+            .disabled(isWorking || health.isChecking(kind) || !canRefresh(account))
+            Spacer()
+            Button("Remover…", role: .destructive) { isConfirmingRemoval = true }
+        }
+        .buttonStyle(.borderless)
+        if let error {
+            Label(error, systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(Palette.warn)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func canRefresh(_ account: ProviderAccount) -> Bool {
+        if kind == .custom { return GatewayForm.urlState(account.baseURL) == .valid }
+        return isConnected
+    }
+
+    private func urlField(_ account: ProviderAccount) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            TextField("URL base", text: Binding(get: { account.baseURL },
+                                                set: { url in model.updateProvider(kind) { $0.baseURL = url } }),
+                      prompt: Text(kind == .custom ? "https://meu-gateway.exemplo/v1" : kind.defaultBaseURL))
+                .onSubmit { run(inStatus: true) { try await health.refresh(kind, model: model) } }
+            if GatewayForm.urlState(account.baseURL) == .invalid {
+                Label("Use um endereço que comece com http:// ou https://", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(Palette.warn)
+            }
         }
     }
 
@@ -157,7 +273,7 @@ private struct ProviderRow: View {
                 }
                 .disabled(isWorking)
             } label: {
-                Text("Abre o navegador para você entrar na sua conta. Precisa de Plus ou Pro.")
+                Text("Abre o navegador para você entrar. Precisa de ChatGPT Plus ou Pro.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -165,15 +281,29 @@ private struct ProviderRow: View {
     }
 
     private var keyRow: some View {
-        LabeledContent("Chave de API") {
-            HStack {
-                SecureField("Chave", text: $key, prompt: Text(isConnected ? "Salva no Keychain" : "Cole a chave"))
-                    .labelsHidden()
-                    .onSubmit(saveKey)
-                if !key.isEmpty {
-                    Button("Salvar", action: saveKey).disabled(isWorking)
-                } else if let page = kind.keyPage {
-                    Link("Obter chave", destination: page)
+        LabeledContent(kind == .custom ? "Chave (opcional)" : "Chave de API") {
+            if hasKey && !isReplacingKey {
+                HStack(spacing: 10) {
+                    Label("Chave salva", systemImage: "checkmark.circle.fill").foregroundStyle(Palette.ok)
+                    Button("Trocar") {
+                        isReplacingKey = true
+                        keyFocused = true
+                    }
+                    .buttonStyle(.borderless)
+                }
+            } else {
+                HStack {
+                    SecureField("Chave", text: $key, prompt: Text("Cole a chave"))
+                        .labelsHidden()
+                        .focused($keyFocused)
+                        .onSubmit(saveKey)
+                    if !key.isEmpty {
+                        Button("Salvar", action: saveKey).disabled(isWorking)
+                    } else if isReplacingKey {
+                        Button("Cancelar") { isReplacingKey = false }
+                    } else if let page = kind.keyPage {
+                        Link("Obter chave", destination: page)
+                    }
                 }
             }
         }
@@ -181,15 +311,26 @@ private struct ProviderRow: View {
 
     private func saveKey() {
         let value = key
+        guard !value.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         key = ""
-        run { try await model.setKey(value, for: kind) }
+        run(inStatus: true) {
+            try await model.setKey(value, for: kind)
+            isReplacingKey = false
+        }
     }
 
-    private func run(_ work: @escaping @MainActor () async throws -> Void) {
+    /// Runs `work`. A failure of loading models goes to the status line (`inStatus`); any other (a sign-in) is said
+    /// under the row.
+    private func run(inStatus: Bool = false, _ work: @escaping @MainActor () async throws -> Void) {
         isWorking = true
         error = nil
         Task {
-            do { try await work() } catch { self.error = error.localizedDescription }
+            do {
+                try await work()
+                if inStatus { health.record(nil, for: kind) }
+            } catch {
+                if inStatus { health.record(error, for: kind) } else { self.error = error.localizedDescription }
+            }
             isWorking = false
         }
     }

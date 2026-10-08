@@ -1,19 +1,31 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The message field of one Orb's chat. Takes the Orb's id: it shows nothing of the `Bot` itself (its menus read
+/// The message field of one Orb's chat. Takes the Orb's id: it shows nothing of the `Bot` itself (its chips read
 /// their own parts), so changes to the Orb's settings do not re-render it.
+///
+/// It stays usable while the Orb works: a message sent then is queued and handed to the model at its next step
+/// (see `AppModel+Steering`), and Stop (⌘.) is always one key away. Attachments live in the Orb's `ComposerLane`, so
+/// they survive switching to another Orb and back.
 struct ComposerView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let botID: UUID
 
     @FocusState private var isFocused: Bool
     @State private var isImporting = false
-    @State private var attachments: [URL] = []
-    /// Pictures already decoded, shrunk and saved (see `ImageStore`); they go with the message as images.
-    @State private var images: [ImageAttachment] = []
-    @State private var attachmentError: String?
+    @State private var isDropTargeted = false
+    @State private var isModelOpen = false
+    /// The composer is too narrow for words on its chips: only their icons show.
+    @State private var isCompact = false
     @State private var pasteMonitor: Any?
+    /// The skill highlighted in the `/` suggestions.
+    @State private var slashIndex = 0
+    /// Esc closed the suggestions; any change to the draft brings them back.
+    @State private var isSlashDismissed = false
+
+    /// Card width below which the chips lose their words.
+    private nonisolated static let compactBelow: CGFloat = 520
 
     private var draft: Binding<String> {
         Binding(
@@ -22,116 +34,270 @@ struct ComposerView: View {
         )
     }
 
+    private var lane: ComposerLane { model.composerLane(botID) }
     private var isWorking: Bool { model.live(botID).isWorking }
-    private var canSend: Bool {
-        !isWorking && (!draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty)
+    private var hasContent: Bool {
+        !draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !lane.pictures.isEmpty
     }
+    /// A message can be sent: any time the Orb is free, and while it works on your chat (it is queued).
+    private var canSend: Bool { hasContent && (!isWorking || model.canSteer(botID)) }
+    private var isQueueing: Bool { isWorking && model.canSteer(botID) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if !attachments.isEmpty || !images.isEmpty {
-                ScrollView(.horizontal) {
-                    HStack(spacing: 6) {
-                        ForEach(images, id: \.path) { image in
-                            PictureChip(image: image) {
-                                images.removeAll { $0 == image }
-                                model.images.remove(image)
-                            }
-                        }
-                        ForEach(attachments, id: \.self) { url in
-                            AttachmentChip(name: url.lastPathComponent) {
-                                attachments.removeAll { $0 == url }
-                            }
-                        }
-                    }
-                    .padding(.top, 6)
-                }
-                .scrollIndicators(.never)
-            }
-            if let attachmentError {
-                Text(attachmentError)
-                    .font(.caption)
-                    .foregroundStyle(Palette.warn)
-                    .padding(.horizontal, 4)
-            }
-
-            TextField("Pergunte qualquer coisa ou solte um arquivo", text: draft, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(Palette.conversationFont)
-                .foregroundStyle(Palette.ink)
-                .lineLimit(1...8)
-                .focused($isFocused)
-                .onSubmit(send)
-                .padding(.horizontal, 4)
-
-            HStack(spacing: 2) {
-                Button("Anexar", systemImage: "plus") { isImporting = true }
-                    .help("Anexar arquivos")
-                SkillMenu { insert("/\($0) ") }
-                PermissionMenu(botID: botID)
-                Spacer()
-                ModelMenu(botID: botID)
-                if isWorking {
-                    Button("Parar", systemImage: "stop.fill") { model.stop(botID) }
-                        .buttonStyle(RoundActionStyle(isEnabled: true))
-                        .help("Parar resposta")
-                } else {
-                    Button("Enviar", systemImage: "arrow.up", action: send)
-                        .buttonStyle(RoundActionStyle(isEnabled: canSend))
-                        .disabled(!canSend)
-                        .keyboardShortcut(.return, modifiers: .command)
-                        .help("Enviar (↩)")
-                }
-            }
-            .labelStyle(.iconOnly)
-            .buttonStyle(IconGhostStyle())
-            .menuStyle(.borderlessButton)
-            .foregroundStyle(Palette.muted)
+        let lane = lane
+        VStack(spacing: 6) {
+            card(lane)
+            Text(hint(lane))
+                .font(.system(size: 11))
+                .foregroundStyle(Palette.muted)
+                .lineLimit(1)
+                .frame(height: 14)
+                .opacity(hint(lane).isEmpty ? 0 : 1)
+                .accessibilityHidden(true)
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 12)
-        .padding(.bottom, 8)
-        .card(radius: 20, stroke: isFocused ? Palette.lineStrong : Palette.line)
-        .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
         .frame(maxWidth: 760)
         .padding(.horizontal, 28)
         .padding(.top, 6)
-        .padding(.bottom, 16)
+        .padding(.bottom, 8)
         .frame(maxWidth: .infinity)
         .background {
             LinearGradient(colors: [Palette.canvas.opacity(0), Palette.canvas], startPoint: .top, endPoint: .init(x: 0.5, y: 0.35))
         }
-        .dropDestination(for: URL.self) { urls, _ in
-            attach(urls)
-            return true
-        }
+        .background { shortcuts }
         .fileImporter(isPresented: $isImporting, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { attach(urls) }
         }
         .onAppear {
             isFocused = true
             installPasteMonitor()
+            _ = model.takeChatRequest(.focusComposer, of: botID) // ⌘L that opened this chat: it already has the focus
         }
         .onDisappear { removePasteMonitor() }
+        // ⌘L, from the sidebar, the panel or another page, with this chat already open.
+        .onChange(of: model.pendingChatRequest) {
+            if model.takeChatRequest(.focusComposer, of: botID) { isFocused = true }
+        }
     }
+
+    // MARK: Card
+
+    private func card(_ lane: ComposerLane) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if lane.hasAttachments { attachmentStrip(lane) }
+            if let error = lane.error {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(Palette.warn)
+                    .padding(.horizontal, 4)
+            }
+            slashSuggestions
+
+            TextField(placeholder, text: draft, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(Palette.conversationFont)
+                .foregroundStyle(Palette.ink)
+                .lineLimit(1...8)
+                .focused($isFocused)
+                .onSubmit(send)
+                .onKeyPress(.upArrow) { moveSlash(-1) }
+                .onKeyPress(.downArrow) { moveSlash(1) }
+                .onKeyPress(.tab) { completeSlash() ? .handled : .ignored }
+                .onKeyPress(.escape) { dismissSlash() }
+                .onChange(of: draft.wrappedValue) { isSlashDismissed = false }
+                .padding(.horizontal, 4)
+
+            bar
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+        .card(radius: 20, stroke: isDropTargeted ? Palette.accentText : (isFocused ? Palette.lineStrong : Palette.line),
+              lineWidth: isDropTargeted ? 2 : 1)
+        .shadow(color: isDropTargeted ? Palette.accent.opacity(0.35) : .black.opacity(0.35), radius: 18, y: isDropTargeted ? 0 : 8)
+        .overlay { if isDropTargeted { dropOverlay } }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isDropTargeted)
+        .onGeometryChange(for: Bool.self) { $0.size.width < Self.compactBelow } action: { isCompact = $0 }
+        .dropDestination(for: URL.self) { urls, _ in
+            attach(urls)
+            return true
+        } isTargeted: { isDropTargeted = $0 }
+    }
+
+    private var dropOverlay: some View {
+        Label("Solte para anexar", systemImage: "arrow.down.doc")
+            .font(.system(size: 14, weight: .medium))
+            .foregroundStyle(Palette.ink)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Palette.surface.opacity(0.92), in: .rect(cornerRadius: 20))
+            .allowsHitTesting(false)
+            .transition(.opacity)
+    }
+
+    private var placeholder: LocalizedStringKey {
+        if isQueueing { return "Escreva para orientar o Orb enquanto ele trabalha" }
+        if isWorking { return "Uma rotina está rodando. Envie quando ela terminar." }
+        return "Pergunte qualquer coisa ou solte um arquivo"
+    }
+
+    /// The line under the card: how the keys work, shown only when it helps and nothing else is being said.
+    private func hint(_ lane: ComposerLane) -> String {
+        if isQueueing, hasContent {
+            return model.steersMidTurn(botID)
+                ? "↩ entra na fila e chega ao Orb no próximo passo · ⌘↩ para e envia agora"
+                : "↩ entra na fila e segue quando a resposta terminar · ⌘↩ para e envia agora"
+        }
+        if isWorking { return "" }
+        if isFocused, !hasContent, !lane.hasAttachments { return "↩ envia · \(CommandName.newLineKeys) nova linha" }
+        return ""
+    }
+
+    // MARK: Attachments
+
+    private func attachmentStrip(_ lane: ComposerLane) -> some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 6) {
+                ForEach(lane.pictures, id: \.path) { image in
+                    PictureChip(image: image) {
+                        lane.pictures.removeAll { $0 == image }
+                        model.images.remove(image)
+                    }
+                }
+                ForEach(lane.files) { file in
+                    AttachmentChip(file: file) { lane.files.removeAll { $0.id == file.id } }
+                }
+            }
+            .padding(.top, 6)
+        }
+        .scrollIndicators(.never)
+    }
+
+    // MARK: Bar
+
+    private var bar: some View {
+        HStack(spacing: 2) {
+            Button("Anexar", systemImage: "plus") { isImporting = true }
+                .labelStyle(.iconOnly)
+                .buttonStyle(IconGhostStyle())
+                .help("Anexar arquivos (ou solte aqui)")
+            SkillsChip(botID: botID, compact: isCompact) { insert("/\($0) ") }
+            PermissionChip(botID: botID, compact: isCompact)
+            Spacer(minLength: 8)
+            ModelChip(botID: botID, isOpen: $isModelOpen)
+            actionButtons
+        }
+        .foregroundStyle(Palette.muted)
+    }
+
+    /// Send, and Stop while the Orb works. With something typed during a turn both show: Send queues it, Stop ends
+    /// the turn. Alone, Stop is the white button; next to Send it steps back.
+    @ViewBuilder private var actionButtons: some View {
+        HStack(spacing: 6) {
+            if isWorking {
+                Button("Parar", systemImage: "stop.fill") { model.stop(botID) }
+                    .buttonStyle(RoundActionStyle(isEnabled: true, isSecondary: canSend))
+                    .help("\(CommandName.stop) (\(AppShortcut.stop.label))")
+            }
+            if !isWorking {
+                sendButton.keyboardShortcut(.return, modifiers: .command)
+            } else if canSend {
+                sendButton.transition(.opacity) // ⌘↩ then means "stop and send" (see `shortcuts`)
+            }
+        }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: canSend)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isWorking)
+    }
+
+    private var sendButton: some View {
+        Button(isQueueing ? "Enviar para a fila" : "Enviar", systemImage: "arrow.up", action: send)
+            .buttonStyle(RoundActionStyle(isEnabled: canSend))
+            .disabled(!canSend)
+            .help(isQueueing ? "Colocar na fila (↩)" : "Enviar (↩)")
+    }
+
+    /// Shortcuts that belong to the composer without a visible button: ⌘↩ to stop and send, ⇧⌘M for the model list.
+    private var shortcuts: some View {
+        ZStack {
+            Button("Parar e enviar") { model.stopAndSend(botID, draft: draft.wrappedValue) }
+                .keyboardShortcut(.return, modifiers: .command)
+                .disabled(!(isQueueing && canSend))
+            Button("Escolher modelo") { isModelOpen.toggle() }
+                .keyboardShortcut("m", modifiers: [.command, .shift])
+        }
+        .opacity(0)
+        .frame(width: 0, height: 0)
+        .accessibilityHidden(true)
+    }
+
+    // MARK: Slash suggestions
+
+    /// Skills that match what follows a leading `/`, above the field: ↑↓ choose, ↩ or ⇥ complete, Esc closes.
+    private var slashMatches: [Skill] {
+        guard !isSlashDismissed, let query = SkillSearch.slashQuery(in: draft.wrappedValue) else { return [] }
+        return Array(SkillSearch.matches(model.skills(for: botID), query).prefix(5))
+    }
+
+    @ViewBuilder private var slashSuggestions: some View {
+        let matches = slashMatches
+        if !matches.isEmpty {
+            VStack(spacing: 0) {
+                ForEach(Array(matches.enumerated()), id: \.element.id) { index, skill in
+                    SkillRow(skill: skill, isHighlighted: index == min(slashIndex, matches.count - 1)) { complete(skill) }
+                }
+            }
+            .padding(.vertical, 4)
+            .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: 12))
+        }
+    }
+
+    private func moveSlash(_ step: Int) -> KeyPress.Result {
+        let count = slashMatches.count
+        guard count > 0 else { return .ignored }
+        slashIndex = (min(slashIndex, count - 1) + step + count) % count
+        return .handled
+    }
+
+    /// Completes the highlighted skill. Return does not when the draft already is a skill's whole `/slug` (it sends).
+    private func completeSlash(forReturn: Bool = false) -> Bool {
+        let matches = slashMatches
+        guard !matches.isEmpty else { return false }
+        if forReturn, SkillSearch.isComplete(draft.wrappedValue, skills: matches) { return false }
+        complete(matches[min(slashIndex, matches.count - 1)])
+        return true
+    }
+
+    private func dismissSlash() -> KeyPress.Result {
+        guard !slashMatches.isEmpty else { return .ignored }
+        isSlashDismissed = true // closes the list; what was typed stays
+        return .handled
+    }
+
+    private func complete(_ skill: Skill) {
+        draft.wrappedValue = "/\(skill.slug) "
+        slashIndex = 0
+        isFocused = true
+    }
+
+    // MARK: Actions
 
     /// Pictures become image attachments (shrunk and saved in the background); other files keep being listed by path.
     private func attach(_ urls: [URL]) {
+        let lane = lane
         for url in urls where url.isFileURL {
             if ImageProcessing.isImageFile(url) {
                 attachPicture { try await $0.attach(fileAt: url, botID: $1) }
-            } else if !attachments.contains(url) {
-                attachments.append(url)
+            } else if !lane.files.contains(where: { $0.url == url }) {
+                lane.files.append(AttachedFile(url: url))
             }
         }
     }
 
     private func attachPicture(_ load: @escaping @Sendable (ImageStore, UUID) async throws -> ImageAttachment) {
-        attachmentError = nil
+        let lane = lane
+        lane.error = nil
         let store = model.images, botID = botID
         Task {
-            do { images.append(try await load(store, botID)) }
-            catch { attachmentError = error.localizedDescription }
+            do { lane.pictures.append(try await load(store, botID)) }
+            catch { lane.error = error.localizedDescription }
         }
     }
 
@@ -169,6 +335,8 @@ struct ComposerView: View {
     }
 
     private func send() {
+        // With the suggestions open, Return completes the highlighted skill instead of sending a bare "/res" (a whole "/resumir" is sent).
+        if completeSlash(forReturn: true) { return }
         guard canSend else { return }
         if model.isLoadingConversation(botID) {
             // The history is still being read: send once it is in memory (checked again then, so a second Return
@@ -180,11 +348,7 @@ struct ComposerView: View {
             return
         }
         // If the message wasn't sent (no model connected), the attachments stay with the draft.
-        if model.send(draft.wrappedValue, attachments: attachments, images: images, to: botID, fromUser: true) {
-            attachments.removeAll()
-            images.removeAll()
-            attachmentError = nil
-        }
+        model.submit(draft.wrappedValue, to: botID)
     }
 
     private func insert(_ token: String) {
@@ -212,14 +376,18 @@ private struct PictureChip: View {
     }
 }
 
+/// A file waiting to be sent: an icon for its type, its name and its size.
 private struct AttachmentChip: View {
-    let name: String
+    let file: AttachedFile
     let onRemove: () -> Void
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: "doc")
-            Text(name).lineLimit(1)
+            Image(systemName: file.symbol).foregroundStyle(Palette.muted)
+            Text(file.name).lineLimit(1).truncationMode(.middle)
+            if let size = AttachmentKind.size(file.size) {
+                Text(size).foregroundStyle(Palette.muted)
+            }
             Button("Remover", systemImage: "xmark", action: onRemove)
                 .labelStyle(.iconOnly)
                 .buttonStyle(.borderless)
@@ -228,105 +396,23 @@ private struct AttachmentChip: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .background(Palette.raised, in: .capsule)
+        .help(file.url.path)
     }
 }
 
-private struct SkillMenu: View {
-    @Environment(AppModel.self) private var model
-    let onPick: (String) -> Void
-
-    var body: some View {
-        Menu {
-            ForEach(model.enabledSkills) { skill in
-                Button(skill.name) { onPick(skill.slug) }
-            }
-        } label: {
-            Label("Skills", systemImage: "wand.and.stars")
-        }
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("Usar uma skill")
-    }
-}
-
-private struct PermissionMenu: View {
-    @Environment(AppModel.self) private var model
-    let botID: UUID
-    @State private var isConfirmingBypass = false
-
-    /// "Perguntar antes · 2 liberações": the grants only apply where the Orb asks.
-    private func modeLabel(_ permission: PermissionState) -> String {
-        let count = permission.rules.count
-        guard permission.mode == .ask, count > 0 else { return permission.mode.label }
-        return "\(permission.mode.label) · \(count) \(count == 1 ? "liberação" : "liberações")"
-    }
-
-    private func grantsHelp(_ permission: PermissionState) -> String {
-        guard permission.mode == .ask, !permission.rules.isEmpty else { return "" }
-        return "\n\nLiberado:\n" + permission.rules.map { "• " + $0.title }.joined(separator: "\n")
-    }
-
-    var body: some View {
-        let permission = model.live(botID).permission
-        Menu {
-            Picker("Permissões", selection: Binding(
-                get: { model.live(botID).permission.mode },
-                set: { mode in model.update(botID) { $0.permissionMode = mode } }
-            ).confirmingBypass { isConfirmingBypass = true }) {
-                ForEach(PermissionMode.allCases) { mode in
-                    Label(mode.label, systemImage: mode.symbol).tag(mode)
-                }
-            }
-            .pickerStyle(.inline)
-        } label: {
-            Label(modeLabel(permission), systemImage: permission.mode.symbol)
-                .foregroundStyle(permission.mode == .bypass ? Palette.warn : Palette.muted)
-        }
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("Permissões: \(permission.mode.label). \(permission.mode.summary)" + grantsHelp(permission))
-        .bypassConfirmation(isPresented: $isConfirmingBypass) {
-            model.update(botID) { $0.permissionMode = .bypass }
-        }
-    }
-}
-
-private struct ModelMenu: View {
-    @Environment(AppModel.self) private var model
-    let botID: UUID
-
-    var body: some View {
-        let name = model.modelName(forModel: model.live(botID).modelID)
-        Menu {
-            ModelPicker(selection: Binding(
-                get: { model.live(botID).modelID },
-                set: { name in model.update(botID) { $0.model = name } }
-            ), inMenu: true)
-            .pickerStyle(.inline)
-        } label: {
-            Text(name.isEmpty ? "Sem modelo" : name)
-                .font(.caption.weight(.medium))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Palette.raised, in: .capsule)
-        }
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("Modelo deste Orb")
-    }
-}
-
-/// White circular send/stop button.
+/// White circular send/stop button. Stepping back (`isSecondary`) when Send is next to it: a dark button.
 private struct RoundActionStyle: ButtonStyle {
     let isEnabled: Bool
+    var isSecondary = false
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .labelStyle(.iconOnly)
             .font(.system(size: 13, weight: .bold))
-            .foregroundStyle(Palette.onInk)
+            .foregroundStyle(isSecondary ? Palette.ink : Palette.onInk)
             .frame(width: 28, height: 28)
-            .background(Palette.ink.opacity(isEnabled ? 1 : 0.25), in: .circle)
+            .background(isSecondary ? Palette.raised : Palette.ink.opacity(isEnabled ? 1 : 0.25), in: .circle)
+            .overlay { if isSecondary { Circle().strokeBorder(Palette.lineStrong) } }
             .scaleEffect(configuration.isPressed ? 0.92 : 1)
             .animation(.snappy(duration: 0.15), value: configuration.isPressed)
     }

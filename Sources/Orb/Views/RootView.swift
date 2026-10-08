@@ -2,6 +2,11 @@ import SwiftUI
 
 struct RootView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Closes the Orb's panel when the window gets narrow and opens it again when it is wide (unless you chose).
+    @State private var autoClose = InspectorAutoClose()
+    /// What the last automatic change set, to tell it from the user's own toggle.
+    @State private var autoChange: Bool?
 
     var body: some View {
         @Bindable var model = model
@@ -11,9 +16,18 @@ struct RootView: View {
         } detail: {
             DetailView()
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+            guard let open = autoClose.windowResized(to: width, isOpen: model.showInspector) else { return }
+            autoChange = open
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { model.showInspector = open }
+        }
+        .onChange(of: model.showInspector) { _, isOpen in
+            if autoChange == isOpen { autoChange = nil } else { autoClose.userToggled() }
+        }
         .sheet(isPresented: $model.showNewBot) {
             NewBotSheet()
         }
+        .systemSheets()
         .alert("Atenção com seus dados", isPresented: Binding(
             get: { !model.dataNotices.isEmpty },
             set: { if !$0 { model.dismissDataNotice() } }

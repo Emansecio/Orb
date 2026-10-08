@@ -3,32 +3,31 @@ import SwiftUI
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openSettings) private var openSettings
-    @State private var deleting: BotLook?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 1) {
                 SectionTitle("Orbs")
-                ForEach(model.botIDs, id: \.self) { id in
-                    SidebarBotRow(botID: id, deleting: $deleting)
+                ForEach(Array(model.botIDs.enumerated()), id: \.element) { index, id in
+                    SidebarBotRow(botID: id, index: index)
                 }
 
                 SectionTitle("Espaço de trabalho")
                     .padding(.top, 16)
                 SidebarRow(isSelected: model.selection == .routines) {
                     model.selection = .routines
-                } content: {
-                    NavLabel(title: "Rotinas", symbol: "clock.arrow.circlepath")
+                } content: { hovering in
+                    NavLabel(title: "Rotinas", symbol: "clock.arrow.circlepath", hint: hovering ? "⌥⌘R" : nil)
                 }
                 SidebarRow(isSelected: model.selection == .connectors) {
                     model.selection = .connectors
-                } content: {
-                    NavLabel(title: "Conectores", symbol: "point.3.filled.connected.trianglepath.dotted")
+                } content: { hovering in
+                    NavLabel(title: "Conectores", symbol: "point.3.filled.connected.trianglepath.dotted", hint: hovering ? "⌥⌘C" : nil)
                 }
                 SidebarRow(isSelected: model.selection == .skills) {
                     model.selection = .skills
-                } content: {
-                    NavLabel(title: "Skills", symbol: "wand.and.stars")
+                } content: { hovering in
+                    NavLabel(title: "Skills", symbol: "wand.and.stars", hint: hovering ? "⌥⌘K" : nil)
                 }
             }
             .padding(.horizontal, 8)
@@ -36,34 +35,33 @@ struct SidebarView: View {
         }
         .scrollIndicators(.never)
         .background(Palette.chrome)
-        .confirmationDialog("Apagar \(deleting?.name ?? "")?", isPresented: Binding(
-            get: { deleting != nil }, set: { if !$0 { deleting = nil } }
-        )) {
-            Button("Apagar o Orb e a memória", role: .destructive) {
-                if let bot = deleting { model.deleteBot(bot.id) }
-            }
-            Button("Apagar o Orb e guardar a memória") {
-                if let bot = deleting { model.deleteBot(bot.id, keepMemory: true) }
-            }
-        } message: {
-            Text(DeleteOrbText.message)
-        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(alignment: .leading, spacing: 1) {
-                SidebarRow(isSelected: false) {
-                    openSettings()
-                } content: {
-                    NavLabel(title: "Ajustes", symbol: "gearshape")
+            VStack(alignment: .leading, spacing: 8) {
+                KeptMemoryBanner()
+                HStack(spacing: 6) {
+                    Button { model.showNewBot = true } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("Novo Orb")
+                            Spacer(minLength: 4)
+                            Text("⌘N")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Palette.muted)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(SecondaryPillStyle())
+                    .help("Criar um novo Orb (⌘N)")
+                    Button("Ajustes", systemImage: "gearshape") { openSettings() }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(SidebarIconStyle())
+                        .foregroundStyle(Palette.muted)
+                        .help("Ajustes (⌘,)")
                 }
-                .help("Ajustes (⌘,)")
-                SidebarRow(isSelected: false) {
-                    model.showNewBot = true
-                } content: {
-                    NavLabel(title: "Novo Orb", symbol: "plus")
-                }
-                .help("Novo Orb (⌘N)")
+                .padding(.horizontal, 8)
             }
-            .padding(8)
+            .padding(.vertical, 8)
             .background(Palette.chrome)
         }
     }
@@ -83,16 +81,17 @@ private struct SectionTitle: View {
     }
 }
 
-/// Full-width row with a rounded ghost highlight on hover/selection.
+/// Full-width row with a rounded ghost highlight on hover/selection. The content learns whether the pointer is on
+/// the row (the Orbs' rows show their ⌘1…⌘9 then).
 private struct SidebarRow<Content: View>: View {
     let isSelected: Bool
     let action: () -> Void
-    @ViewBuilder let content: Content
+    @ViewBuilder let content: (Bool) -> Content
     @State private var isHovering = false
 
     var body: some View {
         Button(action: action) {
-            content
+            content(isHovering)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -106,27 +105,51 @@ private struct SidebarRow<Content: View>: View {
     }
 }
 
+private struct SidebarIconStyle: ButtonStyle {
+    @State private var isHovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 14))
+            .frame(width: 32, height: 32)
+            .background(configuration.isPressed || isHovering ? Palette.ghostSelected : .clear, in: .circle)
+            .contentShape(.circle)
+            .onHover { isHovering = $0 }
+    }
+}
+
 /// One Orb's row. Reads only its own Orb's state, so a tool call, a status or a new unread message in another Orb
 /// re-renders that Orb's row and nothing here.
 private struct SidebarBotRow: View {
     @Environment(AppModel.self) private var model
     let botID: UUID
-    @Binding var deleting: BotLook?
+    /// Position in the list: the first nine answer ⌘1…⌘9.
+    let index: Int
 
     var body: some View {
         let live = model.live(botID)
         let isSelected = model.selection == .bot(botID)
         SidebarRow(isSelected: isSelected) {
             model.selection = .bot(botID)
-        } content: {
+        } content: { isHovering in
             BotRowContent(row: BotRow(look: live.look, status: live.status, activity: live.activity, isSelected: isSelected,
-                                      poke: live.poke, needsYou: live.needsYou, unread: live.unread))
+                                      poke: live.poke, needsYou: live.needsYou, unread: live.unread,
+                                      hint: isHovering && index < 9 ? "⌘\(index + 1)" : nil))
                 .equatable()
         }
         .contextMenu {
-            Button("Nova conversa") { model.newConversation(botID) }
+            Button(CommandName.newConversation, systemImage: "square.and.pencil") {
+                model.selection = .bot(botID)
+                model.newConversation(botID)
+            }
+            Button(CommandName.conversations, systemImage: "clock.arrow.circlepath") {
+                model.showConversations(of: botID)
+            }
+            Button(CommandName.openFolder, systemImage: "folder") { model.openFolder(of: botID) }
+            Button("Personalizar…", systemImage: "paintpalette") { model.showLookEditor(of: botID) }
+            Button("Ver todas as rotinas", systemImage: "clock") { model.selection = .routines }
             Divider()
-            Button("Apagar \(live.look.name)…", role: .destructive) { deleting = live.look }
+            Button("Apagar \(live.look.name)…", systemImage: "trash", role: .destructive) { model.askToDelete(botID) }
         }
     }
 }
@@ -134,6 +157,7 @@ private struct SidebarBotRow: View {
 private struct NavLabel: View {
     let title: String
     let symbol: String
+    var hint: String?
 
     var body: some View {
         HStack(spacing: 10) {
@@ -145,6 +169,12 @@ private struct NavLabel: View {
                 .font(.system(size: 13))
                 .foregroundStyle(Palette.secondary)
             Spacer(minLength: 4)
+            if let hint {
+                Text(hint)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.muted)
+                    .accessibilityHidden(true)
+            }
         }
     }
 }
@@ -159,6 +189,8 @@ private struct BotRow: Equatable {
     /// An approval card is open: the Orb is stopped until the user answers.
     let needsYou: Bool
     let unread: Int
+    /// The shortcut shown while the pointer is on the row.
+    var hint: String?
 }
 
 private struct BotRowContent: View, Equatable {
@@ -188,6 +220,12 @@ private struct BotRowContent: View, Equatable {
             .animateChanges(of: status)
             .animateChanges(of: needsYou)
             Spacer(minLength: 4)
+            if let hint = row.hint {
+                Text(hint)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.muted)
+                    .accessibilityHidden(true)
+            }
             ZStack {
                 if needsYou {
                     Image(systemName: "exclamationmark.bubble.fill")
