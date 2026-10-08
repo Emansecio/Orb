@@ -40,7 +40,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
   <key>NSHighResolutionCapable</key><true/>
-  <key>NSAppleEventsUsageDescription</key><string>O Orb usa Mail, Calendário e Notas quando você pede.</string>
+  <key>NSAppleEventsUsageDescription</key><string>O Orb usa apps como Mail, Calendário, Notas, Safari e Chrome quando você pede.</string>
 </dict>
 </plist>
 PLIST

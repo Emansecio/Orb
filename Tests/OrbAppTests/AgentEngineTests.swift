@@ -183,17 +183,18 @@ struct ModelTests {
         #expect(repaired.answeringDanglingToolCalls() == repaired)
     }
 
-    @Test func modelContextStartsAtAUserMessageAndShortensOldOutputs() {
+    /// The real call site (`AppModel.send`) passes the history WITHOUT the new prompt, so the last turn of the
+    /// history is a finished one: its outputs are shortened too.
+    @Test func modelContextShortensOutputsOfTheLastFinishedTurn() {
         let call = ToolCallRequest(id: "c1", name: "touch", arguments: "{}")
         let history: [ChatMessage] = [
             .user("velho"), ChatMessage(role: .assistant, content: "", toolCalls: [call]),
             .tool("c1", String(repeating: "x", count: 10_000)), ChatMessage(role: .assistant, content: "ok"),
-            .user("novo"),
         ]
-        let full = history.modelContext()
-        #expect(full[2].content.count < 5000)
-        let cut = history.modelContext(limit: 3)
-        #expect(cut == [.user("novo")])
+        let sent = history.modelContext()
+        #expect(sent.map(\.role) == [.user, .assistant, .tool, .assistant])
+        #expect(sent[2].content.count < 5000)
+        #expect(sent[0] == .user("velho"))
     }
 
     @Test func reopeningClosesAnInterruptedTurn() {

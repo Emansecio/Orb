@@ -14,6 +14,17 @@ struct RootView: View {
         .sheet(isPresented: $model.showNewBot) {
             NewBotSheet()
         }
+        .alert("Atenção com seus dados", isPresented: Binding(
+            get: { !model.dataNotices.isEmpty },
+            set: { if !$0 { model.dismissDataNotice() } }
+        )) {
+            Button("OK") {}
+            if let copy = model.dataNotices.first?.copy {
+                Button("Mostrar no Finder") { NSWorkspace.shared.activateFileViewerSelecting([copy]) }
+            }
+        } message: {
+            Text(model.dataNotices.first?.message ?? "")
+        }
     }
 }
 

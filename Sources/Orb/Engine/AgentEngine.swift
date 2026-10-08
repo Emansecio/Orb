@@ -10,6 +10,8 @@ enum TurnEvent: Sendable {
     /// A message to append to the model history (user, assistant or tool result).
     case message(ChatMessage)
     case failed(String)
+    /// Something the user should know, shown in the transcript (not sent to the model).
+    case notice(String)
     /// The Claude Code session this conversation continues in ("" = forget it and start a new one next time).
     case session(String)
 }
@@ -24,6 +26,8 @@ struct TurnRequest: Sendable {
     var client: any LLMClient
     var tools: [any AgentTool]
     var context: ToolContext
+    /// How much history the model's window takes (the system prompt and tool specs come on top).
+    var budget = ContextBudget.fallback
 }
 
 /// Runs bot turns: the model ↔ tools loop, gated by the bot's permission mode.
@@ -61,24 +65,48 @@ actor AgentEngine {
         out.yield(.message(user))
         let specs = request.tools.map(\.spec)
         var allowed = request.bot.allowedTools
+        var budget = request.budget
+        // History that already starts with a summary was announced when it was compacted (`AppModel.send`).
+        var announcedCompaction = ContextSummary.leading(in: request.history) != nil
+        let toolNames = Set(request.tools.map(\.spec.name))
 
         do {
             for _ in 0..<Self.maxSteps {
                 out.yield(.status("Pensando"))
                 var text = ""
                 var calls: [ToolCallRequest] = []
-                for try await event in request.client.stream(model: request.model, messages: messages, tools: specs) {
-                    switch event {
-                    case .text(let delta):
-                        if text.isEmpty { out.yield(.status("Escrevendo")) }
-                        text += delta
-                        out.yield(.text(delta))
-                    case .toolCalls(let requested):
-                        calls = requested
+                var reasoning: ReasoningTrace?
+                var retried = false
+                while true {
+                    do {
+                        let window = Self.fitted(messages, to: budget)
+                        if !announcedCompaction, window.contains(where: { $0.role == .user && $0.content.hasPrefix(ContextSummary.marker) }) {
+                            announcedCompaction = true
+                            out.yield(.notice("Conversa compactada: o começo virou um resumo."))
+                        }
+                        for try await event in request.client.stream(model: request.model, messages: window, tools: specs) {
+                            switch event {
+                            case .text(let delta):
+                                if text.isEmpty { out.yield(.status("Escrevendo")) }
+                                text += delta
+                                out.yield(.text(delta))
+                            case .reasoning(let trace):
+                                reasoning = trace
+                            case .toolCalls(let requested):
+                                calls = requested
+                            case .finished:
+                                break
+                            }
+                        }
+                        break
+                    } catch let error where !retried && text.isEmpty && calls.isEmpty && ContextOverflow.matches(error) {
+                        // The window was smaller than estimated: try once more with half the history.
+                        retried = true
+                        budget = budget.scaled(by: 0.5)
                     }
                 }
                 try Task.checkCancellation()
-                let reply = ChatMessage(role: .assistant, content: text, toolCalls: calls)
+                let reply = ChatMessage(role: .assistant, content: text, toolCalls: calls, reasoning: reasoning)
                 messages.append(reply)
                 out.yield(.message(reply))
                 if calls.isEmpty { return }
@@ -87,7 +115,8 @@ actor AgentEngine {
                     let output = await execute(call, request: request, reason: text.trimmingCharacters(in: .whitespacesAndNewlines),
                                                allowed: &allowed, out: out)
                     try Task.checkCancellation()
-                    let result = ChatMessage.tool(call.id, output)
+                    let result = ChatMessage.tool(call.id, ToolOutputCap.apply(output, botID: request.bot.id, callID: call.id,
+                                                                                 toolNames: toolNames))
                     messages.append(result)
                     out.yield(.message(result))
                 }
@@ -100,6 +129,13 @@ actor AgentEngine {
         }
     }
 
+    /// What the model is sent: the system prompt and the turn so far, fitted to the budget. `messages` itself stays
+    /// whole, so trimming is recomputed from the full record before every call.
+    private static func fitted(_ messages: [ChatMessage], to budget: ContextBudget) -> [ChatMessage] {
+        guard let system = messages.first, system.role == .system else { return messages }
+        return [system] + ContextWindow.fit(Array(messages.dropFirst()), budget: budget).messages
+    }
+
     /// Runs one tool call (asking first when needed) and returns the text the model receives.
     private func execute(_ call: ToolCallRequest, request: TurnRequest, reason: String, allowed: inout Set<String>,
                          out: AsyncStream<TurnEvent>.Continuation) async -> String {
@@ -109,10 +145,12 @@ actor AgentEngine {
         guard let arguments = JSONValue.parse(call.arguments) else {
             return "Error: the arguments are not valid JSON."
         }
-        let summary = tool.summary(arguments)
+        let summary = tool.summary(arguments, context: request.context)
 
-        // Shell text a tool would run (commands, or AppleScript's `do shell script`) checked for destructive patterns.
-        let danger = (arguments["command"]?.string ?? arguments["script"]?.string).flatMap(DangerousCommand.reason)
+        // A tool's own `danger` comes first; otherwise shell text it would run (commands, or AppleScript's
+        // `do shell script`) is checked for destructive patterns.
+        let danger = tool.danger(arguments)
+            ?? (arguments["command"]?.string ?? arguments["script"]?.string).flatMap(DangerousCommand.reason)
         let risk = tool.risk(arguments)
         if risk != .safe {
             switch request.bot.permissionMode {
@@ -160,37 +198,5 @@ actor AgentEngine {
     /// Tool output shown in the transcript (the model always gets the full text).
     private static func preview(_ output: String) -> String {
         output.count > 4000 ? output.prefix(4000) + "\n…" : output
-    }
-}
-
-// MARK: - System prompt
-
-enum SystemPrompt {
-    /// `memory` is the Orb's memory brief (`MemoryBank.brief`).
-    static func make(bot: Bot, skills: [Skill], memory: String = "", now: Date = .now) -> String {
-        var lines = [
-            "You are \(bot.name), \(bot.role.isEmpty ? "a personal assistant" : bot.role).",
-            "You run natively on the user's Mac inside the Orb app and can act through your tools.",
-            "Now: \(now.formatted(date: .complete, time: .shortened)) (\(TimeZone.current.identifier)).",
-            "Home folder: \(FileManager.default.homeDirectoryForCurrentUser.path). Working directory: \(bot.workingURL.path).",
-            "Reply in the user's language (Brazilian Portuguese unless they write otherwise). Be brief and concrete.",
-            "Use tools to find out and to act instead of asking the user to do it. Read before you change things.",
-            "Before a tool that changes something, say in one short sentence what you are about to do and why.",
-        ]
-        if !memory.isEmpty { lines.append("\n" + memory) }
-        if !skills.isEmpty {
-            lines.append("\nThe user can invoke skills with /name: " + skills.map { "/\($0.slug)" }.joined(separator: ", ") + ".")
-        }
-        return lines.joined(separator: "\n")
-    }
-
-    /// Expands "/slug rest" into the skill's instructions plus the request; nil if no skill matches.
-    static func expandSkill(in prompt: String, skills: [Skill]) -> (skill: Skill, prompt: String)? {
-        guard prompt.hasPrefix("/") else { return nil }
-        let parts = prompt.dropFirst().split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
-        guard let slug = parts.first, let skill = skills.first(where: { $0.slug == slug }) else { return nil }
-        let rest = parts.count > 1 ? String(parts[1]) : ""
-        let files = skill.folderURL.map { "\n\n(Files this skill refers to are in \($0.absoluteString); fetch them if needed.)" } ?? ""
-        return (skill, "Skill \"\(skill.name)\":\n\(skill.instructions)\(files)\n\nUser request: \(rest.isEmpty ? "(none)" : rest)")
     }
 }

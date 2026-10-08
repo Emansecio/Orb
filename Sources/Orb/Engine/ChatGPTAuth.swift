@@ -28,17 +28,40 @@ actor ChatGPTAuth {
     static let shared = ChatGPTAuth()
 
     private static let authorizeURL = URL(string: "https://auth.openai.com/api/accounts/authorize")!
-    private static let tokenURL = URL(string: "https://auth.openai.com/api/accounts/oauth/token")!
+    private static let defaultTokenURL = URL(string: "https://auth.openai.com/api/accounts/oauth/token")!
     private static let resource = "https://api.openai.com/v1"
     private static let directScope = "chatgpt.tokens.use.direct"
     private static let scope = "openid profile email offline_access resource.invoke \(directScope)"
     private static let keychainAccount = "chatgpt"
     private static let callbackPath = "/auth/callback"
 
+    /// Where the credential is kept between launches (the Keychain, except in tests).
+    struct Storage: Sendable {
+        var load: @Sendable () -> String?
+        /// An empty value deletes it.
+        var save: @Sendable (String) -> Void
+
+        static let keychain = Storage(load: { Keychain.get(ChatGPTAuth.keychainAccount) },
+                                      save: { Keychain.set($0, account: ChatGPTAuth.keychainAccount) })
+    }
+
+    private let storage: Storage
+    private let tokenURL: URL
+    private let session: URLSession
     private var cached: ChatGPTCredential?
+    /// The refresh in progress, shared by every caller that needs one: refresh tokens rotate, so two refreshes with
+    /// the same token would make the second fail and sign the user out.
+    private var refreshing: Task<ChatGPTCredential, Error>?
+    private var lastRefresh: Date?
+
+    init(storage: Storage = .keychain, tokenURL: URL = ChatGPTAuth.defaultTokenURL, session: URLSession = .shared) {
+        self.storage = storage
+        self.tokenURL = tokenURL
+        self.session = session
+    }
 
     var credential: ChatGPTCredential? {
-        if cached == nil, let data = Keychain.get(Self.keychainAccount)?.data(using: .utf8) {
+        if cached == nil, let data = storage.load()?.data(using: .utf8) {
             cached = try? JSONDecoder().decode(ChatGPTCredential.self, from: data)
         }
         return cached
@@ -46,20 +69,35 @@ actor ChatGPTAuth {
 
     func signOut() {
         cached = nil
-        Keychain.set("", account: Self.keychainAccount)
+        storage.save("")
     }
 
-    /// A valid access token, refreshed shortly before it expires.
-    func accessToken() async throws -> String {
-        guard var current = credential else { throw LLMError.notConfigured }
-        if current.expiresAt.timeIntervalSinceNow < 180 {
-            current = try await exchange([
+    /// A valid access token, refreshed shortly before it expires. `forceRefresh` is for a token the API just
+    /// rejected; if another caller already refreshed a moment ago, that fresh token is returned instead.
+    func accessToken(forceRefresh: Bool = false) async throws -> String {
+        guard let current = credential else { throw LLMError.notConfigured }
+        let expiring = current.expiresAt.timeIntervalSinceNow < 180
+        let justRefreshed = lastRefresh.map { -$0.timeIntervalSinceNow < 10 } ?? false
+        let stale = expiring || (forceRefresh && !justRefreshed)
+        if !stale && refreshing == nil { return current.accessToken }
+        return try await refresh(current).accessToken
+    }
+
+    /// Joins the refresh in progress or starts one.
+    private func refresh(_ current: ChatGPTCredential) async throws -> ChatGPTCredential {
+        if let refreshing { return try await refreshing.value }
+        let task = Task {
+            let fresh = try await exchange([
                 "grant_type": "refresh_token", "client_id": current.clientID,
                 "refresh_token": current.refreshToken, "resource": Self.resource,
             ], clientID: current.clientID, previous: current)
-            save(current)
+            save(fresh)
+            lastRefresh = .now
+            return fresh
         }
-        return current.accessToken
+        refreshing = task
+        defer { refreshing = nil }
+        return try await task.value
     }
 
     /// Opens the browser, waits for the loopback callback and stores the credential.
@@ -105,13 +143,13 @@ actor ChatGPTAuth {
     // MARK: Token endpoint
 
     private func exchange(_ form: [String: String], clientID: String, previous: ChatGPTCredential?) async throws -> ChatGPTCredential {
-        var request = URLRequest(url: Self.tokenURL, timeoutInterval: 30)
+        var request = URLRequest(url: tokenURL, timeoutInterval: 30)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         var body = URLComponents()
         body.queryItems = form.map { URLQueryItem(name: $0.key, value: $0.value) }
         request.httpBody = Data((body.percentEncodedQuery ?? "").replacingOccurrences(of: "+", with: "%2B").utf8)
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         let json = JSONValue.parse(String(decoding: data, as: UTF8.self))
         guard (response as? HTTPURLResponse)?.statusCode == 200, let json,
               let access = json["access_token"]?.string else {
@@ -134,7 +172,7 @@ actor ChatGPTAuth {
     private func save(_ credential: ChatGPTCredential) {
         cached = credential
         if let data = try? JSONEncoder().encode(credential) {
-            Keychain.set(String(decoding: data, as: UTF8.self), account: Self.keychainAccount)
+            storage.save(String(decoding: data, as: UTF8.self))
         }
     }
 

@@ -1,18 +1,30 @@
 import Foundation
 
 struct RunCommandTool: AgentTool {
+    static let defaultTimeout = 120
+    static let maxTimeout = 600
+    static let outputLimit = 20_000
+
     let spec = ToolSpec(
         name: "run_command",
         description: """
-        Run a shell command on the user's Mac with zsh (login shell) and return its exit code and combined \
-        stdout/stderr. Use it for git, builds, scripts, package managers and anything without a dedicated tool. \
-        Commands are non-interactive (stdin is empty) and are killed when the timeout expires; long output is \
-        cut in the middle.
+        Run a shell command on the user's Mac the way their own Terminal would (their PATH and tools such as \
+        npm, adb or java are available) and return its exit code and combined stdout/stderr. Use it for git, \
+        builds, scripts, package managers and anything without a dedicated tool. Commands are non-interactive \
+        (stdin is empty).
+        Every call starts a fresh shell: cd, export and aliases do NOT carry over to the next call. Set the \
+        directory with the cwd argument and chain related steps in one command (cd x && make).
+        The command is killed after timeout_seconds (default 120, max 600). Output longer than about 20 KB \
+        keeps its start and end and drops the middle.
+        For servers, watchers and anything that must keep running, pass background: true. The process then \
+        outlives the call: you get a job id and its first output. Read it later with job_output, list jobs with \
+        job_list, stop one with job_stop. A plain `cmd &` does not survive the call.
         """,
         parameters: .schema([
             "command": .property("string", "The command line to run."),
             "cwd": .property("string", "Directory to run in, absolute or relative to the working directory. Defaults to the working directory."),
-            "timeout_seconds": .property("integer", "Seconds before the command is killed (default 120, max 600)."),
+            "timeout_seconds": .property("integer", "Seconds before the command is killed (default 120, max 600). Ignored with background."),
+            "background": .property("boolean", "Start the command and return right away, leaving it running (dev servers, watchers). Default false."),
         ], required: ["command"]))
 
     var kind: ToolCall.Kind { .shell }
@@ -20,20 +32,147 @@ struct RunCommandTool: AgentTool {
     func risk(_ arguments: JSONValue) -> ToolRisk { .sensitive }
 
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) {
-        ("Rodando no Terminal", arguments["command"]?.string ?? "")
+        (arguments["background"]?.bool == true ? "Rodando em segundo plano" : "Rodando no Terminal",
+         arguments["command"]?.string ?? "")
     }
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
         let command = try arguments.requiredString("command")
         let directory = arguments.nonEmptyString("cwd").map(context.url(for:)) ?? context.workingDirectory
         guard directory.isExistingDirectory else { throw ToolError("Pasta não encontrada: \(directory.path)") }
-        let seconds = arguments.integer("timeout_seconds", default: 120, in: 1...600)
+        let shell = await context.shell.resolved()
 
-        let result = try await ProcessRunner.run("/bin/zsh", ["-lc", command], directory: directory, timeout: .seconds(seconds))
-        let output = result.output.isEmpty ? "(sem saída)" : result.output
+        if arguments["background"]?.bool == true {
+            return try await startInBackground(command, directory: directory, shell: shell, context: context)
+        }
+        let seconds = arguments.integer("timeout_seconds", default: Self.defaultTimeout, in: 1...Self.maxTimeout)
+        let result = try await ProcessRunner.run(shell.shell, ["-c", command], directory: directory, environment: shell.environment,
+                                                 timeout: .seconds(seconds), outputLimit: Self.outputLimit)
+        var output = result.output.isEmpty ? "(sem saída)" : result.output
+        if result.leftOutputOpen {
+            output += "\n[aviso: um processo iniciado com & ainda segurava a saída e pode ser encerrado ao escrever nela; "
+                + "para deixar algo rodando use background: true]"
+        }
         if result.timedOut {
             return output + "\n[tempo esgotado após \(seconds) s; o processo foi encerrado]"
         }
-        return "Código de saída: \(result.status)\n\(output)"
+        if let signal = result.signal {
+            return "Código de saída: encerrado pelo sinal \(Signals.describe(signal))\n\(output)"
+        }
+        return "Código de saída: \(result.status)\(Signals.hint(forExitCode: result.status))\n\(output)"
     }
+
+    private func startInBackground(_ command: String, directory: URL, shell: ShellEnvironment.Resolved,
+                                   context: ToolContext) async throws -> String {
+        guard let jobs = context.jobs, let botID = context.botID else {
+            throw ToolError("Processos em segundo plano não estão disponíveis aqui; rode sem background.")
+        }
+        let started = try await jobs.start(botID: botID, command: command, directory: directory, shell: shell.shell,
+                                           environment: shell.environment)
+        let job = started.job
+        let output = started.firstOutput.isEmpty ? "(sem saída ainda)" : started.firstOutput
+        return """
+        Processo em segundo plano \(job.id): \(job.statusText).
+        Log completo: \(job.logPath)
+        Primeira saída:
+        \(output)
+
+        job_output(id: "\(job.id)") mostra mais, job_stop(id: "\(job.id)") encerra.
+        """
+    }
+}
+
+// MARK: - Background jobs
+
+private extension JSONValue {
+    /// The `id` argument; models send it as a string or as a number.
+    func jobID() throws -> String {
+        if let text = nonEmptyString("id") { return text }
+        if let number = self["id"]?.int { return String(number) }
+        throw ToolError("Faltou o argumento \"id\". job_list mostra os processos em segundo plano.")
+    }
+}
+
+private extension ToolContext {
+    func backgroundJobs() throws -> (jobs: BackgroundJobs, botID: UUID) {
+        guard let jobs, let botID else { throw ToolError("Processos em segundo plano não estão disponíveis aqui.") }
+        return (jobs, botID)
+    }
+}
+
+struct JobOutputTool: AgentTool {
+    let spec = ToolSpec(
+        name: "job_output",
+        description: "Show the latest output of a process started with run_command(background: true), plus whether it is still running.",
+        parameters: .schema([
+            "id": .property("string", "The job id returned by run_command or listed by job_list."),
+            "lines": .property("integer", "How many of the last lines to show (default 50, max 500)."),
+        ], required: ["id"]))
+
+    var kind: ToolCall.Kind { .shell }
+    var capability: Capability? { .terminal }
+    /// Reads the log of a job this Orb started itself.
+    func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
+
+    func summary(_ arguments: JSONValue) -> (title: String, detail: String) {
+        ("Lendo a saída do processo", (try? arguments.jobID()) ?? "")
+    }
+
+    func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
+        let (jobs, botID) = try context.backgroundJobs()
+        let lines = arguments.integer("lines", default: 50, in: 1...500)
+        let result = try await jobs.output(botID: botID, id: try arguments.jobID(), lines: lines)
+        return "Processo \(result.job.id) (\(result.job.statusText)): \(result.job.command)\n"
+            + (result.text.isEmpty ? "(sem saída)" : result.text)
+    }
+}
+
+struct JobListTool: AgentTool {
+    let spec = ToolSpec(
+        name: "job_list",
+        description: "List the processes this Orb started with run_command(background: true), running or finished.",
+        parameters: .schema([:]))
+
+    var kind: ToolCall.Kind { .shell }
+    var capability: Capability? { .terminal }
+    func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
+
+    func summary(_ arguments: JSONValue) -> (title: String, detail: String) {
+        ("Listando processos em segundo plano", "")
+    }
+
+    func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
+        let (jobs, botID) = try context.backgroundJobs()
+        let all = await jobs.list(botID: botID)
+        guard !all.isEmpty else { return "Nenhum processo em segundo plano." }
+        return all.map { "\($0.id)  \($0.statusText)  \($0.command)  (em \($0.directory))" }.joined(separator: "\n")
+    }
+}
+
+struct JobStopTool: AgentTool {
+    let spec = ToolSpec(
+        name: "job_stop",
+        description: "Stop a process started with run_command(background: true) and everything it launched.",
+        parameters: .schema([
+            "id": .property("string", "The job id returned by run_command or listed by job_list."),
+        ], required: ["id"]))
+
+    var kind: ToolCall.Kind { .shell }
+    var capability: Capability? { .terminal }
+    /// Only ever reaches jobs this Orb started, which already passed the approval for running the command.
+    func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
+
+    func summary(_ arguments: JSONValue) -> (title: String, detail: String) {
+        ("Parando o processo", (try? arguments.jobID()) ?? "")
+    }
+
+    func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
+        let (jobs, botID) = try context.backgroundJobs()
+        let job = try await jobs.stop(botID: botID, id: try arguments.jobID())
+        return "Processo \(job.id) (\(job.statusText)): \(job.command)"
+    }
+}
+
+extension ToolBox {
+    static let shellTools: [any AgentTool] = [RunCommandTool(), JobOutputTool(), JobListTool(), JobStopTool()]
 }

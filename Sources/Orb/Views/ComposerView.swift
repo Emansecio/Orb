@@ -94,8 +94,10 @@ struct ComposerView: View {
 
     private func send() {
         guard canSend else { return }
-        model.send(draft.wrappedValue, attachments: attachments, to: bot.id)
-        attachments.removeAll()
+        // If the message wasn't sent (no model connected), the attachments stay with the draft.
+        if model.send(draft.wrappedValue, attachments: attachments, to: bot.id, fromUser: true) {
+            attachments.removeAll()
+        }
     }
 
     private func insert(_ token: String) {

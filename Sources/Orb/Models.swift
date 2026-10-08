@@ -5,6 +5,9 @@ enum PermissionMode: String, CaseIterable, Identifiable, Codable, Sendable {
 
     var id: String { rawValue }
 
+    /// A mode from a newer version falls back to the most cautious one.
+    init(from decoder: Decoder) throws { self = try decoder.rawValue(Self.self, fallback: .ask) }
+
     var label: String {
         switch self {
         case .ask: "Perguntar antes"
@@ -65,7 +68,7 @@ struct Bot: Identifiable, Hashable, Codable, Sendable {
     /// Model id; empty means the provider's default model.
     var model = ""
     var permissionMode = PermissionMode.ask
-    var capabilities: Set<Capability> = [.terminal, .browser]
+    var capabilities: Set<Capability> = [.terminal, .browser, .computerUse]
     /// Tools the user chose "Sempre permitir" for.
     var allowedTools: Set<String> = []
     /// Where commands run and relative paths resolve; empty means the home folder.
@@ -90,7 +93,7 @@ extension Bot {
         orb = try c.value(.orb, default: OrbConfig())
         model = try c.value(.model, default: "")
         permissionMode = try c.value(.permissionMode, default: .ask)
-        capabilities = try c.value(.capabilities, default: [.terminal, .browser])
+        capabilities = Set(try c.lossyArray(.capabilities, default: [.terminal, .browser]))
         allowedTools = try c.value(.allowedTools, default: [])
         workingDirectory = try c.value(.workingDirectory, default: "")
         unread = try c.value(.unread, default: 0)
@@ -119,6 +122,13 @@ struct TranscriptItem: Identifiable, Codable, Sendable, Equatable {
     init(_ kind: Kind) {
         self.kind = kind
     }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.value(.id, default: UUID())
+        kind = try c.decode(Kind.self, forKey: .kind)
+        date = try c.value(.date, default: Date.now)
+    }
 }
 
 /// A bot's current conversation: what the UI shows and what the model sees.
@@ -134,6 +144,10 @@ struct Conversation: Codable, Sendable {
     var memorySavedCount: Int?
     /// Identity and preferences as the current Claude Code session's (frozen) system prompt has them.
     var claudeMemoryPinned: String?
+    /// Summary standing in for the first `summaryCoveredCount` of `messages`, which no longer fit the model's
+    /// window (see `ContextWindow`). The messages themselves stay.
+    var summary: String?
+    var summaryCoveredCount: Int?
 
     /// After a quit or crash mid-turn: nothing is streaming, running or waiting anymore.
     func closingInterruptedTurn() -> Conversation {
@@ -157,9 +171,27 @@ struct Conversation: Codable, Sendable {
     }
 }
 
+extension Conversation {
+    /// Tolerant decoding: an item or message this version can't read (an unknown case after a downgrade) is
+    /// skipped instead of sending the whole conversation to `.corrupt`.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        items = try c.lossyArray(.items)
+        messages = try c.lossyArray(.messages)
+        claudeSessionID = try c.decodeIfPresent(String.self, forKey: .claudeSessionID)
+        claudeSeenCount = try c.decodeIfPresent(Int.self, forKey: .claudeSeenCount)
+        memorySavedCount = try c.decodeIfPresent(Int.self, forKey: .memorySavedCount)
+        claudeMemoryPinned = try c.decodeIfPresent(String.self, forKey: .claudeMemoryPinned)
+        summary = try c.decodeIfPresent(String.self, forKey: .summary)
+        summaryCoveredCount = try c.decodeIfPresent(Int.self, forKey: .summaryCoveredCount)
+    }
+}
+
 struct ToolCall: Identifiable, Codable, Sendable, Equatable {
     enum Kind: String, Codable, Sendable {
         case shell, browser, file, search, computer, connector, memory
+
+        init(from decoder: Decoder) throws { self = try decoder.rawValue(Self.self, fallback: .connector) }
 
         var symbol: String {
             switch self {
@@ -176,6 +208,8 @@ struct ToolCall: Identifiable, Codable, Sendable, Equatable {
 
     enum State: String, Codable, Sendable, Equatable {
         case running, done, failed
+
+        init(from decoder: Decoder) throws { self = try decoder.rawValue(Self.self, fallback: .failed) }
     }
 
     var id = UUID()
@@ -190,8 +224,25 @@ struct ToolCall: Identifiable, Codable, Sendable, Equatable {
     var duration: TimeInterval? { finishedAt.map { $0.timeIntervalSince(startedAt) } }
 }
 
+extension ToolCall {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.value(.id, default: UUID())
+        kind = try c.value(.kind, default: Kind.connector)
+        title = try c.value(.title, default: "")
+        detail = try c.value(.detail, default: "")
+        state = try c.value(.state, default: State.done)
+        output = try c.decodeIfPresent(String.self, forKey: .output)
+        startedAt = try c.value(.startedAt, default: Date.now)
+        finishedAt = try c.decodeIfPresent(Date.self, forKey: .finishedAt)
+    }
+}
+
 enum ApprovalDecision: String, Codable, Sendable, Equatable {
     case deny, once, always
+
+    /// A decision from a newer version counts as a refusal.
+    init(from decoder: Decoder) throws { self = try decoder.rawValue(Self.self, fallback: .deny) }
 
     var label: String {
         switch self {
@@ -212,6 +263,18 @@ struct ApprovalRequest: Identifiable, Codable, Sendable, Equatable {
     var decision: ApprovalDecision?
 }
 
+extension ApprovalRequest {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.value(.id, default: UUID())
+        toolName = try c.value(.toolName, default: "")
+        title = try c.value(.title, default: "")
+        command = try c.value(.command, default: "")
+        reason = try c.value(.reason, default: "")
+        decision = try c.decodeIfPresent(ApprovalDecision.self, forKey: .decision)
+    }
+}
+
 // MARK: - Routines
 
 struct Routine: Identifiable, Codable, Sendable {
@@ -226,6 +289,27 @@ struct Routine: Identifiable, Codable, Sendable {
     var lastResult: String?
 
     var nextRun: Date { schedule.next(after: lastRun ?? createdAt) }
+
+    /// Turning a routine back on counts from now: its old `lastRun` would make it due right away.
+    mutating func setEnabled(_ enabled: Bool, now: Date = .now) {
+        if enabled && !isEnabled { lastRun = now }
+        isEnabled = enabled
+    }
+}
+
+extension Routine {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.value(.id, default: UUID())
+        name = try c.value(.name, default: "")
+        botID = try c.decode(UUID.self, forKey: .botID)
+        prompt = try c.value(.prompt, default: "")
+        schedule = try c.decode(Schedule.self, forKey: .schedule)
+        isEnabled = try c.value(.isEnabled, default: true)
+        createdAt = try c.value(.createdAt, default: Date.now)
+        lastRun = try c.decodeIfPresent(Date.self, forKey: .lastRun)
+        lastResult = try c.decodeIfPresent(String.self, forKey: .lastResult)
+    }
 }
 
 enum Schedule: Codable, Hashable, Sendable {

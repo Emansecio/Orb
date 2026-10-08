@@ -93,9 +93,7 @@ actor ClaudeCode {
     /// The CLI's environment: ours without the markers of an enclosing Claude Code session (or SDK host),
     /// which would otherwise leak into the child, and with the login shell's PATH.
     static func environment(_ base: [String: String], path: String) -> [String: String] {
-        var environment = base.filter { key, _ in
-            key != "CLAUDECODE" && !key.hasPrefix("CLAUDE_CODE_") && !key.hasPrefix("CLAUDE_AGENT_SDK_")
-        }
+        var environment = base.filter { !ShellEnvironment.isClaudeSessionVariable($0.key) }
         environment["PATH"] = path
         return environment
     }

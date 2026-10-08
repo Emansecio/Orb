@@ -245,19 +245,21 @@ enum ModelCatalog {
 // MARK: - Clients
 
 extension ProviderAccount {
-    /// The client for one model: the format decides the wire protocol; OpenCode also wants a stable session id.
-    func client(for model: ProviderModel?, token: String?, conversationID: String) -> (any LLMClient)? {
+    /// The client for one model: the format decides the wire protocol; OpenCode also wants a stable session id,
+    /// and the OpenAI-style formats key their prompt cache to the conversation.
+    func client(for model: ProviderModel?, credentials: @escaping CredentialsProvider, conversationID: String) -> (any LLMClient)? {
         guard let base = URL(string: baseURL), base.host != nil else { return nil }
         var headers = kind == .custom ? self.headers : [:]
         if kind == .opencodeZen || kind == .opencodeGo { headers["x-opencode-session"] = conversationID }
         switch model?.format ?? .chat {
         case .chat:
-            return OpenAIClient(baseURL: base, apiKey: token, extraHeaders: headers)
+            return OpenAIClient(baseURL: base, credentials: credentials, extraHeaders: headers, conversationID: conversationID)
         case .messages:
-            return AnthropicClient(baseURL: base, apiKey: token, extraHeaders: headers)
+            return AnthropicClient(baseURL: base, credentials: credentials, extraHeaders: headers)
         case .responses:
             // Sign in with ChatGPT takes tools as an `additional_tools` input item, not top-level `tools`.
-            return ResponsesClient(baseURL: base, apiKey: token, extraHeaders: headers, toolsAsInputItem: kind == .chatgpt)
+            return ResponsesClient(baseURL: base, credentials: credentials, extraHeaders: headers,
+                                   toolsAsInputItem: kind == .chatgpt, conversationID: conversationID)
         case .claudeCode:
             return nil
         }

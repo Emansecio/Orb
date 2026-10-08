@@ -120,16 +120,21 @@ final class ToolTests {
         """
         let page = HTMLText.convert(html)
         #expect(page.title == "Café & Co")
-        #expect(page.text == "Hello world\n\nSee the docs now — ok A.\n\n• One\n\n• Two")
+        // Links are kept as "text (url)" so the model can follow them.
+        #expect(page.text == "Hello world\n\nSee the docs (https://example.com) now — ok A.\n\n• One\n\n• Two")
     }
 
     // MARK: Catalog
 
     /// Anything that can change the Mac or send data out (web, open, saving to memory) must go through the
-    /// approval gate. Searching the Orb's own memory only reads it.
+    /// approval gate. Searching the Orb's own memory, looking at the Mac (apps, processes, clipboard, screen, the
+    /// browser's front tab, Shortcuts names) and showing a notification only read or notify.
     @Test func onlyLocalReadsRunWithoutAsking() {
         let safe = ToolBox.all.filter { $0.risk(.object(["target": .string("https://example.com")])) == .safe }
-        #expect(Set(safe.map(\.spec.name)) == ["read_file", "list_directory", "search_files", "recall"])
+        #expect(Set(safe.map(\.spec.name)) == [
+            "read_file", "list_directory", "search_files", "grep", "glob", "recall", "job_output", "job_list", "job_stop",
+            "shortcuts_list", "clipboard_read", "screenshot", "notify", "apps_list", "processes", "browser_tab",
+        ])
     }
 
     @Test func rememberAndRecallUseTheOrbsMemory() async throws {

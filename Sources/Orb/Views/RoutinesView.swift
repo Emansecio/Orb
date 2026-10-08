@@ -60,7 +60,7 @@ private struct RoutineCard: View {
                     .font(.caption.weight(.medium))
                     .foregroundStyle(Palette.muted)
                 Spacer()
-                Toggle("Ativa", isOn: $routine.isEnabled)
+                Toggle("Ativa", isOn: Binding(get: { routine.isEnabled }, set: { routine.setEnabled($0) }))
                     .toggleStyle(.switch)
                     .labelsHidden()
                     .controlSize(.small)

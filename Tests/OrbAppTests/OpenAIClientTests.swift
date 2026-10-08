@@ -97,7 +97,8 @@ struct OpenAIClientTests {
         for try await event in client.stream(model: "m", messages: [.user("oi")], tools: []) {
             events.append(event)
         }
-        #expect(events == [.text("Olá"), .text(", mundo"), .toolCalls([ToolCallRequest(id: "c1", name: "now", arguments: "{}")])])
+        #expect(events == [.text("Olá"), .text(", mundo"), .toolCalls([ToolCallRequest(id: "c1", name: "now", arguments: "{}")]),
+                           .finished(.toolUse, nil)])
 
         let request = try #require(StubProtocol.requests.withLock { $0["stream.test"] })
         #expect(request.url?.path() == "/v1/chat/completions")
@@ -123,23 +124,328 @@ struct OpenAIClientTests {
     }
 }
 
-/// Serves canned responses keyed by host, so parallel tests don't interfere.
+/// A mutable value shared with `@Sendable` closures.
+final class Box<Value: Sendable>: Sendable {
+    private let lock: OSAllocatedUnfairLock<Value>
+    init(_ value: Value) { lock = OSAllocatedUnfairLock(initialState: value) }
+    var value: Value {
+        get { lock.withLock { $0 } }
+        set { lock.withLock { $0 = newValue } }
+    }
+    func update(_ change: (inout Value) -> Void) { lock.withLockUnchecked { change(&$0) } }
+}
+
+struct OpenAIReliabilityTests {
+    private func events(_ client: some LLMClient, messages: [ChatMessage] = [.user("oi")]) async throws -> [LLMEvent] {
+        var events: [LLMEvent] = []
+        for try await event in client.stream(model: "m", messages: messages, tools: []) { events.append(event) }
+        return events
+    }
+
+    private func client(host: String, credentials: @escaping CredentialsProvider) -> OpenAIClient {
+        OpenAIClient(baseURL: URL(string: "https://\(host)/v1")!, credentials: credentials, session: StubProtocol.session)
+    }
+
+    // MARK: Tool-call fragments
+
+    @Test func continuesACallByIdWhenTheProviderOmitsIndex() throws {
+        let chunks = [
+            #"[{"id":"call_a","type":"function","function":{"name":"read_file","arguments":""}}]"#,
+            #"[{"id":"call_a","function":{"arguments":"{\"path\":"}}]"#,
+            #"[{"id":"call_b","type":"function","function":{"name":"list_dir","arguments":"{"}}]"#,
+            #"[{"id":"call_a","function":{"arguments":"\"a.txt\"}"}}]"#,
+            #"[{"id":"call_b","function":{"arguments":"}"}}]"#,
+        ]
+        var accumulator = ToolCallAccumulator()
+        for chunk in chunks { accumulator.ingest(try #require(JSONValue.parse(chunk)?.array)) }
+        #expect(accumulator.requests == [
+            ToolCallRequest(id: "call_a", name: "read_file", arguments: #"{"path":"a.txt"}"#),
+            ToolCallRequest(id: "call_b", name: "list_dir", arguments: "{}"),
+        ])
+    }
+
+    @Test func separatesCallsThatShareAnIndexButNotAnId() throws {
+        let chunks = [
+            #"[{"index":0,"id":"call_a","function":{"name":"one","arguments":"{}"}}]"#,
+            #"[{"index":0,"id":"call_b","function":{"name":"two","arguments":"{}"}}]"#,
+        ]
+        var accumulator = ToolCallAccumulator()
+        for chunk in chunks { accumulator.ingest(try #require(JSONValue.parse(chunk)?.array)) }
+        #expect(accumulator.requests.map(\.name) == ["one", "two"])
+    }
+
+    @Test func fragmentsWithoutIdOrIndexContinueTheLastCall() throws {
+        var accumulator = ToolCallAccumulator()
+        accumulator.ingest(try #require(JSONValue.parse(#"[{"id":"c","function":{"name":"now","arguments":"{"}}]"#)?.array))
+        accumulator.ingest(try #require(JSONValue.parse(#"[{"function":{"arguments":"}"}}]"#)?.array))
+        #expect(accumulator.requests == [ToolCallRequest(id: "c", name: "now", arguments: "{}")])
+    }
+
+    // MARK: Stop reasons and usage
+
+    @Test func mapsFinishReasons() {
+        let reason = { (finish: String?, calls: Bool, done: Bool) in OpenAIClient.stopReason(finish, hasToolCalls: calls, sawDone: done) }
+        #expect(reason("stop", false, true) == .done)
+        #expect(reason("tool_calls", true, true) == .toolUse)
+        #expect(reason("stop", true, true) == .toolUse)
+        #expect(reason("length", false, true) == .maxTokens)
+        #expect(reason("content_filter", false, true) == .refusal)
+        #expect(reason("weird", false, true) == .unknown("weird"))
+        #expect(reason(nil, false, true) == .done)
+        #expect(reason(nil, true, true) == .toolUse)
+        #expect(reason(nil, false, false) == .incomplete)
+    }
+
+    @Test func streamEndsWithStopReasonAndUsage() async throws {
+        let sse = """
+        data: {"choices":[{"delta":{"content":"Oi"}}]}
+
+        data: {"choices":[{"delta":{},"finish_reason":"length"}],"usage":null}
+
+        data: {"choices":[],"usage":{"prompt_tokens":120,"completion_tokens":7,"prompt_tokens_details":{"cached_tokens":100}}}
+
+        data: [DONE]
+
+        """
+        let client = StubProtocol.client(host: "usage.test", apiKey: nil, status: 200, body: sse)
+        #expect(try await events(client) == [.text("Oi"), .finished(.maxTokens, TokenUsage(input: 20, output: 7, cacheRead: 100, cacheWrite: nil))])
+    }
+
+    @Test func aStreamCutBeforeTheEndIsIncomplete() async throws {
+        let client = StubProtocol.client(host: "cut.test", apiKey: nil, status: 200,
+                                         body: "data: {\"choices\":[{\"delta\":{\"content\":\"Oi\"}}]}\n\n")
+        #expect(try await events(client) == [.text("Oi"), .finished(.incomplete, nil)])
+    }
+
+    @Test func requestsUsageAndCacheKeyOnlyWhereSupported() throws {
+        let plain = OpenAIClient.requestBody(model: "m", messages: [.user("oi")], tools: [])
+        #expect(plain["stream_options"] == nil)
+        #expect(plain["prompt_cache_key"] == nil)
+        let full = OpenAIClient.requestBody(model: "m", messages: [.user("oi")], tools: [], includeUsage: true, promptCacheKey: "bot-1")
+        #expect(full["stream_options"] == .object(["include_usage": .bool(true)]))
+        #expect(full["prompt_cache_key"] == .string("bot-1"))
+
+        let make = { (url: String) in OpenAIClient(baseURL: URL(string: url)!, apiKey: nil) }
+        #expect(make("https://api.openai.com/v1").isOpenAI)
+        #expect(make("https://api.openai.com/v1").reportsUsage)
+        #expect(!make("https://openrouter.ai/api/v1").isOpenAI)
+        #expect(make("https://openrouter.ai/api/v1").reportsUsage)
+        for local in ["http://localhost:11434/v1", "http://localhost:1234/v1", "https://api.x.ai/v1", "https://example.com/v1"] {
+            #expect(!make(local).isOpenAI)
+            #expect(!make(local).reportsUsage)
+        }
+    }
+
+    @Test func compatibleServersGetNeitherUsageNorCacheKeyOnTheWire() async throws {
+        let stub = client(host: "compat.test") { _ in nil }
+        var withKey = stub
+        withKey.conversationID = "bot-1"
+        StubProtocol.queue(host: "compat.test", [.init(body: "data: [DONE]\n\n")])
+        _ = try await events(withKey)
+        let body = try #require(StubProtocol.sent(to: "compat.test").first?.body)
+        #expect(body["stream_options"] == nil)
+        #expect(body["prompt_cache_key"] == nil)
+    }
+
+    @Test func openAIAndOpenRouterGetUsageOnTheWireButOnlyOpenAIGetsTheCacheKey() async throws {
+        for (host, cacheKey) in [("api.openai.com", true), ("openrouter.ai", false)] {
+            var client = OpenAIClient(baseURL: URL(string: "https://\(host)/v1")!, apiKey: nil, session: StubProtocol.session)
+            client.conversationID = "bot-1"
+            StubProtocol.queue(host: host, [.init(body: "data: [DONE]\n\n")])
+            _ = try await events(client)
+            let body = try #require(StubProtocol.sent(to: host).first?.body)
+            #expect(body["stream_options"] == .object(["include_usage": .bool(true)]))
+            #expect(body["prompt_cache_key"] == (cacheKey ? .string("bot-1") : nil))
+        }
+    }
+
+    // MARK: Errors
+
+    @Test func aLongRetryAfterIsSaidInTheErrorMessage() {
+        let message = { (seconds: TimeInterval?) in LLMError.http(status: 429, message: "x", retryAfter: seconds).errorDescription ?? "" }
+        #expect(message(nil).contains("pediu para aguardar") == false)
+        #expect(message(0.2).contains("pediu para aguardar") == false)
+        #expect(message(30).hasSuffix("O provedor pediu para aguardar 30 s."))
+        #expect(message(600).hasSuffix("O provedor pediu para aguardar 10 min."))
+    }
+
+    @Test func parsesRetryAfterHeaders() throws {
+        let response = { (headers: [String: String]) in
+            HTTPURLResponse(url: URL(string: "https://x.test")!, statusCode: 429, httpVersion: nil, headerFields: headers)!
+        }
+        #expect(OpenAIClient.retryAfter(in: response(["Retry-After": "12"])) == 12)
+        #expect(OpenAIClient.retryAfter(in: response(["Retry-After": "1.5"])) == 1.5)
+        #expect(OpenAIClient.retryAfter(in: response(["retry-after-ms": "250"])) == 0.25)
+        #expect(OpenAIClient.retryAfter(in: response(["Retry-After": "-3"])) == nil)
+        #expect(OpenAIClient.retryAfter(in: response(["Retry-After": "soon"])) == nil)
+        #expect(OpenAIClient.retryAfter(in: response([:])) == nil)
+        let now = Date(timeIntervalSince1970: 1_800_000_000) // Fri, 15 Jan 2027 08:00:00 GMT
+        #expect(OpenAIClient.retryAfter(in: response(["Retry-After": "Fri, 15 Jan 2027 08:00:30 GMT"]), now: now) == 30)
+        #expect(OpenAIClient.retryAfter(in: response(["Retry-After": "Fri, 15 Jan 2027 07:00:00 GMT"]), now: now) == 0)
+    }
+
+    @Test func rateLimitErrorsCarryRetryAfter() async {
+        let client = StubProtocol.client(host: "limit.test", apiKey: nil, status: 429, body: #"{"error":{"message":"Slow down"}}"#)
+        StubProtocol.queue(host: "limit.test", [.init(status: 429, body: #"{"error":{"message":"Slow down"}}"#, headers: ["Retry-After": "7"])])
+        do {
+            for try await _ in client.stream(model: "m", messages: [], tools: []) {}
+            Issue.record("should have thrown")
+        } catch let error as LLMError {
+            #expect(error == .http(status: 429, message: "Slow down", retryAfter: 7))
+            #expect(error.retryAfter == 7)
+            #expect(error.isRetryable)
+        } catch {
+            Issue.record("unexpected \(error)")
+        }
+    }
+
+    @Test func contextOverflowIsDistinguishable() async {
+        let bodies = [
+            #"{"error":{"message":"This model's maximum context length is 128000 tokens.","code":"context_length_exceeded"}}"#,
+            #"{"error":{"type":"invalid_request_error","message":"prompt is too long: 250000 tokens > 200000 maximum"}}"#,
+            #"{"error":{"message":"Bad request","code":"context_length_exceeded"}}"#,
+        ]
+        for (index, body) in bodies.enumerated() {
+            let client = StubProtocol.client(host: "ctx\(index).test", apiKey: nil, status: 400, body: body)
+            do {
+                for try await _ in client.stream(model: "m", messages: [], tools: []) {}
+                Issue.record("should have thrown")
+            } catch let error as LLMError {
+                guard case .contextExceeded = error else { Issue.record("not mapped: \(error)"); continue }
+                #expect(!error.isRetryable)
+            } catch {
+                Issue.record("unexpected \(error)")
+            }
+        }
+        // Another 400 stays a plain HTTP error.
+        let other = StubProtocol.client(host: "ctx-other.test", apiKey: nil, status: 400, body: #"{"error":{"message":"bad tool schema"}}"#)
+        await #expect(throws: LLMError.http(status: 400, message: "bad tool schema")) {
+            for try await _ in other.stream(model: "m", messages: [], tools: []) {}
+        }
+    }
+
+    @Test func transportFailuresBecomeRetryableNetworkErrors() async {
+        let client = StubProtocol.client(host: "down.test", apiKey: nil, status: 200, body: "")
+        StubProtocol.queue(host: "down.test", [.init(failure: URLError.timedOut.rawValue)])
+        do {
+            for try await _ in client.stream(model: "m", messages: [], tools: []) {}
+            Issue.record("should have thrown")
+        } catch let error as LLMError {
+            guard case .network(let code, _) = error else { Issue.record("not wrapped: \(error)"); return }
+            #expect(code == URLError.timedOut.rawValue)
+            #expect(error.isRetryable)
+        } catch {
+            Issue.record("unexpected \(error)")
+        }
+    }
+
+    // MARK: Credentials
+
+    @Test func asksForCredentialsBeforeEveryRequest() async throws {
+        let asked = Box<[Bool]>([])
+        let tokens = Box<[String]>(["k1", "k2"])
+        let client = client(host: "creds.test") { force in
+            asked.update { $0.append(force) }
+            return tokens.value.first
+        }
+        StubProtocol.queue(host: "creds.test", [.init(body: "data: [DONE]\n\n"), .init(body: "data: [DONE]\n\n")])
+        _ = try await events(client)
+        tokens.update { $0.removeFirst() }
+        _ = try await events(client)
+        let sent = StubProtocol.sent(to: "creds.test").map { $0.request.value(forHTTPHeaderField: "Authorization") }
+        #expect(sent == ["Bearer k1", "Bearer k2"])
+        #expect(asked.value == [false, false])
+    }
+
+    @Test func a401RefreshesTheCredentialAndRetriesOnce() async throws {
+        let asked = Box<[Bool]>([])
+        let client = client(host: "refresh.test") { force in
+            asked.update { $0.append(force) }
+            return force ? "fresh" : "stale"
+        }
+        StubProtocol.queue(host: "refresh.test", [
+            .init(status: 401, body: #"{"error":{"message":"expired"}}"#),
+            .init(body: "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"),
+        ])
+        #expect(try await events(client) == [.text("ok"), .finished(.done, nil)])
+        #expect(asked.value == [false, true])
+        let sent = StubProtocol.sent(to: "refresh.test").map { $0.request.value(forHTTPHeaderField: "Authorization") }
+        #expect(sent == ["Bearer stale", "Bearer fresh"])
+    }
+
+    @Test func aSecond401IsReportedWithoutLooping() async {
+        let asked = Box<[Bool]>([])
+        let client = client(host: "denied.test") { force in
+            asked.update { $0.append(force) }
+            return "nope"
+        }
+        StubProtocol.queue(host: "denied.test", [.init(status: 401, body: #"{"error":{"message":"bad key"}}"#),
+                                                 .init(status: 401, body: #"{"error":{"message":"bad key"}}"#),
+                                                 .init(status: 401, body: #"{"error":{"message":"bad key"}}"#)])
+        await #expect(throws: LLMError.http(status: 401, message: "bad key")) {
+            for try await _ in client.stream(model: "m", messages: [], tools: []) {}
+        }
+        #expect(StubProtocol.sent(to: "denied.test").count == 2)
+        #expect(asked.value == [false, true])
+    }
+
+    @Test func aFailingCredentialLookupSurfacesItsError() async {
+        let client = client(host: "nocreds.test") { _ in throw ToolError("A sessão do ChatGPT expirou.") }
+        await #expect(throws: ToolError("A sessão do ChatGPT expirou.")) {
+            for try await _ in client.stream(model: "m", messages: [], tools: []) {}
+        }
+    }
+}
+
+/// Serves canned responses keyed by host, so parallel tests don't interfere. A host with a queue gets its
+/// responses in order (then falls back to the fixed one); every request is logged with its body.
 final class StubProtocol: URLProtocol {
     struct Response: Sendable {
         var status: Int
         var body: Data
+        var headers: [String: String] = [:]
+        /// Fails the request with this `URLError` code instead of answering.
+        var failure: Int?
+
+        init(status: Int = 200, body: String = "", headers: [String: String] = [:], failure: Int? = nil) {
+            self.status = status
+            self.body = Data(body.utf8)
+            self.headers = headers
+            self.failure = failure
+        }
+    }
+
+    struct Sent: Sendable {
+        var request: URLRequest
+        /// The body parsed as JSON (nil for form bodies).
+        var body: JSONValue?
+        var text: String
     }
 
     static let responses = OSAllocatedUnfairLock<[String: Response]>(initialState: [:])
+    static let queues = OSAllocatedUnfairLock<[String: [Response]]>(initialState: [:])
     static let requests = OSAllocatedUnfairLock<[String: URLRequest]>(initialState: [:])
+    static let log = OSAllocatedUnfairLock<[String: [Sent]]>(initialState: [:])
 
-    static func client(host: String, apiKey: String?, status: Int, body: String) -> OpenAIClient {
-        responses.withLock { $0[host] = Response(status: status, body: Data(body.utf8)) }
+    static var session: URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StubProtocol.self]
-        return OpenAIClient(baseURL: URL(string: "https://\(host)/v1")!, apiKey: apiKey,
-                            session: URLSession(configuration: configuration))
+        return URLSession(configuration: configuration)
     }
+
+    static func client(host: String, apiKey: String?, status: Int, body: String) -> OpenAIClient {
+        responses.withLock { $0[host] = Response(status: status, body: body) }
+        return OpenAIClient(baseURL: URL(string: "https://\(host)/v1")!, apiKey: apiKey, session: session)
+    }
+
+    /// Answers the next requests to `host` with these, in order.
+    static func queue(host: String, _ list: [Response]) {
+        queues.withLock { $0[host] = list }
+        log.withLock { $0[host] = [] }
+    }
+
+    /// Everything sent to `host` so far.
+    static func sent(to host: String) -> [Sent] { log.withLock { $0[host] ?? [] } }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -148,8 +454,24 @@ final class StubProtocol: URLProtocol {
         let request = request
         let host = request.url?.host() ?? ""
         Self.requests.withLock { $0[host] = request }
-        guard let url = request.url, let stub = Self.responses.withLock({ $0[host] }),
-              let response = HTTPURLResponse(url: url, statusCode: stub.status, httpVersion: "HTTP/1.1", headerFields: nil) else {
+        let body = request.httpBody ?? request.httpBodyStream.map(Self.readAll)
+        let text = body.map { String(decoding: $0, as: UTF8.self) } ?? ""
+        Self.log.withLock { $0[host, default: []].append(Sent(request: request, body: JSONValue.parse(text), text: text)) }
+        let queued: Response? = Self.queues.withLock { queues in
+            guard var list = queues[host], !list.isEmpty else { return nil }
+            let first = list.removeFirst()
+            queues[host] = list
+            return first
+        }
+        guard let url = request.url, let stub = queued ?? Self.responses.withLock({ $0[host] }) else {
+            client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
+            return
+        }
+        if let failure = stub.failure {
+            client?.urlProtocol(self, didFailWithError: URLError(URLError.Code(rawValue: failure)))
+            return
+        }
+        guard let response = HTTPURLResponse(url: url, statusCode: stub.status, httpVersion: "HTTP/1.1", headerFields: stub.headers) else {
             client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
             return
         }
@@ -159,4 +481,17 @@ final class StubProtocol: URLProtocol {
     }
 
     override func stopLoading() {}
+
+    private static func readAll(_ stream: InputStream) -> Data {
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            if count <= 0 { break }
+            data.append(buffer, count: count)
+        }
+        return data
+    }
 }

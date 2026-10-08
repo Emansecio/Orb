@@ -15,7 +15,12 @@ final class AppModel {
     var providers: [ProviderAccount] { didSet { scheduleStateSave() } }
     /// "provider/model" for bots without a model of their own.
     var defaultModel: String { didSet { scheduleStateSave() } }
+    /// Conversations loaded so far. At launch only the selected Orb's is; the rest follow in the background
+    /// (`unloadedConversations`), and anything that needs one earlier loads it on demand (`ensureLoaded`).
     private(set) var conversations: [UUID: Conversation]
+    /// Things the user should hear about the data files (an unreadable file and where its copy is, a failed save).
+    /// The first one is shown as an alert; `dismissDataNotice` moves on to the next.
+    private(set) var dataNotices: [StoreNotice] = []
 
     // MARK: UI state
 
@@ -50,13 +55,16 @@ final class AppModel {
     private static let speakingQuiet = Duration.milliseconds(600)
     var selection: SidebarItem? {
         didSet {
-            if case .bot(let id) = selection { update(id) { $0.unread = 0 } }
+            if case .bot(let id) = selection {
+                ensureLoaded(id)
+                update(id) { $0.unread = 0 }
+            }
         }
     }
 
     // MARK: Services
 
-    @ObservationIgnored private let store: Store
+    @ObservationIgnored private var store: Store
     /// Every Orb's own memory bank (`memoria/<id>/` in the data folder).
     @ObservationIgnored let memory: MemoryLibrary
     /// What each Orb's memory panel shows, refreshed after changes.
@@ -70,34 +78,61 @@ final class AppModel {
     /// Bots whose running turn belongs to `claudeEngine` (stop and approvals go there).
     @ObservationIgnored private var claudeTurns: Set<UUID> = []
     @ObservationIgnored private let mcp = MCPManager()
+    /// Processes the Orbs left running with `run_command(background: true)`.
+    @ObservationIgnored private let jobs = BackgroundJobs()
     @ObservationIgnored private var turns: [UUID: Task<Void, Never>] = [:]
     /// Bot id → routine id, for turns started by a routine.
     @ObservationIgnored private var routineTurns: [UUID: UUID] = [:]
     @ObservationIgnored private var stateSave: Task<Void, Never>?
     @ObservationIgnored private var conversationSaves: [UUID: Task<Void, Never>] = [:]
+    /// Orbs whose conversation changed since it was last written; quitting saves only these.
+    @ObservationIgnored private var dirtyConversations: Set<UUID> = []
+    /// Orbs whose conversation file hasn't been read yet (never in `conversations`).
+    @ObservationIgnored private var unloadedConversations: Set<UUID> = []
+    @ObservationIgnored private var didReportSaveFailure = false
+    /// A conversation that keeps changing (a streaming reply) is written at most this often.
+    private static let streamingSaveInterval = 5.0
     /// Streamed text not shown yet: deltas are published at most every `textFlushInterval`.
     @ObservationIgnored private var pendingText: [UUID: String] = [:]
     @ObservationIgnored private var textFlushes: [UUID: Task<Void, Never>] = [:]
     private static let textFlushInterval = Duration.milliseconds(33)
     @ObservationIgnored private var scheduler: Task<Void, Never>?
 
-    init(store: Store = .standard) {
+    /// `runsBackgroundWork: false` skips the scheduler, Keychain checks and app-wide observers (tests).
+    init(store: Store = .standard, runsBackgroundWork: Bool = true) {
         self.store = store
         memory = MemoryLibrary.at(store.directory.appending(path: "memoria"))
-        let state = store.loadState() ?? .initial
+        var notices: [StoreNotice] = []
+        let stateRead = store.readState()
+        notices += stateRead.notice.map { [$0] } ?? []
+        let state = stateRead.value ?? .initial
         bots = state.bots
         routines = state.routines
         skills = state.skills
         connectors = state.connectors
         providers = state.providers
         defaultModel = state.defaultModel
-        conversations = Dictionary(uniqueKeysWithValues: state.bots.map { bot in
-            (bot.id, store.loadConversation(bot.id)?.closingInterruptedTurn() ?? Conversation())
-        })
+        // Only the Orb shown first is read before the first frame.
+        var firstConversations: [UUID: Conversation] = [:]
+        if let first = state.bots.first {
+            let read = store.readConversation(first.id)
+            notices += Self.labeled(read.notice, for: first).map { [$0] } ?? []
+            firstConversations[first.id] = read.value?.closingInterruptedTurn() ?? Conversation()
+        }
+        conversations = firstConversations
+        unloadedConversations = Set(state.bots.dropFirst().map(\.id))
+        dataNotices = notices
         selection = state.bots.first.map { .bot($0.id) }
+        self.store.onSaveFailure = { [weak self] notice in
+            Task { @MainActor in self?.reportSaveFailure(notice) }
+        }
 
         syncConnectors()
-        Task { [weak self] in await self?.prepareMemory() }
+        guard runsBackgroundWork else { return }
+        Task { [weak self] in
+            await self?.loadRemainingConversations()
+            await self?.prepareMemory()
+        }
         scheduler = Task { [weak self] in
             await self?.refreshConnections()
             while !Task.isCancelled {
@@ -107,7 +142,10 @@ final class AppModel {
             }
         }
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.saveNow() }
+            MainActor.assumeIsolated {
+                self?.saveNow()
+                self?.jobs.killAllNow()
+            }
         }
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -116,6 +154,66 @@ final class AppModel {
                     Task { await self.refreshMemory(id) } // picks up pages edited by hand meanwhile
                 }
             }
+        }
+    }
+
+    // MARK: Loading and data notices
+
+    func dismissDataNotice() {
+        if !dataNotices.isEmpty { dataNotices.removeFirst() }
+    }
+
+    private func reportSaveFailure(_ notice: StoreNotice) {
+        guard !didReportSaveFailure else { return } // once: a full disk would otherwise repeat on every save
+        didReportSaveFailure = true
+        dataNotices.append(notice)
+    }
+
+    /// Reads the conversation of an Orb that hasn't been loaded yet, right now. Everything that reads or changes
+    /// a conversation outside a running turn goes through here first, so an unloaded one is never mistaken for an
+    /// empty one (and then saved over its file).
+    private func ensureLoaded(_ botID: UUID) {
+        guard unloadedConversations.remove(botID) != nil else { return }
+        let read = store.readConversation(botID)
+        addNotice(Self.labeled(read.notice, for: bot(botID)))
+        conversations[botID] = read.value?.closingInterruptedTurn() ?? Conversation()
+        rewriteIfItLostItems(botID, read)
+    }
+
+    /// A file that lost items while decoding is rewritten once (its original is kept aside), so the loss is
+    /// reported once instead of on every launch.
+    private func rewriteIfItLostItems(_ botID: UUID, _ read: StoreRead<Conversation>) {
+        guard read.value != nil, read.notice?.copy != nil else { return }
+        scheduleConversationSave(botID, delay: 0)
+    }
+
+    /// The same message is never queued twice (a file read from two places at once reports the same thing).
+    private func addNotice(_ notice: StoreNotice?) {
+        guard let notice, !dataNotices.contains(notice) else { return }
+        dataNotices.append(notice)
+    }
+
+    /// Tells which Orb a notice is about: the file name alone (`<UUID>.json`) doesn't.
+    private static func labeled(_ notice: StoreNotice?, for bot: Bot?) -> StoreNotice? {
+        guard var notice, let bot else { return notice }
+        notice.message = "Conversa de \(bot.name): \(notice.message)"
+        return notice
+    }
+
+    /// Reads the other Orbs' conversations one by one, decoding on the store's queue instead of the main thread.
+    func loadRemainingConversations() async {
+        for bot in bots where unloadedConversations.contains(bot.id) {
+            let read = await store.readConversationAsync(bot.id)
+            // Loaded on demand, or the Orb deleted, while this was reading: that result wins. Its notice still
+            // stands when the file was moved aside (the on-demand read then found nothing), but not when the
+            // on-demand read already reported the same lost items.
+            let stillUnloaded = unloadedConversations.remove(bot.id) != nil
+            if stillUnloaded || read.value == nil {
+                addNotice(Self.labeled(read.notice, for: bot))
+            }
+            guard stillUnloaded, self.bot(bot.id) != nil else { continue }
+            conversations[bot.id] = read.value?.closingInterruptedTurn() ?? Conversation()
+            rewriteIfItLostItems(bot.id, read)
         }
     }
 
@@ -289,7 +387,14 @@ final class AppModel {
     }
 
     private func token(for kind: ProviderKind) async throws -> String? {
-        kind == .chatgpt ? try await ChatGPTAuth.shared.accessToken() : Keychain.get(kind.rawValue)
+        try await Self.credentials(for: kind)(false)
+    }
+
+    /// Looked up again before every model request, so an expired sign-in is refreshed and a changed key is picked up.
+    private static func credentials(for kind: ProviderKind) -> CredentialsProvider {
+        { forceRefresh in
+            kind == .chatgpt ? try await ChatGPTAuth.shared.accessToken(forceRefresh: forceRefresh) : Keychain.get(kind.rawValue)
+        }
     }
 
     // MARK: Bots
@@ -322,6 +427,8 @@ final class AppModel {
         let name = bot(botID)?.name ?? "Orb"
         memoryRequests[botID] = nil
         stop(botID)
+        let jobs = jobs
+        Task { await jobs.forget(botID: botID) }
         memoryIdle.removeValue(forKey: botID)?.cancel()
         let library = memory
         if keepMemory {
@@ -338,6 +445,9 @@ final class AppModel {
         bots.removeAll { $0.id == botID }
         routines.removeAll { $0.botID == botID }
         conversations[botID] = nil
+        unloadedConversations.remove(botID)
+        dirtyConversations.remove(botID)
+        conversationSaves.removeValue(forKey: botID)?.cancel()
         store.deleteConversation(botID)
         if selection == .bot(botID) { selection = bots.first.map { .bot($0.id) } }
     }
@@ -353,6 +463,7 @@ final class AppModel {
         stop(botID)
         memoryIdle.removeValue(forKey: botID)?.cancel()
         saveMemory(of: botID)
+        unloadedConversations.remove(botID)
         conversations[botID] = Conversation()
         drafts[botID] = ""
         scheduleConversationSave(botID, delay: 0)
@@ -417,6 +528,7 @@ final class AppModel {
     }
 
     private func hasUnsavedStretch(_ botID: UUID) -> Bool {
+        ensureLoaded(botID)
         guard let conversation = conversations[botID] else { return false }
         return conversation.items.count > (conversation.memorySavedCount ?? 0)
     }
@@ -424,6 +536,7 @@ final class AppModel {
     /// The conversation since the last saved stretch (nil when there is nothing new, or not yet idle for `gap`).
     /// Marks it saved.
     private func pendingStretch(of botID: UUID, ifIdleFor gap: TimeInterval? = nil) -> [TranscriptItem]? {
+        ensureLoaded(botID)
         guard turns[botID] == nil, let conversation = conversations[botID] else { return nil }
         let start = min(conversation.memorySavedCount ?? 0, conversation.items.count)
         let stretch = Array(conversation.items[start...])
@@ -495,18 +608,23 @@ final class AppModel {
         }
     }
 
-    func send(_ text: String, attachments: [URL] = [], to botID: UUID) {
+    /// Starts a turn. Returns false when nothing was sent (empty text, a turn already running, no usable model),
+    /// so the composer keeps what you wrote. Only a message typed in the composer (`fromUser`) clears its draft:
+    /// routines and quick ask must not wipe what you are typing for that Orb.
+    @discardableResult
+    func send(_ text: String, attachments: [URL] = [], to botID: UUID, fromUser: Bool = false) -> Bool {
         let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !typed.isEmpty, turns[botID] == nil, var bot = bot(botID) else { return }
+        guard !typed.isEmpty, turns[botID] == nil, var bot = bot(botID) else { return false }
+        ensureLoaded(botID)
         guard let ref = modelRef(for: bot), let account = account(ref.provider), account.isEnabled, isUsable(account) else {
             append(.notice("Conecte um modelo em Ajustes → Modelos para começar."), to: botID)
-            return
+            return false
         }
         let modelInfo = account.models.first { $0.id == ref.model }
 
         memoryIdle.removeValue(forKey: botID)?.cancel()
         append(.user(text: typed, attachments: attachments.map(\.lastPathComponent)), to: botID)
-        drafts[botID] = ""
+        if fromUser { drafts[botID] = "" }
         statusLine[botID] = "Pensando"
         pokes[botID, default: 0] += 1
         flash(\.listening, botID, seconds: 1.4)
@@ -531,21 +649,25 @@ final class AppModel {
         }
         if ref.provider == .claudeCode {
             runClaudeCode(bot, model: ref.model, prompt: prompt, message: typed)
-            return
+            return true
         }
         let skills = enabledSkills
-        let history = (conversations[botID]?.messages ?? []).modelContext()
+        let budget = ContextBudget(model: modelInfo, provider: ref.provider, format: ref.provider == .custom ? account.format : nil)
+        let prepared = conversations[botID, default: Conversation()].prepareHistory(budget: budget)
+        let history = prepared.history
+        if prepared.firstCompaction { append(.notice("Conversa compactada: o começo virou um resumo."), to: botID) }
         let bank = memory.bank(for: botID)
-        let context = ToolContext(workingDirectory: bot.workingURL, memory: bank)
+        let context = ToolContext(workingDirectory: bot.workingURL, memory: bank, botID: botID, jobs: jobs)
         let userTurns = userTurnCount(botID)
 
         turns[botID] = Task {
+            guard !Task.isCancelled else { return } // stopped before it began
             let brief = await bank.brief(for: typed, conversationIsNew: history.isEmpty, userTurns: userTurns,
                                          canSave: bot.permissionMode != .readOnly)
             let system = SystemPrompt.make(bot: bot, skills: skills, memory: brief.full)
             let client: any LLMClient
             do {
-                guard let made = account.client(for: modelInfo, token: try await token(for: ref.provider),
+                guard let made = account.client(for: modelInfo, credentials: Self.credentials(for: ref.provider),
                                                  conversationID: botID.uuidString) else { throw LLMError.notConfigured }
                 client = made
             } catch {
@@ -556,9 +678,10 @@ final class AppModel {
             var tools = ToolBox.all.filter { $0.capability.map(bot.capabilities.contains) ?? true }
             if bot.capabilities.contains(.connectors) { tools += await mcp.tools() }
             let request = TurnRequest(bot: bot, model: ref.model, system: system, history: history, prompt: prompt,
-                                      client: client, tools: tools, context: context)
+                                      client: client, tools: tools, context: context, budget: budget)
             await play(engine.run(request), for: botID)
         }
+        return true
     }
 
     /// A turn run by the user's Claude Code, continuing the conversation's Claude Code session.
@@ -578,6 +701,7 @@ final class AppModel {
         let userTurns = userTurnCount(botID)
         claudeTurns.insert(botID)
         turns[botID] = Task {
+            guard !Task.isCancelled else { return } // stopped before it began
             let brief = await bank.brief(for: message, conversationIsNew: isNew, userTurns: userTurns,
                                          tools: ClaudeCodePrompt.memoryTools, canSave: bot.permissionMode != .readOnly)
             let system = ClaudeCodePrompt.make(bot: bot, skills: skills, memory: brief.full)
@@ -699,14 +823,20 @@ final class AppModel {
             awaitingApproval.insert(botID)
             if let bot = bot(botID) { notify(bot.name, "Precisa da sua permissão: \(request.title.lowercased())") }
         case .message(let message):
+            ensureLoaded(botID)
             conversations[botID, default: Conversation()].messages.append(message)
+            scheduleConversationSave(botID, delay: Self.streamingSaveInterval)
         case .failed(let message):
             closeStreaming(botID)
             append(.notice("Não deu certo: \(message)"), to: botID)
+        case .notice(let text):
+            closeStreaming(botID)
+            append(.notice(text), to: botID)
         case .session(let id):
+            ensureLoaded(botID)
             conversations[botID, default: Conversation()].claudeSessionID = id.isEmpty ? nil : id
             if id.isEmpty { conversations[botID]?.claudeSeenCount = nil }
-            scheduleConversationSave(botID, delay: 1)
+            scheduleConversationSave(botID, delay: Self.streamingSaveInterval)
         }
     }
 
@@ -715,14 +845,16 @@ final class AppModel {
         turns[botID] = nil
         if claudeTurns.remove(botID) != nil, conversations[botID]?.claudeSessionID != nil {
             // Everything so far went through (or was handed to) this Claude Code session.
-            conversations[botID]?.claudeSeenCount = conversations[botID]?.messages.count
+            let count = conversations[botID]?.messages.count // read first: reading inside the write below traps
+            conversations[botID]?.claudeSeenCount = count
         }
         stopSpeaking(botID)
         closeStreaming(botID)
         statusLine[botID] = nil
         if routineTurns[botID] != nil {
             // A routine's run isn't a conversation with you: it stays out of the memory's sessions.
-            conversations[botID]?.memorySavedCount = conversations[botID]?.items.count
+            let count = conversations[botID]?.items.count
+            conversations[botID]?.memorySavedCount = count
         } else {
             keepRequestedMemory(botID, succeeded: succeeded)
             scheduleMemorySave(botID)
@@ -741,7 +873,7 @@ final class AppModel {
         } else {
             flash(\.failed, botID, seconds: 2.5)
         }
-        if selection != .bot(botID) || !NSApp.isActive {
+        if selection != .bot(botID) || !(NSApp?.isActive ?? false) {
             update(botID) { $0.unread += 1 }
         }
         scheduleConversationSave(botID, delay: 0)
@@ -790,9 +922,10 @@ final class AppModel {
     }
 
     private func mutateItems(of botID: UUID, _ change: (inout [TranscriptItem]) -> Void) {
+        ensureLoaded(botID)
         change(&conversations[botID, default: Conversation()].items)
         scrollTick[botID, default: 0] += 1
-        scheduleConversationSave(botID, delay: 1)
+        scheduleConversationSave(botID, delay: Self.streamingSaveInterval)
     }
 
     // MARK: Routines
@@ -859,7 +992,7 @@ final class AppModel {
 
     /// Posts a banner when the app is in the background (bundled app only).
     private func notify(_ title: String, _ body: String) {
-        guard !NSApp.isActive, Self.notificationsEnabled, Bundle.main.bundleIdentifier != nil else { return }
+        guard !(NSApp?.isActive ?? false), Self.notificationsEnabled, Bundle.main.bundleIdentifier != nil else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
@@ -887,23 +1020,32 @@ final class AppModel {
         }
     }
 
-    /// Saves `delay` seconds after the first unsaved change (a streaming reply is saved about once a second,
-    /// not rescheduled per token); `delay: 0` saves right away.
+    /// Saves `delay` seconds after the first unsaved change (a streaming reply is written at most every
+    /// `streamingSaveInterval`, not rescheduled per token); `delay: 0` saves right away (end of a turn, new
+    /// conversation). Encoding and pruning happen on the store's queue.
     private func scheduleConversationSave(_ botID: UUID, delay: Double) {
+        guard conversations[botID] != nil else { return } // not loaded: nothing of ours to write
+        dirtyConversations.insert(botID)
         if delay > 0, conversationSaves[botID] != nil { return }
         conversationSaves[botID]?.cancel()
-        conversationSaves[botID] = Task { [store] in
+        conversationSaves[botID] = Task {
             if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
             guard !Task.isCancelled else { return }
             conversationSaves[botID] = nil
-            if let conversation = conversations[botID] { store.save(conversation, for: botID) }
+            writeConversation(botID)
         }
     }
 
-    /// Writes everything and waits for the disk (on quit).
+    private func writeConversation(_ botID: UUID) {
+        guard let conversation = conversations[botID] else { return }
+        dirtyConversations.remove(botID)
+        store.save(conversation, for: botID)
+    }
+
+    /// Writes everything that changed and waits for the disk (on quit).
     func saveNow() {
         store.save(state)
-        for (id, conversation) in conversations { store.save(conversation, for: id) }
+        for botID in dirtyConversations { writeConversation(botID) }
         store.flush()
     }
 }

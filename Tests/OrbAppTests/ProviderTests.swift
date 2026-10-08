@@ -87,10 +87,10 @@ struct ProviderTests {
     @Test func openCodeClientsCarryASessionHeader() throws {
         var account = ProviderAccount(kind: .opencodeGo)
         account.models = [ProviderModel(id: "glm-5.3", name: "GLM", format: .chat)]
-        let client = try #require(account.client(for: account.models[0], token: "k", conversationID: "abc") as? OpenAIClient)
+        let client = try #require(account.client(for: account.models[0], credentials: { _ in "k" }, conversationID: "abc") as? OpenAIClient)
         #expect(client.extraHeaders["x-opencode-session"] == "abc")
         let messages = ProviderModel(id: "claude-haiku-5-5", name: "Claude", format: .messages)
-        #expect(account.client(for: messages, token: "k", conversationID: "abc") is AnthropicClient)
+        #expect(account.client(for: messages, credentials: { _ in "k" }, conversationID: "abc") is AnthropicClient)
     }
 }
 
@@ -116,7 +116,7 @@ struct CustomProviderTests {
         account.format = .messages
         account.headers = ["X-Gateway-Token": "abc"]
         account.models = [ProviderModel(id: "claude-x", name: "Claude X", format: .messages)]
-        let client = try #require(account.client(for: account.models[0], token: nil, conversationID: "c") as? AnthropicClient)
+        let client = try #require(account.client(for: account.models[0], credentials: { _ in nil }, conversationID: "c") as? AnthropicClient)
         #expect(client.extraHeaders["X-Gateway-Token"] == "abc")
     }
 
@@ -125,7 +125,123 @@ struct CustomProviderTests {
         account.baseURL = "http://127.0.0.1:8080/v1"
         account.headers = ["Authorization": "Bearer t"]
         let model = ProviderModel(id: "m", name: "m", format: .chat)
-        let client = try #require(account.client(for: model, token: nil, conversationID: "c") as? OpenAIClient)
+        let client = try #require(account.client(for: model, credentials: { _ in nil }, conversationID: "c") as? OpenAIClient)
         #expect(client.extraHeaders["Authorization"] == "Bearer t")
+    }
+}
+
+struct ProviderClientTests {
+    @Test func clientsKeyTheirPromptCacheToTheConversation() throws {
+        var openai = ProviderAccount(kind: .openai)
+        openai.models = [ProviderModel(id: "gpt-x", name: "x", format: .responses)]
+        let responses = try #require(openai.client(for: openai.models[0], credentials: { _ in "k" }, conversationID: "bot-1") as? ResponsesClient)
+        #expect(responses.conversationID == "bot-1")
+        let chat = try #require(openai.client(for: ProviderModel(id: "m", name: "m", format: .chat), credentials: { _ in "k" },
+                                              conversationID: "bot-1") as? OpenAIClient)
+        #expect(chat.conversationID == "bot-1")
+        #expect(chat.isOpenAI) // so it sends the key
+        let local = try #require(ProviderAccount(kind: .ollama).client(for: ProviderModel(id: "m", name: "m", format: .chat),
+                                                                       credentials: { _ in nil }, conversationID: "bot-1") as? OpenAIClient)
+        #expect(!local.isOpenAI && !local.reportsUsage) // local servers get neither the key nor stream_options
+    }
+
+    @Test func clientsAskForTheCredentialAtRequestTime() async throws {
+        let account = ProviderAccount(kind: .openai)
+        let current = Box<String?>("first")
+        let client = try #require(account.client(for: ProviderModel(id: "m", name: "m", format: .chat),
+                                                 credentials: { _ in current.value }, conversationID: "c") as? OpenAIClient)
+        #expect(try await client.credentials(false) == "first")
+        current.value = "second"
+        #expect(try await client.credentials(false) == "second")
+    }
+
+    @Test func claudeCodeModelsHaveNoHTTPClient() {
+        var account = ProviderAccount(kind: .claudeCode)
+        account.baseURL = "http://127.0.0.1:1/v1"
+        #expect(account.client(for: ProviderModel(id: "opus", name: "Opus", format: .claudeCode), credentials: { _ in nil }, conversationID: "c") == nil)
+    }
+}
+
+struct ChatGPTAuthTests {
+    private static let tokenReply = #"{"access_token":"access-2","refresh_token":"refresh-2","id_token":"id","expires_in":3600,"scope":"openid chatgpt.tokens.use.direct"}"#
+
+    private final class Disk: @unchecked Sendable {
+        private let lock = NSLock()
+        private var text: String?
+        init(_ credential: ChatGPTCredential?) { text = credential.flatMap { try? JSONEncoder().encode($0) }.map { String(decoding: $0, as: UTF8.self) } }
+        var storage: ChatGPTAuth.Storage {
+            .init(load: { self.lock.withLock { self.text } }, save: { value in self.lock.withLock { self.text = value.isEmpty ? nil : value } })
+        }
+        var saved: String? { lock.withLock { text } }
+    }
+
+    private func credential(expiresIn seconds: TimeInterval) -> ChatGPTCredential {
+        ChatGPTCredential(clientID: "oaiapp_test", accessToken: "access-1", refreshToken: "refresh-1", idToken: "id",
+                          expiresAt: .now.addingTimeInterval(seconds), scopes: ["chatgpt.tokens.use.direct"])
+    }
+
+    private func auth(host: String, disk: Disk) -> ChatGPTAuth {
+        ChatGPTAuth(storage: disk.storage, tokenURL: URL(string: "https://\(host)/oauth/token")!, session: StubProtocol.session)
+    }
+
+    @Test func aFreshTokenIsReturnedWithoutTouchingTheNetwork() async throws {
+        let auth = auth(host: "auth-fresh.test", disk: Disk(credential(expiresIn: 3600)))
+        StubProtocol.queue(host: "auth-fresh.test", [])
+        #expect(try await auth.accessToken() == "access-1")
+        #expect(StubProtocol.sent(to: "auth-fresh.test").isEmpty)
+    }
+
+    @Test func anExpiringTokenIsRefreshedAndSaved() async throws {
+        let disk = Disk(credential(expiresIn: 60))
+        let auth = auth(host: "auth-expiring.test", disk: disk)
+        StubProtocol.queue(host: "auth-expiring.test", [.init(body: Self.tokenReply)])
+        #expect(try await auth.accessToken() == "access-2")
+        #expect(disk.saved?.contains("refresh-2") == true)
+        #expect(try await auth.accessToken() == "access-2")
+        #expect(StubProtocol.sent(to: "auth-expiring.test").count == 1)
+    }
+
+    @Test func concurrentCallersShareOneRefresh() async throws {
+        let auth = auth(host: "auth-single.test", disk: Disk(credential(expiresIn: 30)))
+        StubProtocol.queue(host: "auth-single.test", [.init(body: Self.tokenReply), .init(status: 400, body: #"{"error":"invalid_grant"}"#)])
+        async let first = auth.accessToken()
+        async let second = auth.accessToken()
+        async let third = auth.accessToken(forceRefresh: true)
+        let tokens = try await [first, second, third]
+        #expect(tokens == ["access-2", "access-2", "access-2"])
+        // One call to the token endpoint, with the original refresh token: a rotated token must never be used twice.
+        let sent = StubProtocol.sent(to: "auth-single.test")
+        #expect(sent.count == 1)
+        #expect(sent.first?.text.contains("refresh_token=refresh-1") == true)
+    }
+
+    @Test func forcingARefreshReplacesATokenTheAPIRejected() async throws {
+        let auth = auth(host: "auth-force.test", disk: Disk(credential(expiresIn: 3600)))
+        StubProtocol.queue(host: "auth-force.test", [.init(body: Self.tokenReply)])
+        #expect(try await auth.accessToken() == "access-1")
+        #expect(try await auth.accessToken(forceRefresh: true) == "access-2")
+        // A second rejection right after reuses the token that was just issued instead of rotating again.
+        #expect(try await auth.accessToken(forceRefresh: true) == "access-2")
+        #expect(StubProtocol.sent(to: "auth-force.test").count == 1)
+    }
+
+    @Test func aFailedRefreshReachesEveryWaiterAndCanBeRetried() async throws {
+        let auth = auth(host: "auth-fail.test", disk: Disk(credential(expiresIn: 30)))
+        StubProtocol.queue(host: "auth-fail.test", [.init(status: 400, body: #"{"error":"invalid_grant"}"#), .init(body: Self.tokenReply)])
+        async let first: String = auth.accessToken()
+        async let second: String = auth.accessToken()
+        do {
+            _ = try await (first, second)
+            Issue.record("should have thrown")
+        } catch let error as ToolError {
+            #expect(error.message.contains("expirou"))
+        }
+        #expect(StubProtocol.sent(to: "auth-fail.test").count == 1)
+        #expect(try await auth.accessToken() == "access-2")
+    }
+
+    @Test func signedOutThrowsNotConfigured() async {
+        let auth = auth(host: "auth-none.test", disk: Disk(nil))
+        await #expect(throws: LLMError.notConfigured) { try await auth.accessToken() }
     }
 }

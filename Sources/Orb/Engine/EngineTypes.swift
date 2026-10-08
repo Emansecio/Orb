@@ -84,27 +84,86 @@ struct ChatMessage: Codable, Hashable, Sendable {
     var toolCalls: [ToolCallRequest] = []
     /// Tool messages: which call this result answers.
     var toolCallID: String?
+    /// Assistant messages: the model's reasoning for this reply, kept so it can be sent back unchanged.
+    var reasoning: ReasoningTrace?
 
     static func system(_ text: String) -> ChatMessage { ChatMessage(role: .system, content: text) }
     static func user(_ text: String) -> ChatMessage { ChatMessage(role: .user, content: text) }
     static func tool(_ id: String, _ output: String) -> ChatMessage { ChatMessage(role: .tool, content: output, toolCallID: id) }
 }
 
-extension [ChatMessage] {
-    /// The part of a conversation sent to the model: the last `limit` messages starting at a user message,
-    /// older tool outputs shortened, and every tool call answered.
-    func modelContext(limit: Int = 60, oldToolOutput: Int = 4000) -> [ChatMessage] {
-        var window = Array(suffix(limit))
-        let start = window.firstIndex { $0.role == .user } ?? window.firstIndex { $0.role != .tool } ?? window.count
-        window.removeFirst(start)
-        let lastUser = window.lastIndex { $0.role == .user } ?? 0
-        for index in window.indices where index < lastUser && window[index].role == .tool
-            && window[index].content.count > oldToolOutput {
-            window[index].content = window[index].content.prefix(oldToolOutput) + "\n[… saída antiga cortada …]"
-        }
-        return window.answeringDanglingToolCalls()
+extension ChatMessage {
+    /// Tolerant decoding (see Store.swift): conversations saved before `reasoning` existed still load, a trace this
+    /// version cannot read is dropped instead of losing the message, and a message with an unknown role is skipped by
+    /// the lossy list around it.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        role = try c.decode(Role.self, forKey: .role)
+        content = try c.value(.content, default: "")
+        toolCalls = try c.lossyArray(.toolCalls)
+        toolCallID = try c.decodeIfPresent(String.self, forKey: .toolCallID)
+        reasoning = try? c.decodeIfPresent(ReasoningTrace.self, forKey: .reasoning)
+    }
+}
+
+/// The reasoning a model produced for one reply, as the provider that made it needs it back: Anthropic thinking
+/// blocks (with their signatures) and Responses encrypted reasoning items. It only means something to the same
+/// wire format, endpoint and model, so those travel with it.
+struct ReasoningTrace: Codable, Hashable, Sendable {
+    var format: APIFormat
+    /// Host of the endpoint that produced it (a signature or encrypted blob is not valid anywhere else).
+    var provider: String
+    var model: String
+    var parts: [ReasoningPart]
+
+    /// Whether the parts may be sent in a request to this format, endpoint and model.
+    func isReusable(format: APIFormat, provider: String, model: String) -> Bool {
+        self.format == format && self.provider == provider && self.model == model && !parts.isEmpty
+    }
+}
+
+struct ReasoningPart: Codable, Hashable, Sendable {
+    enum Kind: String, Codable, Sendable {
+        /// Anthropic `thinking` block: readable text plus a signature.
+        case thinking
+        /// Anthropic `redacted_thinking` block: opaque `data` only.
+        case redactedThinking
+        /// Responses `reasoning` item: `data` is its `encrypted_content`, `text` the readable summary.
+        case encrypted
     }
 
+    var kind: Kind
+    var text: String = ""
+    var signature: String?
+    var data: String?
+    /// Responses `reasoning` item id (the API requires it on the item when it is sent back).
+    var id: String?
+    /// Responses: how many of the reply's function calls came before this item, so it goes back right before the
+    /// call it produced. nil (older traces) counts as 0.
+    var callsBefore: Int?
+
+    init(kind: Kind, text: String = "", signature: String? = nil, data: String? = nil, id: String? = nil,
+         callsBefore: Int? = nil) {
+        self.kind = kind
+        self.text = text
+        self.signature = signature
+        self.data = data
+        self.id = id
+        self.callsBefore = callsBefore
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try c.decode(Kind.self, forKey: .kind)
+        text = try c.value(.text, default: "")
+        signature = try c.decodeIfPresent(String.self, forKey: .signature)
+        data = try c.decodeIfPresent(String.self, forKey: .data)
+        id = try? c.decodeIfPresent(String.self, forKey: .id)
+        callsBefore = try? c.decodeIfPresent(Int.self, forKey: .callsBefore)
+    }
+}
+
+extension [ChatMessage] {
     /// Gives every assistant tool call a result. A stopped turn leaves calls unanswered, which providers reject.
     func answeringDanglingToolCalls() -> [ChatMessage] {
         var result: [ChatMessage] = []
@@ -144,31 +203,127 @@ struct ToolSpec: Hashable, Sendable {
 
 // MARK: - LLM client
 
+/// Why a response ended.
+enum StopReason: Sendable, Equatable {
+    /// The model finished its answer.
+    case done
+    /// The model stopped to call tools.
+    case toolUse
+    /// Cut off by the output limit.
+    case maxTokens
+    /// The model (or the provider's filter) declined to answer.
+    case refusal
+    /// The prompt did not fit the model's context window.
+    case contextExceeded
+    /// Ended early for another reason (paused, or the stream closed before a normal ending).
+    case incomplete
+    /// A reason this version does not know, as the provider wrote it.
+    case unknown(String)
+}
+
+/// Tokens a response used. `input` counts only prompt tokens that were not served from or written to the cache
+/// (providers report them differently; the clients normalize), so the whole prompt is `input + cacheRead + cacheWrite`.
+struct TokenUsage: Sendable, Equatable {
+    var input: Int?
+    var output: Int?
+    var cacheRead: Int?
+    var cacheWrite: Int?
+}
+
 enum LLMEvent: Sendable, Equatable {
     /// Streamed piece of assistant text.
     case text(String)
+    /// The model's reasoning for this response, to be kept on the assistant message (emitted once, before the tool calls).
+    case reasoning(ReasoningTrace)
     /// Tool calls requested in this response, fully assembled (emitted once, before the stream ends).
     case toolCalls([ToolCallRequest])
+    /// How the response ended and what it cost; the last event of every stream.
+    case finished(StopReason, TokenUsage?)
 }
 
 protocol LLMClient: Sendable {
     /// Streams one assistant response. Throws `LLMError` for HTTP/protocol failures; honors task cancellation.
     func stream(model: String, messages: [ChatMessage], tools: [ToolSpec]) -> AsyncThrowingStream<LLMEvent, Error>
-    /// Model ids offered by the provider.
-    func models() async throws -> [String]
 }
+
+/// Supplies the key or token for one request. `forceRefresh` asks for a new one after the provider rejected the
+/// last (sign-in tokens expire; API keys come back unchanged).
+typealias CredentialsProvider = @Sendable (_ forceRefresh: Bool) async throws -> String?
 
 enum LLMError: LocalizedError, Equatable {
     case notConfigured
-    case http(status: Int, message: String)
+    case http(status: Int, message: String, retryAfter: TimeInterval? = nil)
+    /// The prompt is larger than the model's context window (HTTP 400 or an in-stream error).
+    case contextExceeded(String)
+    /// An error event inside an otherwise successful stream (Anthropic `overloaded_error`, `api_error`…).
+    case stream(type: String, message: String)
+    /// The connection failed (`URLError` code raw value).
+    case network(code: Int, message: String)
     case invalidResponse(String)
 
     var errorDescription: String? {
         switch self {
         case .notConfigured: "Nenhum modelo configurado. Abra Ajustes → Modelos."
-        case .http(let status, let message): "O provedor respondeu \(status): \(message)"
+        case .http(let status, let message, let retryAfter):
+            Self.describe(status: status, message: message) + Self.waitNote(retryAfter)
+        case .contextExceeded(let message): "A conversa ficou grande demais para este modelo. Detalhe do provedor: \(message)"
+        case .stream(let type, let message):
+            if Self.rateLimitTypes.contains(type) { Self.describe(status: 429, message: message) }
+            else if Self.retryableStreamErrors.contains(type) { Self.describe(status: 503, message: message) }
+            else { "O provedor devolveu um erro (\(type)): \(message)" }
+        case .network(_, let message): "Sem conexão com o provedor: \(message)"
         case .invalidResponse(let detail): "Resposta inválida do provedor: \(detail)"
         }
+    }
+
+    /// Seconds the provider asked us to wait (`Retry-After`), when it did.
+    var retryAfter: TimeInterval? {
+        if case .http(_, _, let seconds) = self { seconds } else { nil }
+    }
+
+    /// Whether trying the same request again can succeed: rate limits, overload, timeouts, dropped connections.
+    var isRetryable: Bool {
+        switch self {
+        case .http(let status, _, _): Self.retryableStatuses.contains(status)
+        case .stream(let type, _): Self.retryableStreamErrors.contains(type)
+        case .network(let code, _): Self.retryableNetworkCodes.contains(URLError.Code(rawValue: code))
+        case .notConfigured, .contextExceeded, .invalidResponse: false
+        }
+    }
+
+    static let retryableStatuses: Set<Int> = [408, 409, 429, 500, 502, 503, 504, 529]
+    static let retryableStreamErrors: Set<String> = ["overloaded_error", "api_error", "rate_limit_error", "server_error", "rate_limit_exceeded"]
+    static let retryableNetworkCodes: Set<URLError.Code> = [.timedOut, .networkConnectionLost, .cannotConnectToHost, .notConnectedToInternet]
+
+    private static let rateLimitTypes: Set<String> = ["rate_limit_error", "rate_limit_exceeded"]
+
+    /// " O provedor pediu para aguardar 5 min." when the wait is long enough to matter (a long one is not retried).
+    private static func waitNote(_ seconds: TimeInterval?) -> String {
+        guard let seconds, seconds >= 1 else { return "" }
+        let wait = seconds >= 120 ? "\(Int((seconds / 60).rounded(.up))) min" : "\(Int(seconds.rounded(.up))) s"
+        return " O provedor pediu para aguardar \(wait)."
+    }
+
+    private static func describe(status: Int, message: String) -> String {
+        switch status {
+        case 401, 403: "Chave ou login inválido (\(status)). Confira em Ajustes → Modelos. Detalhe do provedor: \(message)"
+        case 429: "Você atingiu o limite de uso do provedor (429); espere um pouco ou confira seu plano. Detalhe do provedor: \(message)"
+        case 500...599: "O provedor está sobrecarregado ou instável (\(status)); tente de novo em instantes. Detalhe do provedor: \(message)"
+        default: "O provedor respondeu \(status): \(message)"
+        }
+    }
+
+    /// Whether an HTTP 400 message says the prompt did not fit (providers word it differently).
+    static func isContextOverflow(_ message: String) -> Bool {
+        let text = message.lowercased()
+        return ["context_length_exceeded", "context length", "context window", "prompt is too long", "prompt too long",
+                "input is too long", "maximum context"].contains { text.contains($0) }
+    }
+
+    /// A transport failure as `.network`; cancellation and everything else pass through untouched.
+    static func wrapping(_ error: Error) -> Error {
+        guard let urlError = error as? URLError, urlError.code != .cancelled else { return error }
+        return LLMError.network(code: urlError.code.rawValue, message: urlError.localizedDescription)
     }
 }
 
@@ -189,6 +344,12 @@ struct ToolContext: Sendable {
     var workingDirectory: URL
     /// The Orb's own memory (remember/recall); nil where there is none (some tests).
     var memory: MemoryBank?
+    /// The Orb running the tool; owns the background jobs it starts. Nil where there is no Orb (some tests).
+    var botID: UUID?
+    /// Background jobs of every Orb (one per app); nil where the app does not offer them.
+    var jobs: BackgroundJobs?
+    /// The user's Terminal environment that commands run in.
+    var shell: ShellEnvironment = .shared
 }
 
 protocol AgentTool: Sendable {
@@ -198,10 +359,20 @@ protocol AgentTool: Sendable {
     /// Bot capability that must be enabled for the tool to be offered (nil = always available).
     var capability: Capability? { get }
     func risk(_ arguments: JSONValue) -> ToolRisk
+    /// Why this particular call is destructive (so "Automático" still asks), or nil. Shell text in `command` or
+    /// `script` is checked separately by `DangerousCommand`; this is for tools whose danger is in other arguments.
+    func danger(_ arguments: JSONValue) -> String?
     /// Human summary for the transcript and approval card, in Portuguese (title: "Rodando no Terminal", detail: the command).
     func summary(_ arguments: JSONValue) -> (title: String, detail: String)
+    /// Same, for tools whose summary needs the working directory (to resolve a relative path); defaults to `summary(_:)`.
+    func summary(_ arguments: JSONValue, context: ToolContext) -> (title: String, detail: String)
     /// Runs the tool and returns text for the model. Throw `ToolError` for user-facing failures.
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String
+}
+
+extension AgentTool {
+    func summary(_ arguments: JSONValue, context: ToolContext) -> (title: String, detail: String) { summary(arguments) }
+    func danger(_ arguments: JSONValue) -> String? { nil }
 }
 
 struct ToolError: LocalizedError, Equatable {

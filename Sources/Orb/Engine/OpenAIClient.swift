@@ -3,44 +3,76 @@ import Foundation
 /// Client for OpenAI-compatible Chat Completions APIs (xAI, OpenAI, OpenRouter, Ollama, LM Studio).
 struct OpenAIClient: LLMClient {
     let baseURL: URL
-    let apiKey: String?
+    /// Asked before every request, so a rotated or refreshed credential is picked up (see `CredentialsProvider`).
+    let credentials: CredentialsProvider
     var extraHeaders: [String: String] = [:]
+    /// Keys the provider's prompt cache to this conversation (sent only to OpenAI itself).
+    var conversationID: String?
     let session: URLSession
 
-    init(baseURL: URL, apiKey: String?, extraHeaders: [String: String] = [:], session: URLSession = .shared) {
+    init(baseURL: URL, credentials: @escaping CredentialsProvider, extraHeaders: [String: String] = [:],
+         conversationID: String? = nil, session: URLSession = .shared) {
         self.baseURL = baseURL
-        self.apiKey = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.credentials = credentials
         self.extraHeaders = extraHeaders
+        self.conversationID = conversationID
         self.session = session
     }
+
+    /// A client with one fixed key.
+    init(baseURL: URL, apiKey: String?, extraHeaders: [String: String] = [:], conversationID: String? = nil,
+         session: URLSession = .shared) {
+        let key = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.init(baseURL: baseURL, credentials: { _ in key }, extraHeaders: extraHeaders, conversationID: conversationID,
+                  session: session)
+    }
+
+    /// OpenAI itself, which accepts `prompt_cache_key`; other compatible servers may reject unknown fields.
+    var isOpenAI: Bool { baseURL.host() == "api.openai.com" }
+    /// Servers known to take `stream_options` (local ones may reject it).
+    var reportsUsage: Bool { isOpenAI || baseURL.host() == "openrouter.ai" }
 
     func stream(model: String, messages: [ChatMessage], tools: [ToolSpec]) -> AsyncThrowingStream<LLMEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    var request = makeRequest("chat/completions")
-                    request.httpMethod = "POST"
-                    request.timeoutInterval = 300 // local models can take long before the first token
-                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                    request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-                    request.httpBody = try JSONEncoder().encode(Self.requestBody(model: model, messages: messages, tools: tools))
-
-                    let (bytes, response) = try await session.bytes(for: request)
+                    let body = try JSONEncoder().encode(Self.requestBody(
+                        model: model, messages: messages, tools: tools, includeUsage: reportsUsage,
+                        promptCacheKey: isOpenAI ? conversationID : nil))
+                    let (bytes, response) = try await Self.open(session, credentials: credentials) { key in
+                        var request = Self.authorizedRequest(baseURL.appending(path: "chat/completions"), apiKey: key,
+                                                             headers: extraHeaders)
+                        request.httpMethod = "POST"
+                        request.timeoutInterval = 300 // local models can take long before the first token
+                        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                        request.httpBody = body
+                        return request
+                    }
                     try await Self.check(response, body: { try await Self.prefix(of: bytes) })
 
                     var toolCalls = ToolCallAccumulator()
+                    var finishReason: String?
+                    var usage: TokenUsage?
+                    var sawDone = false
                     lines: for try await line in bytes.lines {
                         switch SSEParser.parse(line) {
                         case nil: continue
-                        case .done: break lines
+                        case .done: sawDone = true; break lines
                         case .data(let payload):
                             guard let chunk = JSONValue.parse(payload) else {
                                 throw LLMError.invalidResponse(String(payload.prefix(200)))
                             }
                             if let error = chunk["error"] {
-                                throw LLMError.invalidResponse(Self.message(in: error) ?? error.jsonString)
+                                let message = Self.message(in: error) ?? error.jsonString
+                                throw LLMError.isContextOverflow(message) ? LLMError.contextExceeded(message)
+                                    : LLMError.invalidResponse(message)
                             }
-                            guard let delta = chunk["choices"]?.array?.first?["delta"] else { continue }
+                            // The usage chunk arrives last, with an empty `choices`.
+                            if let reported = Self.usage(in: chunk["usage"]) { usage = reported }
+                            let choice = chunk["choices"]?.array?.first
+                            if let reason = choice?["finish_reason"]?.string, !reason.isEmpty { finishReason = reason }
+                            guard let delta = choice?["delta"] else { continue }
                             if let text = delta["content"]?.string, !text.isEmpty {
                                 continuation.yield(.text(text))
                             }
@@ -51,9 +83,10 @@ struct OpenAIClient: LLMClient {
                     }
                     let calls = toolCalls.requests
                     if !calls.isEmpty { continuation.yield(.toolCalls(calls)) }
+                    continuation.yield(.finished(Self.stopReason(finishReason, hasToolCalls: !calls.isEmpty, sawDone: sawDone), usage))
                     continuation.finish()
                 } catch {
-                    continuation.finish(throwing: error)
+                    continuation.finish(throwing: LLMError.wrapping(error))
                 }
             }
             continuation.onTermination = { _ in task.cancel() }
@@ -61,16 +94,13 @@ struct OpenAIClient: LLMClient {
     }
 
     func models() async throws -> [String] {
-        let (data, response) = try await session.data(for: makeRequest("models"))
+        let (data, response) = try await session.data(for: Self.authorizedRequest(
+            baseURL.appending(path: "models"), apiKey: try await credentials(false), headers: extraHeaders))
         try await Self.check(response, body: { data.prefix(Self.errorBodyLimit) })
         guard let entries = JSONValue.parse(String(decoding: data, as: UTF8.self))?["data"]?.array else {
             throw LLMError.invalidResponse("lista de modelos ausente")
         }
         return Set(entries.compactMap { $0["id"]?.string }).sorted()
-    }
-
-    private func makeRequest(_ path: String) -> URLRequest {
-        Self.authorizedRequest(baseURL.appending(path: path), apiKey: apiKey, headers: extraHeaders)
     }
 
     /// Identifies the app (some gateways reject generic HTTP-library user agents).
@@ -91,12 +121,15 @@ struct OpenAIClient: LLMClient {
 // MARK: - Wire format
 
 extension OpenAIClient {
-    static func requestBody(model: String, messages: [ChatMessage], tools: [ToolSpec]) -> JSONValue {
+    static func requestBody(model: String, messages: [ChatMessage], tools: [ToolSpec], includeUsage: Bool = false,
+                            promptCacheKey: String? = nil) -> JSONValue {
         var body: [String: JSONValue] = [
             "model": .string(model),
             "stream": .bool(true),
             "messages": .array(messages.map(wire)),
         ]
+        if includeUsage { body["stream_options"] = .object(["include_usage": .bool(true)]) }
+        if let promptCacheKey, !promptCacheKey.isEmpty { body["prompt_cache_key"] = .string(promptCacheKey) }
         if !tools.isEmpty {
             body["tools"] = .array(tools.map { tool in
                 .object(["type": .string("function"), "function": .object([
@@ -130,7 +163,16 @@ extension OpenAIClient {
         return .object(object)
     }
 
-    // MARK: Errors
+    // MARK: Requests and errors
+
+    /// Opens a streaming request with the current credential. A 401 means the credential went stale (an expired
+    /// sign-in): it asks for a fresh one once and sends the request again.
+    static func open(_ session: URLSession, credentials: CredentialsProvider,
+                     request build: (String?) -> URLRequest) async throws -> (URLSession.AsyncBytes, URLResponse) {
+        let first = try await session.bytes(for: build(try await credentials(false)))
+        guard (first.1 as? HTTPURLResponse)?.statusCode == 401 else { return first }
+        return try await session.bytes(for: build(try await credentials(true)))
+    }
 
     static let errorBodyLimit = 2048
 
@@ -140,7 +182,54 @@ extension OpenAIClient {
             throw LLMError.invalidResponse("resposta não HTTP")
         }
         guard !(200..<300).contains(http.statusCode) else { return }
-        throw LLMError.http(status: http.statusCode, message: errorMessage(from: try await body(), status: http.statusCode))
+        let data = try await body()
+        let message = errorMessage(from: data, status: http.statusCode)
+        if http.statusCode == 400 || http.statusCode == 413,
+           LLMError.isContextOverflow(message) || LLMError.isContextOverflow(String(decoding: data, as: UTF8.self)) {
+            throw LLMError.contextExceeded(message)
+        }
+        throw LLMError.http(status: http.statusCode, message: message, retryAfter: retryAfter(in: http))
+    }
+
+    /// Seconds from `Retry-After` (a number of seconds or an HTTP date) or the millisecond variant some gateways send.
+    static func retryAfter(in response: HTTPURLResponse, now: Date = .now) -> TimeInterval? {
+        if let milliseconds = response.value(forHTTPHeaderField: "retry-after-ms").flatMap(Double.init), milliseconds >= 0 {
+            return milliseconds / 1000
+        }
+        guard let value = response.value(forHTTPHeaderField: "retry-after")?.trimmingCharacters(in: .whitespaces) else { return nil }
+        if let seconds = Double(value) { return seconds >= 0 ? seconds : nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "GMT")
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        return formatter.date(from: value).map { max(0, $0.timeIntervalSince(now)) }
+    }
+
+    // MARK: Stop reason and usage
+
+    /// `finish_reason` mapped to a `StopReason`. Without one, a stream that ended with `[DONE]` is judged by its
+    /// tool calls (some local servers omit the field) and one that just stopped was cut off.
+    static func stopReason(_ finishReason: String?, hasToolCalls: Bool, sawDone: Bool) -> StopReason {
+        switch finishReason {
+        case "stop": hasToolCalls ? .toolUse : .done
+        case "tool_calls", "function_call": .toolUse
+        case "length": .maxTokens
+        case "content_filter": .refusal
+        case let other?: .unknown(other)
+        case nil: sawDone ? (hasToolCalls ? .toolUse : .done) : .incomplete
+        }
+    }
+
+    /// Chat-completions `usage`, with cached tokens (`prompt_tokens_details.cached_tokens`, OpenRouter's
+    /// `cache_write_tokens`, DeepSeek's `prompt_cache_hit_tokens`) split out of the input count.
+    static func usage(in usage: JSONValue?) -> TokenUsage? {
+        guard let usage, case .object = usage else { return nil }
+        let details = usage["prompt_tokens_details"]
+        let cacheRead = details?["cached_tokens"]?.int ?? usage["prompt_cache_hit_tokens"]?.int
+        let cacheWrite = details?["cache_write_tokens"]?.int
+        let prompt = usage["prompt_tokens"]?.int
+        return TokenUsage(input: prompt.map { max(0, $0 - (cacheRead ?? 0) - (cacheWrite ?? 0)) },
+                          output: usage["completion_tokens"]?.int, cacheRead: cacheRead, cacheWrite: cacheWrite)
     }
 
     /// `error.message` (OpenAI), `error` as a string (Ollama) or `message`; otherwise the raw text.
@@ -191,8 +280,7 @@ struct ToolCallAccumulator {
 
     mutating func ingest(_ fragments: [JSONValue]) {
         for fragment in fragments {
-            // Providers that omit `index` send one call per id.
-            let index = fragment["index"]?.int ?? (fragment["id"] == nil ? max(calls.count - 1, 0) : calls.count)
+            let index = slot(for: fragment)
             var call = calls[index] ?? ToolCallRequest(id: "", name: "", arguments: "")
             if let id = fragment["id"]?.string, !id.isEmpty { call.id = id }
             if let name = fragment["function"]?["name"]?.string, !name.isEmpty { call.name = name }
@@ -202,6 +290,18 @@ struct ToolCallAccumulator {
             }
             calls[index] = call
         }
+    }
+
+    /// Which call a fragment continues. Providers that omit `index` repeat the call's `id` on every fragment (or send
+    /// it only on the first); some send the same `index` for different calls, told apart by `id`.
+    private func slot(for fragment: JSONValue) -> Int {
+        let explicit = fragment["index"]?.int
+        if let id = fragment["id"]?.string, !id.isEmpty {
+            if let known = calls.first(where: { $0.value.id == id })?.key { return known }
+            if let explicit, calls[explicit]?.id.isEmpty ?? true { return explicit }
+            return (calls.keys.max() ?? -1) + 1
+        }
+        return explicit ?? calls.keys.max() ?? 0
     }
 
     /// Completed calls ordered by index; missing ids get a stable placeholder.
