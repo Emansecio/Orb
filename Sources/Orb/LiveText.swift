@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 // What the chat shows of a reply while it is being written, kept apart from the conversation: a flush of streamed
-// text changes only a `LiveText`, not the list of items (see `AppModel.flushText`), and the transcript an Orb's
+// text changes only a `LiveText`, not the list of items (see `BotSession.flushText`), and the transcript an Orb's
 // chat view reads is an object of its own, so another Orb's work does not redraw it.
 
 /// A reply split into paragraphs at blank lines, updated as text arrives. Paragraphs that are done never change,
@@ -114,8 +114,7 @@ final class LiveText {
 }
 
 /// What the chat view of one Orb shows of its conversation. An object of its own, so a view reading it is redrawn
-/// only when this Orb's items change, not when any conversation does. (The place where more per-Orb state can
-/// join, if the Orb gets one object for it.)
+/// only when this Orb's items change, not when any conversation does. The Orb's `BotSession` makes and feeds it.
 @MainActor @Observable
 final class OrbTranscript {
     /// The user's chat. The reply still being streamed is in it as it was when it began; its text is a `LiveText`.

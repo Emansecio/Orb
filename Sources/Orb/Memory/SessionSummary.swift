@@ -54,6 +54,9 @@ enum SessionSummary {
         time.dateFormat = spansDays ? "dd/MM HH:mm" : "HH:mm"
         var body = "## Pedidos\n" + requests.suffix(12).map { "- \(time.string(from: $0.0)) — \(line($0.1, 280))" }
             .joined(separator: "\n")
+        // What you decided, in so many words (a stricter rule than the conversation's summary uses: this stays for good).
+        let decisions = requests.map(\.1).filter(ConversationLedger.looksLikeExplicitDecision)
+        if !decisions.isEmpty { body += "\n\n## Decisões\n" + decisions.suffix(8).map { "- \(line($0, 200))" }.joined(separator: "\n") }
         if !actions.isEmpty { body += "\n\n## O que foi feito\n" + actions.suffix(15).map { "- \($0)" }.joined(separator: "\n") }
         if !references.isEmpty { body += "\n\n## Arquivos e links\n" + references.prefix(15).map { "- \($0)" }.joined(separator: "\n") }
         if !lastAnswer.isEmpty {

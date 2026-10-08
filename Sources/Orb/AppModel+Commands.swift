@@ -123,7 +123,7 @@ extension AppModel {
         // Only an Orb with something to keep has a folder to point at (one that never remembered anything and has
         // not talked has none, and "guardada" would be a lie).
         let hasMemory = FileManager.default.fileExists(atPath: memory.directory(for: botID).path)
-            || !(conversations[botID]?.items.isEmpty ?? true)
+            || !(sessions[botID]?.conversation?.items.isEmpty ?? true)
         deletingBotID = nil
         deleteBot(botID, keepMemory: keepMemory)
         keptMemoryNotice = keepMemory && hasMemory ? KeptMemoryNotice(botName: name, date: .now) : nil

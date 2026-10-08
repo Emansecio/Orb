@@ -1,0 +1,245 @@
+import Foundation
+import Observation
+
+// What the context meter in the composer shows, apart from how it is drawn: the numbers of the conversation turned
+// into a `ContextReading` (a pure function, computed off the main thread), the words that say them in Portuguese,
+// and the small object the composer's meter and its "conversation is getting long" card share.
+
+// MARK: - Words
+
+/// Numbers as the meter says them: "42 mil", "1,5 milhão". Always approximate (the counts are estimates).
+enum ContextWords {
+    /// "840", "3,5 mil", "42 mil", "1 milhão", "2,5 milhões".
+    static func approx(_ tokens: Int) -> String {
+        let n = max(tokens, 0)
+        switch n {
+        case ..<995:
+            return "\((n + 5) / 10 * 10)"
+        case ..<10_000:
+            let tenths = Int((Double(n) / 100).rounded()) // in tenths of a thousand
+            return tenths % 10 == 0 ? "\(tenths / 10) mil" : "\(tenths / 10),\(tenths % 10) mil"
+        default:
+            let thousands = Int((Double(n) / 1_000).rounded())
+            if thousands < 1_000 { return "\(thousands) mil" }
+            let tenths = Int((Double(n) / 100_000).rounded()) // in tenths of a million
+            let whole = tenths / 10, rest = tenths % 10
+            let unit = tenths >= 20 ? "milhões" : "milhão"
+            return rest == 0 ? "\(whole) \(unit)" : "\(whole),\(rest) \(unit)"
+        }
+    }
+
+    /// "cerca de 42 mil de 128 mil tokens" (and "de uns 128 mil" while the window is only assumed).
+    static func usage(used: Int, window: Int, windowIsStated: Bool) -> String {
+        "cerca de \(approx(used)) de \(windowIsStated ? "" : "uns ")\(approx(window)) tokens"
+    }
+
+    /// "De ~60 mil para ~18 mil tokens".
+    static func compaction(before: Int, after: Int) -> String {
+        "De ~\(approx(before)) para ~\(approx(after)) tokens"
+    }
+
+    /// What is kept word for word: the whole conversation, or a summary and the latest messages.
+    static func kept(totalMessages total: Int, foldedMessages folded: Int) -> String {
+        guard folded > 0, folded < total else {
+            if folded >= total, total > 0 { return "Só o resumo da conversa; as mensagens recentes ainda não chegaram." }
+            return total == 1 ? "A mensagem inteira, palavra por palavra." : "Todas as \(total) mensagens, palavra por palavra."
+        }
+        let recent = total - folded
+        let summary = folded == 1 ? "Um resumo da primeira mensagem" : "Um resumo das \(folded) primeiras mensagens"
+        let rest = recent == 1 ? "a última, palavra por palavra" : "as últimas \(recent), palavra por palavra"
+        return "\(summary) e \(rest)."
+    }
+
+    /// "82% veio do cache do provedor".
+    static func cache(_ ratio: Double) -> String {
+        let percent = Int((min(max(ratio, 0), 1) * 100).rounded())
+        return percent == 0 ? "Nada veio do cache do provedor" : "\(percent)% veio do cache do provedor"
+    }
+
+    /// What "Compactar agora" would do to a conversation that has something to fold.
+    static func wouldFree(messages: Int, tokens: Int) -> String {
+        let what = messages == 1 ? "1 mensagem" : "\(messages) mensagens"
+        return "Compactar agora resumiria \(what) e liberaria cerca de \(approx(tokens)) tokens."
+    }
+}
+
+// MARK: - Reading
+
+/// How worried the meter looks: neutral for most of the way, warmer from 70%, warm from 85% of the model's window
+/// (the same share the ring's percentage says, so the colour and the number never disagree).
+enum ContextTone: Equatable, Sendable {
+    case calm, warming, full
+
+    init(share: Double) {
+        self = share >= ContextReading.suggestsCompactingAt ? .full : (share >= ContextReading.warmsAt ? .warming : .calm)
+    }
+}
+
+/// Everything the meter needs to know about one Orb's conversation, taken on the main thread and measured elsewhere.
+struct ContextInput: Sendable {
+    var botID: UUID
+    var conversation: Conversation
+    /// nil for Claude Code, which manages its own context.
+    var budget: ContextBudget?
+    var isClaudeCode: Bool
+    /// The window comes from the provider's catalog or from a refusal (else Orb assumes one for the model's kind).
+    var windowIsStated: Bool
+    /// The Orb's latest model call.
+    var usage: TokenUsage?
+    var memory: ContextMemoryLevel
+}
+
+/// The context meter's numbers for one Orb. nil (see `make`) while there is nothing to measure.
+struct ContextReading: Equatable, Sendable {
+    /// From this share of the window the ring turns warm (and the popover tells when the history budget gets there).
+    static let warmsAt = 0.7
+    /// From this share of the window, or of the history budget, the conversation is "getting long": the card above the
+    /// composer appears (a big window keeps the card from waiting for a window that the memory level never lets fill).
+    static let suggestsCompactingAt = 0.85
+
+    var botID: UUID
+    /// Identifies the conversation (its first transcript item), so a card shown once is not shown again for it.
+    var conversationKey: UUID?
+    var isClaudeCode: Bool
+    /// nil for Claude Code.
+    var fill: ContextFill?
+    var windowIsStated: Bool
+    var messageCount: Int
+    var memory: ContextMemoryLevel
+    /// Share of the latest request served by the provider's cache, when it said.
+    var cacheHit: Double?
+
+    /// Nil while the conversation has no messages, or when no model is connected to measure it against.
+    static func make(_ input: ContextInput) -> ContextReading? {
+        let conversation = input.conversation
+        guard !conversation.messages.isEmpty else { return nil }
+        var fill: ContextFill?
+        if !input.isClaudeCode {
+            guard let budget = input.budget else { return nil }
+            fill = ContextMeter.fill(of: conversation, budget: budget)
+        }
+        return ContextReading(botID: input.botID, conversationKey: conversation.items.first?.id, isClaudeCode: input.isClaudeCode,
+                              fill: fill, windowIsStated: input.windowIsStated, messageCount: conversation.messages.count,
+                              memory: input.memory, cacheHit: input.isClaudeCode ? nil : input.usage?.cacheHitRatio)
+    }
+
+    /// Share of the model's window the next request would take, 0 to 1.
+    var fraction: Double { min(max(fill?.fraction ?? 0, 0), 1) }
+
+    /// How close the conversation is to being folded or to not fitting: the window's share or the history budget's,
+    /// whichever is further along (with a big window the memory level folds the start long before the window fills).
+    /// It decides the card above the composer; the ring's colour and percentage follow the window alone.
+    var pressure: Double { fill.map { max($0.fraction, $0.budgetFraction) } ?? 0 }
+
+    /// The percentage on the meter, 1 to 100 (0 only for an empty request).
+    var percent: Int {
+        let share = (fill?.fraction ?? 0) * 100
+        guard share > 0 else { return 0 }
+        return min(max(Int(share.rounded()), 1), 100)
+    }
+
+    var tone: ContextTone { ContextTone(share: fraction) }
+
+    /// The conversation is long enough to suggest compacting or starting a new one. Claude Code has no measure for it.
+    var isGettingLong: Bool { fill != nil && pressure >= Self.suggestsCompactingAt }
+
+    /// Messages the summary has swallowed so far.
+    var foldedMessages: Int { fill?.foldedMessages ?? 0 }
+
+    /// Whether "Compactar agora" has anything to do. For Claude Code any conversation with more than one message can
+    /// start a new session from a summary.
+    var canCompact: Bool { isClaudeCode ? messageCount > 1 : fill?.compaction != nil }
+
+    /// "cerca de 42 mil de 128 mil tokens"; nil for Claude Code.
+    var usageWords: String? {
+        fill.map { ContextWords.usage(used: $0.usedTokens, window: $0.windowTokens, windowIsStated: windowIsStated) }
+    }
+
+    /// The spoken state of the meter, for VoiceOver and the tooltip.
+    var spokenState: String {
+        guard fill != nil, let usageWords else { return "O Claude Code cuida do próprio contexto" }
+        return "\(percent)% usado, \(usageWords)"
+    }
+}
+
+// MARK: - Shared state
+
+/// The composer's context reading, kept where the meter in the bar and the card above the composer can both see it.
+/// Written by `ContextGaugeDriver`, which measures when something that changes the numbers does.
+@MainActor @Observable
+final class ContextGauge {
+    private(set) var reading: ContextReading?
+    /// The card was dismissed, or acted on, for the reading's conversation.
+    private(set) var isNudgeHandled = false
+
+    @ObservationIgnored private let nudges: ContextNudgeStore
+
+    init(nudges: ContextNudgeStore = ContextNudgeStore()) {
+        self.nudges = nudges
+    }
+
+    /// Shows `reading` (only when it differs: assigning an `@Observable` property notifies even for an equal value).
+    func show(_ reading: ContextReading?) {
+        if self.reading != reading { self.reading = reading }
+        let handled = reading?.conversationKey.map(nudges.contains) ?? false
+        if handled != isNudgeHandled { isNudgeHandled = handled }
+    }
+
+    /// The card is not shown again for this conversation.
+    func handleNudge() {
+        guard let key = reading?.conversationKey else { return }
+        nudges.insert(key)
+        isNudgeHandled = true
+    }
+
+    /// The card above the composer is due.
+    var showsNudge: Bool { (reading?.isGettingLong ?? false) && !isNudgeHandled }
+}
+
+/// The conversations whose "está ficando longa" card was already answered, remembered across launches in the
+/// preferences (the newest few hundred; anything unreadable is a card shown once more).
+struct ContextNudgeStore {
+    static let defaultsKey = "contextNudgeHandled"
+    static let limit = 300
+
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    private var keys: [String] { (defaults.array(forKey: Self.defaultsKey) as? [String]) ?? [] }
+
+    func contains(_ conversation: UUID) -> Bool { keys.contains(conversation.uuidString) }
+
+    func insert(_ conversation: UUID) {
+        var all = keys
+        guard !all.contains(conversation.uuidString) else { return }
+        all.append(conversation.uuidString)
+        defaults.set(Array(all.suffix(Self.limit)), forKey: Self.defaultsKey)
+    }
+}
+
+// MARK: - Learned windows
+
+/// One row of "Janelas aprendidas" in the settings.
+struct LearnedWindowRow: Identifiable, Equatable, Sendable {
+    /// "provider/model", as `AppModel.learnedContexts` keys it.
+    var id: String
+    var name: String
+    var tokens: Int
+    var date: Date
+    /// The refusal named no number: the window is a share of the one assumed.
+    var isEstimate: Bool
+
+    var words: String { "\(ContextWords.approx(tokens)) tokens" + (isEstimate ? " (estimada)" : "") }
+
+    func age(now: Date = .now) -> String {
+        let days = Int(now.timeIntervalSince(date) / 86_400)
+        switch days {
+        case ..<1: return "aprendida hoje"
+        case 1: return "aprendida ontem"
+        default: return "aprendida há \(days) dias"
+        }
+    }
+}

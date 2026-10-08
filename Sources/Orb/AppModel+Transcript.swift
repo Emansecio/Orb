@@ -107,7 +107,7 @@ extension AppModel {
     /// nothing runs twice.
     @discardableResult
     func retryLastTurn(_ botID: UUID) -> Bool {
-        guard !isWorking(botID), turns[botID] == nil, bot(botID) != nil else { return false }
+        guard !isWorking(botID), sessions[botID]?.turnTask == nil, bot(botID) != nil else { return false }
         guard let items = loadedConversation(botID)?.items else { return false }
         switch RetryPlan.plan(for: items) {
         case .none:

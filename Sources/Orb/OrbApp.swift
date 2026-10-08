@@ -280,7 +280,8 @@ enum Snapshot {
         case let name where name.hasPrefix("transcript"):
             AnyView(model.bots.first.map { TranscriptSample.view(name, model: model, bot: $0) })
         default:
-            Snapshot.composerScene(screen, model: model)
+            ContextSnapshots.view(screen, model: model)
+                ?? Snapshot.composerScene(screen, model: model)
                 ?? SettingsSnapshots.view(screen, firstBotID: model.bots.first?.id)
                 ?? CatalogSnapshots.view(screen, model: model)
                 ?? AnyView(model.bots.first.map { ChatView(botID: $0.id) })

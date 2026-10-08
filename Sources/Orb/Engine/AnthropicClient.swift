@@ -32,45 +32,12 @@ struct AnthropicClient: LLMClient {
     }
 
     func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
-        AsyncThrowingStream { continuation in
-            let task = Task {
-                do {
-                    let provider = baseURL.host() ?? ""
-                    let body = try WireEncoder.encode(Self.requestBody(
-                        model: model, messages: messages, tools: tools, maxTokens: maxTokens, provider: provider, toolChoice: toolChoice,
-                        stablePrefixTTL: Self.stablePrefixTTL(host: provider)), trailing: Self.trailingKeys)
-                    let (bytes, response) = try await OpenAIClient.open(session, credentials: credentials) { key in
-                        var request = makeRequest("messages", key: key)
-                        request.httpMethod = "POST"
-                        request.timeoutInterval = 300
-                        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                        request.httpBody = body
-                        return request
-                    }
-                    try await OpenAIClient.check(response, body: { try await OpenAIClient.prefix(of: bytes) })
-
-                    var assembler = AnthropicStreamAssembler()
-                    for try await line in bytes.lines {
-                        guard case .data(let payload) = SSEParser.parse(line) else { continue }
-                        guard let event = JSONValue.parse(payload) else {
-                            throw LLMError.invalidResponse(String(payload.prefix(200)))
-                        }
-                        for output in try assembler.ingest(event) { continuation.yield(output) }
-                        if assembler.isFinished { break }
-                    }
-                    if !assembler.reasoning.isEmpty {
-                        continuation.yield(.reasoning(ReasoningTrace(format: .messages, provider: provider, model: model,
-                                                                     parts: assembler.reasoning)))
-                    }
-                    if !assembler.toolCalls.isEmpty { continuation.yield(.toolCalls(assembler.toolCalls)) }
-                    continuation.yield(.finished(assembler.stopReason, assembler.usage))
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: LLMError.wrapping(error))
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
+        let provider = baseURL.host() ?? ""
+        return ProviderTransport.stream(session: session, credentials: credentials, acceptsEventStream: false, body: {
+            try WireEncoder.encode(Self.requestBody(
+                model: model, messages: messages, tools: tools, maxTokens: maxTokens, provider: provider, toolChoice: toolChoice,
+                stablePrefixTTL: Self.stablePrefixTTL(host: provider)), trailing: Self.trailingKeys)
+        }, request: { makeRequest("messages", key: $0) }, mapper: AnthropicStreamAssembler(provider: provider, model: model))
     }
 
     /// All model ids (follows `has_more` / `last_id` pagination).
@@ -82,8 +49,7 @@ struct AnthropicClient: LLMClient {
             var components = URLComponents(url: request.url ?? baseURL, resolvingAgainstBaseURL: false)
             components?.queryItems = [URLQueryItem(name: "limit", value: "1000")] + (after.map { [URLQueryItem(name: "after_id", value: $0)] } ?? [])
             request.url = components?.url
-            let (data, response) = try await session.data(for: request)
-            try await OpenAIClient.check(response, body: { data.prefix(OpenAIClient.errorBodyLimit) })
+            let data = try await ProviderTransport.fetch(request, session: session)
             guard let json = JSONValue.parse(String(decoding: data, as: UTF8.self)), let page = json["data"]?.array else {
                 throw LLMError.invalidResponse("lista de modelos ausente")
             }
@@ -96,7 +62,7 @@ struct AnthropicClient: LLMClient {
 
     private func makeRequest(_ path: String, key: String?) -> URLRequest {
         // Anthropic takes the key in `x-api-key`; gateways accept it there too.
-        var request = OpenAIClient.authorizedRequest(baseURL.appending(path: path), apiKey: nil, headers: extraHeaders)
+        var request = ProviderTransport.authorizedRequest(baseURL.appending(path: path), apiKey: nil, headers: extraHeaders)
         request.setValue(Self.apiVersion, forHTTPHeaderField: "anthropic-version")
         if let key, !key.isEmpty {
             request.setValue(key, forHTTPHeaderField: "x-api-key")
@@ -251,12 +217,20 @@ extension AnthropicClient {
 /// Turns Messages API stream events into `LLMEvent`s: text deltas pass through, `tool_use` blocks are assembled
 /// from `input_json_delta` fragments and reported once at the end, and thinking blocks (with their signatures) are
 /// collected so they can be sent back.
-struct AnthropicStreamAssembler {
+struct AnthropicStreamAssembler: AssemblingMapper {
+    static let reasoningFormat = APIFormat.messages
+    let provider: String
+    let model: String
     private var calls: [Int: ToolCallRequest] = [:]
     private var thinking: [Int: ReasoningPart] = [:]
     private var stop: String?
     private(set) var usage: TokenUsage?
     private(set) var isFinished = false
+
+    init(provider: String = "", model: String = "") {
+        self.provider = provider
+        self.model = model
+    }
 
     var toolCalls: [ToolCallRequest] { calls.sorted { $0.key < $1.key }.map(\.value) }
     var reasoning: [ReasoningPart] { thinking.sorted { $0.key < $1.key }.map(\.value) }

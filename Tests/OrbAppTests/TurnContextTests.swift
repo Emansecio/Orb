@@ -168,7 +168,7 @@ struct CapabilityPromptTests {
 
     @Test @MainActor func aNativeTurnRecordsTheSnapshotOnlyWhenItsMessageIsStored() {
         let (model, bot) = model()
-        model.pendingMarks[bot.id] = .native(workspaceHash: "w1")
+        model.session(bot.id).pendingMarks = .native(workspaceHash: "w1")
         model.apply(.message(ChatMessage(role: .assistant, content: "oi")), to: bot.id)
         #expect(model.conversations[bot.id]?.workspaceHash == nil)
 
@@ -179,7 +179,7 @@ struct CapabilityPromptTests {
 
     @Test @MainActor func aClaudeCodeTurnRecordsItsMarksWhenTheSessionAnswers() {
         let (model, bot) = model()
-        model.pendingMarks[bot.id] = .claudeCode(workspaceHash: "w2", pinned: "identidade", standingHash: "s2")
+        model.session(bot.id).pendingMarks = .claudeCode(workspaceHash: "w2", pinned: "identidade", standingHash: "s2")
         model.apply(.message(.user("pedido")), to: bot.id) // Orb's own copy of the prompt: nothing was delivered yet
         model.apply(.session(""), to: bot.id)
         #expect(model.conversations[bot.id]?.claudeWorkspaceHash == nil)

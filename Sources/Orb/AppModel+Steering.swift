@@ -79,21 +79,19 @@ extension SteeredMessage {
 }
 
 extension AppModel {
-    /// The composer state of one Orb, made when first asked for.
-    func composerLane(_ botID: UUID) -> ComposerLane {
-        if let lane = composerLanes[botID] { return lane }
-        let lane = ComposerLane()
-        composerLanes[botID] = lane
-        return lane
-    }
+    /// The composer state of one Orb, made when first asked for (it lives in the Orb's session).
+    func composerLane(_ botID: UUID) -> ComposerLane { session(botID).composerLane() }
 
     /// Whether a message sent now is queued behind the running turn instead of starting one: the Orb is working on
     /// your chat (a routine's run has a conversation of its own, which a message cannot join).
-    func canSteer(_ botID: UUID) -> Bool { turns[botID] != nil && routineTurns[botID] == nil }
+    func canSteer(_ botID: UUID) -> Bool {
+        guard let session = sessions[botID] else { return false }
+        return session.turnTask != nil && session.routineID == nil
+    }
 
     /// Whether a queued message reaches the model before the turn ends (Orb's own engine) and not only after it
     /// (Claude Code takes one prompt per process).
-    func steersMidTurn(_ botID: UUID) -> Bool { canSteer(botID) && !claudeTurns.contains(botID) }
+    func steersMidTurn(_ botID: UUID) -> Bool { canSteer(botID) && sessions[botID]?.isClaudeTurn != true }
 
     /// The composer's send: starts a turn when the Orb is free, queues the message when it is working. Returns false
     /// when nothing was sent, so the composer keeps what you wrote.
@@ -184,7 +182,7 @@ extension AppModel {
     /// after a failure or a stop it goes back to the composer instead, so a broken turn is not followed by another
     /// one the user did not choose.
     func settleSteering(_ botID: UUID, succeeded: Bool) {
-        guard let lane = composerLanes[botID], !lane.queued.isEmpty else { return }
+        guard let lane = sessions[botID]?.lane, !lane.queued.isEmpty else { return }
         let waiting = lane.takeAll()
         guard succeeded, let message = SteeredMessage.merged(waiting),
               send(message.text, attachments: message.files, images: message.pictures, to: botID) else {

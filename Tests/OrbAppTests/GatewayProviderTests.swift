@@ -165,7 +165,7 @@ struct GatewayWireTests {
             #expect(text.contains("plano não inclui acesso à API") && !text.contains("Chave ou login inválido"))
         }
         // Anthropic's own 403 is not about a plan.
-        #expect(OpenAIClient.errorMessage(from: Data(body.utf8), status: 403, host: "api.anthropic.com") == "Go plan has no API access")
+        #expect(ProviderTransport.errorMessage(from: Data(body.utf8), status: 403, host: "api.anthropic.com") == "Go plan has no API access")
     }
 
     @Test func aRejectedApiKeyIsNotSentTwice() async throws {
@@ -194,7 +194,7 @@ struct GatewayWireTests {
 
 struct GatewayErrorTests {
     @Test func keepsTheDocumentedActionableCodeWithTheMessage() {
-        let message = { (text: String) in OpenAIClient.errorMessage(from: Data(text.utf8), status: 403) }
+        let message = { (text: String) in ProviderTransport.errorMessage(from: Data(text.utf8), status: 403) }
         #expect(message(#"{"error":{"message":"Plan lacks API access","type":"permission_error","code":"upgrade_required"}}"#)
                 == "Plan lacks API access [upgrade_required]")
         #expect(message(#"{"error":{"message":"unsupported_model: x","code":"unsupported_model"}}"#) == "unsupported_model: x")

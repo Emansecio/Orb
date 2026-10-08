@@ -51,20 +51,21 @@ enum ContextMeter {
         let paused = conversation.isTaskPaused
 
         // The history as it stands: nothing new folded away, however far over the budget it is.
-        var cut = ContextCut(summary: conversation.summary)
+        var cut = ContextCut(summary: conversation.summary, ledger: conversation.currentLedger)
         let unlimited = ContextBudget(tokens: Int.max / 8)
         let current = ContextWindow.fit(slice, budget: unlimited, cut: &cut, condensing: condensing, paused: paused)
         let history = tokens(current.messages)
 
+        // A compaction condenses the older stretch too (see `Conversation.prepareHistory`): what it would fold is
+        // measured on the history condensed that far, as `Conversation.compact` does.
         var compaction: ContextFill.Compaction?
-        var smaller = budget
-        smaller.tokens = max(Int(Double(budget.tokens) * compactingShare), 500)
-        smaller.lowWaterShare = 1
-        var folding = ContextCut(summary: conversation.summary)
-        let compacted = ContextWindow.fit(slice, budget: smaller, cut: &folding, condensing: condensing, paused: paused)
+        let frontier = max(ContextCondensing.frontier(in: slice), condensing)
+        let smaller = manualBudget(for: conversation, budget: budget, share: compactingShare)
+        var folding = ContextCut(summary: conversation.summary, ledger: conversation.currentLedger)
+        let compacted = ContextWindow.fit(slice, budget: smaller, cut: &folding, condensing: frontier, paused: paused)
         if folding.covered > 0 {
             let foldedMessages = Array(slice.prefix(compacted.droppedCount))
-            compaction = .init(turns: foldedMessages.filter { $0.role == .user }.count, messages: compacted.droppedCount,
+            compaction = .init(turns: foldedMessages.filter { $0.role == .user }.count, messages: compacted.foldedCount,
                                tokensFreed: max(history - tokens(compacted.messages), 0))
         }
 
@@ -74,6 +75,27 @@ enum ContextMeter {
                            budgetTokens: budget.tokens, foldedMessages: covered,
                            summaryTokens: conversation.summary.map { ContextBudget.tokens(forCharacters: $0.count) } ?? 0,
                            compaction: compaction)
+    }
+
+    /// The budget a manual compaction fits the history to: `share` of `budget`, or half of what the history takes
+    /// (`historyTokens`, once its older stretch is condensed) when that is less, so a conversation that is not big yet
+    /// still has turns folded; folded only as far as needed (no low-water mark below it).
+    static func manualBudget(_ budget: ContextBudget, historyTokens: Int, share: Double = compactingShare) -> ContextBudget {
+        var smaller = budget
+        smaller.tokens = max(min(Int(Double(budget.tokens) * share), historyTokens / 2), 500)
+        smaller.lowWaterShare = 1
+        return smaller
+    }
+
+    /// The budget `Conversation.compact` uses for `conversation` (see `manualBudget`).
+    static func manualBudget(for conversation: Conversation, budget: ContextBudget, share: Double = compactingShare) -> ContextBudget {
+        let covered = conversation.coveredMessageCount
+        let slice = Array(conversation.messages[covered...])
+        let stored = max((conversation.condensedCount ?? 0) - covered, 0)
+        var cut = ContextCut(summary: conversation.summary, ledger: conversation.currentLedger)
+        let condensed = ContextWindow.fit(slice, budget: ContextBudget(tokens: Int.max / 8), cut: &cut,
+                                          condensing: max(ContextCondensing.frontier(in: slice), stored), paused: conversation.isTaskPaused)
+        return manualBudget(budget, historyTokens: tokens(condensed.messages), share: share)
     }
 
     private static func tokens(_ messages: [ChatMessage]) -> Int {

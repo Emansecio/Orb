@@ -105,6 +105,9 @@ struct ChatMessage: Codable, Hashable, Sendable {
     static func tool(_ id: String, _ output: String, isError: Bool = false, images: [ImageAttachment] = []) -> ChatMessage {
         ChatMessage(role: .tool, content: output, toolCallID: id, isError: isError, images: images)
     }
+
+    /// The result made up for a call a stopped turn left unanswered (see `answeringDanglingToolCalls`): the call never ran.
+    static let interruptedResult = "Not run: the turn was interrupted."
 }
 
 /// A picture the model can be shown. The file is a copy under the app's data folder (`ImageStore`), already
@@ -227,7 +230,7 @@ extension [ChatMessage] {
         var result: [ChatMessage] = []
         var open: [String] = []
         func close() {
-            result += open.map { ChatMessage.tool($0, "Not run: the turn was interrupted.") }
+            result += open.map { ChatMessage.tool($0, ChatMessage.interruptedResult) }
             open = []
         }
         for message in self {

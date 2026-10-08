@@ -165,6 +165,15 @@ struct ContextBudget: Sendable, Equatable {
         return copy
     }
 
+    /// The same budget with room left for `characters` the request carries besides the history (the new message and
+    /// what goes before it). Never less than half of it.
+    func leavingRoom(forCharacters characters: Int) -> ContextBudget {
+        guard characters > 0 else { return self }
+        var copy = self
+        copy.tokens = max(tokens - Self.tokens(forCharacters: characters), tokens / 2)
+        return copy
+    }
+
     func scaled(by factor: Double) -> ContextBudget {
         var copy = self
         copy.tokens = max(Int(Double(tokens) * factor), 500)

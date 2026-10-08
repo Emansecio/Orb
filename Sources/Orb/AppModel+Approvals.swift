@@ -59,3 +59,46 @@ extension AppModel {
         }
     }
 }
+
+extension AppModel {
+    /// Your answer to an approval card. `rule` is the standing rule picked under "Sempre…"; "Sempre" without one
+    /// takes the card's first suggestion, and "Só nesta tarefa" grants that rule until the turn ends. `note` is what
+    /// you told the Orb to do instead of what it asked, on a denial. A card already answered stays as it was (a
+    /// banner can be tapped after the card was answered in the app or the app was closed).
+    func decide(_ decision: ApprovalDecision, rule: PermissionRule? = nil, note: String? = nil, approvalID: UUID, botID: UUID) {
+        // Loaded first: a banner can arrive before this Orb's conversation was read, and a card left open by a run that
+        // closed is already denied once it is. Only an open card is answered.
+        guard bot(botID) != nil else { return }
+        if sessions[botID]?.isLoading == true { // a read is under way: wait for it instead of reading the file again here
+            Task {
+                await loadedConversation(botID)
+                decide(decision, rule: rule, note: note, approvalID: approvalID, botID: botID)
+            }
+            return
+        }
+        ensureLoaded(botID)
+        guard isPending(approvalID, of: botID) else { return }
+        var chosen = rule
+        let note = decision == .deny ? ApprovalNote.clean(note) : nil
+        let session = session(botID)
+        session.mutateItems { items in
+            for index in items.indices {
+                if case .approval(var request) = items[index].kind, request.id == approvalID {
+                    request.decision = decision
+                    request.note = note
+                    // A grouped card's "Só nesta tarefa" grants every rule it offered (the engine reads them from the card).
+                    if decision == .always || (decision == .task && !request.isBatch) { chosen = chosen ?? request.suggestions.first }
+                    items[index].kind = .approval(request)
+                }
+            }
+        }
+        session.updateAwaitingApproval()
+        ApprovalNotifications.clear([approvalID])
+        // Saved before the engine is answered, so its next tool call already sees the rule.
+        if decision == .always, let chosen, chosen.isValid {
+            update(botID) { if !$0.permissionRules.contains(chosen) { $0.permissionRules.append(chosen) } }
+        }
+        let answer = ApprovalAnswer(decision: decision, rule: chosen, note: note)
+        Task { await gate.resolve(approvalID: approvalID, answer: answer) }
+    }
+}

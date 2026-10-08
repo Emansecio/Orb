@@ -23,8 +23,8 @@ struct BotLook: Equatable, Sendable {
 /// Views read the object of the Orb they show and nothing else, so an event in one Orb (a tool call, a status,
 /// the end of a turn) re-renders only what shows that Orb, never another Orb's row, composer or inspector. The
 /// dictionary of these objects lives in `AppModel` and is not observed: it changes only when an Orb is added
-/// or deleted, and `AppModel.botIDs` says so. This is the seed of the per-Orb session the app model will be
-/// split into; the transcript can join it later.
+/// or deleted, and `AppModel.botIDs` says so. What runs behind it (the turn, the conversation, the streamed reply)
+/// is the Orb's `BotSession`.
 ///
 /// The properties views read are `private(set)` and assigned only when the value differs: writing an
 /// `@Observable` property notifies its readers, and for a collection even a write that changes nothing does.
@@ -59,6 +59,11 @@ final class BotLive {
     private(set) var unread = 0
     /// What the inspector's memory section shows, refreshed after changes.
     private(set) var memory = MemorySnapshot()
+    /// The Orb's latest model call (what the context meter's cache hit reads) and what its latest compaction left
+    /// the conversation at, in tokens. Mirrors of `AppModel.requestUsage` and `lastCompaction`, here so the meter
+    /// depends on its own Orb only.
+    private(set) var lastUsage: TokenUsage?
+    private(set) var compactedTo: Int?
 
     // MARK: What the activity follows
 
@@ -113,6 +118,10 @@ final class BotLive {
         refresh()
     }
 
+    func setLastUsage(_ usage: TokenUsage?) { assign(\.lastUsage, to: usage) }
+
+    func setCompactedTo(_ tokens: Int?) { assign(\.compactedTo, to: tokens) }
+
     func setUnread(_ count: Int) { assign(\.unread, to: count) }
 
     func setMemory(_ snapshot: MemorySnapshot) { assign(\.memory, to: snapshot) }
@@ -151,8 +160,8 @@ final class BotLive {
 
 // MARK: - Writing observable state only when it changes
 
-/// Marks the two observable types (`AppModel`, `BotLive`) that write through the helpers below, so they do not
-/// spread to every `@Observable` type in the app.
+/// Marks the observable types (`AppModel`, `BotLive`, `BotSession`) that write through the helpers below, so they
+/// do not spread to every `@Observable` type in the app.
 @MainActor
 protocol WritesOnlyChanges: AnyObject {}
 

@@ -22,6 +22,9 @@ enum ClaudeCodeMessage: Equatable, Sendable {
     /// The answer to one of our control requests; `error` is the CLI's text when it refused (nil = success).
     case controlResponse(requestID: String, error: String?)
     case result(ClaudeCodeResult)
+    /// `system/compact_boundary`: Claude Code compacted its own session (`trigger` "auto" or "manual"; the token
+    /// counts are its estimates of the context before and after, when it reports them).
+    case compacted(trigger: String, preTokens: Int?, postTokens: Int?)
 }
 
 struct ClaudeCodePermissionRequest: Equatable, Sendable {
@@ -59,8 +62,17 @@ struct ClaudeCodeParser {
         if let parent = json["parent_tool_use_id"], parent != .null { return [] }
         switch type {
         case "system":
-            guard json["subtype"]?.string == "init", let id = json["session_id"]?.string else { return [] }
-            return [.started(sessionID: id)]
+            switch json["subtype"]?.string {
+            case "init":
+                guard let id = json["session_id"]?.string else { return [] }
+                return [.started(sessionID: id)]
+            case "compact_boundary":
+                let details = json["compact_metadata"]
+                return [.compacted(trigger: details?["trigger"]?.string ?? "auto", preTokens: details?["pre_tokens"]?.int,
+                                   postTokens: details?["post_tokens"]?.int)]
+            default:
+                return []
+            }
         case "stream_event":
             return streamEvent(json["event"])
         case "assistant":

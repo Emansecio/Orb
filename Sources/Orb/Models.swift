@@ -160,6 +160,10 @@ struct Conversation: Codable, Sendable {
     /// window (see `ContextWindow`). The messages themselves stay.
     var summary: String?
     var summaryCoveredCount: Int?
+    /// The data `summary` is rendered from (see `ConversationLedger`); a summary saved without one is carried as text.
+    var ledger: ConversationLedger?
+    /// How many times this conversation has been compacted (automatically or on request).
+    var compactions: Int?
     /// Messages before this index are sent to the model condensed (old prefaces, outputs and reasoning cut down; the
     /// messages themselves stay whole). It moves in batches (see `ContextCondensing`).
     var condensedCount: Int?
@@ -226,6 +230,9 @@ extension Conversation {
         claudeMemoryPinned = try c.decodeIfPresent(String.self, forKey: .claudeMemoryPinned)
         summary = try c.decodeIfPresent(String.self, forKey: .summary)
         summaryCoveredCount = try c.decodeIfPresent(Int.self, forKey: .summaryCoveredCount)
+        // A ledger this version cannot read is dropped (the summary text still stands) instead of losing the conversation.
+        ledger = (try? c.decodeIfPresent(ConversationLedger.self, forKey: .ledger)) ?? nil
+        compactions = (try? c.decodeIfPresent(Int.self, forKey: .compactions)) ?? nil
         condensedCount = try c.decodeIfPresent(Int.self, forKey: .condensedCount)
         taskPaused = try c.decodeIfPresent(Bool.self, forKey: .taskPaused)
         workspaceHash = try c.decodeIfPresent(String.self, forKey: .workspaceHash)

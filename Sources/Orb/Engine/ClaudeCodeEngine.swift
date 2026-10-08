@@ -346,6 +346,9 @@ struct ClaudeCodeTranscript {
                 events.append(.failed(result.message))
             }
             return events
+        case .compacted(let trigger, let before, let after):
+            return [.compacted(CompactionReport(kind: .claudeCode, foldedMessages: 0, tokensBefore: before, tokensAfter: after,
+                                                trigger: trigger))]
         case .permission, .unsupportedRequest, .controlResponse:
             return []
         }

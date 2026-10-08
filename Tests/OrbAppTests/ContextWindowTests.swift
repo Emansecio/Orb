@@ -374,8 +374,8 @@ struct ContextWindowTests {
 
         #expect(window.droppedCount > 0)
         let summary = try #require(window.summary)
-        #expect(summary.contains("organize a pasta Fotos"))
-        #expect(summary.contains("read_file"))
+        #expect(summary.contains("Pedido original: organize a pasta Fotos"))
+        #expect(summary.contains("Arquivos e links lidos"))
         #expect(summary.contains("/tmp/a.txt"))
         #expect(window.messages[0].role == .user)
         #expect(window.messages[0].content.hasPrefix("[Resumo do começo desta conversa]"))
@@ -387,19 +387,35 @@ struct ContextWindowTests {
         #expect(window.messages.last == ChatMessage(role: .assistant, content: "Resposta de pedido 7"))
     }
 
-    @Test func aPreviousSummaryIsKeptAndExtended() throws {
+    @Test func aPreviousSummaryIsKeptAndExtendedWithoutNesting() throws {
         var history: [ChatMessage] = []
         for index in 0..<6 { history += turn("pedido \(index)", output: 30_000, tag: "p\(index)") }
         let budget = ContextBudget(tokens: 3_000)
         let first = ContextWindow.fit(history, budget: budget)
         #expect(first.droppedCount > 0)
         let kept = Array(history[first.droppedCount...])
-        let second = ContextWindow.fit(kept + turn("novo", output: 30_000, tag: "n"), budget: budget, summary: first.summary)
+        let second = ContextWindow.fit(kept + turn("novo", output: 30_000, tag: "n"), budget: budget, summary: first.summary, ledger: first.ledger)
         let summary = try #require(second.summary)
-        #expect(summary.contains("Resumo anterior"))
+        #expect(!summary.contains("Resumo anterior"))
         #expect(summary.contains("pedido 0"))
+        #expect(summary.contains("pedido 3"))
         #expect(second.droppedCount > 0)
         #expect(isValidConversation(second.messages))
+    }
+
+    @Test func aSummaryWrittenByAnEarlierVersionIsCarriedOnceAsText() throws {
+        let old = "Pedidos do usuário:\n- pedido antigo sobre o Atlas\nResumo anterior: Pedidos do usuário:\n- mais antigo ainda"
+        var history: [ChatMessage] = []
+        for index in 0..<6 { history += turn("pedido \(index)", output: 30_000, tag: "p\(index)") }
+        let window = ContextWindow.fit(history, budget: ContextBudget(tokens: 3_000), summary: old)
+        let summary = try #require(window.summary)
+        #expect(summary.contains("Resumo anterior (formato antigo): Pedidos do usuário: - pedido antigo sobre o Atlas"))
+        #expect(!summary.contains("mais antigo ainda"))
+        #expect(summary.components(separatedBy: "Resumo anterior").count == 2)
+        // Extending it again does not nest it.
+        let again = ContextWindow.fit(Array(history[window.droppedCount...]) + turn("novo", output: 30_000, tag: "n"),
+                                      budget: ContextBudget(tokens: 3_000), summary: window.summary, ledger: window.ledger)
+        #expect(again.summary?.components(separatedBy: "Resumo anterior").count == 2)
     }
 
     @Test func aSummaryPairAlreadyAtTheStartIsRecognizedAndNotDuplicated() {
@@ -647,12 +663,39 @@ struct ContextEngineTests {
         #expect(events.contains { if case .message(let message) = $0 { message.content == "ok" } else { false } })
     }
 
-    @Test func aTurnThatCompactsInsideTheLoopAnnouncesItOnce() async {
+    @Test func aTurnThatSetsStepsAsideAnnouncesItOnceWithNumbers() async {
         let rounds = (0..<8).map { LLMEvent.toolCalls([call("s\($0)")]) }
         let recorder = Recorder(rounds.map { [$0] } + [[.text("fim")]])
         let events = await collect(engineRequest(recorder, budget: ContextBudget(tokens: 1_500), toolSize: 3_000))
-        let notices = events.compactMap { if case .notice(let text) = $0 { text } else { nil } }
-        #expect(notices == ["Conversa compactada: o começo virou um resumo."])
+        let reports = events.compactMap { if case .compacted(let report) = $0 { report } else { nil } }
+        #expect(reports.count == 1)
+        let report = reports.first
+        #expect(report?.kind == .steps)
+        #expect((report?.foldedMessages ?? 0) > 0)
+        #expect(report?.fold == nil)   // steps of the request in progress are not kept for the next turn
+        #expect(report?.notice.hasPrefix("Neste pedido, resumi ") == true)
+        #expect(report?.notice.contains("tokens)") == true)
+        #expect(!events.contains { if case .notice = $0 { true } else { false } })
+    }
+
+    @Test func olderTurnsFoldedInsideATurnAreReportedWithTheSummaryToKeep() async throws {
+        var history: [ChatMessage] = []
+        for index in 0..<8 { history += turn("pedido número \(index) do projeto", steps: 1, output: 3_000, tag: "h\(index)") }
+        let rounds = (0..<4).map { LLMEvent.toolCalls([call("s\($0)")]) }
+        let recorder = Recorder(rounds.map { [$0] } + [[.text("fim")]])
+        let events = await collect(engineRequest(recorder, history: history, budget: ContextBudget(tokens: 4_000), toolSize: 3_000))
+        let folds = events.compactMap { event -> CompactionReport? in
+            if case .compacted(let report) = event, report.kind == .turns { report } else { nil }
+        }
+        #expect(!folds.isEmpty)
+        // Each fold is reported once, with how many more messages it covers and the summary after it.
+        let total = folds.reduce(0) { $0 + $1.foldedMessages }
+        let last = try #require(folds.last?.fold)
+        #expect(last.summary.contains("Pedido original: pedido número 0 do projeto"))
+        #expect(last.ledger?.original == "pedido número 0 do projeto")
+        let received = await recorder.received
+        #expect(total > 0 && total <= history.count)
+        #expect(received.count == 5)
     }
 
     @Test func aShortTurnAnnouncesNothing() async {

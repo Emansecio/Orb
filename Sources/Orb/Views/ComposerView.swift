@@ -16,6 +16,8 @@ struct ComposerView: View {
     @State private var isImporting = false
     @State private var isDropTargeted = false
     @State private var isModelOpen = false
+    /// What the context meter and the "conversa longa" card show (measured by `ContextGaugeDriver`).
+    @State private var gauge = ContextGauge()
     /// The composer is too narrow for words on its chips: only their icons show.
     @State private var isCompact = false
     @State private var pasteMonitor: Any?
@@ -45,13 +47,15 @@ struct ComposerView: View {
 
     var body: some View {
         let lane = lane
-        VStack(spacing: 6) {
+        VStack(spacing: 0) {
+            ContextNudge(botID: botID, gauge: gauge) // adds nothing, not even spacing, while its card is not due
             card(lane)
             Text(hint(lane))
                 .font(.system(size: 11))
                 .foregroundStyle(Palette.muted)
                 .lineLimit(1)
                 .frame(height: 14)
+                .padding(.top, 6)
                 .opacity(hint(lane).isEmpty ? 0 : 1)
                 .accessibilityHidden(true)
         }
@@ -64,6 +68,7 @@ struct ComposerView: View {
             LinearGradient(colors: [Palette.canvas.opacity(0), Palette.canvas], startPoint: .top, endPoint: .init(x: 0.5, y: 0.35))
         }
         .background { shortcuts }
+        .background { ContextGaugeDriver(botID: botID, gauge: gauge) }
         .fileImporter(isPresented: $isImporting, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { attach(urls) }
         }
@@ -182,6 +187,7 @@ struct ComposerView: View {
             SkillsChip(botID: botID, compact: isCompact) { insert("/\($0) ") }
             PermissionChip(botID: botID, compact: isCompact)
             Spacer(minLength: 8)
+            ContextMeterChip(botID: botID, gauge: gauge, compact: isCompact)
             ModelChip(botID: botID, isOpen: $isModelOpen)
             actionButtons
         }

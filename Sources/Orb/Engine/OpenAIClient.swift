@@ -40,64 +40,13 @@ struct OpenAIClient: LLMClient {
     }
 
     func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
-        AsyncThrowingStream { continuation in
-            let task = Task {
-                do {
-                    let body = try WireEncoder.encode(Self.requestBody(
-                        model: model, messages: messages, tools: tools, includeUsage: reportsUsage,
-                        promptCacheKey: isOpenAI ? conversationID : nil, toolChoice: toolChoice), trailing: Self.trailingKeys)
-                    let (bytes, response) = try await Self.open(session, credentials: credentials) { key in
-                        var request = Self.authorizedRequest(baseURL.appending(path: "chat/completions"), apiKey: key,
-                                                             headers: extraHeaders)
-                        request.httpMethod = "POST"
-                        request.timeoutInterval = 300 // local models can take long before the first token
-                        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-                        request.httpBody = body
-                        return request
-                    }
-                    try await Self.check(response, body: { try await Self.prefix(of: bytes) })
-
-                    var toolCalls = ToolCallAccumulator()
-                    var finishReason: String?
-                    var usage: TokenUsage?
-                    var sawDone = false
-                    lines: for try await line in bytes.lines {
-                        switch SSEParser.parse(line) {
-                        case nil: continue
-                        case .done: sawDone = true; break lines
-                        case .data(let payload):
-                            guard let chunk = JSONValue.parse(payload) else {
-                                throw LLMError.invalidResponse(String(payload.prefix(200)))
-                            }
-                            if let error = chunk["error"] {
-                                let message = Self.message(in: error) ?? error.jsonString
-                                throw LLMError.isContextOverflow(message) ? LLMError.contextExceeded(message)
-                                    : LLMError.invalidResponse(message)
-                            }
-                            // The usage chunk arrives last, with an empty `choices`.
-                            if let reported = Self.usage(in: chunk["usage"]) { usage = reported }
-                            let choice = chunk["choices"]?.array?.first
-                            if let reason = choice?["finish_reason"]?.string, !reason.isEmpty { finishReason = reason }
-                            guard let delta = choice?["delta"] else { continue }
-                            if let text = delta["content"]?.string, !text.isEmpty {
-                                continuation.yield(.text(text))
-                            }
-                            if let fragments = delta["tool_calls"]?.array {
-                                toolCalls.ingest(fragments)
-                            }
-                        }
-                    }
-                    let calls = toolCalls.requests
-                    if !calls.isEmpty { continuation.yield(.toolCalls(calls)) }
-                    continuation.yield(.finished(Self.stopReason(finishReason, hasToolCalls: !calls.isEmpty, sawDone: sawDone), usage))
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: LLMError.wrapping(error))
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
+        ProviderTransport.stream(session: session, credentials: credentials, body: {
+            try WireEncoder.encode(Self.requestBody(
+                model: model, messages: messages, tools: tools, includeUsage: reportsUsage,
+                promptCacheKey: isOpenAI ? conversationID : nil, toolChoice: toolChoice), trailing: Self.trailingKeys)
+        }, request: {
+            ProviderTransport.authorizedRequest(baseURL.appending(path: "chat/completions"), apiKey: $0, headers: extraHeaders)
+        }, mapper: ChatStreamMapper())
     }
 
     func models() async throws -> [String] {
@@ -106,27 +55,12 @@ struct OpenAIClient: LLMClient {
 
     /// The `data` entries of the model list, whole (some servers say more about each model than its id).
     func modelEntries() async throws -> [JSONValue] {
-        let (data, response) = try await session.data(for: Self.authorizedRequest(
-            baseURL.appending(path: "models"), apiKey: try await credentials(false), headers: extraHeaders))
-        try await Self.check(response, body: { data.prefix(Self.errorBodyLimit) })
+        let data = try await ProviderTransport.fetch(ProviderTransport.authorizedRequest(
+            baseURL.appending(path: "models"), apiKey: try await credentials(false), headers: extraHeaders), session: session)
         guard let entries = JSONValue.parse(String(decoding: data, as: UTF8.self))?["data"]?.array else {
             throw LLMError.invalidResponse("lista de modelos ausente")
         }
         return entries
-    }
-
-    /// Identifies the app (some gateways reject generic HTTP-library user agents).
-    static let userAgent = "Orb/\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev") (macOS)"
-
-    /// A request with `Authorization: Bearer` (when a key is set), the app's User-Agent and any extra headers.
-    static func authorizedRequest(_ url: URL, apiKey: String?, headers: [String: String] = [:]) -> URLRequest {
-        var request = URLRequest(url: url)
-        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-        if let apiKey, !apiKey.isEmpty {
-            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        }
-        for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
-        return request
     }
 }
 
@@ -194,53 +128,6 @@ extension OpenAIClient {
         return .array(parts)
     }
 
-    // MARK: Requests and errors
-
-    /// Opens a streaming request with the current credential. A 401 means the credential went stale (an expired
-    /// sign-in): it asks for a fresh one once and sends the request again.
-    static func open(_ session: URLSession, credentials: CredentialsProvider,
-                     request build: (String?) -> URLRequest) async throws -> (URLSession.AsyncBytes, URLResponse) {
-        let token = try await credentials(false)
-        let first = try await session.bytes(for: build(token))
-        guard (first.1 as? HTTPURLResponse)?.statusCode == 401 else { return first }
-        // An API key comes back unchanged: asking again would repeat a request that failed for a reason the key
-        // does not fix (OpenCode answers a missing balance or a disabled model with 401 too).
-        let renewed = try await credentials(true)
-        guard renewed != token else { return first }
-        return try await session.bytes(for: build(renewed))
-    }
-
-    static let errorBodyLimit = 2048
-
-    /// Throws `LLMError.http` for non-2xx responses, using the (lazily read) body as the message.
-    static func check(_ response: URLResponse, body: () async throws -> Data) async throws {
-        guard let http = response as? HTTPURLResponse else {
-            throw LLMError.invalidResponse("resposta não HTTP")
-        }
-        guard !(200..<300).contains(http.statusCode) else { return }
-        let data = try await body()
-        let message = errorMessage(from: data, status: http.statusCode, host: http.url?.host())
-        if http.statusCode == 400 || http.statusCode == 413,
-           LLMError.isContextOverflow(message) || LLMError.isContextOverflow(String(decoding: data, as: UTF8.self)) {
-            throw LLMError.contextExceeded(message)
-        }
-        throw LLMError.http(status: http.statusCode, message: message, retryAfter: retryAfter(in: http))
-    }
-
-    /// Seconds from `Retry-After` (a number of seconds or an HTTP date) or the millisecond variant some gateways send.
-    static func retryAfter(in response: HTTPURLResponse, now: Date = .now) -> TimeInterval? {
-        if let milliseconds = response.value(forHTTPHeaderField: "retry-after-ms").flatMap(Double.init), milliseconds >= 0 {
-            return milliseconds / 1000
-        }
-        guard let value = response.value(forHTTPHeaderField: "retry-after")?.trimmingCharacters(in: .whitespaces) else { return nil }
-        if let seconds = Double(value) { return seconds >= 0 ? seconds : nil }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(identifier: "GMT")
-        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
-        return formatter.date(from: value).map { max(0, $0.timeIntervalSince(now)) }
-    }
-
     // MARK: Stop reason and usage
 
     /// `finish_reason` mapped to a `StopReason`. Without one, a stream that ended with `[DONE]` is judged by its
@@ -267,63 +154,37 @@ extension OpenAIClient {
         return TokenUsage(input: prompt.map { max(0, $0 - (cacheRead ?? 0) - (cacheWrite ?? 0)) },
                           output: usage["completion_tokens"]?.int, cacheRead: cacheRead, cacheWrite: cacheWrite)
     }
-
-    /// Error codes that tell the user what to do (Command Code's Go plan has no API); kept with the message,
-    /// which does not always repeat them.
-    static let actionableErrorCodes: Set<String> = ["upgrade_required", "cmd_zdr_no_providers", "unsupported_model"]
-
-    /// `error.message` (OpenAI), `error` as a string (Ollama) or `message`; otherwise the raw text. An actionable
-    /// `error.code` (see `actionableErrorCodes`) is added in brackets when the message lacks it.
-    static func errorMessage(from data: Data, status: Int, host: String? = nil) -> String {
-        let message = rawErrorMessage(from: data, status: status)
-        // Command Code's only 403 is the Go plan; /messages answers in Anthropic's envelope, which has no `code`.
-        if status == 403, host?.hasSuffix("commandcode.ai") == true, !message.contains("upgrade_required") {
-            return "\(message) [upgrade_required]"
-        }
-        return message
-    }
-
-    private static func rawErrorMessage(from data: Data, status: Int) -> String {
-        let text = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-        if let json = JSONValue.parse(text), let message = message(in: json["error"] ?? json) {
-            if let code = json["error"]?["code"]?.string, actionableErrorCodes.contains(code), !message.contains(code) {
-                return "\(message) [\(code)]"
-            }
-            return message
-        }
-        return text.isEmpty ? HTTPURLResponse.localizedString(forStatusCode: status) : text
-    }
-
-    private static func message(in error: JSONValue) -> String? {
-        error.string ?? error["message"]?.string
-    }
-
-    /// The start of an error body (enough for the message, without reading huge responses).
-    static func prefix(of bytes: URLSession.AsyncBytes) async throws -> Data {
-        var data = Data()
-        for try await byte in bytes {
-            data.append(byte)
-            if data.count >= errorBodyLimit { break }
-        }
-        return data
-    }
 }
 
 // MARK: - Streaming helpers
 
-/// Line-level Server-Sent Events parsing (one `data:` line per event, as chat-completions providers send).
-enum SSEParser {
-    enum Line: Equatable {
-        case data(String)
-        case done
+/// Maps chat-completions chunks: text passes through, tool-call fragments are assembled and reported once at the end,
+/// and the finish reason and usage (which arrives last, with an empty `choices`) close the response.
+struct ChatStreamMapper: SSEMapper {
+    private var toolCalls = ToolCallAccumulator()
+    private var finishReason: String?
+    private var usage: TokenUsage?
+    /// Chat completions end with `[DONE]` (or the connection closing), never with an event of their own.
+    let isFinished = false
+
+    mutating func ingest(_ chunk: JSONValue) throws -> [LLMEvent] {
+        if let error = chunk["error"] {
+            let message = ProviderTransport.message(in: error) ?? error.jsonString
+            throw LLMError.isContextOverflow(message) ? LLMError.contextExceeded(message) : LLMError.invalidResponse(message)
+        }
+        if let reported = OpenAIClient.usage(in: chunk["usage"]) { usage = reported }
+        let choice = chunk["choices"]?.array?.first
+        if let reason = choice?["finish_reason"]?.string, !reason.isEmpty { finishReason = reason }
+        guard let delta = choice?["delta"] else { return [] }
+        if let fragments = delta["tool_calls"]?.array { toolCalls.ingest(fragments) }
+        guard let text = delta["content"]?.string, !text.isEmpty else { return [] }
+        return [.text(text)]
     }
 
-    /// The event carried by `line`; nil for comments, blank lines and other fields.
-    static func parse(_ line: String) -> Line? {
-        guard line.hasPrefix("data:") else { return nil }
-        let payload = line.dropFirst(5).trimmingCharacters(in: .whitespacesAndNewlines)
-        if payload.isEmpty { return nil }
-        return payload == "[DONE]" ? .done : .data(payload)
+    mutating func finish(sawDone: Bool) -> [LLMEvent] {
+        let calls = toolCalls.requests
+        return (calls.isEmpty ? [] : [.toolCalls(calls)])
+            + [.finished(OpenAIClient.stopReason(finishReason, hasToolCalls: !calls.isEmpty, sawDone: sawDone), usage)]
     }
 }
 

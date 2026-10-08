@@ -17,6 +17,9 @@ struct ContextCut: Sendable, Equatable {
     /// Messages at the start of the input already folded into `summary` (a leading summary pair counts).
     var covered = 0
     var summary: String?
+    /// What `summary` is rendered from (see `ConversationLedger`): a fold extends it with the messages leaving the
+    /// window. nil with a summary: the summary is a text of an earlier version, read into a ledger once when extended.
+    var ledger: ConversationLedger?
     /// The task all the fields below belong to starts at this index of the input; a new task starts them over.
     var anchor = -1
     /// Shortening level reached in a task too big for the window (see `ContextWindow.rungs`); it only goes up.
@@ -26,8 +29,9 @@ struct ContextCut: Sendable, Equatable {
     /// Tool outputs of the task, oldest first, already past their fresh period (shortened).
     var settled = 0
 
-    init(summary: String? = nil) {
+    init(summary: String? = nil, ledger: ConversationLedger? = nil) {
         self.summary = summary
+        self.ledger = ledger
     }
 }
 
@@ -39,10 +43,21 @@ struct ContextWindow: Sendable, Equatable {
     var messages: [ChatMessage]
     /// How many leading messages of the input the summary now stands for.
     var droppedCount: Int
+    /// How many of them this fit folded into the summary (those before the first user message of a slice that began
+    /// mid-turn are only left out).
+    var foldedCount = 0
     /// Summary of those messages (nil when nothing was folded away); kept by `Conversation` between turns.
     var summary: String?
+    /// What the summary is rendered from; kept with it.
+    var ledger: ConversationLedger?
     /// How many messages after the request of a task too big for the window were set aside (digested in the pair).
     var skippedCount = 0
+    /// How many model steps those messages are.
+    var skippedSteps = 0
+    /// Estimated size of the history before this fit folded or set aside anything new (the summary pair included), and
+    /// of what it sends: for telling the user what a compaction did.
+    var charactersBefore = 0
+    var charactersAfter: Int { messages.reduce(0) { $0 + $1.contextCharacters } }
 
     /// Old tool outputs (those of earlier turns, and the task's own once past their fresh period), in characters.
     static let toolOutputPreview = 4_000
@@ -76,10 +91,10 @@ struct ContextWindow: Sendable, Equatable {
     ]
 
     /// Fits `input` (no system message) to `budget` with no memory of earlier fits.
-    /// `previousSummary` stands for messages already left out of `input`.
-    static func fit(_ input: [ChatMessage], budget: ContextBudget, summary previousSummary: String? = nil, condensing: Int = 0,
-                    continuing: Bool = false) -> ContextWindow {
-        var cut = ContextCut(summary: previousSummary)
+    /// `previousSummary` stands for messages already left out of `input`; `previousLedger` is what it was rendered from.
+    static func fit(_ input: [ChatMessage], budget: ContextBudget, summary previousSummary: String? = nil,
+                    ledger previousLedger: ConversationLedger? = nil, condensing: Int = 0, continuing: Bool = false) -> ContextWindow {
+        var cut = ContextCut(summary: previousSummary, ledger: previousLedger)
         return fit(input, budget: budget, cut: &cut, condensing: condensing, continuing: continuing)
     }
 
@@ -99,15 +114,22 @@ struct ContextWindow: Sendable, Equatable {
     /// `continuing`: the last user message of the input only picks up the task before it (a task that stopped at
     /// the step limit), so that task's outputs are the fresh ones and its turn is not dropped from under it.
     /// `paused`: the input ends with such a task, before the message that picks it up: it still counts as in progress.
+    /// `nudge`: index in the input of a user message the engine added only to steer the turn (the "continue" after a
+    /// reply cut by the output limit): part of the turn in progress, never the start of one, so the turn's request
+    /// is never folded away from under it.
     static func fit(_ input: [ChatMessage], budget: ContextBudget, cut: inout ContextCut, condensing: Int = 0,
-                    continuing: Bool = false, paused: Bool = false) -> ContextWindow {
+                    continuing: Bool = false, paused: Bool = false, nudge: Int? = nil) -> ContextWindow {
         let limit = budget.characters
         let covered = min(max(cut.covered, 0), input.count)
         var work = Array(input[covered...])
         var previous = cut.summary
+        // The note about steps an earlier fit set aside belongs to the request right after its pair: it goes on, apart
+        // from the summary, for as long as that request is in the window.
+        var carriedNote: String?
         var pairLength = 0
-        if covered == 0, let inherited = ContextSummary.leading(in: work) {
-            previous = inherited
+        if covered == 0, let inherited = ContextSummary.inherited(in: work) {
+            previous = inherited.summary ?? previous
+            carriedNote = inherited.stepsNote
             work.removeFirst(2)
             pairLength = 2
         }
@@ -118,10 +140,12 @@ struct ContextWindow: Sendable, Equatable {
         let origin = covered + pairLength + start
 
         // The task in progress: the latest request, or, for a task picked up again, the one before it.
-        let users = raw.indices.filter { raw[$0].role == .user }
+        let nudgeIndex = nudge.map { $0 - origin }
+        let users = raw.indices.filter { raw[$0].role == .user && $0 != nudgeIndex }
         let pickedUp = continuing && users.count >= 2
         let taskStart = pickedUp ? users[users.count - 2] : (users.last ?? -1)
-        let inProgress = pickedUp || paused || (raw.last.map { $0.role == .tool || !$0.toolCalls.isEmpty } ?? false)
+        let nudged = nudgeIndex.map { $0 > taskStart && $0 < raw.count } ?? false
+        let inProgress = pickedUp || paused || nudged || (raw.last.map { $0.role == .tool || !$0.toolCalls.isEmpty } ?? false)
         let anchor = origin + max(taskStart, 0)
         if cut.anchor != anchor {
             cut.anchor = anchor
@@ -193,7 +217,9 @@ struct ContextWindow: Sendable, Equatable {
         // A task picked up again is one turn with its predecessor: its own request is not a place to cut.
         let turnStarts = users.filter { !(pickedUp && $0 == users.last) }
         var dropped = 0
-        func reserve() -> Int { previous != nil || dropped > 0 ? ContextSummary.reserve : 0 }
+        func reserve() -> Int { previous != nil || carriedNote != nil || dropped > 0 ? ContextSummary.reserve : 0 }
+        let charactersBefore = total + (previous != nil || carriedNote != nil ? ContextSummary.pair(
+            [previous, carriedNote].compactMap { $0 }.joined(separator: "\n")).reduce(0) { $0 + $1.contextCharacters } : 0)
 
         // Over the limit: fold whole old turns away, down to the low-water mark.
         var turn = 0
@@ -260,19 +286,33 @@ struct ContextWindow: Sendable, Equatable {
         cut.rung = rung
         cut.skipped = skipped
         cut.settled = settled
-        let skippedSteps = skipped > 0 ? Array(raw[(dropped + 1)..<(dropped + 1 + skipped)]) : []
+        let skippedRange = skipped > 0 ? (dropped + 1)..<(dropped + 1 + skipped) : 0..<0
+        // The nudge is no word of the user's: it leaves no line.
+        let skippedSteps = skippedRange.filter { $0 != nudgeIndex }.map { raw[$0] }
 
         // Messages before the first user message (a slice that began mid-turn) are just left out, not summarized.
+        // What leaves the window is absorbed into the ledger once; the summary is rendered from it (never nested).
         let folded = Array(work[start..<(start + dropped)])
-        let summary: String? = folded.isEmpty ? previous : ContextSummary.make(from: folded, previous: previous)
-        let shown = [summary, ContextSummary.stepsNote(skippedSteps, maxLines: digestLines)].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
+        var ledger = cut.ledger
+        var summary = previous
+        if !folded.isEmpty {
+            let base = cut.ledger ?? previous.map { ConversationLedger(legacy: $0) } ?? ConversationLedger()
+            let extended = base.absorbing(folded)
+            ledger = extended
+            summary = extended.render()
+        }
+        let note = ContextSummary.mergedNotes(dropped == 0 ? carriedNote : nil,
+                                              ContextSummary.stepsNote(skippedSteps, maxLines: digestLines))
+        let shown = [summary, note].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
         let messages = shown.isEmpty ? [] : ContextSummary.pair(shown, foldedTurns: summary != nil)
         if dropped > 0 {
             cut.covered = covered + pairLength + start + dropped
             cut.summary = summary
+            cut.ledger = ledger
         }
         return ContextWindow(messages: (messages + body).answeringDanglingToolCalls(), droppedCount: start + dropped,
-                             summary: summary, skippedCount: skipped)
+                             foldedCount: folded.count, summary: summary, ledger: ledger, skippedCount: skipped,
+                             skippedSteps: skippedSteps.filter { $0.role == .assistant }.count, charactersBefore: charactersBefore)
     }
 }
 
@@ -384,14 +424,17 @@ private extension JSONValue {
 
 // MARK: - Summary
 
-/// Rule-based summary of messages folded out of the window (the spirit of `SessionSummary`, over `ChatMessage`s).
+/// The summary of messages folded out of the window, as the model reads it. What it says comes from a
+/// `ConversationLedger` (rules, no model call); this type is its wrapper in the history: the marker, the pair and
+/// the lines about steps of the current request.
 enum ContextSummary {
     static let marker = "[Resumo do começo desta conversa]"
     static let acknowledgement = "Entendido. Sigo a partir deste resumo e das mensagens abaixo."
     /// Characters set aside in the budget for the summary pair.
     static let reserve = 4_000
     static let maxLength = 3_000
-    private static let previousLength = 1_200
+    /// The title line of the note about steps set aside (`stepsNote`).
+    static let stepsNoteTitle = "Neste pedido, os primeiros passos foram omitidos; o que cada um fez:"
 
     /// A user message with the summary and an assistant acknowledgement, so the conversation alternates
     /// correctly for every provider.
@@ -403,60 +446,54 @@ enum ContextSummary {
          ChatMessage(role: .assistant, content: acknowledgement)]
     }
 
-    /// The summary text of a pair at the start of `messages` (from an earlier fit), or nil.
-    static func leading(in messages: [ChatMessage]) -> String? {
+    /// What a pair at the start of a history holds: the summary of the folded turns and, apart from it, the note
+    /// about steps of the current request that an earlier fit set aside (which is no summary of anything older).
+    struct Inherited: Equatable {
+        var summary: String?
+        var stepsNote: String?
+    }
+
+    /// The pair at the start of `messages` (from an earlier fit), or nil when there is none.
+    static func inherited(in messages: [ChatMessage]) -> Inherited? {
         guard messages.count >= 2, messages[0].role == .user, messages[0].content.hasPrefix(marker),
               messages[1].role == .assistant, messages[1].content == acknowledgement else { return nil }
         let lines = messages[0].content.split(separator: "\n", maxSplits: 2, omittingEmptySubsequences: false)
-        return lines.count == 3 ? String(lines[2]) : ""
+        let body = lines.count == 3 ? String(lines[2]) : ""
+        var summary = body
+        var note: String?
+        if let title = body.range(of: stepsNoteTitle),
+           title.lowerBound == body.startIndex || body[body.index(before: title.lowerBound)] == "\n" {
+            summary = String(body[..<title.lowerBound])
+            note = String(body[title.lowerBound...])
+        }
+        summary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        return Inherited(summary: summary.isEmpty ? nil : summary, stepsNote: note)
     }
 
-    static func make(from dropped: [ChatMessage], previous: String?) -> String {
-        func line(_ text: String, _ limit: Int) -> String { MemoryText.clip(MemoryText.flatten(text), limit) }
-        var sections: [String] = []
+    /// The summary text of a pair at the start of `messages` (from an earlier fit), or nil.
+    static func leading(in messages: [ChatMessage]) -> String? { inherited(in: messages)?.summary }
 
-        let requests = dropped.filter { $0.role == .user }.map { line(TurnPreface.stripped($0.content), 200) }.filter { !$0.isEmpty }
-        if !requests.isEmpty {
-            let older = requests.count > 8 ? ["(+\(requests.count - 8) pedidos anteriores)"] : []
-            sections.append("Pedidos do usuário:\n" + (older + requests.suffix(8).map { "- " + $0 }).joined(separator: "\n"))
-        }
-        if let work = work(in: dropped) { sections.append(work) }
-        if let answer = dropped.last(where: { $0.role == .assistant && !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
-            sections.append("Última resposta do assistente: " + line(answer.content, 600))
-        }
-        if let previous, !previous.isEmpty {
-            sections.append("Resumo anterior: " + MemoryText.clip(previous, previousLength))
-        }
-        return MemoryText.clip(sections.joined(separator: "\n"), maxLength)
+    /// An earlier note and a new one as one note (the title once).
+    static func mergedNotes(_ earlier: String?, _ new: String) -> String {
+        guard let earlier, !earlier.isEmpty else { return new }
+        guard !new.isEmpty else { return earlier }
+        return ([earlier] + new.components(separatedBy: "\n").dropFirst()).joined(separator: "\n")
+    }
+
+    /// The summary of `dropped` added to `previous` (the text of an earlier summary, carried once as it is).
+    static func make(from dropped: [ChatMessage], previous: String?) -> String {
+        make(from: dropped, ledger: previous.map { ConversationLedger(legacy: $0) } ?? ConversationLedger())
+    }
+
+    static func make(from dropped: [ChatMessage], ledger: ConversationLedger) -> String {
+        ledger.absorbing(dropped).render()
     }
 
     /// Lines about steps of the current request that were set aside to make room: one for each (see `ToolDigest`).
     static func stepsNote(_ skipped: [ChatMessage], maxLines: Int = ToolDigest.maxLines) -> String {
         let lines = ToolDigest.lines(for: skipped, maxLines: maxLines)
         guard !lines.isEmpty else { return "" }
-        return "Neste pedido, os primeiros passos foram omitidos; o que cada um fez:\n" + lines.joined(separator: "\n")
-    }
-
-    /// Tools used and the files and links they touched.
-    private static func work(in messages: [ChatMessage]) -> String? {
-        var counts: [(name: String, count: Int)] = []
-        var references: [String] = []
-        for message in messages {
-            for call in message.toolCalls {
-                if let index = counts.firstIndex(where: { $0.name == call.name }) { counts[index].count += 1 }
-                else { counts.append((call.name, 1)) }
-                for token in MemoryText.keepTokens(String(call.arguments.prefix(2_000)), limit: 6)
-                where references.count < 12 && !references.contains(token) {
-                    references.append(token)
-                }
-            }
-        }
-        var lines: [String] = []
-        if !counts.isEmpty {
-            lines.append("Ferramentas usadas: " + counts.prefix(10).map { "\($0.name) (\($0.count))" }.joined(separator: ", ") + ".")
-        }
-        if !references.isEmpty { lines.append("Arquivos e links: " + references.joined(separator: "; ")) }
-        return lines.isEmpty ? nil : lines.joined(separator: "\n")
+        return stepsNoteTitle + "\n" + lines.joined(separator: "\n")
     }
 }
 
@@ -480,33 +517,66 @@ extension Conversation {
     /// first message touched: turns are folded away when the history passes the budget (down to its low-water mark,
     /// see `ContextBudget`), and the older stretch is condensed (see `ContextCondensing`) at that same moment, or
     /// when that alone would save enough. Between batches the history only grows at its end.
-    /// `firstCompaction` is true the first time this conversation gets a summary.
-    mutating func prepareHistory(budget: ContextBudget) -> (history: [ChatMessage], firstCompaction: Bool) {
-        let covered = summary == nil ? 0 : min(max(summaryCoveredCount ?? 0, 0), messages.count)
+    /// `firstCompaction` is true the first time this conversation gets a summary; `compaction` says what this call
+    /// folded away, with numbers (nil when it folded nothing): one notice per fold.
+    /// `reserving`: characters the request carries besides this history (the new message and what goes before it),
+    /// left out of the room, so a fold at sending is not followed by another at the turn's first step.
+    /// `focus`: something the summary should pay attention to (a manual compaction); kept only when this call folds.
+    mutating func prepareHistory(budget: ContextBudget, reserving characters: Int = 0, focus: String? = nil)
+        -> (history: [ChatMessage], firstCompaction: Bool, compaction: CompactionReport?) {
+        let room = budget.leavingRoom(forCharacters: characters)
+        let covered = coveredMessageCount
         let slice = Array(messages[covered...])
         let stored = max((condensedCount ?? 0) - covered, 0)
         var condensing = stored
         let paused = isTaskPaused
-        var cut = ContextCut(summary: summary)
-        var window = ContextWindow.fit(slice, budget: budget, cut: &cut, condensing: condensing, paused: paused)
+        var base = currentLedger
+        if let focus = Self.cleanFocus(focus) {
+            var seeded = base ?? ConversationLedger()
+            seeded.focus = focus
+            base = seeded
+        }
+        var cut = ContextCut(summary: summary, ledger: base)
+        var window = ContextWindow.fit(slice, budget: room, cut: &cut, condensing: condensing, paused: paused)
+        let before = window.charactersBefore
 
         let frontier = ContextCondensing.frontier(in: slice)
         if frontier > stored {
             let saving = ContextCondensing.savings(in: slice, from: stored, to: frontier)
-            if cut.covered > 0 || saving >= Int(Double(budget.characters) * ContextBudget.condenseShare) {
+            if cut.covered > 0 || saving >= Int(Double(room.characters) * ContextBudget.condenseShare) {
                 condensing = frontier
-                cut = ContextCut(summary: summary)
-                window = ContextWindow.fit(slice, budget: budget, cut: &cut, condensing: condensing, paused: paused)
+                cut = ContextCut(summary: summary, ledger: base)
+                window = ContextWindow.fit(slice, budget: room, cut: &cut, condensing: condensing, paused: paused)
             }
         }
         if condensing > 0 { condensedCount = covered + condensing }
 
         let first = summary == nil && window.summary != nil
-        if window.summary != nil {
-            summary = window.summary
-            summaryCoveredCount = covered + window.droppedCount
-        }
-        return (window.messages, first)
+        guard cut.covered > 0, window.summary != nil else { return (window.messages, first, nil) }
+        summary = window.summary
+        ledger = cut.ledger
+        summaryCoveredCount = covered + window.droppedCount
+        compactions = (compactions ?? 0) + 1
+        let report = CompactionReport(kind: .turns, foldedMessages: window.foldedCount,
+                                      tokensBefore: ContextBudget.tokens(forCharacters: before),
+                                      tokensAfter: ContextBudget.tokens(forCharacters: window.charactersAfter))
+        return (window.messages, first, report)
+    }
+
+    /// How many of `messages` the summary stands for.
+    var coveredMessageCount: Int { summary == nil ? 0 : min(max(summaryCoveredCount ?? 0, 0), messages.count) }
+
+    /// The ledger the summary was rendered from; for a conversation saved before ledgers existed, its text.
+    var currentLedger: ConversationLedger? {
+        guard let summary else { return nil }
+        return ledger ?? ConversationLedger(legacy: summary)
+    }
+
+    /// The focus of a manual compaction on one line, at most `ConversationLedger.focusLimit` characters; nil when blank.
+    static func cleanFocus(_ text: String?) -> String? {
+        guard let text else { return nil }
+        let line = ConversationLedger.clip(text, ConversationLedger.focusLimit)
+        return line.isEmpty ? nil : line
     }
 }
 

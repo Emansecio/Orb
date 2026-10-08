@@ -24,7 +24,7 @@ import Testing
         await model.gate.open(request.id, botID: botID)
         model.apply(.approval(request), to: botID)
         // A turn is running (it is waiting on the card).
-        model.turns[botID] = Task { try? await Task.sleep(for: .seconds(30)) }
+        model.session(botID).turnTask = Task { try? await Task.sleep(for: .seconds(30)) }
         return (model, botID, request)
     }
 
@@ -64,7 +64,7 @@ import Testing
     @Test @MainActor func aModeChangeWithoutARunningTurnTouchesNothing() async throws {
         let (model, botID, request) = try await modelWithOpenCard(mode: .ask)
         model.turns[botID]?.cancel()
-        model.turns[botID] = nil
+        model.session(botID).turnTask = nil
         model.update(botID) { $0.permissionMode = .readOnly }
         // Without a running turn the change returns before it spawns anything; the short settle covers a regression that does.
         try await Task.sleep(for: .milliseconds(20))

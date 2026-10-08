@@ -407,11 +407,18 @@ struct ClaudeCodeTranscriptTests {
         #expect(text.hasSuffix("The user's new message:"))
     }
 
-    @Test func catchUpKeepsTheMostRecentPartWhenLong() {
+    @Test func catchUpKeepsTheMostRecentMessagesWholeAndSummarizesTheRestWhenLong() {
         let long = (0..<200).map { ChatMessage.user("mensagem \($0) " + String(repeating: "x", count: 100)) }
         let text = ClaudeCodePrompt.catchUp(long, limit: 2_000)
-        #expect(text.contains("mensagem 199"))
-        #expect(!text.contains("mensagem 0 "))
+        #expect(text.count < 2_400)
+        #expect(text.contains("User: mensagem 199 "))
+        #expect(!text.contains("User: mensagem 0 "))
+        // The first request is not lost with the cut: it heads the summary of what did not fit.
+        #expect(text.contains("Pedido original: mensagem 0 "))
+        // Whole messages only: every listed line is complete.
+        for line in text.components(separatedBy: "\n") where line.hasPrefix("User: ") {
+            #expect(line.hasSuffix(String(repeating: "x", count: 100)))
+        }
     }
 
     @Test func failuresAndDenials() {

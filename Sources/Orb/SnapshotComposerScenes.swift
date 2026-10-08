@@ -14,7 +14,7 @@ extension Snapshot {
             // Mid-turn: a tool ran, the Orb is working for 12 s and two messages wait their turn.
             seedConversation(model, bot: bot)
             model.apply(.status("Rodando no Terminal"), to: bot.id)
-            model.turns[bot.id] = Task { try? await Task.sleep(for: .seconds(3600)) }
+            model.session(bot.id).turnTask = Task { try? await Task.sleep(for: .seconds(3600)) }
             model.live(bot.id).backdateWork(to: .now.addingTimeInterval(-12))
             let lane = model.composerLane(bot.id)
             lane.enqueue(SteeredMessage(text: "Na verdade, ignore a pasta node_modules.", prompt: ""))

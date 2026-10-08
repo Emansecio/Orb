@@ -56,7 +56,11 @@ Views (SwiftUI)  ──►  AppModel (@MainActor @Observable)
 - **Contexto** (`ContextBudget`, `ContextWindow`): o histórico enviado ao modelo cabe num orçamento de 90% da janela menos o
   prompt de sistema, as especificações das ferramentas e o espaço da resposta, com teto escolhido em “Memória da conversa”
   (40 mil tokens, 80 mil, ou até 60% da janela). Passou do orçamento, o começo vira resumo **em lote**, até a metade dele
-  (cada mudança no começo do pedido reescreve o cache do provedor, então mexe-se pouco e de uma vez). Saídas antigas de
+  (cada mudança no começo do pedido reescreve o cache do provedor, então mexe-se pouco e de uma vez). O resumo é um
+  registro estruturado (`ConversationLedger`), atualizado só com as mensagens que saem da janela: pedido original fixo,
+  objetivo atual, pedidos e decisões, arquivos alterados e lidos, erros, pendências e última resposta, com teto por seção
+  e sem resumos aninhados. Cada compactação vira um aviso com números e grava o trecho na memória antes de esquecer;
+  “Compactar agora” (`AppModel.compactNow`, ou `/compactar [foco]` no compositor) faz o mesmo até 30% do orçamento. Saídas antigas de
   ferramentas, prefácios `<orb_context>` e raciocínio criptografado de trechos velhos são condensados na cópia enviada (as
   mensagens guardadas ficam inteiras); numa tarefa maior que a janela, as saídas mais novas ficam inteiras e os passos mais
   velhos viram uma linha cada. Uma tarefa que para no limite de passos deixa um registro de progresso para o “continua”.
@@ -104,8 +108,9 @@ Claude Code e nunca chama a Anthropic com eles:
   “Padrão do Claude Code” não passa `--model`. Se o CLI não responder, ficam os apelidos documentados (opus, sonnet, haiku).
 - **Memória**: o resumo da memória vai no `--append-system-prompt` de cada turno, e `remember`/`recall` chegam pelo MCP:
   o próprio binário do app roda como servidor (`Orb --memory-mcp <pasta>`, ver `MemoryMCPServer`) nos mesmos arquivos.
-- Limites: ao trocar de outro provedor para o Claude Code no meio da conversa, o Claude Code
-  começa sem o histórico anterior.
+- **Contexto**: uma sessão nova (troca de modelo, pasta mudou, “Compactar agora”) recebe o resumo da conversa e as
+  mensagens depois dele, inteiras e das mais novas para as mais velhas; o que não cabe entra no resumo. Quando o próprio
+  Claude Code compacta a sessão (`compact_boundary`), a conversa mostra um aviso com os números que ele informa.
 
 ## Permissões do macOS
 

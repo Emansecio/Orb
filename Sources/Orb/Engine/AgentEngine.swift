@@ -24,6 +24,9 @@ enum TurnEvent: Sendable {
     /// A message the user sent during the turn (see `SteeringQueue`) was just handed to the model: the transcript
     /// shows it now, in its place among the steps, instead of as queued.
     case steered(UUID)
+    /// Part of the history was folded into a summary during the turn (or Claude Code compacted its own session). The
+    /// app tells the user once, with numbers, and keeps the summary when the fold is of older turns (`report.fold`).
+    case compacted(CompactionReport)
 }
 
 /// Everything one turn needs, captured up front so the turn never reads UI state.
@@ -38,6 +41,9 @@ struct TurnRequest: Sendable {
     var context: ToolContext
     /// How much history the model's window takes (the system prompt and tool specs come on top).
     var budget = ContextBudget.fallback
+    /// What the summary at the start of `history` was rendered from, so folding more turns during the turn extends it
+    /// instead of starting over from its text.
+    var ledger: ConversationLedger?
     /// Upper bound on model calls in this turn, so a confused model cannot loop forever.
     var maxSteps = AgentEngine.defaultMaxSteps
     /// Grants for this turn only that the user's own request already gave (saving to memory when asked to remember).
@@ -128,18 +134,21 @@ actor AgentEngine {
         var budget = request.budget.refined(overheadTokens: overhead)
         request.onOverheadMeasured?(overhead)
         // Where the fits of this turn cut the history, so the start of the request holds still between compactions.
-        var cut = ContextCut()
+        var cut = ContextCut(ledger: request.ledger)
+        // What of it was already told: every fold once (a summary the history starts with was told when it was made,
+        // see `AppModel.send`), steps set aside once per turn.
+        var announced = Announced()
         // The last task stopped at the step limit and this message picks it up.
         let picksUpTask = request.picksUpTask ?? ProgressRecord.endsHistory(request.history)
         var learnedWindow: (tokens: Int, stated: Bool)?
-        // History that already starts with a summary was announced when it was compacted (`AppModel.send`).
-        var announcedCompaction = ContextSummary.leading(in: request.history) != nil
         let toolNames = Set(request.tools.map(\.spec.name))
         let maxSteps = max(2, request.maxSteps)
         var usage: TokenUsage?
         var requestsWithUsage = 0
         var warnedAboutCache = false
         var continuedAfterCut = false
+        // Where in `messages` the "continue" after a cut reply went (it steers the turn; it starts none).
+        var nudge: Int?
         var sendImages = request.supportsImages != false
         if !sendImages, !request.images.isEmpty { out.yield(.notice(ImageRejection.notice)) }
 
@@ -155,11 +164,11 @@ actor AgentEngine {
                 while true {
                     var windowHasImages = false
                     do {
-                        let window = Self.fitted(messages, to: budget, cut: &cut, continuing: picksUpTask, sendImages: sendImages)
+                        let (window, fit) = Self.fitted(messages, to: budget, cut: &cut, continuing: picksUpTask, nudge: nudge,
+                                                           sendImages: sendImages)
                         windowHasImages = window.contains { !$0.images.isEmpty }
-                        if !announcedCompaction, window.contains(where: { $0.role == .user && $0.content.hasPrefix(ContextSummary.marker) }) {
-                            announcedCompaction = true
-                            out.yield(.notice("Conversa compactada: o começo virou um resumo."))
+                        if let fit {
+                            for report in announced.reports(after: fit, cut: cut, input: messages.dropFirst()) { out.yield(.compacted(report)) }
                         }
                         reply = try await respond(to: window, request: request, specs: specs,
                                                   toolChoice: isLastStep ? .none : .auto, out: out)
@@ -249,6 +258,7 @@ actor AgentEngine {
                     if !continuedAfterCut && !isLastStep {
                         continuedAfterCut = true
                         // Not recorded: it only steers this turn and is no message of the user's.
+                        nudge = messages.count
                         messages.append(.user(Self.continueNudge))
                         continue
                     }
@@ -262,7 +272,7 @@ actor AgentEngine {
                     // On the last step the model may have only tried to call tools: that is the limit, not silence.
                     if isLastStep && !reply.calls.isEmpty {
                         // Nothing else says where the task stands: leave a record for the "continua" that follows.
-                        if let progress = Self.progress(in: messages, pickedUp: picksUpTask) {
+                        if let progress = Self.progress(in: messages, pickedUp: picksUpTask, nudge: nudge) {
                             record(ChatMessage(role: .assistant, content: progress), in: &messages, out: out)
                             out.yield(.taskPaused)
                         }
@@ -272,7 +282,7 @@ actor AgentEngine {
                     }
                     return
                 }
-                if calls.isEmpty && isLastStep, let progress = Self.progress(in: messages, pickedUp: picksUpTask) {
+                if calls.isEmpty && isLastStep, let progress = Self.progress(in: messages, pickedUp: picksUpTask, nudge: nudge) {
                     // The model's closing words, with the record of the steps after them (one message, so the roles
                     // keep alternating; the transcript shows only what the model wrote).
                     var closing = assistant
@@ -392,11 +402,14 @@ actor AgentEngine {
     }
 
     /// The steps of the task `messages` end with, written as a progress record (nil when it made no tool calls).
-    /// `pickedUp`: the turn's request only picks up the task before it.
-    private static func progress(in messages: [ChatMessage], pickedUp: Bool) -> String? {
-        let users = messages.indices.filter { messages[$0].role == .user && !messages[$0].content.hasPrefix(ContextSummary.marker) }
+    /// `pickedUp`: the turn's request only picks up the task before it. `nudge`: the index of the "continue" the engine
+    /// added, which is no request.
+    private static func progress(in messages: [ChatMessage], pickedUp: Bool, nudge: Int? = nil) -> String? {
+        let users = messages.indices.filter {
+            $0 != nudge && messages[$0].role == .user && !messages[$0].content.hasPrefix(ContextSummary.marker)
+        }
         guard let start = pickedUp && users.count >= 2 ? users[users.count - 2] : users.last else { return nil }
-        return ProgressRecord.text(task: Array(messages[start...]))
+        return ProgressRecord.text(task: messages.indices.filter { $0 >= start && $0 != nudge }.map { messages[$0] })
     }
 
     static func pausedNotice(after steps: Int) -> String {
@@ -502,11 +515,43 @@ actor AgentEngine {
     /// `cut` is what earlier calls of this turn decided to leave out: it holds still until the history is over the
     /// budget again, and then moves in one go (see `ContextWindow.fit`), so most calls extend the previous request
     /// and the provider's cache keeps working.
+    /// `nudge`: index in `messages` of the engine's "continue" (see `ContextWindow.fit`).
     private static func fitted(_ messages: [ChatMessage], to budget: ContextBudget, cut: inout ContextCut, continuing: Bool = false,
-                               sendImages: Bool = true) -> [ChatMessage] {
-        guard let system = messages.first, system.role == .system else { return messages }
-        let window = [system] + ContextWindow.fit(Array(messages.dropFirst()), budget: budget, cut: &cut, continuing: continuing).messages
-        return sendImages ? window : window.strippingImages()
+                               nudge: Int? = nil, sendImages: Bool = true) -> (messages: [ChatMessage], fit: ContextWindow?) {
+        guard let system = messages.first, system.role == .system else { return (messages, nil) }
+        let fit = ContextWindow.fit(Array(messages.dropFirst()), budget: budget, cut: &cut, continuing: continuing,
+                                    nudge: nudge.map { $0 - 1 })
+        let window = [system] + fit.messages
+        return (sendImages ? window : window.strippingImages(), fit)
+    }
+
+    /// What the compactions of one turn have told so far. The window is fitted again before every model call, so
+    /// without this the same fold would be seen at every step: a fold is reported when the cut moves (and only the
+    /// part that moved), steps set aside once per turn.
+    struct Announced: Sendable {
+        /// Messages of the fit's input already reported as folded.
+        private var covered = 0
+        private var steps = false
+
+        mutating func reports(after window: ContextWindow, cut: ContextCut, input: ArraySlice<ChatMessage>) -> [CompactionReport] {
+            var reports: [CompactionReport] = []
+            let before = ContextBudget.tokens(forCharacters: window.charactersBefore)
+            let after = ContextBudget.tokens(forCharacters: window.charactersAfter)
+            if cut.covered > covered, let summary = cut.summary {
+                // A summary pair the input starts with stands for what was folded before this turn: not counted again.
+                let pair = covered == 0 && ContextSummary.inherited(in: Array(input.prefix(2))) != nil ? 2 : 0
+                let own = Array(input.dropFirst(max(covered, pair)).prefix(max(cut.covered - max(covered, pair), 0)))
+                reports.append(CompactionReport(kind: .turns, foldedMessages: own.count, tokensBefore: before, tokensAfter: after,
+                                                fold: .init(summary: summary, ledger: cut.ledger,
+                                                            turns: own.filter { $0.role == .user }.count)))
+                covered = cut.covered
+            }
+            if window.skippedSteps > 0, !steps {
+                steps = true
+                reports.append(CompactionReport(kind: .steps, foldedMessages: window.skippedSteps, tokensBefore: before, tokensAfter: after))
+            }
+            return reports
+        }
     }
 
     /// Runs one tool call (asking first when needed) and returns the text the model receives. `allowed` holds the

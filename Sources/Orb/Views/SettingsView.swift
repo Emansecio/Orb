@@ -28,7 +28,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
     /// Each tab is as tall as it needs, not as the tallest.
     var height: CGFloat {
         switch self {
-        case .general: 680
+        case .general: 760
         case .models, .permissions: 640
         }
     }
@@ -108,6 +108,8 @@ struct SettingsShortcut: Identifiable {
 }
 
 struct GeneralSettings: View {
+    @Environment(AppModel.self) private var model
+    @State private var learnedWindows: [LearnedWindowRow] = []
     @AppStorage("notifyWhenDone") private var notifyWhenDone = true
     @AppStorage(GlobalHotKey.defaultsKey) private var globalShortcut = false
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -128,6 +130,8 @@ struct GeneralSettings: View {
                 Toggle("Me avisar quando um Orb terminar ou precisar de mim", isOn: $notifyWhenDone)
                 notificationState
             }
+            ContextMemorySettings()
+            LearnedWindowsSettings(rows: $learnedWindows)
             Section {
                 dataRow("Pasta de dados", "Conversas, memórias e ajustes", button: "Mostrar no Finder", isEnabled: true) {
                     NSWorkspace.shared.activateFileViewerSelecting([Store.standard.directory])
@@ -211,6 +215,7 @@ struct GeneralSettings: View {
     }
 
     private func refresh() async {
+        learnedWindows = model.learnedWindowRows()
         notifications = await NotificationPermission.current()
         // A look at the disk, once, off the render path.
         hasKeptMemories = FileManager.default.fileExists(atPath: GeneralSettings.keptMemoriesFolder.path)

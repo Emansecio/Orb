@@ -244,6 +244,74 @@ struct EngineLearningTests {
     }
 }
 
+// MARK: - The "continue" after a cut reply
+
+/// The engine adds "continue" when a reply hits the output limit. It steers the turn and starts none: a fold inside the
+/// turn never takes the request away from the model, and the record of a paused task covers the whole task.
+struct EngineNudgeTests {
+    private static let request = "PEDIDO ATUAL: migre o banco do app para SQLite " + String(repeating: "com cuidado ", count: 100)
+
+    @Test func aFoldAfterTheContinueKeepsTheRequestInEveryWindow() async throws {
+        var history: [ChatMessage] = []
+        for index in 0..<6 { history += turn("pedido antigo \(index)", output: 3_000, tag: "h\(index)") }
+        let cutReply: [LLMEvent] = [.text("primeira parte"), .finished(.maxTokens, nil)]
+        let rounds = (0..<3).map { [LLMEvent.toolCalls([call("s\($0)", "read_file", #"{"path":"/tmp/g\#($0).txt"}"#)])] }
+        let recorder = Recorder([cutReply] + rounds + [[.text("fim")]])
+        let events = await collect(engineRequest(recorder, history: history, budget: ContextBudget(tokens: 6_000), toolSize: 9_000,
+                                                 prompt: Self.request))
+        #expect(!events.contains { if case .failed = $0 { true } else { false } })
+
+        let received = await recorder.received
+        #expect(received.count == 5)
+        // The history was folded during the turn, after the "continue"…
+        #expect(received.dropFirst(2).contains { $0.contains { $0.content.hasPrefix(ContextSummary.marker) } })
+        // …and every window still holds the request, right after the summary pair when there is one.
+        for sent in received {
+            #expect(sent.contains { $0.content == Self.request })
+            #expect(isValidConversation(Array(sent.dropFirst())))
+        }
+        // What was folded is the earlier turns only: the request is not in the summary, the "continue" is no turn.
+        let folds = events.compactMap { if case .compacted(let report) = $0, report.kind == .turns { report.fold } else { nil } }
+        #expect(!folds.isEmpty)
+        for fold in folds {
+            #expect(!fold.summary.contains("PEDIDO ATUAL"))
+            #expect(fold.turns <= 6)
+            #expect((fold.ledger?.foldedMessages ?? 0) <= history.count)
+        }
+    }
+
+    @Test func aPausedTaskRecordsTheStepsBeforeTheContinueToo() async throws {
+        let first = LLMEvent.toolCalls([call("s0", "read_file", #"{"path":"/tmp/f0.txt"}"#)])
+        let second = LLMEvent.toolCalls([call("s1", "read_file", #"{"path":"/tmp/f1.txt"}"#)])
+        let recorder = Recorder([[first], [.text("parte"), .finished(.maxTokens, nil)], [second], [.text("Fiz.")]])
+        let events = await collect(engineRequest(recorder, budget: .fallback, maxSteps: 4))
+        let last = try #require(recorded(events).last)
+        #expect(last.content.hasPrefix("Fiz.\n\n" + ProgressRecord.marker))
+        #expect(last.content.contains("read_file /tmp/f0.txt") && last.content.contains("read_file /tmp/f1.txt"))
+        #expect(!last.content.contains(AgentEngine.continueNudge))
+        #expect(events.contains { if case .taskPaused = $0 { true } else { false } })
+    }
+
+    @Test func theNudgeIsNoTurnStartForTheWindow() throws {
+        var input: [ChatMessage] = []
+        for index in 0..<6 { input += turn("pedido antigo \(index)", output: 3_000, tag: "w\(index)") }
+        let start = input.count
+        input += [.user(Self.request), ChatMessage(role: .assistant, content: "primeira parte"), .user(AgentEngine.continueNudge),
+                  ChatMessage(role: .assistant, content: "", toolCalls: [call("n0", "read_file", #"{"path":"/tmp/n0.txt"}"#)]),
+                  .tool("n0", String(repeating: "y", count: 12_000))]
+        let budget = ContextBudget(tokens: 6_000)
+        var plain = ContextCut()
+        let unaware = ContextWindow.fit(input, budget: budget, cut: &plain)
+        // Without knowing the nudge, the cut lands on it: the request leaves the window.
+        #expect(!unaware.messages.contains { $0.content == Self.request })
+        var cut = ContextCut()
+        let window = ContextWindow.fit(input, budget: budget, cut: &cut, nudge: start + 2)
+        #expect(window.messages.contains { $0.content == Self.request })
+        #expect(window.droppedCount <= start && cut.covered <= start)
+        #expect(window.foldedCount == window.droppedCount)
+    }
+}
+
 // MARK: - Step limit
 
 struct EngineStepLimitTests {

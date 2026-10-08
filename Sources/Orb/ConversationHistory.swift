@@ -89,6 +89,8 @@ extension Conversation {
         copy.messages = []
         copy.summary = nil
         copy.summaryCoveredCount = nil
+        copy.ledger = nil
+        copy.compactions = nil
         copy.condensedCount = nil
         copy.taskPaused = nil
         copy.claudeSessionID = nil

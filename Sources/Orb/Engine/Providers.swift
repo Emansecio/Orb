@@ -334,8 +334,7 @@ enum ModelCatalog {
     }
 
     private static func getJSON(_ url: URL, token: String?, session: URLSession) async throws -> JSONValue {
-        let (data, response) = try await session.data(for: OpenAIClient.authorizedRequest(url, apiKey: token))
-        try await OpenAIClient.check(response, body: { data.prefix(OpenAIClient.errorBodyLimit) })
+        let data = try await ProviderTransport.fetch(ProviderTransport.authorizedRequest(url, apiKey: token), session: session)
         guard let json = JSONValue.parse(String(decoding: data, as: UTF8.self)) else {
             throw LLMError.invalidResponse("lista de modelos ilegível")
         }

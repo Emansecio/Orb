@@ -4,16 +4,6 @@ import Testing
 @testable import Orb
 
 struct OpenAIClientTests {
-    @Test func parsesSSELines() {
-        #expect(SSEParser.parse(#"data: {"a":1}"#) == .data(#"{"a":1}"#))
-        #expect(SSEParser.parse(#"data:{"a":1}"#) == .data(#"{"a":1}"#))
-        #expect(SSEParser.parse("data: [DONE]") == .done)
-        #expect(SSEParser.parse(": OPENROUTER PROCESSING") == nil)
-        #expect(SSEParser.parse("") == nil)
-        #expect(SSEParser.parse("data: ") == nil)
-        #expect(SSEParser.parse("event: ping") == nil)
-    }
-
     @Test func assemblesParallelToolCallsFromFragments() throws {
         let chunks = [
             #"[{"index":0,"id":"call_a","type":"function","function":{"name":"read_file","arguments":""}}]"#,
@@ -65,7 +55,7 @@ struct OpenAIClientTests {
     }
 
     @Test func extractsErrorMessages() {
-        let message = { (text: String) in OpenAIClient.errorMessage(from: Data(text.utf8), status: 404) }
+        let message = { (text: String) in ProviderTransport.errorMessage(from: Data(text.utf8), status: 404) }
         #expect(message(#"{"error":{"message":"Incorrect API key","type":"invalid_request_error"}}"#) == "Incorrect API key")
         #expect(message(#"{"error":"model not found"}"#) == "model not found")
         #expect(message(#"{"message":"rate limited"}"#) == "rate limited")
@@ -273,15 +263,15 @@ struct OpenAIReliabilityTests {
         let response = { (headers: [String: String]) in
             HTTPURLResponse(url: URL(string: "https://x.test")!, statusCode: 429, httpVersion: nil, headerFields: headers)!
         }
-        #expect(OpenAIClient.retryAfter(in: response(["Retry-After": "12"])) == 12)
-        #expect(OpenAIClient.retryAfter(in: response(["Retry-After": "1.5"])) == 1.5)
-        #expect(OpenAIClient.retryAfter(in: response(["retry-after-ms": "250"])) == 0.25)
-        #expect(OpenAIClient.retryAfter(in: response(["Retry-After": "-3"])) == nil)
-        #expect(OpenAIClient.retryAfter(in: response(["Retry-After": "soon"])) == nil)
-        #expect(OpenAIClient.retryAfter(in: response([:])) == nil)
+        #expect(ProviderTransport.retryAfter(in: response(["Retry-After": "12"])) == 12)
+        #expect(ProviderTransport.retryAfter(in: response(["Retry-After": "1.5"])) == 1.5)
+        #expect(ProviderTransport.retryAfter(in: response(["retry-after-ms": "250"])) == 0.25)
+        #expect(ProviderTransport.retryAfter(in: response(["Retry-After": "-3"])) == nil)
+        #expect(ProviderTransport.retryAfter(in: response(["Retry-After": "soon"])) == nil)
+        #expect(ProviderTransport.retryAfter(in: response([:])) == nil)
         let now = Date(timeIntervalSince1970: 1_800_000_000) // Fri, 15 Jan 2027 08:00:00 GMT
-        #expect(OpenAIClient.retryAfter(in: response(["Retry-After": "Fri, 15 Jan 2027 08:00:30 GMT"]), now: now) == 30)
-        #expect(OpenAIClient.retryAfter(in: response(["Retry-After": "Fri, 15 Jan 2027 07:00:00 GMT"]), now: now) == 0)
+        #expect(ProviderTransport.retryAfter(in: response(["Retry-After": "Fri, 15 Jan 2027 08:00:30 GMT"]), now: now) == 30)
+        #expect(ProviderTransport.retryAfter(in: response(["Retry-After": "Fri, 15 Jan 2027 07:00:00 GMT"]), now: now) == 0)
     }
 
     @Test func rateLimitErrorsCarryRetryAfter() async {
