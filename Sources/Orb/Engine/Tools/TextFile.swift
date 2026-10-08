@@ -136,20 +136,82 @@ struct TextFile: Sendable {
     }
 }
 
+/// Turns the errors the file system gives into messages the model can act on: in Portuguese, with the full path, and for
+/// a refused access with what to tell the user (the macOS protected folders are the usual cause on a Mac).
+enum FileAccess {
+    /// Runs `body`; a permission or read-only failure becomes a `ToolError` that names `url`, any other error passes through.
+    static func translating<T>(_ url: URL, writing: Bool, _ body: () throws -> T) throws -> T {
+        do {
+            return try body()
+        } catch let error as ToolError {
+            throw error
+        } catch {
+            if let denied = denial(error, path: url.path, writing: writing) { throw denied }
+            throw error
+        }
+    }
+
+    static func denial(_ error: Error, path: String, writing: Bool) -> ToolError? {
+        guard let kind = refusal(error) else { return nil }
+        switch kind {
+        case .readOnlyVolume:
+            return ToolError("\(path) está num volume somente leitura; não dá para gravar ali.")
+        case .noPermission:
+            let action = writing ? "gravar em" : "ler"
+            return ToolError("Sem permissão para \(action) \(path). Se for Mesa, Documentos, Downloads ou outra pasta protegida, o macOS pode "
+                + "estar bloqueando o Orb: peça para a pessoa permitir em Ajustes do Sistema → Privacidade e Segurança → Arquivos e "
+                + "Pastas (ou Acesso Total ao Disco). Não tente contornar com sudo ou outro caminho.")
+        }
+    }
+
+    private enum Refusal { case noPermission, readOnlyVolume }
+
+    private static func refusal(_ error: Error) -> Refusal? {
+        var current: NSError? = error as NSError
+        for _ in 0..<4 {
+            guard let nsError = current else { return nil }
+            if nsError.domain == NSCocoaErrorDomain {
+                switch nsError.code {
+                case NSFileReadNoPermissionError, NSFileWriteNoPermissionError: return .noPermission
+                case NSFileWriteVolumeReadOnlyError: return .readOnlyVolume
+                default: break
+                }
+            }
+            if nsError.domain == NSPOSIXErrorDomain {
+                switch Int32(nsError.code) {
+                case EACCES, EPERM: return .noPermission
+                case EROFS: return .readOnlyVolume
+                default: break
+                }
+            }
+            current = nsError.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return nil
+    }
+}
+
 /// Writes through symbolic links, keeping the permissions (executable bit) of the file being replaced.
 enum FileWriter {
     static func write(_ data: Data, to url: URL) throws {
         let target = url.resolvingLinkChain
         let manager = FileManager.default
-        try manager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let permissions = (try? manager.attributesOfItem(atPath: target.path))?[.posixPermissions]
-        do {
-            try data.write(to: target, options: .atomic)
-        } catch {
-            // Atomic replacement needs a writable folder; a writable file in a read-only one can still be updated.
-            guard manager.isWritableFile(atPath: target.path) else { throw error }
-            try data.write(to: target)
+        try FileAccess.translating(target, writing: true) {
+            try manager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+            // Replacing a file atomically swaps it by name and so ignores that it is read-only; the owner set that bit on
+            // purpose (or a tool did), so writing over it needs the owner to lift it first.
+            if manager.fileExists(atPath: target.path), !manager.isWritableFile(atPath: target.path) {
+                throw ToolError("\(target.path) está protegido contra escrita (somente leitura). Se é para mudá-lo mesmo, libere antes "
+                    + "(chmod u+w) ou grave em outro arquivo.")
+            }
+            let permissions = (try? manager.attributesOfItem(atPath: target.path))?[.posixPermissions]
+            do {
+                try data.write(to: target, options: .atomic)
+            } catch {
+                // Atomic replacement needs a writable folder; a writable file in a read-only one can still be updated.
+                guard manager.isWritableFile(atPath: target.path) else { throw error }
+                try data.write(to: target)
+            }
+            if let permissions { try? manager.setAttributes([.posixPermissions: permissions], ofItemAtPath: target.path) }
         }
-        if let permissions { try? manager.setAttributes([.posixPermissions: permissions], ofItemAtPath: target.path) }
     }
 }

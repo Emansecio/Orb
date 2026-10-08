@@ -352,7 +352,9 @@ extension [ChatMessage] {
 enum ContextText {
     private static let omissionOpen = "\n[… "
     private static let omissionClose = " characters omitted from the middle …]\n"
-    private static let savedNoteOpen = "\n[full output saved at "
+    /// How the note about a saved output starts, whichever tool wrote it (see `RunCommandTool`): later shortening of the
+    /// conversation keeps such a note whole.
+    static let savedNoteOpen = "\n[full output saved at "
     private static let maxSavedNote = 600
 
     /// The start and end of `text` with a marker for what is left out, `limit` characters in all (plus the marker).

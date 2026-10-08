@@ -25,6 +25,8 @@ struct PermissionRule: Codable, Hashable, Sendable {
         case folder(String)
         /// This site and its subdomains.
         case host(String)
+        /// Searching the web (Claude Code's WebSearch), which has no site to name; never covers reading a page.
+        case search
         /// One connector tool, by `PermissionPolicy.connectorKey`.
         case connectorTool(String)
     }
@@ -51,6 +53,7 @@ struct PermissionRule: Codable, Hashable, Sendable {
         case .commandPrefix(let words): family == .shell && !words.isEmpty && !words.contains(where: \.isEmpty)
         case .folder(let path): family == .writeFiles && path.hasPrefix("/") && path != "/"
         case .host(let host): family == .web && !host.isEmpty
+        case .search: family == .web
         case .connectorTool(let key): family == .connector && !key.isEmpty
         }
     }
@@ -75,6 +78,7 @@ extension PermissionRule.Scope: Codable {
         case "commandPrefix": self = .commandPrefix(try c.decode([String].self, forKey: .words))
         case "folder": self = .folder(try c.decode(String.self, forKey: .path))
         case "host": self = .host(try c.decode(String.self, forKey: .host))
+        case "search": self = .search
         case "connectorTool": self = .connectorTool(try c.decode(String.self, forKey: .tool))
         case let other:
             throw DecodingError.dataCorruptedError(forKey: .kind, in: c, debugDescription: "unknown scope \(other)")
@@ -88,6 +92,7 @@ extension PermissionRule.Scope: Codable {
         case .commandPrefix(let words): try c.encode("commandPrefix", forKey: .kind); try c.encode(words, forKey: .words)
         case .folder(let path): try c.encode("folder", forKey: .kind); try c.encode(path, forKey: .path)
         case .host(let host): try c.encode("host", forKey: .kind); try c.encode(host, forKey: .host)
+        case .search: try c.encode("search", forKey: .kind)
         case .connectorTool(let key): try c.encode("connectorTool", forKey: .kind); try c.encode(key, forKey: .tool)
         }
     }
@@ -113,6 +118,7 @@ extension PermissionRule {
         case .commandPrefix(let words): "Rodar comandos \(words.joined(separator: " "))"
         case .folder(let path): "Gravar em \(Self.display(path))"
         case .host(let host): "Acessar \(host)"
+        case .search: "Pesquisar na web"
         case .connectorTool(let key): "Usar \(Self.connectorTitle(key))"
         }
     }
@@ -123,7 +129,7 @@ extension PermissionRule {
         case .host(let host): return "Sempre permitir \(host)"
         case .commandPrefix(let words): return "Sempre permitir comandos \(words.joined(separator: " "))"
         case .folder(let path): return "Sempre permitir gravar em \(Self.display(path))"
-        case .connectorTool, .any:
+        case .connectorTool, .any, .search:
             let text = title
             return "Sempre permitir " + text.prefix(1).lowercased() + text.dropFirst()
         }
@@ -213,14 +219,28 @@ enum PermissionPolicy {
             if let danger = call.danger { return .ask(.dangerous(danger)) }
             if call.risk == .instructs { return .ask(.instructs) }
             if mode == .auto { return .allow }
-            if isCovered(call, by: rules + turnGrants) || isInsideOwnFolder(call, workspace: workspace, home: home) { return .allow }
+            if isCovered(call, by: rules + turnGrants, ownFolder: ownFolder(workspace, home: home)) || isInsideOwnFolder(call, workspace: workspace, home: home) {
+                return .allow
+            }
             return .ask(.needsPermission)
         }
     }
 
-    /// Whether the rules together allow the call.
-    static func isCovered(_ call: PermissionCall, by rules: [PermissionRule]) -> Bool {
+    /// Whether the rules together allow the call. A download (`web_fetch` with `save_to`) does two things, reach the
+    /// site and write a file, and needs both covered: a rule for the site alone, or "any site", never lets it write
+    /// anywhere. `ownFolder` is where the Orb may write without a rule (see `ownFolder(_:home:)`).
+    static func isCovered(_ call: PermissionCall, by rules: [PermissionRule], ownFolder: URL? = nil) -> Bool {
         guard let family = call.family else { return false }
+        if family == .web, call.savesFile {
+            var visit = call, write = call
+            visit.savesFile = false
+            visit.paths = []
+            write.family = .writeFiles
+            write.host = nil
+            write.savesFile = false
+            return isCovered(visit, by: rules)
+                && (isCovered(write, by: rules) || (ownFolder.map { folder in !call.paths.isEmpty && call.paths.allSatisfy { isInside($0, folder: folder) } } ?? false))
+        }
         let relevant = rules.filter { $0.family == family && $0.isValid }
         if relevant.contains(where: { $0.scope == .any }) { return true }
         switch family {
@@ -231,7 +251,8 @@ enum PermissionPolicy {
             let folders: [URL] = relevant.compactMap { if case .folder(let path) = $0.scope { resolved(URL(fileURLWithPath: path)) } else { nil } }
             return !call.paths.isEmpty && call.paths.allSatisfy { path in folders.contains { isInside(path, folder: $0) } }
         case .web:
-            guard let host = call.host, !call.savesFile else { return false }
+            if Self.isSearch(call) { return relevant.contains { $0.scope == .search } }
+            guard let host = call.host else { return false }
             return relevant.contains { if case .host(let allowed) = $0.scope { hostMatches(host, allowed) } else { false } }
         case .connector:
             guard let key = call.connector else { return false }
@@ -257,6 +278,11 @@ enum PermissionPolicy {
     /// `cd dir` only moves; models chain it in front of the real command (`cd app && npm test`).
     private static func isTransparent(_ segment: ShellCommandLine.Segment) -> Bool {
         segment.words.first == "cd" && segment.words.count <= 2
+    }
+
+    /// Claude Code's WebSearch (and a native search tool of the same name family).
+    static func isSearch(_ call: PermissionCall) -> Bool {
+        call.family == .web && ["WebSearch", "web_search"].contains(call.toolName)
     }
 
     static func hostMatches(_ host: String, _ allowed: String) -> Bool {
@@ -320,13 +346,15 @@ enum PermissionPolicy {
         var call = PermissionCall(toolName: name, family: family, risk: tool.risk(arguments))
         let directory = arguments.nonEmptyString("cwd").map(context.url(for:)) ?? context.workingDirectory
         let scope = dangerScope(workspace: context.workingDirectory, directory: directory, home: home)
-        var danger = tool.danger(arguments)
+        var danger = tool.danger(arguments, context: context)
 
         if let text = arguments["command"]?.string {
             call.command = ShellCommandLine.parse(text)
             danger = danger ?? DangerousCommand.reason(for: text, in: scope, home: home)
         } else if let script = arguments["script"]?.string {
-            danger = danger ?? DangerousCommand.reason(forAppleScript: script, in: scope, home: home)
+            // No language means AppleScript (the tool's default); one it does not know is read both ways.
+            let named = arguments.nonEmptyString("language")?.lowercased() ?? AppleScript.Language.applescript.rawValue
+            danger = danger ?? DangerousCommand.reason(forAppleScript: script, language: AppleScript.Language(rawValue: named), in: scope, home: home)
         }
         switch family {
         case .writeFiles:
@@ -335,14 +363,38 @@ enum PermissionPolicy {
             danger = danger ?? call.paths.lazy.compactMap { DangerousCommand.reason(forWritingTo: $0, home: home) }.first
         case .web:
             call.host = arguments["url"]?.string.flatMap(Self.host(of:))
-            call.savesFile = arguments.nonEmptyString("save_to") != nil
+            // A download is a write like `write_file`: judged by where it lands, so it cannot replace a startup
+            // file or a key (`~/Library/LaunchAgents`, `.zshrc`, `.ssh`) any more than `write_file` can.
+            if let destination = arguments.nonEmptyString("save_to") {
+                call.savesFile = true
+                call.paths = [resolved(context.url(for: destination))]
+                danger = danger ?? call.paths.lazy.compactMap { DangerousCommand.reason(forWritingTo: $0, home: home) }.first
+            }
         case .connector:
             call.connector = connectorKey(name)
         default:
             break
         }
+        // Reading is harmless except for secrets: those ask like a destructive command (and are refused in read-only).
+        if call.risk == .safe, let reason = secretBeingRead(toolName: name, path: arguments.nonEmptyString("path").map(context.url(for:)), home: home) {
+            call.risk = .sensitive
+            danger = reason
+        }
         call.danger = danger
+        // A line that only looks (ls, git status…) needs no card and runs even in read-only.
+        if family == .shell, danger == nil, !arguments.flag("background"), let line = call.command,
+           ReadOnlyCommand.isReadOnly(line, directory: directory, home: home) {
+            call.risk = .safe
+        }
         return call
+    }
+
+    /// Why this read of a file is a secret being read: `read_file` and `grep` of a private key, saved password or token.
+    /// (A folder search withholds such files by itself, see `GrepTool`.)
+    static func secretBeingRead(toolName: String, path: URL?, home: URL) -> String? {
+        guard let path, ["read_file", "grep", "Read", "Grep", "NotebookRead"].contains(toolName) else { return nil }
+        let sensitive = DangerousCommand.SensitiveFiles(home: home)
+        return sensitive.reason(for: path.standardizedFileURL.path) ?? sensitive.reason(for: resolved(path).path)
     }
 
     /// A tool call from Claude Code (`Bash`, `Write`, `mcp__server__tool`…).
@@ -379,6 +431,10 @@ enum PermissionPolicy {
             if let text = input["command"]?.string {
                 call.command = ShellCommandLine.parse(text)
                 call.danger = DangerousCommand.reason(for: text, in: scope, home: home)
+                if call.danger == nil, !input.flag("run_in_background"), let line = call.command,
+                   ReadOnlyCommand.isReadOnly(line, directory: base, home: home) {
+                    call.risk = .safe
+                }
             }
         case "BashOutput", "TaskOutput", "KillShell", "KillBash", "TaskStop":
             call.family = .jobs
@@ -386,6 +442,11 @@ enum PermissionPolicy {
             call.family = .writeFiles
             call.paths = [path("file_path") ?? path("notebook_path")].compactMap { $0 }.map(resolved)
             call.danger = call.paths.lazy.compactMap { DangerousCommand.reason(forWritingTo: $0, home: home) }.first
+        case "Read", "Grep", "NotebookRead":
+            if let reason = secretBeingRead(toolName: name, path: path("file_path") ?? path("notebook_path") ?? path("path"), home: home) {
+                call.risk = .sensitive
+                call.danger = reason
+            }
         case "WebFetch":
             call.family = .web
             call.host = input["url"]?.string.flatMap(Self.host(of:))
@@ -464,7 +525,9 @@ enum PermissionPolicy {
         case .writeFiles:
             found = call.paths.isEmpty ? [PermissionRule(family: .writeFiles)] : folderSuggestions(call.paths, home: home)
         case .web:
-            found = call.host.map { [PermissionRule.host($0)] } ?? [PermissionRule(family: .web)]
+            // A search has no site to name; "any site" would also allow reading every page, so it gets its own rule.
+            found = isSearch(call) ? [PermissionRule(family: .web, scope: .search)]
+                : call.host.map { [PermissionRule.host($0)] } ?? [PermissionRule(family: .web)]
             if call.savesFile { found = [] }
         case .connector:
             found = call.connector.map { [PermissionRule(family: .connector, scope: .connectorTool($0))] } ?? []

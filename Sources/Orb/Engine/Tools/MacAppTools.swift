@@ -320,9 +320,8 @@ struct AppsListTool: AgentTool {
     let spec = ToolSpec(
         name: "apps_list",
         description: """
-        List the running apps with bundle identifier, which is in front and which are hidden. Use it to see what \
-        is open or to get the exact name for app_quit and open. `include_background` adds menu bar apps and \
-        helper agents.
+        List the running apps with bundle identifier, which is in front and which are hidden: what is open, or \
+        the exact name for app_quit and open. `include_background` adds menu bar apps and helper agents.
         """,
         parameters: .schema([
             "include_background": .property("boolean"),
@@ -413,10 +412,9 @@ struct AppQuitTool: AgentTool {
     let spec = ToolSpec(
         name: "app_quit",
         description: """
-        Quit a running app by exact name or bundle identifier (see apps_list), asking it to quit normally: with \
-        unsaved documents it may show a Save dialog and stay open, so tell the user. `force` kills it at once \
-        and loses unsaved work (the user is always asked to confirm); only for a frozen app. Cannot quit the Orb \
-        itself.
+        Quit a running app by exact name or bundle identifier (see apps_list), normally: with unsaved documents \
+        it may show a Save dialog and stay open, so tell the user. `force` kills it and loses unsaved work (the \
+        user is always asked to confirm); only for a frozen app. Cannot quit the Orb itself.
         """,
         parameters: .schema([
             "app": .property("string"),
@@ -504,7 +502,10 @@ struct TrashTool: AgentTool {
     }
 
     var kind: ToolCall.Kind { .file }
-    var capability: Capability? { .computerUse }
+    /// A file operation: moving to the Trash needs no Mac permission, so "Terminal e arquivos" is enough. "Controlar apps do
+    /// Mac" offers it too, as it did before.
+    var capability: Capability? { .terminal }
+    var alsoWithCapability: Capability? { .computerUse }
     func risk(_ arguments: JSONValue) -> ToolRisk { .sensitive }
 
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) {

@@ -353,13 +353,21 @@ final class ToolOutputSizeTests {
     // MARK: web_fetch
 
     @Test func theDefaultFetchPageIsTwelveThousandCharacters() {
-        let text = String(repeating: "a", count: 30_000)
+        let text = String(repeating: "a", count: 30_000)   // no break to cut at: the piece is exactly the size asked for
         let page = WebFetchTool.page(of: text, arguments: .object([:]), truncatedDownload: nil)
         #expect(page.hasPrefix("[caracteres 1–12000 de 30000]"))
         #expect(page.hasSuffix("use offset=12000 para continuar ...]"))
         let bigger = WebFetchTool.page(of: text, arguments: .object(["max_chars": .number(24_000)]), truncatedDownload: nil)
         #expect(bigger.hasPrefix("[caracteres 1–24000 de 30000]"))
         #expect(WebFetchTool.page(of: text, arguments: .object(["max_chars": .number(99_000)]), truncatedDownload: nil).contains("1–24000"))
+        // A piece ends at a line break, else at a space, never inside a word; the note says where it stopped.
+        let words = String(repeating: "abcdef ", count: 5_000)
+        let soft = WebFetchTool.page(of: words, arguments: .object([:]), truncatedDownload: nil)
+        #expect(soft.hasPrefix("[caracteres 1–11998 de 35000]") && soft.hasSuffix("use offset=11998 para continuar ...]"))
+        let lines = (0..<2_000).map { "linha \($0) de texto" }.joined(separator: "\n")
+        let byLine = WebFetchTool.page(of: lines, arguments: .object([:]), truncatedDownload: nil)
+        let offset = try? #require(Int(byLine.components(separatedBy: "use offset=").last?.components(separatedBy: " ").first ?? ""))
+        #expect(offset.map { lines[lines.index(lines.startIndex, offsetBy: $0 - 1)] == "\n" } == true)
         // A short page has no header and no note.
         #expect(WebFetchTool.page(of: "curto", arguments: .object([:]), truncatedDownload: nil) == "curto")
     }

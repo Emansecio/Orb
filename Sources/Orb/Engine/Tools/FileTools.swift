@@ -14,8 +14,9 @@ struct ReadFileTool: AgentTool {
         description: """
         Read a file as numbered lines (`<number><tab><text>`); the number prefix is not file content, never \
         include it in edits. One call returns up to ~24,000 characters or `limit` lines; a note at the end gives \
-        the `offset` to continue. Also reads PDFs (`pages`), Word/RTF/ODT (as text) and images (size plus OCR \
-        text). HTML is returned as source.
+        the `offset` to continue. Also reads PDFs (`pages`), Word/RTF/ODT, Excel (.xlsx) and PowerPoint (.pptx) as \
+        text, and images (size plus OCR text). HTML is returned as source. Files over 20 MB are refused: use grep \
+        (one file up to 200 MB) or head/tail/sed.
         """,
         parameters: .schema([
             "path": .property("string"),
@@ -33,34 +34,40 @@ struct ReadFileTool: AgentTool {
     }
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
-        let url = context.url(for: try arguments.requiredString("path")).resolvingLinkChain
+        let requested = context.url(for: try arguments.requiredString("path"))
+        if requested.isInLinkLoop { throw ToolError("Link simbólico em loop (aponta de volta para si mesmo): \(requested.path)") }
+        let url = requested.resolvingLinkChain
         guard FileManager.default.fileExists(atPath: url.path) else { throw ToolError("Arquivo não encontrado: \(url.path)") }
         guard !url.isExistingDirectory else { throw ToolError("\(url.path) é uma pasta; use list_directory.") }
         let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
 
-        if DocumentReader.isPDF(url) || DocumentReader.isImage(url) || DocumentReader.isDocument(url) {
+        if DocumentReader.isPDF(url) || DocumentReader.isImage(url) || DocumentReader.isDocument(url) || OfficeReader.isOffice(url) {
             guard size <= maxDocumentBytes else {
                 throw ToolError("\(url.path) é grande demais (\(size) bytes); use run_command para extrair só o que precisa.")
             }
             if DocumentReader.isPDF(url) {
-                let data = try Data(contentsOf: url, options: .mappedIfSafe)
+                let data = try FileAccess.translating(url, writing: false) { try Data(contentsOf: url, options: .mappedIfSafe) }
                 let pages = arguments.nonEmptyString("pages")
                 return try await runDetached { try DocumentReader.pdfText(data, pages: pages) }
             }
             if DocumentReader.isImage(url) {
                 return try await Task.detached(priority: .userInitiated) { try DocumentReader.describeImage(at: url, size: size) }.value
             }
-            let text = try await runDetached { try DocumentReader.documentText(at: url) }
+            let office = OfficeReader.isOffice(url)
+            let text = try await runDetached {
+                try FileAccess.translating(url, writing: false) { try office ? OfficeReader.text(at: url) : DocumentReader.documentText(at: url) }
+            }
             return Self.numbered(TextFile.lines(of: text), arguments: arguments, note: "documento .\(url.pathExtension.lowercased()) convertido em texto")
         }
 
         guard size <= maxTextFileBytes else {
             throw ToolError("\(url.path) é grande demais (\(size) bytes); use grep ou run_command com head, tail ou sed.")
         }
-        let data = try Data(contentsOf: url, options: .mappedIfSafe)
+        let data = try FileAccess.translating(url, writing: false) { try Data(contentsOf: url, options: .mappedIfSafe) }
         guard let file = TextFile.decode(data) else {
             let bytes = ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
-            throw ToolError("\(url.path) é um arquivo binário (\(bytes)); não dá para ler como texto. Use run_command (file, strings, xxd) se precisar inspecioná-lo.")
+            throw ToolError("\(url.path) é um arquivo binário (\(bytes)); não dá para ler como texto. "
+                + (Self.binaryAdvice(for: url) ?? "Use run_command (file, strings, xxd) se precisar inspecioná-lo."))
         }
         var notes: [String] = []
         if file.encoding != .utf8 || file.hasBOM { notes.append("codificação \(file.encodingName)") }
@@ -93,9 +100,23 @@ struct ReadFileTool: AgentTool {
         return text
     }
 
+    /// What to do with a binary format this tool does not read, by extension.
+    static func binaryAdvice(for url: URL) -> String? {
+        switch url.pathExtension.lowercased() {
+        case "pages", "numbers", "key":
+            "É um pacote do iWork: peça para exportar para PDF, Word ou Excel (Arquivo → Exportar para), ou olhe a prévia embutida com run_command (unzip -l)."
+        case "xls", "ppt":
+            "É um formato antigo do Office, sem leitor aqui: converta para .xlsx ou .pptx (ou PDF) antes, por exemplo abrindo e exportando no Excel ou PowerPoint."
+        case "zip", "gz", "tgz", "7z", "rar", "tar":
+            "É um arquivo compactado: liste com run_command (unzip -l, tar -tf) e extraia só o que precisa."
+        default:
+            nil
+        }
+    }
+
     private static func clip(_ line: String) -> String {
         guard line.utf8.count > maxLineLength, line.count > maxLineLength else { return line }
-        return line.prefix(maxLineLength) + "… [+\(line.count - maxLineLength) caracteres nesta linha]"
+        return line.prefix(maxLineLength) + "… [+\(line.count - maxLineLength) caracteres nesta linha; para ver o resto use grep (mostra ~300 caracteres em volta de cada ocorrência) ou run_command com cut -c 2001-6000]"
     }
 }
 
@@ -155,6 +176,7 @@ struct WriteFileTool: AgentTool {
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
         let url = context.url(for: try arguments.requiredString("path"))
+        if url.isInLinkLoop { throw ToolError("Link simbólico em loop (aponta de volta para si mesmo): \(url.path)") }
         let target = url.resolvingLinkChain
         var content = try arguments.requiredString("content", allowEmpty: true)
         let append = arguments.flag("append")
@@ -163,7 +185,7 @@ struct WriteFileTool: AgentTool {
         let written = Data(content.utf8)
         if append, FileManager.default.fileExists(atPath: target.path) {
             // Appending UTF-8 bytes to a UTF-16 or Windows-1252 file would corrupt it, so match the file.
-            let existing = try Data(contentsOf: target, options: .mappedIfSafe)
+            let existing = try FileAccess.translating(target, writing: true) { try Data(contentsOf: target, options: .mappedIfSafe) }
             if existing.count <= maxTextFileBytes, let file = TextFile.decode(existing), file.encoding != .utf8 || file.lineEnding == .crlf {
                 if file.lineEnding == .crlf {
                     content = content.replacingOccurrences(of: "\r\n", with: "\n", options: .literal)
@@ -172,10 +194,12 @@ struct WriteFileTool: AgentTool {
                 try FileWriter.write(try file.encoded(file.text + content), to: url)
                 return "\(content.utf8.count) bytes acrescentados a \(Self.location(url, target))"
             }
-            let handle = try FileHandle(forWritingTo: target)
-            defer { try? handle.close() }
-            try handle.seekToEnd()
-            try handle.write(contentsOf: written)
+            try FileAccess.translating(target, writing: true) {
+                let handle = try FileHandle(forWritingTo: target)
+                defer { try? handle.close() }
+                try handle.seekToEnd()
+                try handle.write(contentsOf: written)
+            }
         } else {
             try FileWriter.write(written, to: url)
         }
@@ -228,6 +252,7 @@ struct EditFileTool: AgentTool {
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
         let url = context.url(for: try arguments.requiredString("path"))
+        if url.isInLinkLoop { throw ToolError("Link simbólico em loop (aponta de volta para si mesmo): \(url.path)") }
         let target = url.resolvingLinkChain
         let old = try arguments.requiredString("old_text")
         let new = try arguments.requiredString("new_text", allowEmpty: true)
@@ -239,7 +264,7 @@ struct EditFileTool: AgentTool {
         guard old != new else { throw ToolError("old_text e new_text são idênticos; não há nada para alterar.") }
         let size = try target.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
         guard size <= maxTextFileBytes else { throw ToolError("\(url.path) é grande demais para editar (\(size) bytes).") }
-        guard let file = TextFile.decode(try Data(contentsOf: target)) else {
+        guard let file = TextFile.decode(try FileAccess.translating(target, writing: false) { try Data(contentsOf: target) }) else {
             throw ToolError("\(url.path) é um arquivo binário; edit_file só edita texto.")
         }
 

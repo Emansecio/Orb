@@ -120,15 +120,36 @@ struct InstructionTrustTests {
 // MARK: - Prompt follows the switches
 
 struct CapabilityPromptTests {
-    @Test func withoutComputerUseThePromptDoesNotSendTheOrbToAppleScriptOrTheTrashTool() {
+    @Test func withoutComputerUseThePromptDoesNotSendTheOrbToAppleScript() {
         for engine in [PromptEngine.native, .claudeCode] {
             let text = PromptParts.permissions(bot([.terminal, .browser]), engine: engine)
-            #expect(!text.contains("administrator privileges") && !text.contains("trash tool") && !text.contains("Finder via osascript"))
+            #expect(!text.contains("administrator privileges") && !text.contains("Finder via osascript"))
             #expect(!text.contains("Gravação de Tela"))
             #expect(text.contains("sudo") && text.contains("Controlar apps do Mac"))
         }
         let on = PromptParts.permissions(bot(), engine: .native)
         #expect(on.contains("administrator privileges") && on.contains("trash tool") && on.contains("Gravação de Tela"))
+    }
+
+    @Test func theTrashToolIsNamedWheneverTheOrbHasIt() {
+        // It needs "Terminal e arquivos" or "Controlar apps do Mac", whichever is on, in both engines.
+        let native = PromptParts.permissions(bot([.terminal]), engine: .native)
+        #expect(native.contains("prefer the trash tool over rm"))
+        let claudeCode = PromptParts.permissions(bot([.terminal]), engine: .claudeCode)
+        #expect(claudeCode.contains("prefer the mcp__orb_memoria__trash tool over rm"))
+        #expect(!claudeCode.contains("Finder"))
+        #expect(PromptParts.permissions(bot([.computerUse]), engine: .claudeCode).contains("mcp__orb_memoria__trash"))
+        // With neither switch there is no trash tool and nothing to delete with.
+        for engine in [PromptEngine.native, .claudeCode] {
+            #expect(!PromptParts.permissions(bot([.browser]), engine: engine).contains("trash tool"))
+        }
+    }
+
+    @Test func claudeCodeIsToldWhatItKeepsWhenTheTerminalSwitchIsOff() {
+        let claudeCode = PromptParts.permissions(bot([.browser]), engine: .claudeCode)
+        #expect(claudeCode.contains("Read only for files the user attached"))
+        let native = PromptParts.permissions(bot([.browser]), engine: .native)
+        #expect(native.contains("no tools to read, write or search files"))
     }
 
     @Test func toolHintsListOnlyTheToolsTheOrbHas() {
@@ -141,6 +162,19 @@ struct CapabilityPromptTests {
 
         let noMac = PromptParts.nativeToolHints(bot([.terminal]))
         #expect(noMac.contains("read_file") && !noMac.contains("applescript") && !noMac.contains("shortcuts_run"))
+    }
+
+    @Test func webHintsFollowTheWebSwitchAndSayWhichToolReadsWhat() {
+        let all = PromptParts.nativeToolHints(bot())
+        #expect(all.contains("web_fetch") && all.contains("offset or find") && all.contains("no JavaScript"))
+        #expect(all.contains("browser_tab with include_text") && all.contains("not to read a page"))
+        #expect(all.contains("no web search tool") && all.contains("Wikipedia's api.php") && all.contains("not a search engine"))
+        // Without "Controlar apps do Mac" there is no browser_tab to point to.
+        let web = PromptParts.nativeToolHints(bot([.browser]))
+        #expect(web.contains("web_fetch") && !web.contains("browser_tab"))
+        // Without "Navegar na web" there is no web_fetch to point to.
+        let noWeb = PromptParts.nativeToolHints(bot([.terminal, .computerUse]))
+        #expect(!noWeb.contains("web_fetch") && !noWeb.contains("Wikipedia") && noWeb.contains("open to open files and links"))
     }
 
     @Test func askModeAdmitsTheActionsTheUserAlwaysAllows() {

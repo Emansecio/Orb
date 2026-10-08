@@ -295,8 +295,18 @@ enum ClaudeCodeTools {
     /// Tools of the Orb's own MCP server: memory (`mcp__orb_memoria__remember`, `__recall`) and, for an Orb with
     /// "Controlar apps do Mac", the Mac tools (`mcp__orb_memoria__open`, `__applescript`…). The server keeps its first name.
     static let memoryPrefix = "mcp__\(OrbToolsMCPServer.name)__"
-    /// Removed when the bot's "Terminal e arquivos" capability is off.
-    static let terminal = ["Bash", "Edit", "Write", "MultiEdit", "NotebookEdit"]
+    /// Removed when the bot's "Terminal e arquivos" capability is off: the shell, everything that changes files, and the
+    /// tools that look through them or manage shell jobs, as the native engine offers none of these then. `Read` stays,
+    /// because Claude Code opens the pictures the user attaches with it.
+    static let terminal = ["Bash", "Edit", "Write", "MultiEdit", "NotebookEdit", "Glob", "Grep", "LS", "NotebookRead",
+                           "BashOutput", "TaskOutput", "KillShell", "KillBash", "TaskStop"]
+    /// Reads of private keys and saved passwords, refused outright in every mode but "Sem pedir permissão". The CLI trusts
+    /// the whole home folder (`--add-dir`) and so would never ask the Orb about these reads (the native engine asks, see
+    /// `PermissionPolicy.secretBeingRead`).
+    static let secretReads = [
+        "Read(~/.ssh/**)", "Read(~/.gnupg/**)", "Read(~/.aws/**)", "Read(~/.kube/**)", "Read(~/.config/gcloud/**)",
+        "Read(~/Library/Keychains/**)", "Read(~/.netrc)", "Read(~/.npmrc)", "Read(~/.config/gh/hosts.yml)", "Read(~/.docker/config.json)",
+    ]
     /// Removed when "Navegar na web" is off.
     static let web = ["WebFetch", "WebSearch"]
 

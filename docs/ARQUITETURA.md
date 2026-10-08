@@ -52,7 +52,7 @@ Tudo em `Sources/Orb/`.
 | `DevRun.swift` | os modos de desenho (`--snapshot`, `--render-*`): decide a pasta de dados (temporária, a menos que `ORB_DATA_DIR`) e bloqueia o Keychain e a migração neles; apaga a pasta temporária ao sair |
 | `LegacyMigration.swift` | migração do app que se chamava OpenBot (dados e preferências; as chaves do Keychain passam uma a uma quando usadas) |
 | `OrbFolder.swift` | pasta própria `~/Orbs/<Nome>`, estado da pasta, arquivos recentes e alterados do painel |
-| `MacPermissions.swift` | permissões do macOS (TCC), pré-voo de Automação, tradução de erros |
+| `MacPermissions.swift` | permissões do macOS (TCC), pré-voo de Automação (abre escondido o app conhecido que está fechado), tradução de erros |
 | `ImageAttachments.swift` | imagens do usuário e de ferramentas: reduzir, guardar em `anexos/`, formato de cada API |
 | `ApprovalNotifications.swift` | banners "Permitir / Não permitir", roteamento do toque, um só delegate de notificações |
 | `ContextGauge.swift`, `MarkdownBlocks.swift`, `MenuBarSupport.swift`, `Shortcuts.swift`, `Motion.swift`, `Theme.swift` | palavras e leitura do medidor; blocos de Markdown; ícone da barra de menus e atalho global; nomes e teclas dos comandos e o catálogo de atalhos (folha, Ajustes e paleta leem a mesma lista); vocabulário de curvas; paleta, estilos e brilho |
@@ -81,11 +81,32 @@ Tudo em `Sources/Orb/`.
 
 | Capacidade | Ferramentas | Arquivos |
 |---|---|---|
-| Terminal e arquivos | `run_command` (`background: true`), `job_output`, `job_list`, `job_stop`, `read_file` (texto, PDF, Word/RTF/ODT, imagens com OCR), `write_file`, `edit_file`, `list_directory`, `search_files` (Spotlight), `grep`, `glob` | `ShellTool`, `BackgroundJobs`, `ProcessRunner`, `ShellEnvironment`, `FileTools`, `SearchTools`, `TextFile`, `DocumentReader` |
-| Navegar na web | `web_fetch` (páginas, PDF, `save_to`) | `WebTools` |
+| Terminal e arquivos | `run_command` (`background: true`; saída acima de 20 KB é salva inteira em `saidas/<orb>/comando-….txt`), `job_output`, `job_list`, `job_stop`, `read_file` (texto, PDF, Word/RTF/ODT, Excel .xlsx, PowerPoint .pptx, imagens com OCR), `write_file`, `edit_file`, `list_directory`, `search_files` (Spotlight), `grep` (um arquivo informado em `path` vai até 200 MB, em streaming), `glob` (aceita padrão absoluto), `trash` (também com Controlar apps) | `ShellTool`, `BackgroundJobs`, `ProcessRunner`, `ShellEnvironment`, `FileTools`, `SearchTools`, `TextFile`, `DocumentReader`, `OfficeReader`, `ReadOnlyCommand` |
+| Navegar na web | `web_fetch` (páginas, PDF, JSON, imagens; `offset`/`find` para páginas longas; `save_to`) | `WebTools`, `HTMLText` |
 | Controlar apps do Mac | `applescript`, `shortcuts_list/run`, `clipboard_read/write`, `screenshot` (com OCR), `apps_list`, `processes`, `app_quit`, `trash`, `browser_tab`, `ui_read`, `ui_act` | `MacTools`, `MacAppTools`, `BrowserTools`, `ScreenshotTool`, `AccessibilityTools`/`Elements`/`Outline`, `AppleScriptSupport` |
 | Sempre | `open`, `notify`, `remember`, `recall` | `MacTools`, `MacAppTools` |
 | Conectores | uma por ferramenta MCP | `MCPTool` |
+
+**`web_fetch`.** Lê HTTP(S) com o User-Agent do Safari (gzip/br, `Accept-Language: pt-BR`, 20 s de limite) e decodifica pelo BOM,
+pelo cabeçalho, pelo `<meta charset>` e por UTF-8/Windows-1252. HTML (até 5 MB) vira um Markdown leve (`HTMLText`): só o
+conteúdo principal (`<main>`, o único `<article>`, `role="main"` ou um id conhecido, desde que tenha ao menos 500
+caracteres e 20% do texto; senão a página inteira), sem menus, rodapés, `<aside>`, elementos ocultos (`hidden`,
+`aria-hidden`, `display:none`), landmarks ARIA e algumas classes da Wikipedia; títulos em `#`, código em cercas
+com a indentação intacta, tabelas em linhas `| a | b |`, `alt` de imagens e links `texto (url)`, com os do mesmo site
+só pelo caminho (`texto (/wiki/X)`) e o endereço do site no cabeçalho. Se o resultado ficar quase vazio e a página tiver
+scripts, vem uma nota dizendo que ela precisa de JavaScript (com o texto do `<noscript>`). JSON, XML e texto vêm como
+estão; PDF vira texto (até 25 MB) com marcador de página; imagem vira imagem quando o modelo enxerga (`runWithImages`).
+A resposta é paginada (12 000 caracteres, até 24 000) cortando na última quebra de linha ou espaço, e a página convertida
+fica 10 minutos em memória (`WebPageCache`, 8 páginas) para `offset` e `find` (trechos com o offset de cada um) não
+baixarem de novo. `save_to` baixa até 100 MB num arquivo temporário e move no fim; recusa antes se o `Content-Length` já
+passa do limite. Erros de rede e de HTTP voltam em português, com o endereço e uma dica. O `Info.plist` do app traz
+`NSAllowsArbitraryLoads` para o macOS não bloquear `http://`.
+
+**Sem ferramenta de busca.** Não há `web_search` nativo: raspar DuckDuckGo, Bing ou Google não é confiável (CAPTCHA, páginas de
+bloqueio, links de rastreamento) nem respeita o `robots.txt`. O prompt manda o Orb usar a busca/API do próprio site
+(`api.php` da Wikipedia, `api.github.com/search`, registros de pacotes, a documentação oficial). Com o Claude Code há o
+`WebSearch` dele. A busca do provedor (ferramenta de servidor da Anthropic, `web_search` da OpenAI) ou uma chave Brave
+opcional seriam o caminho se isso virar requisito.
 
 Os nomes e as descrições das ferramentas para o modelo são em inglês; o que aparece para você (título e detalhe de cada
 linha, cartões) é em português (`AgentTool.summary`).
@@ -344,7 +365,7 @@ abrir janela, use o modelo falso com `--long`, `ORB_SEND` e `ORB_SNAPSHOT_WAIT=4
 
 | Script | O que faz |
 |---|---|
-| `scripts/bundle.sh [debug\|release]` | compila (padrão `release`), monta `build/Orb.app` (executável, `Resources/Orbs`, `Info.plist` com `app.orb.mac`, ícone gerado pelo próprio app) e assina |
+| `scripts/bundle.sh [debug\|release]` | compila (padrão `release`), monta `build/Orb.app` (executável, `Resources/Orbs`, `Info.plist` com `app.orb.mac` e `NSAllowsArbitraryLoads` (sem isso o macOS bloqueia `http://` no app empacotado), ícone gerado pelo próprio app) e assina |
 | `scripts/make-signing-identity.sh` | cria uma vez o certificado local "Orb Local" no chaveiro de login e o marca como confiável para assinar |
 | `scripts/fake-llm.py` | o modelo falso acima |
 

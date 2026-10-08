@@ -1033,7 +1033,10 @@ final class AppModel {
         if let report = prepared.compaction { session.announce(report, memoryUpTo: itemsBeforeMessage) }
         let bank = memory.bank(for: botID)
         let context = ToolContext(workingDirectory: bot.workingURL, memory: bank, botID: botID, jobs: jobs,
-                                  imageStore: images, acceptsImages: sees != false)
+                                  imageStore: images, acceptsImages: sees != false,
+                                  outputsDirectory: outputsDirectory,
+                                  canSaveFiles: bot.capabilities.contains(.terminal),
+                                  computerUseAllowed: bot.capabilities.contains(.computerUse))
         let userTurns = session.userTurnCount()
         let maxSteps = session.routineID != nil ? AgentEngine.routineMaxSteps : AgentEngine.defaultMaxSteps
         let lastWorkspaceHash = session.conversation?.workspaceHash
@@ -1164,8 +1167,9 @@ final class AppModel {
         let bank = memory.bank(for: botID)
         // The app knows whether it has Accessibility; the server (a child process) is told rather than left to ask.
         let usesMac = bot.capabilities.contains(.computerUse)
-        let servers = [OrbToolsMCPServer.config(directory: bank.directory, mac: usesMac, folder: bot.workingURL,
-                                                accessibilityGranted: usesMac ? accessibilityProbe() : nil)]
+        let accessibility = usesMac ? accessibilityProbe() : nil
+        let servers = [OrbToolsMCPServer.config(directory: bank.directory, mac: usesMac, files: bot.capabilities.contains(.terminal),
+                                                folder: bot.workingURL, accessibilityGranted: accessibility)]
             + connectorServers(for: bot)
         let isNew = conversation.messages.isEmpty
         let userTurns = session.userTurnCount()
@@ -1195,7 +1199,8 @@ final class AppModel {
             }
             let environment = await ClaudeCode.shared.environment(for: installation)
             guard session.isCurrent(turn) else { return }
-            let claudeTurn = ClaudeCodeTurn(bot: bot, executable: installation.executable, model: model, system: built.system,
+            let claudeTurn = ClaudeCodeTurn(bot: bot, executable: installation.executable, model: model,
+                                            system: ClaudeCodePrompt.withAccessibilityNote(built.system, accessibilityGranted: accessibility),
                                             prompt: prompt, images: pictures, context: context, sessionID: sessionID, connectors: servers,
                                             environment: environment, turnGrants: turnGrants,
                                             permissions: permissionSource(for: bot))

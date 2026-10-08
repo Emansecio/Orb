@@ -294,7 +294,8 @@ struct ClaudeCodePolicyTests {
         #expect(!fresh.contains { $0.hasPrefix("--model") })
         // Connectors off: only the MCP servers we pass (the Orb's memory) load, none of the user's own.
         #expect(fresh.last == "--strict-mcp-config")
-        #expect(!fresh.contains { $0.hasPrefix("--disallowedTools") })
+        // Everything is on, so only the reads of private keys are refused.
+        #expect(fresh.contains("--disallowedTools=" + ClaudeCodeTools.secretReads.joined(separator: ",")))
 
         bot.permissionMode = .readOnly
         bot.capabilities = [.connectors]
@@ -303,8 +304,39 @@ struct ClaudeCodePolicyTests {
         #expect(resumed.contains("--resume=s-1") && !resumed.contains("--session-id=abc"))
         #expect(resumed.contains("--model=opus"))
         #expect(resumed[resumed.firstIndex(of: "--permission-mode").map { $0 + 1 } ?? 0] == "plan")
-        #expect(resumed.contains("--disallowedTools=Bash,Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch"))
+        let removed = ClaudeCodeTools.terminal + ClaudeCodeTools.web + ClaudeCodeTools.secretReads
+        #expect(resumed.contains("--disallowedTools=" + removed.joined(separator: ",")))
         #expect(resumed.last == "--mcp-config=/tmp/m.json")
+    }
+
+    @Test func withoutTheTerminalSwitchClaudeCodeKeepsNoShellNoFileSearchAndNoJobs() {
+        var bot = Bot(name: "Atlas", role: "", orb: OrbConfig())
+        bot.capabilities = [.browser]
+        let turn = ClaudeCodeTurn(bot: bot, executable: URL(fileURLWithPath: "/bin/claude"), model: nil, system: "s", prompt: "oi", sessionID: nil)
+        let removed = (turn.arguments(newSessionID: "a", mcpConfig: nil).first { $0.hasPrefix("--disallowedTools=") } ?? "")
+            .dropFirst("--disallowedTools=".count).split(separator: ",").map(String.init)
+        for tool in ["Bash", "Edit", "Write", "MultiEdit", "NotebookEdit", "Glob", "Grep", "LS", "NotebookRead", "BashOutput", "TaskOutput",
+                     "KillShell", "KillBash", "TaskStop"] {
+            #expect(removed.contains(tool), Comment(rawValue: tool))
+        }
+        // Read stays: it is how Claude Code opens the pictures the user attached.
+        #expect(!removed.contains("Read"))
+        #expect(!removed.contains("WebFetch"))
+    }
+
+    @Test func privateKeysAreRefusedToClaudeCodeUnlessTheUserSaidNoQuestionsAsked() {
+        func disallowed(_ mode: PermissionMode) -> [String] {
+            var bot = Bot(name: "Atlas", role: "", orb: OrbConfig())
+            bot.permissionMode = mode
+            let turn = ClaudeCodeTurn(bot: bot, executable: URL(fileURLWithPath: "/bin/claude"), model: nil, system: "s", prompt: "oi", sessionID: nil)
+            return (turn.arguments(newSessionID: "a", mcpConfig: nil).first { $0.hasPrefix("--disallowedTools=") } ?? "")
+                .dropFirst("--disallowedTools=".count).split(separator: ",").map(String.init)
+        }
+        for mode in [PermissionMode.ask, .auto, .readOnly] {
+            #expect(disallowed(mode).contains("Read(~/.ssh/**)"), Comment(rawValue: "\(mode)"))
+            #expect(disallowed(mode).contains("Read(~/.aws/**)"))
+        }
+        #expect(disallowed(.bypass).isEmpty)
     }
 
     @Test func connectorsBecomeAnMCPConfig() throws {
@@ -356,8 +388,8 @@ struct ClaudeCodeAccountTests {
         #expect(probe.claude == "/Users/a/.local/bin/claude" && probe.path == "/usr/bin:/bin")
         #expect(ClaudeCode.parseShellProbe("__orb__claude=\n").claude == nil)
         let environment = ClaudeCode.environment(["HOME": "/h", "CLAUDECODE": "1", "CLAUDE_CODE_ENTRYPOINT": "x",
-                                                  "CLAUDE_AGENT_SDK_VERSION": "1", "ANTHROPIC_MODEL": "m"], path: "/p")
-        #expect(environment == ["HOME": "/h", "ANTHROPIC_MODEL": "m", "PATH": "/p"])
+                                                  "CLAUDE_AGENT_SDK_VERSION": "1", "HTTPS_PROXY": "http://proxy:3128", "ANTHROPIC_MODEL": "m"], path: "/p")
+        #expect(environment == ["HOME": "/h", "HTTPS_PROXY": "http://proxy:3128", "PATH": "/p"])
     }
 }
 
@@ -458,5 +490,113 @@ struct ClaudeCodeTranscriptTests {
         let ended = crashed.endedEarly(details: "error: unknown option")
         guard case .toolFinished(_, .failed, _) = ended.first, case .failed(let why) = ended.last else { Issue.record("expected close + failure"); return }
         #expect(why.contains("unknown option"))
+    }
+
+    @Test func claudeCodeLearnsWhenTheInterfaceToolsAreHeldBack() {
+        let base = ClaudeCodePrompt.make(bot: Bot(name: "Atlas", role: "", orb: OrbConfig()), skills: [], environment: .current())
+        #expect(ClaudeCodePrompt.withAccessibilityNote(base, accessibilityGranted: true) == base)
+        #expect(ClaudeCodePrompt.withAccessibilityNote(base, accessibilityGranted: nil) == base)
+        let held = ClaudeCodePrompt.withAccessibilityNote(base, accessibilityGranted: false)
+        #expect(held.hasPrefix(base) && held.contains("Acessibilidade") && held.contains("ui_read"))
+    }
+}
+
+// MARK: - The CLI's environment and process
+
+struct ClaudeCodeProcessTests {
+    private func temporaryDirectory() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "OrbClaudeEnv-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
+    @Test func theCLIGetsTheUsersTerminalEnvironmentLikeTheNativeCommands() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        // A `.zshrc` that exports a variable and extends the PATH, which a plain login shell would not run.
+        let rc = try FakeShell.make(in: directory, exports: ["ONLY_IN_ZSHRC": "ok", "JAVA_HOME": "/jdk", "PATH": "/rc/bin:/usr/bin:/bin"])
+        let shell = ShellEnvironment(shell: rc, base: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory(), "CLAUDECODE": "1"], timeout: .seconds(60))
+        let installation = ClaudeCode.Installation(executable: URL(fileURLWithPath: "/opt/claude/bin/claude"), path: "/probe/only")
+        let environment = await ClaudeCode.shared.environment(for: installation, shell: shell)
+        #expect(environment["ONLY_IN_ZSHRC"] == "ok" && environment["JAVA_HOME"] == "/jdk")
+        // claude's own folder is in front, then what the shell had; the probe's PATH is not used.
+        #expect(environment["PATH"] == "/opt/claude/bin:/rc/bin:/usr/bin:/bin")
+        #expect(environment["CLAUDECODE"] == nil)
+    }
+
+    @Test func theProvidersCredentialsOfTheUsersShellDoNotReachTheCLI() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        // A `.zshrc` exporting an API key would otherwise swap the claude.ai sign-in for API billing in `claude -p`.
+        let rc = try FakeShell.make(in: directory, exports: ["ANTHROPIC_API_KEY": "sk-teste", "ANTHROPIC_BASE_URL": "https://outro.example",
+                                                             "ANTHROPIC_AUTH_TOKEN": "tok", "JAVA_HOME": "/jdk"])
+        let shell = ShellEnvironment(shell: rc, base: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()], timeout: .seconds(60))
+        let installation = ClaudeCode.Installation(executable: URL(fileURLWithPath: "/opt/claude/bin/claude"), path: "/probe/only")
+        let environment = await ClaudeCode.shared.environment(for: installation, shell: shell)
+        #expect(environment["JAVA_HOME"] == "/jdk")
+        #expect(environment.keys.filter { $0.hasPrefix("ANTHROPIC_") }.isEmpty)
+        #expect(ClaudeCode.environment(["ANTHROPIC_API_KEY": "x", "FOO": "1"], path: "/p") == ["FOO": "1", "PATH": "/p"])
+    }
+
+    @Test func withoutAnswerFromTheShellTheLoginPathStandsIn() async {
+        let shell = ShellEnvironment(shell: "/nonexistent/shell", base: ["PATH": "/x"], timeout: .seconds(5))
+        let installation = ClaudeCode.Installation(executable: URL(fileURLWithPath: "/opt/claude/bin/claude"), path: "/probe/only")
+        let environment = await ClaudeCode.shared.environment(for: installation, shell: shell)
+        #expect(environment["PATH"] == "/probe/only")
+    }
+
+    @Test func theFolderOfClaudeIsAddedOnlyWhenMissing() {
+        let claude = URL(fileURLWithPath: "/a/bin/claude")
+        #expect(ClaudeCode.path("/x:/y", including: claude) == "/a/bin:/x:/y")
+        #expect(ClaudeCode.path("/x:/a/bin:/y", including: claude) == "/x:/a/bin:/y")
+        #expect(ClaudeCode.path(nil, including: claude) == "/a/bin:/usr/bin:/bin:/usr/sbin:/sbin")
+    }
+
+    /// Foundation's `Process` decomposes accents (é becomes e + U+0301); the persona and memory sent to the CLI in
+    /// `--append-system-prompt` must arrive as written.
+    @Test func argumentsAndEnvironmentReachTheChildByteForByte() async throws {
+        let process = try LineProcess(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "printf %s \"$1\" | xxd -p; printf %s \"$NOME\" | xxd -p", "sh", "Jo\u{00E3}o"],
+            directory: FileManager.default.temporaryDirectory, environment: ["NOME": "Jo\u{00E3}o", "PATH": "/usr/bin:/bin"])
+        process.closeInput()
+        var lines: [String] = []
+        for await line in process.lines { lines.append(line) }
+        #expect(lines == ["4a6fc3a36f", "4a6fc3a36f"], Comment(rawValue: "\(lines)"))
+    }
+
+    @Test func linesFlowBothWaysAndStderrIsKept() async throws {
+        let process = try LineProcess(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "echo started; echo oops >&2; read line; echo \"got:$line\"; exit 3"],
+            directory: FileManager.default.temporaryDirectory, environment: ["PATH": "/usr/bin:/bin"])
+        var iterator = process.lines.makeAsyncIterator()
+        #expect(await iterator.next() == "started")
+        process.send("hello")
+        #expect(await iterator.next() == "got:hello")
+        #expect(await iterator.next() == nil)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(process.errorOutput == "oops")
+    }
+
+    @Test func aMissingExecutableThrowsInsteadOfLeavingPipesOpen() {
+        #expect(throws: (any Error).self) {
+            try LineProcess(executable: URL(fileURLWithPath: "/nonexistent/claude"), arguments: [],
+                            directory: FileManager.default.temporaryDirectory, environment: [:])
+        }
+    }
+
+    @Test func terminateStopsTheChildAndWhatItLaunched() async throws {
+        let process = try LineProcess(
+            executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "sleep 60 & echo $!; wait"],
+            directory: FileManager.default.temporaryDirectory, environment: ["PATH": "/usr/bin:/bin"])
+        var iterator = process.lines.makeAsyncIterator()
+        let child = try #require(await iterator.next().flatMap { pid_t($0) })
+        #expect(kill(child, 0) == 0)
+        process.terminate(after: 0)
+        #expect(await iterator.next() == nil)
+        for _ in 0..<50 where kill(child, 0) == 0 { try await Task.sleep(for: .milliseconds(100)) }
+        #expect(kill(child, 0) != 0, "the grandchild is gone too")
+        process.closeInput()
     }
 }

@@ -56,6 +56,7 @@ struct ClaudeCodeTurn: Sendable {
         }
         if !bot.capabilities.contains(.terminal) { removed += ClaudeCodeTools.terminal }
         if !bot.capabilities.contains(.browser) { removed += ClaudeCodeTools.web }
+        if bot.permissionMode != .bypass { removed += ClaudeCodeTools.secretReads }
         if !removed.isEmpty { arguments.append("--disallowedTools=\(removed.joined(separator: ","))") }
         if !bot.capabilities.contains(.connectors) { arguments.append("--strict-mcp-config") }
         if let mcpConfig { arguments.append("--mcp-config=\(mcpConfig.path)") }

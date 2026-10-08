@@ -379,6 +379,8 @@ struct ToolCallLine: View {
     /// Found once per output, not on every render.
     @State private var permissionProblem: MacPermissionProblem?
 
+    private struct PermissionKey: Equatable { var state: ToolCall.State; var output: String? }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button {
@@ -415,7 +417,7 @@ struct ToolCallLine: View {
             .accessibilityValue(call.output == nil ? "" : (isExpanded ? "expandido" : "recolhido"))
             .accessibilityHint(call.output == nil ? "" : "Mostra a saída")
 
-            if call.state == .failed, let problem = permissionProblem {
+            if let problem = permissionProblem {
                 OpenPrivacySettingsButton(problem: problem).padding(.leading, 22)
             }
 
@@ -431,8 +433,8 @@ struct ToolCallLine: View {
             }
         }
         .padding(.leading, gutter)
-        .task(id: call.state == .failed ? call.output : nil) {
-            permissionProblem = call.state == .failed ? call.output.flatMap(MacPermissionProblem.detect(in:)) : nil
+        .task(id: PermissionKey(state: call.state, output: call.state == .running ? nil : call.output)) {
+            permissionProblem = call.permissionProblemToShow
         }
     }
 

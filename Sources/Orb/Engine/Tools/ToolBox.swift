@@ -14,7 +14,7 @@ enum ToolBox {
     /// permission does, which is rare, so the provider's cache of the tool list is not disturbed).
     static func offered(for capabilities: Set<Capability>, accessibilityGranted: Bool) -> [any AgentTool] {
         all.filter { tool in
-            guard tool.capability.map(capabilities.contains) ?? true else { return false }
+            guard tool.isOffered(for: capabilities) else { return false }
             return accessibilityGranted || !accessibilityToolNames.contains(tool.spec.name)
         }
     }
@@ -136,6 +136,19 @@ extension URL {
                 : current.deletingLastPathComponent().appending(path: destination)).standardizedFileURL
         }
         return current
+    }
+
+    /// Whether following the symbolic links from here never ends (`a -> b -> a`), which `resolvingLinkChain` gives up on.
+    var isInLinkLoop: Bool {
+        var current = self
+        var seen: Set<String> = []
+        for _ in 0..<64 {
+            guard let destination = try? FileManager.default.destinationOfSymbolicLink(atPath: current.path) else { return false }
+            current = (destination.hasPrefix("/") ? URL(fileURLWithPath: destination)
+                : current.deletingLastPathComponent().appending(path: destination)).standardizedFileURL
+            if !seen.insert(current.path).inserted { return true }
+        }
+        return true
     }
 
     var isExistingDirectory: Bool {

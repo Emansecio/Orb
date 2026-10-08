@@ -8,15 +8,14 @@ struct RunCommandTool: AgentTool {
     let spec = ToolSpec(
         name: "run_command",
         description: """
-        Run a shell command the way the user's own Terminal would (their PATH and tools such as npm, adb, java) \
-        and return the exit code and combined stdout/stderr. For git, builds, scripts and anything without a \
-        dedicated tool. Non-interactive (stdin is empty).
-        Every call is a fresh shell: cd, export and aliases do NOT persist. Use cwd, and chain related steps in \
-        one command (cd x && make).
-        Killed after timeout_seconds (default 120, max 600). Output over ~20 KB keeps its start and end.
-        For servers and watchers pass background: true: you get a job id and the first output; read it later \
-        with job_output, list jobs with job_list, stop one with job_stop. A plain `cmd &` does not survive the \
-        call.
+        Run a shell command as the user's own Terminal would (their PATH and tools: npm, adb, java…); returns \
+        the exit code and combined stdout/stderr. For git, builds, scripts and anything without a dedicated \
+        tool. Non-interactive (stdin is empty).
+        Each call is a fresh shell: cd, export and aliases do NOT persist; use cwd or chain steps (cd x && make).
+        Killed after timeout_seconds (default 120, max 600). Output over ~20 KB keeps its start and end; the \
+        full text is saved to the file named at the end (read_file or grep it, do not rerun).
+        For servers and watchers pass background: true: you get a job id and the first output; then job_output, \
+        job_list, job_stop. A plain `cmd &` is untracked.
         """,
         parameters: .schema([
             "command": .property("string"),
@@ -34,6 +33,26 @@ struct RunCommandTool: AgentTool {
          arguments["command"]?.string ?? "")
     }
 
+    /// The approval card also says where the command runs when that is not the Orb's folder: `rm *.log` or `make install`
+    /// mean something else in `/` than in the project.
+    func summary(_ arguments: JSONValue, context: ToolContext) -> (title: String, detail: String) {
+        var result = summary(arguments)
+        if let cwd = arguments.nonEmptyString("cwd") {
+            let directory = context.url(for: cwd).standardizedFileURL
+            if directory.path != context.workingDirectory.standardizedFileURL.path {
+                result.detail += "\n\nem \(Self.display(directory))"
+            }
+        }
+        return result
+    }
+
+    /// The path with the home folder written as "~".
+    static func display(_ url: URL) -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
+        if url.path == home { return "~" }
+        return url.path.hasPrefix(home + "/") ? "~" + url.path.dropFirst(home.count) : url.path
+    }
+
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
         let command = try arguments.requiredString("command")
         let directory = arguments.nonEmptyString("cwd").map(context.url(for:)) ?? context.workingDirectory
@@ -44,20 +63,41 @@ struct RunCommandTool: AgentTool {
             return try await startInBackground(command, directory: directory, shell: shell, context: context)
         }
         let seconds = arguments.integer("timeout_seconds", default: Self.defaultTimeout, in: 1...Self.maxTimeout)
+        let spill = Self.spillFile(context: context)
         let result = try await ProcessRunner.run(shell.shell, ["-c", command], directory: directory, environment: shell.environment,
-                                                 timeout: .seconds(seconds), outputLimit: Self.outputLimit)
+                                                 timeout: .seconds(seconds), outputLimit: Self.outputLimit, spillTo: spill)
         var output = result.output.isEmpty ? "(sem saída)" : result.output
-        if result.leftOutputOpen {
-            output += "\n[aviso: um processo iniciado com & ainda segurava a saída e pode ser encerrado ao escrever nela; "
-                + "para deixar algo rodando use background: true]"
+        if result.isBinary {
+            output = "[saída binária de \(ByteCountFormatter.string(fromByteCount: Int64(result.totalBytes), countStyle: .file)) omitida; "
+                + "redirecione para um arquivo, ou use file, strings ou xxd]"
+        } else if let file = result.fullOutputFile {
+            // The same shape as the note of `ToolOutputCap`, so that shortening the conversation later keeps it whole.
+            let cut = result.fullOutputCut
+                ? ", file cut at \(ByteCountFormatter.string(fromByteCount: Int64(StreamCapture.maxSpillBytes), countStyle: .file))" : ""
+            output += ContextText.savedNoteOpen + "\(file.path) (\(result.totalLines) lines, "
+                + "\(ByteCountFormatter.string(fromByteCount: Int64(result.totalBytes), countStyle: .file))\(cut)); "
+                + "read it with read_file (offset/limit) or grep instead of running the command again]"
+        }
+        if result.leftoversAlive || result.leftOutputOpen {
+            output += "\n[aviso: o comando deixou processos rodando (iniciados com &). O Orb não os acompanha nem os encerra"
+                + (result.leftOutputOpen ? ", e um deles pode morrer ao escrever na saída que já foi fechada" : "")
+                + "; para servidores e watchers use background: true, que dá um id para job_output e job_stop]"
         }
         if result.timedOut {
-            return output + "\n[tempo esgotado após \(seconds) s; o processo foi encerrado]"
+            return output + "\n[tempo esgotado após \(seconds) s; o processo foi encerrado. Para comandos longos use timeout_seconds "
+                + "(máx. \(Self.maxTimeout)) ou background: true com job_output]"
         }
         if let signal = result.signal {
             return "Código de saída: encerrado pelo sinal \(Signals.describe(signal))\n\(output)"
         }
         return "Código de saída: \(result.status)\(Signals.hint(forExitCode: result.status))\n\(output)"
+    }
+
+    /// Where the whole output goes if it outgrows the limit: the Orb's folder of saved outputs, next to the files
+    /// `ToolOutputCap` writes (and tidied with them).
+    static func spillFile(context: ToolContext) -> URL {
+        let folder = (context.outputsDirectory ?? ToolOutputCap.defaultDirectory).appending(path: (context.botID ?? UUID()).uuidString)
+        return folder.appending(path: "comando-\(UUID().uuidString.prefix(8).lowercased()).txt")
     }
 
     private func startInBackground(_ command: String, directory: URL, shell: ShellEnvironment.Resolved,

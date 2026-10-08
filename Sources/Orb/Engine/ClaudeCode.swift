@@ -120,13 +120,33 @@ actor ClaudeCode {
     /// The CLI's environment: ours without the markers of an enclosing Claude Code session (or SDK host),
     /// which would otherwise leak into the child, and with the login shell's PATH.
     static func environment(_ base: [String: String], path: String) -> [String: String] {
-        var environment = base.filter { !ShellEnvironment.isClaudeSessionVariable($0.key) }
+        var environment = base.filter { !ShellEnvironment.isClaudeSessionVariable($0.key) && !isProviderVariable($0.key) }
         environment["PATH"] = path
         return environment
     }
 
-    func environment(for installation: Installation) -> [String: String] {
-        Self.environment(ProcessInfo.processInfo.environment, path: installation.path)
+    /// Credentials and endpoints of the model provider (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`…),
+    /// which a `.zshrc` often exports for scripts. The CLI would use them in `-p` mode in place of the user's Claude
+    /// sign-in, billing the API or sending the conversation to another address without anyone choosing that here.
+    static func isProviderVariable(_ name: String) -> Bool {
+        name.hasPrefix("ANTHROPIC_") || name == "AWS_BEARER_TOKEN_BEDROCK"
+    }
+
+    /// What the CLI, its Bash tool and the MCP servers it starts run with: the user's Terminal environment, as commands of
+    /// the native engine get it (login and interactive shell, so `.zshrc` PATH entries and variables such as JAVA_HOME are
+    /// there), with `claude`'s own folder on the PATH. When that shell cannot be asked, the app's environment with the
+    /// login shell's PATH stands in.
+    func environment(for installation: Installation, shell: ShellEnvironment = .shared) async -> [String: String] {
+        let resolved = await shell.resolved()
+        guard resolved.isFromUserShell else { return Self.environment(ProcessInfo.processInfo.environment, path: installation.path) }
+        return Self.environment(resolved.environment, path: Self.path(resolved.environment["PATH"], including: installation.executable))
+    }
+
+    /// `path` with the folder of `executable` in front when it is not in it.
+    static func path(_ path: String?, including executable: URL) -> String {
+        let directory = executable.deletingLastPathComponent().path
+        let current = path ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        return current.split(separator: ":").contains(Substring(directory)) ? current : directory + ":" + current
     }
 
     // MARK: Account (Claude Code's own commands)
@@ -146,7 +166,7 @@ actor ClaudeCode {
         guard let installation = await installation() else { throw ToolError("O Claude Code não está instalado neste Mac.") }
         let process = try LineProcess(executable: installation.executable, arguments: ["auth", "login", "--claudeai"],
                                       directory: FileManager.default.homeDirectoryForCurrentUser,
-                                      environment: environment(for: installation))
+                                      environment: await environment(for: installation))
         process.terminate(after: 300)
         await withTaskCancellationHandler {
             // Stdin stays open: the CLI also accepts a pasted code there; we only wait for it to finish.
@@ -166,7 +186,7 @@ actor ClaudeCode {
     private func run(_ installation: Installation, _ arguments: [String]) async throws -> String {
         let process = try LineProcess(executable: installation.executable, arguments: arguments,
                                       directory: FileManager.default.homeDirectoryForCurrentUser,
-                                      environment: environment(for: installation))
+                                      environment: await environment(for: installation))
         process.closeInput()
         process.terminate(after: 20)
         var lines: [String] = []
@@ -184,7 +204,7 @@ actor ClaudeCode {
             executable: installation.executable,
             arguments: ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
                         "--no-session-persistence", "--strict-mcp-config"],
-            directory: FileManager.default.temporaryDirectory, environment: environment(for: installation))
+            directory: FileManager.default.temporaryDirectory, environment: await environment(for: installation))
         let requestID = ClaudeCodeWire.newRequestID()
         process.send(ClaudeCodeWire.controlRequest(id: requestID, subtype: "initialize"))
         process.terminate(after: 30)

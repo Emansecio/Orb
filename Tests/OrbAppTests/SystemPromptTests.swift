@@ -76,8 +76,11 @@ struct SystemPromptTests {
 
     @Test func staysShortAndKeepsEveryRuleThatChangesBehaviour() {
         let system = SystemPrompt.make(bot: bot(capabilities: [.terminal, .browser, .computerUse]), skills: [], environment: mac)
-        // A budget, so the prompt does not grow back one sentence at a time (it was 3,270 characters before it was tightened).
-        #expect(system.count < 3_050, "the native system prompt is \(system.count) characters")
+        // A budget, so the prompt does not grow back one sentence at a time (it was 3,270 characters before it was tightened;
+        // 250 more were spent on telling web_fetch, browser_tab and open apart, and on how to search without a search tool;
+        // this Orb has "Controlar apps do Mac", so it includes the ~900-character "Mac apps" recipes, and ~250 more went to
+        // read-only commands, keys and passwords, and confirming before sending messages). The prompt is cached across turns.
+        #expect(system.count < 4_500, "the native system prompt is \(system.count) characters")
         for rule in ["Reply in the user's language", "Be brief", "Use tools to find out", "read before you change things",
                      "say in one short sentence what you are about to do", "never retry what the user denied",
                      "Do not emulate a switched-off capability", "sudo cannot work", "prefer the trash tool over rm",
@@ -116,14 +119,41 @@ struct SystemPromptTests {
     @Test func eachModeIsExplainedInPlainWords() {
         let ask = PromptParts.permissions(bot(mode: .ask), engine: .native)
         #expect(ask.contains("Perguntar antes") && ask.contains("state the plan first") && ask.contains("few calls")
-                && ask.contains("reading and searching never ask"))
+                && ask.contains("look-only commands") && ask.contains("never ask"))
         let auto = PromptParts.permissions(bot(mode: .auto), engine: .native)
         #expect(auto.contains("Automático") && auto.contains("destructive") && !auto.contains("state the plan first"))
         let bypass = PromptParts.permissions(bot(mode: .bypass), engine: .native)
         #expect(bypass.contains("Sem pedir permissão") && bypass.contains("wait for a clear yes"))
         let readOnly = PromptParts.permissions(bot(mode: .readOnly), engine: .native)
         #expect(readOnly.contains("Só leitura") && readOnly.contains("blocks anything that would change"))
+        // web_fetch is refused in this mode, so the prompt must not promise browsing.
+        #expect(!readOnly.contains("browse,") && readOnly.contains("web access"))
         #expect(Set([ask, auto, bypass, readOnly]).count == 4)
+    }
+
+    @Test func macAppRecipesAppearOnlyWithTheCapabilityAndStayStable() {
+        let on = bot()
+        let off = bot(capabilities: [.terminal, .browser])
+        #expect(PromptParts.macApps(off, engine: .native).isEmpty && PromptParts.macApps(off, engine: .claudeCode).isEmpty)
+        let native = PromptParts.macApps(on, engine: .native)
+        for word in ["current date", "-30720", "draft", "Do not `send`", "Reminders", "Notes", "Calendar", "Music", "browser_tab", "-1728", "-2741"] {
+            #expect(native.contains(word), Comment(rawValue: word))
+        }
+        #expect(!native.contains("mcp__orb_memoria__"))
+        #expect(PromptParts.macApps(on, engine: .claudeCode).contains("mcp__orb_memoria__applescript"))
+        // Same text on every call: it is part of the cached system prompt.
+        #expect(PromptParts.macApps(on, engine: .native) == native)
+        #expect(SystemPrompt.make(bot: on, skills: [], environment: mac).contains("## Mac apps"))
+        #expect(!SystemPrompt.make(bot: off, skills: [], environment: mac).contains("## Mac apps"))
+        #expect(ClaudeCodePrompt.make(bot: on, skills: [], environment: mac).contains("## Mac apps"))
+        #expect(ClaudeCodePrompt.standing(bot: on, skills: [], folder: "").contains { $0.hasPrefix("## Mac apps") })
+        #expect(!ClaudeCodePrompt.standing(bot: off, skills: [], folder: "").contains { $0.hasPrefix("## Mac apps") })
+    }
+
+    @Test func claudeCodeIsToldToUseTheOrbsTrashToolAndAutoModeAsksToConfirmSending() {
+        let text = PromptParts.permissions(bot(), engine: .claudeCode)
+        #expect(text.contains("mcp__orb_memoria__trash") && !text.contains("Finder via osascript"))
+        #expect(PromptParts.permissions(bot(mode: .auto), engine: .native).contains("confirmed in the chat first"))
     }
 
     @Test func namesTheCapabilitiesThatAreOff() {

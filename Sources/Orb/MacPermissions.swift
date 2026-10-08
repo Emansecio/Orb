@@ -156,9 +156,24 @@ protocol MacPermissionSystem: Sendable {
     var homeDirectory: URL { get }
     /// The bundle identifier of a running app called `name` (localized name or file name), if there is one.
     func runningBundleID(named name: String) -> String?
+    /// Opens the app without showing it or taking focus, and waits until it is running. False when it cannot be found or
+    /// does not start. Automation consent can only be asked of a running app.
+    func launchHidden(bundleID: String) -> Bool
 }
 
 struct LiveMacPermissionSystem: MacPermissionSystem {
+    func launchHidden(bundleID: String) -> Bool {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return false }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = false
+        configuration.hides = true
+        configuration.addsToRecentItems = false
+        let done = DispatchSemaphore(value: 0)
+        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, _ in done.signal() }
+        _ = done.wait(timeout: .now() + 10)
+        return !NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty
+    }
+
     func automationStatus(bundleID: String, askUserIfNeeded: Bool) -> OSStatus {
         let target = NSAppleEventDescriptor(bundleIdentifier: bundleID)
         guard let address = target.aeDesc else { return OSStatus(procNotFound) }
@@ -450,7 +465,9 @@ enum MacPermissionProblem: Equatable, Sendable {
 
     /// The app named by "Not authorized to send Apple events to Mail." (or its Portuguese form), when the text has it.
     private static let appNameExpressions = [
-        #"send Apple events to (.+?)\.(?:\s|\(|$)"#, #"eventos da Apple (?:para|ao|à) (?:o |a )?(.+?)\.(?:\s|\(|$)"#,
+        #"send Apple events to (.+?)\.(?:\s|\(|$)"#, #"eventos (?:da )?Apple (?:para|ao|à) (?:o |a )?(.+?)\.(?:\s|\(|$)"#,
+        // Orb's own message (`summary`), when it comes back through a tool result.
+        #"blocked Orb from controlling (.+?): the Automation"#,
     ].compactMap { try? NSRegularExpression(pattern: $0, options: [.caseInsensitive]) }
 
     private static func appName(inAutomationFailure text: String) -> String? {
@@ -458,9 +475,27 @@ enum MacPermissionProblem: Equatable, Sendable {
             guard let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
                   let range = Range(match.range(at: 1), in: text) else { continue }
             let name = text[range].trimmingCharacters(in: .whitespacesAndNewlines)
-            if !name.isEmpty { return name }
+            if !name.isEmpty, name != "that app" { return name }
         }
         return nil
+    }
+}
+
+extension ToolCall {
+    /// The permission to offer a button for. A failed call: whatever its output says. A call that finished: only a computer or
+    /// browser tool that carries Orb's own permission text (a screenshot taken without Screen Recording, a browser that refused
+    /// Automation while the rest was read), never page or file contents that happen to mention a setting.
+    var permissionProblemToShow: MacPermissionProblem? {
+        guard let output else { return nil }
+        switch state {
+        case .failed:
+            return MacPermissionProblem.detect(in: output)
+        case .done:
+            guard kind == .computer || kind == .browser, output.contains("Ajustes do Sistema → Privacidade e Segurança") else { return nil }
+            return MacPermissionProblem.detect(in: output)
+        case .running:
+            return nil
+        }
     }
 }
 
@@ -510,16 +545,23 @@ enum AutomationPreflight {
     }
 
     /// Asks for consent where macOS has never asked, and says which app is refused. Nil means the script may run.
-    /// Closed apps are skipped (macOS cannot tell, and the script may launch them), as are unknown ones and Orb itself.
+    /// A well-known app that is closed (System Events usually is) is opened hidden first, because macOS only asks about a
+    /// running app and the dialog would otherwise appear while the script's clock runs. Unknown closed apps and Orb itself
+    /// are skipped, as the script may launch them.
     static func blockingProblem(for script: String, language: AppleScript.Language,
                                 checker: MacPermissionChecker = .live,
-                                patience: Duration = .seconds(120)) async -> MacPermissionProblem? {
+                                patience: Duration = .seconds(120),
+                                settle: Duration = .milliseconds(300)) async -> MacPermissionProblem? {
         let ownBundleID = Bundle.main.bundleIdentifier
         for name in appNames(in: script, language: language) {
             let target = await Blocking.run(fallback: nil) { checker.target(forScriptName: name) }
             guard let target, target.bundleID != ownBundleID else { continue }
             let kind = MacPermissionKind.automation(target)
-            switch await checker.status(ofInBackground: kind) {
+            var status = await checker.status(ofInBackground: kind)
+            if status == .appNotRunning, AutomationTarget.known(named: target.bundleID) != nil {
+                status = await launchedStatus(of: kind, target: target, checker: checker, settle: settle)
+            }
+            switch status {
             case .denied:
                 return .automation(app: target.name)
             case .notDetermined:
@@ -530,5 +572,20 @@ enum AutomationPreflight {
             }
         }
         return nil
+    }
+
+    /// Opens a closed app hidden and gives it a moment to register with Apple Events before asking again.
+    private static func launchedStatus(of kind: MacPermissionKind, target: AutomationTarget, checker: MacPermissionChecker,
+                                       settle: Duration) async -> MacPermissionStatus {
+        guard await Blocking.run(fallback: false, timeout: .seconds(15), { checker.system.launchHidden(bundleID: target.bundleID) }) else {
+            return .appNotRunning
+        }
+        var status = MacPermissionStatus.appNotRunning
+        for _ in 0..<10 {
+            status = await checker.status(ofInBackground: kind)
+            if status != .appNotRunning { break }
+            try? await Task.sleep(for: settle)
+        }
+        return status
     }
 }

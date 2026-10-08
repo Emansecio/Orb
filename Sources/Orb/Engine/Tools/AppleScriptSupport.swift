@@ -22,7 +22,7 @@ enum AppleScript {
         let result = try await ProcessRunner.run("/usr/bin/osascript", arguments, timeout: timeout, outputLimit: outputLimit)
         let output = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
         if result.timedOut { throw ToolError(timeoutMessage(seconds: Int(timeout.components.seconds))) }
-        guard result.status == 0 else { throw ToolError(explain(output, status: result.status)) }
+        guard result.status == 0 else { throw ToolError(explain(output, status: result.status, scriptApps: AutomationPreflight.appNames(in: script, language: language))) }
         return output
     }
 
@@ -40,9 +40,12 @@ enum AppleScript {
     }
 
     /// Adds guidance for the errors that need a human step; the system's own message stays as detail.
-    static func explain(_ message: String, status: Int32 = 1) -> String {
+    /// `scriptApps` are the apps the script addresses: when macOS does not name the refused app and the script talks to
+    /// only one, that one is the app.
+    static func explain(_ message: String, status: Int32 = 1, scriptApps: [String] = []) -> String {
         guard !message.isEmpty else { return "O script falhou (código \(status))." }
-        if let problem = MacPermissionProblem.detect(in: message) {
+        if var problem = MacPermissionProblem.detect(in: message) {
+            if case .automation(nil) = problem, scriptApps.count == 1 { problem = .automation(app: scriptApps[0]) }
             return problem.modelMessage + "\n\nmacOS said: " + message
         }
         guard let code = errorCode(in: message), let advice = advice(for: code) else { return message }
@@ -55,6 +58,15 @@ enum AppleScript {
             "O app não está aberto (ou fechou durante o script). Abra-o com a ferramenta open e tente de novo."
         case -1712:
             "O app não respondeu a tempo. Ele pode estar ocupado ou travado, ou esperando uma resposta numa janela."
+        case -30720:
+            "Data ou hora inválida para o idioma do Mac. Não escreva a data como texto: monte a partir de `current date` "
+                + "(set d to current date; set day of d to 1; depois year, month, day, hours, minutes e seconds), ou em JXA use new Date(ano, mês-1, dia, hora, minuto)."
+        case -1728:
+            "O item não existe (ou o nome está diferente). Liste os nomes antes (por exemplo name of every calendar / list / folder) e use o nome exato."
+        case -1708:
+            "O app não entende esse comando. Confira o vocabulário do app (sdef) ou use outra forma, como ui_read/ui_act ou um Atalho."
+        case -2741:
+            "Erro de sintaxe no script: corrija o script. Não é um problema de permissão."
         case -128:
             "O usuário cancelou um diálogo aberto pelo script."
         default:

@@ -354,9 +354,26 @@ final class UISnapshotStore: @unchecked Sendable {
     private let lock = NSLock()
     private var snapshots: [Key: UISnapshot] = [:]
     private let directory: URL?
+    /// A reading older than this is forgotten (and its file deleted): the screen it described is long gone, and the file is
+    /// readable by any process of the user.
+    private let maxAge: TimeInterval
+    private let now: @Sendable () -> Date
 
-    init(directory: URL? = FileManager.default.temporaryDirectory.appending(path: "OrbAccessibility")) {
+    init(directory: URL? = FileManager.default.temporaryDirectory.appending(path: "OrbAccessibility"),
+         maxAge: TimeInterval = 3_600, now: @escaping @Sendable () -> Date = { .now }) {
         self.directory = directory
+        self.maxAge = maxAge
+        self.now = now
+    }
+
+    /// The snapshot in `url`, or nil when it cannot be read or is older than `maxAge` (then the file is deleted).
+    private func fresh(at url: URL) -> UISnapshot? {
+        guard let data = try? Data(contentsOf: url), let snapshot = try? JSONDecoder().decode(UISnapshot.self, from: data) else { return nil }
+        guard now().timeIntervalSince(snapshot.takenAt) <= maxAge else {
+            try? FileManager.default.removeItem(at: url)
+            return nil
+        }
+        return snapshot
     }
 
     private static func key(_ app: AccessibilityApp, bot: UUID?) -> Key {
@@ -372,19 +389,27 @@ final class UISnapshotStore: @unchecked Sendable {
 
     /// The Orb's own last reading of the app, else the last one anybody made (another process's, from the file).
     func snapshot(bot: UUID?, app: AccessibilityApp) -> UISnapshot? {
-        if let own = lock.withLock({ snapshots[Self.key(app, bot: bot)] }) { return own }
-        guard let directory, let data = try? Data(contentsOf: file(for: app, in: directory)) else { return nil }
-        return try? JSONDecoder().decode(UISnapshot.self, from: data)
+        let key = Self.key(app, bot: bot)
+        let own: UISnapshot? = lock.withLock {
+            guard let snapshot = snapshots[key] else { return nil }
+            guard now().timeIntervalSince(snapshot.takenAt) <= maxAge else { snapshots[key] = nil; return nil }
+            return snapshot
+        }
+        if let own { return own }
+        guard let directory else { return nil }
+        return fresh(at: file(for: app, in: directory))
     }
 
     /// Every snapshot that may be what a call is about, for judging a call before it runs: those of the named app (a
     /// name or bundle identifier), or all of them when no app is named, newest first.
     func candidates(matching app: String?) -> [UISnapshot] {
-        var found = lock.withLock { Array(snapshots.values) }
+        var found = lock.withLock {
+            snapshots = snapshots.filter { now().timeIntervalSince($0.value.takenAt) <= maxAge }
+            return Array(snapshots.values)
+        }
         if let directory, let names = try? FileManager.default.contentsOfDirectory(atPath: directory.path) {
             for name in names where name.hasPrefix("ax-") && name.hasSuffix(".json") {
-                if let data = try? Data(contentsOf: directory.appending(path: name)),
-                   let snapshot = try? JSONDecoder().decode(UISnapshot.self, from: data) { found.append(snapshot) }
+                if let snapshot = fresh(at: directory.appending(path: name)) { found.append(snapshot) }
             }
         }
         if let app = app?.trimmingCharacters(in: .whitespacesAndNewlines), !app.isEmpty { found = found.filter { $0.isFor(app) } }

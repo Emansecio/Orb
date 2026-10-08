@@ -13,14 +13,14 @@ struct ShellCommandLine: Equatable, Sendable {
         var words: [String]
         /// What joined this command to the previous one.
         var separator: Separator
-        /// A `$( )`, backtick or `<( )` somewhere in this command.
+        /// A `$( )`, backtick, `<( )` or zsh `=( )` somewhere in this command.
         var hasSubstitution = false
         /// Writes through a redirection (`>`, `>>`) or reads a heredoc; `2>&1` and `>/dev/null` do not count.
         var redirects = false
     }
 
     var segments: [Segment]
-    /// The text inside every `$( )`, backtick pair and `<( )`, each one a command line of its own.
+    /// The text inside every `$( )`, backtick pair, `<( )` and `=( )`, each one a command line of its own.
     var substitutions: [String]
     /// False when a quote or substitution was never closed.
     var isComplete: Bool
@@ -102,7 +102,7 @@ struct ShellCommandLine: Equatable, Sendable {
                     substitution(opening: 2, closing: ")")
                 case "`":
                     backticks()
-                case "<" where peek() == "(", ">" where peek() == "(":
+                case "<" where peek() == "(", ">" where peek() == "(", "=" where peek() == "(" && !inWord:
                     substitution(opening: 2, closing: ")")
                 case " ", "\t":
                     endWord()

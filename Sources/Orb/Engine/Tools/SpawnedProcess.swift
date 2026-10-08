@@ -17,9 +17,10 @@ struct ChildExit: Sendable, Equatable {
 /// - started with default signal handling and an empty signal mask.
 enum SpawnedProcess {
     /// Starts `executable` (a full path) and returns its pid. `environment` nil inherits the app's own.
-    /// `output` is used for both stdout and stderr; stdin is empty. The caller still owns (and should close) `output`.
+    /// `output` is used for both stdout and stderr, and stdin is empty, unless `error` or `input` give descriptors for
+    /// those. The caller still owns (and should close) the descriptors it passes.
     static func start(_ executable: String, _ arguments: [String], directory: URL?, environment: [String: String]?,
-                      output: Int32) throws -> pid_t {
+                      output: Int32, error: Int32? = nil, input: Int32? = nil) throws -> pid_t {
         let environment = environment ?? ProcessInfo.processInfo.environment
         let argv = try cStrings([executable] + arguments)
         let envp = try cStrings(environment.map { "\($0.key)=\($0.value)" })
@@ -42,9 +43,13 @@ enum SpawnedProcess {
         posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF
                                                     | POSIX_SPAWN_CLOEXEC_DEFAULT))
         if let directory { posix_spawn_file_actions_addchdir_np(&actions, directory.path) }
-        posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
+        if let input {
+            posix_spawn_file_actions_adddup2(&actions, input, 0)
+        } else {
+            posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
+        }
         posix_spawn_file_actions_adddup2(&actions, output, 1)
-        posix_spawn_file_actions_adddup2(&actions, output, 2)
+        posix_spawn_file_actions_adddup2(&actions, error ?? output, 2)
 
         var pid: pid_t = 0
         let code = posix_spawn(&pid, executable, &actions, &attributes, argv + [nil], envp + [nil])

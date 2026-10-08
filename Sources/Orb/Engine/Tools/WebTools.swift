@@ -12,28 +12,35 @@ struct WebFetchTool: AgentTool {
     static let maxPDFBytes = 25_000_000
     /// Largest file `save_to` will download.
     static let maxDownloadBytes = 100_000_000
+    /// How many passages `find` returns.
+    static let maxFindMatches = 8
 
     let session: URLSession
     /// Bytes read from a PDF response before cutting it; a parameter so tests need not serve 25 MB.
     let pdfLimit: Int
+    /// Converted pages, so that reading a long one in pieces downloads it once.
+    let cache: WebPageCache
 
-    init(session: URLSession = .shared, pdfLimit: Int = WebFetchTool.maxPDFBytes) {
+    init(session: URLSession = .shared, pdfLimit: Int = WebFetchTool.maxPDFBytes, cache: WebPageCache = .shared) {
         self.session = session
         self.pdfLimit = pdfLimit
+        self.cache = cache
     }
 
     let spec = ToolSpec(
         name: "web_fetch",
         description: """
-        Fetch a web page over http(s) and return its readable text (scripts and navigation removed, links as \
-        "text (url)") with the final URL and title. JSON, XML and plain text come back as is, PDFs as text. One \
-        call returns 12,000 characters by default (`max_chars` up to 24,000); a note at the end gives the \
-        `offset` to continue. To keep a file (image, archive, PDF…) pass `save_to` instead.
+        Fetch a web page over http(s) as readable light Markdown (main content only; headings #, code fenced, tables as \
+        rows, links as "text (url)") with the final URL and title. JSON, XML and text come back as is, PDFs as text, \
+        images as a picture; no JavaScript. Returns 12,000 characters (`max_chars` up to 24,000); the closing note gives \
+        the `offset` to continue (the page stays cached a few minutes); `find` locates a word in a long page. To keep a \
+        file (image, archive, PDF…) pass `save_to`.
         """,
         parameters: .schema([
             "url": .property("string"),
             "offset": .property("integer", "First character, to continue a long page (default 0)."),
             "max_chars": .property("integer"),
+            "find": .property("string", "Instead of the page, up to 8 passages around this text (any case), each with its offset."),
             "save_to": .property("string", "Download to this path instead (up to 100 MB; replaces a file)."),
         ], required: ["url"]))
 
@@ -50,23 +57,54 @@ struct WebFetchTool: AgentTool {
     }
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
+        try await perform(arguments, context: context, wantsImage: false).text
+    }
+
+    /// A picture at the address reaches the model as a picture when it can look at one.
+    func runWithImages(_ arguments: JSONValue, context: ToolContext) async throws -> ToolResult {
+        try await perform(arguments, context: context, wantsImage: context.acceptsImages && context.imageStore != nil && context.botID != nil)
+    }
+
+    private func perform(_ arguments: JSONValue, context: ToolContext, wantsImage: Bool) async throws -> ToolResult {
         let address = try arguments.requiredString("url")
         guard let url = URL(string: address), ["http", "https"].contains(url.scheme?.lowercased()), url.host != nil else {
             throw ToolError("Endereço inválido: use uma URL http:// ou https://.")
         }
+        let destination = arguments.nonEmptyString("save_to")
+        if destination != nil, !context.canSaveFiles {
+            throw ToolError("save_to grava um arquivo no Mac, e \"\(Capability.terminal.label)\" está desligado neste Orb. Leia a página sem save_to, ou peça ao usuário para ligar essa chave no painel do Orb.")
+        }
+        // A page read in pieces is downloaded once: the pieces after the first (and a search in it) come from memory.
+        let find = arguments.nonEmptyString("find")
+        if destination == nil, arguments.integer("offset", default: 0, in: 0...Int.max) > 0 || find != nil,
+           let entry = await cache.entry(for: url.absoluteString) {
+            return ToolResult(text: entry.render(arguments: arguments, find: find))
+        }
+        do {
+            return try await fetch(url, destination: destination, arguments: arguments, context: context, find: find, wantsImage: wantsImage)
+        } catch let error as URLError where error.code != .cancelled {
+            throw Self.explain(error, url: url)
+        }
+    }
+
+    private func fetch(_ url: URL, destination: String?, arguments: JSONValue, context: ToolContext, find: String?, wantsImage: Bool) async throws -> ToolResult {
         var request = URLRequest(url: url, timeoutInterval: 20)
         request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
         let (bytes, response) = try await session.bytes(for: request)
+        let finalURL = response.url ?? url
         // The status is known from the headers alone; do not download an error page's body to find out.
         if let status = (response as? HTTPURLResponse)?.statusCode, status >= 400 {
-            throw ToolError("O site respondeu HTTP \(status).")
+            throw ToolError(Self.statusMessage(status, url: finalURL))
         }
-        let finalURL = response.url ?? url
 
-        if let destination = arguments.nonEmptyString("save_to") {
+        if let destination {
+            // Said up front when the server announces a size, instead of after 100 MB.
+            if response.expectedContentLength > Int64(Self.maxDownloadBytes) {
+                throw ToolError(Self.tooLargeMessage)
+            }
             let target = context.url(for: destination)
             let size = try await Self.download(bytes, to: target)
-            return "\(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)) (\(response.mimeType ?? "tipo desconhecido")) de \(finalURL.absoluteString) salvos em \(WriteFileTool.location(target, target.resolvingLinkChain))"
+            return ToolResult(text: "\(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)) (\(response.mimeType ?? "tipo desconhecido")) de \(finalURL.absoluteString) salvos em \(WriteFileTool.location(target, target.resolvingLinkChain))")
         }
 
         let mimeType = (response.mimeType ?? "").lowercased()
@@ -79,7 +117,7 @@ struct WebFetchTool: AgentTool {
         let cut = data.count >= limit
 
         var header = "URL: \(finalURL.absoluteString)"
-        let text: String
+        var text: String
         if mimeType.contains("pdf") || data.starts(with: Array("%PDF".utf8)) {
             do {
                 text = try await runDetached { [data] in try DocumentReader.allPDFText(data) }
@@ -92,17 +130,30 @@ struct WebFetchTool: AgentTool {
                 HTMLText.convert(WebText.decode(data, headerCharset: charset, sniffMeta: true), baseURL: finalURL)
             }
             if let title = page.title, !title.isEmpty { header += "\nTítulo: \(title)" }
+            if page.hasSiteLinks, let origin = Self.origin(of: finalURL) { header += "\nLinks começando com / são deste site (\(origin))." }
             text = page.text
+            if page.needsJavaScript { text += (text.isEmpty ? "" : "\n\n") + HTMLText.javaScriptNote }
         } else if mimeType.hasPrefix("text/") || mimeType.contains("json") || mimeType.contains("xml") || mimeType.contains("javascript") {
             text = WebText.decode(data, headerCharset: response.textEncodingName, sniffMeta: mimeType.contains("xml"))
+        } else if wantsImage, mimeType.hasPrefix("image/"), mimeType != "image/svg+xml", !cut,
+                  let store = context.imageStore, let botID = context.botID,
+                  let image = try? await store.attach(data, name: url.lastPathComponent.isEmpty ? "imagem" : url.lastPathComponent, botID: botID) {
+            let size = ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file)
+            return ToolResult(text: header + "\nImagem \(mimeType) de \(size), anexada para você ver.", images: [image])
         } else {
             let bytes = ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file)
-            return header + "\nConteúdo \(mimeType.isEmpty ? "de tipo desconhecido" : mimeType) de \(cut ? "mais de " : "")\(bytes) (não é texto). Use save_to para baixá-lo."
+            return ToolResult(text: header + "\nConteúdo \(mimeType.isEmpty ? "de tipo desconhecido" : mimeType) de \(cut ? "mais de " : "")\(bytes) (não é texto). Use save_to para baixá-lo.")
         }
-        return header + "\n\n" + Self.page(of: text, arguments: arguments, truncatedDownload: cut ? limit : nil)
+
+        let entry = WebPageCache.Entry(header: header, text: text, truncatedDownload: cut ? limit : nil)
+        await cache.store(entry, for: url.absoluteString)
+        return ToolResult(text: entry.render(arguments: arguments, find: find))
     }
 
-    /// `max_chars` characters from `offset`, with a note on where to continue.
+    // MARK: Pages
+
+    /// `max_chars` characters from `offset`, with a note on where to continue. A page is cut at the last line
+    /// break (or space) near its end, not in the middle of a word or an address, and the note says where it really stopped.
     static func page(of text: String, arguments: JSONValue, truncatedDownload: Int?) -> String {
         let total = text.count
         let offset = arguments.integer("offset", default: 0, in: 0...Int.max)
@@ -110,18 +161,111 @@ struct WebFetchTool: AgentTool {
         if total == 0 { return "(sem texto)" }
         guard offset < total else { return "O texto tem só \(total) caracteres; offset=\(offset) está além do fim." }
         let start = text.index(text.startIndex, offsetBy: offset)
-        let end = text.index(start, offsetBy: min(length, total - offset))
+        var end = text.index(start, offsetBy: min(length, total - offset))
+        if end < text.endIndex { end = softEnd(of: text, from: start, to: end) }
+        let shown = text.distance(from: start, to: end)
         var result = String(text[start..<end])
         if offset > 0 || end < text.endIndex {
-            result = "[caracteres \(offset + 1)–\(offset + result.count) de \(total)]\n" + result
+            result = "[caracteres \(offset + 1)–\(offset + shown) de \(total)]\n" + result
         }
         if end < text.endIndex {
-            result += "\n[... mais \(total - offset - length) caracteres; use offset=\(offset + length) para continuar ...]"
+            result += "\n[... mais \(total - offset - shown) caracteres; use offset=\(offset + shown) para continuar ...]"
         } else if let limit = truncatedDownload {
             result += "\n[... a resposta passa de \(limit / 1_000_000) MB; o resto não foi lido ...]"
         }
         return result
     }
+
+    /// Moves the end of a piece back to the last line break in its final quarter (else the last space), so the next
+    /// piece starts at a line. The piece never becomes empty.
+    private static func softEnd(of text: String, from start: String.Index, to end: String.Index) -> String.Index {
+        let window = max(text.distance(from: start, to: end) / 4, 1)
+        let floor = text.index(end, offsetBy: -window)
+        let tail = text[floor..<end]
+        if let newline = tail.lastIndex(of: "\n") { return text.index(after: newline) }
+        if let space = tail.lastIndex(of: " ") { return text.index(after: space) }
+        return end
+    }
+
+    /// Up to `maxFindMatches` passages around `query` (any case), each with the offset to read from.
+    static func passages(of query: String, in text: String) -> String {
+        var found: [(offset: Int, passage: String)] = []
+        var total = 0
+        var searchStart = text.startIndex
+        var counted = 0
+        var countedIndex = text.startIndex
+        while let range = text.range(of: query, options: [.caseInsensitive, .diacriticInsensitive], range: searchStart..<text.endIndex) {
+            total += 1
+            if found.count < maxFindMatches {
+                counted += text.distance(from: countedIndex, to: range.lowerBound)
+                countedIndex = range.lowerBound
+                let from = text.index(range.lowerBound, offsetBy: -120, limitedBy: text.startIndex) ?? text.startIndex
+                let to = text.index(range.upperBound, offsetBy: 180, limitedBy: text.endIndex) ?? text.endIndex
+                let passage = text[from..<to].split(whereSeparator: \.isNewline).joined(separator: " ")
+                found.append((max(counted - 120, 0), (from > text.startIndex ? "…" : "") + passage + (to < text.endIndex ? "…" : "")))
+            }
+            // The next match is looked for after this passage, so one paragraph does not fill the list.
+            searchStart = text.index(range.upperBound, offsetBy: 180, limitedBy: text.endIndex) ?? text.endIndex
+        }
+        guard !found.isEmpty else { return "Nenhuma ocorrência de “\(query)” nesta página (\(text.count) caracteres)." }
+        let lines = found.map { "• offset=\($0.offset): \($0.passage)" }
+        return "Trechos com “\(query)” (\(found.count)\(total > found.count ? "+" : "")); leia um deles com offset:\n" + lines.joined(separator: "\n")
+    }
+
+    static func origin(of url: URL) -> String? {
+        guard let scheme = url.scheme, let host = url.host() else { return nil }
+        return scheme + "://" + host + (url.port.map { ":\($0)" } ?? "")
+    }
+
+    // MARK: Errors
+
+    static let tooLargeMessage = "O arquivo passa de \(maxDownloadBytes / 1_000_000) MB, o limite do save_to. Se o Orb tiver o Terminal, baixe com run_command (curl -L -o); senão, peça ao usuário para baixar."
+
+    /// What an HTTP error status means for the model, with the address that answered it.
+    static func statusMessage(_ status: Int, url: URL) -> String {
+        let hint: String
+        switch status {
+        case 401, 403:
+            hint = "O site exige login ou bloqueia leitores automáticos. Se o usuário já está logado nessa página, tente browser_tab (\"Controlar apps do Mac\"); senão, procure outra fonte."
+        case 404, 410:
+            hint = "A página não existe ou mudou de endereço; confira a URL."
+        case 429:
+            hint = "Muitas requisições a este site; espere um pouco antes de tentar de novo."
+        case 500...599:
+            hint = "Erro no servidor do site; tente de novo mais tarde ou use outra fonte."
+        default:
+            hint = ""
+        }
+        return "O site respondeu HTTP \(status) para \(url.absoluteString)." + (hint.isEmpty ? "" : " " + hint)
+    }
+
+    /// A network failure in Portuguese, with the host and what to do about it.
+    static func explain(_ error: URLError, url: URL) -> ToolError {
+        let host = url.host() ?? url.absoluteString
+        switch error.code {
+        case .appTransportSecurityRequiresSecureConnection:
+            return ToolError("O macOS bloqueou \(host) por usar http:// sem criptografia. Tente o mesmo endereço com https://.")
+        case .cannotFindHost, .dnsLookupFailed:
+            return ToolError("O endereço \(host) não existe ou não foi encontrado; confira a grafia da URL.")
+        case .timedOut:
+            return ToolError("\(host) não respondeu a tempo (20 s). O site pode estar fora do ar ou lento; tente de novo mais tarde.")
+        case .serverCertificateUntrusted, .serverCertificateHasBadDate, .serverCertificateHasUnknownRoot, .serverCertificateNotYetValid,
+             .secureConnectionFailed, .clientCertificateRejected, .clientCertificateRequired:
+            return ToolError("O certificado de segurança de \(host) é inválido (vencido, autoassinado ou de outro site). O Orb não contorna isso: avise o usuário ou use outra fonte.")
+        case .notConnectedToInternet, .dataNotAllowed, .internationalRoamingOff:
+            return ToolError("O Mac está sem conexão com a internet.")
+        case .networkConnectionLost, .cannotConnectToHost:
+            return ToolError("Não consegui conectar a \(host) (conexão recusada ou interrompida); tente de novo mais tarde.")
+        case .unsupportedURL, .badURL:
+            return ToolError("Endereço inválido: use uma URL http:// ou https://.")
+        case .httpTooManyRedirects, .redirectToNonExistentLocation:
+            return ToolError("\(host) redirecionou em círculos ou para um endereço que não existe.")
+        default:
+            return ToolError("Falha de rede ao acessar \(host): \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: Download
 
     /// Streams the body to a temporary file next to `target` and moves it into place, so a failed or oversized
     /// download never leaves a half-written file behind. Returns the size in bytes.
@@ -147,7 +291,7 @@ struct WebFetchTool: AgentTool {
                     buffer.removeAll(keepingCapacity: true)
                 }
                 if total + buffer.count > maxDownloadBytes {
-                    throw ToolError("O arquivo passa de \(maxDownloadBytes / 1_000_000) MB; baixe com run_command (curl -L -o).")
+                    throw ToolError(tooLargeMessage)
                 }
             }
             total += buffer.count
@@ -167,157 +311,48 @@ struct WebFetchTool: AgentTool {
     }
 }
 
-/// Decodes response bodies the way browsers do: byte-order mark, then the HTTP charset, then (for markup) a
-/// `<meta charset>`, then strict UTF-8, and Windows-1252 as the last resort.
-enum WebText {
-    static func decode(_ data: Data, headerCharset: String?, sniffMeta: Bool) -> String {
-        let marks: [[UInt8]] = [[0xEF, 0xBB, 0xBF], [0xFF, 0xFE], [0xFE, 0xFF]]
-        if marks.contains(where: { data.starts(with: $0) }), let file = TextFile.decode(data) { return file.text }
-        if let charset = headerCharset, let text = string(data, charset: charset) { return text }
-        if sniffMeta, let charset = metaCharset(in: data.prefix(4096)), let text = string(data, charset: charset) { return text }
-        return String(data: data, encoding: .utf8) ?? String(data: data, encoding: .windowsCP1252) ?? String(decoding: data, as: UTF8.self)
-    }
+/// The last few pages `web_fetch` converted, for a few minutes: reading a long page in pieces (`offset`) or searching
+/// it (`find`) does not download and convert it again for every piece, and the pieces stay consistent with each other.
+actor WebPageCache {
+    static let shared = WebPageCache()
 
-    private static func string(_ data: Data, charset: String) -> String? {
-        let encoding = CFStringConvertIANACharSetNameToEncoding(charset.trimmingCharacters(in: .whitespaces) as CFString)
-        guard encoding != kCFStringEncodingInvalidId else { return nil }
-        return String(data: data, encoding: String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(encoding)))
-    }
+    struct Entry: Sendable {
+        var header: String
+        var text: String
+        var truncatedDownload: Int?
+        var date = Date()
 
-    private static let metaCharsetRegex = try! NSRegularExpression(pattern: #"<meta\b[^>]*?charset\s*=\s*["']?\s*([A-Za-z0-9_.:\-]+)"#, options: .caseInsensitive)
-
-    /// The tag is ASCII in every encoding in use, so reading the head as Latin-1 finds it.
-    private static func metaCharset(in head: Data) -> String? {
-        guard let text = String(data: head, encoding: .isoLatin1),
-              let match = metaCharsetRegex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
-              let range = Range(match.range(at: 1), in: text) else { return nil }
-        return String(text[range])
-    }
-}
-
-/// Turns HTML into readable plain text with regular expressions (no WebKit).
-enum HTMLText {
-    /// Links appear as "text (url)", relative ones resolved against `baseURL`.
-    static func convert(_ html: String, baseURL: URL? = nil) -> (title: String?, text: String) {
-        let title = firstGroup(titleRegex, in: html).map { collapseWhitespace(decodeEntities($0)) }
-        var text = html
-        for rule in cleanupRules { text = rule.apply(to: text) }
-        text = inlineLinks(text, baseURL: baseURL)
-        for rule in layoutRules { text = rule.apply(to: text) }
-        return (title, collapseWhitespace(decodeEntities(text)))
-    }
-
-    /// A regular expression and its replacement template, compiled once (pages are converted often).
-    private struct Rule {
-        let regex: NSRegularExpression
-        let template: String
-
-        init(_ pattern: String, _ template: String) {
-            // Static, known-valid patterns.
-            regex = try! NSRegularExpression(pattern: pattern, options: .caseInsensitive)
-            self.template = template
-        }
-
-        func apply(to text: String) -> String {
-            regex.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: template)
+        /// What the model gets: the header, then the page from `offset`, or the passages around `find`.
+        func render(arguments: JSONValue, find: String?) -> String {
+            let body = find.map { WebFetchTool.passages(of: $0, in: text) }
+                ?? WebFetchTool.page(of: text, arguments: arguments, truncatedDownload: truncatedDownload)
+            return header + "\n\n" + body
         }
     }
 
-    private static let titleRegex = try! NSRegularExpression(pattern: #"<title\b[^>]*>([\s\S]*?)</title\s*>"#, options: .caseInsensitive)
-    private static let linkRegex = try! NSRegularExpression(pattern: #"<a\b([^>]*)>([\s\S]*?)</a\s*>"#, options: .caseInsensitive)
-    private static let hrefRegex = try! NSRegularExpression(pattern: #"\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#, options: .caseInsensitive)
-    private static let tagRegex = try! NSRegularExpression(pattern: #"<[^>]*>"#)
-    private static let entityRegex = try! NSRegularExpression(pattern: "&(#[0-9]+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);")
+    static let capacity = 8
+    static let lifetime: TimeInterval = 600
+    /// A page bigger than this is not kept (the cache must stay small).
+    static let largestText = 3_000_000
 
-    /// Applied before links are read: whatever is dropped here must not leak its links into the text.
-    private static let cleanupRules = [
-        Rule(#"<!--[\s\S]*?-->"#, ""),
-        Rule(#"<(script|style|nav|noscript|svg|template|iframe|head)\b[^>]*>[\s\S]*?</\1\s*>"#, ""),
-    ]
+    private var entries: [(address: String, entry: Entry)] = []
 
-    /// Applied after links are rewritten; link text survives because only the tags are removed.
-    private static let layoutRules = [
-        Rule(#"<li\b[^>]*>"#, "\n• "),
-        Rule(#"</?(?:p|div|h[1-6]|ul|ol|li|tr|table|section|article|header|footer|main|aside|blockquote|pre|form|dl|dt|dd|figure|figcaption|br|hr)\b[^>]*>"#, "\n"),
-        Rule(#"</?t[dh]\b[^>]*>"#, " "),
-        Rule(#"<[^>]*>"#, ""),
-    ]
-
-    /// `<a href="u">text</a>` becomes `text (u)`; fragments, `javascript:` links, links without text (icons)
-    /// and links whose text already is the address stay as they were.
-    private static func inlineLinks(_ html: String, baseURL: URL?) -> String {
-        let result = NSMutableString(string: html)
-        let source = html as NSString
-        for match in linkRegex.matches(in: html, range: NSRange(location: 0, length: source.length)).reversed() {
-            let attributes = source.substring(with: match.range(at: 1))
-            let inner = source.substring(with: match.range(at: 2))
-            guard let target = linkTarget(attributes, baseURL: baseURL) else { continue }
-            let label = collapseWhitespace(decodeEntities(tagRegex.stringByReplacingMatches(
-                in: inner, range: NSRange(inner.startIndex..., in: inner), withTemplate: "")))
-            guard !label.isEmpty, label != target, label + "/" != target, label != target + "/" else { continue }
-            result.replaceCharacters(in: match.range, with: inner + " (\(target))")
-        }
-        return result as String
+    func entry(for address: String, now: Date = Date()) -> Entry? {
+        entries.removeAll { now.timeIntervalSince($0.entry.date) > Self.lifetime }
+        guard let index = entries.firstIndex(where: { $0.address == address }) else { return nil }
+        let found = entries.remove(at: index)
+        entries.append(found)   // most recently used last
+        return found.entry
     }
 
-    private static func linkTarget(_ attributes: String, baseURL: URL?) -> String? {
-        guard let match = hrefRegex.firstMatch(in: attributes, range: NSRange(attributes.startIndex..., in: attributes)) else { return nil }
-        let raw = (1...3).lazy.compactMap { Range(match.range(at: $0), in: attributes).map { String(attributes[$0]) } }.first ?? ""
-        let href = decodeEntities(raw).trimmingCharacters(in: .whitespacesAndNewlines)
-        let lowered = href.lowercased()
-        guard !href.isEmpty, !href.hasPrefix("#"), !lowered.hasPrefix("javascript:"), !lowered.hasPrefix("data:") else { return nil }
-        return URL(string: href, relativeTo: baseURL)?.absoluteString ?? href
+    func store(_ entry: Entry, for address: String) {
+        entries.removeAll { $0.address == address }
+        guard entry.text.utf8.count <= Self.largestText else { return }
+        entries.append((address, entry))
+        if entries.count > Self.capacity { entries.removeFirst(entries.count - Self.capacity) }
     }
 
-    private static func firstGroup(_ regex: NSRegularExpression, in text: String) -> String? {
-        guard let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
-              let range = Range(match.range(at: 1), in: text) else { return nil }
-        return String(text[range])
-    }
-
-    private static func decodeEntities(_ text: String) -> String {
-        let result = NSMutableString(string: text)
-        // Back to front so earlier ranges stay valid.
-        for match in entityRegex.matches(in: text, range: NSRange(text.startIndex..., in: text)).reversed() {
-            if let character = entity(result.substring(with: match.range(at: 1))) {
-                result.replaceCharacters(in: match.range, with: character)
-            }
-        }
-        return (result as String).precomposedStringWithCanonicalMapping
-    }
-
-    private static let namedEntities: [String: String] = [
-        "amp": "&", "lt": "<", "gt": ">", "quot": "\"", "apos": "'", "nbsp": " ", "mdash": "—", "ndash": "–",
-        "hellip": "…", "lsquo": "‘", "rsquo": "’", "ldquo": "“", "rdquo": "”", "laquo": "«", "raquo": "»",
-        "bull": "•", "middot": "·", "copy": "©", "reg": "®", "trade": "™", "euro": "€", "ordm": "º", "ordf": "ª",
-    ]
-
-    /// Accented Latin letters such as `&atilde;` and `&ccedil;`, built from a base letter and a combining mark.
-    private static let accents: [String: String] = [
-        "acute": "\u{301}", "grave": "\u{300}", "circ": "\u{302}", "tilde": "\u{303}", "uml": "\u{308}",
-        "cedil": "\u{327}", "ring": "\u{30A}",
-    ]
-
-    private static func entity(_ name: String) -> String? {
-        if name.hasPrefix("#") {
-            let digits = name.dropFirst()
-            let code = digits.first == "x" || digits.first == "X" ? UInt32(digits.dropFirst(), radix: 16) : UInt32(digits)
-            return code.flatMap(Unicode.Scalar.init).map { String(Character($0)) }
-        }
-        if let value = namedEntities[name] { return value }
-        guard let letter = name.first, letter.isLetter, let mark = accents[String(name.dropFirst())] else { return nil }
-        return String(letter) + mark
-    }
-
-    /// Collapses runs of spaces, trims lines and keeps at most one blank line in a row.
-    private static func collapseWhitespace(_ text: String) -> String {
-        var lines: [String] = []
-        for line in text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline) {
-            let words = line.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-            if !words.isEmpty || lines.last?.isEmpty == false { lines.append(words) }
-        }
-        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-    }
+    func clear() { entries.removeAll() }
 }
 
 extension ToolBox {

@@ -20,6 +20,58 @@ struct OpenTool: AgentTool {
     /// Even a web URL can carry data out (in its query), so opening anything asks first.
     func risk(_ arguments: JSONValue) -> ToolRisk { .sensitive }
 
+    func danger(_ arguments: JSONValue) -> String? { Self.danger(target: arguments["target"]?.string ?? "") }
+
+    func danger(_ arguments: JSONValue, context: ToolContext) -> String? {
+        Self.danger(target: arguments["target"]?.string ?? "", directory: context.workingDirectory)
+    }
+
+    /// Extensions of files that run code or install software when opened.
+    static let programExtensions: Set<String> = ["command", "tool", "sh", "zsh", "bash", "terminal", "workflow", "scpt", "scptd",
+                                                 "applescript", "pkg", "mpkg", "dmg"]
+
+    /// Opening a document is ordinary; opening something that runs (a script, an installer, an executable file, an app from
+    /// outside the usual application folders) or a link that runs a Shortcut is not, so "Automático" still asks.
+    /// `directory` is where a relative path resolves (the Orb's working folder), as the tool itself does.
+    static func danger(target: String, home: String = NSHomeDirectory(), directory: URL? = nil) -> String? {
+        let text = target.trimmingCharacters(in: .whitespacesAndNewlines)
+        if runsShortcut(text) { return "roda um Atalho, que pode fazer qualquer coisa que ele faça" }
+        var path: String
+        switch OpenTarget.classify(text) {
+        case .url(let url): guard url.isFileURL else { return nil }; path = url.path
+        case .pathOrName(let name):
+            path = (name as NSString).expandingTildeInPath
+            // The tool opens a file of that name in its folder before looking for an app of that name.
+            if !path.hasPrefix("/"), let directory {
+                let file = directory.appending(path: path).path
+                if FileManager.default.fileExists(atPath: file) { path = file }
+            }
+        }
+        // `/Applications/../Users/x/Evil.app` is not in /Applications.
+        if path.hasPrefix("/") { path = URL(fileURLWithPath: path).standardizedFileURL.path }
+        while path.count > 1, path.hasSuffix("/") { path.removeLast() }
+        let pathExtension = (path as NSString).pathExtension.lowercased()
+        if programExtensions.contains(pathExtension) { return "abre um script ou instalador, que pode rodar código" }
+        // A bare name ("Safari.app") is looked up by the system; a path is taken as it is.
+        if pathExtension == "app", path.contains("/") {
+            let usual = ["/Applications/", "/System/Applications/", home + "/Applications/"]
+            if !usual.contains(where: path.hasPrefix) { return "abre um programa de fora das pastas de aplicativos" }
+        }
+        // A file with no extension that can be executed opens in Terminal and runs.
+        var isDirectory: ObjCBool = false
+        if pathExtension.isEmpty, path.hasPrefix("/"), FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+           !isDirectory.boolValue, FileManager.default.isExecutableFile(atPath: path) {
+            return "abre um programa executável, que roda no Terminal"
+        }
+        return nil
+    }
+
+    /// `shortcuts://run-shortcut?name=…` and `shortcuts://x-callback-url/run-shortcut…`.
+    static func runsShortcut(_ target: String) -> Bool {
+        let text = target.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return text.hasPrefix("shortcuts:") && text.contains("run-shortcut")
+    }
+
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) {
         let target = arguments["target"]?.string ?? ""
         guard let app = arguments["app"]?.string, !app.isEmpty else { return ("Abrindo", target) }
@@ -28,6 +80,10 @@ struct OpenTool: AgentTool {
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
         let target = try arguments.requiredString("target")
+        if Self.runsShortcut(target), !context.computerUseAllowed {
+            throw ToolError("Rodar Atalhos está desligado para este Orb: \"\(Capability.computerUse.label)\" precisa estar ligado. "
+                            + "Diga ao usuário para ligá-lo no painel do Orb (Geral) se a tarefa precisar disso.")
+        }
         if let appName = arguments.nonEmptyString("app") {
             guard let appURL = await Self.application(named: appName) else {
                 throw ToolError("Não encontrei o app \"\(appName)\" neste Mac.")
@@ -172,12 +228,11 @@ struct AppleScriptTool: AgentTool {
     let spec = ToolSpec(
         name: "applescript",
         description: """
-        Run an AppleScript (or JavaScript for Automation, language "javascript") with osascript and return its \
-        result, to automate Mac apps (Mail, Calendar, Notes, Finder, Safari, System Events…). Output \
-        "structured" keeps strings and numbers apart. Stops after 60 seconds (timeout_seconds up to 300). The \
-        first use of each app makes macOS ask the user for Automation permission and the call waits for the \
-        answer; on a permission error, pass the message on instead of retrying. Prefer a dedicated tool (open, \
-        browser_tab, clipboard_read, screenshot…) when one exists.
+        Run an AppleScript (or JavaScript for Automation, language "javascript") with osascript to automate Mac \
+        apps (Mail, Calendar, Notes, Finder, Safari, System Events…). Output "structured" keeps strings and numbers \
+        apart. Stops after 60 seconds (timeout_seconds up to 300). macOS asks the user for Automation permission on \
+        the first use of each app and the call waits; on a permission error, pass the message on instead of \
+        retrying. Prefer a dedicated tool (open, browser_tab, clipboard_read, screenshot…) when one exists.
         """,
         parameters: .schema([
             "script": .property("string"),

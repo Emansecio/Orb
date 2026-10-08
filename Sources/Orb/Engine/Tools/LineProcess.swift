@@ -2,27 +2,21 @@ import Foundation
 import os
 
 /// A long-running child that talks in lines: Orb writes lines to its stdin, reads its stdout line by line
-/// and keeps the end of its stderr for error messages. Like `ProcessRunner`, the child gets its own process
-/// group, so stopping it also stops whatever it launched.
+/// and keeps the end of its stderr for error messages. Like `ProcessRunner` it is started with `SpawnedProcess`: the
+/// child gets its own process group (stopping it also stops whatever it launched) and its arguments and environment
+/// arrive byte for byte, so the persona and memory in Portuguese reach Claude Code as written, not decomposed.
 final class LineProcess: Sendable {
     /// Stdout, one line at a time; finishes when the child closes stdout.
     let lines: AsyncStream<String>
-    /// Kept so the child is never released while it runs.
-    private let process: Process
+    private let pid: pid_t
+    /// Kept so the readers' descriptors stay open for as long as the child may write.
+    private let pipes: [Pipe]
     private let input: OSAllocatedUnfairLock<FileHandle?>
     private let errors: OSAllocatedUnfairLock<OutputBuffer>
     private let exited: OSAllocatedUnfairLock<Bool>
 
     init(executable: URL, arguments: [String], directory: URL, environment: [String: String]) throws {
-        let process = Process()
-        process.executableURL = executable
-        process.arguments = arguments
-        process.currentDirectoryURL = directory
-        process.environment = environment
         let stdin = Pipe(), stdout = Pipe(), stderr = Pipe()
-        process.standardInput = stdin
-        process.standardOutput = stdout
-        process.standardError = stderr
 
         let (lines, continuation) = AsyncStream.makeStream(of: String.self)
         let partial = OSAllocatedUnfairLock(initialState: Data())
@@ -52,15 +46,32 @@ final class LineProcess: Sendable {
             if data.isEmpty { handle.readabilityHandler = nil } else { errors.withLock { $0.append(data) } }
         }
         let exited = OSAllocatedUnfairLock(initialState: false)
-        process.terminationHandler = { _ in exited.withLock { $0 = true } }
 
-        try process.run()
+        let pid: pid_t
+        do {
+            pid = try SpawnedProcess.start(executable.path, arguments, directory: directory, environment: environment,
+                                           output: stdout.fileHandleForWriting.fileDescriptor,
+                                           error: stderr.fileHandleForWriting.fileDescriptor,
+                                           input: stdin.fileHandleForReading.fileDescriptor)
+        } catch {
+            for handle in [stdin.fileHandleForReading, stdin.fileHandleForWriting, stdout.fileHandleForReading, stdout.fileHandleForWriting,
+                           stderr.fileHandleForReading, stderr.fileHandleForWriting] {
+                try? handle.close()
+            }
+            throw error
+        }
+        // Only the child holds these ends now, so the readers see the end of the streams when it is gone.
+        try? stdin.fileHandleForReading.close()
+        try? stdout.fileHandleForWriting.close()
+        try? stderr.fileHandleForWriting.close()
+        SpawnedProcess.watch(pid) { _ in exited.withLock { $0 = true } }
         // A child that exits early must not kill the app with SIGPIPE when we write to it.
         _ = fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
         self.lines = lines
         self.errors = errors
         self.exited = exited
-        self.process = process
+        self.pid = pid
+        pipes = [stdin, stdout, stderr]
         input = OSAllocatedUnfairLock(initialState: stdin.fileHandleForWriting)
     }
 
@@ -84,7 +95,7 @@ final class LineProcess: Sendable {
 
     /// Unless the child exits first: SIGTERM to its process group after `grace` seconds, SIGKILL 2 seconds later.
     func terminate(after grace: TimeInterval) {
-        let pid = process.processIdentifier, exited = exited
+        let pid = pid, exited = exited
         DispatchQueue.global().asyncAfter(deadline: .now() + grace) {
             guard !exited.withLock({ $0 }) else { return }
             kill(-pid, SIGTERM)

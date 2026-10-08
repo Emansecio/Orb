@@ -12,14 +12,27 @@ struct ProcessOutput: Sendable {
     /// A descendant still held the output open after the process ended (a `cmd &` left behind), so the rest of
     /// its output was not read and it may die from SIGPIPE on its next write.
     var leftOutputOpen = false
+    /// Processes of the command's group (a `cmd &` left behind) were still alive when it returned. They are not
+    /// tracked or stopped by the app.
+    var leftoversAlive = false
+    /// Bytes and lines of the whole stream, including what the cut removed.
+    var totalBytes = 0
+    var totalLines = 0
+    /// Where the whole stream was saved, when it was longer than the limit and a folder to save it in was given.
+    var fullOutputFile: URL?
+    /// The saved file stops at `StreamCapture.maxSpillBytes`; the stream was longer.
+    var fullOutputCut = false
+    /// Mostly unreadable bytes (an executable, an archive): `output` is a placeholder, not the data.
+    var isBinary = false
 }
 
 /// Runs an executable directly (no shell) with a timeout, task cancellation and capped merged output.
 /// `executable` must be a full path. Arguments and environment reach the child byte for byte (see `SpawnedProcess`).
 enum ProcessRunner {
-    /// `environment` replaces the inherited one when given.
+    /// `environment` replaces the inherited one when given. `spillTo`: a file to write the whole stream to when it is
+    /// longer than `outputLimit` (the result keeps only the start and end); never created for shorter output.
     static func run(_ executable: String, _ arguments: [String], directory: URL? = nil, environment: [String: String]? = nil,
-                    timeout: Duration, outputLimit: Int = 20_000) async throws -> ProcessOutput {
+                    timeout: Duration, outputLimit: Int = 20_000, spillTo: URL? = nil) async throws -> ProcessOutput {
         try Task.checkCancellation()
         let pipe = Pipe()
         let (exited, exitedContinuation) = AsyncStream<ChildExit>.makeStream()
@@ -40,7 +53,7 @@ enum ProcessRunner {
         }
 
         // Read as data arrives so a chatty child never blocks on a full pipe.
-        let buffer = OSAllocatedUnfairLock(initialState: OutputBuffer(limit: outputLimit))
+        let buffer = OSAllocatedUnfairLock(initialState: StreamCapture(limit: outputLimit, spillTo: spillTo))
         let (drained, drainedContinuation) = AsyncStream<Never>.makeStream()
         pipe.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
@@ -77,14 +90,102 @@ enum ProcessRunner {
         }
         pipe.fileHandleForReading.readabilityHandler = nil
         try? pipe.fileHandleForReading.close()
+        // The leader is gone; the group id lives on while anything it started is still running.
+        let leftoversAlive = kill(-pid, 0) == 0
+        let captured = buffer.withLock { $0.finish() }
         return ProcessOutput(status: ended?.status ?? -1, signal: ended.flatMap { $0.signaled ? $0.status : nil },
-                             output: buffer.withLock { $0.text }, timedOut: timedOut, leftOutputOpen: !drainedInTime)
+                             output: captured.text, timedOut: timedOut, leftOutputOpen: !drainedInTime, leftoversAlive: leftoversAlive,
+                             totalBytes: captured.bytes, totalLines: captured.lines, fullOutputFile: captured.file,
+                             fullOutputCut: captured.fileCut, isBinary: captured.isBinary)
     }
 
     /// SIGTERM to the whole process group, then SIGKILL to whatever is left 2 seconds later.
     private static func terminateGroup(_ pid: pid_t) {
         kill(-pid, SIGTERM)
         DispatchQueue.global().asyncAfter(deadline: .now() + 2) { kill(-pid, SIGKILL) }
+    }
+}
+
+/// The merged output as it is read: the start and end for the result, and the whole stream in a file once it outgrows
+/// the limit (everything before that is still in the buffer, so the file starts complete).
+struct StreamCapture: Sendable {
+    /// What the saved file may hold (like the log of a background job): a command that never stops printing (`yes`) fills
+    /// the disk in minutes otherwise. The counts and the start and end kept in the result still cover the whole stream.
+    static let maxSpillBytes = 50_000_000
+    private var buffer: OutputBuffer
+    private let spillTarget: URL?
+    private let spillLimit: Int
+    private var spill: FileHandle?
+    private var spilledBytes = 0
+    private var spillCut = false
+    private var lines = 0
+    private var binaryBytes = 0
+    private var sampled = 0
+
+    init(limit: Int, spillTo: URL?, spillLimit: Int = StreamCapture.maxSpillBytes) {
+        buffer = OutputBuffer(limit: limit)
+        spillTarget = spillTo
+        self.spillLimit = spillLimit
+    }
+
+    mutating func append(_ data: Data) {
+        data.withUnsafeBytes { raw in
+            for byte in raw {
+                if byte == 10 { lines += 1 }
+            }
+        }
+        // Binary data is spotted on the first kilobytes; the rest of the stream does not change the verdict.
+        if sampled < 4_096 {
+            for byte in data.prefix(4_096 - sampled) where byte == 0 { binaryBytes += 1 }
+            sampled += min(data.count, 4_096 - sampled)
+        }
+        if let spillTarget, spill == nil, !spillCut, buffer.totalBytes + data.count > buffer.limit {
+            let manager = FileManager.default
+            try? manager.createDirectory(at: spillTarget.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if manager.createFile(atPath: spillTarget.path, contents: buffer.bytes) {
+                spill = try? FileHandle(forWritingTo: spillTarget)
+                _ = try? spill?.seekToEnd()
+                spilledBytes = buffer.bytes.count
+            }
+        }
+        if let handle = spill {
+            let room = max(spillLimit - spilledBytes, 0)
+            if data.count > room {
+                // Stop at the limit: the file ends here, the rest of the stream is only counted.
+                if room > 0 { try? handle.write(contentsOf: data.prefix(room)) }
+                try? handle.close()
+                spill = nil
+                spillCut = true
+                spilledBytes = spillLimit
+            } else {
+                try? handle.write(contentsOf: data)
+                spilledBytes += data.count
+            }
+        }
+        buffer.append(data)
+    }
+
+    /// Closes the file and gives the result.
+    mutating func finish() -> (text: String, bytes: Int, lines: Int, file: URL?, fileCut: Bool, isBinary: Bool) {
+        try? spill?.close()
+        let wrote = spill != nil || spillCut
+        spill = nil
+        // The last line may have no newline.
+        let total = buffer.totalBytes
+        let text = buffer.text
+        return (text, total, lines + (total > 0 && !text.hasSuffix("\n") ? 1 : 0), wrote ? spillTarget : nil, spillCut, looksBinary(text))
+    }
+
+    /// NUL bytes in the first kilobytes, or mostly replacement and control characters: not text to show a model.
+    private func looksBinary(_ text: String) -> Bool {
+        if binaryBytes > 0, sampled > 0, binaryBytes * 20 >= sampled { return true }
+        var bad = 0
+        var total = 0
+        for scalar in text.unicodeScalars.prefix(4_096) {
+            total += 1
+            if scalar.value == 0xFFFD || scalar.value == 0 || (scalar.value < 0x20 && ![9, 10, 13, 27].contains(scalar.value)) { bad += 1 }
+        }
+        return total >= 32 && bad * 4 >= total
     }
 }
 
@@ -113,6 +214,11 @@ struct OutputBuffer: Sendable {
     private var head = Data()
     private var tail = Data()
     private var droppedBytes = 0
+
+    /// Bytes read so far, kept or not.
+    var totalBytes: Int { head.count + tail.count + droppedBytes }
+    /// The stream itself, while nothing has been dropped.
+    var bytes: Data { head + tail }
     /// Unicode scalars in the dropped middle (counted as the bytes go, since they are not kept).
     private var droppedCharacters = 0
 

@@ -9,9 +9,11 @@ struct GlobPattern: Sendable {
     /// A pattern with a "/" is matched against the whole relative path; one without, against the file name only.
     private let usesFullPath: Bool
 
-    init(_ glob: String) throws {
+    /// `anchored`: match the whole relative path even without a "/" (the pattern of an absolute glob, `/tmp/*.txt`, which
+    /// means the files directly in /tmp).
+    init(_ glob: String, anchored: Bool = false) throws {
         let trimmed = glob.hasPrefix("./") ? String(glob.dropFirst(2)) : glob
-        usesFullPath = trimmed.contains("/")
+        usesFullPath = anchored || trimmed.contains("/")
         do {
             regex = try NSRegularExpression(pattern: Self.regex(for: trimmed), options: .caseInsensitive)
         } catch {
@@ -96,6 +98,9 @@ struct WalkedFile: Sendable {
 enum FileWalker {
     static let skippedDirectories: Set<String> = [
         ".git", ".hg", ".svn", "node_modules", ".build", "DerivedData", "Pods", ".venv", "__pycache__",
+        // Build output and caches of the usual toolchains (Gradle, npm bundlers, Cargo, Python): thousands of generated
+        // files that bury the real sources. Asking for the folder itself as `path` still searches it.
+        "build", "dist", "out", "target", ".gradle", ".next", ".nuxt", "coverage", "venv", ".tox", ".mypy_cache", ".cache",
     ]
     static let maxFiles = 200_000
 
@@ -148,6 +153,8 @@ enum FileWalker {
 struct GrepTool: AgentTool {
     static let lineLimit = 300
     static let maxFileBytes = 5_000_000
+    /// The largest single file searched when it is named as `path`.
+    static let maxStreamedBytes = 200_000_000
     static let defaultTimeBudget = Duration.seconds(20)
 
     /// How long one search may run before it stops and says so.
@@ -156,10 +163,11 @@ struct GrepTool: AgentTool {
     let spec = ToolSpec(
         name: "grep",
         description: """
-        Search file contents with a regex (ICU) and return `path:line: text` (a file with many matches is \
-        grouped under a `path:` header, `  line: text` below it). Searches a folder recursively or one file; \
-        skips .git, node_modules, build folders, binaries and files over 5 MB. Narrow with `path` or `include` \
-        rather than raising `max_results`. Prefer it over run_command grep; for file names use glob.
+        Search file contents with an ICU regex; returns `path:line: text` (many matches in one file are grouped \
+        under a `path:` header). Recursive in a folder, or one file; skips .git, node_modules, build/dist/target-style \
+        folders (pass one as `path` to search it) and binaries. In a folder, files over 5 MB are skipped and named; \
+        pass such a file as `path` (up to 200 MB, e.g. a log). Narrow with `path` or `include` before raising \
+        `max_results`. Prefer it over run_command grep; for file names use glob.
         """,
         parameters: .schema([
             "pattern": .property("string"),
@@ -205,15 +213,36 @@ struct GrepTool: AgentTool {
         }
     }
 
+    /// What one file gave: the lines that matched, and the means to show them (with context) afterwards.
+    private struct ScannedFile {
+        /// Zero-based line index and the column of the first match. In streamed content mode, capped just past the room left.
+        var hits: [(index: Int, column: Int)] = []
+        /// How many lines matched (`hits.count` unless counting only).
+        var hitCount = 0
+        var lineCount = 0
+        var line: (Int) -> String? = { _ in nil }
+        var timedOut = false
+    }
+
     private static func search(regex: NSRegularExpression, patternText: String, mode: String, contextLines: Int, limit: Int,
                                include: GlobPattern?, root: URL, workingDirectory: URL,
                                deadline: ContinuousClock.Instant) throws -> String {
         var candidates: [WalkedFile]
         var truncated = false
-        if root.isExistingDirectory {
+        var withheld = 0
+        let singleFile = !root.isExistingDirectory
+        if !singleFile {
             let walked = try FileWalker.files(under: root, deadline: deadline)
             candidates = walked.files.filter { include?.matches(relativePath: $0.relativePath) ?? true }
             truncated = walked.truncated
+            // Private keys and saved passwords are not read in passing by a search of a folder around them; naming
+            // such a folder or file as `path` is a deliberate request (and asks, see `PermissionPolicy`).
+            let secrets = DangerousCommand.SensitiveFiles()
+            if secrets.reason(for: root.path + "/x") == nil {
+                let before = candidates.count
+                candidates.removeAll { secrets.reason(for: $0.url.path) != nil }
+                withheld = before - candidates.count
+            }
         } else {
             let target = root.resolvingLinkChain
             candidates = [WalkedFile(url: target, relativePath: "", modified: .distantPast,
@@ -226,58 +255,59 @@ struct GrepTool: AgentTool {
         var totalLines = 0
         var matchedFiles = 0
         var searched = 0
-        var tooLarge = 0
+        /// Files that were not searched because of their size, by the name the model can pass back as `path`.
+        var tooLarge: [String] = []
         var limitReached = false
 
         scan: for candidate in candidates {
             try Task.checkCancellation()
             if ContinuousClock.now > deadline { truncated = true; break }
-            guard candidate.size <= maxFileBytes else { tooLarge += 1; continue }
-            guard let data = try? Data(contentsOf: candidate.url, options: .mappedIfSafe),
-                  let file = TextFile.decode(data) else { continue }
-            searched += 1
-
-            let lines = TextFile.lines(of: file.text)
-            var hits: [(index: Int, column: Int)] = []
-            var timedOut = false
-            for (index, line) in lines.enumerated() {
-                guard let range = firstMatch(of: regex, in: line, deadline: deadline, timedOut: &timedOut) else {
-                    if timedOut { break }
-                    continue
-                }
-                hits.append((index, range.location))
-                if mode == "files" { break }
+            let name = FileWalker.display(root, candidate.relativePath, workingDirectory: workingDirectory)
+            let scanned: ScannedFile
+            if candidate.size <= maxFileBytes {
+                guard let data = try? Data(contentsOf: candidate.url, options: .mappedIfSafe),
+                      let file = TextFile.decode(data) else { continue }
+                let lines = TextFile.lines(of: file.text)
+                scanned = scan(lines: lines, regex: regex, mode: mode, deadline: deadline)
+            } else if singleFile, candidate.size <= maxStreamedBytes {
+                // A log is what read_file sends the model here to search: look through it without loading it as text.
+                guard let streamed = try stream(candidate.url, regex: regex, mode: mode, contextLines: contextLines,
+                                                room: max(limit - results, 0) + 1, deadline: deadline) else { continue }
+                scanned = streamed
+            } else {
+                tooLarge.append(name)
+                continue
             }
-            if timedOut {
+            searched += 1
+            if scanned.timedOut {
                 // A pattern that backtracks without end would otherwise run past the time budget unchecked.
                 try Task.checkCancellation()
                 truncated = true
                 break scan
             }
-            guard !hits.isEmpty else { continue }
+            guard scanned.hitCount > 0 else { continue }
             if results >= limit {
                 // Something more exists beyond the limit, so the output is truncated rather than just full.
                 limitReached = true
                 break scan
             }
             matchedFiles += 1
-            totalLines += hits.count
-            let name = FileWalker.display(root, candidate.relativePath, workingDirectory: workingDirectory)
+            totalLines += scanned.hitCount
 
             switch mode {
             case "files":
                 output.append(name)
                 results += 1
             case "count":
-                output.append("\(name): \(hits.count)")
+                output.append("\(name): \(scanned.hitCount)")
                 results += 1
             default:
                 if contextLines > 0, !output.isEmpty { output.append("--") }
                 let room = limit - results
-                if hits.count > room { limitReached = true }
-                let kept = Array(hits.prefix(room))
+                if scanned.hits.count > room { limitReached = true }
+                let kept = Array(scanned.hits.prefix(room))
                 results += kept.count
-                output += contentLines(name: name, lines: lines, hits: kept, context: contextLines)
+                output += contentLines(name: name, lineCount: scanned.lineCount, line: scanned.line, hits: kept, context: contextLines)
             }
         }
 
@@ -285,12 +315,22 @@ struct GrepTool: AgentTool {
         let fitted = ToolOutputBudget.fit(output)
         let cutBySize = fitted.omitted > 0
         output = fitted.kept
+        var sizeNote = tooLargeNote(tooLarge, singleFile: singleFile)
+        if withheld > 0 {
+            let note = "[\(withheld) \(withheld == 1 ? "arquivo" : "arquivos") com chaves ou senhas (.env, .ssh, *.pem…) não \(withheld == 1 ? "foi pesquisado" : "foram pesquisados"); busque neles dando o arquivo como path]"
+            sizeNote = [sizeNote, note].compactMap { $0 }.joined(separator: "\n")
+        }
 
         guard !output.isEmpty else {
-            return "Nenhum resultado para \"\(patternText)\" em \(FileWalker.display(root, "", workingDirectory: workingDirectory)) (\(searched) arquivos de texto pesquisados)."
-                + (truncated ? " A busca parou antes de varrer tudo (tempo ou número de arquivos); restrinja path ou include." : "")
+            var message = "Nenhum resultado para \"\(patternText)\" em \(FileWalker.display(root, "", workingDirectory: workingDirectory)) (\(searched) arquivos de texto pesquisados)."
+            if truncated { message += " A busca parou antes de varrer tudo (tempo ou número de arquivos); restrinja path ou include." }
+            // An empty answer must not read as "not there" when a file that could hold it was skipped.
+            if let sizeNote { message += "\n" + sizeNote }
+            return message
         }
-        if mode == "count" { output.append("Total: \(totalLines) linhas em \(matchedFiles) arquivos.") }
+        if mode == "count" {
+            output.append("Total\(limitReached || cutBySize ? " (até o limite)" : ""): \(totalLines) linhas em \(matchedFiles) arquivos.")
+        }
         if limitReached {
             output.append("[... resultados truncados em \(limit); refine o padrão, use path ou include, ou aumente max_results ...]")
         }
@@ -300,8 +340,101 @@ struct GrepTool: AgentTool {
         if truncated {
             output.append("[... a busca parou antes de varrer tudo (tempo ou número de arquivos); restrinja path ou include ...]")
         }
-        if tooLarge > 0 { output.append("[\(tooLarge) arquivos acima de 5 MB foram ignorados]") }
+        if let sizeNote { output.append(sizeNote) }
         return output.joined(separator: "\n")
+    }
+
+    /// "[2 arquivos acima de 5 MB não foram pesquisados: a.log, b.log; ...]", naming at most three.
+    private static func tooLargeNote(_ names: [String], singleFile: Bool) -> String? {
+        guard !names.isEmpty else { return nil }
+        if singleFile {
+            return "[\(names[0]) tem mais de 200 MB e não foi pesquisado; use run_command (grep, rg, sed -n) nele]"
+        }
+        let shown = names.prefix(3).joined(separator: ", ") + (names.count > 3 ? " e mais \(names.count - 3)" : "")
+        return "[\(names.count) \(names.count == 1 ? "arquivo acima de 5 MB não foi pesquisado" : "arquivos acima de 5 MB não foram pesquisados"): \(shown); "
+            + "para buscar neles passe o arquivo como path]"
+    }
+
+    /// The matching lines of a file already split into lines.
+    private static func scan(lines: [String], regex: NSRegularExpression, mode: String, deadline: ContinuousClock.Instant) -> ScannedFile {
+        var scanned = ScannedFile(lineCount: lines.count, line: { lines.indices.contains($0) ? lines[$0] : nil })
+        for (index, line) in lines.enumerated() {
+            var timedOut = false
+            guard let range = firstMatch(of: regex, in: line, deadline: deadline, timedOut: &timedOut) else {
+                if timedOut { scanned.timedOut = true; return scanned }
+                continue
+            }
+            scanned.hits.append((index, range.location))
+            if mode == "files" { break }
+        }
+        scanned.hitCount = scanned.hits.count
+        return scanned
+    }
+
+    /// Looks through a big file line by line straight from the mapped bytes, keeping only the lines that are shown
+    /// (matches and their context). Nil when it is not text this can read (binary, UTF-16): those are skipped like
+    /// any binary. Latin-1 lines are decoded per line.
+    private static func stream(_ url: URL, regex: NSRegularExpression, mode: String, contextLines: Int, room: Int,
+                               deadline: ContinuousClock.Instant) throws -> ScannedFile? {
+        guard let data = try? Data(contentsOf: url, options: .alwaysMapped) else { return nil }
+        let sample = [UInt8](data.prefix(8192))
+        if sample.contains(0) || sample.starts(with: [0xFF, 0xFE]) || sample.starts(with: [0xFE, 0xFF]) { return nil }
+
+        var kept: [Int: String] = [:]
+        var scanned = ScannedFile()
+        var recent: [(index: Int, text: String)] = []
+        var afterRemaining = 0
+        var cancelled = false
+        data.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) in
+            guard let base = bytes.baseAddress else { return }
+            var start = 0
+            var index = 0
+            while start < bytes.count {
+                if index.isMultiple(of: 4096), Task.isCancelled || ContinuousClock.now > deadline {
+                    cancelled = Task.isCancelled
+                    scanned.timedOut = true
+                    return
+                }
+                var end = bytes.count
+                if let found = memchr(base + start, 10, bytes.count - start) { end = base.distance(to: found) }
+                var lineEnd = end
+                if lineEnd > start, bytes[lineEnd - 1] == 13 { lineEnd -= 1 }
+                let slice = Data(bytes: base + start, count: lineEnd - start)
+                let text = String(data: slice, encoding: .utf8) ?? String(data: slice, encoding: .windowsCP1252)
+                    ?? String(decoding: slice, as: UTF8.self)
+
+                var timedOut = false
+                if let range = firstMatch(of: regex, in: text, deadline: deadline, timedOut: &timedOut) {
+                    scanned.hitCount += 1
+                    if mode == "files" { scanned.lineCount = index + 1; return }
+                    if mode == "content" {
+                        scanned.hits.append((index, range.location))
+                        kept[index] = text
+                        for earlier in recent { kept[earlier.index] = earlier.text }
+                        afterRemaining = contextLines
+                        // `room` counts one hit past what is shown, which only tells that the list is cut.
+                        if scanned.hits.count >= room { scanned.lineCount = index + 1; return }
+                    }
+                } else if timedOut {
+                    scanned.timedOut = true
+                    return
+                } else if afterRemaining > 0 {
+                    kept[index] = text
+                    afterRemaining -= 1
+                }
+                if contextLines > 0 {
+                    recent.append((index, text))
+                    if recent.count > contextLines { recent.removeFirst() }
+                }
+                start = end + 1
+                index += 1
+            }
+            scanned.lineCount = index
+        }
+        if cancelled { throw CancellationError() }
+        scanned.line = { kept[$0] }
+        if scanned.lineCount == 0 { scanned.lineCount = (kept.keys.max() ?? -1) + 1 }
+        return scanned
     }
 
     /// First match in `line`. NSRegularExpression has no time limit of its own, so progress callbacks are used to
@@ -327,22 +460,25 @@ struct GrepTool: AgentTool {
     /// spares repeating the path on every line.
     static let groupedAbove = 5
 
-    /// `path:line: text` for matches and `path-line- text` for context lines, grep style.
-    private static func contentLines(name: String, lines: [String], hits: [(index: Int, column: Int)], context: Int) -> [String] {
+    /// `path:line: text` for matches and `path-line- text` for context lines, grep style. `line` gives the text of a
+    /// line (nil when it was not kept or is past the end).
+    private static func contentLines(name: String, lineCount: Int, line: (Int) -> String?, hits: [(index: Int, column: Int)],
+                                     context: Int) -> [String] {
         if context == 0, hits.count > groupedAbove {
-            return ["\(name):"] + hits.map { "  \($0.index + 1): \(clip(lines[$0.index], around: $0.column))" }
+            return ["\(name):"] + hits.map { "  \($0.index + 1): \(clip(line($0.index) ?? "", around: $0.column))" }
         }
         var output: [String] = []
         var nextToShow = 0
         let columns = Dictionary(hits.map { ($0.index, $0.column) }, uniquingKeysWith: { first, _ in first })
         for hit in hits {
             let start = max(hit.index - context, nextToShow)
-            let end = min(hit.index + context, lines.count - 1)
+            let end = min(hit.index + context, max(lineCount - 1, hit.index))
             guard start <= end else { continue }
             if context > 0, !output.isEmpty, start > nextToShow { output.append("--") }
             for index in start...end {
+                guard let text = line(index) else { continue }
                 let isMatch = columns[index] != nil
-                output.append("\(name)\(isMatch ? ":" : "-")\(index + 1)\(isMatch ? ":" : "-") \(clip(lines[index], around: columns[index]))")
+                output.append("\(name)\(isMatch ? ":" : "-")\(index + 1)\(isMatch ? ":" : "-") \(clip(text, around: columns[index]))")
             }
             nextToShow = end + 1
         }
@@ -369,8 +505,9 @@ struct GlobTool: AgentTool {
         name: "glob",
         description: """
         Find files by name pattern, newest first. `**` crosses folders ("**/*.md", "src/**/*.swift"); a pattern \
-        without "/" matches names at any depth. Skips .git, node_modules and build folders. Returns up to \
-        `max_results` paths (default 200, max 1000). To search inside files use grep.
+        without "/" matches names at any depth. Skips .git, node_modules and build/dist/target-style folders \
+        (pass one as `path` to look inside). Returns up to `max_results` paths (default 200, max 1000). To search \
+        inside files use grep.
         """,
         parameters: .schema([
             "pattern": .property("string"),
@@ -387,9 +524,14 @@ struct GlobTool: AgentTool {
     }
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
-        let pattern = try GlobPattern(try arguments.requiredString("pattern"))
+        let requested = try arguments.requiredString("pattern")
+        // "/tmp/*.txt" or "~/Downloads/**/*.pdf": the folder part before the first wildcard is the search folder.
+        let split = Self.splitAbsolute(requested)
+        let patternText = split?.pattern ?? requested
+        let root = split.map { URL(fileURLWithPath: $0.folder) }
+            ?? arguments.nonEmptyString("path").map(context.url(for:)) ?? context.workingDirectory
+        let pattern = try GlobPattern(patternText, anchored: split != nil)
         let limit = arguments.integer("max_results", default: 200, in: 1...1000)
-        let root = arguments.nonEmptyString("path").map(context.url(for:)) ?? context.workingDirectory
         guard root.isExistingDirectory else { throw ToolError("Pasta não encontrada: \(root.path)") }
 
         let (walked, matches) = try await runDetached {
@@ -399,7 +541,7 @@ struct GlobTool: AgentTool {
             return (walked, matches)
         }
         guard !matches.isEmpty else {
-            return "Nenhum arquivo combina com \"\(arguments["pattern"]?.string ?? "")\" em \(root.path)."
+            return "Nenhum arquivo combina com \"\(patternText)\" em \(root.path)."
                 + (walked.truncated ? " (A busca parou antes de varrer tudo.)" : "")
         }
         let fitted = ToolOutputBudget.fit(matches.prefix(limit).map {
@@ -409,5 +551,20 @@ struct GlobTool: AgentTool {
         if matches.count > lines.count { lines.append("[... mais \(matches.count - lines.count) arquivos; refine o padrão ou o path ...]") }
         if walked.truncated { lines.append("[... a busca parou antes de varrer tudo; restrinja o path ...]") }
         return lines.joined(separator: "\n")
+    }
+
+    /// A pattern that starts with "/" or "~" split into the folder before its first wildcard and the relative pattern
+    /// after it (`/tmp/*.txt` → `/tmp`, `*.txt`); nil for relative patterns. Without any wildcard the last component is
+    /// the pattern, so an exact path still finds that file.
+    static func splitAbsolute(_ pattern: String) -> (folder: String, pattern: String)? {
+        guard pattern.hasPrefix("/") || pattern == "~" || pattern.hasPrefix("~/") else { return nil }
+        let expanded = (pattern as NSString).expandingTildeInPath
+        var parts = expanded.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+        var folder: [String] = []
+        while let first = parts.first, !first.contains(where: { "*?[{".contains($0) }), parts.count > 1 {
+            folder.append(first)
+            parts.removeFirst()
+        }
+        return ("/" + folder.joined(separator: "/"), parts.joined(separator: "/"))
     }
 }

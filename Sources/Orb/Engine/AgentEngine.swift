@@ -507,7 +507,8 @@ actor AgentEngine {
     private static func runsWithoutAsking(_ call: ToolCallRequest, request: TurnRequest) -> Bool {
         guard let tool = request.tools.first(where: { $0.spec.name == call.name }),
               let arguments = JSONValue.parse(call.arguments) else { return false }
-        return tool.risk(arguments) == .safe
+        // Judged as the policy will judge it: a read of a private key asks, a command that only looks does not.
+        return PermissionPolicy.call(for: tool, arguments: arguments, context: request.context).risk == .safe
     }
 
     /// What the model is sent: the system prompt and the turn so far, fitted to the budget. `messages` itself stays

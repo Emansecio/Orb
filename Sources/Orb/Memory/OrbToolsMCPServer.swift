@@ -11,6 +11,8 @@ enum OrbToolsMCPServer {
     /// What the server was called when it only served memory; still accepted.
     static let legacyFlag = "--memory-mcp"
     static let macFlag = "--mac"
+    /// The Orb has "Terminal e arquivos": the file tools that need no Mac permission (`trash`) are served too.
+    static let filesFlag = "--files"
     static let folderFlag = "--folder"
     /// What the app (the parent process, which knows) found out about Accessibility, so the server does not have to
     /// ask macOS from a child process whose trust is not certain to be attributed to the app.
@@ -27,15 +29,18 @@ enum OrbToolsMCPServer {
 
     /// What one server process offers, gated like the native tools: memory always, and each Mac tool when the Orb has
     /// "Controlar apps do Mac" or the tool needs no capability (`open`, `notify`).
-    static func tools(mac: Bool) -> [any AgentTool] {
-        ToolBox.memoryTools + ToolBox.macTools.filter { mac || $0.capability == nil }
+    static func tools(mac: Bool, files: Bool = false) -> [any AgentTool] {
+        var capabilities: Set<Capability> = []
+        if mac { capabilities.insert(.computerUse) }
+        if files { capabilities.insert(.terminal) }
+        return ToolBox.memoryTools + ToolBox.macTools.filter { $0.capability == nil || $0.isOffered(for: capabilities) }
     }
 
     /// What `tools/list` shows: `tools(mac:)` without `ui_read` and `ui_act` while the app lacks Accessibility (they
     /// would only fail, and every Claude Code request carries their descriptions). Calling one still works.
     /// `accessibilityGranted` nil asks macOS.
-    static func listedTools(mac: Bool, accessibilityGranted: Bool? = nil) -> [any AgentTool] {
-        let tools = tools(mac: mac)
+    static func listedTools(mac: Bool, files: Bool = false, accessibilityGranted: Bool? = nil) -> [any AgentTool] {
+        let tools = tools(mac: mac, files: files)
         guard tools.contains(where: { ToolBox.accessibilityToolNames.contains($0.spec.name) }) else { return tools }
         let granted = accessibilityGranted ?? LiveMacPermissionSystem().isAccessibilityTrusted()
         return tools.filter { granted || !ToolBox.accessibilityToolNames.contains($0.spec.name) }
@@ -48,18 +53,23 @@ enum OrbToolsMCPServer {
         return allTools.first { $0.spec.name == short }
     }
 
+    /// The folder name the server's temporary pictures are kept under (there is no Orb in this process).
+    static let pictureOwner = UUID(uuidString: "0B5E5E5E-0000-4000-8000-00000000C0DE")!
+
     /// The command line of one server process.
     struct Options: Equatable, Sendable {
         var memoryDirectory: URL
         var mac = false
+        var files = false
         /// The Orb's folder, where relative paths and commands of its tools start. Nil means the home folder.
         var folder: URL?
         /// Whether the app has Accessibility, as the app said it when it started the server. Nil (no flag) asks macOS.
         var accessibilityGranted: Bool?
 
-        init(memoryDirectory: URL, mac: Bool = false, folder: URL? = nil, accessibilityGranted: Bool? = nil) {
+        init(memoryDirectory: URL, mac: Bool = false, files: Bool = false, folder: URL? = nil, accessibilityGranted: Bool? = nil) {
             self.memoryDirectory = memoryDirectory
             self.mac = mac
+            self.files = files
             self.folder = folder
             self.accessibilityGranted = accessibilityGranted
         }
@@ -73,6 +83,7 @@ enum OrbToolsMCPServer {
             self.init(memoryDirectory: URL(fileURLWithPath: arguments[start + 1]))
             let rest = Array(arguments[(start + 2)...])
             mac = rest.contains(OrbToolsMCPServer.macFlag)
+            files = rest.contains(OrbToolsMCPServer.filesFlag)
             if rest.contains(OrbToolsMCPServer.noAccessibilityFlag) { accessibilityGranted = false }
             else if rest.contains(OrbToolsMCPServer.accessibilityFlag) { accessibilityGranted = true }
             if let folder = rest.firstIndex(of: OrbToolsMCPServer.folderFlag), rest.indices.contains(folder + 1) {
@@ -81,16 +92,26 @@ enum OrbToolsMCPServer {
         }
 
         var context: ToolContext {
-            ToolContext(workingDirectory: folder ?? FileManager.default.homeDirectoryForCurrentUser,
-                        memory: MemoryBank(directory: memoryDirectory))
+            var context = ToolContext(workingDirectory: folder ?? FileManager.default.homeDirectoryForCurrentUser,
+                                      memory: MemoryBank(directory: memoryDirectory), computerUseAllowed: mac)
+            if mac {
+                // Claude Code sees pictures: a screenshot goes back as one (shrunk like the native engine's), and the copy is
+                // deleted once it was sent.
+                context.imageStore = ImageStore(directory: FileManager.default.temporaryDirectory.appending(path: "OrbMCPImages"))
+                context.botID = pictureOwner
+                context.acceptsImages = true
+            }
+            return context
         }
     }
 
     /// The stdio server entry for one Orb.
     /// `accessibilityGranted` is the app's own answer for `listedTools`; nil leaves the server to ask macOS.
-    static func config(directory: URL, mac: Bool = false, folder: URL? = nil, accessibilityGranted: Bool? = nil) -> MCPServerConfig {
+    static func config(directory: URL, mac: Bool = false, files: Bool = false, folder: URL? = nil,
+                       accessibilityGranted: Bool? = nil) -> MCPServerConfig {
         var server = MCPServerConfig(name: name, command: Bundle.main.executablePath ?? CommandLine.arguments[0])
-        server.arguments = [flag, directory.path] + (mac ? [macFlag] : []) + (folder.map { [folderFlag, $0.path] } ?? [])
+        server.arguments = [flag, directory.path] + (mac ? [macFlag] : []) + (files ? [filesFlag] : [])
+            + (folder.map { [folderFlag, $0.path] } ?? [])
             + (accessibilityGranted.map { [$0 ? accessibilityFlag : noAccessibilityFlag] } ?? [])
         return server
     }
@@ -110,23 +131,24 @@ enum OrbToolsMCPServer {
     /// line separators raw) and handled in turn. Call it off the main thread: it waits for each answer.
     static func serve(_ options: Options) {
         let context = options.context
-        let mac = options.mac
+        let mac = options.mac, files = options.files
         let accessibility = options.accessibilityGranted
         while let line = readLine(strippingNewline: true) {
             guard !line.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
-            let reply = blocking { await respond(to: line, context: context, mac: mac, accessibilityGranted: accessibility) }
+            let reply = blocking { await respond(to: line, context: context, mac: mac, files: files, accessibilityGranted: accessibility) }
             if let reply { FileHandle.standardOutput.write(Data((reply.jsonString + "\n").utf8)) }
         }
     }
 
     /// The reply to one line (a parse error gets a JSON-RPC error; notifications get none).
-    static func respond(to line: String, context: ToolContext, mac: Bool = false, accessibilityGranted: Bool? = nil) async -> JSONValue? {
+    static func respond(to line: String, context: ToolContext, mac: Bool = false, files: Bool = false,
+                        accessibilityGranted: Bool? = nil) async -> JSONValue? {
         guard let request = JSONValue.parse(line), case .object = request else {
             FileHandle.standardError.write(Data("orb-memoria: mensagem inválida ignorada\n".utf8))
             return .object(["jsonrpc": .string("2.0"), "id": .null,
                             "error": .object(["code": .number(-32700), "message": .string("Parse error")])])
         }
-        return await handle(request, context: context, mac: mac, accessibilityGranted: accessibilityGranted)
+        return await handle(request, context: context, mac: mac, files: files, accessibilityGranted: accessibilityGranted)
     }
 
     private static func blocking<T: Sendable>(_ work: @escaping @Sendable () async -> T) -> T {
@@ -142,9 +164,10 @@ enum OrbToolsMCPServer {
     }
 
     /// The JSON-RPC response to one message (nil for notifications).
-    static func handle(_ request: JSONValue, context: ToolContext, mac: Bool = false, accessibilityGranted: Bool? = nil) async -> JSONValue? {
+    static func handle(_ request: JSONValue, context: ToolContext, mac: Bool = false, files: Bool = false,
+                       accessibilityGranted: Bool? = nil) async -> JSONValue? {
         guard let id = request["id"], id != .null else { return nil }
-        let tools = tools(mac: mac)
+        let tools = tools(mac: mac, files: files)
         func result(_ value: JSONValue) -> JSONValue { .object(["jsonrpc": .string("2.0"), "id": id, "result": value]) }
         switch request["method"]?.string {
         case "initialize":
@@ -157,7 +180,7 @@ enum OrbToolsMCPServer {
         case "ping":
             return result(.object([:]))
         case "tools/list":
-            return result(.object(["tools": .array(listedTools(mac: mac, accessibilityGranted: accessibilityGranted).map {
+            return result(.object(["tools": .array(listedTools(mac: mac, files: files, accessibilityGranted: accessibilityGranted).map {
                 .object(["name": .string($0.spec.name), "description": .string($0.spec.description),
                          "inputSchema": $0.spec.parameters,
                          "annotations": .object(["readOnlyHint": .bool($0.risk(.object([:])) == .safe)])])
@@ -169,15 +192,31 @@ enum OrbToolsMCPServer {
                 return .object(["jsonrpc": .string("2.0"), "id": id,
                                 "error": .object(["code": .number(-32602), "message": .string("Ferramenta desconhecida")])])
             }
-            let (text, failed): (String, Bool)
-            do { (text, failed) = (try await tool.run(arguments, context: context), false) } catch {
-                (text, failed) = (error.localizedDescription, true)
-            }
-            return result(.object(["content": .array([.object(["type": .string("text"), "text": .string(text)])]),
-                                   "isError": .bool(failed)]))
+            return result(await callResult(of: tool, arguments: arguments, context: context))
         default:
             return .object(["jsonrpc": .string("2.0"), "id": id,
                             "error": .object(["code": .number(-32601), "message": .string("Método não suportado")])])
         }
+    }
+
+    /// The `tools/call` result of one tool: its text, then the pictures it returned as MCP image blocks (read back from the
+    /// store and deleted), and `isError` when it threw.
+    static func callResult(of tool: any AgentTool, arguments: JSONValue, context: ToolContext) async -> JSONValue {
+        var content: [JSONValue] = []
+        var failed = false
+        do {
+            let output = try await tool.runWithImages(arguments, context: context)
+            content.append(.object(["type": .string("text"), "text": .string(output.text)]))
+            for image in output.images {
+                defer { context.imageStore?.remove(image) }
+                guard let data = try? Data(contentsOf: URL(fileURLWithPath: image.path)), !data.isEmpty else { continue }
+                content.append(.object(["type": .string("image"), "data": .string(data.base64EncodedString()),
+                                        "mimeType": .string(image.mediaType)]))
+            }
+        } catch {
+            failed = true
+            content = [.object(["type": .string("text"), "text": .string(error.localizedDescription)])]
+        }
+        return .object(["content": .array(content), "isError": .bool(failed)])
     }
 }

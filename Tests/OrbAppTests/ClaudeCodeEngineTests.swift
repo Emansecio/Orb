@@ -18,7 +18,7 @@ note(json.dumps({"args": sys.argv[1:]}))
 session = next((a.split("=", 1)[1] for a in sys.argv if a.startswith(("--session-id=", "--resume="))), "none")
 scenario = os.environ.get("FAKE_CLAUDE_SCENARIO", "tool")
 tool_name = os.environ.get("FAKE_CLAUDE_TOOL", "Bash")
-tool_input = json.loads(os.environ.get("FAKE_CLAUDE_INPUT", '{"command": "ls"}'))
+tool_input = json.loads(os.environ.get("FAKE_CLAUDE_INPUT", '{"command": "touch x"}'))
 for raw in sys.stdin:
     note(raw)
     msg = json.loads(raw)
@@ -152,7 +152,7 @@ struct ClaudeCodeEngineTests {
         #expect(user == .user("liste os arquivos"))
         #expect(events.contains { if case .session("sess-1") = $0 { true } else { false } })
         let approvals = events.compactMap { if case .approval(let request) = $0 { request } else { nil } }
-        #expect(approvals.map(\.toolName) == ["Bash"] && approvals.first?.command == "ls")
+        #expect(approvals.map(\.toolName) == ["Bash"] && approvals.first?.command == "touch x")
         let finished = events.compactMap { if case .toolFinished(_, let state, let output) = $0 { (state, output) } else { nil } }
         #expect(finished.count == 1 && finished[0].0 == .done && finished[0].1 == "a.txt")
         guard case .message(let reply) = events.last else { Issue.record("no reply"); return }
@@ -171,7 +171,7 @@ struct ClaudeCodeEngineTests {
         let answer = try #require(sent.first { $0["type"] == .string("control_response") })
         #expect(answer["response"]?["request_id"] == .string("perm_1"))
         #expect(answer["response"]?["response"] == .object(["behavior": .string("allow"),
-                                                              "updatedInput": .object(["command": .string("ls")])]))
+                                                              "updatedInput": .object(["command": .string("touch x")])]))
         #expect(lines.last == "eof")
     }
 
@@ -245,7 +245,7 @@ struct ClaudeCodeEngineTests {
         defer { fake.remove() }
         let events = await run(ClaudeCodeEngine(), fake.turn(mode: .ask), decision: .deny)
         let approvals = events.compactMap { if case .approval(let request) = $0 { request } else { nil } }
-        #expect(approvals.first?.suggestions == [.shell("ls")])
+        #expect(approvals.first?.suggestions == [.shell("touch")])
     }
 
     @Test func rulesAreReadWhenTheRequestArrivesNotWhenTheTurnStarts() async throws {
@@ -253,7 +253,7 @@ struct ClaudeCodeEngineTests {
         defer { fake.remove() }
         // The turn started with no grants; the app has one by the time Claude Code asks.
         var turn = fake.turn(mode: .ask)
-        turn.permissions = { PermissionState(mode: .ask, rules: [.shell("ls")]) }
+        turn.permissions = { PermissionState(mode: .ask, rules: [.shell("touch")]) }
         let events = await run(ClaudeCodeEngine(), turn, decision: .deny)
         #expect(!events.contains { if case .approval = $0 { true } else { false } })
         let finished = events.compactMap { if case .toolFinished(_, let state, _) = $0 { state } else { nil } }
@@ -264,7 +264,7 @@ struct ClaudeCodeEngineTests {
         let fake = try FakeClaude()
         defer { fake.remove() }
         var turn = fake.turn(mode: .bypass)
-        turn.permissions = { PermissionState(mode: .readOnly, rules: [.shell("ls")]) }
+        turn.permissions = { PermissionState(mode: .readOnly, rules: [.shell("touch")]) }
         let events = await run(ClaudeCodeEngine(), turn)
         let finished = events.compactMap { if case .toolFinished(_, let state, let output) = $0 { (state, output) } else { nil } }
         #expect(finished.count == 1 && finished[0].0 == .failed && finished[0].1 == "Bloqueado: o Orb está em modo Só leitura.")

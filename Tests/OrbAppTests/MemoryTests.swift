@@ -1,4 +1,6 @@
+import CoreGraphics
 import Foundation
+import ImageIO
 import Testing
 @testable import Orb
 
@@ -281,6 +283,53 @@ import Testing
         let hint = { (name: String) in tools.first { $0["name"]?.string == name }?["annotations"]?["readOnlyHint"] }
         #expect(hint("processes") == .bool(true) && hint("apps_list") == .bool(true))
         #expect(hint("applescript") == .bool(false) && hint("trash") == .bool(false))
+    }
+
+    /// A screenshot stand-in: writes a real PNG and returns it as the picture, the way `ScreenshotTool` does.
+    private struct PictureTool: AgentTool {
+        var spec: ToolSpec { ToolSpec(name: "foto", description: "Foto", parameters: .schema([:])) }
+        var kind: ToolCall.Kind { .computer }
+        var capability: Capability? { nil }
+        func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
+        func summary(_ arguments: JSONValue) -> (title: String, detail: String) { ("Foto", "") }
+        func run(_ arguments: JSONValue, context: ToolContext) async throws -> String { "só texto" }
+        func runWithImages(_ arguments: JSONValue, context: ToolContext) async throws -> ToolResult {
+            guard let store = context.imageStore, let botID = context.botID, context.acceptsImages else { return ToolResult(text: "só texto") }
+            let space = CGColorSpace(name: CGColorSpace.sRGB)!
+            let bitmap = CGContext(data: nil, width: 40, height: 30, bitsPerComponent: 8, bytesPerRow: 0, space: space,
+                                   bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+            bitmap.setFillColor(CGColor(red: 0.2, green: 0.4, blue: 0.9, alpha: 1))
+            bitmap.fill(CGRect(x: 0, y: 0, width: 40, height: 30))
+            let data = NSMutableData()
+            let destination = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil)!
+            CGImageDestinationAddImage(destination, bitmap.makeImage()!, nil)
+            CGImageDestinationFinalize(destination)
+            return ToolResult(text: "com imagem", images: [try store.add(data as Data, name: "foto.png", botID: botID)])
+        }
+    }
+
+    @Test func aPictureFromAMacToolReachesClaudeCodeAsAnImageBlockAndTheCopyIsDeleted() async throws {
+        var options = OrbToolsMCPServer.Options(memoryDirectory: root, mac: true)
+        options.folder = root
+        var context = options.context
+        #expect(context.acceptsImages && context.imageStore != nil && context.botID != nil)
+        let store = ImageStore(directory: root.appending(path: "imagens"))
+        context.imageStore = store
+        let result = await OrbToolsMCPServer.callResult(of: PictureTool(), arguments: .object([:]), context: context)
+        #expect(result["isError"] == .bool(false))
+        let blocks = try #require(result["content"]?.array)
+        #expect(blocks.count == 2)
+        #expect(blocks[0]["text"]?.string == "com imagem")
+        #expect(blocks[1]["type"]?.string == "image")
+        #expect(blocks[1]["mimeType"]?.string?.hasPrefix("image/") == true)
+        let encoded = try #require(blocks[1]["data"]?.string)
+        #expect(Data(base64Encoded: encoded)?.isEmpty == false)
+        let leftovers = (try? FileManager.default.contentsOfDirectory(atPath: store.folder(for: try #require(context.botID)).path)) ?? []
+        #expect(leftovers.isEmpty, "the temporary copy is deleted once it was sent")
+        // No Mac switch, no picture: the same tool answers with text only.
+        let plain = await OrbToolsMCPServer.callResult(of: PictureTool(), arguments: .object([:]),
+                                                       context: OrbToolsMCPServer.Options(memoryDirectory: root).context)
+        #expect(plain["content"]?.array?.count == 1 && plain["content"]?.array?.first?["text"]?.string == "só texto")
     }
 
     @Test func aMacToolRunsThroughTheServerInTheOrbsFolder() async throws {

@@ -91,12 +91,18 @@ actor ShellEnvironment {
     }
 
     /// `environment` minus what leaks from the app, plus the settings that keep command output readable:
-    /// no pager, no terminal tricks, and git printing accented file names as they are.
+    /// no pager, no terminal tricks, git that never waits for an editor or a prompt, and git printing accented file names as they are.
     static func prepared(_ environment: [String: String]) -> [String: String] {
         var result = environment.filter { !leaksFromApp($0.key) }
         result["TERM"] = "dumb"
         result["PAGER"] = "cat"
         result["GIT_PAGER"] = "cat"
+        // There is no terminal to type in: git must not wait for an editor or a credential prompt. `true` accepts the
+        // message git prepared (`commit --amend`, `merge`, `rebase --continue` work as they do with a closed editor),
+        // while an interactive rebase fails loudly instead of "succeeding" without anyone editing the todo list.
+        result["GIT_EDITOR"] = "true"
+        result["GIT_SEQUENCE_EDITOR"] = "false"
+        result["GIT_TERMINAL_PROMPT"] = "0"
         // Appended after whatever the user's own environment already configures through GIT_CONFIG_*.
         let existing = result["GIT_CONFIG_COUNT"].flatMap { Int($0) }.map { max($0, 0) } ?? 0
         result["GIT_CONFIG_COUNT"] = String(existing + 1)

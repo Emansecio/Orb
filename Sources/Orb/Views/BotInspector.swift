@@ -3,6 +3,7 @@ import SwiftUI
 /// Right-hand panel: who the bot is, what it may do, its workspace, memory and routines.
 struct BotInspector: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openSettings) private var openSettings
     let botID: UUID
     @State private var tab: InspectorTab
     @State private var isEditingOrb = false
@@ -263,6 +264,14 @@ struct BotInspector: View {
             Button("Gerenciar conectores", systemImage: "arrow.up.right") { model.selection = .connectors }
                 .buttonStyle(.link)
                 .font(.caption)
+        }
+        if capability == .computerUse && isOn {
+            // The macOS permissions (Automação, Acessibilidade, Gravação de Tela) this switch relies on live in Ajustes.
+            Button(SettingsTab.permissions.title, systemImage: "arrow.up.right") {
+                SettingsRouter.open(.permissions, using: openSettings)
+            }
+            .buttonStyle(.link)
+            .font(.caption)
         }
     }
 

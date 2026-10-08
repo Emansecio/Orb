@@ -85,6 +85,25 @@ Detalhes que costumam surpreender:
   `BashOutput`, `TaskOutput`, `KillShell`, `KillBash` e `TaskStop`; qualquer outra ferramenta dele é `.sensitive`. Parar um processo é
   seguro nos dois motores pelo mesmo motivo: só alcança processos em segundo plano que o próprio Orb iniciou (e que já
   passaram pela aprovação do comando que os começou). `TaskStop` e `TaskOutput` são os nomes novos de `KillShell`/`KillBash` e `BashOutput` no CLI.
+- **Dois casos em que o `.safe` da ferramenta não vale.** (1) **Segredos**: `read_file` e `grep` (e `Read`/`Grep`/`NotebookRead` do
+  Claude Code) de uma chave ou credencial (`~/.ssh` menos `.pub`/`known_hosts`/`config`, `~/.aws` menos `config`, `~/.gnupg`,
+  `~/.kube`, `~/.config/gcloud`, `~/Library/Keychains`, `~/.netrc`, `~/.npmrc`, `~/.config/gh/hosts.yml`,
+  `~/.docker/config.json`, `.env` e `.env.*` menos `.example`/`.sample`, `*.pem`, `*.p12`, `*.key`, `id_rsa`…; ver
+  `DangerousCommand.SensitiveFiles`) viram `.sensitive` com perigo: **perguntam** em "Perguntar antes" e "Automático", são
+  **negadas** em "Só leitura" e rodam em "Sem pedir permissão". Uma busca em pasta (`grep` sem apontar o arquivo) não lê esses
+  arquivos de passagem: deixa-os de fora e diz quantos. Comandos de shell também perguntam no "Automático" quando uma palavra
+  deles aponta para um segredo em `~` (`cat ~/.ssh/id_rsa`, `tar … ~/.aws`), com exceção dos que só mostram nomes e tamanhos
+  (`ls`, `stat`, `file`, `du`, `wc`, `find`). (2) **Comandos que só olham**: uma linha de `run_command` (ou `Bash`) feita só de
+  `ls`, `cat`/`head`/`tail`, `grep` (sem `-r`), `wc`, `file`, `stat`, `du`, `df`, `which`, `echo`, `pwd`, `find` (sem
+  `-exec`/`-delete`/`-fprint`), `sort`/`uniq` (sem arquivo de saída) e `git status`/`log`/`diff`/`show`/`blame`/`branch`
+  (listar)/`remote -v`/`config --get` (a opção de leitura vem antes de qualquer chave)…, ligadas por `;`, `&&`, `||` ou `|`, sem redirecionamento, substituição, variável,
+  `-c`/`--output`/`--ext-diff` do git nem segundo plano, é tratada como `.safe` (`ReadOnlyCommand`): não pede cartão em "Perguntar
+  antes" e roda em "Só leitura". Qualquer coisa fora dessa lista curta segue a regra normal; um `cd` só conta se o alvo é
+  claro (sem curingas), e as palavras relativas são conferidas em todas as pastas onde o shell pode estar. O classificador lê
+  as palavras como texto, mas o zsh expande mais do que isso (qualificadores de glob como `*(e:'cmd':)`, `=(cmd)`, `=cmd`,
+  chaves `{a,b}`): qualquer palavra com `(`, `)`, `{`, `}` ou começando com `=` volta ao cartão, mesmo entre aspas. Nenhum
+  desses comandos acessa a rede (`git remote show <url>`, `fetch`, `ls-remote` ficam de fora), então não abrem canal de saída
+  de dados; `ps` com `e`/`E`/`-e` (que mostra o ambiente dos processos) também pede cartão.
 - `web_fetch`, `open` e `remember` são `.sensitive` de propósito: são o caminho de **saída** de dados (ou o que fica no
   prompt de toda conversa). Um texto malicioso numa página não consegue ler um segredo e mandá-lo sem você aprovar.
 - `remember` com `tipo` `identidade` ou `preferencia` é `.instructs`. Com `fato` ou `procedimento` é `.sensitive`.
@@ -106,6 +125,7 @@ Uma liberação é uma `PermissionRule`: uma família com um **escopo** (`Bot.pe
 | `commandPrefix(palavras)` | comandos que começam com essas palavras | "Rodar comandos git", "Rodar comandos npm run" |
 | `folder(caminho)` | gravar em arquivos **dentro** da pasta (absoluta, nunca `/`) | "Gravar em ~/Projetos/app" |
 | `host(site)` | o site e seus subdomínios | "Acessar exemplo.com" |
+| `search` | pesquisar na web (o `WebSearch` do Claude Code, que não tem site); nunca cobre ler uma página | "Pesquisar na web" |
 | `connectorTool(chave)` | uma ferramenta de conector | "Usar create_issue (github)" |
 
 Regras de validade (`PermissionRule.isValid`): o escopo só faz sentido para a sua família. Ao ler o arquivo, uma regra de
@@ -119,7 +139,12 @@ escopo inválido ou desconhecido é **descartada**, nunca ampliada.
 - `writeFiles`: todo caminho da chamada precisa ficar dentro de uma das pastas liberadas. O caminho é o que de fato seria
   gravado (`PermissionPolicy.resolved`: `..` resolvido, link simbólico seguido até o fim, pastas existentes resolvidas, então
   `/tmp` e `/private/tmp` são iguais).
-- `web`: o site da URL; `web_fetch` com `save_to` (grava arquivo) nunca é coberto por escopo de site.
+- `web`: o site da URL. `web_fetch` com `save_to` faz duas coisas, alcançar o site e gravar um arquivo, e **as duas** precisam
+  estar cobertas: uma regra do site (ou "qualquer site") e uma regra de pasta (ou a pasta própria do Orb). Só "Acessar
+  qualquer site" nunca libera gravar em qualquer lugar. O destino é julgado como em `write_file`
+  (`DangerousCommand.reason(forWritingTo:)`): `~/Library/LaunchAgents`, `.zshrc`, `.ssh`… perguntam até no "Automático". O
+  `WebSearch` do Claude Code não tem site: o cartão oferece "Pesquisar na web" (escopo `search`), não "qualquer site", que
+  liberaria todo `WebFetch`. Sem "Terminal e arquivos" o `web_fetch` recusa `save_to` (`ToolContext.canSaveFiles`).
 - `connector`: a chave da ferramenta (`PermissionPolicy.connectorKey`, igual para `GitHub__create_issue` e
   `mcp__github__create_issue`).
 - `open`, `appleScript`, `macApps`, `appInterface`, `memory`, `jobs`: só o escopo `any`.
@@ -164,6 +189,7 @@ O analisador (`ShellCommandLine`) separa a linha em trechos (`;`, `&&`, `||`, `|
 |---|---|
 | `sudo`, `doas` | roda como administrador |
 | `rm -r`, `rm -f` (e `--recursive`/`--force`); `xargs rm`; `find -delete` | apaga arquivos de forma recursiva ou forçada |
+| `rm`/`unlink` simples com algum alvo fora da pasta própria e fora de `/tmp`/`/var/folders` (ou sem pasta própria, ou alvo que não dá para saber, como `$VAR`) | apaga de forma definitiva (sem passar pela Lixeira) fora da pasta do Orb |
 | `git push --force`/`-f`/`--mirror`/`+ref`; `reset --hard`; `clean -f`; `checkout .`/`-f`; `restore .`; `branch -D` | sobrescreve o histórico remoto / descarta mudanças |
 | `curl`/`wget` em pipe para um shell; `sh <(curl …)` | baixa e executa um script da internet |
 | `rsync --delete` com destino na pasta pessoal ou `/` | apaga no destino |
@@ -178,8 +204,21 @@ Exceção: `rm -rf node_modules .build dist DerivedData` **dentro da pasta próp
 (só caminhos literais, sem `*`, `$`, `~` ou crase).
 
 **AppleScript/JXA** (`applescript`, `osascript`): o texto dentro de `do shell script "…"` / `doShellScript('…')` passa pelo
-mesmo analisador; fora das aspas, são perigosos esvaziar a Lixeira, `delete every …`, `shut down`, `restart`, `log out` e
-`with administrator privileges`.
+mesmo analisador (aspas duplas, simples e crases). O script é lido na linguagem dele, nunca por palpite: o parâmetro
+`language` da ferramenta (padrão AppleScript) ou o `-l` do `osascript`. Em AppleScript só as aspas duplas são texto e os
+comentários (`--`, `#`, `(* *)`) saem da análise, então um apóstrofo (`window 1's`, `it's`) não esconde código; em JXA as
+aspas simples, os templates e os comentários (`//`, `/* */`) ficam de fora. Linguagem desconhecida: o script é lido das
+duas formas e vale o primeiro motivo. O script de `osascript -e` pode começar com `--`. Shell montado sem literal (`do shell script c`, `("rm -rf " & "~")`) é julgado juntando todas as strings
+do script ("monta um comando de shell que…"). Fora das aspas, são perigosos esvaziar a Lixeira, `delete every …`, apagar
+vários itens de uma vez (`delete notes of folder …`, `delete (… whose …)`), `shut down`, `restart`, `log out`,
+`with administrator privileges` e **enviar**: `send` em Mail, Mensagens, Outlook, WhatsApp, Telegram, Slack, Signal, Discord ou
+Teams (ou `.send()` em JXA), e `keystroke return` / `key code 36` num desses apps. Um rascunho do Mail (`make new outgoing
+message`) não é perigoso.
+
+**`open`**: abrir script ou instalador (`.command`, `.sh`, `.pkg`, `.dmg`, `.scpt`, `.workflow`…), um `.app` de fora de
+`/Applications`, `/System/Applications` e `~/Applications` (o caminho é normalizado: `/Applications/../x/Evil.app` não
+vale), um arquivo executável sem extensão (abre no Terminal e roda) ou um link `shortcuts://run-shortcut…` é perigoso. Com
+"Controlar apps do Mac" desligado, `open` recusa o link que roda um Atalho.
 
 **Escritas**: `write_file`/`edit_file`/`trash` (e `Write`/`Edit`/`MultiEdit`/`NotebookEdit` do Claude Code, também no
 "Automático") em arquivos de inicialização do shell
@@ -258,7 +297,18 @@ Orb. O modo `acceptEdits` não é usado de propósito: com ele o CLI aprovaria e
 perigo do Orb (`DangerousCommand.reason(forWritingTo:)`) nunca as veria. `default` é aceito pelo CLI instalado (2.1.x; a
 lista de `--help` mostra `manual`, que o próprio CLI converte em `default`).
 - Capacidades desligadas viram `--disallowedTools` (sem "Terminal e arquivos": `Bash`, `Edit`, `Write`, `MultiEdit`,
-  `NotebookEdit`; sem "Navegar na web": `WebFetch`, `WebSearch`) e, sem "Conectores", `--strict-mcp-config`.
+  `NotebookEdit`, `Glob`, `Grep`, `LS`, `NotebookRead` e os controles de shell `BashOutput`, `TaskOutput`, `KillShell`,
+  `KillBash`, `TaskStop`, como no motor nativo; só o `Read` fica, porque o CLI abre por ele as imagens anexadas; sem "Navegar na
+  web": `WebFetch`, `WebSearch`) e, sem "Conectores", `--strict-mcp-config`. Fora do "Sem pedir permissão", entram também
+  `Read(~/.ssh/**)`, `Read(~/.aws/**)` e as outras leituras de segredo (`ClaudeCodeTools.secretReads`): o CLI confia na pasta pessoal
+  inteira (`--add-dir`) e nunca perguntaria ao Orb, então a leitura é recusada de vez (o motor nativo pergunta). Isso vale para
+  a ferramenta `Read`; um `cat ~/.ssh/id_rsa` pelo `Bash` do CLI passa pela ponte do Orb, a não ser que o próprio CLI o aprove antes
+  (ele aprova sozinho alguns comandos de leitura dentro das pastas de `--add-dir`): não foi possível conferir isso sem abrir uma
+  sessão real, então é um limite conhecido.
+- O CLI roda com o mesmo ambiente do `run_command` (`ShellEnvironment`: shell de login interativo, com o PATH do `.zshrc`,
+  `JAVA_HOME` etc.) e com a pasta do `claude` na frente do PATH, menos as variáveis do provedor (`ANTHROPIC_*`, como
+  `ANTHROPIC_API_KEY`), que trocariam em silêncio o login do claude.ai por cobrança da API; o Bash dele e os conectores MCP que ele inicia herdam isso.
+  Os argumentos (persona e memória em português) chegam byte a byte (`LineProcess` usa `posix_spawn`).
 - As ferramentas do próprio Orb (memória e Mac), que o Claude Code vê como `mcp__orb_memoria__…`, passam pela mesma política
   que as gêmeas nativas: risco, perigo (`app_quit` forçado, `do shell script`) e família. As seguras rodam em todos os modos.
 - Uma negação aparece na linha da ferramenta em português ("Você negou esta ação." / "Bloqueado: o Orb está em modo Só
@@ -283,13 +333,19 @@ Separadas das anteriores: dizem o que o **macOS** deixa o app fazer. Ficam em Aj
   pedir" cobre a Automação de um app fechado e "Abrir Ajustes do Sistema" leva ao painel certo. Atualiza ao voltar ao app. Gravação de Tela e Acesso Total só valem depois de reabrir o Orb.
 - **Pré-voo de Automação.** Antes de rodar AppleScript/JXA, `AutomationPreflight` lê os apps que o script endereça
   (`tell application "X"`, `application id "…"`, `Application("X")`) e, para os que estão abertos e ainda sem resposta do
-  macOS, mostra o aviso e espera (até 120 s, fora do tempo do script). App recusado falha na hora, sem rodar.
+  macOS, mostra o aviso e espera (até 120 s, fora do tempo do script). Um app conhecido que está fechado (o System Events
+  quase sempre está) é aberto escondido, sem tomar o foco, para o aviso aparecer antes do script e não dentro dos 60 s dele.
+  App recusado falha na hora, sem rodar.
   `application "X" is running` e `name/id/version of application "X"` não mandam eventos e são ignorados.
 - **Tradução de erro.** `MacPermissionProblem.detect` reconhece a falta de permissão na saída de `osascript`,
   `screencapture` e do shell (`-1743`, `-25211`, `-1719` com "assistive access", "Operation not permitted" em pastas
   protegidas da Biblioteca, "could not create image from display") e devolve ao modelo uma mensagem em inglês que diz o que
   falta e onde ligar, e que **não** tentem de novo nem contornem. A linha da ferramenta na conversa ganha o botão
-  "Permitir…" (`OpenPrivacySettingsButton`: pede ao macOS onde ele mostra o aviso, senão abre o painel certo).
+  "Permitir…" (`OpenPrivacySettingsButton`: pede ao macOS onde ele mostra o aviso, senão abre o painel certo); o botão também
+  aparece quando uma captura de tela sai só com o papel de parede ou o `browser_tab` traz a recusa dentro do resultado.
+  O nome do app recusado é lido também do texto em português do sistema ("eventos Apple para Mail") e, se nada o nomeia e o
+  script fala com um só app, esse é o app. No painel do Orb (Geral → "O que o Orb pode usar"), a chave "Controlar apps do Mac"
+  ligada mostra o atalho **Permissões do Mac**.
 - `ui_read` e `ui_act` só são oferecidos ao modelo com a Acessibilidade concedida (o prompt avisa quando ficam de fora). O
   servidor de ferramentas do Claude Code recebe a resposta do app (`--accessibility` / `--no-accessibility`) em vez de
   perguntar ao macOS de dentro de um processo filho.
@@ -301,12 +357,13 @@ Separadas das anteriores: dizem o que o **macOS** deixa o app fazer. Ficam em Aj
 
 O que o modelo de permissões **não** faz, para ninguém contar com isso:
 
-- **Ler nunca pergunta.** `read_file`, `grep`, `glob`, `list_directory`, `clipboard_read`, `screenshot` e `ui_read` rodam em
-  qualquer modo, em qualquer pasta que o macOS deixe o app ler (a captura de tela, a leitura da interface e o Acesso Total
+- **Ler quase nunca pergunta.** `read_file`, `grep`, `glob`, `list_directory`, `clipboard_read`, `screenshot` e `ui_read` rodam em
+  qualquer modo, em qualquer pasta que o macOS deixe o app ler, **exceto** os segredos listados acima (chaves, `.env`, credenciais) (a captura de tela, a leitura da interface e o Acesso Total
   ao Disco dependem das permissões do macOS). `ui_read` nunca devolve o conteúdo de campos de senha. O que protege contra
   vazamento é que o **envio** (`web_fetch`, `open`, `run_command`, AppleScript, conectores) pergunta em "Perguntar antes".
 - **"Automático" e "Sem pedir permissão" não olham para onde os dados vão.** `curl -d @arquivo` ou um `web_fetch` roda sem
-  cartão: só a lista de comandos perigosos acima pergunta, e ela fala de destruir, não de enviar.
+  cartão: só a lista de comandos perigosos acima pergunta. Ela fala de destruir e, em AppleScript e na tecla Return de apps de
+  mensagem, também de enviar; um Atalho (`shortcuts_run`) ou um clique em "Enviar" fora de um app de mensagem não são vistos.
 - **Não é uma jaula.** A pasta própria só dá conforto de escrita; o Orb lê e age em qualquer lugar. Ir além disso exigiria
   um sandbox, que o app não tem.
 - **O detector olha o texto do comando.** Um script gravado em arquivo e executado (`bash script.sh`, `python3 x.py`) não é
@@ -331,7 +388,8 @@ fechar as tags `<orb_context>`/`<workspace_snapshot>` (`Fence.neutralize`).
 |---|---|
 | `Models.swift` | `PermissionMode`, `Capability`, `ApprovalRequest`/`ApprovalDecision`, `Bot.permissionRules` |
 | `Engine/PermissionPolicy.swift` | famílias, regras e escopos, `evaluate`, `isCovered`, pasta própria, sugestões, migração |
-| `Engine/DangerousCommand.swift`, `Engine/ShellCommandLine.swift` | perigo em shell, AppleScript e escritas; análise da linha de comando |
+| `Engine/DangerousCommand.swift`, `Engine/ShellCommandLine.swift` | perigo em shell, AppleScript e escritas; segredos que não se leem sem perguntar (`SensitiveFiles`); análise da linha de comando |
+| `Engine/ReadOnlyCommand.swift` | quais linhas de shell só olham (sem cartão no "Perguntar antes", rodam no "Só leitura") |
 | `Engine/ApprovalGate.swift`, `Engine/ApprovalBatch.swift` | cartões abertos, resposta, grupos, troca de modo |
 | `Engine/AgentEngine.swift` | `execute` / `confirmBatch`: onde o motor nativo pergunta |
 | `Engine/ClaudeCodeEngine.swift`, `Engine/ClaudeCodeProtocol.swift` | `can_use_tool`, `ClaudeCodePolicy`, modos do CLI |
@@ -340,4 +398,4 @@ fechar as tags `<orb_context>`/`<workspace_snapshot>` (`Fence.neutralize`).
 | `Views/TranscriptViews.swift` (`ApprovalCard`), `Views/QuickAskView.swift` | os cartões |
 | `Views/ComposerChips.swift`, `Views/BotInspector.swift`, `Views/PermissionConfirmation.swift` | seletor de modo, "Liberações", confirmação do bypass |
 | `MacPermissions.swift`, `Views/MacPermissionsView.swift` | TCC, pré-voo, tradução de erros |
-| Testes | `PermissionPolicyTests`, `PermissionModelTests`, `DangerousCommandTests`, `ApprovalNotificationTests`, `MacPermissionsTests`, `AgentEngineTests`, `ClaudeCodeEngineTests` |
+| Testes | `PermissionPolicyTests`, `ReadOnlyCommandTests`, `PermissionModelTests`, `DangerousCommandTests`, `ApprovalNotificationTests`, `MacPermissionsTests`, `AgentEngineTests`, `ClaudeCodeEngineTests` |

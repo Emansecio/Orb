@@ -113,7 +113,7 @@ No alto do painel: nome e papel (clique para editar; mudar o nome não renomeia 
 pasta", "Terminal" e "Nova conversa". O painel se recolhe sozinho em janelas estreitas (menos de 1180 pt) e volta quando há espaço.
 
 As chaves de "O que pode usar" desligam grupos inteiros de ferramentas para aquele Orb: sem **Terminal e arquivos** ele não roda
-comandos nem lê ou escreve arquivos; sem **Navegar na web** não busca páginas; sem **Controlar apps do Mac** não usa
+comandos nem lê, escreve, procura ou apaga arquivos (no Claude Code sobra só o `Read`, que abre as imagens que você anexa); sem **Navegar na web** não lê páginas (nem baixa arquivos com `save_to`, que também precisa de **Terminal e arquivos**); sem **Controlar apps do Mac** não usa
 AppleScript, Atalhos, área de transferência, captura de tela nem controla outros apps; sem **Conectores** não usa os conectores.
 
 ## Conversar
@@ -139,13 +139,15 @@ AppleScript, Atalhos, área de transferência, captura de tela nem controla outr
 
 ## Permissões
 
-Cada Orb tem um **modo** (botão no compositor, aba Geral do painel, ou ao criar). Ler e pesquisar nunca pergunta, em modo nenhum.
+Cada Orb tem um **modo** (botão no compositor, aba Geral do painel, ou ao criar). Ler e pesquisar não pergunta, em modo nenhum,
+com duas exceções: **chaves e senhas** (`~/.ssh`, `~/.aws`, `.env`, `*.pem`…) perguntam até no Automático e são recusadas no Só
+leitura; e comandos que só olham (`ls`, `git status`, `git log`, `cat`…) não pedem cartão no Perguntar antes e rodam no Só leitura.
 
 | Modo | O que acontece |
 |---|---|
 | **Perguntar antes** (padrão) | O que muda algo, roda código, abre algo, acessa a web ou guarda memória **pede a sua aprovação**, a menos que você já tenha liberado aquilo ("Sempre permitir") ou seja escrita na pasta própria do Orb |
-| **Automático** | Faz tudo sozinho, **menos** comandos destrutivos (`rm -rf`, `sudo`, `git push --force`, formatar disco…) e mudanças nas instruções dele (identidade e preferências da memória), que ainda perguntam |
-| **Só leitura** | Só lê e pesquisa. Tudo o mais é recusado, **mesmo com "Sempre permitir"** |
+| **Automático** | Faz tudo sozinho, **menos** comandos destrutivos (`rm -rf`, `rm` de arquivo fora da pasta do Orb, `sudo`, `git push --force`, formatar disco…) e mudanças nas instruções dele (identidade e preferências da memória), que ainda perguntam |
+| **Só leitura** | Só lê e pesquisa arquivos e apps do Mac e roda comandos que só olham (`ls`, `git status`, `git log`). Tudo o mais é recusado, **inclusive a web** (`web_fetch`), **mesmo com "Sempre permitir"** |
 | **Sem pedir permissão** | Nunca pergunta, nem os comandos destrutivos. Ligar exige uma confirmação ("Rodar sem pedir permissão?"). Use só com Orbs e pastas em que você confia |
 
 ### Cartões de aprovação
@@ -196,8 +198,13 @@ Cada linha mostra o estado (Liberado, Negado, Não pedido…) e **um** botão: *
 atualiza quando você volta ao app e tem **Verificar de novo**. Gravação de Tela e Acesso Total ao Disco só valem depois de
 **reabrir o Orb**.
 
-- Antes de rodar um AppleScript, o Orb mostra o aviso de Automação dos apps que o script usa e espera você responder. App
-  recusado falha na hora.
+- Antes de rodar um AppleScript, o Orb mostra o aviso de Automação dos apps que o script usa e espera você responder (um app
+  conhecido que está fechado é aberto escondido antes, para o aviso não cair dentro do tempo do script). App recusado falha na hora.
+- No **Automático**, enviar e-mail ou mensagem por AppleScript (ou apertar Return no WhatsApp/Telegram…), apagar vários itens de
+  uma vez e abrir scripts, instaladores ou links que rodam Atalhos perguntam antes, como os outros comandos perigosos.
+- O Orb recebe receitas curtas para as tarefas comuns do Mac (datas sem depender do idioma, rascunho no Mail, Lembretes, Notas,
+  Calendário, Música) e conselhos para os erros típicos do AppleScript. No Claude Code, a captura de tela chega como imagem.
+- No painel do Orb, a chave "Controlar apps do Mac" ligada traz o atalho **Permissões do Mac**.
 - Quando uma ferramenta falha por falta de permissão, o Orb não tenta de novo: diz o que ligar e onde, e a linha da ferramenta
   ganha o botão **Permitir…** (pede ao macOS ou abre o painel certo).
 - As permissões valem para esta cópia do app; veja [Assinatura estável](#assinatura-estável-recomendado).

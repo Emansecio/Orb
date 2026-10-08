@@ -95,7 +95,7 @@ struct BrowserTabTool: AgentTool {
         Eventos da Apple"; the result says if it is off.
         """,
         parameters: .schema([
-            "browser": .property("string", "Safari, Chrome, Arc, Edge or Brave (default: every one open)."),
+            "browser": .property("string", "Safari, Chrome, Arc, Edge or Brave (default: the one in front; if none is, every one open). \"all\" reads every open browser."),
             "include_text": .property("boolean"),
             "max_chars": .property("integer", "Text limit (default 6000, max 12000)."),
         ]))
@@ -110,19 +110,27 @@ struct BrowserTabTool: AgentTool {
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
         let wanted: [DesktopBrowser]
-        if let name = arguments.nonEmptyString("browser") {
+        let readsAll = arguments.nonEmptyString("browser")?.lowercased() == "all"
+        if !readsAll, let name = arguments.nonEmptyString("browser") {
             guard let browser = DesktopBrowser(name) else {
-                throw ToolError("Navegador desconhecido \"\(name)\". Use Safari, Chrome, Arc, Edge ou Brave.")
+                throw ToolError("Navegador desconhecido \"\(name)\". Use Safari, Chrome, Arc, Edge, Brave ou all.")
             }
             wanted = [browser]
         } else {
             wanted = DesktopBrowser.allCases
         }
-        let running = await MainActor.run {
+        var running = await MainActor.run {
             wanted.filter { !NSRunningApplication.runningApplications(withBundleIdentifier: $0.bundleID).isEmpty }
         }
+        if arguments.nonEmptyString("browser") == nil {
+            // Reading one browser asks macOS for one permission and shows the tab the user is looking at.
+            let (front, windows) = await MainActor.run {
+                (NSWorkspace.shared.frontmostApplication?.bundleIdentifier, Self.onScreenWindowOwners())
+            }
+            running = Self.choose(running, frontmostBundleID: front, windowOwners: windows)
+        }
         guard !running.isEmpty else {
-            return arguments.nonEmptyString("browser").map { "\($0) não está aberto." }
+            return (readsAll ? nil : arguments.nonEmptyString("browser")).map { "\($0) não está aberto." }
                 ?? "Nenhum navegador compatível (Safari, Chrome, Arc, Edge, Brave) está aberto."
         }
 
@@ -137,6 +145,29 @@ struct BrowserTabTool: AgentTool {
             }
         }
         return sections.joined(separator: "\n\n")
+    }
+
+    /// The browser in front when it is one of `running`. When something else is in front (usually the Orb, where the user is
+    /// typing "read this page"), the browser whose window is nearest the front of the screen; all of them when none shows.
+    /// `windowOwners` are the bundle ids of the on-screen windows, front to back.
+    static func choose(_ running: [DesktopBrowser], frontmostBundleID: String?, windowOwners: [String] = []) -> [DesktopBrowser] {
+        if let frontmostBundleID, let front = running.first(where: { $0.bundleID == frontmostBundleID }) { return [front] }
+        for owner in windowOwners {
+            if let browser = running.first(where: { $0.bundleID == owner }) { return [browser] }
+        }
+        return running
+    }
+
+    /// Bundle ids of the apps that own the ordinary on-screen windows, front to back. The owner and the order come with
+    /// the window list without Screen Recording (only window titles and pictures need it), so this asks for nothing.
+    @MainActor static func onScreenWindowOwners() -> [String] {
+        guard let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+            return []
+        }
+        return info.compactMap { window in
+            guard (window[kCGWindowLayer as String] as? Int) == 0, let pid = window[kCGWindowOwnerPID as String] as? Int32 else { return nil }
+            return NSRunningApplication(processIdentifier: pid)?.bundleIdentifier
+        }
     }
 
     private static func describe(_ browser: DesktopBrowser, includeText: Bool, limit: Int) async throws -> String {

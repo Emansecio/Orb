@@ -519,6 +519,12 @@ struct ToolContext: Sendable {
     var imageStore: ImageStore?
     /// The model may be shown pictures, so a tool that can return one should.
     var acceptsImages = false
+    /// Where saved tool outputs go (`saidas/<orb id>/` in the app's data folder); nil uses the temporary folder.
+    var outputsDirectory: URL?
+    /// The tool may write files outside the Orb's own work (a download with `save_to`): the Orb has "Terminal e arquivos".
+    var canSaveFiles = true
+    /// The Orb has "Controlar apps do Mac". Tools that are always offered (`open`) use it to refuse what only that switch allows.
+    var computerUseAllowed = true
 }
 
 protocol AgentTool: Sendable {
@@ -527,10 +533,15 @@ protocol AgentTool: Sendable {
     var kind: ToolCall.Kind { get }
     /// Bot capability that must be enabled for the tool to be offered (nil = always available).
     var capability: Capability? { get }
+    /// Another capability that also offers the tool (`trash` needs files or apps, whichever the Orb has).
+    var alsoWithCapability: Capability? { get }
     func risk(_ arguments: JSONValue) -> ToolRisk
     /// Why this particular call is destructive (so "Automático" still asks), or nil. Shell text in `command` or
     /// `script` is checked separately by `DangerousCommand`; this is for tools whose danger is in other arguments.
     func danger(_ arguments: JSONValue) -> String?
+    /// Same, for tools whose danger depends on the disk or the working directory (`open` on an executable file);
+    /// defaults to `danger(_:)`.
+    func danger(_ arguments: JSONValue, context: ToolContext) -> String?
     /// Human summary for the transcript and approval card, in Portuguese (title: "Rodando no Terminal", detail: the command).
     func summary(_ arguments: JSONValue) -> (title: String, detail: String)
     /// Same, for tools whose summary needs the working directory (to resolve a relative path); defaults to `summary(_:)`.
@@ -554,6 +565,15 @@ extension AgentTool {
 
     func summary(_ arguments: JSONValue, context: ToolContext) -> (title: String, detail: String) { summary(arguments) }
     func danger(_ arguments: JSONValue) -> String? { nil }
+    var alsoWithCapability: Capability? { nil }
+
+    /// Whether an Orb with these capabilities is offered the tool.
+    func isOffered(for capabilities: Set<Capability>) -> Bool {
+        guard let required = capability else { return true }
+        return capabilities.contains(required) || alsoWithCapability.map(capabilities.contains) == true
+    }
+
+    func danger(_ arguments: JSONValue, context: ToolContext) -> String? { danger(arguments) }
 }
 
 struct ToolError: LocalizedError, Equatable {

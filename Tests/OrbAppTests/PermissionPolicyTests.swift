@@ -189,7 +189,7 @@ struct CommandPrefixTests {
     }
 
     @Test func aTurnGrantCoversLikeARule() {
-        let call = shell("git status", context: folders.context, home: folders.home)
+        let call = shell("git fetch", context: folders.context, home: folders.home)
         #expect(PermissionPolicy.evaluate(mode: .ask, call: call, rules: [], turnGrants: [.shell("git")], workspace: folders.elsewhere,
                                           home: folders.home) == .allow)
         #expect(PermissionPolicy.evaluate(mode: .ask, call: call, rules: [], turnGrants: [.shell("npm")], workspace: folders.elsewhere,
@@ -209,9 +209,9 @@ struct CommandPrefixTests {
                                          home: folders.home)
         }
         #expect(suggestions("git push origin main") == [.shell("git", "push"), .shell("git")])
-        #expect(suggestions("ls -la") == [.shell("ls")])
+        #expect(suggestions("tar -xf a.tar") == [.shell("tar")])
         #expect(suggestions("git add . && npm test") == [.shell("git", "add"), .shell("npm", "test"), .shell("git")])
-        #expect(suggestions("git status", existing: [.shell("git")]).isEmpty)
+        #expect(suggestions("git fetch", existing: [.shell("git")]).isEmpty)
         // Programs that run whatever they are given never get a rule, nor do commands the words do not describe.
         #expect(suggestions("python3 script.py").isEmpty)
         #expect(suggestions("bash -c 'ls'").isEmpty)
@@ -365,6 +365,70 @@ struct HostAndConnectorScopeTests {
         #expect(PermissionPolicy.suggestions(for: fetch("https://github.com/a.zip", saveTo: "a.zip"), home: folders.home).isEmpty)
         #expect(PermissionRule.host("github.com").menuTitle == "Sempre permitir github.com")
         #expect(PermissionRule.host("github.com").title == "Acessar github.com")
+    }
+
+    @Test func aDownloadIsJudgedByWhereItLands() throws {
+        // save_to replaces a file like write_file does, so startup files and keys ask even in "Automático".
+        for path in ["Library/LaunchAgents/a.plist", ".zshrc", ".ssh/authorized_keys"] {
+            let target = folders.home.appending(path: path).path
+            let call = fetch("https://exemplo.dev/a", saveTo: target)
+            #expect(call.savesFile && call.paths.count == 1)
+            let danger = try #require(call.danger, "\(path)")
+            #expect(PermissionPolicy.evaluate(mode: .auto, call: call, rules: [], workspace: folders.orb, home: folders.home) == .ask(.dangerous(danger)))
+            // Not even "any site" plus "any folder" lets it through in "Perguntar antes"; only bypass does.
+            #expect(PermissionPolicy.evaluate(mode: .ask, call: call, rules: [PermissionRule(family: .web), PermissionRule(family: .writeFiles)],
+                                              workspace: folders.orb, home: folders.home) == .ask(.dangerous(danger)))
+            #expect(PermissionPolicy.evaluate(mode: .bypass, call: call, rules: [], workspace: folders.orb, home: folders.home) == .allow)
+        }
+        // A harmless destination runs in "Automático".
+        let plain = fetch("https://exemplo.dev/a.zip", saveTo: folders.elsewhere.appending(path: "a.zip").path)
+        #expect(plain.danger == nil)
+        #expect(PermissionPolicy.evaluate(mode: .auto, call: plain, rules: [], workspace: folders.orb, home: folders.home) == .allow)
+    }
+
+    @Test func aDownloadNeedsTheSiteAndTheFolderToBeCovered() {
+        let target = folders.elsewhere.appending(path: "a.zip").path
+        let download = fetch("https://exemplo.dev/a.zip", saveTo: target)
+        func verdict(_ rules: [PermissionRule]) -> PermissionVerdict {
+            PermissionPolicy.evaluate(mode: .ask, call: download, rules: rules, workspace: folders.orb, home: folders.home)
+        }
+        // "Any site" (or the site) does not cover writing anywhere; a folder rule does not cover the site.
+        #expect(verdict([PermissionRule(family: .web)]) == .ask(.needsPermission))
+        #expect(verdict([.host("exemplo.dev")]) == .ask(.needsPermission))
+        #expect(verdict([.folder(folders.elsewhere.path)]) == .ask(.needsPermission))
+        #expect(verdict([.host("exemplo.dev"), .folder(folders.elsewhere.path)]) == .allow)
+        #expect(verdict([PermissionRule(family: .web), PermissionRule(family: .writeFiles)]) == .allow)
+        #expect(verdict([.host("outro.dev"), .folder(folders.elsewhere.path)]) == .ask(.needsPermission))
+        // Inside the Orb's own folder the write needs no rule, but reaching the site still does.
+        let inOwn = fetch("https://exemplo.dev/a.zip", saveTo: folders.orb.appending(path: "a.zip").path)
+        func inOwnVerdict(_ rules: [PermissionRule]) -> PermissionVerdict {
+            PermissionPolicy.evaluate(mode: .ask, call: inOwn, rules: rules, workspace: folders.orb, home: folders.home)
+        }
+        #expect(inOwnVerdict([]) == .ask(.needsPermission))
+        #expect(inOwnVerdict([.host("exemplo.dev")]) == .allow)
+        #expect(inOwnVerdict([.host("outro.dev")]) == .ask(.needsPermission))
+        // "Só nesta tarefa" grants count the same way.
+        #expect(PermissionPolicy.evaluate(mode: .ask, call: download, rules: [], turnGrants: [.host("exemplo.dev"), .folder(folders.elsewhere.path)],
+                                          workspace: folders.orb, home: folders.home) == .allow)
+    }
+
+    @Test func searchingTheWebHasItsOwnRuleThatNeverCoversReadingPages() throws {
+        let search = PermissionPolicy.call(claudeCodeTool: "WebSearch", input: .object(["query": .string("swift")]), workspace: folders.orb, home: folders.home)
+        let page = PermissionPolicy.call(claudeCodeTool: "WebFetch", input: .object(["url": .string("https://github.com/x")]), workspace: folders.orb, home: folders.home)
+        let searchRule = PermissionRule(family: .web, scope: .search)
+        // The card offers "Pesquisar na web", not "any site" (which would also allow every WebFetch).
+        #expect(PermissionPolicy.suggestions(for: search, home: folders.home) == [searchRule])
+        #expect(searchRule.title == "Pesquisar na web" && searchRule.menuTitle == "Sempre permitir pesquisar na web")
+        #expect(PermissionPolicy.isCovered(search, by: [searchRule]))
+        #expect(!PermissionPolicy.isCovered(page, by: [searchRule]))
+        #expect(!PermissionPolicy.isCovered(search, by: [.host("github.com")]))
+        #expect(PermissionPolicy.isCovered(search, by: [PermissionRule(family: .web)]), "an old \"any site\" grant still covers searching")
+        #expect(PermissionPolicy.evaluate(mode: .ask, call: search, rules: [searchRule], workspace: folders.orb, home: folders.home) == .allow)
+        #expect(PermissionPolicy.evaluate(mode: .ask, call: page, rules: [searchRule], workspace: folders.orb, home: folders.home) == .ask(.needsPermission))
+        // It is stored and read back, and only makes sense for the web family.
+        let decoded = try JSONDecoder().decode(PermissionRule.self, from: JSONEncoder().encode(searchRule))
+        #expect(decoded == searchRule)
+        #expect(!PermissionRule(family: .shell, scope: .search).isValid)
     }
 
     @Test func connectorGrantsFollowTheToolAcrossEngines() {
@@ -549,10 +613,10 @@ struct ClaudeCodePermissionBridgeTests {
     }
 
     @Test func theCLIsSuggestionsJoinOursWhereTheyFit() {
-        let c = call("Bash", ["command": .string("ls")])
-        let extra: [PermissionRule] = [.shell("ls"), .host("github.com"), .shell("ls", "-la")]
+        let c = call("Bash", ["command": .string("tar x")])
+        let extra: [PermissionRule] = [.shell("tar"), .host("github.com"), .shell("tar", "-xf")]
         let merged = PermissionPolicy.suggestions(for: c, home: folders.home, extra: extra)
-        #expect(merged == [.shell("ls"), .shell("ls", "-la")])
+        #expect(merged == [.shell("tar"), .shell("tar", "-xf")])
         let dangerous = call("Bash", ["command": .string("rm -rf ~/x")])
         #expect(PermissionPolicy.suggestions(for: dangerous, home: folders.home, extra: extra).isEmpty)
     }
@@ -711,5 +775,26 @@ struct MCPAnnotationTests {
         #expect(try risk("wipe") == .sensitive && risk("liar") == .sensitive)
         #expect(try danger("wipe") != nil && danger("liar") != nil)
         #expect(try danger("read") == nil && danger("write") == nil && danger("garbled") == nil && danger("bare") == nil)
+    }
+}
+
+// MARK: - Commands that only look
+
+struct ReadOnlyCommandPolicyTests {
+    /// A line the shell would expand into code or into a private key is no read, in any mode.
+    @Test func expansionsOfTheShellStillNeedTheCardAndAreRefusedInReadOnly() throws {
+        let folders = try Folders()
+        for command in ["ls *(e:'touch PWNED':)", "cd ~ && cat {.,}ssh/id_ed2551{9,}", "cd ~/.s?h && cat id_*", "ls =(touch x)",
+                        "git config user.name foo --get", "git remote show https://example.com/x"] {
+            let call = shell(command, context: folders.context, home: folders.home)
+            #expect(call.risk != .safe, Comment(rawValue: command))
+            #expect(PermissionPolicy.evaluate(mode: .readOnly, call: call, rules: [], workspace: folders.orb, home: folders.home)
+                    == .deny(PermissionPolicy.readOnlyDenial), Comment(rawValue: command))
+            let verdict = PermissionPolicy.evaluate(mode: .ask, call: call, rules: [], workspace: folders.orb, home: folders.home)
+            if case .ask = verdict {} else { Issue.record("\(command): \(verdict)") }
+        }
+        let looking = shell("git status && ls -la", context: folders.context, home: folders.home)
+        #expect(looking.risk == .safe)
+        #expect(PermissionPolicy.evaluate(mode: .readOnly, call: looking, rules: [], workspace: folders.orb, home: folders.home) == .allow)
     }
 }

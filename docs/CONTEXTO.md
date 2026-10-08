@@ -144,6 +144,12 @@ modelo recebe o começo (10 000), o fim (5 000) e o caminho, com o jeito de ler 
 com o caminho fica por último e sobrevive a qualquer encurtamento posterior. Os arquivos são apagados após 14 dias ou quando
 o Orb passa de 200 MB (`ToolOutputCap.cleanUp`, na abertura do app) e com o Orb.
 
+`run_command` faz o mesmo por conta própria, e antes: o `ProcessRunner` guarda só o começo e o fim (20 KB) na memória, mas, quando
+a saída passa disso, vai gravando **tudo** em `saidas/<id do Orb>/comando-….txt` e termina com a mesma nota
+(`[full output saved at …; read it with read_file …]`), que o encurtamento posterior da conversa também preserva. Assim um
+`npm test` ou `git log` longo não precisa ser rodado de novo para ver o meio. O arquivo para em 50 MB (como o log de um
+processo em segundo plano): um comando que não para de imprimir (`yes`) não enche o disco, e a nota diz `file cut at 50 MB`.
+
 ## Medidor, "Compactar agora" e `/compactar`
 
 - **Medidor** (`ContextMeter.fill`, `ContextReading.make`): função pura da conversa e do orçamento, medida **fora da thread
@@ -192,7 +198,7 @@ Medidas que não são "compactar" mas decidem quanto cada mensagem custa:
 | **Prefácio por diferença** | `TurnPreface`, `WorkspaceSnapshot.report`, `WorkspaceChanges` | A pasta vai inteira uma vez; depois só `<workspace_changes>` (entradas, branch, mudanças e commits novos), ou nada. O hash exclui "arquivos recentes" (mudavam a cada escrita do próprio Orb). O snapshot completo volta quando o histórico não o tem mais |
 | **Memória relacionada sem repetição** | `MemoryBank.related`, `TurnPreface.relatedLines` | No máximo 3 itens de 220 caracteres, só para mensagens com assunto (nada para "obrigado"), com 2 palavras em comum quando a mensagem tem 3 ou mais; um item (id `#a1b2`) que as últimas 3 mensagens já levaram só volta se a página mudou |
 | Ferramentas enxutas | `ToolSpec`, `JSONValue.property` | Descrições e schemas ~35% menores; `required` vazio sai; `ui_read`/`ui_act` só são oferecidos com Acessibilidade concedida |
-| Ferramentas que pagam o próprio orçamento | `ToolOutputBudget` | `read_file`, `grep`, `glob`, `list_directory` devolvem até 24 000 caracteres por página e dizem como continuar; `web_fetch` devolve 12 000 por padrão (`offset` continua) |
+| Ferramentas que pagam o próprio orçamento | `ToolOutputBudget` | `read_file`, `grep`, `glob`, `list_directory` devolvem até 24 000 caracteres por página e dizem como continuar; `web_fetch` devolve 12 000 por padrão (`offset` continua e `find` procura; a página convertida fica 10 min em memória) |
 | Imagens | `ImageProcessing`, `elidingOldImages` | Reduzidas a 1 568 px (JPEG 0,85) ao anexar; só as 3 últimas vezes do usuário mantêm imagens no envio; cada imagem é contada como 1 600 tokens |
 | Raciocínio | `ReasoningTrace` | Guardado e reenviado só ao mesmo formato, endpoint e modelo; entra no orçamento; descartado na condensação |
 

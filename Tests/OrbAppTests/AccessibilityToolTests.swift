@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Testing
 @testable import Orb
 
@@ -725,7 +726,7 @@ struct UIActToolTests {
         let safari = AccessibilityApp(name: "Safari", bundleID: "com.apple.Safari", pid: 2)
         func reading(_ app: AccessibilityApp, _ label: String, at seconds: TimeInterval) -> UISnapshot {
             UISnapshot(app: app, windowIndex: 1, windowTitle: "A", entries: ["w1.1": .init(rawRole: "AXButton", label: label, secure: false)],
-                       takenAt: Date(timeIntervalSince1970: seconds))
+                       takenAt: Date.now.addingTimeInterval(seconds - 60))
         }
         // Two Orbs read the same app and saw different things at w1.3; a newer reading of another app has w1.1 too.
         store.save(reading(notes, "Excluir", at: 10), bot: UUID())
@@ -837,6 +838,37 @@ struct UISnapshotStoreTests {
         #expect(appProcess.candidates(matching: nil).count == 1)
     }
 
+    @Test func oldReadingsAreForgottenAndTheirFilesDeleted() throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "OrbAX-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let clock = OSAllocatedUnfairLock(initialState: Date(timeIntervalSince1970: 1_000_000))
+        let store = UISnapshotStore(directory: folder, maxAge: 3_600, now: { clock.withLock { $0 } })
+        store.save(snapshot(label: "Apagar", at: clock.withLock { $0 }), bot: nil)
+        let other = UISnapshotStore(directory: folder, maxAge: 3_600, now: { clock.withLock { $0 } })
+        #expect(other.candidates(matching: "Notas").count == 1)
+        #expect(other.snapshot(bot: UUID(), app: notes) != nil)
+
+        clock.withLock { $0 = $0.addingTimeInterval(3_601) }
+        #expect(other.snapshot(bot: UUID(), app: notes) == nil, "an hour later the screen it described is long gone")
+        #expect(((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []).filter { $0.hasPrefix("ax-") }.isEmpty)
+        store.save(snapshot(label: "Novo", at: clock.withLock { $0 }), bot: nil)
+        clock.withLock { $0 = $0.addingTimeInterval(3_601) }
+        #expect(other.candidates(matching: nil).isEmpty)
+        #expect(store.candidates(matching: nil).isEmpty, "in memory too")
+    }
+
+    @Test func anOldReadingInMemoryIsNotUsedToValidateIds() {
+        let clock = OSAllocatedUnfairLock(initialState: Date(timeIntervalSince1970: 1_000_000))
+        let store = UISnapshotStore(directory: nil, maxAge: 3_600, now: { clock.withLock { $0 } })
+        let bot = UUID()
+        store.save(snapshot(label: "Apagar", at: clock.withLock { $0 }), bot: bot)
+        clock.withLock { $0 = $0.addingTimeInterval(3_599) }
+        #expect(store.snapshot(bot: bot, app: notes) != nil)
+        clock.withLock { $0 = $0.addingTimeInterval(2) }
+        #expect(store.snapshot(bot: bot, app: notes) == nil, "past an hour even the Orb's own reading is forgotten")
+        #expect(store.candidates(matching: nil).isEmpty)
+    }
+
     @Test func aSnapshotFileWithMissingFieldsStillLoads() throws {
         let json = #"{"app":{"name":"Notas","pid":5},"entries":{"w1":{"rawRole":"AXWindow"},"w1.2":{"bogus":1}},"extra":true}"#
         let loaded = try JSONDecoder().decode(UISnapshot.self, from: Data(json.utf8))
@@ -848,8 +880,8 @@ struct UISnapshotStoreTests {
 
     @Test func newestReadingsComeFirst() {
         let store = UISnapshotStore(directory: nil)
-        store.save(snapshot(app: AccessibilityApp(name: "Antigo", bundleID: nil, pid: 1), at: Date(timeIntervalSince1970: 10)), bot: nil)
-        store.save(snapshot(app: AccessibilityApp(name: "Novo", bundleID: nil, pid: 2), at: Date(timeIntervalSince1970: 20)), bot: nil)
+        store.save(snapshot(app: AccessibilityApp(name: "Antigo", bundleID: nil, pid: 1), at: Date.now.addingTimeInterval(-20)), bot: nil)
+        store.save(snapshot(app: AccessibilityApp(name: "Novo", bundleID: nil, pid: 2), at: Date.now.addingTimeInterval(-10)), bot: nil)
         #expect(store.candidates(matching: nil).map(\.app.name) == ["Novo", "Antigo"])
     }
 }

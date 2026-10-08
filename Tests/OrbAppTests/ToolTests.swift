@@ -4,15 +4,21 @@ import Testing
 
 final class ToolTests {
     let directory: URL
+    /// Where tool outputs that outgrow the cap are saved, away from the working directory.
+    let outputs: URL
     let context: ToolContext
 
     init() throws {
         directory = FileManager.default.temporaryDirectory.appending(path: "OrbToolTests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        context = ToolContext(workingDirectory: directory)
+        outputs = FileManager.default.temporaryDirectory.appending(path: "OrbToolTests-saidas-\(UUID().uuidString)")
+        context = ToolContext(workingDirectory: directory, outputsDirectory: outputs)
     }
 
-    deinit { try? FileManager.default.removeItem(at: directory) }
+    deinit {
+        try? FileManager.default.removeItem(at: directory)
+        try? FileManager.default.removeItem(at: outputs)
+    }
 
     private func run(_ tool: some AgentTool, _ arguments: [String: JSONValue]) async throws -> String {
         try await tool.run(.object(arguments), context: context)
@@ -46,7 +52,8 @@ final class ToolTests {
         let output = try await run(RunCommandTool(), ["command": .string("seq 1 100000")])
         #expect(output.contains("caracteres omitidos"))
         #expect(output.contains("\n1\n2\n3\n"))
-        #expect(output.hasSuffix("99999\n100000\n"))
+        #expect(output.contains("99999\n100000\n"))
+        #expect(output.contains("full output saved at"))
         #expect(output.count < 21_000)
     }
 
@@ -119,7 +126,7 @@ final class ToolTests {
         let page = HTMLText.convert(html)
         #expect(page.title == "Café & Co")
         // Links are kept as "text (url)" so the model can follow them.
-        #expect(page.text == "Hello world\n\nSee the docs (https://example.com) now — ok A.\n\n• One\n\n• Two")
+        #expect(page.text == "# Hello world\n\nSee the docs (https://example.com) now — ok A.\n\n• One\n• Two")
     }
 
     // MARK: Catalog

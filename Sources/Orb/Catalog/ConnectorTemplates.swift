@@ -91,7 +91,7 @@ struct ConnectorTemplate: Identifiable, Sendable {
             category: .notes),
         ConnectorTemplate(
             id: "fetch", config: MCPServerConfig(name: "Busca na web (Fetch)", command: "uvx", arguments: ["mcp-server-fetch"]),
-            summary: "Baixa páginas da web e converte em texto para o Orb ler.",
+            summary: "Baixa uma página da web e converte em texto. Não faz buscas, e o Orb já lê páginas sozinho com \"Navegar na web\".",
             category: .data),
         ConnectorTemplate(
             id: "pensamento", config: MCPServerConfig(name: "Pensamento em etapas", command: "npx",

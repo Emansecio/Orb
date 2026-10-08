@@ -9,15 +9,21 @@ import UniformTypeIdentifiers
 /// A throwaway working directory for tool tests, removed when the test ends.
 final class ToolWorkspace {
     let directory: URL
+    /// Where tool outputs that outgrow the cap are saved, away from the working directory.
+    let outputs: URL
     let context: ToolContext
 
     init() throws {
         directory = FileManager.default.temporaryDirectory.appending(path: "OrbToolTests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        context = ToolContext(workingDirectory: directory)
+        outputs = FileManager.default.temporaryDirectory.appending(path: "OrbToolTests-saidas-\(UUID().uuidString)")
+        context = ToolContext(workingDirectory: directory, outputsDirectory: outputs)
     }
 
-    deinit { try? FileManager.default.removeItem(at: directory) }
+    deinit {
+        try? FileManager.default.removeItem(at: directory)
+        try? FileManager.default.removeItem(at: outputs)
+    }
 
     func run(_ tool: some AgentTool, _ arguments: [String: JSONValue]) async throws -> String {
         try await tool.run(.object(arguments), context: context)

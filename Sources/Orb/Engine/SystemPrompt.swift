@@ -57,15 +57,17 @@ enum PromptParts {
         switch bot.permissionMode {
         case .ask:
             lines.append("""
-            Mode \"Perguntar antes\": reading and searching never ask. Anything that changes something or reaches outside \
-            (writing files, running commands, AppleScript, web access) shows the user an approval card and waits, except actions \
+            Mode \"Perguntar antes\": reading, searching and look-only commands (ls, git status) never ask (keys and passwords do). \
+            Changes and reaching outside (writing files, commands, AppleScript, the web) show the user an approval card and wait, except actions \
             the user chose to always allow. So for a task with changes, state the plan first in a few lines, group the changes into \
             few calls, and never retry what the user denied: ask, or suggest another way.
             """)
         case .auto:
             lines.append("""
             Mode \"Automático\": reads and ordinary changes run without asking; the app asks first only for commands it flags as \
-            destructive (rm -rf, sudo, git push --force…). Prefer steps that can be undone, and say what you are about to do.
+            destructive (rm -rf, rm outside your folder, sudo, git push --force…) or for reading keys and passwords. Prefer steps \
+            that can be undone, and say what you are about to do. Sending an email or message (Mail, Messages, a Shortcut, a click \
+            on "Enviar") also needs the recipient and text confirmed in the chat first, unless the user already asked you to send it.
             """)
         case .bypass:
             lines.append("""
@@ -75,14 +77,14 @@ enum PromptParts {
             """)
         case .readOnly:
             lines.append("""
-            Mode \"Só leitura\": you can read, search and browse, but the app blocks anything that would change the Mac. Research, \
-            then describe the changes you would make; the user can switch this Orb to another mode (\(whereToChangeMode)) \
-            to have you apply them.
+            Mode \"Só leitura\": you can read and search files and run look-only commands (ls, git status, git log); the app \
+            blocks anything that would change the Mac, and web access. Research, then describe the changes you would make; the user \
+            can switch this Orb to another mode (\(whereToChangeMode)) to have you apply them or browse.
             """)
         }
         let off = Capability.allCases.filter { !bot.capabilities.contains($0) }
         if !off.isEmpty {
-            lines.append("Switched off for this Orb: " + off.map { "\"\($0.label)\" (\(offEffect($0)))" }.joined(separator: "; ")
+            lines.append("Switched off for this Orb: " + off.map { "\"\($0.label)\" (\(offEffect($0, engine: engine)))" }.joined(separator: "; ")
                 + ". Do not emulate a switched-off capability another way (osascript, curl, a script…). Tell the user which switch to "
                 + "turn on, in \(whereToTurnOn(bot)), and why you need it.")
         }
@@ -90,10 +92,13 @@ enum PromptParts {
         return lines.joined(separator: "\n")
     }
 
-    private static func offEffect(_ capability: Capability) -> String {
+    private static func offEffect(_ capability: Capability, engine: PromptEngine) -> String {
         switch capability {
-        case .terminal: "no shell commands and no tools to read, write or search files"
-        case .browser: "no fetching web pages"
+        case .terminal:
+            // Claude Code keeps `Read`, which opens the pictures the user attaches; it has no other file tool then.
+            engine == .native ? "no shell commands and no tools to read, write or search files"
+                : "no shell commands and no tools to write, search or list files; Read only for files the user attached"
+        case .browser: "no fetching or searching web pages, and no opening web pages just to read them"
         case .computerUse: "no AppleScript, Shortcuts, clipboard, screenshots or control of apps"
         case .connectors: "no connector (MCP) tools"
         }
@@ -104,17 +109,21 @@ enum PromptParts {
     private static func macRealities(_ bot: Bot, engine: PromptEngine) -> String {
         var parts = ["On this Mac there is no terminal where you could type a password, so sudo cannot work."]
         if bot.capabilities.contains(.computerUse) {
-            let trash = engine == .native ? "the trash tool" : "moving them to the Trash (Finder via osascript)"
             parts.append("For administrator rights use AppleScript: do shell script \"…\" with administrator privileges (macOS asks the "
                          + "user).")
-            parts.append("To delete, prefer \(trash) over rm.")
-            parts.append("Screenshots and controlling other apps need macOS permissions (Privacidade e Segurança → Gravação de Tela, "
-                         + "Automação, Acessibilidade); if a call fails for that reason, say which one to allow instead of retrying.")
         } else {
             parts.append("When something needs administrator rights, tell the user the command so they can run it in the Terminal, or "
                          + "that they can turn on \"\(Capability.computerUse.label)\" in \(whereToTurnOn(bot)) so macOS asks for the "
                          + "password itself.")
-            parts.append("rm cannot be undone: ask before deleting anything that is not a temporary file you made.")
+        }
+        // The trash tool needs either switch (it is a file operation that asks macOS for nothing).
+        if bot.capabilities.contains(.computerUse) || bot.capabilities.contains(.terminal) {
+            let trash = engine == .native ? "the trash tool" : "the \(ClaudeCodeTools.memoryPrefix)trash tool"
+            parts.append("To delete, prefer \(trash) over rm (rm cannot be undone).")
+        }
+        if bot.capabilities.contains(.computerUse) {
+            parts.append("Screenshots and controlling other apps need macOS permissions (Privacidade e Segurança → Gravação de Tela, "
+                         + "Automação, Acessibilidade); if a call fails for that reason, say which one to allow instead of retrying.")
         }
         return parts.joined(separator: " ")
     }
@@ -146,9 +155,40 @@ enum PromptParts {
             uses.append("applescript and shortcuts_run to work with apps")
             uses.append("ui_read then ui_act for apps with no AppleScript or Shortcuts support (read the screen before acting, read again after it changes)")
         }
-        uses.append("open to open files and links")
+        if bot.capabilities.contains(.browser) {
+            uses.append("web_fetch for public pages, APIs and PDFs (offset or find for long ones; no JavaScript)"
+                + (bot.capabilities.contains(.computerUse) ? "; browser_tab with include_text for the page the user has open, a logged-in site or a JavaScript one" : ""))
+            uses.append("there is no web search tool: use a site's own search or API (Wikipedia's api.php, api.github.com/search), not a search engine's result page")
+        }
+        uses.append("open to open files and links for the user" + (bot.capabilities.contains(.browser) ? ", not to read a page" : ""))
         let background = hasFiles ? " Long commands can run in the background (job_output)." : ""
         return uses.joined(separator: "; ") + "." + background
+    }
+
+    /// Recipes for the Mac tasks people ask most, and the mistakes models make in them, only for an Orb that may control apps.
+    /// Stable text (no date, no state), so it keeps the provider's prompt cache. It rides in Claude Code's standing rules too.
+    static func macApps(_ bot: Bot, engine: PromptEngine) -> String {
+        guard bot.capabilities.contains(.computerUse) else { return "" }
+        var lines = [
+            "## Mac apps",
+            "- Dates: never write `date \"March 5, 2 PM\"` (fails in the user's language, error -30720). Build it: `set d to current date`, "
+                + "`set day of d to 1`, then year, month, day, hours, minutes, seconds. JXA: `new Date(y, m-1, d, h, min)`.",
+            "- Mail: make a draft (`make new outgoing message with properties {subject:…, content:…, visible:true}`, `make new to "
+                + "recipient`). Do not `send` unless asked; confirm recipient and text first.",
+            "- Reminders: `make new reminder at list \"…\" with properties {name:…, due date:d}`. Notes: `make new note at folder \"…\" "
+                + "with properties {name:…, body:\"<h1>…</h1>\"}` (HTML). Calendar: read `name of every calendar` first, keep `whose` "
+                + "date ranges short (slow), `make new event at calendar \"…\" with properties {summary:…, start date:d, end date:e}`.",
+            "- Music: play, pause, next track, set sound volume to 40. Shortcuts: shortcuts_list before building something new.",
+            "- \"This page\": browser_tab. \"The screen\": screenshot or ui_read. No AppleScript support: ui_read then ui_act.",
+            "- Error -1728: that item does not exist, list names first. Error -2741: a mistake in your script, not a permission.",
+        ]
+        if engine == .claudeCode {
+            let tools = ClaudeCodeTools.memoryPrefix
+            lines.append("- Prefer \(tools)applescript, \(tools)screenshot and \(tools)browser_tab over osascript, screencapture or "
+                         + "scripted Chrome in Bash: they settle the macOS permission first and explain failures. Use "
+                         + "\(tools)ui_read and \(tools)ui_act for apps without AppleScript, when they are offered.")
+        }
+        return lines.joined(separator: "\n")
     }
 
     /// Skills with what each is for, so the Orb can suggest the right one.
@@ -179,6 +219,7 @@ enum SystemPrompt {
             PromptParts.permissions(bot, engine: .native),
             PromptParts.untrustedContent,
             PromptParts.workHabits + "\n" + PromptParts.nativeToolHints(bot),
+            PromptParts.macApps(bot, engine: .native),
             memory,
             PromptParts.skills(skills, engine: .native),
             folder,

@@ -26,6 +26,16 @@ struct MacToolTests {
         #expect(blocked.contains("Acessibilidade"))
     }
 
+    @Test func commonScriptErrorsComeWithAdvice() {
+        let cases: [(Int, String)] = [(-30720, "current date"), (-1728, "Liste os nomes"), (-1708, "vocabulário"), (-2741, "Erro de sintaxe")]
+        for (code, hint) in cases {
+            let text = AppleScript.explain("execution error: algo deu errado. (\(code))")
+            #expect(text.contains(hint), Comment(rawValue: "\(code)"))
+            #expect(text.contains("algo deu errado"))
+            #expect(!text.contains("Abrir Ajustes") && !text.contains("Permissões do Mac"))
+        }
+    }
+
     @Test func registersEveryMacToolWithTheRightCapabilityAndRisk() {
         let tools = Dictionary(uniqueKeysWithValues: ToolBox.macTools.map { ($0.spec.name, $0) })
         let expected: [(name: String, risk: ToolRisk, capability: Capability?)] = [
@@ -33,7 +43,7 @@ struct MacToolTests {
             ("clipboard_read", .safe, .computerUse), ("clipboard_write", .sensitive, .computerUse),
             ("screenshot", .safe, .computerUse), ("notify", .safe, nil),
             ("apps_list", .safe, .computerUse), ("processes", .safe, .computerUse),
-            ("app_quit", .sensitive, .computerUse), ("trash", .sensitive, .computerUse),
+            ("app_quit", .sensitive, .computerUse), ("trash", .sensitive, .terminal),
             ("applescript", .sensitive, .computerUse), ("browser_tab", .safe, .computerUse),
             ("open", .sensitive, nil),
         ]
@@ -167,6 +177,89 @@ struct MacToolTests {
         #expect(missing.contains("Não encontrei o app"))
         let nothing = await message { try await run(OpenTool(), ["target": .string("arquivo-que-nao-existe-9271.txt")]) }
         #expect(nothing.contains("Não encontrei"))
+    }
+
+    @Test func browserTabReadsTheFrontBrowserOnlyWhenOneIsInFront() {
+        let open: [DesktopBrowser] = [.safari, .chrome]
+        #expect(BrowserTabTool.choose(open, frontmostBundleID: DesktopBrowser.chrome.bundleID) == [.chrome])
+        #expect(BrowserTabTool.choose(open, frontmostBundleID: DesktopBrowser.safari.bundleID) == [.safari])
+        // The Orb (or any other app) is in front: the user may be looking at either, so both are read.
+        #expect(BrowserTabTool.choose(open, frontmostBundleID: "com.example.orb") == open)
+        #expect(BrowserTabTool.choose(open, frontmostBundleID: nil) == open)
+        // A front browser that is not among the open ones changes nothing.
+        #expect(BrowserTabTool.choose([.safari], frontmostBundleID: DesktopBrowser.arc.bundleID) == [.safari])
+        // The Orb in front: the browser whose window is nearest the front is the one the user means.
+        let owners = ["com.example.orb", DesktopBrowser.chrome.bundleID, "com.apple.finder", DesktopBrowser.safari.bundleID]
+        #expect(BrowserTabTool.choose(open, frontmostBundleID: "com.example.orb", windowOwners: owners) == [.chrome])
+        #expect(BrowserTabTool.choose(open, frontmostBundleID: nil, windowOwners: owners.reversed()) == [.safari])
+        // A browser with no window on screen is not picked over the others; a front browser still wins over the order.
+        #expect(BrowserTabTool.choose(open, frontmostBundleID: "com.example.orb", windowOwners: ["com.apple.finder"]) == open)
+        #expect(BrowserTabTool.choose([.safari], frontmostBundleID: "com.example.orb", windowOwners: [DesktopBrowser.arc.bundleID]) == [.safari])
+        #expect(BrowserTabTool.choose(open, frontmostBundleID: DesktopBrowser.safari.bundleID, windowOwners: owners) == [.safari])
+        #expect(BrowserTabTool().spec.parameters.jsonString.contains("all"))
+    }
+
+    @Test func openingProgramsInstallersAndShortcutLinksIsDangerous() {
+        let home = "/Users/maria"
+        for target in ["~/Downloads/instalar.command", "/tmp/x.sh", "run.zsh", "Instalador.PKG", "disco.dmg", "file:///tmp/a.scpt",
+                       "~/Downloads/Coisa.app", "/Volumes/USB/Coisa.app/", "shortcuts://run-shortcut?name=Teste",
+                       "shortcuts://x-callback-url/run-shortcut?name=a", "shortcuts:run-shortcut?name=b"] {
+            #expect(OpenTool.danger(target: target, home: home) != nil, Comment(rawValue: target))
+        }
+        for target in ["https://example.com", "localhost:3000", "~/Documents/relatorio.pdf", "/Applications/Safari.app",
+                       "/System/Applications/Calculator.app", "/Users/maria/Applications/Meu.app", "Safari", "Safari.app", "Notas",
+                       "mailto:a@b.com", "shortcuts://open-shortcut?name=Teste", "x-apple.systempreferences:com.apple.preference.security"] {
+            #expect(OpenTool.danger(target: target, home: home) == nil, Comment(rawValue: target))
+        }
+        let call = PermissionPolicy.call(for: OpenTool(), arguments: .object(["target": .string("~/Downloads/instalar.command")]), context: context)
+        #expect(call.danger != nil)
+        #expect(PermissionPolicy.evaluate(mode: .auto, call: call, rules: [], workspace: nil) == .ask(.dangerous(call.danger ?? "")))
+    }
+
+    @Test func openingAnExecutableOrAnAppThroughDotDotIsDangerous() throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "OrbOpen-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let script = folder.appending(path: "instalar")
+        try Data("#!/bin/sh\necho oi\n".utf8).write(to: script)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        let note = folder.appending(path: "leia-me")
+        try Data("texto".utf8).write(to: note)
+        try FileManager.default.createDirectory(at: folder.appending(path: "Documentos"), withIntermediateDirectories: true)
+
+        #expect(OpenTool.danger(target: script.path, home: "/Users/maria") != nil)
+        #expect(OpenTool.danger(target: "instalar", home: "/Users/maria", directory: folder) != nil, "a relative path resolves in the Orb's folder")
+        #expect(OpenTool.danger(target: "./instalar", home: "/Users/maria", directory: folder) != nil)
+        #expect(OpenTool.danger(target: note.path, home: "/Users/maria") == nil, "not executable")
+        #expect(OpenTool.danger(target: folder.appending(path: "Documentos").path, home: "/Users/maria") == nil, "a folder")
+        #expect(OpenTool.danger(target: "instalar", home: "/Users/maria") == nil, "a bare name is an app name when there is no folder to look in")
+        // `..` cannot make a path look like it is in /Applications.
+        #expect(OpenTool.danger(target: "/Applications/../Users/maria/Downloads/Evil.app", home: "/Users/maria") != nil)
+        #expect(OpenTool.danger(target: "/Applications/./Safari.app", home: "/Users/maria") == nil)
+        #expect(OpenTool.danger(target: "~/Applications/../Downloads/Evil.app", home: NSHomeDirectory()) != nil)
+        #expect(OpenTool.danger(target: "Evil.app", home: "/Users/maria", directory: folder) == nil, "no such file here: the system looks the app up")
+        try FileManager.default.createDirectory(at: folder.appending(path: "Evil.app"), withIntermediateDirectories: true)
+        #expect(OpenTool.danger(target: "Evil.app", home: "/Users/maria", directory: folder) != nil, "an app in the Orb's folder is opened from there")
+        // Through the permission policy the working folder is the Orb's.
+        let ctx = ToolContext(workingDirectory: folder)
+        let call = PermissionPolicy.call(for: OpenTool(), arguments: .object(["target": .string("instalar")]), context: ctx)
+        #expect(call.danger != nil)
+    }
+
+    @Test func aShortcutLinkNeedsTheMacCapability() async {
+        var off = context
+        off.computerUseAllowed = false
+        let refused = await message { try await OpenTool().run(.object(["target": .string("shortcuts://run-shortcut?name=Teste")]), context: off) }
+        #expect(refused.contains("Controlar apps do Mac"))
+        // Everything else `open` does stays available.
+        #expect(!OpenTool.runsShortcut("https://example.com"))
+        #expect(OpenTool.runsShortcut(" Shortcuts://run-shortcut?name=x "))
+    }
+
+    @Test func theMCPServerContextCarriesTheMacSwitch() {
+        let directory = URL(fileURLWithPath: "/tmp/m")
+        #expect(OrbToolsMCPServer.Options(memoryDirectory: directory, mac: true).context.computerUseAllowed)
+        #expect(!OrbToolsMCPServer.Options(memoryDirectory: directory).context.computerUseAllowed)
     }
 
     @Test func findsApplicationsThroughLaunchServices() async throws {

@@ -58,6 +58,8 @@ struct ShellEnvironmentTests {
         #expect(prepared["TERM"] == "dumb")
         #expect(prepared["PAGER"] == "cat")
         #expect(prepared["GIT_PAGER"] == "cat")
+        #expect(prepared["GIT_EDITOR"] == "true" && prepared["GIT_SEQUENCE_EDITOR"] == "false")
+        #expect(prepared["GIT_TERMINAL_PROMPT"] == "0")
         #expect(prepared["GIT_CONFIG_COUNT"] == "1")
         #expect(prepared["GIT_CONFIG_KEY_0"] == "core.quotepath")
         #expect(prepared["GIT_CONFIG_VALUE_0"] == "false")
@@ -156,7 +158,8 @@ final class RunCommandTests {
         let shell = try FakeShell.make(in: directory, exports: ["FROM_PROFILE": "ok-\u{00E7}"])
         context = ToolContext(workingDirectory: directory, botID: UUID(),
                               jobs: BackgroundJobs(directory: directory.appending(path: "jobs"), firstOutputWindow: patientShell, endsAtFirstOutput: true),
-                              shell: ShellEnvironment(shell: shell, base: basicEnvironment, timeout: patientShell))
+                              shell: ShellEnvironment(shell: shell, base: basicEnvironment, timeout: patientShell),
+                              outputsDirectory: directory.appending(path: "saidas"))
     }
 
     deinit { try? FileManager.default.removeItem(at: directory) }
@@ -216,10 +219,11 @@ final class RunCommandTests {
         let notice = try #require(output.firstMatch(of: /\[\.\.\. (\d+) caracteres omitidos \.\.\.\]/))
         let omitted = try #require(Int(notice.1))
         // Unicode scalars: 30000 lines of "é\n".
-        let kept = output.replacing(notice.0, with: "").replacing("Código de saída: 0\n", with: "").unicodeScalars.count
+        let withoutNote = output.replacing(/\n\[full output saved[^\]]*\]/, with: "")
+        let kept = withoutNote.replacing(notice.0, with: "").replacing("Código de saída: 0\n", with: "").unicodeScalars.count
         // Plus the two line breaks that frame the notice.
         #expect(kept + omitted == 60_002)
-        #expect(output.count < 20_200)
+        #expect(output.count < 20_400)
     }
 
     @Test func warnsWhenABackgroundChildHoldsTheOutput() async throws {
@@ -230,9 +234,107 @@ final class RunCommandTests {
         #expect(output.contains("background: true"))
     }
 
+    @Test func longOutputIsSavedWholeToAFileTheModelCanRead() async throws {
+        let output = try await run("seq 1 100000")
+        let note = try #require(output.firstMatch(of: /\[full output saved at ([^;]+?) \((\d+) lines, [^)]*\); read it with read_file/))
+        #expect(note.2 == "100000")
+        let file = URL(fileURLWithPath: String(note.1))
+        #expect(file.path.hasPrefix(directory.appending(path: "saidas").path))
+        let saved = try String(contentsOf: file, encoding: .utf8)
+        let lines = saved.split(separator: "\n")
+        #expect(lines.count == 100_000)
+        #expect(lines[0] == "1" && lines[49_999] == "50000" && lines[99_999] == "100000")
+        // The middle that the inline output dropped is in the file, and read_file can page to it.
+        #expect(!output.contains("\n50000\n"))
+        let page = try await ReadFileTool().run(.object(["path": .string(file.path), "offset": .number(50_000), "limit": .number(2)]), context: context)
+        #expect(page.contains("50000") && page.contains("50001"))
+    }
+
+    @Test func theNoteAboutTheSavedFileSurvivesWhenOldResultsAreShortened() async throws {
+        let output = try await run("seq 1 100000")
+        let shortened = ContextText.preview(output, limit: 800)
+        #expect(shortened.count < output.count / 10)
+        #expect(shortened.contains("full output saved at") && shortened.hasSuffix("instead of running the command again]"))
+    }
+
+    @Test func theSavedFileStopsAtItsLimitWhenACommandNeverStops() async throws {
+        var capture = StreamCapture(limit: 1_000, spillTo: directory.appending(path: "cap.txt"), spillLimit: 5_000)
+        // Several chunks after the cut: the file must not be started over.
+        var stream = Data()
+        for index in 0..<20 {
+            let chunk = Data(repeating: UInt8(ascii: "a") + UInt8(index), count: 700)
+            stream.append(chunk)
+            capture.append(chunk)
+        }
+        let done = capture.finish()
+        #expect(done.fileCut && done.bytes == 14_000)
+        #expect(try Data(contentsOf: directory.appending(path: "cap.txt")) == stream.prefix(5_000))
+        // The real thing: `yes` writes hundreds of megabytes a second.
+        let output = try await run("yes", ["timeout_seconds": .number(3)])
+        let note = try #require(output.firstMatch(of: /\[full output saved at ([^;]+?) \((\d+) lines, [^)]*file cut at [^)]*\); read it with read_file/))
+        let size = try #require(FileManager.default.attributesOfItem(atPath: String(note.1))[.size] as? Int)
+        #expect(size <= StreamCapture.maxSpillBytes && size > 1_000_000, "size \(size)")
+        #expect(output.contains("tempo esgotado"))
+    }
+
+    @Test func shortOutputCreatesNoFile() async throws {
+        let output = try await run("seq 1 100")
+        #expect(!output.contains("full output saved"))
+        #expect(!FileManager.default.fileExists(atPath: directory.appending(path: "saidas").path))
+    }
+
+    @Test func outputThatJustFitsIsNotSaved() async throws {
+        // 6,000 lines of 3 bytes stay below the 20 KB limit: nothing is cut, nothing is saved.
+        let output = try await run("yes ab | head -n 6000")
+        #expect(!output.contains("omitidos") && !output.contains("full output saved"))
+    }
+
+    @Test func binaryOutputIsReplacedByAShortNote() async throws {
+        let output = try await run("head -c 600 /bin/ls")
+        #expect(output.contains("saída binária de"))
+        #expect(output.contains("xxd"))
+        #expect(output.count < 300)
+        // Text in a legacy encoding is not binary.
+        let latin = try await run("printf 'caf\\351 com acentua\\347\\365es em Latin-1, bem comum em arquivos antigos\\n'")
+        #expect(!latin.contains("saída binária"))
+    }
+
+    @Test func timeoutMessageSaysHowToRunLongCommands() async throws {
+        let output = try await run("sleep 30", ["timeout_seconds": .number(1)])
+        #expect(output.contains("tempo esgotado após 1 s"))
+        #expect(output.contains("timeout_seconds") && output.contains("background: true"))
+    }
+
+    @Test func tellsWhenACommandLeavesProcessesRunning() async throws {
+        let output = try await run("nohup sleep 30 >/dev/null 2>&1 & echo started=$!")
+        defer { if let child = pids(in: output).first { kill(child, SIGKILL) } }
+        #expect(output.contains("started"))
+        #expect(output.contains("deixou processos rodando"))
+        #expect(output.contains("background: true"))
+        // A command that cleans up after itself gets no warning.
+        #expect(!(try await run("sleep 0.1 & wait; echo done")).contains("deixou processos"))
+    }
+
+    @Test func theApprovalCardSaysWhereTheCommandRuns() {
+        let tool = RunCommandTool()
+        let inFolder = tool.summary(.object(["command": .string("make")]), context: context)
+        #expect(inFolder.detail == "make")
+        let sameFolder = tool.summary(.object(["command": .string("make"), "cwd": .string(directory.path)]), context: context)
+        #expect(sameFolder.detail == "make")
+        let elsewhere = tool.summary(.object(["command": .string("rm *.log"), "cwd": .string("/")]), context: context)
+        #expect(elsewhere.detail == "rm *.log\n\nem /")
+        let home = tool.summary(.object(["command": .string("ls"), "cwd": .string("~/Documents")]), context: context)
+        #expect(home.detail.hasSuffix("em ~/Documents"))
+    }
+
+    @Test func gitNeverWaitsForAnEditor() async throws {
+        let output = try await run("echo $GIT_EDITOR $GIT_SEQUENCE_EDITOR $GIT_TERMINAL_PROMPT")
+        #expect(output.contains("true false 0"))
+    }
+
     @Test func describesWhatTheShellDoesNotKeep() {
         let description = RunCommandTool().spec.description
-        for needle in ["cd, export", "cwd", "120", "600", "20 KB", "background: true", "job_output", "job_stop"] {
+        for needle in ["cd, export", "cwd", "120", "600", "20 KB", "full text is saved", "background: true", "job_output", "job_stop"] {
             #expect(description.contains(needle), "\(needle)")
         }
     }

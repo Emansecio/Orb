@@ -46,6 +46,19 @@ final class StubMacPermissionSystem: MacPermissionSystem, @unchecked Sendable {
     func requestScreenRecording() -> Bool { lock.withLock { requests.append("screen") }; return screenRecording }
     func probe(_ url: URL) -> MacFileProbe { lock.withLock { probes[url.path] ?? .missing } }
     func runningBundleID(named name: String) -> String? { lock.withLock { running[name] } }
+    /// Apps that start when asked: what `AEDetermine…` answers once they run (bundle id -> status).
+    private var launchable: [String: OSStatus] = [:]
+    private var launched: [String] = []
+    func setLaunchable(_ bundleID: String, thenAutomation status: OSStatus) { lock.withLock { launchable[bundleID] = status } }
+    var launches: [String] { lock.withLock { launched } }
+    func launchHidden(bundleID: String) -> Bool {
+        lock.withLock {
+            guard let status = launchable[bundleID] else { return false }
+            launched.append(bundleID)
+            automation[bundleID] = status
+            return true
+        }
+    }
 }
 
 /// Status mapping, failure detection, script app extraction and the AppleScript pre-flight. The real TCC calls are never
@@ -171,6 +184,47 @@ struct MacPermissionsTests {
         #expect(MacPermissionProblem.detect(in: "execution error: System Events got an error: Not authorized to send Apple events to System Events. (-1743)")
                 == .automation(app: "System Events"))
         #expect(MacPermissionProblem.detect(in: "execution error: algo bloqueado (-1743)") == .automation(app: nil))
+    }
+
+    @Test func namesTheAppInTheRealPortugueseWordingOfTheSystem() {
+        // The strings of AppleScript.component's Localizable.loctable: Brazilian ("eventos Apple para") and European Portuguese.
+        for text in ["execution error: Não autorizado a enviar eventos Apple para Mail. (-1743)",
+                     "execution error: Não autorizado a enviar eventos Apple ao Mail. (-1743)",
+                     "execution error: Não tem autorização para enviar eventos Apple para o Mail. (-1743)",
+                     "execution error: Não autorizado a enviar eventos da Apple para Mail. (-1743)"] {
+            #expect(MacPermissionProblem.detect(in: text) == .automation(app: "Mail"), Comment(rawValue: text))
+        }
+        #expect(MacPermissionProblem.detect(in: "execution error: Não autorizado a enviar eventos Apple para Calendário. (-1743)")
+                == .automation(app: "Calendário"))
+    }
+
+    @Test func aRefusalWithoutAnAppNameFallsBackToTheOnlyAppTheScriptAddresses() {
+        let text = "execution error: algo bloqueado (-1743)"
+        #expect(AppleScript.explain(text, scriptApps: ["Reminders"]).contains("Reminders"))
+        // Two candidates: no guess.
+        let two = AppleScript.explain(text, scriptApps: ["Reminders", "Notes"])
+        #expect(!two.contains("Reminders") && two.contains("Automação"))
+        #expect(AppleScript.explain(text).contains("Automação"))
+    }
+
+    @Test func theTranscriptOffersTheButtonForFailuresAndForOrbsOwnPermissionWarnings() {
+        func call(_ kind: ToolCall.Kind, _ state: ToolCall.State, _ output: String?) -> ToolCall {
+            ToolCall(kind: kind, title: "t", detail: "", state: state, output: output)
+        }
+        // A failure: anything the detector knows.
+        #expect(call(.computer, .failed, "execution error: Not authorized to send Apple events to Mail. (-1743)").permissionProblemToShow
+                == .automation(app: "Mail"))
+        // A screenshot that went through with only the wallpaper, carrying Orb's own instruction: the button shows.
+        let wallpaper = "Captura salva em /tmp/a.png (10×10 px).\nWarning: Orb does not have Screen Recording yet. " + ScreenshotImage.permissionAdvice
+        #expect(call(.computer, .done, wallpaper).permissionProblemToShow == .screenRecording)
+        // The browser tab tool embeds a refusal in an otherwise good result.
+        let embedded = "Safari\nTítulo: x\n\nNão consegui ler o texto da página: " + MacPermissionProblem.automation(app: "Safari").modelMessage
+        #expect(call(.browser, .done, embedded).permissionProblemToShow == .automation(app: "Safari"))
+        // Successful output that merely mentions an error, a setting or a file path never shows it.
+        #expect(call(.computer, .done, "erro (-1743) no log").permissionProblemToShow == nil)
+        #expect(call(.file, .done, "veja Ajustes do Sistema → Privacidade e Segurança → Acessibilidade").permissionProblemToShow == nil)
+        #expect(call(.computer, .running, wallpaper).permissionProblemToShow == nil)
+        #expect(call(.computer, .done, nil).permissionProblemToShow == nil)
     }
 
     @Test func recognizesAccessibilityRefusalsButNotInvalidIndexes() {
@@ -342,7 +396,7 @@ struct MacPermissionsTests {
     // MARK: Pre-flight decisions
 
     private func preflight(_ script: String, _ stub: StubMacPermissionSystem, language: AppleScript.Language = .applescript) async -> MacPermissionProblem? {
-        await AutomationPreflight.blockingProblem(for: script, language: language, checker: checker(stub), patience: .seconds(5))
+        await AutomationPreflight.blockingProblem(for: script, language: language, checker: checker(stub), patience: .seconds(5), settle: .milliseconds(1))
     }
 
     @Test func asksFirstWhenMacOSHasNeverBeenAsked() async {
@@ -386,6 +440,39 @@ struct MacPermissionsTests {
         #expect(await preflight(#"tell application "Mail" to launch"#, stub) == nil)
         #expect(await preflight(#"tell application "App Que Nao Existe" to launch"#, stub) == nil)
         #expect(stub.promptCount == 0)
+    }
+
+    @Test func opensAClosedKnownAppHiddenSoItsConsentComesBeforeTheScriptClock() async {
+        let stub = StubMacPermissionSystem()   // System Events answers -600 until it runs
+        stub.setLaunchable("com.apple.systemevents", thenAutomation: -1744)
+        stub.setAutomation("com.apple.systemevents", -600, afterPrompt: 0)
+        let script = #"tell application "System Events" to keystroke "a""#
+        #expect(await preflight(script, stub) == nil)
+        #expect(stub.launches == ["com.apple.systemevents"])
+        #expect(stub.asks.filter(\.prompts).map(\.bundleID) == ["com.apple.systemevents"], "asked after it started, before the script")
+    }
+
+    @Test func aClosedAppThatWasRefusedEarlierFailsRightAfterTheHiddenLaunch() async {
+        let stub = StubMacPermissionSystem()
+        stub.setLaunchable("com.apple.iCal", thenAutomation: -1743)
+        let problem = await preflight(#"tell application "Calendar" to get name of calendars"#, stub)
+        #expect(problem == .automation(app: "Calendário"))
+        #expect(stub.promptCount == 0, "a refusal never shows the dialog again")
+    }
+
+    @Test func anAppThatDoesNotStartOrIsNotWellKnownIsLeftToTheScript() async {
+        let stub = StubMacPermissionSystem()
+        #expect(await preflight(#"tell application "Notes" to get name"#, stub) == nil)   // cannot be launched
+        #expect(await preflight(#"tell application "App Que Nao Existe" to launch"#, stub) == nil)
+        #expect(stub.launches.isEmpty && stub.promptCount == 0)
+    }
+
+    @Test func anOpenAppIsNeverRelaunched() async {
+        let stub = StubMacPermissionSystem()
+        stub.setLaunchable("com.apple.mail", thenAutomation: 0)
+        stub.setAutomation("com.apple.mail", 0)
+        #expect(await preflight(#"tell application "Mail" to get name"#, stub) == nil)
+        #expect(stub.launches.isEmpty)
     }
 
     @Test func asksForEachUndecidedAppBeforeTheScriptStarts() async {

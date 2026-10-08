@@ -146,7 +146,8 @@ enum ClaudeCodePrompt {
     /// skills are added, the folder's instructions are edited), in prompt order. They are compared by hash, and sent
     /// again with the message when they differ from what the session started with.
     static func standing(bot: Bot, skills: [Skill], folder: String) -> [String] {
-        [opening(bot), standingPermissions(bot), PromptParts.skills(skills, engine: .claudeCode), folder].filter { !$0.isEmpty }
+        [opening(bot), standingPermissions(bot), PromptParts.macApps(bot, engine: .claudeCode),
+         PromptParts.skills(skills, engine: .claudeCode), folder].filter { !$0.isEmpty }
     }
 
     /// Who the Orb is and how it talks: the first lines of the prompt.
@@ -165,12 +166,19 @@ enum ClaudeCodePrompt {
             standingPermissions(bot),
             PromptParts.untrustedContent,
             PromptParts.workHabits,
+            PromptParts.macApps(bot, engine: .claudeCode),
             memory,
             PromptParts.skills(skills, engine: .claudeCode),
             folder,
         ]
         sections.removeAll { $0.isEmpty }
         return sections.joined(separator: "\n\n")
+    }
+
+    /// The system prompt, plus the note that the interface tools are held back when the app lacks Accessibility (the native
+    /// engine says the same in its prompt). `accessibilityGranted` nil means the Orb does not control apps: nothing to say.
+    static func withAccessibilityNote(_ system: String, accessibilityGranted: Bool?) -> String {
+        accessibilityGranted == false ? system + "\n\n" + ToolBox.accessibilityUnavailableNote : system
     }
 
     /// The permissions section as the system prompt has it.

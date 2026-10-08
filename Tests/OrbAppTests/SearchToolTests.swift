@@ -199,4 +199,109 @@ final class SearchToolTests {
         #expect(try matches("./src/*.md", "src/x.md"))
         #expect(try GlobPattern("*.md").matches(name: "notes.md"))
     }
+
+    // MARK: Big files
+
+    /// A log a little over `megabytes` MB, with `needle` on the given (1-based) lines.
+    @discardableResult
+    private func writeLog(_ name: String, megabytes: Int, needleLines: [Int]) throws -> URL {
+        var text = ""
+        text.reserveCapacity(megabytes * 1_000_000 + 1_000)
+        var line = 1
+        while text.utf8.count < megabytes * 1_000_000 || line <= (needleLines.max() ?? 0) {
+            text += needleLines.contains(line) ? "line \(line) ERRO needle\n" : "line \(line) all good with some padding to make it longer\n"
+            line += 1
+        }
+        return try workspace.write(name, text)
+    }
+
+    @Test func grepSearchesABigFileNamedAsPathInsteadOfSkippingIt() async throws {
+        try writeLog("big.log", megabytes: 6, needleLines: [4_000, 90_000])
+        let output = try await run(GrepTool(), ["pattern": .string("ERRO"), "path": .string("big.log")])
+        #expect(lines(output) == ["big.log:4000: line 4000 ERRO needle", "big.log:90000: line 90000 ERRO needle"])
+
+        let context = try await run(GrepTool(), ["pattern": .string("ERRO"), "path": .string("big.log"), "context": .number(1)])
+        #expect(lines(context) == ["big.log-3999- line 3999 all good with some padding to make it longer", "big.log:4000: line 4000 ERRO needle",
+                                   "big.log-4001- line 4001 all good with some padding to make it longer", "--",
+                                   "big.log-89999- line 89999 all good with some padding to make it longer", "big.log:90000: line 90000 ERRO needle",
+                                   "big.log-90001- line 90001 all good with some padding to make it longer"])
+        #expect(lines(try await run(GrepTool(), ["pattern": .string("ERRO"), "path": .string("big.log"), "mode": .string("count")]))
+                == ["big.log: 2", "Total: 2 linhas em 1 arquivos."])
+        #expect(lines(try await run(GrepTool(), ["pattern": .string("ERRO"), "path": .string("big.log"), "mode": .string("files")])) == ["big.log"])
+        #expect(try await run(GrepTool(), ["pattern": .string("never appears"), "path": .string("big.log")]).contains("Nenhum resultado"))
+    }
+
+    @Test func grepStopsABigFileAtTheResultLimit() async throws {
+        try workspace.write("big.log", String(repeating: "ERRO again and again and again and again\n", count: 150_000))
+        let output = try await run(GrepTool(), ["pattern": .string("ERRO"), "path": .string("big.log"), "max_results": .number(3)])
+        #expect(lines(output).count == 4)
+        #expect(output.contains("resultados truncados em 3"))
+        #expect(!output.contains("(até o limite)"))
+        let count = try await run(GrepTool(), ["pattern": .string("ERRO"), "path": .string("big.log"), "mode": .string("count")])
+        #expect(count.contains("big.log: 150000"))
+    }
+
+    @Test func grepSaysWhichBigFilesAFolderSearchSkipped() async throws {
+        try writeLog("logs/big.log", megabytes: 6, needleLines: [10])
+        try workspace.write("small.txt", "nothing relevant\n")
+        // Nothing found: the empty answer must name the file that could hold it.
+        let empty = try await run(GrepTool(), ["pattern": .string("ERRO")])
+        #expect(empty.contains("Nenhum resultado"))
+        #expect(empty.contains("1 arquivo acima de 5 MB não foi pesquisado: logs/big.log"))
+        #expect(empty.contains("path"))
+        // The named file is searchable.
+        #expect(try await run(GrepTool(), ["pattern": .string("ERRO"), "path": .string("logs/big.log")]).contains("big.log:10:"))
+        // With results elsewhere the note is still there.
+        try workspace.write("hit.txt", "ERRO here\n")
+        let mixed = try await run(GrepTool(), ["pattern": .string("ERRO")])
+        #expect(mixed.contains("hit.txt:1: ERRO here"))
+        #expect(mixed.contains("logs/big.log"))
+    }
+
+    @Test func grepSkipsBinaryAndUTF16FilesThatAreBig() async throws {
+        try workspace.write("big.bin", Data(repeating: 0, count: 6_000_000))
+        let output = try await run(GrepTool(), ["pattern": .string("x"), "path": .string("big.bin")])
+        #expect(output.contains("Nenhum resultado"))
+    }
+
+    @Test func grepCountsTotalAsPartialWhenTheListIsCut() async throws {
+        for index in 1...5 { try workspace.write("f\(index).txt", "hit\n") }
+        let capped = try await run(GrepTool(), ["pattern": .string("hit"), "mode": .string("count"), "max_results": .number(2)])
+        #expect(capped.contains("Total (até o limite): 2 linhas em 2 arquivos."))
+    }
+
+    // MARK: Generated folders
+
+    @Test func grepAndGlobSkipBuildOutputButNotWhenAskedForThatFolder() async throws {
+        for folder in ["build", "dist", "out", "target", ".gradle", ".next", "coverage", "venv", ".cache", ".mypy_cache"] {
+            try workspace.write("\(folder)/gen.js", "needle\n")
+        }
+        try workspace.write("src/real.js", "needle\n")
+        #expect(lines(try await run(GrepTool(), ["pattern": .string("needle")])) == ["src/real.js:1: needle"])
+        #expect(lines(try await run(GlobTool(), ["pattern": .string("**/*.js")])) == ["src/real.js"])
+        // Asking for the folder itself looks inside it.
+        #expect(try await run(GrepTool(), ["pattern": .string("needle"), "path": .string("build")]).contains("gen.js:1: needle"))
+        #expect(lines(try await run(GlobTool(), ["pattern": .string("*.js"), "path": .string("dist")])) == ["dist/gen.js"])
+    }
+
+    // MARK: Absolute glob patterns
+
+    @Test func globAcceptsAbsoluteAndHomePatterns() async throws {
+        try workspace.write("docs/a.txt", "")
+        try workspace.write("docs/deep/b.txt", "")
+        try workspace.write("docs/c.md", "")
+        let absolute = lines(try await run(GlobTool(), ["pattern": .string(workspace.url("docs").path + "/*.txt")]))
+        #expect(absolute.count == 1 && absolute[0].hasSuffix("docs/a.txt"))
+        let recursive = lines(try await run(GlobTool(), ["pattern": .string(workspace.url("docs").path + "/**/*.txt")]))
+        #expect(recursive.count == 2)
+        // A pattern with no wildcard at all finds that exact file.
+        let exact = lines(try await run(GlobTool(), ["pattern": .string(workspace.url("docs/c.md").path)]))
+        #expect(exact.count == 1 && exact[0].hasSuffix("docs/c.md"))
+        #expect(GlobTool.splitAbsolute("*.txt") == nil)
+        #expect(GlobTool.splitAbsolute("src/*.txt") == nil)
+        let home = try #require(GlobTool.splitAbsolute("~/Downloads/**/*.pdf"))
+        #expect(home.folder == NSHomeDirectory() + "/Downloads" && home.pattern == "**/*.pdf")
+        let root = try #require(GlobTool.splitAbsolute("/*.txt"))
+        #expect(root.folder == "/" && root.pattern == "*.txt")
+    }
 }

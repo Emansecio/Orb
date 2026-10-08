@@ -19,9 +19,10 @@ enum DangerousCommand {
     }
 
     /// Why running this AppleScript or JavaScript for Automation is dangerous, or nil.
-    static func reason(forAppleScript script: String, in scope: Scope? = nil,
+    /// `language` is the one the script is written in; when nil, both readings are tried and the first reason wins.
+    static func reason(forAppleScript script: String, language: AppleScript.Language? = nil, in scope: Scope? = nil,
                        home: URL = FileManager.default.homeDirectoryForCurrentUser) -> String? {
-        checkScript(script, scope: scope, home: home, depth: 0)
+        checkScript(script, language: language, scope: scope, home: home, depth: 0)
     }
 
     /// Why writing to this file is dangerous (shell startup files, SSH keys, login items), or nil. Symbolic
@@ -44,6 +45,89 @@ enum DangerousCommand {
             return "muda a configuração do sistema"
         }
         return nil
+    }
+
+    /// Why reading this file is dangerous (private keys, saved passwords and tokens), or nil. Reading never changes
+    /// anything, but what it shows reaches the model, and from there anything it can send out (a web page it fetches,
+    /// a command), so these always need the user's word, "Automático" included.
+    static func reason(forReading url: URL, home: URL = FileManager.default.homeDirectoryForCurrentUser) -> String? {
+        SensitiveFiles(home: home).reason(for: url.standardizedFileURL.path)
+    }
+
+    /// The files that hold secrets. Compares paths as text (no file system access), so a walk over thousands of
+    /// files can ask it for each one.
+    struct SensitiveFiles: Sendable {
+        private let homes: [String]
+
+        init(home: URL = FileManager.default.homeDirectoryForCurrentUser) {
+            homes = Array(Set([home.standardizedFileURL.path, home.standardizedFileURL.resolvingSymlinksInPath().path]))
+        }
+
+        static let message = "lê chaves, senhas ou credenciais guardadas neste Mac"
+
+        private static let folders = [".ssh", ".gnupg", ".aws", ".kube", "library/keychains", ".config/gcloud"]
+        private static let files = [".netrc", ".npmrc", ".pypirc", ".git-credentials", ".config/gh/hosts.yml", ".docker/config.json"]
+        /// Inside a secrets folder these are not secret.
+        private static let harmless = ["known_hosts", "known_hosts.old", "config"]
+        private static let secretExtensions: Set<String> = ["pem", "p12", "pfx", "key", "keychain", "keychain-db", "kdbx"]
+        private static let envExamples: Set<String> = [".env.example", ".env.sample", ".env.template", ".env.dist", ".env.defaults"]
+
+        /// `patterns`: also judge by the file's own name (`.env`, `*.pem`, `id_rsa`), which only makes sense for a file
+        /// that is being opened, not for any word of a shell command.
+        func reason(for path: String, patterns: Bool = true) -> String? {
+            let name = (path as NSString).lastPathComponent.lowercased()
+            // The Mac's usual file systems ignore case: `~/.SSH/ID_RSA` is the same file.
+            for home in homes where path.hasPrefix(home + "/") {
+                let relative = String(path.dropFirst(home.count + 1)).lowercased()
+                if Self.files.contains(relative) { return Self.message }
+                for folder in Self.folders where relative == folder || relative.hasPrefix(folder + "/") {
+                    // Public keys, `known_hosts` and the SSH and AWS `config` files hold no secrets.
+                    if folder == ".ssh", name.hasSuffix(".pub") || Self.harmless.contains(name) { return nil }
+                    if folder == ".aws", name == "config" { return nil }
+                    return Self.message
+                }
+            }
+            guard patterns else { return nil }
+            let lowered = name
+            if lowered == ".env" || (lowered.hasPrefix(".env.") && !Self.envExamples.contains(lowered)) { return Self.message }
+            if let dot = lowered.lastIndex(of: "."), Self.secretExtensions.contains(String(lowered[lowered.index(after: dot)...])) {
+                return Self.message
+            }
+            if ["id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"].contains(lowered) { return Self.message }
+            return nil
+        }
+
+        /// The same for one word of a shell command (`~/.ssh/id_rsa`, `$HOME/.aws/credentials`, `../.ssh/id_rsa`,
+        /// `--file=~/.netrc`), resolved the way the shell would from `directory`. Nil when the word is no path to a secret
+        /// or cannot be resolved.
+        func reason(forShellWord word: String, directories: [URL], home: URL, patterns: Bool = false) -> String? {
+            var text = word
+            if text.hasPrefix("--"), let equals = text.firstIndex(of: "=") { text = String(text[text.index(after: equals)...]) }
+            if text.hasPrefix("${HOME}") { text = home.path + text.dropFirst(7) }
+            else if text.hasPrefix("$HOME") { text = home.path + text.dropFirst(5) }
+            else if text == "~" || text.hasPrefix("~/") { text = home.path + text.dropFirst(1) }
+            guard !text.isEmpty, !text.contains("$") else { return nil }
+            // A relative word means a different file in each folder the shell might be in.
+            let urls = text.hasPrefix("/") ? [URL(fileURLWithPath: text)] : directories.map { $0.appending(path: text) }
+            for url in urls {
+                if let reason = reason(for: url.standardizedFileURL.path, patterns: patterns) { return reason }
+                // A link to a secret is the secret.
+                if let reason = reason(for: PermissionPolicy.resolved(url).path, patterns: patterns) { return reason }
+            }
+            return nil
+        }
+    }
+
+    /// The folders `cd target` may leave the shell in, given where it may be before: `target` from each of them (a `cd`
+    /// that fails leaves it where it was, so the caller keeps the old ones too). Nil for a target that cannot be told
+    /// from the text (`cd -`, `cd $DIR`, `cd ~user`).
+    static func directory(afterCD target: String, from directories: [URL], home: URL) -> [URL]? {
+        guard !target.contains("$"), !target.contains("`"), target != "-", !(target.hasPrefix("~") && target != "~" && !target.hasPrefix("~/")) else {
+            return nil
+        }
+        let expanded = target.hasPrefix("~") ? home.path + target.dropFirst() : target
+        if expanded.hasPrefix("/") { return [URL(fileURLWithPath: expanded).standardizedFileURL] }
+        return directories.map { $0.appending(path: expanded).standardizedFileURL }
     }
 
     private static let startupFiles = [".zshrc", ".zprofile", ".zshenv", ".zlogin", ".bash_profile", ".bashrc", ".bash_login", ".profile"]
@@ -69,6 +153,7 @@ enum DangerousCommand {
             if let reason = check(body, scope: scope, home: home, depth: depth + 1) { return reason }
         }
         var downloadInChain = false
+        var directories = scope.map { [$0.directory.standardizedFileURL] } ?? []
         for segment in line.segments {
             if segment.separator != .pipe { downloadInChain = false }
             let command = effective(segment.words)
@@ -77,6 +162,30 @@ enum DangerousCommand {
             }
             if let command, downloaders.contains(command.name) { downloadInChain = true }
             if let reason = checkWords(segment.words, scope: scope, home: home, depth: depth, viaXargs: false) { return reason }
+            if let command, !namesOnly.contains(command.name),
+               let reason = secretReason(in: command.arguments, directories: directories, home: home) {
+                return reason
+            }
+            if let command, command.name == "cd", let target = command.arguments.first,
+               let moved = directory(afterCD: target, from: directories, home: home) {
+                directories += moved
+            }
+        }
+        return nil
+    }
+
+    /// Commands that only touch names, sizes and dates, so pointing them at `~/.ssh` shows no secret.
+    private static let namesOnly: Set<String> = [
+        "ls", "stat", "file", "du", "df", "wc", "find", "cd", "pwd", "mdfind", "mdls", "basename", "dirname", "realpath",
+        "readlink", "which", "mkdir", "chmod", "chown", "touch", "test", "[",
+    ]
+
+    /// Any word of the command that is a path to a private key, saved password or token: what it prints or copies
+    /// reaches the model whatever the command is.
+    private static func secretReason(in words: [String], directories: [URL], home: URL) -> String? {
+        let sensitive = SensitiveFiles(home: home)
+        for word in words where !word.hasPrefix("-") || (word.hasPrefix("--") && word.contains("=")) {
+            if let reason = sensitive.reason(forShellWord: word, directories: directories, home: home) { return reason }
         }
         return nil
     }
@@ -87,11 +196,16 @@ enum DangerousCommand {
         switch command.name {
         case "sudo", "doas":
             return "roda como administrador"
-        case "rm":
+        case "rm", "unlink":
             if viaXargs { return "apaga vários arquivos de uma vez (xargs rm)" }
-            guard args.hasShort("rRf") || args.hasLong(["--recursive", "--force"]) else { return nil }
-            if let scope, isBuildOutput(args.operands, in: scope) { return nil }
-            return "apaga arquivos de forma recursiva ou forçada"
+            if command.name == "rm", args.hasShort("rRf") || args.hasLong(["--recursive", "--force"]) {
+                if let scope, isBuildOutput(args.operands, in: scope) { return nil }
+                return "apaga arquivos de forma recursiva ou forçada"
+            }
+            // A plain `rm file` skips the Trash too: fine for what the Orb made in its own folder or in a temporary
+            // one, a loss with no way back anywhere else.
+            guard !args.operands.isEmpty, !args.operands.allSatisfy({ isDisposable($0, scope: scope, home: home) }) else { return nil }
+            return "apaga arquivos de forma definitiva (sem passar pela Lixeira) fora da pasta do Orb"
         case "find":
             if command.arguments.contains("-delete") { return "apaga os arquivos encontrados" }
             if let exec = command.arguments.firstIndex(where: { ["-exec", "-execdir", "-ok", "-okdir"].contains($0) }) {
@@ -130,8 +244,16 @@ enum DangerousCommand {
         case "spctl":
             return command.arguments.contains("--master-disable") ? "mexe na proteção do sistema" : nil
         case "osascript":
-            for word in command.arguments where !word.hasPrefix("-") {
-                if let reason = checkScript(word, scope: scope, home: home, depth: depth + 1) { return reason }
+            let language = osascriptLanguage(command.arguments)
+            // The script is what follows `-e`, which may well begin with `--` (a comment); other words are script files.
+            var afterScriptFlag = false, skipNext = false
+            for word in command.arguments {
+                defer { if word != "-e" { afterScriptFlag = false } }
+                if skipNext { skipNext = false; continue }
+                if word == "-e" { afterScriptFlag = true; continue }
+                if word == "-l" || word == "-s" { skipNext = true; continue }
+                guard afterScriptFlag || !word.hasPrefix("-") || word.contains(where: \.isWhitespace) else { continue }
+                if let reason = checkScript(word, language: language, scope: scope, home: home, depth: depth + 1) { return reason }
             }
             return nil
         case "eval":
@@ -259,6 +381,21 @@ enum DangerousCommand {
         return nil
     }
 
+    /// The language `osascript` is told to use (`-l JavaScript`); AppleScript without `-l`, nil when it cannot be told.
+    private static func osascriptLanguage(_ arguments: [String]) -> AppleScript.Language? {
+        var value: String?
+        for (i, word) in arguments.enumerated() {
+            if word == "-l", i + 1 < arguments.count { value = arguments[i + 1] }
+            else if word.hasPrefix("-l"), word.count > 2, !word.hasPrefix("--") { value = String(word.dropFirst(2)) }
+        }
+        guard let value else { return .applescript }
+        switch value.lowercased() {
+        case "javascript": return .javascript
+        case "applescript": return .applescript
+        default: return nil
+        }
+    }
+
     private static func shellReason(_ arguments: [String], scope: Scope?, home: URL, depth: Int) -> String? {
         if arguments.contains(where: downloadsCode) { return "baixa e executa um script da internet" }
         // `sh -c 'script'`, also `-lc` and `-ic`: the script is a command line of its own.
@@ -290,6 +427,28 @@ enum DangerousCommand {
         return homePaths.contains(trimmed) || homePaths.contains { $0 + "/*" == trimmed }
     }
 
+    /// Temporary folders, where the Orb's scratch files live.
+    private static let temporaryFolders = ["/tmp", "/private/tmp", "/var/folders", "/private/var/folders"]
+
+    /// Whether deleting this operand loses nothing that belongs to the user: it is inside the Orb's own folder or in a
+    /// temporary one. Anything that cannot be told from the text (`$VAR`, `$(…)`, `~user`) counts as not.
+    private static func isDisposable(_ operand: String, scope: Scope?, home: URL) -> Bool {
+        guard !operand.contains(where: { "$`".contains($0) }), !operand.hasPrefix("~") || operand == "~" || operand.hasPrefix("~/") else {
+            return false
+        }
+        let expanded = operand.hasPrefix("~") ? home.path + operand.dropFirst() : operand
+        let base = expanded.hasPrefix("/") ? nil : scope?.directory
+        guard expanded.hasPrefix("/") || base != nil else { return false }
+        let url = (base.map { $0.appending(path: expanded) } ?? URL(fileURLWithPath: expanded)).standardizedFileURL
+        // A link in the way (`ws/escape -> ~/Documents`) must not make the outside look inside.
+        let path = PermissionPolicy.resolved(url).path
+        if let scope {
+            let workspace = PermissionPolicy.resolved(scope.workspace).path
+            if path.hasPrefix(workspace + "/") { return true }
+        }
+        return temporaryFolders.contains { path.hasPrefix($0 + "/") }
+    }
+
     /// `rm -rf node_modules dist` inside the Orb's folder only clears what a build recreates.
     private static func isBuildOutput(_ operands: [String], in scope: Scope) -> Bool {
         guard !operands.isEmpty else { return false }
@@ -307,30 +466,138 @@ enum DangerousCommand {
     private static let scriptRules: [(pattern: String, reason: String)] = [
         (#"\bempty\s+(the\s+)?trash\b|\bemptyTrash\b"#, "esvazia a Lixeira"),
         (#"\bdelete\s*\(?\s*(every|all)\b"#, "apaga tudo de uma vez"),
+        // `delete notes of folder "X"`, `delete (messages of inbox …)`: a plural noun, then the container it comes from.
+        (#"\bdelete\s*\(?\s*(?:the\s+)?\w+s\s+(?:of|in)\b"#, "apaga vários itens de uma vez"),
         (#"\bshut\s+down\b|\bshutDown\b"#, "desliga o Mac"),
         (#"\brestart\b"#, "reinicia o Mac"),
         (#"\blog\s*out\b|\blogOut\b"#, "encerra a sessão do usuário"),
         (#"\bwith\s+administrator\s+privileges\b"#, "roda como administrador"),
     ]
 
-    private static func checkScript(_ script: String, scope: Scope?, home: URL, depth: Int) -> String? {
+    /// Apps whose scripted `send` (or Return in their window) delivers something to other people and cannot be taken back.
+    /// Matched against the whole text of a string literal (a name or a bundle id), so a longer sentence that mentions
+    /// an app does not count.
+    private static let messagingApps = #"^(?:mail|messages|mensagens|(?:microsoft )?outlook|whatsapp|telegram|slack|signal|discord|microsoft teams|com\.apple\.mail|com\.apple\.MobileSMS|com\.microsoft\.Outlook|net\.whatsapp\.WhatsApp|ru\.keepcoder\.Telegram|com\.tinyspeck\.slackmacgap)(?:\.app)?$"#
+
+    /// A script split into what runs and what is only text: `code` has its comments removed and every string literal
+    /// blanked to `""`; `strings` are the literals, unescaped, in order.
+    private struct ScriptText {
+        var code = ""
+        var strings: [String] = []
+    }
+
+    /// Reads the script the way its language does. AppleScript has `"…"` strings and `--`, `#` and `(* *)` comments, so an
+    /// apostrophe in it is just a character; JavaScript for Automation has `"…"`, `'…'` and `` `…` `` strings and `//` and
+    /// `/* */` comments. Guessing the language from the text is not safe: a stray `app.` in a comment would flip it and
+    /// an apostrophe could then hide the code that follows.
+    private static func scan(_ script: String, javaScript: Bool) -> ScriptText {
+        var result = ScriptText()
+        let chars = Array(script)
+        let quotes: Set<Character> = javaScript ? ["\"", "'", "`"] : ["\""]
+        var index = 0
+        while index < chars.count {
+            let c = chars[index]
+            let next: Character? = index + 1 < chars.count ? chars[index + 1] : nil
+            if quotes.contains(c) {
+                var literal = ""
+                index += 1
+                while index < chars.count, chars[index] != c {
+                    if chars[index] == "\\", index + 1 < chars.count {
+                        let escaped = chars[index + 1]
+                        if escaped == c || escaped == "\\" { literal.append(escaped) } else { literal.append("\\"); literal.append(escaped) }
+                        index += 2
+                    } else {
+                        literal.append(chars[index])
+                        index += 1
+                    }
+                }
+                index += 1 // the closing quote (an unterminated string still counts as one)
+                result.strings.append(literal)
+                result.code += "\"\""
+            } else if let opener = commentOpener(c, next, javaScript: javaScript) {
+                if opener.block {
+                    var depth = 1
+                    index += 2
+                    while index < chars.count, depth > 0 {
+                        let a = chars[index], b: Character? = index + 1 < chars.count ? chars[index + 1] : nil
+                        if !javaScript, a == "(", b == "*" { depth += 1; index += 2 }
+                        else if a == opener.close.0, b == opener.close.1 { depth -= 1; index += 2 }
+                        else { index += 1 }
+                    }
+                    result.code += " "
+                } else {
+                    while index < chars.count, chars[index] != "\n" { index += 1 }
+                }
+            } else {
+                result.code.append(c)
+                index += 1
+            }
+        }
+        return result
+    }
+
+    private static func commentOpener(_ c: Character, _ next: Character?, javaScript: Bool) -> (block: Bool, close: (Character, Character))? {
+        if javaScript {
+            if c == "/", next == "/" { return (false, ("\n", "\n")) }
+            if c == "/", next == "*" { return (true, ("*", "/")) }
+        } else {
+            if c == "(", next == "*" { return (true, ("*", ")")) }
+            if c == "-", next == "-" { return (false, ("\n", "\n")) }
+            if c == "#" { return (false, ("\n", "\n")) }
+        }
+        return nil
+    }
+
+    /// With the language known the script is read as that language; when it is not, as both, and the first reason wins.
+    private static func checkScript(_ script: String, language: AppleScript.Language?, scope: Scope?, home: URL, depth: Int) -> String? {
+        guard let language else {
+            return checkScript(script, javaScript: false, scope: scope, home: home, depth: depth)
+                ?? checkScript(script, javaScript: true, scope: scope, home: home, depth: depth)
+        }
+        return checkScript(script, javaScript: language == .javascript, scope: scope, home: home, depth: depth)
+    }
+
+    private static func checkScript(_ script: String, javaScript: Bool, scope: Scope?, home: URL, depth: Int) -> String? {
         guard depth < maxDepth else { return "usa scripts aninhados demais para conferir" }
+        let text = scan(script, javaScript: javaScript)
         // `do shell script "…"` (and JXA's `doShellScript('…')`) runs shell text.
-        let shellText = #"(?:do\s+shell\s+script|doShellScript\()\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')"#
+        let shellText = #"(?:do\s+shell\s+script|doShellScript\s*\()\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|`((?:[^`\\]|\\.)*)`)"#
         if let regex = try? NSRegularExpression(pattern: shellText, options: [.caseInsensitive]) {
             let range = NSRange(script.startIndex..., in: script)
             for match in regex.matches(in: script, range: range) {
-                for group in 1...2 {
+                for group in 1...3 {
                     guard let r = Range(match.range(at: group), in: script) else { continue }
                     let inner = script[r].replacingOccurrences(of: "\\\"", with: "\"").replacingOccurrences(of: "\\\\", with: "\\")
                     if let reason = check(inner, scope: scope, home: home, depth: depth + 1) { return reason }
                 }
             }
         }
-        // The words of the script itself, not text inside its strings (`display dialog "restart later"`).
-        let code = script.replacingOccurrences(of: #""(?:[^"\\]|\\.)*""#, with: "\"\"", options: .regularExpression)
+        // The words of the script itself, not text inside its strings or comments (`display dialog "restart later"`).
+        let code = text.code
+        // Shell text built from a variable or pieces (`do shell script c`, `("rm -rf " & "~")`) cannot be read as one
+        // literal: judge the script's strings together and one by one.
+        if code.range(of: #"(?:do\s+shell\s+script|doShellScript\s*\()\s*[^"\s]"#, options: [.regularExpression, .caseInsensitive]) != nil {
+            for piece in [text.strings.joined()] + text.strings {
+                if let reason = check(piece, scope: scope, home: home, depth: depth + 1) { return "monta um comando de shell que \(reason)" }
+            }
+        }
         for rule in scriptRules where code.range(of: rule.pattern, options: [.regularExpression, .caseInsensitive]) != nil {
             return rule.reason
+        }
+        // Filtering with `whose` and then deleting removes everything that matches.
+        if code.range(of: #"\bwhose\b"#, options: [.regularExpression, .caseInsensitive]) != nil,
+           code.range(of: #"\bdelete\b"#, options: [.regularExpression, .caseInsensitive]) != nil {
+            return "apaga vários itens de uma vez"
+        }
+        let messaging = text.strings.contains { $0.range(of: messagingApps, options: [.regularExpression, .caseInsensitive]) != nil }
+        if code.range(of: #"\.send\s*\("#, options: .regularExpression) != nil
+            || (messaging && code.range(of: #"\bsend\b"#, options: [.regularExpression, .caseInsensitive]) != nil) {
+            return "envia um e-mail ou mensagem, que não dá para desfazer"
+        }
+        // Return in the window of a chat app sends what is typed there.
+        if messaging, code.range(of: #"\bkeystroke\s+(?:return|enter)\b|\bkey\s+code\s+(?:36|76)\b|\bASCII\s+character\s+(?:10|13)\b"#,
+                                 options: [.regularExpression, .caseInsensitive]) != nil {
+            return "envia uma mensagem (tecla Return)"
         }
         return nil
     }
