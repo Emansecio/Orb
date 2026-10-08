@@ -186,6 +186,142 @@ import Testing
 
     // MARK: Deleting
 
+    // MARK: Pictures of a deleted conversation
+
+    /// A picture file in the Orb's `anexos/<id>/`, as `ImageStore` writes them.
+    private func picture(for botID: UUID) throws -> ImageAttachment {
+        let folder = root.appending(path: "anexos/\(botID.uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = folder.appending(path: "\(UUID().uuidString).jpg")
+        try Data("jpeg".utf8).write(to: file)
+        return ImageAttachment(path: file.path, mediaType: "image/jpeg", width: 1, height: 1)
+    }
+
+    private func conversation(showing images: [ImageAttachment]) -> Conversation {
+        var made = conversation("com imagem")
+        made.messages.append(.user("olhe", images: images))
+        return made
+    }
+
+    private func exists(_ image: ImageAttachment) -> Bool { FileManager.default.fileExists(atPath: image.path) }
+
+    @Test @MainActor func deletingAnArchivedConversationRemovesItsPictures() throws {
+        let (model, botID) = model(current: conversation("atual"))
+        let mine = try picture(for: botID), alsoMine = try picture(for: botID), unrelated = try picture(for: botID)
+        let archived = store.archive(conversation(showing: [mine, alsoMine]), for: botID)
+        store.flush()
+
+        model.deleteArchivedConversation(archived.id, of: botID)
+        store.flush()
+
+        #expect(!exists(mine) && !exists(alsoMine))
+        #expect(exists(unrelated)) // nothing else points to it, but this conversation did not either
+    }
+
+    @Test @MainActor func aPictureAnotherConversationStillUsesStays() throws {
+        let (model, botID) = model(current: conversation("atual"))
+        let shared = try picture(for: botID), onlyHere = try picture(for: botID)
+        let first = store.archive(conversation(showing: [shared, onlyHere]), for: botID)
+        _ = store.archive(conversation(showing: [shared]), for: botID)
+        store.flush()
+
+        model.deleteArchivedConversation(first.id, of: botID)
+        store.flush()
+
+        #expect(exists(shared) && !exists(onlyHere))
+    }
+
+    @Test @MainActor func aPictureTheCurrentConversationUsesStaysWhetherSavedOrOnlyInMemory() throws {
+        let (model, botID) = model(current: conversation("atual"))
+        let onDisk = try picture(for: botID), inMemory = try picture(for: botID), attached = try picture(for: botID)
+        let archived = store.archive(conversation(showing: [onDisk, inMemory, attached]), for: botID)
+        store.save(conversation(showing: [onDisk]), for: botID) // the saved current conversation
+        store.flush()
+        model.session(botID).conversation = conversation(showing: [inMemory]) // newer than the file
+        model.composerLane(botID).pictures = [attached] // typed, not sent yet
+
+        model.deleteArchivedConversation(archived.id, of: botID)
+        store.flush()
+
+        #expect(exists(onDisk) && exists(inMemory) && exists(attached))
+    }
+
+    @Test @MainActor func aRoutinesConversationKeepsItsPicturesToo() throws {
+        let (model, botID) = model(current: conversation("atual"))
+        let shot = try picture(for: botID)
+        let archived = store.archive(conversation(showing: [shot]), for: botID)
+        store.saveRoutineConversation(conversation(showing: [shot]), routine: UUID(), for: botID)
+        store.flush()
+
+        model.deleteArchivedConversation(archived.id, of: botID)
+        store.flush()
+
+        #expect(exists(shot))
+    }
+
+    @Test @MainActor func picturesOfAnotherOrbAndFilesOutsideTheStoreAreNotTouched() throws {
+        let (model, botID) = model(current: conversation("atual"))
+        let other = try picture(for: UUID())
+        let outside = root.appending(path: "foto-do-usuario.jpg")
+        try Data("x".utf8).write(to: outside)
+        let outsideImage = ImageAttachment(path: outside.path, mediaType: "image/jpeg", width: 1, height: 1)
+        let archived = store.archive(conversation(showing: [other, outsideImage]), for: botID)
+        store.flush()
+
+        model.deleteArchivedConversation(archived.id, of: botID)
+        store.flush()
+
+        #expect(exists(other))
+        #expect(FileManager.default.fileExists(atPath: outside.path))
+    }
+
+    /// The `.corrupt-<date>` copies the Store sets aside (to be recovered by hand) still count as pointing at a picture.
+    @Test @MainActor func aPictureASetAsideCopyStillNamesStays() throws {
+        let (model, botID) = model(current: conversation("atual"))
+        let inCurrentCopy = try picture(for: botID), inArchiveCopy = try picture(for: botID), onlyHere = try picture(for: botID)
+        let otherOrbsCopy = try picture(for: UUID())
+        let archived = store.archive(conversation(showing: [inCurrentCopy, inArchiveCopy, onlyHere, otherOrbsCopy]), for: botID)
+        store.flush()
+        try put("{ broken \"path\":\"\(inCurrentCopy.path)\"",
+                at: root.appending(path: "conversations/\(botID.uuidString).json.corrupt-20260101-120000"))
+        try put("{ broken \"path\":\"\(inArchiveCopy.path)\"",
+                at: archiveFolder(botID).appending(path: "\(UUID().uuidString).json.corrupt-20260101-120000"))
+        // Another Orb's set-aside copy in the shared folder says nothing about this Orb.
+        try put("{ broken \"path\":\"\(onlyHere.path)\"",
+                at: root.appending(path: "conversations/\(UUID().uuidString).json.corrupt-20260101-120000"))
+
+        model.deleteArchivedConversation(archived.id, of: botID)
+        store.flush()
+
+        #expect(exists(inCurrentCopy) && exists(inArchiveCopy))
+        #expect(!exists(onlyHere))
+        #expect(exists(otherOrbsCopy)) // another Orb's folder: never touched
+    }
+
+    @Test @MainActor func reopeningAConversationKeepsItsPictures() throws {
+        let (model, botID) = model(current: conversation("atual"))
+        let shot = try picture(for: botID)
+        let archived = store.archive(conversation(showing: [shot]), for: botID)
+        store.flush()
+
+        #expect(model.reopenConversation(archived.id, of: botID))
+        store.flush()
+
+        #expect(exists(shot))
+    }
+
+    @Test func aDamagedArchiveFileStillGivesUpItsPictures() throws {
+        let botID = UUID()
+        let shot = try picture(for: botID)
+        let id = UUID()
+        try put(#"{ broken "path":"\#(shot.path)"#, at: archiveFolder(botID).appending(path: "\(id.uuidString).json"))
+
+        store.deleteArchived(id, for: botID, removingPicturesUnlessUsedBy: [])
+        store.flush()
+
+        #expect(!exists(shot))
+    }
+
     @Test @MainActor func deletingAnArchivedConversationRemovesItForGood() throws {
         let (model, botID) = model(current: conversation("apagar"))
         model.newConversation(botID)

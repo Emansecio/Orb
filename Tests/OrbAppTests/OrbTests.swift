@@ -227,7 +227,10 @@ struct OrbTests {
         var shy = config
         shy.temperament = .timido
         #expect(try JSONDecoder().decode(OrbConfig.self, from: JSONEncoder().encode(shy)) == shy)
-        #expect(try JSONDecoder().decode(OrbConfig.self, from: Data("{}".utf8)) == OrbConfig())
+        // (Saved before the designed automatic colors, so it keeps the original ones: see OrbDesignTests.)
+        var empty = OrbConfig()
+        empty.autoColors = .original
+        #expect(try JSONDecoder().decode(OrbConfig.self, from: Data("{}".utf8)) == empty)
     }
 
     @Test func temperamentIsEditedLikeACategory() {

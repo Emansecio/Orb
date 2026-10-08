@@ -7,21 +7,6 @@ import UniformTypeIdentifiers
 
 // MARK: Permission
 
-extension PermissionMode {
-    /// One line under the mode's name in the composer's picker.
-    var composerSummary: String {
-        switch self {
-        case .ask: "Pede sua aprovação antes de mudar arquivos, rodar comandos ou usar a web."
-        case .auto: "Trabalha sozinho e só pergunta em ações destrutivas (apagar, sudo, push --force)."
-        case .bypass: "Nunca pergunta. Use só com Orbs e pastas em que você confia."
-        case .readOnly: "Só lê e pesquisa. Não muda nada no seu Mac."
-        }
-    }
-
-    /// The order of the picker: the safest first, "Sem pedir permissão" last.
-    static let pickerOrder: [PermissionMode] = [.ask, .auto, .readOnly, .bypass]
-}
-
 enum PermissionChipText {
     /// What the chip says: the mode, and how many standing grants apply (they only count where the Orb asks).
     static func label(_ permission: PermissionState) -> String {

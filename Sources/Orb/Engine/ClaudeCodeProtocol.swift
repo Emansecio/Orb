@@ -293,11 +293,11 @@ enum ClaudeCodeModels {
 
 enum ClaudeCodeTools {
     /// Tools of the Orb's own MCP server: memory (`mcp__orb_memoria__remember`, `__recall`) and, for an Orb with
-    /// "Apps do Mac", the Mac tools (`mcp__orb_memoria__open`, `__applescript`…). The server keeps its first name.
+    /// "Controlar apps do Mac", the Mac tools (`mcp__orb_memoria__open`, `__applescript`…). The server keeps its first name.
     static let memoryPrefix = "mcp__\(OrbToolsMCPServer.name)__"
     /// Removed when the bot's "Terminal e arquivos" capability is off.
     static let terminal = ["Bash", "Edit", "Write", "MultiEdit", "NotebookEdit"]
-    /// Removed when "Ler páginas da web" is off.
+    /// Removed when "Navegar na web" is off.
     static let web = ["WebFetch", "WebSearch"]
 
     static func kind(_ name: String) -> ToolCall.Kind {
@@ -340,14 +340,16 @@ enum ClaudeCodeTools {
 }
 
 enum ClaudeCodePolicy {
-    /// `--permission-mode` for a bot: read-only plans (edits reach us and are denied), "ask" uses the default
-    /// mode (unapproved tools reach us as approval cards), automatic accepts edits and we allow the rest except
-    /// destructive commands, and "sem pedir permissão" is Claude Code's own `bypassPermissions`.
+    /// `--permission-mode` for a bot. Read-only plans (edits reach us and are denied). "Perguntar antes" and
+    /// "Automático" both run the CLI in `default`: nothing it considers risky is approved by the CLI itself, every
+    /// such request reaches the Orb as `can_use_tool`, and `PermissionPolicy.evaluate` decides (ask, or in
+    /// "Automático" allow unless dangerous or it changes the Orb's instructions, exactly like the native engine).
+    /// `acceptEdits` would let the CLI approve file edits without the Orb's checks (`~/.zshrc`, `~/.ssh`,
+    /// LaunchAgents…). "Sem pedir permissão" is Claude Code's own `bypassPermissions`.
     static func cliMode(_ mode: PermissionMode) -> String {
         switch mode {
         case .readOnly: "plan"
-        case .ask: "default"
-        case .auto: "acceptEdits"
+        case .ask, .auto: "default"
         case .bypass: "bypassPermissions"
         }
     }

@@ -1,0 +1,365 @@
+# Arquitetura
+
+Para quem vai mexer no código do Orb. App nativo em SwiftUI, Swift 6 (`swift-tools-version: 6.0`, concorrência estrita),
+macOS 14+, um pacote SwiftPM com um alvo executável (`Orb`, `Sources/Orb`) e um alvo de testes (`OrbAppTests`). Não há
+dependências externas: SQLite, ImageIO, Vision, Network, CryptoKit e o resto vêm do sistema.
+
+Documentos irmãos: [CONTEXTO.md](CONTEXTO.md) (janela, compactação, economia de tokens), [PERMISSOES.md](PERMISSOES.md),
+[MEMORIA.md](MEMORIA.md), [ORBS.md](ORBS.md) (avatar e animação), [MOVIMENTO.md](MOVIMENTO.md) (especificação de movimento da
+interface).
+
+## Visão geral
+
+```
+Views (SwiftUI)
+   │ leem só o objeto do Orb que mostram              ┌──────────────── Memory/  MemoryBank por Orb (actor)
+   ▼                                                   │
+AppModel (@MainActor @Observable)  ── BotSession por Orb ── TurnRequest ──► AgentEngine (actor)
+   │   lista de Orbs, rotinas, provedores,    (turno, conversa,   TurnEvent ◄──  │  clientes (OpenAI · Responses · Anthropic)
+   │   catálogos, ajustes, arquivos de dados   texto em stream)                  │  ferramentas (Engine/Tools) · MCP
+   │                                                                             │  PermissionPolicy · ApprovalGate
+   ├─ BotLive por Orb (estado que as telas leem)                                 └─ ClaudeCodeEngine (processo `claude -p`)
+   ├─ Store (JSON em disco, filas próprias) · Keychain                              + OrbToolsMCPServer (o app como servidor MCP)
+   └─ Orbs/ (avatar: Core Animation, OrbDriver)
+```
+
+Três ideias organizam o resto:
+
+1. **Cada Orb é independente.** O que um Orb faz (turno, texto em stream, aprovações, fila de mensagens, memória, uso de
+   tokens) vive em um `BotSession`; o que as telas mostram dele vive em um `BotLive`. Dois Orbs trabalham ao mesmo tempo sem
+   se tocar, e uma mudança num não redesenha a tela do outro.
+2. **Dois motores, um contrato.** O motor nativo (`AgentEngine`) e o do Claude Code (`ClaudeCodeEngine`) recebem uma
+   requisição de turno e devolvem um `AsyncStream<TurnEvent>`. Permissões, aprovações, memória e prompt passam pelas mesmas peças.
+3. **O disco é a fonte da verdade e nada o bloqueia.** Estado, conversas e memória são arquivos legíveis; leitura e
+   escrita ficam fora da thread principal; arquivos ilegíveis nunca são sobrescritos.
+
+## Mapa dos módulos
+
+Tudo em `Sources/Orb/`.
+
+### Aplicativo e estado
+
+| Arquivo | Papel |
+|---|---|
+| `OrbApp.swift` | `Launcher` (`@main`: com `--tools-mcp` roda só o servidor MCP, sem janela), `OrbApp` (janela, Ajustes, barra de menus), `AppDelegate`, `AppCommands` (menu "Orbs"), `OrbSheet` (`--render-orbs`, `--render-icon`), `Snapshot` (`--snapshot`) |
+| `AppModel.swift` | `@MainActor @Observable`: Orbs, rotinas, skills, conectores, provedores, modelo padrão, nível de memória da conversa; criar/apagar Orb, `send`, `runClaudeCode`, `compactNow`, rotinas e fila, conexão de provedores, salvar |
+| `AppModel+Approvals / +Commands / +ContextUI / +MemoryUI / +RoutinesUI / +Steering / +Transcript` | o que cada área pede ao modelo: `decide` e banners; comandos, paleta e barra de menus; dados do medidor; esquecer/desfazer; modelos de rotina e listas; fila "enquanto trabalha"; "Tentar de novo"/"Continuar" |
+| `BotSession.swift`, `BotSession+Turn.swift`, `BotSession+Conversation.swift` | a maquinaria de um Orb: conversa em memória (carregar, descarregar, salvar, estacionar durante rotina), turno (id, eventos, texto em stream, cartões), uso de tokens, trechos para a memória |
+| `BotLive.swift` | o que as telas leem de um Orb: configurações, `status`, `activity` (com "digitando" e a olhada ao ser escolhido), `needsYou`, não lidas, memória, medidor. `WritesOnlyChanges` (`assign`, `writeIfChanged`) |
+| `LiveText.swift` | `ReplyParagraphs` (parágrafos incrementais), `LiveText` (a resposta que está chegando), `OrbTranscript` (os itens que a conversa mostra) |
+| `Models.swift` | `Bot`, `PermissionMode`, `Capability`, `Conversation`, `TranscriptItem`, `ToolCall`, `ApprovalRequest`, `Routine`, `Schedule`, `Skill` |
+| `Store.swift`, `StoreCoordination.swift`, `ConversationCoding.swift`, `ConversationHistory.swift` | `AppState`, `Store` (leitura/escrita com filas), `Keychain`, decodificação tolerante, `FileGate`, codificação incremental da conversa, arquivo de conversas, relatórios de rotina |
+| `DevRun.swift` | os modos de desenho (`--snapshot`, `--render-*`): decide a pasta de dados (temporária, a menos que `ORB_DATA_DIR`) e bloqueia o Keychain e a migração neles; apaga a pasta temporária ao sair |
+| `LegacyMigration.swift` | migração do app que se chamava OpenBot (dados e preferências; as chaves do Keychain passam uma a uma quando usadas) |
+| `OrbFolder.swift` | pasta própria `~/Orbs/<Nome>`, estado da pasta, arquivos recentes e alterados do painel |
+| `MacPermissions.swift` | permissões do macOS (TCC), pré-voo de Automação, tradução de erros |
+| `ImageAttachments.swift` | imagens do usuário e de ferramentas: reduzir, guardar em `anexos/`, formato de cada API |
+| `ApprovalNotifications.swift` | banners "Permitir / Não permitir", roteamento do toque, um só delegate de notificações |
+| `ContextGauge.swift`, `MarkdownBlocks.swift`, `MenuBarSupport.swift`, `Shortcuts.swift`, `Motion.swift`, `Theme.swift` | palavras e leitura do medidor; blocos de Markdown; ícone da barra de menus e atalho global; nomes e teclas dos comandos e o catálogo de atalhos (folha, Ajustes e paleta leem a mesma lista); vocabulário de curvas; paleta, estilos e brilho |
+
+### Motor (`Engine/`)
+
+| Arquivo | Papel |
+|---|---|
+| `EngineTypes.swift` | contratos: `JSONValue`, `ChatMessage`, `LLMClient`/`LLMEvent`/`LLMError`, `TokenUsage`, `CacheHealth`, `AgentTool`, `ToolRisk`, `ToolContext`, `MCPServerConfig` |
+| `AgentEngine.swift` | o laço do turno: modelo ↔ ferramentas, até 30 passos (60 em rotinas), retentativas, cortes por limite, grupos de aprovação, `TurnEvent`/`TurnRequest` |
+| `Providers.swift` | `ProviderKind`, `ProviderAccount`, `ModelRef` (`provedor/modelo`), `ModelCatalog` (listas ao vivo), qual cliente para qual formato |
+| `OpenAIClient.swift`, `ResponsesClient.swift`, `AnthropicClient.swift` | os três formatos (chat completions, Responses, Messages): corpo da requisição e mapeamento dos eventos |
+| `ProviderTransport.swift`, `SSE.swift`, `Retry.swift`, `WireEncoder.swift` | o que os clientes dividem: requisição autorizada (renova 401), erros legíveis, `Retry-After`, leitor SSE incremental, retentativa com recuo, JSON ordenado |
+| `ChatGPTAuth.swift` | login "Sign in with ChatGPT" (registro dinâmico, PKCE, retorno em 127.0.0.1), token no Keychain |
+| `ContextBudget.swift`, `ContextWindow.swift`, `ContextCondensing.swift`, `ConversationLedger.swift`, `ContextMeter.swift`, `Compaction.swift`, `ToolDigest.swift`, `ToolOutputSpill.swift` | janela, compactação e medidor: veja [CONTEXTO.md](CONTEXTO.md) |
+| `TurnPrompt.swift`, `SystemPrompt.swift`, `WorkspaceSnapshot.swift`, `WorkspaceChanges.swift`, `FolderInstructions.swift` | o prompt: sistema estável + prefácio por mensagem (`<orb_context>`: hora, pasta, memória); instruções da pasta (`ORB.md`/`AGENTS.md`/`CLAUDE.md`) |
+| `PermissionPolicy.swift`, `ApprovalGate.swift`, `ApprovalBatch.swift`, `DangerousCommand.swift`, `ShellCommandLine.swift` | permissões: veja [PERMISSOES.md](PERMISSOES.md) |
+| `Steering.swift` | a fila de mensagens enviadas durante um turno (`SteeringQueue`) |
+| `ClaudeCode.swift`, `ClaudeCodeEngine.swift`, `ClaudeCodePrompt.swift`, `ClaudeCodeProtocol.swift` | provedor Claude Code: achar o `claude`, login/status, um processo `claude -p` por turno, protocolo `stream-json` e `can_use_tool`, prompt anexado e catch-up |
+| `MCPConnection.swift`, `MCPTransport.swift`, `MCPTool.swift` | conectores MCP: stdio e HTTP (Streamable HTTP com recuo para SSE), `MCPManager`, ferramentas `Servidor__ferramenta` |
+
+### Ferramentas (`Engine/Tools/`)
+
+`ToolBox.all` = `shellTools + fileTools + webTools + macTools + memoryTools`; cada família lista as suas no próprio arquivo.
+`ToolBox.offered(for:accessibilityGranted:)` filtra por capacidade do Orb e esconde `ui_read`/`ui_act` sem Acessibilidade.
+
+| Capacidade | Ferramentas | Arquivos |
+|---|---|---|
+| Terminal e arquivos | `run_command` (`background: true`), `job_output`, `job_list`, `job_stop`, `read_file` (texto, PDF, Word/RTF/ODT, imagens com OCR), `write_file`, `edit_file`, `list_directory`, `search_files` (Spotlight), `grep`, `glob` | `ShellTool`, `BackgroundJobs`, `ProcessRunner`, `ShellEnvironment`, `FileTools`, `SearchTools`, `TextFile`, `DocumentReader` |
+| Navegar na web | `web_fetch` (páginas, PDF, `save_to`) | `WebTools` |
+| Controlar apps do Mac | `applescript`, `shortcuts_list/run`, `clipboard_read/write`, `screenshot` (com OCR), `apps_list`, `processes`, `app_quit`, `trash`, `browser_tab`, `ui_read`, `ui_act` | `MacTools`, `MacAppTools`, `BrowserTools`, `ScreenshotTool`, `AccessibilityTools`/`Elements`/`Outline`, `AppleScriptSupport` |
+| Sempre | `open`, `notify`, `remember`, `recall` | `MacTools`, `MacAppTools` |
+| Conectores | uma por ferramenta MCP | `MCPTool` |
+
+Os nomes e as descrições das ferramentas para o modelo são em inglês; o que aparece para você (título e detalhe de cada
+linha, cartões) é em português (`AgentTool.summary`).
+
+### Memória (`Memory/`)
+
+`MemoryBank` (um actor por Orb) + `MemoryIndex` (SQLite/FTS5) + `MemoryPage`/`MemoryText`/`MemorySanitizer` +
+`SessionSummary` + `MemoryIntent` + `OrbToolsMCPServer`. Detalhes em [MEMORIA.md](MEMORIA.md).
+
+### Catálogos (`Catalog/`)
+
+`MCPRegistry` (registro oficial do MCP), `ConnectorTemplates` (conectores em destaque), `SkillCatalog` (Skills.sh + GitHub),
+`ConnectorSecrets` (segredos de conectores no Keychain, `@keychain` no `state.json`), `OrbScope` (conectores e skills por
+Orb: "Usar com").
+
+### Orbs (`Orbs/`)
+
+O avatar e seu sistema de animação: `OrbModel` (config, catálogo, imagens), `OrbActivity`, `OrbAnimationView` + `OrbDriver`
+(Core Animation, um display link por tela), `OrbMotion`, `OrbTemperament`, `OrbSpeech`, `OrbView`, `OrbEditor`. Veja [ORBS.md](ORBS.md).
+
+### Telas (`Views/`)
+
+| Área | Arquivos |
+|---|---|
+| Janela | `RootView` (`NavigationSplitView`, painel que se recolhe em janela estreita), `SidebarView`, `ChatView` (lista da conversa), `EmptyChatContent`, `FirstRunCard` |
+| Conversa | `TranscriptViews` (`TranscriptRow` Equatable, ferramentas, `ApprovalCard`, `WorkingLine`), `MarkdownBlockViews`, `QueuedMessages`, `ImageThumbnails`, `ApprovalKeyboard` |
+| Compositor | `ComposerView`, `ComposerChips` (permissões, skills, modelo), `ComposerSupport`, `ModelPopover`, `ModelPicker`, `ContextMeterViews` |
+| Painel do Orb | `BotInspector` (abas Geral, Memória, Pasta e acessos, Rotinas), `InspectorSupport`, `MemoryViews`, `DeleteOrbDialog`, `PermissionConfirmation` |
+| Ajustes | `SettingsView` (Geral, Modelos, Permissões do Mac), `ProviderSettings`, `ProviderPresentation`, `CustomProviderFields`, `ClaudeCodeSettings`, `MacPermissionsView`, `ContextSettings` |
+| Páginas | `RoutinesView`, `ConversationsMenu`, `SkillsView`, `ConnectorsView`, `CatalogParts` |
+| Sistema | `CommandPalette` (⌘K e a folha de atalhos; as teclas vêm de `ShortcutCatalog`, em `Shortcuts.swift`, a mesma lista que Ajustes → Geral mostra), `QuickAskView` (painel da barra de menus), `SheetKit` |
+| Para revisão (só `--snapshot`) | `CatalogSnapshots`, `ContextSnapshots`, `SystemSnapshots`, `TranscriptSamples`, e `SnapshotComposerScenes.swift` (na raiz de `Sources/Orb/`) |
+
+## O caminho de um turno
+
+```
+ComposerView ── AppModel.submit ─┬─ Orb livre ─► AppModel.send ─┬─ Claude Code ─► runClaudeCode ──► ClaudeCodeEngine.run
+                                 └─ Orb trabalhando ─► fila     └─ nativo ───────► AgentEngine.run
+                                    (ComposerLane / SteeringQueue)                          │
+                                                                       AsyncStream<TurnEvent>│
+                                                                                             ▼
+                           BotSession.play ─► apply(evento) ─► conversa (itens + mensagens), BotLive, LiveText ─► telas
+```
+
+1. **Envio.** `ComposerView.send` chama `AppModel.submit`. Com o Orb trabalhando na sua conversa, a mensagem entra numa fila
+   (`ComposerLane.enqueue`) e aparece como "Na fila"; senão vai para `AppModel.send`. Uma rotina trabalhando bloqueia o envio
+   (o compositor avisa).
+2. **`AppModel.send`** valida (texto, turno em andamento, provedor pronto; sem provedor, `setupNudge` faz o cartão de primeiro
+   uso pulsar e o texto fica no compositor), trata `/compactar`, grava a mensagem do usuário na conversa, limpa o rascunho,
+   põe o status "Pensando" e a "agitação" do Orb (`poke`, `isListening`), detecta pedido de memória (`MemoryIntent`), expande
+   `/skill`, acrescenta os caminhos dos anexos e a nota das imagens e, numa rotina, o aviso de que ninguém está presente.
+3. **Histórico.** `Conversation.prepareHistory(budget:reserving:)` corta e condensa se passou do orçamento (um aviso
+   na conversa e a memória gravada antes de esquecer). O turno ganha um id (`beginTurn`).
+4. **Montagem (em `Task`, fora da thread principal quando custa).** `MemoryBank.brief` (memória), `TurnPromptInputs.gather`
+   (snapshot da pasta, em cache de 60 s, e instruções da pasta), `TurnPrompt.native` (prompt do sistema estável + prefácio
+   por mensagem), o cliente (`ProviderAccount.client` pelo formato do modelo), as ferramentas (`ToolBox.offered` + as dos
+   conectores permitidos) e o `TurnRequest` (`Sendable`). Se o turno foi parado nesse meio-tempo (`isCurrent`), nada segue.
+5. **Laço** (`AgentEngine.play`, até 30 passos): entrega mensagens da fila; ajusta a janela (`ContextWindow.fit` com o
+   `ContextCut` do turno); chama o modelo com até 4 tentativas e recuo (`withRetries`, status "Provedor ocupado, tentando de
+   novo em N s"); trata o motivo de parada (recusa, resposta cortada, estouro de contexto); roda as chamadas
+   (`runCalls`: um cartão para o que pergunta junto, leituras em paralelo, o resto em ordem); registra cada mensagem. O
+   Claude Code faz o análogo num processo `claude -p`, com os pedidos `can_use_tool` vindo para o mesmo `ApprovalGate`.
+6. **Eventos.** `TurnEvent`: `status`, `text`, `toolStarted`/`toolFinished`, `approval`, `message` (vai para o histórico do
+   modelo), `notice`, `failed`, `usage`/`requestUsage`, `compacted`, `taskPaused`, `steered`, `session`.
+7. **Aplicação** (`BotSession.apply`, na thread principal): o texto vai para `pendingText` e é publicado em `LiveText` a cada
+   33 ms, **sem tocar na lista de itens**; ferramentas e cartões viram itens da conversa; `message` entra em
+   `Conversation.messages`; o `BotLive` recebe status, ferramenta em uso, "falando" e "esperando você".
+8. **Fim** (`finishTurn`): zera status; agenda a página de sessão da memória (30 min depois); fecha a execução da rotina;
+   notifica (se o app está em segundo plano) e conta não lidas; o Orb comemora (`happy`) ou erra (`error`); entrega a fila que
+   ficou; grava a conversa de uma vez; começa a próxima rotina que esperava por este Orb.
+
+## Persistência
+
+Pasta de dados: `~/Library/Application Support/Orb/` (a variável `ORB_DATA_DIR` troca).
+
+```
+state.json                       AppState: Orbs, rotinas, skills, conectores (segredos viram "@keychain"), provedores,
+                                 modelo padrão, não lidas, nível de memória da conversa, janelas aprendidas
+conversations/<Orb>.json         conversa atual: itens da tela + mensagens do modelo + resumo/ledger + marcas
+conversations/<Orb>.meta.json    nota ao lado: quantos itens, quantos já foram para a memória, impressão digital do arquivo
+conversations/<Orb>/<id>.json    conversas arquivadas ("Nova conversa"), com index.json (cache corrigido pelos arquivos)
+conversations/<Orb>/routine-<rotina>.json   a conversa de cada rotina
+memoria/<Orb>/…                  a memória (páginas .md + index.sqlite); memoria/_guardadas/ de Orbs apagados
+anexos/<Orb>/<uuid>.jpg|png      imagens reduzidas (a conversa guarda o caminho); saem com o Orb ou com a conversa arquivada que só elas usava (as cópias `.corrupt-…` também contam como uso)
+saidas/<Orb>/*.txt               saídas grandes de ferramentas; limpas por idade (14 dias) e tamanho (200 MB)
+*.corrupt-<aaaammdd-hhmmss>      cópia de um arquivo que não pôde ser lido (nunca sobrescrito)
+.migrado-do-openbot              marca de que a migração do OpenBot já foi feita
+```
+
+Fora dela: o **Keychain** (serviço `app.orb.mac`; uma conta por provedor com chave, `chatgpt` com o JSON do login e
+`mcp.<id do conector>.<NOME>` para segredos de conectores), as **preferências** (`UserDefaults`: `notifyWhenDone`,
+`quickAskGlobalShortcut`, aba de Ajustes e do painel de cada Orb, modelos recentes…) e a **pasta de cada Orb**
+(`~/Orbs/<Nome>/`, com `Rotinas/<nome>/…md`), que o app não apaga ao apagar o Orb.
+
+### Decodificação tolerante
+
+Campo novo precisa de valor padrão: `container.value(_:default:)`, listas com `lossyArray` (um item ilegível é pulado, não
+derruba a lista) e enums de texto com `Decoder.rawValue(_:fallback:)`. O que se perdeu vira aviso: `DecodeLoss` conta os itens
+pulados e o `Store` guarda uma cópia do original (`.corrupt-…`) antes de regravar. Um arquivo que não decodifica é **movido**
+para essa cópia (nunca fica no caminho de uma escrita); se nem isso dá, o `FileGate` bloqueia as gravações naquele arquivo até
+o app abrir de novo. Falha ao gravar avisa uma vez. Os avisos aparecem no alerta "Atenção com seus dados"
+(`AppModel.dataNotices`). A gravação incremental da conversa mantém o formato do arquivo, legível por versões anteriores.
+
+### Filas e gravação
+
+- Gravações: **uma fila serial por pasta de dados** (`WriterQueues`), em ordem, fora da thread principal. O estado é salvo
+  400 ms depois da última mudança (`scheduleStateSave`); uma conversa, no máximo a cada 5 s enquanto uma resposta chega (um
+  pouco mais em conversas longas) e na hora ao fim do turno; ao sair, só o que mudou (`saveNow`).
+- Leituras: fila concorrente própria, coordenada por arquivo (`FileGate`): uma leitura espera as gravações *daquele* arquivo
+  (nunca vê um arquivo pela metade nem uma versão velha) e não espera as dos outros.
+- Gravação incremental: `ConversationEncoder` reaproveita o JSON dos itens que não mudaram desde a última gravação do
+  arquivo (cache por arquivo, no máximo 4 arquivos e 48 MB) e não grava quando nada mudou. Ao gravar, saídas antigas de
+  ferramentas (anteriores à penúltima mensagem do usuário) ficam com começo e fim (~4 000 caracteres).
+- Só a conversa do Orb aberto é lida na abertura (`beginLoading`, com marcador de carregamento); as outras, ao trocar de Orb ou
+  quando algo precisa delas (`ensureLoaded`, na thread principal, só quando não dá para esperar). Uma conversa parada há mais
+  de 5 min, sem nada para gravar, volta ao disco (`unloadIdleConversations`, a cada 30 s), o que a nota `.meta.json` ao lado
+  permite verificar sem reler.
+
+## Concorrência
+
+| O que | Onde roda |
+|---|---|
+| `AppModel`, `BotSession`, `BotLive`, `LiveText`, `OrbTranscript`, `ComposerLane`, `ConnectorSecrets`, as telas | `@MainActor` |
+| `AgentEngine`, `ClaudeCodeEngine`, `ApprovalGate`, `MCPManager`/`MCPConnection`/transportes, `ChatGPTAuth`, `ClaudeCode`, `WorkspaceSnapshots`, `BackgroundJobs`, `ShellEnvironment`, `SkillCatalog` | `actor` |
+| `MemoryBank` | um `actor` por Orb: todas as escritas daquele Orb em fila; `MemoryLibrary` (sem estado mutável fora do lock) guarda os bancos |
+| Disco, Keychain, SQLite, decodificação de imagens, leitura de pasta e git | fila do `Store`, tarefas desprendidas (`Task.detached`), `DispatchQueue` próprias, `runDetached` (cancelável) para `grep`/`glob`/documentos, `Blocking.run` para chamadas bloqueantes do TCC |
+
+- Os valores que atravessam fronteiras são `Sendable` e imutáveis: `TurnRequest` captura tudo de que o turno precisa
+  (inclusive `PermissionSource`, uma closure que lê o modo e as liberações **no momento** de cada chamada), e o turno não lê
+  estado da interface.
+- Um turno tem um **id** (`BotSession.turnID`). Um turno parado ainda pode estar terminando a montagem ou escoando eventos
+  enquanto o próximo roda: só o turno atual (`isCurrent`) muda o estado do Orb.
+- Parar (`BotSession.stop`) cancela a `Task` do turno, nega os cartões abertos, fecha a resposta, acrescenta "Você
+  interrompeu esta resposta" e encerra o turno. Os motores respeitam `Task.isCancelled` (e o processo do Claude Code recebe
+  `interrupt`, fecha a entrada e é terminado se não sair).
+- Em rotina, a conversa da rotina assume o lugar da conversa do chat (que fica "estacionada" em `parkedChat`) enquanto ela
+  roda: um Orb faz uma coisa por vez, e a rotina espera (fila de uma por rotina) se o Orb está ocupado.
+- As poucas exceções à isolação (`nonisolated(unsafe)` em caches `NSCache` e tabelas de filas) estão marcadas e guardadas por
+  lock ou por serem seguras por construção.
+
+## Princípios de desempenho
+
+Estes princípios nasceram de medições (a mais conhecida: a CPU durante uma resposta longa caiu de ~96% para ~20%; veja o
+histórico do repositório, `git log --grep "streaming"`, e as seções de desempenho de [ORBS.md](ORBS.md)).
+
+| Princípio | Como é feito | Por quê |
+|---|---|---|
+| **Observação por Orb** | `BotLive`, `BotSession`, `OrbTranscript` e `LiveText` são `@Observable` separados; as telas recebem o **id** (ou um `BotLook` pequeno e `Equatable`), nunca o `Bot` inteiro; `botIDs` só muda ao criar, apagar ou reordenar | Um evento de outro Orb não pode redesenhar a barra lateral, o compositor nem o painel |
+| **Escrever só se mudou** | `assign` / `writeIfChanged` (`WritesOnlyChanges`) comparam antes de escrever | Escrever numa propriedade `@Observable` avisa os leitores mesmo sem mudança (e em coleções, até em `+=`) |
+| **Streaming de custo constante** | O texto chega em `pendingText`, é publicado a cada 33 ms em um `LiveText` fora da lista de itens; `ReplyParagraphs` divide por linhas em branco de forma incremental (offsets em bytes UTF-8, sem reler); só o último parágrafo é interpretado e medido; os fechados mantêm identidade e cache | O custo de um flush não pode crescer com o tamanho da resposta nem da conversa |
+| **Linhas `Equatable`** | `TranscriptRow` com `.equatable()`, `SidebarBotRow`, cartões recebem ids; `LazyVStack` | Só a linha que mudou é refeita |
+| **Nada de trabalho no `body`** | Filtros, buscas e agrupamentos ficam em `.task`/estado (`FoldedTextCache`, `ModelListing`, `ConversationListing`); o medidor de contexto é medido fora da thread principal com debounce (`ContextGaugeDriver`) | O `body` roda com frequência e na thread principal |
+| **Rolagem barata** | macOS 15: `defaultScrollAnchor` mantém o fim; macOS 14: `scrollTo` com no máximo um a cada 200 ms; segue só enquanto você não rolou para cima | Um `scrollTo` por flush custa o tamanho da conversa |
+| **Trocar de Orb recria o `ChatView`** | Prender o `.id` só à lista foi medido e ficou ~7× pior em conversas longas | Comentário em `RootView` |
+| **E/S fora da thread principal** | Veja "Filas e gravação" | Abrir um Orb não pode esperar disco |
+| **Animação** | Core Animation, um link por tela, taxa guiada pelo movimento, pausa quando ninguém vê, imagens decodificadas em segundo plano | Veja [ORBS.md](ORBS.md) |
+| **Prefixo estável** | Requisições determinísticas, prompt sem data, prefácio por diferença | Cache de prompt do provedor; veja [CONTEXTO.md](CONTEXTO.md) |
+
+Reduzir movimento (`accessibilityReduceMotion`) é respeitado onde há movimento (`animateChanges`, transições, cartões e
+linhas de ferramenta, brilho, Orbs): sem translação, escala nem pulso; o Orb fica estático e o brilho vira texto fixo.
+
+## Testes
+
+```bash
+swift test                                   # a suíte inteira, em paralelo
+swift test --filter ContextWindowTests       # um arquivo/suíte
+ORB_LIVE_TESTS=1 swift test --filter LiveCatalogTests      # catálogos reais (internet)
+ORB_LIVE_TESTS=1 swift test --filter ClaudeCodeLiveTests   # o `claude` real, deslogado (flags, handshake, modelos)
+```
+
+São mais de 1.700 testes em `Tests/OrbAppTests`, em Swift Testing (`@Test`, `@Suite`, `#expect`, `#require`).
+
+- **Determinismo.** Nada de dormir um tempo fixo para "dar tempo": `waitUntil(_:timeout:poll:_:)` (em `TestSupport/Waiting.swift`)
+  espera uma **condição** (com limite generoso e `Issue` descritiva se estourar). Para afirmações negativas, espere primeiro
+  um sinal positivo de que o sistema assentou. Os testes do modelo chamam `flushText` direto em vez de esperar os 33 ms.
+- **Isolamento.** Cada suíte usa pastas temporárias próprias (`Store(directory:)` tem a sua fila de escrita), e
+  `AppModel(store:runsBackgroundWork: false, asyncLoading:, secretVault:)` não inicia agendador, Keychain nem observadores
+  do app (o cofre de segredos é um `MemoryVault`). `QuietNotifications.hold()` impede banners do processo de teste.
+- **Modelo falso.** Os testes injetam um `LLMClient` próprio: `AppModel.clientOverride`, ou um `ScriptedLLM`/`RecordingLLM`
+  passado direto ao `AgentEngine.run`. Cada arquivo define o seu, pequeno (respostas roteirizadas, portas que só abrem quando
+  o teste manda, gravação das requisições). O Claude Code é testado com um `claude` falso, um script que o
+  próprio teste grava (`ORB_CLAUDE_PATH` faz o app usar outro executável).
+- **Fixtures sem binários**: PDFs e PNGs são desenhados na hora (`Fixtures`), e o AX (Acessibilidade) é uma árvore falsa
+  injetável (`AccessibilitySystem`).
+- **Contratos de fio**: `ProviderWireGoldenTests` fixa a requisição e os eventos de cada formato.
+
+### Modelo falso para uso manual
+
+`scripts/fake-llm.py [porta] [--long]` serve uma API compatível com OpenAI em `http://127.0.0.1:8765/v1`: cada mensagem
+recebe um texto curto, uma chamada `run_command` (para ver o cartão de aprovação) e, depois do resultado, uma resposta final
+(`--long`: ~2 000 palavras de Markdown, uma a cada 15 ms, para medir o streaming). Para usar: abra o app com dados isolados e
+aponte um provedor "Gateway próprio" para a URL.
+
+```bash
+python3 scripts/fake-llm.py 8765 --long
+open -n build/Orb.app --env ORB_DATA_DIR=/tmp/orb-teste --env ORB_SEND="Como está meu Mac?"
+# Ajustes → Modelos → Adicionar provedor → Gateway próprio → http://127.0.0.1:8765/v1 → modelo fake-model
+```
+
+## Ferramentas de desenvolvimento
+
+### Argumentos
+
+| Argumento | Efeito |
+|---|---|
+| `--tools-mcp <memória> [--mac] [--folder <pasta>] [--accessibility\|--no-accessibility]` | roda só o servidor MCP de ferramentas do Orb para o Claude Code (`--memory-mcp` ainda vale); sem janela |
+| `--snapshot <modo> <arquivo.png>` | desenha uma tela fora da vista e sai (abaixo) |
+| `--render-orbs <arquivo.png>` | folha de Orbs × atividades (`docs/orbs-activities.png`) |
+| `--render-icon <arquivo.png>` | o ícone de 1024 px (usado por `scripts/bundle.sh`) |
+
+Os três modos de desenho (`--snapshot`, `--render-orbs`, `--render-icon`) usam uma pasta de dados temporária nova, nunca a sua
+(`DevRun.dataFolder`), a menos que você defina `ORB_DATA_DIR` de propósito. Neles o Keychain não é lido, gravado nem migrado do
+OpenBot, e a migração de dados do OpenBot não roda. A pasta temporária é apagada ao terminar.
+
+### Variáveis de ambiente
+
+| Variável | Efeito |
+|---|---|
+| `ORB_DATA_DIR` | pasta de dados alternativa (use sempre que testar). Nos modos `--snapshot`/`--render-*`, sem ela vale uma pasta temporária nova |
+| `ORB_SEND="texto"` | envia o texto ao Orb selecionado ao abrir (ponta a ponta) |
+| `ORB_STATIC=1` | desliga a animação dos Orbs |
+| `ORB_ANIMATE_INACTIVE=1` | Orbs e brilho animam mesmo com a janela inativa ou coberta (medir CPU sem trazer o app para a frente) |
+| `ORB_MEMORY_IDLE=<segundos>` | tempo de pausa até a conversa virar página de sessão (padrão 1 800) |
+| `ORB_CLAUDE_PATH=/caminho/claude` | outro executável como Claude Code (um falso, nos testes) |
+| `ORB_DEBUG_USAGE=1` | uma linha por chamada ao modelo no stderr: tokens, cache lido/escrito |
+| `ORB_SNAPSHOT_WIDTH` / `ORB_SNAPSHOT_HEIGHT` / `ORB_SNAPSHOT_WAIT` | tamanho (1100×760) e espera em segundos (8) de `--snapshot` |
+| `ORB_LIVE_TESTS=1` | liga as suítes que usam a rede ou o `claude` real |
+| `ORB_SIGN_IDENTITY="Nome"` | (em `scripts/bundle.sh`) assina com outra identidade |
+
+### `--snapshot`
+
+Renderiza a tela com dados de exemplo numa janela fora da tela, sem tirar o foco
+(`NSApp.setActivationPolicy(.accessory)`), e grava o PNG. Os Orbs saem estáticos (o Core Animation não é capturado). Os dados
+vêm de uma pasta temporária nova (os Orbs iniciais) ou, se você definir `ORB_DATA_DIR`, dessa pasta. O Keychain não é tocado.
+
+> O modo `conversations` grava seis conversas de exemplo (`RoutinesSnapshots.seedArchive` usa `Store.standard`): por isso o
+> `--snapshot` nunca usa a sua pasta real. Só escreve em `ORB_DATA_DIR` se você o definir (aponte para uma pasta de teste).
+
+Modos (qualquer outro nome mostra o chat do primeiro Orb):
+
+| Área | Modos |
+|---|---|
+| Janela e painéis | `app`, `sidebar`, `inspector` (= `inspector-general`), `inspector-memory`, `inspector-folder`, `inspector-routines`, `memory-sheet`, `new-orb`, `editor`, `delete-orb`, `palette`, `shortcuts`, `menubar-icons` |
+| Conversa | `chat-working`, `chat-typed`, `chat-slash`, `popover-permissions`, `popover-model`, `popover-skills`, `approvals`, `transcript`, `transcript-approvals`, `transcript-notices`, `transcript-failed`, `transcript-retry` |
+| Contexto | `context-meter`, `context-nudge`, `context-popover`, `context-popover-result`, `context-popover-short`, `context-popover-claude`, `settings-context` |
+| Ajustes | `settings-general`, `settings-models`, `settings-perms`, `first-run-banner`, `models` |
+| Barra de menus | `quickask`, `quickask-approvals`, `quickask-reply` |
+| Rotinas e conversas | `routines`, `routine-editor`, `routine-editor-new`, `routine-run`, `routine-run-failed`, `routine-conversation`, `conversations` |
+| Skills e conectores | `skills`, `skills-explore`, `skill-editor`, `skill-editor-new`, `skill-preview`, `skill-preview-installed`, `connectors`, `connectors-explore`, `conn-editor-github`, `conn-editor-files`, `conn-editor-slack`, `conn-editor-manual`, `conn-editor-edit`, `conn-editor-edit-registry`, `conn-editor-connecting`, `conn-editor-connected`, `conn-editor-failed` |
+
+Com `ORB_SEND`, o snapshot envia o prompt e espera `ORB_SNAPSHOT_WAIT` segundos antes de fotografar. Para medir o streaming sem
+abrir janela, use o modelo falso com `--long`, `ORB_SEND` e `ORB_SNAPSHOT_WAIT=40` e observe o processo (`ps -o %cpu=`,
+`sample`).
+
+### Scripts
+
+| Script | O que faz |
+|---|---|
+| `scripts/bundle.sh [debug\|release]` | compila (padrão `release`), monta `build/Orb.app` (executável, `Resources/Orbs`, `Info.plist` com `app.orb.mac`, ícone gerado pelo próprio app) e assina |
+| `scripts/make-signing-identity.sh` | cria uma vez o certificado local "Orb Local" no chaveiro de login e o marca como confiável para assinar |
+| `scripts/fake-llm.py` | o modelo falso acima |
+
+A arte (camadas dos Orbs) tem o seu próprio gerador, descrito em [art/README.md](../art/README.md).
+
+## Como estender
+
+- **Nova ferramenta.** Um `struct` que implementa `AgentTool` (`spec`, `kind`, `capability`, `risk`, `summary`, `run`; `danger`
+  se alguma chamada é destrutiva), na lista da família em `ToolBox` (`fileTools`, `shellTools`…). Decida a **família de
+  permissão** em `PermissionPolicy.family(ofTool:kind:)` (sem isso ela cai pelo `kind`) e o `legacyRule` se precisar. Se o
+  Claude Code deve ter a ferramenta, ela entra em `ToolBox.macTools` ou `memoryTools` (o que `OrbToolsMCPServer` serve). Texto
+  da ferramenta para o modelo em inglês, curto (cada palavra é cobrada em toda requisição); título e detalhe para o usuário em português.
+- **Novo provedor.** Um `case` em `ProviderKind` com `label`, `summary`, `defaultBaseURL`, `keyPage`, `shortName`, `tagline` e
+  `group`; a lista de modelos em `ModelCatalog.fetch`; o formato de cada modelo decide o cliente (`ProviderAccount.client`).
+- **Novo campo persistido.** Valor padrão na decodificação tolerante; nunca renomeie nem remova uma chave sem migração.
+- **Nova tela para revisar.** Um `case` em `Snapshot.render` (ou em um dos auxiliares), com dados de exemplo, nunca reais.
+- **Novo comando de teclado.** Nome em `CommandName`, tecla em `AppShortcut` (o teste confere que nenhuma tecla se repete),
+  item em `AppCommands`, linha em `ShortcutCatalog` e, se couber, entrada na paleta (`PaletteBuilder`).

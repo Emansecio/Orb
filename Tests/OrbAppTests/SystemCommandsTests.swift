@@ -23,9 +23,19 @@ import Testing
 
     // MARK: Shortcuts
 
-    @Test func noTwoShortcutsShareAKey() {
-        let keys = ShortcutCatalog.groups.flatMap(\.items).map(\.keys)
-        #expect(Set(keys).count == keys.count)
+    @Test func noTwoShortcutsOfAGroupShareAKey() {
+        for group in ShortcutCatalog.groups {
+            let keys = group.items.map(\.keys)
+            #expect(Set(keys).count == keys.count, "\(group.title)")
+        }
+        #expect(Set(ShortcutCatalog.items.map(\.id)).count == ShortcutCatalog.items.count) // one item per command
+    }
+
+    /// ⌘↩ is answered by several views, each only while it is on screen; no other key is listed twice.
+    @Test func onlyTheReturnKeyIsSharedBetweenGroups() {
+        let keys = ShortcutCatalog.items.map(\.keys)
+        let repeated = Set(keys.filter { key in keys.filter { $0 == key }.count > 1 })
+        #expect(repeated == [AppShortcut.commandReturn.label])
     }
 
     @Test func theKeysTheMenusDeclareAreUniqueAndNotTheSystems() {
@@ -43,6 +53,40 @@ import Testing
             #expect(keys.contains(shortcut.label), "\(shortcut.label) falta no catálogo")
         }
         #expect(keys.contains("⌘1 – ⌘9"))
+    }
+
+    /// The sheet, Ajustes → Geral and the palette read one catalog: a key a view declares for itself is in it too.
+    @Test func theKeysOfTheViewsAreInTheCatalogToo() {
+        let keys = ShortcutCatalog.items.map(\.keys)
+        for shortcut in AppShortcut.contextual { #expect(keys.contains(shortcut.label), "\(shortcut.label) falta no catálogo") }
+        for key in ["⇧⌘M", "⌘↩", "⌘Z", "⌘,", "esc", "↩", "⌥↩", "⌃⌥Espaço"] { #expect(keys.contains(key), "\(key) falta no catálogo") }
+        // Every command has a key, and each is listed once.
+        for command in ShortcutCommand.allCases {
+            #expect(ShortcutCatalog.items.filter { $0.command == command }.count == 1, "\(command)")
+            #expect(!ShortcutCatalog.keys(for: command).isEmpty, "\(command)")
+        }
+    }
+
+    @Test func theContextualKeysDoNotCollideWithTheMenus() {
+        for shortcut in AppShortcut.contextual where shortcut != AppShortcut.settings && shortcut != AppShortcut.undoForget {
+            #expect(!AppShortcut.all.contains(shortcut), "\(shortcut.label)")
+        }
+    }
+
+    /// The palette does not write keys of its own: each action shows the catalog's key for its command.
+    @Test func theKeysInThePaletteAreTheCatalogsKeys() {
+        let expected: [String: ShortcutCommand] = [
+            "new-conversation": .newConversation, "focus": .writeMessage, "history": .conversations, "folder": .openFolder,
+            "inspector": .toggleInspector, "new-bot": .newBot, "page-routines": .routines, "page-connectors": .connectors,
+            "page-skills": .skills,
+        ]
+        let entries = sample()
+        for (id, command) in expected {
+            let entry = entries.first { $0.id == id }
+            #expect(entry?.shortcut == ShortcutCatalog.keys(for: command), "\(id)")
+        }
+        let catalogKeys = Set(ShortcutCatalog.items.map(\.keys))
+        for entry in entries { if let key = entry.shortcut, entry.section != .orbs { #expect(catalogKeys.contains(key), "\(entry.id)") } }
     }
 
     @Test func shortcutsAreWrittenLikeTheMenusDo() {

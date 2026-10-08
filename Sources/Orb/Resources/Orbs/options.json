@@ -8,7 +8,8 @@
         "#4A34F2",
         "#3D2BE4",
         "#86DFFF"
-      ]
+      ],
+      "hair": "#2B1F9E"
     },
     {
       "id": "ceu",
@@ -18,7 +19,8 @@
         "#2E9BFF",
         "#1D63D6",
         "#B5FFF6"
-      ]
+      ],
+      "hair": "#1A4FA8"
     },
     {
       "id": "oceano",
@@ -28,7 +30,8 @@
         "#0FB5B0",
         "#07706F",
         "#9EF0FF"
-      ]
+      ],
+      "hair": "#0B4870"
     },
     {
       "id": "menta",
@@ -38,7 +41,8 @@
         "#14C08C",
         "#0A7A59",
         "#D8FF6B"
-      ]
+      ],
+      "hair": "#0E4F5C"
     },
     {
       "id": "lima",
@@ -48,7 +52,8 @@
         "#9BE02E",
         "#5FA30E",
         "#FFF59E"
-      ]
+      ],
+      "hair": "#6B4A1E"
     },
     {
       "id": "sol",
@@ -58,7 +63,8 @@
         "#FFB21F",
         "#C97A00",
         "#FFF6C2"
-      ]
+      ],
+      "hair": "#A45A12"
     },
     {
       "id": "pessego",
@@ -68,7 +74,8 @@
         "#FF9A6B",
         "#E0603A",
         "#FFE3A3"
-      ]
+      ],
+      "hair": "#B4482C"
     },
     {
       "id": "coral",
@@ -78,7 +85,8 @@
         "#F2533F",
         "#B8281B",
         "#FFD36B"
-      ]
+      ],
+      "hair": "#7A2A18"
     },
     {
       "id": "cereja",
@@ -88,7 +96,8 @@
         "#E11D3F",
         "#9C0A24",
         "#FF9E7A"
-      ]
+      ],
+      "hair": "#4E0A24"
     },
     {
       "id": "rosa",
@@ -98,7 +107,8 @@
         "#E8409A",
         "#A81D66",
         "#FF9DF2"
-      ]
+      ],
+      "hair": "#5E1046"
     },
     {
       "id": "lavanda",
@@ -108,7 +118,8 @@
         "#A77BFF",
         "#7A4FE0",
         "#FFC7F5"
-      ]
+      ],
+      "hair": "#5E3BC0"
     },
     {
       "id": "ametista",
@@ -118,7 +129,8 @@
         "#8A2BE2",
         "#5A1196",
         "#FF8AD8"
-      ]
+      ],
+      "hair": "#4A0F80"
     },
     {
       "id": "aurora",
@@ -128,7 +140,8 @@
         "#37D4C0",
         "#7A3CF0",
         "#FF7AD9"
-      ]
+      ],
+      "hair": "#5A2BC0"
     },
     {
       "id": "algodao",
@@ -138,7 +151,8 @@
         "#FFB3E1",
         "#9FD3FF",
         "#FFF0B3"
-      ]
+      ],
+      "hair": "#6E9FE0"
     },
     {
       "id": "chocolate",
@@ -148,7 +162,8 @@
         "#8B5A3C",
         "#4E2E1C",
         "#FFB86B"
-      ]
+      ],
+      "hair": "#3A2216"
     },
     {
       "id": "noite",
@@ -158,7 +173,8 @@
         "#1B1F5E",
         "#0D0F33",
         "#6F7BFF"
-      ]
+      ],
+      "hair": "#3B45B8"
     },
     {
       "id": "grafite",
@@ -168,7 +184,8 @@
         "#3A3F52",
         "#1C1F2A",
         "#7CE3FF"
-      ]
+      ],
+      "hair": "#3A4560"
     },
     {
       "id": "perola",
@@ -178,7 +195,8 @@
         "#ECE8F6",
         "#C4BDD9",
         "#FFFFFF"
-      ]
+      ],
+      "hair": "#6F6490"
     }
   ],
   "eyes": [
@@ -345,28 +363,48 @@
       "label": "Nenhum"
     },
     {
-      "id": "topete",
-      "label": "Topete"
-    },
-    {
-      "id": "tufinho",
-      "label": "Tufinho"
-    },
-    {
       "id": "franja",
       "label": "Franja"
+    },
+    {
+      "id": "ondulado",
+      "label": "Ondulado"
     },
     {
       "id": "cachos",
       "label": "Cachinhos"
     },
     {
+      "id": "black-power",
+      "label": "Black power"
+    },
+    {
       "id": "coque",
       "label": "Coque"
     },
     {
+      "id": "rabo-de-cavalo",
+      "label": "Rabo de cavalo"
+    },
+    {
+      "id": "chiquinhas",
+      "label": "Maria-chiquinha"
+    },
+    {
+      "id": "topete",
+      "label": "Topete"
+    },
+    {
+      "id": "espetado",
+      "label": "Espetado"
+    },
+    {
       "id": "moicano",
       "label": "Moicano"
+    },
+    {
+      "id": "tufinho",
+      "label": "Tufinho"
     },
     {
       "id": "antena",
@@ -458,5 +496,12 @@
     "fala-o",
     "fala-e",
     "fala-m"
+  ],
+  "hats": [
+    "bone",
+    "cartola",
+    "chapeu-festa",
+    "coroa",
+    "gorro"
   ]
 }

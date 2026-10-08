@@ -51,9 +51,10 @@ import Testing
 
     @Test func theActivityFollowsTheMostUrgentFact() {
         func activity(waiting: Bool = false, failed: Bool = false, celebrating: Bool = false, working: Bool = true,
-                      tool: ToolCall.Kind? = nil, speaking: Bool = false, listening: Bool = false) -> OrbActivity {
+                      tool: ToolCall.Kind? = nil, speaking: Bool = false, listening: Bool = false,
+                      composing: Bool = false) -> OrbActivity {
             BotLive.activity(awaitingApproval: waiting, failed: failed, celebrating: celebrating, isWorking: working,
-                             tool: tool, speaking: speaking, listening: listening)
+                             tool: tool, speaking: speaking, listening: listening, composing: composing)
         }
         #expect(activity(working: false) == .idle)
         #expect(activity() == .thinking)
@@ -66,6 +67,104 @@ import Testing
         #expect(activity(celebrating: true, working: false) == .happy)
         #expect(activity(failed: true, celebrating: true, working: false) == .error)
         #expect(activity(waiting: true, failed: true, celebrating: true) == .waiting)
+        // Typing to it: attentive, below everything a turn or its beats show (a working Orb keeps working).
+        #expect(activity(working: false, composing: true) == .attentive)
+        #expect(activity(composing: true) == .thinking && activity(listening: true, composing: true) == .listening)
+        #expect(activity(tool: .file, composing: true) == .reading)
+        #expect(activity(celebrating: true, working: false, composing: true) == .happy)
+        #expect(activity(failed: true, working: false, composing: true) == .error)
+        #expect(activity(waiting: true, working: false, composing: true) == .waiting)
+    }
+
+    // MARK: Composing
+
+    @Test func theComposingDeadlineMovesWithEveryKeystroke() {
+        let start = ContinuousClock.now
+        var deadline = ComposingDeadline(quiet: .milliseconds(1500))
+        #expect(deadline.until == nil && deadline.isOver(at: start))
+        let first = deadline.keystroke(at: start), next = deadline.keystroke(at: start + .seconds(1))
+        #expect(first && !next) // the first key starts a burst, the next ones only push its end back
+        #expect(deadline.until == start + .milliseconds(2500))
+        #expect(!deadline.isOver(at: start + .milliseconds(2499)) && deadline.isOver(at: start + .milliseconds(2500)))
+        deadline.end()
+        #expect(deadline.isOver(at: start))
+        let again = deadline.keystroke(at: start + .seconds(3))
+        #expect(again)
+    }
+
+    @Test @MainActor func typingMakesTheOrbAttentiveUntilYouPause() async {
+        let model = model()
+        let id = model.bots[0].id
+        let live = model.live(id)
+
+        expectNotified(reading: { _ = live.activity }, whenYouDo: { live.noteComposing(draftIsEmpty: false, quiet: .seconds(60)) })
+        #expect(live.isComposing && live.activity == .attentive)
+        // Keystrokes in the middle of a burst notify no view (the deadline is not observed).
+        expectSilent(reading: { _ = (live.activity, live.isWorking, live.status, live.poke, live.glance) },
+                     whenYouDo: { for _ in 0..<20 { live.noteComposing(draftIsEmpty: false, quiet: .seconds(60)) } })
+        // Emptying the field (deleting it all, or sending) ends it at once.
+        live.noteComposing(draftIsEmpty: true)
+        #expect(!live.isComposing && live.activity == .idle)
+        live.noteComposing(draftIsEmpty: true)
+        #expect(live.activity == .idle)
+
+        // A pause ends it on its own.
+        live.noteComposing(draftIsEmpty: false, quiet: .milliseconds(50))
+        #expect(live.activity == .attentive)
+        await waitUntil("the Orb stops watching after the pause") { live.activity == .idle }
+        #expect(!live.isComposing)
+    }
+
+    @Test @MainActor func typingInTheComposerMakesTheOrbAttentiveAndAWorkingOrbKeepsWorking() {
+        let model = model()
+        let id = model.bots[0].id
+        let live = model.live(id)
+        // What the composer's field calls on every change (`ComposerView.draft`'s setter).
+        model.editDraft("O", for: id)
+        model.editDraft("Oi", for: id)
+        #expect(model.drafts[id] == "Oi" && live.activity == .attentive)
+        model.setStatus("Pensando", of: id)
+        #expect(live.activity == .thinking)
+        model.setStatus(nil, of: id)
+        #expect(live.activity == .attentive)
+        model.editDraft("", for: id) // deleted it all
+        #expect(live.activity == .idle && !live.isComposing)
+        model.editDraft("Oi", for: id)
+        model.setDraft("", for: id) // sent: the app empties the field
+        #expect(live.activity == .idle && !live.isComposing)
+        model.editDraft("Oi", for: UUID()) // an Orb that does not exist: nothing to watch
+    }
+
+    @Test @MainActor func draftsTheAppWritesDoNotMakeTheOrbAttentive() {
+        let model = model()
+        let id = model.bots[0].id
+        // A queued message given back, a skill inserted, a snapshot's draft: written with `setDraft`.
+        model.setDraft("Depois disso, rode os testes", for: id)
+        #expect(model.live(id).activity == .idle && !model.live(id).isComposing)
+    }
+
+    @Test @MainActor func deletingAnOrbStopsItsWatchingYouType() {
+        let model = model()
+        let id = model.bots[1].id
+        let live = model.live(id)
+        model.editDraft("Oi", for: id)
+        #expect(live.isComposing)
+        model.deleteBot(id)
+        #expect(!live.isComposing)
+    }
+
+    @Test @MainActor func selectingAnOrbMakesItGlanceOnce() {
+        let model = model()
+        let (first, second) = (model.bots[0].id, model.bots[1].id)
+        model.selection = .bot(first)
+        let glance = model.live(first).glance
+        model.selection = .bot(first) // the same Orb again: no glance
+        #expect(model.live(first).glance == glance)
+        model.selection = .bot(second)
+        #expect(model.live(second).glance == 1 && model.live(first).glance == glance)
+        model.selection = .routines
+        model.selection = .bot(first)
+        #expect(model.live(first).glance == glance + 1)
     }
 
     @Test @MainActor func turnEventsMoveTheOrbsLiveState() {

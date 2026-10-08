@@ -17,6 +17,8 @@ def emit(obj):
 note(json.dumps({"args": sys.argv[1:]}))
 session = next((a.split("=", 1)[1] for a in sys.argv if a.startswith(("--session-id=", "--resume="))), "none")
 scenario = os.environ.get("FAKE_CLAUDE_SCENARIO", "tool")
+tool_name = os.environ.get("FAKE_CLAUDE_TOOL", "Bash")
+tool_input = json.loads(os.environ.get("FAKE_CLAUDE_INPUT", '{"command": "ls"}'))
 for raw in sys.stdin:
     note(raw)
     msg = json.loads(raw)
@@ -43,9 +45,9 @@ for raw in sys.stdin:
         emit({"type": "assistant", "parent_tool_use_id": None, "session_id": session,
               "message": {"id": "msg_1", "model": "claude-test", "content": [{"type": "text", "text": "Vou listar."}]}})
         emit({"type": "assistant", "parent_tool_use_id": None, "session_id": session,
-              "message": {"id": "msg_1", "model": "claude-test", "content": [{"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {"command": "ls"}}]}})
-        emit({"type": "control_request", "request_id": "perm_1", "request": {"subtype": "can_use_tool", "tool_name": "Bash",
-              "input": {"command": "ls"}, "tool_use_id": "toolu_1", "permission_suggestions": None, "blocked_path": None}})
+              "message": {"id": "msg_1", "model": "claude-test", "content": [{"type": "tool_use", "id": "toolu_1", "name": tool_name, "input": tool_input}]}})
+        emit({"type": "control_request", "request_id": "perm_1", "request": {"subtype": "can_use_tool", "tool_name": tool_name,
+              "input": tool_input, "tool_use_id": "toolu_1", "permission_suggestions": None, "blocked_path": None}})
         answer = sys.stdin.readline()
         note(answer)
         response = json.loads(answer)["response"]["response"]
@@ -78,12 +80,14 @@ private struct FakeClaude {
                                        attributes: [.posixPermissions: 0o755])
     }
 
-    func turn(mode: PermissionMode, scenario: String = "tool", sessionID: String? = nil) -> ClaudeCodeTurn {
+    func turn(mode: PermissionMode, scenario: String = "tool", sessionID: String? = nil,
+              tool: (name: String, input: String)? = nil) -> ClaudeCodeTurn {
         var bot = Bot(name: "Atlas", role: "", orb: OrbConfig(), permissionMode: mode)
         bot.workingDirectory = directory.path
         return ClaudeCodeTurn(bot: bot, executable: executable, model: "sonnet", system: "persona", prompt: "liste os arquivos",
-                              sessionID: sessionID, environment: ["PATH": "/usr/bin:/bin", "FAKE_CLAUDE_LOG": log.path,
-                                                                  "FAKE_CLAUDE_SCENARIO": scenario])
+                              sessionID: sessionID,
+                              environment: ["PATH": "/usr/bin:/bin", "FAKE_CLAUDE_LOG": log.path, "FAKE_CLAUDE_SCENARIO": scenario]
+                                  .merging(tool.map { ["FAKE_CLAUDE_TOOL": $0.name, "FAKE_CLAUDE_INPUT": $0.input] } ?? [:]) { $1 })
     }
 
     /// Logged lines, once one contains `marker`. The marker is something the fake always logs, so the wait is
@@ -213,7 +217,27 @@ struct ClaudeCodeEngineTests {
         #expect(!events.contains { if case .approval = $0 { true } else { false } })
         let lines = await fake.logLines(waitingFor: "eof")
         let args = lines.first ?? ""
-        #expect(args.contains("acceptEdits") && args.contains("--session-id="))
+        // Claude Code itself approves nothing in "Automático": every request reaches the Orb's policy (`can_use_tool`).
+        #expect(args.contains(#""--permission-mode", "default""#) && !args.contains("acceptEdits") && args.contains("--session-id="))
+    }
+
+    /// "Automático" no longer lets Claude Code approve edits itself: a write to a login file reaches the Orb, which
+    /// asks (the danger check of `DangerousCommand.reason(forWritingTo:)`), while an ordinary edit is allowed by the Orb.
+    @Test func automaticModeStillAsksAboutDangerousEdits() async throws {
+        let fake = try FakeClaude()
+        defer { fake.remove() }
+        let zshrc = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".zshrc").path
+        let dangerous = JSONValue.object(["file_path": .string(zshrc), "content": .string("x")]).jsonString
+        let events = await run(ClaudeCodeEngine(), fake.turn(mode: .auto, tool: ("Write", dangerous)), decision: .deny)
+        let approvals = events.compactMap { if case .approval(let request) = $0 { request } else { nil } }
+        #expect(approvals.map(\.toolName) == ["Write"])
+        let lines = await fake.logLines(waitingFor: "eof")
+        #expect(lines.contains { $0.contains(#""behavior":"deny""#) })
+
+        let ordinary = fake.directory.appending(path: "notas.txt").path
+        let fine = JSONValue.object(["file_path": .string(ordinary), "content": .string("x")]).jsonString
+        let calm = await run(ClaudeCodeEngine(), fake.turn(mode: .auto, tool: ("Write", fine)))
+        #expect(!calm.contains { if case .approval = $0 { true } else { false } })
     }
 
     @Test func theCardOffersRulesForWhatWasAsked() async throws {

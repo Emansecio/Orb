@@ -13,8 +13,8 @@ struct ConversationsMenuButton: View {
 
     var body: some View {
         Button("Conversas", systemImage: "clock.arrow.circlepath") { isOpen.toggle() }
-            .keyboardShortcut("y", modifiers: .command)
-            .help("Conversas anteriores deste Orb (⌘Y)")
+            .keyboardShortcut(AppShortcut.conversations)
+            .help("Conversas anteriores deste Orb (\(AppShortcut.conversations.label))")
             .onReceive(NotificationCenter.default.publisher(for: .orbToggleConversations)) { _ in isOpen.toggle() }
             .popover(isPresented: $isOpen, arrowEdge: .bottom) {
                 ConversationsMenu(botID: botID) { isOpen = false }

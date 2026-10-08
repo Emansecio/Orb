@@ -573,14 +573,34 @@ struct ClaudeCodePermissionBridgeTests {
     }
 
     @Test func claudeCodeToolsThatRunThingsAreNotReadOnly() {
-        for name in ["Task", "Agent", "Skill", "TodoWrite", "ToolSearch", "KillShell"] {
+        for name in ["Task", "Agent", "Skill", "TodoWrite", "ToolSearch"] {
             let c = call(name, [:])
             #expect(PermissionPolicy.evaluate(mode: .readOnly, call: c, rules: [], workspace: nil) != .allow, "\(name)")
             if case .ask = PermissionPolicy.evaluate(mode: .ask, call: c, rules: [], workspace: nil) {} else { Issue.record("\(name) should ask") }
         }
-        for name in ["Read", "Grep", "Glob", "LS", "BashOutput"] {
+        for name in ["Read", "Grep", "Glob", "LS", "BashOutput", "TaskOutput"] {
             let c = call(name, [:])
             #expect(PermissionPolicy.evaluate(mode: .readOnly, call: c, rules: [], workspace: nil) == .allow, "\(name)")
+        }
+    }
+
+    /// `job_stop` and Claude Code's KillShell/KillBash (TaskStop in newer CLIs) only stop processes the Orb itself
+    /// started: same family, same risk, so the same answer in every mode.
+    @Test func stoppingAJobIsTheSameInBothEngines() {
+        let native = PermissionPolicy.call(for: JobStopTool(), arguments: .object(["id": .string("1")]),
+                                           context: ToolContext(workingDirectory: folders.home), home: folders.home)
+        #expect(native.risk == .safe && native.family == .jobs)
+        for name in ["KillShell", "KillBash", "TaskStop"] {
+            let c = call(name, [:])
+            #expect(c.risk == native.risk && c.family == native.family, "\(name)")
+            for mode in PermissionMode.allCases {
+                #expect(PermissionPolicy.evaluate(mode: mode, call: c, rules: [], workspace: nil)
+                        == PermissionPolicy.evaluate(mode: mode, call: native, rules: [], workspace: nil), "\(name) \(mode)")
+            }
+        }
+        // Reading a job's output is safe in both (TaskOutput is what newer CLIs call BashOutput).
+        for name in ["BashOutput", "TaskOutput"] {
+            #expect(call(name, [:]).risk == .safe && call(name, [:]).family == .jobs, "\(name)")
         }
     }
 

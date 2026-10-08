@@ -20,7 +20,7 @@ extension View {
         confirmationDialog("Rodar sem pedir permissão?", isPresented: isPresented, titleVisibility: .visible) {
             Button("Ativar sem pedir permissão", role: .destructive, action: apply)
         } message: {
-            Text("\(PermissionMode.bypass.summary) Use só com Orbs e pastas em que você confia.")
+            Text(PermissionMode.bypass.summary)
         }
     }
 }

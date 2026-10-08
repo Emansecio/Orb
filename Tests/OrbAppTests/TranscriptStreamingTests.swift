@@ -286,8 +286,10 @@ private final class Flag: @unchecked Sendable {
         #expect(shown.items.count == 2)
         #expect(model.transcript(first).count == 1)
 
+        let swaps = shown.swaps
         model.newConversation(second)
         #expect(shown.items.isEmpty)
+        #expect(shown.swaps == swaps + 1) // the chat cross-fades to another conversation
         model.deleteBot(second)
         #expect(model.transcript(second).isEmpty)
     }

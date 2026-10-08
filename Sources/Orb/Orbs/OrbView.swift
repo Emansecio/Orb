@@ -21,7 +21,12 @@ struct OrbView: View {
     var followsPointer = true
     /// Changing this value makes the orb jump (e.g. when a prompt is sent).
     var poke = 0
+    /// Changing this value makes the orb blink and glance toward the chat (e.g. when it is selected). Not with
+    /// Reduce Motion: the static orb ignores it.
+    var glance = 0
     var interactive = false
+    /// What VoiceOver says (default: "Orb" and what it is doing).
+    var accessibilityText: String?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.appearsActive) private var appearsActive
@@ -30,7 +35,7 @@ struct OrbView: View {
         Group {
             if animated && !reduceMotion && !OrbView.forceStatic {
                 AnimatedOrb(config: config, activity: activity, size: size, followsPointer: followsPointer,
-                            poke: poke, interactive: interactive,
+                            poke: poke, glance: glance, interactive: interactive,
                             live: !paused && (appearsActive || OrbView.animateInactive))
             } else {
                 OrbFrame(config: config, activity: activity, size: size, pose: .rest)
@@ -38,7 +43,7 @@ struct OrbView: View {
         }
         .frame(width: size, height: size)
         .accessibilityElement()
-        .accessibilityLabel("Orb, \(activity.label)")
+        .accessibilityLabel(accessibilityText ?? "Orb, \(activity.label)")
     }
 
     /// Dev aid for profiling: `ORB_STATIC=1`.
@@ -173,6 +178,13 @@ private struct OrbPainter {
             var layerContext = orb
             let shift = parallax(layer)
             layerContext.translateBy(x: shift.width, y: shift.height)
+            if layer.isLoose, pose.hairSwing != 0 {
+                // Around the top of the head, as the live orb does.
+                let crown = side * OrbGeometry.crownLine
+                layerContext.translateBy(x: side / 2, y: crown)
+                layerContext.rotate(by: .degrees(pose.hairSwing))
+                layerContext.translateBy(x: -side / 2, y: -crown)
+            }
             if layer.kind == .eyes, pose.blink > 0 {
                 let line = side * OrbGeometry.eyeLine
                 layerContext.translateBy(x: 0, y: line)
@@ -223,11 +235,12 @@ struct BotAvatar: View {
     var animated = true
     var paused = false
     var poke = 0
+    var glance = 0
     var interactive = false
 
     var body: some View {
         OrbView(config: orb, activity: activity, size: size, animated: animated, paused: paused, poke: poke,
-                interactive: interactive)
+                glance: glance, interactive: interactive)
     }
 }
 

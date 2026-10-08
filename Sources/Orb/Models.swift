@@ -1,7 +1,9 @@
 import Foundation
 
+/// The four ways an Orb is allowed to act. `allCases` is THE order in which every picker lists them (the Orb's panel,
+/// the new-Orb sheet and the composer): the safest first, "Sem pedir permissão" last.
 enum PermissionMode: String, CaseIterable, Identifiable, Codable, Sendable {
-    case ask, auto, bypass, readOnly
+    case ask, auto, readOnly, bypass
 
     var id: String { rawValue }
 
@@ -12,19 +14,39 @@ enum PermissionMode: String, CaseIterable, Identifiable, Codable, Sendable {
         switch self {
         case .ask: "Perguntar antes"
         case .auto: "Automático"
-        case .bypass: "Sem pedir permissão"
         case .readOnly: "Só leitura"
+        case .bypass: "Sem pedir permissão"
         }
     }
 
-    var summary: String {
+    /// One line under the mode's name (the composer's picker, its tooltip).
+    var shortSummary: String {
         switch self {
-        case .ask: "Pede sua aprovação antes de mudar algo, rodar comandos ou acessar a web."
-        case .auto: "Faz tudo sozinho, mas pergunta antes de comandos destrutivos (rm -rf, sudo, push --force…)."
-        case .bypass: "Nunca pergunta: roda qualquer comando e altera qualquer arquivo sem confirmação."
-        case .readOnly: "Só lê e pesquisa; não muda nada no seu Mac."
+        case .ask: "Pede sua aprovação antes de mudar arquivos, rodar comandos ou usar a web."
+        case .auto: "Trabalha sozinho e só pergunta em ações destrutivas (apagar, sudo, push --force)."
+        case .readOnly: "Só lê e pesquisa. Não muda nada no seu Mac."
+        case .bypass: "Nunca pergunta, nem em ações destrutivas."
         }
     }
+
+    /// What the mode does in full (the Orb's panel, the new-Orb sheet, a routine's explanation, the confirmation of
+    /// "Sem pedir permissão"): always `shortSummary` first, then what it leaves out.
+    var summary: String { shortSummary + " " + detail }
+
+    private var detail: String {
+        switch self {
+        case .ask: "Ler e pesquisar nunca pergunta."
+        case .auto: "Mudar a identidade ou as preferências do Orb também pergunta."
+        case .readOnly: "Para o Orb agir, troque de modo."
+        case .bypass: "Roda qualquer comando e altera qualquer arquivo sem confirmação. Use só com Orbs e pastas em que você confia."
+        }
+    }
+
+    /// Under "Liberações" (the Orb's panel and the composer's popover): the standing grants only count where the Orb
+    /// asks, and risky actions ask everywhere except in "Sem pedir permissão".
+    static let grantsNote = "Estas liberações valem em “\(PermissionMode.ask.label)”. "
+        + "Comandos arriscados sempre perguntam (em “\(PermissionMode.readOnly.label)” são recusados), "
+        + "exceto em “\(PermissionMode.bypass.label)”."
 
     var symbol: String {
         switch self {
@@ -41,11 +63,13 @@ enum Capability: String, CaseIterable, Identifiable, Codable, Sendable {
 
     var id: String { rawValue }
 
+    /// The name of the switch in the Orb's panel ("O que <Orb> pode usar"), and the only one: the panel, the empty chat
+    /// and every prompt that tells the user which switch to turn on read it from here.
     var label: String {
         switch self {
         case .terminal: "Terminal e arquivos"
-        case .browser: "Ler páginas da web"
-        case .computerUse: "Apps do Mac (AppleScript)"
+        case .browser: "Navegar na web"
+        case .computerUse: "Controlar apps do Mac"
         case .connectors: "Conectores"
         }
     }

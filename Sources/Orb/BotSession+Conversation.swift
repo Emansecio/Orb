@@ -160,6 +160,7 @@ extension BotSession {
         clearRequestUsage() // so is the cache hit of its last request (the meter would show it for this chat)
         model?.live(id).setLastUsage(nil)
         model?.live(id).setCompactedTo(nil)
+        transcript?.swapped() // before the items change: the chat sees another conversation, not new messages
         if parkedChat != nil {
             parkedChat = chat
         } else {

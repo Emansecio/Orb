@@ -15,7 +15,7 @@ enum LegacyMigration {
     /// from scripts/bundle.sh or `--snapshot` must not touch the user's data).
     static var shouldRun: Bool {
         Bundle.main.bundleIdentifier == identifier
-            && !CommandLine.arguments.contains { ["--render-icon", "--render-orbs", "--snapshot"].contains($0) }
+            && !DevRun.isActive
     }
 
     /// Copies OpenBot's folder into `directory` unless Orb already has data at least as new (an earlier copy, or

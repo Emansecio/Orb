@@ -132,8 +132,22 @@ struct ClaudeCodePolicyTests {
     @Test func permissionModes() {
         #expect(ClaudeCodePolicy.cliMode(.readOnly) == "plan")
         #expect(ClaudeCodePolicy.cliMode(.ask) == "default")
-        #expect(ClaudeCodePolicy.cliMode(.auto) == "acceptEdits")
+        // "Automático" must not let the CLI approve edits itself (`acceptEdits`): the Orb's policy sees every request.
+        #expect(ClaudeCodePolicy.cliMode(.auto) == "default")
+        #expect(ClaudeCodePolicy.cliMode(.bypass) == "bypassPermissions")
+        #expect(PermissionMode.allCases.allSatisfy { ClaudeCodePolicy.cliMode($0) != "acceptEdits" })
         #expect(ClaudeCodePolicy.answer(mode: .auto, toolName: "Bash") == .allow)
+        // Edits in "Automático" go through the Orb's danger checks, like the native write_file / edit_file.
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        for name in [".zshrc", ".ssh/authorized_keys", "Library/LaunchAgents/x.plist"] {
+            for tool in ["Write", "Edit", "MultiEdit"] {
+                let input = JSONValue.object(["file_path": .string(home.appending(path: name).path)])
+                #expect(ClaudeCodePolicy.answer(mode: .auto, toolName: tool, input: input) == nil, "\(tool) \(name)")
+                #expect(ClaudeCodePolicy.answer(mode: .bypass, toolName: tool, input: input) == .allow)
+            }
+        }
+        let notes = JSONValue.object(["file_path": .string(home.appending(path: "Projetos/notas.txt").path)])
+        #expect(ClaudeCodePolicy.answer(mode: .auto, toolName: "Edit", input: notes) == .allow)
         #expect(ClaudeCodePolicy.answer(mode: .ask, toolName: "Bash") == nil)
         #expect(ClaudeCodePolicy.answer(mode: .ask, toolName: "Bash", rules: PermissionPolicy.legacyRules(fromToolNames: ["Bash"])) == .allow)
         // Read-only wins over an earlier "Sempre permitir".

@@ -4,7 +4,7 @@ import SwiftUI
 /// context-popover-short | settings-context out.png`: the context meter in the composer, the card for a long
 /// conversation (at the default window height too: the card must not push the composer out), its popover (a popover
 /// window does not render offscreen, so it is drawn on its own) and the memory settings with learned windows.
-/// Made-up data in the temporary data folder `ORB_DATA_DIR` points to.
+/// Made-up data in a fresh temporary data folder (or the one `ORB_DATA_DIR` names; see `DevRun`).
 @MainActor
 enum ContextSnapshots {
     static func view(_ screen: String, model: AppModel) -> AnyView? {

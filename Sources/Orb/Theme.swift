@@ -24,6 +24,7 @@ enum Palette {
     static let chrome = Color(hex: 0x111111)        // sidebar, details pane
     static let canvas = Color(hex: 0x070707)        // conversation
     static let surface = Color(hex: 0x181818)       // cards, composer
+    static let surfaceFocused = Color(hex: 0x1D1D1D) // surface 2 % lighter: the composer while it has the focus
     static let raised = Color(hex: 0x222222)        // code blocks, chips
     static let agentBubble = Color(hex: 0x262626)
     static let userBubble = Color(hex: 0x5A5A5A)
@@ -98,7 +99,7 @@ private struct ContentAnimation<Value: Equatable>: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
-        content.animation(reduceMotion ? nil : .smooth(duration: 0.25), value: value)
+        content.animation(reduceMotion ? nil : Motion.content, value: value)
     }
 }
 
@@ -261,7 +262,7 @@ struct SecondaryPillStyle: ButtonStyle {
     }
 }
 
-/// Text-only ghost button with hover fill.
+/// Text-only ghost button with hover fill (in fast, out slow: `hoverFill`).
 struct GhostStyle: ButtonStyle {
     /// A color for the label instead of the usual gray (red for a destructive action).
     var tint: Color?
@@ -273,7 +274,8 @@ struct GhostStyle: ButtonStyle {
             .foregroundStyle(tint ?? Palette.secondary)
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
-            .background(configuration.isPressed || isHovering ? Palette.ghostSelected : .clear, in: .capsule)
+            .hoverFill(configuration.isPressed || isHovering, pressed: configuration.isPressed, in: .capsule,
+                       color: Palette.ghostSelected)
             .onHover { isHovering = $0 }
     }
 }

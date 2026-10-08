@@ -7,8 +7,10 @@ Commands:
             --name rosa-dj        -> art/renders/<name>.png (+ -dark/-light previews)
     catalog [--category eyes]     -> one labeled tile per option + a contact sheet per category
                                      (--category visemes: the talking mouths, not user options)
-    layers [--category mouth]     -> app layers in Sources/Orb/Resources/Orbs (+ options.json)
+    layers [--category mouth]     -> flat feature layers in art/orbgen/flat (+ options.json in the app)
                                      (--category visemes -> visemes/<id>.png and <id>-dark.png)
+                                     Then `orbgen faces` seats them on the lit body (art/orbgen). The body
+                                     and the hair are made by orbgen, not here.
     manifest                      -> art/orb_options.json (ids + labels for the app editor)
 """
 
@@ -27,6 +29,9 @@ from orbkit import core, features  # noqa: E402
 
 ART = os.path.dirname(os.path.abspath(__file__))
 DARK = (0.027, 0.027, 0.027)
+RESOURCES = os.path.join(os.path.dirname(ART), "Sources", "Orb", "Resources", "Orbs")
+# Made by art/orbgen (procedural lighting), not by Blender: `layers` skips them and `manifest` keeps their entries.
+ORBGEN_CATEGORIES = {"color", "hair"}
 
 
 def build(config, samples, size, label=None):
@@ -165,14 +170,11 @@ def layers(samples, size, out, only_category=None):
     def wanted(category):
         return only_category is None or only_category == category
 
-    if wanted("color"):
-        os.makedirs(os.path.join(out, "body"), exist_ok=True)
-        for pid, _, _ in features.PALETTES:
-            render_scene({"color": pid}, os.path.join(out, "body", f"{pid}.png"))
-            print("layer body", pid)
-
     for category in LAYER_CATEGORIES:
         if not wanted(category):
+            continue
+        if category in ORBGEN_CATEGORIES:
+            print("skip", category, "(art/orbgen)")
             continue
         os.makedirs(os.path.join(out, category), exist_ok=True)
         for option_id, _, builder in options_of(category):
@@ -192,7 +194,7 @@ def layers(samples, size, out, only_category=None):
                 render_scene(config, os.path.join(out, category, f"{option_id}{suffix}.png"), only=(category, option_id))
                 print("layer", category, option_id + suffix)
 
-    manifest(os.path.join(out, "options.json"))
+    manifest(os.path.join(RESOURCES, "options.json"))
 
 
 def manifest(path=None):
@@ -200,6 +202,18 @@ def manifest(path=None):
             for name, options in features.CATEGORIES.items()}
     data["color"] = [{"id": pid, "label": label, "hex": [f"#{c:06X}" for c in colors]}
                      for pid, label, colors in features.PALETTES]
+    # Keep what orbgen owns: the hair styles, each palette's default hair color and the hats list.
+    previous_path = path or os.path.join(ART, "orb_options.json")
+    if os.path.exists(previous_path):
+        with open(previous_path, encoding="utf-8") as handle:
+            previous = json.load(handle)
+        for key in ("hair", "hats"):
+            if key in previous:
+                data[key] = previous[key]
+        hair_colors = {entry["id"]: entry["hair"] for entry in previous.get("color", []) if "hair" in entry}
+        for entry in data["color"]:
+            if entry["id"] in hair_colors:
+                entry["hair"] = hair_colors[entry["id"]]
     data["tinted"] = sorted(TINTED)
     data["tintedAccessories"] = sorted(TINTED_ACCESSORIES)
     data["variants"] = sorted(VARIANT_CATEGORIES)
@@ -213,7 +227,7 @@ def main():
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=["render", "catalog", "manifest", "personas", "layers"])
-    parser.add_argument("--out", default=os.path.join(os.path.dirname(ART), "Sources", "Orb", "Resources", "Orbs"))
+    parser.add_argument("--out", default=os.path.join(ART, "orbgen", "flat"))
     parser.add_argument("--config", default="{}")
     parser.add_argument("--name", default="orb")
     parser.add_argument("--category", default=None)

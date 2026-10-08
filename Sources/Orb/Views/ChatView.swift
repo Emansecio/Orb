@@ -10,11 +10,21 @@ struct ChatView: View {
         @Bindable var model = model
         let live = model.live(botID)
         let look = live.look
-        TranscriptList(look: look)
+        // Switching Orbs swaps the conversation for the other's with a cross-fade (§2.9) while the composer, the
+        // toolbar and the panel, outside this container, change at once and never flash: the transcript is a view of
+        // its own per Orb (`.id`), so SwiftUI fades the old one out and the new one in.
+        ZStack {
+            TranscriptList(look: look)
+                .id(botID)
+                .transition(.opacity)
+        }
+        .motion(Motion.crossFade, value: botID)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
                 FirstRunBanner(botID: botID)
+                    .id(botID)
                 ComposerView(botID: botID)
+                    .id(botID)
             }
         }
         .background(Palette.canvas)
@@ -23,6 +33,7 @@ struct ChatView: View {
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 ConversationsMenuButton(botID: botID)
+                    .id(botID)
                 Button("Nova conversa", systemImage: "square.and.pencil") {
                     model.newConversation(botID)
                 }
@@ -35,6 +46,7 @@ struct ChatView: View {
         }
         .inspector(isPresented: $model.showInspector) {
             BotInspector(botID: botID)
+                .id(botID)
                 .inspectorColumnWidth(min: 244, ideal: 300, max: 420)
         }
     }
@@ -46,11 +58,15 @@ struct ChatView: View {
 /// another Orb's work; rows are `Equatable`, so only the row that changed re-renders.
 private struct TranscriptList: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.presentedEmptyChats) private var presentedEmptyChats
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let look: BotLook
     /// Off while the user has scrolled up to read, so new content doesn't pull the view down.
     @State private var followsBottom = true
     /// Scrolls for the lists that cannot keep the bottom in view themselves (macOS 14).
     @State private var follower = BottomFollower()
+    /// Which rows just arrived (they come in; the rest are simply there), and when the conversation itself was replaced.
+    @State private var entrances = TranscriptEntrances()
 
     var body: some View {
         let transcript = model.orbTranscript(look.id)
@@ -58,18 +74,39 @@ private struct TranscriptList: View {
         let live = model.live(look.id)
         let status = live.status
         let isLoading = model.isLoadingConversation(look.id)
+        // Looked at before the rows are made, as many times as this is evaluated: the same items say the same thing.
+        let generation = entrances.observe(items, isLoading: isLoading, swaps: transcript.swaps)
 
+        // A conversation swapped for another (a new one, one reopened from Conversas) cross-fades; the scroll view is
+        // a new one then, as it was when the whole chat was rebuilt.
+        ZStack {
+            conversation(items: items, status: status, isLoading: isLoading, live: live, transcript: transcript)
+                .id(generation)
+                .transition(.opacity)
+        }
+        .motion(Motion.crossFade, value: generation)
+        .onChange(of: generation) { followsBottom = true; follower.follows = true }
+    }
+
+    private func conversation(items: [TranscriptItem], status: String?, isLoading: Bool, live: BotLive,
+                              transcript: OrbTranscript) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     if isLoading {
                         LoadingTranscript()
                     } else if items.isEmpty {
-                        EmptyChatView(look: look)
+                        EmptyChatView(look: look, presented: presentedEmptyChats)
+                            .transition(.opacity)
                     }
                     ForEach(items) { item in
-                        TranscriptRow(item: item, botID: look.id, orb: look.orb)
+                        let isNew = entrances.isNew(item.id)
+                        TranscriptRow(item: item, botID: look.id, orb: look.orb, entering: isNew)
                             .equatable()
+                            // The row comes in by itself, not through an animation of the list (which would lay every row
+                            // out again); the list's own animation must not add a transition of its own.
+                            .modifier(RowEntrance(id: item.id, style: item.kind.entrance, isNew: isNew, entrances: entrances))
+                            .transition(.identity)
                     }
                     QueuedMessages(botID: look.id)
                     if let status {
@@ -77,8 +114,10 @@ private struct TranscriptList: View {
                     }
                     Color.clear.frame(height: 1).id(BottomAnchor.id)
                 }
-                .animateChanges(of: items.count)
-                .animateChanges(of: status == nil)
+                // Only what changes rarely animates at the list: the Orb starting or ending a turn (its working line), and
+                // the empty state leaving with the first message. Never the count of messages, never a streamed token.
+                .motion(Motion.content, value: status == nil)
+                .motion(Motion.exit, value: items.isEmpty)
                 .padding(.horizontal, 28)
                 .padding(.top, 20)
                 .padding(.bottom, 12)
@@ -97,9 +136,13 @@ private struct TranscriptList: View {
                 if !BottomFollower.anchorsItself { follower.follow { scrollToBottom(proxy) } }
             }
             .onChange(of: live.poke) {
-                // The user just sent a message: always show it.
+                // The user just sent a message: always show it. The list glides to it if it was at the end already;
+                // from higher up it goes there at once.
+                let wasAtBottom = followsBottom
                 followsBottom = true
-                scrollToBottom(proxy)
+                withAnimation(wasAtBottom ? ScrollMotion.animation(reduceMotion: reduceMotion) : nil) {
+                    scrollToBottom(proxy)
+                }
             }
             .onAppear {
                 guard !BottomFollower.anchorsItself else { return }
@@ -273,45 +316,71 @@ private struct LoadingTranscript: View {
 /// Orb's settings; nothing is read from disk while it draws.
 private struct EmptyChatView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let look: BotLook
+    /// Which Orbs' empty chat already came in this session (nil: no entrance, as in a snapshot).
+    let presented: PresentedOrbs?
     @State private var firstRun = FirstRunModel()
+    /// The first time this Orb's empty chat shows in the session it comes in (§2.8); never again after that.
+    @State private var enters: Bool
+    /// Set when the Orb lands, which is one poke of its own spring.
+    @State private var landed = 0
+
+    init(look: BotLook, presented: PresentedOrbs?) {
+        self.look = look
+        self.presented = presented
+        // Decided when the view is made, from what was recorded before it: the record is written once it has appeared.
+        _enters = State(initialValue: EmptyChatEntrance.plays(for: look.id, in: presented))
+    }
 
     var body: some View {
         let live = model.live(look.id)
         let showsFirstRun = !model.isProviderReady || firstRun.connectedName != nil
         VStack(spacing: 16) {
-            BotAvatar(orb: look.orb, size: 96, activity: live.activity, poke: live.poke, interactive: true)
+            LiveBotAvatar(botID: look.id, orb: look.orb, size: 96, interactive: true, extraPoke: landed)
                 .padding(.top, 72)
-            VStack(spacing: 4) {
-                Text(look.name)
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(Palette.ink)
-                Text(look.role.isEmpty ? "Seu assistente" : look.role)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Palette.muted)
-            }
-            if showsFirstRun {
-                FirstRunCard(style: .chat(botName: look.name), run: firstRun)
-                    .padding(.top, 8)
-            } else {
-                let bot = live.bot
-                OrbContextLine(folder: EmptyChatContent.folderText(for: bot),
-                               capabilities: EmptyChatContent.capabilityNames(for: bot))
-                VStack(spacing: 6) {
-                    ForEach(EmptyChatContent.suggestions(for: bot, interviewPending: live.memory.interviewPending)) { suggestion in
-                        SuggestionButton(symbol: suggestion.symbol, text: suggestion.text) {
-                            model.send(suggestion.symbol == "questionmark.bubble"
-                                       ? "Oi! Antes de começarmos, me faça algumas perguntas para entender como você pode me ajudar."
-                                       : suggestion.text, to: look.id)
+                .entrance(.drop, enters: enters) {
+                    // Touches the floor: one poke (the Orb's own spring lands it). The Orb stays still under Reduce Motion.
+                    if !reduceMotion { landed = 1 }
+                }
+            VStack(spacing: 16) {
+                VStack(spacing: 4) {
+                    Text(look.name)
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(Palette.ink)
+                    Text(look.role.isEmpty ? "Seu assistente" : look.role)
+                        .font(.system(size: 13))
+                        .foregroundStyle(Palette.muted)
+                }
+                .entrance(.rise.delayed(EmptyChatEntrance.nameDelay), enters: enters)
+                if showsFirstRun {
+                    FirstRunCard(style: .chat(botName: look.name), run: firstRun)
+                        .padding(.top, 8)
+                        .entrance(.rise.delayed(EmptyChatEntrance.suggestionsStart), enters: enters)
+                } else {
+                    let bot = live.bot
+                    OrbContextLine(folder: EmptyChatContent.folderText(for: bot),
+                                   capabilities: EmptyChatContent.capabilityNames(for: bot))
+                        .entrance(.rise.delayed(EmptyChatEntrance.contextDelay), enters: enters)
+                    VStack(spacing: 6) {
+                        let suggestions = EmptyChatContent.suggestions(for: bot, interviewPending: live.memory.interviewPending)
+                        ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, suggestion in
+                            SuggestionButton(symbol: suggestion.symbol, text: suggestion.text) {
+                                model.send(suggestion.symbol == "questionmark.bubble"
+                                           ? "Oi! Antes de começarmos, me faça algumas perguntas para entender como você pode me ajudar."
+                                           : suggestion.text, to: look.id)
+                            }
+                            .entrance(.staggered(index, start: EmptyChatEntrance.suggestionsStart), enters: enters)
                         }
                     }
+                    .frame(maxWidth: 420)
+                    .padding(.top, 4)
                 }
-                .frame(maxWidth: 420)
-                .padding(.top, 4)
             }
         }
         .frame(maxWidth: .infinity)
         .animateChanges(of: showsFirstRun)
+        .onAppear { presented?.insert(look.id) }
     }
 }
 
@@ -354,12 +423,14 @@ private struct SuggestionButton: View {
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(Palette.hint)
                     .opacity(isHovering ? 1 : 0)
+                    .animation(Motion.hover(isHovering), value: isHovering)
                     .accessibilityHidden(true)
             }
             .font(.system(size: 13))
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .card(radius: 12, fill: isHovering ? Palette.raised : Palette.surface)
+            .hoverFill(isHovering, in: .rect(cornerRadius: 12), color: Palette.raised, resting: Palette.surface)
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Palette.line))
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -377,7 +448,7 @@ private struct WorkingLine: View {
     var body: some View {
         let live = model.live(look.id)
         HStack(spacing: 10) {
-            BotAvatar(orb: look.orb, size: 30, activity: live.activity, poke: live.poke)
+            LiveBotAvatar(botID: look.id, orb: look.orb, size: 30)
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text("\(text)…")
                     .font(.system(size: 13))
@@ -402,6 +473,8 @@ private struct ElapsedClock: View {
             Text(text)
                 .font(.system(size: 12).monospacedDigit())
                 .foregroundStyle(Palette.faint)
+                // Plain text, no animation: a clock that ticks every second must not be a recurring animation outside
+                // Core Animation (MOVIMENTO.md, principle 7). Rolling digits are for counters that change once.
         }
         .accessibilityHidden(true)
     }

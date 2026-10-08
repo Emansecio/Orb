@@ -13,14 +13,10 @@ struct ComposerChipStyle: ButtonStyle {
             .font(.system(size: 12, weight: .medium))
             .padding(.horizontal, 8)
             .frame(minWidth: 28, minHeight: 28)
-            .background(background(pressed: configuration.isPressed), in: .capsule)
+            .hoverFill(configuration.isPressed || isHovering, pressed: configuration.isPressed, in: .capsule,
+                       color: Palette.ghostSelected, resting: filled ? Palette.raised : nil)
             .contentShape(.capsule)
             .onHover { isHovering = $0 }
-    }
-
-    private func background(pressed: Bool) -> Color {
-        if pressed || isHovering { return Palette.ghostSelected }
-        return filled ? Palette.raised : .clear
     }
 }
 
@@ -45,7 +41,7 @@ struct PermissionChip: View {
             .foregroundStyle(Self.tint(permission.mode))
         }
         .buttonStyle(ComposerChipStyle())
-        .help("Permissões: \(PermissionChipText.spoken(permission)). \(permission.mode.composerSummary)" + grantsHelp(permission))
+        .help("Permissões: \(PermissionChipText.spoken(permission)). \(permission.mode.shortSummary)" + grantsHelp(permission))
         .accessibilityLabel("Permissões")
         .accessibilityValue(PermissionChipText.spoken(permission))
         .popover(isPresented: $isOpen, arrowEdge: .bottom) {
@@ -96,7 +92,7 @@ struct PermissionPopover: View {
                 .padding(.horizontal, 14)
                 .padding(.top, 12)
                 .padding(.bottom, 6)
-            ForEach(PermissionMode.pickerOrder) { mode in
+            ForEach(PermissionMode.allCases) { mode in
                 PermissionRow(mode: mode, isSelected: mode == permission.mode) { choose(mode) }
             }
             if let grants = PermissionChipText.grantsLine(permission) {
@@ -110,7 +106,7 @@ struct PermissionPopover: View {
                             .buttonStyle(.link)
                             .font(.system(size: 12))
                     }
-                    Text("Estas liberações valem em “Perguntar antes”. Comandos arriscados sempre perguntam.")
+                    Text(PermissionMode.grantsNote)
                         .font(.system(size: 11))
                         .foregroundStyle(Palette.muted)
                         .fixedSize(horizontal: false, vertical: true)
@@ -140,7 +136,7 @@ private struct PermissionRow: View {
                     Text(mode.label)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(mode == .bypass ? Palette.warn : Palette.ink)
-                    Text(mode.composerSummary)
+                    Text(mode.shortSummary)
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.muted)
                         .fixedSize(horizontal: false, vertical: true)
@@ -153,7 +149,7 @@ private struct PermissionRow: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 7)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isHovering ? Palette.ghostHover : .clear)
+            .hoverFill(isHovering, in: .rect)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -258,7 +254,14 @@ struct SkillRow: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isHovering || isHighlighted ? Palette.ghostSelected : .clear)
+            // Hover fades (fast in, slow out); the keyboard highlight does not: like a native menu it moves at once,
+            // so holding ↓ never leaves a trail of rows fading out behind it.
+            .hoverFill(isHovering && !isHighlighted, in: .rect, color: Palette.ghostSelected)
+            .background {
+                Rectangle().fill(Palette.ghostSelected)
+                    .opacity(isHighlighted ? 1 : 0)
+                    .animation(nil, value: isHighlighted)
+            }
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -289,7 +292,7 @@ struct ModelChip: View {
         }
         .buttonStyle(ComposerChipStyle(filled: true))
         .foregroundStyle(name.isEmpty ? Palette.warn : Palette.secondary)
-        .help("Modelo deste Orb" + (name.isEmpty ? "" : ": \(name)" + (provider.map { " · \($0)" } ?? "")) + " (⇧⌘M)")
+        .help("Modelo deste Orb" + (name.isEmpty ? "" : ": \(name)" + (provider.map { " · \($0)" } ?? "")) + " (\(AppShortcut.chooseModel.label))")
         .accessibilityLabel("Modelo")
         .accessibilityValue(name.isEmpty ? "Nenhum" : name)
         .popover(isPresented: $isOpen, arrowEdge: .bottom) { ModelPopover(botID: botID) { isOpen = false } }

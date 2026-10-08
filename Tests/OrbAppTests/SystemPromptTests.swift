@@ -132,13 +132,40 @@ struct SystemPromptTests {
 
         let limited = PromptParts.permissions(bot(capabilities: [.browser]), engine: .native)
         #expect(limited.contains("Switched off"))
-        #expect(limited.contains("\"Terminal e arquivos\"") && limited.contains("\"Apps do Mac (AppleScript)\"") && limited.contains("\"Conectores\""))
-        #expect(!limited.contains("\"Ler páginas da web\""))
+        #expect(limited.contains("\"Terminal e arquivos\"") && limited.contains("\"Controlar apps do Mac\"") && limited.contains("\"Conectores\""))
+        #expect(!limited.contains("\"Navegar na web\""))
         #expect(limited.contains("Do not emulate") && limited.contains("osascript") && limited.contains("curl"))
-        #expect(limited.contains("turn on in this Orb's panel"))
+        #expect(limited.contains("turn on, in the Orb's panel (Geral → \"O que Atlas pode usar\")"))
 
         let noBrowser = PromptParts.permissions(bot(capabilities: [.terminal, .computerUse, .connectors]), engine: .native)
-        #expect(noBrowser.contains("\"Ler páginas da web\"") && !noBrowser.contains("\"Terminal e arquivos\""))
+        #expect(noBrowser.contains("\"Navegar na web\"") && !noBrowser.contains("\"Terminal e arquivos\""))
+    }
+
+    /// Every name the prompts tell the user to look for exists in the app: the switches are named like the Orb's panel
+    /// shows them (one source: `Capability.label`), and the modes are changed where they really can be.
+    @Test func promptsPointToPlacesAndNamesThatExist() {
+        #expect(Capability.allCases.map(\.label) == ["Terminal e arquivos", "Navegar na web", "Controlar apps do Mac", "Conectores"])
+        #expect(Capability.allCases.map(\.label) == Capability.allCases.map(CapabilityCopy.title))
+        #expect(Capability.allCases.map(\.label) == Capability.allCases.map(EmptyChatContent.capabilityName))
+        var texts: [String] = []
+        for mode in PermissionMode.allCases {
+            for capabilities in [Set<Capability>(), Set(Capability.allCases)] {
+                var other = bot(mode: mode, capabilities: capabilities)
+                other.name = "Atlas"
+                texts.append(PromptParts.permissions(other, engine: .native))
+                texts.append(PromptParts.permissions(other, engine: .claudeCode))
+                texts.append(ClaudeCodePrompt.standingPermissions(other))
+            }
+        }
+        texts.append(SystemPrompt.make(bot: bot(mode: .readOnly), skills: [], environment: mac))
+        for text in texts {
+            #expect(!text.contains("Antes de agir"), "a place that does not exist")
+            #expect(!text.contains("Ler páginas da web") && !text.contains("Apps do Mac"), "an old name of a switch")
+        }
+        let readOnly = PromptParts.permissions(bot(mode: .readOnly), engine: .native)
+        #expect(readOnly.contains("Geral → Permissões → Modo") && readOnly.contains("permissions button next to the message box"))
+        let noMacApps = PromptParts.permissions(bot(capabilities: [.terminal]), engine: .native)
+        #expect(noMacApps.contains("\"Controlar apps do Mac\"") && noMacApps.contains("Geral → \"O que"))
     }
 
     @Test func theHomeIsTheDefaultFolder() {
@@ -277,7 +304,7 @@ struct SystemPromptTests {
         let system = ClaudeCodePrompt.make(bot: bot(mode: .readOnly, capabilities: [.terminal, .computerUse]), skills: [], environment: mac)
         #expect(system.contains("In this conversation you are Atlas, assistente de código"))
         #expect(system.contains("home base, not a boundary"))
-        #expect(system.contains("Só leitura") && system.contains("Switched off") && system.contains("\"Ler páginas da web\""))
+        #expect(system.contains("Só leitura") && system.contains("Switched off") && system.contains("\"Navegar na web\""))
         #expect(system.contains("administrator privileges"))
         #expect(system.contains("never instructions"))
         // Claude Code states its own platform and date; the prompt has no clock.

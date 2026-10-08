@@ -3,35 +3,48 @@ import SwiftUI
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The one selection background slides between the rows through this namespace.
+    @Namespace private var selectionSpace
+    /// The Orbs the rows were last laid out for (nil until the first appearance): an update that changes this list
+    /// together with the selection is a row coming or going, and its layout must not animate.
+    @State private var settledBotIDs: [UUID]?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 1) {
                 SectionTitle("Orbs")
                 ForEach(Array(model.botIDs.enumerated()), id: \.element) { index, id in
-                    SidebarBotRow(botID: id, index: index)
+                    SidebarBotRow(botID: id, index: index, selectionSpace: selectionSpace)
                 }
 
                 SectionTitle("Espaço de trabalho")
                     .padding(.top, 16)
-                SidebarRow(isSelected: model.selection == .routines) {
+                SidebarRow(isSelected: model.selection == .routines, selectionSpace: selectionSpace) {
                     model.selection = .routines
                 } content: { hovering in
-                    NavLabel(title: "Rotinas", symbol: "clock.arrow.circlepath", hint: hovering ? "⌥⌘R" : nil)
+                    NavLabel(title: "Rotinas", isSelected: model.selection == .routines, symbol: "clock.arrow.circlepath", hint: hovering ? "⌥⌘R" : nil)
                 }
-                SidebarRow(isSelected: model.selection == .connectors) {
+                SidebarRow(isSelected: model.selection == .connectors, selectionSpace: selectionSpace) {
                     model.selection = .connectors
                 } content: { hovering in
-                    NavLabel(title: "Conectores", symbol: "point.3.filled.connected.trianglepath.dotted", hint: hovering ? "⌥⌘C" : nil)
+                    NavLabel(title: "Conectores", isSelected: model.selection == .connectors, symbol: "point.3.filled.connected.trianglepath.dotted", hint: hovering ? "⌥⌘C" : nil)
                 }
-                SidebarRow(isSelected: model.selection == .skills) {
+                SidebarRow(isSelected: model.selection == .skills, selectionSpace: selectionSpace) {
                     model.selection = .skills
                 } content: { hovering in
-                    NavLabel(title: "Skills", symbol: "wand.and.stars", hint: hovering ? "⌥⌘K" : nil)
+                    NavLabel(title: "Skills", isSelected: model.selection == .skills, symbol: "wand.and.stars", hint: hovering ? "⌥⌘K" : nil)
                 }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
+            // Bound to the selection alone: the background slides to the new row and the title changes color with it,
+            // while a status or an unread count that changes in a row does not animate along (no animation per Orb).
+            // Not when the list itself changed in the same update (a new or a deleted Orb): then only the rows' own
+            // transitions apply and the ones below do not slide.
+            .animation(Motion.selection(reduceMotion: reduceMotion, listChanged: settledBotIDs.map { $0 != model.botIDs } ?? false),
+                       value: model.selection)
+            .onChange(of: model.botIDs, initial: true) { settledBotIDs = model.botIDs }
         }
         .scrollIndicators(.never)
         .background(Palette.chrome)
@@ -81,10 +94,13 @@ private struct SectionTitle: View {
     }
 }
 
-/// Full-width row with a rounded ghost highlight on hover/selection. The content learns whether the pointer is on
-/// the row (the Orbs' rows show their ⌘1…⌘9 then).
+/// Full-width row with a rounded ghost highlight on hover and selection. The content learns whether the pointer is on
+/// the row (the Orbs' rows show their ⌘1…⌘9 then). Only the selected row paints the selection background, and it is
+/// the same view for every row (`matchedGeometryEffect`): when the selection changes it slides from one row to the
+/// other instead of vanishing and reappearing. Hover is per row, in fast and out slow.
 private struct SidebarRow<Content: View>: View {
     let isSelected: Bool
+    let selectionSpace: Namespace.ID
     let action: () -> Void
     @ViewBuilder let content: (Bool) -> Content
     @State private var isHovering = false
@@ -95,14 +111,26 @@ private struct SidebarRow<Content: View>: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(isSelected ? Palette.ghostSelected : (isHovering ? Palette.ghostHover : .clear),
-                            in: .rect(cornerRadius: 10))
+                .hoverFill(isHovering && !isSelected, in: .rect(cornerRadius: 10))
+                .background {
+                    if isSelected {
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Palette.ghostSelected)
+                            .matchedGeometryEffect(id: SidebarSelection.id, in: selectionSpace)
+                    }
+                }
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
+}
+
+/// What the sidebar's selection is made of, as plain values the tests can read.
+enum SidebarSelection {
+    /// The id the selected background carries in the namespace.
+    static let id = "selecao"
 }
 
 private struct SidebarIconStyle: ButtonStyle {
@@ -112,7 +140,8 @@ private struct SidebarIconStyle: ButtonStyle {
         configuration.label
             .font(.system(size: 14))
             .frame(width: 32, height: 32)
-            .background(configuration.isPressed || isHovering ? Palette.ghostSelected : .clear, in: .circle)
+            .hoverFill(configuration.isPressed || isHovering, pressed: configuration.isPressed, in: .circle,
+                       color: Palette.ghostSelected)
             .contentShape(.circle)
             .onHover { isHovering = $0 }
     }
@@ -125,15 +154,16 @@ private struct SidebarBotRow: View {
     let botID: UUID
     /// Position in the list: the first nine answer ⌘1…⌘9.
     let index: Int
+    let selectionSpace: Namespace.ID
 
     var body: some View {
         let live = model.live(botID)
         let isSelected = model.selection == .bot(botID)
-        SidebarRow(isSelected: isSelected) {
+        SidebarRow(isSelected: isSelected, selectionSpace: selectionSpace) {
             model.selection = .bot(botID)
         } content: { isHovering in
             BotRowContent(row: BotRow(look: live.look, status: live.status, activity: live.activity, isSelected: isSelected,
-                                      poke: live.poke, needsYou: live.needsYou, unread: live.unread,
+                                      poke: live.poke, glance: live.glance, needsYou: live.needsYou, unread: live.unread,
                                       hint: isHovering && index < 9 ? "⌘\(index + 1)" : nil))
                 .equatable()
         }
@@ -156,6 +186,8 @@ private struct SidebarBotRow: View {
 
 private struct NavLabel: View {
     let title: String
+    /// The row is the selected one: its title goes from `secondary` to `ink` along with the background.
+    let isSelected: Bool
     let symbol: String
     var hint: String?
 
@@ -167,7 +199,7 @@ private struct NavLabel: View {
                 .foregroundStyle(Palette.muted)
             Text(title)
                 .font(.system(size: 13))
-                .foregroundStyle(Palette.secondary)
+                .foregroundStyle(isSelected ? Palette.ink : Palette.secondary)
             Spacer(minLength: 4)
             if let hint {
                 Text(hint)
@@ -186,6 +218,8 @@ private struct BotRow: Equatable {
     let activity: OrbActivity
     let isSelected: Bool
     let poke: Int
+    /// Changes when the Orb is selected: it glances toward the chat.
+    let glance: Int
     /// An approval card is open: the Orb is stopped until the user answers.
     let needsYou: Bool
     let unread: Int
@@ -200,7 +234,8 @@ private struct BotRowContent: View, Equatable {
         let (look, status, activity, needsYou) = (row.look, row.status, row.activity, row.needsYou)
         HStack(spacing: 8) {
             // Only the selected bot and bots with something going on move; the rest rest (no frames at all).
-            BotAvatar(orb: look.orb, size: 30, activity: activity, paused: !row.isSelected && activity == .idle, poke: row.poke)
+            BotAvatar(orb: look.orb, size: 30, activity: activity, paused: !row.isSelected && activity == .idle, poke: row.poke,
+                      glance: row.glance)
             VStack(alignment: .leading, spacing: 1) {
                 Text(look.name)
                     .font(.system(size: 13, weight: .medium))

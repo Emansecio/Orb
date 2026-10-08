@@ -4,7 +4,7 @@ import os
 /// The Orb's own tools for Claude Code turns. Claude Code only takes extra tools through MCP, so each turn's MCP
 /// config starts the app's own binary as `Orb --tools-mcp <memory folder> [--mac] [--folder <working folder>]`: a
 /// small stdio server offering `remember` and `recall` on the same files as the app (SQLite WAL lets it share the
-/// index) and, for an Orb with "Apps do Mac", the Mac tools (`open`, `applescript`, `shortcuts_*`, `clipboard_*`,
+/// index) and, for an Orb with "Controlar apps do Mac", the Mac tools (`open`, `applescript`, `shortcuts_*`, `clipboard_*`,
 /// `screenshot`, `notify`, `apps_list`, `processes`, `app_quit`, `trash`, `browser_tab`) with the same schemas.
 enum OrbToolsMCPServer {
     static let flag = "--tools-mcp"
@@ -26,7 +26,7 @@ enum OrbToolsMCPServer {
     static let allTools: [any AgentTool] = ToolBox.memoryTools + ToolBox.macTools
 
     /// What one server process offers, gated like the native tools: memory always, and each Mac tool when the Orb has
-    /// "Apps do Mac" or the tool needs no capability (`open`, `notify`).
+    /// "Controlar apps do Mac" or the tool needs no capability (`open`, `notify`).
     static func tools(mac: Bool) -> [any AgentTool] {
         ToolBox.memoryTools + ToolBox.macTools.filter { mac || $0.capability == nil }
     }

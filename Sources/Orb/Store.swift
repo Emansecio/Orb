@@ -73,18 +73,14 @@ struct Store: Sendable {
     /// only what changed. One cache per data folder; touched only on `queue`.
     private var encoders: EncoderCache { EncoderCache.shared(for: directory) }
 
+    /// The user's folder, or, in a developer mode (`--snapshot`, `--render-*`) without `ORB_DATA_DIR`, a fresh temporary
+    /// one (see `DevRun.dataFolder`). OpenBot's data is only ever copied into the user's own folder.
     static let standard: Store = {
-        if let custom = ProcessInfo.processInfo.environment["ORB_DATA_DIR"] { return Store(directory: URL(fileURLWithPath: custom)) }
-        // Rendering the icon or the Orb sheet (scripts/bundle.sh) only needs sample data: never the user's.
-        if CommandLine.arguments.contains(where: { $0 == "--render-icon" || $0 == "--render-orbs" }) {
-            return Store(directory: FileManager.default.temporaryDirectory.appending(path: "orb-render-\(UUID().uuidString)"))
+        let location = DevRun.currentDataFolder
+        if location.allowsLegacyMigration, LegacyMigration.shouldRun {
+            LegacyMigration.run(into: location.url, from: URL.applicationSupportDirectory.appendingPathComponent(LegacyMigration.oldFolder))
         }
-        let support = URL.applicationSupportDirectory
-        let directory = support.appendingPathComponent("Orb")
-        if LegacyMigration.shouldRun {
-            LegacyMigration.run(into: directory, from: support.appendingPathComponent(LegacyMigration.oldFolder))
-        }
-        return Store(directory: directory)
+        return Store(directory: location.url)
     }()
 
     private var stateURL: URL { directory.appendingPathComponent("state.json") }
@@ -253,14 +249,65 @@ struct Store: Sendable {
         }
     }
 
-    func deleteArchived(_ id: UUID, for botID: UUID) {
+    /// Deletes an archived conversation. With `unlessUsedBy` (the file names of the pictures the app holds in memory
+    /// for this Orb: its open conversation, unsent attachments, queued messages) the pictures only this conversation
+    /// pointed to go with it; one that another conversation of the same Orb (the current one, another archived one,
+    /// a routine's) or `unlessUsedBy` still refers to stays. nil leaves the pictures alone (reopening a conversation
+    /// moves it, it is not deleted).
+    func deleteArchived(_ id: UUID, for botID: UUID, removingPicturesUnlessUsedBy inUse: Set<String>? = nil) {
         let file = archivedURL(botID, id)
         enqueue(touching: [file, archiveIndexURL(botID)]) {
             Self.gate.waitForReaders(of: file)
+            let pictures = inUse == nil ? [] : Self.pictureNames(inFileAt: file)
             try? FileManager.default.removeItem(at: file)
             let (entries, changed) = reconciledArchive(botID)
             if changed { write(ConversationIndex(entries: entries), to: archiveIndexURL(botID)) }
+            if let inUse { removePictures(pictures, of: botID, unlessUsedBy: inUse) }
         }
+    }
+
+    /// The names (`<uuid>.jpg|png`, see `ImageStore`) of the pictures a conversation file points to. It reads the
+    /// file's text, not the conversation: it works on a file that no longer decodes, and any mention counts.
+    static func pictureNames(inFileAt url: URL) -> Set<String> {
+        guard let data = try? Data(contentsOf: url), !data.isEmpty else { return [] }
+        let text = String(decoding: data, as: UTF8.self)
+        let matches = pictureNamePattern.matches(in: text, range: NSRange(text.startIndex..., in: text))
+        return Set(matches.compactMap { Range($0.range, in: text).map { String(text[$0]) } })
+    }
+
+    private static let pictureNamePattern = try! NSRegularExpression(
+        pattern: #"[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}\.(?:jpg|png)"#)
+
+    private static func jsonFiles(in folder: URL) -> [URL] {
+        ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.pathExtension == "json" && $0.lastPathComponent != "index.json" }
+    }
+
+    /// The `<name>.json.corrupt-<date>` copies of files that stopped decoding: they are kept for the user to recover
+    /// and may still name a picture, so a picture they name is not deleted. In the Orb's own `conversations/` folder
+    /// (`botID` given) only the copies of this Orb's files count.
+    private static func setAsideCopies(in folder: URL, of botID: UUID? = nil) -> [URL] {
+        ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? [])
+            .filter { url in
+                let name = url.lastPathComponent
+                guard name.contains(".json.corrupt-") else { return false }
+                return botID.map { name.hasPrefix($0.uuidString) } ?? true
+            }
+    }
+
+    /// Deletes the Orb's pictures named in `names`, except those the Orb's current conversation, the rest of its archive
+    /// (routines' conversations included) or `inUse` still point to. Runs on the store's queue.
+    private func removePictures(_ names: Set<String>, of botID: UUID, unlessUsedBy inUse: Set<String>) {
+        var doomed = names.subtracting(inUse)
+        guard !doomed.isEmpty else { return }
+        let others = ([conversationURL(botID)] + Self.jsonFiles(in: archiveFolder(botID)))
+            + Self.setAsideCopies(in: archiveFolder(botID)) + Self.setAsideCopies(in: conversationURL(botID).deletingLastPathComponent(), of: botID)
+        for other in others where !doomed.isEmpty {
+            Self.gate.waitForReaders(of: other)
+            doomed.subtract(Self.pictureNames(inFileAt: other))
+        }
+        let folder = ImageStore(dataFolder: directory).folder(for: botID)
+        for name in doomed { try? FileManager.default.removeItem(at: folder.appending(path: name)) }
     }
 
     /// Everything archived for the Orb, its routines' conversations included (the Orb is being deleted).
@@ -540,6 +587,7 @@ enum Keychain {
     /// The item, or, for the app's own service, OpenBot's item of the same name (copied over on the way, so
     /// macOS asks at most once per key and only when it's needed).
     static func get(_ account: String, service: String = Keychain.service) -> String? {
+        guard DevRun.allowsKeychain(arguments: CommandLine.arguments) else { return nil }
         if let value = read(account, service: service) { return value }
         guard service == Keychain.service, LegacyMigration.shouldRun,
               let legacy = read(account, service: legacyService) else { return nil }
@@ -559,6 +607,7 @@ enum Keychain {
 
     /// Stores `value`; an empty value deletes the item.
     static func set(_ value: String, account: String, service: String = Keychain.service) {
+        guard DevRun.allowsKeychain(arguments: CommandLine.arguments) else { return }
         SecItemDelete(baseQuery(account, service: service) as CFDictionary)
         guard !value.isEmpty else { return }
         var item = baseQuery(account, service: service)
@@ -570,6 +619,7 @@ enum Keychain {
     /// Like `set`, and says whether the item is stored: a caller that is about to remove the only other copy of a
     /// secret (the data file) must know the Keychain has it.
     static func store(_ value: String, account: String, service: String = Keychain.service) -> Bool {
+        guard DevRun.allowsKeychain(arguments: CommandLine.arguments) else { return false }
         SecItemDelete(baseQuery(account, service: service) as CFDictionary)
         guard !value.isEmpty else { return true }
         var item = baseQuery(account, service: service)

@@ -44,6 +44,8 @@ private struct OrbSheetFrame<Footer: View>: ViewModifier {
     let maxHeight: CGFloat
     let footer: Footer
 
+    // On the sheet's first appearance its parts come in one after another (`sheetSection`): the heading, what it holds,
+    // the footer. The presentation itself is the system's and is left alone.
     func body(content: Content) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 3) {
@@ -61,10 +63,13 @@ private struct OrbSheetFrame<Footer: View>: ViewModifier {
             .padding(.horizontal, 20)
             .padding(.top, 18)
             .padding(.bottom, 12)
+            .sheetSection(0)
             content
                 .orbFormBackground()
                 .frame(maxHeight: .infinity, alignment: .top)
+                .sheetSection(1)
             footer
+                .sheetSection(2)
         }
         .frame(minWidth: size.width, idealWidth: size.width, maxWidth: size.width, maxHeight: maxHeight)
         .background(Palette.chrome)

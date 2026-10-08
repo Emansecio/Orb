@@ -305,7 +305,7 @@ struct MemoryUndoToast: View {
                         .buttonStyle(.link)
                         .font(.system(size: 12, weight: .semibold))
                         .focused($isFocused)
-                        .help("Desfazer (⌘Z)")
+                        .help("Desfazer (\(AppShortcut.undoForget.label))")
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
@@ -332,7 +332,7 @@ struct MemoryUndoToast: View {
                 undo.undo(in: model)
             }
         }
-        .keyboardShortcut("z", modifiers: .command)
+        .keyboardShortcut(AppShortcut.undoForget)
         .frame(width: 0, height: 0)
         .opacity(0)
         .accessibilityHidden(true)

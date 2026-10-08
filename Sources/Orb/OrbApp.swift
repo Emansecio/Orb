@@ -63,8 +63,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillFinishLaunching(_ notification: Notification) {
-        // Snapshots render in the background: no Dock icon, never takes focus.
-        if snapshot != nil { NSApp.setActivationPolicy(.accessory) }
+        // Snapshots and sheets render in the background: no Dock icon, never takes focus.
+        let renders = ["--snapshot", "--render-orbs", "--render-icon"]
+        if CommandLine.arguments.contains(where: renders.contains) { NSApp.setActivationPolicy(.accessory) }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -77,13 +78,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Dev aid: `Orb --render-orbs out.png` writes a sheet of Orbs × activities and exits.
         let arguments = CommandLine.arguments
         if let flag = arguments.firstIndex(of: "--render-orbs"), arguments.indices.contains(flag + 1) {
+            #if DEBUG || ORB_DEV_TOOLS
+            // `Orb --render-orbs bench <count> [working] [seconds]`: CPU benchmark of live orbs (see `OrbBench`).
+            if arguments[flag + 1] == "bench" {
+                NSApp.windows.forEach { $0.orderOut(nil) }
+                OrbBench.run(arguments: Array(arguments.dropFirst(flag + 2)))
+                return
+            }
+            // `Orb --render-orbs out.png cabelos`: one of the design-review sheets (`OrbDesignSheet.names`).
+            if arguments.indices.contains(flag + 2) {
+                let rendered = OrbDesignSheet.render(arguments[flag + 2], to: URL(fileURLWithPath: arguments[flag + 1]))
+                if !rendered { FileHandle.standardError.write(Data("folhas: \(OrbDesignSheet.names.joined(separator: ", "))\n".utf8)) }
+                DevRun.finish(status: rendered ? 0 : 1)
+            }
+            #else
+            // The bench and the review sheets are not in this build: say so instead of writing the activities sheet
+            // to a file called "bench" or ignoring the sheet's name.
+            if arguments[flag + 1] == "bench" || arguments.indices.contains(flag + 2) {
+                let note = "--render-orbs bench e as folhas de revisão só existem em debug ou num release feito com "
+                    + "ORB_DEV_TOOLS (swift build -c release -Xswiftc -DORB_DEV_TOOLS).\n"
+                FileHandle.standardError.write(Data(note.utf8))
+                DevRun.finish(status: 1)
+            }
+            #endif
             OrbSheet.render(to: URL(fileURLWithPath: arguments[flag + 1]))
-            exit(0)
+            DevRun.finish()
         }
         // `Orb --render-icon out.png` writes the 1024 px app icon (used by scripts/bundle.sh).
         if let flag = arguments.firstIndex(of: "--render-icon"), arguments.indices.contains(flag + 1) {
             OrbSheet.renderIcon(to: URL(fileURLWithPath: arguments[flag + 1]))
-            exit(0)
+            DevRun.finish()
         }
         // So a tap on a banner reaches the app even when that tap is what launched it.
         ApprovalNotifications.prepareAtLaunch()
@@ -267,7 +291,7 @@ enum Snapshot {
             })
         case "memory-sheet": AnyView(model.bots.first.map { MemorySheet(botID: $0.id, name: $0.name) })
         case "approvals": AnyView(model.bots.first.map { ApprovalCardsSample(bot: $0) })
-        case "new-orb": AnyView(NewBotSheet())
+        case "new-orb": AnyView(NewBotSheet(height: ProcessInfo.processInfo.environment["ORB_SNAPSHOT_HEIGHT"].flatMap(Double.init).map { CGFloat($0) }))
         case "sidebar": AnyView(SidebarView().frame(width: 280))
         case "quickask": AnyView(SystemSnapshots.quickAsk(model, approvals: false))
         case "quickask-approvals": AnyView(SystemSnapshots.quickAsk(model, approvals: true))
@@ -277,6 +301,12 @@ enum Snapshot {
         case "shortcuts": AnyView(ShortcutsSheet())
         case "menubar-icons": AnyView(SystemSnapshots.menuBarIcons())
         case "editor": AnyView(OrbEditor(config: .constant(AppState.initial.bots[0].orb), name: "Atlas", category: .temperament))
+        case let screen where screen.hasPrefix("editor-"):
+            // `editor-hair`, `editor-eyes`…: the editor on one category, with a look that has hair and a hat.
+            AnyView(OrbEditor(config: .constant(OrbConfig(color: "rosa", eyes: "ovais", mouth: "sorriso", cheeks: "blush",
+                                                          hair: "chiquinhas", accessories: ["laco"])),
+                              name: "Lia", category: OrbCategory(rawValue: String(screen.dropFirst(7))) ?? .color)
+                .frame(width: 540))
         case let name where name.hasPrefix("transcript"):
             AnyView(model.bots.first.map { TranscriptSample.view(name, model: model, bot: $0) })
         default:
@@ -301,7 +331,7 @@ enum Snapshot {
                 view.cacheDisplay(in: view.bounds, to: rep)
                 try? rep.representation(using: .png, properties: [:])?.write(to: url)
             }
-            exit(0)
+            DevRun.finish()
         }
     }
 }

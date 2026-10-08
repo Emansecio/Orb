@@ -64,7 +64,7 @@ private struct QueuedBubble: View {
                         .help("Tirar da fila e voltar ao campo de mensagem para editar")
                     if isLast, canInterrupt {
                         Button("Parar e enviar", action: interrupt)
-                            .help("Interrompe o que o Orb está fazendo e envia o que está na fila agora (⌘↩)")
+                            .help("Interrompe o que o Orb está fazendo e envia o que está na fila agora (\(AppShortcut.commandReturn.label))")
                     }
                 }
                 .buttonStyle(.link)

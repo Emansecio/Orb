@@ -92,7 +92,7 @@ struct CatalogSearchHeader: View {
             .background {
                 // ⌘F, like the search of the other pages.
                 Button("Buscar") { isFocused = true }
-                    .keyboardShortcut("f", modifiers: .command)
+                    .keyboardShortcut(AppShortcut.find)
                     .opacity(0)
                     .frame(width: 0, height: 0)
                     .accessibilityHidden(true)

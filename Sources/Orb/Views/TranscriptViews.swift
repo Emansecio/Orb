@@ -9,6 +9,9 @@ struct TranscriptRow: View, Equatable {
     /// the Orb's permissions or folder does not re-render the visible rows.
     let botID: UUID
     let orb: OrbConfig
+    /// The row just arrived in a chat that was open (the list says so). Not part of the row's identity: it is read
+    /// once, when the row is made, by the one row that does something with it (the approval card's pulse).
+    var entering = false
 
     nonisolated static func == (lhs: TranscriptRow, rhs: TranscriptRow) -> Bool {
         lhs.item == rhs.item && lhs.botID == rhs.botID && lhs.orb == rhs.orb
@@ -23,7 +26,7 @@ struct TranscriptRow: View, Equatable {
         case .tool(let call):
             ToolCallLine(call: call)
         case .approval(let request):
-            ApprovalCard(request: request, botID: botID)
+            ApprovalCard(request: request, botID: botID, pulses: entering)
         case .notice(let text):
             NoticeLine(id: item.id, text: text, botID: botID)
         }
@@ -123,6 +126,9 @@ private struct BotMessage: View {
     // whole text out). The avatar floats over the left padding; the right one is 80 and the HStack's spacing, 10.
     var body: some View {
         content
+            // The reply's text never animates: not as it streams, and not when the last flush swaps the paragraphs for
+            // the finished blocks, whatever the list around it is animating (the row's own entrance is outside this).
+            .transaction { $0.animation = nil }
             .font(Palette.conversationFont)
             .foregroundStyle(Palette.ink)
             .lineSpacing(Palette.conversationLineSpacing)
@@ -376,7 +382,7 @@ struct ToolCallLine: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button {
-                withAnimation(reduceMotion ? nil : .smooth(duration: 0.2)) { isExpanded.toggle() }
+                withAnimation(Motion.adapted(Motion.content, reduceMotion: reduceMotion)) { isExpanded.toggle() }
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: call.kind.symbol)
@@ -394,6 +400,8 @@ struct ToolCallLine: View {
                             .font(.system(size: 9, weight: .semibold))
                             .foregroundStyle(Palette.faint)
                             .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                            // No turning under Reduce Motion: the arrow points the other way at once.
+                            .animation(reduceMotion ? nil : Motion.content, value: isExpanded)
                     }
                     Spacer(minLength: 0)
                 }
@@ -401,7 +409,8 @@ struct ToolCallLine: View {
             }
             .buttonStyle(.plain)
             .disabled(call.output == nil)
-            .animateChanges(of: call.state)
+            // Running -> done or failed: the mark of the state comes in (see `stateMark`).
+            .motion(Motion.enter, value: call.state)
             .accessibilityLabel("\(call.title) \(call.detail)")
             .accessibilityValue(call.output == nil ? "" : (isExpanded ? "expandido" : "recolhido"))
             .accessibilityHint(call.output == nil ? "" : "Mostra a saída")
@@ -418,13 +427,19 @@ struct ToolCallLine: View {
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .card(radius: 10)
-                    .transition(.opacity)
+                    .transition(.adapted(.unfold, reduceMotion: reduceMotion))
             }
         }
         .padding(.leading, gutter)
         .task(id: call.state == .failed ? call.output : nil) {
             permissionProblem = call.state == .failed ? call.output.flatMap(MacPermissionProblem.detect(in:)) : nil
         }
+    }
+
+    /// The mark of a state that ended comes in small and grows to size while it appears; a failure's the same, without
+    /// shaking (the Orb shows the error). A plain fade under Reduce Motion.
+    private var markTransition: AnyTransition {
+        .adapted(.scale(scale: 0.6).combined(with: .opacity), reduceMotion: reduceMotion)
     }
 
     @ViewBuilder private var stateMark: some View {
@@ -437,12 +452,15 @@ struct ToolCallLine: View {
                     .font(.system(size: 11))
                     .monospacedDigit()
                     .foregroundStyle(Palette.faint)
+                    .contentTransition(.numericText())
+                    .transition(markTransition)
             }
         case .failed:
             Image(systemName: "exclamationmark.circle")
                 .font(.system(size: 11))
                 .foregroundStyle(Palette.danger)
                 .accessibilityLabel("Falhou")
+                .transition(markTransition)
         }
     }
 }
@@ -567,6 +585,10 @@ struct ApprovalCard: View {
     let request: ApprovalRequest
     let botID: UUID
 
+    /// The card arrived while the chat was open: its border pulses once (the list says so, see `TranscriptRow`). Decided
+    /// when the card is made and kept: the row's "entering" is not part of its identity and reads false again as soon as
+    /// the item changes (a batch that grows), which must not take the pulse away halfway.
+    @State private var pulsesOnArrival: Bool
     @State private var note = ""
     @State private var showsNote = false
     @FocusState private var noteFocused: Bool
@@ -574,7 +596,19 @@ struct ApprovalCard: View {
     @State private var isEditingNote = false
     /// An answered card shown in full.
     @State private var isOpen = false
+    /// A group's actions past the first `visibleItems`, shown once asked for.
+    @State private var showsAllItems = false
+    /// Changes once to play the pulse.
+    @State private var pulse = 0
+    /// The button a keyboard shortcut is pressing (shown for `ApprovalShortcut.pressDuration` before it answers).
+    @State private var pressed: ApprovalShortcut?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    init(request: ApprovalRequest, botID: UUID, pulses: Bool = false) {
+        self.request = request
+        self.botID = botID
+        _pulsesOnArrival = State(initialValue: pulses)
+    }
 
     /// Read from this Orb's own state (not the list of Orbs), so reordering Orbs does not redraw the card.
     private var orbName: String { model.live(botID).look.name }
@@ -585,20 +619,30 @@ struct ApprovalCard: View {
     private static let visibleItems = 8
 
     var body: some View {
-        Group {
+        // One container for the card and its record, so while one fades out and the other in they overlap instead of
+        // the list making room for both. The pending card leaves fast and the record comes in at the content pace;
+        // the card never disappears, it leaves its record.
+        ZStack(alignment: .topLeading) {
             if isPending {
-                pendingCard
+                pendingCard.transition(.adapted(Self.leaving, reduceMotion: reduceMotion))
             } else {
-                answeredCard
+                answeredCard.transition(.opacity)
             }
         }
         .padding(.leading, gutter)
         .frame(maxWidth: 560, alignment: .leading)
-        .animateChanges(of: request.decision)
+        .motion(Motion.content, value: request.decision)
+        .motion(Motion.content, value: request.items.count)
         .onChange(of: noteFocused) { isEditingNote = noteFocused }
         .background {
             if isPending { ApprovalKeyMonitor(handler: handleKey) }
         }
+        .task(id: pressed) { await answerPressed() }
+    }
+
+    /// Fades out at the exit pace, whatever the animation of the change.
+    private static var leaving: AnyTransition {
+        .asymmetric(insertion: .opacity, removal: .opacity.animation(Motion.exit))
     }
 
     // MARK: Pending
@@ -642,6 +686,12 @@ struct ApprovalCard: View {
         }
         .padding(14)
         .card(radius: 12, stroke: Palette.lineStrong)
+        .overlay {
+            if ApprovalPulse.pulses(isNew: pulsesOnArrival, reduceMotion: reduceMotion) {
+                ApprovalPulseBorder(radius: 12, trigger: pulse)
+            }
+        }
+        .onAppear { if pulsesOnArrival { pulse += 1 } }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(TranscriptSpeech.approval(botName: orbName.isEmpty ? "O Orb" : orbName, title: request.title))
     }
@@ -658,6 +708,7 @@ struct ApprovalCard: View {
             Text(request.title)
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(Palette.ink)
+                .contentTransition(.numericText())
             Spacer()
         }
         if !request.reason.isEmpty {
@@ -683,9 +734,17 @@ struct ApprovalCard: View {
         }
     }
 
+    /// What opening the rest of a long group does to the actions it reveals: each comes down from the one above, a
+    /// beat after the last (at most six are staggered; the others come with the sixth), and only fades under Reduce Motion.
+    private func revealTransition(_ index: Int) -> AnyTransition {
+        AnyTransition.adapted(.unfold, reduceMotion: reduceMotion)
+            .animation(reduceMotion ? Motion.fade : Motion.enter.delay(Motion.staggerDelay(index)))
+    }
+
     private var batchList: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(request.items.prefix(Self.visibleItems).enumerated()), id: \.offset) { _, item in
+        let shown = showsAllItems ? request.items : Array(request.items.prefix(Self.visibleItems))
+        return VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(shown.enumerated()), id: \.offset) { index, item in
                 VStack(alignment: .leading, spacing: 2) {
                     Text(item.title)
                         .font(.system(size: 12, weight: .medium))
@@ -697,11 +756,22 @@ struct ApprovalCard: View {
                             .lineLimit(2)
                     }
                 }
+                .transition(index >= Self.visibleItems ? revealTransition(index - Self.visibleItems) : .identity)
             }
-            if request.items.count > Self.visibleItems {
-                Text("e mais \(request.items.count - Self.visibleItems)")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Palette.muted)
+            if !showsAllItems, request.items.count > Self.visibleItems {
+                Button {
+                    withAnimation(Motion.adapted(Motion.content, reduceMotion: reduceMotion)) { showsAllItems = true }
+                } label: {
+                    Text("e mais \(request.items.count - Self.visibleItems)")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.muted)
+                        .contentTransition(.numericText())
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .help("Mostrar todas as ações")
+                .accessibilityHint("Mostra todas as ações")
+                .transition(.opacity)
             }
         }
         .textSelection(.enabled)
@@ -720,6 +790,9 @@ struct ApprovalCard: View {
             }
         }
         .buttonStyle(GhostStyle())
+        .background(pressed == .deny ? Palette.ghostSelected : .clear, in: .capsule)
+        .scaleEffect(pressed == .deny ? ApprovalShortcut.pressScale : 1)
+        .animation(Motion.press, value: pressed)
         .help("Não permitir (esc)")
         .accessibilityLabel("Não permitir")
         .accessibilityHint("Atalho: Esc")
@@ -733,7 +806,8 @@ struct ApprovalCard: View {
             } label: {
                 HStack(spacing: 7) {
                     Text(allowTitle)
-                    Text("⌘↩")
+                        .contentTransition(.numericText())
+                    Text(AppShortcut.commandReturn.label)
                         .font(.system(size: 11))
                         .opacity(0.55)
                 }
@@ -745,7 +819,7 @@ struct ApprovalCard: View {
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .help("\(allowTitle) (⌘↩)")
+            .help("\(allowTitle) (\(AppShortcut.commandReturn.label))")
             .accessibilityLabel(allowTitle)
             .accessibilityHint("Atalho: comando e return")
             if hasMoreOptions {
@@ -788,6 +862,9 @@ struct ApprovalCard: View {
             }
         }
         .background(Palette.ink, in: .capsule)
+        .opacity(pressed == .allow ? 0.85 : 1)
+        .scaleEffect(pressed == .allow ? ApprovalShortcut.pressScale : 1)
+        .animation(Motion.press, value: pressed)
     }
 
     // MARK: Answered
@@ -795,7 +872,7 @@ struct ApprovalCard: View {
     private var answeredCard: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button {
-                withAnimation(reduceMotion ? nil : .smooth(duration: 0.2)) { isOpen.toggle() }
+                withAnimation(Motion.adapted(Motion.content, reduceMotion: reduceMotion)) { isOpen.toggle() }
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: request.decision == .deny ? "xmark.circle" : "checkmark.circle")
@@ -808,10 +885,12 @@ struct ApprovalCard: View {
                         + Text("  \(ApprovalSummary.detail(request))").foregroundColor(Palette.faint))
                         .font(.system(size: 12))
                         .lineLimit(1)
+                        .contentTransition(.opacity)
                     Image(systemName: "chevron.right")
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(Palette.faint)
                         .rotationEffect(.degrees(isOpen ? 90 : 0))
+                        .animation(reduceMotion ? nil : Motion.content, value: isOpen)
                     Spacer(minLength: 0)
                 }
                 .contentShape(.rect)
@@ -825,7 +904,7 @@ struct ApprovalCard: View {
                 VStack(alignment: .leading, spacing: 10) { details }
                     .padding(14)
                     .card(radius: 12, stroke: Palette.line)
-                    .transition(.opacity)
+                    .transition(.adapted(.unfold, reduceMotion: reduceMotion))
             }
         }
     }
@@ -842,11 +921,35 @@ struct ApprovalCard: View {
         let field = window.firstResponder as? NSTextView
         let editing = ApprovalShortcut.isEditing(responderIsText: field != nil, hasText: field.map { !$0.string.isEmpty } ?? false,
                                                  hasMarkedText: field?.hasMarkedText() ?? false, noteFocused: isEditingNote)
-        switch ApprovalShortcut.resolve(keyCode: event.keyCode, modifiers: event.modifierFlags, isEditingText: editing) {
+        guard let shortcut = ApprovalShortcut.resolve(keyCode: event.keyCode, modifiers: event.modifierFlags,
+                                                      isEditingText: editing) else { return false }
+        press(shortcut)
+        return true
+    }
+
+    /// A shortcut shows its button pressed for a beat so the person sees what the key did, then answers. (Under
+    /// Reduce Motion nothing is pressed and the answer is immediate; a second press during the beat is ignored.)
+    private func press(_ shortcut: ApprovalShortcut) {
+        guard pressed == nil else { return }
+        if ApprovalShortcut.pressDelay(reduceMotion: reduceMotion) == .zero {
+            answer(shortcut)
+        } else {
+            pressed = shortcut
+        }
+    }
+
+    /// The beat of a pressed button, then its answer. Runs also if the card goes away during the beat: the key was pressed.
+    private func answerPressed() async {
+        guard let shortcut = pressed else { return }
+        try? await Task.sleep(for: ApprovalShortcut.pressDelay(reduceMotion: reduceMotion))
+        answer(shortcut)
+        pressed = nil
+    }
+
+    private func answer(_ shortcut: ApprovalShortcut) {
+        switch shortcut {
         case .allow: model.decide(.once, approvalID: request.id, botID: botID)
         case .deny: deny()
-        case nil: return false
         }
-        return true
     }
 }

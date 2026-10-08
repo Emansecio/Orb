@@ -32,7 +32,7 @@ struct ComposerView: View {
     private var draft: Binding<String> {
         Binding(
             get: { model.drafts[botID, default: ""] },
-            set: { model.setDraft($0, for: botID) }
+            set: { model.editDraft($0, for: botID) } // typing: the Orb watches you (the app's own changes use setDraft)
         )
     }
 
@@ -116,8 +116,7 @@ struct ComposerView: View {
         .padding(.horizontal, 12)
         .padding(.top, 12)
         .padding(.bottom, 8)
-        .card(radius: 20, stroke: isDropTargeted ? Palette.accentText : (isFocused ? Palette.lineStrong : Palette.line),
-              lineWidth: isDropTargeted ? 2 : 1)
+        .background { ComposerSurface(isFocused: isFocused, isDropTargeted: isDropTargeted, reduceMotion: reduceMotion) }
         .shadow(color: isDropTargeted ? Palette.accent.opacity(0.35) : .black.opacity(0.35), radius: 18, y: isDropTargeted ? 0 : 8)
         .overlay { if isDropTargeted { dropOverlay } }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isDropTargeted)
@@ -148,8 +147,8 @@ struct ComposerView: View {
     private func hint(_ lane: ComposerLane) -> String {
         if isQueueing, hasContent {
             return model.steersMidTurn(botID)
-                ? "↩ entra na fila e chega ao Orb no próximo passo · ⌘↩ para e envia agora"
-                : "↩ entra na fila e segue quando a resposta terminar · ⌘↩ para e envia agora"
+                ? "↩ entra na fila e chega ao Orb no próximo passo · \(AppShortcut.commandReturn.label) para e envia agora"
+                : "↩ entra na fila e segue quando a resposta terminar · \(AppShortcut.commandReturn.label) para e envia agora"
         }
         if isWorking { return "" }
         if isFocused, !hasContent, !lane.hasAttachments { return "↩ envia · \(CommandName.newLineKeys) nova linha" }
@@ -194,40 +193,47 @@ struct ComposerView: View {
         .foregroundStyle(Palette.muted)
     }
 
-    /// Send, and Stop while the Orb works. With something typed during a turn both show: Send queues it, Stop ends
-    /// the turn. Alone, Stop is the white button; next to Send it steps back.
+    /// One round button that is Send or Stop: its symbol is swapped (not the button), so the change reads as the same
+    /// control changing meaning. While the Orb works and a message is typed, Stop steps back beside it as a dark
+    /// button and the main one queues the message.
     @ViewBuilder private var actionButtons: some View {
+        let action = ComposerAction.current(isWorking: isWorking, canSend: canSend)
         HStack(spacing: 6) {
-            if isWorking {
+            if action.showsSecondaryStop {
                 Button("Parar", systemImage: "stop.fill") { model.stop(botID) }
-                    .buttonStyle(RoundActionStyle(isEnabled: true, isSecondary: canSend))
+                    .buttonStyle(RoundActionStyle(isEnabled: true, isSecondary: true))
                     .help("\(CommandName.stop) (\(AppShortcut.stop.label))")
+                    .transition(.opacity)
             }
-            if !isWorking {
-                sendButton.keyboardShortcut(.return, modifiers: .command)
-            } else if canSend {
-                sendButton.transition(.opacity) // ⌘↩ then means "stop and send" (see `shortcuts`)
-            }
+            mainButton(action)
         }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: canSend)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isWorking)
+        .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: action.showsSecondaryStop)
     }
 
-    private var sendButton: some View {
-        Button(isQueueing ? "Enviar para a fila" : "Enviar", systemImage: "arrow.up", action: send)
-            .buttonStyle(RoundActionStyle(isEnabled: canSend))
-            .disabled(!canSend)
-            .help(isQueueing ? "Colocar na fila (↩)" : "Enviar (↩)")
+    private func mainButton(_ action: ComposerAction) -> some View {
+        Button {
+            if action == .stop { model.stop(botID) } else { send() }
+        } label: {
+            Image(systemName: action.symbol)
+                .contentTransition(.symbolEffect(.replace))
+                .animation(Motion.availability(reduceMotion: reduceMotion), value: action.symbol)
+        }
+        .buttonStyle(RoundActionStyle(isEnabled: action == .stop || canSend))
+        .disabled(action != .stop && !canSend)
+        .accessibilityLabel(action.title)
+        .help(action.help)
+        // ⌘↩ sends when the Orb is free; while it works ⌘↩ means "stop and send" (see `shortcuts`).
+        .keyboardShortcut(action == .send ? AppShortcut.commandReturn : nil)
     }
 
     /// Shortcuts that belong to the composer without a visible button: ⌘↩ to stop and send, ⇧⌘M for the model list.
     private var shortcuts: some View {
         ZStack {
             Button("Parar e enviar") { model.stopAndSend(botID, draft: draft.wrappedValue) }
-                .keyboardShortcut(.return, modifiers: .command)
+                .keyboardShortcut(AppShortcut.commandReturn)
                 .disabled(!(isQueueing && canSend))
             Button("Escolher modelo") { isModelOpen.toggle() }
-                .keyboardShortcut("m", modifiers: [.command, .shift])
+                .keyboardShortcut(AppShortcut.chooseModel)
         }
         .opacity(0)
         .frame(width: 0, height: 0)
@@ -407,9 +413,12 @@ private struct AttachmentChip: View {
 }
 
 /// White circular send/stop button. Stepping back (`isSecondary`) when Send is next to it: a dark button.
+/// Enabling fades the fill (`Motion.content`); pressing scales it to 0.92 (`Motion.press`). Reduce Motion: the
+/// state changes at once and a press dims instead of shrinking.
 private struct RoundActionStyle: ButtonStyle {
     let isEnabled: Bool
     var isSecondary = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -418,9 +427,79 @@ private struct RoundActionStyle: ButtonStyle {
             .foregroundStyle(isSecondary ? Palette.ink : Palette.onInk)
             .frame(width: 28, height: 28)
             .background(isSecondary ? Palette.raised : Palette.ink.opacity(isEnabled ? 1 : 0.25), in: .circle)
+            .animation(Motion.availability(reduceMotion: reduceMotion), value: isEnabled)
             .overlay { if isSecondary { Circle().strokeBorder(Palette.lineStrong) } }
-            .scaleEffect(configuration.isPressed ? 0.92 : 1)
-            .animation(.snappy(duration: 0.15), value: configuration.isPressed)
+            .scaleEffect(ComposerAction.pressVisual(pressed: configuration.isPressed, reduceMotion: reduceMotion).scale)
+            .opacity(ComposerAction.pressVisual(pressed: configuration.isPressed, reduceMotion: reduceMotion).opacity)
+            .animation(reduceMotion ? nil : Motion.press, value: configuration.isPressed)
+    }
+}
+
+/// What the composer's round button does right now. Pure, so the tests can read it.
+enum ComposerAction: Equatable {
+    /// The Orb is free: send (⌘↩ also sends).
+    case send
+    /// The Orb works on your chat and something is typed: the message waits its turn.
+    case queue
+    /// The Orb works and nothing is typed (or the turn is a routine, which only stops): stop.
+    case stop
+
+    static let pressedScale: CGFloat = 0.92
+
+    /// What a press does to the button: it shrinks to `pressedScale`; under Reduce Motion it only dims.
+    static func pressVisual(pressed: Bool, reduceMotion: Bool) -> (scale: CGFloat, opacity: Double) {
+        guard pressed else { return (1, 1) }
+        return reduceMotion ? (1, 0.8) : (pressedScale, 1)
+    }
+
+    static func current(isWorking: Bool, canSend: Bool) -> ComposerAction {
+        if !isWorking { return .send }
+        return canSend ? .queue : .stop
+    }
+
+    var symbol: String { self == .stop ? "stop.fill" : "arrow.up" }
+
+    /// The button's name for VoiceOver.
+    var title: String {
+        switch self {
+        case .send: "Enviar"
+        case .queue: "Enviar para a fila"
+        case .stop: "Parar"
+        }
+    }
+
+    var help: String {
+        switch self {
+        case .send: "Enviar (↩)"
+        case .queue: "Colocar na fila (↩)"
+        case .stop: "\(CommandName.stop) (\(AppShortcut.stop.label))"
+        }
+    }
+
+    /// Stop keeps its own (dark) button next to the queueing one, so a turn can still be ended with a message typed.
+    var showsSecondaryStop: Bool { self == .queue }
+}
+
+/// The card around the message field: its border and background answer the focus like a hover does (in 0.10 s, out
+/// 0.22 s), the background 2 % lighter and the border `lineStrong`. No glow: the Orb is the color on screen.
+struct ComposerSurface: View {
+    let isFocused: Bool
+    let isDropTargeted: Bool
+    let reduceMotion: Bool
+
+    /// The card's fill: `surface`, 2 % lighter while the field has the focus.
+    static func fill(isFocused: Bool) -> Color { isFocused ? Palette.surfaceFocused : Palette.surface }
+
+    static func stroke(isFocused: Bool, isDropTargeted: Bool) -> Color {
+        isDropTargeted ? Palette.accentText : (isFocused ? Palette.lineStrong : Palette.line)
+    }
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 20)
+        shape.fill(Self.fill(isFocused: isFocused))
+            .overlay { shape.strokeBorder(Self.stroke(isFocused: isFocused, isDropTargeted: isDropTargeted), lineWidth: isDropTargeted ? 2 : 1) }
+            // On the surface only: the field, its chips and its height never animate with the focus.
+            .animation(Motion.focus(isFocused, reduceMotion: reduceMotion), value: isFocused)
     }
 }
 
@@ -432,7 +511,8 @@ private struct IconGhostStyle: ButtonStyle {
         configuration.label
             .font(.system(size: 13))
             .frame(width: 28, height: 28)
-            .background(configuration.isPressed || isHovering ? Palette.ghostSelected : .clear, in: .circle)
+            .hoverFill(configuration.isPressed || isHovering, pressed: configuration.isPressed, in: .circle,
+                       color: Palette.ghostSelected)
             .contentShape(.circle)
             .onHover { isHovering = $0 }
     }

@@ -121,6 +121,12 @@ final class OrbTranscript {
     private(set) var items: [TranscriptItem]
     /// Counts the changes of `items`, for a list that has to follow them.
     private(set) var revision = 0
+    /// Counts the times the whole chat was replaced by another conversation (a new one, one reopened): the chat cross-fades
+    /// then, whatever the length of what it shows, instead of guessing from the shape of the list.
+    private(set) var swaps = 0
+
+    /// The chat is now another conversation (call before `show`).
+    func swapped() { swaps &+= 1 }
 
     init(items: [TranscriptItem] = []) {
         self.items = items

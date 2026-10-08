@@ -1,8 +1,8 @@
 import SwiftUI
 
 // Review snapshots of the composer and the chat while an Orb works (`Orb --snapshot <mode> out.png`, see
-// `Snapshot.render`). They fill the model with made-up data in the temporary data folder the caller points
-// `ORB_DATA_DIR` to; nothing here is used by the app itself.
+// `Snapshot.render`). They fill the model with made-up data in a fresh temporary data folder (or in the
+// one `ORB_DATA_DIR` names; `DevRun` never lets them reach the user's own); nothing here is used by the app itself.
 
 extension Snapshot {
     /// The scene named `screen`, or nil when it is not one of these.

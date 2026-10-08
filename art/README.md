@@ -1,7 +1,24 @@
 # Orbs: personagens 3D do app Orb
 
-Esferas de gel translúcido, modeladas e renderizadas no **Blender (Cycles)** por script.
-O visual foi calibrado lado a lado com `reference/orb-ref.png`.
+Esferas de gel translúcido com luz de objeto 3D macio. A arte das camadas vem de duas ferramentas:
+
+- **`orbgen/`** (Swift, CPU, reproduzível): o **corpo** iluminado de cada cor, os **cabelos** (campos de
+  distância, com camada `-brilho` sem tinta e versão `-chapeu`), o **assentamento** dos traços planos (sombra de
+  contato) e as entradas de `options.json` que são dele. Não precisa de Blender.
+- **Blender (Cycles)** por script (`orbs.py`): os **traços planos** (olhos, bocas, sobrancelhas, bochechas,
+  bigodes, visemas, acessórios), gravados em `orbgen/flat/`.
+
+O visual do gel foi calibrado lado a lado com `reference/orb-ref.png`.
+
+```bash
+G="swift run -c release --package-path art/orbgen orbgen"
+$G all                                  # tudo que é do orbgen -> Sources/Orb/Resources/Orbs (~2 min)
+$G hair franja && $G zoom /tmp/z.png rosa franja   # um cabelo e um close para conferir
+```
+
+Detalhes, luz e como adicionar opções: `docs/ORBS.md`, seção 8.
+
+## Blender (traços planos e prévias)
 
 ```bash
 B=/caminho/para/Blender.app/Contents/MacOS/Blender
@@ -14,7 +31,10 @@ $B -b --python art/orbs.py -- render --name meu-orb \
 $B -b --python art/orbs.py -- catalog [--category eyes]
 $B -b --python art/orbs.py -- personas
 
-# Manifesto com ids e rótulos para o editor do app
+# Traços planos para o orbgen assentar (corpo e cabelo são do orbgen e ficam de fora)
+$B -b --python art/orbs.py -- layers [--category eyes]   # -> art/orbgen/flat (+ options.json do app)
+
+# Manifesto com ids e rótulos para o editor do app (mantém cabelo, chapéus e cores de cabelo do orbgen)
 $B -b --python art/orbs.py -- manifest      # -> art/orb_options.json
 ```
 
@@ -30,7 +50,7 @@ Cada render gera um PNG transparente (para o app) e as prévias `-dark` e `-ligh
 | Sobrancelhas (`brows`) | 5 | Nenhuma, Retas, Arqueadas, Bravas, Preocupadas |
 | Bochechas (`cheeks`) | 4 | Nenhuma, Blush, Sardas, Coraçõezinhos |
 | Bigode (`mustache`) | 6 | Nenhum, Clássico, Enrolado, Fino, Escovinha, Cavanhaque |
-| Cabelo (`hair`) | 8 | Nenhum, Topete, Tufinho, Franja, Cachinhos, Coque, Moicano, Antena |
+| Cabelo (`hair`, orbgen) | 13 | Nenhum, Franja, Ondulado, Cachinhos, Black power, Coque, Rabo de cavalo, Maria-chiquinha, Topete, Espetado, Moicano, Tufinho, Antena |
 | Acessórios (`accessories`, vários) | 15 | Óculos redondos / quadrados / de sol, Monóculo, Chapéu de festa, Boné, Gorro, Cartola, Coroa, Laço, Fones, Auréola, Chifrinhos, Orelhas de gato, Flor |
 
 Cores extras opcionais: `feature_color` (olhos e boca), `mustache_color`, `hair_color` e `accent_color` (boné, gorro, laço, fones, chifres, flor).
@@ -55,4 +75,8 @@ $B -b --python art/orbs.py -- render --config '{"color": "rosa", "viseme": "fala
 ## Estrutura
 - `orbkit/core.py`: cena, luz, material de gel, materiais (plástico, metal, tricô, vidro, listrado) e geometria (projeção na superfície, cápsulas, tubos, formas 2D).
 - `orbkit/features.py`: o catálogo. Cada opção é um `(id, rótulo, construtor)`; para adicionar uma, basta incluí-la na lista.
-- `orbs.py`: linha de comando (render, catalog, personas, manifest).
+- `orbs.py`: linha de comando (render, catalog, personas, layers, manifest).
+- `orbgen/`: pacote Swift do orbgen (`Body.swift` corpo e luz, `Hair.swift` estilos, `HairRenderer.swift` marcha de
+  raios e sombreamento, `SDF.swift` primitivas, `Decals.swift` sombra de contato dos traços, `Manifest.swift`
+  options.json, `Preview.swift` folhas rápidas) e `flat/` (traços planos do Blender).
+- O cabelo de `orbkit/features.py` só aparece nas prévias do Blender; o do app é o do orbgen.

@@ -13,6 +13,8 @@ struct AnimatedOrb: NSViewRepresentable {
     let size: CGFloat
     let followsPointer: Bool
     let poke: Int
+    /// Changing this value makes the orb blink and glance toward the chat (it was selected).
+    var glance = 0
     let interactive: Bool
     /// false: the orb eases into its resting pose and stops producing frames (inactive window, idle sidebar row).
     let live: Bool
@@ -20,6 +22,7 @@ struct AnimatedOrb: NSViewRepresentable {
     func makeNSView(context: Context) -> OrbAnimationView {
         let view = OrbAnimationView()
         view.lastPoke = poke
+        view.lastGlance = glance
         update(view)
         return view
     }
@@ -33,6 +36,10 @@ struct AnimatedOrb: NSViewRepresentable {
         if view.lastPoke != poke {
             view.lastPoke = poke
             view.pokeNow()
+        }
+        if view.lastGlance != glance {
+            view.lastGlance = glance
+            view.glanceNow()
         }
     }
 
@@ -60,6 +67,7 @@ final class OrbAnimationView: NSView {
     private var interactive = false
     private var live = true
     var lastPoke = 0
+    var lastGlance = 0
 
     /// A composited image layer and what `apply` needs to place it (computed once, not per frame).
     private struct Placed {
@@ -98,18 +106,28 @@ final class OrbAnimationView: NSView {
     /// Whether the shared clock should step this orb (visible, in view, and not yet settled at rest).
     private(set) var isRunning = false
     private var clock = OrbFrameClock()
-    private var steps = 0
+    /// Frames drawn so far (read by the bench, `OrbBench`).
+    private(set) var steps = 0
     private weak var clipView: NSClipView?
     private var outOfViewTimer: Timer?
     /// For tests: the timer that waits for the orb to come back into view, and the layers on screen.
     var isWatchingForReturn: Bool { outOfViewTimer != nil }
     var placedLayerCount: Int { placed.count }
+    /// For tests: a selection glance is playing.
+    var isGlancing: Bool { glanceStart != nil }
+    /// For tests: the placed layers, back to front, with what they show.
+    var placedLayersForTesting: [(layer: OrbLayer, view: CALayer)] { placed.map { ($0.layer, $0.view) } }
     private var rng = SystemRandomNumberGenerator()
     private let phase = Double.random(in: 0..<10)
     private var lastTime: Double?
     private var head = SpringPoint()     // turns the whole face, unhurried
     private var eyes = SpringPoint()     // quick saccades, leading the head
     private var loose = SpringPoint()    // hair and hats trailing the head and body
+    private var swing = Spring()         // hair and hats swinging behind the body's tilt
+    /// The swing the loose layers were last rotated to (infinity: not yet, e.g. new layers).
+    private var appliedSwing = Double.infinity
+    /// Layers were just (re)built: everything is placed once, even what never moves (the body).
+    private var freshLayers = true
     private var hover = Spring()
     private var wobble = Spring()        // jelly squash after landings and expression changes
     private var bubbleIn = Spring()
@@ -129,9 +147,12 @@ final class OrbAnimationView: NSView {
     private var shown: OrbActivity = .idle
     private var previous: OrbActivity = .idle
     private var transitionStart = -Double.infinity
+    /// When `previous` started (one-shot reactions like `happy` keep their timing while they fade out).
+    private var previousStart = -Double.infinity
     private static let transition = 0.35
     private var hoverPoint: CGPoint?
     private var pokeStart: Double?
+    private var glanceStart: Double?
     private var tickleUntil = 0.0
     private var trackingArea: NSTrackingArea?
 
@@ -218,7 +239,7 @@ final class OrbAnimationView: NSView {
     /// Hands the temperament's rhythm to the motion helpers; `showcase` plays its signature flourish.
     private func applyTemperament(showcase: Bool) {
         traits = config.temperament.traits
-        blinker.gap = traits.blinkGap
+        blinker.gap = shown.blinkGap(traits.blinkGap)
         blinker.doubleChance = traits.doubleBlink
         saccades.reach = traits.saccadeReach
         saccades.hold = traits.saccadeHold
@@ -235,11 +256,21 @@ final class OrbAnimationView: NSView {
         liven(at: now)
     }
 
+    /// A blink and a quick look toward the chat (`OrbGlance`), over whatever the orb is doing.
+    func glanceNow() {
+        guard live, window != nil else { return }
+        glanceStart = now
+        liven(at: now)
+    }
+
     /// Starts a smooth transition when the activity on screen changes: body motion, gaze and glow blend over
-    /// `transition` seconds, the expression crossfades behind a blink and the body gives a small wobble.
+    /// `transition` seconds, the expression crossfades behind a blink and the body gives a small wobble. Between
+    /// activities with the same face (idle, attentive, listening) only motion and gaze blend: no blink (except one as
+    /// the Orb starts watching you type), no wobble and nothing to rebuild, so typing bursts never twitch.
     private func syncActivity(at time: Double) {
         let target = time < tickleUntil ? OrbActivity.happy : activity
         guard target != shown else { return }
+        let sameFace = target.hasSameFace(as: shown, mouth: config.mouth)
         if window == nil {
             // Not on screen yet: start in the right state instead of animating into it.
             shown = target
@@ -248,15 +279,17 @@ final class OrbAnimationView: NSView {
         } else {
             previous = shown
             shown = target
+            previousStart = transitionStart
             transitionStart = time
             // At rest nothing moves, so a kick would pile up and burst out on resume.
             if !isResting {
-                blinker.trigger(at: time)
-                wobble.velocity += 0.5
+                if !sameFace || target == .attentive { blinker.trigger(at: time) }
+                if !sameFace { wobble.velocity += 0.5 }
             }
-            liven(at: time)
+            if !sameFace { liven(at: time) }
         }
-        rebuild()
+        blinker.gap = shown.blinkGap(traits.blinkGap)
+        if !sameFace { rebuild() }
     }
 
     /// Builds the layer tree for the current config, activity and size. Only on screen: bitmaps depend on the
@@ -333,6 +366,7 @@ final class OrbAnimationView: NSView {
                 view.magnificationFilter = .linear
                 view.bounds = CGRect(x: 0, y: 0, width: side, height: side)
                 if item.kind == .eyes { view.anchorPoint = CGPoint(x: 0.5, y: 1 - OrbGeometry.eyeLine) }
+                if item.isLoose { view.anchorPoint = CGPoint(x: 0.5, y: 1 - OrbGeometry.crownLine) }
                 if item.kind == .mouth {
                     view.anchorPoint = CGPoint(x: 0.5, y: 1 - OrbGeometry.mouthLine)
                     mouthImage = image
@@ -341,6 +375,8 @@ final class OrbAnimationView: NSView {
                 return Placed(layer: item, view: view, isLoose: item.isLoose)
             }
             orb.sublayers = placed.map(\.view)
+            appliedSwing = .infinity   // new loose layers start unrotated
+            freshLayers = true
         }
 
         if let text = shown.bubble, size >= 26, text != shownBubble {
@@ -536,7 +572,11 @@ final class OrbAnimationView: NSView {
         settle.step(toward: live ? 0 : 1, dt: dt, response: 0.45)
         let resting = isResting
         let rest = restPose
-        let pose = resting ? rest : OrbPose.mix(self.pose(at: time, dt: dt), rest, min(1, max(0, settle.value)))
+        var pose = resting ? rest : OrbPose.mix(self.pose(at: time, dt: dt), rest, min(1, max(0, settle.value)))
+        // Over the settling, so an orb selected while resting glances at full strength as it wakes up.
+        if let start = glanceStart {
+            if resting || time - start >= OrbGlance.total { glanceStart = nil } else { OrbGlance.apply(to: &pose, elapsed: time - start) }
+        }
         var moved = pose
         moved.blink = lastPose.blink    // blinks are paced as short bursts, not as motion
         moved.viseme = lastPose.viseme  // so are mouth shapes and their jaw tween (speaking keeps a floor rate)
@@ -557,8 +597,8 @@ final class OrbAnimationView: NSView {
     /// The rate the motion needs: raised as soon as it speeds up, lowered only after it stayed slow for a bit.
     /// Blinks and events get the full rate only while they last.
     private func pace(speed: Double, at time: Double) {
-        let lively = time < livelyUntil || hoverPoint != nil || pokeStart != nil || flourishes.current != nil
-            || time - transitionStart < Self.transition
+        let lively = time < livelyUntil || hoverPoint != nil || pokeStart != nil || glanceStart != nil
+            || flourishes.current != nil || time - transitionStart < Self.transition
         let cap = OrbFrameRate.cap(forSize: size, lively: lively)
         let wanted = OrbFrameRate.rate(forSpeed: speed, cap: cap)
         if wanted >= motionRate {
@@ -568,8 +608,9 @@ final class OrbAnimationView: NSView {
             motionRate = wanted
         }
         let blending = time - transitionStart < Self.transition
-        var floor = max(shown.minFrameRate, blending ? previous.minFrameRate : 0)
-        if blinker.isBlinking || blinker.nextBlink - time < 0.1 { floor = max(floor, 30) }
+        var floor = max(shown.minFrameRate(elapsed: time - transitionStart),
+                        blending ? previous.minFrameRate(elapsed: time - previousStart) : 0)
+        if blinker.isBlinking || blinker.nextBlink - time < 0.1 || glanceStart != nil { floor = max(floor, 30) }
         if let flourish = flourishes.current { floor = max(floor, flourish.minFrameRate) }
         if time < livelyUntil { floor = maxFrameRate }
         setFrameRate(min(cap, max(floor, motionRate)))
@@ -609,7 +650,8 @@ final class OrbAnimationView: NSView {
         let springs = traits.springResponse
         var pose = OrbPose()
 
-        let motion = OrbBodyMotion.mix(previous.motion(at: body, traits: traits), shown.motion(at: body, traits: traits), blend)
+        let motion = OrbBodyMotion.mix(previous.motion(at: body, elapsed: time - previousStart, traits: traits),
+                                       shown.motion(at: body, elapsed: time - transitionStart, traits: traits), blend)
         pose.lift = motion.lift
         pose.squash = motion.squash
         pose.tilt = motion.tilt
@@ -640,6 +682,8 @@ final class OrbAnimationView: NSView {
         pose.lift += flourish.lift * traits.jump
         pose.squash += flourish.squash
         pose.tilt += flourish.tilt
+        // A click during a hop or Feliz's hops would add up past the stage's headroom.
+        OrbStageRoom.limit(&pose)
 
         // Gaze: the activity's pattern plus idle saccades, blended across activity changes, then the pointer
         // and any flourish. Wide glances sometimes come with a blink, as people's do.
@@ -656,7 +700,7 @@ final class OrbAnimationView: NSView {
         let pointer = pointerGaze(target, weight: OrbMath.mix(from.pointerWeight, to.pointerWeight, blend), at: time)
         target = OrbMath.mix(pointer.look, flourish.look, flourish.lookWeight)
         eyes.step(toward: target, dt: dt, response: 0.07 * springs)
-        head.step(toward: target, dt: dt, response: 0.4 * springs, damping: 0.9)
+        head.step(toward: target, dt: dt, response: OrbSprings.head.response * springs, damping: OrbSprings.head.damping)
         pose.look = head.value
         pose.eyeLead = CGPoint(x: (eyes.value.x - head.value.x) * 0.035, y: (eyes.value.y - head.value.y) * 0.035)
         lean.step(toward: pointer.lean, dt: dt, response: 0.5 * springs, damping: 0.8)
@@ -664,9 +708,12 @@ final class OrbAnimationView: NSView {
 
         // Hair and hats trail the head turn and the body's bounce, with a little overshoot.
         let anchor = CGPoint(x: pose.look.x * 0.05, y: pose.look.y * 0.05 + pose.lift)
-        loose.step(toward: anchor, dt: dt, response: 0.28, damping: 0.4)
-        pose.hairLag = CGPoint(x: max(-0.02, min(0.02, loose.value.x - anchor.x)),
-                               y: max(-0.02, min(0.02, loose.value.y - anchor.y)))
+        loose.step(toward: anchor, dt: dt, response: OrbSprings.loose.response, damping: OrbSprings.loose.damping)
+        let lag = OrbSprings.maxLag
+        pose.hairLag = CGPoint(x: max(-lag, min(lag, loose.value.x - anchor.x)), y: max(-lag, min(lag, loose.value.y - anchor.y)))
+        // ...and swing behind the body's tilt, overshooting a little as it settles.
+        swing.step(toward: pose.tilt, dt: dt, response: OrbSprings.swing.response, damping: OrbSprings.swing.damping)
+        pose.hairSwing = max(-OrbSprings.maxSwing, min(OrbSprings.maxSwing, swing.value - pose.tilt))
 
         hover.step(toward: hoverPoint == nil ? 0 : 1, dt: dt, response: 0.35 * springs, damping: 0.6)
         pose.hover = hover.value * (1 + 0.75 * traits.lean)
@@ -753,6 +800,12 @@ final class OrbAnimationView: NSView {
 
         // Mouthless orbs show talking with a rhythmic squint instead.
         let eyeTalk = config.mouth == "nenhuma" ? max(0, pose.talk) * traits.mouthOpening : 0
+        // Loose layers are only rotated again when their swing moved their outer edge (about half the image away
+        // from the center) by a quarter of a device pixel or more: most frames it doesn't.
+        let swingStep = 0.25 / (0.5 * side * backingScale) * 180 / .pi
+        let swingTransform: CATransform3D? = abs(pose.hairSwing - appliedSwing) >= swingStep
+            ? CATransform3DMakeRotation(-pose.hairSwing * .pi / 180, 0, 0, 1) : nil
+        if swingTransform != nil { appliedSwing = pose.hairSwing }
         for item in placed {
             let depth = item.layer.depth, view = item.view
             var dx = pose.look.x * depth, dy = pose.look.y * depth
@@ -770,9 +823,17 @@ final class OrbAnimationView: NSView {
                 let stretch = 1 + 0.25 * traits.mouthOpening * (pose.talk - (pose.viseme?.opening ?? 0))
                 view.transform = CATransform3DMakeScale(1, min(1.5, max(0.6, stretch)), 1)
             default:
-                view.position = CGPoint(x: mid + dx * size, y: mid + dy * size)
+                if item.isLoose {
+                    // Hung from the top of the head (their anchor), so they swing like hair, not like a seesaw.
+                    view.position = CGPoint(x: mid + dx * size, y: side * (1 - OrbGeometry.crownLine) + dy * size)
+                    if let swingTransform { view.transform = swingTransform }
+                } else if depth != 0 || freshLayers {
+                    // The body (depth 0) never moves inside the orb: placed once, not every frame.
+                    view.position = CGPoint(x: mid + dx * size, y: mid + dy * size)
+                }
             }
         }
+        freshLayers = false
 
         bubble.isHidden = shownBubble == nil || pose.bubbleOpacity < 0.01
         if !bubble.isHidden {

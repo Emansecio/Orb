@@ -280,9 +280,9 @@ struct ContextPopover: View {
                 Spacer(minLength: 8)
                 Button("Compactar agora", action: run)
                     .buttonStyle(PrimaryPillStyle())
-                    .keyboardShortcut(.return, modifiers: .command)
+                    .keyboardShortcut(AppShortcut.commandReturn)
                     .disabled(!canRun)
-                    .help("Compactar agora (⌘↩)")
+                    .help("Compactar agora (\(AppShortcut.commandReturn.label))")
             }
             if let shownResult { resultView(shownResult) }
         }

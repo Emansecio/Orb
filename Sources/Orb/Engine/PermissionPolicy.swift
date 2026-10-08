@@ -363,7 +363,9 @@ enum PermissionPolicy {
         }
         func risk(_ name: String) -> ToolRisk {
             switch name {
-            case "Read", "LS", "Glob", "Grep", "NotebookRead", "BashOutput":
+            // Like the native `job_output` / `job_stop`: they only reach background shells this Orb's own turn started
+            // (TaskStop and TaskOutput are what the newer CLI calls KillShell/KillBash and BashOutput).
+            case "Read", "LS", "Glob", "Grep", "NotebookRead", "BashOutput", "TaskOutput", "KillShell", "KillBash", "TaskStop":
                 .safe
             default:
                 .sensitive
@@ -378,7 +380,7 @@ enum PermissionPolicy {
                 call.command = ShellCommandLine.parse(text)
                 call.danger = DangerousCommand.reason(for: text, in: scope, home: home)
             }
-        case "BashOutput", "KillShell", "KillBash":
+        case "BashOutput", "TaskOutput", "KillShell", "KillBash", "TaskStop":
             call.family = .jobs
         case "Write", "Edit", "MultiEdit", "NotebookEdit":
             call.family = .writeFiles
@@ -557,7 +559,7 @@ enum PermissionPolicy {
         case "shortcuts_run", "clipboard_write", "app_quit": return PermissionRule(family: .macApps)
         case "ui_act": return PermissionRule(family: .appInterface)
         case "remember": return PermissionRule(family: .memory)
-        case "job_stop", "KillShell", "KillBash": return PermissionRule(family: .jobs)
+        case "job_stop", "KillShell", "KillBash", "TaskStop": return PermissionRule(family: .jobs)
         default: break
         }
         // A connector tool: `server__tool` (native) or `mcp__server__tool` (Claude Code).

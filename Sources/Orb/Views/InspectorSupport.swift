@@ -47,14 +47,7 @@ enum InspectorTabMemory {
 
 /// How the panel talks about what the Orb may use: a name and one line each.
 enum CapabilityCopy {
-    static func title(_ capability: Capability) -> String {
-        switch capability {
-        case .terminal: "Terminal e arquivos"
-        case .browser: "Navegar na web"
-        case .computerUse: "Controlar apps do Mac"
-        case .connectors: "Conectores"
-        }
-    }
+    static func title(_ capability: Capability) -> String { capability.label }
 
     static func subtitle(_ capability: Capability) -> String {
         switch capability {

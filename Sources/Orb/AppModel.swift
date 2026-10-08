@@ -76,6 +76,7 @@ final class AppModel {
                 beginLoading(id)
                 session(id).lastUsed = .now
                 setUnread(0, for: id)
+                if selection != oldValue { liveBot(id)?.glanced() } // its sidebar Orb glances toward the chat
             }
         }
     }
@@ -131,7 +132,7 @@ final class AppModel {
     /// `runsBackgroundWork` unless given.
     init(store: Store = .standard, runsBackgroundWork: Bool = true, asyncLoading: Bool? = nil, secretVault: (any SecretVault)? = nil) {
         self.store = store
-        let secrets = ConnectorSecrets(vault: secretVault ?? (runsBackgroundWork ? KeychainVault() : MemoryVault()))
+        let secrets = ConnectorSecrets(vault: secretVault ?? (runsBackgroundWork && !DevRun.isActive ? KeychainVault() : MemoryVault()))
         connectorSecrets = secrets
         images = ImageStore(dataFolder: store.directory)
         let gate = ApprovalGate()
@@ -408,9 +409,19 @@ final class AppModel {
     }
 
     /// The draft in the composer, kept per Orb. Writing what is already there does nothing (no draft counts as "").
+    /// An emptied draft (sent, cleared) also ends the Orb's watching you type; other changes made by the app (a
+    /// queued message given back, a skill inserted) do not start it.
     func setDraft(_ text: String, for botID: UUID) {
+        if text.isEmpty { liveBot(botID)?.stopComposing() }
         guard drafts[botID, default: ""] != text else { return }
         drafts[botID] = text
+    }
+
+    /// You changed the draft in the composer (typing, completing a `/skill`, dropping a file's name in): it is kept,
+    /// and the Orb watches you type until you pause (see `BotLive.noteComposing`).
+    func editDraft(_ text: String, for botID: UUID) {
+        setDraft(text, for: botID)
+        liveBot(botID)?.noteComposing(draftIsEmpty: text.isEmpty)
     }
 
     // MARK: Providers
@@ -640,6 +651,7 @@ final class AppModel {
     func deleteBot(_ botID: UUID, keepMemory: Bool = false) {
         let name = bot(botID)?.name ?? "Orb"
         let session = session(botID)
+        liveBot(botID)?.stopComposing() // its watcher task ends with it
         session.memoryRequest = nil
         session.lastCompaction = nil
         session.compactedInTurn = false
@@ -717,10 +729,21 @@ final class AppModel {
         return true
     }
 
-    /// Permanently deletes an archived conversation.
+    /// Permanently deletes an archived conversation, and the pictures (`anexos/`) only it pointed to.
     func deleteArchivedConversation(_ id: UUID, of botID: UUID) {
-        store.deleteArchived(id, for: botID)
+        store.deleteArchived(id, for: botID, removingPicturesUnlessUsedBy: pictureNamesInUse(by: botID))
         archives[botID]?.removeAll { $0.id == id }
+    }
+
+    /// The file names of the pictures this Orb's live state points to: the open conversation (the store reads the saved
+    /// one too), the pictures attached to the message box and the ones in queued messages.
+    func pictureNamesInUse(by botID: UUID) -> Set<String> {
+        guard let session = sessions[botID] else { return [] }
+        var pictures = (session.conversation?.messages ?? []).flatMap(\.images)
+        if let lane = session.lane {
+            pictures += lane.pictures + lane.queued.flatMap(\.pictures)
+        }
+        return Set(pictures.map { URL(fileURLWithPath: $0.path).lastPathComponent })
     }
 
     /// Reads the Orb's archive (the conversations menu does this when it opens).

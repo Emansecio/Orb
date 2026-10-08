@@ -23,6 +23,19 @@ enum ApprovalShortcut: Equatable {
         }
     }
 
+    // MARK: Feedback
+
+    /// How long the button a shortcut stands for shows pressed before the card is answered: the beat of `Motion.press`,
+    /// so the person sees what the key did (docs/MOVIMENTO.md §2.4).
+    static let pressDuration = Duration.milliseconds(120)
+    /// The scale of a pressed button.
+    static let pressScale: CGFloat = 0.97
+
+    /// The wait between the key and the answer: none under Reduce Motion, where nothing is shown pressed.
+    static func pressDelay(reduceMotion: Bool) -> Duration {
+        reduceMotion ? .zero : pressDuration
+    }
+
     /// Whether a text field is being edited. The composer is focused by default, so an empty field does not count:
     /// something typed, text being composed, or the card's own note field does.
     static func isEditing(responderIsText: Bool, hasText: Bool, hasMarkedText: Bool, noteFocused: Bool) -> Bool {

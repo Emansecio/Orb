@@ -125,7 +125,7 @@ struct CapabilityPromptTests {
             let text = PromptParts.permissions(bot([.terminal, .browser]), engine: engine)
             #expect(!text.contains("administrator privileges") && !text.contains("trash tool") && !text.contains("Finder via osascript"))
             #expect(!text.contains("Gravação de Tela"))
-            #expect(text.contains("sudo") && text.contains("Apps do Mac (AppleScript)"))
+            #expect(text.contains("sudo") && text.contains("Controlar apps do Mac"))
         }
         let on = PromptParts.permissions(bot(), engine: .native)
         #expect(on.contains("administrator privileges") && on.contains("trash tool") && on.contains("Gravação de Tela"))

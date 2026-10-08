@@ -92,21 +92,6 @@ struct SettingsView: View {
 
 // MARK: - Geral
 
-/// One line of the shortcuts list.
-struct SettingsShortcut: Identifiable {
-    var keys: String
-    var action: String
-    var id: String { keys }
-
-    static let all = [
-        SettingsShortcut(keys: "⌘N", action: "Novo Orb"),
-        SettingsShortcut(keys: "⇧⌘N", action: "Nova conversa"),
-        SettingsShortcut(keys: "⌥⌘B", action: "Mostrar ou ocultar o painel do Orb"),
-        SettingsShortcut(keys: "⌥↑  ⌥↓", action: "Ir para o Orb anterior ou o próximo"),
-        SettingsShortcut(keys: "⌘1 – ⌘9", action: "Ir direto para um Orb"),
-    ]
-}
-
 struct GeneralSettings: View {
     @Environment(AppModel.self) private var model
     @State private var learnedWindows: [LearnedWindowRow] = []
@@ -159,11 +144,16 @@ struct GeneralSettings: View {
                         if wanted && !works { GlobalHotKey.showUnavailableAlert() }
                     }
                 ))
-                ForEach(SettingsShortcut.all) { shortcut in
-                    LabeledContent(shortcut.action) {
-                        Text(shortcut.keys)
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(Palette.muted)
+            }
+            // The whole list, from the same catalog as the "Atalhos do teclado" sheet (Ajuda → Atalhos do teclado).
+            ForEach(ShortcutCatalog.groups) { group in
+                Section("Atalhos · \(group.title)") {
+                    ForEach(group.items) { item in
+                        LabeledContent(item.title) {
+                            Text(item.keys)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(Palette.muted)
+                        }
                     }
                 }
             }

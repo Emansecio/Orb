@@ -93,27 +93,27 @@ enum PaletteBuilder {
         if current != nil {
             let suffix = name.map { " de \($0)" } ?? ""
             list.append(PaletteEntry(id: "new-conversation", title: CommandName.newConversation, subtitle: name, symbol: "square.and.pencil",
-                                     section: .actions, shortcut: AppShortcut.newConversation.label, action: .newConversation, keywords: "limpar começar"))
+                                     section: .actions, shortcut: ShortcutCatalog.keys(for: .newConversation), action: .newConversation, keywords: "limpar começar"))
             list.append(PaletteEntry(id: "focus", title: CommandName.writeMessage, subtitle: name, symbol: "text.cursor",
-                                     section: .actions, shortcut: AppShortcut.writeMessage.label, action: .focusComposer, keywords: "compositor campo focar digitar"))
+                                     section: .actions, shortcut: ShortcutCatalog.keys(for: .writeMessage), action: .focusComposer, keywords: "compositor campo focar digitar"))
             list.append(PaletteEntry(id: "history", title: CommandName.conversations, subtitle: name, symbol: "clock.arrow.circlepath",
-                                     section: .actions, shortcut: AppShortcut.conversations.label, action: .showConversations, keywords: "histórico reabrir arquivo"))
+                                     section: .actions, shortcut: ShortcutCatalog.keys(for: .conversations), action: .showConversations, keywords: "histórico reabrir arquivo"))
             list.append(PaletteEntry(id: "folder", title: CommandName.openFolder, subtitle: "Pasta de trabalho\(suffix)", symbol: "folder",
-                                     section: .actions, shortcut: AppShortcut.openFolder.label, action: .openFolder, keywords: "finder arquivos"))
+                                     section: .actions, shortcut: ShortcutCatalog.keys(for: .openFolder), action: .openFolder, keywords: "finder arquivos"))
             list.append(PaletteEntry(id: "inspector", title: CommandName.toggleInspector, subtitle: nil, symbol: "sidebar.right",
-                                     section: .actions, shortcut: AppShortcut.toggleInspector.label, action: .toggleInspector,
+                                     section: .actions, shortcut: ShortcutCatalog.keys(for: .toggleInspector), action: .toggleInspector,
                                      keywords: "detalhes memória permissões modelo personalizar"))
         }
         list.append(PaletteEntry(id: "new-bot", title: CommandName.newBot, subtitle: nil, symbol: "plus", section: .actions,
-                                 shortcut: AppShortcut.newBot.label, action: .newBot, keywords: "criar adicionar"))
+                                 shortcut: ShortcutCatalog.keys(for: .newBot), action: .newBot, keywords: "criar adicionar"))
         list.append(PaletteEntry(id: "shortcuts", title: CommandName.shortcuts, subtitle: nil, symbol: "keyboard", section: .actions,
                                  shortcut: nil, action: .shortcuts, keywords: "ajuda teclas"))
         list.append(PaletteEntry(id: "page-routines", title: CommandName.routines, subtitle: "Tarefas que rodam sozinhas", symbol: "clock.arrow.circlepath",
-                                 section: .workspace, shortcut: AppShortcut.routines.label, action: .page(.routines), keywords: "agendar horário"))
+                                 section: .workspace, shortcut: ShortcutCatalog.keys(for: .routines), action: .page(.routines), keywords: "agendar horário"))
         list.append(PaletteEntry(id: "page-connectors", title: CommandName.connectors, subtitle: "Serviços que os Orbs podem usar", symbol: "point.3.filled.connected.trianglepath.dotted",
-                                 section: .workspace, shortcut: AppShortcut.connectors.label, action: .page(.connectors), keywords: "integrações mcp"))
+                                 section: .workspace, shortcut: ShortcutCatalog.keys(for: .connectors), action: .page(.connectors), keywords: "integrações mcp"))
         list.append(PaletteEntry(id: "page-skills", title: CommandName.skills, subtitle: "Instruções que os Orbs sabem seguir", symbol: "wand.and.stars",
-                                 section: .workspace, shortcut: AppShortcut.skills.label, action: .page(.skills), keywords: "habilidades"))
+                                 section: .workspace, shortcut: ShortcutCatalog.keys(for: .skills), action: .page(.skills), keywords: "habilidades"))
         for routine in routines {
             let owner = orbs.first { $0.id == routine.botID }?.name
             list.append(PaletteEntry(id: "routine-\(routine.id)", title: "Rotina: \(routine.name)", subtitle: owner, symbol: "clock",
@@ -328,59 +328,6 @@ private struct PaletteRow: View {
 }
 
 // MARK: Shortcuts
-
-struct ShortcutItem: Identifiable, Equatable {
-    var keys: String
-    var title: String
-    var id: String { keys + title }
-}
-
-extension ShortcutItem {
-    init(_ shortcut: KeyboardShortcut, _ title: String) { self.init(keys: shortcut.label, title: title) }
-}
-
-struct ShortcutGroup: Identifiable, Equatable {
-    var title: String
-    var items: [ShortcutItem]
-    var id: String { title }
-}
-
-/// Every shortcut the app answers, in one place: the "Atalhos do teclado" sheet shows it and a test checks that no
-/// two actions share a key. The menus in `AppCommands` declare the same keys.
-enum ShortcutCatalog {
-    static let groups: [ShortcutGroup] = [
-        ShortcutGroup(title: "Geral", items: [
-            ShortcutItem(AppShortcut.newBot, CommandName.newBot),
-            ShortcutItem(AppShortcut.goTo, "Ir para… (Orbs, conversas e ações)"),
-            ShortcutItem(AppShortcut.toggleInspector, CommandName.toggleInspector),
-            ShortcutItem(keys: "⌘,", title: "Ajustes"),
-        ]),
-        ShortcutGroup(title: "Conversa", items: [
-            ShortcutItem(AppShortcut.writeMessage, CommandName.writeMessage),
-            ShortcutItem(AppShortcut.newConversation, CommandName.newConversation),
-            ShortcutItem(AppShortcut.conversations, CommandName.conversations),
-            ShortcutItem(AppShortcut.stop, CommandName.stop),
-            ShortcutItem(AppShortcut.openFolder, CommandName.openFolder),
-            ShortcutItem(keys: "↩", title: "Enviar a mensagem"),
-            ShortcutItem(keys: CommandName.newLineKeys, title: "Nova linha na mensagem"),
-        ]),
-        ShortcutGroup(title: "Navegar", items: [
-            ShortcutItem(keys: "\(AppShortcut.bot(at: 0).label) – \(AppShortcut.bot(at: 8).label)", title: "Ir para o Orb de mesmo número"),
-            ShortcutItem(AppShortcut.previousBot, CommandName.previousBot),
-            ShortcutItem(AppShortcut.nextBot, CommandName.nextBot),
-            ShortcutItem(AppShortcut.routines, CommandName.routines),
-            ShortcutItem(AppShortcut.connectors, CommandName.connectors),
-            ShortcutItem(AppShortcut.skills, CommandName.skills),
-        ]),
-        ShortcutGroup(title: "Pedidos de permissão", items: [
-            ShortcutItem(keys: "⌘↩", title: "Permitir (quando há um pedido aberto)"),
-            ShortcutItem(keys: "esc", title: "Não permitir (com o campo de mensagem vazio)"),
-        ]),
-        ShortcutGroup(title: "De qualquer lugar do Mac", items: [
-            ShortcutItem(keys: "⌃⌥Espaço", title: "Abrir o painel da barra de menus do Orb (opcional, no menu Orbs)"),
-        ]),
-    ]
-}
 
 struct ShortcutsSheet: View {
     @Environment(AppModel.self) private var model

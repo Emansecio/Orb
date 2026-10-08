@@ -51,14 +51,7 @@ enum EmptyChatContent {
         Capability.allCases.filter(bot.capabilities.contains).map(capabilityName)
     }
 
-    static func capabilityName(_ capability: Capability) -> String {
-        switch capability {
-        case .terminal: "Terminal e arquivos"
-        case .browser: "Navegar na web"
-        case .computerUse: "Controlar apps do Mac"
-        case .connectors: "Conectores"
-        }
-    }
+    static func capabilityName(_ capability: Capability) -> String { capability.label }
 
     private static let homeFiles = [
         EmptyChatSuggestion(symbol: "folder", text: "Organize minha pasta Downloads"),

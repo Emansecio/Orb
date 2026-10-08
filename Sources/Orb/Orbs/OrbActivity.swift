@@ -3,13 +3,14 @@ import SwiftUI
 /// What the bot is doing right now. Drives the Orb's expression (eye/mouth/brow overrides),
 /// gaze pattern, body motion and the little status bubble.
 enum OrbActivity: String, CaseIterable, Identifiable, Sendable {
-    case idle, listening, speaking, thinking, typing, browsing, reading, searching, waiting, happy, error, sleepy
+    case idle, attentive, listening, speaking, thinking, typing, browsing, reading, searching, waiting, happy, error, sleepy
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
         case .idle: "Parado"
+        case .attentive: "Atento"
         case .listening: "Ouvindo"
         case .speaking: "Falando"
         case .thinking: "Pensando"
@@ -27,6 +28,7 @@ enum OrbActivity: String, CaseIterable, Identifiable, Sendable {
     var symbol: String {
         switch self {
         case .idle: "circle"
+        case .attentive: "keyboard"
         case .listening: "ear"
         case .speaking: "waveform"
         case .thinking: "ellipsis"
@@ -94,7 +96,7 @@ enum OrbActivity: String, CaseIterable, Identifiable, Sendable {
         case .typing, .error, .waiting, .happy: 30
         case .speaking: 20
         case .thinking, .browsing, .reading, .searching: 15
-        case .idle, .listening, .sleepy: 10
+        case .idle, .attentive, .listening, .sleepy: 10
         }
     }
 
@@ -103,9 +105,23 @@ enum OrbActivity: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .idle: 1
         case .listening, .waiting, .happy: 0.3
+        case .attentive: 0.2
         case .speaking: 0.35
         default: 0
         }
+    }
+
+    /// The two show the same face (eyes, mouth, brows and bubble): switching between them changes only motion and
+    /// gaze (parado, atento, ouvindo), so it needs no blink to hide a swap and no wobble.
+    func hasSameFace(as other: OrbActivity, mouth base: String) -> Bool {
+        eyes == other.eyes && brows == other.brows && bubble == other.bubble
+            && mouth(base: base) == other.mouth(base: base)
+    }
+
+    /// Seconds between blinks, from the temperament's: watching you type, the Orb blinks less (people do while
+    /// reading).
+    func blinkGap(_ gap: ClosedRange<Double>) -> ClosedRange<Double> {
+        self == .attentive ? gap.lowerBound * 1.5...gap.upperBound * 1.5 : gap
     }
 
     /// Activity-driven gaze (x right, y up, both -1...1) and how much the pointer may override it.
@@ -115,6 +131,9 @@ enum OrbActivity: String, CaseIterable, Identifiable, Sendable {
             return (.zero, 1)
         case .listening:
             return (CGPoint(x: 0, y: -0.15), 1)
+        case .attentive:
+            // Watching the user type: eyes down toward the message field, a lazy drift along the line.
+            return (CGPoint(x: 0.08 * sin(t * 0.9), y: -0.45), 0.3)
         case .speaking:
             return (CGPoint(x: 0.06 * sin(t * 0.7), y: -0.05), 0.7)
         case .thinking:
@@ -139,14 +158,16 @@ enum OrbActivity: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Body motion and glow at time `t`. The temperament scales the idle bob and the hops (its pace is applied
-    /// to `t` by the caller, so the motion stays continuous when it changes).
-    func motion(at t: Double, traits: OrbTemperament.Traits = .init()) -> OrbBodyMotion {
+    /// Body motion and glow at time `t`, `elapsed` seconds after the activity started (one-shot reactions use it;
+    /// nil plays them in a loop). The temperament scales the idle bob and the hops (its pace is applied to `t` by the
+    /// caller, so the motion stays continuous when it changes).
+    func motion(at t: Double, elapsed: Double? = nil, traits: OrbTemperament.Traits = .init()) -> OrbBodyMotion {
         let breathe = sin(t * 2.0)
         let bob = traits.bob, jump = traits.jump
         switch self {
-        case .idle, .listening:
-            return OrbBodyMotion(lift: 0.025 * bob * sin(t * 1.6), squash: 0.012 * bob * breathe)
+        case .idle, .attentive, .listening:
+            // Breathing, a slow float and a barely-there sway, out of step so it never looks like a loop.
+            return OrbBodyMotion(lift: 0.025 * bob * sin(t * 1.6), squash: 0.012 * bob * breathe, tilt: 1.1 * bob * sin(t * 0.55 + 0.8))
         case .speaking:
             // A gentle nod in the rhythm of speech.
             return OrbBodyMotion(lift: 0.014 * bob * sin(t * 4.4), squash: 0.01 * bob * sin(t * 2.2 + 1), tilt: 2 * sin(t * 1.3))
@@ -161,15 +182,41 @@ enum OrbActivity: String, CaseIterable, Identifiable, Sendable {
             let hop = abs(sin(t * 3.2))
             return OrbBodyMotion(lift: 0.07 * jump * hop, squash: Self.bounce(hop, squash: 0.06, stretch: 0.02), glow: Self.pulse(t))
         case .happy:
-            let hop = abs(sin(t * 4))
-            return OrbBodyMotion(lift: 0.09 * jump * hop, squash: Self.bounce(hop, squash: 0.07, stretch: 0.03), tilt: 7 * sin(t * 4),
-                                 glow: Self.pulse(t))
+            // A burst of joy that calms down: a squash to get ready (long enough to show through the blend into
+            // the activity), hops each lower than the last, then the idle float with a contented sway. Without
+            // timing it hops in a loop; an orb that was already happy when it appeared (infinite `elapsed`) is calm.
+            guard let e = elapsed.map({ $0 * traits.pace }) else {
+                let hop = abs(sin(t * 4.2))
+                return OrbBodyMotion(lift: 0.1 * jump * hop, squash: Self.bounce(hop, squash: 0.075, stretch: 0.03),
+                                     tilt: 7 * sin(t * 4.2), glow: Self.pulse(t))
+            }
+            if e < Self.happyReady {
+                return OrbBodyMotion(squash: 0.075 * OrbMath.smoothstep(e / Self.happyReady), glow: Self.pulse(t))
+            }
+            let since = e.isFinite ? e - Self.happyReady : .infinity
+            let energy = 1 - OrbMath.smoothstep((since - 0.6) / (Self.happyCalm - 0.6))
+            let phase = since.isFinite ? since : 0
+            let hop = abs(sin(phase * 4.2))
+            return OrbBodyMotion(lift: 0.1 * jump * hop * energy + (1 - energy) * 0.025 * bob * sin(t * 1.6),
+                                 squash: Self.bounce(hop, squash: 0.075 * energy, stretch: 0.03 * energy)
+                                     + (1 - energy) * 0.012 * bob * breathe,
+                                 tilt: 7 * sin(phase * 4.2) * energy + 2 * (1 - energy) * sin(t * 1.1), glow: Self.pulse(t))
         case .error:
             return OrbBodyMotion(squash: 0.01 * breathe, shake: 0.025 * sin(t * 32) * (0.5 + 0.5 * sin(t * 1.5)),
                                  glow: 0.8 + 0.2 * sin(t * 10))
         case .sleepy:
             return OrbBodyMotion(lift: 0.012 * bob * sin(t * 0.9), squash: 0.025 * bob * sin(t * 0.9), tilt: -6, glow: 0.55)
         }
+    }
+
+    /// `happy`: seconds of the getting-ready squash, and seconds of hopping after it until the orb has calmed down.
+    static let happyReady = 0.3, happyCalm = 2.2
+
+    /// `minFrameRate` for an activity that started `elapsed` seconds ago: once `happy` has calmed down it needs no
+    /// more than idle (the editor's preview can stay happy for minutes).
+    func minFrameRate(elapsed: Double) -> Float {
+        // (The slowest temperament paces motion at 0.7×.)
+        self == .happy && elapsed > (Self.happyReady + Self.happyCalm) / 0.7 ? OrbActivity.idle.minFrameRate : minFrameRate
     }
 
     /// Busy orbs' glow pulses.
@@ -192,7 +239,9 @@ struct OrbBodyMotion: Equatable {
     var glow = 1.0
 
     static func mix(_ a: OrbBodyMotion, _ b: OrbBodyMotion, _ t: Double) -> OrbBodyMotion {
-        OrbBodyMotion(lift: OrbMath.mix(a.lift, b.lift, t), squash: OrbMath.mix(a.squash, b.squash, t),
+        guard t > 0 else { return a }
+        guard t < 1 else { return b }
+        return OrbBodyMotion(lift: OrbMath.mix(a.lift, b.lift, t), squash: OrbMath.mix(a.squash, b.squash, t),
                       tilt: OrbMath.mix(a.tilt, b.tilt, t), shake: OrbMath.mix(a.shake, b.shake, t),
                       glow: OrbMath.mix(a.glow, b.glow, t))
     }

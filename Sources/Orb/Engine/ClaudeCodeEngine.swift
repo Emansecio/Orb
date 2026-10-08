@@ -17,7 +17,7 @@ struct ClaudeCodeTurn: Sendable {
     var context = ""
     /// Claude Code session to resume; nil starts a new one.
     var sessionID: String?
-    /// MCP servers for `--mcp-config`: the Orb's tools server (memory, and the Mac tools with "Apps do Mac"), plus
+    /// MCP servers for `--mcp-config`: the Orb's tools server (memory, and the Mac tools with "Controlar apps do Mac"), plus
     /// the enabled connectors when the bot may use them. With "Conectores" off, `--strict-mcp-config` keeps the
     /// user's own Claude Code MCP servers out.
     var connectors: [MCPServerConfig] = []

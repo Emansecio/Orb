@@ -260,7 +260,7 @@ import Testing
     @Test func macToolsAreListedOnlyForAnOrbThatMayUseTheMac() async throws {
         let context = ToolContext(workingDirectory: root, memory: bank())
         let plain = try await call("tools/list", mac: false, context: context)
-        // Without "Apps do Mac" the tools that need no capability stay, as they do for a native Orb.
+        // Without "Controlar apps do Mac" the tools that need no capability stay, as they do for a native Orb.
         #expect(plain["result"]?["tools"]?.array?.compactMap { $0["name"]?.string } == ["remember", "recall", "open", "notify"])
 
         let mac = try await call("tools/list", mac: true, context: context)
@@ -300,7 +300,7 @@ import Testing
         #expect(trash["result"]?["isError"] == .bool(true))
         #expect(trash["result"]?["content"]?.array?.first?["text"]?.string?.contains(folder.appending(path: "nao-existe.txt").path) == true)
 
-        // Without "Apps do Mac" the Mac tools do not exist for that server.
+        // Without "Controlar apps do Mac" the Mac tools do not exist for that server.
         let refused = try await call("tools/call", .object(["name": .string("processes"), "arguments": .object([:])]), mac: false, context: context)
         #expect(refused["error"]?["code"] == .number(-32602))
         // Memory works the same either way.

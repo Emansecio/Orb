@@ -19,7 +19,12 @@ struct NewBotSheet: View {
     @State private var folder = OrbFolderChoice.own
     @FocusState private var isNameFocused: Bool
     /// The window's height less a margin when the window is short (the form scrolls then).
-    @State private var height = NewBotSheetLayout.height()
+    @State private var height: CGFloat
+
+    /// `height`: a fixed sheet height (review snapshots of a short window); by default it follows the window.
+    init(height: CGFloat? = nil) {
+        _height = State(initialValue: height ?? NewBotSheetLayout.height())
+    }
 
     private var trimmedName: String { name.trimmingCharacters(in: .whitespaces) }
 
@@ -38,13 +43,18 @@ struct NewBotSheet: View {
                 form
                     .frame(width: 380)
                     .background(Palette.chrome)
+                    // The form comes in after the sheet, the footer after the form (MOVIMENTO.md §2.6). The editor
+                    // on the right is the Orb editor's own (it brings its stage in itself).
+                    .sheetSection(0)
                 Divider().overlay(Palette.line)
-                OrbEditor(config: $orb, name: name)
+                // Compact: the form beside it already shows the name, and the options need the height.
+                OrbEditor(config: $orb, name: name, compact: true)
                     .frame(width: 440)
             }
             SheetFooter(message: hint, cancel: { dismiss() }, primaryTitle: "Criar Orb",
                         isPrimaryDisabled: trimmedName.isEmpty, primary: create)
                 .background(Palette.chrome)
+                .sheetSection(1)
         }
         .frame(width: 820, height: height)
         .task { isNameFocused = true }

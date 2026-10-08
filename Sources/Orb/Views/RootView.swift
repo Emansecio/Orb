@@ -7,6 +7,8 @@ struct RootView: View {
     @State private var autoClose = InspectorAutoClose()
     /// What the last automatic change set, to tell it from the user's own toggle.
     @State private var autoChange: Bool?
+    /// The Orbs whose empty chat already came in this session: going to another Orb and back does not repeat it (§2.8).
+    @State private var presentedEmptyChats = PresentedOrbs()
 
     var body: some View {
         @Bindable var model = model
@@ -24,6 +26,7 @@ struct RootView: View {
         .onChange(of: model.showInspector) { _, isOpen in
             if autoChange == isOpen { autoChange = nil } else { autoClose.userToggled() }
         }
+        .environment(\.presentedEmptyChats, presentedEmptyChats)
         .sheet(isPresented: $model.showNewBot) {
             NewBotSheet()
         }
@@ -49,12 +52,10 @@ private struct DetailView: View {
         Group {
             switch model.selection {
             case .bot(let id):
-                // One chat view per Orb, rebuilt on switching. Keeping it and scoping the `.id` to the transcript was
-                // measured: it made switching to a long conversation about 7x more expensive (the new transcript
-                // realized its rows eagerly) and saved nothing on short ones.
+                // The chat view stays across Orbs and swaps the Orb's own parts when `id` changes (the transcript with a
+                // cross-fade, the composer, panel and toolbar at once), so the composer is outside the fade (§2.9).
                 if model.botIDs.contains(id) {
                     ChatView(botID: id)
-                        .id(id)
                 }
             case .routines:
                 RoutinesView()

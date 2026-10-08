@@ -17,11 +17,33 @@ struct ComposerSupportTests {
         #expect(PermissionChipText.grantsLine(PermissionState(mode: .ask, rules: [])) == nil)
     }
 
-    @Test func thePickerListsEveryModeOnceWithTheRiskiestLast() {
-        #expect(Set(PermissionMode.pickerOrder) == Set(PermissionMode.allCases))
-        #expect(PermissionMode.pickerOrder.count == PermissionMode.allCases.count)
-        #expect(PermissionMode.pickerOrder.last == .bypass)
-        for mode in PermissionMode.allCases { #expect(!mode.composerSummary.isEmpty) }
+    /// One order everywhere (the Orb's panel, the new-Orb sheet and the composer all list `allCases`) and one wording:
+    /// the long description of a mode starts with its short one.
+    @Test func everyPickerListsTheModesInOneOrderWithTheRiskiestLast() {
+        #expect(PermissionMode.allCases == [.ask, .auto, .readOnly, .bypass])
+        #expect(PermissionMode.allCases.map(\.label) == ["Perguntar antes", "Automático", "Só leitura", "Sem pedir permissão"])
+        for mode in PermissionMode.allCases {
+            #expect(!mode.shortSummary.isEmpty)
+            #expect(mode.summary.hasPrefix(mode.shortSummary) && mode.summary.count > mode.shortSummary.count, "\(mode)")
+        }
+        #expect(Set(PermissionMode.allCases.map(\.summary)).count == 4 && Set(PermissionMode.allCases.map(\.shortSummary)).count == 4)
+        #expect(PermissionMode.bypass.summary.hasSuffix("Use só com Orbs e pastas em que você confia.")) // the warning closes the text
+        #expect(!PermissionMode.bypass.shortSummary.contains("confia"))
+    }
+
+    /// "Comandos arriscados sempre perguntam" is not true in "Sem pedir permissão": the note says so.
+    @Test func theGrantsNoteIsTrueInEveryMode() {
+        let note = PermissionMode.grantsNote
+        #expect(note.contains("“Perguntar antes”") && note.contains("exceto em “Sem pedir permissão”"))
+        #expect(note.contains("em “Só leitura” são recusados")) // read-only refuses them, it does not ask
+        for mode in PermissionMode.allCases where mode != .bypass {
+            // In every other mode the dangerous call asks, whatever the standing grants.
+            let call = PermissionCall(toolName: "run_command", family: .shell, risk: .sensitive, danger: "apaga arquivos")
+            let verdict = PermissionPolicy.evaluate(mode: mode, call: call, rules: [.init(family: .shell)], workspace: nil)
+            if mode == .readOnly { #expect(verdict != .allow) } else { #expect(verdict == .ask(.dangerous("apaga arquivos")), "\(mode)") }
+        }
+        let call = PermissionCall(toolName: "run_command", family: .shell, risk: .sensitive, danger: "apaga arquivos")
+        #expect(PermissionPolicy.evaluate(mode: .bypass, call: call, rules: [], workspace: nil) == .allow)
     }
 
     // MARK: Skills

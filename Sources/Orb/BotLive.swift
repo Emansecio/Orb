@@ -55,6 +55,8 @@ final class BotLive {
     private(set) var needsYou = false
     /// Incremented when a prompt is sent; Orbs jump when it changes.
     private(set) var poke = 0
+    /// Incremented when the Orb is selected; its sidebar Orb blinks and glances toward the chat when it changes.
+    private(set) var glance = 0
     /// Messages from turns that ended while you were elsewhere. Saved with the app's state.
     private(set) var unread = 0
     /// What the inspector's memory section shows, refreshed after changes.
@@ -81,6 +83,11 @@ final class BotLive {
     /// The last turn was interrupted or failed (a brief "error" expression).
     @ObservationIgnored var hasFailed = false { didSet { refresh() } }
     @ObservationIgnored private(set) var isAwaitingApproval = false
+    /// You are typing to the Orb: from the first keystroke until `composingQuiet` after the last (see `noteComposing`).
+    @ObservationIgnored private(set) var isComposing = false
+    @ObservationIgnored private var composing = ComposingDeadline(quiet: BotLive.composingQuiet)
+    @ObservationIgnored private var composingWatch: Task<Void, Never>?
+    static let composingQuiet = Duration.milliseconds(1500)
 
     init(_ bot: Bot) {
         id = bot.id
@@ -128,22 +135,55 @@ final class BotLive {
 
     func poked() { poke += 1 }
 
+    func glanced() { glance += 1 }
+
+    // MARK: Composing
+
+    /// The draft in the Orb's composer changed: the Orb watches you type (`attentive`) from the first keystroke
+    /// until you pause for `quiet`, and stops at once when the field is emptied (deleted or sent). Like `speaking`,
+    /// only the start and the end of a burst change what views read; a keystroke in between moves a deadline that
+    /// nothing observes, checked by one task per Orb.
+    func noteComposing(draftIsEmpty: Bool, quiet: Duration = BotLive.composingQuiet) {
+        guard !draftIsEmpty else { stopComposing(); return }
+        composing.quiet = quiet
+        guard composing.keystroke(at: .now) else { return }
+        isComposing = true
+        refresh()
+        composingWatch = Task { [weak self] in
+            while !Task.isCancelled, let deadline = self?.composing.until {
+                if self?.composing.isOver(at: .now) != false { self?.stopComposing(); return }
+                try? await Task.sleep(until: deadline)
+            }
+        }
+    }
+
+    func stopComposing() {
+        composing.end()
+        composingWatch?.cancel()
+        composingWatch = nil
+        guard isComposing else { return }
+        isComposing = false
+        refresh()
+    }
+
     private func refresh() {
         assign(\.needsYou, to: isAwaitingApproval)
         assign(\.isWorking, to: status != nil)
         assign(\.activity, to: Self.activity(awaitingApproval: isAwaitingApproval, failed: hasFailed, celebrating: isCelebrating,
                                               isWorking: status != nil, tool: runningTool, speaking: isSpeaking,
-                                              listening: isListening))
+                                              listening: isListening, composing: isComposing))
     }
 
     /// What the Orb does, most urgent first: waiting for you, the error and happy beats, then (while a turn
-    /// runs) its tool, its speech, the listening beat or plain thinking. Idle when nothing runs.
+    /// runs) its tool, its speech, the listening beat or plain thinking. When nothing runs, it watches you type
+    /// (`attentive`) or is idle: a working Orb keeps working while you write to it.
     nonisolated static func activity(awaitingApproval: Bool, failed: Bool, celebrating: Bool, isWorking: Bool,
-                                     tool: ToolCall.Kind?, speaking: Bool, listening: Bool) -> OrbActivity {
+                                     tool: ToolCall.Kind?, speaking: Bool, listening: Bool,
+                                     composing: Bool = false) -> OrbActivity {
         if awaitingApproval { return .waiting }
         if failed { return .error }
         if celebrating { return .happy }
-        guard isWorking else { return .idle }
+        guard isWorking else { return composing ? .attentive : .idle }
         if let tool {
             switch tool {
             case .shell: return .typing
@@ -156,6 +196,29 @@ final class BotLive {
         if speaking { return .speaking }
         return listening ? .listening : .thinking
     }
+}
+
+// MARK: - Composing
+
+/// When you stop typing to an Orb: a deadline that every keystroke pushes back. Only the first keystroke of a burst
+/// starts something; the end is up to whoever watches `until`.
+struct ComposingDeadline: Sendable {
+    var quiet: Duration
+    /// When the burst ends if no other key comes (nil: no burst).
+    private(set) var until: ContinuousClock.Instant?
+
+    init(quiet: Duration) { self.quiet = quiet }
+
+    /// A keystroke at `now`; true when it starts a burst.
+    mutating func keystroke(at now: ContinuousClock.Instant) -> Bool {
+        defer { until = now + quiet }
+        return until == nil
+    }
+
+    /// The burst is over at `now` (no burst counts as over).
+    func isOver(at now: ContinuousClock.Instant) -> Bool { until.map { $0 <= now } ?? true }
+
+    mutating func end() { until = nil }
 }
 
 // MARK: - Writing observable state only when it changes

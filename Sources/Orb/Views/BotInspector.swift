@@ -35,7 +35,7 @@ struct BotInspector: View {
         if let live = model.liveBot(botID) {
             let bot = live.bot
             VStack(spacing: 0) {
-                header(bot, live)
+                header(bot)
                 quickActions(bot)
                 InspectorTabBar(selection: $tab)
                 Form {
@@ -119,10 +119,10 @@ struct BotInspector: View {
     // MARK: Top of the panel
 
     /// Who the Orb is, always visible: avatar, name and role (editable), its look in one line.
-    private func header(_ bot: Bot, _ live: BotLive) -> some View {
+    private func header(_ bot: Bot) -> some View {
         let summary = AppearanceSummary.text(for: bot.orb)
         return HStack(spacing: 12) {
-            BotAvatar(orb: bot.orb, size: 60, activity: live.activity, poke: live.poke, interactive: true)
+            LiveBotAvatar(botID: bot.id, orb: bot.orb, size: 60, interactive: true) // the only part that follows the activity
             VStack(alignment: .leading, spacing: 3) {
                 InspectorHeader(bot: bot)
                     .id(bot.id)
@@ -333,7 +333,7 @@ struct BotInspector: View {
         } header: {
             Text("Liberações")
         } footer: {
-            Text("Estas liberações valem em “Perguntar antes”. Comandos arriscados sempre perguntam.")
+            Text(PermissionMode.grantsNote)
         }
 
         filesSection(bot)
@@ -761,7 +761,7 @@ private struct IdentityEditor: View {
             // Return adds a line in the editor; ⌘↩ saves.
             .background {
                 Button("Salvar", action: save)
-                    .keyboardShortcut(.return, modifiers: .command)
+                    .keyboardShortcut(AppShortcut.commandReturn)
                     .frame(width: 0, height: 0)
                     .opacity(0)
                     .accessibilityHidden(true)

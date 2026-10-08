@@ -1,28 +1,56 @@
 import SwiftUI
 
-/// Full Orb customizer: live preview (with activity preview), category tabs, option grid with
-/// rendered thumbnails, tint swatches and randomize.
+/// Full Orb customizer: a big live stage (with activity preview, "Aleatório" and undo), categories grouped by
+/// body, face and style, option grids whose thumbnails frame what they change, and named tint swatches.
+///
+/// A short editor (the "Novo Orb" sheet, or a sheet over a short window) uses a compact stage: a smaller Orb, the
+/// buttons up in the room beside its head and no name under it, so the options keep most of the height.
 struct OrbEditor: View {
     @Binding var config: OrbConfig
     var name = ""
+    /// true/false forces the compact stage on or off; nil picks it from the editor's height.
+    var compact: Bool?
 
     @State private var category: OrbCategory
     @State private var previewActivity: OrbActivity = .idle
     @State private var poke = 0
+    /// Owns this editor's entries in the window's undo manager (dropped when the editor goes away).
+    @State private var undoTarget = OrbEditUndo.Target()
+    @Environment(\.undoManager) private var undoManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Measured: the editor is shorter than `compactBelow` (used when `compact` is nil).
+    @State private var isShort = false
 
-    init(config: Binding<OrbConfig>, name: String = "", category: OrbCategory = .color) {
+    init(config: Binding<OrbConfig>, name: String = "", category: OrbCategory = .color, compact: Bool? = nil) {
         _config = config
         self.name = name
+        self.compact = compact
         _category = State(initialValue: category)
     }
 
     private let previewActivities: [OrbActivity] = [.idle, .speaking, .thinking, .typing, .browsing, .searching, .waiting, .happy, .error, .sleepy]
+
+    /// Categories grouped the way people think about a character.
+    private static let bodyGroup: (title: String, categories: [OrbCategory]) = ("Corpo", [.color, .temperament])
+    private static let faceGroup: (title: String, categories: [OrbCategory]) = ("Rosto", [.eyes, .mouth, .brows, .cheeks, .mustache])
+    private static let styleGroup: (title: String, categories: [OrbCategory]) = ("Estilo", [.hair, .accessories])
+
+    /// The stage's Orb (regular and compact), and the room it needs: hats and hair reach ~0.39 of its size above
+    /// it, and a hop with a stretch adds ~0.3 more (lively temperaments jump 1.4× higher); below it, its shadow and
+    /// glow. Both are proportional to the Orb (`OrbStageRoom`).
+    nonisolated static let stageOrb: CGFloat = 144, compactStageOrb: CGFloat = 112
+    /// Editors shorter than this get the compact stage (the regular one leaves the options too little room).
+    nonisolated static let compactBelow: CGFloat = 680
+
+    private var isCompact: Bool { compact ?? isShort }
+    private var stageOrb: CGFloat { isCompact ? Self.compactStageOrb : Self.stageOrb }
 
     var body: some View {
         VStack(spacing: 0) {
             stage
             Divider().overlay(Palette.line)
             categoryBar
+            Divider().overlay(Palette.line)
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     if category == .temperament {
@@ -37,94 +65,293 @@ struct OrbEditor: View {
             .scrollIndicators(.automatic)
         }
         .background(Palette.canvas)
+        .onGeometryChange(for: Bool.self) { $0.size.height < Self.compactBelow } action: { isShort = $0 }
+        .onDisappear { undoManager?.removeAllActions(withTarget: undoTarget) }
+    }
+
+    // MARK: Editing
+
+    /// Every change goes through here: it can be undone and redone (the "Desfazer" button, ⌘Z and ⇧⌘Z, Edit menu),
+    /// and the stage gives a little hop of approval.
+    private func edit(hop: Bool = true, _ change: (inout OrbConfig) -> Void) {
+        var next = config
+        change(&next)
+        guard next != config else { return }
+        let binding = $config
+        let animation: Animation? = reduceMotion ? nil : .snappy
+        OrbEditUndo.register(undoManager, target: undoTarget, from: config, to: next) { look in
+            withAnimation(animation) { binding.wrappedValue = look }
+        }
+        withAnimation(animation) { config = next }
+        if hop { poke += 1 }
+    }
+
+    private func undo() {
+        guard OrbEditUndo.canUndo(undoManager) else { return }
+        undoManager?.undo()
+        poke += 1
     }
 
     // MARK: Stage
 
     private var stage: some View {
-        VStack(spacing: 12) {
-            OrbView(config: config, activity: previewActivity, size: 132, poke: poke, interactive: true)
-                .frame(height: 190)
-                .padding(.top, 26)
-            if !name.isEmpty {
+        let palette = OrbCatalog.shared.palette(config.color)
+        let orb = stageOrb, compact = isCompact
+        let spot = 230 * orb / Self.stageOrb
+        return VStack(spacing: compact ? 8 : 10) {
+            OrbView(config: config, activity: previewActivity, size: orb, poke: poke, interactive: true,
+                    accessibilityText: "Prévia do Orb: \(config.summary). \(previewActivity.label).")
+                .background {
+                    // A soft spotlight in the Orb's own glow color, so each palette is shown in its best light.
+                    // (A circle stretched sideways, so the gradient fades out exactly at its edge.)
+                    Circle()
+                        .fill(RadialGradient(colors: [palette.glow.opacity(0.2), palette.core.opacity(0.06), .clear],
+                                             center: .center, startRadius: 0, endRadius: spot / 2))
+                        .frame(width: spot, height: spot)
+                        .scaleEffect(x: 1.55, y: 1)
+                        .animation(reduceMotion ? nil : .easeInOut(duration: 0.45), value: config.color)
+                        .accessibilityHidden(true)
+                }
+                .padding(.top, OrbStageRoom.headroom(for: orb))
+                .padding(.bottom, OrbStageRoom.footroom(for: orb))
+                .frame(maxWidth: .infinity)
+                // Compact: the buttons sit up beside the head, where nothing of the Orb reaches (hats and hops stay
+                // within the middle column).
+                .overlay(alignment: .top) {
+                    if compact {
+                        HStack(spacing: 2) {
+                            randomButton
+                            Spacer(minLength: orb * 1.3)
+                            undoButton.labelStyle(.iconOnly)
+                            hopButton.labelStyle(.iconOnly)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.top, 10)
+                    }
+                }
+                // ...and the activity preview becomes a menu in the corner beside the Orb's base.
+                .overlay(alignment: .bottomLeading) {
+                    if compact { previewMenu.padding(.leading, 12) }
+                }
+            // The "Novo Orb" form shows the name right beside it.
+            if !compact, !name.isEmpty {
                 Text(name)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(Palette.ink)
             }
-            ScrollView(.horizontal) {
-                HStack(spacing: 6) {
-                    ForEach(previewActivities) { activity in
-                        Button {
-                            previewActivity = activity
-                        } label: {
-                            Label(activity.label, systemImage: activity.symbol)
-                                .font(.system(size: 11, weight: .medium))
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .foregroundStyle(previewActivity == activity ? Palette.onInk : Palette.secondary)
-                                .background(previewActivity == activity ? Palette.ink : Color.white.opacity(0.07), in: .capsule)
-                        }
-                        .buttonStyle(.plain)
-                    }
+            if !compact {
+                previewChips
+                HStack(spacing: 8) {
+                    randomButton
+                    undoButton
+                    hopButton
                 }
-                .padding(.horizontal, 16)
             }
-            .scrollIndicators(.never)
-            HStack(spacing: 8) {
-                Button("Sortear", systemImage: "dice") {
-                    // Sorts the looks only; the temperament stays.
-                    var next = OrbConfig.random()
-                    next.temperament = config.temperament
-                    withAnimation(.snappy) { config = next }
-                    poke += 1
-                }
-                .buttonStyle(SecondaryPillStyle())
-                Button("Pular", systemImage: "arrow.up.circle") { poke += 1 }
-                    .buttonStyle(GhostStyle())
-            }
-            .padding(.bottom, 14)
         }
+        .padding(.bottom, compact ? 8 : 14)
         .frame(maxWidth: .infinity)
         .background(Palette.chrome)
     }
 
-    // MARK: Categories
-
-    private var categoryBar: some View {
+    /// The activities the stage can preview, as a row of chips.
+    private var previewChips: some View {
         ScrollView(.horizontal) {
-            HStack(spacing: 4) {
-                ForEach(OrbCategory.allCases) { item in
+            HStack(spacing: 6) {
+                ForEach(previewActivities) { activity in
                     Button {
-                        category = item
+                        previewActivity = activity
                     } label: {
-                        VStack(spacing: 3) {
-                            Image(systemName: item.symbol)
-                                .font(.system(size: 14))
-                            Text(item.label)
-                                .font(.system(size: 10, weight: .medium))
-                        }
-                        .frame(width: 74, height: 46)
-                        .foregroundStyle(category == item ? Palette.ink : Palette.muted)
-                        .background(category == item ? Palette.ghostSelected : .clear, in: .rect(cornerRadius: 10))
-                        .contentShape(.rect)
+                        Label(activity.label, systemImage: activity.symbol)
+                            .font(.system(size: 11, weight: .medium))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .foregroundStyle(previewActivity == activity ? Palette.onInk : Palette.secondary)
+                            .background(previewActivity == activity ? Palette.ink : Color.white.opacity(0.07), in: .capsule)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Prévia: \(activity.label)")
+                    .accessibilityAddTraits(previewActivity == activity ? .isSelected : [])
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 16)
         }
         .scrollIndicators(.never)
+    }
+
+    /// The same choice in a menu (compact stage).
+    private var previewMenu: some View {
+        Menu {
+            Picker("Prévia", selection: $previewActivity) {
+                ForEach(previewActivities) { activity in
+                    Label(activity.label, systemImage: activity.symbol).tag(activity)
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            Label(previewActivity.label, systemImage: previewActivity.symbol)
+                .font(.system(size: 11, weight: .medium))
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .foregroundStyle(Palette.secondary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(Color.white.opacity(0.07), in: .capsule)
+        .help("Mostra o Orb numa atividade")
+        .accessibilityLabel("Prévia: \(previewActivity.label)")
+    }
+
+    private var randomButton: some View {
+        Button("Aleatório", systemImage: "dice") {
+            // A new look that hangs together; the temperament stays.
+            edit { config in
+                let temperament = config.temperament
+                config = OrbConfig.random()
+                config.temperament = temperament
+            }
+        }
+        .buttonStyle(SecondaryPillStyle())
+        .help("Sorteia um visual combinando cores, rosto e estilo")
+    }
+
+    private var undoButton: some View {
+        let canUndo = OrbEditUndo.canUndo(undoManager)
+        return Button("Desfazer", systemImage: "arrow.uturn.backward", action: undo)
+            .buttonStyle(GhostStyle())
+            .disabled(!canUndo)
+            .opacity(canUndo ? 1 : 0.45)
+            .help("Desfaz a última mudança no Orb, inclusive no jeito (⌘Z; ⇧⌘Z refaz)")
+    }
+
+    /// A hop shows nothing with Reduce Motion (the Orb holds still), so there is no button for it then.
+    @ViewBuilder private var hopButton: some View {
+        if !reduceMotion {
+            Button("Pular", systemImage: "arrow.up.circle") { poke += 1 }
+                .buttonStyle(GhostStyle())
+                .help("Faz o Orb pular")
+        }
+    }
+
+    // MARK: Categories
+
+    /// One row when it fits; below that, Corpo and Estilo on top and Rosto underneath. The compact editor uses one
+    /// row of icons instead, the chosen category with its name, the groups apart.
+    @ViewBuilder private var categoryBar: some View {
+        if isCompact { compactCategoryBar } else { groupedCategoryBar }
+    }
+
+    private var compactCategoryBar: some View {
+        HStack(spacing: 2) {
+            ForEach(Array([Self.bodyGroup, Self.faceGroup, Self.styleGroup].enumerated()), id: \.offset) { index, group in
+                if index > 0 {
+                    Rectangle().fill(Palette.line).frame(width: 1, height: 18).padding(.horizontal, 5)
+                }
+                ForEach(group.categories) { item in compactCategoryButton(item) }
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: category)
+    }
+
+    private func compactCategoryButton(_ item: OrbCategory) -> some View {
+        let isSelected = category == item
+        return Button {
+            category = item
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: item.symbol)
+                    .font(.system(size: 13))
+                    .frame(width: 16, height: 16)
+                if isSelected {
+                    Text(item.label)
+                        .font(.system(size: 11, weight: .medium))
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+            }
+            .padding(.horizontal, 9)
+            .frame(minWidth: 34, minHeight: 30)
+            .foregroundStyle(isSelected ? Palette.ink : Palette.muted)
+            .background(isSelected ? Palette.ghostSelected : .clear, in: .rect(cornerRadius: 9))
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .help(item.label)
+        .accessibilityLabel(item.label)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private var groupedCategoryBar: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 12) {
+                group(Self.bodyGroup)
+                group(Self.faceGroup)
+                group(Self.styleGroup)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .top, spacing: 12) {
+                    group(Self.bodyGroup)
+                    group(Self.styleGroup)
+                }
+                group(Self.faceGroup)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func group(_ group: (title: String, categories: [OrbCategory])) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(group.title.uppercased())
+                .font(.system(size: 11, weight: .semibold))
+                .tracking(0.5)
+                .foregroundStyle(Palette.faint)
+                .padding(.leading, 6)
+                .accessibilityAddTraits(.isHeader)
+            HStack(spacing: 1) {
+                ForEach(group.categories) { item in categoryButton(item) }
+            }
+        }
+        .fixedSize()
+    }
+
+    private func categoryButton(_ item: OrbCategory) -> some View {
+        Button {
+            category = item
+        } label: {
+            VStack(spacing: 3) {
+                Image(systemName: item.symbol)
+                    .font(.system(size: 13))
+                    .frame(height: 16)
+                Text(item.label)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            .padding(.horizontal, 6)
+            .frame(minWidth: 44, minHeight: 42)
+            .foregroundStyle(category == item ? Palette.ink : Palette.muted)
+            .background(category == item ? Palette.ghostSelected : .clear, in: .rect(cornerRadius: 9))
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(item.label)
+        .accessibilityAddTraits(category == item ? .isSelected : [])
     }
 
     // MARK: Options
 
     private var optionGrid: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 84), spacing: 8)], spacing: 8) {
+        let framing = OptionCell.Framing(category)
+        return LazyVGrid(columns: [GridItem(.adaptive(minimum: 84), spacing: 8)], spacing: 8) {
             ForEach(OrbCatalog.shared.options(category)) { option in
-                OptionCell(label: option.label, isSelected: isSelected(option.id), preview: previewConfig(option.id)) {
-                    withAnimation(.snappy) { config.set(category, option.id) }
-                    poke += 1
+                OptionCell(label: option.label, isSelected: isSelected(option.id), preview: previewConfig(option.id),
+                           framing: framing) {
+                    edit { $0.set(category, option.id) }
                 }
             }
         }
@@ -135,7 +362,7 @@ struct OrbEditor: View {
         VStack(spacing: 6) {
             ForEach(OrbTemperament.allCases) { temperament in
                 TemperamentRow(temperament: temperament, isSelected: config.temperament == temperament) {
-                    config.temperament = temperament
+                    edit(hop: false) { $0.temperament = temperament }
                 }
             }
         }
@@ -157,18 +384,23 @@ struct OrbEditor: View {
 
     // MARK: Tints
 
-    private static let swatches: [UInt32] = [0x1C1A2B, 0x5A3B22, 0xC98A3A, 0xF4F2FF, 0xFF5A3D, 0xFF4F8B,
-                                             0x8A5BFF, 0x2E9BFF, 0x14C08C, 0xFFC83D, 0x2B2B36]
-
     @ViewBuilder
     private var tintRow: some View {
         switch category {
         case .hair where config.hair != "nenhum":
-            TintPicker(title: "Cor do cabelo", value: $config.hairColor, swatches: Self.swatches)
+            TintPicker(title: "Cor do cabelo", value: config.hairColor, swatches: OrbSwatch.hair,
+                       automatic: config.autoHairColor(OrbCatalog.shared.palette(config.color))) { tint in
+                edit(hop: false) { $0.hairColor = tint }
+            }
         case .mustache where config.mustache != "nenhum":
-            TintPicker(title: "Cor do bigode", value: $config.mustacheColor, swatches: Self.swatches)
+            TintPicker(title: "Cor do bigode", value: config.mustacheColor, swatches: OrbSwatch.mustache,
+                       automatic: config.autoMustacheColor(OrbCatalog.shared.palette(config.color))) { tint in
+                edit(hop: false) { $0.mustacheColor = tint }
+            }
         case .accessories where config.accessories.contains(where: OrbCatalog.shared.tintedAccessories.contains):
-            TintPicker(title: "Cor dos acessórios", value: $config.accentColor, swatches: Self.swatches)
+            TintPicker(title: "Cor dos acessórios", value: config.accentColor, swatches: OrbSwatch.accent, automatic: nil) { tint in
+                edit(hop: false) { $0.accentColor = tint }
+            }
         case .accessories:
             Text("Combine quantos acessórios quiser. Clique de novo para remover.")
                 .font(.system(size: 11))
@@ -184,17 +416,32 @@ struct OrbEditor: View {
 }
 
 private struct OptionCell: View {
+    /// What the thumbnail shows: the whole Orb (colors), a close-up of the face (eyes, mouth…), or the head with
+    /// room above it (hair, hats).
+    enum Framing {
+        case whole, face, head
+
+        init(_ category: OrbCategory) {
+            switch category {
+            case .eyes, .mouth, .brows, .cheeks, .mustache: self = .face
+            case .hair, .accessories: self = .head
+            case .color, .temperament: self = .whole
+            }
+        }
+    }
+
     let label: String
     let isSelected: Bool
     let preview: OrbConfig
+    let framing: Framing
     let action: () -> Void
     @State private var isHovering = false
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 2) {
-                OrbView(config: preview, size: 40, animated: isHovering, followsPointer: false)
-                    .frame(height: 62)
+            VStack(spacing: 4) {
+                thumbnail
+                    .frame(height: 66)
                 Text(label)
                     .font(.system(size: 10.5, weight: isSelected ? .semibold : .regular))
                     .foregroundStyle(isSelected ? Palette.ink : Palette.muted)
@@ -211,6 +458,25 @@ private struct OptionCell: View {
         .onHover { isHovering = $0 }
         .accessibilityLabel(label)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    @ViewBuilder
+    private var thumbnail: some View {
+        switch framing {
+        case .whole:
+            OrbView(config: preview, size: 46, animated: isHovering, followsPointer: false)
+        case .head:
+            // Hair and hats reach about half an orb above the head.
+            OrbView(config: preview, size: 44, animated: isHovering, followsPointer: false)
+                .offset(y: 10)
+        case .face:
+            // A close-up: the band from the brows to the mouth fills the cell. Static: the live orb is an AppKit
+            // view, which the clip shape would not cut.
+            OrbView(config: preview, size: 80, animated: false, followsPointer: false)
+                .frame(width: 70, height: 52)
+                .clipShape(.rect(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.white.opacity(0.06)))
+        }
     }
 }
 
@@ -257,40 +523,107 @@ private struct TemperamentRow: View {
     }
 }
 
+/// "Auto" plus named swatches in a grid that wraps; the automatic chip shows the color it stands for, and a saved
+/// color that isn't in the list shows as a custom swatch. Rings keep a 3:1 contrast on the dark background and on
+/// light swatches alike (WCAG 1.4.11).
 private struct TintPicker: View {
     let title: String
-    @Binding var value: UInt32?
-    let swatches: [UInt32]
+    let value: UInt32?
+    let swatches: [OrbSwatch]
+    /// The color "Auto" gives (nil: each accessory has its own).
+    let automatic: UInt32?
+    let pick: (UInt32?) -> Void
+
+    private var shown: [OrbSwatch] {
+        guard let value, !swatches.contains(where: { $0.hex == value }) else { return swatches }
+        return [OrbSwatch(hex: value, name: "Cor personalizada")] + swatches
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Palette.muted)
-            HStack(spacing: 7) {
+            HStack(alignment: .top, spacing: 7) {
                 Button {
-                    value = nil
+                    pick(nil)
                 } label: {
-                    Text("Auto")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(value == nil ? Palette.onInk : Palette.secondary)
-                        .padding(.horizontal, 8)
-                        .frame(height: 22)
-                        .background(value == nil ? Palette.ink : Color.white.opacity(0.08), in: .capsule)
+                    HStack(spacing: 4) {
+                        if let automatic {
+                            Circle().fill(Color(hex: automatic)).frame(width: 10, height: 10)
+                                .overlay(Circle().strokeBorder(Color.white.opacity(0.4), lineWidth: 0.5))
+                        }
+                        Text("Auto")
+                            .font(.system(size: 10, weight: .medium))
+                    }
+                    .foregroundStyle(value == nil ? Palette.onInk : Palette.secondary)
+                    .padding(.horizontal, 8)
+                    .frame(height: 24)
+                    .background(value == nil ? Palette.ink : Color.white.opacity(0.08), in: .capsule)
+                    .fixedSize()
                 }
                 .buttonStyle(.plain)
-                ForEach(swatches, id: \.self) { hex in
-                    Button {
-                        value = hex
-                    } label: {
-                        Circle()
-                            .fill(Color(hex: hex))
-                            .frame(width: 22, height: 22)
-                            .overlay(Circle().strokeBorder(Color.white.opacity(value == hex ? 0.9 : 0.15), lineWidth: value == hex ? 2 : 1))
+                .accessibilityLabel("Cor automática")
+                .accessibilityAddTraits(value == nil ? .isSelected : [])
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 24, maximum: 24), spacing: 7)], alignment: .leading, spacing: 7) {
+                    ForEach(shown, id: \.self) { swatch in
+                        Button {
+                            pick(swatch.hex)
+                        } label: {
+                            SwatchDot(color: Color(hex: swatch.hex), isSelected: value == swatch.hex)
+                        }
+                        .buttonStyle(.plain)
+                        .help(swatch.name)
+                        .accessibilityLabel(swatch.name)
+                        .accessibilityAddTraits(value == swatch.hex ? .isSelected : [])
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }
+    }
+}
+
+/// A color dot: a light hairline so dark colors stand out on the dark background; when selected, a white ring with a
+/// dark inner ring, visible on white and on black swatches.
+private struct SwatchDot: View {
+    let color: Color
+    let isSelected: Bool
+
+    var body: some View {
+        Circle()
+            .fill(color)
+            .frame(width: 24, height: 24)
+            .overlay(Circle().strokeBorder(Color.white.opacity(isSelected ? 0.95 : 0.4), lineWidth: isSelected ? 2 : 1))
+            .overlay {
+                if isSelected { Circle().inset(by: 2).strokeBorder(Color.black.opacity(0.6), lineWidth: 1) }
+            }
+    }
+}
+
+/// Orb edits in the window's undo manager (Edit ▸ Undo, ⌘Z and ⇧⌘Z, and the editor's "Desfazer"), each one
+/// redoable. `apply` writes a look back; the entries belong to `target` so the editor can drop them when it closes.
+@MainActor
+enum OrbEditUndo {
+    final class Target {}
+
+    static let actionName = "Mudança no Orb"
+
+    static func register(_ undoManager: UndoManager?, target: Target, from old: OrbConfig, to new: OrbConfig,
+                         apply: @escaping @MainActor (OrbConfig) -> Void) {
+        guard let undoManager else { return }
+        undoManager.registerUndo(withTarget: target) { target in
+            MainActor.assumeIsolated {
+                apply(old)
+                // Registered while undoing, so it lands on the redo stack.
+                register(undoManager, target: target, from: new, to: old, apply: apply)
+            }
+        }
+        undoManager.setActionName(actionName)
+    }
+
+    /// Whether ⌘Z would undo an Orb edit now (and not, say, typing in a field of the same window).
+    static func canUndo(_ undoManager: UndoManager?) -> Bool {
+        guard let undoManager, undoManager.canUndo else { return false }
+        return undoManager.undoActionName == actionName
     }
 }

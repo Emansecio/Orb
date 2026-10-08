@@ -43,6 +43,14 @@ enum PromptParts {
         return lines.joined(separator: "\n")
     }
 
+    /// Where the user changes the permission mode, by the names the app really shows: the panel's "Geral" tab has a
+    /// "Permissões" section with a "Modo" menu, and the message box has a permissions button with the same four modes.
+    static let whereToChangeMode = "the permissions button next to the message box, or the Orb's panel (Geral → Permissões → Modo)"
+
+    /// Where the user turns a capability on, by the names the app really shows (`Capability.label` is the name of each
+    /// switch). The section is titled after the Orb.
+    static func whereToTurnOn(_ bot: Bot) -> String { "the Orb's panel (Geral → \"O que \(bot.name) pode usar\")" }
+
     /// What the Orb may do right now, in plain words, and how to work with that.
     static func permissions(_ bot: Bot, engine: PromptEngine) -> String {
         var lines = ["## What you may do"]
@@ -68,7 +76,7 @@ enum PromptParts {
         case .readOnly:
             lines.append("""
             Mode \"Só leitura\": you can read, search and browse, but the app blocks anything that would change the Mac. Research, \
-            then describe the changes you would make; the user can switch this Orb to another mode (Permissões → Antes de agir) \
+            then describe the changes you would make; the user can switch this Orb to another mode (\(whereToChangeMode)) \
             to have you apply them.
             """)
         }
@@ -76,7 +84,7 @@ enum PromptParts {
         if !off.isEmpty {
             lines.append("Switched off for this Orb: " + off.map { "\"\($0.label)\" (\(offEffect($0)))" }.joined(separator: "; ")
                 + ". Do not emulate a switched-off capability another way (osascript, curl, a script…). Tell the user which switch to "
-                + "turn on in this Orb's panel (Permissões) and why you need it.")
+                + "turn on, in \(whereToTurnOn(bot)), and why you need it.")
         }
         lines.append(macRealities(bot, engine: engine))
         return lines.joined(separator: "\n")
@@ -92,7 +100,7 @@ enum PromptParts {
     }
 
     /// What is true of this Mac, limited to what the Orb's switches leave it able to do (the AppleScript and trash advice
-    /// would contradict "do not emulate a switched-off capability" when "Apps do Mac" is off).
+    /// would contradict "do not emulate a switched-off capability" when "Controlar apps do Mac" is off).
     private static func macRealities(_ bot: Bot, engine: PromptEngine) -> String {
         var parts = ["On this Mac there is no terminal where you could type a password, so sudo cannot work."]
         if bot.capabilities.contains(.computerUse) {
@@ -104,7 +112,7 @@ enum PromptParts {
                          + "Automação, Acessibilidade); if a call fails for that reason, say which one to allow instead of retrying.")
         } else {
             parts.append("When something needs administrator rights, tell the user the command so they can run it in the Terminal, or "
-                         + "that they can turn on \"\(Capability.computerUse.label)\" in this Orb's panel (Permissões) so macOS asks for the "
+                         + "that they can turn on \"\(Capability.computerUse.label)\" in \(whereToTurnOn(bot)) so macOS asks for the "
                          + "password itself.")
             parts.append("rm cannot be undone: ask before deleting anything that is not a temporary file you made.")
         }
