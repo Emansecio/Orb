@@ -27,7 +27,7 @@ enum Palette {
     static let surfaceFocused = Color(hex: 0x1D1D1D) // surface 2 % lighter: the composer while it has the focus
     static let raised = Color(hex: 0x222222)        // code blocks, chips
     static let agentBubble = Color(hex: 0x262626)
-    static let userBubble = Color(hex: 0x5A5A5A)
+    static let userBubble = Color(hex: 0x2C2C2C)
 
     // Ink
     static let ink = Color(hex: 0xFCFCFC)

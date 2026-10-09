@@ -85,11 +85,11 @@ private struct QueuedBubble: View {
                         .foregroundStyle(Palette.secondary)
                         .multilineTextAlignment(.leading)
                         .textSelection(.enabled)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 9)
-                        // The same shape as the bubble it becomes (`UserBubble`: radius 18).
-                        .background(Palette.userBubble.opacity(0.3), in: .rect(cornerRadius: 18))
-                        .overlay { RoundedRectangle(cornerRadius: 18).strokeBorder(Palette.lineStrong, style: StrokeStyle(lineWidth: 1, dash: [4, 3])) }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        // The same shape as the bubble it becomes (`UserBubble`: radius 16).
+                        .background(Palette.userBubble.opacity(0.5), in: .rect(cornerRadius: 16))
+                        .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(Palette.lineStrong, style: StrokeStyle(lineWidth: 1, dash: [4, 3])) }
                 }
                 // One row when it fits; the line above the buttons when the chat is narrow (Claude Code's line is the longest).
                 ViewThatFits(in: .horizontal) {

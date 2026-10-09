@@ -92,9 +92,9 @@ private struct UserBubble: View {
                         .font(Palette.conversationFont)
                         .foregroundStyle(Palette.ink)
                         .textSelection(.enabled)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 9)
-                        .background(Palette.userBubble, in: .rect(cornerRadius: 18))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(Palette.userBubble, in: .rect(cornerRadius: 16))
                         .contextMenu { Button("Copiar") { Clipboard.copy(text) } }
                         .accessibilityLabel(TranscriptSpeech.user(text: text, attachmentCount: attachments.count, duringTask: duringTask))
                 }
