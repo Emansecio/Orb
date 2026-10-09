@@ -1,7 +1,6 @@
 import SwiftUI
 import Observation
 import os
-import UserNotifications
 
 @MainActor
 @Observable
@@ -36,7 +35,7 @@ final class AppModel {
     /// before starting it (at most one per Orb): a second request for either waits for that one.
     @ObservationIgnored private var reopening: Set<UUID> = []
     @ObservationIgnored private var startingRoutines: [UUID: UUID] = [:]
-    var isStartingRoutine: Bool { !startingRoutines.isEmpty } // internal for tests
+    var isStartingRoutine: Bool { !startingRoutines.isEmpty } // internal for tests (`startingRoutines` is private to this file)
     /// Things the user should hear about the data files (an unreadable file and where its copy is, a failed save).
     /// The first one is shown as an alert; `dismissDataNotice` moves on to the next.
     private(set) var dataNotices: [StoreNotice] = []
@@ -376,11 +375,6 @@ final class AppModel {
     /// Whether the chat should show that the conversation is still on its way.
     func isLoadingConversation(_ botID: UUID) -> Bool { sessions[botID]?.isLoading ?? false }
 
-    /// Reads every conversation not in memory now. Testing only: the app reads them when they are needed.
-    func loadRemainingConversations() async {
-        for bot in bots where sessions[bot.id]?.isUnloaded == true { await loadedConversation(bot.id) }
-    }
-
     /// Lets go of conversations nobody is looking at: not the selected Orb's, not one that is working, parked by a
     /// routine, or waiting to be saved, and not one used within `conversationKeepAlive`. Only when the file on disk
     /// is known to hold what is in memory (the note beside it says so), and never after a failed save, when memory
@@ -476,25 +470,6 @@ final class AppModel {
         sessions[botID] = session
         return session
     }
-
-    /// The conversations in memory, by Orb (a routine's while it runs). A view over the sessions, for tests and the
-    /// few places that look at all of them; the app reads and changes one Orb's through its session.
-    var conversations: [UUID: Conversation] { sessions.compactMapValues { $0.conversation } }
-
-    /// Each Orb's running turn and its id (views over the sessions, read by tests).
-    var turns: [UUID: Task<Void, Never>] { sessions.compactMapValues { $0.turnTask } }
-    var turnIDs: [UUID: UUID] { sessions.compactMapValues { $0.turnID } }
-    /// Bot id → routine id, for turns started by a routine.
-    var routineTurns: [UUID: UUID] { sessions.compactMapValues { $0.routineID } }
-    /// Bots whose running turn belongs to Claude Code.
-    var claudeTurns: Set<UUID> { Set(sessions.values.filter(\.isClaudeTurn).map(\.id)) }
-    /// The snapshot and rules marks of each running turn (see `BotSession.pendingMarks`).
-    var pendingMarks: [UUID: DeliveryMarks] { sessions.compactMapValues { $0.pendingMarks } }
-    /// Tokens each Orb's last turn used, its latest model call alone, and its latest compaction (for the context
-    /// meter). Views over the sessions: a view showing one Orb reads `session(id)` instead, which is observed on its own.
-    var usage: [UUID: TokenUsage] { sessions.compactMapValues { $0.usage } }
-    var requestUsage: [UUID: TokenUsage] { sessions.compactMapValues { $0.requestUsage } }
-    var lastCompaction: [UUID: CompactionReport] { sessions.compactMapValues { $0.lastCompaction } }
 
     /// The Orb's live state. Views read this (and only this) for the Orb they show. An unknown id (an Orb that was
     /// just deleted) gets a stand-in nothing is attached to, so a late write or a view still on screen is harmless.
@@ -1026,14 +1001,6 @@ final class AppModel {
         if bot(botID) != nil { live(botID).setMemory(snapshot) }
     }
 
-    func forgetMemory(_ path: String, of botID: UUID) {
-        let bank = memory.bank(for: botID)
-        Task {
-            await bank.forget(path)
-            await refreshMemory(botID)
-        }
-    }
-
     func setIdentity(_ text: String, of botID: UUID) {
         let bank = memory.bank(for: botID)
         Task {
@@ -1160,15 +1127,6 @@ final class AppModel {
         case .claudeSessionRestarted: append(.notice(Self.claudeRestartNote), to: botID)
         case .nothingToCompact, .busy, .unavailable: append(.notice(result.message), to: botID)
         }
-    }
-
-    /// What the summary of the Orb's conversation holds (nil while nothing has been folded away).
-    func contextSummary(for botID: UUID) -> ContextSummaryInfo? {
-        ensureLoaded(botID)
-        guard let conversation = sessions[botID]?.conversation, let text = conversation.summary else { return nil }
-        return ContextSummaryInfo(text: text, foldedMessages: conversation.coveredMessageCount,
-                                  compactions: conversation.compactions ?? 1, focus: conversation.ledger?.focus,
-                                  ledger: conversation.ledger)
     }
 
     // MARK: Turns
@@ -1525,8 +1483,6 @@ final class AppModel {
         sessions[botID]?.finishTurn(turn, succeeded: succeeded)
     }
 
-    func flushText(_ botID: UUID) { session(botID).flushText() } // internal for tests (they flush when they want, not after a delay)
-
     func closeStreaming(_ botID: UUID) { session(botID).closeStreaming() }
 
     func append(_ kind: TranscriptItem.Kind, to botID: UUID) { session(botID).append(kind) }
@@ -1839,8 +1795,11 @@ final class AppModel {
 
     // MARK: Notifications
 
+    /// The preference behind "Me avisar quando um Orb terminar ou precisar de mim" (Ajustes → Geral).
+    nonisolated static let notifyWhenDoneKey = "notifyWhenDone"
+
     static var notificationsEnabled: Bool {
-        UserDefaults.standard.object(forKey: "notifyWhenDone") as? Bool ?? true
+        UserDefaults.standard.object(forKey: notifyWhenDoneKey) as? Bool ?? true
     }
 
     /// Posts a banner when the app is in the background (bundled app only).

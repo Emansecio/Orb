@@ -737,13 +737,9 @@ final class OrbAnimationView: NSView {
         pose.tilt += 7 * lean.value
 
         // Hair and hats trail the head turn and the body's bounce, with a little overshoot.
-        let anchor = CGPoint(x: pose.look.x * 0.05, y: pose.look.y * 0.05 + pose.lift)
-        loose.step(toward: anchor, dt: dt, response: OrbSprings.loose.response, damping: OrbSprings.loose.damping)
-        let lag = OrbSprings.maxLag
-        pose.hairLag = CGPoint(x: max(-lag, min(lag, loose.value.x - anchor.x)), y: max(-lag, min(lag, loose.value.y - anchor.y)))
+        pose.hairLag = OrbSprings.hairLag(&loose, anchor: OrbSprings.hairAnchor(look: pose.look, lift: pose.lift), dt: dt)
         // ...and swing behind the body's tilt, overshooting a little as it settles.
-        swing.step(toward: pose.tilt, dt: dt, response: OrbSprings.swing.response, damping: OrbSprings.swing.damping)
-        pose.hairSwing = max(-OrbSprings.maxSwing, min(OrbSprings.maxSwing, swing.value - pose.tilt))
+        pose.hairSwing = OrbSprings.hairSwing(&swing, tilt: pose.tilt, dt: dt)
 
         hover.step(toward: hoverPoint == nil ? 0 : 1, dt: dt, response: 0.35 * springs, damping: 0.6)
         pose.hover = hover.value * (1 + 0.75 * traits.lean)

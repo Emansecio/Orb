@@ -74,9 +74,6 @@ struct HoverTipsTests {
 
     // MARK: Icon-only buttons
 
-    /// Files of another batch of work, listed until that batch adds its tips (the connector gallery is being redone).
-    private static let pendingFiles: Set<String> = ["ConnectorsView.swift"]
-
     @Test func everyIconOnlyButtonHasAHoverTip() throws {
         let sources = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -84,7 +81,7 @@ struct HoverTipsTests {
         let files = try #require(FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil))
         var found = 0
         var missing: [String] = []
-        for case let url as URL in files where url.pathExtension == "swift" && !Self.pendingFiles.contains(url.lastPathComponent) {
+        for case let url as URL in files where url.pathExtension == "swift" {
             let lines = try String(contentsOf: url, encoding: .utf8).components(separatedBy: "\n")
             for (index, line) in lines.enumerated() where Self.startsControl(line) {
                 let block = Self.block(from: index, in: lines)

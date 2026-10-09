@@ -8,7 +8,6 @@ protocol OrbScoped {
 
 extension OrbScoped {
     func isAvailable(to botID: UUID) -> Bool { orbIDs?.contains(botID) ?? true }
-    var isForAllOrbs: Bool { orbIDs == nil }
 }
 
 extension MCPServerConfig: OrbScoped {}
@@ -72,6 +71,12 @@ extension AppModel {
         return connectors(for: botID).map(\.name)
     }
 
+    /// The panel's count of connectors for this Orb: how many it gets now, out of those installed in its scope
+    /// ("Todos os Orbs" or the ones that include it). A connector kept for other Orbs only is not counted.
+    func connectorCounts(for botID: UUID) -> (enabled: Int, total: Int) {
+        (connectorNames(for: botID).count, connectors.filter { $0.isAvailable(to: botID) }.count)
+    }
+
     /// The Orbs that get a connector now: in its scope and with their "Conectores" switch on.
     func orbsUsing(_ connector: MCPServerConfig) -> [Bot] {
         guard connector.isEnabled else { return [] }
@@ -94,17 +99,6 @@ extension AppModel {
         }
     }
 
-    func setConnector(_ id: UUID, enabled: Bool, for botID: UUID) {
-        guard let index = connectors.firstIndex(where: { $0.id == id }) else { return }
-        connectors[index].orbIDs = Self.toggled(connectors[index].orbIDs, botID: botID, on: enabled, allBots: bots.map(\.id))
-        if enabled { allowConnectors(for: [botID]) }
-    }
-
-    func setSkill(_ id: UUID, enabled: Bool, for botID: UUID) {
-        guard let index = skills.firstIndex(where: { $0.id == id }) else { return }
-        skills[index].orbIDs = Self.toggled(skills[index].orbIDs, botID: botID, on: enabled, allBots: bots.map(\.id))
-    }
-
     /// Turns "Conectores" on for the Orbs that were just given a connector, so choosing an Orb in "Usar com" is enough.
     func allowConnectors(for botIDs: some Collection<UUID>) {
         for id in botIDs {
@@ -112,13 +106,6 @@ extension AppModel {
                 bots[index].capabilities.insert(.connectors)
             }
         }
-    }
-
-    /// The new scope after switching one Orb: from "all Orbs" it becomes everyone else (minus this one) or just it.
-    nonisolated static func toggled(_ scope: Set<UUID>?, botID: UUID, on: Bool, allBots: [UUID]) -> Set<UUID>? {
-        var ids = scope ?? Set(allBots)
-        if on { ids.insert(botID) } else { ids.remove(botID) }
-        return ids.isSuperset(of: allBots) && scope == nil ? nil : ids
     }
 
     // MARK: Using a skill

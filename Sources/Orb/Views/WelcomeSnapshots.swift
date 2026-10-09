@@ -13,7 +13,7 @@ import SwiftUI
 /// - `welcome-narrow`: the ready screen; use `ORB_SNAPSHOT_WIDTH=1000 ORB_SNAPSHOT_HEIGHT=620` for the smallest window.
 @MainActor
 enum WelcomeSnapshots {
-    static func view(_ screen: String, model: AppModel) -> AnyView? {
+    static func view(_ screen: String) -> AnyView? {
         switch screen {
         case "welcome":
             return scene(WelcomeView(forcedStage: .connect, copy: .firstUse, kept: [], detectsProviders: false,
@@ -43,16 +43,8 @@ enum WelcomeSnapshots {
     /// Two kept memories, written into a folder of their own that is gone as soon as they are listed (never the data
     /// folder, which may be the real one when `ORB_DATA_DIR` points at it).
     private static func sampleMemories() -> [KeptMemory] {
-        let scratch = FileManager.default.temporaryDirectory.appending(path: "orb-welcome-sample-\(UUID().uuidString)", directoryHint: .isDirectory)
-        defer { try? FileManager.default.removeItem(at: scratch) }
-        let root = scratch.appending(path: "memoria", directoryHint: .isDirectory)
-        func day(_ month: Int, _ day: Int) -> Date {
-            Calendar.current.date(from: DateComponents(year: 2026, month: month, day: day, hour: 12, minute: 30)) ?? .now
-        }
         let nina = KeptProfile(name: "Nina", role: "Cuida da minha agenda", orb: OrbConfig(color: "sol", eyes: "pilulas", mouth: "sorriso"))
         let luna = KeptProfile(name: "Luna", role: "Escreve comigo", orb: OrbConfig(color: "lavanda", eyes: "ovais", mouth: "sorriso", cheeks: "blush"))
-        NewBotSnapshots.seed(nina, pages: 12, at: day(10, 8), in: root)
-        NewBotSnapshots.seed(luna, pages: 5, at: day(9, 30), in: root)
-        return KeptMemories.list(in: root)
+        return NewBotSnapshots.sampleKept(nina, luna)
     }
 }

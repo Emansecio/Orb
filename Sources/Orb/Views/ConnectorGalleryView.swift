@@ -25,6 +25,7 @@ struct ConnectorGalleryView: View {
                 HStack(spacing: 6) {
                     Text("Não achou o que procura?").foregroundStyle(Palette.muted)
                     Button("Explorar o registro de conectores", action: explore).buttonStyle(.link)
+                        .help("Abre a busca no registro oficial de conectores")
                 }
                 .font(.system(size: 12))
             }
@@ -123,6 +124,7 @@ private struct ServiceCard: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .help(help)
         .disabled(status == .soon)
         .onHover { isHovering = $0 }
         .animation(reduceMotion ? nil : Motion.hover(isHovering), value: isHovering)
@@ -162,6 +164,16 @@ private struct ServiceCard: View {
                 .background(Palette.warn, in: .capsule)
         case .soon:
             CatalogBadge(text: "Em breve", symbol: "clock")
+        }
+    }
+
+    /// What a click on the card does.
+    private var help: String {
+        switch status {
+        case .available: "Abre a conexão com \(service.name)"
+        case .connected, .off: "Abre \(service.name) para editar ou mudar os Orbs que o usam"
+        case .needsAttention: "Abre \(service.name) para resolver o que falta"
+        case .soon: "\(service.name) ainda não está disponível"
         }
     }
 

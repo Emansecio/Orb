@@ -74,9 +74,9 @@ Cada ferramenta declara três coisas (`AgentTool`):
 | `open` | `open` | |
 | `appleScript` | `applescript` | |
 | `macApps` | `shortcuts_run`, `clipboard_write`, `app_quit` | |
-| `appInterface` | `ui_act` | |
+| `appInterface` | `ui_read`, `ui_act` | |
 | `connector` | ferramentas de conectores (`Servidor__ferramenta`) | `mcp__servidor__ferramenta` |
-| `memory` | `remember` | `mcp__orb_memoria__remember` |
+| `memory` | `remember`, `recall` | `mcp__orb_memoria__remember`, `mcp__orb_memoria__recall` |
 | `schedule` | `schedule` (criar, pausar, retomar, apagar) | `mcp__orb_memoria__schedule` |
 | `jobs` | `job_output`, `job_list`, `job_stop` | `BashOutput`, `KillShell`, `KillBash` (`TaskOutput` e `TaskStop` nos CLIs novos) |
 
@@ -171,7 +171,7 @@ Detalhes que costumam surpreender:
   que está ausente ou tem mais de 24 h.
 - `ui_act` tem perigo quando o rótulo do elemento (ou o item de menu) fala em excluir, enviar, comprar ou descartar, ou
   quando preenche um campo de senha. `app_quit` com `force` tem perigo ("encerra o app à força").
-- A família `appInterface` é só do `ui_act`: uma liberação antiga de Atalhos ou da área de transferência (`macApps`) não passa a
+- A família `appInterface` (`ui_read`, `ui_act`) só pergunta pelo `ui_act`: uma liberação antiga de Atalhos ou da área de transferência (`macApps`) não passa a
   cobrir "clicar e preencher campos em qualquer app".
 
 ## Liberações ("Sempre permitir")

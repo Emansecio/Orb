@@ -74,7 +74,6 @@ enum ClaudeCodePrompt {
         static let latestAnswerLimit = 4_000
 
         init(_ message: ChatMessage, limit: Int = Unit.textLimit) {
-            func clip(_ text: String, _ limit: Int) -> String { text.count > limit ? String(text.prefix(limit)) + "…" : text }
             switch message.role {
             case .system:
                 text = ""
@@ -82,10 +81,10 @@ enum ClaudeCodePrompt {
             case .user:
                 // Pictures cannot travel in a prompt; Claude Code's Read tool opens the files.
                 let pictures = message.images.isEmpty ? "" : "\n[images: " + message.images.map(\.path).joined(separator: ", ") + "]"
-                text = message.content.hasPrefix(ContextSummary.marker) ? "" : "User: " + clip(TurnPreface.stripped(message.content), limit) + pictures
+                text = message.content.hasPrefix(ContextSummary.marker) ? "" : "User: " + TurnPreface.stripped(message.content).clipped(to: limit) + pictures
                 isEssential = true
             case .assistant:
-                var line = clip(message.content, limit)
+                var line = message.content.clipped(to: limit)
                 let calls = message.toolCalls.map { "\($0.name)(\($0.arguments.prefix(160)))" }
                 if !calls.isEmpty { line += (line.isEmpty ? "" : "\n") + "[called: " + calls.joined(separator: "; ") + "]" }
                 text = line.isEmpty ? "" : "Assistant: " + line
@@ -93,7 +92,7 @@ enum ClaudeCodePrompt {
             case .tool:
                 let pictures = message.images.isEmpty ? "" : " [images: " + message.images.map(\.path).joined(separator: ", ") + "]"
                 let first = message.content.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
-                text = "Tool result: " + clip(first, 240) + pictures
+                text = "Tool result: " + first.clipped(to: 240) + pictures
                 isEssential = false
             }
         }

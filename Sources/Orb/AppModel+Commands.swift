@@ -177,7 +177,7 @@ extension AppModel {
     /// Shows the memory kept for `name` in the Finder: its own folder when it can be found (the newest one with
     /// that name), otherwise the folder of kept memories.
     func revealKeptMemory(named name: String) {
-        let kept = memory.root.appending(path: "_guardadas")
+        let kept = KeptMemories.folder(in: memory.root)
         let match = Self.newestKeptFolder(named: name, in: kept)
         if let match {
             NSWorkspace.shared.activateFileViewerSelecting([match])
@@ -190,8 +190,7 @@ extension AppModel {
 
     /// The folder `MemoryLibrary.keep` made for an Orb called `name` (`<name> – <date>`), newest first.
     nonisolated static func newestKeptFolder(named name: String, in directory: URL) -> URL? {
-        let safe = String(name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-").prefix(60))
-        let prefix = "\(safe.isEmpty ? "Orb" : safe) – "
+        let prefix = KeptMemories.namePrefix(for: name)
         let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
         return names.filter { $0.hasPrefix(prefix) }.max().map { directory.appending(path: $0) }
     }

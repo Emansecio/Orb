@@ -127,8 +127,7 @@ extension Conversation {
         if let focus = Self.cleanFocus(focus) { base.focus = focus }
         // What a new session would have to be told, estimated: the summary and every message not yet in it, against
         // the summary as it becomes and the latest turn.
-        func size(_ messages: ArraySlice<ChatMessage>) -> Int { messages.reduce(0) { $0 + $1.contextCharacters } }
-        let before = (summary?.count ?? 0) + size(messages[covered...])
+        let before = (summary?.count ?? 0) + messages[covered...].contextCharacters
         base.absorb(Array(messages[covered..<latest]))
         let text = base.render()
         summary = text
@@ -137,7 +136,7 @@ extension Conversation {
         compactions = (compactions ?? 0) + 1
         return CompactionReport(kind: .manual, foldedMessages: latest - covered,
                                 tokensBefore: ContextBudget.tokens(forCharacters: before),
-                                tokensAfter: ContextBudget.tokens(forCharacters: text.count + size(messages[latest...])))
+                                tokensAfter: ContextBudget.tokens(forCharacters: text.count + messages[latest...].contextCharacters))
     }
 }
 
@@ -183,14 +182,4 @@ enum CompactionCommand {
         let focus = rest.trimmingCharacters(in: .whitespacesAndNewlines)
         return .some(focus.isEmpty ? nil : focus)
     }
-}
-
-/// What the summary holds, for a screen that shows it ("Ver resumo", "O que o Orb lembra").
-struct ContextSummaryInfo: Sendable, Equatable {
-    /// The text the model reads in place of the old messages.
-    var text: String
-    var foldedMessages: Int
-    var compactions: Int
-    var focus: String?
-    var ledger: ConversationLedger?
 }

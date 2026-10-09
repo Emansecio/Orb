@@ -70,9 +70,8 @@ struct WorkspaceSnapshot: Sendable, Equatable, Codable {
     static let changesCloseTag = "</workspace_changes>"
 
     static let entryLimit = 40, changeLimit = 20, commitCount = 5, recentLimit = 15
-    /// Folders nobody wants in a "recently changed" list.
-    static let skippedFolders: Set<String> = [".git", "node_modules", ".build", "DerivedData", "Pods", ".venv", "__pycache__",
-                                              ".gradle", ".idea"]
+    /// Folders nobody wants in a "recently changed" list: the same ones the file search skips (`FileWalker`).
+    static let skippedFolders = FileWalker.skippedDirectories
     /// Names never worth listing at the top level.
     static let hiddenEntries: Set<String> = [".DS_Store", ".git", ".localized", ".Trash"]
 
@@ -262,13 +261,13 @@ struct WorkspaceSnapshot: Sendable, Equatable, Codable {
         }
         var lines = statusResult.output.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
         if let first = lines.first, first.hasPrefix("## ") {
-            git.branch = clip(line(String(first.dropFirst(3))), 160)
+            git.branch = line(String(first.dropFirst(3))).clipped(to: 160)
             lines.removeFirst()
         }
-        git.changes = lines.prefix(changeLimit).map { clip(line($0), 200) }
+        git.changes = lines.prefix(changeLimit).map { line($0).clipped(to: 200) }
         git.extraChanges = max(0, lines.count - changeLimit)
         if let logResult, !logResult.timedOut, logResult.status == 0 {
-            git.commits = logResult.output.split(separator: "\n").prefix(commitCount).map { clip(line(String($0)), 140) }
+            git.commits = logResult.output.split(separator: "\n").prefix(commitCount).map { line(String($0)).clipped(to: 140) }
         } else if logResult?.timedOut == true {
             git.note = "git did not list the commits in time"
         }
@@ -318,10 +317,6 @@ struct WorkspaceSnapshot: Sendable, Equatable, Codable {
     static func developerToolsAreInstalled(manager: FileManager = .default) -> Bool {
         manager.fileExists(atPath: "/Library/Developer/CommandLineTools/usr/bin/git")
             || manager.fileExists(atPath: "/var/db/xcode_select_link") // follows the link: true only when its target exists
-    }
-
-    private static func clip(_ text: String, _ limit: Int) -> String {
-        text.count > limit ? String(text.prefix(limit)) + "…" : text
     }
 }
 

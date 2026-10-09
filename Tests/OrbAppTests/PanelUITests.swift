@@ -49,16 +49,18 @@ import Testing
     // MARK: Copy
 
     @Test func capabilitiesUseTheSharedVocabulary() {
-        #expect(Capability.allCases.map(CapabilityCopy.title) ==
+        #expect(Capability.allCases.map(\.label) ==
                 ["Terminal e arquivos", "Navegar na web", "Controlar apps do Mac", "Conectores"])
         for capability in Capability.allCases { #expect(!CapabilityCopy.subtitle(capability).isEmpty) }
     }
 
     @Test func connectorsLineSaysHowManyAreOn() {
-        #expect(CapabilityCopy.connectorsLine(enabled: 0, total: 0) == "Nenhum conector instalado")
-        #expect(CapabilityCopy.connectorsLine(enabled: 0, total: 2) == "Nenhum ativo (2 instalados)")
-        #expect(CapabilityCopy.connectorsLine(enabled: 1, total: 3) == "1 conector ativo")
-        #expect(CapabilityCopy.connectorsLine(enabled: 2, total: 3) == "2 conectores ativos")
+        #expect(CapabilityCopy.connectorsLine(enabled: 0, total: 0, anyInstalled: false) == "Nenhum conector instalado")
+        // Connectors exist, but all are kept for other Orbs: not "none installed".
+        #expect(CapabilityCopy.connectorsLine(enabled: 0, total: 0, anyInstalled: true) == "Nenhum conector para este Orb")
+        #expect(CapabilityCopy.connectorsLine(enabled: 0, total: 2, anyInstalled: true) == "Nenhum ativo (2 instalados)")
+        #expect(CapabilityCopy.connectorsLine(enabled: 1, total: 3, anyInstalled: true) == "1 conector ativo")
+        #expect(CapabilityCopy.connectorsLine(enabled: 2, total: 3, anyInstalled: true) == "2 conectores ativos")
     }
 
     @MainActor @Test func theLookIsOneLine() {

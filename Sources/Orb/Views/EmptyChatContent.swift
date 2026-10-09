@@ -51,10 +51,8 @@ enum EmptyChatContent {
 
     /// What the Orb is allowed to use, in the app's words ("Terminal e arquivos · Navegar na web").
     static func capabilityNames(for bot: Bot) -> [String] {
-        Capability.allCases.filter(bot.capabilities.contains).map(capabilityName)
+        Capability.allCases.filter(bot.capabilities.contains).map(\.label)
     }
-
-    static func capabilityName(_ capability: Capability) -> String { capability.label }
 
     private static let homeFiles = [
         EmptyChatSuggestion(symbol: "folder", text: "Organize minha pasta Downloads"),

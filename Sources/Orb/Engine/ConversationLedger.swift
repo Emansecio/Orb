@@ -394,15 +394,6 @@ struct ConversationLedger: Codable, Sendable, Equatable {
     private func changedLine() -> String { "Arquivos alterados: " + Self.list(changed, budget: 420) }
     private func readLine() -> String { "Arquivos e links lidos: " + Self.list(read, budget: 260) }
 
-    /// Only the state: files changed and read and the errors left open (what a few skipped steps of a request leave).
-    func stateLines() -> [String] {
-        var lines: [String] = []
-        if !changed.isEmpty { lines.append(changedLine()) }
-        if !read.isEmpty { lines.append(readLine()) }
-        if !failures.isEmpty { lines.append("Erros e bloqueios: " + failures.map(\.text).joined(separator: "; ")) }
-        return lines
-    }
-
     /// Whether `goal` is just the first request again (so the summary does not say it twice).
     private func isOriginal(_ goal: String) -> Bool {
         guard let original else { return false }
@@ -486,8 +477,7 @@ struct ConversationLedger: Codable, Sendable, Equatable {
     // MARK: Heuristics
 
     private static func normalized(_ text: String) -> String {
-        text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "pt_BR"))
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        MemoryText.fold(text).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static let fillers: Set<String> = [

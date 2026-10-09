@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// The message field of one Orb's chat. Takes the Orb's id: it shows nothing of the `Bot` itself (its chips read
 /// their own parts), so changes to the Orb's settings do not re-render it.
@@ -223,7 +222,7 @@ struct ComposerView: View {
         return HStack(spacing: 2) {
             Button("Anexar", systemImage: "plus") { isImporting = true }
                 .labelStyle(.iconOnly)
-                .buttonStyle(IconGhostStyle())
+                .buttonStyle(CircleGhostStyle(side: 28, fontSize: 13))
                 .help(Tip.attach)
             SkillsChip(botID: botID, compact: isCompact) { insert("/\($0) ") }
             PermissionChip(botID: botID, compact: isCompact) { isFocused = true }
@@ -644,20 +643,5 @@ struct ComposerSurface: View {
             .animation(Motion.focus(isFocused, reduceMotion: reduceMotion), value: isFocused)
             // The drop highlight (border, glow) answers like a hover: fast in, slow out; at once under Reduce Motion.
             .animation(reduceMotion ? nil : Motion.hover(isDropTargeted), value: isDropTargeted)
-    }
-}
-
-/// Small icon button with a circular hover fill.
-private struct IconGhostStyle: ButtonStyle {
-    @State private var isHovering = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 13))
-            .frame(width: 28, height: 28)
-            .hoverFill(configuration.isPressed || isHovering, pressed: configuration.isPressed, in: .circle,
-                       color: Palette.ghostSelected)
-            .contentShape(.circle)
-            .onHover { isHovering = $0 }
     }
 }

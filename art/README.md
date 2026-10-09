@@ -35,7 +35,7 @@ $B -b --python art/orbs.py -- personas
 $B -b --python art/orbs.py -- layers [--category eyes]   # -> art/orbgen/flat (+ options.json do app)
 
 # Manifesto com ids e rótulos para o editor do app (mantém cabelo, chapéus e cores de cabelo do orbgen)
-$B -b --python art/orbs.py -- manifest      # -> art/orb_options.json
+$B -b --python art/orbs.py -- manifest      # -> options.json do app
 ```
 
 Cada render gera um PNG transparente (para o app) e as prévias `-dark` e `-light`.
@@ -48,7 +48,7 @@ Cada render gera um PNG transparente (para o app) e as prévias `-dark` e `-ligh
 | Olhos (`eyes`) | 12 | Pílulas, Pontos, Ovais, Grandões, Fendas, Felizes, Sono, Piscadela, Estrelas, Corações, Tontos, Bravos |
 | Boca (`mouth`) | 10 | Nenhuma, Sorriso, Sorrisão, Surpresa, Neutra, Gatinho :3, Língua, Dentinho, Triste, Assobio |
 | Sobrancelhas (`brows`) | 5 | Nenhuma, Retas, Arqueadas, Bravas, Preocupadas |
-| Bochechas (`cheeks`) | 4 | Nenhuma, Blush, Sardas, Coraçõezinhos |
+| Bochechas (`cheeks`) | 4 | Nenhuma, Rosadas, Sardas, Coraçõezinhos |
 | Bigode (`mustache`) | 6 | Nenhum, Clássico, Enrolado, Fino, Escovinha, Cavanhaque |
 | Cabelo (`hair`, orbgen) | 13 | Nenhum, Franja, Ondulado, Cachinhos, Black power, Coque, Rabo de cavalo, Maria-chiquinha, Topete, Espetado, Moicano, Tufinho, Antena |
 | Acessórios (`accessories`, vários) | 15 | Óculos redondos / quadrados / de sol, Monóculo, Chapéu de festa, Boné, Gorro, Cartola, Coroa, Laço, Fones, Auréola, Chifrinhos, Orelhas de gato, Flor |

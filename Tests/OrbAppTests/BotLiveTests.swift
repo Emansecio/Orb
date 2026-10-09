@@ -19,16 +19,6 @@ import Testing
         return AppModel(store: Store(directory: root), runsBackgroundWork: false)
     }
 
-    private final class Flag: @unchecked Sendable { var raised = false }
-
-    /// Whether `change` notifies a view that reads `reads`.
-    @MainActor private func notifies(reading reads: @MainActor () -> Void, whenYouDo change: @MainActor () -> Void) -> Bool {
-        let flag = Flag()
-        withObservationTracking { reads() } onChange: { flag.raised = true }
-        change()
-        return flag.raised
-    }
-
     @MainActor private func expectSilent(reading reads: @MainActor () -> Void, whenYouDo change: @MainActor () -> Void,
                                          sourceLocation: SourceLocation = #_sourceLocation) {
         let fired = notifies(reading: reads, whenYouDo: change)

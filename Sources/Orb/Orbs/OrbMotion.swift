@@ -80,6 +80,25 @@ enum OrbSprings {
     static let swing = (response: 0.3, damping: 0.42)
     /// Largest trailing offset (fraction of the orb) and swing (degrees).
     static let maxLag = 0.02, maxSwing = 3.0
+
+    /// What hair and hats follow: where the head looks and the body's lift (fractions of the orb).
+    static func hairAnchor(look: CGPoint, lift: Double) -> CGPoint {
+        CGPoint(x: look.x * 0.05, y: look.y * 0.05 + lift)
+    }
+
+    /// Steps the trailing spring toward `anchor` and returns how far hair and hats lag behind it (at most `maxLag`),
+    /// with a little overshoot. The live orb and the review sheets both call this, so the sheets show the real motion.
+    static func hairLag(_ loose: inout SpringPoint, anchor: CGPoint, dt: Double) -> CGPoint {
+        loose.step(toward: anchor, dt: dt, response: Self.loose.response, damping: Self.loose.damping)
+        return CGPoint(x: max(-maxLag, min(maxLag, loose.value.x - anchor.x)), y: max(-maxLag, min(maxLag, loose.value.y - anchor.y)))
+    }
+
+    /// Steps the swing spring toward the body's `tilt` and returns how many degrees hair and hats swing behind it
+    /// (at most `maxSwing`), overshooting a little as it settles.
+    static func hairSwing(_ swing: inout Spring, tilt: Double, dt: Double) -> Double {
+        swing.step(toward: tilt, dt: dt, response: Self.swing.response, damping: Self.swing.damping)
+        return max(-maxSwing, min(maxSwing, swing.value - tilt))
+    }
 }
 
 /// How far a live Orb reaches above its size box, so a stage can leave room for it (fractions of its size). Lifts

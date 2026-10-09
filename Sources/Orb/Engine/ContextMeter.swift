@@ -19,14 +19,12 @@ struct ContextFill: Sendable, Equatable {
     var historyTokens: Int
     /// The fixed part of every request.
     var overheadTokens: Int
-    /// The model's window (an estimate from the budget when the window is not known: see `windowIsKnown`).
+    /// The model's window (an estimate from the budget when the window is not known).
     var windowTokens: Int
-    var windowIsKnown: Bool
     /// History tokens allowed before a compaction starts.
     var budgetTokens: Int
-    /// Messages already folded into the summary, and the summary's own size.
+    /// Messages already folded into the summary.
     var foldedMessages: Int
-    var summaryTokens: Int
     /// What compacting now (a manual compaction brings the history down to `compactingShare` of the budget) would drop;
     /// nil when there is nothing to fold (a single turn).
     var compaction: Compaction?
@@ -35,7 +33,6 @@ struct ContextFill: Sendable, Equatable {
     var fraction: Double { windowTokens > 0 ? Double(usedTokens) / Double(windowTokens) : 0 }
     /// Share of the history budget in use: at 1 the next message starts a compaction.
     var budgetFraction: Double { budgetTokens > 0 ? Double(historyTokens) / Double(budgetTokens) : 0 }
-    var willCompactOnNextMessage: Bool { historyTokens > budgetTokens }
 }
 
 enum ContextMeter {
@@ -84,10 +81,8 @@ enum ContextMeter {
 
         let window = budget.window ?? budget.tokens + budget.overheadTokens + budget.replyTokens
         return ContextFill(usedTokens: budget.overheadTokens + history, historyTokens: history,
-                           overheadTokens: budget.overheadTokens, windowTokens: window, windowIsKnown: budget.window != nil,
-                           budgetTokens: budget.tokens, foldedMessages: covered,
-                           summaryTokens: conversation.summary.map { ContextBudget.tokens(forCharacters: $0.count) } ?? 0,
-                           compaction: compaction)
+                           overheadTokens: budget.overheadTokens, windowTokens: window,
+                           budgetTokens: budget.tokens, foldedMessages: covered, compaction: compaction)
     }
 
     /// The budget a manual compaction fits the history to: `share` of `budget`, or half of what the history takes
@@ -112,7 +107,7 @@ enum ContextMeter {
     }
 
     private static func tokens(_ messages: [ChatMessage]) -> Int {
-        ContextBudget.tokens(forCharacters: messages.reduce(0) { $0 + $1.contextCharacters })
+        ContextBudget.tokens(forCharacters: messages.contextCharacters)
     }
 }
 

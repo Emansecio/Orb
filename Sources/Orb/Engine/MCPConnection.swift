@@ -108,7 +108,7 @@ actor MCPConnection {
             try await transport.open(receive: { [weak self] in await self?.handle($0) },
                                      closed: { [weak self] in await self?.shutdown($0) })
             handshake = MCPHandshake(initializeResult: try await request("initialize", .object([
-                "protocolVersion": .string("2025-06-18"),
+                "protocolVersion": .string(MCPProtocol.preferred),
                 "capabilities": .object([:]),
                 "clientInfo": .object(["name": .string("Orb"), "version": .string("1.0")]),
             ]), timeout: .seconds(30)))

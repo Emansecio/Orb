@@ -412,7 +412,7 @@ private struct RoutineRunSheet: View {
             .frame(height: max(80, min(contentHeight, 340)))
             .orbSheet(title, subtitle: [how, RoutineText.duration(of: run)].compactMap { $0 }.joined(separator: " · "),
                       size: .medium) {
-                footer(routine: routine, run: run)
+                footer(run: run)
             }
             .task(id: runID) {
                 blocks = RoutineText.reportBlocks(run.report ?? "")
@@ -446,7 +446,7 @@ private struct RoutineRunSheet: View {
         .padding(20)
     }
 
-    private func footer(routine: Routine, run: RoutineRun) -> some View {
+    private func footer(run: RoutineRun) -> some View {
         HStack(spacing: 4) {
             Button("Copiar", systemImage: "doc.on.doc") { copy(run) }
                 .buttonStyle(GhostStyle())
@@ -480,8 +480,7 @@ private struct RoutineRunSheet: View {
     }
 
     private func copy(_ run: RoutineRun) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(run.report ?? run.summary, forType: .string)
+        Clipboard.copy(run.report ?? run.summary)
     }
 
     /// The report file of the run inside the Orb's folder, if it is still there.

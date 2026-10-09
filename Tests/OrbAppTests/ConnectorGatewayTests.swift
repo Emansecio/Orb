@@ -2,8 +2,6 @@ import Foundation
 import Testing
 @testable import Orb
 
-private let hasPython = FileManager.default.isExecutableFile(atPath: "/usr/bin/python3")
-
 /// A connector with a catalog already on disk: `Store.saveConnectorCatalog`, then `MCPManager.sync` reads it, with no
 /// server involved.
 private struct CatalogFixture {

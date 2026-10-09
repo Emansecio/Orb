@@ -437,7 +437,7 @@ import Testing
 
     // MARK: The app
 
-    @MainActor private func appModel(vault: MemoryVault, arguments: [String] = ["Orb"], unsavedStretch: Bool = false) throws -> (AppModel, Flag) {
+    @MainActor private func appModel(vault: MemoryVault, arguments: [String] = ["Orb"], unsavedStretch: Bool = false) throws -> (AppModel, RaisedFlag) {
         var state = AppState.initial
         state.bots = [atlas, luna]
         state.connectors = [connector]
@@ -453,7 +453,7 @@ import Testing
         }
         store.flush()
         let model = AppModel(store: store, runsBackgroundWork: false, secretVault: vault)
-        let finished = Flag()
+        let finished = RaisedFlag()
         model.resetEnvironment.arguments = arguments
         model.resetEnvironment.preferences = preferences
         model.resetEnvironment.legacyFolder = legacy
@@ -478,6 +478,41 @@ import Testing
         #expect(vault.get(ConnectorSecrets.account(id: connectorID, name: "GITHUB_TOKEN")) == nil)
         #expect(vault.get("openai") == "sk-aaa")
         #expect(model.routines.isEmpty && model.queuedRoutines.isEmpty)
+    }
+
+    @Test @MainActor func aResetThatLeavesSomethingBehindTellsTheUserBeforeQuitting() async throws {
+        let (model, finished) = try appModel(vault: MemoryVault())
+        // `_guardadas` is a file here, so the memories cannot be moved into it.
+        try FileManager.default.removeItem(at: data.appending(path: "memoria/_guardadas"))
+        try write("não sou uma pasta", to: data.appending(path: "memoria/_guardadas"))
+        let warned = ReportBox()
+        model.resetEnvironment.warn = { warned.report = $0; #expect(!finished.isRaised) } // before the app quits
+
+        let outcome = await model.resetEverything(ResetOptions(memories: .keep, leavesProviders: false))
+
+        guard case .done(let report) = outcome else { Issue.record("the reset did not run: \(outcome)"); return }
+        #expect(!report.isComplete)
+        #expect(warned.report == report)
+        #expect(finished.isRaised)
+    }
+
+    @Test @MainActor func aCompleteResetShowsNoWarning() async throws {
+        let (model, _) = try appModel(vault: MemoryVault())
+        let warned = ReportBox()
+        model.resetEnvironment.warn = { warned.report = $0 }
+
+        _ = await model.resetEverything(ResetOptions(memories: .keep, leavesProviders: false))
+
+        #expect(warned.report == nil)
+    }
+
+    @Test @MainActor func theWarningNamesWhatIsLeftAndCountsTheRest() {
+        let few = ResetReport(failures: ["memoria/a", "conversations"])
+        #expect(ResetWarning.message(for: few).contains("memoria/a, conversations."))
+        let many = ResetReport(failures: (1...8).map { "item\($0)" })
+        let text = ResetWarning.message(for: many)
+        #expect(text.contains("item1, item2, item3, item4, item5 e mais 3."))
+        #expect(!text.contains("item6"))
     }
 
     @Test @MainActor func keepingTheMemoriesSavesTheLastStretchOfTheConversationFirst() async throws {
@@ -585,11 +620,8 @@ import Testing
     }
 }
 
-private final class Flag: @unchecked Sendable {
-    private let lock = NSLock()
-    private var raised = false
-    func raise() { lock.withLock { raised = true } }
-    var isRaised: Bool { lock.withLock { raised } }
+private final class ReportBox: @unchecked Sendable {
+    var report: ResetReport?
 }
 
 /// Preferences in a dictionary (what `LegacyMigration.run` writes to).

@@ -2,8 +2,6 @@ import Foundation
 import Testing
 @testable import Orb
 
-private let hasPython = FileManager.default.isExecutableFile(atPath: "/usr/bin/python3")
-
 /// A server with `count` tools, written to a temporary folder.
 private func fakeServer(name: String, count: Int, environment: [String: String] = [:], delay: Int = 0) throws -> MCPServerConfig {
     let script = """
@@ -71,15 +69,6 @@ struct OrbScopeModelTests {
         #expect(connector.orbIDs == nil)
     }
 
-    @Test func togglingOneOrbOutOfEveryone() {
-        let (a, b, c) = (UUID(), UUID(), UUID())
-        let all = [a, b, c]
-        #expect(AppModel.toggled(nil, botID: b, on: false, allBots: all) == [a, c])
-        #expect(AppModel.toggled(nil, botID: b, on: true, allBots: all) == nil)
-        #expect(AppModel.toggled([a], botID: c, on: true, allBots: all) == [a, c])
-        #expect(AppModel.toggled([a, c], botID: a, on: false, allBots: all) == [c])
-    }
-
     @Test func scopeReadsInPortuguese() {
         let lia = Bot(name: "Lia", role: "", orb: OrbConfig()), atlas = Bot(name: "Atlas", role: "", orb: OrbConfig())
         let rex = Bot(name: "Rex", role: "", orb: OrbConfig())
@@ -131,6 +120,22 @@ struct OrbScopeModelTests {
         #expect(model.orbsUsing(model.connectors[0]).map(\.name) == ["Atlas"])
         model.connectors[0].isEnabled = false
         #expect(model.orbsUsing(model.connectors[0]).isEmpty)
+    }
+
+    @Test @MainActor func thePanelCountsOnlyTheConnectorsInTheOrbsScope() {
+        let model = model()
+        let (atlas, lia) = (model.bots[0].id, model.bots[1].id)
+        model.bots[0].capabilities.insert(.connectors)
+        model.connectors = [MCPServerConfig(name: "A", command: "x"),
+                            MCPServerConfig(name: "B", command: "x", orbIDs: [lia]),
+                            MCPServerConfig(name: "C", command: "x", isEnabled: false, orbIDs: [atlas])]
+        // Atlas gets A; B is kept for Lia only (it does not count for Atlas); C is Atlas's but off.
+        #expect(model.connectorCounts(for: atlas) == (enabled: 1, total: 2))
+        #expect(model.connectorCounts(for: lia) == (enabled: 0, total: 2)) // Lia's switch is off: she gets none
+        // Connectors exist but all are kept for Lia: Atlas sees none in its scope (and the panel says so, not "none installed").
+        model.connectors = [MCPServerConfig(name: "B", command: "x", orbIDs: [lia])]
+        #expect(model.connectorCounts(for: atlas) == (enabled: 0, total: 0))
+        #expect(!model.connectors.isEmpty)
     }
 
     @Test @MainActor func choosingAnOrbTurnsItsConnectorsSwitchOn() {

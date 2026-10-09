@@ -2,8 +2,6 @@ import Foundation
 import Testing
 @testable import Orb
 
-private let hasPython = FileManager.default.isExecutableFile(atPath: "/usr/bin/python3")
-
 /// Fake remote MCP server. "streamable" mode: POST /mcp needs `Authorization: Bearer test` and a session id,
 /// answers initialize/tools/list as JSON and tools/call as SSE. "legacy" mode: POST /sse is 405, GET /sse is the
 /// event stream that announces `/messages` (or another host when the path is /evil). GET /state reports what it saw.

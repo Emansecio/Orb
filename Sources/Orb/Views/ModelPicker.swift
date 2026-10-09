@@ -3,7 +3,7 @@ import SwiftUI
 /// Picks a model as "provider/model", grouped by provider. With `allowsDefault`, "" means the app's default model.
 ///
 /// A `Picker` builds a row for every model before it shows anything, which a gateway that lists hundreds of them
-/// turns into half a second or more every time the panel opens. Past `searchableAbove` models the field is a button
+/// turns into half a second or more every time the panel opens. Past `ModelSearch.longListAbove` models the field is a button
 /// that opens a searchable list instead, which builds only the rows on screen. In a menu (`inMenu`) the list is
 /// already built lazily, so it stays as it was.
 struct ModelPicker: View {
@@ -12,9 +12,6 @@ struct ModelPicker: View {
     var title = "Modelo"
     var allowsDefault = true
     var inMenu = false
-
-    /// More models than this: a searchable list in a popover instead of a `Picker`.
-    static let searchableAbove = 40
 
     private var defaultLabel: String {
         guard let ref = ModelRef(model.defaultModel) else { return "Padrão" }
@@ -30,7 +27,7 @@ struct ModelPicker: View {
 
     var body: some View {
         let choices = model.modelChoices
-        if !inMenu, choices.reduce(0, { $0 + $1.models.count }) > Self.searchableAbove {
+        if !inMenu, ModelSearch.isLongList(choices) {
             SearchableModelField(selection: $selection, title: title, allowsDefault: allowsDefault,
                                  defaultLabel: defaultLabel, choices: choices)
         } else {
@@ -92,6 +89,14 @@ private struct SearchableModelField: View {
 
 /// Models matching what was typed (name or id, ignoring case and accents); everything when nothing was typed.
 enum ModelSearch {
+    /// More models than this make a long list: Ajustes shows a searchable popover instead of a `Picker`, and the
+    /// composer's list starts with its providers folded.
+    static let longListAbove = 40
+
+    static func isLongList(_ choices: [(account: ProviderAccount, models: [ProviderModel])]) -> Bool {
+        choices.reduce(0) { $0 + $1.models.count } > longListAbove
+    }
+
     static func matches(_ model: ProviderModel, _ query: String) -> Bool {
         let words = query.split(whereSeparator: \.isWhitespace)
         guard !words.isEmpty else { return true }
@@ -107,6 +112,22 @@ enum ModelSearch {
     }
 }
 
+/// The "Buscar modelo" field above a model list: takes focus when it appears; Return calls `onSubmit`.
+struct ModelSearchField: View {
+    @Binding var query: String
+    let onSubmit: () -> Void
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        TextField("Buscar modelo", text: $query)
+            .textFieldStyle(.roundedBorder)
+            .focused($isFocused)
+            .onSubmit(onSubmit)
+            .padding(10)
+            .onAppear { isFocused = true }
+    }
+}
+
 /// Search field above a lazily built list of every enabled provider's models.
 private struct ModelChooser: View {
     @Binding var selection: String
@@ -115,22 +136,17 @@ private struct ModelChooser: View {
     let choices: [(account: ProviderAccount, models: [ProviderModel])]
     let done: () -> Void
     @State private var query = ""
-    @FocusState private var isSearching: Bool
 
     var body: some View {
         let shown = choices.map { (account: $0.account, models: $0.models.filter { ModelSearch.matches($0, query) }) }
             .filter { !$0.models.isEmpty }
         VStack(spacing: 0) {
-            TextField("Buscar modelo", text: $query)
-                .textFieldStyle(.roundedBorder)
-                .focused($isSearching)
-                .onSubmit {
-                    if let tag = ModelSearch.submitted(shown, query: query, allowsDefault: allowsDefault) {
-                        selection = tag
-                        done()
-                    }
+            ModelSearchField(query: $query) {
+                if let tag = ModelSearch.submitted(shown, query: query, allowsDefault: allowsDefault) {
+                    selection = tag
+                    done()
                 }
-                .padding(10)
+            }
             Divider()
             ScrollViewReader { proxy in
                 ScrollView {
@@ -172,41 +188,13 @@ private struct ModelChooser: View {
             }
         }
         .frame(width: 340, height: 380)
-        .onAppear { isSearching = true }
     }
 
     private func row(_ name: String, tag: String, help: String) -> some View {
-        ModelChoiceRow(name: name, isSelected: selection == tag, help: help) {
+        ModelPopoverRow(name: name, detail: "", isSelected: selection == tag, help: help) {
             selection = tag
             done()
         }
         .id(tag)
-    }
-}
-
-private struct ModelChoiceRow: View {
-    let name: String
-    let isSelected: Bool
-    let help: String
-    let action: () -> Void
-    @State private var isHovering = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack {
-                Text(name).lineLimit(1).truncationMode(.middle)
-                Spacer(minLength: 8)
-                if isSelected { Image(systemName: "checkmark").font(.caption.weight(.semibold)) }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 5)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isHovering ? Palette.ghostHover : .clear)
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovering = $0 }
-        .help(help)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }

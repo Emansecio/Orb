@@ -142,6 +142,19 @@ final class GlobalHotKey {
         hotKey = nil
     }
 
+    /// The binding for the switch that turns the shortcut on (`stored` is its `@AppStorage`). Another app may already
+    /// hold the keys: then the switch stays off and the user is told.
+    static func toggleBinding(_ stored: Binding<Bool>) -> Binding<Bool> {
+        Binding(
+            get: { stored.wrappedValue },
+            set: { wanted in
+                let works = shared.apply(wanted)
+                stored.wrappedValue = wanted && works
+                if wanted && !works { showUnavailableAlert() }
+            }
+        )
+    }
+
     static func showUnavailableAlert() {
         let alert = NSAlert()
         alert.messageText = "⌃⌥Espaço já é usado por outro app"

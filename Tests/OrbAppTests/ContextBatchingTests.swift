@@ -27,27 +27,6 @@ private func turn(_ request: String, steps: Int = 1, output: Int = 100, tag: Str
     return messages
 }
 
-private func characters(_ messages: [ChatMessage]) -> Int { messages.reduce(0) { $0 + $1.contextCharacters } }
-
-private func isValidConversation(_ messages: [ChatMessage]) -> Bool {
-    guard messages.first?.role == .user else { return false }
-    var open: Set<String> = []
-    for message in messages {
-        switch message.role {
-        case .assistant: open = Set(message.toolCalls.map(\.id))
-        case .tool:
-            guard let id = message.toolCallID, open.remove(id) != nil else { return false }
-        default: open = []
-        }
-    }
-    return true
-}
-
-/// Whether `later` starts with all of `earlier` (the provider's cache would still hold).
-private func extends(_ earlier: [ChatMessage], _ later: [ChatMessage]) -> Bool {
-    later.count >= earlier.count && zip(earlier, later).allSatisfy { $0 == $1 }
-}
-
 private func toolSizes(_ messages: [ChatMessage]) -> [Int] { messages.filter { $0.role == .tool }.map(\.content.count) }
 
 private func prefaced(_ prompt: String, snapshot: Bool = false, notes: String = "") -> ChatMessage {
@@ -207,7 +186,7 @@ struct FreshOutputsTests {
         // The 30 old outputs (3,900 each) plus the 3 whole ones do not fit; shortening the old ones is enough.
         let budget = ContextBudget(tokens: 30_000)   // 105,000 characters
         let window = ContextWindow.fit(messages, budget: budget)
-        #expect(window.summary == nil && window.skippedCount == 0)
+        #expect(window.summary == nil && window.skippedSteps == 0)
         #expect(toolSizes(window.messages).suffix(3).allSatisfy { $0 == 10_000 })
         #expect(toolSizes(window.messages).dropLast(3).allSatisfy { $0 < 3_900 })
         #expect(characters(window.messages) <= budget.characters)
@@ -274,12 +253,12 @@ struct SetAsideStepsTests {
 
     @Test func eachStepSetAsideLeavesOneLineWithWhatItDid() throws {
         let window = ContextWindow.fit(hugeTask(steps: 30), budget: ContextBudget(tokens: 6_000))
-        #expect(window.skippedCount > 0)
+        #expect(window.skippedSteps > 0)
         #expect(window.summary == nil)
         let note = try #require(window.messages.first)
         #expect(note.content.hasPrefix(ContextSummary.marker))
         // One line per step set aside (the oldest ones counted when there are more than the window can spare).
-        let skippedSteps = window.skippedCount / 2
+        let skippedSteps = window.skippedSteps
         #expect(note.content.contains("[passo \(skippedSteps)] read_file /Users/ana/src/mod\(skippedSteps - 1).swift -> ok, 3.000 car."))
         #expect(note.content.contains("começa com «ooo"))
         #expect(!note.content.contains("[passo \(skippedSteps + 1)]"))
@@ -307,7 +286,7 @@ struct SetAsideStepsTests {
         let window = ContextWindow.fit(hugeTask(steps: 30), budget: budget)
         #expect(characters(window.messages) <= Int(Double(budget.characters) * budget.stepsLowWater) + 200)
         // Nearly everything went at once (a step at a time would have stopped just under the limit).
-        #expect(window.skippedCount >= 56)
+        #expect(window.skippedSteps >= 28)
     }
 
     @Test func theCutHoldsBetweenBatches() {
@@ -342,7 +321,7 @@ struct SetAsideStepsTests {
 
     @Test func aTaskThatFitsAfterShorteningSetsNothingAside() {
         let window = ContextWindow.fit(hugeTask(steps: 12, output: 3_000), budget: ContextBudget(tokens: 20_000))
-        #expect(window.skippedCount == 0)
+        #expect(window.skippedSteps == 0)
         #expect(window.messages.first?.content == "pedido original")
     }
 }
@@ -658,10 +637,10 @@ struct ContextMeterTests {
         let fill = Conversation().contextFill(budget: ContextBudget(modelWindow: 128_000))
         #expect(fill.historyTokens == 0)
         #expect(fill.usedTokens == ContextBudget.typicalOverheadTokens)
-        #expect(fill.windowTokens == 128_000 && fill.windowIsKnown)
+        #expect(fill.windowTokens == 128_000)
         #expect(fill.fraction > 0.06 && fill.fraction < 0.07)
-        #expect(fill.compaction == nil && !fill.willCompactOnNextMessage)
-        #expect(fill.foldedMessages == 0 && fill.summaryTokens == 0)
+        #expect(fill.compaction == nil && fill.budgetFraction <= 1)
+        #expect(fill.foldedMessages == 0)
     }
 
     @Test func theHistoryIsMeasuredAsTheNextRequestWouldCarryIt() {
@@ -698,15 +677,15 @@ struct ContextMeterTests {
         _ = conversation.prepareHistory(budget: budget)
         let fill = conversation.contextFill(budget: budget)
         #expect(fill.foldedMessages == conversation.summaryCoveredCount)
-        #expect(fill.foldedMessages > 0 && fill.summaryTokens > 0)
+        #expect(fill.foldedMessages > 0 && conversation.summary != nil)
         // Too small a budget for what is left: the next message starts a compaction.
         let tight = conversation.contextFill(budget: ContextBudget(tokens: 600))
-        #expect(tight.willCompactOnNextMessage)
+        #expect(tight.budgetFraction > 1)
     }
 
     @Test func aBudgetWithoutAWindowEstimatesOne() {
-        let fill = Conversation().contextFill(budget: ContextBudget(tokens: 10_000))
-        #expect(!fill.windowIsKnown)
+        let budget = ContextBudget(tokens: 10_000)
+        let fill = Conversation().contextFill(budget: budget)
         #expect(fill.windowTokens == 10_000)
     }
 }

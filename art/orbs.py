@@ -11,7 +11,7 @@ Commands:
                                      (--category visemes -> visemes/<id>.png and <id>-dark.png)
                                      Then `orbgen faces` seats them on the lit body (art/orbgen). The body
                                      and the hair are made by orbgen, not here.
-    manifest                      -> art/orb_options.json (ids + labels for the app editor)
+    manifest                      -> options.json in the app (ids + labels for the app editor)
 """
 
 import argparse
@@ -203,7 +203,8 @@ def manifest(path=None):
     data["color"] = [{"id": pid, "label": label, "hex": [f"#{c:06X}" for c in colors]}
                      for pid, label, colors in features.PALETTES]
     # Keep what orbgen owns: the hair styles, each palette's default hair color and the hats list.
-    previous_path = path or os.path.join(ART, "orb_options.json")
+    path = path or os.path.join(RESOURCES, "options.json")
+    previous_path = path
     if os.path.exists(previous_path):
         with open(previous_path, encoding="utf-8") as handle:
             previous = json.load(handle)
@@ -218,7 +219,7 @@ def manifest(path=None):
     data["tintedAccessories"] = sorted(TINTED_ACCESSORIES)
     data["variants"] = sorted(VARIANT_CATEGORIES)
     data["visemes"] = [oid for oid, _, _ in features.VISEMES]
-    with open(path or os.path.join(ART, "orb_options.json"), "w", encoding="utf-8") as handle:
+    with open(path, "w", encoding="utf-8") as handle:
         json.dump(data, handle, ensure_ascii=False, indent=2)
     print("manifest written")
 

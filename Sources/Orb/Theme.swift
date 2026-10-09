@@ -293,6 +293,23 @@ struct SecondaryPillStyle: ButtonStyle {
     }
 }
 
+/// Round icon button with a circular hover fill: `side` wide (28 in the composer, 32 in the sidebar), the symbol at `fontSize`.
+struct CircleGhostStyle: ButtonStyle {
+    let side: CGFloat
+    let fontSize: CGFloat
+    @State private var isHovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: fontSize))
+            .frame(width: side, height: side)
+            .hoverFill(configuration.isPressed || isHovering, pressed: configuration.isPressed, in: .circle,
+                       color: Palette.ghostSelected)
+            .contentShape(.circle)
+            .onHover { isHovering = $0 }
+    }
+}
+
 /// Text-only ghost button with hover fill (in fast, out slow: `hoverFill`).
 struct GhostStyle: ButtonStyle {
     /// A color for the label instead of the usual gray (red for a destructive action).

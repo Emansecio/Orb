@@ -155,17 +155,7 @@ enum OrbDesignSheet {
         let times = (0..<12).map { Double($0) / 6 }
         let sheet = VStack(alignment: .leading, spacing: 8) {
             ForEach(activities) { activity in
-                let poses = OrbPosePreview.poses(activity: activity, at: times)
-                HStack(spacing: 4) {
-                    Text(activity.label)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Palette.muted)
-                        .frame(width: 96, alignment: .leading)
-                    ForEach(Array(poses.enumerated()), id: \.offset) { _, pose in
-                        OrbFrame(config: orb, activity: activity, size: 64, pose: pose)
-                            .frame(width: 84, height: 108)
-                    }
-                }
+                poseRow(label: activity.label, orb: orb, activity: activity, poses: OrbPosePreview.poses(activity: activity, at: times))
             }
         }
         .padding(24)
@@ -193,16 +183,7 @@ enum OrbDesignSheet {
         ]
         let sheet = VStack(alignment: .leading, spacing: 8) {
             ForEach(rows, id: \.0) { label, activity, poses in
-                HStack(spacing: 4) {
-                    Text(label)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Palette.muted)
-                        .frame(width: 96, alignment: .leading)
-                    ForEach(Array(poses.enumerated()), id: \.offset) { _, pose in
-                        OrbFrame(config: orb, activity: activity, size: 64, pose: pose)
-                            .frame(width: 84, height: 108)
-                    }
-                }
+                poseRow(label: label, orb: orb, activity: activity, poses: poses)
             }
         }
         .padding(24)
@@ -248,12 +229,21 @@ enum OrbDesignSheet {
 
     // MARK: Helpers
 
-    static let sampleOrbs: [OrbConfig] = [
-        OrbConfig(color: "indigo", eyes: "pilulas", mouth: "sorriso", accessories: ["oculos-redondos"]),
-        OrbConfig(color: "rosa", eyes: "ovais", cheeks: "blush", hair: "tufinho", accessories: ["laco"]),
-        OrbConfig(color: "menta", eyes: "felizes", mouth: "sorriso", cheeks: "sardas", hair: "cachos"),
-        OrbConfig(color: "perola", eyes: "pilulas", cheeks: "blush", hair: "franja"),
-    ]
+    /// One labeled row of frames: the Orb at each of `poses`.
+    private static func poseRow(label: String, orb: OrbConfig, activity: OrbActivity, poses: [OrbPose]) -> some View {
+        HStack(spacing: 4) {
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Palette.muted)
+                .frame(width: 96, alignment: .leading)
+            ForEach(Array(poses.enumerated()), id: \.offset) { _, pose in
+                OrbFrame(config: orb, activity: activity, size: 64, pose: pose)
+                    .frame(width: 84, height: 108)
+            }
+        }
+    }
+
+    static let sampleOrbs = OrbBench.looks
 
     private static func grid(columns: [String], rows: [(String, [OrbConfig])], size: CGFloat) -> some View {
         let cell = CGSize(width: size * 1.35, height: size * 1.75)
@@ -314,12 +304,8 @@ enum OrbPosePreview {
                 head.step(toward: activity.gaze(at: time).look, dt: dt, response: OrbSprings.head.response,
                           damping: OrbSprings.head.damping)
                 pose.look = head.value
-                let anchor = CGPoint(x: pose.look.x * 0.05, y: pose.look.y * 0.05 + pose.lift)
-                loose.step(toward: anchor, dt: dt, response: OrbSprings.loose.response, damping: OrbSprings.loose.damping)
-                let lag = OrbSprings.maxLag
-                pose.hairLag = CGPoint(x: max(-lag, min(lag, loose.value.x - anchor.x)), y: max(-lag, min(lag, loose.value.y - anchor.y)))
-                swing.step(toward: pose.tilt, dt: dt, response: OrbSprings.swing.response, damping: OrbSprings.swing.damping)
-                pose.hairSwing = max(-OrbSprings.maxSwing, min(OrbSprings.maxSwing, swing.value - pose.tilt))
+                pose.hairLag = OrbSprings.hairLag(&loose, anchor: OrbSprings.hairAnchor(look: pose.look, lift: pose.lift), dt: dt)
+                pose.hairSwing = OrbSprings.hairSwing(&swing, tilt: pose.tilt, dt: dt)
                 pose.blink = Blinker.closure(time - 1.5)
                 time += dt
             } while time < target

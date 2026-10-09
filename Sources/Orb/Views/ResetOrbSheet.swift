@@ -169,3 +169,28 @@ enum ResetConfirmation {
         return response == .alertSecondButtonReturn
     }
 }
+
+/// The notice for a reset that left something behind (a file that could not be removed, a memory that could not be
+/// kept): the app is about to quit and open again, so it says so before, once, and names what is left.
+@MainActor
+enum ResetWarning {
+    static let title = "A redefinição não removeu tudo"
+    /// How many leftovers the notice names; the rest are counted.
+    static let namedLimit = 5
+
+    static func message(for report: ResetReport) -> String {
+        let named = report.failures.prefix(namedLimit).joined(separator: ", ")
+        let more = report.failures.count > namedLimit ? " e mais \(report.failures.count - namedLimit)" : ""
+        return "O resto foi redefinido, mas não deu para remover, mover ou gravar: \(named)\(more). "
+            + "Com o Orb fechado, dá para apagar esses itens à mão na pasta de dados (Ajustes → Geral → Pasta de dados)."
+    }
+
+    static func present(_ report: ResetReport) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = title
+        alert.informativeText = message(for: report)
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+}

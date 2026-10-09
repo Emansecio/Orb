@@ -72,11 +72,6 @@ import Testing
 
     // MARK: Catalog tabs
 
-    @Test func findOnTheInstalledTabGoesToTheCatalogWhereTheSearchIs() {
-        #expect(CatalogTab.afterFind(.installed) == .explore)
-        #expect(CatalogTab.afterFind(.explore) == .explore)
-    }
-
     @Test func onlyTheSelectedTabIsAnnouncedAsSelected() {
         #expect(CatalogTab.traits(isSelected: true) == .isSelected)
         #expect(CatalogTab.traits(isSelected: false) == [])

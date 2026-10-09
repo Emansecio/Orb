@@ -1,5 +1,4 @@
 import Foundation
-import os
 
 // Connectors that run inside the app, without a server to launch: Google Agenda and Lembretes (EventKit) and Gmail (Mail.app).
 // They sit behind the same door as every other connector (`connector_tools` / `connector_call`), so they get the catalog, the
@@ -88,10 +87,9 @@ struct LocalConnectorEnvironment: Sendable {
 
 // MARK: - Speaking MCP
 
-/// The JSON-RPC side of a local connector: `initialize`, `tools/list` and `tools/call`, the same for the in-process transport
-/// and for the stdio server Claude Code starts.
+/// The JSON-RPC side of a local connector: what `MCPStdioServer` needs to serve one, the same for the in-process transport and
+/// for the stdio server Claude Code starts.
 enum LocalConnectorServer {
-    static let protocolVersions = ["2024-11-05", "2025-03-26", "2025-06-18"]
     /// The command line flag of the stdio server: `Orb --local-connector <agenda|lembretes|gmail>`.
     static let flag = "--local-connector"
 
@@ -109,69 +107,45 @@ enum LocalConnectorServer {
 
     /// The response to one message; nil for notifications.
     static func respond(to request: JSONValue, connector: any LocalConnector) async -> JSONValue? {
-        guard let id = request["id"], id != .null else { return nil }
-        func reply(_ result: JSONValue) -> JSONValue { .object(["jsonrpc": .string("2.0"), "id": id, "result": result]) }
-        func failure(_ code: Double, _ message: String) -> JSONValue {
-            .object(["jsonrpc": .string("2.0"), "id": id, "error": .object(["code": .number(code), "message": .string(message)])])
-        }
-        switch request["method"]?.string {
-        case "initialize":
-            let asked = request["params"]?["protocolVersion"]?.string ?? ""
-            return reply(.object([
-                "protocolVersion": .string(protocolVersions.contains(asked) ? asked : "2025-06-18"),
-                "capabilities": .object(["tools": .object([:])]),
-                "serverInfo": .object(["name": .string("orb-local"), "version": .string("1.0")]),
-            ]))
-        case "ping":
-            return reply(.object([:]))
-        case "tools/list":
-            return reply(.object(["tools": .array(connector.tools.map(listed))]))
-        case "tools/call":
-            guard let name = request["params"]?["name"]?.string, connector.tools.contains(where: { $0.name == name }) else {
-                return failure(-32602, "Ferramenta desconhecida")
-            }
-            let arguments = request["params"]?["arguments"] ?? .object([:])
-            do {
-                let text = try await connector.call(name, arguments: arguments)
-                return reply(.object(["content": .array([textBlock(text)]), "isError": .bool(false)]))
-            } catch {
-                return reply(.object(["content": .array([textBlock(error.localizedDescription)]), "isError": .bool(true)]))
-            }
-        default:
-            return failure(-32601, "Método não suportado")
-        }
+        await MCPStdioServer.respond(to: request, handler: Handler(connector: connector))
     }
 
-    private static func textBlock(_ text: String) -> JSONValue { .object(["type": .string("text"), "text": .string(text)]) }
-
-    private static func listed(_ tool: LocalTool) -> JSONValue {
-        var annotations: [String: JSONValue] = [:]
-        if let readOnly = tool.annotations.readOnly { annotations["readOnlyHint"] = .bool(readOnly) }
-        if let destructive = tool.annotations.destructive { annotations["destructiveHint"] = .bool(destructive) }
-        if let openWorld = tool.annotations.openWorld { annotations["openWorldHint"] = .bool(openWorld) }
-        return .object(["name": .string(tool.name), "description": .string(tool.description),
-                        "inputSchema": tool.parameters, "annotations": .object(annotations)])
+    /// The response to one stdin line; nil for a line that is not a JSON object (the connector never answers parse errors) and for notifications.
+    static func respond(toLine line: String, connector: any LocalConnector) async -> JSONValue? {
+        await MCPStdioServer.respond(toLine: line, handler: Handler(connector: connector))
     }
 
     /// Serves `kind` over stdin/stdout until stdin closes, then exits (what Claude Code starts). Never opens a window.
     static func run(_ kind: LocalConnectorKind) -> Never {
-        Thread.detachNewThread {
-            let connector = LocalConnectorEnvironment.live.connector(kind)
-            while let line = readLine(strippingNewline: true) {
-                guard let request = JSONValue.parse(line), case .object = request else { continue }
-                let box = OSAllocatedUnfairLock<JSONValue?>(initialState: nil)
-                let done = DispatchSemaphore(value: 0)
-                Task.detached {
-                    let answer = await respond(to: request, connector: connector)
-                    box.withLock { $0 = answer }
-                    done.signal()
-                }
-                done.wait()
-                if let answer = box.withLock({ $0 }) { FileHandle.standardOutput.write(Data((answer.jsonString + "\n").utf8)) }
+        MCPStdioServer.run { Handler(connector: LocalConnectorEnvironment.live.connector(kind)) }
+    }
+
+    /// A local connector as an MCP server: its tools, listed with their annotations, and its calls.
+    private struct Handler: MCPServerHandler {
+        let connector: any LocalConnector
+        var serverName: String { "orb-local" }
+        var answersParseErrors: Bool { false }
+
+        func listedTools() -> [JSONValue] { connector.tools.map(listed) }
+
+        func offers(_ tool: String) -> Bool { connector.tools.contains { $0.name == tool } }
+
+        func call(_ tool: String, arguments: JSONValue) async -> JSONValue {
+            do {
+                return MCPStdioServer.textResult(try await connector.call(tool, arguments: arguments))
+            } catch {
+                return MCPStdioServer.textResult(error.localizedDescription, isError: true)
             }
-            exit(0)
         }
-        dispatchMain()
+
+        private func listed(_ tool: LocalTool) -> JSONValue {
+            var annotations: [String: JSONValue] = [:]
+            if let readOnly = tool.annotations.readOnly { annotations["readOnlyHint"] = .bool(readOnly) }
+            if let destructive = tool.annotations.destructive { annotations["destructiveHint"] = .bool(destructive) }
+            if let openWorld = tool.annotations.openWorld { annotations["openWorldHint"] = .bool(openWorld) }
+            return .object(["name": .string(tool.name), "description": .string(tool.description),
+                            "inputSchema": tool.parameters, "annotations": .object(annotations)])
+        }
     }
 }
 

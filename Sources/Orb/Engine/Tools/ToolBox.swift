@@ -123,6 +123,11 @@ extension String {
         guard count > limit else { return self }
         return prefix(limit) + "\n[... \(count - limit) caracteres omitidos ...]"
     }
+
+    /// Keeps the first `limit` characters and ends with "…" when something was cut.
+    func clipped(to limit: Int) -> String {
+        count > limit ? String(prefix(limit)) + "…" : self
+    }
 }
 
 extension URL {

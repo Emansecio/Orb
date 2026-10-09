@@ -40,9 +40,7 @@ struct PaletteEntry: Identifiable, Equatable {
 
 enum PaletteSearch {
     /// Lowercase without accents, so "conversa" finds "Conversá" and "ACOES" finds "Ações".
-    static func normalize(_ text: String) -> String {
-        text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "pt_BR"))
-    }
+    static func normalize(_ text: String) -> String { MemoryText.fold(text) }
 
     /// The entries that match every word typed, best first: a title that starts with the word, then a word of the
     /// title that starts with it, then anywhere in the title, then the subtitle or keywords. Ties keep the order of
@@ -151,7 +149,6 @@ enum PaletteBuilder {
 
 struct CommandPalette: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var query = ""
     @State private var selected = 0
     @State private var entries: [PaletteEntry] = []

@@ -108,6 +108,7 @@ struct LocalConnectorSheet: View {
                 .frame(maxWidth: 380, alignment: .leading)
                 Button("Abrir Contas de Internet") { NSWorkspace.shared.open(LocalConnectorSetup.internetAccountsURL) }
                     .buttonStyle(SecondaryPillStyle())
+                    .help("Abre as Contas de Internet nos Ajustes do Sistema, onde você entra com o Google")
             } else {
                 Text(state == .denied ? deniedText : state.message)
                     .font(.system(size: 12))
@@ -117,6 +118,7 @@ struct LocalConnectorSheet: View {
                 if state == .denied {
                     Button("Abrir Privacidade e Segurança") { NSWorkspace.shared.open(privacyURL) }
                         .buttonStyle(SecondaryPillStyle())
+                        .help("Abre a tela dos Ajustes do Sistema onde você liga o Orb")
                 }
             }
         }
@@ -177,14 +179,16 @@ struct LocalConnectorSheet: View {
         switch phase {
         case .intro:
             SheetFooter(message: installed == nil ? nil : "Já conectado. Aqui você muda quais Orbs usam.", cancel: { dismiss() },
-                        primaryTitle: installed == nil ? "Conectar" : "Verificar e salvar", isPrimaryDisabled: chosenNoOrb, primary: connect)
+                        primaryTitle: installed == nil ? "Conectar" : "Verificar e salvar", isPrimaryDisabled: chosenNoOrb,
+                        primaryHelp: "Pede a permissão ao macOS, se faltar, e liga o conector", primary: connect)
         case .working:
             SheetFooter(cancelTitle: "Fechar", cancel: { dismiss() }, primaryTitle: "Conectando…", isPrimaryDisabled: true, primary: {})
         case .attention(let state):
             SheetFooter(message: state == .noAccount && kind == .agenda ? "Sua conta tem outro nome? Dá para conectar assim mesmo." : nil,
                         destructiveTitle: state == .noAccount && kind == .agenda ? "Conectar assim mesmo" : nil,
                         destructive: { Task { @MainActor in await install(anyAccount: true) } }, cancel: { dismiss() },
-                        primaryTitle: "Verificar de novo", primary: connect)
+                        primaryTitle: "Verificar de novo", destructiveHelp: "Conecta usando qualquer agenda do Mac, mesmo sem achar a sua conta Google",
+                        primaryHelp: "Confere de novo a permissão e a conta", primary: connect)
         case .done:
             SheetFooter(cancel: { dismiss() }, primaryTitle: "Fechar", showsCancel: false, primary: { dismiss() })
         }

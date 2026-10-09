@@ -260,12 +260,13 @@ struct BotInspector: View {
     @ViewBuilder
     private func capabilityRow(_ capability: Capability, of bot: Bot) -> some View {
         let isOn = bot.capabilities.contains(capability)
+        let counts = model.connectorCounts(for: bot.id)
         let connectorsLine = capability == .connectors && isOn
-            ? CapabilityCopy.connectorsLine(enabled: model.connectors.filter(\.isEnabled).count, total: model.connectors.count)
+            ? CapabilityCopy.connectorsLine(enabled: counts.enabled, total: counts.total, anyInstalled: !model.connectors.isEmpty)
             : nil
         Toggle(isOn: capabilityBinding(capability, of: bot)) {
             VStack(alignment: .leading, spacing: 1) {
-                Label(CapabilityCopy.title(capability), systemImage: capability.symbol)
+                Label(capability.label, systemImage: capability.symbol)
                 Text(connectorsLine ?? CapabilityCopy.subtitle(capability))
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -361,7 +362,7 @@ struct BotInspector: View {
             Text(PermissionMode.grantsNote)
         }
 
-        filesSection(bot)
+        filesSection
     }
 
     /// Where the Orb works and what can be done with it: open it, move it, give the Orb a folder of its own.
@@ -415,7 +416,7 @@ struct BotInspector: View {
 
     /// Changed (git) and recently modified files of the Orb's folder. Not shown for the home folder, which is not scanned.
     @ViewBuilder
-    private func filesSection(_ bot: Bot) -> some View {
+    private var filesSection: some View {
         if let listing, listing.folder != .missing, listing.snapshot != .home {
             Section {
                 if listing.snapshot == .unreadable {

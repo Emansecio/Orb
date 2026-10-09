@@ -1,4 +1,4 @@
-import AppKit
+import Foundation
 
 // The Orb's skills as the Orb itself sees them, and the skills it proposes: it learns a procedure by doing a task,
 // proposes it as a skill, and you read it in the editor and save it, or not. Nothing is saved without you.

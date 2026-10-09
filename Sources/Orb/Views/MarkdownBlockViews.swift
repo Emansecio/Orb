@@ -4,16 +4,6 @@ import AppKit
 /// Space between the blocks of a reply (a blank line used to cost about 22 pt).
 let markdownBlockSpacing: CGFloat = 8
 
-/// Puts text on the general pasteboard.
-@MainActor
-enum Clipboard {
-    static func copy(_ text: String) {
-        let board = NSPasteboard.general
-        board.clearContents()
-        board.setString(text, forType: .string)
-    }
-}
-
 /// One piece of a reply (a paragraph between blank lines while it streams, the whole text once it is done) drawn as
 /// its blocks. Equatable on its source: a piece that did not change is neither parsed nor measured again.
 /// `streaming` is the piece being written: it ends with the cursor. `cached`: whether its parsed blocks are kept in
@@ -130,9 +120,7 @@ struct CodeBlockView: View, Equatable {
     /// The code is still being written (this is the last block of a reply that streams).
     var streaming = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var copied = false
-    /// The pending return to "Copiar", so a second click starts the 1.5 s over.
-    @State private var reset: Task<Void, Never>?
+    @State private var flash = CopiedFlash()
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.language == rhs.language && lhs.code == rhs.code && lhs.streaming == rhs.streaming
@@ -150,22 +138,22 @@ struct CodeBlockView: View, Equatable {
                 Spacer(minLength: 8)
                 Button(action: copy) {
                     HStack(spacing: 5) {
-                        Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                        Image(systemName: flash.isOn ? "checkmark" : "doc.on.doc")
                             .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
                         // No width is reserved for "Copiado": at rest the button sits on the 10 pt margin like the language
                         // does. The button is anchored to the right by the spacer, so only the symbol slides a few points,
                         // inside the same animation.
-                        Text(copied ? "Copiado" : "Copiar")
+                        Text(flash.isOn ? "Copiado" : "Copiar")
                             .contentTransition(.opacity)
                     }
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(copied ? Palette.ink : Palette.muted)
+                    .foregroundStyle(flash.isOn ? Palette.ink : Palette.muted)
                     // On the view that changes, not `withAnimation`: the reply sets "never animate" on everything it draws.
-                    .animation(copied ? Motion.press : Motion.content, value: copied)
+                    .animation(flash.isOn ? Motion.press : Motion.content, value: flash.isOn)
                 }
                 .buttonStyle(.plain)
                 .help(Tip.copyCode)
-                .accessibilityLabel(copied ? "Código copiado" : "Copiar código")
+                .accessibilityLabel(flash.isOn ? "Código copiado" : "Copiar código")
             }
             .padding(.horizontal, 10)
             .padding(.top, 7)
@@ -213,13 +201,7 @@ struct CodeBlockView: View, Equatable {
 
     private func copy() {
         Clipboard.copy(code)
-        copied = true
-        reset?.cancel()
-        reset = Task {
-            try? await Task.sleep(for: .seconds(1.5))
-            guard !Task.isCancelled else { return }
-            copied = false
-        }
+        flash.trigger()
     }
 }
 

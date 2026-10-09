@@ -2,8 +2,6 @@ import Foundation
 import Testing
 @testable import Orb
 
-private let hasPython = FileManager.default.isExecutableFile(atPath: "/usr/bin/python3")
-
 /// Fake MCP server: paginated tools/list, partial-line writes, a server→client request, stray stdout noise.
 private let fakeServer = #"""
 import json, os, sys, time

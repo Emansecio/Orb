@@ -513,13 +513,6 @@ private struct PlannedLLM: LLMClient {
     }
 }
 
-private final class Flag: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value = false
-    var isSet: Bool { lock.withLock { value } }
-    func set() { lock.withLock { value = true } }
-}
-
 /// A read-only tool that returns a picture along with its text.
 private struct LookAtTool: AgentTool {
     let image: ImageAttachment
@@ -536,8 +529,8 @@ private struct LookAtTool: AgentTool {
 
 struct ImageEngineTests {
     private func request(_ calls: Calls, images: [ImageAttachment] = [], supportsImages: Bool? = nil, tools: [any AgentTool] = [],
-                         rejected: Flag? = nil, acceptsImages: Bool = true) -> TurnRequest {
-        let onRejected: (@Sendable () -> Void)? = rejected.map { flag in { @Sendable in flag.set() } }
+                         rejected: RaisedFlag? = nil, acceptsImages: Bool = true) -> TurnRequest {
+        let onRejected: (@Sendable () -> Void)? = rejected.map { flag in { @Sendable in flag.raise() } }
         return TurnRequest(bot: Bot(name: "T", role: "", orb: OrbConfig(), permissionMode: .auto), model: "m", system: "sys", history: [],
                     prompt: "veja isto", client: PlannedLLM(calls: calls), tools: tools,
                     context: ToolContext(workingDirectory: URL(fileURLWithPath: NSTemporaryDirectory()), acceptsImages: acceptsImages),
@@ -587,7 +580,7 @@ struct ImageEngineTests {
         let image = try folder.attachment()
         let calls = Calls([.failure(LLMError.http(status: 400, message: "This model does not support image input")),
                            .success([.text("Não vejo, mas segue o caminho.")])])
-        let rejected = Flag()
+        let rejected = RaisedFlag()
         let events = await run(request(calls, images: [image], supportsImages: nil, rejected: rejected))
         let received = await calls.received
         #expect(received.count == 2)
@@ -595,7 +588,7 @@ struct ImageEngineTests {
         #expect(received[1].allSatisfy { $0.images.isEmpty })
         #expect(received[1].last?.content.contains("[imagem: \(image.path) — este modelo não aceita imagens]") == true)
         #expect(notices(events) == ["Este modelo não vê imagens; mandei só o caminho do arquivo."])
-        #expect(rejected.isSet)
+        #expect(rejected.isRaised)
         #expect(recorded(events).last?.content == "Não vejo, mas segue o caminho.")
         #expect(!events.contains { if case .failed = $0 { true } else { false } })
     }

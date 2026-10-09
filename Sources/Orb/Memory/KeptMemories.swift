@@ -99,12 +99,7 @@ struct KeptMemory: Identifiable, Equatable, Sendable {
     private static let shortDay = dayFormatter("d 'de' MMM")
     private static let longDay = dayFormatter("d 'de' MMMM")
 
-    private static let dayFormat: DateFormatter = {
-        let format = DateFormatter()
-        format.locale = Locale(identifier: "pt_BR")
-        format.dateFormat = "dd/MM/yyyy"
-        return format
-    }()
+    private static let dayFormat = dayFormatter("dd/MM/yyyy")
 }
 
 /// The folder of kept memories and what goes in and out of it. Plain file work with no state, so it can run on any
@@ -126,8 +121,13 @@ enum KeptMemories {
 
     /// The folder name for a memory kept at `now`: "<name> – <aaaa-mm-dd hh.mm>".
     static func folderName(for name: String, at now: Date) -> String {
+        namePrefix(for: name) + formatter().string(from: now)
+    }
+
+    /// "<name> – ", the start of every folder kept for an Orb called `name` (slashes and colons cannot be in a folder name).
+    static func namePrefix(for name: String) -> String {
         let safe = String(name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-").prefix(60))
-        return "\(safe.isEmpty ? "Orb" : safe)\(separator)\(formatter().string(from: now))"
+        return (safe.isEmpty ? "Orb" : safe) + separator
     }
 
     /// Moves `source` (an Orb's memory folder) to `_guardadas/<name> – <date>` under `root`, with `profile` written

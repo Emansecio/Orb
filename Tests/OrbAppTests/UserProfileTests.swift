@@ -1,7 +1,5 @@
-import CoreGraphics
 import Foundation
 import Testing
-import UniformTypeIdentifiers
 @testable import Orb
 
 // The user's profile: what the Orbs read of it, how it is kept, its photo and the reset.

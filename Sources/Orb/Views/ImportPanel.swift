@@ -46,7 +46,7 @@ struct ImportPanel: View {
     @State private var error: String?
     @State private var isReading = false
     @State private var reading: Task<Void, Never>?
-    @State private var copied = false
+    @State private var copied = CopiedFlash()
     @State private var isPicking = false
     @State private var isTargeted = false
     @State private var locals: [LocalAssistant] = []
@@ -136,10 +136,10 @@ struct ImportPanel: View {
                 .fixedSize(horizontal: false, vertical: true)
             Button(action: copyPrompt) {
                 ZStack {
-                    Text("Copiar prompt").opacity(copied ? 0 : 1)
-                    Text("Copiado ✓").opacity(copied ? 1 : 0)
+                    Text("Copiar prompt").opacity(copied.isOn ? 0 : 1)
+                    Text("Copiado ✓").opacity(copied.isOn ? 1 : 0)
                 }
-                .animation(Motion.press, value: copied)
+                .animation(Motion.press, value: copied.isOn)
             }
             .buttonStyle(SecondaryPillStyle())
             .help(Tip.importCopyPrompt)
@@ -205,13 +205,8 @@ struct ImportPanel: View {
     // MARK: Reading
 
     private func copyPrompt() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(ImportPrompt.text, forType: .string)
-        withAnimation(Motion.press) { copied = true }
-        Task {
-            try? await Task.sleep(for: .milliseconds(1_500))
-            withAnimation(Motion.press) { copied = false }
-        }
+        Clipboard.copy(ImportPrompt.text)
+        copied.trigger(animation: Motion.press)
     }
 
     /// Pasting reads by itself, a moment after the last change.

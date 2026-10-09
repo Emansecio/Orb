@@ -206,15 +206,7 @@ struct AppCommands: Commands {
                     .disabled(sheetOpen)
             }
             Divider()
-            Toggle(CommandName.globalShortcut, isOn: Binding(
-                get: { globalShortcut },
-                set: { wanted in
-                    // Another app may already hold ⌃⌥Espaço: then the switch stays off and the user is told.
-                    let works = GlobalHotKey.shared.apply(wanted)
-                    globalShortcut = wanted && works
-                    if wanted && !works { GlobalHotKey.showUnavailableAlert() }
-                }
-            ))
+            Toggle(CommandName.globalShortcut, isOn: GlobalHotKey.toggleBinding($globalShortcut))
         }
     }
 }
@@ -277,9 +269,9 @@ enum Snapshot {
         model.showInspector = false // the inspector column does not render offscreen
         if screen.hasSuffix("-profile") { ProfileSnapshots.fill(model) }
         model.sendLaunchPrompt()
+        let height = ProcessInfo.processInfo.environment["ORB_SNAPSHOT_HEIGHT"].flatMap(Double.init)
         let content: AnyView = switch screen {
         case "app": AnyView(RootView())
-        case let other where RoutinesSnapshots.view(other, model: model) != nil: RoutinesSnapshots.view(other, model: model)!
         case "skills": AnyView(SkillsView())
         case "skills-explore": AnyView(SkillsView(tab: .explore))
         case "connectors": AnyView(ConnectorsView(tab: .installed))
@@ -294,11 +286,11 @@ enum Snapshot {
             })
         case "memory-sheet": AnyView(model.bots.first.map { MemorySheet(botID: $0.id, name: $0.name) })
         case "approvals": AnyView(model.bots.first.map { ApprovalCardsSample(bot: $0) })
-        case "new-orb": AnyView(NewBotSheet(height: ProcessInfo.processInfo.environment["ORB_SNAPSHOT_HEIGHT"].flatMap(Double.init).map { CGFloat($0) }))
-        case "new-orb-import": AnyView(NewBotSheet(height: ProcessInfo.processInfo.environment["ORB_SNAPSHOT_HEIGHT"].flatMap(Double.init).map { CGFloat($0) }, startsImporting: true))
-        case "new-orb-import-preview": NewBotSnapshots.importSheet(height: ProcessInfo.processInfo.environment["ORB_SNAPSHOT_HEIGHT"].flatMap(Double.init).map { CGFloat($0) }, confirmed: false)
-        case "new-orb-imported": NewBotSnapshots.importSheet(height: ProcessInfo.processInfo.environment["ORB_SNAPSHOT_HEIGHT"].flatMap(Double.init).map { CGFloat($0) }, confirmed: true)
-        case "new-orb-kept": NewBotSnapshots.keptSheet(model: model, height: ProcessInfo.processInfo.environment["ORB_SNAPSHOT_HEIGHT"].flatMap(Double.init).map { CGFloat($0) })
+        case "new-orb": AnyView(NewBotSheet(height: height.map { CGFloat($0) }))
+        case "new-orb-import": AnyView(NewBotSheet(height: height.map { CGFloat($0) }, startsImporting: true))
+        case "new-orb-import-preview": NewBotSnapshots.importSheet(height: height.map { CGFloat($0) }, confirmed: false)
+        case "new-orb-imported": NewBotSnapshots.importSheet(height: height.map { CGFloat($0) }, confirmed: true)
+        case "new-orb-kept": NewBotSnapshots.keptSheet(height: height.map { CGFloat($0) })
         case "sidebar", "sidebar-profile": AnyView(SidebarView().frame(width: 280))
         case "quickask": AnyView(SystemSnapshots.quickAsk(model, approvals: false))
         case "quickask-approvals": AnyView(SystemSnapshots.quickAsk(model, approvals: true))
@@ -317,14 +309,15 @@ enum Snapshot {
         case let name where name.hasPrefix("transcript"):
             AnyView(model.bots.first.map { TranscriptSample.view(name, model: model, bot: $0) })
         default:
-            ContextSnapshots.view(screen, model: model)
+            RoutinesSnapshots.view(screen, model: model)
+                ?? ContextSnapshots.view(screen, model: model)
                 ?? UsageSnapshots.view(screen, model: model)
                 ?? Snapshot.composerScene(screen, model: model)
                 ?? SettingsSnapshots.view(screen, firstBotID: model.bots.first?.id)
                 ?? CatalogSnapshots.view(screen, model: model)
                 ?? AnyView(model.bots.first.map { ChatView(botID: $0.id) })
         }
-        let size = NSSize(width: ProcessInfo.processInfo.environment["ORB_SNAPSHOT_WIDTH"].flatMap(Double.init) ?? 1100, height: ProcessInfo.processInfo.environment["ORB_SNAPSHOT_HEIGHT"].flatMap(Double.init) ?? 760)
+        let size = NSSize(width: ProcessInfo.processInfo.environment["ORB_SNAPSHOT_WIDTH"].flatMap(Double.init) ?? 1100, height: height ?? 760)
         let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: -30_000, y: -30_000), size: size),
                               styleMask: .borderless, backing: .buffered, defer: false)
         window.contentView = NSHostingView(rootView: NavigationStack { content }

@@ -707,9 +707,9 @@ struct LegacyKeychainLedger {
 
 /// Secrets in the login Keychain (API keys per provider, sign-in tokens), one item per account name.
 enum Keychain {
-    static let service = "app.orb.mac"
+    static let service = LegacyMigration.identifier
     /// Where OpenBot kept its items; each one is copied here the first time it is read, once per account.
-    static let legacyService = "app.openbot.mac"
+    static let legacyService = LegacyMigration.oldIdentifier
 
     /// The item, or, for the app's own service, OpenBot's item of the same name (copied over on the way, so
     /// macOS asks at most once per key and only when it's needed).

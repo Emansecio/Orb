@@ -534,7 +534,7 @@ actor MCPAuth {
         request.setValue("application/json, text/event-stream", forHTTPHeaderField: "Accept")
         request.httpBody = Data(JSONValue.object([
             "jsonrpc": .string("2.0"), "id": .number(1), "method": .string("initialize"),
-            "params": .object(["protocolVersion": .string("2025-06-18"), "capabilities": .object([:]),
+            "params": .object(["protocolVersion": .string(MCPProtocol.preferred), "capabilities": .object([:]),
                                "clientInfo": .object(["name": .string("Orb"), "version": .string("1.0")])]),
         ]).jsonString.utf8)
         guard let (_, response) = try? await session.data(for: request), let http = response as? HTTPURLResponse,

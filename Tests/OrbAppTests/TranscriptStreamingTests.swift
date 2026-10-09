@@ -4,10 +4,6 @@ import Testing
 @testable import Orb
 
 /// Set from an observation callback (which is `@Sendable`).
-private final class Flag: @unchecked Sendable {
-    var isSet = false
-}
-
 /// A reply that streams costs the same whatever its length: it is split into paragraphs as it arrives, its text is
 /// kept apart from the conversation, and the chat view of an Orb is redrawn only by that Orb's own changes.
 @Suite("Transcript streaming") struct TranscriptStreamingTests {
@@ -133,17 +129,17 @@ private final class Flag: @unchecked Sendable {
 
     @MainActor @Test func aFlushWithoutAParagraphBreakChangesOnlyTheLastParagraph() {
         let live = LiveText(itemID: UUID(), text: "primeiro\n\nsegundo")
-        let closedChanged = Flag(), tailChanged = Flag()
-        withObservationTracking { _ = live.closed } onChange: { closedChanged.isSet = true }
-        withObservationTracking { _ = live.tail } onChange: { tailChanged.isSet = true }
+        let closedChanged = RaisedFlag(), tailChanged = RaisedFlag()
+        withObservationTracking { _ = live.closed } onChange: { closedChanged.raise() }
+        withObservationTracking { _ = live.tail } onChange: { tailChanged.raise() }
 
         live.append(" e continua")
-        #expect(tailChanged.isSet)
-        #expect(!closedChanged.isSet)
+        #expect(tailChanged.isRaised)
+        #expect(!closedChanged.isRaised)
         #expect(live.text == "primeiro\n\nsegundo e continua")
 
         live.append("\n\nterceiro")
-        #expect(closedChanged.isSet)
+        #expect(closedChanged.isRaised)
         #expect(live.closed == ["primeiro", "segundo e continua"])
         #expect(live.tail == "terceiro")
     }
@@ -161,10 +157,10 @@ private final class Flag: @unchecked Sendable {
         #expect(transcript.revision == 1)
         #expect(transcript.items.count == 3)
 
-        let observed = Flag()
-        withObservationTracking { _ = transcript.items } onChange: { observed.isSet = true }
+        let observed = RaisedFlag()
+        withObservationTracking { _ = transcript.items } onChange: { observed.raise() }
         transcript.show(changed)
-        #expect(!observed.isSet)
+        #expect(!observed.isRaised)
     }
 
     @Test func arraysShareStorageOnlyWhenTheyAreTheSameBuffer() {
@@ -258,8 +254,8 @@ private final class Flag: @unchecked Sendable {
         let (model, first, second) = twoOrbs()
         let visible = model.orbTranscript(first)
         let revision = visible.revision
-        let redrawn = Flag()
-        withObservationTracking { _ = visible.items; _ = visible.revision } onChange: { redrawn.isSet = true }
+        let redrawn = RaisedFlag()
+        withObservationTracking { _ = visible.items; _ = visible.revision } onChange: { redrawn.raise() }
 
         for word in ["a", "b", "c", "d"] {
             model.apply(.text(word + "\n\n"), to: second)
@@ -269,7 +265,7 @@ private final class Flag: @unchecked Sendable {
         model.apply(.text("outra resposta"), to: second)
         model.flushText(second)
 
-        #expect(!redrawn.isSet)
+        #expect(!redrawn.isRaised)
         #expect(visible.revision == revision)
         #expect(model.transcript(second).count == 4)
     }

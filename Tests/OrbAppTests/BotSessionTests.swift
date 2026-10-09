@@ -464,22 +464,21 @@ private struct WritingModel: LLMClient {
         let b = model.createBot(name: "Luna", role: "", orb: OrbConfig(), model: "", mode: .ask, interview: false,
                                 folder: .existing(root)).id
         let mine = model.session(a)
-        final class Flag: @unchecked Sendable { var raised = false }
-        let flag = Flag()
+        let flag = RaisedFlag()
         withObservationTracking {
             _ = (mine.conversation, mine.parkedChat, mine.isLoading, mine.routineID, mine.usage, mine.requestUsage,
                  mine.lastCompaction)
             _ = model.isLoadingConversation(a)
             _ = model.isRoutineRunning(UUID())
-        } onChange: { flag.raised = true }
+        } onChange: { flag.raise() }
 
         model.apply(.message(.user("para Luna")), to: b)
         model.apply(.usage(TokenUsage(input: 1, output: 1, cacheRead: 0, cacheWrite: 0)), to: b)
         model.apply(.requestUsage(TokenUsage(input: 1, output: 1, cacheRead: 0, cacheWrite: 0)), to: b)
         model.apply(.notice("de Luna"), to: b)
-        #expect(!flag.raised)
+        #expect(!flag.isRaised)
 
         model.apply(.usage(TokenUsage(input: 2, output: 1, cacheRead: 0, cacheWrite: 0)), to: a)
-        #expect(flag.raised)
+        #expect(flag.isRaised)
     }
 }

@@ -37,10 +37,7 @@ enum SessionSummary {
             let summaries = notes.map { line($0, ChunkSummary.maxLength) }.filter { !$0.isEmpty }
             guard let top = summaries.first else { return nil }
             let end = items.last?.date ?? now
-            let stamp = DateFormatter()
-            stamp.locale = Locale(identifier: "en_US_POSIX")
-            stamp.dateFormat = "yyyy-MM-dd-HHmm"
-            return MemoryPage(path: "sessoes/\(stamp.string(from: end))-\(String(UUID().uuidString.prefix(6)).lowercased()).md",
+            return MemoryPage(path: sessionPath(at: end),
                               kind: .sessao, title: MemoryText.clip(top, 70), body: resumoHeading + summaries.map { "- \($0)" }.joined(separator: "\n"),
                               created: end, updated: end, origin: .automatico)
         }
@@ -111,12 +108,18 @@ enum SessionSummary {
         if !open.isEmpty { body += "\n\n## Pendências\n" + open.suffix(8).map { "- \($0)" }.joined(separator: "\n") }
 
         let start = first.0, end = items.last?.date ?? now
+        return MemoryPage(path: sessionPath(at: start),
+                          kind: .sessao, title: line(first.1, 70), body: body, created: start, updated: end, origin: .automatico)
+    }
+
+    /// Where a session page starting at `date` is written: `sessoes/<aaaa-mm-dd-hhmm>-<6 hex>.md` (the hex keeps two pages of
+    /// the same minute apart).
+    static func sessionPath(at date: Date) -> String {
         let stamp = DateFormatter()
         stamp.locale = Locale(identifier: "en_US_POSIX")
-        stamp.calendar = calendar
+        stamp.calendar = Calendar(identifier: .gregorian)
         stamp.dateFormat = "yyyy-MM-dd-HHmm"
-        return MemoryPage(path: "sessoes/\(stamp.string(from: start))-\(String(UUID().uuidString.prefix(6)).lowercased()).md",
-                          kind: .sessao, title: line(first.1, 70), body: body, created: start, updated: end, origin: .automatico)
+        return "sessoes/\(stamp.string(from: date))-\(String(UUID().uuidString.prefix(6)).lowercased()).md"
     }
 
     /// The bullet lines under `## <title>` in a session page.

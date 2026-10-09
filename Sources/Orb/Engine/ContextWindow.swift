@@ -56,14 +56,12 @@ struct ContextWindow: Sendable, Equatable {
     var summary: String?
     /// What the summary is rendered from; kept with it.
     var ledger: ConversationLedger?
-    /// How many messages after the request of a task too big for the window were set aside (digested in the pair).
-    var skippedCount = 0
-    /// How many model steps those messages are.
+    /// How many model steps after the request of a task too big for the window were set aside (digested in the pair).
     var skippedSteps = 0
     /// Estimated size of the history before this fit folded or set aside anything new (the summary pair included), and
     /// of what it sends: for telling the user what a compaction did.
     var charactersBefore = 0
-    var charactersAfter: Int { messages.reduce(0) { $0 + $1.contextCharacters } }
+    var charactersAfter: Int { messages.contextCharacters }
 
     /// Old tool outputs (those of earlier turns, and the task's own once past their fresh period), in characters.
     static let toolOutputPreview = 4_000
@@ -231,7 +229,7 @@ struct ContextWindow: Sendable, Equatable {
         let notesRoom = cut.chunks.isEmpty && cut.ledger?.digests.isEmpty != false ? 0 : ConversationLedger.digestRoom
         func reserve() -> Int { previous != nil || carriedNote != nil || dropped > 0 ? ContextSummary.reserve + notesRoom : 0 }
         let charactersBefore = total + (previous != nil || carriedNote != nil ? ContextSummary.pair(
-            [previous, carriedNote].compactMap { $0 }.joined(separator: "\n")).reduce(0) { $0 + $1.contextCharacters } : 0)
+            [previous, carriedNote].compactMap { $0 }.joined(separator: "\n")).contextCharacters : 0)
 
         // Over the limit: fold whole old turns away, down to the low-water mark.
         var turn = 0
@@ -259,14 +257,13 @@ struct ContextWindow: Sendable, Equatable {
             if skipped > 0 { messages.removeSubrange(1..<(1 + skipped)) }
             return messages
         }
-        func measure(_ messages: [ChatMessage]) -> Int { messages.reduce(0) { $0 + $1.contextCharacters } }
         // Steps set aside leave a digest in the summary pair; a small window can spare fewer lines of it.
         let digestLines = ToolDigest.lines(forLimit: limit)
         let digestRoom = ToolDigest.maxCharacters(lines: digestLines)
         func crowded() -> Bool { total + reserve() + (skipped > 0 ? digestRoom : 0) > limit }
         if skipped > 0 {
             body = view(rung)
-            total = measure(body)
+            total = body.contextCharacters
         }
         if crowded() {
             // Over the limit: bring the task down to the low-water mark, so this does not happen again at the very
@@ -283,20 +280,20 @@ struct ContextWindow: Sendable, Equatable {
             if next > settled {
                 settled = next
                 body = view(rung)
-                total = measure(body)
+                total = body.contextCharacters
             }
             // 2. Previews get shorter, then the whole outputs are capped, then only the newest stays long.
             while !relieved(), rung + 1 < rungs.count {
                 rung += 1
                 body = view(rung)
-                total = measure(body)
+                total = body.contextCharacters
             }
             // 3. The oldest steps are set aside, one line each in the summary; the newest step always stays.
             if crowded(), canSkip {
                 while !relieved() {
                     // One step at a time: from the message after the request to the next model reply.
                     guard let next = body.indices.dropFirst(2).first(where: { body[$0].role == .assistant }) else { break }
-                    total -= measure(Array(body[1..<next]))
+                    total -= body[1..<next].contextCharacters
                     skipped += next - 1
                     body.removeSubrange(1..<next)
                 }
@@ -335,7 +332,7 @@ struct ContextWindow: Sendable, Equatable {
             cut.ledger = ledger
         }
         return ContextWindow(messages: (messages + body).answeringDanglingToolCalls(), droppedCount: start + dropped,
-                             foldedCount: folded.count, summary: summary, ledger: ledger, skippedCount: skipped,
+                             foldedCount: folded.count, summary: summary, ledger: ledger,
                              skippedSteps: skippedSteps.filter { $0.role == .assistant }.count, charactersBefore: charactersBefore)
     }
 }
@@ -352,6 +349,11 @@ extension ChatMessage {
             + images.count * Int(Double(Self.imageTokens) * ContextBudget.charactersPerToken)
             + (reasoning?.parts.reduce(0) { $0 + $1.text.count + ($1.data?.count ?? 0) + ($1.signature?.count ?? 0) } ?? 0)
     }
+}
+
+extension Sequence where Element == ChatMessage {
+    /// Rough size of all these messages for budgeting (the sum of each one's `contextCharacters`).
+    var contextCharacters: Int { reduce(0) { $0 + $1.contextCharacters } }
 }
 
 extension [ChatMessage] {
@@ -524,14 +526,6 @@ enum ContextSummary {
 }
 
 // MARK: - Model context
-
-extension [ChatMessage] {
-    /// The part of a conversation sent to the model, fitted to `budget` (see `ContextWindow.fit`), with every
-    /// tool call answered.
-    func modelContext(budget: ContextBudget = .fallback) -> [ChatMessage] {
-        ContextWindow.fit(self, budget: budget).messages
-    }
-}
 
 extension Conversation {
     /// The history for the next turn. When turns had to be folded away, remembers the summary and how many

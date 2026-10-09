@@ -67,11 +67,10 @@ extension AnyTransition {
 ### 2.1 Seleção na barra lateral
 
 - **Gatilho:** clique na linha, ⌥↑/⌥↓, ⌘1–9.
-- **Movimento:** o fundo de seleção desliza da linha anterior para a nova (não some e reaparece). Hoje cada
-  `SidebarRow` pinta o próprio fundo (`isSelected ? ghostSelected : …`); passar a pintar o fundo selecionado só na
-  linha escolhida, com `.matchedGeometryEffect(id: "selecao", in: namespace)` (namespace na `SidebarView`), e
-  animar a troca de `model.selection` com `Motion.content`. O hover continua por linha. O texto da linha nova passa
-  de `Palette.secondary` a `Palette.ink` no mesmo tempo.
+- **Movimento:** o fundo de seleção desliza da linha anterior para a nova (não some e reaparece). Só a linha escolhida
+  pinta o fundo selecionado, e é a mesma vista em todas as linhas (`.matchedGeometryEffect(id: SidebarSelection.id, in: selectionSpace)`,
+  com o namespace na `SidebarView`); a troca de `model.selection` anima com `Motion.content`. O hover continua por linha. O texto
+  da linha nova passa de `Palette.secondary` a `Palette.ink` no mesmo tempo.
 - **Orb da linha:** o Orb selecionado já sai da pausa deslizando para o movimento (comportamento atual). Somar
   um "acordei": uma piscada e um olhar rápido para a direita (para o chat) ao ser selecionado — ver §3.
 - **Reduzir movimento:** o fundo troca de linha sem deslizar (`animation(nil)`); cor do texto troca na hora.
@@ -111,8 +110,8 @@ extension AnyTransition {
 
 ### 2.3 Linhas de ferramenta
 
-- **Expandir/recolher:** já existe (`.snappy(0.2)`, divisa gira 90°). Ajustar a saída do texto para `.unfold`
-  (entra descendo 4 pt, sai só apagando) e trocar a curva por `Motion.content` para a altura não "quicar".
+- **Expandir/recolher:** a divisa gira 90° e o texto usa `.unfold` (entra descendo 4 pt, sai só apagando) com
+  `Motion.content`, para a altura não "quicar".
 - **Rodando → feita:** enquanto roda, a linha fica parada em `Palette.faint` (o brilho é só da linha de trabalho, §2.10); ao terminar, o título volta a `Palette.muted` e a marca de estado entra com `.transition(.scale(0.6).combined(with: .opacity))`
   em `Motion.enter`. Falha: a marca vermelha entra igual, sem tremer (o Orb já mostra o erro).
 - **Contadores** ("3 ações", tempos): `.contentTransition(.numericText())` com `Motion.content`.
@@ -138,9 +137,8 @@ extension AnyTransition {
   seca. Animar com `Motion.hoverIn` ao ganhar foco e `Motion.hoverOut` ao perder, e clarear o fundo 2 % junto.
   Sem brilho colorido (o Orb já é a cor da tela).
 - **Botão enviar:** habilita com opacidade (`Motion.content`) quando há texto; pressionado = `Motion.press`
-  (escala 0,92). Hoje "Enviar" e "Parar" são dois botões num `if isWorking` (troca seca); juntar num só botão
-  cujo ícone troca com `Image(systemName: isWorking ? "stop.fill" : "arrow.up").contentTransition(.symbolEffect(.replace))`
-  (macOS 14), mantendo rótulo, ajuda e atalho de cada estado.
+  (escala 0,92). É um botão só (`ComposerAction`: enviar, enfileirar ou parar) cujo ícone troca com
+  `.contentTransition(.symbolEffect(.replace))`, e cada estado mantém rótulo, ajuda e atalho.
 - **Altura do campo** crescendo com linhas: sem animação (segue a digitação; animar dá sensação de atraso).
 - **O Orb reage** à digitação e ao envio — ver §3.
 - **Reduzir movimento:** borda e cor trocam sem animação; símbolo troca direto.
@@ -292,8 +290,8 @@ Implementado em `BotInspector.swift` (`RoutineRow`) e `AppModel+Schedule.swift`.
 > o conjunto ficou em `BotLive`, não em `AppModel`, depois da divisão do modelo) e `BotLive.glance` + `OrbGlance`.
 > Detalhes em [ORBS.md](ORBS.md#reagindo-à-interface).
 
-O motor já tem atividades e pulos (`listening`, `poke`, `happy`, `waiting`). Faltam dois ganchos de estado, que
-devem seguir o padrão de `speaking` (o conjunto só muda no começo e no fim da rajada, nunca por tecla):
+O motor tem atividades e pulos (`listening`, `poke`, `happy`, `waiting`) e os ganchos de estado abaixo, que seguem o
+padrão de `speaking` (o conjunto só muda no começo e no fim da rajada, nunca por tecla):
 
 | Evento | Reação do Orb | Gancho |
 |---|---|---|
@@ -304,9 +302,9 @@ devem seguir o padrão de `speaking` (o conjunto só muda no começo e no fim da
 | Resposta terminou | `happy` (alegria que acalma, já existe) | — |
 | Pediu aprovação | `waiting` (já existe) | — |
 
-A atividade "atento" seria um caso novo em `OrbActivity` (`attentive`: olhar para baixo, `wander` 0,2,
-`pointerWeight` 0,3, sem expressão própria, `minFrameRate` 10). Custo: igual a `listening`. Prioridade em
-`activity(for:)`: abaixo de trabalhando (se o Orb está trabalhando, continua trabalhando).
+A atividade "atento" é `OrbActivity.attentive` (olhar para baixo, `wander` 0,2, `pointerWeight` 0,3, sem expressão
+própria, `minFrameRate` 10). Custo: igual a `listening`. Prioridade em `activity(for:)`: abaixo de trabalhando (se o
+Orb está trabalhando, continua trabalhando).
 
 ## 4. Reduzir movimento — resumo
 
@@ -323,14 +321,3 @@ A atividade "atento" seria um caso novo em `OrbActivity` (`attentive`: olhar par
 | Boas-vindas | três Orbs caem em sequência, pontos em cascata, cartão sobe | tudo junto em 0,15 s, Orbs parados, halo fixo |
 | Linha de trabalho | frase sobe 4 pt, medidor desliza, contador rola | frase troca por opacidade (0,15 s), sem deslizar nem rolar |
 | Orb | vivo | estático (já é assim) |
-
-## 5. Ordem de implementação sugerida
-
-1. Tokens + transições (`Motion.swift`, já feito) — adotar nas views.
-2. Mensagens e ferramentas (maior frequência de uso) — 2 h, medir com o teste de streaming.
-3. Aprovação (maior importância) — 1 h.
-4. Compositor + gancho `composing` + atividade `attentive` — 3 h com testes (padrão de `speaking`).
-5. Seleção, folhas, chat vazio — 2 h.
-
-Validar cada um com Instruments (SwiftUI + Animation Hitches) numa conversa longa em streaming: nenhum quadro
-acima de 16 ms e nenhum aumento de atualizações de corpo por token.

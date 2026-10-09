@@ -267,15 +267,6 @@ struct WorkAnnouncerTests {
         return AppModel(store: Store(directory: root), runsBackgroundWork: false)
     }
 
-    private final class Flag: @unchecked Sendable { var raised = false }
-
-    @MainActor private func notifies(reading reads: @MainActor () -> Void, whenYouDo change: @MainActor () -> Void) -> Bool {
-        let flag = Flag()
-        withObservationTracking { reads() } onChange: { flag.raised = true }
-        change()
-        return flag.raised
-    }
-
     private func shell(_ command: String) -> ToolCall { ToolCall(kind: .shell, title: "Rodando no Terminal", detail: command) }
 
 

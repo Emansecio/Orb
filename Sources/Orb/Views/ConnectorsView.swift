@@ -33,12 +33,12 @@ struct ConnectorsView: View {
         .navigationSubtitle("Dão novas ferramentas aos Orbs, como Gmail, Agenda, Slack e GitHub")
         .toolbar {
             Button("Reconectar", systemImage: "arrow.clockwise") { model.retryFailedConnectors() }
-                .help(hasProblem ? "Tentar conectar de novo os conectores com erro" : "Nenhum conector com erro")
+                .help(hasProblem ? "Tenta conectar de novo os conectores com erro" : "Nenhum conector está com erro")
                 .disabled(!hasProblem)
             Button("Adicionar manualmente", systemImage: "plus") {
                 editing = ConnectorDraft(config: MCPServerConfig(name: ""))
             }
-            .help("Adicionar um servidor pelo comando ou pela URL")
+            .help("Abre o editor para adicionar um servidor pelo comando ou pela URL")
         }
         .sheet(item: $editing) { draft in
             ConnectorEditor(draft: draft)
@@ -151,6 +151,7 @@ private struct InstalledConnectors: View {
                     Text("Conectores dão aos Orbs novas ferramentas, como ler o Gmail, a Agenda ou o GitHub. Escolha um na galeria ou adicione o seu.")
                 } actions: {
                     Button("Abrir a galeria", action: explore).buttonStyle(PrimaryPillStyle())
+                        .help(Tip.showGallery)
                 }
             }
         }
@@ -227,7 +228,7 @@ private struct ConnectorCard: View {
                     .toggleStyle(.switch)
                     .labelsHidden()
                     .controlSize(.small)
-                    .help(connector.isEnabled ? "Desativar (fica instalado, mas os Orbs não usam)" : "Ativar")
+                    .help(connector.isEnabled ? "Desativa o conector; ele fica instalado, mas os Orbs não o usam" : "Ativa o conector para os Orbs usarem")
             }
             if case .failed(let message) = status, connector.isEnabled {
                 failure(message)
@@ -243,22 +244,26 @@ private struct ConnectorCard: View {
                     .font(.system(size: 11))
                     .foregroundStyle(usedBy.isEmpty ? Palette.warn : Palette.muted)
                     .lineLimit(1)
-                    .help(usedBy.isEmpty ? "Ligue “Conectores” no painel de um Orb, ou escolha os Orbs em Editar." : "")
+                    .help(usedBy.isEmpty ? "Ligue “Conectores” no painel de um Orb, ou escolha os Orbs em Editar" : "")
             }
             HStack(spacing: 6) {
                 statusBadge
                 Spacer(minLength: 0)
                 Menu {
                     Button("Testar conexão", action: runTest).disabled(!connector.isEnabled || test == .running)
+                        .help(connector.isEnabled ? "Liga o servidor e lista as ferramentas, para ver se funciona" : "Só dá para testar com o conector ativado")
                     Button("Ver ferramentas…", action: onViewTools)
+                        .help("Mostra o que este conector oferece aos Orbs")
                     Divider()
                     Button("Editar…", action: onEdit)
+                        .help(connector.local != nil ? "Muda os Orbs que usam este conector" : "Abre o editor deste conector")
                     if signsIn {
                         Button("Sair da conta") { Task { await onSignOut() } }
                             .help("Esquece o login deste Mac e o revoga no serviço, se ele permitir")
                     }
                     Divider()
                     Button("Apagar…", role: .destructive, action: onDelete)
+                        .help("Pede a confirmação; apaga também as chaves deste conector")
                 } label: {
                     Image(systemName: "ellipsis")
                         .frame(width: 26, height: 22)
@@ -267,7 +272,7 @@ private struct ConnectorCard: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .accessibilityLabel("Mais opções de \(connector.name)")
+                .iconTip("Testa, mostra as ferramentas, edita ou apaga \(connector.name)", label: Tip.moreOptions(of: connector.name))
             }
         }
         .padding(14)
@@ -422,6 +427,7 @@ private struct ConnectorCard: View {
                 .lineLimit(3)
                 .multilineTextAlignment(.leading)
             Button("Resolver…", action: onEdit).buttonStyle(SecondaryPillStyle()).controlSize(.small)
+                .help("Abre a conexão para você resolver o que falta")
         }
     }
 
@@ -440,7 +446,7 @@ private struct ConnectorCard: View {
                     .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .help("Ver a mensagem completa")
+            .help("Mostra a mensagem de erro completa")
             .popover(isPresented: $isShowingDetail, arrowEdge: .bottom) {
                 ScrollView {
                     Text(message)
@@ -454,7 +460,9 @@ private struct ConnectorCard: View {
             }
             HStack(spacing: 6) {
                 Button("Tentar de novo", action: runTest).buttonStyle(SecondaryPillStyle())
+                    .help("Testa a conexão de novo")
                 Button("Editar…", action: onEdit).buttonStyle(GhostStyle())
+                    .help("Abre o editor para corrigir o conector")
             }
             .controlSize(.small)
         }
@@ -501,7 +509,7 @@ private struct InUseBadge: View {
         .padding(.horizontal, 7)
         .padding(.vertical, 3)
         .background(Palette.ok.opacity(0.12), in: .capsule)
-        .help("Conectado agora. Desliga sozinho quando fica um tempo sem uso.")
+        .help("Conectado agora; desliga sozinho depois de um tempo sem uso")
     }
 }
 
@@ -713,6 +721,7 @@ private struct RegistryServerCard: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .help("Abre a instalação de \(server.title)")
         .onHover { isHovering = $0 }
         .accessibilityLabel("\(server.title). \(server.summary)")
         .accessibilityHint("Abre a instalação")
@@ -810,6 +819,12 @@ struct ConnectorEditor: View {
         return isNew ? "Instalar e conectar" : "Salvar e conectar"
     }
 
+    private var primaryHelp: String {
+        guard config.isEnabled else { return "Salva o conector sem conectar, porque ele está desativado" }
+        if signsIn { return "Salva o conector e entra com a sua conta, se ainda faltar o login" }
+        return "Salva o conector e testa a conexão agora"
+    }
+
     private var footerMessage: String? {
         if chosenNoOrb { return "Marque ao menos um Orb em “Usar com”." }
         if clientIDMissing { return "Cole o Client ID do app do Slack." }
@@ -858,7 +873,7 @@ struct ConnectorEditor: View {
         switch phase {
         case .form:
             SheetFooter(message: footerMessage, cancel: { dismiss() }, primaryTitle: primaryTitle,
-                        isPrimaryDisabled: !canSave, primary: save)
+                        isPrimaryDisabled: !canSave, primaryHelp: primaryHelp, primary: save)
         case .connecting:
             SheetFooter(cancelTitle: "Fechar", cancel: { dismiss() }, primaryTitle: "Conectando…", isPrimaryDisabled: true, primary: {})
         case .signingIn:
@@ -867,7 +882,7 @@ struct ConnectorEditor: View {
             SheetFooter(cancel: { dismiss() }, primaryTitle: "Fechar", showsCancel: false, primary: { dismiss() })
         case .failed:
             SheetFooter(message: "O conector foi salvo. Corrija e tente de novo.", cancelTitle: "Fechar", cancel: { dismiss() },
-                        primaryTitle: "Editar", primary: {
+                        primaryTitle: "Editar", primaryHelp: "Volta ao formulário para corrigir o conector", primary: {
                 // A service that wants an app registered by the person: the fields for it are the next thing to see.
                 if case .failed(let message) = phase, message.contains("app registrado") { showsAdvanced = true }
                 phase = .form
@@ -885,6 +900,7 @@ struct ConnectorEditor: View {
                     if isRemote { CatalogBadge(text: "Remoto", symbol: "cloud") }
                     if let url = draft.helpURL {
                         Link(destination: url) { CatalogBadge(text: "Onde conseguir a chave", symbol: "arrow.up.right.square") }
+                            .help("Abre no navegador a página onde a chave é criada")
                     }
                     Spacer(minLength: 0)
                 }
@@ -963,12 +979,14 @@ struct ConnectorEditor: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                .help("Escolhe se o app do Slack só lê ou também envia mensagens")
                 Text(slackPreset.detail).font(.system(size: 11)).foregroundStyle(Palette.faint)
             }
             VStack(alignment: .leading, spacing: 8) {
                 Text("2. Crie o seu app do Slack").font(.system(size: 13, weight: .semibold))
                 Button("Criar meu app do Slack", systemImage: "arrow.up.right.square") { NSWorkspace.shared.open(SlackApp.creationURL(slackPreset)) }
                     .buttonStyle(SecondaryPillStyle())
+                    .help("Abre o Slack no navegador com o app já preenchido")
                 Text("O Slack abre no navegador com tudo preenchido. Escolha o seu workspace e clique em Create. Depois, em Install App, clique em Install to Workspace e em Allow.")
                     .font(.system(size: 11)).foregroundStyle(Palette.faint)
             }
@@ -980,12 +998,14 @@ struct ConnectorEditor: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                .help("Escolhe entre entrar com o app do Slack ou colar o token")
                 if pastesToken {
                     Text("Em OAuth & Permissions, copie o User OAuth Token (começa com xoxp-) e cole na chave abaixo.")
                         .font(.system(size: 11)).foregroundStyle(Palette.faint)
                 } else {
                     TextField("Client ID", text: $clientID, prompt: Text("Em Basic Information → App Credentials"))
                         .textFieldStyle(.roundedBorder)
+                        .help("O Client ID do app do Slack, que o Orb usa para entrar com a sua conta")
                     Text("Copie o Client ID do app e clique em Entrar com Slack: o Slack pede a sua licença no navegador. Não precisa copiar token.")
                         .font(.system(size: 11)).foregroundStyle(Palette.faint)
                 }
@@ -1014,6 +1034,7 @@ struct ConnectorEditor: View {
                 .textFieldStyle(.roundedBorder)
             SecureField("Client Secret", text: $clientSecret, prompt: Text("Só se o app tiver um"))
                 .textFieldStyle(.roundedBorder)
+                .help("Guardado no Keychain do Mac; em branco, mantém o atual")
         } header: {
             Text("App registrado (login)")
         } footer: {
@@ -1070,6 +1091,7 @@ struct ConnectorEditor: View {
                 values.append(KeyValueRow(key: "", value: ""))
             }
             .buttonStyle(.borderless)
+            .help(isRemote ? "Adiciona um cabeçalho HTTP, enviado só para a URL" : "Adiciona uma variável de ambiente para o comando")
         } header: {
             Text(isRemote ? "Cabeçalhos HTTP" : "Variáveis de ambiente")
         } footer: {
@@ -1095,6 +1117,7 @@ struct ConnectorEditor: View {
                     .truncationMode(.middle)
                 Spacer(minLength: 8)
                 Button("Escolher pasta…") { chooseFolder(index: index, current: path) }
+                    .help("Escolhe a pasta que este conector pode abrir")
             }
         } header: {
             Text("Pasta liberada")
@@ -1214,8 +1237,13 @@ struct ConnectorEditor: View {
         // Choosing an Orb is enough: its "Conectores" switch follows.
         model.allowConnectors(for: (orbIDs ?? []).subtracting(before))
 
-        guard config.isEnabled else { dismiss(); return }
         let id = config.id, secret = clientSecret.trimmingCharacters(in: .whitespaces)
+        guard config.isEnabled else {
+            // A disabled connector still keeps the secret that was typed.
+            if !secret.isEmpty { Task { await model.connectorAuth.setClientSecret(secret, clientID: clientID, for: id) } }
+            dismiss()
+            return
+        }
         let appChanged = clientID.trimmingCharacters(in: .whitespaces) != (draft.config.oauth?.clientID ?? "") || !secret.isEmpty
         let wantsLogin = signsIn
         phase = wantsLogin && isNew ? .signingIn : .connecting
@@ -1315,6 +1343,7 @@ private struct KeyValueField: View {
                     Button("Remover", systemImage: "minus.circle", action: onRemove)
                         .labelStyle(.iconOnly)
                         .buttonStyle(.borderless)
+                        .help("Tira esta linha do conector; vale quando você salvar")
                 }
             }
             if let input, !input.summary.isEmpty || input.isRequired {

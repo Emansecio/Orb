@@ -101,7 +101,7 @@ enum ChunkSummarizer {
         var whole = ContextCut(summary: conversation.summary, ledger: conversation.currentLedger)
         let history = ContextWindow.fit(slice, budget: ContextBudget(tokens: Int.max / 8), cut: &whole, condensing: condensing, paused: paused)
         let body = history.messages.dropFirst(ContextSummary.leading(in: history.messages) == nil ? 0 : 2)
-            .reduce(0) { $0 + $1.contextCharacters }
+            .contextCharacters
         // Measured as the fold measures (`ContextWindow.fit`): against the room the budget leaves once the message and its
         // preface are counted, with the room the summary will take added to the history.
         let room = budget.leavingRoom(forCharacters: AppModel.prefaceAllowance)
@@ -121,7 +121,7 @@ enum ChunkSummarizer {
         let upper = covered + cut.covered
         guard upper > from, upper <= conversation.messages.count else { return nil }
         let range = from..<upper
-        let size = conversation.messages[range].reduce(0) { $0 + $1.contextCharacters }
+        let size = conversation.messages[range].contextCharacters
         let least = from > covered ? laterStretchShare : firstStretchShare
         guard Double(size) >= Double(budget.characters) * least else { return nil }
         return Plan(range: range, input: transcript(of: conversation.messages[range]))

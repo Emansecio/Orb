@@ -22,72 +22,9 @@ private func turn(_ request: String, steps: Int = 1, output: Int = 100, tag: Str
     return messages
 }
 
-private func characters(_ messages: [ChatMessage]) -> Int { messages.reduce(0) { $0 + $1.contextCharacters } }
-
-/// Every tool message answers a call of the assistant message before it, and nothing starts with assistant/tool.
-private func isValidConversation(_ messages: [ChatMessage]) -> Bool {
-    guard messages.first?.role == .user else { return false }
-    var open: Set<String> = []
-    for message in messages {
-        switch message.role {
-        case .assistant: open = Set(message.toolCalls.map(\.id))
-        case .tool:
-            guard let id = message.toolCallID, open.remove(id) != nil else { return false }
-        default: open = []
-        }
-    }
-    return true
-}
-
-private actor Recorder {
-    private var responses: [[LLMEvent]]
-    private(set) var received: [[ChatMessage]] = []
-    private var failures: [Error]
-
-    init(_ responses: [[LLMEvent]], failures: [Error] = []) {
-        self.responses = responses
-        self.failures = failures
-    }
-
-    func next(_ messages: [ChatMessage]) throws -> [LLMEvent] {
-        received.append(messages)
-        if !failures.isEmpty { throw failures.removeFirst() }
-        return responses.isEmpty ? [.text("fim")] : responses.removeFirst()
-    }
-}
-
-private struct RecordingLLM: LLMClient {
-    let recorder: Recorder
-
-    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
-        AsyncThrowingStream { continuation in
-            Task {
-                do {
-                    for event in try await recorder.next(messages) { continuation.yield(event) }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-        }
-    }
-
-    func models() async throws -> [String] { ["fake"] }
-}
-
-private struct OutputTool: AgentTool {
-    let size: Int
-    var spec: ToolSpec { ToolSpec(name: "read_file", description: "Reads", parameters: .schema([:])) }
-    var kind: ToolCall.Kind { .file }
-    var capability: Capability? { nil }
-    func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
-    func summary(_ arguments: JSONValue) -> (title: String, detail: String) { ("Lendo", "arquivo") }
-    func run(_ arguments: JSONValue, context: ToolContext) async throws -> String { String(repeating: "y", count: size) }
-}
-
 private func engineRequest(_ recorder: Recorder, history: [ChatMessage] = [], budget: ContextBudget, toolSize: Int = 100,
                            bot: Bot = Bot(name: "Teste", role: "", orb: OrbConfig(), permissionMode: .bypass)) -> TurnRequest {
-    TurnRequest(bot: bot, model: "fake", system: "sys", history: history, prompt: "oi", client: RecordingLLM(recorder: recorder),
+    TurnRequest(bot: bot, model: "fake", system: "sys", history: history, prompt: "oi", client: ReplayLLM(recorder: recorder),
                 tools: [OutputTool(size: toolSize)], context: ToolContext(workingDirectory: FileManager.default.temporaryDirectory),
                 budget: budget)
 }

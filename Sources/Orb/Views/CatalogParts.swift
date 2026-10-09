@@ -7,10 +7,6 @@ enum CatalogTab: Hashable {
     /// The gallery of services (only the Conectores page has one).
     case gallery, installed, explore
 
-    /// ⌘F: only the catalog has a search field, so from the installed tab the page goes there (the field takes focus
-    /// when it appears).
-    static func afterFind(_ tab: CatalogTab) -> CatalogTab { .explore }
-
     /// What VoiceOver says about a tab of the switch besides its name: the selected one is announced as such.
     static func traits(isSelected: Bool) -> AccessibilityTraits { isSelected ? .isSelected : [] }
 }
@@ -32,9 +28,10 @@ struct CatalogTabBar: View {
         .padding(3)
         .background(Color.white.opacity(0.06), in: .capsule)
         .background {
-            // ⌘F outside the explore tab (the explore tab's header has its own button for it).
+            // ⌘F outside the explore tab (the explore tab's header has its own button for it). Only the catalog has a
+            // search field, so the page goes there (the field takes focus when it appears).
             if tab != .explore {
-                Button("Buscar no catálogo") { withAnimation(.snappy(duration: 0.2)) { tab = CatalogTab.afterFind(tab) } }
+                Button("Buscar no catálogo") { withAnimation(.snappy(duration: 0.2)) { tab = .explore } }
                     .keyboardShortcut(AppShortcut.find)
                     .opacity(0)
                     .frame(width: 0, height: 0)
@@ -64,7 +61,7 @@ struct CatalogTabBar: View {
             .contentShape(.capsule)
         }
         .buttonStyle(.plain)
-        .help(value == .installed ? Tip.showInstalled : Tip.showCatalog)
+        .help(value == .installed ? Tip.showInstalled : value == .gallery ? Tip.showGallery : Tip.showCatalog)
         .accessibilityAddTraits(CatalogTab.traits(isSelected: tab == value))
     }
 }

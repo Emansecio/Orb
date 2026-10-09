@@ -85,7 +85,7 @@ actor ClaudeCode {
     /// Finds `claude`: `ORB_CLAUDE_PATH` (dev/tests), then the login shell, then the usual install folders.
     func installation(refresh: Bool = false) async -> Installation? {
         if let cached, !refresh, FileManager.default.isExecutableFile(atPath: cached.executable.path) { return cached }
-        let shell = ProcessInfo.processInfo.environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? "/bin/zsh"
+        let shell = ShellEnvironment.loginShell(in: ProcessInfo.processInfo.environment)
         let script = "printf '\(Self.marker)claude=%s\\n' \"$(command -v claude)\"; printf '\(Self.marker)path=%s\\n' \"$PATH\""
         let probe = try? await ProcessRunner.run(shell, ["-l", "-c", script], timeout: .seconds(15))
         let found = Self.parseShellProbe(probe?.output ?? "")

@@ -4,8 +4,8 @@
     python3 scripts/fake-llm.py [port]        # default 8765
     python3 scripts/fake-llm.py 8765 --long   # first reply: ~2000 words of Markdown, one word every 15 ms
 
-In Orb: Ajustes → Modelo → "Outro compatível com OpenAI", URL http://127.0.0.1:8765/v1,
-then "Testar e buscar modelos". Each prompt gets a short reply, a `run_command` call (so the
+In Orb: Ajustes → Modelos → add the provider "Gateway próprio", URL http://127.0.0.1:8765/v1,
+then "Atualizar modelos". Each prompt gets a short reply, a `run_command` call (so the
 approval card shows up) and, after the tool result, a final answer quoting its first line.
 """
 import json

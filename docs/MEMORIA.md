@@ -217,8 +217,8 @@ reindexa. O VoiceOver é avisado nos dois casos.
 ## Modo Claude Code
 
 O Claude Code só recebe ferramentas por MCP. Cada turno passa um servidor chamado `orb_memoria` que é o próprio binário do
-app: `Orb --tools-mcp <pasta da memória> [--mac] [--folder <pasta do Orb>] [--accessibility | --no-accessibility]`
-(`--memory-mcp` ainda é aceito). Ele oferece `remember` e `recall` sobre os mesmos arquivos (o SQLite em modo WAL deixa o
+app: `Orb --tools-mcp <pasta da memória> [--mac] [--files] [--folder <pasta do Orb>] [--accessibility | --no-accessibility]`
+(`--memory-mcp` ainda é aceito; `--files` liga `trash`, a ferramenta de arquivos que não pede permissão do Mac). Ele oferece `remember` e `recall` sobre os mesmos arquivos (o SQLite em modo WAL deixa o
 app e o servidor usarem o índice juntos) e, com "Controlar apps do Mac", também as ferramentas do Mac (`open`,
 `applescript`, `shortcuts_*`, `clipboard_*`, `screenshot`, `notify`, `apps_list`, `processes`, `app_quit`, `trash`,
 `browser_tab`, e `ui_read`/`ui_act` se o app tem Acessibilidade). Para o Claude Code os nomes são

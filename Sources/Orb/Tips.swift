@@ -122,6 +122,7 @@ enum Tip {
     static let clearSearch = "Limpa a busca"
     static let showInstalled = "Mostra o que já está instalado"
     static let showCatalog = "Procura no catálogo aberto"
+    static let showGallery = "Mostra os serviços que se conectam com um clique"
     static func useSkill(orb: String, slug: String) -> String { "Abre a conversa com \(orb) com /\(slug) pronto" }
     static func chooseOrbForSkill(slug: String) -> String { "Escolhe o Orb que vai usar /\(slug)" }
     static func copySlug(_ slug: String) -> String { "Copia /\(slug) para colar numa mensagem" }
@@ -249,7 +250,7 @@ enum Tip {
          importFromAssistant, startFromKeptMemory, importBack, importCopyPrompt, importChooseFile, importReadLocal, importKind, importItem, importReview, importRemove,
          importToggleSkill(isShowing: true), importToggleSkill(isShowing: false),
          newSkill, noOrbForSkill, installed, openSkillDetails, discardProposal, keepProposal, saveProposal, clearSearch,
-         showInstalled, showCatalog, useSkill(orb: "Orb", slug: "resumir"), chooseOrbForSkill(slug: "resumir"),
+         showInstalled, showCatalog, showGallery, useSkill(orb: "Orb", slug: "resumir"), chooseOrbForSkill(slug: "resumir"),
          copySlug("resumir"), skillToggle(isOn: true), skillToggle(isOn: false), moreOptions(of: "Orb"), searchFor("pdf"),
          memoryShowKind, memoryShowAll, memoryFolder, memoryHow, editIdentity, forget, expandMemory, collapseMemory,
          restartInterview("Orb"),

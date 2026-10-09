@@ -1,7 +1,7 @@
 """Orb customization catalog: palettes, eyes, mouths, brows, cheeks, mustaches, hair and accessories.
 
 Every option is (id, Portuguese label, builder). Builders receive a Ctx and add objects to the scene.
-The same ids are exported to the app (orb_options.json) so the editor and the renders stay in sync.
+The same ids are exported to the app (options.json, in the app) so the editor and the renders stay in sync.
 """
 
 import math
@@ -342,7 +342,7 @@ def cheeks_coracoes(ctx):
 
 CHEEKS = [
     ("nenhuma", "Nenhuma", None),
-    ("blush", "Blush", cheeks_blush),
+    ("blush", "Rosadas", cheeks_blush),
     ("sardas", "Sardas", cheeks_sardas),
     ("coracoes", "Coraçõezinhos", cheeks_coracoes),
 ]

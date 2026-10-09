@@ -168,12 +168,7 @@ enum ProviderStatus: Equatable {
     }
 
     /// "há 2 h" (abbreviated, pt-BR).
-    static func relative(_ date: Date, now: Date = .now) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.locale = Locale(identifier: "pt_BR")
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: now)
-    }
+    static func relative(_ date: Date, now: Date = .now) -> String { RelativeTime.text(date, now: now) }
 }
 
 /// Why the last model refresh failed.

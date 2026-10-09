@@ -261,24 +261,16 @@ private struct CopyButton: View {
     let copiedHelp: String
     let action: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var copied = false
-    /// The pending return to the copy symbol, so a second click starts the 1.5 s over instead of being cut short.
-    @State private var reset: Task<Void, Never>?
+    @State private var flash = CopiedFlash()
 
     var body: some View {
         Button {
             action()
-            copied = true
-            reset?.cancel()
-            reset = Task {
-                try? await Task.sleep(for: .seconds(1.5))
-                guard !Task.isCancelled else { return }
-                copied = false
-            }
+            flash.trigger()
         } label: {
-            Image(systemName: copied ? "checkmark" : symbol)
+            Image(systemName: flash.isOn ? "checkmark" : symbol)
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(copied ? Palette.ink : Palette.muted)
+                .foregroundStyle(flash.isOn ? Palette.ink : Palette.muted)
                 // The symbol is swapped for the check (a plain fade under Reduce Motion), inside a frame that does not move.
                 .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
                 .frame(width: 26, height: 26)
@@ -287,10 +279,10 @@ private struct CopyButton: View {
                 .contentShape(.circle)
                 // Set on the view that changes (the code block's button does the same, where it must: the reply says
                 // "never animate" to everything it draws).
-                .animation(copied ? Motion.press : Motion.content, value: copied)
+                .animation(flash.isOn ? Motion.press : Motion.content, value: flash.isOn)
         }
         .buttonStyle(.plain)
-        .help(copied ? copiedHelp : help)
+        .help(flash.isOn ? copiedHelp : help)
         .accessibilityLabel(help)
     }
 }

@@ -151,7 +151,7 @@ private struct InstalledSkillRow: View {
     @Binding var skill: Skill
     let onEdit: () -> Void
     let onDelete: () -> Void
-    @State private var didCopy = false
+    @State private var copied = CopiedFlash()
 
     var body: some View {
         HStack(alignment: .center, spacing: 14) {
@@ -163,11 +163,11 @@ private struct InstalledSkillRow: View {
                     Text("/\(skill.slug)")
                         .font(.system(size: 12).monospaced())
                         .foregroundStyle(Palette.muted)
-                    Button(didCopy ? "Copiado" : "Copiar /\(skill.slug)", systemImage: didCopy ? "checkmark" : "doc.on.doc", action: copy)
+                    Button(copied.isOn ? "Copiado" : "Copiar /\(skill.slug)", systemImage: copied.isOn ? "checkmark" : "doc.on.doc", action: copy)
                         .labelStyle(.iconOnly)
                         .buttonStyle(.plain)
                         .font(.system(size: 11))
-                        .foregroundStyle(didCopy ? Palette.ok : Palette.faint)
+                        .foregroundStyle(copied.isOn ? Palette.ok : Palette.faint)
                         .help(Tip.copySlug(skill.slug))
                 }
                 if !skill.summary.isEmpty {
@@ -226,13 +226,8 @@ private struct InstalledSkillRow: View {
     }
 
     private func copy() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString("/\(skill.slug)", forType: .string)
-        didCopy = true
-        Task {
-            try? await Task.sleep(for: .seconds(1.5))
-            didCopy = false
-        }
+        Clipboard.copy("/\(skill.slug)")
+        copied.trigger()
     }
 }
 

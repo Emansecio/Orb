@@ -47,8 +47,6 @@ enum InspectorTabMemory {
 
 /// How the panel talks about what the Orb may use: a name and one line each.
 enum CapabilityCopy {
-    static func title(_ capability: Capability) -> String { capability.label }
-
     static func subtitle(_ capability: Capability) -> String {
         switch capability {
         case .terminal: "Rodar comandos e ler e escrever arquivos"
@@ -58,10 +56,11 @@ enum CapabilityCopy {
         }
     }
 
-    /// The connectors row's line: how many are on, since the toggle alone does not say.
-    static func connectorsLine(enabled: Int, total: Int) -> String {
+    /// The connectors row's line: how many are on, since the toggle alone does not say. `anyInstalled` tells "none
+    /// installed at all" from "none in this Orb's scope" (every installed connector is kept for other Orbs).
+    static func connectorsLine(enabled: Int, total: Int, anyInstalled: Bool) -> String {
         switch (enabled, total) {
-        case (_, 0): "Nenhum conector instalado"
+        case (_, 0): anyInstalled ? "Nenhum conector para este Orb" : "Nenhum conector instalado"
         case (0, _): "Nenhum ativo (\(total) instalado\(total == 1 ? "" : "s"))"
         case (1, _): "1 conector ativo"
         default: "\(enabled) conectores ativos"
@@ -152,9 +151,7 @@ final class FoldedTextCache {
 }
 
 enum SearchText {
-    static func fold(_ text: String) -> String {
-        text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "pt_BR"))
-    }
+    static func fold(_ text: String) -> String { MemoryText.fold(text) }
 
     static func words(_ query: String) -> [String] {
         fold(query).split { !$0.isLetter && !$0.isNumber }.map(String.init)

@@ -1,5 +1,4 @@
 import Foundation
-import os
 
 /// The Orb's own tools for Claude Code turns. Claude Code only takes extra tools through MCP, so each turn's MCP
 /// config starts the app's own binary as `Orb --tools-mcp <memory folder> [--mac] [--folder <working folder>]`: a
@@ -22,7 +21,6 @@ enum OrbToolsMCPServer {
     /// The name stays what it was: sessions that are resumed, and the user's "Sempre permitir" choices, refer to the
     /// tools by it. It is also a name unlikely to collide with an MCP server of the user's own.
     static let name = "orb_memoria"
-    static let protocolVersions = ["2024-11-05", "2025-03-26", "2025-06-18"]
 
     /// Every tool the server can offer, for naming and summarizing the calls Claude Code reports.
     static let allTools: [any AgentTool] = ToolBox.memoryTools + ToolBox.scheduleTools + ToolBox.macTools
@@ -125,86 +123,46 @@ enum OrbToolsMCPServer {
         return server
     }
 
-    /// Runs the server until stdin closes, then exits the process. The messages are read on a background thread so
-    /// the main thread stays free for tools that must run on the main actor (clipboard, notifications); it only
-    /// services the main queue, and never starts the app (no NSApplication, no windows, no Dock icon).
+    /// Runs the server until stdin closes, then exits the process; see `MCPStdioServer.run`.
     static func run(_ options: Options) -> Never {
-        Thread.detachNewThread {
-            serve(options)
-            exit(0)
-        }
-        dispatchMain()
-    }
-
-    /// Serves until stdin closes. Messages are split on "\n" only (JSON text may contain U+2028 and other Unicode
-    /// line separators raw) and handled in turn. Call it off the main thread: it waits for each answer.
-    static func serve(_ options: Options) {
-        let context = options.context
-        let mac = options.mac, files = options.files
-        let accessibility = options.accessibilityGranted
-        while let line = readLine(strippingNewline: true) {
-            guard !line.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
-            let reply = blocking { await respond(to: line, context: context, mac: mac, files: files, accessibilityGranted: accessibility) }
-            if let reply { FileHandle.standardOutput.write(Data((reply.jsonString + "\n").utf8)) }
-        }
+        MCPStdioServer.run { Handler(context: options.context, mac: options.mac, files: options.files, accessibilityGranted: options.accessibilityGranted) }
     }
 
     /// The reply to one line (a parse error gets a JSON-RPC error; notifications get none).
     static func respond(to line: String, context: ToolContext, mac: Bool = false, files: Bool = false,
                         accessibilityGranted: Bool? = nil) async -> JSONValue? {
-        guard let request = JSONValue.parse(line), case .object = request else {
-            FileHandle.standardError.write(Data("orb-memoria: mensagem inválida ignorada\n".utf8))
-            return .object(["jsonrpc": .string("2.0"), "id": .null,
-                            "error": .object(["code": .number(-32700), "message": .string("Parse error")])])
-        }
-        return await handle(request, context: context, mac: mac, files: files, accessibilityGranted: accessibilityGranted)
-    }
-
-    private static func blocking<T: Sendable>(_ work: @escaping @Sendable () async -> T) -> T {
-        let box = OSAllocatedUnfairLock<T?>(initialState: nil)
-        let done = DispatchSemaphore(value: 0)
-        Task.detached {
-            let value = await work()
-            box.withLock { $0 = value }
-            done.signal()
-        }
-        done.wait()
-        return box.withLock { $0 }!
+        await MCPStdioServer.respond(toLine: line, handler: Handler(context: context, mac: mac, files: files, accessibilityGranted: accessibilityGranted))
     }
 
     /// The JSON-RPC response to one message (nil for notifications).
     static func handle(_ request: JSONValue, context: ToolContext, mac: Bool = false, files: Bool = false,
                        accessibilityGranted: Bool? = nil) async -> JSONValue? {
-        guard let id = request["id"], id != .null else { return nil }
-        let tools = tools(mac: mac, files: files)
-        func result(_ value: JSONValue) -> JSONValue { .object(["jsonrpc": .string("2.0"), "id": id, "result": value]) }
-        switch request["method"]?.string {
-        case "initialize":
-            let asked = request["params"]?["protocolVersion"]?.string ?? ""
-            return result(.object([
-                "protocolVersion": .string(protocolVersions.contains(asked) ? asked : "2025-06-18"),
-                "capabilities": .object(["tools": .object([:])]),
-                "serverInfo": .object(["name": .string("orb-memoria"), "version": .string("1.0")]),
-            ]))
-        case "ping":
-            return result(.object([:]))
-        case "tools/list":
-            return result(.object(["tools": .array(listedTools(mac: mac, files: files, accessibilityGranted: accessibilityGranted).map {
+        await MCPStdioServer.respond(to: request, handler: Handler(context: context, mac: mac, files: files, accessibilityGranted: accessibilityGranted))
+    }
+
+    /// One server process as an MCP server: the tools it offers, and `callResult` for a call.
+    private struct Handler: MCPServerHandler {
+        let context: ToolContext
+        let mac: Bool
+        let files: Bool
+        let accessibilityGranted: Bool?
+        var serverName: String { "orb-memoria" }
+
+        func listedTools() -> [JSONValue] {
+            OrbToolsMCPServer.listedTools(mac: mac, files: files, accessibilityGranted: accessibilityGranted).map {
                 .object(["name": .string($0.spec.name), "description": .string($0.spec.description),
                          "inputSchema": $0.spec.parameters,
                          "annotations": .object(["readOnlyHint": .bool($0.risk(.object([:])) == .safe)])])
-            })]))
-        case "tools/call":
-            let name = request["params"]?["name"]?.string
-            let arguments = request["params"]?["arguments"] ?? .object([:])
-            guard let tool = tools.first(where: { $0.spec.name == name }) else {
-                return .object(["jsonrpc": .string("2.0"), "id": id,
-                                "error": .object(["code": .number(-32602), "message": .string("Ferramenta desconhecida")])])
             }
-            return result(await callResult(of: tool, arguments: arguments, context: context))
-        default:
-            return .object(["jsonrpc": .string("2.0"), "id": id,
-                            "error": .object(["code": .number(-32601), "message": .string("Método não suportado")])])
+        }
+
+        func offers(_ tool: String) -> Bool { OrbToolsMCPServer.tools(mac: mac, files: files).contains { $0.spec.name == tool } }
+
+        func call(_ tool: String, arguments: JSONValue) async -> JSONValue {
+            guard let tool = OrbToolsMCPServer.tools(mac: mac, files: files).first(where: { $0.spec.name == tool }) else {
+                return MCPStdioServer.textResult("Ferramenta desconhecida", isError: true)
+            }
+            return await OrbToolsMCPServer.callResult(of: tool, arguments: arguments, context: context)
         }
     }
 

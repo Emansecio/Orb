@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 import ServiceManagement
 
-// Ajustes: three tabs (Geral, Modelos, Permissões do Mac) that anything in the app can open directly.
+// Ajustes: four tabs (Geral, Modelos, Uso, Permissões do Mac) that anything in the app can open directly.
 
 enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
     case general, models, usage, permissions
@@ -101,7 +101,7 @@ struct SettingsView: View {
 struct GeneralSettings: View {
     @Environment(AppModel.self) private var model
     @State private var learnedWindows: [LearnedWindowRow] = []
-    @AppStorage("notifyWhenDone") private var notifyWhenDone = true
+    @AppStorage(AppModel.notifyWhenDoneKey) private var notifyWhenDone = true
     @AppStorage(SkillReview.settingKey) private var proposeSkills = true
     @AppStorage(GlobalHotKey.defaultsKey) private var globalShortcut = false
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -160,15 +160,7 @@ struct GeneralSettings: View {
                 Text("Tudo fica neste Mac. As chaves ficam no Keychain.")
             }
             Section("Atalhos") {
-                Toggle(CommandName.globalShortcut, isOn: Binding(
-                    get: { globalShortcut },
-                    set: { wanted in
-                        // Another app may already hold the keys: then the switch stays off and the user is told.
-                        let works = GlobalHotKey.shared.apply(wanted)
-                        globalShortcut = wanted && works
-                        if wanted && !works { GlobalHotKey.showUnavailableAlert() }
-                    }
-                ))
+                Toggle(CommandName.globalShortcut, isOn: GlobalHotKey.toggleBinding($globalShortcut))
                 .help(Tip.globalShortcut)
             }
             // The whole list, from the same catalog as the "Atalhos do teclado" sheet (Ajuda → Atalhos do teclado).
@@ -287,7 +279,7 @@ struct GeneralSettings: View {
 
 // MARK: - Snapshots
 
-/// `--snapshot settings-general | settings-models | settings-perms | first-run-banner`: each tab of Ajustes on its own
+/// `--snapshot settings-general | settings-profile | settings-reset | settings-models | settings-perms | first-run-banner`: each tab of Ajustes on its own
 /// (the tab bar does not render offscreen), at the size the window gives it.
 @MainActor
 enum SettingsSnapshots {

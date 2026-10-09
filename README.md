@@ -507,7 +507,7 @@ tem a **Galeria**, os **Instalados** e **Explorar**.
 
 A mesma lista, completa, está em **Ajuda → Atalhos do teclado** e em Ajustes → Geral (as duas leem o mesmo catálogo, `Shortcuts.swift`).
 O atalho global liga no menu **Orbs** ("Abrir o painel da barra de menus com ⌃⌥Espaço") ou em Ajustes → Geral. Se outro app
-já usa essas teclas, o Orb avisa e deixa desligado. **Ajuda → Atalhos do teclado** mostra a lista dentro do app.
+já usa essas teclas, o Orb avisa e deixa desligado.
 
 ## Barra de menus e pergunta rápida
 
@@ -544,6 +544,8 @@ antigo. Se `ORB_DATA_DIR` aponta para uma pasta que não parece do Orb (sem `sta
 não confirma. O app
 para tudo (conversas em andamento, rotinas, pedidos de permissão, conectores, processos em segundo plano), cobre a janela
 enquanto trabalha (nada de mensagem nova nem de Novo Orb), apaga e abre de novo.
+Se algo da pasta de dados não puder ser removido, movido ou gravado, o Orb avisa antes de fechar e abrir de novo ("A redefinição
+não removeu tudo"): lista os itens (até 5, mais a contagem do resto) e indica Ajustes → Geral → Pasta de dados, para apagá-los à mão.
 Rodando pelo SwiftPM (sem um `.app`), ele só fecha: abra de novo. Nos modos de desenvolvedor (`--snapshot`…) a redefinição nunca roda.
 
 ## Privacidade

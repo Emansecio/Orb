@@ -559,15 +559,15 @@ struct MacPermissionsTests {
     }
 
     @Test func aTaskCancelledBeforeTheCallNeverStartsIt() async {
-        let started = Flag()
+        let started = RaisedFlag()
         let task = Task {
             while !Task.isCancelled { await Task.yield() }
-            return await Blocking.run(fallback: "cancelado") { started.set(); return "resposta" }
+            return await Blocking.run(fallback: "cancelado") { started.raise(); return "resposta" }
         }
         task.cancel()
         #expect(await task.value == "cancelado")
         try? await Task.sleep(for: .milliseconds(100))
-        #expect(!started.value, "no system dialog for a call nobody waits for")
+        #expect(!started.isRaised, "no system dialog for a call nobody waits for")
     }
 
     @Test func cancellingTheTaskStopsWaitingForTheDialog() async {
@@ -579,13 +579,6 @@ struct MacPermissionsTests {
         release.signal()
         #expect(value == "cancelado")
     }
-}
-
-private final class Flag: @unchecked Sendable {
-    private let lock = NSLock()
-    private var raised = false
-    func set() { lock.withLock { raised = true } }
-    var value: Bool { lock.withLock { raised } }
 }
 
 /// The settings tab's model, driven by the stub: no prompt ever reaches the system.

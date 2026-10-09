@@ -97,7 +97,7 @@ struct WalkedFile: Sendable {
 /// generated or vendored files.
 enum FileWalker {
     static let skippedDirectories: Set<String> = [
-        ".git", ".hg", ".svn", "node_modules", ".build", "DerivedData", "Pods", ".venv", "__pycache__",
+        ".git", ".hg", ".svn", ".idea", "node_modules", ".build", "DerivedData", "Pods", ".venv", "__pycache__",
         // Build output and caches of the usual toolchains (Gradle, npm bundlers, Cargo, Python): thousands of generated
         // files that bury the real sources. Asking for the folder itself as `path` still searches it.
         "build", "dist", "out", "target", ".gradle", ".next", ".nuxt", "coverage", "venv", ".tox", ".mypy_cache", ".cache",

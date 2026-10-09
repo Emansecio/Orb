@@ -423,7 +423,7 @@ As camadas, as opções e os geradores (`art/orbgen` em Swift para o corpo, os c
 o Blender para os traços planos; como acrescentar um penteado, um chapéu ou um acessório; o manifesto `options.json`)
 estão descritos em [art/README.md](../art/README.md). O app só depende do que sai de lá: os PNGs em
 `Sources/Orb/Resources/Orbs/` e o `options.json` com os ids, rótulos e cores. Acrescentar uma opção nova não exige mexer em
-Swift, exceto quando ela precisa de uma cor padrão (`OrbConfig.defaultAccent`) ou de uma ordem de camadas diferente
+Swift, exceto quando ela precisa de uma cor padrão (`OrbConfig.autoAccentColor(_:palette:)`) ou de uma ordem de camadas diferente
 (`OrbConfig.layers(...)`; a profundidade da paralaxe está em `OrbLayer.depth`, aplicada em `OrbAnimationView.apply` e
 `OrbPainter.parallax`).
 

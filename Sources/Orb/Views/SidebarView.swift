@@ -83,7 +83,7 @@ struct SidebarView: View {
                     .help(Tip.newBot())
                     Button("Ajustes", systemImage: "gearshape") { openSettings() }
                         .labelStyle(.iconOnly)
-                        .buttonStyle(SidebarIconStyle())
+                        .buttonStyle(CircleGhostStyle(side: 32, fontSize: 14))
                         .foregroundStyle(Palette.muted)
                         .iconTip(Tip.settings(), label: "Ajustes")
                 }
@@ -158,20 +158,6 @@ enum SidebarSelection {
     static let id = "selecao"
 }
 
-private struct SidebarIconStyle: ButtonStyle {
-    @State private var isHovering = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 14))
-            .frame(width: 32, height: 32)
-            .hoverFill(configuration.isPressed || isHovering, pressed: configuration.isPressed, in: .circle,
-                       color: Palette.ghostSelected)
-            .contentShape(.circle)
-            .onHover { isHovering = $0 }
-    }
-}
-
 /// The user's round picture at the foot of the sidebar: it opens "Você" in Ajustes (an invitation to fill it in while
 /// it is empty). A small view of its own, so typing in the profile redraws only it.
 private struct ProfileAvatarButton: View {
@@ -183,7 +169,7 @@ private struct ProfileAvatarButton: View {
         Button { SettingsRouter.open(.general, using: openSettings) } label: {
             ProfileAvatar(photoPath: model.profilePhotoPath, initial: profile.initial, size: 28)
         }
-        .buttonStyle(SidebarIconStyle())
+        .buttonStyle(CircleGhostStyle(side: 32, fontSize: 14))
         .help(Tip.profile(callName: profile.callName))
         .accessibilityLabel("Seu perfil")
         .accessibilityHint("Abre os Ajustes")

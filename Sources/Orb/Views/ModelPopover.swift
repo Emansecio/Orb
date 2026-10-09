@@ -13,20 +13,13 @@ struct ModelPopover: View {
     /// Providers the user folded (or that start folded because the list is long).
     @State private var folded: Set<ProviderKind> = []
     @State private var didSetFolds = false
-    @FocusState private var isSearching: Bool
-
-    private static let foldAbove = 40
 
     var body: some View {
         let selection = model.live(botID).modelID
         let listing = ModelListing(choices: model.modelChoices, recents: recents.ids, query: query)
         let isSearch = !query.trimmingCharacters(in: .whitespaces).isEmpty
         VStack(spacing: 0) {
-            TextField("Buscar modelo", text: $query)
-                .textFieldStyle(.roundedBorder)
-                .focused($isSearching)
-                .onSubmit { if let first = listing.first { choose(first) } }
-                .padding(10)
+            ModelSearchField(query: $query) { if let first = listing.first { choose(first) } }
             Divider()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -82,12 +75,11 @@ struct ModelPopover: View {
         }
         .frame(width: 320, height: 380)
         .onAppear {
-            isSearching = true
             recents = RecentModels()
             guard !didSetFolds else { return }
             didSetFolds = true
             let choices = model.modelChoices
-            if choices.reduce(0, { $0 + $1.models.count }) > Self.foldAbove {
+            if ModelSearch.isLongList(choices) {
                 let current = ModelRef(selection.isEmpty ? model.defaultModel : selection)?.provider
                 folded = Set(choices.map(\.account.kind)).subtracting(current.map { [$0] } ?? [])
             }
@@ -150,7 +142,8 @@ struct ModelPopover: View {
     }
 }
 
-private struct ModelPopoverRow: View {
+/// A row of a model list: the name, what makes it special in gray, and a check on the chosen one.
+struct ModelPopoverRow: View {
     let name: String
     let detail: String
     let isSelected: Bool

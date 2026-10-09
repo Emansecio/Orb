@@ -286,13 +286,14 @@ até o fim:
 5. **Limpa fora da thread principal** (`ResetExecutor.run`, em `Task.detached`): `store.flush()` (o que estava sendo gravado
    termina), `BackgroundJobs.killAllNow()`, e então, na ordem: move a memória de cada Orb para `_guardadas` com o perfil (ou, em
    "Apagar tudo", remove `memoria/` inteira); remove **só o que o app grava** na pasta de dados (`ResetGuard.removes(entry:)`:
-   `state.json` e suas cópias `state.json.…`, `conversations/`, `memoria/`, `anexos/`, `saidas/`, `perfil/`, `uso/`; qualquer outro arquivo, como
+   `state.json` e suas cópias `state.json.…`, `conversations/`, `memoria/`, `anexos/`, `conectores/`, `saidas/`, `perfil/`, `uso/`; qualquer outro arquivo, como
    `.migrado-do-openbot`, fica); apaga os segredos pelo cofre injetável (`SecretVault.remove` = `Keychain.set("")`, o mesmo
    caminho público de apagar chave: conectores e, com "Também sair dos provedores", uma conta por provedor mais `chatgpt`;
    nunca o Claude Code); devolve as preferências ao padrão (`UserDefaults` do próprio app, menos `LegacyKeychainLedger.key`);
    grava um `state.json` novo só com os provedores, o modelo padrão e as janelas aprendidas quando eles ficam; e, se a pasta do
    OpenBot ainda tem dados e o marcador faltava, cria o marcador. Cada passo continua se outro falhou; o relatório
-   (`ResetReport`) diz o que sobrou.
+   (`ResetReport`) diz o que sobrou e, se sobrou algo, um aviso (`ResetWarning`, injetável em `ResetEnvironment.warn`) lista os itens
+   antes de o app fechar.
 6. **Fecha e reabre** (`AppRelaunch.finish`): um `sh` espera o processo acabar (até 20 s) e roda `open` no `.app` (sem `-n`; se o
    processo não acabou, não abre nada); fora de um `.app` (SwiftPM) só fecha.
 
@@ -430,7 +431,8 @@ São mais de 2.000 testes em `Tests/OrbAppTests`, em Swift Testing (`@Test`, `@S
   do app (o cofre de segredos é um `MemoryVault`). `QuietNotifications.hold()` impede banners do processo de teste.
 - **Modelo falso.** Os testes injetam um `LLMClient` próprio: `AppModel.clientOverride`, ou um `ScriptedLLM`/`RecordingLLM`
   passado direto ao `AgentEngine.run`. Cada arquivo define o seu, pequeno (respostas roteirizadas, portas que só abrem quando
-  o teste manda, gravação das requisições). O Claude Code é testado com um `claude` falso, um script que o
+  o teste manda, gravação das requisições); o que mais de um arquivo usa mora em `TestSupport/` (`ReplayLLM` e `Recorder` para o
+  contexto, `RaisedFlag`, `notifies(reading:whenYouDo:)`, `hasPython`, as visões do `AppModel` que só os testes leem). O Claude Code é testado com um `claude` falso, um script que o
   próprio teste grava (`ORB_CLAUDE_PATH` faz o app usar outro executável).
 - **Fixtures sem binários**: PDFs e PNGs são desenhados na hora (`Fixtures`), e o AX (Acessibilidade) é uma árvore falsa
   injetável (`AccessibilitySystem`).
@@ -456,7 +458,7 @@ open -n build/Orb.app --env ORB_DATA_DIR=/tmp/orb-teste --env ORB_SEND="Como est
 
 | Argumento | Efeito |
 |---|---|
-| `--tools-mcp <memória> [--mac] [--folder <pasta>] [--accessibility\|--no-accessibility] [--schedule-mailbox <pasta> --orb <id>]` | roda só o servidor MCP de ferramentas do Orb para o Claude Code (`--memory-mcp` ainda vale); sem janela |
+| `--tools-mcp <memória> [--mac] [--files] [--folder <pasta>] [--accessibility\|--no-accessibility] [--schedule-mailbox <pasta> --orb <id>]` | roda só o servidor MCP de ferramentas do Orb para o Claude Code (`--memory-mcp` ainda vale); sem janela |
 | `--snapshot <modo> <arquivo.png>` | desenha uma tela fora da vista e sai (abaixo) |
 | `--render-orbs <arquivo.png>` | folha de Orbs × atividades (`docs/orbs-activities.png`) |
 | `--render-icon <arquivo.png> [pixels]` | o ícone do app, desenhado no tamanho pedido (padrão 1024; `scripts/bundle.sh` chama um por tamanho do iconset) |
@@ -495,14 +497,13 @@ Modos (qualquer outro nome mostra o chat do primeiro Orb):
 
 | Área | Modos |
 |---|---|
-| Janela e painéis | `app`, `sidebar`, `sidebar-profile` (com o perfil de exemplo), `inspector` (= `inspector-general`), `inspector-memory`, `inspector-folder`, `inspector-routines`, `memory-sheet`, `new-orb`, `new-orb-kept` (com memórias guardadas, uma escolhida), `new-orb-import` (o painel de importação vazio), `new-orb-import-preview` (a prévia de um exemplo, com um item suspeito desmarcado; use `ORB_SNAPSHOT_HEIGHT=1300` para vê-la inteira), `new-orb-imported` (de volta ao formulário, com a importação confirmada), `welcome` (sem modelo), `welcome-checking` (conexões ainda não verificadas), `welcome-ready`, `welcome-kept` (com duas memórias guardadas), `welcome-returning` (lista esvaziada), `welcome-narrow` (a pronta; use `ORB_SNAPSHOT_WIDTH=1000 ORB_SNAPSHOT_HEIGHT=620`) — todas com `ORB_DATA_DIR` numa pasta com `{"bots":[]}`, senão o modo de desenvolvedor cria o Atlas —, `editor`, `delete-orb`, `palette`, `shortcuts`, `menubar-icons` |
-| Conversa | `chat-working`, `chat-working-wait`, `chat-working-retry`, `chat-typed`, `chat-attachments`, `chat-attachments-queued`, `chat-slash`, `popover-permissions`, `popover-model`, `popover-skills`, `approvals`, `transcript`, `transcript-approvals`, `transcript-notices`, `transcript-failed`, `transcript-retry`, `transcript-attachments` (uma, duas, cinco e doze imagens, arquivos longos, ausente e antigo), `transcript-outputs` (arquivo novo, alterado e captura sob a linha da ferramenta) |
+| Janela e painéis | `app`, `sidebar`, `sidebar-profile` (com o perfil de exemplo), `inspector` (aba Geral), `inspector-memory`, `inspector-folder`, `inspector-routines`, `memory-sheet`, `new-orb`, `new-orb-kept` (com memórias guardadas, uma escolhida), `new-orb-import` (o painel de importação vazio), `new-orb-import-preview` (a prévia de um exemplo, com um item suspeito desmarcado; use `ORB_SNAPSHOT_HEIGHT=1300` para vê-la inteira), `new-orb-imported` (de volta ao formulário, com a importação confirmada), `welcome` (sem modelo), `welcome-checking` (conexões ainda não verificadas), `welcome-ready`, `welcome-kept` (com duas memórias guardadas), `welcome-returning` (lista esvaziada), `welcome-narrow` (a pronta; use `ORB_SNAPSHOT_WIDTH=1000 ORB_SNAPSHOT_HEIGHT=620`) — todas com `ORB_DATA_DIR` numa pasta com `{"bots":[]}`, senão o modo de desenvolvedor cria o Atlas —, `editor`, `editor-<categoria>` (o editor numa categoria, com um visual que tem cabelo e chapéu), `delete-orb`, `palette`, `shortcuts`, `menubar-icons` |
+| Conversa | `chat-greeting`, `chat-greeting-returning`, `chat-greeting-typed`, `chat-working`, `chat-working-wait`, `chat-working-retry`, `chat-typed`, `chat-attachments`, `chat-attachments-queued`, `chat-slash`, `popover-permissions`, `popover-model`, `popover-skills`, `approvals`, `transcript`, `transcript-approvals`, `transcript-notices`, `transcript-failed`, `transcript-retry`, `transcript-attachments` (uma, duas, cinco e doze imagens, arquivos longos, ausente e antigo), `transcript-outputs` (arquivo novo, alterado e captura sob a linha da ferramenta) |
 | Contexto | `context-meter`, `context-nudge`, `context-popover`, `context-popover-result`, `context-popover-short`, `context-popover-claude`, `settings-context` |
-| Ajustes | `settings-general`, `settings-profile` (Geral com um perfil de exemplo e foto desenhada na hora), `settings-reset` (a folha "Redefinir o Orb?"), | Ajustes | `settings-general`, `settings-profile` (Geral com um perfil de exemplo e foto desenhada na hora), `settings-reset` (a folha "Redefinir o Orb?"), `settings-models`, `settings-usage` (um mês de uso de exemplo escrito na pasta de dados; `-usagePeriod today\|week\|month30\|thisMonth` e `-usageChartBy model`, antes de `--snapshot`, escolhem outra vista sem salvar nada), `settings-usage-empty` (sem exemplo: mostra o que a pasta tiver), `settings-perms`, `first-run-banner`, `models` |
- `settings-perms`, `first-run-banner`, `models` |
+| Ajustes | `settings-general`, `settings-profile` (Geral com um perfil de exemplo e foto desenhada na hora), `settings-reset` (a folha "Redefinir o Orb?"), `settings-models`, `settings-usage` (um mês de uso de exemplo escrito na pasta de dados; `-usagePeriod today\|week\|month30\|thisMonth` e `-usageChartBy model`, antes de `--snapshot`, escolhem outra vista sem salvar nada), `settings-usage-empty` (sem exemplo: mostra o que a pasta tiver), `settings-perms`, `first-run-banner`, `models` |
 | Barra de menus | `quickask`, `quickask-approvals`, `quickask-reply` |
 | Rotinas e conversas | `routines`, `routine-editor`, `routine-editor-new`, `routine-run`, `routine-run-failed`, `routine-conversation`, `conversations` |
-| Skills e conectores | `skills`, `skills-explore`, `skill-editor`, `skill-editor-new`, `skill-preview`, `skill-preview-installed`, `connectors` (instalados), `connectors-gallery`, `connectors-explore`, `connectors-lazy`, `conn-tools`, `conn-signin`, `conn-needs-signin`, `conn-editor-notion`, `conn-google-intro`, `conn-google-account`, `conn-google-account-agenda`, `conn-google-denied`, `conn-google-working`, `conn-google-done`, `conn-editor-supabase`, `conn-editor-github`, `conn-editor-files`, `conn-editor-slack`, `conn-editor-manual`, `conn-editor-edit`, `conn-editor-edit-registry`, `conn-editor-connecting`, `conn-editor-connected`, `conn-editor-failed` |
+| Skills e conectores | `skills`, `skills-explore`, `skill-editor`, `skill-editor-new`, `skill-preview`, `skill-preview-installed`, `connectors` (instalados), `connectors-gallery`, `connectors-explore`, `connectors-lazy`, `conn-tools`, `conn-signin`, `conn-needs-signin`, `conn-editor-notion`, `conn-google-intro`, `conn-google-account`, `conn-google-account-agenda`, `conn-google-denied`, `conn-google-working`, `conn-google-done`, `conn-editor-supabase`, `conn-editor-github`, `conn-editor-files`, `conn-editor-slack`, `conn-editor-manual`, `conn-editor-edit`, `conn-editor-edit-registry`, `conn-editor-connecting`, `conn-editor-connected`, `conn-editor-failed`, `conn-editor-retired-slack` |
 
 Com `ORB_SEND`, o snapshot envia o prompt e espera `ORB_SNAPSHOT_WAIT` segundos antes de fotografar. Para medir o streaming sem
 abrir janela, use o modelo falso com `--long`, `ORB_SEND` e `ORB_SNAPSHOT_WAIT=40` e observe o processo (`ps -o %cpu=`,
@@ -517,6 +518,18 @@ abrir janela, use o modelo falso com `--long`, `ORB_SEND` e `ORB_SNAPSHOT_WAIT=4
 | `scripts/fake-llm.py` | o modelo falso acima |
 
 A arte (camadas dos Orbs) tem o seu próprio gerador, descrito em [art/README.md](../art/README.md).
+
+## Pendências de arquitetura
+
+Duplicações conhecidas que ficaram para depois:
+
+- **Fluxo de aprovação.** O trecho que abre o `ApprovalGate`, emite `.approval` e `.status`, espera e resolve a resposta
+  (`.deny`/`.review`/`.task`/`.always`/`.once`) existe três vezes (`AgentEngine`, duas delas, e `ClaudeCodeEngine`), e a frase
+  "Esperando sua resposta" é repetida em vários arquivos, com `WorkLine` comparando o texto. A ideia é uma função só em
+  `ApprovalGate` e uma constante para a frase. Não foi feito ainda.
+- **Servidor MCP stdio.** `LocalConnectorServer` e `OrbToolsMCPServer` repetem à mão as versões de protocolo, as respostas de
+  `initialize`/`ping`/`tools/list`, os erros `-32601`/`-32602`, o envelope JSON-RPC e o laço de stdin (e `MCPConnection` repete a
+  versão preferida). A ideia é um `MCPStdioServer` comum. Não foi feito ainda.
 
 ## Como estender
 

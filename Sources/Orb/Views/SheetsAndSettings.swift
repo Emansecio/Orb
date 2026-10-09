@@ -331,22 +331,26 @@ private struct NewBotFolderSection: View {
 /// the snapshot's own data folder (a temporary one, or `ORB_DATA_DIR`), never the user's.
 @MainActor
 enum NewBotSnapshots {
-    static func keptSheet(model: AppModel, height: CGFloat?) -> AnyView {
-        // The examples live in a folder of their own, gone as soon as they are listed: never in the data folder, which
-        // may be the real one when `ORB_DATA_DIR` points at it.
+    static func keptSheet(height: CGFloat?) -> AnyView {
+        let nina = KeptProfile(name: "Nina", role: "Cuida da minha agenda",
+                               orb: OrbConfig(color: "menta", eyes: "pilulas", mouth: "sorriso", hair: "franja", accessories: ["laco"]))
+        let luna = KeptProfile(name: "Luna", role: "Escreve comigo", orb: OrbConfig(color: "rosa", eyes: "ovais", cheeks: "blush"))
+        let list = sampleKept(nina, luna)
+        return AnyView(NewBotSheet(height: height, kept: list, chosen: list.first))
+    }
+
+    /// Two kept memories (Nina with 12 pages, Luna with 5), written into a folder of their own that is gone as soon as
+    /// they are listed: never the data folder, which may be the real one when `ORB_DATA_DIR` points at it.
+    static func sampleKept(_ nina: KeptProfile, _ luna: KeptProfile) -> [KeptMemory] {
         let scratch = FileManager.default.temporaryDirectory.appending(path: "orb-kept-sample-\(UUID().uuidString)", directoryHint: .isDirectory)
         defer { try? FileManager.default.removeItem(at: scratch) }
         let root = scratch.appending(path: "memoria", directoryHint: .isDirectory)
         func day(_ month: Int, _ day: Int) -> Date {
             Calendar.current.date(from: DateComponents(year: 2026, month: month, day: day, hour: 12, minute: 30)) ?? .now
         }
-        let nina = KeptProfile(name: "Nina", role: "Cuida da minha agenda",
-                               orb: OrbConfig(color: "menta", eyes: "pilulas", mouth: "sorriso", hair: "franja", accessories: ["laco"]))
-        let luna = KeptProfile(name: "Luna", role: "Escreve comigo", orb: OrbConfig(color: "rosa", eyes: "ovais", cheeks: "blush"))
         seed(nina, pages: 12, at: day(10, 8), in: root)
         seed(luna, pages: 5, at: day(9, 30), in: root)
-        let list = KeptMemories.list(in: root)
-        return AnyView(NewBotSheet(height: height, kept: list, chosen: list.first))
+        return KeptMemories.list(in: root)
     }
 
     /// `--snapshot new-orb-import-preview` and `new-orb-imported`: an answer written as the prompt asks, read and shown in the

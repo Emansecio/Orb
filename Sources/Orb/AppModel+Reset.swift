@@ -23,6 +23,8 @@ struct ResetEnvironment {
     var waitForTurns = Duration.seconds(3)
     /// How long saving the last conversation stretches (Guardar as memórias) holds it.
     var waitForMemories = Duration.seconds(5)
+    /// Tells the user what the reset could not remove (only called when something was left), just before quitting.
+    var warn: @MainActor (ResetReport) -> Void = { ResetWarning.present($0) }
     /// The last step: quit (and open the app again).
     var finish: @MainActor () -> Void = { AppRelaunch.finish() }
 
@@ -31,13 +33,14 @@ struct ResetEnvironment {
         environment.preferences = IgnoredPreferences()
         environment.legacyFolder = nil
         environment.waitForTurns = .milliseconds(200)
+        environment.warn = { _ in }
         environment.finish = {}
         return environment
     }
 }
 
 enum ResetOutcome: Equatable, Sendable {
-    /// Done (the report says what could not be removed, if anything); the app is quitting.
+    /// Done (the report says what could not be removed, if anything: the user is told before the app quits).
     case done(ResetReport)
     case refused(ResetGuard.Refusal)
     case alreadyRunning
@@ -86,6 +89,7 @@ extension AppModel {
         }.value
         // Last, and again: a preference an open window wrote meanwhile does not survive the reset.
         environment.preferences.removeAll(keeping: ResetGuard.keepsPreference)
+        if !report.isComplete { environment.warn(report) }
         environment.finish()
         return .done(report)
     }

@@ -189,8 +189,6 @@ struct SystemPromptTests {
     /// shows them (one source: `Capability.label`), and the modes are changed where they really can be.
     @Test func promptsPointToPlacesAndNamesThatExist() {
         #expect(Capability.allCases.map(\.label) == ["Terminal e arquivos", "Navegar na web", "Controlar apps do Mac", "Conectores"])
-        #expect(Capability.allCases.map(\.label) == Capability.allCases.map(CapabilityCopy.title))
-        #expect(Capability.allCases.map(\.label) == Capability.allCases.map(EmptyChatContent.capabilityName))
         var texts: [String] = []
         for mode in PermissionMode.allCases {
             for capabilities in [Set<Capability>(), Set(Capability.allCases)] {
