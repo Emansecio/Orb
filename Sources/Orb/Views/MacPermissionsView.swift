@@ -221,7 +221,7 @@ struct MacPermissionsView: View {
                             .foregroundStyle(Palette.muted)
                     }
                     .contentShape(.rect)
-                    .onTapGesture { withAnimation(reduceMotion ? nil : .snappy(duration: 0.2)) { showsAutomation.toggle() } }
+                    .onTapGesture { withAnimation(Motion.adapted(Motion.content, reduceMotion: reduceMotion)) { showsAutomation.toggle() } }
                 }
             } footer: {
                 Text("Cada app pede a própria permissão, na primeira vez que o Orb o controla.")
@@ -350,20 +350,36 @@ private struct NotificationRow: View {
 private struct StatusBadge: View {
     let status: MacPermissionStatus?
     let isAsking: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// What comes after the spinner (granted, a warning): the same mark as everywhere (`mark`), growing from 0.6 in `Motion.enter`.
+    private var mark: AnyTransition { .adapted(AnyTransition.mark.animation(Motion.enter), reduceMotion: reduceMotion) }
 
     var body: some View {
-        if isAsking {
-            HStack(spacing: 6) {
+        // Spinner → mark swap in place, one over the other, so the row does not shift while they trade.
+        ZStack(alignment: .trailing) {
+            if isAsking {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Aguardando você").font(.caption).foregroundStyle(.secondary)
+                }
+                .transition(.opacity)
+            } else if let status {
+                Label(status.label, systemImage: status.symbol)
+                    .font(.caption)
+                    .foregroundStyle(status.tint)
+                    .transition(mark)
+            } else {
                 ProgressView().controlSize(.small)
-                Text("Aguardando você").font(.caption).foregroundStyle(.secondary)
+                    .transition(.opacity)
             }
-        } else if let status {
-            Label(status.label, systemImage: status.symbol)
-                .font(.caption)
-                .foregroundStyle(status.tint)
-        } else {
-            ProgressView().controlSize(.small)
         }
+        .motion(Motion.content, value: BadgeKey(status: status, isAsking: isAsking))
+    }
+
+    private struct BadgeKey: Equatable {
+        var status: MacPermissionStatus?
+        var isAsking: Bool
     }
 }
 

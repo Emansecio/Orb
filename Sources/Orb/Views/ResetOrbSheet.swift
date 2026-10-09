@@ -104,21 +104,26 @@ private struct ResetShield: ViewModifier {
         content
             .disabled(model.isResetting)
             .overlay {
-                if model.isResetting {
-                    ZStack {
-                        Rectangle().fill(.black.opacity(0.5)).contentShape(Rectangle())
-                        VStack(spacing: 10) {
-                            ProgressView().controlSize(.small)
-                            Text("Redefinindo o Orb…")
-                                .font(.callout)
-                                .foregroundStyle(Palette.secondary)
+                // The veil and its card come in by fading (§2.13), at once under Reduce Motion's 0.15 s.
+                ZStack {
+                    if model.isResetting {
+                        ZStack {
+                            Rectangle().fill(.black.opacity(0.5)).contentShape(Rectangle())
+                            VStack(spacing: 10) {
+                                ProgressView().controlSize(.small)
+                                Text("Redefinindo o Orb…")
+                                    .font(.callout)
+                                    .foregroundStyle(Palette.secondary)
+                            }
+                            .padding(20)
+                            .background(Palette.raised, in: RoundedRectangle(cornerRadius: 12))
                         }
-                        .padding(20)
-                        .background(Palette.raised, in: RoundedRectangle(cornerRadius: 12))
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Redefinindo o Orb")
+                        .transition(.opacity)
                     }
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Redefinindo o Orb")
                 }
+                .motion(Motion.content, value: model.isResetting)
             }
     }
 }

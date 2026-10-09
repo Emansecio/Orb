@@ -40,6 +40,7 @@ final class ProviderHealth {
 /// Ajustes → Modelos: the default model and every provider, grouped by how it is paid for or reached.
 struct ProviderSettings: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var health = ProviderHealth()
     @State private var firstRun = FirstRunModel()
 
@@ -49,7 +50,8 @@ struct ProviderSettings: View {
             // The card stays while a connection is under way, failed or just done ("Pronto"), not only while no provider
             // is listed: connecting adds the provider first, and the card would vanish before saying how it went.
             if model.providers.isEmpty || firstRun.working != nil || firstRun.failure != nil || firstRun.connectedName != nil {
-                Section { FirstRunCard(style: .settings, run: firstRun) }
+                // The card to connect and the default model trade places by fading, in the Form's own rows (`.quiet`).
+                Section { FirstRunCard(style: .settings, run: firstRun).transition(.quiet) }
             } else {
                 Section {
                     if model.modelChoices.isEmpty {
@@ -65,13 +67,15 @@ struct ProviderSettings: View {
                          : model.isProviderReady || !model.hasCheckedConnections
                          ? "Usado por Orbs sem modelo próprio."
                          : "O modelo padrão não está disponível. Escolha outro.")
+                        .textSwap(model.modelChoices.isEmpty ? 0 : model.isProviderReady || !model.hasCheckedConnections ? 1 : 2)
                 }
             }
             ForEach(ProviderGroup.allCases) { group in
                 let kinds = group.kinds.filter { model.account($0) != nil }
                 if !kinds.isEmpty {
                     Section(group.title) {
-                        ForEach(kinds) { ProviderRow(kind: $0, health: health) }
+                        // A provider added comes in, and one removed goes, by fading: the row is a Form's.
+                        ForEach(kinds) { ProviderRow(kind: $0, health: health).transition(.adapted(.opacity.animation(Motion.exit), reduceMotion: reduceMotion)) }
                     }
                 }
             }
@@ -122,6 +126,7 @@ private struct ProviderRow: View {
     @State private var signInTask: Task<Void, Never>?
     @FocusState private var keyFocused: Bool
     @AppStorage(ProviderExpansion.storageKey) private var expansion = ""
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var account: ProviderAccount? { model.account(kind) }
     private var isConnected: Bool { account.map(model.isUsable) ?? false }
@@ -153,7 +158,7 @@ private struct ProviderRow: View {
                 .contentShape(.rect)
                 .help(isExpanded ? Tip.hideProviderDetails : Tip.showProviderDetails)
                 .onTapGesture {
-                    withAnimation(.snappy(duration: 0.2)) { ProviderExpansion.set(kind, expanded: !isExpanded) }
+                    withAnimation(Motion.adapted(Motion.content, reduceMotion: reduceMotion)) { ProviderExpansion.set(kind, expanded: !isExpanded) }
                 }
             }
             .confirmationDialog("Remover o provedor \(kind.shortName)?", isPresented: $isConfirmingRemoval) {
@@ -182,6 +187,9 @@ private struct ProviderRow: View {
         }
         .font(.caption)
         .lineLimit(1)
+        // The label changes in place (checking, ready, failed…): the words cross-fade and the line changes at once.
+        .contentTransition(.opacity)
+        .motion(Motion.content, value: status.summary())
         .accessibilityElement(children: .combine)
     }
 

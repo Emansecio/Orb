@@ -121,6 +121,7 @@ struct GeneralSettings: View {
                     Label(loginError, systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
                         .foregroundStyle(Palette.warn)
+                        .transition(.quiet)
                 }
                 Toggle("Me avisar quando um Orb terminar ou precisar de mim", isOn: $notifyWhenDone)
                     .help(Tip.notifyWhenDone)
@@ -199,6 +200,7 @@ struct GeneralSettings: View {
                     .font(.caption)
                     .foregroundStyle(Palette.warn)
             }
+            .transition(.quiet)
         case .notDetermined? where notifyWhenDone:
             LabeledContent {
                 Button("Pedir agora") { Task { notifications = await NotificationPermission.request() } }
@@ -208,6 +210,7 @@ struct GeneralSettings: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            .transition(.quiet)
         default:
             EmptyView()
         }
