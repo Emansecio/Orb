@@ -45,6 +45,7 @@ struct ConversationsMenu: View {
     @State private var groups: [ConversationGroup] = []
     @FocusState private var isSearchFocused: Bool
     @FocusState private var isListFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var all: [ConversationSummary] { model.archives[botID] ?? [] }
     private var hasSearch: Bool { all.count >= ConversationListing.searchFrom }
@@ -71,6 +72,8 @@ struct ConversationsMenu: View {
                     .foregroundStyle(Palette.muted)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 8)
+                    // The popover fits its content, so what appears fades by itself and its height changes at once (`.quiet`).
+                    .transition(.quiet)
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
@@ -90,6 +93,8 @@ struct ConversationsMenu: View {
                                                     onCancelDelete: { confirmingDelete = nil },
                                                     onDelete: { delete(entry.id) })
                                         .id(entry.id)
+                                        // A deleted conversation just fades, quickly; the others close the gap (see `delete`).
+                                        .transition(.adapted(.opacity.animation(Motion.exit), reduceMotion: reduceMotion))
                                 }
                             }
                         }
@@ -99,9 +104,11 @@ struct ConversationsMenu: View {
                         if let id { proxy.scrollTo(id) }
                     }
                 }
+                .transition(.quiet)
                 Text("A conversa atual fica guardada aqui quando você reabre outra.")
                     .font(.system(size: 11))
                     .foregroundStyle(Palette.faint)
+                    .transition(.quiet)
             }
         }
         .padding(14)
@@ -158,9 +165,14 @@ struct ConversationsMenu: View {
         Task { if await model.reopenConversation(id, of: botID) { onClose() } }
     }
 
+    /// The row fades and the ones below slide up in `Motion.content`; typing in the search, on the other hand, filters at
+    /// once (the list is not animated by its contents, only by this deletion).
     private func delete(_ id: UUID) {
-        model.deleteArchivedConversation(id, of: botID)
-        confirmingDelete = nil
+        withAnimation(Motion.panel(reduceMotion: reduceMotion)) {
+            model.deleteArchivedConversation(id, of: botID)
+            confirmingDelete = nil
+            rebuild()
+        }
     }
 }
 
@@ -204,8 +216,13 @@ private struct ConversationRow: View {
                         .foregroundStyle(Palette.muted)
                         .help("Apagar esta conversa")
                         .opacity(isHovering || isSelected ? 1 : 0)
+                        .animation(Motion.hover(isHovering), value: isHovering)
+                        .transition(.opacity)
                 }
             }
+            // The trash gives way to the question by fading; the row takes its new height at once, because the popover
+            // is the size of its content (animating it would resize the popover on every frame).
+            .animateChanges(of: isConfirming)
             if isConfirming {
                 HStack {
                     Text("Apagar de vez? Não dá para desfazer.")
@@ -216,12 +233,15 @@ private struct ConversationRow: View {
                     Button("Apagar", role: .destructive, action: onDelete)
                 }
                 .controlSize(.small)
+                .transition(.quiet)
             }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .background(isSelected || isConfirming ? Palette.ghostSelected : (isHovering ? Palette.ghostHover : .clear),
-                    in: .rect(cornerRadius: 8))
+        // The row the arrow keys are on (or the one being asked about) is filled at once, as in the palette; the pointer's
+        // fill is the shared hover fade.
+        .background { RoundedRectangle(cornerRadius: 8).fill(Palette.ghostSelected).opacity(isSelected || isConfirming ? 1 : 0) }
+        .hoverFill(isHovering && !(isSelected || isConfirming), in: .rect(cornerRadius: 8))
         .onHover { isHovering = $0 }
     }
 }
