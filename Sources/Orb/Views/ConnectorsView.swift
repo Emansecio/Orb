@@ -860,7 +860,7 @@ struct ConnectorEditor: View {
             .orbSheet(title, subtitle: subtitle, size: .medium, maxHeight: draft.guide == nil ? SheetSize.maxHeight : 700) { footer }
             .onAppear(perform: load)
             .onDisappear { signInTask?.cancel() }
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: phase)
+            .motion(Motion.content, value: phase)
             .onChange(of: phase) { announce(phase) }
     }
 
@@ -876,17 +876,40 @@ struct ConnectorEditor: View {
         }
     }
 
-    @ViewBuilder private var content: some View {
+    /// The form, or one result view for all the phases after it: connecting, signing in, connected and failed are the
+    /// same view with other values, so the spinner turns into the mark and the words change in place (§2.13).
+    private var content: some View {
+        ZStack {
+            if case .form = phase {
+                form.transition(.opacity)
+            } else {
+                result(outcome).transition(.opacity)
+            }
+        }
+    }
+
+    private struct Outcome {
+        var symbol: String?
+        var tint: Color
+        var title: String
+        var detail: String
+        var full: String?
+    }
+
+    private var outcome: Outcome {
         switch phase {
-        case .form: form
-        case .connecting: result(symbol: nil, tint: Palette.muted, title: "Conectando…",
-                                 detail: "Na primeira vez pode levar alguns segundos: o conector às vezes precisa ser baixado.")
-        case .signingIn: result(symbol: nil, tint: Palette.muted, title: "Entrar com \(config.name)",
-                                detail: "Abrimos o navegador. Termine o login lá e volte.")
-        case .connected(let count): result(symbol: "checkmark.circle.fill", tint: Palette.ok, title: "Conectado",
-                                           detail: ConnectorStatusText.toolsAvailable(count))
-        case .failed(let message): result(symbol: "exclamationmark.triangle.fill", tint: Palette.warn, title: "Não conectou",
-                                          detail: ConnectorStatusText.shortError(message), full: message)
+        case .form, .connecting:
+            Outcome(symbol: nil, tint: Palette.muted, title: "Conectando…",
+                    detail: "Na primeira vez pode levar alguns segundos: o conector às vezes precisa ser baixado.")
+        case .signingIn:
+            Outcome(symbol: nil, tint: Palette.muted, title: "Entrar com \(config.name)",
+                    detail: "Abrimos o navegador. Termine o login lá e volte.")
+        case .connected(let count):
+            Outcome(symbol: "checkmark.circle.fill", tint: Palette.ok, title: "Conectado",
+                    detail: ConnectorStatusText.toolsAvailable(count))
+        case .failed(let message):
+            Outcome(symbol: "exclamationmark.triangle.fill", tint: Palette.warn, title: "Não conectou",
+                    detail: ConnectorStatusText.shortError(message), full: message)
         }
     }
 
@@ -1164,19 +1187,26 @@ struct ConnectorEditor: View {
 
     // MARK: Result
 
-    private func result(symbol: String?, tint: Color, title: String, detail: String, full: String? = nil) -> some View {
-        VStack(spacing: 12) {
-            if let symbol {
-                Image(systemName: symbol).font(.system(size: 34)).foregroundStyle(tint)
-            } else {
-                ProgressView().controlSize(.large)
+    private func result(_ outcome: Outcome) -> some View {
+        let (symbol, tint, title, detail, full) = (outcome.symbol, outcome.tint, outcome.title, outcome.detail, outcome.full)
+        return VStack(spacing: 12) {
+            // The check (or the warning) grows from 0.6 as it arrives, the same mark as everywhere (`mark`); the spinner
+            // that was there gives way by fading.
+            ZStack {
+                if let symbol {
+                    Image(systemName: symbol).font(.system(size: 34)).foregroundStyle(tint)
+                        .transition(.adapted(AnyTransition.mark.animation(Motion.enter), reduceMotion: reduceMotion))
+                } else {
+                    DelayedSpinner(size: .large).transition(.opacity)
+                }
             }
-            Text(title).font(.system(size: 15, weight: .semibold))
+            Text(title).font(.system(size: 15, weight: .semibold)).contentTransition(.opacity)
             Text(detail)
                 .font(.system(size: 12))
                 .foregroundStyle(Palette.muted)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 360)
+                .contentTransition(.opacity)
             if let full, full != detail {
                 Text(full)
                     .font(.system(size: 11).monospaced())
