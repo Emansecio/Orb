@@ -19,6 +19,16 @@ extension Snapshot {
             lane.files = [AttachedFile(url: URL(fileURLWithPath: "/Users/x/Documentos/relatório.pdf")),
                           AttachedFile(url: URL(fileURLWithPath: "/Users/x/Documentos/orçamento.xlsx"))]
             return AnyView(ChatView(botID: bot.id))
+        case "chat-attachments":
+            // Two pictures (drawn here, in the run's data folder), a file and one picture still being prepared.
+            seedConversation(model, bot: bot)
+            let lane = model.composerLane(bot.id)
+            lane.pictures = [sampleImage(named: "a", hue: 0.6), sampleImage(named: "b", hue: 0.05)]
+            lane.files = [AttachedFile(url: URL(fileURLWithPath: "/Users/x/Documentos/relatório.pdf"))]
+            lane.pendingPictures = 1
+            lane.error = "Não foi possível ler uma das imagens."
+            model.setDraft("O que há nestas imagens?", for: bot.id)
+            return AnyView(ChatView(botID: bot.id))
         case "chat-slash":
             model.skills = [Skill(slug: "resumir", name: "Resumir", summary: "Resume um texto ou arquivo em poucos tópicos.", instructions: "x"),
                             Skill(slug: "revisar", name: "Revisar código", summary: "Revisa mudanças e aponta riscos.", instructions: "x"),
@@ -118,6 +128,24 @@ extension Snapshot {
             try? await Task.sleep(for: .seconds(1))
             model.seedConversation(Conversation(items: items), for: id)
         })
+    }
+
+    /// A small gradient PNG in the run's data folder (which `DevRun` removes on exit when it is temporary), as a
+    /// picture attached to the composer.
+    @MainActor
+    private static func sampleImage(named name: String, hue: CGFloat) -> ImageAttachment {
+        let size = NSSize(width: 240, height: 180)
+        let image = NSImage(size: size, flipped: false) { rect in
+            NSGradient(colors: [NSColor(hue: hue, saturation: 0.6, brightness: 0.9, alpha: 1),
+                                NSColor(hue: hue + 0.1, saturation: 0.8, brightness: 0.4, alpha: 1)])?.draw(in: rect, angle: 60)
+            return true
+        }
+        let folder = DevRun.currentDataFolder.url.appendingPathComponent("snapshot-images", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let url = folder.appendingPathComponent("orb-snapshot-\(name).png")
+        if let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+           let png = rep.representation(using: .png, properties: [:]) { try? png.write(to: url) }
+        return ImageAttachment(path: url.path, mediaType: "image/png", width: 240, height: 180)
     }
 
     @MainActor

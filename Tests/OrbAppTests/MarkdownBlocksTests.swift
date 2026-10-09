@@ -1,4 +1,6 @@
 import Foundation
+import SwiftUI
+import AppKit
 import Testing
 @testable import Orb
 
@@ -156,5 +158,57 @@ import Testing
         #expect(code == 1)
         #expect(links == 1)
         #expect(String(text.characters) == "use ls ou veja o guia")
+    }
+}
+
+/// A long block of code that streams is drawn in pieces of complete lines, so a flush only draws the last one.
+@Suite("Código em stream") struct CodeBlockPiecesTests {
+    private func lines(_ count: Int) -> String {
+        (1...count).map { "linha \($0)" }.joined(separator: "\n")
+    }
+
+    @Test func shortCodeIsNotCut() {
+        #expect(CodeBlockView.pieces(of: "") == nil)
+        #expect(CodeBlockView.pieces(of: lines(CodeBlockView.pieceLines)) == nil)
+    }
+
+    @Test func longCodeIsCutInClosedPiecesAndATailThatIsNeverEmpty() throws {
+        let size = CodeBlockView.pieceLines
+        // One line more than a piece: the first 40 close, the 41st is the one being written.
+        let one = try #require(CodeBlockView.pieces(of: lines(size + 1)))
+        #expect(one.closed.count == 1)
+        #expect(one.tail == "linha \(size + 1)")
+        // Exactly two pieces: the second stays open until another line arrives, so the tail is never empty.
+        let two = try #require(CodeBlockView.pieces(of: lines(size * 2)))
+        #expect(two.closed.count == 1 && two.tail.split(separator: "\n").count == size)
+        let three = try #require(CodeBlockView.pieces(of: lines(size * 2 + 5)))
+        #expect(three.closed.count == 2 && three.tail.split(separator: "\n").count == 5)
+    }
+
+    @Test func thePiecesJoinedBackAreTheCodeAndAClosedPieceNeverChangesWhileItGrows() throws {
+        let size = CodeBlockView.pieceLines
+        var previous: [String] = []
+        for count in stride(from: size + 1, through: size * 4 + 3, by: 7) {
+            let code = lines(count) + (count % 2 == 0 ? "\n\nfim" : "")
+            let pieces = try #require(CodeBlockView.pieces(of: code))
+            #expect((pieces.closed + [pieces.tail]).joined(separator: "\n") == code)
+            #expect(!pieces.tail.isEmpty)
+            // What closed before is still the same text: that is what lets each piece keep what was drawn of it.
+            #expect(Array(pieces.closed.prefix(previous.count)) == previous)
+            previous = pieces.closed
+        }
+    }
+
+    /// The stack's spacing equals the code's line spacing: the seam between two pieces is the gap between two lines.
+    @MainActor @Test func theSeamBetweenPiecesAddsNoHeight() {
+        let all = (1...80).map { "linha \($0)" }
+        func height(_ view: some View) -> CGFloat { NSHostingView(rootView: view.frame(width: 400)).fittingSize.height }
+        let font = Font.system(size: 12, design: .monospaced)
+        let whole = height(Text(all.joined(separator: "\n")).font(font).lineSpacing(2))
+        let pieces = height(VStack(alignment: .leading, spacing: 2) {
+            Text(all[0..<40].joined(separator: "\n")).font(font).lineSpacing(2)
+            Text(all[40...].joined(separator: "\n")).font(font).lineSpacing(2)
+        })
+        #expect(abs(whole - pieces) < 0.5)
     }
 }

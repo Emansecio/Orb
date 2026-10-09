@@ -37,7 +37,8 @@ struct ComposerView: View {
 
     private var lane: ComposerLane { model.composerLane(botID) }
     private var isWorking: Bool { model.live(botID).isWorking }
-    private var hasText: Bool { !draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    /// Stops at the first character that is not a blank: no copy of a long pasted draft, however often the body asks.
+    private var hasText: Bool { draft.wrappedValue.contains { !$0.isWhitespace } }
     private var hasContent: Bool { hasText || !lane.pictures.isEmpty }
     /// A message can be sent: any time the Orb is free, and while it works on your chat (it is queued). Not while a
     /// picture is still being prepared: it would miss this message and ride along with the next one.
@@ -49,16 +50,21 @@ struct ComposerView: View {
 
     var body: some View {
         let lane = lane
+        let hintText = hint(lane)
         VStack(spacing: 0) {
             ContextNudge(botID: botID, gauge: gauge) // adds nothing, not even spacing, while its card is not due
             card(lane)
-            Text(hint(lane))
+            Text(hintText)
                 .font(.system(size: 11))
                 .foregroundStyle(Palette.muted)
                 .lineLimit(1)
                 .frame(height: 14)
                 .padding(.top, 6)
-                .opacity(hint(lane).isEmpty ? 0 : 1)
+                .opacity(hintText.isEmpty ? 0 : 1)
+                // The line changes with the focus, the first letter and the queue, never with a key: it cross-fades
+                // (opacity only, so it holds under Reduce Motion too) instead of cutting.
+                .contentTransition(.opacity)
+                .animation(Motion.fade, value: hintText)
                 .accessibilityHidden(true)
         }
         .frame(maxWidth: 760)
@@ -79,6 +85,8 @@ struct ComposerView: View {
             isFocused = true
             _ = model.takeChatRequest(.focusComposer, of: botID) // ⌘L that opened this chat: it already has the focus
         }
+        // The model list closing (⇧⌘M then ↩, or a click) hands the focus back to the field.
+        .onChange(of: isModelOpen) { if !isModelOpen { isFocused = true } }
         // ⌘L, from the sidebar, the panel or another page, with this chat already open.
         .onChange(of: model.pendingChatRequest) {
             if model.takeChatRequest(.focusComposer, of: botID) { isFocused = true }
@@ -88,15 +96,19 @@ struct ComposerView: View {
     // MARK: Card
 
     private func card(_ lane: ComposerLane) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if lane.hasAttachments || lane.pendingPictures > 0 { attachmentStrip(lane) }
+        let matches = slashMatches
+        return VStack(alignment: .leading, spacing: 10) {
+            if lane.hasAttachments || lane.pendingPictures > 0 {
+                attachmentStrip(lane).transition(.adapted(.unfold, reduceMotion: reduceMotion))
+            }
             if let error = lane.error {
                 Text(error)
                     .font(.caption)
                     .foregroundStyle(Palette.warn)
                     .padding(.horizontal, 4)
+                    .transition(.adapted(.unfold, reduceMotion: reduceMotion))
             }
-            slashSuggestions
+            slashSuggestions(matches)
 
             TextField(placeholder, text: draft, axis: .vertical)
                 .textFieldStyle(.plain)
@@ -109,7 +121,10 @@ struct ComposerView: View {
                 .onKeyPress(.downArrow) { moveSlash(1) }
                 .onKeyPress(.tab) { completeSlash() ? .handled : .ignored }
                 .onKeyPress(.escape) { dismissSlash() }
-                .onChange(of: draft.wrappedValue) { isSlashDismissed = false }
+                .onChange(of: draft.wrappedValue) {
+                    isSlashDismissed = false
+                    slashIndex = 0 // a new word means a new list: the highlight starts at its top
+                }
                 .padding(.horizontal, 4)
 
             bar
@@ -117,10 +132,18 @@ struct ComposerView: View {
         .padding(.horizontal, 12)
         .padding(.top, 12)
         .padding(.bottom, 8)
+        // The card grows or shrinks once when the suggestions, the strip or an error come or go (never by their item
+        // count or by a key): one discrete value, so the field's own height keeps following the typing (§2.5).
+        .animation(reduceMotion ? Motion.fade : Motion.content,
+                   value: CardParts(suggestions: !matches.isEmpty, strip: lane.hasAttachments || lane.pendingPictures > 0,
+                                    error: lane.error != nil))
+        // The shadow belongs to the background alone: on the whole card every key in the field re-rendered the text,
+        // chips and buttons into an offscreen pass to cast it.
         .background { ComposerSurface(isFocused: isFocused, isDropTargeted: isDropTargeted, reduceMotion: reduceMotion) }
-        .shadow(color: isDropTargeted ? Palette.accent.opacity(0.35) : .black.opacity(0.35), radius: 18, y: isDropTargeted ? 0 : 8)
-        .overlay { if isDropTargeted { dropOverlay } }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isDropTargeted)
+        .overlay {
+            ZStack { if isDropTargeted { dropOverlay } }
+                .animation(reduceMotion ? nil : Motion.hover(isDropTargeted), value: isDropTargeted)
+        }
         .onGeometryChange(for: Bool.self) { $0.size.width < Self.compactBelow } action: { isCompact = $0 }
         .dropDestination(for: URL.self) { urls, _ in
             attach(urls)
@@ -148,7 +171,7 @@ struct ComposerView: View {
     private func hint(_ lane: ComposerLane) -> String {
         if isQueueing, hasContent {
             return ComposerHint.queueing(steersMidTurn: model.steersMidTurn(botID), needsYou: model.live(botID).needsYou,
-                                         typesInComposer: isFocused && hasText)
+                                         typesInComposer: isFocused && hasText, compact: isCompact)
         }
         if isWorking { return "" }
         if isFocused, !hasContent, !lane.hasAttachments { return "↩ envia · \(CommandName.newLineKeys) nova linha" }
@@ -165,40 +188,61 @@ struct ComposerView: View {
                         lane.pictures.removeAll { $0 == image }
                         model.images.remove(image)
                     }
+                    .transition(chipTransition)
                 }
                 ForEach(lane.files) { file in
                     AttachmentChip(file: file) { lane.files.removeAll { $0.id == file.id } }
+                        .transition(chipTransition)
                 }
-                if lane.pendingPictures > 0 { PreparingChip(count: lane.pendingPictures) }
+                if lane.pendingPictures > 0 { PreparingChip(count: lane.pendingPictures).transition(chipTransition) }
             }
-            .padding(.top, 6)
+            .padding(.top, 10)
+            .padding(.trailing, 10)
+            // A chip joining or leaving fades while the others slide over; keyed by what is in the strip, so nothing
+            // else in the card animates with it. Under Reduce Motion the others do not slide (that is movement):
+            // the chip alone fades, by its own transition.
+            .animation(reduceMotion ? nil : Motion.content, value: ComposerView.stripIDs(lane))
         }
         .scrollIndicators(.never)
+        .padding(.top, -4) // the strip's own top margin grew by 4 pt for the remove buttons' targets: the picture stays put
+    }
+
+    /// A chip joining or leaving the strip: a fade, on its own short curve under Reduce Motion (the strip's slide is off then).
+    private var chipTransition: AnyTransition {
+        reduceMotion ? .opacity.animation(Motion.fade) : .opacity
+    }
+
+    /// Who is in the attachment strip, in order: the one value its chips' coming and going animate with.
+    static func stripIDs(_ lane: ComposerLane) -> [String] {
+        lane.pictures.map(\.path) + lane.files.map { $0.url.absoluteString } + (lane.pendingPictures > 0 ? ["preparing"] : [])
     }
 
     // MARK: Bar
 
     private var bar: some View {
-        HStack(spacing: 2) {
+        let action = ComposerAction.current(isWorking: isWorking, canSend: canSend)
+        return HStack(spacing: 2) {
             Button("Anexar", systemImage: "plus") { isImporting = true }
                 .labelStyle(.iconOnly)
                 .buttonStyle(IconGhostStyle())
                 .help("Anexar arquivos (ou solte aqui)")
             SkillsChip(botID: botID, compact: isCompact) { insert("/\($0) ") }
-            PermissionChip(botID: botID, compact: isCompact)
+            PermissionChip(botID: botID, compact: isCompact) { isFocused = true }
             Spacer(minLength: 8)
             ContextMeterChip(botID: botID, gauge: gauge, compact: isCompact)
             ModelChip(botID: botID, isOpen: $isModelOpen)
-            actionButtons
+            actionButtons(action)
         }
         .foregroundStyle(Palette.muted)
+        // Stop stepping in or out moves the whole row: the model and meter chips slide with it (34-38 pt, 0.25 s)
+        // instead of jumping. Tied to this one value, so neither the chips' texts nor `isCompact` animate with it.
+        .animation(reduceMotion ? nil : Motion.content, value: action.showsSecondaryStop)
     }
 
     /// One round button that is Send or Stop: its symbol is swapped (not the button), so the change reads as the same
     /// control changing meaning. While the Orb works and a message is typed, Stop steps back beside it as a dark
     /// button and the main one queues the message.
-    @ViewBuilder private var actionButtons: some View {
-        let action = ComposerAction.current(isWorking: isWorking, canSend: canSend)
+    @ViewBuilder private func actionButtons(_ action: ComposerAction) -> some View {
         let routine = model.runningRoutineName(botID)
         HStack(spacing: 6) {
             if action.showsSecondaryStop {
@@ -209,6 +253,7 @@ struct ComposerView: View {
             }
             mainButton(action, routine: routine)
         }
+        // Under Reduce Motion the row above does not animate: Stop alone fades in or out (opacity is not movement).
         .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: action.showsSecondaryStop)
     }
 
@@ -251,8 +296,7 @@ struct ComposerView: View {
         return Array(SkillSearch.matches(model.skills(for: botID), query).prefix(5))
     }
 
-    @ViewBuilder private var slashSuggestions: some View {
-        let matches = slashMatches
+    @ViewBuilder private func slashSuggestions(_ matches: [Skill]) -> some View {
         if !matches.isEmpty {
             VStack(spacing: 0) {
                 ForEach(Array(matches.enumerated()), id: \.element.id) { index, skill in
@@ -261,6 +305,10 @@ struct ComposerView: View {
             }
             .padding(.vertical, 4)
             .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: 12))
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Skills sugeridas")
+            .transition(.adapted(.asymmetric(insertion: .opacity.combined(with: .offset(y: 4)), removal: .opacity),
+                                 reduceMotion: reduceMotion))
         }
     }
 
@@ -304,6 +352,7 @@ struct ComposerView: View {
                 lane.files.append(AttachedFile(url: url))
             }
         }
+        isFocused = true // the file picker, a drop or ⌘V: typing can go on right away
     }
 
     private func attachPicture(_ load: @escaping @Sendable (ImageStore, UUID) async throws -> ImageAttachment) {
@@ -368,21 +417,52 @@ struct ComposerView: View {
     }
 }
 
+/// What the composer's card holds besides the field: the three things whose coming and going changes its height.
+private struct CardParts: Equatable {
+    var suggestions: Bool
+    var strip: Bool
+    var error: Bool
+}
+
 /// A picture waiting to be sent: its thumbnail with a remove button.
 private struct PictureChip: View {
     let image: ImageAttachment
     let onRemove: () -> Void
 
     var body: some View {
+        let name = URL(fileURLWithPath: image.path).lastPathComponent
         ImageThumbnail(path: image.path)
             .overlay(alignment: .topTrailing) {
-                Button("Remover", systemImage: "xmark.circle.fill", action: onRemove)
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.plain)
+                RemoveButton(label: "Remover " + name, symbol: "xmark.circle.fill", action: onRemove)
                     .foregroundStyle(Palette.ink, Palette.canvas)
-                    .offset(x: 5, y: -5)
+                    .offset(x: 10, y: -10) // the 24 pt target is centered where the 14 pt symbol used to be
             }
-            .help(URL(fileURLWithPath: image.path).lastPathComponent)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Imagem anexada: " + name)
+            .help(name)
+            // The bubble shows this picture at 96 pt: decode that copy now, so it is in the cache when the message goes.
+            .task(id: image.path) { _ = await Thumbnails.image(at: image.path, side: 96) }
+    }
+}
+
+/// The small round button that takes an attachment out. Its target is `size` pt (the symbol itself is smaller) and it
+/// gets the round hover fill the other composer buttons have; VoiceOver hears which attachment it removes.
+private struct RemoveButton: View {
+    let label: String
+    let symbol: String
+    var size: CGFloat = 24
+    let action: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(label, systemImage: symbol, action: action)
+            .labelStyle(.iconOnly)
+            .buttonStyle(.plain)
+            .frame(width: size, height: size)
+            // The fill is a little smaller than the target, so the strip's edges never clip it.
+            .hoverFill(isHovering, in: .circle, color: Palette.ghostSelected)
+            .contentShape(.circle)
+            .onHover { isHovering = $0 }
     }
 }
 
@@ -398,33 +478,29 @@ private struct AttachmentChip: View {
             if let size = AttachmentKind.size(file.size) {
                 Text(size).foregroundStyle(Palette.muted)
             }
-            Button("Remover", systemImage: "xmark", action: onRemove)
-                .labelStyle(.iconOnly)
-                .buttonStyle(.borderless)
+            RemoveButton(label: "Remover " + file.name, symbol: "xmark", size: 20, action: onRemove)
         }
         .font(.caption)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
+        .padding(.leading, 8)
+        .padding(.trailing, 2)
+        .padding(.vertical, 1.5)
         .background(Palette.raised, in: .capsule)
         .help(file.url.path)
     }
 }
 
-/// Pictures still being shrunk and saved: a placeholder in the strip, so the paste or drop is seen to have worked.
+/// Pictures still being shrunk and saved: a tile the size of a thumbnail in the strip, so the paste or drop is seen to
+/// have worked and the strip does not change height when the picture takes its place.
 private struct PreparingChip: View {
     let count: Int
 
     var body: some View {
-        HStack(spacing: 6) {
-            ProgressView().controlSize(.small)
-            Text(ComposerLane.preparingText(count))
-        }
-        .font(.caption)
-        .foregroundStyle(Palette.muted)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(Palette.raised, in: .capsule)
-        .accessibilityElement(children: .combine)
+        ProgressView()
+            .controlSize(.small)
+            .frame(width: 56, height: 56)
+            .background(Palette.raised, in: .rect(cornerRadius: 10))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(ComposerLane.preparingText(count))
     }
 }
 
@@ -522,8 +598,13 @@ enum ComposerAction: Equatable {
 enum ComposerHint {
     /// With a permission request open, ⌘↩ typed in the composer stops the turn (which refuses the request) and sends;
     /// from anywhere else it still allows the request (see `ApprovalShortcut`), and the line says so.
-    static func queueing(steersMidTurn: Bool, needsYou: Bool, typesInComposer: Bool) -> String {
+    static func queueing(steersMidTurn: Bool, needsYou: Bool, typesInComposer: Bool, compact: Bool = false) -> String {
         let command = AppShortcut.commandReturn.label
+        if compact {
+            // A narrow composer gets the same promises in fewer words, so the line is whole rather than cut with "…".
+            if needsYou { return typesInComposer ? "Na fila · \(command) recusa e envia" : "Na fila · \(command) permite o pedido" }
+            return steersMidTurn ? "Na fila · próximo passo" : "Na fila · segue ao terminar"
+        }
         if needsYou {
             return typesInComposer ? "↩ entra na fila · \(command) recusa o pedido e envia agora" : "↩ entra na fila · \(command) permite o pedido"
         }
@@ -548,6 +629,11 @@ struct ComposerSurface: View {
     let isDropTargeted: Bool
     let reduceMotion: Bool
 
+    /// The card's shadow: black below it; while a file is dragged over, an accent glow all around.
+    static func shadow(isDropTargeted: Bool) -> (color: Color, y: CGFloat) {
+        isDropTargeted ? (Palette.accent.opacity(0.35), 0) : (.black.opacity(0.35), 8)
+    }
+
     /// The card's fill: `surface`, 2 % lighter while the field has the focus.
     static func fill(isFocused: Bool) -> Color { isFocused ? Palette.surfaceFocused : Palette.surface }
 
@@ -557,10 +643,14 @@ struct ComposerSurface: View {
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 20)
+        let shadow = Self.shadow(isDropTargeted: isDropTargeted)
         shape.fill(Self.fill(isFocused: isFocused))
+            .shadow(color: shadow.color, radius: 18, y: shadow.y)
             .overlay { shape.strokeBorder(Self.stroke(isFocused: isFocused, isDropTargeted: isDropTargeted), lineWidth: isDropTargeted ? 2 : 1) }
             // On the surface only: the field, its chips and its height never animate with the focus.
             .animation(Motion.focus(isFocused, reduceMotion: reduceMotion), value: isFocused)
+            // The drop highlight (border, glow) answers like a hover: fast in, slow out; at once under Reduce Motion.
+            .animation(reduceMotion ? nil : Motion.hover(isDropTargeted), value: isDropTargeted)
     }
 }
 

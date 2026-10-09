@@ -28,6 +28,8 @@ struct PermissionChip: View {
     @Environment(AppModel.self) private var model
     let botID: UUID
     let compact: Bool
+    /// The list closed (a mode chosen, "Gerenciar", or a click away): the composer takes the focus back.
+    var onClose: () -> Void = {}
     @State private var isOpen = false
     @State private var isConfirmingBypass = false
 
@@ -48,6 +50,7 @@ struct PermissionChip: View {
             PermissionPopover(permission: permission, choose: choose, manage: manage)
         }
         .bypassConfirmation(isPresented: $isConfirmingBypass) { apply(.bypass) }
+        .onChange(of: isOpen) { if !isOpen { onClose() } }
     }
 
     static func tint(_ mode: PermissionMode) -> Color {
@@ -193,6 +196,9 @@ struct SkillsPopover: View {
     let pick: (String) -> Void
     @State private var query = ""
     @FocusState private var isSearching: Bool
+    /// The height of the whole list, measured once with nothing typed: the popover keeps it while the list is filtered,
+    /// so it never resizes with a letter.
+    @State private var listHeight: CGFloat?
 
     var body: some View {
         let shown = SkillSearch.matches(skills, query)
@@ -213,11 +219,22 @@ struct SkillsPopover: View {
                         ForEach(shown) { skill in SkillRow(skill: skill) { pick(skill.slug) } }
                     }
                     .padding(.vertical, 4)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                        if listHeight == nil, query.isEmpty { listHeight = height }
+                    }
                 }
             }
         }
-        .frame(width: 340, height: min(380, CGFloat(max(shown.count, 1)) * 52 + 64))
+        .frame(width: 340, height: Self.height(skillCount: skills.count, listHeight: listHeight))
         .onAppear { isSearching = true }
+    }
+
+    /// The popover's height: the search field and divider (`chrome`, measured at about 46 pt) over the whole list of skills, at most 380. Before the
+    /// list is measured, an estimate of 52 pt a skill; it depends on the Orb's skills, never on the filtered ones.
+    private static let chrome: CGFloat = 48
+
+    static func height(skillCount: Int, listHeight: CGFloat?) -> CGFloat {
+        min(380, (listHeight ?? CGFloat(max(skillCount, 1)) * 52) + chrome)
     }
 
     private func empty(_ title: String, _ detail: String) -> some View {
@@ -251,17 +268,19 @@ struct SkillRow: View {
                         .multilineTextAlignment(.leading)
                 }
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 8)
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
             // Hover fades (fast in, slow out); the keyboard highlight does not: like a native menu it moves at once,
-            // so holding ↓ never leaves a trail of rows fading out behind it.
-            .hoverFill(isHovering && !isHighlighted, in: .rect, color: Palette.ghostSelected)
+            // so holding ↓ never leaves a trail of rows fading out behind it. Both fills are rounded and sit 4 pt in
+            // from the list's edges, so the corners of the list never show a square patch.
+            .hoverFill(isHovering && !isHighlighted, in: .rect(cornerRadius: 8), color: Palette.ghostSelected)
             .background {
-                Rectangle().fill(Palette.ghostSelected)
+                RoundedRectangle(cornerRadius: 8).fill(Palette.ghostSelected)
                     .opacity(isHighlighted ? 1 : 0)
                     .animation(nil, value: isHighlighted)
             }
+            .padding(.horizontal, 4)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)

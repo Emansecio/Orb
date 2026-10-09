@@ -21,6 +21,7 @@ extension ContextTone {
 /// re-renders nothing but itself, and the measuring (which walks the whole history) runs off the main thread.
 struct ContextGaugeDriver: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let botID: UUID
     let gauge: ContextGauge
 
@@ -56,7 +57,15 @@ struct ContextGaugeDriver: View {
             reading = await Task.detached(priority: .utility) { ContextReading.make(input) }.value
         }
         guard !Task.isCancelled else { return }
-        gauge.show(reading)
+        // The chip arriving (or its number gaining a digit) moves the model chip and the buttons beside it: the whole
+        // bar slides with it, once per turn, instead of jumping. Not under Reduce Motion (the chip alone fades).
+        let shown = gauge.reading?.botID == botID
+        let moves = shown != (reading?.botID == botID) || (shown && gauge.reading?.percent != reading?.percent)
+        if moves, !reduceMotion {
+            withAnimation(Motion.content) { gauge.show(reading) }
+        } else {
+            gauge.show(reading)
+        }
     }
 }
 
@@ -79,7 +88,7 @@ struct ContextRing: View {
         }
         .frame(width: size - 2, height: size - 2)
         .frame(width: size, height: size)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: fraction)
+        .animation(Motion.availability(reduceMotion: reduceMotion), value: fraction)
         .accessibilityHidden(true)
     }
 }
@@ -93,32 +102,42 @@ struct ContextMeterChip: View {
     let gauge: ContextGauge
     let compact: Bool
     @State private var isOpen = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        if let reading = gauge.reading, reading.botID == botID {
-            Button { isOpen.toggle() } label: {
-                HStack(spacing: 5) {
-                    if reading.fill != nil {
-                        ContextRing(fraction: reading.fraction, tone: reading.tone)
-                        if !compact {
-                            Text("\(reading.percent)%")
-                                .monospacedDigit()
-                                .foregroundStyle(reading.tone == .calm ? Palette.muted : reading.tone.color)
-                        }
-                    } else {
-                        Image(systemName: "gauge.with.needle")
-                            .foregroundStyle(Palette.muted)
+        Group {
+            if let reading = gauge.reading, reading.botID == botID { chip(reading) }
+        }
+        .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: gauge.reading?.botID == botID)
+    }
+
+    private func chip(_ reading: ContextReading) -> some View {
+        Button { isOpen.toggle() } label: {
+            HStack(spacing: 5) {
+                if reading.fill != nil {
+                    ContextRing(fraction: reading.fraction, tone: reading.tone)
+                    if !compact {
+                        Text("\(reading.percent)%")
+                            .monospacedDigit()
+                            .foregroundStyle(reading.tone == .calm ? Palette.muted : reading.tone.color)
+                            // The number rolls to the next one once per turn (never per token); it fades under Reduce Motion.
+                            .contentTransition(reduceMotion ? .identity : .numericText())
+                            .animation(Motion.content, value: reading.percent)
                     }
+                } else {
+                    Image(systemName: "gauge.with.needle")
+                        .foregroundStyle(Palette.muted)
                 }
             }
-            .buttonStyle(ComposerChipStyle())
-            .help("Contexto desta conversa: \(reading.spokenState)")
-            .accessibilityLabel("Contexto da conversa")
-            .accessibilityValue(reading.spokenState)
-            .accessibilityHint("Abre os detalhes e a opção de compactar")
-            .popover(isPresented: $isOpen, arrowEdge: .bottom) {
-                ContextPopoverHost(botID: botID, reading: reading) { isOpen = false }
-            }
+        }
+        .buttonStyle(ComposerChipStyle())
+        .transition(.opacity) // appears with a fade once the first message is measured
+        .help("Contexto desta conversa: \(reading.spokenState)")
+        .accessibilityLabel("Contexto da conversa")
+        .accessibilityValue(reading.spokenState)
+        .accessibilityHint("Abre os detalhes e a opção de compactar")
+        .popover(isPresented: $isOpen, arrowEdge: .bottom) {
+            ContextPopoverHost(botID: botID, reading: reading) { isOpen = false }
         }
     }
 }
@@ -378,11 +397,11 @@ struct ContextNudge: View {
             if gauge.showsNudge, gauge.reading?.botID == botID {
                 card
                     .padding(.bottom, 6)
-                    .transition(reduceMotion ? .identity : .opacity.combined(with: .move(edge: .bottom)))
+                    .transition(.adapted(.rise, reduceMotion: reduceMotion))
             }
         }
         .frame(maxWidth: .infinity)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: gauge.showsNudge)
+        .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: gauge.showsNudge)
         .onChange(of: gauge.reading?.conversationKey) { note = nil }
     }
 

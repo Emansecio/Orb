@@ -43,6 +43,13 @@ struct MotionControlsTests {
         #expect(ComposerSurface.fill(isFocused: true) == Palette.surfaceFocused)
     }
 
+    @Test func theCardCastsABlackShadowBelowAndAnAccentGlowWhileAFileIsDraggedOver() {
+        let rest = ComposerSurface.shadow(isDropTargeted: false)
+        #expect(rest.color == Color.black.opacity(0.35) && rest.y == 8)
+        let drop = ComposerSurface.shadow(isDropTargeted: true)
+        #expect(drop.color == Palette.accent.opacity(0.35) && drop.y == 0)
+    }
+
     @Test func theFocusedFillIsAboutTwoPercentLighter() throws {
         let rest = try #require(NSColor(Palette.surface).usingColorSpace(.sRGB))
         let focused = try #require(NSColor(Palette.surfaceFocused).usingColorSpace(.sRGB))

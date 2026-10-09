@@ -295,6 +295,9 @@ final class PresentedOrbs: @unchecked Sendable {
 extension EnvironmentValues {
     /// Nil where there is no root view (previews, snapshots): the empty chat then shows without its entrance.
     @Entry var presentedEmptyChats: PresentedOrbs? = nil
+    /// The queued messages (by id) that already came in this session; nil where there is no root view. A bubble that is
+    /// made again (the chat reopened, the lazy list recreating the row) does not enter a second time.
+    @Entry var presentedQueued: PresentedOrbs? = nil
 }
 
 // MARK: - The pulse of an approval card

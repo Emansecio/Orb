@@ -76,11 +76,15 @@ private struct TranscriptList: View {
         let isLoading = model.isLoadingConversation(look.id)
         // Looked at before the rows are made, as many times as this is evaluated: the same items say the same thing.
         let generation = entrances.observe(items, isLoading: isLoading, swaps: transcript.swaps)
+        // The Orb's reply at the end of the chat carries its living avatar; the working line below gives up its own
+        // then, so there is one Orb in view at a time. Only the two rows whose answer changed are drawn again.
+        let lastReplyID: UUID? = if let last = items.last, case .bot = last.kind { last.id } else { nil }
 
         // A conversation swapped for another (a new one, one reopened from Conversas) cross-fades; the scroll view is
         // a new one then, as it was when the whole chat was rebuilt.
         ZStack {
-            conversation(items: items, isWorking: isWorking, isLoading: isLoading, live: live, transcript: transcript)
+            conversation(items: items, isWorking: isWorking, isLoading: isLoading, live: live, transcript: transcript,
+                         lastReplyID: lastReplyID)
                 .id(generation)
                 .transition(.opacity)
         }
@@ -89,7 +93,7 @@ private struct TranscriptList: View {
     }
 
     private func conversation(items: [TranscriptItem], isWorking: Bool, isLoading: Bool, live: BotLive,
-                              transcript: OrbTranscript) -> some View {
+                              transcript: OrbTranscript, lastReplyID: UUID?) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
@@ -101,7 +105,8 @@ private struct TranscriptList: View {
                     }
                     ForEach(items) { item in
                         let isNew = entrances.isNew(item.id)
-                        TranscriptRow(item: item, botID: look.id, orb: look.orb, entering: isNew)
+                        TranscriptRow(item: item, botID: look.id, orb: look.orb, entering: isNew,
+                                      isLastReply: item.id == lastReplyID)
                             .equatable()
                             // The row comes in by itself, not through an animation of the list (which would lay every row
                             // out again); the list's own animation must not add a transition of its own.
@@ -110,7 +115,7 @@ private struct TranscriptList: View {
                     }
                     QueuedMessages(botID: look.id)
                     if isWorking {
-                        WorkingLine(look: look)
+                        WorkingLine(look: look, avatarHidden: lastReplyID != nil)
                             .transition(.adapted(.arrive, reduceMotion: reduceMotion))
                     }
                     Color.clear.frame(height: 1).id(BottomAnchor.id)
@@ -129,7 +134,10 @@ private struct TranscriptList: View {
                 .id(isLoading)
             }
             .scrollIndicators(.automatic)
-            .modifier(BottomFollowing(isFollowing: $followsBottom))
+            .modifier(BottomFollowing(isFollowing: $followsBottom, resumed: {
+                // The list grew while a finger rested on it: glide to the end again.
+                withAnimation(ScrollMotion.animation(reduceMotion: reduceMotion)) { scrollToBottom(proxy) }
+            }))
             .modifier(KeepsBottom(follows: followsBottom))
             .environment(\.replyGrew, replyGrew(proxy))
             .onChange(of: followsBottom) { follower.follows = followsBottom }
@@ -270,21 +278,75 @@ struct ScrollThrottle {
     }
 }
 
+/// Whether the chat keeps following the end after the user's own scroll ended. Away from the end by more than
+/// `slack` it does not; near it, it does; and a touch that did not take the list up (the list was at the end when
+/// the touch began and its top is where it was, give or take `jitter`) keeps following, so resting a finger on the
+/// trackpad does not cost the chat its place at the end.
+enum FollowRule {
+    static let slack: CGFloat = 48
+    static let jitter: CGFloat = 8
+
+    /// `distance`: how far the end of the content is below the visible area. `minY`: the top of the visible area.
+    static func follows(distance: CGFloat, minY: CGFloat, wasAtBottom: Bool, startMinY: CGFloat) -> Bool {
+        distance < slack || touchLeftListInPlace(minY: minY, wasAtBottom: wasAtBottom, startMinY: startMinY)
+    }
+
+    /// The touch began at the end and did not take the list up.
+    static func touchLeftListInPlace(minY: CGFloat, wasAtBottom: Bool, startMinY: CGFloat) -> Bool {
+        wasAtBottom && minY >= startMinY - jitter
+    }
+
+    /// Whether to glide back to the end when the scroll ends: only for a touch that left the list in place while it
+    /// grew (the end is out of reach and the user did not scroll away). Someone who scrolled up a little to reread
+    /// something is left where they put the list, near the end or not.
+    static func glides(distance: CGFloat, minY: CGFloat, wasAtBottom: Bool, startMinY: CGFloat) -> Bool {
+        distance > 1 && touchLeftListInPlace(minY: minY, wasAtBottom: wasAtBottom, startMinY: startMinY)
+    }
+}
+
+/// Where the list was when the user's scroll began. A reference, so noting it never redraws the list.
+@MainActor
+private final class ScrollTouch {
+    var wasAtBottom = false
+    var startMinY: CGFloat = 0
+}
+
 /// Stops following new content while the user scrolls away from the bottom and resumes once they
-/// scroll back down. Needs scroll phases (macOS 15); on macOS 14 the chat always follows.
+/// scroll back down (or only touched the trackpad: `FollowRule`). Needs scroll phases (macOS 15); on macOS 14 the chat
+/// always follows. `resumed` is called when following resumes with the end out of reach (the list grew during the
+/// touch), to glide back to it.
 private struct BottomFollowing: ViewModifier {
     @Binding var isFollowing: Bool
+    let resumed: @MainActor () -> Void
+    /// Made on first appearance, not as an initial value (which would build one on every body of the list).
+    @State private var touch: ScrollTouch?
 
     func body(content: Content) -> some View {
         if #available(macOS 15, *) {
-            content.onScrollPhaseChange { old, new, context in
+            let resumed = resumed
+            content.onAppear {
+                if touch == nil { touch = ScrollTouch() }
+            }
+            .onScrollPhaseChange { old, new, context in
+                guard let touch else { return }
                 // Only the user's own scrolling counts, not programmatic scrolls (`.animating`).
                 let byUser: [ScrollPhase] = [.tracking, .interacting, .decelerating]
+                let geometry = context.geometry
+                let distance = geometry.contentSize.height - geometry.visibleRect.maxY
                 if byUser.contains(new) {
+                    if !byUser.contains(old) {
+                        touch.wasAtBottom = distance < FollowRule.slack
+                        touch.startMinY = geometry.visibleRect.minY
+                    }
                     isFollowing = false
                 } else if new == .idle, byUser.contains(old) {
-                    let geometry = context.geometry
-                    isFollowing = geometry.contentSize.height - geometry.visibleRect.maxY < 48
+                    let follows = FollowRule.follows(distance: distance, minY: geometry.visibleRect.minY,
+                                                     wasAtBottom: touch.wasAtBottom, startMinY: touch.startMinY)
+                    isFollowing = follows
+                    if follows, FollowRule.glides(distance: distance, minY: geometry.visibleRect.minY,
+                                                  wasAtBottom: touch.wasAtBottom, startMinY: touch.startMinY) {
+                        MainActor.assumeIsolated { resumed() }
+                    }
                 }
             }
         } else {
@@ -307,7 +369,7 @@ private struct LoadingTranscript: View {
             .accessibilityLabel("Carregando a conversa")
             .task {
                 try? await Task.sleep(for: .milliseconds(150))
-                withAnimation(.easeIn(duration: 0.2)) { isVisible = true }
+                withAnimation(Motion.fade) { isVisible = true }
             }
     }
 }
@@ -449,6 +511,9 @@ private struct WorkingLine: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let look: BotLook
+    /// The reply just above is the last item of the chat and carries the living Orb: this one stays out of sight (its
+    /// place stays, so the phrase does not move) and rests.
+    let avatarHidden: Bool
     /// The last phrase there was: when the turn ends the line is still fading out for a moment, and must say the
     /// same words until it is gone instead of falling back to "Pensando".
     @State private var lastWork = WorkPhrase.line(status: "Pensando")
@@ -458,7 +523,10 @@ private struct WorkingLine: View {
         let work = live.shownWork ?? lastWork
         HStack(spacing: 10) {
             HStack(spacing: 10) {
-                LiveBotAvatar(botID: look.id, orb: look.orb, size: 30)
+                LiveBotAvatar(botID: look.id, orb: look.orb, size: 30, paused: avatarHidden)
+                    // Only opacity, so it is the same under Reduce Motion.
+                    .opacity(avatarHidden ? 0 : 1)
+                    .animation(Motion.fade, value: avatarHidden)
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     ZStack(alignment: .leading) {
                         WorkPhraseView(work: work)
@@ -466,6 +534,9 @@ private struct WorkingLine: View {
                             .transition(.adapted(.swap, reduceMotion: reduceMotion))
                     }
                     .animation(Motion.adapted(Motion.enter, reduceMotion: reduceMotion), value: work.phraseKey)
+                    // The phrase leaving follows its parent when the line is pushed down by a row coming in above it,
+                    // instead of staying drawn where the line used to be.
+                    .geometryGroup()
                     WorkMeterView(work: work, since: live.workingSince)
                 }
                 // The meter slides along with the width of the phrase.
@@ -541,10 +612,13 @@ private struct WorkMeterView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let work: WorkLine
     let since: Date?
+    /// Where the ticks start when there is no start time (the wait to try again): fixed when the meter appears, so a
+    /// redraw of the line does not move the second marks (`.now` in the body would restart the clock at every one).
+    @State private var anchor = Date()
 
     var body: some View {
         if since != nil || work.tone != .working {
-            TimelineView(.periodic(from: since ?? .now, by: 1)) { context in
+            TimelineView(.periodic(from: since ?? anchor, by: 1)) { context in
                 Text(text(at: context.date))
                     .font(.system(size: 12).monospacedDigit())
                     .foregroundStyle(Palette.faint)

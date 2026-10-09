@@ -12,9 +12,12 @@ struct TranscriptRow: View, Equatable {
     /// The row just arrived in a chat that was open (the list says so). Not part of the row's identity: it is read
     /// once, when the row is made, by the one row that does something with it (the approval card's pulse).
     var entering = false
+    /// This is the Orb's reply at the very end of the chat: its avatar is alive (the one Orb in view), and the
+    /// working line below it hides its own. Part of the row's identity, so only the two rows that change re-render.
+    var isLastReply = false
 
     nonisolated static func == (lhs: TranscriptRow, rhs: TranscriptRow) -> Bool {
-        lhs.item == rhs.item && lhs.botID == rhs.botID && lhs.orb == rhs.orb
+        lhs.item == rhs.item && lhs.botID == rhs.botID && lhs.orb == rhs.orb && lhs.isLastReply == rhs.isLastReply
     }
 
     var body: some View {
@@ -22,7 +25,8 @@ struct TranscriptRow: View, Equatable {
         case .user(let text, let attachments):
             UserBubble(text: text, attachments: attachments)
         case .bot(let text, let isStreaming):
-            BotMessage(orb: orb, botID: botID, text: text, live: isStreaming ? model.liveText(for: item.id, of: botID) : nil)
+            BotMessage(orb: orb, botID: botID, text: text, live: isStreaming ? model.liveText(for: item.id, of: botID) : nil,
+                       isLastReply: isLastReply)
         case .tool(let call):
             ToolCallLine(call: call)
         case .approval(let request):
@@ -111,6 +115,7 @@ private struct BotMessage: View {
     let botID: UUID
     let text: String
     let live: LiveText?
+    let isLastReply: Bool
 
     @State private var hovering = false
 
@@ -150,11 +155,25 @@ private struct BotMessage: View {
             .padding(.trailing, 90)
             .frame(maxWidth: .infinity, alignment: .leading)
             .overlay(alignment: .bottomLeading) {
-                BotAvatar(orb: orb, size: 30, animated: false)
-                    .accessibilityHidden(true)
+                // The last reply of the chat has the one living Orb in view (it works, celebrates, watches you type, and
+                // rests once idle); the ones above are still, in the same resting pose. When it stops being the last (a tool
+                // line or a new message came in) the live one may be mid-expression: the two cross-fade (0.15 s) instead
+                // of the expression jumping. The animation is tied to this flag, which changes rarely, not to the list.
+                Group {
+                    if isLastReply {
+                        LiveBotAvatar(botID: botID, orb: orb, size: 30, restsWhenIdle: true)
+                            .transition(.opacity)
+                    } else {
+                        BotAvatar(orb: orb, size: 30, animated: false)
+                            .transition(.opacity)
+                    }
+                }
+                .animation(Motion.fade, value: isLastReply)
+                .accessibilityHidden(true)
             }
             .onHover { if live == nil { hovering = $0 } }
-            .animation(.easeOut(duration: 0.15), value: hovering)
+            // Responds fast and lets go slowly (§2.7).
+            .animation(Motion.hover(hovering), value: hovering)
             .contextMenu {
                 if live == nil {
                     Button("Copiar") { Clipboard.copy(MarkdownBlocks.plainText(of: text)) }
@@ -198,24 +217,34 @@ private struct CopyButton: View {
     let help: String
     let copiedHelp: String
     let action: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var copied = false
+    /// The pending return to the copy symbol, so a second click starts the 1.5 s over instead of being cut short.
+    @State private var reset: Task<Void, Never>?
 
     var body: some View {
         Button {
             action()
             copied = true
-            Task {
+            reset?.cancel()
+            reset = Task {
                 try? await Task.sleep(for: .seconds(1.5))
+                guard !Task.isCancelled else { return }
                 copied = false
             }
         } label: {
             Image(systemName: copied ? "checkmark" : symbol)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(copied ? Palette.ink : Palette.muted)
+                // The symbol is swapped for the check (a plain fade under Reduce Motion), inside a frame that does not move.
+                .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
                 .frame(width: 26, height: 26)
                 .background(Palette.surface, in: .circle)
                 .overlay(Circle().strokeBorder(Palette.line, lineWidth: 1))
                 .contentShape(.circle)
+                // Set on the view that changes (the code block's button does the same, where it must: the reply says
+                // "never animate" to everything it draws).
+                .animation(copied ? Motion.press : Motion.content, value: copied)
         }
         .buttonStyle(.plain)
         .help(copied ? copiedHelp : help)

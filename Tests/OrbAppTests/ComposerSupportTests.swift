@@ -5,6 +5,37 @@ import Testing
 struct ComposerSupportTests {
     // MARK: Keys and pictures
 
+    @Test func theQueueHintHasAShortFormForANarrowComposer() {
+        let key = AppShortcut.commandReturn.label
+        #expect(ComposerHint.queueing(steersMidTurn: true, needsYou: false, typesInComposer: true, compact: true) == "Na fila · próximo passo")
+        #expect(ComposerHint.queueing(steersMidTurn: false, needsYou: false, typesInComposer: true, compact: true) == "Na fila · segue ao terminar")
+        #expect(ComposerHint.queueing(steersMidTurn: true, needsYou: true, typesInComposer: true, compact: true) == "Na fila · \(key) recusa e envia")
+        #expect(ComposerHint.queueing(steersMidTurn: true, needsYou: true, typesInComposer: false, compact: true) == "Na fila · \(key) permite o pedido")
+        // Every short form is shorter than its long one, and the long ones are unchanged without `compact`.
+        for (steers, needs, types) in [(true, false, true), (false, false, true), (true, true, true), (true, true, false)] {
+            let long = ComposerHint.queueing(steersMidTurn: steers, needsYou: needs, typesInComposer: types)
+            #expect(ComposerHint.queueing(steersMidTurn: steers, needsYou: needs, typesInComposer: types, compact: true).count < long.count)
+        }
+    }
+
+    @Test func theSkillsPopoverHeightFollowsTheWholeListNotTheFilter() {
+        #expect(SkillsPopover.height(skillCount: 3, listHeight: nil) == CGFloat(3 * 52 + 48)) // the estimate before it is measured
+        #expect(SkillsPopover.height(skillCount: 3, listHeight: 150) == CGFloat(198)) // the measured list wins
+        #expect(SkillsPopover.height(skillCount: 0, listHeight: nil) == CGFloat(52 + 48))
+        #expect(SkillsPopover.height(skillCount: 40, listHeight: 2000) == CGFloat(380)) // and it scrolls past 380
+    }
+
+    @MainActor @Test func theAttachmentStripIsKeyedByWhoIsInIt() {
+        let lane = ComposerLane()
+        #expect(ComposerView.stripIDs(lane).isEmpty)
+        lane.pictures = [ImageAttachment(path: "/tmp/a.png", mediaType: "image/png", width: 1, height: 1)]
+        lane.files = [AttachedFile(url: URL(fileURLWithPath: "/tmp/b.pdf"))]
+        lane.pendingPictures = 2
+        #expect(ComposerView.stripIDs(lane) == ["/tmp/a.png", "file:///tmp/b.pdf", "preparing"]) // one tile, however many are pending
+        lane.pendingPictures = 0
+        #expect(ComposerView.stripIDs(lane) == ["/tmp/a.png", "file:///tmp/b.pdf"])
+    }
+
     @Test func theHintNeverPromisesStopAndSendWhereCommandReturnAllows() {
         let key = AppShortcut.commandReturn.label
         // No request open: the line is the usual one.
@@ -54,6 +85,14 @@ struct ComposerSupportTests {
         #expect(QueuedMessages.whenText(needsYou: true, steersMidTurn: false).contains("responder ao pedido"))
         #expect(QueuedMessages.whenText(needsYou: false, steersMidTurn: true) == "Na fila · entra no próximo passo")
         #expect(QueuedMessages.whenText(needsYou: false, steersMidTurn: false) == "Na fila · segue quando a resposta terminar")
+    }
+
+    @Test func aQueuedMessageShowsPicturesAsThumbnailsAndTheRestAsFiles() {
+        let split = QueuedMessages.split(["/Users/x/foto.PNG", "/Users/x/relatório.pdf", "foto-antiga.png", "/Users/x/b.jpg"])
+        #expect(split.images == ["/Users/x/foto.PNG", "/Users/x/b.jpg"])
+        // A name without a path (older conversations) cannot be shown as a picture.
+        #expect(split.others == ["/Users/x/relatório.pdf", "foto-antiga.png"])
+        #expect(QueuedMessages.split([]).images.isEmpty && QueuedMessages.split([]).others.isEmpty)
     }
 
     @Test func pasteIsTakenOnlyInTheComposersOwnKeyWindowWithoutASheet() {

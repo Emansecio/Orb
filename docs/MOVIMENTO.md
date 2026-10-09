@@ -1,8 +1,9 @@
 # Movimento da interface — especificação
 
-Para implementar nas views. **Estado:** o vocabulário (os tokens de `Motion` e as transições `rise`/`unfold`) já existe em
-[`Motion.swift`](../Sources/Orb/Motion.swift), mas só `Motion.content` está em uso (por `animateChanges`); os componentes
-descritos abaixo ainda não foram implementados. Os ganchos de estado do Orb (§3) seguem o padrão atual de `speaking`, que
+Para implementar nas views. **Estado:** o vocabulário (os tokens de `Motion` e as transições `rise`/`unfold`) está em
+[`Motion.swift`](../Sources/Orb/Motion.swift) e já é usado pela barra lateral, pelas mensagens e ferramentas, pelos
+cartões de aprovação, pelo chat vazio, pela linha de trabalho e pelo compositor (§2.5); cada seção diz o que ainda
+falta nela. Os ganchos de estado do Orb (§3) seguem o padrão atual de `speaking`, que
 vive em `BotSession`/`BotLive` (veja [ORBS.md](ORBS.md)). Alvo: macOS 14+, SwiftUI. Tudo aqui é sutil de propósito: o app já é calmo e refinado; o movimento deve deixar claro
 **o que mudou e por quê**, nunca chamar atenção para si. Quem tem personalidade e brincadeira é o Orb.
 
@@ -86,6 +87,24 @@ extension AnyTransition {
   mensagem). O texto que vai chegando **não** anima (sem transição por token): o streaming tem custo constante e
   deve continuar assim (`Transaction(animation: nil)` nas atualizações de texto).
 - **Fim da resposta:** nada na mensagem; quem comemora é o Orb (`happy`).
+- **Um Orb vivo por vez.** A resposta que é o último item do chat leva o avatar vivo (`LiveBotAvatar` com
+  `restsWhenIdle`: vive no turno, no `happy` e na atenção à digitação, e descansa na pose de repouso, sem gerar
+  quadros, quando o Orb fica ocioso); as de cima têm o avatar parado, na pose de repouso. Quando uma resposta deixa de
+  ser a última (entra uma ferramenta ou uma mensagem), o avatar vivo pode estar numa expressão: os dois trocam com fade de
+  `Motion.fade` (0,15 s), sem salto, preso a `isLastReply`, não à lista. A linha de trabalho esconde o seu
+  avatar enquanto essa resposta está logo acima (só opacidade em `Motion.fade`, também com Reduzir movimento; a vaga de
+  30 pt fica, e a frase não se move) e o pausa. `TranscriptRow.isLastReply` entra no `==`: só duas linhas redesenham
+  quando um item entra.
+- **Mensagem na fila.** Entra como as outras (`.entrance(.rise)`, 6 pt em `Motion.enter`, fade de 0,15 s com Reduzir
+  movimento), sem animar a lista, e sai na hora (a bolha real sobe no mesmo lugar). Tem a forma da bolha final (raio 18)
+  e mostra imagens como miniaturas esmaecidas (0,75), como o `UserBubble`. Só entra na primeira vez que é feita: os ids
+  já mostrados ficam numa referência barata (`PresentedOrbs`, ambiente `presentedQueued`), então reabrir o chat ou a lista
+  recriar a linha não repete a entrada.
+- **Copiar.** O símbolo troca com `.symbolEffect(.replace)` (identidade com Reduzir movimento); em código, "Copiar" →
+  "Copiado" faz fade sem largura reservada (em repouso o botão fica na margem de 10 pt, só o símbolo desliza
+  uns 8 pt). Vai para "copiado" em `Motion.press` e volta em `Motion.content`
+  depois de 1,5 s; um segundo clique reinicia a contagem. A animação fica em `.animation(_, value:)` na própria view,
+  porque a resposta zera as animações de tudo o que desenha.
 - **Reduzir movimento:** opacidade 0,15 s no bloco; rolagem sem animação.
 - **Desempenho:** a transição vale para a inserção da célula, não para a lista toda; nada de `animation(_:value:)`
   no `ScrollView` com valor = contagem de mensagens (refaria o layout de tudo).
@@ -124,6 +143,15 @@ extension AnyTransition {
 - **Altura do campo** crescendo com linhas: sem animação (segue a digitação; animar dá sensação de atraso).
 - **O Orb reage** à digitação e ao envio — ver §3.
 - **Reduzir movimento:** borda e cor trocam sem animação; símbolo troca direto.
+- **O que o cartão contém e como entra e sai** (implementado em `ComposerView.swift`):
+  - A **sombra** fica só no fundo (`ComposerSurface`), nunca no cartão inteiro: na forma antiga cada tecla passava texto, chips e botões por um passe offscreen. O realce do soltar arquivo usa `Motion.hover`.
+  - **Parar** entra e sai com `.opacity`, e a linha da barra (chips de modelo e medidor) desliza junto em `Motion.content`, presa a `action.showsSecondaryStop`; com Reduzir movimento só o Parar faz fade (`Motion.fade`) e os chips trocam de lugar na hora.
+  - **Chegada do medidor** (fim da primeira resposta) e o percentual ganhando um dígito (`9%` → `10%`) também movem a barra: o `ContextGaugeDriver` entrega a leitura dentro de `withAnimation(Motion.content)` só quando a presença ou o percentual mudam (uma vez por turno, nunca por token); com Reduzir movimento o chip só faz fade e o resto troca de lugar na hora.
+  - **Sugestões de `/`, faixa de anexos e linha de erro** entram com `.opacity` + 4 pt (`unfold` para a faixa e o erro) e o cartão cresce uma vez em `Motion.content`, presa a um valor discreto (`CardParts`: existe lista, existe faixa, existe erro), nunca à contagem de itens nem à digitação. A altura do campo segue sem animação. Cada chip que entra ou sai da faixa faz fade e os vizinhos deslizam (`Motion.content`, presa aos ids); com Reduzir movimento os vizinhos trocam de lugar na hora e só o chip faz fade (`Motion.fade`).
+  - **Miniaturas**: nascem do cache (`Thumbnails.cached`) e, se precisarem decodificar, entram por cima do ícone em `Motion.fade` (só opacidade, vale com Reduzir movimento). A miniatura de 96 pt da bolha é aquecida ao anexar. O `PreparingChip` é um ladrilho de 56 pt, para a faixa não mudar de altura na troca.
+  - **Dica sob o campo** troca com `.contentTransition(.opacity)` em `Motion.fade`: o texto só muda ao ganhar ou perder foco, na primeira letra e ao enfileirar. Abaixo de 520 pt usa a forma curta (`ComposerHint.queueing(compact:)`).
+  - **Medidor de contexto**: o percentual rola (`.numericText()`, `.identity` com Reduzir movimento), o anel e o aviso de conversa longa usam `Motion.content` e `rise` (nada de `.move(edge:)`).
+  - **Foco**: volta ao campo depois de anexar, de escolher o modelo e de fechar a lista de permissões.
 
 ### 2.6 Folhas (Novo Orb, Personalizar Orb, Identidade)
 
@@ -173,7 +201,8 @@ do chat, ao lado do Orb. O transcript acima dela é o histórico (a linha de uma
   do turno, a espera por você (e a saída dela) e a primeira frase do turno. É legibilidade, não movimento: **vale
   também com Reduzir movimento**. O Orb (atividade) segue o evento real, sem esse ritmo.
 - **Troca de frase.** Um `ZStack` com a frase marcada por `.id(phraseKey)` e `AnyTransition.swap` em `Motion.enter`:
-  a nova sobe 4 pt e aparece, a antiga só apaga em `Motion.exit` (0,16 s). O medidor ao lado desliza junto com a largura
+  a nova sobe 4 pt e aparece, a antiga só apaga em `Motion.exit` (0,16 s). O `ZStack` é um `.geometryGroup()`: quando a
+  linha é empurrada por uma linha que entra acima, a frase que sai acompanha o pai em vez de ficar desenhada onde a linha estava. O medidor ao lado desliza junto com a largura
   da frase (`Motion.content`). A frase nova não reinicia o brilho: a varredura é um relógio global.
 - **Entrada e saída da linha.** `AnyTransition.arrive`: sobe 6 pt em `Motion.enter`; sai só apagando em `Motion.exit`.
   A lista continua animando só o início e o fim do turno (`isWorking`), nunca a contagem de itens.
@@ -222,7 +251,7 @@ A atividade "atento" seria um caso novo em `OrbActivity` (`attentive`: olhar par
 | Mensagens | sobe 6 pt + aparece | aparece em 0,15 s |
 | Ferramentas | marca com escala; detalhes descem | opacidade |
 | Aprovação | escala + deslocamento + 1 pulso na borda | opacidade, borda fixa |
-| Compositor | borda/fundo animados, símbolo troca com efeito | troca direta |
+| Compositor | borda/fundo animados, símbolo troca com efeito; cartão cresce com lista, anexos e erro; chips deslizam com o Parar; percentual rola | troca direta; só fade de 0,15 s (Parar, miniatura, dica) |
 | Folhas | seções em cascata | tudo junto |
 | Chat vazio | Orb cai e amassa, cascata | tudo junto, Orb parado |
 | Linha de trabalho | frase sobe 4 pt, medidor desliza, contador rola | frase troca por opacidade (0,15 s), sem deslizar nem rolar |

@@ -9,6 +9,8 @@ struct RootView: View {
     @State private var autoChange: Bool?
     /// The Orbs whose empty chat already came in this session: going to another Orb and back does not repeat it (§2.8).
     @State private var presentedEmptyChats = PresentedOrbs()
+    /// The queued messages that already came in (ids): reopening the chat does not bring them in again.
+    @State private var presentedQueued = PresentedOrbs()
 
     var body: some View {
         @Bindable var model = model
@@ -27,6 +29,7 @@ struct RootView: View {
             if autoChange == isOpen { autoChange = nil } else { autoClose.userToggled() }
         }
         .environment(\.presentedEmptyChats, presentedEmptyChats)
+        .environment(\.presentedQueued, presentedQueued)
         .sheet(isPresented: $model.showNewBot) {
             NewBotSheet()
         }

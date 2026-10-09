@@ -329,4 +329,39 @@ private final class Flag: @unchecked Sendable {
         throttle.ranScheduled(at: start + .milliseconds(400))
         #expect(throttle.request(at: start + .milliseconds(900)) == .now) // quiet for longer than the interval
     }
+
+    @Test func aTouchThatDidNotScrollAwayKeepsFollowingTheEnd() {
+        // At the end when the touch began, still where it was: follows, even if the reply grew below meanwhile.
+        #expect(FollowRule.follows(distance: 300, minY: 1000, wasAtBottom: true, startMinY: 1000))
+        // A little give (a finger moving the list by a few points, the reply growing under it) is not leaving.
+        #expect(FollowRule.follows(distance: 300, minY: 995, wasAtBottom: true, startMinY: 1000))
+        // Scrolling down more keeps following too.
+        #expect(FollowRule.follows(distance: 300, minY: 1100, wasAtBottom: true, startMinY: 1000))
+    }
+
+    @Test func scrollingUpStopsFollowingAndNothingBringsItBackByItself() {
+        #expect(!FollowRule.follows(distance: 400, minY: 900, wasAtBottom: true, startMinY: 1000)) // 100 pt up
+        #expect(!FollowRule.follows(distance: 400, minY: 1000, wasAtBottom: false, startMinY: 1000)) // was reading above
+        // Reading above and scrolling a little down is still reading.
+        #expect(!FollowRule.follows(distance: 400, minY: 1040, wasAtBottom: false, startMinY: 1000))
+    }
+
+    @Test func comingBackNearTheEndFollowsAgain() {
+        #expect(FollowRule.follows(distance: 47, minY: 500, wasAtBottom: false, startMinY: 1000))
+        #expect(FollowRule.follows(distance: 0, minY: 500, wasAtBottom: false, startMinY: 1000))
+        #expect(!FollowRule.follows(distance: 48, minY: 500, wasAtBottom: false, startMinY: 1000))
+    }
+
+    @Test func onlyATouchThatLeftTheListInPlaceGlidesBackToTheEnd() {
+        // The list grew under a resting finger: the end is out of reach, the list did not move: glide.
+        #expect(FollowRule.glides(distance: 300, minY: 1000, wasAtBottom: true, startMinY: 1000))
+        #expect(FollowRule.glides(distance: 300, minY: 995, wasAtBottom: true, startMinY: 1000))
+        // At the end, scrolled 30 pt up to reread a line, let go: follows (near the end), but stays where it was put.
+        #expect(FollowRule.follows(distance: 30, minY: 970, wasAtBottom: true, startMinY: 1000))
+        #expect(!FollowRule.glides(distance: 30, minY: 970, wasAtBottom: true, startMinY: 1000))
+        // Coming down by hand to near the end from above does not glide either.
+        #expect(!FollowRule.glides(distance: 20, minY: 500, wasAtBottom: false, startMinY: 1000))
+        // Already at the end: nothing to glide to.
+        #expect(!FollowRule.glides(distance: 0.5, minY: 1000, wasAtBottom: true, startMinY: 1000))
+    }
 }

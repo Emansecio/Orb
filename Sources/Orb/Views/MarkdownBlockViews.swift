@@ -69,7 +69,7 @@ struct MarkdownBlockView: View, Equatable {
                     RoundedRectangle(cornerRadius: 1).fill(Palette.lineStrong).frame(width: 2)
                 }
         case .code(let language, let code, _):
-            CodeBlockView(language: language, code: code)
+            CodeBlockView(language: language, code: code, streaming: cursor)
         case .table(let table):
             TableBlockView(table: table)
         case .rule:
@@ -127,9 +127,19 @@ private struct ListItemRow: View {
 struct CodeBlockView: View, Equatable {
     let language: String?
     let code: String
+    /// The code is still being written (this is the last block of a reply that streams).
+    var streaming = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var copied = false
+    /// The pending return to "Copiar", so a second click starts the 1.5 s over.
+    @State private var reset: Task<Void, Never>?
 
-    nonisolated static func == (lhs: Self, rhs: Self) -> Bool { lhs.language == rhs.language && lhs.code == rhs.code }
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.language == rhs.language && lhs.code == rhs.code && lhs.streaming == rhs.streaming
+    }
+
+    /// Lines per piece of a long code block while it streams.
+    nonisolated static let pieceLines = 40
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -139,10 +149,19 @@ struct CodeBlockView: View, Equatable {
                     .foregroundStyle(Palette.muted)
                 Spacer(minLength: 8)
                 Button(action: copy) {
-                    Label(copied ? "Copiado" : "Copiar", systemImage: copied ? "checkmark" : "doc.on.doc")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(copied ? Palette.ink : Palette.muted)
-                        .contentTransition(.identity)
+                    HStack(spacing: 5) {
+                        Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                            .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
+                        // No width is reserved for "Copiado": at rest the button sits on the 10 pt margin like the language
+                        // does. The button is anchored to the right by the spacer, so only the symbol slides a few points,
+                        // inside the same animation.
+                        Text(copied ? "Copiado" : "Copiar")
+                            .contentTransition(.opacity)
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(copied ? Palette.ink : Palette.muted)
+                    // On the view that changes, not `withAnimation`: the reply sets "never animate" on everything it draws.
+                    .animation(copied ? Motion.press : Motion.content, value: copied)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(copied ? "Código copiado" : "Copiar código")
@@ -150,10 +169,7 @@ struct CodeBlockView: View, Equatable {
             .padding(.horizontal, 10)
             .padding(.top, 7)
             .padding(.bottom, 2)
-            Text(code.isEmpty ? " " : code)
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(Palette.ink.opacity(0.9))
-                .lineSpacing(2)
+            codeText
                 .padding(.horizontal, 10)
                 .padding(.top, 4)
                 .padding(.bottom, 10)
@@ -165,13 +181,57 @@ struct CodeBlockView: View, Equatable {
         .accessibilityLabel(language.map { "Código em \($0)" } ?? "Código")
     }
 
+    /// One `Text` for the whole code, which keeps selection and "Copiar" whole. While a long block streams it is drawn in
+    /// pieces of `pieceLines` complete lines instead: the closed ones do not change (they keep what was drawn of them)
+    /// and only the last, the one being written, is laid out and drawn again at each flush, so the cost of a flush no
+    /// longer grows with the length of the code.
+    @ViewBuilder private var codeText: some View {
+        if streaming, let pieces = Self.pieces(of: code) {
+            // The stack's spacing is the line spacing, so the seams between pieces are the same as between lines.
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(Array(pieces.closed.enumerated()), id: \.offset) { _, piece in
+                    CodeLines(text: piece).equatable()
+                }
+                CodeLines(text: pieces.tail)
+            }
+        } else {
+            CodeLines(text: code)
+        }
+    }
+
+    /// The code cut into closed pieces of `pieceLines` lines and what is left (never empty), or nil when it is short.
+    nonisolated static func pieces(of code: String) -> (closed: [String], tail: String)? {
+        let lines = code.split(separator: "\n", omittingEmptySubsequences: false)
+        guard lines.count > pieceLines else { return nil }
+        let closedCount = (lines.count - 1) / pieceLines
+        let closed = (0..<closedCount).map { index in
+            lines[index * pieceLines..<(index + 1) * pieceLines].joined(separator: "\n")
+        }
+        return (closed, lines[(closedCount * pieceLines)...].joined(separator: "\n"))
+    }
+
     private func copy() {
         Clipboard.copy(code)
         copied = true
-        Task {
-            try? await Task.sleep(for: .seconds(1.6))
+        reset?.cancel()
+        reset = Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled else { return }
             copied = false
         }
+    }
+}
+
+/// Lines of code in the block's style. Equatable, so a piece that did not change is not laid out again.
+private struct CodeLines: View, Equatable {
+    let text: String
+
+    var body: some View {
+        Text(text.isEmpty ? " " : text)
+            .font(.system(size: 12, design: .monospaced))
+            .foregroundStyle(Palette.ink.opacity(0.9))
+            .lineSpacing(2)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

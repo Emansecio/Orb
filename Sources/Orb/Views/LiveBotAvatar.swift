@@ -11,9 +11,15 @@ struct LiveBotAvatar: View {
     var interactive = false
     /// Added to the Orb's own pokes (e.g. the empty chat's landing).
     var extraPoke = 0
+    /// Holds still (the Orb eases into its resting pose and stops producing frames).
+    var paused = false
+    /// Lives only while it has something to do: working, celebrating, watching you type. Once the Orb is idle it
+    /// settles into the resting pose and stops, so a reply that stays on screen costs nothing.
+    var restsWhenIdle = false
 
     var body: some View {
         let live = model.live(botID)
-        BotAvatar(orb: orb, size: size, activity: live.activity, poke: live.poke &+ extraPoke, interactive: interactive)
+        BotAvatar(orb: orb, size: size, activity: live.activity, paused: paused || (restsWhenIdle && live.activity == .idle),
+                  poke: live.poke &+ extraPoke, interactive: interactive)
     }
 }
