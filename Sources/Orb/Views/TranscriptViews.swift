@@ -81,6 +81,11 @@ private struct UserBubble: View {
         HStack {
             Spacer(minLength: 120)
             VStack(alignment: .trailing, spacing: 6) {
+                Text("Você")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Palette.muted)
+                    .padding(.trailing, 4)
+                    .accessibilityHidden(true) // the message's own label starts with "Você"
                 if !attachments.isEmpty { AttachmentStack(paths: attachments) }
                 if !text.isEmpty {
                     Text(text)
