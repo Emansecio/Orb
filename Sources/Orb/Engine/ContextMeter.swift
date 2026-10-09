@@ -43,6 +43,14 @@ enum ContextMeter {
 
     /// `conversation`'s history as the next message would find it, measured against `budget`. Nothing is changed.
     static func fill(of conversation: Conversation, budget: ContextBudget, compactingShare: Double = compactingShare) -> ContextFill {
+        // Without a cancellation check the measurement always completes.
+        fill(of: conversation, budget: budget, compactingShare: compactingShare, isCancelled: { false })!
+    }
+
+    /// `fill`, asking `isCancelled` before each step that walks the whole history (each `ContextWindow.fit`); nil as
+    /// soon as it says yes, so a measurement nobody waits for any more stops instead of finishing.
+    static func fill(of conversation: Conversation, budget: ContextBudget, compactingShare: Double = compactingShare,
+                     isCancelled: () -> Bool) -> ContextFill? {
         let covered = conversation.summary == nil ? 0 : min(max(conversation.summaryCoveredCount ?? 0, 0), conversation.messages.count)
         let slice = Array(conversation.messages[covered...])
         let condensing = max((conversation.condensedCount ?? 0) - covered, 0)
@@ -52,16 +60,19 @@ enum ContextMeter {
         // The history as it stands: nothing new folded away, however far over the budget it is.
         var cut = ContextCut(summary: conversation.summary, ledger: conversation.currentLedger)
         let unlimited = ContextBudget(tokens: Int.max / 8)
+        if isCancelled() { return nil }
         let current = ContextWindow.fit(slice, budget: unlimited, cut: &cut, condensing: condensing, paused: paused)
         let history = tokens(current.messages)
 
         // A compaction condenses the older stretch too (see `Conversation.prepareHistory`): what it would fold is
         // measured on the history condensed that far, as `Conversation.compact` does.
         var compaction: ContextFill.Compaction?
+        if isCancelled() { return nil }
         let frontier = max(ContextCondensing.frontier(in: slice), condensing)
         let smaller = manualBudget(for: conversation, budget: budget, share: compactingShare)
         var folding = ContextCut(summary: conversation.summary, ledger: conversation.currentLedger)
         folding.chunks = conversation.pendingChunks(after: covered)
+        if isCancelled() { return nil }
         let compacted = ContextWindow.fit(slice, budget: smaller, cut: &folding, condensing: frontier, paused: paused)
         if folding.covered > 0 {
             let foldedMessages = Array(slice.prefix(compacted.droppedCount))
@@ -69,6 +80,7 @@ enum ContextMeter {
             // summary and what follows it, whole (the rungs and steps set aside to fit the smaller budget are only for
             // that one request), not the window that fit just produced.
             var kept = ContextCut(summary: folding.summary, ledger: folding.ledger)
+            if isCancelled() { return nil }
             let remaining = ContextWindow.fit(Array(slice.dropFirst(compacted.droppedCount)), budget: unlimited, cut: &kept,
                                               condensing: max(frontier - compacted.droppedCount, 0), paused: paused)
             let freed = max(history - tokens(remaining.messages), 0)

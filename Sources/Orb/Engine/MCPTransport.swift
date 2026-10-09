@@ -22,16 +22,33 @@ actor StdioTransport: MCPTransport {
     private var stderrReader: Task<Void, Never>?
     private var closed: (@Sendable (Error) async -> Void)?
     private var buffer = Data()
+    /// How much of `buffer` is already known to hold no newline, so each chunk is searched only from where the last one ended.
+    private var scanned = 0
     private var stderrTail = Data()
 
     private let shell: ShellEnvironment
+    private let registry: StdioServerRegistry
+    /// How long a server may take to leave after SIGTERM before it is killed.
+    private let killGrace: Duration
+    /// The longest output a server may write without a newline; past it the connection is closed.
+    private let maxLineBytes: Int
+    /// Writes to the server's stdin happen here, never on the actor: a server that stops reading blocks `write(2)` once the
+    /// pipe is full, and `close` must still be able to run to kill it.
+    private let writes = DispatchQueue(label: "app.orb.mcp.stdio-writes")
 
-    init(config: MCPServerConfig, shell: ShellEnvironment = .shared) {
+    init(config: MCPServerConfig, shell: ShellEnvironment = .shared, registry: StdioServerRegistry = .shared,
+         killGrace: Duration = .seconds(3), maxLineBytes: Int = 32 << 20) {
         self.config = config
         self.shell = shell
+        self.registry = registry
+        self.killGrace = killGrace
+        self.maxLineBytes = maxLineBytes
     }
 
-    deinit { process?.terminate() }
+    deinit { process.map { registry.end($0, grace: killGrace) } }
+
+    /// The server's process id while it runs.
+    var processID: pid_t? { process?.processIdentifier }
 
     func open(receive: @escaping @Sendable (JSONValue) async -> Void,
               closed: @escaping @Sendable (Error) async -> Void) async throws {
@@ -58,6 +75,7 @@ actor StdioTransport: MCPTransport {
             throw ToolError("Não foi possível iniciar o conector \(config.name): \(error.localizedDescription)")
         }
         self.process = process
+        registry.add(process)
         input = stdin.fileHandleForWriting
 
         let output = Self.chunks(stdout.fileHandleForReading)
@@ -71,17 +89,31 @@ actor StdioTransport: MCPTransport {
         }
     }
 
-    func send(_ message: JSONValue) throws {
+    func send(_ message: JSONValue) async throws {
         guard let input else { throw ToolError("O conector \(config.name) não está em execução.") }
-        try input.write(contentsOf: Data((message.jsonString + "\n").utf8))
+        let data = Data((message.jsonString + "\n").utf8)
+        // Queued in the order of the calls (this runs on the actor up to the suspension), written off the actor.
+        try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
+            writes.async {
+                do {
+                    try input.write(contentsOf: data)
+                    done.resume()
+                } catch {
+                    done.resume(throwing: error)
+                }
+            }
+        }
     }
 
-    /// Closes the server's stdin and terminates it.
+    /// Closes the server's stdin and terminates it (killing it if it does not leave).
     func close() {
         closed = nil
-        try? input?.close()
+        if let input {
+            // Behind a write that is stuck, if there is one: the process ending is what frees it.
+            writes.async { try? input.close() }
+        }
         input = nil
-        if let process, process.isRunning { process.terminate() }
+        if let process { registry.end(process, grace: killGrace) }
         process = nil
     }
 
@@ -106,14 +138,45 @@ actor StdioTransport: MCPTransport {
 
     private func receive(_ chunk: Data, deliver: @Sendable (JSONValue) async -> Void) async {
         buffer.append(chunk)
-        while let newline = buffer.firstIndex(of: 0x0A) {
-            let line = buffer[buffer.startIndex..<newline]
-            buffer.removeSubrange(buffer.startIndex...newline)
-            // Anything that isn't a JSON object (e.g. stray log output) is ignored.
-            if let message = try? JSONDecoder().decode(JSONValue.self, from: line), case .object = message {
-                await deliver(message)
-            }
+        // The complete lines are cut out first, searching only the bytes that arrived since the last chunk.
+        var lines: [Data] = []
+        var start = 0
+        while let newline = Self.newline(in: buffer, from: max(start, scanned)) {
+            lines.append(buffer.subdata(in: buffer.startIndex + start..<buffer.startIndex + newline))
+            start = newline + 1
         }
+        if start > 0 { buffer.removeSubrange(buffer.startIndex..<buffer.startIndex + start) }
+        scanned = buffer.count
+        for line in lines {
+            // Anything that isn't a JSON object (e.g. stray log output) is ignored; a message that follows output written
+            // without a newline (`Loading…\r{"jsonrpc":…}`) is still read.
+            if let message = Self.message(in: line) { await deliver(message) }
+        }
+        if buffer.count > maxLineBytes {
+            let closed = self.closed
+            buffer = Data()
+            scanned = 0
+            close()
+            await closed?(ToolError("O conector \(config.name) mandou uma resposta grande demais ou sem quebra de linha."))
+        }
+    }
+
+    /// Offset of the first newline of `data` at or after `from`.
+    private static func newline(in data: Data, from: Int) -> Int? {
+        data.withUnsafeBytes { raw in
+            guard let base = raw.baseAddress, from < raw.count, let found = memchr(base + from, 0x0A, raw.count - from) else { return nil }
+            return base.distance(to: UnsafeRawPointer(found))
+        }
+    }
+
+    private static func message(in line: Data) -> JSONValue? {
+        func decode(_ data: some DataProtocol) -> JSONValue? {
+            guard let message = try? JSONDecoder().decode(JSONValue.self, from: Data(data)), case .object = message else { return nil }
+            return message
+        }
+        if let message = decode(line) { return message }
+        guard let brace = line.firstIndex(of: 0x7B), brace > line.startIndex else { return nil }
+        return decode(line[brace...])
     }
 
     private func appendStderr(_ chunk: Data) {
@@ -136,6 +199,12 @@ actor StdioTransport: MCPTransport {
 }
 
 // MARK: - HTTP
+
+/// The server forgot the session (HTTP 404 with a session id). The request never ran there, so a new session can take it again.
+struct MCPSessionExpired: Error, LocalizedError, Equatable {
+    let name: String
+    var errorDescription: String? { "A sessão com o conector \(name) expirou." }
+}
 
 /// A remote server over Streamable HTTP (2025-06-18), falling back to the legacy HTTP+SSE transport (2024-11-05)
 /// when the server rejects the initialize POST.
@@ -196,6 +265,8 @@ actor HTTPTransport: MCPTransport {
             throw error
         } catch let error as MCPAuthRequired {
             throw error
+        } catch let error as MCPSessionExpired {
+            throw error
         } catch {
             if Task.isCancelled || (error as? URLError)?.code == .cancelled { throw CancellationError() }
             throw ToolError("Não foi possível conectar ao conector \(name): \(error.localizedDescription)")
@@ -228,7 +299,7 @@ actor HTTPTransport: MCPTransport {
         }
         if response.statusCode == 404, sessionID != nil {
             sessionID = nil
-            let error = ToolError("A sessão com o conector \(name) expirou; reconecte o conector.")
+            let error = MCPSessionExpired(name: name)
             await closed?(error)
             throw error
         }

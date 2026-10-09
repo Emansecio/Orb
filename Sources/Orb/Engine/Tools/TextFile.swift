@@ -11,6 +11,9 @@ struct TextFile: Sendable {
     var lineEnding: LineEnding
     /// Latin-1 fallback for bytes Windows-1252 leaves undefined.
     var isLatin1Fallback = false
+    /// UTF-8 files with a few stray bytes (a character cut at the end of a log, a pasted fragment) are read as UTF-8
+    /// with these bytes shown as U+FFFD; writing `text` back would lose them.
+    var invalidUTF8Bytes = 0
 
     var encodingName: String {
         switch encoding {
@@ -53,12 +56,46 @@ struct TextFile: Sendable {
         if let text = String(data: data, encoding: .utf8) {
             return TextFile(text: text, encoding: .utf8, hasBOM: false, lineEnding: lineEnding(of: text))
         }
+        // Mostly UTF-8 with a few bad bytes: reading all of it as Windows-1252 would turn every accent into two characters.
+        let profile = utf8Profile(data)
+        if profile.multibyte >= 3, profile.invalid * 3 <= profile.multibyte, profile.invalid <= 3 || profile.invalid * 10 <= profile.multibyte {
+            let text = String(decoding: data, as: UTF8.self)
+            return TextFile(text: text, encoding: .utf8, hasBOM: false, lineEnding: lineEnding(of: text), invalidUTF8Bytes: profile.invalid)
+        }
         if let text = String(data: data, encoding: .windowsCP1252) {
             return TextFile(text: text, encoding: .windowsCP1252, hasBOM: false, lineEnding: lineEnding(of: text))
         }
         // Windows-1252 leaves five bytes undefined; Latin-1 maps every byte.
         guard let text = String(data: data, encoding: .isoLatin1) else { return nil }
         return TextFile(text: text, encoding: .isoLatin1, hasBOM: false, lineEnding: lineEnding(of: text), isLatin1Fallback: true)
+    }
+
+    /// How many valid multi-byte UTF-8 sequences `data` holds, and how many bytes belong to none (a truncated or stray one).
+    static func utf8Profile(_ data: Data) -> (multibyte: Int, invalid: Int) {
+        var multibyte = 0
+        var invalid = 0
+        data.withUnsafeBytes { raw in
+            let bytes = raw.bindMemory(to: UInt8.self)
+            var index = 0
+            func isContinuation(_ at: Int, _ range: ClosedRange<UInt8> = 0x80...0xBF) -> Bool { at < bytes.count && range.contains(bytes[at]) }
+            while index < bytes.count {
+                let byte = bytes[index]
+                var length = 0
+                switch byte {
+                case 0x00...0x7F: index += 1; continue
+                case 0xC2...0xDF: length = isContinuation(index + 1) ? 2 : 0
+                case 0xE0: length = isContinuation(index + 1, 0xA0...0xBF) && isContinuation(index + 2) ? 3 : 0
+                case 0xE1...0xEC, 0xEE...0xEF: length = isContinuation(index + 1) && isContinuation(index + 2) ? 3 : 0
+                case 0xED: length = isContinuation(index + 1, 0x80...0x9F) && isContinuation(index + 2) ? 3 : 0
+                case 0xF0: length = isContinuation(index + 1, 0x90...0xBF) && isContinuation(index + 2) && isContinuation(index + 3) ? 4 : 0
+                case 0xF1...0xF3: length = isContinuation(index + 1) && isContinuation(index + 2) && isContinuation(index + 3) ? 4 : 0
+                case 0xF4: length = isContinuation(index + 1, 0x80...0x8F) && isContinuation(index + 2) && isContinuation(index + 3) ? 4 : 0
+                default: length = 0
+                }
+                if length == 0 { invalid += 1; index += 1 } else { multibyte += 1; index += length }
+            }
+        }
+        return (multibyte, invalid)
     }
 
     /// ASCII-heavy UTF-16 has a zero in every other byte; which side the zeros fall on gives the byte order.

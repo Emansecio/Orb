@@ -5,7 +5,7 @@ import Foundation
 /// A Mac app starts with launchd's bare environment, and a plain `zsh -lc` skips `~/.zshrc`, where people put
 /// their PATH (npm, Android platform-tools, Homebrew…) and variables like JAVA_HOME. So the user's login +
 /// interactive shell is asked once for its environment, which is cached and handed to every command; commands
-/// then run with `-c` and never re-run the profile files.
+/// then run with `-c` and never re-run the profile files (unless that environment could not be read: see `arguments(for:)`).
 actor ShellEnvironment {
     static let shared = ShellEnvironment()
 
@@ -16,32 +16,43 @@ actor ShellEnvironment {
         var shell: String
         /// False when the user's shell could not be asked and the app's own environment stands in.
         var isFromUserShell: Bool
+
+        /// The arguments that run `command`. With the user's environment a plain `-c` is enough; with the fallback
+        /// (launchd's bare PATH) a login shell at least reads /etc/zprofile and `~/.zprofile` (path_helper, Homebrew),
+        /// so the system's tools are still found, as `MCPTransport` does.
+        func arguments(for command: String) -> [String] { [isFromUserShell ? "-c" : "-lc", command] }
     }
 
     private let shellPath: String
     private let base: [String: String]
     private let timeout: Duration
-    private var cached: (value: Resolved, at: ContinuousClock.Instant)?
-    private var resolving: Task<Resolved, Never>?
+    private var cached: (value: Resolved, at: ContinuousClock.Instant, retryAfter: Duration)?
+    private var resolving: Task<(Resolved, timedOut: Bool), Never>?
+
+    private let retryAfterTimeout: Duration
 
     /// A fallback is retried after this long; a real answer is kept until the app quits.
     private static let retryAfter = Duration.seconds(300)
+    /// A shell that was merely slow (a cold disk at login, a heavy `.zshrc`) is asked again soon: it answers once warm.
+    static let retryAfterTimeout = Duration.seconds(30)
 
     /// `shell` defaults to the user's login shell; `base` is the environment used as fallback and as a starting point.
-    init(shell: String? = nil, base: [String: String] = ProcessInfo.processInfo.environment, timeout: Duration = .seconds(5)) {
+    init(shell: String? = nil, base: [String: String] = ProcessInfo.processInfo.environment, timeout: Duration = .seconds(5),
+         retryAfterTimeout: Duration = ShellEnvironment.retryAfterTimeout) {
         shellPath = shell ?? Self.loginShell(in: base)
         self.base = base
         self.timeout = timeout
+        self.retryAfterTimeout = retryAfterTimeout
     }
 
     func resolved() async -> Resolved {
-        if let cached, cached.value.isFromUserShell || ContinuousClock.now - cached.at < Self.retryAfter { return cached.value }
-        if let resolving { return await resolving.value }
+        if let cached, cached.value.isFromUserShell || ContinuousClock.now - cached.at < cached.retryAfter { return cached.value }
+        if let resolving { return await resolving.value.0 }
         let task = Task { await self.resolve() }
         resolving = task
-        let value = await task.value
+        let (value, timedOut) = await task.value
         resolving = nil
-        cached = (value, .now)
+        cached = (value, .now, timedOut ? retryAfterTimeout : Self.retryAfter)
         return value
     }
 
@@ -49,16 +60,18 @@ actor ShellEnvironment {
 
     private static let marker = "__ORB_ENV_BEGIN__"
 
-    private func resolve() async -> Resolved {
+    /// The environment, and whether the fallback stands in because the shell took too long.
+    private func resolve() async -> (Resolved, timedOut: Bool) {
         let runner = Self.commandShell(for: shellPath)
         let fallback = Resolved(environment: Self.prepared(base), shell: runner, isFromUserShell: false)
         guard FileManager.default.isExecutableFile(atPath: shellPath),
               let result = try? await ProcessRunner.run(shellPath, ["-lic", "printf '\(Self.marker)'; env -0"],
                                                         directory: FileManager.default.homeDirectoryForCurrentUser,
-                                                        environment: base, timeout: timeout, outputLimit: 4_000_000),
-              !result.timedOut, result.status == 0, let parsed = Self.parse(result.output), parsed["PATH"] != nil
-        else { return fallback }
-        return Resolved(environment: Self.prepared(parsed), shell: runner, isFromUserShell: true)
+                                                        environment: base, timeout: timeout, outputLimit: 4_000_000)
+        else { return (fallback, false) }
+        guard !result.timedOut, result.status == 0, let parsed = Self.parse(result.output), parsed["PATH"] != nil
+        else { return (fallback, result.timedOut) }
+        return (Resolved(environment: Self.prepared(parsed), shell: runner, isFromUserShell: true), false)
     }
 
     /// The variables printed by `env -0` after the marker. Anything before it (a noisy `.zshrc`) or after the

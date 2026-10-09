@@ -113,6 +113,14 @@ final class MemoryUndo {
         if holds.isEmpty { if entry != nil { startCountdown() } } else { expiry?.cancel(); expiry = nil }
     }
 
+    /// The toast that held the countdown left the screen (its sheet closed under the pointer, or its button lost focus
+    /// with it) without saying the hold ended: let go, so it does not wait for a pointer that is gone.
+    func releaseHolds() {
+        guard !holds.isEmpty else { return }
+        holds = []
+        if entry != nil { startCountdown() }
+    }
+
     func undo(in model: AppModel) {
         guard let entry else { return }
         dismiss()

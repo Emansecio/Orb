@@ -312,8 +312,8 @@ struct ClaudeCodePolicyTests {
         #expect(!fresh.contains { $0.hasPrefix("--model") })
         // Only the MCP servers we pass (the Orb's memory) load, none of the user's own or of claude.ai.
         #expect(fresh.last == "--strict-mcp-config")
-        // Everything is on, so only the reads of private keys are refused.
-        #expect(fresh.contains("--disallowedTools=" + ClaudeCodeTools.secretReads.joined(separator: ",")))
+        // Everything is on, so only the reads of private keys and the question card the Orb cannot show are refused.
+        #expect(fresh.contains("--disallowedTools=" + (ClaudeCodeTools.secretReads + ["AskUserQuestion"]).joined(separator: ",")))
 
         bot.permissionMode = .readOnly
         bot.capabilities = [.connectors]
@@ -322,7 +322,7 @@ struct ClaudeCodePolicyTests {
         #expect(resumed.contains("--resume=s-1") && !resumed.contains("--session-id=abc"))
         #expect(resumed.contains("--model=opus"))
         #expect(resumed[resumed.firstIndex(of: "--permission-mode").map { $0 + 1 } ?? 0] == "plan")
-        let removed = ClaudeCodeTools.terminal + ClaudeCodeTools.web + ClaudeCodeTools.secretReads
+        let removed = ClaudeCodeTools.terminal + ClaudeCodeTools.web + ClaudeCodeTools.secretReads + ["AskUserQuestion"]
         #expect(resumed.contains("--disallowedTools=" + removed.joined(separator: ",")))
         #expect(resumed.last == "--mcp-config=/tmp/m.json")
         // With "Conectores" on too: claude.ai's connectors and the user's own servers stay out, so nothing runs without the
@@ -357,7 +357,8 @@ struct ClaudeCodePolicyTests {
             #expect(disallowed(mode).contains("Read(~/.ssh/**)"), Comment(rawValue: "\(mode)"))
             #expect(disallowed(mode).contains("Read(~/.aws/**)"))
         }
-        #expect(disallowed(.bypass).isEmpty)
+        // Not even then does the model get a question card the Orb cannot answer.
+        #expect(disallowed(.bypass) == ["AskUserQuestion"])
     }
 
     @Test func theProcessKeepsBashInTheProjectFolderAndTheTurnKeepsItsEnvironment() {
@@ -765,6 +766,43 @@ struct ClaudeCodeProcessTests {
         #expect(await iterator.next() == nil)
         try await Task.sleep(for: .milliseconds(100))
         #expect(process.errorOutput == "oops")
+    }
+
+    /// The child closes stdout and only then writes why it is leaving: reading `errorOutput` right after stdout ends would miss it.
+    @Test func theReasonOnStderrIsAwaitedAfterStdoutCloses() async throws {
+        let process = try LineProcess(
+            executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "exec 1>&-; sleep 0.3; echo motivo-final >&2; exit 3"],
+            directory: FileManager.default.temporaryDirectory, environment: ["PATH": "/usr/bin:/bin"])
+        process.closeInput()
+        for await _ in process.lines {}
+        #expect(await process.finalErrorOutput() == "motivo-final")
+        // A stderr that never closes does not hold the caller for longer than the limit.
+        let held = try LineProcess(
+            executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "exec 1>&-; sleep 5"],
+            directory: FileManager.default.temporaryDirectory, environment: ["PATH": "/usr/bin:/bin"])
+        let started = ContinuousClock.now
+        for await _ in held.lines {}
+        #expect(await held.finalErrorOutput(waitingUpTo: .milliseconds(200)) == "")
+        #expect(ContinuousClock.now - started < .seconds(3))
+        held.terminate(after: 0)
+        held.closeInput()
+    }
+
+    @Test func quittingStopsTheCLIAndWhatItLaunched() async throws {
+        let process = try LineProcess(
+            executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "echo $$; sleep 60 & echo $!; wait"],
+            directory: FileManager.default.temporaryDirectory, environment: ["PATH": "/usr/bin:/bin"])
+        var iterator = process.lines.makeAsyncIterator()
+        let leader = try #require(await iterator.next().flatMap { pid_t($0) })
+        let child = try #require(await iterator.next().flatMap { pid_t($0) })
+        #expect(ChildProcessGroups.running.contains(leader))
+        ChildProcessGroups.killAllNow(only: [leader])
+        #expect(await iterator.next() == nil)
+        for _ in 0..<50 where kill(child, 0) == 0 { try await Task.sleep(for: .milliseconds(100)) }
+        #expect(kill(child, 0) != 0)
+        for _ in 0..<50 where ChildProcessGroups.running.contains(leader) { try await Task.sleep(for: .milliseconds(50)) }
+        #expect(!ChildProcessGroups.running.contains(leader))
+        process.closeInput()
     }
 
     @Test func aMissingExecutableThrowsInsteadOfLeavingPipesOpen() {

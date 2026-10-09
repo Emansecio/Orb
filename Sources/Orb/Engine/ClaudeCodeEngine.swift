@@ -102,6 +102,7 @@ struct ClaudeCodeTurn: Sendable {
         if !bot.capabilities.contains(.terminal) { removed += ClaudeCodeTools.terminal }
         if !bot.capabilities.contains(.browser) { removed += ClaudeCodeTools.web }
         if bot.permissionMode != .bypass { removed += ClaudeCodeTools.secretReads }
+        removed.append(ClaudeCodeTools.askUserQuestion)
         if !removed.isEmpty { arguments.append("--disallowedTools=\(removed.joined(separator: ","))") }
         arguments.append("--strict-mcp-config")
         if let mcpConfig { arguments.append("--mcp-config=\(mcpConfig.path)") }
@@ -174,6 +175,12 @@ actor ClaudeCodeEngine {
         defer { out.finish() }
         out.yield(.message(.user(turn.prompt, images: turn.images)))
         out.yield(.status("Pensando"))
+        // Without the folder the spawn fails with a bare "No such file or directory" that reads as if the CLI were missing.
+        guard turn.bot.workingURL.isExistingDirectory else {
+            out.yield(.failed("A pasta do Orb (\(OrbFolder.display(turn.bot.workingURL))) não existe mais. Recrie-a ou escolha outra no painel "
+                              + "do Orb, ou reconecte o disco onde ela estava."))
+            return
+        }
         // Connector secrets go in a private temporary file, not on the command line.
         let mcpFile = ClaudeCodeTurn.mcpConfig(turn.connectors).flatMap(Self.writePrivate)
         defer { mcpFile.map { try? FileManager.default.removeItem(at: $0) } }
@@ -230,6 +237,10 @@ actor ClaudeCodeEngine {
                         return
                     }
                     process.send(ClaudeCodeWire.userMessage(turn.context.isEmpty ? turn.prompt : turn.context + "\n\n" + turn.prompt))
+                case .permission(let request) where request.toolName == ClaudeCodeTools.askUserQuestion:
+                    // No card to answer it with, and approving it would let the model go on as if the user had answered.
+                    process.send(ClaudeCodeWire.permissionResponse(requestID: request.requestID, answer: .deny(ClaudeCodePolicy.questionDenial),
+                                                                   input: request.input))
                 case .permission(let request):
                     let fromSubagent = request.toolUseID.map { !mainSession.contains($0) } ?? false
                     let answer = await permission(request, turn: turn, hasText: transcript.hasText, fromSubagent: fromSubagent,
@@ -251,14 +262,16 @@ actor ClaudeCodeEngine {
             }
         }
         guard !Task.isCancelled else { return }
+        // The reason a CLI that died early gave on stderr may still be on its way when stdout closes.
+        let errorOutput = await process.finalErrorOutput()
         switch handshake.state {
         case .expired:
             out.yield(.failed("O Claude Code não respondeu em \(Int(turn.initializeTimeout)) segundos e foi encerrado. "
-                              + "Tente de novo; se continuar, confira o Claude Code em Ajustes → Modelos." + Self.details(process.errorOutput)))
+                              + "Tente de novo; se continuar, confira o Claude Code em Ajustes → Modelos." + Self.details(errorOutput)))
         case .waiting:
-            out.yield(.failed("O Claude Code fechou antes de começar a conversa." + Self.details(process.errorOutput)))
+            out.yield(.failed("O Claude Code fechou antes de começar a conversa." + Self.details(errorOutput)))
         case .answered:
-            for event in transcript.endedEarly(details: process.errorOutput) { out.yield(event) }
+            for event in transcript.endedEarly(details: errorOutput) { out.yield(event) }
         }
     }
 

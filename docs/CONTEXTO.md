@@ -39,7 +39,7 @@ histórico (tokens) = máx( 2 000,  mín( 90% da janela − sobrecarga − reser
 | Janela | a do catálogo do modelo (`ProviderModel.contextLength`); senão 16 000 (Ollama e LM Studio), 128 000 (chat e Responses) ou 200 000 (Messages e Claude Code); o menor entre ela e a **janela aprendida** |
 | Sobrecarga | prompt do sistema + especificações das ferramentas. O motor mede a real (`ContextBudget.overheadTokens`) e avisa o app (`onOverheadMeasured`); antes disso vale 8 000 |
 | Reserva da resposta | 16 000 (Messages, Claude Code) ou 4 000 (demais), nunca mais que 1/8 da janela |
-| Teto do nível | "Contexto das conversas" em Ajustes → Geral: **Econômico** 40 000 · **Equilibrado** 80 000 (padrão) · **Amplo** 60% da janela. `ContextMemoryLevel`, salvo em `AppState.contextMemory` |
+| Teto do nível | "Contexto das conversas" em Ajustes → Geral: **Econômico** 40 000 · **Equilibrado** 80 000 (padrão) · **Amplo** 60% da janela, nunca menos que o Equilibrado (em janelas abaixo de ~133 mil, 60% seria menos que 80 000). `ContextMemoryLevel`, salvo em `AppState.contextMemory` |
 | Folga para o pedido | `leavingRoom`: tira do orçamento a mensagem nova e o prefácio (até 4 000 caracteres de reserva, `AppModel.prefaceAllowance`), nunca mais que a metade |
 
 Um modelo fora do catálogo usa o formato do provedor (ou o `format` da conta, no gateway próprio). Claude Code não tem
@@ -51,7 +51,9 @@ Se o provedor recusa o pedido por tamanho (HTTP 400/413 ou erro dentro do stream
 **uma vez** com menos histórico:
 
 - a recusa disse a janela ("maximum context length is 8192", `reportedWindow`): o orçamento é refeito por ela;
-- não disse: o histórico cai à metade e a janela passa a valer 85% da que se supunha (`unstatedWindowShare`).
+- não disse, ou disse a mesma janela (ou uma maior) que a suposta, o que mostra que errou a estimativa do histórico e não a
+  janela: o histórico cai à metade e a janela passa a valer 85% da que se supunha (`unstatedWindowShare`), gravada como
+  estimativa, para os turnos seguintes não estourarem de novo a cada ciclo.
 
 Em ambos a nova tentativa é **sempre menor** que a que falhou (senão o teto do nível reenviaria o mesmo pedido). Se a
 tentativa menor funciona, `onContextLearned` grava o valor em `AppState.learnedContexts["provedor/modelo"]`
@@ -188,7 +190,9 @@ Ao bater no limite de passos (30 por turno, 60 numa rotina) o motor deixa um **r
 (`ProgressRecord`) no histórico e emite `taskPaused`: o próximo "continua" retoma de onde parou. `Conversation.taskPaused`
 é um campo explícito (zerado na próxima mensagem do usuário), então um modelo que imita o marcador numa resposta comum não
 pausa nada. O "continue" que o motor injeta após uma resposta cortada por `max_tokens` (`nudge`) não conta como início de
-turno nem entra na linha do tempo.
+turno nem entra na linha do tempo. O mesmo vale para as mensagens que a usuária manda durante o turno (`steering`) e para o
+prompt da revisão de skills (`promptOnlySteers`): são mais um passo do turno em andamento, então o pedido que o começou
+continua sendo o início da tarefa, as saídas dela seguem inteiras e ele não é dobrado no resumo.
 
 ## Resumo estruturado (`ConversationLedger`)
 

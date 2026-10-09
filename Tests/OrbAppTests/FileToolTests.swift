@@ -62,6 +62,52 @@ final class FileToolTests {
         #expect(try await run(ReadFileTool(), ["path": .string("bom.txt")]).hasSuffix("1\tola"))
     }
 
+    /// A log cut in the middle of a character: one stray byte must not turn every accent of the file into two.
+    @Test func utf8WithAStrayByteStaysUTF8() async throws {
+        let bytes = Data("coração e Ásia\n".utf8) + Data([0xC3])
+        let file = try #require(TextFile.decode(bytes))
+        #expect(file.encoding == .utf8)
+        #expect(file.invalidUTF8Bytes == 1)
+        #expect(file.text.contains("coração") && file.text.contains("Ásia"))
+        // Text in Windows-1252 has no valid multi-byte sequences, so it is still told apart.
+        let latinBytes = try #require("ação\n".data(using: .windowsCP1252))
+        let latin = try #require(TextFile.decode(latinBytes))
+        #expect(latin.encoding == .windowsCP1252 && latin.invalidUTF8Bytes == 0)
+
+        try workspace.write("cortado.log", bytes)
+        let read = try await run(ReadFileTool(), ["path": .string("cortado.log")])
+        #expect(read.contains("coração") && read.contains("1 bytes inválidos") && !read.contains("Windows-1252"))
+    }
+
+    @Test func editRefusesAUTF8FileWithInvalidBytesAndLeavesItUntouched() async throws {
+        let bytes = Data("coração\nfim\n".utf8) + Data([0xC3, 0x0A]) + Data("Ásia e ação\n".utf8)
+        try workspace.write("sujo.txt", bytes)
+        let message = await failure(EditFileTool(), ["path": .string("sujo.txt"), "old_text": .string("fim"), "new_text": .string("atenção")])
+        #expect(message.contains("bytes inválidos"))
+        #expect(try workspace.read("sujo.txt") == bytes)
+    }
+
+    /// A pipe has no size and a read waits for a writer that may never come; a device like /dev/zero never ends.
+    @Test func filesThatAreNotOrdinaryAreRefusedBeforeBeingOpened() async throws {
+        let pipe = workspace.url("log.fifo")
+        #expect(mkfifo(pipe.path, 0o600) == 0)
+        try workspace.link("alias.fifo", to: pipe.path)
+        for tool in [ReadFileTool(), EditFileTool()] as [any AgentTool] {
+            for name in ["log.fifo", "alias.fifo"] {
+                let message = await workspace.outcome(of: tool, ["path": .string(name), "old_text": .string("a"), "new_text": .string("b")])
+                #expect(message?.contains("não é um arquivo comum") == true, Comment(rawValue: "\(tool.spec.name) \(name): \(message ?? "no answer")"))
+            }
+        }
+        let device = await workspace.outcome(of: ReadFileTool(), ["path": .string("/dev/zero")])
+        #expect(device?.contains("não é um arquivo comum") == true, Comment(rawValue: device ?? "no answer"))
+        // Ordinary files, and links to them, still read.
+        try workspace.write("normal.txt", "oi\n")
+        try workspace.link("normal.link", to: workspace.url("normal.txt").path)
+        for name in ["normal.txt", "normal.link"] {
+            #expect(try await run(ReadFileTool(), ["path": .string(name)]).contains("oi"))
+        }
+    }
+
     @Test func decodingPicksTheRightEncoding() throws {
         #expect(TextFile.decode(Data("café".utf8))?.encoding == .utf8)
         #expect(TextFile.decode(try #require("café".data(using: .isoLatin1)))?.encoding == .windowsCP1252)

@@ -110,15 +110,25 @@ enum QuickAskReplyText {
 /// What ↩ does in the panel, by the state of the chosen Orb: the same rule as the composer's (queue while it works on
 /// your chat), and a line instead of silence when it cannot take a message (a routine holds it).
 enum QuickAskSend: Equatable {
-    case send, queue, blocked, nothing
+    case send, queue, blocked, noModel, nothing
 
-    static func action(isWorking: Bool, canSteer: Bool, isReady: Bool, hasText: Bool) -> QuickAskSend {
+    /// `orbHasModel`: the Orb's own model (it may differ from the default one `isReady` is about) is usable.
+    static func action(isWorking: Bool, canSteer: Bool, isReady: Bool, hasText: Bool, orbHasModel: Bool = true) -> QuickAskSend {
         guard isReady, hasText else { return .nothing }
+        guard orbHasModel else { return .noModel }
         if !isWorking { return .send }
         return canSteer ? .queue : .blocked
     }
 
     static func blockedNote(name: String) -> String { "\(name) está rodando uma rotina. Envie quando terminar." }
+
+    static func noModelNote(name: String) -> String { "O modelo de \(name) não está conectado. Veja em Ajustes → Modelos." }
+
+    /// What the app shows after a question: the asked Orb's chat, unless a sheet of the main window is open (switching
+    /// the screen would close it along with what was typed in it).
+    static func selection(after target: UUID, current: SidebarItem?, hasOpenSheet: Bool) -> SidebarItem? {
+        hasOpenSheet ? current : .bot(target)
+    }
 
     /// The panel's key hint.
     static func hint(isWorking: Bool, canSteer: Bool) -> String {
@@ -232,16 +242,21 @@ struct QuickAskView: View {
 
     private func send() {
         guard let id = selectedID else { return }
+        let name = model.liveBot(id)?.look.name ?? "O Orb"
         switch QuickAskSend.action(isWorking: model.isWorking(id), canSteer: model.canSteer(id), isReady: model.isProviderReady,
-                                   hasText: !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
+                                   hasText: !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                                   orbHasModel: model.hasUsableModel(id)) {
         case .nothing: return
         case .blocked:
-            note = QuickAskSend.blockedNote(name: model.liveBot(id)?.look.name ?? "O Orb")
+            note = QuickAskSend.blockedNote(name: name)
+            return
+        case .noModel:
+            note = QuickAskSend.noModelNote(name: name) // what was typed stays
             return
         case .queue: model.queueOutsideComposer(text, to: id)
         case .send: model.sendWhenLoaded(text, to: id)
         }
-        model.selection = .bot(id)
+        model.selection = QuickAskSend.selection(after: id, current: model.selection, hasOpenSheet: model.hasOpenSheet)
         replyBotID = id
         text = ""
     }
@@ -410,7 +425,7 @@ private struct PendingApprovalsSection: View {
         VStack(alignment: .leading, spacing: 10) {
             ForEach(pending) { entry in
                 QuickAskApprovalCard(entry: entry, openApp: {
-                    model.selection = .bot(entry.bot.id)
+                    model.selection = QuickAskSend.selection(after: entry.bot.id, current: model.selection, hasOpenSheet: model.hasOpenSheet)
                     openApp()
                 })
             }

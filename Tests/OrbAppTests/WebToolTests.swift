@@ -601,3 +601,98 @@ final class WebFetchBehaviorTests {
         #expect(await cache.entry(for: "huge") == nil)
     }
 }
+
+// MARK: - Endless responses
+
+/// Answers 200 and then keeps sending `chunk` every `interval` until the load is stopped, like an event stream or a radio.
+final class EndlessStreamProtocol: URLProtocol {
+    struct Stream: Sendable {
+        var mime: String
+        var chunk: Data
+        var interval: TimeInterval
+        var served = 0
+        var stopped = false
+    }
+
+    static let streams = OSAllocatedUnfairLock<[String: Stream]>(initialState: [:])
+
+    static func session(host: String, _ stream: Stream) -> URLSession {
+        streams.withLock { $0[host] = stream }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [EndlessStreamProtocol.self]
+        return URLSession(configuration: configuration)
+    }
+
+    static func stream(_ host: String) -> Stream? { streams.withLock { $0[host] } }
+
+    private let running = OSAllocatedUnfairLock(initialState: true)
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let url = request.url, let host = url.host(), let stream = Self.stream(host),
+              let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": stream.mime]) else {
+            client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
+            return
+        }
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        DispatchQueue.global().async { [self] in
+            while running.withLock({ $0 }) {
+                client?.urlProtocol(self, didLoad: stream.chunk)
+                Self.streams.withLock { $0[host]?.served += stream.chunk.count }
+                Thread.sleep(forTimeInterval: stream.interval)
+            }
+        }
+    }
+
+    override func stopLoading() {
+        running.withLock { $0 = false }
+        if let host = request.url?.host() { Self.streams.withLock { $0[host]?.stopped = true } }
+    }
+}
+
+final class EndlessResponseTests {
+    let workspace: ToolWorkspace
+
+    init() throws { workspace = try ToolWorkspace() }
+
+    private func arguments(_ host: String) -> JSONValue { .object(["url": .string("https://\(host)/events")]) }
+
+    @Test func aStreamThatNeverEndsIsCutAtTheDeadlineWithWhatArrived() async throws {
+        let host = "sse.test"
+        let session = EndlessStreamProtocol.session(host: host, .init(mime: "text/event-stream", chunk: Data("data: x\n\n".utf8), interval: 0.05))
+        let tool = WebFetchTool(session: session, cache: WebPageCache(), readDeadline: .seconds(2))
+        let started = ContinuousClock.now
+        let output = try await tool.run(arguments(host), context: workspace.context)
+        // Far from the 7 days of a plain URLSession, but generous: the whole suite runs on a loaded machine.
+        #expect(ContinuousClock.now - started < .seconds(30))
+        #expect(output.contains("data: x"))
+        #expect(output.contains("não terminou"))
+    }
+
+    @Test func aTypeThatIsNotTextIsAnsweredFromTheHeaders() async throws {
+        let host = "radio.test"
+        let session = EndlessStreamProtocol.session(host: host, .init(mime: "audio/mpeg", chunk: Data(repeating: 1, count: 65_536), interval: 0.01))
+        let tool = WebFetchTool(session: session, cache: WebPageCache(), readDeadline: .seconds(20))
+        let started = ContinuousClock.now
+        let output = try await tool.run(arguments(host), context: workspace.context)
+        #expect(ContinuousClock.now - started < .seconds(15))
+        #expect(output.contains("audio/mpeg") && output.contains("não é texto") && output.contains("save_to"))
+        // The load is dropped, not read to the limit.
+        for _ in 0..<40 where EndlessStreamProtocol.stream(host)?.stopped != true { try await Task.sleep(for: .milliseconds(50)) }
+        #expect(EndlessStreamProtocol.stream(host)?.stopped == true)
+        #expect((EndlessStreamProtocol.stream(host)?.served ?? .max) < WebFetchTool.maxBytes)
+    }
+
+    @Test func unreadableTypesAreRecognisedFromTheirMimeType() {
+        for readable in ["", "text/plain", "text/event-stream", "application/json", "application/pdf", "application/xhtml+xml", "image/svg+xml",
+                         "application/octet-stream", "application/javascript"] {
+            #expect(WebFetchTool.isReadable(readable, wantsImage: false), "\(readable)")
+        }
+        for unreadable in ["audio/mpeg", "video/mp4", "application/zip", "image/png", "font/woff2"] {
+            #expect(!WebFetchTool.isReadable(unreadable, wantsImage: false), "\(unreadable)")
+        }
+        #expect(WebFetchTool.isReadable("image/png", wantsImage: true))
+    }
+}

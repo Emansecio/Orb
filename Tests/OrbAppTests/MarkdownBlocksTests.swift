@@ -212,3 +212,60 @@ import Testing
         #expect(abs(whole - pieces) < 0.5)
     }
 }
+
+/// A long table that streams is drawn in pieces of rows (the columns stay aligned in one `Grid`), and the cells of the row
+/// being written stay out of `MarkdownCache`.
+@Suite("Tabela e lista em stream") struct TableStreamingTests {
+    private func table(rows: Int, columns: Int = 3) -> MarkdownTable {
+        MarkdownTable(header: (0..<columns).map { "Coluna \($0)" },
+                      rows: (0..<rows).map { row in (0..<columns).map { "r\(row)c\($0)" + String(repeating: "x", count: (row * 7 + $0 * 3) % 9) } },
+                      alignments: Array(repeating: .leading, count: columns))
+    }
+
+    @Test func shortTablesAreNotCut() {
+        #expect(TableBlockView.pieces(of: []) == nil)
+        #expect(TableBlockView.pieces(of: table(rows: TableBlockView.pieceRows).rows) == nil)
+    }
+
+    @Test func longTablesAreCutInClosedPiecesAndATailThatIsNeverEmpty() throws {
+        let size = TableBlockView.pieceRows
+        let one = try #require(TableBlockView.pieces(of: table(rows: size + 1).rows))
+        #expect(one.closed.count == 1 && one.closed[0].count == size && one.tail.count == 1)
+        let two = try #require(TableBlockView.pieces(of: table(rows: size * 2).rows))
+        #expect(two.closed.count == 1 && two.tail.count == size)
+        let rows = table(rows: size * 2 + 5).rows
+        let three = try #require(TableBlockView.pieces(of: rows))
+        #expect(three.closed.count == 2 && three.tail.count == 5)
+        #expect((three.closed.flatMap { $0 } + three.tail) == rows)
+    }
+
+    @Test func aClosedPieceNeverChangesWhileTheLastCellGrows() throws {
+        let size = TableBlockView.pieceRows
+        var rows = table(rows: size * 2 + 3).rows
+        let before = try #require(TableBlockView.pieces(of: rows))
+        rows[rows.count - 1][2] += " mais um pouco" // the cell being written
+        let after = try #require(TableBlockView.pieces(of: rows))
+        #expect(after.closed == before.closed && after.tail != before.tail)
+    }
+
+    @MainActor @Test func theColumnsStayAlignedWhilePiecesStream() {
+        func size(_ view: some View) -> CGSize { NSHostingView(rootView: view.frame(width: 700)).fittingSize }
+        let long = table(rows: TableBlockView.pieceRows * 2 + 7)
+        let whole = size(TableBlockView(table: long, streaming: false))
+        let pieces = size(TableBlockView(table: long, streaming: true))
+        #expect(whole.height > 0 && abs(whole.height - pieces.height) < 0.5 && abs(whole.width - pieces.width) < 0.5)
+    }
+
+    @MainActor @Test func theCellsOfTheRowBeingWrittenStayOutOfTheCache() {
+        MarkdownCache.removeAll()
+        let small = table(rows: 3, columns: 2)
+        let host = NSHostingView(rootView: TableBlockView(table: small, streaming: true).frame(width: 500))
+        _ = host.fittingSize
+        // The header and the two closed rows (4 + ... cells) are kept, the last row is not.
+        #expect(MarkdownCache.count == 2 + 2 * 2)
+        MarkdownCache.removeAll()
+        _ = NSHostingView(rootView: TableBlockView(table: small, streaming: false).frame(width: 500)).fittingSize
+        #expect(MarkdownCache.count == 2 + 3 * 2) // a finished table keeps every cell
+        MarkdownCache.removeAll()
+    }
+}

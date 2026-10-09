@@ -398,6 +398,32 @@ struct SteeringEngineTests {
         await waitUntilIdle(model, bot.id)
     }
 
+    @Test @MainActor func theQueueBubblesStopAndSendLeavesTheComposerAlone() async throws {
+        let gate = Latch()
+        let client = HeldModel(gate: gate)
+        let (model, bot) = setUp(client)
+        model.submit("primeiro", to: bot.id)
+        await waitUntil("the model call") { await client.seen.count >= 1 }
+        model.submit("mude de rumo", to: bot.id) // queued
+        model.setDraft("olha esta foto", for: bot.id)
+        let picture = ImageAttachment(path: "/tmp/orb-test-foto.png", mediaType: "image/png", width: 1, height: 1)
+        model.composerLane(bot.id).pictures = [picture]
+
+        model.stopAndSend(bot.id) // as the bubble calls it: no draft
+
+        #expect(model.drafts[bot.id] == "olha esta foto")
+        #expect(model.composerLane(bot.id).pictures == [picture])
+        #expect(userTexts(model, bot.id) == ["primeiro", "mude de rumo"])
+        await gate.open()
+        await waitUntilIdle(model, bot.id)
+    }
+
+    @Test func theQueueBubbleCannotInterruptWhileAPictureIsStillOnItsWay() {
+        #expect(QueuedMessages.canInterrupt(canSteer: true, pendingPictures: 0))
+        #expect(!QueuedMessages.canInterrupt(canSteer: true, pendingPictures: 1))
+        #expect(!QueuedMessages.canInterrupt(canSteer: false, pendingPictures: 0))
+    }
+
     @Test @MainActor func aFailedTurnDoesNotSendWhatWasQueuedByItself() async throws {
         let gate = Latch()
         let client = HeldModel(gate: gate, failsFirst: true)
@@ -451,6 +477,21 @@ struct SteeringEngineTests {
         model.submit("segundo", to: bot.id)
         #expect(model.live(bot.id).scrollNudge > before) // the queued bubble changes no transcript revision; the nudge follows it
         #expect(model.live(bot.id).poke == jumps) // ...and the Orb does not jump for it
+        await gate.open()
+        await waitUntilIdle(model, bot.id)
+    }
+
+    @Test @MainActor func deliveringAQueuedMessageDoesNotPullTheChatToTheEnd() async throws {
+        let gate = Latch()
+        let client = HeldModel(gate: gate)
+        let (model, bot) = setUp(client)
+        model.submit("primeiro", to: bot.id)
+        await waitUntil("the model call") { await client.seen.count >= 1 }
+        model.submit("segundo", to: bot.id)
+        let queued = try #require(model.composerLane(bot.id).queued.first)
+        let nudges = model.live(bot.id).scrollNudge
+        model.deliverSteered(queued.id, to: bot.id) // minutes later, maybe, with you reading further up
+        #expect(model.live(bot.id).scrollNudge == nudges)
         await gate.open()
         await waitUntilIdle(model, bot.id)
     }

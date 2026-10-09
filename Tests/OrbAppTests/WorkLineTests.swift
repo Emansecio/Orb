@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SwiftUI
 import Testing
 @testable import Orb
 
@@ -371,5 +372,31 @@ struct WorkAnnouncerTests {
         live.setWorkDwell(.zero)
         let changed = notifies(reading: { _ = live.work }, whenYouDo: { model.apply(.status("Escrevendo"), to: id) })
         #expect(changed)
+    }
+}
+
+/// The phrase of the working line gives way to a narrow column instead of running past it (and pushing the
+/// "Ver pedido" button out of sight).
+struct WorkPhraseLayoutTests {
+    @MainActor private func width(of line: WorkLine, offered: CGFloat) -> CGFloat {
+        NSHostingController(rootView: WorkPhraseView(work: line)).sizeThatFits(in: CGSize(width: offered, height: 100)).width
+    }
+
+    @MainActor @Test func aLongRoutineNameAndAWaitingVerbAreCutToTheColumn() {
+        let waiting = WorkLine(verb: "Esperando sua resposta", tone: .waiting, routine: String(repeating: "x", count: 80))
+        #expect(width(of: waiting, offered: 240) <= 240)
+        let plain = WorkLine(verb: "Esperando sua resposta", tone: .waiting)
+        #expect(width(of: plain, offered: 80) <= 80)
+    }
+
+    @MainActor @Test func aPhraseThatFitsKeepsItsWords() {
+        // Offered more than it needs, the phrase takes exactly its ideal width: nothing is cut or squeezed.
+        let line = WorkLine(verb: "Lendo", target: "README.md")
+        let ideal = width(of: line, offered: 4_000)
+        #expect(width(of: line, offered: 400) == ideal)
+        let waiting = WorkLine(verb: "Esperando sua resposta", tone: .waiting, routine: "Resumo")
+        #expect(width(of: waiting, offered: 600) == width(of: waiting, offered: 4_000))
+        // ...and given less than it needs, it gives way instead of overflowing.
+        #expect(width(of: line, offered: ideal - 20) < ideal)
     }
 }

@@ -129,6 +129,8 @@ private struct InstalledConnectors: View {
                             await model.testConnector(connector.id)
                         }, onSignIn: { moreScope in
                             await model.signIn(connector: connector.id, moreScope: moreScope)
+                        }, isSigningIn: model.signingIn.contains(connector.id), onCancelSignIn: {
+                            model.cancelSignIn(connector: connector.id)
                         }, onSignOut: {
                             await model.signOut(connector: connector.id)
                         }, onViewTools: {
@@ -196,6 +198,9 @@ private struct ConnectorCard: View {
     let onTest: () async -> ConnectorTestOutcome
     /// Signs in through the browser (the scopes to add, for "Permitir mais"), then starts the server.
     let onSignIn: (String?) async -> ConnectorTestOutcome
+    /// A login of this connector is under way in the app, started from this card or from one that has gone since.
+    let isSigningIn: Bool
+    let onCancelSignIn: () -> Void
     let onSignOut: () async -> Void
     let onViewTools: () -> Void
     let onDelete: () -> Void
@@ -304,14 +309,14 @@ private struct ConnectorCard: View {
     /// "Entrar" · "Sessão expirou" · "Precisa de mais permissão", with the button that fixes it. Waiting for the browser can be cancelled.
     private func loginBlock(_ ask: LoginAsk) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            switch login {
+            switch isSigningIn ? LoginState.waiting : login {
             case .waiting:
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.mini)
                     Text("Abrimos o navegador. Termine o login lá e volte.").foregroundStyle(Palette.muted)
                 }
                 .font(.system(size: 12))
-                Button("Cancelar") { loginTask?.cancel() }.buttonStyle(GhostStyle()).controlSize(.small).help(Tip.cancelLogin)
+                Button("Cancelar") { loginTask?.cancel(); onCancelSignIn() }.buttonStyle(GhostStyle()).controlSize(.small).help(Tip.cancelLogin)
             default:
                 Label(loginMessage(ask), systemImage: ask == .signIn ? "person.crop.circle.badge.exclamationmark" : "exclamationmark.triangle.fill")
                     .font(.system(size: 12))
@@ -361,7 +366,7 @@ private struct ConnectorCard: View {
     }
 
     private func signIn(moreScope: String?) {
-        guard login != .waiting else { return }
+        guard login != .waiting, !isSigningIn else { return }
         loginTask = Task { @MainActor in
             login = .waiting
             switch await onSignIn(moreScope) {

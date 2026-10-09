@@ -127,14 +127,16 @@ struct ContextReading: Equatable, Sendable {
     /// Share of the latest request served by the provider's cache, when it said.
     var cacheHit: Double?
 
-    /// Nil while the conversation has no messages, or when no model is connected to measure it against.
+    /// Nil while the conversation has no messages, or when no model is connected to measure it against, or when the
+    /// task measuring was cancelled (a newer measurement replaced it; it stops before the next step that walks the history).
     static func make(_ input: ContextInput) -> ContextReading? {
         let conversation = input.conversation
-        guard !conversation.messages.isEmpty else { return nil }
+        guard !conversation.messages.isEmpty, !Task.isCancelled else { return nil }
         var fill: ContextFill?
         if !input.isClaudeCode {
             guard let budget = input.budget else { return nil }
-            fill = ContextMeter.fill(of: conversation, budget: budget)
+            guard let measured = ContextMeter.fill(of: conversation, budget: budget, isCancelled: { Task.isCancelled }) else { return nil }
+            fill = measured
         }
         return ContextReading(botID: input.botID, isClaudeCode: input.isClaudeCode,
                               fill: fill, windowIsStated: input.windowIsStated, messageCount: conversation.messages.count,

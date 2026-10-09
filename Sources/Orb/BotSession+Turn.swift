@@ -301,7 +301,7 @@ extension BotSession {
             scheduleMemorySave()
             if succeeded { model.writeStretchNote(of: id) }
         }
-        Task { await model.refreshMemory(botID) }
+        Task { await model.refreshMemory(botID, onlyIfChanged: true) }
         model.usageLog.flush() // what the turn used is written now, not after the batch's delay
         model.live(id).runningTool = nil
         model.setAwaitingApproval(false, of: id)

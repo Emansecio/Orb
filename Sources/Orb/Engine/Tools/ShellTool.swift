@@ -64,9 +64,13 @@ struct RunCommandTool: AgentTool {
         }
         let seconds = arguments.integer("timeout_seconds", default: Self.defaultTimeout, in: 1...Self.maxTimeout)
         let spill = Self.spillFile(context: context)
-        let result = try await ProcessRunner.run(shell.shell, ["-c", command], directory: directory, environment: shell.environment,
+        let result = try await ProcessRunner.run(shell.shell, shell.arguments(for: command), directory: directory, environment: shell.environment,
                                                  timeout: .seconds(seconds), outputLimit: Self.outputLimit, spillTo: spill)
         var output = result.output.isEmpty ? "(sem saída)" : result.output
+        if !shell.isFromUserShell {
+            output += "\n[aviso: não consegui ler o PATH do Terminal; rodei com o perfil de login. Se um programa não foi "
+                + "encontrado, ele pode estar instalado: tente de novo daqui a pouco]"
+        }
         if result.isBinary {
             output = "[saída binária de \(ByteCountFormatter.string(fromByteCount: Int64(result.totalBytes), countStyle: .file)) omitida; "
                 + "redirecione para um arquivo, ou use file, strings ou xxd]"
@@ -105,8 +109,7 @@ struct RunCommandTool: AgentTool {
         guard let jobs = context.jobs, let botID = context.botID else {
             throw ToolError("Processos em segundo plano não estão disponíveis aqui; rode sem background.")
         }
-        let started = try await jobs.start(botID: botID, command: command, directory: directory, shell: shell.shell,
-                                           environment: shell.environment)
+        let started = try await jobs.start(botID: botID, command: command, directory: directory, shell: shell)
         let job = started.job
         let output = started.firstOutput.isEmpty ? "(sem saída ainda)" : started.firstOutput
         return """

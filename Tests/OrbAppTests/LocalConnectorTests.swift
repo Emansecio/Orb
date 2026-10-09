@@ -111,6 +111,11 @@ final class FakeMail: MailBackend, @unchecked Sendable {
     /// The answer for a script that contains the key (the first key that does).
     private var answers: [(String, String)] = []
     var failure: ToolError?
+    /// How long each script takes (Mail is slow when it has to open and sync).
+    var delay = Duration.zero
+    private var scriptFailures: [(String, ToolError)] = []
+    /// The error for a script that contains the key.
+    func fail(containing key: String, with error: ToolError) { lock.withLock { scriptFailures.append((key, error)) } }
 
     var ran: [String] { lock.withLock { scripts } }
     var requestCount: Int { lock.withLock { requested } }
@@ -132,7 +137,9 @@ final class FakeMail: MailBackend, @unchecked Sendable {
 
     func run(_ script: String) async throws -> String {
         lock.withLock { scripts.append(script) }
+        if delay > .zero { try await Task.sleep(for: delay) }
         if let failure { throw failure }
+        if let error = lock.withLock({ scriptFailures.first { script.contains($0.0) }?.1 }) { throw error }
         return lock.withLock { answers.first { script.contains($0.0) }?.1 } ?? ""
     }
 }
@@ -424,6 +431,37 @@ struct CalendarConnectorTests {
 // MARK: - Gmail
 
 struct GmailConnectorTests {
+    private let draft: [String: JSONValue] = ["to": .string("ana@x.com"), "subject": .string("Oi"), "body": .string("Olá")]
+
+    @Test func aSlowMailIsNotCutOffByTheGenericDeadlineOfTheServers() async throws {
+        // Each call runs two scripts (the accounts, then the action), 80 ms each: more than the 100 ms every other connector gets.
+        let mail = FakeMail()
+        mail.reply(containing: "repeat with a in accounts", with: FakeMail.accountsAnswer)
+        mail.delay = .milliseconds(80)
+        let manager = MCPManager(locals: LocalConnectorEnvironment(calendar: FakeCalendar(), mail: mail), callTimeout: .milliseconds(100))
+        let config = LocalConnectorKind.gmail.config
+        await manager.sync([config])
+        let text = try await manager.call(config.id, tool: "create_draft", arguments: .object(draft))
+        #expect(text.hasPrefix("Rascunho salvo"))
+        await manager.sync([])
+    }
+
+    @Test func aSendThatRanOutOfTimeSaysTheMessageMayHaveLeft() async throws {
+        let mail = FakeMail()
+        let gmail = connector(mail)
+        mail.fail(containing: "send msg", with: ToolError(AppleScript.timeoutMessage(seconds: 90)))
+        do {
+            _ = try await call(gmail, "send_message", draft)
+            Issue.record("expected an error")
+        } catch {
+            let text = (error as? ToolError)?.message ?? ""
+            #expect(text.contains("pode ter sido enviado") && text.contains("Enviados"), "\(text)")
+        }
+        // A draft that ran out of time is just an error: nothing could have left.
+        mail.fail(containing: "save msg", with: ToolError(AppleScript.timeoutMessage(seconds: 90)))
+        await #expect(throws: ToolError(AppleScript.timeoutMessage(seconds: 90))) { try await call(gmail, "create_draft", draft) }
+    }
+
     private func connector(_ mail: FakeMail) -> GmailConnector {
         mail.reply(containing: "repeat with a in accounts", with: FakeMail.accountsAnswer)
         return GmailConnector(backend: mail)

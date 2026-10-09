@@ -123,10 +123,13 @@ struct ContextWindow: Sendable, Equatable {
     /// `nudge`: index in the input of a user message the engine added only to steer the turn (the "continue" after a
     /// reply cut by the output limit): part of the turn in progress, never the start of one, so the turn's request
     /// is never folded away from under it.
+    /// `steering`: indexes in the input of the messages the user sent while the turn ran: like the nudge, one more step of
+    /// the turn in progress (the request that started it stays the turn's start, its outputs stay whole).
     /// `foldAbove`: the share of the budget past which the history is folded down to the low-water mark (1: only when
     /// it is over the budget; less when folding is free anyway, see `Conversation.isCacheCold`).
     static func fit(_ input: [ChatMessage], budget: ContextBudget, cut: inout ContextCut, condensing: Int = 0,
-                    continuing: Bool = false, paused: Bool = false, nudge: Int? = nil, foldAbove: Double = 1) -> ContextWindow {
+                    continuing: Bool = false, paused: Bool = false, nudge: Int? = nil, steering: [Int] = [],
+                    foldAbove: Double = 1) -> ContextWindow {
         let limit = budget.characters
         let covered = min(max(cut.covered, 0), input.count)
         var work = Array(input[covered...])
@@ -149,10 +152,11 @@ struct ContextWindow: Sendable, Equatable {
 
         // The task in progress: the latest request, or, for a task picked up again, the one before it.
         let nudgeIndex = nudge.map { $0 - origin }
-        let users = raw.indices.filter { raw[$0].role == .user && $0 != nudgeIndex }
+        let stepIndexes = Set(([nudgeIndex].compactMap { $0 }) + steering.map { $0 - origin })
+        let users = raw.indices.filter { raw[$0].role == .user && !stepIndexes.contains($0) }
         let pickedUp = continuing && users.count >= 2
         let taskStart = pickedUp ? users[users.count - 2] : (users.last ?? -1)
-        let nudged = nudgeIndex.map { $0 > taskStart && $0 < raw.count } ?? false
+        let nudged = stepIndexes.contains { $0 > taskStart && $0 < raw.count }
         let inProgress = pickedUp || paused || nudged || (raw.last.map { $0.role == .tool || !$0.toolCalls.isEmpty } ?? false)
         let anchor = origin + max(taskStart, 0)
         if cut.anchor != anchor {

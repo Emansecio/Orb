@@ -12,7 +12,7 @@ struct QueuedMessages: View {
         let lane = model.composerLane(botID)
         ForEach(lane.queued) { message in
             // The state line and "Parar e enviar" speak for the whole queue: they show once, under the last bubble.
-            QueuedBubble(message: message, whenText: whenText, canInterrupt: model.canSteer(botID), needsYou: needsYou,
+            QueuedBubble(message: message, whenText: whenText, canInterrupt: QueuedMessages.canInterrupt(canSteer: model.canSteer(botID), pendingPictures: lane.pendingPictures), needsYou: needsYou,
                          isLast: message.id == lane.queued.last?.id,
                          edit: { model.unqueue(message.id, botID: botID) },
                          interrupt: { model.stopAndSend(botID) })
@@ -32,6 +32,9 @@ struct QueuedMessages: View {
     private var whenText: String {
         QueuedMessages.whenText(needsYou: needsYou, steersMidTurn: model.steersMidTurn(botID))
     }
+
+    /// A picture still on its way would miss the message that stops the turn (the composer's button waits too).
+    nonisolated static func canInterrupt(canSteer: Bool, pendingPictures: Int) -> Bool { canSteer && pendingPictures == 0 }
 
     nonisolated static func whenText(needsYou: Bool, steersMidTurn: Bool) -> String {
         if needsYou { return "Na fila · entra depois que você responder ao pedido" }

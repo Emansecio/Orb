@@ -144,7 +144,6 @@ private struct TranscriptList: View {
             .onChange(of: transcript.revision) {
                 if !BottomFollower.anchorsItself { follower.follow { scrollToBottom(proxy) } }
             }
-            .onChange(of: live.poke) { showSentMessage(proxy) }
             .onChange(of: live.scrollNudge) { showSentMessage(proxy) }
             .onAppear {
                 guard !BottomFollower.anchorsItself else { return }
@@ -179,7 +178,7 @@ private struct TranscriptList: View {
         proxy.scrollTo(BottomAnchor.id, anchor: .bottom)
     }
 
-    /// The user just sent a message (or one was queued or delivered): always show it. The list glides to it if it was at
+    /// The user just sent a message (or queued one): always show it. The list glides to it if it was at
     /// the end already; from higher up it goes there at once.
     private func showSentMessage(_ proxy: ScrollViewProxy) {
         let wasAtBottom = followsBottom
@@ -536,6 +535,8 @@ private struct WorkingLine: View {
                             .id(work.phraseKey)
                             .transition(.adapted(.swap, reduceMotion: reduceMotion))
                     }
+                    // The phrase gives way (it is cut with "…") before the clock and the button do.
+                    .layoutPriority(-1)
                     .animation(Motion.adapted(Motion.enter, reduceMotion: reduceMotion), value: work.phraseKey)
                     // The phrase leaving follows its parent when the line is pushed down by a row coming in above it,
                     // instead of staying drawn where the line used to be.
@@ -555,6 +556,9 @@ private struct WorkingLine: View {
                 Button("Ver pedido") { model.showRoutineRequest(of: look.id) }
                     .buttonStyle(.link)
                     .font(.system(size: 12))
+                    .lineLimit(1)
+                    .fixedSize()
+                    .layoutPriority(1) // never the part that is cut off: it is the way to the routine's card
                     .help(Tip.routineRequest)
             }
         }
@@ -564,7 +568,7 @@ private struct WorkingLine: View {
 /// The words of a phrase: the verb, then what it works on (code in a monospaced face, cut in the middle when the
 /// line is short of room), after the routine's name when it is a routine's run. The shimmer covers the whole
 /// phrase (one mask), and only while the Orb works.
-private struct WorkPhraseView: View {
+struct WorkPhraseView: View {
     let work: WorkLine
 
     var body: some View {
@@ -574,7 +578,7 @@ private struct WorkPhraseView: View {
                     .font(.system(size: 13))
                     .foregroundStyle(Palette.faint)
                     .lineLimit(1)
-                    .fixedSize()
+                    .layoutPriority(-1) // a long routine name is cut before the phrase
             }
             phrase
                 .shimmer(active: work.shimmers)
@@ -586,7 +590,7 @@ private struct WorkPhraseView: View {
             Text(work.shownTarget == nil ? work.phrase : work.verb)
                 .font(.system(size: 13))
                 .lineLimit(1)
-                .fixedSize()
+                .fixedSize(horizontal: work.shownTarget != nil, vertical: false) // the target is what gives way, not its verb
             if let target = work.shownTarget {
                 Text(target)
                     .font(work.style == .code ? .system(size: 12, design: .monospaced) : .system(size: 13))

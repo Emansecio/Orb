@@ -131,8 +131,9 @@ extension Motion {
 /// at the end of a list the view was already showing; what was there when the chat opened, what a conversation read
 /// from disk brought, and the rows a lazy list recreates while scrolling are not. A list whose items were replaced
 /// (another conversation) is not new rows but new content: `generation` changes then, and the chat cross-fades. The
-/// session says so (`swaps`); without it the shape of the list is the guess (more than `largestArrival` at once, or a
-/// head nobody knew).
+/// session says so (`swaps`); without it the shape of the list is the guess (an empty list suddenly holding more than
+/// `largestArrival`, or a head nobody knew). A burst of items at the end of a list that was showing something is
+/// never a swap (nine tools started in one step).
 ///
 /// Asked once per evaluation of the list's body (`observe` does the same when asked again with the same items), and
 /// costs the length of what arrived, not of the conversation.
@@ -178,18 +179,24 @@ final class TranscriptEntrances {
             if lastCount > 0 { replace(with: items) } else { settle(on: items) }
             return generation
         }
-        // New items are the unknown ones at the end.
+        // A head nobody knew is another conversation, whatever the session said.
+        if lastCount > 0, !(items.first.map { known.contains($0.id) } ?? true) {
+            replace(with: items)
+            return generation
+        }
+        // New items are the unknown ones at the end. In a list that was showing something they are always arrivals, however
+        // many a burst of parallel tools brings at once (only the newest `largestArrival` come in); an empty list suddenly
+        // holding more than that is a conversation arriving.
         var arrived: [UUID] = []
         var index = items.count - 1
-        while index >= 0, !known.contains(items[index].id), arrived.count <= Self.largestArrival {
+        while index >= 0, !known.contains(items[index].id), lastCount > 0 || arrived.count <= Self.largestArrival {
             arrived.append(items[index].id)
             index -= 1
         }
-        let headIsKnown = items.first.map { known.contains($0.id) } ?? true
-        if arrived.count > Self.largestArrival || (lastCount > 0 && !headIsKnown) {
+        if lastCount == 0, arrived.count > Self.largestArrival {
             replace(with: items)
         } else {
-            for id in arrived { arrivals[id] = now }
+            for id in arrived.prefix(Self.largestArrival) { arrivals[id] = now }
             known.formUnion(arrived)
             lastCount = items.count
             lastID = last.id

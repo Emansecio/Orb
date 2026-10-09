@@ -36,22 +36,27 @@ final class MemoryIndex {
     /// Bumped when the schema changes; an index from another version is simply rebuilt from the pages.
     static let schemaVersion = 1
 
-    init?(url: URL) {
-        guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK
-        else {
-            sqlite3_close(db)
-            db = nil
-            return nil
-        }
-        sqlite3_busy_timeout(db, 3000)
+    /// Why an index could not be opened: another process holds it (try again later, never delete it), the file is
+    /// damaged (rebuild it from the pages), or it is not there to open at all (folder missing, no permission).
+    enum Failure: Error { case busy, corrupt, unavailable }
+
+    /// Whether the file is a usable index.
+    enum Health { case ok, corrupt, busy }
+
+    init(url: URL, busyTimeout: Int32 = 3000) throws {
+        let code = sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX, nil)
+        guard code == SQLITE_OK else { throw Self.failure(code) } // `deinit` closes the handle
+        sqlite3_busy_timeout(db, busyTimeout)
+        // Opening an index that is already right writes nothing: a write here would wait for whoever holds the index
+        // (the app rebuilding it, the Claude Code helper) and fail with it busy.
         let version = rows("PRAGMA user_version").first?.int(0) ?? 0
         if version != 0, version != Self.schemaVersion {
             sqlite3_exec(db, "DROP TABLE IF EXISTS pages_fts; DROP TABLE IF EXISTS pages; DROP TABLE IF EXISTS meta;", nil, nil, nil)
         }
-        let schema = """
-        PRAGMA journal_mode = WAL;
-        PRAGMA synchronous = NORMAL;
-        PRAGMA user_version = \(Self.schemaVersion);
+        var schema = "PRAGMA synchronous = NORMAL;\n"
+        if rows("PRAGMA journal_mode").first?.text(0).lowercased() != "wal" { schema += "PRAGMA journal_mode = WAL;\n" }
+        if version != Self.schemaVersion { schema += "PRAGMA user_version = \(Self.schemaVersion);\n" }
+        schema += """
         CREATE TABLE IF NOT EXISTS pages (
             id INTEGER PRIMARY KEY, path TEXT UNIQUE NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL,
             body TEXT NOT NULL, created REAL NOT NULL, updated REAL NOT NULL, compacted INTEGER NOT NULL DEFAULT 0,
@@ -69,15 +74,32 @@ final class MemoryIndex {
             INSERT INTO pages_fts(rowid, title, body) VALUES (new.id, new.title, new.body); END;
         CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         """
-        guard sqlite3_exec(db, schema, nil, nil, nil) == SQLITE_OK else {
-            sqlite3_close(db)
-            db = nil
-            return nil
+        let result = sqlite3_exec(db, schema, nil, nil, nil)
+        guard result == SQLITE_OK else { throw Self.failure(result) }
+    }
+
+    private static func failure(_ code: Int32) -> Failure {
+        switch code & 0xFF {
+        case SQLITE_BUSY, SQLITE_LOCKED: .busy
+        case SQLITE_CORRUPT, SQLITE_NOTADB: .corrupt
+        default: .unavailable
         }
     }
 
-    /// Whether the file is a usable index (a corrupt one is deleted and rebuilt by the bank).
-    var isHealthy: Bool { rows("PRAGMA quick_check").first?.text(0) == "ok" }
+    /// Whether the file is a usable index (a corrupt one is deleted and rebuilt by the bank; one that is only locked
+    /// by another process is neither).
+    var health: Health {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "PRAGMA quick_check", -1, &statement, nil) == SQLITE_OK else {
+            sqlite3_finalize(statement)
+            return Self.failure(sqlite3_errcode(db)) == .busy ? .busy : .corrupt
+        }
+        defer { sqlite3_finalize(statement) }
+        switch sqlite3_step(statement) {
+        case SQLITE_ROW: return String(cString: sqlite3_column_text(statement, 0)) == "ok" ? .ok : .corrupt
+        case let code: return Self.failure(code) == .busy ? .busy : .corrupt
+        }
+    }
 
     deinit { sqlite3_close(db) }
 

@@ -48,10 +48,18 @@ extension AppModel {
         request.maxSteps = SkillReview.maxSteps
         request.onlyTools = SkillReview.tools
         request.context.skillReview = true
-        request.picksUpTask = false
+        // The prompt asks for no task: the turn's own request stays the start of the task in progress, so what the
+        // turn's last call sent whole is sent whole again (and the provider's cache holds).
+        request.promptOnlySteers = true
         let botID = session.id
         let usedModel = session.turnModel ?? modelRef(for: current)?.text
         session.skillReview = Task {
+            // No room for another proposal: the review could only end in a refusal, and it would be paid for first.
+            // (The count starts over, so the next try is after `SkillReview.threshold` more steps.)
+            guard await memory.bank(for: botID).proposals().count < MemoryBank.maximumProposals else {
+                if !Task.isCancelled { session.skillReview = nil }
+                return
+            }
             // Nothing of it reaches the chat or the history, but what it costs is real: each call goes to the usage
             // history as the app's own (`auxiliary`), so the Uso page shows it apart from the chat's.
             for await event in engine.run(request) {

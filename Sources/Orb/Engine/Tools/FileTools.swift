@@ -39,6 +39,7 @@ struct ReadFileTool: AgentTool {
         let url = requested.resolvingLinkChain
         guard FileManager.default.fileExists(atPath: url.path) else { throw ToolError("Arquivo não encontrado: \(url.path)") }
         guard !url.isExistingDirectory else { throw ToolError("\(url.path) é uma pasta; use list_directory.") }
+        try url.requireRegularFile()
         let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
 
         if DocumentReader.isPDF(url) || DocumentReader.isImage(url) || DocumentReader.isDocument(url) || OfficeReader.isOffice(url) {
@@ -54,8 +55,11 @@ struct ReadFileTool: AgentTool {
                 return try await Task.detached(priority: .userInitiated) { try DocumentReader.describeImage(at: url, size: size) }.value
             }
             let office = OfficeReader.isOffice(url)
+            let key = DocumentTextCache.Key(url, size: size)
             let text = try await runDetached {
-                try FileAccess.translating(url, writing: false) { try office ? OfficeReader.text(at: url) : DocumentReader.documentText(at: url) }
+                try FileAccess.translating(url, writing: false) {
+                    try DocumentTextCache.shared.text(for: key) { try office ? OfficeReader.text(at: url) : DocumentReader.documentText(at: url) }
+                }
             }
             return Self.numbered(TextFile.lines(of: text), arguments: arguments, note: "documento .\(url.pathExtension.lowercased()) convertido em texto")
         }
@@ -71,6 +75,7 @@ struct ReadFileTool: AgentTool {
         }
         var notes: [String] = []
         if file.encoding != .utf8 || file.hasBOM { notes.append("codificação \(file.encodingName)") }
+        if file.invalidUTF8Bytes > 0 { notes.append("UTF-8 com \(file.invalidUTF8Bytes) bytes inválidos (mostrados como \u{FFFD})") }
         if file.lineEnding == .crlf { notes.append("linhas CRLF") }
         return Self.numbered(TextFile.lines(of: file.text), arguments: arguments, note: notes.isEmpty ? nil : notes.joined(separator: ", "))
     }
@@ -186,7 +191,8 @@ struct WriteFileTool: AgentTool {
         if append, FileManager.default.fileExists(atPath: target.path) {
             // Appending UTF-8 bytes to a UTF-16 or Windows-1252 file would corrupt it, so match the file.
             let existing = try FileAccess.translating(target, writing: true) { try Data(contentsOf: target, options: .mappedIfSafe) }
-            if existing.count <= maxTextFileBytes, let file = TextFile.decode(existing), file.encoding != .utf8 || file.lineEnding == .crlf {
+            if existing.count <= maxTextFileBytes, let file = TextFile.decode(existing), file.invalidUTF8Bytes == 0,
+               file.encoding != .utf8 || file.lineEnding == .crlf {
                 if file.lineEnding == .crlf {
                     content = content.replacingOccurrences(of: "\r\n", with: "\n", options: .literal)
                         .replacingOccurrences(of: "\n", with: "\r\n", options: .literal)
@@ -261,11 +267,16 @@ struct EditFileTool: AgentTool {
             throw ToolError("Arquivo não encontrado: \(url.path). Para criar um arquivo novo use write_file.")
         }
         guard !target.isExistingDirectory else { throw ToolError("\(url.path) é uma pasta.") }
+        try target.requireRegularFile()
         guard old != new else { throw ToolError("old_text e new_text são idênticos; não há nada para alterar.") }
         let size = try target.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
         guard size <= maxTextFileBytes else { throw ToolError("\(url.path) é grande demais para editar (\(size) bytes).") }
         guard let file = TextFile.decode(try FileAccess.translating(target, writing: false) { try Data(contentsOf: target) }) else {
             throw ToolError("\(url.path) é um arquivo binário; edit_file só edita texto.")
+        }
+        guard file.invalidUTF8Bytes == 0 else {
+            throw ToolError("\(url.path) é UTF-8 com \(file.invalidUTF8Bytes) bytes inválidos; editá-lo regravaria o arquivo sem eles. "
+                + "Use run_command (sed, python) para mudar só o trecho, ou corrija esses bytes antes.")
         }
 
         let text = file.text as NSString

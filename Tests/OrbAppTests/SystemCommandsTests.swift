@@ -192,6 +192,30 @@ import Testing
         #expect(QuickAskSend.hint(isWorking: true, canSteer: false).hasPrefix("Rotina rodando"))
     }
 
+    @Test func theMenuBarPanelDoesNotSwitchTheScreenUnderAnOpenSheet() {
+        let current = SidebarItem.bot(UUID()), target = UUID()
+        #expect(QuickAskSend.selection(after: target, current: current, hasOpenSheet: true) == current)
+        #expect(QuickAskSend.selection(after: target, current: current, hasOpenSheet: false) == .bot(target))
+    }
+
+    @Test func anOrbWhoseOwnModelIsNotConnectedKeepsWhatWasTyped() {
+        #expect(QuickAskSend.action(isWorking: false, canSteer: false, isReady: true, hasText: true, orbHasModel: false) == .noModel)
+        #expect(QuickAskSend.action(isWorking: false, canSteer: false, isReady: true, hasText: true, orbHasModel: true) == .send)
+        #expect(QuickAskSend.noModelNote(name: "Atlas").contains("Atlas"))
+    }
+
+    @MainActor @Test func hasUsableModelFollowsTheOrbsOwnModelNotTheDefault() {
+        let root = FileManager.default.temporaryDirectory.appending(path: "OrbQuickAsk-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)
+        model.providers = [ProviderAccount(kind: .ollama)] // local: usable
+        model.defaultModel = "ollama/llama"
+        let id = model.bots[0].id
+        #expect(model.hasUsableModel(id))
+        model.bots[0].model = "openai/gpt" // its own model belongs to a provider that is not there
+        #expect(!model.hasUsableModel(id))
+    }
+
     @Test func replyIsTheNewestBotMessageAfterTheLastUserOne() {
         let user = TranscriptItem(.user(text: "oi", attachments: []))
         let old = TranscriptItem(.bot(text: "antiga", isStreaming: false))

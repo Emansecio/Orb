@@ -84,6 +84,10 @@ actor MemoryBank {
     nonisolated let directory: URL
     private var index: MemoryIndex?
     private var isPrepared = false
+    /// What the last `snapshot()` showed (see `snapshotKey`).
+    private var shownKey: String?
+    /// When an index that failed to open is tried again.
+    private var nextIndexAttempt = Date.distantPast
     private var lastReconcile = Date.distantPast
     private var lastBump: [String: Date] = [:]
     /// Set when the Orb is deleted (or its memory kept elsewhere): nothing is written here anymore, so a late task
@@ -101,18 +105,47 @@ actor MemoryBank {
     static let relatedShare = 900, relatedLimit = 3, relatedSnippet = 220
     /// How often hand edits to the pages are picked up while the app runs.
     static let reconcileInterval: TimeInterval = 20
+    /// How long after the index failed to open the next try waits.
+    static let indexRetryInterval: TimeInterval = 30
     /// ai-memory's defaults: ~35-day half-life, access reinforcement, cold below 0.2; sessions younger than
     /// 30 days are never compacted.
     static let lambda = 0.02, sigma = 0.6, mu = 0.04, coldThreshold = 0.2, minimumAgeDays = 30.0
     /// Longest text one `remember` keeps.
     static let maximumLength = 2_000
+    /// Longest identity notes you can save from the editor. The notes grow past `maximumLength` as the Orb adds
+    /// what it learns, so saving them must not cut the end (the brief already trims long ones by itself).
+    static let identityMaximumLength = 12_000
 
-    init(directory: URL) {
+    /// The folder was there when this bank opened and the bank does not make it again (`createsRoot: false`): once it
+    /// is gone the Orb was deleted or reset, and the bank closes instead of bringing it back with a late write.
+    private let watchesRoot: Bool
+
+    /// `createsRoot: false` for a bank in another process (Claude Code's tools server), which the app cannot close.
+    init(directory: URL, createsRoot: Bool = true) {
         self.directory = directory
+        watchesRoot = !createsRoot && FileManager.default.fileExists(atPath: directory.path)
+    }
+
+    /// Makes `folder` (inside the bank). A bank that does not create its root builds only the levels below it, one by
+    /// one, so a root that disappeared meanwhile is not brought back by a write that was already under way.
+    private func makeDirectory(_ folder: URL) {
+        let files = FileManager.default
+        guard watchesRoot else {
+            try? files.createDirectory(at: folder, withIntermediateDirectories: true)
+            return
+        }
+        let rootParts = directory.standardizedFileURL.pathComponents
+        var current = directory
+        for part in folder.standardizedFileURL.pathComponents.dropFirst(rootParts.count) {
+            current.append(path: part)
+            try? files.createDirectory(at: current, withIntermediateDirectories: false)
+        }
     }
 
     nonisolated func close() { closedState.withLock { $0 = true } }
-    var isClosed: Bool { closedState.withLock { $0 } }
+    var isClosed: Bool {
+        closedState.withLock { $0 } || (watchesRoot && !FileManager.default.fileExists(atPath: directory.path))
+    }
 
     // MARK: Identity
 
@@ -154,13 +187,18 @@ actor MemoryBank {
         }.count
     }
 
-    /// Your own edit of the identity notes (from the panel).
+    /// Your own edit of the identity notes (from the panel). Notes above `identityMaximumLength` are refused,
+    /// never cut.
     @discardableResult
     func setIdentity(_ body: String, now: Date = .now) -> Bool {
+        // The editor counts what was typed, so that is what the limit is on (and a huge paste is not scrubbed first).
+        guard body.count <= Self.identityMaximumLength else { return false }
+        let cleaned = Self.clean(body, limit: nil)
+        guard cleaned.count <= Self.identityMaximumLength else { return false }
         prepare(now: now)
         var page = identity() ?? MemoryPage(path: Self.identityPath, kind: .identidade, title: "Identidade", body: "",
                                             created: now, updated: now, origin: .voce)
-        page.body = Self.clean(body)
+        page.body = cleaned
         page.updated = now
         page.origin = .voce
         return write(page)
@@ -431,6 +469,7 @@ actor MemoryBank {
     func snapshot(now: Date = .now) -> MemorySnapshot {
         prepare(now: now)
         let identity = identity()
+        shownKey = snapshotKey(identity: identity)
         let items = index?.rows("""
             SELECT path, kind, title, body, updated, compacted FROM pages WHERE kind != 'identidade' ORDER BY updated DESC
             """).compactMap { row -> MemorySnapshot.Item? in
@@ -439,6 +478,25 @@ actor MemoryBank {
                                        date: Date(timeIntervalSince1970: row.double(4) ?? 0), compacted: row.int(5) == 1)
         } ?? []
         return MemorySnapshot(identity: identity?.body ?? "", interviewPending: identity?.interviewPending ?? false, items: items)
+    }
+
+    /// The snapshot, or nil when nothing the panel shows changed since the last one (the pages are not read and
+    /// sent again at the end of every turn once there are thousands of them).
+    func snapshotIfChanged(now: Date = .now) -> MemorySnapshot? {
+        prepare(now: now)
+        guard snapshotKey(identity: identity()) != shownKey else { return nil }
+        return snapshot(now: now)
+    }
+
+    /// What tells two states of the panel apart: how many pages, and sums of their dates and flags (any save, edit,
+    /// compaction or deletion moves one), and the identity notes.
+    private func snapshotKey(identity: MemoryPage?) -> String {
+        let totals = index?.rows("""
+            SELECT count(*), coalesce(sum(updated), 0), coalesce(sum(mtime), 0), coalesce(sum(compacted), 0)
+            FROM pages WHERE kind != 'identidade'
+            """).first
+        let pages = totals.map { "\($0.int(0))/\($0.double(1) ?? 0)/\($0.double(2) ?? 0)/\($0.int(3))" } ?? "none"
+        return pages + "|\(identity?.body.hashValue ?? 0)|\(identity?.interviewPending == true)"
     }
 
     /// Deletes a page for good, with its archived full text (you asked to forget it). Only pages listed in the
@@ -473,27 +531,50 @@ actor MemoryBank {
 
     // MARK: Files
 
-    /// Opens the index on first use (off the main thread) and picks up hand edits every `reconcileInterval`.
+    /// Opens the index on first use (off the main thread) and picks up hand edits every `reconcileInterval`. An index
+    /// that could not be opened is tried again every `indexRetryInterval`, not given up for the whole session.
     private func prepare(now: Date) {
-        if !isPrepared {
+        if !isPrepared || (index == nil && now >= nextIndexAttempt) {
             isPrepared = true
             index = openIndex()
+            if index == nil {
+                nextIndexAttempt = now.addingTimeInterval(Self.indexRetryInterval)
+            } else {
+                // Pages written while there was no index are picked up at once.
+                lastReconcile = .distantPast
+            }
         }
         if now.timeIntervalSince(lastReconcile) >= Self.reconcileInterval { reconcile(now: now) }
     }
 
     /// Opens (or rebuilds) the index. Another process creating it at the same moment gets a short retry; a corrupt
-    /// file is deleted and rebuilt from the pages.
-    private func openIndex() -> MemoryIndex? {
+    /// file is deleted and rebuilt from the pages, once. An index only locked by another process (or a folder that
+    /// can't be opened) is never deleted: nil, and `prepare` tries again later.
+    private func openIndex(busyTimeout: Int32 = 3000) -> MemoryIndex? {
         guard !isClosed else { return nil }
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        makeDirectory(directory)
         let url = directory.appending(path: "index.sqlite")
+        var rebuilt = false
         for attempt in 0..<3 {
-            if let index = MemoryIndex(url: url), index.isHealthy { return index }
-            if attempt == 0 {
-                Thread.sleep(forTimeInterval: 0.2)
-            } else {
+            var failure = MemoryIndex.Failure.unavailable
+            do {
+                let index = try MemoryIndex(url: url, busyTimeout: busyTimeout)
+                switch index.health {
+                case .ok: return index
+                case .busy: failure = .busy
+                case .corrupt: failure = .corrupt
+                }
+            } catch let error as MemoryIndex.Failure {
+                failure = error
+            } catch {}
+            switch failure {
+            case .corrupt where !rebuilt:
+                rebuilt = true
                 for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(at: directory.appending(path: "index.sqlite" + suffix)) }
+            case .busy where attempt == 0:
+                Thread.sleep(forTimeInterval: 0.2)
+            default:
+                return nil
             }
         }
         return nil
@@ -537,7 +618,7 @@ actor MemoryBank {
     private func write(_ page: MemoryPage) -> Bool {
         guard !isClosed else { return false }
         let url = directory.appending(path: page.path)
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        makeDirectory(url.deletingLastPathComponent())
         guard (try? Data(page.markdown().utf8).write(to: url, options: .atomic)) != nil else { return false }
         upsert(page, mtime: Self.modificationDate(url).timeIntervalSince1970)
         return true
@@ -560,7 +641,7 @@ actor MemoryBank {
         let archive = directory.appending(path: "_arquivo/" + path)
         // An archive already there holds the full text from before; never overwrite it with a shorter version.
         if !FileManager.default.fileExists(atPath: archive.path) {
-            try? FileManager.default.createDirectory(at: archive.deletingLastPathComponent(), withIntermediateDirectories: true)
+            makeDirectory(archive.deletingLastPathComponent())
             guard (try? FileManager.default.copyItem(at: directory.appending(path: path), to: archive)) != nil else { return false }
         }
         let requests = SessionSummary.section("Pedidos", in: page.body).prefix(3).map { "- " + MemoryText.clip($0, 140) }
@@ -606,13 +687,14 @@ actor MemoryBank {
 
     // MARK: Text
 
-    /// Secrets scrubbed, control characters dropped (newlines kept), trimmed and capped.
-    static func clean(_ text: String) -> String {
+    /// Secrets scrubbed, control characters dropped (newlines kept), trimmed and capped (`limit` nil: not capped).
+    static func clean(_ text: String, limit: Int? = maximumLength) -> String {
         let scrubbed = MemorySanitizer.scrub(text)
         let visible = String(String.UnicodeScalarView(scrubbed.unicodeScalars.filter {
             !CharacterSet.controlCharacters.contains($0) || $0 == "\n" || $0 == "\t"
         }))
-        return String(visible.trimmingCharacters(in: .whitespacesAndNewlines).prefix(maximumLength))
+        let trimmed = visible.trimmingCharacters(in: .whitespacesAndNewlines)
+        return limit.map { String(trimmed.prefix($0)) } ?? trimmed
     }
 
     /// One related memory as the prompt has it: `- [Fato, 07/10/2026 14:32 #a1b2] text`. Pages saved without a title of their

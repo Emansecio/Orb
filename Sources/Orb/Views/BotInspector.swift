@@ -811,6 +811,9 @@ private struct IdentityEditor: View {
     let save: () -> Void
     let cancel: () -> Void
 
+    /// Notes above the limit are not saved (they would lose their end), so the editor says so instead.
+    private var excess: Int { text.count - MemoryBank.identityMaximumLength }
+
     var body: some View {
         PlaceholderTextEditor(placeholder: "Ex.: Seja direto e me lembre de fazer pausas.", text: $text, minHeight: 220)
             .padding(.horizontal, 20)
@@ -818,12 +821,14 @@ private struct IdentityEditor: View {
             .orbSheet("Como \(name) funciona",
                       subtitle: "Vai em toda conversa. O que \(name) aprender na entrevista entra no fim destas notas. ⌘↩ salva.",
                       size: .medium) {
-                SheetFooter(cancel: cancel, primaryTitle: "Salvar", primary: save)
+                SheetFooter(message: excess > 0 ? "Muito longo: tire \(excess) caracteres para salvar." : nil,
+                            cancel: cancel, primaryTitle: "Salvar", isPrimaryDisabled: excess > 0, primary: save)
             }
             // Return adds a line in the editor; ⌘↩ saves.
             .background {
                 Button("Salvar", action: save)
                     .keyboardShortcut(AppShortcut.commandReturn)
+                    .disabled(excess > 0)
                     .frame(width: 0, height: 0)
                     .opacity(0)
                     .accessibilityHidden(true)

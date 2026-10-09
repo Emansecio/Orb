@@ -234,13 +234,29 @@ actor MCPAuth {
     /// `servers` with the Bearer of each connector that has a login, renewed if less than `minimumLife` is left: for Claude
     /// Code, which reads the headers once and cannot renew in the middle of a turn.
     func withBearer(_ servers: [MCPServerConfig], minimumLife: TimeInterval = 1800) async -> [MCPServerConfig] {
+        await bearers(for: servers, minimumLife: minimumLife).servers
+    }
+
+    /// `withBearer`, and which connectors have no login left (it could not be renewed, so their tokens were forgotten), for the
+    /// cards to say so: the CLI only meets a 401 and drops the connector without a word.
+    func bearers(for servers: [MCPServerConfig], minimumLife: TimeInterval = 1800)
+        async -> (servers: [MCPServerConfig], ended: [UUID: MCPAuthRequired.Reason]) {
         var result = servers
+        var ended: [UUID: MCPAuthRequired.Reason] = [:]
         for index in result.indices where result[index].canSignIn {
-            if let token = try? await accessToken(result[index].id, minimumLife: minimumLife) {
-                result[index].headers["Authorization"] = "Bearer \(token)"
+            let id = result[index].id
+            do {
+                if let token = try await accessToken(id, minimumLife: minimumLife) {
+                    result[index].headers["Authorization"] = "Bearer \(token)"
+                }
+            } catch let required as MCPAuthRequired {
+                // Only a login that was there and ended: "no login" while signing in or out is not news.
+                if required.reason == .expired { ended[id] = required.reason }
+            } catch {
+                // A passing failure (the network): the connector goes without a token this time, as before.
             }
         }
-        return result
+        return (result, ended)
     }
 
     /// Joins the renewal in progress or starts one.

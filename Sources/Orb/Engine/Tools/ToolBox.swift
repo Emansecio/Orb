@@ -160,4 +160,18 @@ extension URL {
         var isDirectory: ObjCBool = false
         return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
     }
+
+    /// An ordinary file once links are followed: not a device, a pipe or a socket, which have no size and can block a read
+    /// forever (a FIFO without a writer) or never end (`/dev/zero`).
+    var isRegularFileResolved: Bool {
+        (try? resolvingLinkChain.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+    }
+
+    /// Throws when this is not an ordinary file; `ReadFileTool`, `EditFileTool` and `GrepTool` call it before opening anything.
+    func requireRegularFile() throws {
+        guard isRegularFileResolved else {
+            throw ToolError("\(path) não é um arquivo comum (é um dispositivo, pipe ou socket); ler isso pode não terminar. "
+                + "Use run_command com head -c se precisar mesmo.")
+        }
+    }
 }

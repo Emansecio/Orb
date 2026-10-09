@@ -1,6 +1,7 @@
 import CoreGraphics
 import CoreText
 import Foundation
+import os
 import ImageIO
 import Testing
 import UniformTypeIdentifiers
@@ -27,6 +28,24 @@ final class ToolWorkspace {
 
     func run(_ tool: some AgentTool, _ arguments: [String: JSONValue]) async throws -> String {
         try await tool.run(.object(arguments), context: context)
+    }
+
+    /// How a call ends: its result, or its error message. Nil when it has not ended after `seconds`, so a call that
+    /// blocks forever (a read on a pipe nobody writes to) fails the test instead of hanging the run.
+    func outcome(of tool: some AgentTool, _ arguments: [String: JSONValue], seconds: Int = 3) async -> String? {
+        let context = context
+        let finished = OSAllocatedUnfairLock<String?>(initialState: nil)
+        let arguments = JSONValue.object(arguments)
+        Task.detached {
+            let message: String
+            do { message = try await tool.run(arguments, context: context) } catch { message = (error as? ToolError)?.message ?? "\(error)" }
+            finished.withLock { $0 = message }
+        }
+        for _ in 0..<(seconds * 50) {
+            if let message = finished.withLock({ $0 }) { return message }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return nil
     }
 
     func url(_ name: String) -> URL { directory.appending(path: name) }

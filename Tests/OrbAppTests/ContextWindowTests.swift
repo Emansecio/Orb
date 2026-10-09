@@ -54,9 +54,20 @@ struct ContextBudgetTests {
         #expect(ContextBudget(modelWindow: 1_000_000, level: .economical).tokens == 40_000)
         // "Ampla" takes up to 60% of the window.
         #expect(ContextBudget(modelWindow: 1_000_000, level: .wide).tokens == 600_000)
-        #expect(ContextBudget(modelWindow: 100_000, level: .wide).tokens == 60_000)
+        // ...and never less than "Equilibrado": in a 100k window that is all that is free (78,000), not 60%.
+        #expect(ContextBudget(modelWindow: 100_000, level: .wide).tokens == 78_000)
+        #expect(ContextBudget(modelWindow: 128_000, level: .wide).tokens == 80_000)
         // ...but never more than what is free after the fixed part.
         #expect(ContextBudget(modelWindow: 30_000, level: .wide).tokens == 15_250)
+    }
+
+    @Test func aWiderLevelNeverGivesLessHistory() {
+        for window in [16_000, 32_000, 64_000, 100_000, 128_000, 131_072, 200_000, 1_000_000] {
+            let economical = ContextBudget(modelWindow: window, level: .economical).tokens
+            let balanced = ContextBudget(modelWindow: window, level: .balanced).tokens
+            let wide = ContextBudget(modelWindow: window, level: .wide).tokens
+            #expect(economical <= balanced && balanced <= wide, "window \(window)")
+        }
     }
 
     @Test func aSmallWindowKeepsRoomForThePromptToolsAndReply() {

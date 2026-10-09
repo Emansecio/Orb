@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// How a spawned process ended.
 struct ChildExit: Sendable, Equatable {
@@ -80,5 +81,28 @@ enum SpawnedProcess {
             result.append(strdup(string))
         }
         return result
+    }
+}
+
+/// The process groups of the commands and CLIs that are running now (`ProcessRunner`, `LineProcess`). Each child leads a group
+/// of its own, so it does not die with the app: quitting in the middle of a turn would leave a build or `claude` running.
+/// `willTerminate` stops them all with `killAllNow`.
+enum ChildProcessGroups {
+    private static let live = OSAllocatedUnfairLock(initialState: Set<pid_t>())
+
+    static var running: Set<pid_t> { live.withLock { $0 } }
+
+    static func insert(_ pid: pid_t) { live.withLock { _ = $0.insert(pid) } }
+    static func remove(_ pid: pid_t) { live.withLock { _ = $0.remove(pid) } }
+
+    /// SIGTERM to every registered group (and to `extra`), SIGKILL to what is still there half a second later. `only` limits
+    /// it to those groups (for tests, which share the registry with each other). Blocks for at most half a second.
+    static func killAllNow(including extra: [pid_t] = [], only: Set<pid_t>? = nil) {
+        let registered = live.withLock { only.map($0.intersection) ?? $0 }
+        let groups = (Array(registered) + (only == nil ? extra : [])).filter { kill(-$0, 0) == 0 }
+        groups.forEach { kill(-$0, SIGTERM) }
+        let deadline = Date.now.addingTimeInterval(0.5)
+        while Date.now < deadline, groups.contains(where: { kill(-$0, 0) == 0 }) { usleep(20_000) }
+        groups.filter { kill(-$0, 0) == 0 }.forEach { kill(-$0, SIGKILL) }
     }
 }

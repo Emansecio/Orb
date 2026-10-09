@@ -98,7 +98,7 @@ enum OrbToolsMCPServer {
 
         var context: ToolContext {
             var context = ToolContext(workingDirectory: folder ?? FileManager.default.homeDirectoryForCurrentUser,
-                                      memory: MemoryBank(directory: memoryDirectory), computerUseAllowed: mac)
+                                      memory: MemoryBank(directory: memoryDirectory, createsRoot: false), computerUseAllowed: mac)
             if mac {
                 // Claude Code sees pictures: a screenshot goes back as one (shrunk like the native engine's), and the copy is
                 // deleted once it was sent.

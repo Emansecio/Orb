@@ -9,6 +9,8 @@ enum LegacyMigration {
     static let oldFolder = "OpenBot"
     static let oldIdentifier = "app.openbot.mac"
     static let identifier = "app.orb.mac"
+    /// The folder of large tool outputs, which is not copied (see `ToolOutputCap`).
+    static let skipped = "saidas"
     /// Written into Orb's data folder once the copy is done.
     static let marker = ".migrado-do-openbot"
 
@@ -38,7 +40,12 @@ enum LegacyMigration {
         let staging = directory.deletingLastPathComponent().appending(path: directory.lastPathComponent + ".migrando")
         try? files.removeItem(at: staging)
         do {
-            try files.copyItem(at: legacy, to: staging)
+            // Item by item, without the large tool outputs (`saidas/`): they are cleaned by age anyway and can be the
+            // bulk of the folder. The original stays where it was.
+            try files.createDirectory(at: staging, withIntermediateDirectories: true)
+            for item in try files.contentsOfDirectory(at: legacy, includingPropertiesForKeys: nil) where item.lastPathComponent != skipped {
+                try files.copyItem(at: item, to: staging.appending(path: item.lastPathComponent))
+            }
             if files.fileExists(atPath: directory.path) {
                 let format = DateFormatter()
                 format.locale = Locale(identifier: "en_US_POSIX")

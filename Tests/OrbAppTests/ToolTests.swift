@@ -67,6 +67,26 @@ final class ToolTests {
         #expect(ContinuousClock.now - start < .seconds(20))
     }
 
+    /// Quitting the app mid-turn: the command leads a group of its own, so only `ChildProcessGroups` can stop it.
+    @Test func quittingStopsCommandsStillRunning() async throws {
+        let pidFile = directory.appending(path: "pid-\(UUID().uuidString)")
+        let task = Task {
+            try await ProcessRunner.run("/bin/sh", ["-c", "echo $$ > '\(pidFile.path)'; sleep 30"], timeout: .seconds(60))
+        }
+        var pid: pid_t = 0
+        await waitUntil("the command to write its pid", timeout: .seconds(20)) {
+            pid = (try? String(contentsOf: pidFile, encoding: .utf8)).flatMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? 0
+            return pid > 0
+        }
+        #expect(ChildProcessGroups.running.contains(pid))
+        ChildProcessGroups.killAllNow(only: [pid])
+        let result = try await task.value
+        #expect(result.signal == SIGTERM)
+        #expect(kill(-pid, 0) != 0)
+        // A finished command is no longer registered.
+        #expect(!ChildProcessGroups.running.contains(pid))
+    }
+
     // MARK: Files
 
     @Test func writeReadAndListWithRelativePaths() async throws {

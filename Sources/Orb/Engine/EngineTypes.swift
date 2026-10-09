@@ -449,7 +449,9 @@ enum LLMError: LocalizedError, Equatable {
 
     static let retryableStatuses: Set<Int> = [408, 409, 429, 500, 502, 503, 504, 529]
     static let retryableStreamErrors: Set<String> = ["overloaded_error", "api_error", "rate_limit_error", "server_error", "rate_limit_exceeded"]
-    static let retryableNetworkCodes: Set<URLError.Code> = [.timedOut, .networkConnectionLost, .cannotConnectToHost, .notConnectedToInternet]
+    /// The two lookup failures are what a Mac that just woke up reports until the network is back.
+    static let retryableNetworkCodes: Set<URLError.Code> = [.timedOut, .networkConnectionLost, .cannotConnectToHost, .notConnectedToInternet,
+                                                            .cannotFindHost, .dnsLookupFailed]
 
     private static let rateLimitTypes: Set<String> = ["rate_limit_error", "rate_limit_exceeded"]
 

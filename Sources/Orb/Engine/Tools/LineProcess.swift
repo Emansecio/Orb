@@ -8,12 +8,14 @@ import os
 final class LineProcess: Sendable {
     /// Stdout, one line at a time; finishes when the child closes stdout.
     let lines: AsyncStream<String>
-    private let pid: pid_t
+    let pid: pid_t
     /// Kept so the readers' descriptors stay open for as long as the child may write.
     private let pipes: [Pipe]
     private let input: OSAllocatedUnfairLock<FileHandle?>
     private let errors: OSAllocatedUnfairLock<OutputBuffer>
     private let exited: OSAllocatedUnfairLock<Bool>
+    /// Finishes when the child's stderr reaches its end.
+    private let errorsDrained: AsyncStream<Never>
 
     init(executable: URL, arguments: [String], directory: URL, environment: [String: String]) throws {
         let stdin = Pipe(), stdout = Pipe(), stderr = Pipe()
@@ -41,9 +43,15 @@ final class LineProcess: Sendable {
             for line in complete where !line.isEmpty { continuation.yield(String(decoding: line, as: UTF8.self)) }
         }
         let errors = OSAllocatedUnfairLock(initialState: OutputBuffer(limit: 4000))
+        let (errorsDrained, errorsDone) = AsyncStream<Never>.makeStream()
         stderr.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
-            if data.isEmpty { handle.readabilityHandler = nil } else { errors.withLock { $0.append(data) } }
+            if data.isEmpty {
+                handle.readabilityHandler = nil
+                errorsDone.finish()
+            } else {
+                errors.withLock { $0.append(data) }
+            }
         }
         let exited = OSAllocatedUnfairLock(initialState: false)
 
@@ -54,6 +62,7 @@ final class LineProcess: Sendable {
                                            error: stderr.fileHandleForWriting.fileDescriptor,
                                            input: stdin.fileHandleForReading.fileDescriptor)
         } catch {
+            errorsDone.finish()
             for handle in [stdin.fileHandleForReading, stdin.fileHandleForWriting, stdout.fileHandleForReading, stdout.fileHandleForWriting,
                            stderr.fileHandleForReading, stderr.fileHandleForWriting] {
                 try? handle.close()
@@ -64,12 +73,17 @@ final class LineProcess: Sendable {
         try? stdin.fileHandleForReading.close()
         try? stdout.fileHandleForWriting.close()
         try? stderr.fileHandleForWriting.close()
-        SpawnedProcess.watch(pid) { _ in exited.withLock { $0 = true } }
+        ChildProcessGroups.insert(pid)
+        SpawnedProcess.watch(pid) { _ in
+            exited.withLock { $0 = true }
+            ChildProcessGroups.remove(pid)
+        }
         // A child that exits early must not kill the app with SIGPIPE when we write to it.
         _ = fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
         self.lines = lines
         self.errors = errors
         self.exited = exited
+        self.errorsDrained = errorsDrained
         self.pid = pid
         pipes = [stdin, stdout, stderr]
         input = OSAllocatedUnfairLock(initialState: stdin.fileHandleForWriting)
@@ -92,6 +106,19 @@ final class LineProcess: Sendable {
 
     /// The last few KB the child wrote to stderr.
     var errorOutput: String { errors.withLock { $0.text }.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    /// `errorOutput` once the child's stderr has been read to its end, for a message about why it died: stdout can
+    /// close before the last bytes of stderr are read. Waits at most `limit` (a grandchild may hold stderr open).
+    func finalErrorOutput(waitingUpTo limit: Duration = .seconds(1)) async -> String {
+        let drained = errorsDrained
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { for await _ in drained {} }
+            group.addTask { try? await Task.sleep(for: limit) }
+            await group.next()
+            group.cancelAll()
+        }
+        return errorOutput
+    }
 
     /// Unless the child exits first: SIGTERM to its process group after `grace` seconds, SIGKILL 2 seconds later.
     func terminate(after grace: TimeInterval) {

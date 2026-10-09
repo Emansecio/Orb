@@ -88,10 +88,17 @@ actor BackgroundJobs {
 
     // MARK: Starting
 
-    /// Starts `command` with `shell -c` and returns the job with the first output (up to about a second of it,
-    /// less when the command ends sooner).
-    func start(botID: UUID, command: String, directory workingDirectory: URL, shell: String,
-               environment: [String: String]) async throws -> (job: Snapshot, firstOutput: String) {
+    /// Starts `command` in the resolved shell (see `ShellEnvironment.Resolved.arguments(for:)`).
+    func start(botID: UUID, command: String, directory: URL, shell: ShellEnvironment.Resolved) async throws
+        -> (job: Snapshot, firstOutput: String) {
+        try await start(botID: botID, command: command, directory: directory, shell: shell.shell,
+                        environment: shell.environment, arguments: shell.arguments(for: command))
+    }
+
+    /// Starts `command` with `shell -c` (or the given `arguments`) and returns the job with the first output (up to
+    /// about a second of it, less when the command ends sooner).
+    func start(botID: UUID, command: String, directory workingDirectory: URL, shell: String, environment: [String: String],
+               arguments: [String]? = nil) async throws -> (job: Snapshot, firstOutput: String) {
         let running = jobs[botID, default: [:]].values.filter { $0.snapshot.isActive }.count
         guard running < Self.maxRunningPerOrb else {
             throw ToolError("Já há \(running) processos em segundo plano rodando. Pare algum com job_stop antes de iniciar outro.")
@@ -109,7 +116,7 @@ actor BackgroundJobs {
 
         let pid: pid_t
         do {
-            pid = try SpawnedProcess.start(shell, ["-c", command], directory: workingDirectory, environment: environment,
+            pid = try SpawnedProcess.start(shell, arguments ?? ["-c", command], directory: workingDirectory, environment: environment,
                                            output: descriptor)
         } catch {
             try? FileManager.default.removeItem(at: log)
@@ -163,6 +170,9 @@ actor BackgroundJobs {
         lastID[botID] = nil
         try? FileManager.default.removeItem(at: directory.appending(path: botID.uuidString))
     }
+
+    /// The process groups of the jobs that are running now.
+    nonisolated var runningGroups: [pid_t] { liveGroups.withLock { Array($0) } }
 
     /// Kills every job's process group right away and deletes the logs; for `willTerminate`, which cannot wait
     /// for the actor. Blocks for at most half a second.

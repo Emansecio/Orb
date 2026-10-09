@@ -41,7 +41,7 @@ O certificado vale só neste Mac (não serve para distribuir o app). Outra ident
 ./scripts/bundle.sh`. Depois da primeira compilação assinada, libere as permissões do macOS mais uma vez.
 
 > Veio do OpenBot? Na primeira abertura do Orb (app instalado, `app.orb.mac`), os dados e as preferências de
-> `~/Library/Application Support/OpenBot` são copiados (os originais ficam onde estavam) e as chaves do Keychain são copiadas uma
+> `~/Library/Application Support/OpenBot` são copiados, menos a pasta de saídas grandes `saidas/` (os originais ficam onde estavam) e as chaves do Keychain são copiadas uma
 > a uma quando usadas (as do OpenBot ficam como backup e, se você remover uma chave no Orb, ela não volta de lá). Como o identificador mudou, o macOS pede de novo as permissões e "Abrir ao iniciar sessão" precisa ser ligado de novo.
 
 ## Primeiro uso: conectar um modelo
@@ -57,7 +57,7 @@ com os caminhos mais curtos (se você escrever antes, o texto fica no campo e o 
 | Colar uma chave de API | OpenAI, Claude, xAI ou OpenRouter |
 
 "Mais opções em Ajustes" (⌘, → **Modelos**) leva à lista completa. Os provedores aparecem em grupos; os modelos de cada um vêm
-**ao vivo** do provedor (ao abrir e a cada 6 h) e valem para qualquer Orb.
+**ao vivo** do provedor (ao abrir e a cada 6 h; uma lista que falha é tentada de novo depois de 5 min, 10 min e assim por diante, sem travar as rotinas) e valem para qualquer Orb.
 
 | Grupo | Provedor | Como conectar | Observações |
 |---|---|---|---|
@@ -376,7 +376,7 @@ janela vai antes para a memória do Orb. As mensagens continuam salvas na conver
   decisões e dos arquivos, e para a memória do Orb. É uma chamada pequena por trecho, não aparece na conversa, e sem rede
   ou com o modelo ocupado o Orb resume do jeito de sempre.
 - **Ajustes → Geral → Contexto das conversas**: *Econômico* (cerca de 40 mil tokens palavra por palavra, gasta menos por
-  mensagem), *Equilibrado* (80 mil, o padrão) ou *Amplo* (até 60% da janela, custa mais por mensagem). Vale para todos os Orbs.
+  mensagem), *Equilibrado* (80 mil, o padrão) ou *Amplo* (até 60% da janela, nunca menos que o Equilibrado; custa mais por mensagem). Vale para todos os Orbs.
 - Se um provedor recusa uma conversa por tamanho, o Orb aprende a janela real daquele modelo (**Janelas aprendidas**, com
   "Esquecer", útil depois de aumentar o limite do servidor).
 - No **Claude Code** o contexto é do próprio Claude Code, que se resume sozinho; "Compactar agora" faz um resumo e **a próxima
@@ -449,13 +449,13 @@ tem a **Galeria**, os **Instalados** e **Explorar**.
     *Entrar com Slack*; colar o token continua valendo como alternativa. O login segue o OAuth 2.1 do MCP (PKCE obrigatório: um
     serviço sem PKCE é recusado). O token fica no Keychain, nunca no arquivo de dados, e **Sair da conta** (no menu do cartão)
     o apaga (e pede ao serviço que o revogue, quando o servidor de login anuncia o endereço da revogação; o `auth.revoke` do Slack ainda não é chamado, então o token dele só deixa de valer ao expirar ou ao desinstalar o app). O cartão mostra **Entrar**, **Sessão expirou** (a renovação foi recusada) ou **Precisa de mais permissão** (o
-    servidor pediu um escopo a mais: **Permitir mais** abre o login de novo, uma vez por clique). Em **Avançado** dá para dar o
+    servidor pediu um escopo a mais: **Permitir mais** abre o login de novo, uma vez por clique, e o botão fica até a permissão ser liberada). Um login que ficou esperando o navegador é do app, não do cartão: sair da tela não o prende, e um novo clique em *Entrar* substitui o anterior. Em **Avançado** dá para dar o
     Client ID e o Client Secret de um app seu, para serviços que não deixam o Orb se registrar. Com o Claude Code, o token vai
-    renovado (com pelo menos 30 minutos de vida, quando o serviço dá refresh token) para cada turno. Só entra em conectores HTTPS.
+    renovado (com pelo menos 30 minutos de vida, quando o serviço dá refresh token) para cada turno; se o serviço recusar a renovação, o cartão passa a dizer **Sessão expirou** na hora. Só entra em conectores HTTPS.
   - **GitHub** e **Supabase** (`mcp.supabase.com/mcp`, token de acesso pessoal; começa com `read_only=true`) pedem uma chave.
 - **Carregam sob demanda.** Um conector não liga com o app nem manda as suas ferramentas a cada mensagem: o Orb recebe só duas
   ferramentas fixas, uma para ver o que cada conector oferece e outra para usá-lo. O servidor sobe na primeira vez que um Orb
-  precisa dele (a conversa mostra "Conectando a GitHub…") e desliga sozinho depois de 10 minutos sem uso. O cartão em
+  precisa dele (a conversa mostra "Conectando a GitHub…") e desliga sozinho depois de 10 minutos sem uso (um servidor local que fica sem responder, duas chamadas seguidas, é desligado e sobe de novo na próxima; ao fechar o app, os servidores locais são encerrados). O cartão em
   *Instalados* mostra **Pronto** (desligado, liga quando precisar), **Em uso**, **Conectando…**, **Erro** ou **Desligado**, e o
   menu tem **Testar conexão** ("Conectou: 12 ferramentas em 0,8 s"; se falhar, o motivo aparece no cartão), **Ver ferramentas…** (com "Só leitura" e "Destrutiva"),
   **Editar…** e **Apagar…**. Uma falha traz "Tentar de novo". Com o Claude Code os conectores vão como sempre, e ele mesmo

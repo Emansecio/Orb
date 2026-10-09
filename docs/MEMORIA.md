@@ -29,7 +29,14 @@ documento descreve o que existe no código. Como a memória se combina com a com
 
 Os arquivos `.md` são a fonte da verdade: dá para abrir no Obsidian, editar à mão ou apagar. A cada ~20 s de uso (e quando
 o app volta para a frente) o índice confere as datas dos arquivos e se atualiza (`MemoryBank.reconcile`); se o `index.sqlite`
-sumir ou corromper, ele é refeito a partir das páginas (só se perde a contagem de uso).
+sumir ou corromper, ele é refeito a partir das páginas (só se perde a contagem de uso). Só a corrupção apaga o arquivo: um
+índice que outro processo está usando (o app reconstruindo, o servidor de ferramentas do Claude Code) ou uma pasta que não
+abre não são apagados, e abrir um índice já certo não escreve nada, então não espera a trava. Se não abriu, o banco tenta de
+novo a cada 30 s (`indexRetryInterval`) em vez de ficar sem busca a sessão inteira.
+
+O painel lê a memória por `MemoryBank.snapshot()`. No fim de cada turno o app pede `snapshotIfChanged()`: o banco compara uma
+chave barata (quantas páginas, somas de datas e da marca de compactada, e a identidade) com a do último snapshot e só relê
+e manda as páginas, com o corpo, quando algo mudou; com milhares de páginas de sessão, o resto do tempo não custa nada.
 
 Uma página é um `.md` com um bloco de campos no topo:
 
@@ -61,7 +68,8 @@ Campos extras (como `tags` do Obsidian) são mantidos quando o app reescreve a p
 | `sessao` | Conversa | `sessoes/` | só "onde paramos" e o que for relacionado | sim |
 
 No painel os grupos se chamam Preferências, Fatos, Procedimentos e "Resumos de conversas"; a identidade tem bloco próprio
-("Como <Orb> funciona").
+("Como <Orb> funciona"). As notas crescem com o que o Orb aprende (cada nota até 2.000 caracteres), então o editor aceita até
+12.000 caracteres (`MemoryBank.identityMaximumLength`) e, passando disso, avisa e bloqueia o Salvar em vez de cortar o fim.
 
 ## Ciclo de vida
 

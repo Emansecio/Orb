@@ -54,7 +54,10 @@ struct ContextGaugeDriver: View {
         guard !Task.isCancelled else { return }
         var reading: ContextReading?
         if let input = model.contextInput(for: botID) {
-            reading = await Task.detached(priority: .utility) { ContextReading.make(input) }.value
+            // A detached task does not inherit the cancellation of this one: pass it on, so a measure that a newer
+            // signal replaced stops instead of walking the whole history for a result nobody reads.
+            let job = Task.detached(priority: .utility) { ContextReading.make(input) }
+            reading = await withTaskCancellationHandler { await job.value } onCancel: { job.cancel() }
         }
         guard !Task.isCancelled else { return }
         // The chip arriving (or its number gaining a digit) moves the model chip and the buttons beside it: the whole

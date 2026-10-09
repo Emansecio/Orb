@@ -536,4 +536,11 @@ extension OpenAIClientTests {
         #expect(none["tools"] == auto["tools"])
         #expect(OpenAIClient.requestBody(model: "m", messages: [.user("oi")], tools: [], toolChoice: .none)["tool_choice"] == nil)
     }
+
+    @Test func aModelListGivesUpAfterAShortWaitNotTheDefaultMinute() async throws {
+        let client = StubProtocol.client(host: "slow-models.test", apiKey: nil, status: 200, body: #"{"data":[]}"#)
+        _ = try await client.models()
+        let request = StubProtocol.requests.withLock { $0["slow-models.test"] }
+        #expect(request?.timeoutInterval == ProviderTransport.listTimeout)
+    }
 }

@@ -142,12 +142,20 @@ struct EngineLearningTests {
         #expect(!events.contains { if case .failed = $0 { true } else { false } })
     }
 
-    @Test func aStatedWindowNotSmallerThanTheOneAssumedTeachesNothing() async {
+    @Test func aStatedWindowNotSmallerThanTheOneAssumedIsRememberedAsAGuess() async {
         let learned = Learned()
-        // The window is right; the estimate was off. The retry halves the history, nothing is remembered.
-        let overflow = LLMError.http(status: 400, message: "prompt is too long: 213456 tokens > 200000 maximum")
-        _ = await run(window: 200_000, failures: [overflow], learned: learned)
-        #expect(learned.all.isEmpty)
+        // The window is right; the estimate of the history was off. The retry halves the history, and the window is
+        // lowered as a guess (not stated), so the next turns do not overflow at every cycle.
+        let overflow = LLMError.http(status: 400, message: "This model's maximum context length is 65536 tokens, however you requested 70123.")
+        let events = await run(window: 65_536, failures: [overflow], learned: learned)
+        #expect(learned.all == [Int(Double(65_536) * AgentEngine.unstatedWindowShare)])
+        #expect(learned.stated == [false])
+        #expect(!events.contains { if case .failed = $0 { true } else { false } })
+        // A refusal that names a bigger window teaches the same guess.
+        let bigger = Learned()
+        let named = LLMError.http(status: 400, message: "prompt is too long: 213456 tokens > 200000 maximum")
+        _ = await run(window: 100_000, failures: [named], learned: bigger)
+        #expect(bigger.all == [85_000] && bigger.stated == [false])
     }
 
     @Test func nothingIsReportedWhenTheRetryFailsToo() async {
@@ -243,6 +251,55 @@ struct EngineNudgeTests {
         #expect(window.messages.contains { $0.content == Self.request })
         #expect(window.droppedCount <= start && cut.covered <= start)
         #expect(window.foldedCount == window.droppedCount)
+    }
+
+    @Test func aMessageSentDuringTheTaskKeepsItsOutputsWhole() throws {
+        let path = #"{"path":"/tmp/grande.txt"}"#
+        let input: [ChatMessage] = [.user("tarefa"), ChatMessage(role: .assistant, content: "", toolCalls: [call("g0", "read_file", path)]),
+                                    .tool("g0", String(repeating: "z", count: 20_000)), .user("usa tabs")]
+        var plain = ContextCut()
+        let unaware = ContextWindow.fit(input, budget: .fallback, cut: &plain)
+        #expect(unaware.messages.first { $0.role == .tool }?.content.count ?? 0 < 20_000)
+        var cut = ContextCut()
+        let window = ContextWindow.fit(input, budget: .fallback, cut: &cut, steering: [3])
+        #expect(window.messages.first { $0.role == .tool }?.content.count == 20_000)
+        #expect(window.messages.last?.content == "usa tabs")
+    }
+
+    @Test func aMessageSentDuringTheTaskIsNoTurnStartForTheWindow() throws {
+        var input: [ChatMessage] = []
+        for index in 0..<6 { input += turn("pedido antigo \(index)", output: 3_000, tag: "w\(index)") }
+        let start = input.count
+        input += [.user(Self.request), ChatMessage(role: .assistant, content: "", toolCalls: [call("n0", "read_file", #"{"path":"/tmp/n0.txt"}"#)]),
+                  .tool("n0", String(repeating: "y", count: 6_000)), .user("usa tabs"),
+                  ChatMessage(role: .assistant, content: "", toolCalls: [call("n1", "read_file", #"{"path":"/tmp/n1.txt"}"#)]),
+                  .tool("n1", String(repeating: "y", count: 12_000))]
+        let budget = ContextBudget(tokens: 6_000)
+        var plain = ContextCut()
+        #expect(!ContextWindow.fit(input, budget: budget, cut: &plain).messages.contains { $0.content == Self.request })
+        var cut = ContextCut()
+        let window = ContextWindow.fit(input, budget: budget, cut: &cut, steering: [start + 3])
+        #expect(window.messages.contains { $0.content == Self.request })
+        #expect(window.droppedCount <= start && cut.covered <= start)
+    }
+
+    @Test func aMessageSentDuringTheTurnKeepsTheOutputsWholeInTheNextRequest() async throws {
+        let queue = SteeringQueue()
+        let big = LLMEvent.toolCalls([call("s0", "read_file", #"{"path":"/tmp/g.txt"}"#)])
+        let next = LLMEvent.toolCalls([call("s1", "read_file", #"{"path":"/tmp/h.txt"}"#)])
+        let recorder = Recorder([[big], [next], [.text("fim")]])
+        var request = engineRequest(recorder, budget: .fallback, toolSize: 9_000, prompt: "tarefa")
+        request.steering = queue
+        // The user speaks while the first tool runs: the message goes in at the next step boundary.
+        request.tools = [OutputTool(size: 9_000, onRun: { queue.push(SteeredMessage(text: "usa tabs", prompt: "usa tabs")) })]
+        let events = await collect(request)
+        #expect(!events.contains { if case .failed = $0 { true } else { false } })
+        let received = await recorder.received
+        #expect(received.count == 3)
+        for window in received.dropFirst() {
+            #expect(window.contains { $0.role == .tool && $0.content.count >= 9_000 })
+            #expect(window.contains { $0.content == "usa tabs" })
+        }
     }
 }
 

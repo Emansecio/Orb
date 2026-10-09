@@ -101,6 +101,12 @@ struct Store: Sendable {
         directory.appendingPathComponent("conversations/\(botID.uuidString).json")
     }
 
+    /// Whether `file` is where the chat of this Orb is saved, or the conversation of one of its routine runs.
+    func isConversationFile(_ file: URL, of botID: UUID) -> Bool {
+        file == conversationURL(botID)
+            || (file.deletingLastPathComponent() == archiveFolder(botID) && file.lastPathComponent.hasPrefix("routine-"))
+    }
+
     private func metaURL(_ botID: UUID) -> URL {
         directory.appendingPathComponent("conversations/\(botID.uuidString).meta.json")
     }

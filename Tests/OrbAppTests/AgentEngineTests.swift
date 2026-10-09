@@ -40,6 +40,20 @@ private struct ScriptedLLM: LLMClient {
     func models() async throws -> [String] { ["fake"] }
 }
 
+/// Like `TouchTool`, and queues a message for the model when it runs (the user wrote during the step).
+private struct SteeringTouchTool: AgentTool {
+    let queue: SteeringQueue
+    var spec: ToolSpec { ToolSpec(name: "touch", description: "Touches a file", parameters: .schema([:])) }
+    var kind: ToolCall.Kind { .file }
+    var capability: Capability? { nil }
+    func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
+    func summary(_ arguments: JSONValue) -> (title: String, detail: String) { ("Tocando", "arquivo") }
+    func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
+        if queue.isEmpty { queue.push(SteeredMessage(text: "use a pasta X", prompt: "use a pasta X")) }
+        return "ok"
+    }
+}
+
 private actor Counter {
     private(set) var value = 0
     func increment() { value += 1 }
@@ -505,6 +519,23 @@ extension AgentEngineTests {
         #expect(last?.role == .assistant)
         #expect(last?.content.hasPrefix(ProgressRecord.marker) == true)
         #expect(last?.content.contains("[passo 1] touch") == true)
+    }
+
+    @Test func theProgressRecordKeepsTheStepsBeforeAMessageQueuedDuringTheTurn() async {
+        let queue = SteeringQueue()
+        var bot = Bot(name: "Teste", role: "", orb: OrbConfig(), permissionMode: .bypass)
+        bot.permissionRules = []
+        let script = Script([[touchCall], [touchCall], [touchCall]])
+        let steered = TurnRequest(bot: bot, model: "fake", system: "sys", history: [], prompt: "oi",
+                                  client: ScriptedLLM(script: script), tools: [SteeringTouchTool(queue: queue)],
+                                  context: ToolContext(workingDirectory: URL(fileURLWithPath: NSTemporaryDirectory())),
+                                  maxSteps: 3, steering: queue)
+        let events = await run(AgentEngine(), steered)
+        let last = messages(events).last
+        #expect(last?.content.hasPrefix(ProgressRecord.marker) == true)
+        // The message "use a pasta X" came after step 1; both steps belong to the same task.
+        #expect(last?.content.contains("[passo 1] touch") == true)
+        #expect(last?.content.contains("[passo 2] touch") == true)
     }
 
     @Test func aTurnThatFinishesEarlyNeverSeesTheLimit() async {

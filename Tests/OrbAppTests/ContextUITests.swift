@@ -72,6 +72,33 @@ struct ContextReadingTests {
         #expect(ContextReading.make(noModel) == nil)
     }
 
+    @Test func aCancelledMeasurementDoesNotWalkTheHistory() async throws {
+        let measured = input(conversation(turns: 8))
+        #expect(ContextReading.make(measured) != nil)
+        // The driver cancels the task of a measurement a newer signal replaced: it stops with nothing.
+        let task = Task.detached {
+            while !Task.isCancelled { await Task.yield() }
+            return ContextReading.make(measured)
+        }
+        task.cancel()
+        #expect(await task.value == nil)
+    }
+
+    @Test func aMeasurementCancelledHalfwayStopsBeforeTheNextWalkOfTheHistory() throws {
+        let long = conversation(turns: 8)
+        let budget = ContextBudget(modelWindow: 16_000)
+        // Never cancelled: every step runs (the check is asked before each of the walks that follow the first).
+        var asked = 0
+        let whole = ContextMeter.fill(of: long, budget: budget, isCancelled: { asked += 1; return false })
+        #expect(whole == ContextMeter.fill(of: long, budget: budget))
+        #expect(asked >= 3)
+        // Cancelled while the first walk is done: nothing more is measured, and no number comes out.
+        var calls = 0
+        let stopped = ContextMeter.fill(of: long, budget: budget, isCancelled: { calls += 1; return calls >= 2 })
+        #expect(stopped == nil)
+        #expect(calls == 2)
+    }
+
     @Test func aShortConversationIsCalmAndHasNothingToCompact() throws {
         let reading = try #require(ContextReading.make(input(conversation(turns: 1, characters: 300))))
         #expect(reading.percent >= 1 && reading.percent < 20)

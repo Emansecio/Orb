@@ -116,6 +116,10 @@ actor MCPManager {
         var lastUsed: ContinuousClock.Instant
         /// Calls (and starts for them) in flight: a server is never stopped for being idle while one is.
         var calls = 0
+        /// The server refused a call for lack of scope and the person has not granted it yet: the card keeps asking for
+        /// "Permitir mais" whatever else happens to the server (it restarts fine with the token it has).
+        var asksMoreScope = false
+        var missingScope: String?
         /// Which registration this is: a call that ends after the connector was edited (and registered again) must not
         /// count against the new entry.
         let token = UUID()
@@ -129,6 +133,8 @@ actor MCPManager {
     private let session: URLSession?
     private let idleLimit: Duration
     private let sweepInterval: Duration
+    /// How long a call may take (a local connector may ask for more: see `LocalConnector.callTimeout`).
+    private let callTimeout: Duration
     private var locals: LocalConnectorEnvironment?
     private var sweeper: Task<Void, Never>?
     private var observer: (@Sendable ([UUID: MCPStatus]) -> Void)?
@@ -136,7 +142,7 @@ actor MCPManager {
     /// `store`: where the catalogs are kept (nil: only in memory, as in tests). `idleLimit`: how long a server may sit
     /// unused; `sweepInterval`: how often that is checked.
     init(store: Store? = nil, shell: ShellEnvironment = .shared, idleLimit: Duration = .seconds(600), sweepInterval: Duration = .seconds(60),
-         locals: LocalConnectorEnvironment? = nil, auth: MCPAuth? = nil, session: URLSession? = nil) {
+         locals: LocalConnectorEnvironment? = nil, auth: MCPAuth? = nil, session: URLSession? = nil, callTimeout: Duration = .seconds(60)) {
         self.store = store
         self.shell = shell
         self.auth = auth
@@ -144,6 +150,7 @@ actor MCPManager {
         self.locals = locals
         self.idleLimit = idleLimit
         self.sweepInterval = sweepInterval
+        self.callTimeout = callTimeout
     }
 
     /// What the app's own connectors talk to (tests and snapshots put fakes here; nil is the Mac itself).
@@ -191,7 +198,16 @@ actor MCPManager {
         publish()
     }
 
-    private func idleStatus(of id: UUID) -> MCPStatus { .idle(toolCount: entries[id]?.catalog?.tools.count) }
+    private func idleStatus(of id: UUID) -> MCPStatus {
+        if let entry = entries[id], entry.asksMoreScope { return .needsMorePermission(entry.missingScope) }
+        return .idle(toolCount: entries[id]?.catalog?.tools.count)
+    }
+
+    /// What the card says of a server that is up: ready, unless a permission is still waiting to be granted.
+    private func runningStatus(of id: UUID, toolCount: Int) -> MCPStatus {
+        if let entry = entries[id], entry.asksMoreScope { return .needsMorePermission(entry.missingScope) }
+        return .ready(toolCount: toolCount)
+    }
 
     /// Back to "off, starts when needed". The status is read before `entries` is written: doing both in one statement
     /// is an overlapping access.
@@ -271,7 +287,8 @@ actor MCPManager {
             let catalog = ConnectorCatalog(handshake: await connection.handshake, specs: specs, annotations: await connection.toolAnnotations)
             entries[id]?.catalog = catalog
             entries[id]?.starting = nil
-            entries[id]?.status = .ready(toolCount: specs.count)
+            let running = runningStatus(of: id, toolCount: specs.count) // read before `entries` is written
+            entries[id]?.status = running
             entries[id]?.lastUsed = .now
             store?.saveConnectorCatalog(catalog, for: id)
             startSweeper()
@@ -307,7 +324,12 @@ actor MCPManager {
               entries[id]?.connection === connection else { return nil }
         let catalog = ConnectorCatalog(handshake: await connection.handshake, specs: specs, annotations: await connection.toolAnnotations)
         entries[id]?.catalog = catalog
-        if case .ready = entries[id]?.status { entries[id]?.status = .ready(toolCount: specs.count) }
+        switch entries[id]?.status {
+        case .ready?, .needsMorePermission?:
+            let running = runningStatus(of: id, toolCount: specs.count)
+            entries[id]?.status = running
+        default: break
+        }
         store?.saveConnectorCatalog(catalog, for: id)
         publish()
         return specs.count
@@ -325,18 +347,34 @@ actor MCPManager {
     // MARK: Using
 
     /// Calls `tool` of the connector, starting its server first when it is off.
-    func call(_ id: UUID, tool: String, arguments: JSONValue, timeout: Duration = .seconds(60)) async throws -> String {
+    func call(_ id: UUID, tool: String, arguments: JSONValue, timeout: Duration? = nil) async throws -> String {
         let token = beginCall(id)
         defer { endCall(id, token) }
         let connection = try await ensureStarted(id)
+        let timeout = timeout ?? deadline(of: id)
         do {
-            return try await connection.call(tool, arguments: arguments, timeout: timeout)
+            do {
+                return try await connection.call(tool, arguments: arguments, timeout: timeout)
+            } catch is MCPSessionExpired {
+                // The server dropped the session before the request reached it: a new session takes it, once.
+                return try await ensureStarted(id).call(tool, arguments: arguments, timeout: timeout)
+            }
         } catch let required as MCPAuthRequired {
             // The login ended (or falls short) in the middle of the use: the server stops, the card asks, the model is told once.
+            if required.reason == .moreScope {
+                entries[id]?.asksMoreScope = true
+                entries[id]?.missingScope = required.challenge.scope
+            }
             await stopServer(id, becoming: status(for: required, of: id))
             publish()
             throw explained(required, of: id)
         }
+    }
+
+    /// How long a call to the connector may take: the app's own connectors run scripts and may need more than a server does.
+    private func deadline(of id: UUID) -> Duration {
+        guard let config = entries[id]?.config, let local = (locals ?? .live).connector(for: config) else { return callTimeout }
+        return max(callTimeout, local.callTimeout)
     }
 
     /// What the card says when the server asks for a login.
@@ -361,9 +399,33 @@ actor MCPManager {
         }
     }
 
+    /// The person granted the permission the server asked for: the card stops asking and the server starts clean.
+    func scopeGranted(_ id: UUID) async {
+        guard let entry = entries[id], entry.asksMoreScope else { return }
+        entries[id]?.asksMoreScope = false
+        entries[id]?.missingScope = nil
+        if case .needsMorePermission = entry.status {
+            let idle = idleStatus(of: id)
+            await stopServer(id, becoming: idle)
+        }
+        publish()
+    }
+
+    /// The login of a connector ended where the manager did not see it (a Claude Code turn renewing the token): the card says so.
+    func loginEnded(_ id: UUID, reason: MCPAuthRequired.Reason) async {
+        guard let entry = entries[id], entry.config.isEnabled else { return }
+        let required = MCPAuthRequired(reason: reason, challenge: MCPChallenge())
+        let status = status(for: required, of: id, previously: entry.status)
+        guard status != entry.status else { return }
+        await stopServer(id, becoming: status)
+        publish()
+    }
+
     /// The person signed out: the server stops and the card asks for a login again.
     func signedOut(_ id: UUID) async {
         guard entries[id] != nil else { return }
+        entries[id]?.asksMoreScope = false
+        entries[id]?.missingScope = nil
         await stopServer(id, becoming: .needsSignIn(nil))
         publish()
     }
@@ -409,7 +471,8 @@ actor MCPManager {
         for id in Array(entries.keys) {
             guard let entry = entries[id], entry.connection != nil, entry.starting == nil, entry.calls == 0,
                   ContinuousClock.now - entry.lastUsed >= idleLimit else { continue }
-            await stopServer(id, becoming: idleStatus(of: id))
+            let idle = idleStatus(of: id)
+            await stopServer(id, becoming: idle)
         }
         publish()
         if entries.values.contains(where: { $0.connection != nil }) { return true }

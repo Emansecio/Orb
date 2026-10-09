@@ -323,6 +323,7 @@ struct MemoryUndoToast: View {
                 .background { undoShortcut }
                 .onHover { undo.hold(.hover, $0) }
                 .onChange(of: isFocused) { _, focused in undo.hold(.focus, focused) }
+                .onDisappear { undo.releaseHolds() }
                 .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel("Memória esquecida. Desfazer disponível por alguns segundos.")

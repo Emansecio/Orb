@@ -13,7 +13,7 @@ enum ContextMemoryLevel: String, Codable, CaseIterable, Sendable {
     case economical
     /// Up to 80 thousand tokens of history.
     case balanced
-    /// Up to 60% of the model's window.
+    /// Up to 60% of the model's window, never less than `balanced`.
     case wide
 
     init(from decoder: Decoder) throws { self = try decoder.rawValue(Self.self, fallback: .balanced) }
@@ -30,7 +30,7 @@ enum ContextMemoryLevel: String, Codable, CaseIterable, Sendable {
         switch self {
         case .economical: "Lembra até ~40 mil tokens palavra por palavra. Gasta menos por mensagem."
         case .balanced: "Lembra até ~80 mil tokens palavra por palavra. O equilíbrio entre custo e contexto."
-        case .wide: "Usa até 60% da janela do modelo. Mais contexto, mais custo por mensagem."
+        case .wide: "Usa até 60% da janela do modelo, nunca menos que o Equilibrado. Mais contexto, mais custo por mensagem."
         }
     }
 
@@ -39,7 +39,8 @@ enum ContextMemoryLevel: String, Codable, CaseIterable, Sendable {
         switch self {
         case .economical: 40_000
         case .balanced: 80_000
-        case .wide: Int(Double(window) * ContextBudget.wideShare)
+        // In a window under ~133k tokens 60% is less than the balanced cap: "wide" never gives less.
+        case .wide: max(ContextMemoryLevel.balanced.cap(window: window), Int(Double(window) * ContextBudget.wideShare))
         }
     }
 }

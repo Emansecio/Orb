@@ -123,8 +123,13 @@ enum ProviderTransport {
         return try await session.bytes(for: build(renewed))
     }
 
+    static let listTimeout: TimeInterval = 15
+
     /// A plain GET (model lists): the body, once the status has been checked.
     static func fetch(_ request: URLRequest, session: URLSession) async throws -> Data {
+        // A list is short: a host that accepts the connection and never answers must not hold on for the default minute.
+        var request = request
+        request.timeoutInterval = min(request.timeoutInterval, listTimeout)
         let (data, response) = try await session.data(for: request)
         try await check(response, body: { data.prefix(errorBodyLimit) })
         return data

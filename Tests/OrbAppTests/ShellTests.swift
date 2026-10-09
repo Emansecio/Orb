@@ -137,6 +137,47 @@ struct ShellEnvironmentTests {
         }
     }
 
+    @Test func fallbackCommandsRunWithALoginShell() {
+        let user = ShellEnvironment.Resolved(environment: [:], shell: "/bin/zsh", isFromUserShell: true)
+        var fallback = user
+        fallback.isFromUserShell = false
+        #expect(user.arguments(for: "npm test") == ["-c", "npm test"])
+        #expect(fallback.arguments(for: "npm test") == ["-lc", "npm test"])
+    }
+
+    /// A shell that merely took too long is asked again soon, not 5 minutes later.
+    @Test func aSlowShellIsAskedAgainSoon() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let slowOnce = directory.appending(path: "slow-once")
+        let shell = try FakeShell.make(in: directory, exports: ["FROM_PROFILE": "late"],
+                                       preamble: "[ -e '\(slowOnce.path)' ] || { touch '\(slowOnce.path)'; sleep 30; }")
+        let environment = ShellEnvironment(shell: shell, base: basicEnvironment, timeout: .seconds(1), retryAfterTimeout: .milliseconds(300))
+        let first = await environment.resolved()
+        #expect(!first.isFromUserShell)
+        // A few tries: a loaded machine may kill the first run before it marks itself as slow.
+        var second = first
+        for _ in 0..<4 where !second.isFromUserShell {
+            try await Task.sleep(for: .milliseconds(400))
+            second = await environment.resolved()
+        }
+        #expect(second.isFromUserShell)
+        #expect(second.environment["FROM_PROFILE"] == "late")
+    }
+
+    /// A shell that fails (rather than being slow) keeps the long wait, whatever the short one is.
+    @Test func aFailingShellIsNotAskedAgainSoon() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let counter = directory.appending(path: "count")
+        let shell = try FakeShell.make(in: directory, preamble: "echo x >> '\(counter.path)'; exit 1")
+        let environment = ShellEnvironment(shell: shell, base: basicEnvironment, retryAfterTimeout: .milliseconds(1))
+        _ = await environment.resolved()
+        try await Task.sleep(for: .milliseconds(50))
+        _ = await environment.resolved()
+        #expect(try String(contentsOf: counter, encoding: .utf8).split(separator: "\n").count == 1)
+    }
+
     @Test func theRealShellGivesACompleteEnvironment() async {
         // Patient: a timeout would fall back to the app's own environment and this would stop testing the real shell.
         let resolved = await ShellEnvironment(timeout: patientShell).resolved()
@@ -171,6 +212,38 @@ final class RunCommandTests {
     @Test func commandsSeeTheUsersEnvironment() async throws {
         let output = try await run("echo $FROM_PROFILE $TERM $PAGER $GIT_PAGER")
         #expect(output.contains("ok-ç dumb cat cat"))
+    }
+
+    /// With launchd's bare PATH (the shell could not be asked), `-c` would not find tools set up by the login profile.
+    private func fallbackContext() throws -> ToolContext {
+        let bin = directory.appending(path: "fakebin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        let program = bin.appending(path: "meucmd")
+        try "#!/bin/sh\necho achei-o\n".write(to: program, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: program.path)
+        try "export PATH='\(bin.path)':$PATH\n".write(to: directory.appending(path: ".zprofile"), atomically: true, encoding: .utf8)
+        let base = ["PATH": "/usr/bin:/bin", "HOME": directory.path, "ZDOTDIR": directory.path]
+        return ToolContext(workingDirectory: directory, botID: UUID(),
+                           jobs: BackgroundJobs(directory: directory.appending(path: "jobs"), firstOutputWindow: patientShell, endsAtFirstOutput: true),
+                           shell: ShellEnvironment(shell: "/nonexistent/shell", base: base),
+                           outputsDirectory: directory.appending(path: "saidas"))
+    }
+
+    @Test func commandsFindTheLoginProfilePathWhenTheEnvironmentFellBack() async throws {
+        let fallback = try fallbackContext()
+        let output = try await RunCommandTool().run(.object(["command": .string("meucmd")]), context: fallback)
+        #expect(output.hasPrefix("Código de saída: 0"))
+        #expect(output.contains("achei-o"))
+        #expect(output.contains("não consegui ler o PATH do Terminal"))
+        // The normal path stays quiet.
+        #expect(!(try await run("true")).contains("PATH do Terminal"))
+    }
+
+    @Test func backgroundJobsFindTheLoginProfilePathWhenTheEnvironmentFellBack() async throws {
+        let fallback = try fallbackContext()
+        let output = try await RunCommandTool().run(.object(["command": .string("meucmd"), "background": .bool(true)]), context: fallback)
+        #expect(output.contains("achei-o"))
+        fallback.jobs?.killAllNow()
     }
 
     @Test func gitShowsAccentedNamesAsTheyAre() async throws {

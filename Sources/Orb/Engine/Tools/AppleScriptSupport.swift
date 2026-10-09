@@ -26,6 +26,9 @@ enum AppleScript {
         return output
     }
 
+    /// Whether `message` is `timeoutMessage`'s (whatever the number of seconds).
+    static func isTimeout(_ message: String) -> Bool { message.hasPrefix("O script passou de ") }
+
     static func timeoutMessage(seconds: Int) -> String {
         "O script passou de \(seconds) s e foi interrompido. Ele pode estar esperando você responder a um aviso de "
             + "permissão do macOS (olhe a tela) ou o app alvo pode estar travado."

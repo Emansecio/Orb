@@ -202,6 +202,7 @@ struct GrepTool: AgentTool {
 
         let root = arguments.nonEmptyString("path").map(context.url(for:)) ?? context.workingDirectory
         guard FileManager.default.fileExists(atPath: root.path) else { throw ToolError("Caminho não encontrado: \(root.path)") }
+        if !root.isExistingDirectory { try root.requireRegularFile() }
         let deadline = ContinuousClock.now + timeBudget
         let workingDirectory = context.workingDirectory
 

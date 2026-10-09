@@ -135,7 +135,8 @@ extension AppModel {
         let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSteer(botID), !typed.isEmpty || !lane.pictures.isEmpty else { return false }
         enqueue(typed, files: lane.files.map(\.url), pictures: lane.pictures, to: botID)
-        setDraft("", for: botID)
+        // Attachments alone (nothing typed) must not take a draft with real text along; a blank one is cleared.
+        if !typed.isEmpty || (drafts[botID] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { setDraft("", for: botID) }
         lane.files.removeAll()
         lane.pictures.removeAll()
         lane.error = nil
@@ -178,21 +179,27 @@ extension AppModel {
     }
 
     /// "Parar e enviar": ends the turn now and sends what was queued (with the draft, when there is one) as the
-    /// next message.
-    func stopAndSend(_ botID: UUID, draft: String = "") {
+    /// next message. Without a `draft` (the queue bubble's button) the composer is left alone: what is typed and
+    /// attached there stays, and only the queue is sent.
+    func stopAndSend(_ botID: UUID, draft: String? = nil) {
         guard canSteer(botID) else {
-            submit(draft, to: botID)
+            submit(draft ?? "", to: botID)
             return
         }
         let lane = composerLane(botID)
-        let isCommand = lane.files.isEmpty && lane.pictures.isEmpty && CompactionCommand.parse(draft) != nil // stays in the composer
-        if !isCommand, !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || lane.hasAttachments { queueMessage(draft, to: botID) }
+        if let draft {
+            let isCommand = lane.files.isEmpty && lane.pictures.isEmpty && CompactionCommand.parse(draft) != nil // stays in the composer
+            if !isCommand, !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || lane.hasAttachments { queueMessage(draft, to: botID) }
+        }
         let waiting = lane.takeAll()
         // A routine waiting for this Orb must not take it between the stop and the send: the message goes first, and
         // the routine starts when that turn ends (or now, when nothing was sent).
         stop(botID, startsQueuedRoutines: false)
         if let message = SteeredMessage.merged(waiting),
-           send(message.text, attachments: message.files, images: message.pictures, to: botID) { return }
+           send(message.text, attachments: message.files, images: message.pictures, to: botID) {
+            live(botID).scrolled() // you asked for this send
+            return
+        }
         giveBack(waiting, to: botID)
         startNextQueuedRoutine(for: botID)
     }
@@ -202,8 +209,7 @@ extension AppModel {
         guard let message = composerLane(botID).delivered(id) else { return }
         countSkillUse(in: message.text)
         closeStreaming(botID)
-        append(.user(text: message.text, attachments: message.attachmentPaths), to: botID)
-        live(botID).scrolled()
+        append(.user(text: message.text, attachments: message.attachmentPaths), to: botID) // follows the end only if the chat was there
     }
 
     /// Counts one use of the skill a message starts with (`/slug`), if it does.

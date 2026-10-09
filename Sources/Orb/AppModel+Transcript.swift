@@ -141,6 +141,15 @@ enum RetryPlan: Equatable, Sendable {
         }
         return .resend(text: text, attachments: attachments, itemRange: lastUser..<items.count)
     }
+
+    /// Whether `message` (the last one in the model's history) is the one `typed` produced. A skill's "/slug request"
+    /// is stored expanded into the skill's instructions, so it does not hold what was typed.
+    static func isMessage(_ message: ChatMessage, from typed: String, skills: [Skill]) -> Bool {
+        guard message.role == .user else { return false }
+        if message.content.contains(typed) { return true }
+        guard let expanded = SystemPrompt.expandSkill(in: typed, skills: skills)?.prompt else { return false }
+        return message.content.contains(expanded)
+    }
 }
 
 extension AppModel {
@@ -159,7 +168,10 @@ extension AppModel {
     /// "Continuar": says "continua" to the Orb, which goes on from where it paused or was cut.
     @discardableResult
     func continueTurn(_ botID: UUID) -> Bool {
-        send(NoticeAction.continueMessage, to: botID)
+        // Not `fromUser`: that would also clear the draft you may be typing. The click is yours, so the chat follows.
+        guard send(NoticeAction.continueMessage, to: botID) else { return false }
+        live(botID).scrolled()
+        return true
     }
 
     /// "Tentar de novo": a turn that failed before doing anything is taken back and its message sent again (the
@@ -178,8 +190,9 @@ extension AppModel {
             // What the model's history holds of the failed message (its picture attachments), taken back with it.
             let removedItems = Array(items[range])
             var removedMessage: ChatMessage?
+            let skillsForRetry = skills(for: botID)
             editConversation(botID) { conversation in
-                if let last = conversation.messages.last, last.role == .user, last.content.contains(text) {
+                if let last = conversation.messages.last, RetryPlan.isMessage(last, from: text, skills: skillsForRetry) {
                     removedMessage = last
                     conversation.messages.removeLast()
                 }
@@ -188,7 +201,15 @@ extension AppModel {
             let pictures = removedMessage?.images ?? []
             let pictured = Set(pictures.map(\.path))
             let files = attachments.filter { !pictured.contains($0) }.map { URL(fileURLWithPath: $0) }
-            if send(text, attachments: files, images: pictures, to: botID) { return true }
+            if send(text, attachments: files, images: pictures, to: botID) {
+                // The failed attempt already counted the skill's use; sending again counted it a second time.
+                if let skill = SystemPrompt.expandSkill(in: text, skills: skillsForRetry)?.skill,
+                   let index = skills.firstIndex(where: { $0.id == skill.id }), skills[index].uses > 0 {
+                    skills[index].uses -= 1
+                }
+                live(botID).scrolled() // the click is yours: the chat follows the new answer
+                return true
+            }
             // Nothing was sent (no usable model): the message goes back where it was.
             editConversation(botID) { conversation in
                 conversation.items.insert(contentsOf: removedItems, at: min(range.lowerBound, conversation.items.count))

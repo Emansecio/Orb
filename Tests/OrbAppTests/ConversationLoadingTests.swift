@@ -140,6 +140,41 @@ import Testing
         #expect(model.transcript(bots[1].id).count == 2)
     }
 
+    @Test func theChatAndARoutineRunOfAnOrbAreItsConversationFiles() {
+        let store = Store(directory: root)
+        let bot = UUID(), other = UUID(), routine = UUID()
+        let folder = root.appending(path: "conversations/\(bot.uuidString)", directoryHint: .isDirectory)
+        #expect(store.isConversationFile(root.appending(path: "conversations/\(bot.uuidString).json"), of: bot))
+        #expect(store.isConversationFile(folder.appending(path: "routine-\(routine.uuidString).json"), of: bot))
+        #expect(!store.isConversationFile(folder.appending(path: "routine-\(routine.uuidString).json"), of: other))
+        #expect(!store.isConversationFile(root.appending(path: "state.json"), of: bot))
+    }
+
+    @Test @MainActor func aConversationThatFailedToSaveIsWrittenAgainOnQuit() async throws {
+        let bots = try orbs(count: 1)
+        let model = launch(async: false)
+        let id = bots[0].id
+        _ = await model.loadedConversation(id)
+
+        // The folder cannot be written: a plain file sits where it should be.
+        let folder = root.appending(path: "conversations")
+        try FileManager.default.removeItem(at: folder)
+        try Data().write(to: folder)
+
+        model.append(.notice("última resposta"), to: id)
+        model.sessions[id]?.scheduleSave(delay: 0)
+        model.store.flush()
+        await waitUntil("the save failure to be reported") { model.dataNotices.count == 1 }
+
+        // Space is back; nothing else changed in the conversation.
+        try FileManager.default.removeItem(at: folder)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        model.saveNow()
+
+        let saved = try #require(Store(directory: root).readConversation(id).value)
+        #expect(saved.items.contains { if case .notice(let text) = $0.kind { text == "última resposta" } else { false } })
+    }
+
     @Test @MainActor func aTurnInterruptedByAQuitIsClosedWhenTheConversationArrives() async throws {
         let bots = try orbs(count: 1)
         var conversation = Conversation()

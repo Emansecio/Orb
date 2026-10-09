@@ -29,6 +29,19 @@ import Testing
         #expect(!LegacyMigration.run(into: directory, from: legacy, oldPreferences: [:], into: defaults))
     }
 
+    @Test func theLargeToolOutputsAreNotCopied() throws {
+        try write(#"{"bots":[]}"#, to: legacy.appending(path: "state.json"), modified: .now)
+        try write("{}", to: legacy.appending(path: "conversations/x.json"), modified: .now)
+        try write("grande", to: legacy.appending(path: "saidas/orb/comando-1.txt"), modified: .now)
+
+        #expect(LegacyMigration.run(into: directory, from: legacy, oldPreferences: [:], into: Preferences()))
+        #expect(FileManager.default.fileExists(atPath: directory.appending(path: "state.json").path))
+        #expect(FileManager.default.fileExists(atPath: directory.appending(path: "conversations/x.json").path))
+        #expect(!FileManager.default.fileExists(atPath: directory.appending(path: "saidas").path))
+        #expect(FileManager.default.fileExists(atPath: directory.appending(path: LegacyMigration.marker).path))
+        #expect(FileManager.default.fileExists(atPath: legacy.appending(path: "saidas/orb/comando-1.txt").path)) // the original stays
+    }
+
     @Test func anOlderCopyIsRedoneAndSetAside() throws {
         try write("velho", to: directory.appending(path: "state.json"), modified: .now - 3600)
         try write("novo", to: legacy.appending(path: "state.json"), modified: .now)

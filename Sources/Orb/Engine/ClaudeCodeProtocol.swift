@@ -305,6 +305,9 @@ enum ClaudeCodeTools {
     ]
     /// Removed when "Navegar na web" is off.
     static let web = ["WebFetch", "WebSearch"]
+    /// The CLI's multiple-choice question to the user. The Orb has no card to answer it with (the SDK's host sends the
+    /// choices back as `answers`), so the tool is removed in every mode and the model asks in text instead.
+    static let askUserQuestion = "AskUserQuestion"
 
     static func kind(_ name: String) -> ToolCall.Kind {
         switch name {
@@ -377,6 +380,8 @@ enum ClaudeCodePolicy {
 
     static let readOnlyDenial = PermissionPolicy.readOnlyDenial
     static let userDenial = "The user denied this action. Do not retry it; ask or suggest an alternative."
+    /// For an `AskUserQuestion` call that reaches us anyway (an older CLI may not know the name to remove).
+    static let questionDenial = "This app cannot show interactive questions. Ask the question as plain text in your reply and end the turn."
 
     /// The answer when no one needs to be asked; nil means show an approval card. The decision is
     /// `PermissionPolicy`'s, the same as for the built-in tools.

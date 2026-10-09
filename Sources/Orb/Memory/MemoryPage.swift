@@ -326,12 +326,13 @@ enum MemorySanitizer {
         (#"(?<![A-Za-z0-9])AIza[0-9A-Za-z_\-]{30,}"#, "[chave removida]"),
         (#"eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}"#, "[token removido]"),
         (#"(?i)\b(bearer|basic)\s+[A-Za-z0-9._\-+/=]{12,}"#, "$1 [removido]"),
-        // user:password@ in URLs (postgres://, mysql://, https://…)
-        (#"(?i)\b([a-z][a-z0-9+.\-]*://[^\s:/@]+):(?!\#(urlReference))[^\s@/]+@"#, "$1:[removido]@"),
+        // user:password@ in URLs (postgres://, mysql://, https://…); the scheme starts where a scheme can start (see below)
+        (#"(?i)(?<![a-z0-9+.\-])([a-z][a-z0-9+.\-]*://[^\s:/@]+):(?!\#(urlReference))[^\s@/]+@"#, "$1:[removido]@"),
         // curl -u user:pass
         (#"(?i)(\s-u\s+[^\s:]+):(?!["']?\#(reference))\S+"#, "$1:[removido]"),
-        // KEY=value, MY_TOKEN: value, "password": "value", ?access_token=value (names containing the words below)
-        (#"(?i)([\w.\-]*(?:password|passwd|senha|secret|segredo|token|api[_\-]?key|access[_\-]?key|private[_\-]?key|credential)[\w.\-]*["']?\s*[:=]\s*)(["']?)(?!\#(reference))[^\s"',;&]+"#,
+        // KEY=value, MY_TOKEN: value, "password": "value", ?access_token=value (names containing the words below). The
+        // name starts where a name can start: tried from every letter of a long run (a hash, base64), it took minutes.
+        (#"(?i)(?<![\w.\-])([\w.\-]*(?:password|passwd|senha|secret|segredo|token|api[_\-]?key|access[_\-]?key|private[_\-]?key|credential)[\w.\-]*["']?\s*[:=]\s*)(["']?)(?!\#(reference))[^\s"',;&]+"#,
          "$1$2[removido]"),
     ].map { (try! NSRegularExpression(pattern: $0.0), $0.1) }
 

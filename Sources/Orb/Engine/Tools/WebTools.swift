@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 struct WebFetchTool: AgentTool {
     static let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
@@ -14,17 +15,24 @@ struct WebFetchTool: AgentTool {
     static let maxDownloadBytes = 100_000_000
     /// How many passages `find` returns.
     static let maxFindMatches = 8
+    /// The longest a page is read for: the request's own timeout only covers silence between packets, so an endless
+    /// stream (server-sent events, a radio) with the odd keep-alive would hold the turn forever.
+    static let readDeadline = Duration.seconds(30)
 
     let session: URLSession
     /// Bytes read from a PDF response before cutting it; a parameter so tests need not serve 25 MB.
     let pdfLimit: Int
     /// Converted pages, so that reading a long one in pieces downloads it once.
     let cache: WebPageCache
+    /// How long the body is read for before what arrived is used; a parameter so tests need not wait 30 s.
+    let readDeadline: Duration
 
-    init(session: URLSession = .shared, pdfLimit: Int = WebFetchTool.maxPDFBytes, cache: WebPageCache = .shared) {
+    init(session: URLSession = .shared, pdfLimit: Int = WebFetchTool.maxPDFBytes, cache: WebPageCache = .shared,
+         readDeadline: Duration = WebFetchTool.readDeadline) {
         self.session = session
         self.pdfLimit = pdfLimit
         self.cache = cache
+        self.readDeadline = readDeadline
     }
 
     let spec = ToolSpec(
@@ -108,15 +116,18 @@ struct WebFetchTool: AgentTool {
         }
 
         let mimeType = (response.mimeType ?? "").lowercased()
-        let limit = mimeType.contains("pdf") ? pdfLimit : Self.maxBytes
-        var data = Data()
-        for try await byte in bytes {
-            data.append(byte)
-            if data.count >= limit { break }
+        var header = "URL: \(finalURL.absoluteString)"
+        // A type that can only be saved (audio, video, an archive…) is answered from the headers: an endless stream of
+        // one would otherwise be read up to the limit just to say it is not text.
+        if !Self.isReadable(mimeType, wantsImage: wantsImage) {
+            let size = response.expectedContentLength > 0
+                ? ByteCountFormatter.string(fromByteCount: response.expectedContentLength, countStyle: .file) + " " : ""
+            return ToolResult(text: header + "\nConteúdo \(mimeType) de \(size)(não é texto). Use save_to para baixá-lo.")
         }
+        let limit = mimeType.contains("pdf") ? pdfLimit : Self.maxBytes
+        let (data, cutByTime) = try await Self.read(bytes, limit: limit, deadline: readDeadline)
         let cut = data.count >= limit
 
-        var header = "URL: \(finalURL.absoluteString)"
         var text: String
         if mimeType.contains("pdf") || data.starts(with: Array("%PDF".utf8)) {
             do {
@@ -145,9 +156,60 @@ struct WebFetchTool: AgentTool {
             return ToolResult(text: header + "\nConteúdo \(mimeType.isEmpty ? "de tipo desconhecido" : mimeType) de \(cut ? "mais de " : "")\(bytes) (não é texto). Use save_to para baixá-lo.")
         }
 
+        if cutByTime { header += "\n[a resposta não terminou em \(max(1, readDeadline.components.seconds)) s; o texto é só o que chegou até lá]" }
         let entry = WebPageCache.Entry(header: header, text: text, truncatedDownload: cut ? limit : nil)
         await cache.store(entry, for: url.absoluteString)
         return ToolResult(text: entry.render(arguments: arguments, find: find))
+    }
+
+    // MARK: Reading
+
+    /// Whether a body of this type is worth reading: text, a PDF, a picture the model can see, or a type the server
+    /// did not say (a PDF is told apart by its first bytes).
+    static func isReadable(_ mimeType: String, wantsImage: Bool) -> Bool {
+        mimeType.isEmpty || mimeType == "application/octet-stream" || mimeType.hasPrefix("text/") || mimeType.contains("pdf")
+            || mimeType.contains("html") || mimeType.contains("json") || mimeType.contains("xml") || mimeType.contains("javascript")
+            || (wantsImage && mimeType.hasPrefix("image/"))
+    }
+
+    /// The body, up to `limit` bytes or until `deadline`, whichever comes first (`timedOut` then). A read that fails
+    /// partway still throws; cancelling the turn does too.
+    static func read(_ bytes: URLSession.AsyncBytes, limit: Int, deadline: Duration) async throws -> (data: Data, timedOut: Bool) {
+        enum Outcome { case finished, timedOut, failed(any Error) }
+        let received = OSAllocatedUnfairLock(initialState: Data())
+        let outcome = await withTaskGroup(of: Outcome.self) { group in
+            group.addTask {
+                var chunk = Data()
+                var total = 0
+                // What arrived is handed over in pieces (a lock per byte is wasteful) and once more on the way out.
+                func hand() {
+                    let piece = chunk
+                    received.withLock { $0.append(piece) }
+                    chunk.removeAll(keepingCapacity: true)
+                }
+                defer { hand() }
+                do {
+                    for try await byte in bytes {
+                        chunk.append(byte)
+                        total += 1
+                        if total >= limit { break }
+                        if chunk.count >= 16_384 { hand() }
+                    }
+                    return .finished
+                } catch {
+                    return .failed(error)
+                }
+            }
+            group.addTask { (try? await Task.sleep(for: deadline)) == nil ? .finished : .timedOut }
+            let first = await group.next() ?? .finished
+            group.cancelAll()
+            return first
+        }
+        if case .failed(let error) = outcome { throw error }
+        try Task.checkCancellation()
+        let data = received.withLock { $0 }
+        if case .timedOut = outcome { return (data, true) }
+        return (data, false)
     }
 
     // MARK: Pages

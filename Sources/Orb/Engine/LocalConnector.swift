@@ -28,6 +28,13 @@ protocol LocalConnector: Sendable {
     var tools: [LocalTool] { get }
     /// Runs a tool and returns its text; throws a `ToolError` that says what to do about it.
     func call(_ name: String, arguments: JSONValue) async throws -> String
+    /// How long one call may take before the connector is taken for stuck. It must cover everything a call does in a row
+    /// (Gmail runs two scripts), so the connector's own, clearer errors come first.
+    var callTimeout: Duration { get }
+}
+
+extension LocalConnector {
+    var callTimeout: Duration { .seconds(60) }
 }
 
 /// The local connectors there are. The raw value is what `MCPServerConfig.local` holds.

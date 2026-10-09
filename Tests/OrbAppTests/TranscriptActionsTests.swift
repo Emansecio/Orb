@@ -143,7 +143,9 @@ private struct EchoModel: LLMClient {
         let (model, id) = model(with: failed)
         await model.loadedConversation(id)
 
+        let nudges = model.live(id).scrollNudge
         #expect(model.retryLastTurn(id))
+        #expect(model.live(id).scrollNudge == nudges + 1) // your click: the chat follows the new answer
         await waitUntil("the Orb to finish") { !model.isWorking(id) && model.turns[id] == nil }
 
         let items = model.transcript(id)
@@ -152,6 +154,54 @@ private struct EchoModel: LLMClient {
         #expect(!items.contains { if case .notice = $0.kind { true } else { false } })
         let sent = model.conversations[id]?.messages.filter { $0.role == .user }.count
         #expect(sent == 1)
+    }
+
+    @MainActor @Test func retryingASkillMessageTakesTheExpandedOneBackAndCountsTheUseOnce() async {
+        defer { try? FileManager.default.removeItem(at: root) }
+        let skill = Skill(slug: "relatorio", name: "Relatório", summary: "", instructions: "Faça o relatório com cuidado.", uses: 1)
+        let expanded = SystemPrompt.expandSkill(in: "/relatorio da semana", skills: [skill])!.prompt
+        let preface = TurnPreface.make(now: .now, timeZone: "UTC", snapshot: nil, notes: "")
+        let failed = Conversation(items: [user("/relatorio da semana"), notice("Não deu certo: Sem conexão com o provedor")],
+                                  messages: [.user(TurnPreface.prepend(preface, to: expanded))])
+        let (model, id) = model(with: failed)
+        model.skills = [skill]
+        await model.loadedConversation(id)
+
+        #expect(model.retryLastTurn(id))
+        await waitUntil("the Orb to finish") { !model.isWorking(id) && model.turns[id] == nil }
+
+        let sent = model.conversations[id]?.messages.filter { $0.role == .user }.count
+        #expect(sent == 1) // the failed one is gone, not kept next to the new one
+        #expect(model.skills.first?.uses == 1) // the failed attempt counted it already
+    }
+
+    @MainActor @Test func retryingASkillMessageWithAPictureSendsThePictureAgainAsAPicture() async {
+        defer { try? FileManager.default.removeItem(at: root) }
+        let skill = Skill(slug: "relatorio", name: "Relatório", summary: "", instructions: "Faça o relatório com cuidado.", uses: 1)
+        let picture = ImageAttachment(path: root.appendingPathComponent("foto.jpg").path, mediaType: "image/jpeg", width: 1, height: 1)
+        let expanded = SystemPrompt.expandSkill(in: "/relatorio da semana", skills: [skill])!.prompt
+        let preface = TurnPreface.make(now: .now, timeZone: "UTC", snapshot: nil, notes: "")
+        let failed = Conversation(items: [user("/relatorio da semana", [picture.path]), notice("Não deu certo: Sem conexão com o provedor")],
+                                  messages: [.user(TurnPreface.prepend(preface, to: expanded), images: [picture])])
+        let (model, id) = model(with: failed)
+        model.skills = [skill]
+        await model.loadedConversation(id)
+
+        #expect(model.retryLastTurn(id))
+        await waitUntil("the Orb to finish") { !model.isWorking(id) && model.turns[id] == nil }
+
+        let sent = model.conversations[id]?.messages.filter { $0.role == .user } ?? []
+        #expect(sent.count == 1)
+        #expect(sent.first?.images.map(\.path) == [picture.path]) // back as a picture of the message
+        #expect(sent.first?.content.contains("Attached files") == false) // not as a path in the text
+    }
+
+    @Test func aStoredSkillMessageIsRecognizedAsTheOneTypedAsASlug() {
+        let skill = Skill(slug: "relatorio", name: "Relatório", summary: "", instructions: "Instruções", uses: 0)
+        let stored = ChatMessage.user(SystemPrompt.expandSkill(in: "/relatorio x", skills: [skill])!.prompt)
+        #expect(RetryPlan.isMessage(stored, from: "/relatorio x", skills: [skill]))
+        #expect(!RetryPlan.isMessage(stored, from: "/relatorio y", skills: [skill]))
+        #expect(!RetryPlan.isMessage(.user("outra coisa"), from: "/relatorio x", skills: [skill]))
     }
 
     @MainActor @Test func retryingWithoutAModelLeavesTheConversationAsItWas() async {
@@ -226,7 +276,9 @@ private struct EchoModel: LLMClient {
         let (model, id) = model(with: paused)
         await model.loadedConversation(id)
 
+        let nudges = model.live(id).scrollNudge
         #expect(model.continueTurn(id))
+        #expect(model.live(id).scrollNudge == nudges + 1)
         await waitUntil("the Orb to finish") { !model.isWorking(id) && model.turns[id] == nil }
         let users = model.transcript(id).compactMap { item -> String? in if case .user(let text, _) = item.kind { text } else { nil } }
         #expect(users == ["a", "continua"])

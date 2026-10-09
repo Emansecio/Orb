@@ -189,6 +189,21 @@ import Testing
         #expect(undo.entry == nil)
     }
 
+    @MainActor @Test func aToastThatLeavesTheScreenHeldDoesNotStayForever() async throws {
+        let undo = MemoryUndo(lifetime: .milliseconds(60))
+        let entry = MemoryUndo.Entry(botID: UUID(), forgotten: ForgottenMemory(path: "fatos/a.md", title: "A", text: "x"))
+        undo.show(entry)
+        undo.hold(.hover, true)
+        undo.hold(.focus, true)
+        try await Task.sleep(for: .milliseconds(250))
+        #expect(undo.entry == entry) // held
+        undo.releaseHolds() // the view went away without a "pointer left"
+        for _ in 0..<100 where undo.entry != nil { try await Task.sleep(for: .milliseconds(50)) }
+        #expect(undo.entry == nil)
+        undo.releaseHolds() // nothing held, nothing shown: no effect
+        #expect(undo.entry == nil)
+    }
+
     // MARK: New Orb sheet
 
     @Test func theNewOrbSheetFitsTheWindow() {

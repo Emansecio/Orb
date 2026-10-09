@@ -160,7 +160,8 @@ struct LLMErrorTests {
     }
 
     @Test func classifiesRetryableNetworkAndStreamErrors() {
-        let codes: [URLError.Code] = [.timedOut, .networkConnectionLost, .cannotConnectToHost, .notConnectedToInternet]
+        let codes: [URLError.Code] = [.timedOut, .networkConnectionLost, .cannotConnectToHost, .notConnectedToInternet,
+                                      .cannotFindHost, .dnsLookupFailed] // the last two: a Mac just awake
         for code in codes { #expect(LLMError.network(code: code.rawValue, message: "").isRetryable) }
         #expect(!LLMError.network(code: URLError.badURL.rawValue, message: "").isRetryable)
         #expect(LLMError.stream(type: "overloaded_error", message: "").isRetryable)

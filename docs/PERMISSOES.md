@@ -342,7 +342,7 @@ bloqueando o que ainda não rodou. Chamadas só de leitura do mesmo passo rodam 
 ⌘↩ permite e Esc nega o cartão **mais novo** do Orb aberto (`ApprovalKeyboard`). Esc não conta enquanto você edita texto
 (campo com algo digitado, texto sendo composto ou o campo "Diga o que fazer em vez disso"): ali ele pertence ao campo.
 ⌘↩ também vale a partir do campo "Diga o que fazer em vez disso", mas **não** com texto no compositor principal: ali ele é
-"Parar e enviar", que recusa o pedido aberto (parar sempre recusa) e envia o que foi escrito. Com o compositor vazio ou
+"Parar e enviar", que recusa o pedido aberto (parar sempre recusa) e envia o que foi escrito. O "Parar e enviar" do balão da fila só envia a fila: o que está escrito e anexado no compositor fica onde está. Com o compositor vazio ou
 sem foco, ⌘↩ permite.
 
 ### Fora da janela
@@ -392,6 +392,11 @@ lista de `--help` mostra `manual`, que o próprio CLI converte em `default`).
   a ferramenta `Read`; um `cat ~/.ssh/id_rsa` pelo `Bash` do CLI passa pela ponte do Orb, a não ser que o próprio CLI o aprove antes
   (ele aprova sozinho alguns comandos de leitura dentro das pastas de `--add-dir`): não foi possível conferir isso sem abrir uma
   sessão real, então é um limite conhecido.
+- `AskUserQuestion` (a pergunta de múltipla escolha do CLI) vai sempre em `--disallowedTools`, até no "Sem pedir permissão": o Orb não
+  tem cartão para respondê-la (o SDK devolve `answers` em `updatedInput`), e aprová-la deixaria o modelo seguir como se a pessoa
+  tivesse respondido. Se uma chamada chegar mesmo assim (um CLI que não conheça o nome), o Orb a nega sem cartão e diz ao modelo
+  para perguntar em texto e encerrar o turno (`ClaudeCodePolicy.questionDenial`). Não foi conferido com um CLI real se, em `-p`,
+  ele chegaria a oferecer a ferramenta; a remoção é inofensiva de qualquer jeito.
 - O CLI roda com o mesmo ambiente do `run_command` (`ShellEnvironment`: shell de login interativo, com o PATH do `.zshrc`,
   `JAVA_HOME` etc.) e com a pasta do `claude` na frente do PATH, menos as variáveis do provedor (`ANTHROPIC_*`, como
   `ANTHROPIC_API_KEY`), que trocariam em silêncio o login do claude.ai por cobrança da API; o Bash dele e os conectores MCP que ele inicia herdam isso.

@@ -157,6 +157,9 @@ final class AppModel {
     /// when each connector was last tried, so one that fails is not started again at every message.
     @ObservationIgnored var renewsCatalogs: Bool // internal so tests can switch it on
     @ObservationIgnored private var catalogRenewals: [UUID: Date] = [:]
+    /// The connectors being logged in through the browser now (their cards show it, whichever screen started it).
+    var signingIn: Set<UUID> = []
+    @ObservationIgnored var loginAttempts: [UUID: Task<String?, Never>] = [:]
     /// Processes the Orbs left running with `run_command(background: true)`.
     @ObservationIgnored let jobs = BackgroundJobs()
     /// Where the app keeps its secrets (the Keychain in the app, a dictionary in tests): "Redefinir o Orb" removes them.
@@ -178,6 +181,25 @@ final class AppModel {
     /// How long a conversation nobody is looking at stays in memory (tests shorten it).
     @ObservationIgnored var conversationKeepAlive = Duration.seconds(300)
     @ObservationIgnored private var didReportSaveFailure = false
+    /// When the Mac last woke from sleep: a routine that came due meanwhile waits for the network (see `runDueRoutines`).
+    @ObservationIgnored private var wokeAt: Date?
+    /// Since when the Mac is going to sleep or asleep: the scheduler's timer can resume before the wake notification arrives,
+    /// so "asleep" is set beforehand. The wake clears it, or passes going on long after it (a wake that never came).
+    @ObservationIgnored private var asleepSince: Date?
+    /// When the scheduler last looked at the routines: a long gap since then means the Mac slept in between.
+    @ObservationIgnored private var lastRoutinePass: Date?
+    /// The list refresh that is running (the scheduler starts one only when the last has ended).
+    @ObservationIgnored private var modelRefresh: Task<Void, Never>?
+    /// Providers whose list could not be loaded: when it was tried last and how many times in a row it failed.
+    @ObservationIgnored private var modelRefreshFailures: [ProviderKind: (at: Date, count: Int)] = [:]
+    /// Loads a provider's model list; tests replace it (the real one reads the Keychain and the network).
+    @ObservationIgnored var modelLoader: (@MainActor (ProviderAccount) async throws -> [ProviderModel])?
+    /// How long after waking the routines hold back: Wi-Fi and DNS are usually back by then.
+    nonisolated static let wakeSettleTime: TimeInterval = 45
+    /// A gap between two passes of the scheduler (30 s apart) beyond which the Mac must have slept.
+    nonisolated static let sleepGap: TimeInterval = 90
+    /// How long "going to sleep" holds the routines back without a wake.
+    nonisolated static let sleepHold: TimeInterval = 120
     /// The Keychain reads of a `refreshConnections` under way, and which state of the Keychain they started from
     /// (`keychainGeneration` changes when the app itself changes a key).
     @ObservationIgnored private var keyReads: (generation: Int, task: Task<Set<ProviderKind>, Never>)?
@@ -297,7 +319,7 @@ final class AppModel {
                 await self?.refreshConnections()
                 while !Task.isCancelled {
                     self?.runDueRoutines()
-                    await self?.refreshAllModels()
+                    self?.startModelRefresh() // apart: a provider that does not answer must not hold up the routines
                     await self?.unloadIdleConversations()
                     try? await Task.sleep(for: .seconds(30))
                 }
@@ -306,9 +328,19 @@ final class AppModel {
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 ApprovalNotifications.clear(self?.pendingApprovals.map(\.id) ?? [])
+                self?.stopTurnsForQuit() // before the save: the cards close and "Você interrompeu" is written
                 self?.saveNow()
+                // Commands and CLIs in the middle of a turn lead process groups of their own and would outlive the app.
+                ChildProcessGroups.killAllNow(including: self?.jobs.runningGroups ?? [])
                 self?.jobs.killAllNow()
+                StdioServerRegistry.shared.killAllNow() // a connector's server that stays open past EOF would outlive the app
             }
+        }
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.systemDidWake() }
+        }
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.systemWillSleep() }
         }
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -327,6 +359,11 @@ final class AppModel {
     }
 
     private func reportSaveFailure(_ notice: StoreNotice) {
+        // The write already cleared the session's "unsaved" mark; memory holds the only copy, so quitting writes it again.
+        if let file = notice.file, let session = sessions.values.first(where: { store.isConversationFile(file, of: $0.id) }),
+           session.conversation != nil {
+            session.isDirty = true
+        }
         guard !didReportSaveFailure else { return } // once: a full disk would otherwise repeat on every save
         didReportSaveFailure = true
         dataNotices.append(Self.described(notice, bots: bots, routines: routines))
@@ -647,7 +684,12 @@ final class AppModel {
     /// Reloads the provider's live model list; picks a default model if there is none yet.
     func refreshModels(_ kind: ProviderKind) async throws {
         guard let current = account(kind) else { return }
-        let fetched = try await ModelCatalog.fetch(current, token: try await token(for: kind))
+        let fetched: [ProviderModel]
+        if let modelLoader {
+            fetched = try await modelLoader(current)
+        } else {
+            fetched = try await ModelCatalog.fetch(current, token: try await token(for: kind))
+        }
         updateProvider(kind) {
             $0.models = fetched
             $0.modelsUpdatedAt = .now
@@ -669,13 +711,34 @@ final class AppModel {
         return true
     }
 
-    /// Keeps model lists current: on launch and then every few hours, for every usable provider.
-    func refreshAllModels(olderThan age: TimeInterval = 6 * 3600) async {
-        for account in providers where account.isEnabled && isUsable(account)
-            && (account.modelsUpdatedAt.map { -$0.timeIntervalSinceNow > age } ?? true) {
-            try? await refreshModels(account.kind)
+    /// Starts `refreshAllModels` unless one is still running.
+    func startModelRefresh() {
+        guard modelRefresh == nil else { return }
+        modelRefresh = Task { [weak self] in
+            await self?.refreshAllModels()
+            self?.modelRefresh = nil
         }
     }
+
+    /// Keeps model lists current: on launch and then every few hours, for every usable provider. A list that fails
+    /// (a revoked key, a gateway that is off) is tried again after 5 minutes, then 10, doubling up to `age`, not at
+    /// every pass of the scheduler.
+    func refreshAllModels(olderThan age: TimeInterval = 6 * 3600, now: Date = .now) async {
+        for account in providers where account.isEnabled && isUsable(account)
+            && (account.modelsUpdatedAt.map { now.timeIntervalSince($0) > age } ?? true) {
+            if let failed = modelRefreshFailures[account.kind],
+               now.timeIntervalSince(failed.at) < min(age, Self.modelRetryBase * pow(2, Double(failed.count - 1))) { continue }
+            do {
+                try await refreshModels(account.kind)
+                modelRefreshFailures[account.kind] = nil
+            } catch {
+                let count = (modelRefreshFailures[account.kind]?.count ?? 0) + 1
+                modelRefreshFailures[account.kind] = (now, min(count, 16))
+            }
+        }
+    }
+
+    nonisolated static let modelRetryBase: TimeInterval = 5 * 60
 
     private func token(for kind: ProviderKind) async throws -> String? {
         try await Self.credentials(for: kind)(false)
@@ -995,9 +1058,12 @@ final class AppModel {
 
     // MARK: Memory
 
-    func refreshMemory(_ botID: UUID) async {
+    /// `onlyIfChanged`: the end of every turn asks; the bank reads and sends every page again only when something
+    /// changed since the last snapshot (the panel, the other callers, always get a fresh one).
+    func refreshMemory(_ botID: UUID, onlyIfChanged: Bool = false) async {
         guard bot(botID) != nil else { return }
-        let snapshot = await memory.bank(for: botID).snapshot()
+        let bank = memory.bank(for: botID)
+        guard let snapshot = onlyIfChanged ? await bank.snapshotIfChanged() : await bank.snapshot() else { return }
         if bot(botID) != nil { live(botID).setMemory(snapshot) }
     }
 
@@ -1155,8 +1221,15 @@ final class AppModel {
         Task {
             await loadedConversation(botID)
             ensureLoaded(botID)
-            send(text, to: botID)
+            // Refused after the caller let go of the text: it goes back to the Orb's draft instead of being lost.
+            if !send(text, to: botID) { setDraft(drafts[botID].map { $0.isEmpty ? text : text + "\n" + $0 } ?? text, for: botID) }
         }
+    }
+
+    /// The model this Orb would use is connected and on (`send` refuses otherwise).
+    func hasUsableModel(_ botID: UUID) -> Bool {
+        guard let bot = bot(botID), let ref = modelRef(for: bot), let account = account(ref.provider) else { return false }
+        return account.isEnabled && isUsable(account)
     }
 
     /// Starts a turn. Returns false when nothing was sent (empty text, a turn already running, no usable model),
@@ -1201,6 +1274,7 @@ final class AppModel {
         session.showWork(WorkPhrase.line(status: "Pensando"))
         session.clearBeats() // the last turn's joy or error does not hide this one
         live(botID).poked()
+        if fromUser { live(botID).scrolled() } // a routine or a quick ask must not drag a chat you are reading to its end
         session.flash(\.isListening, seconds: 1.4)
 
         let intent = session.routineID == nil ? MemoryIntent.detect(typed) : nil // a routine's prompt is not a request to remember
@@ -1424,7 +1498,9 @@ final class AppModel {
             }
             let environment = await ClaudeCode.shared.environment(for: installation)
             // The CLI cannot renew a login in the middle of a turn: it gets a token with time left.
-            let servers = await connectorAuth.withBearer(servers)
+            let (servers, ended) = await connectorAuth.bearers(for: servers)
+            // A login that could not be renewed is told to the cards now, not only when an Orb with the native engine meets it.
+            for (id, reason) in ended { await mcp.loginEnded(id, reason: reason) }
             // What the connectors mark destructive, from their catalogs: the CLI's own connections never reach the Orb. A
             // connector with no catalog yet is asked about tool by tool.
             let annotations = await connectorAnnotations(for: connectorIDs, cliNames: cliNames)
@@ -1473,6 +1549,12 @@ final class AppModel {
                 _ = await testConnector(connector.id)
             }
         }
+    }
+
+    /// Quitting: stops every running turn, so nothing is left running unwatched (the app no longer answers permission
+    /// requests) and the transcript says it was interrupted.
+    func stopTurnsForQuit() {
+        for id in sessions.keys where sessions[id]?.turnTask != nil { stop(id, startsQueuedRoutines: false) }
     }
 
     func stop(_ botID: UUID, startsQueuedRoutines: Bool = true) { sessions[botID]?.stop(startsQueuedRoutines: startsQueuedRoutines) }
@@ -1714,7 +1796,28 @@ final class AppModel {
         return routines.first(where: { $0.id == routineID })?.name
     }
 
-    private func runDueRoutines(now: Date = .now) {
+    func systemWillSleep(at date: Date = .now) { asleepSince = date }
+
+    func systemDidWake(at date: Date = .now) {
+        asleepSince = nil
+        wokeAt = date
+    }
+
+    /// Starts the routines that came due. Right after the Mac wakes it holds back: the scheduler's timer fires at once,
+    /// before the network is up, and a run that fails then would lose its slot until the next day. It does not rely on
+    /// the wake notification winning that race: it also holds back while the Mac is known to be asleep, and when the
+    /// time since its last pass shows that it slept.
+    func runDueRoutines(now: Date = .now) {
+        if let last = lastRoutinePass, now.timeIntervalSince(last) > Self.sleepGap { wokeAt = max(wokeAt ?? now, now) }
+        lastRoutinePass = now
+        if let asleepSince {
+            if now.timeIntervalSince(asleepSince) < Self.sleepHold { return }
+            // A sleep whose wake was never announced (a dark wake, a cancelled sleep): the passes going on show the
+            // Mac is up, so it counts as a wake instead of holding the routines back for good.
+            self.asleepSince = nil
+            wokeAt = max(wokeAt ?? now, now)
+        }
+        if let wokeAt, now < wokeAt.addingTimeInterval(Self.wakeSettleTime) { return }
         for routine in routines where routine.isEnabled && routine.nextRun <= now {
             runRoutine(routine.id)
         }

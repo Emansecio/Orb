@@ -170,7 +170,7 @@ private struct FakeHTTPServer {
     func stop() { process.terminate() }
 }
 
-private func message(_ error: any Error) -> String { (error as? ToolError)?.message ?? "\(error)" }
+private func message(_ error: any Error) -> String { (error as? ToolError)?.message ?? error.localizedDescription }
 
 @Suite(.enabled(if: hasPython))
 struct MCPRemoteTests {
@@ -236,6 +236,19 @@ struct MCPRemoteTests {
             #expect(message(error).contains("expirou"))
         }
         #expect(await !connection.isRunning)
+    }
+
+    @Test func aCallThatFindsTheSessionExpiredIsRepeatedOnANewSession() async throws {
+        let server = try FakeHTTPServer(mode: "streamable")
+        defer { server.stop() }
+        let config = server.config(path: "/mcp")
+        let manager = MCPManager()
+        await manager.sync([config])
+        #expect(try await manager.call(config.id, tool: "expire", arguments: .object([:])) == "ok")
+        // The server forgot the session; the request never ran there, so the model never hears about it.
+        #expect(try await manager.call(config.id, tool: "echo", arguments: .object(["text": .string("oi")])) == "oi")
+        #expect(await manager.status()[config.id] == .ready(toolCount: 4))
+        await manager.sync([])
     }
 
     @Test func aCancellationThatFindsTheSessionExpiredStillExplainsWhyTheNextCallFails() async throws {

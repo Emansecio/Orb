@@ -18,6 +18,9 @@ private actor Script {
 
     func release() { released = true }
 
+    /// Sets the answers after the init (when they need what `setUp` made).
+    func setAnswers(_ new: [[LLMEvent]]) { answers = new }
+
     func answer(_ messages: [ChatMessage], _ tools: [ToolSpec]) async -> [LLMEvent] {
         calls.append(Call(messages: Array(messages.dropFirst()), tools: tools.map(\.name), system: messages.first?.content ?? ""))
         let number = calls.count
@@ -144,6 +147,42 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
         #expect(model.transcript(botID).filter { if case .bot = $0.kind { true } else { false } }.count == 1)
         await model.collectSkillProposals(botID)
         #expect(notices(model, botID).count == 1)
+    }
+
+    @Test @MainActor func theReviewSendsTheBigOutputsAndArgumentsOfTheTurnWholeLikeItsLastCall() async throws {
+        // A file read bigger than a preview, and a call with arguments bigger than the shortened ones.
+        let script = Script([])
+        let (model, botID) = setUp(script)
+        let file = root.appending(path: "pasta/grande.txt")
+        try String(repeating: "linha de texto do arquivo\n", count: 400).write(to: file, atomically: true, encoding: .utf8)
+        let read = call("read_file", .object(["path": .string(file.path), "nota": .string(String(repeating: "n", count: 1_500))]), id: "grande")
+        await script.setAnswers([read] + steps(9) + [said("pronto"), said("Nothing to save.")])
+        #expect(model.send("le o arquivo e publica", to: botID))
+        await waitUntilIdle(model, botID)
+        await waitUntil("the review to end") { await script.calls.count == 12 && model.session(botID).skillReview == nil }
+
+        let calls = await script.calls
+        let result = try #require(calls[10].messages.first { $0.role == .tool && $0.toolCallID == "grande" })
+        #expect(result.content.count > ContextWindow.toolOutputPreview)
+        #expect(calls[10].messages.contains { $0.toolCalls.contains { $0.id == "grande" && $0.arguments.count > 1_500 } })
+        // Same prefix as the turn's last call, big output and arguments included.
+        #expect(Array(calls[11].messages.prefix(calls[10].messages.count)) == calls[10].messages)
+        #expect(calls[11].messages.last?.content == SkillReview.prompt)
+    }
+
+    @Test @MainActor func noReviewIsPaidForWhileFiveProposalsWait() async throws {
+        let script = Script(steps(10) + [said("pronto"), said("Nothing to save.")])
+        let (model, botID) = setUp(script)
+        let bank = model.memory.bank(for: botID)
+        for index in 0..<MemoryBank.maximumProposals {
+            let skill = SkillSamples.good.replacingOccurrences(of: "publicar-site", with: "publicar-site-\(index)")
+            guard case .proposed = await bank.proposeSkill(skill) else { Issue.record("proposal \(index) refused"); return }
+        }
+        #expect(model.send("publica o site", to: botID))
+        await waitUntilIdle(model, botID)
+        await waitUntil("the review to give up") { model.session(botID).skillReview == nil }
+        #expect(await script.calls.count == 11)
+        #expect(model.session(botID).stepsSinceSkill == 0)
     }
 
     @Test @MainActor func whatTheReviewCostsIsInTheUsageHistoryApartFromTheChat() async throws {

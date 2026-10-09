@@ -59,8 +59,9 @@ final class BotLive {
     private(set) var needsYou = false
     /// Incremented when a prompt is sent; Orbs give their small "got it" jump when it changes.
     private(set) var poke = 0
-    /// Incremented when the chat should scroll to something that is not in the transcript yet (a message queued while the
-    /// Orb works, one delivered to the model). The Orb does not jump for it.
+    /// Incremented when the chat should scroll to the end because you sent something: the message you sent, or one queued
+    /// while the Orb works (its bubble changes no transcript revision). Not for a routine's prompt or a queued message
+    /// delivered to the model, which must not pull a chat you are reading. The Orb does not jump for it.
     private(set) var scrollNudge = 0
     /// Incremented when the Orb is selected; its sidebar Orb blinks and glances toward the chat when it changes.
     private(set) var glance = 0

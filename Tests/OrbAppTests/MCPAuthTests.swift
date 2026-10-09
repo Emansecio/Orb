@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Testing
 @testable import Orb
 
@@ -905,6 +906,64 @@ struct MCPLoginStatusTests {
         #expect(await manager.status()[config.id] == .needsMorePermission("chat:write"))
     }
 
+    @Test func theRequestForMorePermissionSurvivesTheServerRestartingForTheNextCall() async throws {
+        let service = FakeOAuthService()
+        let vault = MemoryVault()
+        let auth = MCPAuth(vault: vault, session: service.session)
+        let manager = manager(service, auth: auth)
+        let config = connector(service)
+        try seed(vault, config.id, service)
+        let refused = OSAllocatedUnfairLock(initialState: false) // only the first tools/call is refused for lack of scope
+        service.change {
+            $0.validToken = "at-0"
+            $0.onTool = { _ in
+                guard !refused.withLock({ let was = $0; $0 = true; return was }) else { return nil }
+                return .init(status: 403, headers: ["WWW-Authenticate": #"Bearer error="insufficient_scope", scope="chat:write""#])
+            }
+        }
+        await manager.sync([config])
+        do {
+            _ = try await manager.call(config.id, tool: "echo", arguments: .object([:]))
+            Issue.record("expected an error")
+        } catch {
+            #expect(message(error).hasSuffix("Permitir mais em Conectores."))
+        }
+        #expect(await manager.status()[config.id] == .needsMorePermission("chat:write"))
+        // Another tool of the same connector works with the token it has, and must not make the card forget the request.
+        #expect(try await manager.call(config.id, tool: "echo", arguments: .object([:])) == "ok")
+        #expect(await manager.status()[config.id] == .needsMorePermission("chat:write"))
+        _ = try await manager.test(config.id)
+        #expect(await manager.status()[config.id] == .needsMorePermission("chat:write"))
+
+        // Granting it clears the request; the server then reports as usual.
+        await manager.scopeGranted(config.id)
+        #expect(await manager.status()[config.id] == .idle(toolCount: 1))
+        _ = try await manager.test(config.id)
+        #expect(await manager.status()[config.id] == .ready(toolCount: 1))
+    }
+
+    @Test func aLoginThatEndedWhileClaudeCodeRenewedItReachesTheCard() async throws {
+        let service = FakeOAuthService { $0.onToken = { _ in .json(#"{"error":"invalid_grant"}"#, status: 400) } }
+        let vault = MemoryVault()
+        let auth = MCPAuth(vault: vault, session: service.session)
+        let manager = manager(service, auth: auth)
+        let config = connector(service)
+        try seed(vault, config.id, service, expiresIn: 10)
+        await manager.sync([config])
+        #expect(await manager.status()[config.id] == .idle(toolCount: nil)) // nothing has asked for the login yet
+
+        let (servers, ended) = await auth.bearers(for: [config])
+        #expect(servers[0].headers["Authorization"] == nil) // the CLI gets the server without a token…
+        #expect(ended == [config.id: .expired]) // …and the app now knows why
+        for (id, reason) in ended { await manager.loginEnded(id, reason: reason) }
+        #expect(await manager.status()[config.id] == .needsSignIn("A sessão do Notion expirou. Entre de novo."))
+
+        // The next turn finds no token at all: that is not news, and the card keeps its words.
+        let again = await auth.bearers(for: [config])
+        #expect(again.ended.isEmpty)
+        #expect(await manager.status()[config.id] == .needsSignIn("A sessão do Notion expirou. Entre de novo."))
+    }
+
     @Test func signingOutStopsTheConnectorAndAsksForALoginAgain() async throws {
         let service = FakeOAuthService()
         let vault = MemoryVault()
@@ -927,6 +986,30 @@ struct MCPLoginStatusTests {
 @MainActor
 struct ConnectorLoginModelTests {
     private func folder() -> URL { FileManager.default.temporaryDirectory.appending(path: "OrbLogin-\(UUID().uuidString)") }
+
+    @Test func aNewLoginReplacesTheOneStillWaitingForTheBrowserAndTakesItsPort() async throws {
+        let service = FakeOAuthService()
+        let opened = OSAllocatedUnfairLock(initialState: 0)
+        let root = folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = AppModel(store: Store(directory: root), runsBackgroundWork: false, secretVault: MemoryVault(), connectorSession: service.session)
+        model.opensLoginPage = { _ in opened.withLock { $0 += 1 } } // the person never comes back from this tab
+        // Slack's way: an app registered to the letter, so the redirect is on one fixed port.
+        let config = connector(service, MCPOAuthSettings(clientID: "app", redirect: "http://localhost:\(Int.random(in: 48_100...48_900))/cb"))
+        model.connectors = [config]
+        let first = Task { await model.signIn(connector: config.id) }
+        await waitUntil("the first login to wait for the browser") { opened.withLock { $0 } == 1 }
+        #expect(model.signingIn.contains(config.id))
+
+        // Back on the card, "Entrar" is offered again: the second click must not meet the first one's port.
+        let browser = FakeOAuthService.Browser()
+        model.opensLoginPage = browser.open
+        let second = await model.signIn(connector: config.id)
+        guard case .connected = second else { Issue.record("expected the second login to connect, got \(second)"); return }
+        guard case .failed(let reason) = await first.value else { Issue.record("expected the first login to end"); return }
+        #expect(reason == "Login cancelado.")
+        #expect(model.signingIn.isEmpty && model.loginAttempts.isEmpty)
+    }
 
     @Test func signingInThroughTheModelStartsTheConnectorAndKeepsTheTokenOutOfTheDataFolder() async throws {
         let service = FakeOAuthService()

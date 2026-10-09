@@ -203,6 +203,8 @@ enum MailScripts {
 
 struct GmailConnector: LocalConnector {
     let backend: any MailBackend
+    /// Opening Mail and listing the accounts, then the script itself: each may take the 90 s `LiveMailBackend.run` allows.
+    var callTimeout: Duration = .seconds(200)
 
     static let longestBody = 12_000
     static let defaultMailbox = "INBOX"
@@ -333,8 +335,13 @@ struct GmailConnector: LocalConnector {
         guard !to.isEmpty else { throw ToolError("Faltou o argumento \"to\".") }
         for address in to + cc where !address.contains("@") { throw ToolError("\"\(address)\" não parece um endereço de e-mail.") }
         let subject = try arguments.requiredString("subject", allowEmpty: true), body = try arguments.requiredString("body", allowEmpty: true)
-        _ = try await backend.run(MailScripts.compose(from: account.address.isEmpty ? account.name : account.address, to: to, cc: cc,
-                                                      subject: subject, body: body, send: send))
+        do {
+            _ = try await backend.run(MailScripts.compose(from: account.address.isEmpty ? account.name : account.address, to: to, cc: cc,
+                                                          subject: subject, body: body, send: send))
+        } catch let error as ToolError where send && AppleScript.isTimeout(error.message) {
+            // The message may already have left: the model must not send it again without looking.
+            throw ToolError("O Mail não confirmou o envio a tempo, mas o e-mail pode ter sido enviado. Confira a caixa Enviados de \(account.label) antes de tentar de novo.")
+        }
         return send ? "E-mail enviado de \(account.label) para \(to.joined(separator: ", "))."
                     : "Rascunho salvo em \(account.label) para \(to.joined(separator: ", ")). Nada foi enviado."
     }

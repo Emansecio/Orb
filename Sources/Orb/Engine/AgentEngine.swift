@@ -84,6 +84,9 @@ struct TurnRequest: Sendable {
     /// is answered with "Not available" and never runs, and a call that would need the user's approval is refused with
     /// no card, while `tools` still lists them all, so the request is the one the provider already has in its cache.
     var onlyTools: Set<String>?
+    /// The prompt only steers the turn (the review of the conversation): it is part of the task in progress, not the
+    /// request that starts one, so the outputs of the steps before it stay whole, as in the turn's last call.
+    var promptOnlySteers = false
 
     func currentPermissions() async -> PermissionState {
         if let permissions { return await permissions() }
@@ -138,6 +141,8 @@ actor AgentEngine {
         let user = ChatMessage.user(request.prompt, images: request.images)
         var messages = [ChatMessage.system(request.system)] + request.history + [user]
         out.yield(.message(user))
+        // Where the message that opened this turn sits; the ones the user queues later come after it and open nothing.
+        let turnStart = messages.count - 1
         let specs = request.tools.map(\.spec)
         var allowed = request.turnGrants
         // The request carries the system prompt and the tool specs besides the history: the budget accounts for them.
@@ -160,7 +165,9 @@ actor AgentEngine {
         var warnedAboutCache = false
         var continuedAfterCut = false
         // Where in `messages` the "continue" after a cut reply went (it steers the turn; it starts none).
-        var nudge: Int?
+        var nudge: Int? = request.promptOnlySteers ? messages.count - 1 : nil
+        // Where in `messages` the user's messages sent during the turn went (more steps of it, not new turns).
+        var steered: [Int] = []
         var sendImages = request.supportsImages != false
         if !sendImages, !request.images.isEmpty { out.yield(.notice(ImageRejection.notice)) }
 
@@ -169,14 +176,14 @@ actor AgentEngine {
                 // The last step answers in text (the tools stay listed, so the provider's cache still applies).
                 let isLastStep = step == maxSteps
                 // What the user said since the last call goes to the model now: a step boundary.
-                Self.deliverSteering(request.steering, into: &messages, out: out)
+                steered += Self.deliverSteering(request.steering, into: &messages, out: out)
                 out.yield(.status("Pensando"))
                 var reply = Reply()
                 var contextRetried = false
                 while true {
                     var windowHasImages = false
                     do {
-                        let (window, fit) = Self.fitted(messages, to: budget, cut: &cut, continuing: picksUpTask, nudge: nudge,
+                        let (window, fit) = Self.fitted(messages, to: budget, cut: &cut, continuing: picksUpTask, nudge: nudge, steering: steered,
                                                            sendImages: sendImages)
                         windowHasImages = window.contains { !$0.images.isEmpty }
                         if let fit {
@@ -206,7 +213,10 @@ actor AgentEngine {
                             learnedWindow = (stated, true)
                         } else {
                             budget = budget.scaled(by: 0.5)
-                            learnedWindow = reported == nil ? budget.window.map { (Int(Double($0) * Self.unstatedWindowShare), false) } : nil
+                            // A refusal naming the very window assumed (or a bigger one) says the estimate of the
+                            // history was off, not the window: it is remembered as a guess too, so the next turns
+                            // plan below it instead of overflowing again at every cycle.
+                            learnedWindow = budget.window.map { (Int(Double($0) * Self.unstatedWindowShare), false) }
                         }
                     } catch let error where windowHasImages && ImageRejection.matches(error) {
                         // The model cannot read pictures: say so once, remember it, and go on with their paths.
@@ -284,7 +294,7 @@ actor AgentEngine {
                     // On the last step the model may have only tried to call tools: that is the limit, not silence.
                     if isLastStep && !reply.calls.isEmpty {
                         // Nothing else says where the task stands: leave a record for the "continua" that follows.
-                        if let progress = Self.progress(in: messages, pickedUp: picksUpTask, nudge: nudge) {
+                        if let progress = Self.progress(in: messages, pickedUp: picksUpTask, turnStart: turnStart, nudge: nudge, steering: steered) {
                             record(ChatMessage(role: .assistant, content: progress), in: &messages, out: out)
                             out.yield(.taskPaused)
                         }
@@ -294,7 +304,7 @@ actor AgentEngine {
                     }
                     return
                 }
-                if calls.isEmpty && isLastStep, let progress = Self.progress(in: messages, pickedUp: picksUpTask, nudge: nudge) {
+                if calls.isEmpty && isLastStep, let progress = Self.progress(in: messages, pickedUp: picksUpTask, turnStart: turnStart, nudge: nudge, steering: steered) {
                     // The model's closing words, with the record of the steps after them (one message, so the roles
                     // keep alternating; the transcript shows only what the model wrote).
                     var closing = assistant
@@ -324,14 +334,19 @@ actor AgentEngine {
 
     /// Hands the messages the user sent during the turn to the model, as user messages after whatever came before
     /// (tool results included: the providers merge consecutive user turns), and tells the UI each one arrived.
-    static func deliverSteering(_ queue: SteeringQueue?, into messages: inout [ChatMessage], out: AsyncStream<TurnEvent>.Continuation) {
-        guard let queue else { return }
+    /// Returns where in `messages` they went.
+    @discardableResult
+    static func deliverSteering(_ queue: SteeringQueue?, into messages: inout [ChatMessage], out: AsyncStream<TurnEvent>.Continuation) -> [Int] {
+        guard let queue else { return [] }
+        var indexes: [Int] = []
         for steered in queue.drain() {
             let message = ChatMessage.user(steered.prompt, images: steered.pictures)
+            indexes.append(messages.count)
             messages.append(message)
             out.yield(.message(message))
             out.yield(.steered(steered.id))
         }
+        return indexes
     }
 
     /// Adds a message to the model history and tells the UI.
@@ -417,10 +432,12 @@ actor AgentEngine {
 
     /// The steps of the task `messages` end with, written as a progress record (nil when it made no tool calls).
     /// `pickedUp`: the turn's request only picks up the task before it. `nudge`: the index of the "continue" the engine
-    /// added, which is no request.
-    private static func progress(in messages: [ChatMessage], pickedUp: Bool, nudge: Int? = nil) -> String? {
+    /// added, which is no request. `turnStart`: the index of the message that opened the turn; the messages sent during it
+    /// (`steering`, and anything queued after `turnStart`) are no request starting a task either, but stay in its record.
+    private static func progress(in messages: [ChatMessage], pickedUp: Bool, turnStart: Int, nudge: Int? = nil, steering: [Int] = []) -> String? {
         let users = messages.indices.filter {
-            $0 != nudge && messages[$0].role == .user && !messages[$0].content.hasPrefix(ContextSummary.marker)
+            $0 <= turnStart && $0 != nudge && !steering.contains($0) && messages[$0].role == .user
+                && !messages[$0].content.hasPrefix(ContextSummary.marker)
         }
         guard let start = pickedUp && users.count >= 2 ? users[users.count - 2] : users.last else { return nil }
         return ProgressRecord.text(task: messages.indices.filter { $0 >= start && $0 != nudge }.map { messages[$0] })
@@ -554,12 +571,13 @@ actor AgentEngine {
     /// `cut` is what earlier calls of this turn decided to leave out: it holds still until the history is over the
     /// budget again, and then moves in one go (see `ContextWindow.fit`), so most calls extend the previous request
     /// and the provider's cache keeps working.
-    /// `nudge`: index in `messages` of the engine's "continue" (see `ContextWindow.fit`).
+    /// `nudge`: index in `messages` of the engine's "continue"; `steering`: those of the user's messages sent during the
+    /// turn (see `ContextWindow.fit`).
     private static func fitted(_ messages: [ChatMessage], to budget: ContextBudget, cut: inout ContextCut, continuing: Bool = false,
-                               nudge: Int? = nil, sendImages: Bool = true) -> (messages: [ChatMessage], fit: ContextWindow?) {
+                               nudge: Int? = nil, steering: [Int] = [], sendImages: Bool = true) -> (messages: [ChatMessage], fit: ContextWindow?) {
         guard let system = messages.first, system.role == .system else { return (messages, nil) }
         let fit = ContextWindow.fit(Array(messages.dropFirst()), budget: budget, cut: &cut, continuing: continuing,
-                                    nudge: nudge.map { $0 - 1 })
+                                    nudge: nudge.map { $0 - 1 }, steering: steering.map { $0 - 1 })
         let window = [system] + fit.messages
         return (sendImages ? window : window.strippingImages(), fit)
     }

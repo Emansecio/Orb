@@ -23,6 +23,22 @@ final class SearchToolTests {
         #expect(lines(output) == ["a.swift:2: let needle = 1", "sub/b.swift:1: // needle again"])
     }
 
+    @Test func grepFindsAccentsInAUTF8FileWithAStrayByte() async throws {
+        try workspace.write("cortado.log", Data("um coração\notra Ásia\n".utf8) + Data([0xC3]))
+        let output = try await run(GrepTool(), ["pattern": .string("coração")])
+        #expect(output.contains("cortado.log:1"))
+    }
+
+    @Test func grepRefusesAPipeNamedAsThePathInsteadOfWaitingOnIt() async throws {
+        let pipe = workspace.url("log.fifo")
+        #expect(mkfifo(pipe.path, 0o600) == 0)
+        let message = await workspace.outcome(of: GrepTool(), ["pattern": .string("x"), "path": .string("log.fifo")])
+        #expect(message?.contains("não é um arquivo comum") == true, Comment(rawValue: message ?? "no answer"))
+        // Walking a folder that holds a pipe never opened it, and still does not.
+        try workspace.write("a.txt", "x marks\n")
+        #expect(try await run(GrepTool(), ["pattern": .string("marks")]).contains("a.txt:1"))
+    }
+
     @Test func grepAndGlobSeeSymlinkedFiles() async throws {
         try workspace.write("real/zshrc.txt", "export NEEDLE=1\n")
         try workspace.write("dots/.keep", "")

@@ -216,6 +216,35 @@ struct ClaudeCodeEngineTests {
         #expect(answer["response"]?["response"]?["message"] == .string(ClaudeCodePolicy.userDenial))
     }
 
+    /// AskUserQuestion has no card here: approving it would let the model go on as if the user had answered, and a
+    /// permission card could only say Allow or Deny. It is refused without asking, telling the model to ask in text.
+    @Test func aQuestionToTheUserIsRefusedWithoutACardInEveryMode() async throws {
+        for mode in [PermissionMode.ask, .auto] {
+            let fake = try FakeClaude()
+            defer { fake.remove() }
+            let events = await run(ClaudeCodeEngine(), fake.turn(mode: mode, tool: ("AskUserQuestion", #"{"questions": [{"question": "Qual banco?"}]}"#)))
+            #expect(!events.contains { if case .approval = $0 { true } else { false } }, Comment(rawValue: "\(mode)"))
+            let lines = await fake.logLines(waitingFor: "eof")
+            let answer = try #require(lines.compactMap { JSONValue.parse($0) }.first { $0["type"] == .string("control_response") && $0["response"]?["request_id"] == .string("perm_1") })
+            #expect(answer["response"]?["response"]?["behavior"] == .string("deny"), Comment(rawValue: "\(mode)"))
+            #expect(answer["response"]?["response"]?["message"] == .string(ClaudeCodePolicy.questionDenial))
+        }
+    }
+
+    /// A deleted or unplugged folder is the problem, not the CLI: the spawn must not fail with a bare "No such file or directory".
+    @Test func aMissingFolderIsReportedAsTheFolder() async throws {
+        let fake = try FakeClaude()
+        defer { fake.remove() }
+        var turn = fake.turn(mode: .auto)
+        let gone = fake.directory.appendingPathComponent("nao-existe").path
+        turn.bot.workingDirectory = gone
+        let events = await run(ClaudeCodeEngine(), turn)
+        let failures = events.compactMap { event -> String? in if case .failed(let message) = event { message } else { nil } }
+        #expect(failures.count == 1)
+        #expect(failures.first?.contains("não existe mais") == true && failures.first?.contains("nao-existe") == true)
+        #expect(failures.first?.contains("No such file") == false)
+    }
+
     @Test func automaticModeNeverAsks() async throws {
         let fake = try FakeClaude()
         defer { fake.remove() }

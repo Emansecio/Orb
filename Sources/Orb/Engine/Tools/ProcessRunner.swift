@@ -47,6 +47,9 @@ enum ProcessRunner {
         }
         // Only the child writes now, so the reader sees the end of the stream when the last writer is gone.
         try? pipe.fileHandleForWriting.close()
+        ChildProcessGroups.insert(pid)
+        // Leftovers (`cmd &`) are not ours to track after the call: the warning in the result says so.
+        defer { ChildProcessGroups.remove(pid) }
         SpawnedProcess.watch(pid) {
             exitedContinuation.yield($0)
             exitedContinuation.finish()

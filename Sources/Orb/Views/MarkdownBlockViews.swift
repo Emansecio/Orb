@@ -46,7 +46,7 @@ struct MarkdownBlockView: View, Equatable {
         case .list(let items):
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(Array(items.enumerated()), id: \.offset) { index, item in
-                    ListItemRow(item: item, cursor: cursor && index == items.count - 1)
+                    ListItemRow(item: item, cursor: cursor && index == items.count - 1).equatable()
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -61,7 +61,7 @@ struct MarkdownBlockView: View, Equatable {
         case .code(let language, let code, _):
             CodeBlockView(language: language, code: code, streaming: cursor)
         case .table(let table):
-            TableBlockView(table: table)
+            TableBlockView(table: table, streaming: cursor)
         case .rule:
             Rectangle().fill(Palette.line).frame(height: 1).padding(.vertical, 4)
         }
@@ -82,7 +82,8 @@ struct MarkdownBlockView: View, Equatable {
     }
 }
 
-private struct ListItemRow: View {
+/// Equatable, so while a long list streams only the item being written is evaluated again.
+private struct ListItemRow: View, Equatable {
     let item: MarkdownListItem
     let cursor: Bool
 
@@ -221,22 +222,21 @@ private struct CodeLines: View, Equatable {
 /// A Markdown table: the header in semibold, a hairline under it, the columns aligned as the table says.
 struct TableBlockView: View, Equatable {
     let table: MarkdownTable
+    /// The table is still being written (it is the last block of a reply that streams).
+    var streaming = false
+
+    /// Rows per piece of a long table while it streams.
+    nonisolated static let pieceRows = 20
 
     var body: some View {
         Grid(alignment: .topLeading, horizontalSpacing: 18, verticalSpacing: 6) {
             GridRow {
                 ForEach(Array(table.header.enumerated()), id: \.offset) { column, cell in
-                    cellText(cell, column: column).fontWeight(.semibold)
+                    TableCell(source: cell, alignment: table.alignments.alignment(at: column), cached: true).fontWeight(.semibold)
                 }
             }
             Divider().gridCellUnsizedAxes(.horizontal).overlay(Palette.line)
-            ForEach(Array(table.rows.enumerated()), id: \.offset) { _, row in
-                GridRow {
-                    ForEach(Array(row.enumerated()), id: \.offset) { column, cell in
-                        cellText(cell, column: column)
-                    }
-                }
-            }
+            rows
         }
         .font(.system(size: 13))
         .padding(10)
@@ -245,13 +245,64 @@ struct TableBlockView: View, Equatable {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func cellText(_ source: String, column: Int) -> some View {
-        let alignment: Alignment = switch table.alignments.indices.contains(column) ? table.alignments[column] : .leading {
+    /// The rows in one `Grid`, so the columns stay aligned. While a long table streams the closed pieces of `pieceRows`
+    /// rows are Equatable views that keep what was evaluated of them (no `.equatable()` on them: it would make each piece
+    /// a cell of the grid instead of its rows), and only the last piece is evaluated again at each
+    /// flush; the cells of the row being written are not kept in `MarkdownCache` (each half-written state would be).
+    @ViewBuilder private var rows: some View {
+        if streaming, let pieces = Self.pieces(of: table.rows) {
+            ForEach(Array(pieces.closed.enumerated()), id: \.offset) { _, piece in
+                TableRows(rows: piece, alignments: table.alignments, writing: false)
+            }
+            TableRows(rows: pieces.tail, alignments: table.alignments, writing: true)
+        } else {
+            TableRows(rows: table.rows, alignments: table.alignments, writing: streaming)
+        }
+    }
+
+    /// The rows cut into closed pieces of `pieceRows` and what is left (never empty), or nil when the table is short.
+    nonisolated static func pieces(of rows: [[String]]) -> (closed: [[[String]]], tail: [[String]])? {
+        guard rows.count > pieceRows else { return nil }
+        let closedCount = (rows.count - 1) / pieceRows
+        let closed = (0..<closedCount).map { Array(rows[$0 * pieceRows..<($0 + 1) * pieceRows]) }
+        return (closed, Array(rows[(closedCount * pieceRows)...]))
+    }
+}
+
+/// Rows of a table, as the `GridRow`s of the `Grid` they are in. `writing`: the last of them is the row being written.
+private struct TableRows: View, Equatable {
+    let rows: [[String]]
+    let alignments: [MarkdownTable.Alignment]
+    let writing: Bool
+
+    var body: some View {
+        ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+            GridRow {
+                ForEach(Array(row.enumerated()), id: \.offset) { column, cell in
+                    TableCell(source: cell, alignment: alignments.alignment(at: column), cached: !(writing && index == rows.count - 1))
+                }
+            }
+        }
+    }
+}
+
+private struct TableCell: View {
+    let source: String
+    let alignment: Alignment
+    let cached: Bool
+
+    var body: some View {
+        Text(MarkdownCache.attributed(source, cached: cached))
+            .frame(maxWidth: .infinity, alignment: alignment)
+    }
+}
+
+private extension [MarkdownTable.Alignment] {
+    func alignment(at column: Int) -> Alignment {
+        switch indices.contains(column) ? self[column] : .leading {
         case .leading: .leading
         case .center: .center
         case .trailing: .trailing
         }
-        return Text(MarkdownCache.attributed(source))
-            .frame(maxWidth: .infinity, alignment: alignment)
     }
 }

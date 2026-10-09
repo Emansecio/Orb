@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Testing
 @testable import Orb
 
@@ -144,5 +145,65 @@ final class OfficeReaderTests {
                 #expect((error as? ToolError)?.message.contains(needle) == true, Comment(rawValue: "\(name): \(error)"))
             }
         }
+    }
+}
+
+final class DocumentTextCacheTests {
+    private func key(_ path: String, modified: TimeInterval = 0, size: Int = 1) -> DocumentTextCache.Key {
+        // A file at a path that exists, so the key can be built; fields are then set as the test needs.
+        var key = DocumentTextCache.Key(URL(fileURLWithPath: "/"), size: size)!
+        key.path = path
+        key.modified = Date(timeIntervalSince1970: modified)
+        return key
+    }
+
+    @Test func aDocumentIsConvertedOnceWhileItStaysTheSame() throws {
+        let cache = DocumentTextCache()
+        let calls = OSAllocatedUnfairLock(initialState: 0)
+        func load() throws -> String { calls.withLock { $0 += 1 }; return "texto \(calls.withLock { $0 })" }
+        #expect(try cache.text(for: key("/a.xlsx"), load: load) == "texto 1")
+        #expect(try cache.text(for: key("/a.xlsx"), load: load) == "texto 1")
+        #expect(calls.withLock { $0 } == 1)
+        // Edited (date) or replaced (size): converted again.
+        #expect(try cache.text(for: key("/a.xlsx", modified: 5), load: load) == "texto 2")
+        #expect(try cache.text(for: key("/a.xlsx", modified: 5, size: 9), load: load) == "texto 3")
+        // Without a key nothing is cached; a failing conversion caches nothing either.
+        _ = try cache.text(for: nil, load: load)
+        _ = try cache.text(for: nil, load: load)
+        #expect(calls.withLock { $0 } == 5)
+        #expect(throws: ToolError.self) { try cache.text(for: self.key("/b.xlsx")) { throw ToolError("quebrado") } }
+        #expect(try cache.text(for: key("/b.xlsx")) { "b" } == "b")
+    }
+
+    @Test func theOldestDocumentsLeaveWhenThereAreTooManyOrTooMuchText() throws {
+        let cache = DocumentTextCache()
+        let calls = OSAllocatedUnfairLock(initialState: 0)
+        func load() throws -> String { calls.withLock { $0 += 1 }; return "x" }
+        for index in 0...DocumentTextCache.capacity { _ = try cache.text(for: key("/\(index).xlsx"), load: load) }
+        #expect(calls.withLock { $0 } == DocumentTextCache.capacity + 1)
+        _ = try cache.text(for: key("/1.xlsx"), load: load)   // still there
+        #expect(calls.withLock { $0 } == DocumentTextCache.capacity + 1)
+        _ = try cache.text(for: key("/0.xlsx"), load: load)   // the first one left
+        #expect(calls.withLock { $0 } == DocumentTextCache.capacity + 2)
+
+        // Text beyond the budget is not kept.
+        let huge = String(repeating: "a", count: DocumentTextCache.characterBudget + 1)
+        let before = calls.withLock { $0 }
+        _ = try cache.text(for: key("/huge.xlsx")) { calls.withLock { $0 += 1 }; return huge }
+        _ = try cache.text(for: key("/huge.xlsx")) { calls.withLock { $0 += 1 }; return huge }
+        #expect(calls.withLock { $0 } == before + 2)
+    }
+
+    /// The tool pages over one conversion, and a document that changed is read again.
+    @Test func readFilePagesAndNoticesWhenTheFileChanges() async throws {
+        let workspace = try ToolWorkspace()
+        try workspace.write("nota.rtf", #"{\rtf1\ansi Primeira versao}"#)
+        let first = try await workspace.run(ReadFileTool(), ["path": .string("nota.rtf")])
+        #expect(first.contains("Primeira versao"))
+        let paged = try await workspace.run(ReadFileTool(), ["path": .string("nota.rtf"), "offset": .number(1)])
+        #expect(paged.contains("Primeira versao"))
+        try workspace.write("nota.rtf", #"{\rtf1\ansi Segunda versao, bem maior}"#)
+        let changed = try await workspace.run(ReadFileTool(), ["path": .string("nota.rtf")])
+        #expect(changed.contains("Segunda versao") && !changed.contains("Primeira"))
     }
 }

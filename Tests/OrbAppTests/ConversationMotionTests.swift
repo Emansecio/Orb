@@ -214,6 +214,23 @@ import Testing
         for item in reopened { #expect(!ledger.isNew(item.id)) }
     }
 
+    @Test func aBurstOfToolsAtTheEndOfAnOpenChatIsNotAConversationSwap() {
+        let ledger = TranscriptEntrances()
+        let chat = items(3)
+        ledger.observe(chat, isLoading: false)
+        // Nine parallel tools started in one step: the list grows by more than `largestArrival` between two evaluations.
+        let burst = items(TranscriptEntrances.largestArrival + 4)
+        ledger.observe(chat + burst, isLoading: false)
+        #expect(ledger.generation == 0) // no new identity: the chat is not rebuilt, nor sent to the end
+        let newest = burst.suffix(TranscriptEntrances.largestArrival), older = burst.dropLast(TranscriptEntrances.largestArrival)
+        for item in newest { #expect(ledger.isNew(item.id)) }
+        for item in older { #expect(!ledger.isNew(item.id)) }
+        // All of them are known now: the next message is the only new row.
+        let sent = user()
+        ledger.observe(chat + burst + [sent], isLoading: false)
+        #expect(ledger.generation == 0 && ledger.isNew(sent.id) && !ledger.isNew(burst[0].id))
+    }
+
     @Test func aShortConversationReopenedOverAnEmptyChatReplacesItWhenTheSessionSaysSo() {
         // Five items, under the cap: only the session knows another conversation was installed.
         let ledger = TranscriptEntrances()

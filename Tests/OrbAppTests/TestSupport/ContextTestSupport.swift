@@ -65,10 +65,15 @@ struct ReplayLLM: LLMClient {
 /// A `read_file` that returns `size` characters.
 struct OutputTool: AgentTool {
     let size: Int
+    /// Called whenever the tool runs (a test speaking to the turn while the tool works).
+    var onRun: (@Sendable () -> Void)?
     var spec: ToolSpec { ToolSpec(name: "read_file", description: "Reads", parameters: .schema([:])) }
     var kind: ToolCall.Kind { .file }
     var capability: Capability? { nil }
     func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) { ("Lendo", "arquivo") }
-    func run(_ arguments: JSONValue, context: ToolContext) async throws -> String { String(repeating: "y", count: size) }
+    func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
+        onRun?()
+        return String(repeating: "y", count: size)
+    }
 }

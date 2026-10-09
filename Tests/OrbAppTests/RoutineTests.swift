@@ -108,6 +108,23 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
 
     // MARK: Its own conversation
 
+    // Covers the contract `poke` (the avatar jumps) is not `scrollNudge` (the chat scrolls); ChatView listens only to the latter.
+    @Test @MainActor func aRoutineStartingDoesNotScrollTheChatYouAreReading() async throws {
+        let (model, bot, routine) = setUp()
+        let live = model.live(bot.id)
+        let nudges = live.scrollNudge, jumps = live.poke
+        model.runRoutine(routine.id)
+        await model.routineStarted()
+        #expect(live.poke > jumps) // the Orb still gets to work...
+        #expect(live.scrollNudge == nudges) // ...but the chat stays where you left it
+        await waitUntilIdle(model, bot.id)
+        #expect(live.scrollNudge == nudges)
+
+        model.send("oi", to: bot.id, fromUser: true) // what you send does scroll
+        #expect(live.scrollNudge == nudges + 1)
+        await waitUntilIdle(model, bot.id)
+    }
+
     @Test @MainActor func aRoutineRunsInItsOwnConversationNotInYourChat() async throws {
         let (model, bot, routine) = setUp()
         let before = model.transcript(bot.id)
@@ -317,6 +334,77 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         await waitUntilIdle(model, bot.id)
         #expect(model.routines[0].runs.count == 1)
         #expect(model.routines[0].nextRun > .now.addingTimeInterval(14 * 60))
+    }
+
+    @Test @MainActor func aRoutineDueWhileTheMacSleptWaitsForTheNetworkAfterWaking() async throws {
+        let (model, bot, routine) = setUp()
+        model.routines[0].lastRun = .now.addingTimeInterval(-3 * 3600)
+        let woke = Date.now
+        model.systemDidWake(at: woke)
+
+        model.runDueRoutines(now: woke.addingTimeInterval(5)) // the timer fires at once: no network yet
+        #expect(!model.isStartingRoutine && !model.isWorking(bot.id))
+        #expect(model.routines[0].runs.isEmpty)
+
+        model.runDueRoutines(now: woke.addingTimeInterval(AppModel.wakeSettleTime + 1))
+        await model.routineStarted()
+        await waitUntilIdle(model, bot.id)
+        #expect(model.routines[0].runs.count == 1)
+        _ = routine
+    }
+
+    @Test @MainActor func aRoutineWaitsEvenIfTheTimerBeatsTheWakeNotification() async throws {
+        let (model, bot, _) = setUp()
+        model.routines[0].lastRun = .now.addingTimeInterval(-3 * 3600)
+        let start = Date.now
+
+        // The Mac announced it was going to sleep; the timer resumes before `didWake` is delivered.
+        model.systemWillSleep()
+        model.runDueRoutines(now: start.addingTimeInterval(3600))
+        #expect(!model.isStartingRoutine && !model.isWorking(bot.id))
+        #expect(model.routines[0].runs.isEmpty)
+
+        model.systemDidWake(at: start.addingTimeInterval(3601))
+        model.runDueRoutines(now: start.addingTimeInterval(3601 + AppModel.wakeSettleTime + 1))
+        await model.routineStarted()
+        await waitUntilIdle(model, bot.id)
+        #expect(model.routines[0].runs.count == 1)
+    }
+
+    @Test @MainActor func aSleepWhoseWakeNeverComesDoesNotHoldTheRoutinesForGood() async throws {
+        let (model, bot, _) = setUp()
+        model.routines[0].lastRun = .now.addingTimeInterval(-3 * 3600)
+        let start = Date.now
+
+        // "Going to sleep" arrives, the Mac stays up (a dark wake, a cancelled sleep) and `didWake` never does.
+        model.systemWillSleep(at: start)
+        model.runDueRoutines(now: start.addingTimeInterval(30))
+        #expect(model.routines[0].runs.isEmpty)
+        model.runDueRoutines(now: start.addingTimeInterval(AppModel.sleepHold + 30)) // counts as a wake: waits for the network
+        #expect(!model.isStartingRoutine && !model.isWorking(bot.id))
+
+        model.runDueRoutines(now: start.addingTimeInterval(AppModel.sleepHold + 30 + AppModel.wakeSettleTime + 1))
+        await model.routineStarted()
+        await waitUntilIdle(model, bot.id)
+        #expect(model.routines[0].runs.count == 1)
+    }
+
+    @Test @MainActor func aLongGapBetweenPassesCountsAsWakingEvenWithoutAnyNotification() async throws {
+        let (model, bot, _) = setUp()
+        model.routines[0].lastRun = .now.addingTimeInterval(-3 * 3600)
+        let start = Date.now
+        model.routines[0].isEnabled = false
+        model.runDueRoutines(now: start) // a normal pass before the lid closed
+        model.routines[0].isEnabled = true
+
+        model.runDueRoutines(now: start.addingTimeInterval(3600)) // the timer, with no notification yet
+        #expect(!model.isStartingRoutine && !model.isWorking(bot.id))
+        #expect(model.routines[0].runs.isEmpty)
+
+        model.runDueRoutines(now: start.addingTimeInterval(3600 + AppModel.wakeSettleTime + 1))
+        await model.routineStarted()
+        await waitUntilIdle(model, bot.id)
+        #expect(model.routines[0].runs.count == 1)
     }
 
     @Test @MainActor func aRunThatEndsInsideItsSlotKeepsItsStartAsTheCount() async throws {

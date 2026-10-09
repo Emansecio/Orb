@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import ImageIO
+import SQLite3
 import Testing
 @testable import Orb
 
@@ -36,6 +37,17 @@ import Testing
 
     // MARK: Identity and interview
 
+    /// A long run of name characters (a pasted hash, a minified line) is scrubbed in one pass, not tried from every position.
+    @Test func aLongRunOfLettersIsScrubbedQuickly() {
+        let run = String(repeating: "x", count: 20_000), dotted = String(repeating: "a.", count: 20_000)
+        let start = ContinuousClock.now
+        #expect(MemorySanitizer.scrub(run) == run)
+        #expect(MemorySanitizer.scrub(dotted) == dotted)
+        #expect(MemorySanitizer.scrub(run + " api_key=abc123") == run + " api_key=[removido]")
+        #expect(MemorySanitizer.scrub(dotted + " postgres://eu:hunter2@db") == dotted + " postgres://eu:[removido]@db")
+        #expect(ContinuousClock.now - start < .seconds(5))
+    }
+
     @Test func newOrbsStartWithTheirIdentityAndAnInterview() async {
         let bank = bank()
         await bank.ensureIdentity(notes: "Seja direto. Cuide da minha agenda.", interview: true)
@@ -53,6 +65,23 @@ import Testing
 
         await bank.remember("Prefere ser chamado de Thiago.", kind: .preferencia)
         #expect(!(await bank.snapshot()).interviewPending)
+    }
+
+    @Test func aBankInAnotherProcessDoesNotBringBackAFolderThatWasDeleted() async throws {
+        let directory = root.appending(path: "filho")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let child = MemoryBank(directory: directory, createsRoot: false)
+        func saved(_ result: RememberOutcome) -> Bool { if case .saved = result { true } else { false } }
+        #expect(saved(await child.remember("Gosta de café.", kind: .preferencia)))
+
+        try FileManager.default.removeItem(at: directory) // the Orb was deleted meanwhile
+        #expect(await child.remember("Outra coisa.", kind: .fato) == .failed)
+        #expect(!FileManager.default.fileExists(atPath: directory.path))
+
+        // The app's own bank still makes its folder when it has to.
+        let own = MemoryBank(directory: directory)
+        #expect(saved(await own.remember("Gosta de chá.", kind: .preferencia)))
+        #expect(FileManager.default.fileExists(atPath: directory.path))
     }
 
     @Test func interviewAnswersGrowTheIdentity() async {
@@ -641,6 +670,79 @@ struct MemoryIntentTests {
         let brief = await bank.brief(for: "oi", conversationIsNew: true).full
         #expect(brief.contains("Avisar antes de apagar qualquer arquivo."))
         #expect(brief.count <= MemoryBank.briefBudget)
+    }
+
+    @Test func savingLongIdentityNotesKeepsTheirEnd() async {
+        let bank = bank()
+        await bank.ensureIdentity(notes: String(repeating: "Texto longo de identidade. ", count: 73), interview: false)
+        for note in ["Nota A sobre café.", "Nota B sobre agenda.", "Nota C final"] {
+            await bank.remember(note, kind: .identidade)
+        }
+        let body = await bank.identity()!.body
+        #expect(body.count > MemoryBank.maximumLength)
+        let edited = "Editado" + body.dropFirst(7)
+        #expect(await bank.setIdentity(edited))
+        let saved = await bank.identity()!.body
+        #expect(saved == edited && saved.hasSuffix("- Nota C final"))
+        // Over the editor's limit the text is refused, never cut.
+        #expect(!(await bank.setIdentity(String(repeating: "x", count: MemoryBank.identityMaximumLength + 1))))
+        #expect(await bank.identity()!.body == edited)
+    }
+
+    @Test func anIndexThatFailsToOpenIsTriedAgainLaterAndNeverDeleted() async throws {
+        let bank = bank()
+        let blocker = root.appending(path: "orb/index.sqlite")
+        // Something that can't be opened as a database sits where the index goes.
+        try FileManager.default.createDirectory(at: blocker, withIntermediateDirectories: true)
+        let start = Date()
+        await bank.remember("Gosto de café coado sem açúcar.", kind: .fato, now: start)
+        #expect(await bank.recall("café coado", now: start).isEmpty)
+        #expect(FileManager.default.fileExists(atPath: blocker.path)) // not "rebuilt": a failure to open is not corruption
+        try FileManager.default.removeItem(at: blocker)
+        // Not yet the time for another try, then it opens and picks up the page written meanwhile.
+        #expect(await bank.recall("café coado", now: start + 10).isEmpty)
+        #expect(await bank.recall("café coado", now: start + MemoryBank.indexRetryInterval + 1).count == 1)
+    }
+
+    @Test func openingAnIndexAnotherProcessHoldsWritesNothingAndKeepsTheFile() async throws {
+        let bank = bank()
+        await bank.remember("Gosto de café coado.", kind: .fato)
+        let url = root.appending(path: "orb/index.sqlite")
+        func inode() -> Any? { try? FileManager.default.attributesOfItem(atPath: url.path)[.systemFileNumber] }
+        let before = inode()
+        // The other process (the app rebuilding, the Claude Code helper) is inside a write transaction.
+        var other: OpaquePointer?
+        #expect(sqlite3_open_v2(url.path, &other, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK)
+        defer { sqlite3_close(other) }
+        #expect(sqlite3_exec(other, "BEGIN IMMEDIATE", nil, nil, nil) == SQLITE_OK)
+        let index = try MemoryIndex(url: url, busyTimeout: 50)
+        #expect(index.health == .ok)
+        #expect(index.rows("SELECT path FROM pages").count == 1)
+        #expect(inode() as? Int == before as? Int)
+        sqlite3_exec(other, "ROLLBACK", nil, nil, nil)
+    }
+
+    @Test func theEndOfATurnOnlyReadsThePagesAgainWhenSomethingChanged() async {
+        let bank = bank()
+        await bank.ensureIdentity(notes: "Seja direto.", interview: false)
+        for fact in ["Gosto de café coado.", "Moro em Curitiba.", "Trabalho com design."] { await bank.remember(fact, kind: .fato) }
+        let first = await bank.snapshotIfChanged()
+        #expect(first?.items.count == 3)
+        #expect(await bank.snapshotIfChanged() == nil)
+        // A page saved, a page forgotten, the identity edited: each shows up once.
+        await bank.remember("Tenho um gato chamado Pipoca.", kind: .fato)
+        let more = await bank.snapshotIfChanged()
+        #expect(more?.items.count == 4)
+        #expect(await bank.snapshotIfChanged() == nil)
+        await bank.forget(more!.items[0].path)
+        #expect(await bank.snapshotIfChanged()?.items.count == 3)
+        await bank.setIdentity("Seja direto e gentil.")
+        #expect(await bank.snapshotIfChanged()?.identity == "Seja direto e gentil.")
+        #expect(await bank.snapshotIfChanged() == nil)
+        // A full snapshot (the panel opening) counts as shown too.
+        await bank.remember("Prefiro reuniões curtas.", kind: .fato)
+        #expect(await bank.snapshot().items.count == 4)
+        #expect(await bank.snapshotIfChanged() == nil)
     }
 
     @Test func aFailedFirstTurnDoesNotUseUpTheInterview() async {
