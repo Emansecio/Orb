@@ -198,7 +198,9 @@ struct ShellEnvironmentTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let counter = directory.appending(path: "count")
         let shell = try FakeShell.make(in: directory, preamble: "echo x >> '\(counter.path)'; exit 1")
-        let environment = ShellEnvironment(shell: shell, base: basicEnvironment, retryAfterTimeout: .milliseconds(1))
+        // Patient: on a busy machine the script may take seconds to start, and a timeout is not the failure this tests.
+        let environment = ShellEnvironment(shell: shell, base: basicEnvironment, timeout: .seconds(30),
+                                           retryAfterTimeout: .milliseconds(1))
         _ = await environment.resolved()
         try await Task.sleep(for: .milliseconds(50))
         _ = await environment.resolved()
