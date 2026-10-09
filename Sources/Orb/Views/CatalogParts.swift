@@ -206,6 +206,20 @@ struct CatalogIcon: View {
     }
 }
 
+/// What an "Explorar" page is showing, as one value (the page's swaps are bound to it): the hint before anything is
+/// searched, the search loading, its error, no result, or the results. Typing is not a phase: the changes of the text
+/// itself are never animated.
+enum ExplorePhase: Equatable {
+    case hint, loading, failed, empty, results
+
+    static func of(isSearching: Bool, isLoading: Bool, error: String?, isEmpty: Bool) -> ExplorePhase {
+        if !isSearching { return .hint }
+        if isLoading { return .loading }
+        if error != nil { return .failed }
+        return isEmpty ? .empty : .results
+    }
+}
+
 /// Loading, error and empty states for a catalog search.
 struct CatalogStateView: View {
     let isLoading: Bool
@@ -227,9 +241,10 @@ struct CatalogStateView: View {
                         }
                         .accessibilityHidden(true)
                     }
-                    ProgressView().controlSize(.small)
+                    DelayedSpinner()
                     if isSlow, let slowHint {
                         Text(slowHint).font(.system(size: 12)).foregroundStyle(Palette.faint)
+                            .transition(.opacity)
                     }
                 }
                 .task {

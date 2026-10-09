@@ -646,19 +646,23 @@ private struct ExploreConnectors: View {
                         Text("Digite o nome do serviço ou do que ele faz, como “banco de dados” ou “calendário”.")
                     }
                     .padding(.top, 30)
+                    .transition(.opacity)
                 } else if isLoading || error != nil || results.isEmpty {
                     CatalogStateView(isLoading: isLoading, error: error, isEmpty: results.isEmpty,
                                      slowHint: "O registro às vezes demora até um minuto…", skeleton: true,
                                      retry: { Task { await search() } })
+                        .transition(.opacity)
                 } else {
                     grid(results) { server in
                         RegistryServerCard(server: server, isInstalled: model.installedConnector(server.id) != nil) {
                             editing = ConnectorDraft(server: server)
                         }
                     }
+                    .transition(.opacity)
                 }
             }
-            .animateChanges(of: isLoading)
+            // The hint, the loading, the error, "no result" and the results swap by fading, bound to the one phase.
+            .animateChanges(of: ExplorePhase.of(isSearching: isSearching, isLoading: isLoading, error: error, isEmpty: results.isEmpty))
             .padding(24)
             .frame(maxWidth: 980)
             .frame(maxWidth: .infinity)

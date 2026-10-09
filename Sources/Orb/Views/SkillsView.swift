@@ -257,15 +257,18 @@ private struct ExploreSkills: View {
                 } else if isLoading || error != nil || results.isEmpty {
                     CatalogStateView(isLoading: isLoading, error: error, isEmpty: results.isEmpty, skeleton: true,
                                      retry: { Task { await search() } })
+                        .transition(.opacity)
                 } else {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: 12, alignment: .top)], spacing: 12) {
                         ForEach(results) { entry in
                             CatalogSkillCard(entry: entry) { previewing = entry }
                         }
                     }
+                    .transition(.opacity)
                 }
             }
-            .animateChanges(of: isLoading)
+            // The hint, the loading, the error, "no result" and the results swap by fading, bound to the one phase.
+            .animateChanges(of: ExplorePhase.of(isSearching: isSearching, isLoading: isLoading, error: error, isEmpty: results.isEmpty))
             .padding(24)
             .frame(maxWidth: 980)
             .frame(maxWidth: .infinity)
@@ -293,6 +296,7 @@ private struct ExploreSkills: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .card(radius: 14)
+        .transition(.opacity)
     }
 
     private func search() async {
