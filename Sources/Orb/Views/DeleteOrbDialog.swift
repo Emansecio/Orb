@@ -172,7 +172,7 @@ struct KeptMemoryBanner: View {
                 .card(radius: 10, stroke: Palette.lineStrong)
                 .padding(.horizontal, 8)
                 .padding(.bottom, 4)
-                .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+                .transition(.adapted(.arrive, reduceMotion: reduceMotion))
                 .accessibilityElement(children: .contain)
                 .task(id: notice.id) {
                     try? await Task.sleep(for: .seconds(12))
@@ -180,6 +180,7 @@ struct KeptMemoryBanner: View {
                 }
             }
         }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: model.keptMemoryNotice)
+        // The strip rises 6 pt in `Motion.enter` and leaves by fading in `Motion.exit` (`arrive`); a 0.15 s fade under Reduce Motion.
+        .motion(Motion.enter, value: model.keptMemoryNotice)
     }
 }

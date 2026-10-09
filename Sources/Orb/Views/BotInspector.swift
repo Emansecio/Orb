@@ -4,6 +4,7 @@ import SwiftUI
 struct BotInspector: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let botID: UUID
     @State private var tab: InspectorTab
     @State private var isEditingOrb = false
@@ -355,6 +356,9 @@ struct BotInspector: View {
                 Text(InstructionsText.footer(for: file, name: bot.name, trustedHash: bot.trustedInstructionsHash,
                                              usesClaudeCode: usesClaudeCode(bot)))
             }
+            // What is read from the folder arrives by fading (`.quiet`), never by animating the height of a list that may
+            // be long (§2.13).
+            .transition(.quiet)
         }
 
         Section {
@@ -362,6 +366,7 @@ struct BotInspector: View {
                 Text("Nenhuma ainda. Ao aprovar um pedido, escolha “Sempre permitir…” e ela aparece aqui.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
+                    .transition(.quiet)
             }
             ForEach(bot.permissionRules, id: \.self) { rule in
                 LabeledContent {
@@ -371,17 +376,22 @@ struct BotInspector: View {
                 } label: {
                     Text(rule.title)
                 }
+                // A removed grant just fades, quickly; the others close the gap.
+                .transition(.adapted(.opacity.animation(Motion.exit), reduceMotion: reduceMotion))
             }
             if bot.permissionRules.count > 1 {
                 Button("Remover todas", role: .destructive) { model.update(bot.id) { $0.permissionRules = [] } }
                     .controlSize(.small)
                     .help(Tip.removeAllGrants)
+                    .transition(.quiet)
             }
         } header: {
             Text("Liberações")
         } footer: {
             Text(PermissionMode.grantsNote)
         }
+        // Bound to the rules themselves (a short list), so only a grant coming or going moves anything.
+        .animateChanges(of: bot.permissionRules)
 
         filesSection
     }
@@ -393,11 +403,14 @@ struct BotInspector: View {
         if state == .missing {
             Label("Pasta não encontrada", systemImage: "exclamationmark.triangle.fill")
                 .foregroundStyle(Palette.warn)
+                .transition(.quiet)
             Text("Ela foi apagada, renomeada ou está em um disco desconectado. \(bot.name) não consegue rodar comandos até você escolher outra pasta ou recriar esta.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .transition(.quiet)
             Button("Recriar", systemImage: "folder.badge.plus") { attempt { try model.recreateFolder(of: bot.id) } }
                 .help(Tip.recreateFolder)
+                .transition(.quiet)
         } else {
             HStack(spacing: 8) {
                 Button("Abrir no Finder", systemImage: "folder") { OrbFolder.showInFinder(bot.workingURL) }
@@ -406,6 +419,7 @@ struct BotInspector: View {
                     .help(Tip.openFolderInTerminal(bot.name))
             }
             .controlSize(.small)
+            .transition(.quiet)
         }
         Menu {
             Button("Escolher pasta…", systemImage: "folder.badge.gearshape") { isPickingFolder = true }
@@ -428,10 +442,12 @@ struct BotInspector: View {
             Text("Se usar a pasta pessoal, \(bot.name) volta a trabalhar nela. A pasta atual e o que há nela ficam como estão.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .transition(.quiet)
         } else if state == .noOwnFolder {
             Text("Em uma pasta própria (\(OrbFolder.display(OrbFolder.availableURL(for: bot.name, in: OrbFolder.defaultBase)))), \(bot.name) escreve sem perguntar em “Perguntar antes”.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .transition(.quiet)
         }
     }
 
@@ -444,9 +460,11 @@ struct BotInspector: View {
                     Text("Sem acesso à pasta. O macOS pode estar bloqueando: libere em Ajustes do Sistema → Privacidade e Segurança.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
+                        .transition(.quiet)
                 } else if listing.files.isEmpty {
                     Text("Nada por aqui ainda.")
                         .foregroundStyle(.secondary)
+                        .transition(.quiet)
                 }
                 ForEach(listing.files) { file in
                     WorkspaceFileRow(file: file)
@@ -465,6 +483,9 @@ struct BotInspector: View {
                     Text("Alterados no git primeiro, depois os mais recentes. Clique para mostrar no Finder, duas vezes para abrir.")
                 }
             }
+            // The list is read off the main thread and arrives later: it fades in, and its height (it may be long) is not
+            // animated; a refresh that changes the files swaps them at once.
+            .transition(.quiet)
         }
     }
 

@@ -7,6 +7,7 @@ import SwiftUI
 /// The panel's Memória tab, as sections of the panel's form.
 struct MemoryTab: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let botID: UUID
     let name: String
     let editIdentity: () -> Void
@@ -37,6 +38,7 @@ struct MemoryTab: View {
                 Text("Ainda não guardou nada. A memória cresce a cada conversa: preferências, fatos, procedimentos e um resumo de cada uma.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
+                    .transition(.quiet)
             } else if memory.items.count > MemoryGroups.searchableAbove {
                 MemorySearchField(query: $query)
             }
@@ -56,6 +58,7 @@ struct MemoryTab: View {
             Section {
                 ForEach(shown) { item in
                     MemoryRow(item: item) { model.memoryUndo.forget(item, of: botID, in: model) }
+                        .transition(MemoryMotion.forgotten(reduceMotion: reduceMotion))
                 }
                 if shown.count < group.items.count {
                     Button("Ver todos (\(group.items.count))…") { showAll(group.kind) }
@@ -66,6 +69,9 @@ struct MemoryTab: View {
                 Text("\(group.title) · \(group.items.count)")
             }
         }
+        // A page forgotten fades out in `Motion.exit` and the rest close the gap. Bound to the memory's own ids, not to what the
+        // search shows: typing filters at once (§2.13).
+        .animateChanges(of: memory.items.map(\.id))
 
         Section {
             Button("Ver tudo…", systemImage: "list.bullet.rectangle") { showAll(nil) }
@@ -191,6 +197,7 @@ struct MemoryRow: View {
                 Text(Self.text(of: item))
                     .lineLimit(isExpanded ? nil : (item.kind == .sessao ? 1 : lineLimit))
                     .fixedSize(horizontal: false, vertical: true)
+                    .motion(Motion.content, value: isExpanded)
                 Text(Self.caption(of: item))
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -201,6 +208,7 @@ struct MemoryRow: View {
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
                 .opacity(isHovering ? 1 : 0.45)
+                .animation(Motion.hover(isHovering), value: isHovering)
                 .help(Tip.forget)
                 .accessibilityLabel("Esquecer: \(item.title)")
         }
@@ -229,6 +237,7 @@ struct MemoryRow: View {
 struct MemorySheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let botID: UUID
     let name: String
     @State private var query = ""
@@ -258,16 +267,23 @@ struct MemorySheet: View {
                 Text(memory.items.isEmpty ? "Ainda não guardou nada."
                      : query.isEmpty ? "Nada neste tipo de memória." : "Nada na memória com “\(query)”.")
                     .foregroundStyle(.secondary)
+                    // Only a different message fades; the query typed into it is not an animation.
+                    .textSwap(memory.items.isEmpty ? 0 : query.isEmpty ? 1 : 2)
             }
             ForEach(groups) { group in
                 Section {
                     ForEach(group.items) { item in
                         MemoryRow(item: item, lineLimit: 4) { model.memoryUndo.forget(item, of: botID, in: model) }
+                            .transition(MemoryMotion.forgotten(reduceMotion: reduceMotion))
                     }
                 } header: {
                     Text("\(group.title) · \(group.items.count)")
                 }
+                .transition(.opacity)
             }
+            // "Mostrar" changes the kinds on show by fading; forgetting closes the gap; typing in the search filters at once.
+            .motion(Motion.crossFade, value: kind)
+            .animateChanges(of: memory.items.map(\.id))
         }
         .formStyle(.grouped)
         .orbSheet("Memória de \(name)", subtitle: MemoryGroups.summary(memory.items), size: .large) {
@@ -291,6 +307,13 @@ struct MemorySheet: View {
             .overlay(alignment: .top) { Divider().opacity(0.6) }
         }
         .overlay(alignment: .bottom) { MemoryUndoToast(undo: model.memoryUndo).padding(.bottom, 64) }
+    }
+}
+
+enum MemoryMotion {
+    /// A page of memory that was forgotten: it only fades, quickly; the others close the gap.
+    static func forgotten(reduceMotion: Bool) -> AnyTransition {
+        .adapted(.opacity.animation(Motion.exit), reduceMotion: reduceMotion)
     }
 }
 
@@ -324,12 +347,13 @@ struct MemoryUndoToast: View {
                 .onHover { undo.hold(.hover, $0) }
                 .onChange(of: isFocused) { _, focused in undo.hold(.focus, focused) }
                 .onDisappear { undo.releaseHolds() }
-                .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+                .transition(.adapted(.arrive, reduceMotion: reduceMotion))
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel("Memória esquecida. Desfazer disponível por alguns segundos.")
             }
         }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: undo.entry)
+        // Rises 6 pt in `Motion.enter` and leaves by fading in `Motion.exit` (`arrive`); a fade of 0.15 s under Reduce Motion.
+        .motion(Motion.enter, value: undo.entry)
     }
 
     /// ⌘Z while the toast is up. Typing in a text field keeps its own undo: that one wins when it has something to undo.
