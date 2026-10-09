@@ -521,10 +521,10 @@ struct ToolCallLine: View {
         }
     }
 
-    /// The mark of a state that ended comes in small and grows to size while it appears; a failure's the same, without
-    /// shaking (the Orb shows the error). A plain fade under Reduce Motion.
+    /// The mark of a state that ended comes in small and grows to size while it appears (`AnyTransition.mark`); a
+    /// failure's the same, without shaking (the Orb shows the error). A plain fade under Reduce Motion.
     private var markTransition: AnyTransition {
-        .adapted(.scale(scale: 0.6).combined(with: .opacity), reduceMotion: reduceMotion)
+        .adapted(.mark, reduceMotion: reduceMotion)
     }
 
     @ViewBuilder private var stateMark: some View {

@@ -99,7 +99,7 @@ extension AppModel {
 
     /// "Gerenciar" in the permissions chip: the panel opens on "Pasta e acessos", where the grants (Liberações) are.
     func showPermissions(of botID: UUID) {
-        showInspector = true
+        setInspector(true)
         request(.showTab(.folder), of: botID)
     }
 
@@ -128,7 +128,7 @@ extension AppModel {
 
     /// Opens the Orb with its panel and the appearance editor on top.
     func showLookEditor(of botID: UUID) {
-        showInspector = true
+        setInspector(true)
         request(.editLook, of: botID)
     }
 

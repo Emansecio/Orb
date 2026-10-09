@@ -152,7 +152,7 @@ struct AppCommands: Commands {
             .disabled(model.selectedBotID == nil)
         }
         CommandGroup(after: .sidebar) {
-            Button(CommandName.toggleInspector) { model.showInspector.toggle() }
+            Button(CommandName.toggleInspector) { model.toggleInspector() }
                 .keyboardShortcut(AppShortcut.toggleInspector)
                 .disabled(sheetOpen)
         }

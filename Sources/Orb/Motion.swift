@@ -35,6 +35,15 @@ enum Motion {
     }
 }
 
+extension Motion {
+    /// The Orb's panel (the inspector column) opening or closing: it slides in the content curve, the same from every
+    /// path (the toolbar button, ⌘⌥I, the palette, a window that got narrow, "Ver na memória"); no animation under
+    /// Reduce Motion.
+    static func panel(reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : content
+    }
+}
+
 extension AnyTransition {
     /// Rises 6 pt and appears; leaves by fading only.
     static var rise: AnyTransition {
@@ -58,8 +67,22 @@ extension AnyTransition {
         .asymmetric(insertion: .opacity.combined(with: .offset(y: -4)), removal: .opacity)
     }
 
-    /// `transition`, or a plain fade when Reduce Motion is on.
+    /// Fades in and out by itself, in `Motion.fade` (0.15 s), whatever the surrounding transaction says: for what
+    /// appears where the container must not animate its height (the menu-bar window, a popover, a `Form` row). The
+    /// container takes its new size at once and the content fades into it.
+    static var quiet: AnyTransition {
+        .opacity.animation(Motion.fade)
+    }
+
+    /// A small state mark (a check, a warning, a spinner turning into its result) that appears: grows from 0.6 and
+    /// fades in; leaves by fading. Used across the app so every "it worked" looks the same.
+    static var mark: AnyTransition {
+        .scale(scale: 0.6).combined(with: .opacity)
+    }
+
+    /// `transition`, or the quiet fade when Reduce Motion is on: nothing slides, scales or turns, and a row that
+    /// arrives inside a change that is instant (`animateChanges`) still fades in 0.15 s instead of appearing dry.
     static func adapted(_ transition: AnyTransition, reduceMotion: Bool) -> AnyTransition {
-        reduceMotion ? .opacity : transition
+        reduceMotion ? .quiet : transition
     }
 }

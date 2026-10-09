@@ -46,6 +46,15 @@ final class AppModel {
     /// The drafts as last written to `rascunhos.json` (see `saveDraftsIfChanged`).
     @ObservationIgnored var savedDrafts: [UUID: ComposerDraft] = [:]
     var showInspector = true
+
+    /// Opens or closes the Orb's panel the same way from every path: the column slides in the content curve, and not
+    /// at all under Reduce Motion. (`showInspector` itself is state, not a token: nothing here is animated per change.)
+    func setInspector(_ open: Bool) {
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        withAnimation(Motion.panel(reduceMotion: reduceMotion)) { showInspector = open }
+    }
+
+    func toggleInspector() { setInspector(!showInspector) }
     var showNewBot = false
     /// The kept memory the new-Orb sheet starts from when it opens from the welcome screen (nil: no memory chosen).
     var newBotStart: KeptMemory?

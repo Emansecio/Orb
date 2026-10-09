@@ -238,7 +238,7 @@ extension AppModel {
 
     /// "Ver na memória": the panel opens on the Orb's Memória tab.
     func showMemory(of botID: UUID) {
-        showInspector = true
+        setInspector(true)
         request(.showTab(.memory), of: botID)
     }
 

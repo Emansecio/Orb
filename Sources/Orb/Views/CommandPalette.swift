@@ -282,7 +282,7 @@ struct CommandPalette: View {
         case .focusComposer: model.focusComposer()
         case .showConversations: model.showConversations()
         case .openFolder: if let id = model.commandBotID { model.openFolder(of: id) }
-        case .toggleInspector: model.showInspector.toggle()
+        case .toggleInspector: model.toggleInspector()
         case .shortcuts: model.showShortcuts = true
         }
     }
