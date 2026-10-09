@@ -196,7 +196,7 @@ struct ContextPopover: View {
             compactSection
         }
         .frame(width: 340)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: shownResult)
+        .motion(Motion.content, value: shownResult)
     }
 
     // MARK: How full

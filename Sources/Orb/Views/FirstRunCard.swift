@@ -412,7 +412,7 @@ struct FirstRunCard: View {
                         subtitle: "OpenAI, Claude, xAI ou OpenRouter. Cobrança por uso, direto no provedor.",
                         phase: isKeyOpen ? .idle : phase(.key, steps), isEnabled: true,
                         trailingSymbol: isKeyOpen ? "chevron.up" : "chevron.down", framed: !isKeyOpen) {
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { isKeyOpen.toggle() }
+                withAnimation(Motion.panel(reduceMotion: reduceMotion)) { isKeyOpen.toggle() }
                 if isKeyOpen { keyFocused = true }
             }
             if isKeyOpen {
