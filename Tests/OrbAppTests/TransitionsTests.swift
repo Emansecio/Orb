@@ -100,4 +100,42 @@ import Testing
             #expect(resolved.animation == Motion.fade)
         }
     }
+
+    // MARK: Explorar
+
+    @Test func theExplorePageHasOnePhaseAndTypingIsNotOne() {
+        typealias Phase = ExplorePhase
+        #expect(Phase.of(isSearching: false, isLoading: false, error: nil, isEmpty: true) == .hint)
+        // Not searching wins over everything left from before.
+        #expect(Phase.of(isSearching: false, isLoading: true, error: "x", isEmpty: false) == .hint)
+        #expect(Phase.of(isSearching: true, isLoading: true, error: nil, isEmpty: true) == .loading)
+        #expect(Phase.of(isSearching: true, isLoading: true, error: "x", isEmpty: true) == .loading)
+        #expect(Phase.of(isSearching: true, isLoading: false, error: "x", isEmpty: true) == .failed)
+        #expect(Phase.of(isSearching: true, isLoading: false, error: nil, isEmpty: true) == .empty)
+        #expect(Phase.of(isSearching: true, isLoading: false, error: nil, isEmpty: false) == .results)
+    }
+
+    // MARK: Small values
+
+    @Test func aSpinnerWaitsOneHundredFiftyMilliseconds() {
+        #expect(Motion.spinnerDelay == .milliseconds(150))
+    }
+
+    @Test func aCardsRunStateIsOneOfThreeAndOnlyChangesWithTheRun() {
+        let idle = RoutineRunState(isRunning: false, isQueued: false)
+        #expect(idle != RoutineRunState(isRunning: true, isQueued: false))
+        #expect(idle != RoutineRunState(isRunning: false, isQueued: true))
+        #expect(idle == RoutineRunState(isRunning: false, isQueued: false))
+    }
+
+    @Test func aSelectionThatSlidesDoesNotSlideWhenTheListChangedWithIt() {
+        #expect(Motion.selection(reduceMotion: false, listChanged: true) == nil)
+        #expect(Motion.selection(reduceMotion: false, listChanged: false) == Motion.content)
+    }
+
+    @Test func theFadeUnderReduceMotionIsTheShortOne() {
+        #expect(Motion.fade == .easeOut(duration: 0.15))
+        #expect(Motion.adapted(Motion.enter, reduceMotion: true) == Motion.fade)
+        #expect(Motion.adapted(Motion.enter, reduceMotion: false) == Motion.enter)
+    }
 }
