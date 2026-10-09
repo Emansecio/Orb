@@ -450,4 +450,25 @@ struct OrbDriverTests {
         band.removeFromSuperview()
         #expect(!band.isSweeping)
     }
+
+    @Test func aRunningCommandBreathesOnlyWhileItIsSeen() throws {
+        try #require(hasScreen)
+        let band = ShimmerBandView(fillsBackground: true)
+        band.frame = NSRect(x: 0, y: 0, width: 100, height: 20)
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 200))
+        content.addSubview(band)
+        let win = window(content)
+        defer { close(win) }
+        band.needsLayout = true
+        band.layoutSubtreeIfNeeded()
+        #expect(band.isSweeping && !band.isPulsing)
+        band.pulses = true
+        #expect(band.isPulsing)
+        band.isHidden = true
+        #expect(!band.isPulsing)
+        band.isHidden = false
+        #expect(band.isPulsing)
+        band.pulses = false
+        #expect(!band.isPulsing && band.isSweeping)
+    }
 }

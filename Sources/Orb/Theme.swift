@@ -87,8 +87,9 @@ extension View {
     /// Sweeping highlight across dim text, used for "working" states (steady text under Reduce Motion).
     /// `keepsColors`: for text whose runs have colors of their own (some translucent): they stay as they are
     /// and the band brightens them, instead of the text being redrawn in the shimmer's colors.
-    func shimmer(active: Bool = true, keepsColors: Bool = false) -> some View {
-        modifier(Shimmer(active: active, keepsColors: keepsColors))
+    /// `pulses`: the text also breathes, softly (a command is running).
+    func shimmer(active: Bool = true, keepsColors: Bool = false, pulses: Bool = false) -> some View {
+        modifier(Shimmer(active: active, keepsColors: keepsColors, pulses: pulses))
     }
 
     /// Animates what changes along with `value` (rows appearing, states settling) with the app's one
@@ -119,6 +120,7 @@ enum ShimmerSweep {
 private struct Shimmer: ViewModifier {
     let active: Bool
     let keepsColors: Bool
+    let pulses: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
@@ -133,7 +135,7 @@ private struct Shimmer: ViewModifier {
             // drawn through a Core Animation band that sweeps across it: nothing in SwiftUI changes per frame.
             content
                 .opacity(0)
-                .overlay { ShimmerBand().mask { content.foregroundStyle(.white) } }
+                .overlay { ShimmerBand(pulses: pulses).mask { content.foregroundStyle(.white) } }
         } else {
             content
         }
@@ -146,22 +148,37 @@ private struct Shimmer: ViewModifier {
 private struct ShimmerBand: NSViewRepresentable {
     /// Dim fill under the band (the text takes its color from it), or only the band.
     var fillsBackground = true
+    var pulses = false
 
-    func makeNSView(context: Context) -> ShimmerBandView { ShimmerBandView(fillsBackground: fillsBackground) }
-    func updateNSView(_ view: ShimmerBandView, context: Context) {}
+    func makeNSView(context: Context) -> ShimmerBandView { ShimmerBandView(fillsBackground: fillsBackground, pulses: pulses) }
+    func updateNSView(_ view: ShimmerBandView, context: Context) { view.pulses = pulses }
 }
 
 final class ShimmerBandView: NSView {
     private let band = CAGradientLayer()
     private var sweptWidth: CGFloat = 0
     private static let animationKey = "sweep"
+    private static let pulseKey = "pulse"
     /// For tests: whether the band is moving.
     var isSweeping: Bool { band.animation(forKey: Self.animationKey) != nil }
+    /// For tests: whether the text breathes.
+    var isPulsing: Bool { layer?.animation(forKey: Self.pulseKey) != nil }
+    /// The whole text breathes (opacity, done by Core Animation), on top of the sweep.
+    var pulses = false {
+        didSet {
+            guard pulses != oldValue else { return }
+            paintFill()
+            updateSweep()
+        }
+    }
+    private let fillsBackground: Bool
 
-    init(fillsBackground: Bool) {
+    init(fillsBackground: Bool, pulses: Bool = false) {
+        self.pulses = pulses
+        self.fillsBackground = fillsBackground
         super.init(frame: .zero)
         wantsLayer = true
-        if fillsBackground { layer?.backgroundColor = NSColor(Palette.hint).cgColor }
+        paintFill()
         let ink = NSColor(Palette.ink)
         band.colors = [ink.withAlphaComponent(0).cgColor, ink.cgColor, ink.withAlphaComponent(0).cgColor]
         band.startPoint = CGPoint(x: 0, y: 0.5)
@@ -219,8 +236,10 @@ final class ShimmerBandView: NSView {
         let visible = window.map { !isHiddenOrHasHiddenAncestor && (OrbView.animateInactive || $0.occlusionState.contains(.visible)) } ?? false
         guard visible, bounds.width > 0 else {
             band.removeAnimation(forKey: Self.animationKey)
+            layer?.removeAnimation(forKey: Self.pulseKey)
             return
         }
+        updatePulse()
         guard band.animation(forKey: Self.animationKey) == nil else { return }
         let sweep = CABasicAnimation(keyPath: "position.x")
         sweep.fromValue = bounds.width * ShimmerSweep.from
@@ -234,6 +253,30 @@ final class ShimmerBandView: NSView {
         // last was instead of restarting at the left.
         sweep.timeOffset = CACurrentMediaTime().truncatingRemainder(dividingBy: ShimmerSweep.duration)
         band.add(sweep, forKey: Self.animationKey)
+    }
+
+    /// The dim fill the text takes its color from; a running command's line is a step lighter (it breathes down from it).
+    private func paintFill() {
+        guard fillsBackground else { return }
+        layer?.backgroundColor = NSColor(pulses ? Palette.muted : Palette.hint).cgColor
+    }
+
+    /// A slow breath, 1 → 0.55 → 1 in 2.4 s; out of step with the sweep, so the two do not beat together.
+    private func updatePulse() {
+        guard pulses else {
+            layer?.removeAnimation(forKey: Self.pulseKey)
+            return
+        }
+        guard let layer, layer.animation(forKey: Self.pulseKey) == nil else { return }
+        let pulse = CABasicAnimation(keyPath: "opacity")
+        pulse.fromValue = 1
+        pulse.toValue = 0.55
+        pulse.duration = 1.2
+        pulse.autoreverses = true
+        pulse.repeatCount = .infinity
+        pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        pulse.preferredFrameRateRange = CAFrameRateRange(minimum: 20, maximum: 30, preferred: 24)
+        layer.add(pulse, forKey: Self.pulseKey)
     }
 }
 

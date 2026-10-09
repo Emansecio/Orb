@@ -55,6 +55,8 @@ struct WorkLine: Equatable, Sendable {
 
     /// Whether the line shimmers: only while the Orb works.
     var shimmers: Bool { tone == .working }
+    /// Whether the Orb is running a command (in the Terminal or in the background): the line also breathes.
+    var runsCommand: Bool { tone == .working && verb.hasPrefix("Rodando") }
 
     /// The phrase as plain text (the sidebar, the menu bar panel and VoiceOver read this): the verb and its target,
     /// or the verb with an ellipsis when it has none ("Pensando…"). A wait is a state, not an action: no ellipsis.

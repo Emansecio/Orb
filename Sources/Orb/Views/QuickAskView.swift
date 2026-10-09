@@ -349,7 +349,7 @@ struct QuickAskReply: View {
                 BotAvatar(live: live, size: 18, paused: live.activity == .idle)
                 if let work = live.shownWork, reply == nil || reply?.isStreaming == true {
                     Text("\(live.look.name): \(work.text)")
-                        .shimmer(active: work.shimmers)
+                        .shimmer(active: work.shimmers, pulses: work.runsCommand)
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(work.tone == .waiting ? Palette.warn : Palette.faint)
                         .lineLimit(1)

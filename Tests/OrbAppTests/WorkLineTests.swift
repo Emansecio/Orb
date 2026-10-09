@@ -7,6 +7,13 @@ import Testing
 /// What the Orb says it is doing while a turn runs: the phrase for each tool, the minimum time each phrase stays, the
 /// count of actions, and when VoiceOver hears it.
 struct WorkPhraseTests {
+    @Test func onlyARunningCommandBreathes() {
+        #expect(WorkLine(verb: "Rodando", target: "swift build", style: .code).runsCommand)
+        #expect(WorkLine(verb: "Rodando em segundo plano", target: "npm run dev", style: .code).runsCommand)
+        #expect(!WorkLine(verb: "Lendo", target: "README.md", style: .code).runsCommand)
+        #expect(!WorkLine(verb: "Rodando", target: "rm -rf build", style: .code, tone: .waiting).runsCommand)
+    }
+
     private func line(_ title: String, _ detail: String, kind: ToolCall.Kind = .shell) -> WorkLine {
         WorkPhrase.line(for: ToolCall(kind: kind, title: title, detail: detail))
     }

@@ -582,7 +582,7 @@ struct WorkPhraseView: View {
                     .layoutPriority(-1) // a long routine name is cut before the phrase
             }
             phrase
-                .shimmer(active: work.shimmers)
+                .shimmer(active: work.shimmers, pulses: work.runsCommand)
         }
     }
 
@@ -594,7 +594,9 @@ struct WorkPhraseView: View {
                 .fixedSize(horizontal: work.shownTarget != nil, vertical: false) // the target is what gives way, not its verb
             if let target = work.shownTarget {
                 Text(target)
+                    // The command or path in a lighter monospace, a touch tighter, so it reads as part of the phrase.
                     .font(work.style == .code ? .system(size: 12, design: .monospaced) : .system(size: 13))
+                    .tracking(work.style == .code ? -0.2 : 0)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .layoutPriority(-1)
