@@ -85,4 +85,19 @@ import Testing
         #expect(Motion.selection(reduceMotion: false) == Motion.content)
         #expect(Motion.selection(reduceMotion: true) == nil)
     }
+
+    // MARK: Sheets
+
+    @Test func theEditorsPartsComeInInTurnStageThenOptionsThenFooter() {
+        let delays = (0..<3).map { EntranceStyle.staggered($0, start: SheetEntrance.start).delay }
+        #expect(delays[0] == SheetEntrance.start)
+        #expect(abs(delays[1] - (SheetEntrance.start + Motion.stagger)) < 1e-9)
+        #expect(abs(delays[2] - (SheetEntrance.start + 2 * Motion.stagger)) < 1e-9)
+        // Under Reduce Motion all three fade in together, in place.
+        for index in 0..<3 {
+            let resolved = EntranceStyle.staggered(index, start: SheetEntrance.start).resolved(reduceMotion: true)
+            #expect(resolved.distance == 0)
+            #expect(resolved.animation == Motion.fade)
+        }
+    }
 }

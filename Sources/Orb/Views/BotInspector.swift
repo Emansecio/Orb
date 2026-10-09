@@ -123,6 +123,7 @@ struct BotInspector: View {
                     }
                     .padding(14)
                     .background(Palette.chrome)
+                    .sheetSection(2)
                 }
                 .frame(width: 560, height: editorHeight)
                 .registersOpenSheet()

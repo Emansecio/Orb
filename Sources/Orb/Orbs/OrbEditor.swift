@@ -14,6 +14,8 @@ struct OrbEditor: View {
     @State private var category: OrbCategory
     @State private var previewActivity: OrbActivity = .idle
     @State private var poke = 0
+    /// The one highlight behind the chosen category slides to the new one through this namespace (both bars).
+    @Namespace private var categoryHighlight
     /// Owns this editor's entries in the window's undo manager (dropped when the editor goes away).
     @State private var undoTarget = OrbEditUndo.Target()
     @Environment(\.undoManager) private var undoManager
@@ -47,26 +49,45 @@ struct OrbEditor: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // The stage comes in first, 0.08 s after the sheet, and the Orb gives a little hop of "hi" when it lands;
+            // the categories and the options follow (§2.6). Under Reduce Motion everything fades in together, no hop.
             stage
-            Divider().overlay(Palette.line)
-            categoryBar
-            Divider().overlay(Palette.line)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    if category == .temperament {
-                        temperamentList
-                    } else {
-                        optionGrid
-                    }
-                    tintRow
+                .sheetSection(0) { if !reduceMotion { poke += 1 } }
+            VStack(spacing: 0) {
+                Divider().overlay(Palette.line)
+                categoryBar
+                Divider().overlay(Palette.line)
+                ScrollView {
+                    optionsContent
+                        .padding(16)
                 }
-                .padding(16)
+                .scrollIndicators(.automatic)
             }
-            .scrollIndicators(.automatic)
+            .sheetSection(1)
         }
         .background(Palette.canvas)
         .onGeometryChange(for: Bool.self) { $0.size.height < Self.compactBelow } action: { isShort = $0 }
         .onDisappear { undoManager?.removeAllActions(withTarget: undoTarget) }
+    }
+
+    /// What the chosen category offers. Another category cross-fades with the one before (§2.6): the two are laid over
+    /// each other for 0.18 s, never side by side, and their thumbnails are still Orbs (they only move on hover), so
+    /// each is drawn once.
+    private var optionsContent: some View {
+        ZStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 14) {
+                if category == .temperament {
+                    temperamentList
+                } else {
+                    optionGrid
+                }
+                tintRow
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .id(category)
+            .transition(.opacity)
+        }
+        .motion(Motion.crossFade, value: category)
     }
 
     // MARK: Editing
@@ -254,7 +275,9 @@ struct OrbEditor: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: category)
+        // The highlight slides and the chosen one's name grows its width in the content curve; under Reduce Motion the
+        // highlight jumps and the width changes at once.
+        .animation(Motion.selection(reduceMotion: reduceMotion), value: category)
     }
 
     private func compactCategoryButton(_ item: OrbCategory) -> some View {
@@ -276,7 +299,7 @@ struct OrbEditor: View {
             .padding(.horizontal, 9)
             .frame(minWidth: 34, minHeight: 30)
             .foregroundStyle(isSelected ? Palette.ink : Palette.muted)
-            .background(isSelected ? Palette.ghostSelected : .clear, in: .rect(cornerRadius: 9))
+            .background { categoryHighlightShape(isSelected) }
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -300,9 +323,19 @@ struct OrbEditor: View {
                 group(Self.faceGroup)
             }
         }
+        .animation(Motion.selection(reduceMotion: reduceMotion), value: category)
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The highlight of the chosen category: drawn by that button alone, the same view for all of them.
+    @ViewBuilder private func categoryHighlightShape(_ isSelected: Bool) -> some View {
+        if isSelected {
+            RoundedRectangle(cornerRadius: 9)
+                .fill(Palette.ghostSelected)
+                .matchedGeometryEffect(id: "categoria", in: categoryHighlight)
+        }
     }
 
     private func group(_ group: (title: String, categories: [OrbCategory])) -> some View {
@@ -336,7 +369,7 @@ struct OrbEditor: View {
             .padding(.horizontal, 6)
             .frame(minWidth: 44, minHeight: 42)
             .foregroundStyle(category == item ? Palette.ink : Palette.muted)
-            .background(category == item ? Palette.ghostSelected : .clear, in: .rect(cornerRadius: 9))
+            .background { categoryHighlightShape(category == item) }
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -451,8 +484,12 @@ private struct OptionCell: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 6)
-            .background(isSelected ? Palette.ghostSelected : (isHovering ? Palette.ghostHover : .clear), in: .rect(cornerRadius: 12))
+            // The chosen one keeps its own fill, which changes with the press curve; hover is the shared fade (in 0.10 s,
+            // out 0.22 s), colors only, so it stays under Reduce Motion too.
+            .background { RoundedRectangle(cornerRadius: 12).fill(Palette.ghostSelected).opacity(isSelected ? 1 : 0) }
+            .hoverFill(isHovering && !isSelected, in: .rect(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(isSelected ? Palette.lineStrong : .clear))
+            .animation(Motion.press, value: isSelected)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -513,8 +550,12 @@ private struct TemperamentRow: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
-            .background(isSelected ? Palette.ghostSelected : (isHovering ? Palette.ghostHover : .clear), in: .rect(cornerRadius: 12))
+            // The chosen one keeps its own fill, which changes with the press curve; hover is the shared fade (in 0.10 s,
+            // out 0.22 s), colors only, so it stays under Reduce Motion too.
+            .background { RoundedRectangle(cornerRadius: 12).fill(Palette.ghostSelected).opacity(isSelected ? 1 : 0) }
+            .hoverFill(isHovering && !isSelected, in: .rect(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(isSelected ? Palette.lineStrong : .clear))
+            .animation(Motion.press, value: isSelected)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)

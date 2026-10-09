@@ -80,7 +80,9 @@ struct NewBotSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
-                Group {
+                // A ZStack, not a Group: a Group hands its modifiers to each child, so the form and the import panel
+                // would sit side by side while they swap, and the one coming in would repeat the sheet's entrance.
+                ZStack {
                     if isImporting {
                         ImportPanel(draft: $draft, onBack: { isImporting = false })
                             .transition(.opacity)
@@ -91,8 +93,8 @@ struct NewBotSheet: View {
                 .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: isImporting)
                 .frame(width: 380)
                 .background(Palette.chrome)
-                // The form comes in after the sheet, the footer after the form (MOVIMENTO.md §2.6). The editor
-                // on the right is the Orb editor's own (it brings its stage in itself).
+                // The form comes in with the stage, 0.08 s after the sheet, the options after them and the footer last
+                // (MOVIMENTO.md §2.6). The editor on the right brings its own stage and options in itself.
                 .sheetSection(0)
                 Divider().overlay(Palette.line)
                 // Compact: the form beside it already shows the name, and the options need the height.
@@ -104,7 +106,7 @@ struct NewBotSheet: View {
                         isPrimaryDisabled: isImporting ? draft?.plan().isEmpty ?? true : trimmedName.isEmpty,
                         primary: isImporting ? useImport : create)
                 .background(Palette.chrome)
-                .sheetSection(1)
+                .sheetSection(2)
         }
         .frame(width: 820, height: height)
         .task { isNameFocused = true }

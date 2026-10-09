@@ -94,8 +94,8 @@ extension View {
 
     /// A section of a sheet: on the sheet's first appearance it rises and appears in turn, 0.08 s after the sheet
     /// itself (the presentation is the system's). Everything together, without moving, under Reduce Motion.
-    func sheetSection(_ index: Int) -> some View {
-        entrance(.staggered(index, start: SheetEntrance.start))
+    func sheetSection(_ index: Int, landed: (@MainActor () -> Void)? = nil) -> some View {
+        entrance(.staggered(index, start: SheetEntrance.start), landed: landed)
     }
 
     /// `animation` for the changes of `value`, or the 0.15 s fade under Reduce Motion (where `animateChanges(of:)` is
