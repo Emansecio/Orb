@@ -1,0 +1,88 @@
+import Foundation
+import SwiftUI
+import Testing
+@testable import Orb
+
+/// The transitions between pages, panels and sheets (docs/MOVIMENTO.md §2.13): which page a selection is, which curve
+/// each kind of change uses, with and without Reduce Motion, and the panel opening the same way from every path. The
+/// motion itself is SwiftUI's; what is decided here is tested without a screen.
+@Suite("Transitions", .serialized) final class TransitionsTests {
+    let root = FileManager.default.temporaryDirectory.appending(path: "OrbTransitions-\(UUID().uuidString)")
+
+    deinit { try? FileManager.default.removeItem(at: root) }
+
+    @MainActor private func makeModel() -> AppModel {
+        AppModel(store: Store(directory: root.appending(path: "dados")), runsBackgroundWork: false)
+    }
+
+    // MARK: The page of the detail column
+
+    @Test func everyOrbIsTheSamePageSoGoingFromOneToAnotherDoesNotCrossFadeThePage() {
+        let ids = [UUID(), UUID()]
+        let first = DetailPage.page(for: .bot(ids[0]), botIDs: ids)
+        let second = DetailPage.page(for: .bot(ids[1]), botIDs: ids)
+        #expect(first == .orb)
+        #expect(first == second)
+    }
+
+    @Test func routinesConnectorsSkillsAndTheWelcomeAreEachTheirOwnPage() {
+        let ids = [UUID()]
+        let pages = [DetailPage.page(for: .bot(ids[0]), botIDs: ids),
+                     DetailPage.page(for: .routines, botIDs: ids),
+                     DetailPage.page(for: .connectors, botIDs: ids),
+                     DetailPage.page(for: .skills, botIDs: ids),
+                     DetailPage.page(for: nil, botIDs: [])]
+        #expect(pages == [.orb, .routines, .connectors, .skills, .welcome])
+        #expect(Set(pages).count == 5)
+    }
+
+    @Test func theMomentASelectionPointsAtNothingKeepsTheOrbsPage() {
+        let ids = [UUID()]
+        // A deleted Orb before the root view picks another, and nothing chosen while there are Orbs: no fade in between.
+        #expect(DetailPage.page(for: .bot(UUID()), botIDs: ids) == .orb)
+        #expect(DetailPage.page(for: nil, botIDs: ids) == .orb)
+        // The last Orb deleted: the welcome screen.
+        #expect(DetailPage.page(for: .bot(UUID()), botIDs: []) == .welcome)
+        #expect(DetailPage.page(for: .routines, botIDs: []) == .routines)
+    }
+
+    // MARK: The Orb's panel
+
+    @Test func thePanelSlidesInTheContentCurveAndNotAtAllUnderReduceMotion() {
+        #expect(Motion.panel(reduceMotion: false) == Motion.content)
+        #expect(Motion.panel(reduceMotion: true) == nil)
+    }
+
+    @Test @MainActor func everyPathThatOpensThePanelSetsTheSameState() {
+        let model = makeModel()
+        model.setInspector(false)
+        #expect(!model.showInspector)
+        model.toggleInspector()
+        #expect(model.showInspector)
+        model.toggleInspector()
+        #expect(!model.showInspector)
+        let id = model.botIDs[0]
+        model.showMemory(of: id)
+        #expect(model.showInspector)
+        model.setInspector(false)
+        model.showPermissions(of: id)
+        #expect(model.showInspector)
+        model.setInspector(false)
+        model.showLookEditor(of: id)
+        #expect(model.showInspector)
+    }
+
+    // MARK: The curves
+
+    @Test func crossFadesAreEighteenHundredthsAndTheContentCurveIsAQuarterSecond() {
+        #expect(Motion.crossFade == .easeInOut(duration: 0.18))
+        #expect(Motion.content == .smooth(duration: 0.25))
+        #expect(Motion.adapted(Motion.crossFade, reduceMotion: true) == Motion.fade)
+        #expect(Motion.adapted(Motion.crossFade, reduceMotion: false) == Motion.crossFade)
+    }
+
+    @Test func aSlidingSelectionPaintsItsMotionOnlyWhenMotionIsAllowed() {
+        #expect(Motion.selection(reduceMotion: false) == Motion.content)
+        #expect(Motion.selection(reduceMotion: true) == nil)
+    }
+}

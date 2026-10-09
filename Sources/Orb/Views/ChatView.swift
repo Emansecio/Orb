@@ -7,7 +7,6 @@ struct ChatView: View {
     let botID: UUID
 
     var body: some View {
-        @Bindable var model = model
         let live = model.live(botID)
         let look = live.look
         // Switching Orbs swaps the conversation for the other's with a cross-fade (§2.9) while the composer, the
@@ -39,15 +38,10 @@ struct ChatView: View {
                 }
                 .help(Tip.newConversation())
                 Button("Painel do Orb", systemImage: "sidebar.right") {
-                    model.showInspector.toggle()
+                    model.toggleInspector()
                 }
                 .help(Tip.inspector(isShowing: model.showInspector))
             }
-        }
-        .inspector(isPresented: $model.showInspector) {
-            BotInspector(botID: botID)
-                .id(botID)
-                .inspectorColumnWidth(min: 244, ideal: 300, max: 420)
         }
     }
 }

@@ -31,7 +31,7 @@ struct RootView: View {
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
             guard let open = autoClose.windowResized(to: width, isOpen: model.showInspector) else { return }
             autoChange = open
-            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { model.showInspector = open }
+            model.setInspector(open)
         }
         .onChange(of: model.showInspector) { _, isOpen in
             if autoChange == isOpen { autoChange = nil } else { autoClose.userToggled() }
@@ -65,42 +65,90 @@ extension RootView {
     }
 }
 
-private struct DetailView: View {
-    @Environment(AppModel.self) private var model
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    let welcomeLedger: WelcomeLedger
+/// Which page the detail column is showing, as far as a change of page is concerned (§2.9): the key of the
+/// cross-fade. Every Orb is the same page: going from one Orb to another is not a page change (the chat swaps its own
+/// parts and cross-fades its transcript), so it carries no Orb id. The moments a selection points at nothing yet (an
+/// Orb that was just deleted, before the root view picks another) are still the Orb's page, so they cause no fade.
+enum DetailPage: Hashable {
+    case orb, routines, connectors, skills, welcome
 
-    /// No Orbs and nothing else chosen: the front door.
-    private var showsWelcome: Bool {
-        model.botIDs.isEmpty && model.selection == nil
+    static func page(for selection: SidebarItem?, botIDs: [UUID]) -> DetailPage {
+        switch selection {
+        case .routines: .routines
+        case .connectors: .connectors
+        case .skills: .skills
+        case .bot?: botIDs.isEmpty ? .welcome : .orb
+        case nil: botIDs.isEmpty ? .welcome : .orb
+        }
     }
 
+    /// How the page comes and goes: a cross-fade. The welcome screen leaves faster (`Motion.exit`) when you make the
+    /// first Orb, so the new Orb's chat does not wait for it.
+    var transition: AnyTransition {
+        self == .welcome ? .asymmetric(insertion: .opacity, removal: .opacity.animation(Motion.exit)) : .opacity
+    }
+}
+
+private struct DetailView: View {
+    @Environment(AppModel.self) private var model
+    let welcomeLedger: WelcomeLedger
+
     var body: some View {
-        Group {
-            switch model.selection {
-            case .bot(let id):
-                // The chat view stays across Orbs and swaps the Orb's own parts when `id` changes (the transcript with a
-                // cross-fade, the composer, panel and toolbar at once), so the composer is outside the fade (§2.9).
-                if model.botIDs.contains(id) {
-                    ChatView(botID: id)
-                }
-            case .routines:
-                RoutinesView()
-            case .connectors:
-                ConnectorsView()
-            case .skills:
-                SkillsView()
-            case nil:
-                // With Orbs the root view picks the first one at once; with none this is the welcome screen.
-                if model.botIDs.isEmpty {
-                    WelcomeView(ledger: welcomeLedger)
-                        .transition(.asymmetric(insertion: .opacity, removal: .opacity.animation(Motion.exit)))
-                }
-            }
+        let page = DetailPage.page(for: model.selection, botIDs: model.botIDs)
+        // Pages swap in a ZStack, never a Group or a stack: the page that leaves and the one that arrives are both
+        // there during the fade, laid over each other instead of side by side. A change of page is a fade with no
+        // direction (`Motion.crossFade`, 0.15 s under Reduce Motion).
+        ZStack {
+            content
+                .id(page)
+                .transition(page.transition)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.canvas)
-        // Coming in and out of the welcome screen is the chat's own cross-fade (§2.9).
-        .animation(Motion.adapted(Motion.crossFade, reduceMotion: reduceMotion), value: showsWelcome)
+        .motion(Motion.crossFade, value: page)
+        // The Orb's panel belongs to the Orb's page: it is here, not in the chat, so it closes with the page rather than
+        // staying a fade-length behind it and vanishing. The user's choice (`showInspector`) is left as it was.
+        .inspector(isPresented: Binding(
+            get: { model.showInspector && page == .orb && selectedBotID != nil },
+            set: { if page == .orb { model.showInspector = $0 } }
+        )) {
+            ZStack {
+                if let id = selectedBotID {
+                    BotInspector(botID: id)
+                        .id(id)
+                        .transition(.opacity)
+                }
+            }
+            // The two sides of one click (the chat and the panel) change at the same pace.
+            .motion(Motion.crossFade, value: selectedBotID)
+            .inspectorColumnWidth(min: 244, ideal: 300, max: 420)
+        }
+    }
+
+    private var selectedBotID: UUID? {
+        if case .bot(let id)? = model.selection, model.botIDs.contains(id) { return id }
+        return nil
+    }
+
+    @ViewBuilder private var content: some View {
+        switch model.selection {
+        case .bot(let id):
+            // The chat view stays across Orbs and swaps the Orb's own parts when `id` changes (the transcript with a
+            // cross-fade, the composer and toolbar at once), so the composer is outside the fade (§2.9).
+            if model.botIDs.contains(id) {
+                ChatView(botID: id)
+            }
+        case .routines:
+            RoutinesView()
+        case .connectors:
+            ConnectorsView()
+        case .skills:
+            SkillsView()
+        case nil:
+            // With Orbs the root view picks the first one at once; with none this is the welcome screen.
+            if model.botIDs.isEmpty {
+                WelcomeView(ledger: welcomeLedger)
+            }
+        }
     }
 }
