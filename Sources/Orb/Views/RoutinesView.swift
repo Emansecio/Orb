@@ -198,7 +198,7 @@ private struct TemplateCard: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .padding(14)
-            .card(radius: 12, fill: isHovering ? Palette.raised : Palette.surface)
+            .hoverCard(isHovering, radius: 12)
             .contentShape(.rect(cornerRadius: 12))
         }
         .buttonStyle(.plain)

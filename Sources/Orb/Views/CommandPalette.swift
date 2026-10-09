@@ -291,6 +291,8 @@ struct CommandPalette: View {
 private struct PaletteRow: View {
     let entry: PaletteEntry
     let isSelected: Bool
+    /// The pointer is on the row: it is filled with the shared hover fade. The arrow keys move the selection at once.
+    @State private var isHovering = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -321,8 +323,10 @@ private struct PaletteRow: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(isSelected ? Palette.ghostSelected : .clear, in: .rect(cornerRadius: 8))
+        .background { RoundedRectangle(cornerRadius: 8).fill(Palette.ghostSelected).opacity(isSelected ? 1 : 0) }
+        .hoverFill(isHovering && !isSelected, in: .rect(cornerRadius: 8))
         .contentShape(.rect)
+        .onHover { isHovering = $0 }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }

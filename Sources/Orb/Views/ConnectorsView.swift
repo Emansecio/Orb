@@ -737,8 +737,7 @@ private struct RegistryServerCard: View {
                 }
             }
             .padding(14)
-            .card(radius: 14, fill: isHovering ? Palette.raised : Palette.surface,
-                  stroke: isHovering ? Palette.lineStrong : Palette.line)
+            .hoverCard(isHovering, radius: 14, strongOutline: true)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)

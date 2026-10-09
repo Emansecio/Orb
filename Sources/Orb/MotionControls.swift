@@ -63,6 +63,22 @@ struct DelayedSpinner: View {
 }
 
 extension View {
+    /// A card that answers the pointer: its fill goes from `Palette.surface` to `Palette.raised` with the hover curves
+    /// (in 0.10 s, out 0.22 s), and with `strongOutline` its outline from `Palette.line` to `Palette.lineStrong`. Two layers
+    /// cross-fading, so the end states are exactly the theme's colors. Colors only: it stays under Reduce Motion.
+    func hoverCard(_ isHovering: Bool, radius: CGFloat, strongOutline: Bool = false) -> some View {
+        hoverFill(isHovering, in: .rect(cornerRadius: radius), color: Palette.raised, resting: Palette.surface)
+            .overlay {
+                ZStack {
+                    RoundedRectangle(cornerRadius: radius).strokeBorder(Palette.line).opacity(strongOutline && isHovering ? 0 : 1)
+                    if strongOutline {
+                        RoundedRectangle(cornerRadius: radius).strokeBorder(Palette.lineStrong).opacity(isHovering ? 1 : 0)
+                    }
+                }
+                .animation(Motion.hover(isHovering), value: isHovering)
+            }
+    }
+
     /// A fill behind the view that fades in when `visible` (hover, pressed, highlighted) and out again, with the
     /// hover curves (in 0.10 s, out 0.22 s). `resting` is a fill that shows while it is not visible (a chip's
     /// raised background): the two cross-fade, so the end states stay exactly the colors of the theme.

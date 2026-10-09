@@ -167,7 +167,7 @@ struct ModelPopoverRow: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 5)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isHovering ? Palette.ghostHover : .clear)
+            .hoverFill(isHovering, in: .rect)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
