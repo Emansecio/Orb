@@ -23,7 +23,7 @@ struct TranscriptRow: View, Equatable {
     var body: some View {
         switch item.kind {
         case .user(let text, let attachments):
-            UserBubble(text: text, attachments: attachments)
+            UserBubble(text: text, attachments: attachments, duringTask: item.duringTask == true)
         case .bot(let text, let isStreaming):
             BotMessage(orb: orb, botID: botID, text: text, live: isStreaming ? model.liveText(for: item.id, of: botID) : nil,
                        isLastReply: isLastReply)
@@ -46,9 +46,9 @@ private let gutter: CGFloat = 36
 
 /// What VoiceOver says for the rows of the transcript, so it says who spoke instead of reading the avatar.
 enum TranscriptSpeech {
-    static func user(text: String, attachmentCount: Int) -> String {
+    static func user(text: String, attachmentCount: Int, duringTask: Bool = false) -> String {
         let attached = attachmentCount == 0 ? "" : attachmentCount == 1 ? ", com 1 anexo" : ", com \(attachmentCount) anexos"
-        return "Você: \(text)\(attached)"
+        return "Você: \(text)\(attached)" + (duringTask ? ", durante a tarefa" : "")
     }
 
     /// "Anexo: relatório.pdf, PDF, 2,1 MB", or why there is nothing to open.
@@ -74,6 +74,8 @@ enum TranscriptSpeech {
 private struct UserBubble: View {
     let text: String
     let attachments: [String]
+    /// It reached the Orb in the middle of its task (see `TranscriptItem.duringTask`): a small, quiet line says so.
+    var duringTask = false
 
     var body: some View {
         HStack {
@@ -89,7 +91,13 @@ private struct UserBubble: View {
                         .padding(.vertical, 9)
                         .background(Palette.userBubble, in: .rect(cornerRadius: 18))
                         .contextMenu { Button("Copiar") { Clipboard.copy(text) } }
-                        .accessibilityLabel(TranscriptSpeech.user(text: text, attachmentCount: attachments.count))
+                        .accessibilityLabel(TranscriptSpeech.user(text: text, attachmentCount: attachments.count, duringTask: duringTask))
+                }
+                if duringTask {
+                    Label("Durante a tarefa", systemImage: "arrow.turn.down.right")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.muted)
+                        .accessibilityHidden(!text.isEmpty) // the bubble's label already says it
                 }
             }
         }

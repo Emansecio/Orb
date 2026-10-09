@@ -188,7 +188,8 @@ import Testing
         #expect(action(working: false, ready: false) == .nothing)
         #expect(QuickAskSend.blockedNote(name: "Atlas") == "Atlas está rodando uma rotina. Envie quando terminar.")
         #expect(QuickAskSend.hint(isWorking: false, canSteer: false).hasPrefix("↩ envia"))
-        #expect(QuickAskSend.hint(isWorking: true, canSteer: true).hasPrefix("↩ entra na fila"))
+        #expect(QuickAskSend.hint(isWorking: true, canSteer: true).hasPrefix("↩ direciona"))
+        #expect(QuickAskSend.hint(isWorking: true, canSteer: true, midTurn: false).hasPrefix("↩ fila")) // Claude Code
         #expect(QuickAskSend.hint(isWorking: true, canSteer: false).hasPrefix("Rotina rodando"))
     }
 

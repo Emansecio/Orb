@@ -95,7 +95,7 @@ extension AnyTransition {
   avatar enquanto essa resposta está logo acima (só opacidade em `Motion.fade`, também com Reduzir movimento; a vaga de
   30 pt fica, e a frase não se move) e o pausa. `TranscriptRow.isLastReply` entra no `==`: só duas linhas redesenham
   quando um item entra.
-- **Mensagem na fila.** Entra como as outras (`.entrance(.rise)`, 6 pt em `Motion.enter`, fade de 0,15 s com Reduzir
+- **Mensagem pendente** (direcionada ou para depois da tarefa; antes "na fila"). Entra como as outras (`.entrance(.rise)`, 6 pt em `Motion.enter`, fade de 0,15 s com Reduzir
   movimento), sem animar a lista, e sai na hora (a bolha real sobe no mesmo lugar). Tem a forma da bolha final (raio 18)
   e mostra imagens como miniaturas esmaecidas (0,75), como o `UserBubble`. Só entra na primeira vez que é feita: os ids
   já mostrados ficam numa referência barata (`PresentedOrbs`, ambiente `presentedQueued`), então reabrir o chat ou a lista

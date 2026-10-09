@@ -101,7 +101,7 @@ extension KeyboardShortcut {
 /// A command a key answers to, so the places that show a key (the palette) ask the catalog for it by command.
 enum ShortcutCommand: String, CaseIterable, Sendable {
     case newBot, goTo, toggleInspector, settings
-    case writeMessage, newConversation, conversations, stop, openFolder, send, newLine, stopAndSend, chooseModel
+    case writeMessage, newConversation, conversations, stop, openFolder, send, newLine, queueAfterTask, stopAndSend, chooseModel
     case goToBot, previousBot, nextBot, routines, connectors, skills
     case allowApproval, denyApproval
     case compactOrSave, undoForget, find
@@ -143,7 +143,8 @@ enum ShortcutCatalog {
             ShortcutItem(.conversations, AppShortcut.conversations, CommandName.conversations),
             ShortcutItem(.stop, AppShortcut.stop, CommandName.stop),
             ShortcutItem(.openFolder, AppShortcut.openFolder, CommandName.openFolder),
-            ShortcutItem(command: .send, keys: "↩", title: "Enviar a mensagem"),
+            ShortcutItem(command: .send, keys: "↩", title: "Enviar a mensagem (com o Orb trabalhando, direciona a tarefa)"),
+            ShortcutItem(command: .queueAfterTask, keys: "⇥", title: "Pôr na fila para depois da tarefa (Orb trabalhando e algo escrito)"),
             ShortcutItem(command: .newLine, keys: CommandName.newLineKeys, title: "Nova linha na mensagem"),
             ShortcutItem(.stopAndSend, AppShortcut.commandReturn, "Parar e enviar agora (Orb trabalhando e algo escrito; recusa o pedido aberto)"),
             ShortcutItem(.chooseModel, AppShortcut.chooseModel, "Escolher o modelo do Orb"),

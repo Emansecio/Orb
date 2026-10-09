@@ -179,6 +179,9 @@ actor AgentEngine {
         var nudge: Int? = request.promptOnlySteers ? messages.count - 1 : nil
         // Where in `messages` the user's messages sent during the turn went (more steps of it, not new turns).
         var steered: [Int] = []
+        // Whether the last step ended only because the user was steering: with nothing to hand over now (the message
+        // was put back for after the task meanwhile), there is no step to take.
+        var continuedForSteering = false
         var sendImages = request.supportsImages != false
         if !sendImages, !request.images.isEmpty { out.yield(.notice(ImageRejection.notice)) }
 
@@ -187,7 +190,10 @@ actor AgentEngine {
                 // The last step answers in text (the tools stay listed, so the provider's cache still applies).
                 let isLastStep = step == maxSteps
                 // What the user said since the last call goes to the model now: a step boundary.
-                steered += Self.deliverSteering(request.steering, into: &messages, out: out)
+                let delivered = Self.deliverSteering(request.steering, into: &messages, out: out)
+                if continuedForSteering, delivered.isEmpty { return }
+                continuedForSteering = false
+                steered += delivered
                 out.yield(.status("Pensando"))
                 var reply = Reply()
                 var contextRetried = false
@@ -327,7 +333,10 @@ actor AgentEngine {
                 }
                 if calls.isEmpty {
                     // The user spoke while this answer was being written: it is one more step, not a new turn.
-                    if !isLastStep, request.steering?.isEmpty == false { continue }
+                    if !isLastStep, request.steering?.hasSteering == true {
+                        continuedForSteering = true
+                        continue
+                    }
                     if isLastStep { out.yield(.notice(Self.pausedNotice(after: maxSteps))) }
                     return
                 }
@@ -343,14 +352,14 @@ actor AgentEngine {
         }
     }
 
-    /// Hands the messages the user sent during the turn to the model, as user messages after whatever came before
+    /// Hands the messages the user sent during the turn (for the task in progress, not for after it) to the model, as user messages after whatever came before
     /// (tool results included: the providers merge consecutive user turns), and tells the UI each one arrived.
     /// Returns where in `messages` they went.
     @discardableResult
     static func deliverSteering(_ queue: SteeringQueue?, into messages: inout [ChatMessage], out: AsyncStream<TurnEvent>.Continuation) -> [Int] {
         guard let queue else { return [] }
         var indexes: [Int] = []
-        for steered in queue.drain() {
+        for steered in queue.drainSteering() { // the ones meant for after the task stay
             let message = ChatMessage.user(steered.prompt, images: steered.pictures)
             indexes.append(messages.count)
             messages.append(message)

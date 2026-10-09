@@ -162,10 +162,17 @@ AppleScript, Atalhos, área de transferência, captura de tela nem controla outr
   caminho; dá para arrastar o arquivo para fora. O que o Orb cria ou altera com as ferramentas de arquivo (e as capturas de
   tela dele) aparece sob a linha da ferramenta, como cartão "novo" ou "alterado" ou como miniatura, uma vez só por turno.
   Arquivos criados por comandos do Terminal não entram.
-- **Escrever com o Orb trabalhando.** O compositor continua livre: a mensagem entra como "Na fila" e chega ao Orb no próximo
-  passo dele (no Claude Code, assim que a resposta termina). **⌘↩ para e envia agora**; com um pedido de permissão aberto,
-  isso recusa o pedido (parar sempre recusa) e envia. Se o Orb espera sua resposta a um pedido, a fila só anda depois dela.
-  Dá para tirar uma mensagem da fila ("Editar"). Se o turno falhar ou for parado, o que estava na fila volta para o campo. O que está no campo (texto, arquivos e imagens anexados) e o que voltou da fila ficam guardados em `rascunhos.json` ao fechar o app e voltam na próxima abertura (arquivos que sumiram ficam de fora).
+- **Escrever com o Orb trabalhando.** O compositor continua livre, com dois modos, e a dica sob o campo mostra as teclas:
+  **↩ direciona** (a mensagem chega ao Orb no próximo passo da tarefa, sem interrompê-la), **⇥ põe na fila** (ela espera a
+  tarefa terminar e segue como o próximo pedido; várias juntas, na ordem em que você enviou) e **⌘↩ para e envia agora** (leva
+  as duas); com um pedido de permissão aberto, isso recusa o pedido (parar sempre recusa) e envia. O ⇥ só vale com o Orb
+  trabalhando e algo no campo; com as sugestões de skill abertas ele completa a skill, como antes. Cada mensagem pendente
+  diz para onde vai ("Entra no próximo passo", "Depois da tarefa"), e um botão no balão troca o modo depois de enviada
+  ("Pôr na fila" / "Direcionar"). Uma mensagem que entrou no meio da tarefa aparece no chat onde o Orb a recebeu, com a
+  marca "Durante a tarefa" (guardada na conversa). No Claude Code não há meio de turno: tudo é fila, a dica mostra só
+  "↩ fila · ⌘↩ para e envia" e o balão diz "Depois da resposta (o Claude Code não recebe no meio)". Se o Orb espera sua
+  resposta a um pedido, o que ia entrar no próximo passo só entra depois dela.
+  Dá para tirar uma mensagem da espera ("Editar"). Se o turno falhar ou for parado, o que estava esperando (nos dois modos) volta para o campo. O que está no campo (texto, arquivos e imagens anexados) e o que voltou da fila ficam guardados em `rascunhos.json` ao fechar o app e voltam na próxima abertura (arquivos que sumiram ficam de fora).
 - **Parar.** O botão Parar ou **⌘.**; o Orb avisa "Você interrompeu esta resposta".
 - **O que o Orb está fazendo.** Uma linha no fim da conversa, ao lado dele, diz o verbo e o alvo ("Rodando `swift build`",
   "Lendo README.md", "Procurando “TODO”", "Abrindo github.com") com o tempo do turno e, a partir da segunda ferramenta,
@@ -506,7 +513,8 @@ tem a **Galeria**, os **Instalados** e **Explorar**.
 | ⌘1 … ⌘9 | Ir para o Orb de mesmo número na barra lateral |
 | ⌥⌘R / ⌥⌘C / ⌥⌘K | Rotinas / Conectores / Skills |
 | ⌘, | Ajustes |
-| ↩ / ⌥↩ | Enviar / nova linha |
+| ↩ / ⌥↩ | Enviar (com o Orb trabalhando, direciona a tarefa) / nova linha |
+| ⇥ | Com o Orb trabalhando e algo escrito: pôr na fila para depois da tarefa. Com a lista de skills aberta: completar a skill |
 | ⌘↩ | Com o Orb trabalhando e algo escrito: parar e enviar agora (recusa o pedido aberto, se houver). Num cartão de aprovação, com o campo de mensagem vazio: permitir. No painel de contexto: compactar |
 | Esc | Num cartão de aprovação: não permitir (não vale enquanto você digita). Também fecha a paleta e a lista de skills |
 | ⇧⌘M | Escolher o modelo do Orb |

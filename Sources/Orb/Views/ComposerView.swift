@@ -3,8 +3,8 @@ import SwiftUI
 /// The message field of one Orb's chat. Takes the Orb's id: it shows nothing of the `Bot` itself (its chips read
 /// their own parts), so changes to the Orb's settings do not re-render it.
 ///
-/// It stays usable while the Orb works: a message sent then is queued and handed to the model at its next step
-/// (see `AppModel+Steering`), and Stop (⌘.) is always one key away. Attachments live in the Orb's `ComposerLane`, so
+/// It stays usable while the Orb works: a message sent then steers the task (↩, handed to the model at its next step)
+/// or waits for its end (⇥), see `AppModel+Steering`; ⌘↩ stops and sends. Stop (⌘.) is always one key away. Attachments live in the Orb's `ComposerLane`, so
 /// they survive switching to another Orb and back.
 struct ComposerView: View {
     @Environment(AppModel.self) private var model
@@ -114,10 +114,10 @@ struct ComposerView: View {
                 .foregroundStyle(Palette.ink)
                 .lineLimit(1...8)
                 .focused($isFocused)
-                .onSubmit(send)
+                .onSubmit { send() }
                 .onKeyPress(.upArrow) { moveSlash(-1) }
                 .onKeyPress(.downArrow) { moveSlash(1) }
-                .onKeyPress(.tab) { completeSlash() ? .handled : .ignored }
+                .onKeyPress(keys: [.tab]) { handleTab($0) }
                 .onKeyPress(.escape) { dismissSlash() }
                 .onChange(of: draft.wrappedValue) {
                     isSlashDismissed = false
@@ -266,8 +266,8 @@ struct ComposerView: View {
         }
         .buttonStyle(RoundActionStyle(isEnabled: action == .stop || canSend))
         .disabled(action != .stop && !canSend)
-        .accessibilityLabel(action.title(isRoutine: routine != nil))
-        .help(action.help(isRoutine: routine != nil))
+        .accessibilityLabel(action.title(isRoutine: routine != nil, steers: model.steersMidTurn(botID)))
+        .help(action.help(isRoutine: routine != nil, steers: model.steersMidTurn(botID)))
         // ⌘↩ sends when the Orb is free; while it works ⌘↩ means "stop and send" (see `shortcuts`).
         .keyboardShortcut(action == .send ? AppShortcut.commandReturn : nil)
     }
@@ -308,6 +308,18 @@ struct ComposerView: View {
             .accessibilityLabel("Skills sugeridas")
             .transition(.adapted(.asymmetric(insertion: .opacity.combined(with: .offset(y: 4)), removal: .opacity),
                                  reduceMotion: reduceMotion))
+        }
+    }
+
+    /// ⇥ completes the highlighted skill while the suggestions are open; otherwise, with the Orb working and a message
+    /// ready, it queues the message for after the task. Anywhere else it is the plain Tab (see `ComposerAction.tab`).
+    private func handleTab(_ press: KeyPress) -> KeyPress.Result {
+        switch ComposerAction.tab(slashIsOpen: !slashMatches.isEmpty, isQueueing: isQueueing, canSend: canSend, isPlain: press.modifiers.subtracting([.capsLock, .numericPad, .function]).isEmpty) {
+        case .completeSkill: return completeSlash() ? .handled : .ignored
+        case .queueAfterTask:
+            send(delivery: .afterTask)
+            return .handled
+        case .ignore: return .ignored
         }
     }
 
@@ -392,7 +404,7 @@ struct ComposerView: View {
         return true
     }
 
-    private func send() {
+    private func send(delivery: SteeringDelivery = .steer) {
         // With the suggestions open, Return completes the highlighted skill instead of sending a bare "/res" (a whole "/resumir" is sent).
         if completeSlash(forReturn: true) { return }
         guard canSend else { return }
@@ -401,7 +413,7 @@ struct ComposerView: View {
             // while waiting finds the draft already gone) instead of making the window wait for the file.
             Task {
                 await model.loadedConversation(botID)
-                send()
+                send(delivery: delivery)
             }
             return
         }
@@ -409,12 +421,12 @@ struct ComposerView: View {
             // Launch: the connections are still being looked at, so "no model" would be a guess. Send once they are known.
             Task {
                 await model.connectionsChecked()
-                send()
+                send(delivery: delivery)
             }
             return
         }
         // If the message wasn't sent (no model connected), the attachments stay with the draft.
-        model.submit(draft.wrappedValue, to: botID)
+        model.submit(draft.wrappedValue, to: botID, delivery: delivery)
     }
 
     private func insert(_ token: String) {
@@ -560,6 +572,24 @@ enum ComposerAction: Equatable {
         isQueueing && pendingPictures == 0 && (canSend || queuedCount > 0)
     }
 
+    /// What ⇥ does in the message field.
+    enum TabKey: Equatable {
+        /// Completes the highlighted skill of the `/` suggestions.
+        case completeSkill
+        /// Sends the message to wait for the end of the task (↩ would steer the task with it).
+        case queueAfterTask
+        /// Not ours: the plain Tab (moving the focus) goes on.
+        case ignore
+    }
+
+    /// ⇥ is taken only when it means something: the skill suggestions are open, or the Orb works on your chat and a
+    /// message is ready (`canSend`: something to send, no picture still on its way). With ⇧ or another modifier, or
+    /// with the Orb free or running a routine, it stays the plain Tab.
+    static func tab(slashIsOpen: Bool, isQueueing: Bool, canSend: Bool, isPlain: Bool) -> TabKey {
+        if slashIsOpen { return .completeSkill }
+        return isPlain && isQueueing && canSend ? .queueAfterTask : .ignore
+    }
+
     /// The field's placeholder while a routine runs (which a message cannot join).
     static func routinePlaceholder(routineName: String?) -> String {
         routineName.map { "A rotina “\($0)” está rodando. Envie quando ela terminar." } ?? "Uma rotina está rodando. Envie quando ela terminar."
@@ -589,32 +619,37 @@ enum ComposerAction: Equatable {
         }
     }
 
-    /// Stopping during a routine says so: it ends the routine's run.
-    func title(isRoutine: Bool) -> String { self == .stop && isRoutine ? "Parar a rotina" : title }
+    /// Stopping during a routine says so: it ends the routine's run. Queueing says "Direcionar" where the Orb takes the
+    /// message in the middle of the task (`steers`), which is what ↩ does there; ⇥ is the queue.
+    func title(isRoutine: Bool, steers: Bool = false) -> String {
+        if self == .queue, steers { return "Direcionar" }
+        return self == .stop && isRoutine ? "Parar a rotina" : title
+    }
 
-    func help(isRoutine: Bool) -> String { self == .stop && isRoutine ? "Parar a rotina (\(AppShortcut.stop.label))" : help }
+    func help(isRoutine: Bool, steers: Bool = false) -> String {
+        if self == .queue, steers { return "Direcionar o Orb (↩); ⇥ deixa para depois da tarefa" }
+        return self == .stop && isRoutine ? "Parar a rotina (\(AppShortcut.stop.label))" : help
+    }
 
     /// Stop keeps its own (dark) button next to the queueing one, so a turn can still be ended with a message typed.
     var showsSecondaryStop: Bool { self == .queue }
 }
 
-/// The line under the composer while a message can be queued. Pure, so the tests can read it.
+/// The line under the composer while a message can be sent to a working Orb. Pure, so the tests can read it.
 enum ComposerHint {
-    /// With a permission request open, ⌘↩ typed in the composer stops the turn (which refuses the request) and sends;
-    /// from anywhere else it still allows the request (see `ApprovalShortcut`), and the line says so.
+    /// Orb's own engine: ↩ steers the task, ⇥ waits for its end, ⌘↩ stops and sends. Claude Code takes nothing in the middle
+    /// of a turn, so ↩ is the queue there (⇥ does the same and is not advertised). With a permission request open, ⌘↩ typed
+    /// in the composer stops the turn (which refuses the request) and sends; from anywhere else it still allows the
+    /// request (see `ApprovalShortcut`), and the line says so.
     static func queueing(steersMidTurn: Bool, needsYou: Bool, typesInComposer: Bool, compact: Bool = false) -> String {
         let command = AppShortcut.commandReturn.label
-        if compact {
-            // A narrow composer gets the same promises in fewer words, so the line is whole rather than cut with "…".
-            if needsYou { return typesInComposer ? "Na fila · \(command) recusa e envia" : "Na fila · \(command) permite o pedido" }
-            return steersMidTurn ? "Na fila · próximo passo" : "Na fila · segue ao terminar"
-        }
+        let keys = steersMidTurn ? "↩ direciona · ⇥ fila" : "↩ fila"
         if needsYou {
-            return typesInComposer ? "↩ entra na fila · \(command) recusa o pedido e envia agora" : "↩ entra na fila · \(command) permite o pedido"
+            if !typesInComposer { return compact ? "\(command) permite o pedido" : "\(keys) · \(command) permite o pedido" }
+            // A narrow composer gets the same promises in fewer words, so the line is whole rather than cut with "…".
+            return compact ? "\(keys) · \(command) recusa e envia" : "\(keys) · \(command) recusa o pedido e envia agora"
         }
-        return steersMidTurn
-            ? "↩ entra na fila e chega ao Orb no próximo passo · \(command) para e envia agora"
-            : "↩ entra na fila e segue quando a resposta terminar · \(command) para e envia agora"
+        return compact ? keys : "\(keys) · \(command) para e envia"
     }
 }
 

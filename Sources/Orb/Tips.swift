@@ -26,6 +26,8 @@ enum Tip {
     static let reopenConversation = "Reabre esta conversa"
     static let forgetWindow = "Esquece o tamanho de janela aprendido para este modelo"
     static let suggestion = "Envia esta sugestão ao Orb"
+    static let queueAfterTask = "Deixa esta mensagem para depois da tarefa, em vez de entrar no próximo passo"
+    static let steerNow = "Entrega esta mensagem ao Orb no próximo passo da tarefa"
 
     // MARK: Routines and scheduled tasks
 
@@ -236,7 +238,7 @@ enum Tip {
     /// Every fixed text above, for the test that holds them to the style.
     static var all: [String] {
         [attach, removeAttachment, previewAttachment, previewImage, missingAttachment, moreAttachments,
-         skills, manageGrants, adjustContext, chooseModel, reopenConversation, forgetWindow, suggestion,
+         skills, manageGrants, adjustContext, chooseModel, reopenConversation, forgetWindow, suggestion, queueAfterTask, steerNow,
          newRoutine, editRoutine, deleteRoutine, runRoutineNow, runRoutineAgain, queuedRoutine, routineConversation,
          copyReport, openReportFile, runOnceNow, routinePermissions, allRoutines,
          routineToggle(isOn: true), routineToggle(isOn: false),

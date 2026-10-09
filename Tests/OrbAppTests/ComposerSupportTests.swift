@@ -16,10 +16,10 @@ struct ComposerSupportTests {
 
     @Test func theQueueHintHasAShortFormForANarrowComposer() {
         let key = AppShortcut.commandReturn.label
-        #expect(ComposerHint.queueing(steersMidTurn: true, needsYou: false, typesInComposer: true, compact: true) == "Na fila · próximo passo")
-        #expect(ComposerHint.queueing(steersMidTurn: false, needsYou: false, typesInComposer: true, compact: true) == "Na fila · segue ao terminar")
-        #expect(ComposerHint.queueing(steersMidTurn: true, needsYou: true, typesInComposer: true, compact: true) == "Na fila · \(key) recusa e envia")
-        #expect(ComposerHint.queueing(steersMidTurn: true, needsYou: true, typesInComposer: false, compact: true) == "Na fila · \(key) permite o pedido")
+        #expect(ComposerHint.queueing(steersMidTurn: true, needsYou: false, typesInComposer: true, compact: true) == "↩ direciona · ⇥ fila")
+        #expect(ComposerHint.queueing(steersMidTurn: false, needsYou: false, typesInComposer: true, compact: true) == "↩ fila")
+        #expect(ComposerHint.queueing(steersMidTurn: true, needsYou: true, typesInComposer: true, compact: true) == "↩ direciona · ⇥ fila · \(key) recusa e envia")
+        #expect(ComposerHint.queueing(steersMidTurn: true, needsYou: true, typesInComposer: false, compact: true) == "\(key) permite o pedido")
         // Every short form is shorter than its long one, and the long ones are unchanged without `compact`.
         for (steers, needs, types) in [(true, false, true), (false, false, true), (true, true, true), (true, true, false)] {
             let long = ComposerHint.queueing(steersMidTurn: steers, needsYou: needs, typesInComposer: types)
@@ -48,11 +48,12 @@ struct ComposerSupportTests {
     @Test func theHintNeverPromisesStopAndSendWhereCommandReturnAllows() {
         let key = AppShortcut.commandReturn.label
         // No request open: the line is the usual one.
-        #expect(ComposerHint.queueing(steersMidTurn: true, needsYou: false, typesInComposer: true).contains("\(key) para e envia agora"))
-        #expect(ComposerHint.queueing(steersMidTurn: false, needsYou: false, typesInComposer: true).contains("segue quando a resposta terminar"))
+        #expect(ComposerHint.queueing(steersMidTurn: true, needsYou: false, typesInComposer: true) == "↩ direciona · ⇥ fila · \(key) para e envia")
+        // Claude Code takes nothing in the middle of a turn: everything there is the queue, and the line shows no steering.
+        #expect(ComposerHint.queueing(steersMidTurn: false, needsYou: false, typesInComposer: true) == "↩ fila · \(key) para e envia")
         // A request open and text in the focused composer: ⌘↩ stops (refusing the request) and sends.
         let typing = ComposerHint.queueing(steersMidTurn: true, needsYou: true, typesInComposer: true)
-        #expect(typing.contains("\(key) recusa o pedido e envia agora") && typing.hasPrefix("↩ entra na fila"))
+        #expect(typing.contains("\(key) recusa o pedido e envia agora") && typing.hasPrefix("↩ direciona"))
         // Elsewhere ⌘↩ still allows the request, and the line says that instead.
         let elsewhere = ComposerHint.queueing(steersMidTurn: true, needsYou: true, typesInComposer: false)
         #expect(elsewhere.contains("\(key) permite o pedido") && !elsewhere.contains("para e envia"))
@@ -90,10 +91,43 @@ struct ComposerSupportTests {
     }
 
     @Test func theQueueSaysItWaitsForYourAnswerWhenARequestIsOpen() {
-        #expect(QueuedMessages.whenText(needsYou: true, steersMidTurn: true) == "Na fila · entra depois que você responder ao pedido")
-        #expect(QueuedMessages.whenText(needsYou: true, steersMidTurn: false).contains("responder ao pedido"))
-        #expect(QueuedMessages.whenText(needsYou: false, steersMidTurn: true) == "Na fila · entra no próximo passo")
-        #expect(QueuedMessages.whenText(needsYou: false, steersMidTurn: false) == "Na fila · segue quando a resposta terminar")
+        #expect(QueuedMessages.whenText(needsYou: true, isClaudeCode: false, delivery: .steer) == "Entra depois que você responder ao pedido")
+        #expect(QueuedMessages.whenText(needsYou: true, isClaudeCode: true, delivery: .afterTask).contains("responder ao pedido"))
+    }
+
+    @Test func eachWaitingMessageSaysWhereItIsGoingWithoutSayingQueuedWhenItEntersTheTask() {
+        #expect(QueuedMessages.whenText(needsYou: false, isClaudeCode: false, delivery: .steer) == "Entra no próximo passo")
+        #expect(QueuedMessages.whenText(needsYou: false, isClaudeCode: false, delivery: .afterTask) == "Depois da tarefa")
+        // Claude Code: both modes are the queue, and the line is honest about it.
+        for delivery in [SteeringDelivery.steer, .afterTask] {
+            #expect(QueuedMessages.whenText(needsYou: false, isClaudeCode: true, delivery: delivery) == "Depois da resposta (o Claude Code não recebe no meio)")
+        }
+        #expect(!QueuedMessages.whenText(needsYou: false, isClaudeCode: false, delivery: .steer).contains("fila"))
+        #expect(QueuedMessages.switchTitle(from: .steer) == "Pôr na fila" && QueuedMessages.switchTitle(from: .afterTask) == "Direcionar")
+        #expect(QueuedMessages.switchHelp(from: .steer) == Tip.queueAfterTask && QueuedMessages.switchHelp(from: .afterTask) == Tip.steerNow)
+    }
+
+    @Test func tabQueuesForAfterTheTaskOnlyWithTheOrbWorkingAndSomethingToSend() {
+        func tab(slash: Bool = false, working: Bool = true, content: Bool = true, steer: Bool = true, pending: Int = 0, plain: Bool = true) -> ComposerAction.TabKey {
+            let canSend = ComposerAction.canSend(hasContent: content, isWorking: working, canSteer: steer, pendingPictures: pending)
+            return ComposerAction.tab(slashIsOpen: slash, isQueueing: working && steer, canSend: canSend, isPlain: plain)
+        }
+        #expect(tab() == .queueAfterTask)
+        #expect(tab(content: false) == .ignore) // nothing to send: the plain Tab
+        #expect(tab(working: false) == .ignore) // the Orb is free
+        #expect(tab(steer: false) == .ignore) // a routine's run takes no message
+        #expect(tab(pending: 1) == .ignore) // a picture still on its way
+        #expect(tab(plain: false) == .ignore) // ⇧⇥ keeps moving the focus backwards
+        // The skill suggestions keep ⇥ for completing, with the Orb working or not.
+        #expect(tab(slash: true) == .completeSkill)
+        #expect(tab(slash: true, working: false, content: false) == .completeSkill)
+    }
+
+    @Test func theRoundButtonSaysDirecionarWhereTheOrbTakesMessagesMidTask() {
+        #expect(ComposerAction.queue.title(isRoutine: false, steers: true) == "Direcionar")
+        #expect(ComposerAction.queue.help(isRoutine: false, steers: true).hasPrefix("Direcionar"))
+        #expect(ComposerAction.queue.title(isRoutine: false, steers: false) == "Colocar na fila") // Claude Code
+        #expect(ComposerAction.stop.title(isRoutine: false, steers: true) == "Parar")
     }
 
     @Test func pasteIsTakenOnlyInTheComposersOwnKeyWindowWithoutASheet() {

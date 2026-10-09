@@ -486,8 +486,8 @@ extension BotSession {
 
     // MARK: The transcript
 
-    func append(_ kind: TranscriptItem.Kind) {
-        mutateItems { $0.append(TranscriptItem(kind)) }
+    func append(_ kind: TranscriptItem.Kind, duringTask: Bool = false) {
+        mutateItems { $0.append(TranscriptItem(kind, duringTask: duringTask)) }
     }
 
     /// A file shows under the last call of the turn that touched it: the earlier calls give it up, and one that was

@@ -1864,7 +1864,7 @@ final class AppModel {
 
     func closeStreaming(_ botID: UUID) { session(botID).closeStreaming() }
 
-    func append(_ kind: TranscriptItem.Kind, to botID: UUID) { session(botID).append(kind) }
+    func append(_ kind: TranscriptItem.Kind, to botID: UUID, duringTask: Bool = false) { session(botID).append(kind, duringTask: duringTask) }
 
     /// The Orb's conversation, read from disk first if it was not in memory. For the transcript's "Tentar de novo".
     func loadedConversation(_ botID: UUID) -> Conversation? {

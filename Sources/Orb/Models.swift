@@ -154,9 +154,13 @@ struct TranscriptItem: Identifiable, Codable, Sendable, Equatable {
     var id = UUID()
     var kind: Kind
     var date = Date.now
+    /// A message of the user's that reached the model in the middle of its task (steered, not sent as a request of its
+    /// own): the chat marks it. nil for every other item and for conversations from before the mark existed.
+    var duringTask: Bool?
 
-    init(_ kind: Kind) {
+    init(_ kind: Kind, duringTask: Bool = false) {
         self.kind = kind
+        self.duringTask = duringTask ? true : nil
     }
 
     init(from decoder: Decoder) throws {
@@ -164,6 +168,7 @@ struct TranscriptItem: Identifiable, Codable, Sendable, Equatable {
         id = try c.value(.id, default: UUID())
         kind = try c.decode(Kind.self, forKey: .kind)
         date = try c.value(.date, default: Date.now)
+        duringTask = try? c.decodeIfPresent(Bool.self, forKey: .duringTask) // a mark that cannot be read is no loss
     }
 }
 

@@ -1,9 +1,10 @@
 import Foundation
 import Observation
 
-// Talking to an Orb while it works: what you send during a turn is queued, shown in the chat as waiting, and handed
-// to the model at the next step boundary (Orb's own engine) or sent right after the turn (Claude Code, whose
-// process takes one prompt per turn). Also the composer state that must outlive the composer view (attachments),
+// Talking to an Orb while it works: what you send during a turn waits, shown in the chat with where it is going.
+// Two modes (`SteeringDelivery`): ↩ steers (Orb's own engine hands it to the model at the next step boundary) and ⇥ queues
+// it for after the task (it goes as the next request when the turn ends well). Claude Code takes one prompt per process,
+// so there everything waits for the end of the answer. Also the composer state that must outlive the composer view (attachments),
 // which is rebuilt every time you switch Orb.
 
 /// A file waiting to be sent with the next message. The size is read when it is attached, not when it is drawn.
@@ -64,6 +65,13 @@ final class ComposerLane {
     func delivered(_ id: UUID) -> SteeredMessage? {
         guard let index = queued.firstIndex(where: { $0.id == id }) else { return nil }
         return queued.remove(at: index)
+    }
+
+    /// Changes where a waiting message goes. False when it already left (delivered, or taken back): too late.
+    func setDelivery(_ id: UUID, to delivery: SteeringDelivery) -> Bool {
+        guard queue.setDelivery(id, to: delivery), let index = queued.firstIndex(where: { $0.id == id }) else { return false }
+        queued[index].delivery = delivery
+        return true
     }
 
     /// The user took a message back. nil when it was already delivered (too late to change its mind).
@@ -146,10 +154,13 @@ extension AppModel {
     /// (Claude Code takes one prompt per process).
     func steersMidTurn(_ botID: UUID) -> Bool { canSteer(botID) && sessions[botID]?.isClaudeTurn != true }
 
+    /// Whether the running turn is Claude Code's (which takes nothing in the middle of it).
+    func isClaudeCodeTurn(_ botID: UUID) -> Bool { sessions[botID]?.isClaudeTurn == true }
+
     /// The composer's send: starts a turn when the Orb is free, queues the message when it is working. Returns false
     /// when nothing was sent, so the composer keeps what you wrote.
     @discardableResult
-    func submit(_ text: String, to botID: UUID) -> Bool {
+    func submit(_ text: String, to botID: UUID, delivery: SteeringDelivery = .steer) -> Bool {
         let lane = composerLane(botID)
         guard lane.pendingPictures == 0 else { return false } // a picture still on its way would miss this message
         if !canSteer(botID) {
@@ -167,17 +178,17 @@ extension AppModel {
             append(.notice(Self.compactionBusyMessage), to: botID)
             return false
         }
-        return queueMessage(text, to: botID)
+        return queueMessage(text, to: botID, delivery: delivery)
     }
 
-    /// Queues a message for the running turn. The draft and the attachments leave the composer; the message shows in
-    /// the chat as waiting until it is delivered.
+    /// Queues a message for the running turn: into the task (`.steer`) or after it. The draft and the attachments leave
+    /// the composer; the message shows in the chat as waiting until it is delivered.
     @discardableResult
-    func queueMessage(_ text: String, to botID: UUID) -> Bool {
+    func queueMessage(_ text: String, to botID: UUID, delivery: SteeringDelivery = .steer) -> Bool {
         let lane = composerLane(botID)
         let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSteer(botID), !typed.isEmpty || !lane.pictures.isEmpty || !lane.files.isEmpty else { return false }
-        enqueue(typed, files: lane.files.map(\.url), pictures: lane.pictures, to: botID)
+        enqueue(typed, files: lane.files.map(\.url), pictures: lane.pictures, delivery: delivery, to: botID)
         // Attachments alone (nothing typed) must not take a draft with real text along; a blank one is cleared.
         if !typed.isEmpty || (drafts[botID] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { setDraft("", for: botID) }
         lane.files.removeAll()
@@ -192,11 +203,11 @@ extension AppModel {
     func queueOutsideComposer(_ text: String, to botID: UUID) -> Bool {
         let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSteer(botID), !typed.isEmpty else { return false }
-        enqueue(typed, files: [], pictures: [], to: botID)
+        enqueue(typed, files: [], pictures: [], delivery: .steer, to: botID)
         return true
     }
 
-    private func enqueue(_ typed: String, files: [URL], pictures: [ImageAttachment], to botID: UUID) {
+    private func enqueue(_ typed: String, files: [URL], pictures: [ImageAttachment], delivery: SteeringDelivery, to botID: UUID) {
         let lane = composerLane(botID)
         // The skill's use is counted when the message is delivered (here or by `send`, which expands it again), not
         // now: a queued message may be delivered by either path and must count once.
@@ -211,8 +222,18 @@ extension AppModel {
         if steersMidTurn(botID), MemoryIntent.detect(typed) != nil {
             prompt += MemoryIntent.instruction(tool: "remember")
         }
-        lane.enqueue(SteeredMessage(text: typed, files: files, pictures: pictures, prompt: prompt))
+        // Claude Code has no middle of the turn to steer: everything there waits for the end, and says so.
+        lane.enqueue(SteeredMessage(text: typed, files: files, pictures: pictures, prompt: prompt,
+                                    delivery: steersMidTurn(botID) ? delivery : .afterTask))
         live(botID).scrolled() // scrolls the chat down to the "na fila" bubble, which changes no transcript revision
+    }
+
+    /// Moves a waiting message between "into the task" and "after the task". Does nothing when it was delivered meanwhile,
+    /// or when the engine cannot steer (Claude Code).
+    func switchDelivery(_ id: UUID, botID: UUID) {
+        let lane = composerLane(botID)
+        guard steersMidTurn(botID), let current = lane.queued.first(where: { $0.id == id })?.delivery else { return }
+        _ = lane.setDelivery(id, to: current.other)
     }
 
     /// Takes a queued message back into the composer (its text before what is typed now, its attachments with the
@@ -253,7 +274,8 @@ extension AppModel {
         guard let message = composerLane(botID).delivered(id) else { return }
         countSkillUse(in: message.text)
         closeStreaming(botID)
-        append(.user(text: message.text, attachments: message.attachmentPaths), to: botID) // follows the end only if the chat was there
+        // Marked "durante a tarefa": it reached the model in the middle of its work, not as a request of its own.
+        append(.user(text: message.text, attachments: message.attachmentPaths), to: botID, duringTask: true) // follows the end only if the chat was there
     }
 
     /// Counts one use of the skill a message starts with (`/slug`), if it does.

@@ -700,3 +700,279 @@ struct SteeringEngineTests {
         await waitUntilIdle(model, bot.id)
     }
 }
+
+// MARK: - Two modes: steer the task, or wait for its end
+
+private func afterTask(_ text: String) -> SteeredMessage { SteeredMessage(text: text, prompt: text, delivery: .afterTask) }
+
+struct SteeringModesTests {
+    @Test func theQueueHandsOverOnlyWhatIsMeantForTheTask() {
+        let queue = SteeringQueue()
+        queue.push(steered("a"))
+        queue.push(afterTask("b"))
+        queue.push(steered("c"))
+        queue.push(afterTask("d"))
+        #expect(queue.hasSteering)
+        #expect(queue.drainSteering().map(\.text) == ["a", "c"])
+        #expect(!queue.hasSteering && !queue.isEmpty)
+        #expect(queue.drainSteering().isEmpty)
+        #expect(queue.messages.map(\.text) == ["b", "d"]) // still waiting, in the order of sending
+        #expect(queue.drain().map(\.text) == ["b", "d"])
+    }
+
+    @Test func aMessageChangesModeOnlyWhileItWaits() {
+        let queue = SteeringQueue()
+        let first = steered("a"), second = afterTask("b")
+        queue.push(first)
+        queue.push(second)
+        #expect(queue.setDelivery(first.id, to: .afterTask) && !queue.hasSteering)
+        #expect(queue.setDelivery(second.id, to: .steer) && queue.hasSteering)
+        #expect(queue.messages.map(\.text) == ["a", "b"]) // its place in the order does not change
+        #expect(queue.drainSteering().map(\.text) == ["b"])
+        #expect(!queue.setDelivery(second.id, to: .afterTask)) // delivered: too late
+        #expect(!queue.setDelivery(UUID(), to: .steer))
+    }
+
+    @Test func aMessageSavedWithoutAModeOpensAsSteering() throws {
+        let old = #"{"id":"6F4A8F0E-2D1B-4C53-9E8A-0B7D3F2A1C11","text":"oi","files":[],"pictures":[],"prompt":"oi"}"#
+        let message = try JSONDecoder().decode(SteeredMessage.self, from: Data(old.utf8))
+        #expect(message.delivery == .steer && message.text == "oi")
+        let unknown = old.replacingOccurrences(of: #""prompt":"oi""#, with: #""prompt":"oi","delivery":"daqui-a-pouco""#)
+        #expect(try JSONDecoder().decode(SteeredMessage.self, from: Data(unknown.utf8)).delivery == .steer)
+        let back = try JSONDecoder().decode(SteeredMessage.self, from: JSONEncoder().encode(afterTask("depois")))
+        #expect(back.delivery == .afterTask && back.text == "depois")
+    }
+
+    @Test func aDraftsFileFromBeforeTheModesStillOpens() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "OrbDrafts-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let id = UUID()
+        let old = #"{"\#(id.uuidString)":{"text":"rascunho","files":["/tmp/a.txt"],"pictures":[]}}"#
+        try Data(old.utf8).write(to: root.appending(path: Store.draftsFileName))
+        let drafts = Store(directory: root).readDrafts()
+        #expect(drafts[id]?.text == "rascunho" && drafts[id]?.files == ["/tmp/a.txt"])
+    }
+
+    @Test func theDuringTaskMarkIsSavedAndReadAndOldConversationsStillOpen() throws {
+        let marked = TranscriptItem(.user(text: "só o Engine", attachments: []), duringTask: true)
+        let plain = TranscriptItem(.user(text: "oi", attachments: []))
+        #expect(marked.duringTask == true && plain.duringTask == nil)
+        let conversation = Conversation(items: [plain, marked], messages: [.user("oi")])
+        let back = try JSONDecoder().decode(Conversation.self, from: JSONEncoder().encode(conversation))
+        #expect(back.items.map(\.duringTask) == [nil, true])
+        // Nothing is written for an item without the mark: the file is the one older versions read.
+        #expect(!String(decoding: try JSONEncoder().encode(plain), as: UTF8.self).contains("duringTask"))
+        // An item written before the mark existed.
+        var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(marked)) as? [String: Any])
+        json.removeValue(forKey: "duringTask")
+        let old = try JSONDecoder().decode(TranscriptItem.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(old.duringTask == nil && old.kind == marked.kind)
+        // A mark that cannot be read does not lose the message.
+        json["duringTask"] = "sim"
+        let odd = try JSONDecoder().decode(TranscriptItem.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(odd.duringTask == nil && odd.kind == marked.kind)
+    }
+}
+
+struct SteeringModesEngineTests {
+    private func request(_ client: HeldModel, steering: SteeringQueue?) -> TurnRequest {
+        let bot = Bot(name: "Teste", role: "", orb: OrbConfig(), permissionMode: .auto)
+        return TurnRequest(bot: bot, model: "fake", system: "sys", history: [], prompt: "oi", client: client, tools: [LookTool()],
+                           context: ToolContext(workingDirectory: URL(fileURLWithPath: NSTemporaryDirectory())), steering: steering)
+    }
+
+    private func run(_ request: TurnRequest) async -> [TurnEvent] {
+        var events: [TurnEvent] = []
+        for await event in AgentEngine().run(request) { events.append(event) }
+        return events
+    }
+
+    @Test func theEngineDeliversTheSteeredOnesInTheMiddleAndLeavesTheOthers() async throws {
+        let queue = SteeringQueue()
+        let gate = Latch()
+        let client = HeldModel(gate: gate, toolOnFirst: true)
+        let turn = Task { await run(request(client, steering: queue)) }
+        await waitUntil("the first model call") { await client.seen.count >= 1 }
+        queue.push(afterTask("depois de tudo"))
+        let steer = steered("use a pasta X")
+        queue.push(steer)
+        await gate.open()
+        let events = await turn.value
+
+        let calls = await client.seen.calls
+        #expect(calls.count == 2)
+        #expect(calls[1].last?.content == "use a pasta X") // the other one is nowhere in what the model saw
+        #expect(!calls[1].contains { $0.content == "depois de tudo" })
+        let ids = events.compactMap { event -> UUID? in if case .steered(let id) = event { id } else { nil } }
+        #expect(ids == [steer.id])
+        #expect(queue.messages.map(\.text) == ["depois de tudo"]) // waits for the end of the task
+    }
+
+    @Test func aMessageForAfterTheTaskDoesNotKeepTheTurnGoing() async throws {
+        let queue = SteeringQueue()
+        let gate = Latch()
+        let client = HeldModel(gate: gate) // answers in text at once
+        let turn = Task { await run(request(client, steering: queue)) }
+        await waitUntil("the first model call") { await client.seen.count >= 1 }
+        queue.push(afterTask("e depois?"))
+        await gate.open()
+        let events = await turn.value
+
+        #expect(await client.seen.count == 1) // the answer ended the turn: no empty extra step for a message that waits
+        #expect(!events.contains { if case .steered = $0 { true } else { false } })
+        #expect(queue.messages.map(\.text) == ["e depois?"])
+    }
+}
+
+extension SteeringModelTests {
+    @MainActor private func items(_ model: AppModel, _ id: UUID) -> [(text: String, duringTask: Bool)] {
+        model.transcript(id).compactMap { item in
+            if case .user(let text, _) = item.kind { (text, item.duringTask == true) } else { nil }
+        }
+    }
+
+    @Test @MainActor func theWaitingOnesBecomeTheNextRequestWhenTheTaskEndsInTheOrderOfSending() async throws {
+        let gate = Latch()
+        let client = HeldModel(gate: gate)
+        let (model, bot) = setUp(client)
+        model.submit("primeiro", to: bot.id)
+        await waitUntil("the model call") { await client.seen.count >= 1 }
+        #expect(model.submit("segundo", to: bot.id, delivery: .afterTask))
+        #expect(model.submit("terceiro", to: bot.id, delivery: .afterTask))
+        let lane = model.composerLane(bot.id)
+        #expect(lane.queued.map(\.delivery) == [.afterTask, .afterTask] && lane.queued.map(\.text) == ["segundo", "terceiro"])
+        await gate.open()
+        await waitUntilIdle(model, bot.id)
+
+        // Not delivered in the middle (the first call's answer ended the task), sent together as the next request.
+        #expect(items(model, bot.id).map(\.text) == ["primeiro", "segundo\n\nterceiro"])
+        #expect(items(model, bot.id).allSatisfy { !$0.duringTask }) // it is a request of its own, not a mid-task one
+        #expect(await client.seen.count == 2)
+        #expect(await client.seen.calls[1].last?.content.contains("segundo\n\nterceiro") == true)
+        #expect(lane.queued.isEmpty)
+    }
+
+    @Test @MainActor func theSteeredOneEntersTheTaskMarkedAndTheOtherFollowsAfterIt() async throws {
+        let gate = Latch()
+        let client = HeldModel(gate: gate, toolOnFirst: true)
+        let (model, bot) = setUp(client)
+        model.submit("primeiro", to: bot.id)
+        await waitUntil("the model call") { await client.seen.count >= 1 }
+        model.submit("depois da tarefa", to: bot.id, delivery: .afterTask)
+        model.submit("não, só o Engine", to: bot.id)
+        #expect(model.composerLane(bot.id).queued.map(\.delivery) == [.afterTask, .steer])
+        await gate.open()
+        await waitUntilIdle(model, bot.id)
+
+        let shown = items(model, bot.id)
+        #expect(shown.map(\.text) == ["primeiro", "não, só o Engine", "depois da tarefa"])
+        #expect(shown.map(\.duringTask) == [false, true, false]) // only the one that entered the task is marked
+        let calls = await client.seen.calls
+        #expect(calls.count == 3) // the task (two calls), then the waiting message as a turn of its own
+        #expect(calls[1].last?.content == "não, só o Engine")
+        #expect(!calls[1].contains { $0.content == "depois da tarefa" })
+    }
+
+    @Test @MainActor func aWaitingMessageSwitchesModeUntilItIsDelivered() async throws {
+        let gate = Latch()
+        let client = HeldModel(gate: gate, toolOnFirst: true)
+        let (model, bot) = setUp(client)
+        model.submit("primeiro", to: bot.id)
+        await waitUntil("the model call") { await client.seen.count >= 1 }
+        model.submit("uma ideia", to: bot.id)
+        let lane = model.composerLane(bot.id)
+        let id = try #require(lane.queued.first?.id)
+
+        model.switchDelivery(id, botID: bot.id)
+        #expect(lane.queued[0].delivery == .afterTask && lane.queue.messages[0].delivery == .afterTask && !lane.queue.hasSteering)
+        model.switchDelivery(id, botID: bot.id)
+        #expect(lane.queued[0].delivery == .steer && lane.queue.hasSteering) // and back
+
+        model.deliverSteered(id, to: bot.id) // reached the model meanwhile (the engine took it from `queue` first)
+        _ = lane.queue.drain()
+        model.switchDelivery(id, botID: bot.id)
+        #expect(lane.queued.isEmpty && lane.queue.isEmpty) // too late: nothing comes back to life
+        #expect(!lane.setDelivery(id, to: .afterTask))
+        await gate.open()
+        await waitUntilIdle(model, bot.id)
+    }
+
+    @Test @MainActor func aMessageSwitchedToAfterTheTaskIsNotDeliveredInTheMiddle() async throws {
+        let gate = Latch()
+        let client = HeldModel(gate: gate, toolOnFirst: true)
+        let (model, bot) = setUp(client)
+        model.submit("primeiro", to: bot.id)
+        await waitUntil("the model call") { await client.seen.count >= 1 }
+        model.submit("mudei de ideia", to: bot.id)
+        model.switchDelivery(try #require(model.composerLane(bot.id).queued.first?.id), botID: bot.id)
+        await gate.open()
+        await waitUntilIdle(model, bot.id)
+        let calls = await client.seen.calls
+        #expect(!calls[1].contains { $0.content == "mudei de ideia" }) // the task went on without it
+        #expect(items(model, bot.id).map(\.text) == ["primeiro", "mudei de ideia"])
+        #expect(items(model, bot.id).allSatisfy { !$0.duringTask })
+    }
+
+    @Test @MainActor func inClaudeCodeBothModesAreTheQueueAndTheBubbleSaysSo() async throws {
+        let gate = Latch()
+        let client = HeldModel(gate: gate)
+        let (model, bot) = setUp(client)
+        model.submit("primeiro", to: bot.id)
+        await waitUntil("the model call") { await client.seen.count >= 1 }
+        model.session(bot.id).isClaudeTurn = true // the turn is Claude Code's: it takes nothing in the middle
+        #expect(model.isClaudeCodeTurn(bot.id) && !model.steersMidTurn(bot.id))
+
+        #expect(model.submit("direcionar", to: bot.id, delivery: .steer))
+        #expect(model.submit("fila", to: bot.id, delivery: .afterTask))
+        let lane = model.composerLane(bot.id)
+        #expect(lane.queued.map(\.delivery) == [.afterTask, .afterTask]) // the first one asked to steer: there is nothing to steer
+        #expect(!lane.queue.hasSteering)
+        for message in lane.queued {
+            #expect(QueuedMessages.whenText(needsYou: false, isClaudeCode: model.isClaudeCodeTurn(bot.id), delivery: message.delivery)
+                    == "Depois da resposta (o Claude Code não recebe no meio)")
+        }
+        model.switchDelivery(lane.queued[0].id, botID: bot.id) // the bubble has no button for it; the call changes nothing
+        #expect(lane.queued.map(\.delivery) == [.afterTask, .afterTask])
+        await gate.open()
+        await waitUntilIdle(model, bot.id)
+        // After the answer both go together, in the order of sending, as a request of their own.
+        #expect(items(model, bot.id).map(\.text) == ["primeiro", "direcionar\n\nfila"])
+        #expect(items(model, bot.id).allSatisfy { !$0.duringTask })
+    }
+
+    @Test @MainActor func aFailedOrStoppedTaskGivesBackBothModesToTheField() async throws {
+        let client = HeldModel()
+        let (model, bot) = setUp(client)
+        let lane = model.composerLane(bot.id)
+        lane.enqueue(steered("um"))
+        lane.enqueue(afterTask("dois"))
+        model.settleSteering(bot.id, succeeded: false)
+        #expect(model.drafts[bot.id] == "um\n\ndois" && lane.queued.isEmpty && lane.queue.isEmpty)
+    }
+
+    @Test @MainActor func aSteeredOneNeverDeliveredFollowsAsTheNextRequestWithTheOthers() async throws {
+        let client = HeldModel()
+        let (model, bot) = setUp(client)
+        let lane = model.composerLane(bot.id)
+        lane.enqueue(afterTask("a"))
+        lane.enqueue(steered("b")) // the model answered without more steps: it was never taken
+        model.settleSteering(bot.id, succeeded: true)
+        #expect(items(model, bot.id).map(\.text) == ["a\n\nb"])
+        await waitUntilIdle(model, bot.id)
+    }
+
+    @Test @MainActor func stopAndSendTakesBothModes() async throws {
+        let gate = Latch()
+        let client = HeldModel(gate: gate)
+        let (model, bot) = setUp(client)
+        model.submit("primeiro", to: bot.id)
+        await waitUntil("the model call") { await client.seen.count >= 1 }
+        model.submit("passo", to: bot.id)
+        model.submit("fila", to: bot.id, delivery: .afterTask)
+        model.stopAndSend(bot.id)
+        #expect(items(model, bot.id).map(\.text) == ["primeiro", "passo\n\nfila"])
+        await gate.open()
+        await waitUntilIdle(model, bot.id)
+    }
+}
