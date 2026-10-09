@@ -356,6 +356,18 @@ struct ToolDigestTests {
         #expect(line == "[passo 7] read_file /Users/x/src/mod3.swift -> ok, 20.027 car.; começa com «func exemplo() {»")
     }
 
+    @Test func aConnectorCallKeepsOnlyItsNameAndWhetherItWorked() {
+        let arguments = #"{"connector":"Gmail","tool":"search_threads","arguments":{"query":"proposta Acme"}}"#
+        #expect(ToolDigest.line(call: call("a", "connector_call", arguments), result: .tool("a", "Assunto: Proposta da Acme, R$ 480 mil"), step: 4)
+                == "[passo 4] connector_call Gmail -> ok")
+        #expect(ToolDigest.line(call: call("a", "connector_call", arguments), result: .tool("a", "Acme recusou", isError: true), step: 5)
+                == "[passo 5] connector_call Gmail -> ERRO")
+        // Before the gateway the call carried the tool's own name and arguments.
+        let line = ToolDigest.line(call: call("a", "Gmail__search_threads", #"{"query":"proposta Acme"}"#), result: .tool("a", "Acme 480 mil"), step: 6)
+        #expect(line == "[passo 6] Gmail__search_threads -> ok")
+        #expect(ToolDigest.line(call: call("a", "connector_tools", #"{"connector":"Slack"}"#), result: nil, step: 7) == "[passo 7] connector_tools Slack -> sem resposta")
+    }
+
     @Test func anErrorShowsItsFirstLine() {
         let line = ToolDigest.line(call: call("a", "run_command", #"{"command":"swift test"}"#),
                                    result: .tool("a", "Error: 3 tests failed\nmore", isError: true), step: 9)

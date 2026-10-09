@@ -4,7 +4,8 @@ import SwiftUI
 // the catalog search header, badges and loading/empty states.
 
 enum CatalogTab: Hashable {
-    case installed, explore
+    /// The gallery of services (only the Conectores page has one).
+    case gallery, installed, explore
 
     /// ⌘F: only the catalog has a search field, so from the installed tab the page goes there (the field takes focus
     /// when it appears).
@@ -19,17 +20,20 @@ struct CatalogTabBar: View {
     @Binding var tab: CatalogTab
     let installedTitle: String
     let installedCount: Int
+    /// The title of the gallery pill; nil leaves the pill out.
+    var galleryTitle: String?
 
     var body: some View {
         HStack(spacing: 4) {
+            if let galleryTitle { pill(.gallery, title: galleryTitle, symbol: "square.grid.2x2", count: nil) }
             pill(.installed, title: installedTitle, symbol: "checkmark.circle", count: installedCount)
             pill(.explore, title: "Explorar", symbol: "sparkle.magnifyingglass", count: nil)
         }
         .padding(3)
         .background(Color.white.opacity(0.06), in: .capsule)
         .background {
-            // ⌘F on the installed tab (the explore tab's header has its own button for it).
-            if tab == .installed {
+            // ⌘F outside the explore tab (the explore tab's header has its own button for it).
+            if tab != .explore {
                 Button("Buscar no catálogo") { withAnimation(.snappy(duration: 0.2)) { tab = CatalogTab.afterFind(tab) } }
                     .keyboardShortcut(AppShortcut.find)
                     .opacity(0)

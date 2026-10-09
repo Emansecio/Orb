@@ -17,6 +17,12 @@ enum ConnectorCategory: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// A step-by-step guide the connector sheet shows before it asks for the key.
+enum ConnectorGuide: Equatable, Sendable {
+    /// Slack: create the app from a manifest, install it, paste the User OAuth Token (`SlackApp`).
+    case slack
+}
+
 /// A well-known server shown under "Em destaque": what it does in plain words and what it asks for, so the card
 /// never has to show a command.
 struct ConnectorTemplate: Identifiable, Sendable {
@@ -30,6 +36,10 @@ struct ConnectorTemplate: Identifiable, Sendable {
     var folderArgumentIndex: Int?
     /// Where to get the key, shown in the sheet.
     var helpURL: URL?
+    /// A guide the sheet shows before the keys, for a service that needs more than a token.
+    var guide: ConnectorGuide?
+    /// A caution shown with the key (what the connector starts with, what it can do).
+    var note: String?
 
     var needsKey: Bool { inputs.contains { $0.isRequired && $0.isSecret } }
     var isRemote: Bool { config.isRemote }
@@ -62,6 +72,53 @@ struct ConnectorTemplate: Identifiable, Sendable {
                            isSecret: true, isRequired: true, prefix: "Bearer ")],
             helpURL: URL(string: "https://github.com/settings/tokens")),
         ConnectorTemplate(
+            id: "slack-oficial", config: {
+                var config = MCPServerConfig(name: "Slack", url: SlackApp.serverURL)
+                config.headers["Authorization"] = ""
+                config.secretKeys = ["Authorization"]
+                return config
+            }(),
+            summary: "Buscar e ler mensagens e canais do Slack e, se você liberar, enviar mensagens. Usa o servidor oficial do Slack.",
+            category: .chat,
+            inputs: [.init(name: "Authorization", summary: "User OAuth Token do app do Slack que você cria no passo a passo (começa com xoxp-).",
+                           isSecret: true, isRequired: true, prefix: "Bearer ")],
+            helpURL: SlackApp.appsURL, guide: .slack),
+        ConnectorTemplate(
+            id: "supabase", config: {
+                // Read-only until the person decides otherwise: the server runs queries with the permissions of the token.
+                var config = MCPServerConfig(name: "Supabase", url: "https://mcp.supabase.com/mcp?read_only=true")
+                config.headers["Authorization"] = ""
+                config.secretKeys = ["Authorization"]
+                return config
+            }(),
+            summary: "Consultar os projetos e as tabelas do seu Supabase. Começa só em leitura.",
+            category: .data,
+            inputs: [.init(name: "Authorization", summary: "Token de acesso pessoal do Supabase (Account → Access Tokens).",
+                           isSecret: true, isRequired: true, prefix: "Bearer ")],
+            helpURL: URL(string: "https://supabase.com/dashboard/account/tokens"),
+            note: "Vem com read_only=true na URL: o Orb só lê. Para deixar escrever, tire isso da URL em Avançado. Dados dos seus bancos podem trazer instruções escondidas: deixe o Orb perguntar antes de agir."),
+        ConnectorTemplate(
+            id: "memoria", config: MCPServerConfig(name: "Memória (grafo)", command: "npx", arguments: ["-y", "@modelcontextprotocol/server-memory"]),
+            summary: "Guarda fatos e as relações entre eles para os Orbs consultarem depois.",
+            category: .notes),
+        ConnectorTemplate(
+            id: "fetch", config: MCPServerConfig(name: "Busca na web (Fetch)", command: "uvx", arguments: ["mcp-server-fetch"]),
+            summary: "Baixa uma página da web e converte em texto. Não faz buscas, e o Orb já lê páginas sozinho com \"Navegar na web\".",
+            category: .data),
+        ConnectorTemplate(
+            id: "pensamento", config: MCPServerConfig(name: "Pensamento em etapas", command: "npx",
+                arguments: ["-y", "@modelcontextprotocol/server-sequential-thinking"]),
+            summary: "Ajuda o Orb a pensar passo a passo em problemas difíceis.",
+            category: .data),
+    ]
+}
+
+extension ConnectorTemplate {
+    /// Models the gallery no longer offers because the package behind them is archived or unmaintained (Slack's
+    /// `server-slack`, Notion's npm server). Connectors installed from them keep working and keep their guided form;
+    /// nothing is deleted from the person's data.
+    static let retired: [ConnectorTemplate] = [
+        ConnectorTemplate(
             id: "notion", config: {
                 var config = MCPServerConfig(name: "Notion", command: "npx", arguments: ["-y", "@notionhq/notion-mcp-server"])
                 config.environment["NOTION_TOKEN"] = ""
@@ -85,27 +142,18 @@ struct ConnectorTemplate: Identifiable, Sendable {
             inputs: [.init(name: "SLACK_BOT_TOKEN", summary: "Token do bot do seu app do Slack (começa com xoxb-).",
                            isSecret: true, isRequired: true),
                      .init(name: "SLACK_TEAM_ID", summary: "ID do workspace (começa com T).", isSecret: false, isRequired: true)]),
-        ConnectorTemplate(
-            id: "memoria", config: MCPServerConfig(name: "Memória (grafo)", command: "npx", arguments: ["-y", "@modelcontextprotocol/server-memory"]),
-            summary: "Guarda fatos e as relações entre eles para os Orbs consultarem depois.",
-            category: .notes),
-        ConnectorTemplate(
-            id: "fetch", config: MCPServerConfig(name: "Busca na web (Fetch)", command: "uvx", arguments: ["mcp-server-fetch"]),
-            summary: "Baixa uma página da web e converte em texto. Não faz buscas, e o Orb já lê páginas sozinho com \"Navegar na web\".",
-            category: .data),
-        ConnectorTemplate(
-            id: "pensamento", config: MCPServerConfig(name: "Pensamento em etapas", command: "npx",
-                arguments: ["-y", "@modelcontextprotocol/server-sequential-thinking"]),
-            summary: "Ajuda o Orb a pensar passo a passo em problemas difíceis.",
-            category: .data),
     ]
-}
 
-extension ConnectorTemplate {
-    /// The featured template an installed connector came from (same name and same server), so that editing it keeps
-    /// the guided form.
+    /// The template an installed connector came from (same name and same server), so that editing it keeps the guided
+    /// form. Retired models count: a connector installed from one is still edited with its form.
+    /// A remote one is known by its address, whatever the connector was renamed to, and the query of the address does not
+    /// count (`?read_only=true` is something the person may take out); a local one by its name and command.
     static func matching(_ config: MCPServerConfig) -> ConnectorTemplate? {
-        all.first { $0.config.name == config.name && $0.config.command == config.command && $0.config.url == config.url }
+        func address(_ url: String) -> Substring { url.prefix { $0 != "?" } }
+        return (all + retired).first {
+            $0.config.command == config.command && address($0.config.url) == address(config.url)
+                && (!config.isRemote ? $0.config.name == config.name : true)
+        }
     }
 }
 

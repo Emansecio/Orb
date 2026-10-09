@@ -2,8 +2,16 @@ import Foundation
 
 /// Turns a stretch of a conversation into a session page without an LLM (ai-memory's rule-based session
 /// summary): what you asked, what the Orb did, the files and links involved, its last answer and what was left
-/// open. Secrets are scrubbed before anything is clipped or written, and each entry is one line.
+/// open. Secrets are scrubbed before anything is clipped or written, and each entry is one line. What came from a
+/// connector (mail, messages, pages, calendar) never reaches the page: it only says the connector was used, and the last
+/// answer, which would restate it, is left out of a stretch that used one.
 enum SessionSummary {
+    /// Whether an approval card is about a connector tool (`GitHub__create_issue`, `mcp__slack__send_message`, `connector_call`),
+    /// or groups one.
+    private static func isConnectorCard(_ request: ApprovalRequest) -> Bool {
+        ([request.toolName] + request.items.map(\.toolName)).contains { $0.contains("__") || $0 == ConnectorGateway.callName }
+    }
+
     /// Idle time after which a conversation stretch is saved as a session (a new message later starts another).
     /// `ORB_MEMORY_IDLE=<seconds>` shortens it for end-to-end checks.
     static let idleGap: TimeInterval = ProcessInfo.processInfo.environment["ORB_MEMORY_IDLE"].flatMap(Double.init) ?? 30 * 60
@@ -39,7 +47,7 @@ enum SessionSummary {
 
         var actions: [String] = [], references: [String] = [], open: [String] = []
         var seenActions = Set<String>(), seenReferences = Set<String>()
-        var lastAnswer = "", answeredLast = false
+        var lastAnswer = "", answeredLast = false, usedConnector = false
         for item in items {
             switch item.kind {
             case .user:
@@ -52,6 +60,14 @@ enum SessionSummary {
             case .tool(let call):
                 // Saving to and searching the memory itself isn't worth remembering.
                 guard call.kind != .memory else { continue }
+                if call.kind == .connector {
+                    // The title says which connector ("Usando GitHub"); the detail holds the tool and what was asked of it.
+                    usedConnector = true
+                    let action = line(call.title, 160) + (call.state == .failed ? " (falhou)" : "")
+                    if seenActions.insert(action).inserted { actions.append(action) }
+                    if call.state == .failed { open.append("Não deu certo: " + line(call.title, 140)) }
+                    continue
+                }
                 let action = line(call.title + (call.detail.isEmpty ? "" : ": " + call.detail), 160) + (call.state == .failed ? " (falhou)" : "")
                 if seenActions.insert(action).inserted { actions.append(action) }
                 if call.state == .failed { open.append("Não deu certo: " + line(call.title + " " + call.detail, 140)) }
@@ -59,7 +75,11 @@ enum SessionSummary {
                     references.append(token)
                 }
             case .approval(let request):
-                if request.decision == .deny { open.append("Você negou: " + line(request.title + " " + request.command, 140)) }
+                if request.decision == .deny {
+                    // The command of a connector card holds the tool and its arguments (the body of a message): only the title stays.
+                    let detail = isConnectorCard(request) ? "" : " " + request.command
+                    open.append("Você negou: " + line(request.title + detail, 140))
+                }
             case .notice, .greeting:
                 break
             }
@@ -81,7 +101,7 @@ enum SessionSummary {
         if !decisions.isEmpty { body += "\n\n## Decisões\n" + decisions.suffix(8).map { "- \(line($0, 200))" }.joined(separator: "\n") }
         if !actions.isEmpty { body += "\n\n## O que foi feito\n" + actions.suffix(15).map { "- \($0)" }.joined(separator: "\n") }
         if !references.isEmpty { body += "\n\n## Arquivos e links\n" + references.prefix(15).map { "- \($0)" }.joined(separator: "\n") }
-        if !lastAnswer.isEmpty {
+        if !lastAnswer.isEmpty, !usedConnector {
             // Headings inside the answer would read as sections of this page.
             let answer = lastAnswer.components(separatedBy: "\n")
                 .map { $0.trimmingCharacters(in: .whitespaces).hasPrefix("#") ? $0.trimmingCharacters(in: CharacterSet(charactersIn: "# ")) : $0 }

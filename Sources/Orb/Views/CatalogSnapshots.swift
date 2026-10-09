@@ -11,7 +11,25 @@ enum CatalogSnapshots {
         case "conn-editor-files":
             return template("arquivos")
         case "conn-editor-slack":
+            return template("slack-oficial")
+        case "conn-editor-supabase":
+            return template("supabase")
+        case "conn-editor-retired-slack":
             return template("slack")
+        case "connectors-gallery":
+            return gallery(model)
+        case "conn-google-intro":
+            return AnyView(LocalConnectorSheet(kind: .agenda))
+        case "conn-google-account":
+            return AnyView(LocalConnectorSheet(kind: .gmail, initialPhase: .attention(.noAccount)))
+        case "conn-google-account-agenda":
+            return AnyView(LocalConnectorSheet(kind: .agenda, initialPhase: .attention(.noAccount)))
+        case "conn-google-denied":
+            return AnyView(LocalConnectorSheet(kind: .agenda, initialPhase: .attention(.denied)))
+        case "conn-google-done":
+            return AnyView(LocalConnectorSheet(kind: .gmail, initialPhase: .done(5)))
+        case "conn-google-working":
+            return AnyView(LocalConnectorSheet(kind: .agenda, initialPhase: .working))
         case "conn-editor-manual":
             return AnyView(ConnectorEditor(draft: ConnectorDraft(config: MCPServerConfig(name: ""))))
         case "conn-editor-edit-registry":
@@ -53,17 +71,35 @@ enum CatalogSnapshots {
     /// The installed connectors in each state a card can be in: connected now, off until needed, starting, failed, switched off.
     private static func lazyConnectors(_ model: AppModel) -> AnyView {
         func installed(_ id: String, enabled: Bool = true) -> MCPServerConfig {
-            var config = ConnectorTemplate.all.first { $0.id == id }!.config.withNewID()
+            var config = (ConnectorTemplate.all + ConnectorTemplate.retired).first { $0.id == id }!.config.withNewID()
             config.isEnabled = enabled
             return config
         }
         let github = installed("github"), files = installed("arquivos"), notion = installed("notion"), slack = installed("slack")
         let memory = installed("memoria"), thinking = installed("pensamento", enabled: false)
-        model.connectors = [github, files, notion, slack, memory, thinking]
+        var agenda = LocalConnectorKind.agenda.config
+        agenda.orbIDs = nil
+        model.connectors = [github, files, notion, slack, memory, thinking, agenda]
         model.allowConnectors(for: model.bots.map(\.id))
         model.connectorStatus = [github.id: .ready(toolCount: 42), files.id: .idle(toolCount: 14), notion.id: .starting,
                                  slack.id: .failed("Não foi possível iniciar o conector Slack: invalid_auth"),
-                                 memory.id: .idle(toolCount: 9), thinking.id: .stopped]
+                                 memory.id: .idle(toolCount: 9), thinking.id: .stopped, agenda.id: .idle(toolCount: 6)]
+        model.localStates = [.agenda: .noAccount]
+        return AnyView(ConnectorsView(tab: .installed))
+    }
+
+    /// The gallery with a bit of everything: connected, needing attention, switched off, available and coming soon.
+    private static func gallery(_ model: AppModel) -> AnyView {
+        var gmail = LocalConnectorKind.gmail.config, agenda = LocalConnectorKind.agenda.config
+        gmail.orbIDs = nil
+        agenda.orbIDs = nil
+        let github = ConnectorTemplate.all.first { $0.id == "github" }!.config.withNewID()
+        var memory = ConnectorTemplate.all.first { $0.id == "memoria" }!.config.withNewID()
+        memory.isEnabled = false
+        model.connectors = [gmail, agenda, github, memory]
+        model.allowConnectors(for: model.bots.map(\.id))
+        model.connectorStatus = [gmail.id: .idle(toolCount: 5), agenda.id: .idle(toolCount: 6), github.id: .ready(toolCount: 42), memory.id: .stopped]
+        model.localStates = [.gmail: .ready, .agenda: .noAccount]
         return AnyView(ConnectorsView())
     }
 
@@ -89,7 +125,7 @@ enum CatalogSnapshots {
     }
 
     private static func template(_ id: String, phase: ConnectorEditor.Phase = .form) -> AnyView? {
-        guard let template = ConnectorTemplate.all.first(where: { $0.id == id }) else { return nil }
+        guard let template = (ConnectorTemplate.all + ConnectorTemplate.retired).first(where: { $0.id == id }) else { return nil }
         return AnyView(ConnectorEditor(draft: ConnectorDraft(template: template), initialPhase: phase))
     }
 }

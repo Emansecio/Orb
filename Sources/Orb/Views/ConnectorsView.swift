@@ -1,12 +1,15 @@
 import SwiftUI
 
-/// Connectors (MCP servers): the installed ones (enable, status, edit, delete) and the official registry.
+/// Connectors: the gallery of services (one click to connect), the installed ones (enable, status, edit, delete) and the
+/// official MCP registry for everything else.
 struct ConnectorsView: View {
     @Environment(AppModel.self) private var model
     @State private var tab: CatalogTab
     @State private var editing: ConnectorDraft?
+    /// The connector of this Mac whose "Conectar" sheet is open.
+    @State private var settingUp: LocalConnectorKind?
 
-    init(tab: CatalogTab = .installed) {
+    init(tab: CatalogTab = .gallery) {
         _tab = State(initialValue: tab)
     }
 
@@ -16,17 +19,18 @@ struct ConnectorsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            CatalogTabBar(tab: $tab, installedTitle: "Instalados", installedCount: model.connectors.count)
+            CatalogTabBar(tab: $tab, installedTitle: "Instalados", installedCount: model.connectors.count, galleryTitle: "Galeria")
                 .padding(.top, 16)
                 .padding(.bottom, 4)
             switch tab {
-            case .installed: InstalledConnectors(editing: $editing, explore: { tab = .explore })
+            case .gallery: ConnectorGalleryView(editing: $editing, settingUp: $settingUp, explore: { tab = .explore })
+            case .installed: InstalledConnectors(editing: $editing, settingUp: $settingUp, explore: { tab = .gallery })
             case .explore: ExploreConnectors(editing: $editing)
             }
         }
         .background(Palette.canvas)
         .navigationTitle("Conectores")
-        .navigationSubtitle("Dão novas ferramentas aos Orbs, como GitHub, Notion e arquivos")
+        .navigationSubtitle("Dão novas ferramentas aos Orbs, como Gmail, Agenda, Slack e GitHub")
         .toolbar {
             Button("Reconectar", systemImage: "arrow.clockwise") { model.retryFailedConnectors() }
                 .help(hasProblem ? "Tentar conectar de novo os conectores com erro" : "Nenhum conector com erro")
@@ -38,6 +42,9 @@ struct ConnectorsView: View {
         }
         .sheet(item: $editing) { draft in
             ConnectorEditor(draft: draft)
+        }
+        .sheet(item: $settingUp) { kind in
+            LocalConnectorSheet(kind: kind)
         }
     }
 }
@@ -52,24 +59,28 @@ struct ConnectorDraft: Identifiable {
     /// The argument that holds the folder the server may open (the filesystem server).
     var folderArgumentIndex: Int?
     var helpURL: URL?
+    var guide: ConnectorGuide?
+    var note: String?
     var id: UUID { config.id }
 
     /// Came from the catalog: the sheet asks only for keys, the rest sits under "Avançado".
     var isGuided: Bool { !summary.isEmpty || !inputs.isEmpty || config.source != nil }
 
     init(config: MCPServerConfig, inputs: [RegistryServer.Input] = [], summary: String = "", isOfficial: Bool = false,
-         folderArgumentIndex: Int? = nil, helpURL: URL? = nil) {
+         folderArgumentIndex: Int? = nil, helpURL: URL? = nil, guide: ConnectorGuide? = nil, note: String? = nil) {
         self.config = config
         self.inputs = inputs
         self.summary = summary
         self.isOfficial = isOfficial
         self.folderArgumentIndex = folderArgumentIndex
         self.helpURL = helpURL
+        self.guide = guide
+        self.note = note
     }
 
     init(template: ConnectorTemplate) {
         self.init(config: template.config.withNewID(), inputs: template.inputs, summary: template.summary,
-                  folderArgumentIndex: template.folderArgumentIndex, helpURL: template.helpURL)
+                  folderArgumentIndex: template.folderArgumentIndex, helpURL: template.helpURL, guide: template.guide, note: template.note)
     }
 
     /// An installed connector: the same guided form it was installed with, with "Avançado" open.
@@ -77,7 +88,7 @@ struct ConnectorDraft: Identifiable {
         if let template = ConnectorTemplate.matching(config) {
             self.init(config: config, inputs: template.inputs, summary: template.summary,
                       folderArgumentIndex: template.folderArgumentIndex.flatMap { $0 < config.arguments.count ? $0 : nil },
-                      helpURL: template.helpURL)
+                      helpURL: template.helpURL, guide: template.guide, note: template.note)
         } else if let source = config.source {
             self.init(config: config, inputs: ConnectorEditing.inputs(for: config), isOfficial: RegistryServer.isOfficial(source))
         } else {
@@ -95,6 +106,8 @@ struct ConnectorDraft: Identifiable {
 private struct InstalledConnectors: View {
     @Environment(AppModel.self) private var model
     @Binding var editing: ConnectorDraft?
+    @Binding var settingUp: LocalConnectorKind?
+    /// Back to the gallery, where a connector is picked.
     let explore: () -> Void
     @State private var deleting: MCPServerConfig?
     @State private var viewingTools: MCPServerConfig?
@@ -106,8 +119,12 @@ private struct InstalledConnectors: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 12, alignment: .top)], alignment: .leading, spacing: 12) {
                     ForEach($model.connectors) { $connector in
                         ConnectorCard(connector: $connector, status: model.connectorStatus[connector.id],
-                                      usedBy: usedBy(connector), onEdit: {
-                            editing = ConnectorDraft(editing: connector)
+                                      usedBy: usedBy(connector), attention: attention(connector), onEdit: {
+                            if let kind = connector.local.flatMap(LocalConnectorKind.init(rawValue:)) {
+                                settingUp = kind
+                            } else {
+                                editing = ConnectorDraft(editing: connector)
+                            }
                         }, onTest: {
                             await model.testConnector(connector.id)
                         }, onViewTools: {
@@ -127,9 +144,9 @@ private struct InstalledConnectors: View {
                 ContentUnavailableView {
                     Label("Nenhum conector", systemImage: "point.3.filled.connected.trianglepath.dotted")
                 } description: {
-                    Text("Conectores dão aos Orbs novas ferramentas, como ler o GitHub ou o Notion. Instale um do catálogo ou adicione o seu.")
+                    Text("Conectores dão aos Orbs novas ferramentas, como ler o Gmail, a Agenda ou o GitHub. Escolha um na galeria ou adicione o seu.")
                 } actions: {
-                    Button("Explorar catálogo", action: explore).buttonStyle(PrimaryPillStyle())
+                    Button("Abrir a galeria", action: explore).buttonStyle(PrimaryPillStyle())
                 }
             }
         }
@@ -147,6 +164,13 @@ private struct InstalledConnectors: View {
         }
     }
 
+    /// What a connector of this Mac lacks (a permission, the Google account), for its card.
+    private func attention(_ connector: MCPServerConfig) -> String? {
+        guard connector.isEnabled, let kind = connector.local.flatMap(LocalConnectorKind.init(rawValue:)),
+              let state = model.localStates[kind], state.needsAttention else { return nil }
+        return state.message
+    }
+
     /// "Atlas, Lia" for the Orbs that get this connector now; nil for a disabled one.
     private func usedBy(_ connector: MCPServerConfig) -> String? {
         guard connector.isEnabled else { return nil }
@@ -160,6 +184,8 @@ private struct ConnectorCard: View {
     let status: MCPStatus?
     /// Names of the Orbs that use it; "" when none does; nil when the connector is off.
     let usedBy: String?
+    /// What a connector of this Mac lacks, in a line (a permission, the Google account); nil when nothing does.
+    var attention: String?
     let onEdit: () -> Void
     /// Starts the server (if it is off), lists its tools and says how it went.
     let onTest: () async -> ConnectorTestOutcome
@@ -173,12 +199,12 @@ private struct ConnectorCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 12) {
-                CatalogIcon(symbol: connector.isRemote ? "cloud" : "puzzlepiece.extension")
+                CatalogIcon(symbol: connector.local != nil ? "desktopcomputer" : connector.isRemote ? "cloud" : "puzzlepiece.extension")
                 VStack(alignment: .leading, spacing: 2) {
                     Text(connector.name)
                         .font(.system(size: 14, weight: .semibold))
                         .lineLimit(1)
-                    Text(connector.isRemote ? connector.url : ([connector.command] + connector.arguments).joined(separator: " "))
+                    Text(connector.local != nil ? "Neste Mac" : connector.isRemote ? connector.url : ([connector.command] + connector.arguments).joined(separator: " "))
                         .font(.system(size: 11).monospaced())
                         .foregroundStyle(Palette.faint)
                         .lineLimit(1)
@@ -194,6 +220,8 @@ private struct ConnectorCard: View {
             }
             if case .failed(let message) = status, connector.isEnabled {
                 failure(message)
+            } else if let attention {
+                needsAttention(attention)
             }
             if showsTestLine { testLine }
             if let usedBy {
@@ -278,6 +306,18 @@ private struct ConnectorCard: View {
         .font(.system(size: 11))
         .transition(.opacity)
         .accessibilityElement(children: .combine)
+    }
+
+    /// A connector of this Mac that lacks something: the line, and the button that opens its sheet to fix it.
+    private func needsAttention(_ message: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(message, systemImage: "exclamationmark.triangle.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.warn)
+                .lineLimit(3)
+                .multilineTextAlignment(.leading)
+            Button("Resolver…", action: onEdit).buttonStyle(SecondaryPillStyle()).controlSize(.small)
+        }
     }
 
     /// The reason in words, not in a tooltip, with the two things to do about it.
@@ -445,7 +485,6 @@ private struct ExploreConnectors: View {
     @Environment(AppModel.self) private var model
     @Binding var editing: ConnectorDraft?
     @State private var query = ""
-    @State private var category: ConnectorCategory?
     @State private var results: [RegistryServer] = []
     @State private var isLoading = false
     @State private var error: String?
@@ -457,14 +496,18 @@ private struct ExploreConnectors: View {
             VStack(alignment: .leading, spacing: 18) {
                 CatalogSearchHeader(query: $query, prompt: "Buscar no registro oficial de conectores",
                                     info: "A busca usa o registro oficial do MCP (registry.modelcontextprotocol.io). O nome de cada servidor é verificado pelo registro, mas o código é de quem publicou.")
+                Label("Os servidores do registro são de quem os publicou. Só os marcados “Oficial” vêm do projeto do MCP; os outros rodam código de terceiros no seu Mac. Confira quem publicou antes de instalar. Para os serviços mais usados, veja a galeria.",
+                      systemImage: "exclamationmark.shield")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
                 if !isSearching {
-                    categoryChips
-                    // Stable template ids keep the cards (and their hover state) across re-renders.
-                    grid(ConnectorTemplate.all.filter { $0.matches(category) }) { template in
-                        FeaturedConnectorCard(template: template, isInstalled: isInstalled(template)) {
-                            editing = ConnectorDraft(template: template)
-                        }
+                    ContentUnavailableView {
+                        Label("Busque um serviço", systemImage: "sparkle.magnifyingglass")
+                    } description: {
+                        Text("Digite o nome do serviço ou do que ele faz, como “banco de dados” ou “calendário”.")
                     }
+                    .padding(.top, 30)
                 } else if isLoading || error != nil || results.isEmpty {
                     CatalogStateView(isLoading: isLoading, error: error, isEmpty: results.isEmpty,
                                      slowHint: "O registro às vezes demora até um minuto…", skeleton: true,
@@ -487,28 +530,6 @@ private struct ExploreConnectors: View {
             guard !Task.isCancelled else { return }
             await search()
         }
-    }
-
-    private var categoryChips: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Em destaque")
-                .font(.system(size: 13, weight: .semibold))
-            ScrollView(.horizontal) {
-                HStack(spacing: 6) {
-                    Button("Todos") { category = nil }
-                        .buttonStyle(ChipStyle(isSelected: category == nil))
-                    ForEach(ConnectorCategory.allCases) { value in
-                        Button(value.label) { category = value }
-                            .buttonStyle(ChipStyle(isSelected: category == value))
-                    }
-                }
-            }
-            .scrollIndicators(.never)
-        }
-    }
-
-    private func isInstalled(_ template: ConnectorTemplate) -> Bool {
-        model.connectors.contains { $0.name == template.config.name }
     }
 
     private func grid<Item: Identifiable, Card: View>(_ items: [Item], @ViewBuilder card: @escaping (Item) -> Card) -> some View {
@@ -567,6 +588,8 @@ private struct RegistryServerCard: View {
                 HStack(spacing: 6) {
                     if server.isOfficial {
                         CatalogBadge(text: "Oficial", symbol: "checkmark.seal.fill", tint: Palette.accentText)
+                    } else {
+                        CatalogBadge(text: "Não oficial", symbol: "exclamationmark.triangle", tint: Palette.warn)
                     }
                     CatalogBadge(text: server.kindLabel, symbol: server.config.isRemote ? "cloud" : "desktopcomputer")
                     let required = server.inputs.filter { $0.isRequired && $0.isSecret }.count
@@ -583,52 +606,6 @@ private struct RegistryServerCard: View {
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
         .accessibilityLabel("\(server.title). \(server.summary)")
-        .accessibilityHint("Abre a instalação")
-    }
-}
-
-/// A featured connector: what it does and what it asks for, never the command that starts it.
-private struct FeaturedConnectorCard: View {
-    let template: ConnectorTemplate
-    let isInstalled: Bool
-    let onAdd: () -> Void
-    @State private var isHovering = false
-
-    var body: some View {
-        Button(action: onAdd) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .center, spacing: 12) {
-                    CatalogIcon(symbol: template.isRemote ? "cloud" : "puzzlepiece.extension")
-                    Text(template.config.name)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Palette.ink)
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-                    if isInstalled {
-                        Image(systemName: "checkmark.circle.fill").foregroundStyle(Palette.ok).help("Instalado")
-                    } else {
-                        Image(systemName: "plus.circle").foregroundStyle(Palette.muted)
-                    }
-                }
-                Text(template.summary)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Palette.muted)
-                    .lineLimit(2, reservesSpace: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                HStack(spacing: 6) {
-                    ForEach(template.badges, id: \.self) { badge in
-                        CatalogBadge(text: badge, symbol: badge.hasPrefix("Pede") ? "key" : badge == "Remoto" ? "cloud" : nil)
-                    }
-                }
-            }
-            .padding(14)
-            .card(radius: 14, fill: isHovering ? Palette.raised : Palette.surface,
-                  stroke: isHovering ? Palette.lineStrong : Palette.line)
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovering = $0 }
-        .accessibilityLabel("\(template.config.name). \(template.summary)")
         .accessibilityHint("Abre a instalação")
     }
 }
@@ -655,6 +632,7 @@ struct ConnectorEditor: View {
     @State private var values: [KeyValueRow] = []
     @State private var orbIDs: Set<UUID>?
     @State private var showsAdvanced = false
+    @State private var slackPreset = SlackApp.Preset.readOnly
     @State private var phase = Phase.form
     @State private var didLoad = false
     /// Whether it was new when the sheet opened: saving adds it to `connectors`, but the sheet keeps saying "Instalar".
@@ -684,8 +662,14 @@ struct ConnectorEditor: View {
         guard let orbIDs, !chosenNoOrb else { return nil }
         return OrbScopeText.extraAccess(model.extraConnectorAccess(ifEnabledFor: orbIDs.subtracting(alreadyUsing), besides: config.id))
     }
+    /// The Slack guide asks for a User OAuth Token (`xoxp-…`): a bot token (`xoxb-`) cannot use the MCP server.
+    private var slackTokenProblem: Bool {
+        guard draft.guide == .slack, let token = values.first(where: { $0.key == "Authorization" })?.value,
+              !token.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
+        return !SlackApp.looksLikeUserToken(token)
+    }
     private var canSave: Bool {
-        !config.name.trimmingCharacters(in: .whitespaces).isEmpty && missingRequired.isEmpty && !chosenNoOrb
+        !config.name.trimmingCharacters(in: .whitespaces).isEmpty && missingRequired.isEmpty && !chosenNoOrb && !slackTokenProblem
             && !(isRemote ? config.url : config.command).trimmingCharacters(in: .whitespaces).isEmpty
     }
     private var title: String {
@@ -705,13 +689,15 @@ struct ConnectorEditor: View {
 
     private var footerMessage: String? {
         if chosenNoOrb { return "Marque ao menos um Orb em “Usar com”." }
-        if !missingRequired.isEmpty { return "Preencha \(missingRequired.joined(separator: ", "))." }
+        if slackTokenProblem { return "O token do Slack é o User OAuth Token e começa com xoxp-." }
+        if !missingRequired.isEmpty { return "Preencha \(missingRequired.map { $0 == "Authorization" ? "a chave" : $0 }.joined(separator: ", "))." }
         return nil
     }
 
     var body: some View {
         content
-            .orbSheet(title, subtitle: subtitle, size: .medium) { footer }
+            // A guide makes the form longer: the key it leads to should not be hidden under the fold.
+            .orbSheet(title, subtitle: subtitle, size: .medium, maxHeight: draft.guide == nil ? SheetSize.maxHeight : 700) { footer }
             .onAppear(perform: load)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: phase)
             .onChange(of: phase) { announce(phase) }
@@ -774,13 +760,24 @@ struct ConnectorEditor: View {
             }
             Form {
                 if isGuided {
+                    if draft.guide == .slack { slackGuide }
+                    if config.source != nil && !draft.isOfficial {
+                        Section {
+                            Label("Servidor de terceiros do registro: ele roda no seu Mac com as permissões do seu usuário. Instale só se confiar em quem publicou.",
+                                  systemImage: "exclamationmark.triangle")
+                                .foregroundStyle(Palette.warn)
+                        }
+                    }
                     if !secretRows.isEmpty {
                         Section {
                             inputFields(secretRows)
                         } header: {
                             Text(secretRows.count == 1 ? "Chave" : "Chaves")
                         } footer: {
-                            Text("Chaves ficam no Keychain do Mac, não no arquivo de dados do app.")
+                            VStack(alignment: .leading, spacing: 6) {
+                                if let note = draft.note { Text(note) }
+                                Text("Chaves ficam no Keychain do Mac, não no arquivo de dados do app.")
+                            }
                         }
                     }
                     if !plainRows.isEmpty {
@@ -818,6 +815,37 @@ struct ConnectorEditor: View {
                 }
             }
             .formStyle(.grouped)
+        }
+    }
+
+    /// Slack asks for more than a token: the person creates an app (a link fills in everything), installs it, and copies its token.
+    @ViewBuilder private var slackGuide: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("1. Escolha o que o Orb pode fazer").font(.system(size: 13, weight: .semibold))
+                Picker("Permissões do app", selection: $slackPreset) {
+                    ForEach(SlackApp.Preset.allCases) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                Text(slackPreset.detail).font(.system(size: 11)).foregroundStyle(Palette.faint)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Text("2. Crie o seu app do Slack").font(.system(size: 13, weight: .semibold))
+                Button("Criar meu app do Slack", systemImage: "arrow.up.right.square") { NSWorkspace.shared.open(SlackApp.creationURL(slackPreset)) }
+                    .buttonStyle(SecondaryPillStyle())
+                Text("O Slack abre no navegador com tudo preenchido. Escolha o seu workspace e clique em Create. Depois, em Install App, clique em Install to Workspace e em Allow.")
+                    .font(.system(size: 11)).foregroundStyle(Palette.faint)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text("3. Cole o token").font(.system(size: 13, weight: .semibold))
+                Text("Em OAuth & Permissions, copie o User OAuth Token (começa com xoxp-) e cole na chave abaixo.")
+                    .font(.system(size: 11)).foregroundStyle(Palette.faint)
+            }
+        } header: {
+            Text("Passo a passo")
+        } footer: {
+            Text("O app é seu, só do seu workspace: o Orb age como você e vê só o que você vê. Se o workspace exige aprovação de apps, peça ao administrador.")
         }
     }
 

@@ -42,9 +42,10 @@ struct MCPTool: AgentTool {
         annotations.readOnly == true && annotations.openWorld != true && annotations.destructive != true ? .safe : .sensitive
     }
 
-    /// A tool the server marks destructive asks even in "Automático" and is never covered by "Sempre permitir".
+    /// A tool the server marks destructive, or that by its name sends, publishes or deletes without being declared
+    /// read-only (`PermissionPolicy.connectorDanger`), asks even in "Automático" and is never covered by "Sempre permitir".
     func danger(_ arguments: JSONValue) -> String? {
-        annotations.destructive == true ? "o conector marcou esta ferramenta como destrutiva" : nil
+        PermissionPolicy.connectorDanger(toolName: toolName, annotations: annotations)
     }
 
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) {
@@ -121,17 +122,23 @@ actor MCPManager {
     private let shell: ShellEnvironment
     private let idleLimit: Duration
     private let sweepInterval: Duration
+    private var locals: LocalConnectorEnvironment?
     private var sweeper: Task<Void, Never>?
     private var observer: (@Sendable ([UUID: MCPStatus]) -> Void)?
 
     /// `store`: where the catalogs are kept (nil: only in memory, as in tests). `idleLimit`: how long a server may sit
     /// unused; `sweepInterval`: how often that is checked.
-    init(store: Store? = nil, shell: ShellEnvironment = .shared, idleLimit: Duration = .seconds(600), sweepInterval: Duration = .seconds(60)) {
+    init(store: Store? = nil, shell: ShellEnvironment = .shared, idleLimit: Duration = .seconds(600), sweepInterval: Duration = .seconds(60),
+         locals: LocalConnectorEnvironment? = nil) {
         self.store = store
         self.shell = shell
+        self.locals = locals
         self.idleLimit = idleLimit
         self.sweepInterval = sweepInterval
     }
+
+    /// What the app's own connectors talk to (tests and snapshots put fakes here; nil is the Mac itself).
+    func setLocals(_ environment: LocalConnectorEnvironment?) { locals = environment }
 
     /// `handler` hears every status as it changes (all connectors, so the screen only copies it).
     func observe(_ handler: @escaping @Sendable ([UUID: MCPStatus]) -> Void) {
@@ -219,7 +226,7 @@ actor MCPManager {
                 if entries[id]?.connection === connection { entries[id]?.connection = nil }
                 continue
             }
-            let connection = MCPConnection(config: entry.config, shell: shell)
+            let connection = MCPConnection(config: entry.config, shell: shell, locals: locals)
             let task = Task { try await self.start(id, connection) }
             entries[id]?.connection = connection
             entries[id]?.starting = task

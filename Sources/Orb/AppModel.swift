@@ -84,6 +84,8 @@ final class AppModel {
     /// Which phrases of the working line VoiceOver is told (not more often than every 8 s).
     @ObservationIgnored var workAnnouncer = WorkAnnouncer()
     var connectorStatus: [UUID: MCPStatus] = [:]
+    /// Where each installed local connector (Agenda, Lembretes, Gmail) stands with macOS: filled by `refreshLocalStates`.
+    var localStates: [LocalConnectorKind: LocalConnectorState] = [:]
     /// Providers with a key in the Keychain (or, for ChatGPT and Claude Code, a sign-in).
     private(set) var connected: Set<ProviderKind> = []
     /// True once the first `refreshConnections` has finished (Keychain, ChatGPT, `claude auth status`): before that,
@@ -189,6 +191,14 @@ final class AppModel {
     /// How long a local server (one slot, one conversation in its cache) must have been left alone before a note is asked of
     /// it: the time its cache takes to go cold anyway (`ContextBudget.cacheColdAfter`). A message sent before cancels it.
     @ObservationIgnored var localNoteDelay: TimeInterval = ContextBudget.cacheColdAfter
+    /// What the app's own connectors (Google Agenda, Lembretes, Gmail) talk to: the Mac. Tests and snapshots put fakes here,
+    /// so no permission of macOS is asked outside the running app.
+    @ObservationIgnored var localEnvironment = LocalConnectorEnvironment.live {
+        didSet {
+            let environment = localEnvironment
+            Task { [mcp] in await mcp.setLocals(environment) }
+        }
+    }
 
     /// `runsBackgroundWork: false` skips the scheduler, Keychain checks and app-wide observers (tests).
     /// `devRun` (the process's own mode unless given) also skips the scheduler, the connectors' servers and the

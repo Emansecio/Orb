@@ -345,7 +345,7 @@ struct ConnectorEditingTests {
     }
 
     @Test func onlySecretsCountAsKeys() throws {
-        let slack = try #require(ConnectorTemplate.all.first { $0.id == "slack" })
+        let slack = try #require(ConnectorTemplate.retired.first { $0.id == "slack" })
         #expect(slack.badges == ["Pede 1 chave"] && slack.needsKey)
         #expect(slack.inputs.filter { !$0.isSecret }.map(\.name) == ["SLACK_TEAM_ID"])
     }
@@ -367,8 +367,20 @@ struct ConnectorTemplateTests {
         #expect(all.first { $0.id == "arquivos" }?.folderArgumentIndex == 2)
         #expect(all.first { $0.id == "arquivos" }?.badges == ["Sem chave"])
         #expect(all.first { $0.id == "github" }?.badges == ["Pede 1 chave", "Remoto"])
-        #expect(all.first { $0.id == "slack" }?.badges == ["Pede 1 chave"])
         #expect(MCPServerConfig.templates.count == all.count)
+    }
+
+    @Test func theGalleryNoLongerOffersTheAbandonedPackages() throws {
+        // Slack's archived `server-slack` and Notion's unmaintained npm server are not offered...
+        #expect(!ConnectorTemplate.all.contains { $0.config.arguments.contains { $0.contains("server-slack") || $0.contains("notion-mcp-server") } })
+        #expect(!ConnectorTemplate.all.contains { ["slack", "notion"].contains($0.id) && !$0.isRemote })
+        // ...but a connector already installed from them is still recognized: it keeps its guided form and its summary.
+        let old = try #require(ConnectorTemplate.retired.first { $0.id == "slack" })
+        let installed = old.config.withNewID()
+        #expect(ConnectorTemplate.matching(installed)?.id == "slack")
+        let draft = ConnectorDraft(editing: installed)
+        #expect(draft.isGuided && draft.inputs.map(\.name) == ["SLACK_BOT_TOKEN", "SLACK_TEAM_ID"])
+        #expect(Set(ConnectorTemplate.retired.map(\.id)).isDisjoint(with: Set(ConnectorTemplate.all.map(\.id))))
     }
 
     @Test func categoriesFilter() {

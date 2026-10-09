@@ -42,12 +42,21 @@ enum ToolDigest {
         return ["(+\(lines.count - maxLines + 1) linhas anteriores)"] + lines.suffix(maxLines - 1)
     }
 
-    /// `[passo 7] read_file /src/mod3.swift -> ok, 20.000 car.; começa com «func exemplo…»`
+    /// A call to a connector, through the gateway (`connector_tools`, `connector_call`) or by the tool's own name
+    /// (`GitHub__create_issue`, `mcp__github__…`): what it carries and returns is the connector's content, not the Orb's.
+    static func isConnectorCall(_ name: String) -> Bool {
+        name == ConnectorGateway.toolsName || name == ConnectorGateway.callName || name.contains("__")
+    }
+
+    /// `[passo 7] read_file /src/mod3.swift -> ok, 20.000 car.; começa com «func exemplo…»`. A connector's call keeps only its
+    /// name and whether it worked: the arguments and the start of the answer are the connector's content.
     static func line(call: ToolCallRequest, result: ChatMessage?, step: Int) -> String {
         var text = "[passo \(step)] \(call.name)"
-        let target = target(of: call.arguments)
+        let isConnector = isConnectorCall(call.name)
+        let target = isConnector ? (JSONValue.parse(call.arguments)?["connector"]?.string.map { oneLine($0, 40) } ?? "") : target(of: call.arguments)
         if !target.isEmpty { text += " " + target }
         guard let result else { return clip(text + " -> sem resposta") }
+        if isConnector { return clip(text + (result.isError ? " -> ERRO" : " -> ok")) }
         let first = oneLine(firstLine(of: result.content), result.isError ? 100 : 50)
         if result.isError {
             text += " -> ERRO" + (first.isEmpty ? "" : ": " + first)

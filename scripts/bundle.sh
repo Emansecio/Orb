@@ -43,6 +43,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSAppTransportSecurity</key><dict><key>NSAllowsArbitraryLoads</key><true/></dict>
+  <key>NSCalendarsFullAccessUsageDescription</key><string>O Orb lê e cria eventos da sua Agenda, inclusive da conta Google que você adicionou ao Mac, quando você pede.</string>
+  <key>NSRemindersFullAccessUsageDescription</key><string>O Orb lê e cria lembretes no app Lembretes quando você pede.</string>
   <key>NSAppleEventsUsageDescription</key><string>O Orb controla outros apps quando você pede, como Mail, Calendário, Notas, Finder e navegadores.</string>
 </dict>
 </plist>

@@ -310,7 +310,7 @@ struct ClaudeCodePolicyTests {
         #expect(fresh.contains("--append-system-prompt=-persona"))
         #expect(fresh.contains("--session-id=abc"))
         #expect(!fresh.contains { $0.hasPrefix("--model") })
-        // Connectors off: only the MCP servers we pass (the Orb's memory) load, none of the user's own.
+        // Only the MCP servers we pass (the Orb's memory) load, none of the user's own or of claude.ai.
         #expect(fresh.last == "--strict-mcp-config")
         // Everything is on, so only the reads of private keys are refused.
         #expect(fresh.contains("--disallowedTools=" + ClaudeCodeTools.secretReads.joined(separator: ",")))
@@ -325,6 +325,9 @@ struct ClaudeCodePolicyTests {
         let removed = ClaudeCodeTools.terminal + ClaudeCodeTools.web + ClaudeCodeTools.secretReads
         #expect(resumed.contains("--disallowedTools=" + removed.joined(separator: ",")))
         #expect(resumed.last == "--mcp-config=/tmp/m.json")
+        // With "Conectores" on too: claude.ai's connectors and the user's own servers stay out, so nothing runs without the
+        // Orb's permission cards.
+        #expect(resumed.contains("--strict-mcp-config"))
     }
 
     @Test func withoutTheTerminalSwitchClaudeCodeKeepsNoShellNoFileSearchAndNoJobs() {
@@ -381,6 +384,16 @@ struct ClaudeCodePolicyTests {
         // The key is what the policy derives from the CLI's tool name.
         #expect(PermissionPolicy.connectorKey("mcp__meu-server__apagar-tudo") == "meu_server__apagar_tudo")
         #expect(found["github__delete_repository"] == "o conector marcou esta ferramenta como destrutiva")
+    }
+
+    /// Claude Code asks about the same tools as the native engine: the ones whose name sends, publishes or deletes too.
+    @Test func connectorToolsThatSendOrDeleteAreOnTheCLIsMapEvenWithoutAnnotations() {
+        let slack = MCPServerConfig(name: "Slack", url: "https://mcp.slack.com/mcp")
+        let found = ClaudeCodeTurn.destructiveConnectors([
+            mcpTool(slack, "slack_send_message", .none), mcpTool(slack, "slack_search_public", .none),
+            mcpTool(slack, "slack_read_channel", MCPToolAnnotations(readOnly: true)), mcpTool(slack, "slack_delete_message", MCPToolAnnotations(readOnly: true)),
+        ], cliNames: ClaudeCodeTurn.mcpNames([slack]))
+        #expect(Set(found.keys) == ["slack__slack_send_message"])
     }
 
     /// The map is keyed by the name the CLI is given in `--mcp-config` (ASCII, with `-2` for a repeated name), not by the

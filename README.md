@@ -421,12 +421,29 @@ de dados e só tem números: nada do que foi dito. **Redefinir o Orb** apaga o h
 
 ## Conectores e skills
 
-Páginas **Conectores** (⌥⌘C) e **Skills** (⌥⌘K) na barra lateral, cada uma com as abas **Explorar** e **Instalados/Instaladas**.
+Páginas **Conectores** (⌥⌘C) e **Skills** (⌥⌘K) na barra lateral. Skills tem as abas **Explorar** e **Instaladas**; Conectores
+tem a **Galeria**, os **Instalados** e **Explorar**.
 
-- **Conectores** dão ferramentas novas aos Orbs (ler o GitHub, o Notion, o Slack, uma pasta…). São servidores **MCP**: locais
-  (`npx`, `uvx`, `docker`) ou remotos (URL). Em *Explorar* há os **Em destaque** (Arquivos, GitHub, Notion, Slack, Memória
-  (grafo), Busca na web, Pensamento em etapas) e a busca no [registro oficial do MCP](https://registry.modelcontextprotocol.io).
-  Você só preenche as chaves. Em "Adicionar manualmente" dá para informar o comando ou a URL.
+- **Conectores** dão ferramentas novas aos Orbs (ler o Gmail, a Agenda, o Slack, o GitHub, uma pasta…). A **Galeria** é uma grade
+  de serviços: cada cartão diz o que o serviço faz e como conecta, e o botão diz onde ele está (**Conectar**, **Conectado**,
+  **Resolver** quando falta algo, **Desligado**, **Em breve**). O ícone é um símbolo ou uma letra na cor da marca (nada é baixado).
+  *Explorar* busca no [registro oficial do MCP](https://registry.modelcontextprotocol.io) os demais servidores, com aviso de que os
+  não marcados "Oficial" são código de terceiros. Em "Adicionar manualmente" dá para informar o comando ou a URL.
+  - **Google pelo Mac** (Gmail, Google Agenda, Lembretes): conectores **locais**, sem servidor e sem projeto no Google. A conta
+    Google entra em *Ajustes do Sistema → Contas de Internet* (o login é da Apple, o Orb nunca vê a senha). **Conectar** pede a
+    permissão do macOS (Calendários, Lembretes ou Automação do Mail) e, se não achar a conta Google no Mac, mostra um guia com
+    o botão **Abrir Contas de Internet** (numa conta Google Workspace, que a Agenda nomeia pelo endereço, vale **Conectar assim
+    mesmo**, que o Orb lembra). Agenda (EventKit): listar agendas, buscar (um período dado só por datas inclui o último dia),
+    ler, criar, alterar e apagar eventos (não altera evento repetido; não convida pessoas nem cria link do Meet; **alterar e
+    apagar perguntam sempre**, porque o Google avisa os convidados). Lembretes: listar e criar. Gmail (pelo Mail,
+    AppleScript): listar caixas, buscar por caixa, período e texto no assunto ou remetente (sem os operadores do Gmail), ler
+    mensagem, criar rascunho e **enviar**, que sempre pergunta. O Mail precisa ter baixado a mensagem.
+  - **Slack (oficial)** (`mcp.slack.com/mcp`): **Criar meu app do Slack** abre o link de manifesto do Slack com o MCP ligado,
+    escopos de usuário (*Só leitura* ou *Leitura e envio*) e PKCE; você instala o app no seu workspace e cola o **User OAuth
+    Token** (`xoxp-…`), que vai para o Keychain. Só funciona onde o workspace deixa instalar apps (e o admin pode exigir
+    aprovação). O Slack antigo (pacote `server-slack`, arquivado) e o Notion por npm saíram da galeria; quem já os instalou continua
+    usando. **Notion** e **Linear** aparecem como *Em breve*: pedem um login que ainda não existe no Orb.
+  - **GitHub** e **Supabase** (`mcp.supabase.com/mcp`, token de acesso pessoal; começa com `read_only=true`) pedem uma chave.
 - **Carregam sob demanda.** Um conector não liga com o app nem manda as suas ferramentas a cada mensagem: o Orb recebe só duas
   ferramentas fixas, uma para ver o que cada conector oferece e outra para usá-lo. O servidor sobe na primeira vez que um Orb
   precisa dele (a conversa mostra "Conectando a GitHub…") e desliga sozinho depois de 10 minutos sem uso. O cartão em
@@ -436,7 +453,11 @@ Páginas **Conectores** (⌥⌘C) e **Skills** (⌥⌘K) na barra lateral, cada 
   adia as ferramentas.
 - **Quem usa.** Cada conector e cada skill tem **"Usar com"**: todos os Orbs (padrão) ou só os que você marcar. O Orb também
   precisa estar com a chave **Conectores** ligada (marcar o Orb em "Usar com" liga sozinho). Uma ferramenta de conector pede
-  aprovação como as demais, a menos que o servidor a anuncie como somente leitura.
+  aprovação como as demais, a menos que o servidor a anuncie como somente leitura. Uma que **envia, publica ou apaga** (pelo
+  nome: send, post, reply, forward, share, publish, delete, remove, trash, archive, schedule, invite, transfer) pergunta até no
+  Automático, a não ser que o servidor a declare só de leitura. O que vem de um conector não vira memória de longo prazo: a
+  página de sessão guarda só que o conector foi usado. O Claude Code roda sempre com `--strict-mcp-config`: os conectores do
+  claude.ai e os servidores do `~/.claude.json` não entram, só os conectores do Orb.
 - **Chaves e tokens** dos conectores ficam no **Keychain**, não no arquivo de dados.
 - **Skills** são instruções reutilizáveis no formato aberto `SKILL.md`. *Explorar* busca no catálogo [Skills.sh](https://skills.sh)
   e lê o `SKILL.md` no GitHub de quem publicou, com **prévia completa antes de instalar** (instale só de fontes em que você
@@ -471,7 +492,7 @@ Páginas **Conectores** (⌥⌘C) e **Skills** (⌥⌘K) na barra lateral, cada 
 | Esc | Num cartão de aprovação: não permitir (não vale enquanto você digita). Também fecha a paleta e a lista de skills |
 | ⇧⌘M | Escolher o modelo do Orb |
 | ⌘Z | Desfazer "Esquecer" da memória (enquanto o aviso está na tela) |
-| ⌘F | Buscar, em Skills e Conectores (na aba Instaladas leva ao catálogo, em Explorar) |
+| ⌘F | Buscar, em Skills e Conectores (fora da aba Explorar leva ao catálogo, em Explorar) |
 | ⌃⌥Espaço | De **qualquer app**: abre o painel da barra de menus. Opcional, desligado por padrão |
 
 A mesma lista, completa, está em **Ajuda → Atalhos do teclado** e em Ajustes → Geral (as duas leem o mesmo catálogo, `Shortcuts.swift`).

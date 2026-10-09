@@ -68,10 +68,13 @@ actor MCPConnection {
     private var onClosed: (@Sendable () async -> Void)?
 
     private let shell: ShellEnvironment
+    private let locals: LocalConnectorEnvironment?
 
-    init(config: MCPServerConfig, shell: ShellEnvironment = .shared) {
+    /// `locals`: what the app's own connectors (Agenda, Lembretes, Gmail) talk to; nil is the Mac itself.
+    init(config: MCPServerConfig, shell: ShellEnvironment = .shared, locals: LocalConnectorEnvironment? = nil) {
         self.config = config
         self.shell = shell
+        self.locals = locals
     }
 
     var isRunning: Bool { transport != nil }
@@ -86,7 +89,13 @@ actor MCPConnection {
         guard !started else { throw ToolError("O conector \(config.name) já foi iniciado.") }
         started = true
 
-        let transport: any MCPTransport = config.isRemote ? try HTTPTransport(config: config) : StdioTransport(config: config, shell: shell)
+        let transport: any MCPTransport
+        if config.local != nil {
+            guard let connector = (locals ?? .live).connector(for: config) else { throw ToolError("O conector \(config.name) não existe nesta versão do Orb.") }
+            transport = LocalTransport(connector: connector)
+        } else {
+            transport = config.isRemote ? try HTTPTransport(config: config) : StdioTransport(config: config, shell: shell)
+        }
         self.transport = transport
         do {
             try await transport.open(receive: { [weak self] in await self?.handle($0) },

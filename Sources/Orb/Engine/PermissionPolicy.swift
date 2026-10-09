@@ -495,6 +495,55 @@ enum PermissionPolicy {
         }
     }
 
+    /// What a connector tool does to the world outside, by the verbs in its name: `send`, `post`, `reply`, `forward`,
+    /// `share`, `publish`, `comment`, `push`, `merge`, `submit`, `upload`, `notify`, `delete`, `remove`, `trash`, `archive`,
+    /// `schedule`, `invite`, `transfer`. The sentence completes
+    /// "o nome da ferramenta indica que ela …" on the approval card.
+    private static let outwardVerbs: [String: String] = [
+        "send": "envia algo", "post": "publica algo", "reply": "envia uma resposta", "forward": "encaminha mensagens",
+        "share": "compartilha algo", "publish": "publica algo", "delete": "apaga algo", "remove": "remove algo",
+        "trash": "joga algo no lixo", "archive": "arquiva algo", "schedule": "agenda um envio", "invite": "convida pessoas",
+        "transfer": "transfere algo", "destroy": "apaga algo", "purge": "apaga algo", "comment": "publica um comentário",
+        "push": "envia código para um repositório", "merge": "junta mudanças num repositório", "submit": "envia algo",
+        "upload": "envia um arquivo", "notify": "avisa pessoas", "commit": "grava um commit num repositório",
+    ]
+
+    /// Why a connector tool asks even in "Automático", or nil. Two things count, for both engines: the server marks the tool
+    /// destructive, or its name says it sends, publishes or deletes (`slack_send_message`, `delete_event`) and the server
+    /// did not declare it read-only (`readOnlyHint` true wins: a tool that says it only reads is taken at its word).
+    /// Annotations are hints and many servers leave them out, so the name is the second line.
+    static func connectorDanger(toolName: String, annotations: MCPToolAnnotations) -> String? {
+        if annotations.destructive == true { return "o conector marcou esta ferramenta como destrutiva" }
+        if annotations.readOnly == true { return nil }
+        let words = nameWords(toolName)
+        for word in words {
+            if let phrase = outwardVerbs[word] {
+                return "o nome da ferramenta indica que ela \(phrase) (\(word)) e o conector não a marca como só leitura"
+            }
+        }
+        // Opening a pull request publishes the branch for review (`create_pull_request`), but `create_issue` alone is a note to self.
+        if words.contains("create"), words.contains("pull") {
+            return "o nome da ferramenta indica que ela abre um pull request (create_pull_request) e o conector não a marca como só leitura"
+        }
+        // Writing a file or a branch on the service is a commit others see (`create_or_update_file`, `create_branch`).
+        if !Set(words).isDisjoint(with: ["create", "update", "write", "edit"]), !Set(words).isDisjoint(with: ["file", "files", "branch", "contents"]) {
+            return "o nome da ferramenta indica que ela grava arquivos no serviço (\(toolName)) e o conector não a marca como só leitura"
+        }
+        return nil
+    }
+
+    /// The lowercase words of a tool name: `slack_send_message`, `sendMessage` and `gmail-send` all hold `send`.
+    private static func nameWords(_ name: String) -> [String] {
+        var spaced = ""
+        var previous: Character?
+        for character in name {
+            if character.isUppercase, previous?.isLowercase == true || previous?.isNumber == true { spaced.append(" ") }
+            spaced.append(character)
+            previous = character
+        }
+        return spaced.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
+    }
+
     /// A connector tool's identity, the same whichever engine names it: `GitHub__create_issue` (native) and
     /// `mcp__github__create_issue` (Claude Code) both become `github__create_issue`.
     static func connectorKey(_ name: String) -> String {

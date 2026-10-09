@@ -226,6 +226,59 @@ struct SessionDecisionsTests {
     }
 }
 
+// MARK: - Connectors stay out of memory
+
+struct SessionConnectorTests {
+    /// What came from a connector (the tool, what was asked of it, the answer that restates it) is not remembered for good:
+    /// only the fact that the connector was used.
+    @Test func aSessionThatUsedAConnectorKeepsNoContentOfIt() throws {
+        let secretMail = "Assunto: Proposta confidencial da Acme, valor R$ 480 mil"
+        let items: [TranscriptItem] = [
+            TranscriptItem(.user(text: "veja meus e-mails novos", attachments: [])),
+            TranscriptItem(.tool(ToolCall(kind: .connector, title: "Usando Gmail", detail: "search_threads {\"query\":\"Acme proposta https://acme.example/contrato\"}",
+                                          state: .done, output: secretMail))),
+            TranscriptItem(.tool(ToolCall(kind: .connector, title: "Usando Gmail", detail: "get_message {\"id\":\"18f\"}", state: .failed))),
+            TranscriptItem(.tool(ToolCall(kind: .file, title: "Lendo arquivo", detail: "/Users/x/notas.txt", state: .done))),
+            TranscriptItem(.bot(text: "Você tem um e-mail da Acme com a proposta de R$ 480 mil.", isStreaming: false)),
+        ]
+        let page = try #require(SessionSummary.page(from: items))
+        #expect(page.body.contains("- Usando Gmail"))
+        #expect(page.body.contains("Usando Gmail (falhou)") && page.body.contains("Não deu certo: Usando Gmail"))
+        for leaked in ["Acme", "480", "search_threads", "get_message", "acme.example", "Última resposta"] {
+            #expect(!page.body.contains(leaked), Comment(rawValue: leaked))
+        }
+        // What the Orb itself did is kept as before, and so are the user's words.
+        #expect(page.body.contains("/Users/x/notas.txt") && page.body.contains("veja meus e-mails novos"))
+    }
+
+    /// A denied card of a connector holds the tool and its arguments (the body of a message): the page keeps only the title.
+    @Test func aDeniedConnectorCardKeepsOnlyItsTitle() throws {
+        let body = #"send_message {"to":["ana@acme.example"],"body":"Segue a proposta de R$ 480 mil"}"#
+        func denied(_ tool: String, title: String = "Usando Gmail", items: [ApprovalItem] = []) -> TranscriptItem {
+            TranscriptItem(.approval(ApprovalRequest(toolName: tool, title: title, command: body, reason: "", decision: .deny, items: items)))
+        }
+        let user = TranscriptItem(.user(text: "manda a proposta", attachments: []))
+        for tool in ["Gmail__send_message", "mcp__gmail__send_message", "connector_call"] {
+            let page = try #require(SessionSummary.page(from: [user, denied(tool)]))
+            #expect(page.body.contains("Você negou: Usando Gmail"), Comment(rawValue: tool))
+            for leaked in ["Acme", "acme", "480", "send_message", "ana@"] { #expect(!page.body.contains(leaked), Comment(rawValue: tool + " " + leaked)) }
+        }
+        // A card that groups a connector's call with others is the same.
+        let batch = denied("batch", title: "2 ações precisam da sua permissão", items: [ApprovalItem(toolName: "write_file", title: "Gravando", command: "a.txt"),
+                                                                                            ApprovalItem(toolName: "Slack__post", title: "Usando Slack", command: body)])
+        #expect(try #require(SessionSummary.page(from: [user, batch])).body.contains("Você negou: 2 ações precisam da sua permissão"))
+        #expect(!(try #require(SessionSummary.page(from: [user, batch])).body.contains("480")))
+        // A denied command of the Orb itself is kept as before.
+        let shell = TranscriptItem(.approval(ApprovalRequest(toolName: "run_command", title: "Rodando no Terminal", command: "git push", reason: "", decision: .deny)))
+        #expect(try #require(SessionSummary.page(from: [user, shell])).body.contains("Você negou: Rodando no Terminal git push"))
+    }
+
+    @Test func aSessionWithoutConnectorsKeepsItsLastAnswer() throws {
+        let items = [TranscriptItem(.user(text: "oi", attachments: [])), TranscriptItem(.bot(text: "Olá, tudo bem?", isStreaming: false))]
+        #expect(try #require(SessionSummary.page(from: items)).body.contains("## Última resposta\nOlá, tudo bem?"))
+    }
+}
+
 // MARK: - AppModel
 
 @Suite final class CompactionAppTests {

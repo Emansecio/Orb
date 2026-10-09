@@ -1,13 +1,17 @@
 import SwiftUI
 import AppKit
 
-/// `Orb --tools-mcp <folder>` runs only the Orb's tools for Claude Code (no window, and none of the app's
-/// AppKit/SwiftUI setup: `OrbApp.main()` is never reached); anything else is the app.
+/// `Orb --tools-mcp <folder>` runs only the Orb's tools for Claude Code, and `Orb --local-connector <agenda|lembretes|gmail>`
+/// one of the app's own connectors (no window, and none of the app's AppKit/SwiftUI setup: `OrbApp.main()` is never reached);
+/// anything else is the app.
 @main
 enum Launcher {
     static func main() {
         if let options = OrbToolsMCPServer.Options(arguments: CommandLine.arguments) {
             OrbToolsMCPServer.run(options)
+        }
+        if let kind = LocalConnectorServer.kind(arguments: CommandLine.arguments) {
+            LocalConnectorServer.run(kind)
         }
         OrbApp.main()
     }
@@ -278,7 +282,7 @@ enum Snapshot {
         case let other where RoutinesSnapshots.view(other, model: model) != nil: RoutinesSnapshots.view(other, model: model)!
         case "skills": AnyView(SkillsView())
         case "skills-explore": AnyView(SkillsView(tab: .explore))
-        case "connectors": AnyView(ConnectorsView())
+        case "connectors": AnyView(ConnectorsView(tab: .installed))
         case "connectors-explore": AnyView(ConnectorsView(tab: .explore))
         case "routines": AnyView(RoutinesView())
         case "models": AnyView(ProviderSettings())

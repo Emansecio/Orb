@@ -778,6 +778,57 @@ struct MCPAnnotationTests {
         #expect(tool(.none).danger(.object([:])) == nil)
     }
 
+    /// Tools that send, publish or delete ask even in "Automático", whatever the server declares, unless it says read-only.
+    @Test func toolsThatSendPublishOrDeleteAskByTheirNames() {
+        func named(_ name: String, _ annotations: MCPToolAnnotations = .none) -> MCPTool {
+            MCPTool(serverName: "S", remote: ToolSpec(name: name, description: "", parameters: .schema([:])), serverID: UUID(),
+                    manager: MCPManager(), annotations: annotations)
+        }
+        for name in ["send_message", "slack_post_message", "reply_to_thread", "forwardEmail", "share_file", "publish_page", "delete_event",
+                     "remove_label", "trash_message", "archive-thread", "schedule_message", "invite_user", "transfer_ownership",
+                     "gmail.send", "SendDraft",
+                     // Real names of the GitHub and Slack servers of the gallery: they publish, whatever they declare.
+                     "slack_send_message", "slack_schedule_message", "add_issue_comment", "merge_pull_request", "push_files",
+                     "create_pull_request", "submit_pending_pull_request_review", "upload_file", "notify_channel"] {
+            let reason = named(name).danger(.object([:]))
+            #expect(reason?.contains("só leitura") == true, Comment(rawValue: name))
+        }
+        // Reading and drafting do not ask; a word that only contains a verb is not the verb.
+        for name in ["list_events", "search_messages", "create_draft", "get_sent_items", "list_replies", "read_posts", "get_schedules_overview",
+                     "create_issue", "update_event", "resend_info", "get_pull_request", "list_pull_requests", "get_issue_comments",
+                     "slack_read_channel", "pushed_files", "list_commits"] {
+            #expect(named(name).danger(.object([:])) == nil, Comment(rawValue: name))
+        }
+        // readOnlyHint true wins over the name; destructiveHint true wins over everything.
+        #expect(named("search_and_send_log", MCPToolAnnotations(readOnly: true, openWorld: false)).danger(.object([:])) == nil)
+        #expect(named("send_message", MCPToolAnnotations(readOnly: false)).danger(.object([:])) != nil)
+        #expect(named("add_issue_comment", MCPToolAnnotations(readOnly: true)).danger(.object([:])) == nil)
+        #expect(named("list_things", MCPToolAnnotations(destructive: true)).danger(.object([:])) == "o conector marcou esta ferramenta como destrutiva")
+        // The same words give the same answer without a tool (what the Claude Code turn builds from the catalog).
+        #expect(PermissionPolicy.connectorDanger(toolName: "delete_file", annotations: .none) != nil)
+        // Writing files or branches on the service, or committing, is something others see.
+        for name in ["create_or_update_file", "create_branch", "push_files", "commit_changes", "update_file_contents"] {
+            #expect(PermissionPolicy.connectorDanger(toolName: name, annotations: .none) != nil, Comment(rawValue: name))
+        }
+        for name in ["get_file_contents", "list_branches", "create_issue", "search_files"] {
+            #expect(PermissionPolicy.connectorDanger(toolName: name, annotations: .none) == nil, Comment(rawValue: name))
+        }
+    }
+
+    @Test func aSendingToolAsksInAutomaticModeAndCannotBeAlwaysAllowed() {
+        let context = ToolContext(workingDirectory: FileManager.default.temporaryDirectory)
+        let send = MCPTool(serverName: "Slack", remote: ToolSpec(name: "slack_send_message", description: "", parameters: .schema([:])),
+                           serverID: UUID(), manager: MCPManager())
+        let call = PermissionPolicy.call(for: send, arguments: .object([:]), context: context)
+        guard case .ask(.dangerous) = PermissionPolicy.evaluate(mode: .auto, call: call, rules: [], workspace: nil) else {
+            Issue.record("expected a dangerous ask"); return
+        }
+        #expect(PermissionPolicy.evaluate(mode: .ask, call: call, rules: [PermissionRule(family: .connector)], workspace: nil) != .allow)
+        #expect(PermissionPolicy.suggestions(for: call, existing: [], workspace: nil, extra: []).isEmpty)
+        // "Sem pedir permissão" is the user's own choice and still runs it.
+        #expect(PermissionPolicy.evaluate(mode: .bypass, call: call, rules: [], workspace: nil) == .allow)
+    }
+
     @Test func policyFollowsTheAnnotations() {
         let context = ToolContext(workingDirectory: FileManager.default.temporaryDirectory)
         func verdict(_ annotations: MCPToolAnnotations, mode: PermissionMode, rules: [PermissionRule] = []) -> PermissionVerdict {

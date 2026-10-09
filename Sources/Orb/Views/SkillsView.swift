@@ -17,7 +17,7 @@ struct SkillsView: View {
                 .padding(.top, 16)
                 .padding(.bottom, 4)
             switch tab {
-            case .installed: InstalledSkills(editing: $editing, explore: { tab = .explore })
+            case .installed, .gallery: InstalledSkills(editing: $editing, explore: { tab = .explore }) // only connectors have a gallery
             case .explore: ExploreSkills()
             }
         }

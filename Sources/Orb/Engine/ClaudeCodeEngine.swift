@@ -18,8 +18,9 @@ struct ClaudeCodeTurn: Sendable {
     /// Claude Code session to resume; nil starts a new one.
     var sessionID: String?
     /// MCP servers for `--mcp-config`: the Orb's tools server (memory, and the Mac tools with "Controlar apps do Mac"), plus
-    /// the enabled connectors when the bot may use them. With "Conectores" off, `--strict-mcp-config` keeps the
-    /// user's own Claude Code MCP servers out.
+    /// the enabled connectors when the bot may use them. `--strict-mcp-config` always goes with it: the connectors of
+    /// claude.ai and the servers in the user's own `~/.claude.json` never load, because they would run outside the Orb's
+    /// permission policy and its connector cards (an unknown server gets no card, so it does not run).
     var connectors: [MCPServerConfig] = []
     var environment: [String: String] = [:]
     /// Connector tools the connector itself marks destructive, by `PermissionPolicy.connectorKey`, with the reason shown
@@ -102,7 +103,7 @@ struct ClaudeCodeTurn: Sendable {
         if !bot.capabilities.contains(.browser) { removed += ClaudeCodeTools.web }
         if bot.permissionMode != .bypass { removed += ClaudeCodeTools.secretReads }
         if !removed.isEmpty { arguments.append("--disallowedTools=\(removed.joined(separator: ","))") }
-        if !bot.capabilities.contains(.connectors) { arguments.append("--strict-mcp-config") }
+        arguments.append("--strict-mcp-config")
         if let mcpConfig { arguments.append("--mcp-config=\(mcpConfig.path)") }
         return arguments
     }
@@ -112,7 +113,7 @@ struct ClaudeCodeTurn: Sendable {
     /// servers would share one. Servers that are off or have nothing to run have none.
     static func mcpNames(_ servers: [MCPServerConfig]) -> [UUID: String] {
         var names: [UUID: String] = [:], taken: Set<String> = []
-        for server in servers where server.isEnabled && (server.isRemote || !server.command.isEmpty) {
+        for server in servers where server.isEnabled && (server.isRemote || !server.command.isEmpty || server.local != nil) {
             let base = String(server.name.lowercased().unicodeScalars.map { scalar -> Character in
                 scalar.isASCII && (CharacterSet.alphanumerics.contains(scalar) || scalar == "-" || scalar == "_") ? Character(scalar) : "-"
             })
@@ -128,8 +129,10 @@ struct ClaudeCodeTurn: Sendable {
     static func mcpConfig(_ servers: [MCPServerConfig]) -> JSONValue? {
         let names = mcpNames(servers)
         var entries: [String: JSONValue] = [:]
-        for server in servers {
+        for var server in servers {
             guard let name = names[server.id] else { continue }
+            // A local connector runs in a process of the app's own binary, which talks to the Mac as the app does.
+            if let kind = server.local.flatMap(LocalConnectorKind.init(rawValue:)) { server = LocalConnectorServer.config(for: server, kind: kind) }
             entries[name] = server.isRemote
                 ? .object(["type": .string("http"), "url": .string(server.url),
                            "headers": .object(server.headers.mapValues(JSONValue.string))])

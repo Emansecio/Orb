@@ -78,6 +78,7 @@ Tudo em `Sources/Orb/`.
 | `Steering.swift` | a fila de mensagens enviadas durante um turno (`SteeringQueue`) |
 | `ClaudeCode.swift`, `ClaudeCodeEngine.swift`, `ClaudeCodePrompt.swift`, `ClaudeCodeProtocol.swift` | provedor Claude Code: achar o `claude`, login/status, um processo `claude -p` por turno, protocolo `stream-json` e `can_use_tool`, prompt anexado e catch-up |
 | `MCPConnection.swift`, `MCPTransport.swift`, `MCPTool.swift` | conectores MCP: stdio (com o ambiente do Terminal da usuária, de `ShellEnvironment`, para achar `npx`/`uvx` do `.zshrc`) e HTTP (Streamable HTTP com recuo para SSE). `MCPManager` só registra os conectores; o servidor sobe na primeira chamada (`ensureStarted`, uma subida compartilhada) e um ceifador (acorda a cada 60 s) desliga o que ficou 10 min sem uso e sem chamada pendente. `MCPTool` (`Servidor__ferramenta`) guarda o id do conector e chama o gerente |
+| `LocalConnector.swift`, `Tools/CalendarConnector.swift`, `Tools/MailConnector.swift` | conectores que rodam dentro do app (Google Agenda e Lembretes por EventKit, Gmail pelo Mail.app com AppleScript), atrás do mesmo porteiro. `MCPServerConfig.local` os marca; `LocalTransport` responde o JSON-RPC em processo (`LocalConnectorServer.respond`), então catálogo, cartão, ceifador e permissões funcionam como em qualquer conector. Para o Claude Code o mesmo servidor sai de `Orb --local-connector <agenda\|lembretes\|gmail>` por stdio (`mcpConfig` troca o conector local por essa entrada). `LocalConnectorEnvironment` agrupa o que eles tocam (`CalendarBackend`, `MailBackend`): testes e capturas põem fakes e nenhuma permissão do macOS é pedida |
 | `ConnectorGateway.swift` | o porteiro dos conectores: `connector_tools` (índice dos conectores do Orb na descrição, lista as ferramentas e os argumentos) e `connector_call` (roda uma). Ficam fora de `ToolBox.all`; `AgentEngine.resolved` troca cada `connector_call` pela chamada do `MCPTool` de verdade antes da política de permissão |
 
 ### Ferramentas (`Engine/Tools/`)
@@ -160,7 +161,10 @@ capacidades, conectores ou rotinas. Nos modos de desenvolvedor a detecção de `
 
 ### Catálogos (`Catalog/`)
 
-`MCPRegistry` (registro oficial do MCP), `ConnectorTemplates` (conectores em destaque), `ConnectorCatalog` (o que cada conector ofereceu
+`MCPRegistry` (registro oficial do MCP), `ConnectorTemplates` (modelos prontos; `retired` guarda os que a galeria não oferece mais, só para reconhecer
+conectores já instalados), `ConnectorGallery` (a grade de serviços e o estado de cada cartão: disponível, conectado, desligado, precisa de
+atenção, em breve), `LocalConnectorSetup` (estados "sem permissão", "negado", "sem conta", "pronto" e o "Conectar", que é o único que mostra o
+diálogo do macOS), `SlackApp` (manifesto e link de criação do app do Slack, presets de escopos), `ConnectorCatalog` (o que cada conector ofereceu
 da última vez, em `conectores/<id>.json`: serve ao índice, à resolução das chamadas, às anotações do Claude Code, à contagem do cartão e
 a "Ver ferramentas"), `SkillCatalog` (Skills.sh + GitHub),
 `ConnectorSecrets` (segredos de conectores no Keychain, `@keychain` no `state.json`), `OrbScope` (conectores e skills por
@@ -496,7 +500,7 @@ Modos (qualquer outro nome mostra o chat do primeiro Orb):
  `settings-perms`, `first-run-banner`, `models` |
 | Barra de menus | `quickask`, `quickask-approvals`, `quickask-reply` |
 | Rotinas e conversas | `routines`, `routine-editor`, `routine-editor-new`, `routine-run`, `routine-run-failed`, `routine-conversation`, `conversations` |
-| Skills e conectores | `skills`, `skills-explore`, `skill-editor`, `skill-editor-new`, `skill-preview`, `skill-preview-installed`, `connectors`, `connectors-explore`, `connectors-lazy`, `conn-tools`, `conn-editor-github`, `conn-editor-files`, `conn-editor-slack`, `conn-editor-manual`, `conn-editor-edit`, `conn-editor-edit-registry`, `conn-editor-connecting`, `conn-editor-connected`, `conn-editor-failed` |
+| Skills e conectores | `skills`, `skills-explore`, `skill-editor`, `skill-editor-new`, `skill-preview`, `skill-preview-installed`, `connectors` (instalados), `connectors-gallery`, `connectors-explore`, `connectors-lazy`, `conn-tools`, `conn-google-intro`, `conn-google-account`, `conn-google-account-agenda`, `conn-google-denied`, `conn-google-working`, `conn-google-done`, `conn-editor-supabase`, `conn-editor-github`, `conn-editor-files`, `conn-editor-slack`, `conn-editor-manual`, `conn-editor-edit`, `conn-editor-edit-registry`, `conn-editor-connecting`, `conn-editor-connected`, `conn-editor-failed` |
 
 Com `ORB_SEND`, o snapshot envia o prompt e espera `ORB_SNAPSHOT_WAIT` segundos antes de fotografar. Para medir o streaming sem
 abrir janela, use o modelo falso com `--long`, `ORB_SEND` e `ORB_SNAPSHOT_WAIT=40` e observe o processo (`ps -o %cpu=`,
@@ -506,7 +510,7 @@ abrir janela, use o modelo falso com `--long`, `ORB_SEND` e `ORB_SNAPSHOT_WAIT=4
 
 | Script | O que faz |
 |---|---|
-| `scripts/bundle.sh [debug\|release]` | compila (padrão `release`), monta `build/Orb.app` (executável, `Resources/Orbs`, `Info.plist` com `app.orb.mac` e `NSAllowsArbitraryLoads` (sem isso o macOS bloqueia `http://` no app empacotado), ícone gerado pelo próprio app) e assina |
+| `scripts/bundle.sh [debug\|release]` | compila (padrão `release`), monta `build/Orb.app` (executável, `Resources/Orbs`, `Info.plist` com `app.orb.mac`, `NSAllowsArbitraryLoads` (sem isso o macOS bloqueia `http://` no app empacotado) e os textos de permissão de Agenda (`NSCalendarsFullAccessUsageDescription`), Lembretes (`NSRemindersFullAccessUsageDescription`) e Apple Events, ícone gerado pelo próprio app) e assina |
 | `scripts/make-signing-identity.sh` | cria uma vez o certificado local "Orb Local" no chaveiro de login e o marca como confiável para assinar |
 | `scripts/fake-llm.py` | o modelo falso acima |
 

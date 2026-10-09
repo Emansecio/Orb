@@ -644,6 +644,12 @@ struct MCPServerConfig: Codable, Hashable, Identifiable, Sendable {
     /// What the connector does, in a few words, as the registry or the catalog described it when it was installed: the
     /// line the model reads about it in `connector_tools`.
     var summary: String?
+    /// A connector that runs inside the app instead of a server (`LocalConnectorKind` raw value): Google Agenda, Lembretes,
+    /// Gmail. It has no command and no URL.
+    var local: String?
+    /// The person connected Google Agenda knowing no calendar account is named Google or Gmail (a Workspace account is named by
+    /// its address): the card then stops asking for a Google account.
+    var anyAccount = false
 
     var isRemote: Bool { !url.isEmpty }
 }
@@ -664,5 +670,7 @@ extension MCPServerConfig {
         orbIDs = (try? c.decodeIfPresent(Set<UUID>.self, forKey: .orbIDs)) ?? nil
         secretKeys = (try? c.decodeIfPresent(Set<String>.self, forKey: .secretKeys)) ?? []
         summary = (try? c.decodeIfPresent(String.self, forKey: .summary)) ?? nil
+        local = (try? c.decodeIfPresent(String.self, forKey: .local)) ?? nil
+        anyAccount = (try? c.decodeIfPresent(Bool.self, forKey: .anyAccount)) ?? false
     }
 }

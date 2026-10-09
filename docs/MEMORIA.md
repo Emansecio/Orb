@@ -101,6 +101,13 @@ No painel os grupos se chamam Preferências, Fatos, Procedimentos e "Resumos de 
 - **Última resposta**: até 700 caracteres;
 - **Pendências**: chamadas que falharam ("Não deu certo: …"), ações que você negou e pedido que ficou sem resposta.
 
+**Conectores não entram na memória de longo prazo.** O que vem de um conector (e-mails, mensagens, páginas, agenda) não vai para
+a página: uma chamada de conector aparece só como "Usando GitHub" (sem a ferramenta, os argumentos, os links ou o resultado), e
+um trecho que usou conector fica sem "Última resposta", que repetiria o conteúdo. Um cartão de conector que você negou entra em "Pendências" só pelo título ("Você negou: Usando Gmail"), sem a ferramenta nem
+os argumentos. Seus pedidos continuam como são. O resumo de
+passos da janela de contexto (`ToolDigest`) segue a mesma regra: de uma chamada de conector fica o nome e se deu certo. O que o
+próprio modelo guarda com `remember` continua sob as permissões do Orb (identidade e preferências sempre perguntam).
+
 ## O que entra no prompt
 
 `MemoryBank.brief(for:conversationIsNew:…)` devolve um `MemoryBrief` de **até 6 000 caracteres** (~1 700 tokens),
@@ -218,7 +225,7 @@ app e o servidor usarem o índice juntos) e, com "Controlar apps do Mac", també
 `mcp__orb_memoria__remember`, `mcp__orb_memoria__recall` e assim por diante. O processo não abre janela nem inicia o app.
 
 `recall` é liberada sem pedir; `remember` segue as permissões do Orb (identidade e preferências sempre perguntam). Com
-"Conectores" desligado, `--strict-mcp-config` deixa só esse servidor.
+"Conectores" desligado, `--strict-mcp-config` (que vai em todo turno) deixa só esse servidor.
 
 O Claude Code grava o prompt de sistema na primeira mensagem de cada sessão e o reaproveita ao retomar. Por isso, nas
 mensagens seguintes, a memória que muda vai junto com a mensagem (bloco `[Memory]`): as lembranças ligadas a ela e, se

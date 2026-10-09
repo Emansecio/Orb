@@ -144,7 +144,13 @@ Detalhes que costumam surpreender:
   e nunca executa nada.
 - Ferramentas de conectores (`MCPTool`) são `.sensitive`, **exceto** quando o servidor as anuncia como somente leitura
   (`readOnlyHint`), de mundo fechado (`openWorldHint` não verdadeiro) e não destrutivas. Uma ferramenta anunciada como
-  destrutiva (`destructiveHint`) tem perigo: pergunta até no "Automático". No Claude Code o mapa dessas ferramentas vem do
+  destrutiva (`destructiveHint`) tem perigo: pergunta até no "Automático". O mesmo vale para a ferramenta que **envia, publica ou
+  apaga** pelo nome, mesmo sem `destructiveHint` (`PermissionPolicy.connectorDanger`, a mesma função nos dois motores): uma das
+  palavras `send`, `post`, `reply`, `forward`, `share`, `publish`, `comment`, `push`, `merge`, `submit`, `upload`, `notify`, `delete`,
+  `remove`, `trash`, `archive`, `schedule`, `invite`, `transfer` (também `destroy`, `purge`, e `create` junto de `pull`:
+  `create_pull_request`) no nome, separado por `_`, `-`, `.` ou maiúsculas (`slack_send_message`, `deleteEvent`);
+  palavras parecidas (`sent`, `replies`, `schedules`) não contam. `readOnlyHint` verdadeiro vence o nome; `destructiveHint`
+  verdadeiro vence tudo. Perigo nunca é coberto por "Sempre permitir". No Claude Code o mapa dessas ferramentas vem do
   catálogo em disco de cada conector (`ClaudeCodeTurn.destructiveConnectors`, montado ao preparar o turno, sem subir servidor),
   porque as anotações que o CLI recebe dos seus próprios servidores não chegam ao Orb; assim as duas engines perguntam igual. A chave é a que o CLI usa de
   verdade (`mcp__<nome na configuração>__<ferramenta>` por `connectorKey`), e o nome na configuração (`ClaudeCodeTurn.mcpNames`)
@@ -370,7 +376,10 @@ lista de `--help` mostra `manual`, que o próprio CLI converte em `default`).
 - Capacidades desligadas viram `--disallowedTools` (sem "Terminal e arquivos": `Bash`, `Edit`, `Write`, `MultiEdit`,
   `NotebookEdit`, `Glob`, `Grep`, `LS`, `NotebookRead` e os controles de shell `BashOutput`, `TaskOutput`, `KillShell`,
   `KillBash`, `TaskStop`, como no motor nativo; só o `Read` fica, porque o CLI abre por ele as imagens anexadas; sem "Navegar na
-  web": `WebFetch`, `WebSearch`) e, sem "Conectores", `--strict-mcp-config`. Fora do "Sem pedir permissão", entram também
+  web": `WebFetch`, `WebSearch`) e, **sempre**, `--strict-mcp-config`: só carregam os servidores que o Orb põe no `--mcp-config` (o
+  das ferramentas do Orb e os conectores do Orb, com a política dele). Os conectores do claude.ai (Gmail, Agenda, Drive…) e os servidores do
+  `~/.claude.json` da pessoa nunca entram: rodariam fora das permissões do Orb, sem cartão e sem anotações; um servidor desconhecido
+  não roda. Fora do "Sem pedir permissão", entram também
   `Read(~/.ssh/**)`, `Read(~/.aws/**)` e as outras leituras de segredo (`ClaudeCodeTools.secretReads`): o CLI confia na pasta pessoal
   inteira (`--add-dir`) e nunca perguntaria ao Orb, então a leitura é recusada de vez (o motor nativo pergunta). Isso vale para
   a ferramenta `Read`; um `cat ~/.ssh/id_rsa` pelo `Bash` do CLI passa pela ponte do Orb, a não ser que o próprio CLI o aprove antes
@@ -410,7 +419,18 @@ Separadas das anteriores: dizem o que o **macOS** deixa o app fazer. Ficam em Aj
 | Acessibilidade | `AXIsProcessTrusted` | `ui_read`, `ui_act` |
 | Gravação do Áudio do Sistema e da Tela | `CGPreflightScreenCaptureAccess` | `screenshot` |
 | Acesso Total ao Disco | **estimativa**: tenta abrir `~/Library/Mail` ou `~/Library/Safari/Bookmarks.plist` | pastas protegidas |
+| Calendários e Lembretes (acesso completo, EventKit) | `EKEventStore.authorizationStatus`, sem perguntar; **só o "Conectar" da galeria pede** | conectores Google Agenda e Lembretes |
 
+- **Conectores do Mac** (Google Agenda, Lembretes, Gmail). Cada um se liga pelo botão "Conectar" da galeria (`LocalConnectorSetup`),
+  que é o único lugar que mostra o diálogo do macOS: Calendários (`requestFullAccessToEvents`), Lembretes
+  (`requestFullAccessToReminders`) ou a Automação do Mail (abre o Mail escondido e pede). Estados: sem permissão, negado (só os
+  Ajustes mudam isso: o sheet leva ao painel), sem conta Google (guia curto com "Abrir Contas de Internet") e pronto; Mail
+  fechado conta como "não dá para saber", não como problema. Sem a chave do `Info.plist` (`swift run` puro) o EventKit não é
+  pedido, porque o macOS encerraria o processo: o sheet manda empacotar com `scripts/bundle.sh`. Dentro dos conectores, ler não
+  pergunta; criar evento, lembrete e rascunho seguem o modo do Orb; **alterar evento, apagar evento e enviar e-mail perguntam sempre**
+  (`update_event` é marcado destrutivo porque o Google avisa os convidados da mudança; o evento mostra quantos convidados tem).
+  Um período dado só por datas inclui o dia final inteiro (`to`/`until` "2026-10-10" vai até o fim do dia 10). Um evento repetido não é alterado nem apagado. O servidor para o Claude Code
+  (`Orb --local-connector`) roda no processo filho com a identidade do app e não pergunta nada ao macOS por conta própria.
 - A aba nunca pede nada sozinha; cada linha tem um botão: "Pedir agora" mostra o aviso do macOS onde ele existe, "Abrir <app> e
   pedir" cobre a Automação de um app fechado e "Abrir Ajustes do Sistema" leva ao painel certo. Atualiza ao voltar ao app. Gravação do Áudio do Sistema e da Tela e Acesso Total só valem depois de reabrir o Orb.
 - **Pré-voo de Automação.** Antes de rodar AppleScript/JXA, `AutomationPreflight` lê os apps que o script endereça
