@@ -284,8 +284,8 @@ actor MemoryBank {
     // MARK: Brief
 
     /// What goes into the system prompt for one message, within `budget` characters:
-    /// - pinned: identity and preferences (each within its share), plus the interview during the first turns while it
-    ///   is pending;
+    /// - pinned: the user's profile (`profile`, from Ajustes: not a memory, not searchable, empty costs nothing), identity
+    ///   and preferences (each within its share), plus the interview during the first turns while it is pending;
     /// - notes, fenced as history: where the last conversation left off (only when a new conversation starts),
     ///   memories related to the message, and the titles of other facts. They were written from conversations that
     ///   may have contained text from web pages or files, so they are flattened to plain lines (no fake sections)
@@ -295,7 +295,8 @@ actor MemoryBank {
     /// conversation carries already: `alreadySent` holds the related lines (or just their `relatedHeaders`) of its
     /// latest messages, and a memory is sent again only when it changed.
     func brief(for message: String, conversationIsNew: Bool, userTurns: Int = 1, tools: MemoryToolNames = .init(),
-               canSave: Bool = true, alreadySent: [String] = [], budget: Int = MemoryBank.briefBudget, now: Date = .now) -> MemoryBrief {
+               canSave: Bool = true, alreadySent: [String] = [], budget: Int = MemoryBank.briefBudget, profile: String = "",
+               now: Date = .now) -> MemoryBrief {
         prepare(now: now)
         sweep(now: now)
         var brief = MemoryBrief()
@@ -310,6 +311,7 @@ actor MemoryBank {
             parts.append(text)
             left -= text.count + 2
         }
+        take(profile, into: &pinned) // who the user is (`UserProfile.promptSection`), before how to work with them
         if let identity = identity(), !identity.body.isEmpty {
             take("## Your identity (how the user wants you to work)\n" + Self.headAndTail(identity.body, Self.identityShare), into: &pinned)
         }

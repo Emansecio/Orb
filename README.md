@@ -98,6 +98,11 @@ linha mostra o que o Orb está fazendo ("Pensando…"), "Precisa de você" quand
 mensagens não lidas; o botão direito abre o menu do Orb (nova conversa, conversas anteriores, abrir pasta, personalizar, ver
 rotinas, apagar). No meio fica o chat; à direita, o painel do Orb.
 
+No canto inferior esquerdo da barra lateral fica a **sua foto** (um círculo; sem foto, a inicial do seu nome ou uma silhueta):
+um clique abre **Ajustes → Geral → Você**, onde você diz **Nome**, **Como te chamar** e um texto **Sobre você** (até 400
+caracteres) e escolhe ou arrasta (só arquivos do seu Mac) uma **foto**. O Orb recorta a foto em quadrado, reduz e guarda no seu Mac. Todos os Orbs leem o
+nome, como te chamar e o texto em cada conversa (assim eles sabem como te chamar sem perguntar); a foto nunca sai do Mac.
+
 ## Criar um Orb
 
 **⌘N** (ou "Novo Orb" na barra lateral):
@@ -339,8 +344,14 @@ Páginas **Conectores** (⌥⌘C) e **Skills** (⌥⌘K) na barra lateral, cada 
 - **Conectores** dão ferramentas novas aos Orbs (ler o GitHub, o Notion, o Slack, uma pasta…). São servidores **MCP**: locais
   (`npx`, `uvx`, `docker`) ou remotos (URL). Em *Explorar* há os **Em destaque** (Arquivos, GitHub, Notion, Slack, Memória
   (grafo), Busca na web, Pensamento em etapas) e a busca no [registro oficial do MCP](https://registry.modelcontextprotocol.io).
-  Você só preenche as chaves. O cartão em *Instalados* mostra o estado ao vivo ("Não conectou: …", com "Tentar de novo" e
-  "Editar…"). Em "Adicionar manualmente" dá para informar o comando ou a URL.
+  Você só preenche as chaves. Em "Adicionar manualmente" dá para informar o comando ou a URL.
+- **Carregam sob demanda.** Um conector não liga com o app nem manda as suas ferramentas a cada mensagem: o Orb recebe só duas
+  ferramentas fixas, uma para ver o que cada conector oferece e outra para usá-lo. O servidor sobe na primeira vez que um Orb
+  precisa dele (a conversa mostra "Conectando a GitHub…") e desliga sozinho depois de 10 minutos sem uso. O cartão em
+  *Instalados* mostra **Pronto** (desligado, liga quando precisar), **Em uso**, **Conectando…**, **Erro** ou **Desligado**, e o
+  menu tem **Testar conexão** ("Conectou: 12 ferramentas em 0,8 s"; se falhar, o motivo aparece no cartão), **Ver ferramentas…** (com "Só leitura" e "Destrutiva"),
+  **Editar…** e **Apagar…**. Uma falha traz "Tentar de novo". Com o Claude Code os conectores vão como sempre, e ele mesmo
+  adia as ferramentas.
 - **Quem usa.** Cada conector e cada skill tem **"Usar com"**: todos os Orbs (padrão) ou só os que você marcar. O Orb também
   precisa estar com a chave **Conectores** ligada (marcar o Orb em "Usar com" liga sozinho). Uma ferramenta de conector pede
   aprovação como as demais, a menos que o servidor a anuncie como somente leitura.
@@ -391,7 +402,7 @@ app em segundo plano), a **Pasta de dados**, as **Memórias guardadas**, a **Pas
 ## Redefinir o Orb
 
 Ajustes → Geral → Seus dados → **Redefinir o Orb…** volta o app ao primeiro uso. A folha é irmã de "Apagar Atlas?": diz o que some ("3 Orbs, 42 conversas,
-5 rotinas, 2 conectores, 4 skills e os ajustes") e o que fica (a pasta `~/Orbs` com os arquivos que os Orbs criaram, que
+5 rotinas, 2 conectores, 4 skills, o seu perfil e os ajustes") e o que fica (a pasta `~/Orbs` com os arquivos que os Orbs criaram, que
 **nunca** é apagada, e, se você quiser, as memórias), e pede duas escolhas:
 
 - **Guardar as memórias** (padrão): cada Orb é apagado, mas o que ele aprendeu vai para Memórias guardadas (com o último trecho
@@ -401,7 +412,8 @@ Ajustes → Geral → Seus dados → **Redefinir o Orb…** volta o app ao prime
   configuração dos provedores. Desligado, provedores, chaves e modelo padrão continuam. O login do Claude Code no Terminal
   nunca é tocado.
 
-Sempre somem: os Orbs, as conversas (atuais, anteriores e de rotinas), os anexos e as saídas de ferramentas, as rotinas, os
+Sempre somem: os Orbs, as conversas (atuais, anteriores e de rotinas), os anexos e as saídas de ferramentas, o seu perfil (texto e
+foto; nunca vai para as memórias guardadas), as rotinas, os
 conectores e os segredos deles no Keychain, as skills instaladas ou criadas, as liberações ("Sempre permitir") e os ajustes do
 app (voltam ao padrão, inclusive o primeiro uso). Nada fora da pasta de dados e do Keychain do app é tocado (dentro da pasta de
 dados, só o que o Orb mesmo grava), e a migração do OpenBot não roda de novo: as chaves que o Orb apagou não voltam do Keychain
@@ -423,7 +435,7 @@ Rodando pelo SwiftPM (sem um `.app`), ele só fecha: abra de novo. Nos modos de 
 - **O que vai para o provedor que você escolheu**, a cada mensagem: o que você escreveu, os anexos (imagens reduzidas; arquivos
   como caminho e o conteúdo que o Orb ler), o histórico recente (ou o resumo), o que as ferramentas devolverem (arquivos,
   saídas de comandos, páginas, capturas de tela com o texto lido por OCR), as instruções do Orb, as memórias que se aplicam, as
-  skills ativas, o seu nome de usuário e a pasta pessoal, o idioma e a versão do macOS, a hora, e uma foto da pasta de trabalho
+  skills ativas, o seu perfil (nome, como te chamar e o texto “Sobre você”; a foto não sai do Mac), o seu nome de usuário e a pasta pessoal, o idioma e a versão do macOS, a hora, e uma foto da pasta de trabalho
   (nomes de arquivos do primeiro nível, arquivos mexidos há pouco, branch, mudanças e títulos dos últimos commits do git).
   **Com Ollama ou LM Studio o modelo roda no seu Mac e a conversa não sai dele** (as ferramentas que você liberar, como
   `web_fetch` e os conectores, continuam falando com a rede). **Com o Claude Code, o conteúdo vai à Anthropic por ele.**

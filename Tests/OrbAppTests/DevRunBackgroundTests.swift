@@ -41,12 +41,18 @@ import Testing
         #expect(model.connectorStatus.isEmpty)
     }
 
-    @Test @MainActor func outsideADeveloperModeTheConnectorsStart() async throws {
+    @Test @MainActor func outsideADeveloperModeTheConnectorsAreKnownButStartOnlyWhenUsed() async throws {
         defer { try? FileManager.default.removeItem(at: root) }
         let seed = try seeded()
         // Same data, no scheduler (tests never start one): the marker is the proof that the check above can fail.
         let model = AppModel(store: seed.store, runsBackgroundWork: false, secretVault: MemoryVault(), devRun: false)
-        await waitUntil("the connector's program to run") { FileManager.default.fileExists(atPath: seed.marker.path) }
-        _ = model
+        let id = try #require(model.connectors.first?.id)
+        await waitUntil("the connector to be registered") { model.connectorStatus[id] == .idle(toolCount: nil) }
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(!FileManager.default.fileExists(atPath: seed.marker.path))
+
+        _ = await model.testConnector(id)
+        #expect(FileManager.default.fileExists(atPath: seed.marker.path))
+        await model.mcp.sync([])
     }
 }

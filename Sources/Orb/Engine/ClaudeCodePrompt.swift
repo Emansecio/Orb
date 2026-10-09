@@ -129,7 +129,7 @@ enum ClaudeCodePrompt {
     static func memoryUpdate(_ brief: MemoryBrief, pinnedChanged: Bool) -> String {
         var parts: [String] = []
         if pinnedChanged, !brief.pinned.isEmpty {
-            parts.append("Your identity and the user's preferences changed; this replaces the earlier version:\n" + brief.pinned)
+            parts.append("Your identity, the user's profile and preferences changed; this replaces the earlier version:\n" + brief.pinned)
         }
         if !brief.related.isEmpty { parts.append(TurnPreface.relatedNotes(brief)) }
         return parts.isEmpty ? "" : "[Memory]\n" + parts.joined(separator: "\n\n")

@@ -354,14 +354,32 @@ struct ClaudeCodeEngineTests {
         let fake = try FakeClaude()
         defer { fake.remove() }
         var turn = fake.turn(mode: .auto, tool: (name: "mcp__calend-rio__apagar_evento", input: "{}"))
-        turn.unverifiedConnectors = [PermissionPolicy.connectorKey("calend-rio") + "__"]
+        turn.connectorPrefixes = [PermissionPolicy.connectorKey("calend-rio") + "__"]
         let events = await run(ClaudeCodeEngine(), turn, decision: .deny)
         let approval = try #require(events.compactMap { if case .approval(let request) = $0 { request } else { nil } }.first)
         #expect(approval.isDangerous && approval.reason == "Comando arriscado: \(ClaudeCodeTurn.unverifiedReason).")
         // Another connector is not affected.
         var other = fake.turn(mode: .auto, tool: (name: "mcp__github__list_issues", input: "{}"))
-        other.unverifiedConnectors = turn.unverifiedConnectors
+        other.connectorPrefixes = turn.connectorPrefixes
         let calm = await run(ClaudeCodeEngine(), other)
+        #expect(!calm.contains { if case .approval = $0 { true } else { false } })
+    }
+
+    /// A tool the catalog does not list (the server offers it since the catalog was made) asks in "Automático", while the
+    /// ones it lists run as before.
+    @Test func aToolMissingFromTheCatalogAsksInAutomaticMode() async throws {
+        let fake = try FakeClaude()
+        defer { fake.remove() }
+        var turn = fake.turn(mode: .auto, tool: (name: "mcp__github__delete_x", input: "{}"))
+        turn.connectorPrefixes = ["github__"]
+        turn.knownConnectorTools = ["github__get_me"]
+        let events = await run(ClaudeCodeEngine(), turn, decision: .deny)
+        let approval = try #require(events.compactMap { if case .approval(let request) = $0 { request } else { nil } }.first)
+        #expect(approval.isDangerous && approval.reason == "Comando arriscado: \(ClaudeCodeTurn.unverifiedReason).")
+        var known = fake.turn(mode: .auto, tool: (name: "mcp__github__get_me", input: "{}"))
+        known.connectorPrefixes = turn.connectorPrefixes
+        known.knownConnectorTools = turn.knownConnectorTools
+        let calm = await run(ClaudeCodeEngine(), known)
         #expect(!calm.contains { if case .approval = $0 { true } else { false } })
     }
 

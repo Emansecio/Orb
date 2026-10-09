@@ -131,16 +131,26 @@ Detalhes que costumam surpreender:
   arquivo. Quem escreve nessa pasta já é um processo da sua conta, e um Orb com shell liberado (Automático) já faz tudo o que
   uma rotina faria; um token por turno não o impediria de lê-lo no `ps` ou no arquivo de configuração do turno. Por isso não há
   token: o "só as dele" e o "rotina não cria tarefas" valem para as chamadas da ferramenta, não contra um shell liberado.
+- O Orb não vê as ferramentas dos conectores: usa `connector_tools` e `connector_call` (`.safe`, só leem o catálogo e
+  passam o pedido). O motor troca cada `connector_call` pelo `MCPTool` de verdade (`GitHub__create_issue`) **antes** da
+  política: o cartão ("Usando GitHub"), as anotações, o perigo e as regras "Sempre permitir" (`connectorKey`
+  `github__create_issue`, as mesmas de antes) valem como se o modelo tivesse chamado a ferramenta direto. O histórico guarda a
+  chamada original. Se a chamada não resolve (conector ou ferramenta que não existe), `connector_call` mesmo devolve o erro
+  e nunca executa nada.
 - Ferramentas de conectores (`MCPTool`) são `.sensitive`, **exceto** quando o servidor as anuncia como somente leitura
   (`readOnlyHint`), de mundo fechado (`openWorldHint` não verdadeiro) e não destrutivas. Uma ferramenta anunciada como
-  destrutiva (`destructiveHint`) tem perigo: pergunta até no "Automático". No Claude Code o mapa dessas ferramentas vem das
-  conexões do próprio app (`ClaudeCodeTurn.destructiveConnectors`, montado ao preparar o turno), porque as anotações que o CLI
-  recebe dos seus próprios servidores não chegam ao Orb; assim as duas engines perguntam igual. A chave é a que o CLI usa de
+  destrutiva (`destructiveHint`) tem perigo: pergunta até no "Automático". No Claude Code o mapa dessas ferramentas vem do
+  catálogo em disco de cada conector (`ClaudeCodeTurn.destructiveConnectors`, montado ao preparar o turno, sem subir servidor),
+  porque as anotações que o CLI recebe dos seus próprios servidores não chegam ao Orb; assim as duas engines perguntam igual. A chave é a que o CLI usa de
   verdade (`mcp__<nome na configuração>__<ferramenta>` por `connectorKey`), e o nome na configuração (`ClaudeCodeTurn.mcpNames`)
-  é só ASCII, com `-2`, `-3` para nomes repetidos: "Calendário" vira `calend-rio`. Antes de montar o mapa o app espera até 5 s
-  os conectores do Orb que ainda estão subindo. Um conector que a conexão do app não conseguiu listar (ainda subindo depois
-  do prazo, ou com falha) fica sem anotações conhecidas (`unverifiedConnectors`): no Claude Code todas as ferramentas dele
-  perguntam, com o motivo "não deu para conferir se o conector marca esta ferramenta como destrutiva".
+  é só ASCII, com `-2`, `-3` para nomes repetidos: "Calendário" vira `calend-rio`. O catálogo pode estar defasado (o CLI usa
+  só ele, e ele só se renova quando o motor nativo usa o conector, quando o servidor avisa que as ferramentas mudaram ou com
+  "Testar conexão"), então a checagem é por ferramenta: o turno leva o prefixo de cada conector (`connectorPrefixes`) e as
+  ferramentas que o catálogo conhece (`knownConnectorTools`); uma ferramenta de um conector do Orb que o catálogo não lista
+  (conector sem catálogo, ou ferramenta que surgiu depois dele) não tem anotações conhecidas e pergunta, até no "Automático",
+  com o motivo "não deu para conferir se o conector marca esta ferramenta como destrutiva". Para o catálogo não ficar
+  parado, um turno do Claude Code renova em segundo plano (sem segurar o turno, no máximo uma vez por hora por conector) o
+  que está ausente ou tem mais de 24 h.
 - `ui_act` tem perigo quando o rótulo do elemento (ou o item de menu) fala em excluir, enviar, comprar ou descartar, ou
   quando preenche um campo de senha. `app_quit` com `force` tem perigo ("encerra o app à força").
 - A família `appInterface` é só do `ui_act`: uma liberação antiga de Atalhos ou da área de transferência (`macApps`) não passa a
@@ -357,6 +367,8 @@ lista de `--help` mostra `manual`, que o próprio CLI converte em `default`).
 - O CLI roda com o mesmo ambiente do `run_command` (`ShellEnvironment`: shell de login interativo, com o PATH do `.zshrc`,
   `JAVA_HOME` etc.) e com a pasta do `claude` na frente do PATH, menos as variáveis do provedor (`ANTHROPIC_*`, como
   `ANTHROPIC_API_KEY`), que trocariam em silêncio o login do claude.ai por cobrança da API; o Bash dele e os conectores MCP que ele inicia herdam isso.
+  Sai também `ENABLE_TOOL_SEARCH=false` (e `0`, `off`): o CLI adia sozinho as ferramentas dos conectores (busca de ferramentas),
+  e desligar isso mandaria todas elas a cada mensagem. Por isso o Claude Code não usa o porteiro (`connector_tools`).
   Os argumentos (persona e memória em português) chegam byte a byte (`LineProcess` usa `posix_spawn`).
 - O Bash do CLI mantém o `cd` entre uma chamada e outra, mas a política julga cada comando na pasta do Orb. Por isso o
   processo sobe com `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1` (`ClaudeCodeTurn.processEnvironment`), que faz cada chamada do Bash

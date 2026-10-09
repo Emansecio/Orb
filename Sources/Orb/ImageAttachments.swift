@@ -61,7 +61,10 @@ enum ImageProcessing {
     /// (PNG when it has real transparency and stays small).
     /// `enforcingLimit: false` is for pictures the app made itself (a screenshot of a large display), which are
     /// shrunk like any other but not refused for their size.
-    static func prepare(_ original: Data, name: String, enforcingLimit: Bool = true) throws -> Prepared {
+    /// `maxSide` and `square` serve the user's photo: the long side shrinks to `maxSide`, or, with `square`, the
+    /// centered square (the short side at most `maxSide`) is kept.
+    static func prepare(_ original: Data, name: String, enforcingLimit: Bool = true, maxSide: Int = ImageProcessing.maxSide,
+                        square: Bool = false) throws -> Prepared {
         guard !enforcingLimit || original.count <= maxOriginalBytes else { throw ImageAttachmentError.tooLarge(name: name, bytes: original.count) }
         guard let source = CGImageSourceCreateWithData(original as CFData, nil), CGImageSourceGetCount(source) > 0,
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
@@ -71,14 +74,22 @@ enum ImageProcessing {
         }
         // The thumbnail call scales and applies the orientation in one pass; asking for the picture's own size
         // keeps a small one from being enlarged.
+        // To keep a square of `maxSide` the long side must be larger than that (not beyond 8 times, for a panorama).
+        let longSide = square ? min(maxSide * 8, maxSide * max(width, height) / min(width, height)) : maxSide
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceShouldCacheImmediately: true,
-            kCGImageSourceThumbnailMaxPixelSize: min(maxSide, max(width, height)),
+            kCGImageSourceThumbnailMaxPixelSize: min(longSide, max(width, height)),
         ]
-        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+        guard var image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
             throw ImageAttachmentError.unreadable(name: name)
+        }
+        if square, image.width != image.height {
+            let side = min(image.width, image.height)
+            guard let cropped = image.cropping(to: CGRect(x: (image.width - side) / 2, y: (image.height - side) / 2,
+                                                          width: side, height: side)) else { throw ImageAttachmentError.unreadable(name: name) }
+            image = cropped
         }
 
         let hasAlpha = ![CGImageAlphaInfo.none, .noneSkipFirst, .noneSkipLast].contains(image.alphaInfo)

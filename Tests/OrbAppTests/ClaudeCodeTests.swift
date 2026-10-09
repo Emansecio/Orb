@@ -366,10 +366,8 @@ struct ClaudeCodePolicyTests {
     }
 
     private func mcpTool(_ config: MCPServerConfig, _ name: String, _ annotations: MCPToolAnnotations) -> MCPTool {
-        var tool = MCPTool(serverName: config.name, remote: ToolSpec(name: name, description: "", parameters: .schema([:])),
-                           connection: MCPConnection(config: config), annotations: annotations)
-        tool.serverID = config.id
-        return tool
+        MCPTool(serverName: config.name, remote: ToolSpec(name: name, description: "", parameters: .schema([:])),
+                serverID: config.id, manager: MCPManager(), annotations: annotations)
     }
 
     @Test func destructiveConnectorToolsAreKeyedLikeTheCLIsNames() {
@@ -408,13 +406,14 @@ struct ClaudeCodePolicyTests {
         #expect(found.count == 3)
     }
 
-    @Test func connectorsWithNoToolsInTheAppAreUnverified() {
+    @Test func everyConnectorHasAPrefixAndEveryCatalogedToolIsKnown() {
         let listed = MCPServerConfig(name: "GitHub", command: "x"), silent = MCPServerConfig(name: "Calendário", command: "x")
         let names = ClaudeCodeTurn.mcpNames([listed, silent])
         let tools: [any AgentTool] = [mcpTool(listed, "list_issues", MCPToolAnnotations(readOnly: true))]
-        let unverified = ClaudeCodeTurn.unverifiedConnectors([listed.id, silent.id], tools: tools, cliNames: names)
-        #expect(unverified == [PermissionPolicy.connectorKey("calend-rio") + "__"])
-        #expect(PermissionPolicy.connectorKey("mcp__calend-rio__apagar_evento").hasPrefix(try! #require(unverified.first)))
+        let prefixes = ClaudeCodeTurn.connectorPrefixes([listed.id, silent.id], cliNames: names)
+        #expect(prefixes == ["github__", "calend_rio__"])
+        #expect(ClaudeCodeTurn.knownConnectorTools(tools, cliNames: names) == ["github__list_issues"])
+        #expect(PermissionPolicy.connectorKey("mcp__calend-rio__apagar_evento").hasPrefix("calend_rio__"))
     }
 
     @Test func aDeadOwnersConnectorConfigGoesAndALiveOwnersStays() throws {
@@ -703,6 +702,15 @@ struct ClaudeCodeProcessTests {
         #expect(environment["JAVA_HOME"] == "/jdk")
         #expect(environment.keys.filter { $0.hasPrefix("ANTHROPIC_") }.isEmpty)
         #expect(ClaudeCode.environment(["ANTHROPIC_API_KEY": "x", "FOO": "1"], path: "/p") == ["FOO": "1", "PATH": "/p"])
+    }
+
+    /// The CLI defers the connectors' tools by itself; a `.zshrc` that turns that off would send them all with every message.
+    @Test func aShellThatTurnsToolSearchOffDoesNotReachTheCLI() {
+        for off in ["false", "0", "FALSE", "off"] {
+            #expect(ClaudeCode.environment(["ENABLE_TOOL_SEARCH": off, "FOO": "1"], path: "/p") == ["FOO": "1", "PATH": "/p"])
+        }
+        // Any other value is the user's own choice (`auto`, `true`) and stays.
+        #expect(ClaudeCode.environment(["ENABLE_TOOL_SEARCH": "auto:10"], path: "/p")["ENABLE_TOOL_SEARCH"] == "auto:10")
     }
 
     @Test func withoutAnswerFromTheShellTheLoginPathStandsIn() async {

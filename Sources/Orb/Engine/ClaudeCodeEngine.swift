@@ -26,10 +26,12 @@ struct ClaudeCodeTurn: Sendable {
     /// on the card. Built from the app's own connections (the CLI starts its own, whose annotations never reach us),
     /// so "Automático" asks about them here as it does in the native engine.
     var destructiveConnectors: [String: String] = [:]
-    /// Connectors of this Orb whose tools the app's own connection could not list in time (still starting, or failed),
-    /// as the prefix `connectorKey` gives their tools (`github__`). Their annotations are unknown, so every tool of
-    /// theirs asks, with `unverifiedReason`, instead of running unchecked.
-    var unverifiedConnectors: Set<String> = []
+    /// Every tool of the Orb's connectors that the app's catalog of the connector lists, by `connectorKey`.
+    var knownConnectorTools: Set<String> = []
+    /// The connectors of this Orb, as the prefix `connectorKey` gives their tools (`github__`). A tool of theirs that is not
+    /// in `knownConnectorTools` (the connector has no catalog yet, or offers it since the catalog was made) has unknown
+    /// annotations, so it asks with `unverifiedReason` instead of running unchecked.
+    var connectorPrefixes: Set<String> = []
     static let unverifiedReason = "não deu para conferir se o conector marca esta ferramenta como destrutiva"
     /// Grants for this turn only that the user's own request already gave (saving to memory when asked to remember).
     var turnGrants: [PermissionRule] = []
@@ -57,16 +59,23 @@ struct ClaudeCodeTurn: Sendable {
     static func destructiveConnectors(_ tools: [any AgentTool], cliNames: [UUID: String]) -> [String: String] {
         var result: [String: String] = [:]
         for case let tool as MCPTool in tools {
-            guard let reason = tool.danger(.object([:])), let id = tool.serverID, let name = cliNames[id] else { continue }
+            guard let reason = tool.danger(.object([:])), let name = cliNames[tool.serverID] else { continue }
             result[PermissionPolicy.connectorKey("mcp__\(name)__\(tool.toolName)")] = reason
         }
         return result
     }
 
-    /// The connectors in `ids` that none of `tools` belongs to: the app's connection has not told what they offer.
-    static func unverifiedConnectors(_ ids: Set<UUID>, tools: [any AgentTool], cliNames: [UUID: String]) -> Set<String> {
-        let known = Set(tools.compactMap { ($0 as? MCPTool)?.serverID })
-        return Set(ids.subtracting(known).compactMap { cliNames[$0] }.map { PermissionPolicy.connectorKey($0) + "__" })
+    /// The keys of all of `tools`, by the name the CLI gives them (the destructive ones and the rest).
+    static func knownConnectorTools(_ tools: [any AgentTool], cliNames: [UUID: String]) -> Set<String> {
+        Set(tools.compactMap { tool in
+            guard let tool = tool as? MCPTool, let name = cliNames[tool.serverID] else { return nil }
+            return PermissionPolicy.connectorKey("mcp__\(name)__\(tool.toolName)")
+        })
+    }
+
+    /// What the CLI's names for the connectors in `ids` start with, as `connectorKey` writes them.
+    static func connectorPrefixes(_ ids: Set<UUID>, cliNames: [UUID: String]) -> Set<String> {
+        Set(ids.compactMap { cliNames[$0] }.map { PermissionPolicy.connectorKey($0) + "__" })
     }
 
     func currentPermissions() async -> PermissionState {
@@ -289,7 +298,8 @@ actor ClaudeCodeEngine {
                                          fromSubagent: fromSubagent)
         if call.danger == nil, let key = call.connector {
             call.danger = turn.destructiveConnectors[key]
-                ?? (turn.unverifiedConnectors.contains { key.hasPrefix($0) } ? ClaudeCodeTurn.unverifiedReason : nil)
+                ?? (!turn.knownConnectorTools.contains(key) && turn.connectorPrefixes.contains { key.hasPrefix($0) }
+                    ? ClaudeCodeTurn.unverifiedReason : nil)
         }
         let why: PermissionVerdict.AskReason
         switch PermissionPolicy.evaluate(mode: live.mode, call: call, rules: live.rules, turnGrants: granted, workspace: workspace) {

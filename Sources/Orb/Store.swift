@@ -18,6 +18,8 @@ struct AppState: Codable, Sendable {
     var contextMemory = ContextMemoryLevel.balanced
     /// Context windows models turned out to have (a request was refused for its size), by "provider/model".
     var learnedContexts: [String: LearnedContext] = [:]
+    /// Who the user is, for every Orb (Ajustes → Geral → Você).
+    var profile = UserProfile()
 
     /// What the app starts with when there is no data yet (a new install, after "Redefinir o Orb"): no Orb, so the
     /// window opens on the welcome, where Atlas is one click away.
@@ -185,6 +187,30 @@ struct Store: Sendable {
 
     func save(_ state: AppState) {
         enqueue(touching: [stateURL]) { write(state, to: stateURL) }
+    }
+
+    // MARK: Connector catalogs
+
+    private func connectorCatalogURL(_ id: UUID) -> URL {
+        directory.appendingPathComponent("conectores/\(id.uuidString).json")
+    }
+
+    /// nil when there is none or it cannot be read: it is a cache, the next start of the connector writes it again.
+    func readConnectorCatalog(_ id: UUID) -> ConnectorCatalog? {
+        let url = connectorCatalogURL(id)
+        return Self.gate.reading(url) {
+            (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode(ConnectorCatalog.self, from: $0) }
+        }
+    }
+
+    func saveConnectorCatalog(_ catalog: ConnectorCatalog, for id: UUID) {
+        let url = connectorCatalogURL(id)
+        enqueue(touching: [url]) { write(catalog, to: url) }
+    }
+
+    func deleteConnectorCatalog(_ id: UUID) {
+        let url = connectorCatalogURL(id)
+        enqueue(touching: [url]) { try? FileManager.default.removeItem(at: url) }
     }
 
     /// Old tool outputs are stored shortened (`Conversation.pruningOldToolOutputs`); the caller's copy is untouched.
@@ -530,8 +556,9 @@ struct Store: Sendable {
             return .wrote
         } catch {
             NSLog("Orb: não foi possível salvar \(name): \(error)")
-            // The note beside a conversation is made again from it: not worth alarming anyone.
-            if !name.hasSuffix(".meta.json") {
+            // The note beside a conversation and a connector's catalog are made again (from it, from the next start of
+            // the server): not worth alarming anyone.
+            if !name.hasSuffix(".meta.json"), url.deletingLastPathComponent().lastPathComponent != "conectores" {
                 onSaveFailure?(StoreNotice(message: "Não foi possível salvar “\(name)”: \(error.localizedDescription). "
                     + "As últimas mudanças podem não estar no disco.", file: url))
             }
@@ -756,7 +783,7 @@ enum DecodeLoss {
         return (value, dictionary[key] as? Int ?? 0)
     }
 
-    fileprivate static func record() {
+    static func record() {
         let dictionary = Thread.current.threadDictionary
         if let count = dictionary[key] as? Int { dictionary[key] = count + 1 }
     }
@@ -822,6 +849,7 @@ extension AppState {
         }
         contextMemory = try c.value(.contextMemory, default: .balanced)
         learnedContexts = (try? c.decodeIfPresent([String: LearnedContext].self, forKey: .learnedContexts)) ?? [:]
+        do { profile = try c.value(.profile, default: UserProfile()) } catch { DecodeLoss.record() }
         try migrateSingleProvider(from: decoder)
     }
 

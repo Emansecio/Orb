@@ -28,7 +28,7 @@ struct ConnectorsView: View {
         .navigationTitle("Conectores")
         .navigationSubtitle("Dão novas ferramentas aos Orbs, como GitHub, Notion e arquivos")
         .toolbar {
-            Button("Reconectar", systemImage: "arrow.clockwise") { model.syncConnectors() }
+            Button("Reconectar", systemImage: "arrow.clockwise") { model.retryFailedConnectors() }
                 .help(hasProblem ? "Tentar conectar de novo os conectores com erro" : "Nenhum conector com erro")
                 .disabled(!hasProblem)
             Button("Adicionar manualmente", systemImage: "plus") {
@@ -97,6 +97,7 @@ private struct InstalledConnectors: View {
     @Binding var editing: ConnectorDraft?
     let explore: () -> Void
     @State private var deleting: MCPServerConfig?
+    @State private var viewingTools: MCPServerConfig?
 
     var body: some View {
         @Bindable var model = model
@@ -105,20 +106,16 @@ private struct InstalledConnectors: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 12, alignment: .top)], alignment: .leading, spacing: 12) {
                     ForEach($model.connectors) { $connector in
                         ConnectorCard(connector: $connector, status: model.connectorStatus[connector.id],
-                                      usedBy: usedBy(connector)) {
+                                      usedBy: usedBy(connector), onEdit: {
                             editing = ConnectorDraft(editing: connector)
-                        } onRetry: {
-                            model.syncConnectors()
-                        } onDelete: {
+                        }, onTest: {
+                            await model.testConnector(connector.id)
+                        }, onViewTools: {
+                            viewingTools = connector
+                        }, onDelete: {
                             deleting = connector
-                        }
+                        })
                     }
-                }
-                if let heaviest = ConnectorLoad.heaviest(bots: model.bots, connectors: model.connectors, status: model.connectorStatus) {
-                    Label(ConnectorLoad.warning(for: heaviest), systemImage: "gauge.with.dots.needle.67percent")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Palette.warn)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .padding(24)
@@ -135,6 +132,9 @@ private struct InstalledConnectors: View {
                     Button("Explorar catálogo", action: explore).buttonStyle(PrimaryPillStyle())
                 }
             }
+        }
+        .sheet(item: $viewingTools) { connector in
+            ConnectorToolsSheet(connector: connector)
         }
         .confirmationDialog("Apagar o conector “\(deleting?.name ?? "")”?", isPresented: Binding(
             get: { deleting != nil }, set: { if !$0 { deleting = nil } }
@@ -161,9 +161,14 @@ private struct ConnectorCard: View {
     /// Names of the Orbs that use it; "" when none does; nil when the connector is off.
     let usedBy: String?
     let onEdit: () -> Void
-    let onRetry: () -> Void
+    /// Starts the server (if it is off), lists its tools and says how it went.
+    let onTest: () async -> ConnectorTestOutcome
+    let onViewTools: () -> Void
     let onDelete: () -> Void
     @State private var isShowingDetail = false
+    @State private var test = TestState.none
+
+    private enum TestState: Equatable { case none, running, done(String), failed(String) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -190,6 +195,7 @@ private struct ConnectorCard: View {
             if case .failed(let message) = status, connector.isEnabled {
                 failure(message)
             }
+            if showsTestLine { testLine }
             if let usedBy {
                 Label(usedBy.isEmpty ? "Nenhum Orb usa" : "Usado por \(usedBy)",
                       systemImage: usedBy.isEmpty ? "person.crop.circle.badge.exclamationmark" : "person.2")
@@ -202,6 +208,9 @@ private struct ConnectorCard: View {
                 statusBadge
                 Spacer(minLength: 0)
                 Menu {
+                    Button("Testar conexão", action: runTest).disabled(!connector.isEnabled || test == .running)
+                    Button("Ver ferramentas…", action: onViewTools)
+                    Divider()
                     Button("Editar…", action: onEdit)
                     Divider()
                     Button("Apagar…", role: .destructive, action: onDelete)
@@ -220,6 +229,55 @@ private struct ConnectorCard: View {
         .card(radius: 14)
         .opacity(connector.isEnabled ? 1 : 0.55)
         .animation(.snappy(duration: 0.2), value: connector.isEnabled)
+        .animateChanges(of: status)
+        .animateChanges(of: test)
+    }
+
+    private func runTest() {
+        guard test != .running else { return }
+        Task { @MainActor in
+            test = .running
+            switch await onTest() {
+            case .connected(let tools, let seconds):
+                test = .done(ConnectorStatusText.tested(tools: tools, seconds: seconds))
+                try? await Task.sleep(for: .seconds(6))
+                if case .done = test { test = .none }
+            case .failed(let message):
+                test = .failed(message)
+                try? await Task.sleep(for: .seconds(6))
+                if case .failed = test { test = .none }
+            }
+        }
+    }
+
+    /// A failed test says so on its own line, unless the server itself failed to start: the card then shows that failure.
+    private var showsTestLine: Bool {
+        switch test {
+        case .none: false
+        case .failed: if case .failed = status, connector.isEnabled { false } else { true }
+        default: true
+        }
+    }
+
+    @ViewBuilder private var testLine: some View {
+        HStack(spacing: 6) {
+            switch test {
+            case .running:
+                ProgressView().controlSize(.mini)
+                Text("Testando a conexão…").foregroundStyle(Palette.muted)
+            case .done(let text):
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(Palette.ok)
+                Text(text).foregroundStyle(Palette.secondary)
+            case .failed(let message):
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Palette.warn)
+                Text(ConnectorStatusText.shortError(message)).foregroundStyle(Palette.warn).lineLimit(2)
+            case .none:
+                EmptyView()
+            }
+        }
+        .font(.system(size: 11))
+        .transition(.opacity)
+        .accessibilityElement(children: .combine)
     }
 
     /// The reason in words, not in a tooltip, with the two things to do about it.
@@ -250,24 +308,134 @@ private struct ConnectorCard: View {
                 .padding(14)
             }
             HStack(spacing: 6) {
-                Button("Tentar de novo", action: onRetry).buttonStyle(SecondaryPillStyle())
+                Button("Tentar de novo", action: runTest).buttonStyle(SecondaryPillStyle())
                 Button("Editar…", action: onEdit).buttonStyle(GhostStyle())
             }
             .controlSize(.small)
         }
     }
 
+    /// Pronto (off, starts by itself when an Orb needs it) · Em uso (connected now) · Conectando… · Erro · Desligado.
     @ViewBuilder private var statusBadge: some View {
-        switch status {
-        case .ready(let count):
-            CatalogBadge(text: count == 1 ? "1 ferramenta" : "\(count) ferramentas", symbol: "checkmark.circle.fill", tint: Palette.ok)
-        case .failed:
-            CatalogBadge(text: "Erro", symbol: "exclamationmark.triangle.fill", tint: Palette.warn)
-        case .starting:
-            CatalogBadge(text: "Conectando…", symbol: "hourglass")
-        case .stopped, nil:
+        if !connector.isEnabled {
             CatalogBadge(text: "Desligado", symbol: "pause.circle")
+        } else {
+            switch status {
+            case .ready:
+                InUseBadge()
+            case .idle(let count):
+                CatalogBadge(text: count.map { "Pronto · \(ConnectorStatusText.toolCount($0))" } ?? "Pronto", symbol: "checkmark.circle")
+                    .help("Liga sozinho quando um Orb precisar")
+            case .failed:
+                CatalogBadge(text: "Erro", symbol: "exclamationmark.triangle.fill", tint: Palette.warn)
+            case .starting:
+                CatalogBadge(text: "Conectando…", symbol: "hourglass")
+            case .stopped:
+                CatalogBadge(text: "Desligado", symbol: "pause.circle")
+            case nil:
+                CatalogBadge(text: "Pronto", symbol: "checkmark.circle")
+                    .help("Liga sozinho quando um Orb precisar")
+            }
         }
+    }
+}
+
+/// The connector is connected right now: a small green dot, nothing louder.
+private struct InUseBadge: View {
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle().fill(Palette.ok).frame(width: 6, height: 6)
+            Text("Em uso").lineLimit(1)
+        }
+        .font(.system(size: 11, weight: .medium))
+        .foregroundStyle(Palette.ok)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(Palette.ok.opacity(0.12), in: .capsule)
+        .help("Conectado agora. Desliga sozinho quando fica um tempo sem uso.")
+    }
+}
+
+// MARK: Tools
+
+/// What a connector offers, from its catalog: name, a line about it and whether it only reads or can destroy.
+struct ConnectorToolsSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    let connector: MCPServerConfig
+    @State private var catalog: ConnectorCatalog?
+    @State private var didLoad: Bool
+
+    init(connector: MCPServerConfig, catalog: ConnectorCatalog? = nil) {
+        self.connector = connector
+        _catalog = State(initialValue: catalog)
+        _didLoad = State(initialValue: catalog != nil)
+    }
+
+    private var subtitle: String {
+        guard let catalog else { return "Lista guardada da última vez que o conector ligou." }
+        return "\(ConnectorStatusText.toolCount(catalog.tools.count)) · atualizada \(catalog.updatedAt.formatted(.relative(presentation: .named)))"
+    }
+
+    var body: some View {
+        content
+            .task {
+                guard !didLoad else { return }
+                catalog = await model.mcp.catalog(connector.id)
+                didLoad = true
+            }
+            .orbSheet("Ferramentas de \(connector.name)", subtitle: subtitle, size: .medium) {
+                SheetFooter(cancel: { dismiss() }, primaryTitle: "Fechar", showsCancel: false, primary: { dismiss() })
+            }
+    }
+
+    @ViewBuilder private var content: some View {
+        if !didLoad {
+            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).padding(30)
+        } else if let catalog, !catalog.tools.isEmpty {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(catalog.tools, id: \.name) { tool in
+                        VStack(alignment: .leading, spacing: 0) {
+                            row(tool)
+                            Divider().overlay(Palette.line)
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
+            }
+        } else {
+            Text(catalog == nil ? "O Orb ainda não conhece as ferramentas deste conector. Use “Testar conexão” no menu do cartão."
+                                : "Este conector não oferece ferramentas.")
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.muted)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(30)
+        }
+    }
+
+    private func row(_ tool: ConnectorCatalog.Tool) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Text(tool.name)
+                    .font(.system(size: 12, weight: .semibold).monospaced())
+                    .foregroundStyle(Palette.ink)
+                    .lineLimit(1)
+                if tool.annotations.destructive == true {
+                    CatalogBadge(text: "Destrutiva", symbol: "exclamationmark.triangle.fill", tint: Palette.warn)
+                } else if tool.annotations.readOnly == true {
+                    CatalogBadge(text: "Só leitura", symbol: "eye", tint: Palette.ok)
+                }
+            }
+            Text(tool.description.split(whereSeparator: \.isNewline).first.map(String.init) ?? "Sem descrição.")
+                .font(.system(size: 11))
+                .foregroundStyle(Palette.muted)
+                .lineLimit(1)
+        }
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -829,6 +997,7 @@ struct ConnectorEditor: View {
         }
         config.secretKeys = Set(dictionary.keys.filter(isSecret))
         config.orbIDs = orbIDs
+        if !draft.summary.isEmpty { config.summary = String(draft.summary.prefix(200)) }
 
         let before = alreadyUsing
         if let index = model.connectors.firstIndex(where: { $0.id == config.id }) {

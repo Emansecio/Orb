@@ -82,6 +82,17 @@ import Testing
         #expect(failures.notices.isEmpty)
     }
 
+    @Test func aConnectorsCatalogNeverAlarmsAnyoneEither() throws {
+        let failures = Collected()
+        let store = Store(directory: root) { failures.add($0) }
+        // A folder where the file should go: it can't be written, and it is only a cache.
+        let id = UUID()
+        try FileManager.default.createDirectory(at: root.appending(path: "conectores/\(id.uuidString).json"), withIntermediateDirectories: true)
+        store.saveConnectorCatalog(ConnectorCatalog(handshake: MCPHandshake(), specs: [], annotations: [:]), for: id)
+        store.flush()
+        #expect(failures.notices.isEmpty)
+    }
+
     // MARK: Items that could not be read
 
     @Test @MainActor func lostItemsAgreeInNumberAndNameTheSettings() throws {

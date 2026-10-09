@@ -424,6 +424,7 @@ actor AgentEngine {
     private func runCalls(_ calls: [ToolCallRequest], request: TurnRequest, reason: String, allowed: inout [PermissionRule],
                           toolNames: Set<String>, note: String?, messages: inout [ChatMessage],
                           out: AsyncStream<TurnEvent>.Continuation) async {
+        let (calls, request) = await resolved(calls, in: request)
         func append(_ outcome: ToolOutcome, for call: ToolCallRequest) {
             var text = ToolOutputCap.apply(outcome.text, botID: request.bot.id, callID: call.id, toolNames: toolNames,
                                            directory: request.outputsDirectory)
@@ -467,6 +468,28 @@ actor AgentEngine {
             }
             index = end
         }
+    }
+
+    /// The step's calls with each `connector_call` replaced by the call of the real tool it names (`GitHub__create_issue`,
+    /// with the arguments inside), and the request with those tools added. Everything after this (the approval cards, the
+    /// annotations, the rules "Sempre permitir", the activity line) sees the same call as if the model had made it directly.
+    /// A call that does not resolve stays as it is: `connector_call` itself then fails with what is wrong.
+    private func resolved(_ calls: [ToolCallRequest], in request: TurnRequest) async -> ([ToolCallRequest], TurnRequest) {
+        guard let gateway = request.tools.first(where: { $0.spec.name == ConnectorGateway.callName }) as? ConnectorCallTool else {
+            return (calls, request)
+        }
+        var request = request
+        var resolved: [ToolCallRequest] = []
+        for call in calls {
+            guard call.name == ConnectorGateway.callName, let arguments = JSONValue.parse(call.arguments),
+                  let found = try? await gateway.resolve(arguments) else {
+                resolved.append(call)
+                continue
+            }
+            request.tools.append(found.tool)
+            resolved.append(ToolCallRequest(id: call.id, name: found.tool.spec.name, arguments: found.arguments.jsonString))
+        }
+        return (resolved, request)
     }
 
     /// Asks once for the step's calls that would each ask for ordinary permission (see `ApprovalBatch`). Returns the
@@ -613,7 +636,13 @@ actor AgentEngine {
         let started = ToolCall(kind: tool.kind, title: summary.title, detail: summary.detail)
         out.yield(.toolStarted(started))
         out.yield(.status(summary.title))
+        // A connector that has to start first says so: an `npx` server can take many seconds.
         do {
+            if let connecting = await tool.connectingNote(arguments) {
+                out.yield(.status(connecting))
+                try await tool.prepare(arguments)
+                out.yield(.status(summary.title))
+            }
             let result = try await tool.runWithImages(arguments, context: request.context)
             out.yield(.toolFinished(id: started.id, state: .done, output: Self.preview(result.text)))
             return ToolOutcome(result.text, images: result.images)

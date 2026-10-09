@@ -121,6 +121,11 @@ actor ClaudeCode {
     /// which would otherwise leak into the child, and with the login shell's PATH.
     static func environment(_ base: [String: String], path: String) -> [String: String] {
         var environment = base.filter { !ShellEnvironment.isClaudeSessionVariable($0.key) && !isProviderVariable($0.key) }
+        // The CLI defers the tools of MCP servers on its own (tool search); a `.zshrc` that turns that off would make every
+        // connector's tools travel with each message.
+        if let search = environment["ENABLE_TOOL_SEARCH"]?.lowercased(), ["false", "0", "off", "no"].contains(search) {
+            environment["ENABLE_TOOL_SEARCH"] = nil
+        }
         environment["PATH"] = path
         return environment
     }

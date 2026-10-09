@@ -569,6 +569,10 @@ protocol AgentTool: Sendable {
     func summary(_ arguments: JSONValue) -> (title: String, detail: String)
     /// Same, for tools whose summary needs the working directory (to resolve a relative path); defaults to `summary(_:)`.
     func summary(_ arguments: JSONValue, context: ToolContext) -> (title: String, detail: String)
+    /// What the activity line says while the tool starts something slow before it can run ("Conectando a GitHub…"), or nil.
+    func connectingNote(_ arguments: JSONValue) async -> String?
+    /// Brings up what `connectingNote` announced, so the engine can go back to the tool's own title once it is up.
+    func prepare(_ arguments: JSONValue) async throws
     /// Runs the tool and returns text for the model. Throw `ToolError` for user-facing failures.
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String
     /// Same, for tools that can also hand the model a picture. The engine calls this one.
@@ -588,6 +592,8 @@ extension AgentTool {
 
     func summary(_ arguments: JSONValue, context: ToolContext) -> (title: String, detail: String) { summary(arguments) }
     func danger(_ arguments: JSONValue) -> String? { nil }
+    func connectingNote(_ arguments: JSONValue) async -> String? { nil }
+    func prepare(_ arguments: JSONValue) async throws {}
     var alsoWithCapability: Capability? { nil }
 
     /// Whether an Orb with these capabilities is offered the tool.
@@ -626,6 +632,9 @@ struct MCPServerConfig: Codable, Hashable, Identifiable, Sendable {
     /// Names of environment variables or headers that hold secrets (kept in the Keychain, see `ConnectorSecrets`),
     /// besides the ones whose name gives them away.
     var secretKeys: Set<String> = []
+    /// What the connector does, in a few words, as the registry or the catalog described it when it was installed: the
+    /// line the model reads about it in `connector_tools`.
+    var summary: String?
 
     var isRemote: Bool { !url.isEmpty }
 }
@@ -645,5 +654,6 @@ extension MCPServerConfig {
         source = try c.decodeIfPresent(String.self, forKey: .source)
         orbIDs = (try? c.decodeIfPresent(Set<UUID>.self, forKey: .orbIDs)) ?? nil
         secretKeys = (try? c.decodeIfPresent(Set<String>.self, forKey: .secretKeys)) ?? []
+        summary = (try? c.decodeIfPresent(String.self, forKey: .summary)) ?? nil
     }
 }

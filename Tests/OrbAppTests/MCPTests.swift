@@ -156,26 +156,38 @@ struct MCPConnectionTests {
         await #expect(throws: ToolError.self) { _ = try await bare.start() }
     }
 
-    @Test func managerSyncsConnections() async throws {
+    @Test func managerRegistersWithoutStartingAndStartsOnTheFirstCall() async throws {
         let manager = MCPManager()
         var config = try fakeConfig()
         let broken = MCPServerConfig(name: "Quebrado", command: "orb-no-such-command-xyz")
         await manager.sync([config, broken])
-        let status = await manager.status()
-        #expect(status[config.id] == .ready(toolCount: 5))
-        guard case .failed = status[broken.id] else { Issue.record("expected failure"); return }
+        // Registering starts nothing.
+        #expect(await manager.status() == [config.id: .idle(toolCount: nil), broken.id: .idle(toolCount: nil)])
+        #expect(await !manager.isRunning(config.id))
+        #expect(await manager.catalog(config.id) == nil)
 
-        let tools = await manager.tools()
-        #expect(tools.map(\.spec.name).contains("Fake_Server__echo"))
-        let echo = try #require(tools.first { $0.spec.name == "Fake_Server__echo" })
+        let echo = MCPTool(serverName: "Fake Server", remote: ToolSpec(name: "echo", description: "", parameters: .schema([:])),
+                           serverID: config.id, manager: manager)
+        #expect(echo.spec.name == "Fake_Server__echo")
         #expect(echo.summary(.object(["text": .string("oi")])) == (title: "Usando Fake Server", detail: #"echo {"text":"oi"}"#))
+        #expect(await echo.connectingNote(.null) == "Conectando a Fake Server…")
         let context = ToolContext(workingDirectory: FileManager.default.temporaryDirectory)
         #expect(try await echo.run(.object(["text": .string("oi")]), context: context) == "oi\n[imagem]")
+        #expect(await manager.status()[config.id] == .ready(toolCount: 5))
+        #expect(await echo.connectingNote(.null) == nil)
+        let catalog = try #require(await manager.catalog(config.id))
+        #expect(catalog.tools.map(\.name) == ["echo", "fail", "info", "crash", "slow"])
+        #expect(catalog.serverName == "fake" && catalog.protocolVersion == "2025-06-18")
+
+        // A server that does not come up is a failure, not a hang; the others are left alone.
+        await #expect(throws: ToolError.self) { try await manager.ensureStarted(broken.id) }
+        guard case .failed? = await manager.status()[broken.id] else { Issue.record("expected failure"); return }
 
         config.isEnabled = false
         await manager.sync([config])
         #expect(await manager.status() == [config.id: .stopped])
-        #expect(await manager.tools().isEmpty)
+        #expect(await !manager.isRunning(config.id))
+        await #expect(throws: ToolError.self) { try await manager.ensureStarted(config.id) }
     }
 }
 

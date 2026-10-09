@@ -49,7 +49,7 @@ extension AppModel {
     func resetSummary(conversations: Int?) -> ResetSummary {
         ResetSummary(orbs: bots.count, conversations: conversations, routines: routines.count, connectors: connectors.count,
                      skills: skills.filter { $0.source != Skill.builtInSource }.count,
-                     folder: OrbFolder.display(OrbFolder.defaultBase))
+                     folder: OrbFolder.display(OrbFolder.defaultBase), profile: !profile.isEmpty)
     }
 
     /// Takes the app back to its first use and quits (see the comments above). Never in a developer mode

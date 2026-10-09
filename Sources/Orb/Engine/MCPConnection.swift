@@ -2,7 +2,7 @@ import Foundation
 
 /// What a server says about one of its tools (`annotations` in `tools/list`). Hints, not guarantees: they only
 /// decide whether Orb asks, never what the tool can really do.
-struct MCPToolAnnotations: Sendable, Equatable {
+struct MCPToolAnnotations: Codable, Sendable, Equatable {
     var readOnly: Bool?
     var destructive: Bool?
     var openWorld: Bool?
@@ -20,6 +20,23 @@ struct MCPToolAnnotations: Sendable, Equatable {
         readOnly = json?["readOnlyHint"]?.bool
         destructive = json?["destructiveHint"]?.bool
         openWorld = json?["openWorldHint"]?.bool
+    }
+}
+
+/// What a server says about itself when the session opens (the result of `initialize`).
+struct MCPHandshake: Sendable, Equatable {
+    var protocolVersion: String?
+    var serverName: String?
+    var serverVersion: String?
+    var instructions: String?
+
+    init() {}
+
+    init(initializeResult result: JSONValue) {
+        protocolVersion = result["protocolVersion"]?.string
+        serverName = result["serverInfo"]?["name"]?.string
+        serverVersion = result["serverInfo"]?["version"]?.string
+        instructions = result["instructions"]?.string.flatMap { $0.isEmpty ? nil : $0 }
     }
 }
 
@@ -43,6 +60,12 @@ actor MCPConnection {
     private var nextID = 1
     /// The annotations of each tool from the last `tools/list`, by the server's own tool name.
     private(set) var toolAnnotations: [String: MCPToolAnnotations] = [:]
+    /// What the server said in `initialize`.
+    private(set) var handshake = MCPHandshake()
+    /// Called when the server announces that its tools changed (`notifications/tools/list_changed`).
+    private var onToolsChanged: (@Sendable () async -> Void)?
+    /// Called once when the connection ends, whoever ended it (`stop()`, a crash, an expired session).
+    private var onClosed: (@Sendable () async -> Void)?
 
     private let shell: ShellEnvironment
 
@@ -52,6 +75,11 @@ actor MCPConnection {
     }
 
     var isRunning: Bool { transport != nil }
+
+    func setHandlers(toolsChanged: (@Sendable () async -> Void)?, closed: (@Sendable () async -> Void)?) {
+        onToolsChanged = toolsChanged
+        onClosed = closed
+    }
 
     /// Connects to (or launches) the server, runs the MCP handshake and returns its tools.
     func start() async throws -> [ToolSpec] {
@@ -63,11 +91,11 @@ actor MCPConnection {
         do {
             try await transport.open(receive: { [weak self] in await self?.handle($0) },
                                      closed: { [weak self] in await self?.shutdown($0) })
-            _ = try await request("initialize", .object([
+            handshake = MCPHandshake(initializeResult: try await request("initialize", .object([
                 "protocolVersion": .string("2025-06-18"),
                 "capabilities": .object([:]),
                 "clientInfo": .object(["name": .string("Orb"), "version": .string("1.0")]),
-            ]), timeout: .seconds(30))
+            ]), timeout: .seconds(30)))
             try await transport.send(notification("notifications/initialized"))
             return try await listTools()
         } catch {
@@ -96,7 +124,8 @@ actor MCPConnection {
 
     // MARK: Requests
 
-    private func listTools() async throws -> [ToolSpec] {
+    /// The server's tools now (its annotations are updated too).
+    func listTools() async throws -> [ToolSpec] {
         var specs: [ToolSpec] = []
         var annotations: [String: MCPToolAnnotations] = [:]
         var cursor: String?
@@ -168,7 +197,8 @@ actor MCPConnection {
 
     private func handle(_ message: JSONValue) {
         if let method = message["method"]?.string {
-            // Server→client request: answer pings, refuse the rest. Notifications are ignored.
+            // Server→client request: answer pings, refuse the rest. Notifications are ignored, but for a change of tools.
+            if method == "notifications/tools/list_changed", let onToolsChanged { Task { await onToolsChanged() } }
             guard let id = message["id"], id != .null else { return }
             let reply: (String, JSONValue) = method == "ping"
                 ? ("result", .object([:]))
@@ -187,7 +217,10 @@ actor MCPConnection {
     }
 
     private func shutdown(_ error: Error) {
-        if let transport { Task { await transport.close() } }
+        if let transport {
+            Task { await transport.close() }
+            if let onClosed { Task { await onClosed() } }
+        }
         transport = nil
         closedError = closedError ?? error
         let entries = pending.values

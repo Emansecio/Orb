@@ -65,6 +65,7 @@ struct SidebarView: View {
             VStack(alignment: .leading, spacing: 8) {
                 KeptMemoryBanner()
                 HStack(spacing: 6) {
+                    ProfileAvatarButton()
                     Button { model.showNewBot = true } label: {
                         HStack(spacing: 8) {
                             Image(systemName: "plus")
@@ -165,6 +166,24 @@ private struct SidebarIconStyle: ButtonStyle {
                        color: Palette.ghostSelected)
             .contentShape(.circle)
             .onHover { isHovering = $0 }
+    }
+}
+
+/// The user's round picture at the foot of the sidebar: it opens "Você" in Ajustes (an invitation to fill it in while
+/// it is empty). A small view of its own, so typing in the profile redraws only it.
+private struct ProfileAvatarButton: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.openSettings) private var openSettings
+
+    var body: some View {
+        let profile = model.profile
+        Button { SettingsRouter.open(.general, using: openSettings) } label: {
+            ProfileAvatar(photoPath: model.profilePhotoPath, initial: profile.initial, size: 28)
+        }
+        .buttonStyle(SidebarIconStyle())
+        .help(profile.callName.map { "Perfil de \($0)" } ?? "Seu perfil")
+        .accessibilityLabel("Seu perfil")
+        .accessibilityHint("Abre os Ajustes")
     }
 }
 

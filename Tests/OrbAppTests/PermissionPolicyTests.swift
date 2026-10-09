@@ -748,7 +748,7 @@ for line in sys.stdin:
 struct MCPAnnotationTests {
     private func tool(_ annotations: MCPToolAnnotations) -> MCPTool {
         let spec = ToolSpec(name: "t", description: "", parameters: .schema([:]))
-        return MCPTool(serverName: "S", remote: spec, connection: MCPConnection(config: MCPServerConfig(name: "S")), annotations: annotations)
+        return MCPTool(serverName: "S", remote: spec, serverID: UUID(), manager: MCPManager(), annotations: annotations)
     }
 
     @Test func annotationsAreReadFromToolsList() {
@@ -803,8 +803,10 @@ struct MCPAnnotationTests {
         let script = directory.appending(path: "server.py")
         try annotatedServer.write(to: script, atomically: true, encoding: .utf8)
         let manager = MCPManager()
-        await manager.sync([MCPServerConfig(name: "Fake", command: "/usr/bin/python3", arguments: [script.path])])
-        let tools = await manager.tools()
+        let config = MCPServerConfig(name: "Fake", command: "/usr/bin/python3", arguments: [script.path])
+        await manager.sync([config])
+        try await manager.ensureStarted(config.id)
+        let tools: [any AgentTool] = try #require(await manager.catalog(config.id)).mcpTools(serverName: "Fake", serverID: config.id, manager: manager)
         func risk(_ name: String) throws -> ToolRisk {
             try #require(tools.first { $0.spec.name == "Fake__\(name)" }).risk(.object([:]))
         }

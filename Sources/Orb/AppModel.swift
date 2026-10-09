@@ -18,6 +18,7 @@ final class AppModel {
     var defaultModel: String { didSet { scheduleStateSave() } }
     /// How much conversation the Orbs remember word for word before the start is folded into a summary.
     var contextMemory: ContextMemoryLevel { didSet { scheduleStateSave() } }
+    var profile: UserProfile { didSet { scheduleStateSave() } }
     /// Each Orb's running machinery (see `BotSession`): its conversation in memory, its turn, its streamed reply.
     /// Conversations: at launch only the selected Orb's is read (off the main thread, `beginLoading`); the others are
     /// read when they are needed (`BotSession.isUnloaded`): when you switch to the Orb, or something has to change
@@ -134,16 +135,15 @@ final class AppModel {
     @ObservationIgnored let gate: ApprovalGate
     @ObservationIgnored private let engine: AgentEngine
     @ObservationIgnored private let claudeEngine: ClaudeCodeEngine
-    @ObservationIgnored let mcp = MCPManager()
+    @ObservationIgnored let mcp: MCPManager
     /// Keeps the tokens of connectors in the Keychain instead of the data file.
     @ObservationIgnored let connectorSecrets: ConnectorSecrets
-    /// The syncs of connectors, one after another: waiting for the last one means every connector has started or failed.
+    /// The registrations of connectors, one after another: waiting for the last one means `mcp` knows every connector.
     @ObservationIgnored private var connectorSync: Task<Void, Never>?
-    /// Syncs started and not yet finished, the newest one's number, and how each connector ended in it: what
-    /// `connectAndWait` reads, so one connector's answer does not wait for the others.
-    @ObservationIgnored private var pendingConnectorSyncs = 0
-    @ObservationIgnored private var connectorSyncGeneration = 0
-    @ObservationIgnored private var settledConnectors: [UUID: MCPStatus] = [:]
+    /// Whether a Claude Code turn may renew an old connector catalog in the background (only the running app does), and
+    /// when each connector was last tried, so one that fails is not started again at every message.
+    @ObservationIgnored var renewsCatalogs: Bool // internal so tests can switch it on
+    @ObservationIgnored private var catalogRenewals: [UUID: Date] = [:]
     /// Processes the Orbs left running with `run_command(background: true)`.
     @ObservationIgnored let jobs = BackgroundJobs()
     /// Where the app keeps its secrets (the Keychain in the app, a dictionary in tests): "Redefinir o Orb" removes them.
@@ -151,6 +151,8 @@ final class AppModel {
     /// "Redefinir o Orb" is under way: nothing is saved any more and the app quits when it is done (`resetEverything`;
     /// only the reset sets this).
     var isResetting = false
+    /// Counts the changes of the profile photo, so a slow one that a later choice or a removal overtook is dropped.
+    @ObservationIgnored var profilePhotoGeneration = 0
     /// What the reset needs from outside the app (tests lead it to a temporary folder and keep it from quitting).
     @ObservationIgnored var resetEnvironment = ResetEnvironment()
     /// Stands in for the provider's client (tests).
@@ -184,10 +186,12 @@ final class AppModel {
          devRun: Bool = DevRun.isActive, firstUse: AppState = .initial) {
         self.store = store
         isDevRun = devRun
+        renewsCatalogs = runsBackgroundWork && !devRun
         let vault = secretVault ?? (runsBackgroundWork && !devRun ? KeychainVault() : MemoryVault())
         self.secretVault = vault
         let secrets = ConnectorSecrets(vault: vault)
         connectorSecrets = secrets
+        mcp = MCPManager(store: store)
         images = ImageStore(dataFolder: store.directory)
         let gate = ApprovalGate()
         self.gate = gate
@@ -205,6 +209,7 @@ final class AppModel {
         providers = state.providers
         defaultModel = state.defaultModel
         contextMemory = state.contextMemory
+        profile = state.profile
         learnedContexts = state.learnedContexts
         outputsDirectory = ToolOutputCap.directory(inDataFolder: store.directory)
         // Only the Orb shown first is read at launch, and the window does not wait for it (`beginLoading` below).
@@ -233,6 +238,10 @@ final class AppModel {
         syncLives()
         for (id, count) in state.unread {
             if let id = UUID(uuidString: id) { live(id).setUnread(count) }
+        }
+        if !devRun { // a developer run starts no server, and its screens set the statuses themselves
+            let manager = mcp
+            Task { await manager.observe { [weak self] statuses in Task { @MainActor in self?.connectorStatus = statuses } } }
         }
         syncConnectors()
         // Tokens an older version left in the data file move to the Keychain with the next save.
@@ -1225,7 +1234,8 @@ final class AppModel {
         session.turnTask = Task {
             guard !Task.isCancelled else { return } // stopped before it began
             let brief = await bank.brief(for: typed, conversationIsNew: history.isEmpty, userTurns: userTurns,
-                                         canSave: bot.permissionMode != .readOnly, alreadySent: sentMemories)
+                                         canSave: bot.permissionMode != .readOnly, alreadySent: sentMemories,
+                                         profile: profile.promptSection)
             let inputs = await TurnPromptInputs.gather(bot: bot, skills: skills, brief: brief)
             guard session.isCurrent(turn) else { return } // stopped while preparing
             let built = TurnPrompt.native(inputs, history: history, lastWorkspaceHash: lastWorkspaceHash, lastWorkspace: lastWorkspace)
@@ -1240,7 +1250,11 @@ final class AppModel {
             }
             let accessibilityGranted = !bot.capabilities.contains(.computerUse) || accessibilityProbe()
             var tools = ToolBox.offered(for: bot.capabilities, accessibilityGranted: accessibilityGranted)
-            if bot.capabilities.contains(.connectors) { tools += await mcp.tools(allowing: Set(allowedConnectors.map(\.id))) }
+            // The connectors' own tools do not travel with the request: the model lists and calls them through two fixed ones.
+            if bot.capabilities.contains(.connectors), !allowedConnectors.isEmpty {
+                await connectorSync?.value // one added a moment ago is known to `mcp` before the model may name it
+                tools += ConnectorGateway.tools(for: allowedConnectors, manager: mcp)
+            }
             guard session.isCurrent(turn) else { return }
             // Recorded when the prompt with the snapshot is stored (see `apply`), not before.
             session.pendingMarks = built.marks
@@ -1362,7 +1376,8 @@ final class AppModel {
             guard !Task.isCancelled else { return } // stopped before it began
             let brief = await bank.brief(for: message, conversationIsNew: isNew, userTurns: userTurns,
                                          tools: ClaudeCodePrompt.memoryTools, canSave: bot.permissionMode != .readOnly,
-                                         alreadySent: sessionID == nil ? [] : (conversation.claudeRelatedSent ?? []).flatMap { $0 })
+                                         alreadySent: sessionID == nil ? [] : (conversation.claudeRelatedSent ?? []).flatMap { $0 },
+                                         profile: profile.promptSection)
             // A resumed session sends the same system prompt again (rebuilt only when its identity, preferences or rules change); the rest rides with the message.
             let inputs = await TurnPromptInputs.gather(bot: bot, skills: skills, brief: brief)
             guard session.isCurrent(turn) else { return } // stopped while preparing
@@ -1380,15 +1395,17 @@ final class AppModel {
                 return
             }
             let environment = await ClaudeCode.shared.environment(for: installation)
-            // What the connectors mark destructive, from the app's own connections: the CLI's never reach the Orb. A
-            // connector still starting gets a few seconds; one the app could not list is asked about tool by tool.
-            let (destructive, unverified) = await connectorAnnotations(for: connectorIDs, cliNames: cliNames)
+            // What the connectors mark destructive, from their catalogs: the CLI's own connections never reach the Orb. A
+            // connector with no catalog yet is asked about tool by tool.
+            let annotations = await connectorAnnotations(for: connectorIDs, cliNames: cliNames)
+            renewOldCatalogs(of: connectorIDs)
             guard session.isCurrent(turn) else { return }
             let claudeTurn = ClaudeCodeTurn(bot: bot, executable: installation.executable, model: model,
                                             system: ClaudeCodePrompt.withAccessibilityNote(built.system, accessibilityGranted: accessibility),
                                             prompt: prompt, images: pictures, context: context, sessionID: sessionID, connectors: servers,
-                                            environment: environment, destructiveConnectors: destructive,
-                                            unverifiedConnectors: unverified, turnGrants: turnGrants,
+                                            environment: environment, destructiveConnectors: annotations.destructive,
+                                            knownConnectorTools: annotations.known, connectorPrefixes: annotations.prefixes,
+                                            turnGrants: turnGrants,
                                             permissions: permissionSource(for: bot))
             // Recorded when the session answers (see `apply`): a turn that fails before that sent nothing.
             session.pendingMarks = built.marks
@@ -1396,15 +1413,36 @@ final class AppModel {
         }
     }
 
-    /// The tools of `ids` that the connectors mark destructive, and the connectors whose tools the app's own connection
-    /// could not list (so nothing is known about them), for a Claude Code turn.
-    func connectorAnnotations(for ids: Set<UUID>, cliNames: [UUID: String], timeout: Duration = .seconds(5)) async
-        -> (destructive: [String: String], unverified: Set<String>) {
-        guard !ids.isEmpty else { return ([:], []) }
-        await waitForConnectors(ids, timeout: timeout)
-        let tools = await mcp.tools(allowing: ids)
+    /// For a Claude Code turn: the tools of `ids` that the connectors mark destructive, the tools the catalogs know at all
+    /// (any other tool of these connectors is asked about: it appeared after the catalog was made) and the prefix of each
+    /// connector's tools. Read from the catalogs, so nothing is started.
+    func connectorAnnotations(for ids: Set<UUID>, cliNames: [UUID: String]) async
+        -> (destructive: [String: String], known: Set<String>, prefixes: Set<String>) {
+        guard !ids.isEmpty else { return ([:], [], []) }
+        var tools: [any AgentTool] = []
+        for connector in connectors where ids.contains(connector.id) {
+            if let catalog = await mcp.catalog(connector.id) {
+                tools += catalog.mcpTools(serverName: connector.name, serverID: connector.id, manager: mcp)
+            }
+        }
         return (ClaudeCodeTurn.destructiveConnectors(tools, cliNames: cliNames),
-                ClaudeCodeTurn.unverifiedConnectors(ids, tools: tools, cliNames: cliNames))
+                ClaudeCodeTurn.knownConnectorTools(tools, cliNames: cliNames),
+                ClaudeCodeTurn.connectorPrefixes(ids, cliNames: cliNames))
+    }
+
+    /// Lists again, in the background, the connectors of a Claude Code turn whose catalog is missing or older than
+    /// `maxAge`, so what the turn is told about their tools does not stay frozen (the CLI runs its own servers, which
+    /// only this catalog describes). Never holds the turn; each connector is tried at most once an hour.
+    func renewOldCatalogs(of ids: Set<UUID>, maxAge: TimeInterval = 24 * 3600) {
+        guard renewsCatalogs else { return }
+        let enabled = connectors.filter { ids.contains($0.id) && $0.isEnabled }
+        Task {
+            for connector in enabled where Date.now.timeIntervalSince(catalogRenewals[connector.id] ?? .distantPast) > 3600 {
+                if let catalog = await mcp.catalog(connector.id), Date.now.timeIntervalSince(catalog.updatedAt) < maxAge { continue }
+                catalogRenewals[connector.id] = .now
+                _ = await testConnector(connector.id)
+            }
+        }
     }
 
     func stop(_ botID: UUID, startsQueuedRoutines: Bool = true) { sessions[botID]?.stop(startsQueuedRoutines: startsQueuedRoutines) }
@@ -1678,53 +1716,41 @@ final class AppModel {
 
     // MARK: Connectors
 
+    /// Tells `mcp` which connectors there are. It starts none of them: a server starts when an Orb first needs it.
     func syncConnectors() {
         guard !isDevRun else { return } // their servers are programs (`npx …`) of whoever wrote the data folder
         let configs = connectors
         let previous = connectorSync
-        connectorSyncGeneration += 1
-        let generation = connectorSyncGeneration
-        pendingConnectorSyncs += 1
-        settledConnectors = [:]
         connectorSync = Task {
             await previous?.value
-            // `sync` waits for servers to start; show "Conectando…" meanwhile.
-            let syncing = Task {
-                await mcp.sync(configs) { [weak self] id, status in await self?.connectorSettled(id, status, generation: generation) }
-            }
-            try? await Task.sleep(for: .milliseconds(150))
-            connectorStatus = await mcp.status()
-            await syncing.value
-            connectorStatus = await mcp.status()
-            if generation == connectorSyncGeneration {
-                // Whatever did not need to start (already running, off) is settled too.
-                for (id, status) in connectorStatus where settledConnectors[id] == nil { settledConnectors[id] = status }
-            }
-            pendingConnectorSyncs -= 1
+            await mcp.sync(configs)
         }
     }
 
-    private func connectorSettled(_ id: UUID, _ status: MCPStatus, generation: Int) {
-        connectorStatus[id] = status
-        if generation == connectorSyncGeneration { settledConnectors[id] = status }
+    /// Starts connector `id` now (a server that is already on lists its tools again) and gives how it went: what the
+    /// editor does after saving and what "Testar conexão" and "Tentar de novo" do.
+    func testConnector(_ id: UUID) async -> ConnectorTestOutcome {
+        await connectorSync?.value
+        let started = ContinuousClock.now
+        do {
+            let count = try await mcp.test(id)
+            let elapsed = ContinuousClock.now - started
+            return .connected(tools: count, seconds: Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18)
+        } catch {
+            return .failed(error.localizedDescription)
+        }
     }
 
-    /// Waits until connector `id` has started or failed in the sync that a change to `connectors` began, and gives
-    /// its status. Other connectors that are slow to start or retrying do not hold it back.
+    /// The status of connector `id` once it has been started (or failed to).
     func connectAndWait(_ id: UUID) async -> MCPStatus? {
-        while settledConnectors[id] == nil, pendingConnectorSyncs > 0, !Task.isCancelled {
-            try? await Task.sleep(for: .milliseconds(60))
-        }
-        return settledConnectors[id] ?? connectorStatus[id]
+        _ = await testConnector(id)
+        return await mcp.status()[id]
     }
 
-    /// Waits until every connector in `ids` has started or failed in the sync under way, but no longer than `timeout`
-    /// (an `npx` server can take many seconds).
-    func waitForConnectors(_ ids: Set<UUID>, timeout: Duration) async {
-        let deadline = ContinuousClock.now + timeout
-        while pendingConnectorSyncs > 0, ids.contains(where: { settledConnectors[$0] == nil }),
-              ContinuousClock.now < deadline, !Task.isCancelled {
-            try? await Task.sleep(for: .milliseconds(60))
+    /// "Reconectar": tries again the connectors that failed.
+    func retryFailedConnectors() {
+        for (id, status) in connectorStatus {
+            if case .failed = status { Task { _ = await testConnector(id) } }
         }
     }
 
@@ -1748,7 +1774,7 @@ final class AppModel {
         for (id, live) in lives where live.unread > 0 { unread[id.uuidString] = live.unread }
         return AppState(bots: bots, routines: routines, skills: skills, connectors: connectorSecrets.redact(connectors),
                         providers: providers, defaultModel: defaultModel, unread: unread, contextMemory: contextMemory,
-                        learnedContexts: learnedContexts)
+                        learnedContexts: learnedContexts, profile: profile)
     }
 
     private func scheduleStateSave() {

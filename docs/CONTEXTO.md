@@ -205,6 +205,7 @@ Medidas que não são "compactar" mas decidem quanto cada mensagem custa:
 | Prompt do sistema **estável** | `SystemPrompt`, `PromptParts` | Sem data nem hora: o texto é igual de um dia para o outro. O que muda a cada mensagem vai no prefácio |
 | **Prefácio por diferença** | `TurnPreface`, `WorkspaceSnapshot.report`, `WorkspaceChanges` | A pasta vai inteira uma vez; depois só `<workspace_changes>` (entradas, branch, mudanças e commits novos), ou nada. O hash exclui "arquivos recentes" (mudavam a cada escrita do próprio Orb). O snapshot completo volta quando o histórico não o tem mais |
 | **Memória relacionada sem repetição** | `MemoryBank.related`, `TurnPreface.relatedLines` | No máximo 3 itens de 220 caracteres, só para mensagens com assunto (nada para "obrigado"), com 2 palavras em comum quando a mensagem tem 3 ou mais; um item (id `#a1b2`) que as últimas 3 mensagens já levaram só volta se a página mudou |
+| Conectores sob demanda | `ConnectorGateway`, `ConnectorCatalog` | As ferramentas dos conectores não vão no pedido: o Orb recebe `connector_tools` e `connector_call` (≈ 600 caracteres, mais ≤ 100 por conector no índice, fora do teto de `ToolBox.all`). O índice depende só de quais conectores o Orb tem (nome e resumo, ordenados), então muda quando um conector entra, sai ou é desligado, nunca quando o servidor muda as ferramentas: a lista de ferramentas é a mesma em todos os passos e o cache continua valendo. Os schemas chegam como saída de `connector_tools`, no fim do histórico; se a compactação encurtar essa saída, o modelo chama de novo (barato, o catálogo está em disco) |
 | Ferramentas enxutas | `ToolSpec`, `JSONValue.property` | Descrições e schemas ~35% menores; `required` vazio sai; `ui_read`/`ui_act` só são oferecidos com Acessibilidade concedida |
 | Ferramentas que pagam o próprio orçamento | `ToolOutputBudget` | `read_file`, `grep`, `glob`, `list_directory` devolvem até 24 000 caracteres por página e dizem como continuar; `web_fetch` devolve 12 000 por padrão (`offset` continua e `find` procura; a página convertida fica 10 min em memória) |
 | Imagens | `ImageProcessing`, `elidingOldImages` | Reduzidas a 1 568 px (JPEG 0,85) ao anexar; só as 3 últimas vezes do usuário mantêm imagens no envio; cada imagem é contada como 1 600 tokens |
@@ -235,7 +236,8 @@ Medidas que não são "compactar" mas decidem quanto cada mensagem custa:
 par, `prepareHistory`, saídas grandes), `Engine/ContextCondensing.swift`, `Engine/ConversationLedger.swift`,
 `Engine/ToolDigest.swift` (linhas por passo e registro de progresso), `Engine/Compaction.swift` (relatório, `compact`,
 `/compactar`), `Engine/ContextMeter.swift`, `Engine/ToolOutputSpill.swift`, `AppModel+ContextUI.swift`, `ContextGauge.swift`,
-`Views/ContextMeterViews.swift`, `Views/ContextSettings.swift`, `Engine/TurnPrompt.swift`, `Engine/WorkspaceChanges.swift`.
+`Views/ContextMeterViews.swift`, `Views/ContextSettings.swift`, `Engine/TurnPrompt.swift`, `Engine/WorkspaceChanges.swift`,
+`Engine/ConnectorGateway.swift`.
 Testes: `ContextWindowTests`, `ContextBatchingTests`, `ContextEngineBatchingTests`, `ConversationLedgerTests`,
 `CompactionFlowTests`, `CompactionIntegrationTests`, `CompactionReviewTests`, `ContextUITests`, `CacheMetricsTests`,
-`PrefaceFlowTests`, `RelatedMemoryTests`.
+`PrefaceFlowTests`, `RelatedMemoryTests`, `ConnectorGatewayTests`.

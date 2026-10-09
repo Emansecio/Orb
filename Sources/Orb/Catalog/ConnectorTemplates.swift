@@ -135,34 +135,13 @@ extension MCPServerConfig {
     }
 }
 
-/// Pure helpers for what the connector screens say.
-enum ConnectorLoad {
-    /// Above this many connector tools in one request the model gets slower and costlier (and picks worse tools).
-    static let warningThreshold = 40
-
-    /// The tools of connectors an Orb receives with each message: its "Conectores" switch on, connector enabled and
-    /// allowed for it, and connected (`status`).
-    static func toolCount(for bot: Bot, connectors: [MCPServerConfig], status: [UUID: MCPStatus]) -> Int {
-        guard bot.capabilities.contains(.connectors) else { return 0 }
-        return connectors.reduce(0) { total, connector in
-            guard connector.isEnabled, connector.isAvailable(to: bot.id), case .ready(let count)? = status[connector.id] else { return total }
-            return total + count
-        }
-    }
-
-    /// The Orb that gets the most tools, when that is over the threshold.
-    static func heaviest(bots: [Bot], connectors: [MCPServerConfig], status: [UUID: MCPStatus]) -> (bot: Bot, count: Int)? {
-        bots.map { ($0, toolCount(for: $0, connectors: connectors, status: status)) }
-            .filter { $0.1 > warningThreshold }
-            .max { $0.1 < $1.1 }
-            .map { (bot: $0.0, count: $0.1) }
-    }
-
-    static func warning(for heaviest: (bot: Bot, count: Int)) -> String {
-        "\(heaviest.bot.name) recebe \(heaviest.count) ferramentas de conectores a cada mensagem. Muitas ferramentas ativas deixam as conversas mais lentas e caras: desative as que você não usa."
-    }
+/// How "Testar conexão" ended.
+enum ConnectorTestOutcome: Equatable, Sendable {
+    case connected(tools: Int, seconds: Double)
+    case failed(String)
 }
 
+/// Pure helpers for what the connector screens say.
 enum ConnectorStatusText {
     /// A connection error in one or two short lines: the reason, without the "Não foi possível iniciar o conector X:" lead.
     static func shortError(_ message: String, limit: Int = 140) -> String {
@@ -174,6 +153,15 @@ enum ConnectorStatusText {
         guard line.count > limit else { return line.isEmpty ? "Sem detalhes." : line }
         return String(line.prefix(limit)).trimmingCharacters(in: .whitespaces) + "…"
     }
+
+    /// "Conectou: 12 ferramentas em 0,8 s".
+    static func tested(tools: Int, seconds: Double) -> String {
+        let time = String(format: "%.1f", seconds).replacingOccurrences(of: ".", with: ",")
+        return "Conectou: \(tools == 1 ? "1 ferramenta" : "\(tools) ferramentas") em \(time) s"
+    }
+
+    /// "12 ferramentas".
+    static func toolCount(_ count: Int) -> String { count == 1 ? "1 ferramenta" : "\(count) ferramentas" }
 
     /// "12 ferramentas disponíveis".
     static func toolsAvailable(_ count: Int) -> String {

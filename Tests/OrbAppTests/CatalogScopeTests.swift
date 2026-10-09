@@ -29,6 +29,17 @@ private func fakeServer(name: String, count: Int, environment: [String: String] 
 // MARK: - Per-Orb scope
 
 struct OrbScopeModelTests {
+    @Test func aConnectorKeepsItsSummaryAndOlderFilesHaveNone() throws {
+        var connector = MCPServerConfig(name: "Meu", command: "x")
+        #expect(connector.summary == nil)
+        connector.summary = "Faz coisas."
+        let decoded = try JSONDecoder().decode(MCPServerConfig.self, from: JSONEncoder().encode(connector))
+        #expect(decoded.summary == "Faz coisas.")
+        #expect(try JSONDecoder().decode(MCPServerConfig.self, from: Data(#"{"name":"Antigo","command":"npx"}"#.utf8)).summary == nil)
+        // It says nothing about how the server runs, so a new description does not restart it.
+        #expect(connector.runsSameServer(as: MCPServerConfig(id: connector.id, name: "Meu", command: "x")))
+    }
+
     @Test func olderFilesMeanEveryOrb() throws {
         let connector = try JSONDecoder().decode(MCPServerConfig.self, from: Data(#"{"name":"Antigo","command":"npx"}"#.utf8))
         #expect(connector.orbIDs == nil && connector.isForAllOrbs && connector.secretKeys.isEmpty)
@@ -216,31 +227,23 @@ struct OrbScopeModelTests {
     }
 }
 
-// MARK: - Which connector tools an Orb gets
+// MARK: - Which connectors an Orb reaches
 
 @Suite(.enabled(if: hasPython))
 struct ConnectorToolFilteringTests {
-    @Test func managerOffersOnlyTheAllowedServers() async throws {
-        let manager = MCPManager()
-        let a = try fakeServer(name: "Alfa", count: 2), b = try fakeServer(name: "Beta", count: 3)
-        await manager.sync([a, b])
-        #expect(await manager.tools().count == 5)
-        let onlyA = await manager.tools(allowing: [a.id]).compactMap { $0 as? MCPTool }
-        #expect(onlyA.count == 2 && onlyA.allSatisfy { $0.serverID == a.id })
-        #expect(await manager.tools(allowing: []).isEmpty)
-    }
-
     @Test func changingTheScopeDoesNotRestartTheServer() async throws {
         let manager = MCPManager()
         var config = try fakeServer(name: "Alfa", count: 1)
         await manager.sync([config])
-        let before = try #require(await manager.tools().first as? MCPTool).connection
+        let before = try await manager.ensureStarted(config.id)
         config.orbIDs = [UUID()]
         await manager.sync([config])
-        #expect(try #require(await manager.tools().first as? MCPTool).connection === before)
+        #expect(try await manager.ensureStarted(config.id) === before)
         config.environment["X"] = "1"
         await manager.sync([config])
-        #expect(try #require(await manager.tools().first as? MCPTool).connection !== before)
+        // Edited: the old server is stopped, and the connector starts again (new) when something needs it.
+        #expect(await manager.status()[config.id] == .idle(toolCount: nil))
+        #expect(try await manager.ensureStarted(config.id) !== before)
     }
 
     @Test @MainActor func connectAndWaitReportsTheOutcome() async throws {
@@ -254,68 +257,41 @@ struct ConnectorToolFilteringTests {
         guard case .failed? = await model.connectAndWait(broken.id) else { Issue.record("expected failure"); return }
     }
 
-    /// The CLI starts its own connections, so a connector the app's own failed to list (or has not finished starting)
-    /// must come out as "unverified" rather than as "nothing destructive".
-    @Test @MainActor func connectorsTheAppCouldNotListAreUnverifiedForClaudeCode() async throws {
+    /// The CLI starts its own connections, so a connector with no catalog (it never ran, or failed) must come out with no
+    /// known tool, which makes every tool of it ask, rather than as "nothing destructive".
+    @Test @MainActor func connectorsWithoutACatalogAreUnverifiedForClaudeCode() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "OrbScope-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
         let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)
         let good = try fakeServer(name: "Bom", count: 2)
         let broken = MCPServerConfig(name: "Calendário", command: "orb-no-such-command-xyz")
-        let slow = try fakeServer(name: "Lento", count: 1, delay: 5)
-        model.connectors = [good, broken, slow]
-        let names = ClaudeCodeTurn.mcpNames([good, broken, slow])
-        // The quick ones have settled (listed, failed); only the slow one is still starting when the turn asks.
+        let never = try fakeServer(name: "Lento", count: 1)
+        model.connectors = [good, broken, never]
+        let names = ClaudeCodeTurn.mcpNames([good, broken, never])
         #expect(await model.connectAndWait(good.id) == .ready(toolCount: 2))
         guard case .failed? = await model.connectAndWait(broken.id) else { Issue.record("expected failure"); return }
-        let found = await model.connectorAnnotations(for: [good.id, broken.id, slow.id], cliNames: names, timeout: .seconds(1))
-        #expect(found.unverified == ["calend_rio__", "lento__"])
+        let found = await model.connectorAnnotations(for: [good.id, broken.id, never.id], cliNames: names)
+        #expect(found.prefixes == ["bom__", "calend_rio__", "lento__"])
+        #expect(found.known == ["bom__t0", "bom__t1"])
         #expect(found.destructive.isEmpty)
-        #expect(await model.connectorAnnotations(for: [], cliNames: names).unverified.isEmpty)
+        #expect(await model.connectorAnnotations(for: [], cliNames: names).prefixes.isEmpty)
+        // Reading the catalogs started nothing.
+        #expect(await model.mcp.isRunning(never.id) == false)
     }
 
-    @Test @MainActor func connectAndWaitDoesNotWaitForASlowNeighbour() async throws {
+    @Test @MainActor func startingOneConnectorLeavesTheOthersOff() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "OrbScope-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
         let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)
-        // Far apart, so a loaded machine starting the quick server slowly is not mistaken for waiting on the slow one.
-        let slow = try fakeServer(name: "Lento", count: 1, delay: 40)
-        let quick = try fakeServer(name: "Rápido", count: 2)
-        model.connectors = [slow, quick]
-        let start = ContinuousClock.now
-        #expect(await model.connectAndWait(quick.id) == .ready(toolCount: 2))
-        #expect(ContinuousClock.now - start < .seconds(30), "the quick connector waited for the slow one")
-        if case .ready? = model.connectorStatus[slow.id] { Issue.record("the slow one should still be starting") }
+        let one = try fakeServer(name: "Um", count: 1), two = try fakeServer(name: "Dois", count: 2)
+        model.connectors = [one, two]
+        #expect(await model.connectAndWait(one.id) == .ready(toolCount: 1))
+        await waitUntil("the screen to hear the statuses") { model.connectorStatus[one.id] == .ready(toolCount: 1) }
+        #expect(model.connectorStatus[two.id] == .idle(toolCount: nil))
     }
 }
 
-struct ConnectorLoadTests {
-    private func bot(_ name: String, connectors: Bool = true) -> Bot {
-        var bot = Bot(name: name, role: "", orb: OrbConfig())
-        if connectors { bot.capabilities.insert(.connectors) }
-        return bot
-    }
-
-    @Test func countsOnlyWhatTheOrbReceives() {
-        let atlas = bot("Atlas"), lia = bot("Lia", connectors: false)
-        let big = MCPServerConfig(name: "Grande", command: "x")
-        var mine = MCPServerConfig(name: "Meu", command: "x")
-        mine.orbIDs = [lia.id]
-        var off = MCPServerConfig(name: "Off", command: "x")
-        off.isEnabled = false
-        let status: [UUID: MCPStatus] = [big.id: .ready(toolCount: 30), mine.id: .ready(toolCount: 20), off.id: .ready(toolCount: 9)]
-        let configs = [big, mine, off]
-        #expect(ConnectorLoad.toolCount(for: atlas, connectors: configs, status: status) == 30)
-        #expect(ConnectorLoad.toolCount(for: lia, connectors: configs, status: status) == 0)
-        #expect(ConnectorLoad.heaviest(bots: [atlas, lia], connectors: configs, status: status) == nil)
-
-        var more = big
-        more.id = UUID()
-        let heavy = ConnectorLoad.heaviest(bots: [atlas, lia], connectors: configs + [more], status: status.merging([more.id: .ready(toolCount: 15)]) { $1 })
-        #expect(heavy?.bot.name == "Atlas" && heavy?.count == 45)
-        #expect(heavy.map(ConnectorLoad.warning)?.contains("45 ferramentas") == true)
-    }
-
+struct ConnectorTextTests {
     @Test func errorsReadShort() {
         #expect(ConnectorStatusText.shortError("Não foi possível iniciar o conector GitHub: HTTP 401\nmais detalhe") == "HTTP 401")
         #expect(ConnectorStatusText.shortError("Não foi possível conectar ao conector Slack: Could not connect") == "Could not connect")
@@ -325,6 +301,8 @@ struct ConnectorLoadTests {
         #expect(ConnectorStatusText.toolsAvailable(12) == "12 ferramentas disponíveis")
         #expect(ConnectorStatusText.toolsAvailable(1) == "1 ferramenta disponível")
         #expect(ConnectorStatusText.toolsAvailable(0).contains("não oferece"))
+        #expect(ConnectorStatusText.tested(tools: 12, seconds: 0.84) == "Conectou: 12 ferramentas em 0,8 s")
+        #expect(ConnectorStatusText.tested(tools: 1, seconds: 2) == "Conectou: 1 ferramenta em 2,0 s")
     }
 
     @Test func folderArgumentIsEdited() {

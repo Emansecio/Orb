@@ -11,7 +11,7 @@ import UniformTypeIdentifiers
 // MARK: - Fixtures
 
 /// Pictures built with Core Graphics, so no binary files live in the repository.
-private enum Pictures {
+enum Pictures {
     /// An RGBA bitmap: opaque colour, or a transparent background with a coloured square, or random noise.
     enum Fill { case opaque, transparent, opaqueWithAlphaChannel, noise }
 

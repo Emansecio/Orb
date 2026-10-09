@@ -57,6 +57,7 @@ import Testing
         try write("{}", to: data.appending(path: "conversations/\(atlas.id.uuidString)/routine-\(UUID().uuidString).json"))
         try write("x", to: data.appending(path: "anexos/\(atlas.id.uuidString)/foto.jpg"))
         try write("x", to: data.appending(path: "saidas/\(atlas.id.uuidString)/saida.txt"))
+        try write("{}", to: data.appending(path: "conectores/\(connectorID.uuidString).json"))
         try write("---\ntipo: identidade\n---\n## Como funcionar\n- Seja direto.", to: data.appending(path: "memoria/\(atlas.id.uuidString)/nucleo/identidade.md"))
         try write("---\ntipo: fato\n---\nGosta de café.", to: data.appending(path: "memoria/\(atlas.id.uuidString)/fatos/cafe.md"))
         try write("lixo", to: data.appending(path: "memoria/\(atlas.id.uuidString)/index.sqlite"))
@@ -147,7 +148,7 @@ import Testing
 
         #expect(report.isComplete && report.keptMemories == 2)
         // Gone: the conversations (current, archived, routines'), the attachments, the outputs, the old copies.
-        for gone in ["conversations", "anexos", "saidas", "state.json.corrupt-20260101-000000",
+        for gone in ["conversations", "anexos", "saidas", "conectores", "state.json.corrupt-20260101-000000",
                      "memoria/\(atlas.id.uuidString)", "memoria/\(luna.id.uuidString)"] {
             #expect(!exists(gone), "\(gone) should be gone")
         }

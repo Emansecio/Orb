@@ -96,10 +96,19 @@ qualquer que seja o tamanho da memória. Ele se divide em duas partes, por causa
 
 | Parte | Vai em | Conteúdo |
 |---|---|---|
-| `stable` | prompt do sistema (igual de uma mensagem para outra) | identidade (até 1 500 caracteres: o começo e o fim, onde ficam as notas mais novas), preferências (até 1 500: as 40 mais novas, 240 caracteres cada), a entrevista enquanto pendente (até a 4ª mensagem sua) e a linha de como usar `remember`/`recall` |
+| `stable` | prompt do sistema (igual de uma mensagem para outra) | o perfil da usuária (veja abaixo; nada quando vazio), identidade (até 1 500 caracteres: o começo e o fim, onde ficam as notas mais novas), preferências (até 1 500: as 40 mais novas, 240 caracteres cada), a entrevista enquanto pendente (até a 4ª mensagem sua) e a linha de como usar `remember`/`recall` |
 | `notes` | prefácio da mensagem (`<orb_context>`), dentro de `<memory_notes>` | até **3 lembranças ligadas à mensagem** (220 caracteres cada, 900 no total); "onde paramos" (até 900, **só ao começar uma conversa nova**); títulos de outros fatos (12) e procedimentos (8) |
 
 Detalhes que importam:
+
+- **Perfil da usuária** (Ajustes → Geral → Você; `UserProfile.promptSection`, passado em `brief(profile:)`): nome, como te
+  chamar e "Sobre você", em até ~750 caracteres e **zero quando vazio**. Entra no começo do `pinned`, não em `SystemPrompt`
+  (a base está no teto do `SystemPromptTests`), e vale para todos os Orbs e para os dois motores. Não é uma memória: não é
+  indexado, o `recall` não o acha e não vai para `_guardadas`. A divisão é: **perfil = quem você é** (global, você edita num
+  formulário); **identidade e preferências = como este Orb trabalha com você** (por Orb, o Orb escreve com `remember`). O bloco
+  diz ao modelo que, no jeito de trabalhar, identidade e preferências vencem, e para não perguntar o que o perfil já diz.
+  Passa por `MemoryText.flatten` e `MemorySanitizer.scrub` (colar uma chave não a envia). Editar o perfil custa uma falha de
+  cache (como editar uma preferência); no Claude Code a sessão é reconstruída e `memoryUpdate` leva o bloco novo.
 
 - **Relacionadas** (`MemoryBank.related`): a busca roda em toda mensagem, então é seletiva. Agradecimentos e saudações não
   buscam nada; verbos e palavras de pergunta ("você lembra…", "quantos…") não contam como assunto; `nome` e `anos` só valem
@@ -217,6 +226,7 @@ trecho de conversa (página de sessão), na varredura diária e na conferência 
 |---|---|
 | `Memory/MemoryPage.swift` | `MemoryKind`, formato `.md`, `MemoryText` (palavras, semelhança, busca, achatar), `MemorySanitizer` (segredos) |
 | `Memory/MemoryIndex.swift` | SQLite (tabela + FTS5 + gatilhos, esquema versionado) |
+| `UserProfile.swift` | o perfil da usuária e o seu `promptSection` (entra por `brief(profile:)`) |
 | `Memory/MemoryBank.swift` | a memória de um Orb (actor): identidade, `remember`, `recall`, `related`, `brief`, sessões, envelhecimento, `forget`, `startFromKept`; `MemoryLibrary` (uma por Orb, apagar/guardar/adotar, `seal` na redefinição) |
 | `Memory/KeptMemories.swift` | `_guardadas`: `KeptProfile` (`perfil.json`), `KeptMemory` (o que o menu "Começar de" e Ajustes listam), guardar, listar, contar, adotar |
 | `Memory/SessionSummary.swift` | trecho de conversa → página de sessão, sem LLM; `idleGap` |

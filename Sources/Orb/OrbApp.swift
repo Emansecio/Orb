@@ -271,6 +271,7 @@ enum Snapshot {
         // The Keychain stays untouched: a seed with token-looking values would leave orphan items there.
         let model = AppModel(secretVault: MemoryVault())
         model.showInspector = false // the inspector column does not render offscreen
+        if screen.hasSuffix("-profile") { ProfileSnapshots.fill(model) }
         model.sendLaunchPrompt()
         let content: AnyView = switch screen {
         case "app": AnyView(RootView())
@@ -291,7 +292,7 @@ enum Snapshot {
         case "approvals": AnyView(model.bots.first.map { ApprovalCardsSample(bot: $0) })
         case "new-orb": AnyView(NewBotSheet(height: ProcessInfo.processInfo.environment["ORB_SNAPSHOT_HEIGHT"].flatMap(Double.init).map { CGFloat($0) }))
         case "new-orb-kept": NewBotSnapshots.keptSheet(model: model, height: ProcessInfo.processInfo.environment["ORB_SNAPSHOT_HEIGHT"].flatMap(Double.init).map { CGFloat($0) })
-        case "sidebar": AnyView(SidebarView().frame(width: 280))
+        case "sidebar", "sidebar-profile": AnyView(SidebarView().frame(width: 280))
         case "quickask": AnyView(SystemSnapshots.quickAsk(model, approvals: false))
         case "quickask-approvals": AnyView(SystemSnapshots.quickAsk(model, approvals: true))
         case "quickask-reply": AnyView(SystemSnapshots.quickAsk(model, approvals: false, reply: true))

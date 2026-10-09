@@ -106,6 +106,7 @@ struct GeneralSettings: View {
 
     var body: some View {
         Form {
+            ProfileSettings()
             Section("Geral") {
                 Toggle("Abrir ao iniciar sessão", isOn: Binding(get: { launchAtLogin }, set: { setLaunchAtLogin($0) }))
                 if let loginError {
@@ -276,7 +277,7 @@ enum SettingsSnapshots {
         let tab: SettingsTab
         let content: AnyView
         switch screen {
-        case "settings-general": (tab, content) = (.general, AnyView(GeneralSettings()))
+        case "settings-general", "settings-profile": (tab, content) = (.general, AnyView(GeneralSettings()))
         case "settings-reset":
             // The sheet on its own, as wide as a sheet is, with the numbers of the example in its description.
             return AnyView(ResetOrbSheet(sample: ResetSummary(orbs: 3, conversations: 42, routines: 5, connectors: 2, skills: 4,
