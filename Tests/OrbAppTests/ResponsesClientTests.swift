@@ -50,6 +50,18 @@ struct ResponsesClientTests {
         #expect(ResponsesClient.requestBody(model: "m", messages: [], tools: [])["prompt_cache_key"] == nil)
     }
 
+    @Test func aModelThatDoesNotReasonIsNotAskedForEncryptedReasoning() {
+        for model in ["gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "chatgpt-4o-latest", "openai/gpt-4.1", "gpt-3.5-turbo"] {
+            #expect(ResponsesClient.requestBody(model: model, messages: [.user("oi")], tools: [])["include"] == nil, "\(model)")
+        }
+        for model in ["gpt-5", "o4-mini", "o3", "gpt-5.1-codex", "um-modelo-novo"] {
+            #expect(ResponsesClient.requestBody(model: model, messages: [.user("oi")], tools: [])["include"]
+                == .array([.string("reasoning.encrypted_content")]), "\(model)")
+        }
+        // The ChatGPT backend always gets it.
+        #expect(ResponsesClient.requestBody(model: "gpt-4.1", messages: [], tools: [], toolsAsInputItem: true)["include"] != nil)
+    }
+
     private let reasoningStream = [
         #"{"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","id":"rs_1","summary":[]}}"#,
         #"{"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"Vou listar."}],"encrypted_content":"gAAAA=="}}"#,

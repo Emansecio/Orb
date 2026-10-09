@@ -8,7 +8,7 @@ final class AppModel {
     // MARK: Persisted state
 
     var bots: [Bot] { didSet { scheduleStateSave(); syncLives() } }
-    var routines: [Routine] { didSet { scheduleStateSave(); queueFollowsEdits(from: oldValue) } }
+    var routines: [Routine] { didSet { scheduleStateSave(); queueFollowsEdits(from: oldValue); syncActivities() } }
     var skills: [Skill] { didSet { scheduleStateSave() } }
     var connectors: [MCPServerConfig] { didSet { scheduleStateSave(); syncConnectors() } }
     /// Providers the user set up, with their last fetched model lists.
@@ -188,23 +188,33 @@ final class AppModel {
     @ObservationIgnored private var asleepSince: Date?
     /// When the scheduler last looked at the routines: a long gap since then means the Mac slept in between.
     @ObservationIgnored private var lastRoutinePass: Date?
-    /// The list refresh that is running (the scheduler starts one only when the last has ended).
-    @ObservationIgnored private var modelRefresh: Task<Void, Never>?
-    /// Providers whose list could not be loaded: when it was tried last and how many times in a row it failed.
-    @ObservationIgnored private var modelRefreshFailures: [ProviderKind: (at: Date, count: Int)] = [:]
-    /// Loads a provider's model list; tests replace it (the real one reads the Keychain and the network).
-    @ObservationIgnored var modelLoader: (@MainActor (ProviderAccount) async throws -> [ProviderModel])?
     /// How long after waking the routines hold back: Wi-Fi and DNS are usually back by then.
     nonisolated static let wakeSettleTime: TimeInterval = 45
     /// A gap between two passes of the scheduler (30 s apart) beyond which the Mac must have slept.
     nonisolated static let sleepGap: TimeInterval = 90
     /// How long "going to sleep" holds the routines back without a wake.
     nonisolated static let sleepHold: TimeInterval = 120
+    /// Orbs whose chat is being replaced (a new or a reopened conversation): the archive is written first, and a second
+    /// request meanwhile would archive the same chat twice.
+    @ObservationIgnored private var changingChat: Set<UUID> = []
     /// The Keychain reads of a `refreshConnections` under way, and which state of the Keychain they started from
     /// (`keychainGeneration` changes when the app itself changes a key).
     @ObservationIgnored private var keyReads: (generation: Int, task: Task<Set<ProviderKind>, Never>)?
     @ObservationIgnored private var keychainGeneration = 0
     @ObservationIgnored private(set) var scheduler: Task<Void, Never>?
+    /// What the app asks of macOS for its routines (see `syncActivities`): the real thing in the running app, nothing elsewhere.
+    @ObservationIgnored var activity: any ActivityAsserting = InertActivity()
+    @ObservationIgnored var runningActivity: (any NSObjectProtocol)?
+    @ObservationIgnored var waitingActivity: (any NSObjectProtocol)?
+    /// Whether the app stays out of App Nap while a routine is switched on (the running app; not tests or developer runs).
+    @ObservationIgnored var keepsAwakeForRoutines = false
+    /// The model-list refresh the scheduler started, while it runs, and the providers whose last automatic attempt failed.
+    @ObservationIgnored private var modelRefresh: Task<Void, Never>?
+    @ObservationIgnored private var modelRefreshFailures: [ProviderKind: ModelRefreshBackoff.Failure] = [:]
+    /// How a provider's model list is loaded: the live one asks the Keychain (or the sign-in) and the network; tests put a fake here.
+    @ObservationIgnored var loadModels: (ProviderAccount) async throws -> [ProviderModel] = { account in
+        try await ModelCatalog.fetch(account, token: try await AppModel.credentials(for: account.kind)(false))
+    }
     /// Whether this is a developer mode (`--snapshot`, `--render-*`): it draws and exits, so nothing with an effect
     /// outside the process runs in it, not even over a data folder with routines or connectors (see `DevRun`).
     @ObservationIgnored let isDevRun: Bool
@@ -289,6 +299,13 @@ final class AppModel {
         self.store.onSaveFailure = { [weak self] notice in
             Task { @MainActor in self?.reportSaveFailure(notice) }
         }
+        self.store.onNotice = { [weak self] notice in
+            Task { @MainActor in
+                guard let self else { return }
+                self.addNotice(Self.described(notice, bots: self.bots, routines: self.routines))
+            }
+        }
+        usageLog.adoptCallbacks(of: self.store) // it holds its own copy of the store, made before these were set
 
         syncLives()
         for (id, count) in state.unread {
@@ -315,6 +332,9 @@ final class AppModel {
         Task { [weak self] in await self?.prepareMemory() }
         // No routines, connections or model lists in a developer mode: a copy of real data must not set real work going.
         if !devRun {
+            activity = SystemActivity()
+            keepsAwakeForRoutines = true
+            syncActivities()
             scheduler = Task { [weak self] in
                 await self?.refreshConnections()
                 while !Task.isCancelled {
@@ -322,6 +342,14 @@ final class AppModel {
                     self?.startModelRefresh() // apart: a provider that does not answer must not hold up the routines
                     await self?.unloadIdleConversations()
                     try? await Task.sleep(for: .seconds(30))
+                }
+            }
+            // The settings offer "Entrar" again. Only the app's own login counts (never a copy made by a test), and a
+            // developer run never reads the Keychain.
+            NotificationCenter.default.addObserver(forName: .chatGPTSessionEnded, object: ChatGPTAuth.shared, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    Task { await self.refreshConnections() }
                 }
             }
         }
@@ -684,14 +712,11 @@ final class AppModel {
     /// Reloads the provider's live model list; picks a default model if there is none yet.
     func refreshModels(_ kind: ProviderKind) async throws {
         guard let current = account(kind) else { return }
-        let fetched: [ProviderModel]
-        if let modelLoader {
-            fetched = try await modelLoader(current)
-        } else {
-            fetched = try await ModelCatalog.fetch(current, token: try await token(for: kind))
-        }
+        let fetched = try await loadModels(current)
+        modelRefreshFailures[kind] = nil
         updateProvider(kind) {
-            $0.models = fetched
+            // Read inside the update, so a model added by hand while the list was loading is kept.
+            $0.models = kind == .custom ? ModelCatalog.mergingManual(fetched: fetched, previous: $0.models) : fetched
             $0.modelsUpdatedAt = .now
         }
         if ModelRef(defaultModel).flatMap({ account($0.provider) }) == nil, let first = fetched.first {
@@ -711,37 +736,31 @@ final class AppModel {
         return true
     }
 
-    /// Starts `refreshAllModels` unless one is still running.
-    func startModelRefresh() {
+    /// Keeps model lists current: on launch and then every few hours, for every usable provider. A list that fails to
+    /// load is tried again after a growing wait (`ModelRefreshBackoff`), not at every tick of the scheduler; the
+    /// refresh the user asks for (`refreshModels`) always tries.
+    func refreshAllModels(olderThan age: TimeInterval = 6 * 3600, now: Date = .now) async {
+        for account in providers where account.isEnabled && isUsable(account)
+            && ModelRefreshBackoff.isDue(updatedAt: account.modelsUpdatedAt, failure: modelRefreshFailures[account.kind], now: now, age: age) {
+            do {
+                try await refreshModels(account.kind)
+            } catch {
+                guard !Task.isCancelled else { return }
+                modelRefreshFailures[account.kind] = .init(
+                    at: now, count: (modelRefreshFailures[account.kind]?.count ?? 0) + 1,
+                    credentialRefused: (error as? LLMError)?.isCredentialRefusal == true)
+            }
+        }
+    }
+
+    /// Starts `refreshAllModels` beside the scheduler's other work: a host that does not answer holds this task for as
+    /// long as its timeout, not the routines that are due. One at a time.
+    private func startModelRefresh() {
         guard modelRefresh == nil else { return }
         modelRefresh = Task { [weak self] in
             await self?.refreshAllModels()
             self?.modelRefresh = nil
         }
-    }
-
-    /// Keeps model lists current: on launch and then every few hours, for every usable provider. A list that fails
-    /// (a revoked key, a gateway that is off) is tried again after 5 minutes, then 10, doubling up to `age`, not at
-    /// every pass of the scheduler.
-    func refreshAllModels(olderThan age: TimeInterval = 6 * 3600, now: Date = .now) async {
-        for account in providers where account.isEnabled && isUsable(account)
-            && (account.modelsUpdatedAt.map { now.timeIntervalSince($0) > age } ?? true) {
-            if let failed = modelRefreshFailures[account.kind],
-               now.timeIntervalSince(failed.at) < min(age, Self.modelRetryBase * pow(2, Double(failed.count - 1))) { continue }
-            do {
-                try await refreshModels(account.kind)
-                modelRefreshFailures[account.kind] = nil
-            } catch {
-                let count = (modelRefreshFailures[account.kind]?.count ?? 0) + 1
-                modelRefreshFailures[account.kind] = (now, min(count, 16))
-            }
-        }
-    }
-
-    nonisolated static let modelRetryBase: TimeInterval = 5 * 60
-
-    private func token(for kind: ProviderKind) async throws -> String? {
-        try await Self.credentials(for: kind)(false)
     }
 
     /// Looked up again before every model request, so an expired sign-in is refreshed and a changed key is picked up.
@@ -936,6 +955,8 @@ final class AppModel {
         let loop = scheduler
         loop?.cancel()
         scheduler = nil
+        modelRefresh?.cancel()
+        modelRefresh = nil
         queuedRoutines = []
         routines = [] // the end of a running routine finds nothing to record
         var ending: [Task<Void, Never>] = loop.map { [$0] } ?? []
@@ -969,25 +990,59 @@ final class AppModel {
 
     // MARK: Conversation history
 
-    /// Starts a new conversation. The current one is archived (when you said anything in it), not thrown away. The
-    /// draft belongs to the Orb, not to the conversation: it stays in the composer, with what was queued during a
-    /// stopped turn (which `leaveChat` gave back to it, attachments and all).
-    func newConversation(_ botID: UUID) {
-        guard bot(botID) != nil else { return }
+    /// Starts a new conversation. The current one is archived (when you said anything in it), not thrown away: it is
+    /// replaced only once its archive file is on disk, so a full disk leaves it open instead of losing it. The draft
+    /// belongs to the Orb, not to the conversation: it stays in the composer, with what was queued during a stopped
+    /// turn (which `leaveChat` gave back to it, attachments and all). Returns the task that finishes the change
+    /// (nil when there is nothing to wait for or one is already under way).
+    @discardableResult
+    func newConversation(_ botID: UUID) -> Task<Void, Never>? {
+        guard bot(botID) != nil, !changingChat.contains(botID) else { return nil }
         leaveChat(botID)
-        archiveChat(botID)
-        session(botID).installChat(Conversation())
+        guard let leaving = chatToArchive(botID) else {
+            session(botID).installChat(Conversation())
+            return nil
+        }
+        guard leaving.chat.hasUserMessages else {
+            leaving.keepStretch(in: session(botID))
+            session(botID).installChat(Conversation())
+            return nil
+        }
+        changingChat.insert(botID)
+        return Task { [weak self] in
+            guard let self else { return }
+            defer { changingChat.remove(botID) }
+            guard let summary = await store.archiveAndWait(leaving.chat, for: botID) else {
+                addNotice(Self.couldNotArchive)
+                return
+            }
+            // Said something meanwhile: the new conversation would throw that away. The chat stays open, and the
+            // copy just archived goes, or the next attempt would list the same conversation twice.
+            guard bot(botID) != nil, isUnchanged(botID, since: leaving) else {
+                store.deleteArchived(summary.id, for: botID)
+                if bot(botID) != nil { addNotice(Self.changedMeanwhile) }
+                return
+            }
+            noteArchived(summary, leaving, of: botID)
+            session(botID).installChat(Conversation())
+        }
     }
 
     /// Makes an archived conversation the current one. The current one is archived first (if you said anything in
     /// it), so nothing is lost either way. The conversation keeps its Claude Code session and its memory
     /// bookkeeping (how much of it is already saved as memory), so reopening it saves nothing twice. The file is read
-    /// off the main thread; what changed meanwhile is looked at again before the chat is replaced.
+    /// off the main thread; what changed meanwhile is looked at again before the chat is replaced. The archived copy
+    /// goes only after both the current chat's archive and the reopened one are written: with a full disk the change
+    /// is given up and nothing is lost.
     @discardableResult
     func reopenConversation(_ id: UUID, of botID: UUID) async -> Bool {
-        guard bot(botID) != nil, !reopening.contains(id) else { return false }
+        guard bot(botID) != nil, !reopening.contains(id), !changingChat.contains(botID) else { return false }
         reopening.insert(id)
-        defer { reopening.remove(id) }
+        changingChat.insert(botID)
+        defer {
+            reopening.remove(id)
+            changingChat.remove(botID)
+        }
         let read = await store.readArchivedAsync(id, for: botID)
         // The Orb was deleted, or the conversation was deleted from the list, while it was being read.
         guard let owner = bot(botID), archives[botID]?.contains(where: { $0.id == id }) ?? true else { return false }
@@ -997,9 +1052,39 @@ final class AppModel {
             return false
         }
         leaveChat(botID)
-        archiveChat(botID)
-        session(botID).installChat(chosen.closingInterruptedTurn())
-        store.deleteArchived(id, for: botID) // after the reopened chat is written (`installChat`, same queue): a crash in between keeps both
+        let leaving = chatToArchive(botID)
+        var summary: ConversationSummary?
+        if let leaving, leaving.chat.hasUserMessages {
+            summary = await store.archiveAndWait(leaving.chat, for: botID)
+            guard summary != nil else {
+                addNotice(Self.couldNotArchive)
+                return false
+            }
+        }
+        let reopened = chosen.closingInterruptedTurn()
+        // Given up after the current chat was archived: that copy goes, the chat is still open and would be archived again.
+        func giveUp() -> Bool {
+            if let summary { store.deleteArchived(summary.id, for: botID) }
+            return false
+        }
+        guard bot(botID) != nil, isUnchanged(botID, since: leaving) else { return giveUp() }
+        guard await store.saveAndWait(reopened, for: botID) else {
+            addNotice(Self.couldNotReopen)
+            return giveUp()
+        }
+        guard bot(botID) != nil, isUnchanged(botID, since: leaving) else {
+            // The file holds the reopened chat by now: the one still open goes back on disk before its archived copy goes.
+            if let session = sessions[botID] {
+                session.isDirty = true
+                session.saveNow()
+            }
+            return giveUp()
+        }
+        if let leaving {
+            if let summary { noteArchived(summary, leaving, of: botID) } else { leaving.keepStretch(in: session(botID)) }
+        }
+        session(botID).installChat(reopened)
+        store.deleteArchived(id, for: botID) // the reopened chat is on disk by now: only then does its archived copy go
         archives[botID]?.removeAll { $0.id == id }
         return true
     }
@@ -1038,23 +1123,49 @@ final class AppModel {
         ensureLoaded(botID)
     }
 
-    /// Archives the chat if you said anything in it. Whatever of it is not yet in memory is saved first, once: the
-    /// mark of how much is saved goes into the archive with the conversation.
-    private func archiveChat(_ botID: UUID) {
-        guard let session = sessions[botID], var chat = session.parkedChat ?? session.conversation else { return }
-        let start = min(chat.memorySavedCount ?? 0, chat.items.count)
-        let stretch = Array(chat.items[start...])
-        if !stretch.isEmpty {
-            chat.memorySavedCount = chat.items.count
-            session.persistStretch(stretch)
+    /// The chat that is about to leave, and what of it is not yet in memory (saved once, when it has left).
+    private struct LeavingChat {
+        var chat: Conversation
+        var stretch: [TranscriptItem]
+        var itemCount: Int
+
+        @MainActor func keepStretch(in session: BotSession) {
+            if !stretch.isEmpty { session.persistStretch(stretch) }
         }
-        guard chat.hasUserMessages else { return }
-        let summary = store.archive(chat, for: botID)
+    }
+
+    private func chatToArchive(_ botID: UUID) -> LeavingChat? {
+        guard let session = sessions[botID], var chat = session.parkedChat ?? session.conversation else { return nil }
+        let count = chat.items.count
+        let start = min(chat.memorySavedCount ?? 0, count)
+        let stretch = Array(chat.items[start...])
+        // The mark of how much is saved goes into the archive with the conversation.
+        if !stretch.isEmpty { chat.memorySavedCount = count }
+        return LeavingChat(chat: chat, stretch: stretch, itemCount: count)
+    }
+
+    /// Whether nothing was said in the chat since it was looked at (the awaits in between let the user go on typing).
+    private func isUnchanged(_ botID: UUID, since leaving: LeavingChat?) -> Bool {
+        guard let leaving else { return true }
+        let session = sessions[botID]
+        return (session?.parkedChat ?? session?.conversation)?.items.count == leaving.itemCount
+    }
+
+    /// The chat is in the archive: its menu entry, and the memory page of what was not yet kept.
+    private func noteArchived(_ summary: ConversationSummary, _ leaving: LeavingChat, of botID: UUID) {
+        leaving.keepStretch(in: session(botID))
         if archives[botID] != nil {
             archives[botID]?.append(summary)
             archives[botID]?.sort { $0.updatedAt > $1.updatedAt }
         }
     }
+
+    private static let couldNotArchive = StoreNotice(
+        message: "Não foi possível guardar esta conversa em conversas anteriores (talvez falte espaço no disco). Ela continua aberta.")
+    private static let changedMeanwhile = StoreNotice(
+        message: "A conversa mudou enquanto era guardada, então a nova conversa não foi aberta. Ela continua aberta.")
+    private static let couldNotReopen = StoreNotice(
+        message: "Não foi possível reabrir a conversa: o disco não aceitou a gravação (talvez falte espaço). A conversa atual continua aberta e a outra segue em conversas anteriores.")
 
     // MARK: Memory
 

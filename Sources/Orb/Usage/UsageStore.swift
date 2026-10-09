@@ -25,7 +25,8 @@ extension Store {
             let batch = Dictionary(uniqueKeysWithValues: rows.map { ($0.key, $0.value) })
             enqueue(touching: [url]) {
                 let existing: StoreRead<UsageMonth> = read(UsageMonth.self, from: url, ifUnreadable: "o histórico do mês começou vazio")
-                if let notice = existing.notice { onSaveFailure?(notice) }
+                // What the read found (items left out, a file set aside) is news, not a failed write: the write below goes through.
+                if let notice = existing.notice { onNotice?(notice) }
                 // A file that exists but could not be read nor set aside is blocked for writes (`writeFile` says so).
                 var file = existing.value ?? UsageMonth()
                 file.merge(batch, names: names)
@@ -74,7 +75,7 @@ final class UsageRecorder {
     /// How long rows wait before they are written.
     static let flushDelay = Duration.seconds(10)
 
-    private let store: Store
+    private var store: Store
     private var pending: [UsageKey: UsageTotals] = [:]
     private var names: [UUID: String] = [:]
     private var flushTask: Task<Void, Never>?
@@ -90,6 +91,12 @@ final class UsageRecorder {
     }
 
     var hasPending: Bool { !pending.isEmpty }
+
+    /// The store was copied into this recorder before the app wired its callbacks: take them from `other`.
+    func adoptCallbacks(of other: Store) {
+        store.onSaveFailure = other.onSaveFailure
+        store.onNotice = other.onNotice
+    }
 
     /// Counts a use of `model` by the Orb `orb`, in the hour it happened. Nothing is recorded for an empty use.
     func record(_ totals: UsageTotals, orb: UUID, name: String, model: String, source: UsageSource) {

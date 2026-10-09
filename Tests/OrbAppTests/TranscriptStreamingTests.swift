@@ -283,7 +283,7 @@ import Testing
         #expect(model.transcript(first).count == 1)
 
         let swaps = shown.swaps
-        model.newConversation(second)
+        await model.newConversation(second)?.value
         #expect(shown.items.isEmpty)
         #expect(shown.swaps == swaps + 1) // the chat cross-fades to another conversation
         model.deleteBot(second)

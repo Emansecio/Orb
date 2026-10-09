@@ -23,6 +23,9 @@ struct ProviderModel: Codable, Hashable, Identifiable, Sendable {
     var supportsImages: Bool?
     /// What the provider's own list charges for it, when the list says (OpenRouter, models.dev for OpenCode).
     var price: ModelPrice?
+    /// Set on a model the user typed in by hand (custom gateway): a refreshed list keeps it even when the gateway's
+    /// own list does not name it. Optional so data from before this field decodes unchanged.
+    var isManual: Bool?
     /// What a million input tokens cost, from `price` (only used to avoid picking a dearer model for a background note,
     /// see `ChunkSummarizer.model`).
     var inputPrice: Double? { price?.input }
@@ -42,6 +45,7 @@ extension ProviderModel {
         contextLength = try c.decodeIfPresent(Int.self, forKey: .contextLength)
         supportsImages = try c.decodeIfPresent(Bool.self, forKey: .supportsImages)
         price = try? c.decodeIfPresent(ModelPrice.self, forKey: .price)
+        isManual = try c.decodeIfPresent(Bool.self, forKey: .isManual)
     }
 }
 
@@ -173,7 +177,40 @@ struct ModelRef: Hashable, Sendable {
 
 // MARK: - Live catalogs
 
+/// When the automatic refresh of a provider's models is tried again after it failed (a gateway without `/models`, a
+/// revoked key, a server that is off): after 5 minutes, then twice as long each time, never past the usual 6 hours.
+/// A key or login the provider refused waits the full 6 hours at once: asking again changes nothing.
+enum ModelRefreshBackoff {
+    static let maxAge: TimeInterval = 6 * 3600
+    static let firstWait: TimeInterval = 5 * 60
+
+    /// The last automatic attempt that failed, and how many in a row.
+    struct Failure: Equatable {
+        var at: Date
+        var count: Int
+        var credentialRefused: Bool
+    }
+
+    static func wait(after failure: Failure) -> TimeInterval {
+        guard !failure.credentialRefused else { return maxAge }
+        return min(maxAge, firstWait * pow(2, Double(min(max(failure.count, 1) - 1, 16))))
+    }
+
+    /// Whether the list is due: older than `age` (or never fetched), and not still waiting out a failed attempt.
+    static func isDue(updatedAt: Date?, failure: Failure?, now: Date, age: TimeInterval = maxAge) -> Bool {
+        if let failure, now < failure.at.addingTimeInterval(wait(after: failure)) { return false }
+        guard let updatedAt else { return true }
+        return now.timeIntervalSince(updatedAt) > age
+    }
+}
+
 enum ModelCatalog {
+    /// A refreshed list for a custom gateway: what the gateway lists, then the models added by hand that it does not name.
+    static func mergingManual(fetched: [ProviderModel], previous: [ProviderModel]) -> [ProviderModel] {
+        let listed = Set(fetched.map(\.id))
+        return fetched + previous.filter { $0.isManual == true && !listed.contains($0.id) }
+    }
+
     /// Fetches the provider's current models with their wire format.
     /// `token` is the API key or, for ChatGPT, the access token.
     static func fetch(_ account: ProviderAccount, token: String?, session: URLSession = .shared) async throws -> [ProviderModel] {
@@ -394,7 +431,8 @@ extension ProviderAccount {
         guard let base = URL(string: baseURL), base.host != nil else { return nil }
         var headers = kind == .custom ? self.headers : [:]
         if kind == .opencodeZen || kind == .opencodeGo { headers["x-opencode-session"] = conversationID }
-        switch model?.format ?? .chat {
+        // Without a listed model a custom gateway still speaks the format chosen for it, not always chat.
+        switch model?.format ?? (kind == .custom ? format : .chat) {
         case .chat:
             return OpenAIClient(baseURL: base, credentials: credentials, extraHeaders: headers, conversationID: conversationID)
         case .messages:

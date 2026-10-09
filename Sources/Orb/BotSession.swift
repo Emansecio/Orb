@@ -124,7 +124,9 @@ final class BotSession {
     /// while preparing, handed the session nothing: what other models said stays to be caught up on.
     @ObservationIgnored var claudeTurnDelivered = false
     /// The routine whose run is the running turn.
-    var routineID: UUID?
+    var routineID: UUID? {
+        didSet { if (oldValue == nil) != (routineID == nil) { model?.syncActivities() } }
+    }
     /// When the running routine's run began.
     @ObservationIgnored var routineStart: Date?
     /// The snapshot and rules marks of the running turn, recorded on its conversation once the model has been given them.

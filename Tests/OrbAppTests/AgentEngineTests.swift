@@ -349,6 +349,31 @@ extension AgentEngineTests {
         #expect(recorded.last?.content == "Vou começar\n\n[resposta interrompida]")
     }
 
+    @Test func whatABrokenOffRequestUsedIsStillCounted() async {
+        let script = Script(responses: [Response(events: [.text("Vou começar"), .finished(.incomplete, TokenUsage(input: 100, output: 3))],
+                                                 failure: URLError(.networkConnectionLost))])
+        let events = await run(AgentEngine(), request(script, mode: .ask, runs: Counter()))
+        #expect(failures(events).count == 1)
+        let requests = events.compactMap { event -> TokenUsage? in if case .requestUsage(let used) = event { used } else { nil } }
+        #expect(requests == [TokenUsage(input: 100, output: 3)])
+        let totals = events.compactMap { event -> TokenUsage? in if case .usage(let total) = event { total } else { nil } }
+        #expect(totals.last == TokenUsage(input: 100, output: 3))
+    }
+
+    @Test func eachAttemptThatBrokeOffAfterReportingItsUseIsCounted() async {
+        let (engine, _) = quickEngine()
+        let script = Script(responses: [
+            Response(events: [.finished(.incomplete, TokenUsage(input: 40))], failure: LLMError.http(status: 529, message: "Overloaded")),
+            Response(events: [.text("ok"), .finished(.done, TokenUsage(input: 60, output: 5))]),
+        ])
+        let events = await run(engine, request(script, mode: .ask, runs: Counter()))
+        #expect(failures(events).isEmpty)
+        let requests = events.compactMap { event -> TokenUsage? in if case .requestUsage(let used) = event { used } else { nil } }
+        #expect(requests == [TokenUsage(input: 40), TokenUsage(input: 60, output: 5)]) // the one lost, then the answered one
+        let totals = events.compactMap { event -> TokenUsage? in if case .usage(let total) = event { total } else { nil } }
+        #expect(totals.last == TokenUsage(input: 100, output: 5))
+    }
+
     @Test func aFailureThatCannotBeRetriedEndsTheTurn() async {
         let (engine, waits) = quickEngine()
         let script = Script(responses: [Response(events: [], failure: LLMError.http(status: 401, message: "no"))])
@@ -993,6 +1018,25 @@ struct ModelTests {
         #expect(Schedule.everyHours(3).next(after: monday9) == monday9.addingTimeInterval(3 * 3600))
     }
 
+    @Test func aScheduleOutOfRangeNeverComesDueAgainRightAway() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: "America/Sao_Paulo"))
+        let now = try #require(calendar.date(from: DateComponents(year: 2026, month: 10, day: 5, hour: 9)))
+        for schedule in [Schedule.weekly(weekday: 9, hour: 10, minute: 0), .weekly(weekday: -7, hour: 10, minute: 0),
+                         .daily(hour: 24, minute: 0), .daily(hour: 10, minute: 75)] {
+            #expect(schedule.next(after: now, calendar: calendar) > now)
+        }
+        // Its label cannot trap on a weekday outside 1...7.
+        for weekday in [-7, -1, 0, 8, 9, 100] {
+            #expect(!Schedule.weekly(weekday: weekday, hour: 10, minute: 0).label.isEmpty)
+        }
+        // From a file edited by hand, as a routine: it is not due at the moment it was last run.
+        let json = #"{"botID":"\#(UUID().uuidString)","schedule":{"weekly":{"weekday":9,"hour":30,"minute":0}}}"#
+        var routine = try JSONDecoder().decode(Routine.self, from: Data(json.utf8))
+        routine.lastRun = now
+        #expect(routine.nextRun > now)
+    }
+
     @Test func oldBotFilesStillDecode() throws {
         let json = #"{"id":"\#(UUID().uuidString)","name":"Velho"}"#
         let bot = try JSONDecoder().decode(Bot.self, from: Data(json.utf8))
@@ -1083,7 +1127,7 @@ struct TurnOrchestrationTests {
         defer { try? FileManager.default.removeItem(at: root) }
         // Stop at different moments of the setup (before it starts, while it runs, after it failed on its own).
         for yields in 0..<4 {
-            model.newConversation(bot.id)
+            await model.newConversation(bot.id)?.value
             #expect(model.send("oi", to: bot.id))
             for _ in 0..<yields { await Task.yield() }
             let task = model.turns[bot.id] // nil when the setup already failed on its own

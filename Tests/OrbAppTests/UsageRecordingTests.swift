@@ -126,6 +126,29 @@ struct UsageStoreTests {
         #expect(Store.usageMonths(from: utcDate(2026, 10, 9), to: utcDate(2026, 10, 9, 23), calendar: utc) == ["2026-10"])
     }
 
+    @Test func aDamagedMonthIsNewsNotAFailedSave() throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        final class Heard: @unchecked Sendable {
+            private let lock = NSLock()
+            private var items: [String] = []
+            func add(_ message: String) { lock.withLock { items.append(message) } }
+            var all: [String] { lock.withLock { items } }
+        }
+        let failures = Heard(), notices = Heard()
+        let store = Store(directory: root, onSaveFailure: { failures.add($0.message) }, onNotice: { notices.add($0.message) })
+        let file = root.appending(path: "uso/2026-10.json")
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(#"{"buckets":[{"#.utf8).write(to: file)
+        let key = UsageKey(hour: utcDate(2026, 10, 9, 10), orb: orb, model: "openai/gpt-5", source: .chat)
+        store.addUsage([key: UsageTotals(requests: 1, input: 3)], names: [:], calendar: utc)
+        store.flush()
+        #expect(failures.all.isEmpty)
+        #expect(notices.all.count == 1)
+        // The new month was written all the same.
+        let month = try JSONDecoder().decode(UsageMonth.self, from: Data(contentsOf: file))
+        #expect(month.buckets.map(\.totals.input) == [3])
+    }
+
     @Test func aFileThatCannotBeDecodedIsSetAsideAndTheHistoryStartsAgain() async throws {
         defer { try? FileManager.default.removeItem(at: root) }
         let store = store()

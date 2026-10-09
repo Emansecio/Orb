@@ -287,7 +287,7 @@ struct SteeringEngineTests {
         model.submit("analise isso também", to: bot.id)
         #expect(lane.queued.count == 1 && lane.files.isEmpty)
 
-        model.newConversation(bot.id) // stops the turn: the queued message goes back to the composer
+        await model.newConversation(bot.id)?.value // stops the turn: the queued message goes back to the composer
         #expect(!model.isWorking(bot.id))
         #expect(model.drafts[bot.id] == "analise isso também") // the text is not lost with its attachment
         #expect(lane.files.map(\.url) == [file])
@@ -298,7 +298,7 @@ struct SteeringEngineTests {
     @Test @MainActor func aNewConversationKeepsTheDraftOfTheOrb() async throws {
         let (model, bot) = setUp(HeldModel())
         model.setDraft("ainda escrevendo", for: bot.id)
-        model.newConversation(bot.id)
+        await model.newConversation(bot.id)?.value
         #expect(model.drafts[bot.id] == "ainda escrevendo")
     }
 

@@ -787,7 +787,7 @@ final class MemoryLibrary: Sendable {
     /// shares the same banks: one actor per Orb serializes all its writes.
     static func at(_ root: URL) -> MemoryLibrary {
         shared.withLock { libraries in
-            let key = root.standardizedFileURL.path
+            let key = FileKey.of(root)
             if let library = libraries[key] { return library }
             let library = MemoryLibrary(root: root)
             libraries[key] = library

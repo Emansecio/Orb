@@ -1,5 +1,21 @@
 import Foundation
 
+/// The name two spellings of one file share, to key the gate, the writer queues and the seals. It is worked out from the
+/// text of the path alone (`.` and `..`, and the `/private` of `/private/var`, `/private/tmp` and `/private/etc`):
+/// `URL.standardizedFileURL` also looks at the disk, so a file that did not exist yet and one just created got two
+/// names, and a write registered under the first was never found finished under the second (a read waited forever).
+enum FileKey {
+    static func of(_ url: URL) -> String {
+        var parts: [Substring] = []
+        for part in url.path.split(separator: "/", omittingEmptySubsequences: true) {
+            if part == "." { continue }
+            if part == ".." { _ = parts.popLast() } else { parts.append(part) }
+        }
+        if parts.count > 1, parts[0] == "private", ["var", "tmp", "etc"].contains(parts[1]) { parts.removeFirst() }
+        return "/" + parts.joined(separator: "/")
+    }
+}
+
 // How the Store lets reads and writes share the disk without a read ever waiting behind an unrelated (large) write,
 // and without a read ever seeing anything but a whole file.
 
@@ -21,7 +37,15 @@ final class FileGate: @unchecked Sendable {
     private var reading: Set<String> = []
     private var blocked: Set<String> = []
 
-    private static func key(_ url: URL) -> String { url.standardizedFileURL.path }
+    private static func key(_ url: URL) -> String { FileKey.of(url) }
+
+    /// How long a read may wait before the gate logs what it is waiting for.
+    static let slowWait: TimeInterval = 3
+
+    /// How many writes registered under a path that contains `fragment` are not over (for tests: none should stay behind).
+    func queuedWrites(containing fragment: String) -> Int {
+        condition.withLock { queued.filter { $0.key.contains(fragment) }.values.reduce(0, +) }
+    }
 
     func isBlocked(_ url: URL) -> Bool {
         condition.withLock { blocked.contains(Self.key(url)) }
@@ -56,7 +80,17 @@ final class FileGate: @unchecked Sendable {
     func reading<T>(_ urls: [URL], _ body: () -> T) -> T {
         let keys = urls.map(Self.key)
         condition.lock()
-        while keys.contains(where: { queued[$0] != nil || reading.contains($0) }) { condition.wait() }
+        var reported = false
+        while keys.contains(where: { queued[$0] != nil || reading.contains($0) }) {
+            // Never expected to take long. If it does, the state is logged once, so a stuck read leaves a trace.
+            if !condition.wait(until: .now.addingTimeInterval(Self.slowWait)), !reported {
+                reported = true
+                NSLog("Orb: leitura esperando há mais de %.0f s por %@; escritas na fila: %@; leituras em andamento: %@",
+                      Self.slowWait, keys.map { ($0 as NSString).lastPathComponent }.joined(separator: ", "),
+                      "\(queued.map { ($0.key as NSString).lastPathComponent + ":" + String($0.value) })",
+                      "\(reading.map { ($0 as NSString).lastPathComponent })")
+            }
+        }
         reading.formUnion(keys)
         condition.unlock()
         defer {

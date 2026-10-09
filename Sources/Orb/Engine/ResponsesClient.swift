@@ -64,6 +64,13 @@ struct ResponsesClient: LLMClient {
     /// Last in the body, so the part that repeats comes first (see `WireEncoder`).
     static let trailingKeys = ["input", "tool_choice"]
 
+    /// Whether the model may reason: everything but the families known not to (GPT-4 and GPT-3.5 ones, `chatgpt-4o`),
+    /// so a model this list does not know yet still gets its reasoning carried.
+    static func reasons(_ model: String) -> Bool {
+        let name = model.lowercased().split(separator: "/").last.map(String.init) ?? ""
+        return !["gpt-4", "gpt-3.5", "chatgpt-4o"].contains { name.hasPrefix($0) }
+    }
+
     /// System messages become `instructions`; tool calls and results become `function_call` /
     /// `function_call_output` items. Reasoning recorded by the same endpoint and model goes back as `reasoning`
     /// items right before what it produced (the API rejects one that is not followed by its output).
@@ -108,9 +115,10 @@ struct ResponsesClient: LLMClient {
         }
         var body: [String: JSONValue] = [
             "model": .string(model), "input": .array(input), "stream": .bool(true), "store": .bool(false),
-            // Stateless requests only get reasoning back by carrying it encrypted.
-            "include": .array([.string("reasoning.encrypted_content")]),
         ]
+        // Stateless requests only get reasoning back by carrying it encrypted. A model that does not reason is not
+        // asked: the API refuses `include` for it ("Encrypted content is not supported with this model").
+        if toolsAsInputItem || reasons(model) { body["include"] = .array([.string("reasoning.encrypted_content")]) }
         if !instructions.isEmpty { body["instructions"] = .string(instructions) }
         if let promptCacheKey, !promptCacheKey.isEmpty { body["prompt_cache_key"] = .string(promptCacheKey) }
         if let maxOutputTokens { body["max_output_tokens"] = .number(Double(maxOutputTokens)) }

@@ -54,7 +54,7 @@ import Testing
 
     @Test @MainActor func theCurrentConversationStaysWhereItAlwaysWas() async {
         let (model, botID) = model(current: conversation("primeira"))
-        model.newConversation(botID)
+        await model.newConversation(botID)?.value
         model.saveNow()
         #expect(FileManager.default.fileExists(atPath: currentURL(botID).path))
         #expect(store.loadConversation(botID)?.items.isEmpty == true)
@@ -65,7 +65,7 @@ import Testing
 
     @Test @MainActor func newConversationArchivesTheCurrentOneAndStartsEmpty() async throws {
         let (model, botID) = model(current: conversation("Resuma o relatório de vendas", "e agora o de março"))
-        model.newConversation(botID)
+        await model.newConversation(botID)?.value
 
         #expect(model.transcript(botID).isEmpty)
         let list = store.readArchive(botID)
@@ -77,12 +77,12 @@ import Testing
         #expect(archived.items.count == 4 && archived.messages.count == 4)
     }
 
-    @Test @MainActor func aConversationWithoutUserMessagesIsNotKept() {
+    @Test @MainActor func aConversationWithoutUserMessagesIsNotKept() async {
         var empty = Conversation()
         empty.items = [TranscriptItem(.notice("Conversa compactada"))]
         let (model, botID) = model(current: empty)
-        model.newConversation(botID)
-        model.newConversation(botID)
+        await model.newConversation(botID)?.value
+        await model.newConversation(botID)?.value
         #expect(store.readArchive(botID).isEmpty)
     }
 
@@ -94,7 +94,7 @@ import Testing
         await model.loadArchive(botID)
         #expect(model.archives[botID]?.map(\.title) == ["b", "a"])
 
-        model.newConversation(botID)
+        await model.newConversation(botID)?.value
         #expect(model.archives[botID]?.map(\.title) == ["c", "b", "a"]) // the loaded list follows
         #expect(store.readArchive(botID).map(\.title) == ["c", "b", "a"])
     }
@@ -110,12 +110,96 @@ import Testing
         #expect(attachmentOnly.archiveTitle == "nota.pdf")
     }
 
-    @Test @MainActor func theMemoryOfAnArchivedConversationIsSavedOnceAndTheMarkTravelsWithIt() throws {
+    @Test @MainActor func theMemoryOfAnArchivedConversationIsSavedOnceAndTheMarkTravelsWithIt() async throws {
         let (model, botID) = model(current: conversation("lembre disso", "e disso"))
-        model.newConversation(botID)
+        await model.newConversation(botID)?.value
         let entry = try #require(store.readArchive(botID).first)
         let archived = try #require(store.readArchived(entry.id, for: botID).value)
         #expect(archived.memorySavedCount == archived.items.count)
+    }
+
+    // MARK: A full disk
+
+    /// Takes away the right to create files in `folder` (a full disk fails the same way); false when that changes
+    /// nothing (running as root), and the test has nothing to show.
+    private func fillUp(_ folder: URL) throws -> Bool {
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: folder.path)
+        return !FileManager.default.isWritableFile(atPath: folder.path)
+    }
+
+    private func makeRoom(_ folder: URL) {
+        try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder.path)
+    }
+
+    @Test func anArchiveThatCouldNotBeWrittenIsNotListedAndIsReported() async throws {
+        let botID = UUID()
+        let folder = archiveFolder(botID)
+        defer { makeRoom(folder) }
+        guard try fillUp(folder) else { return }
+        #expect(await store.archiveAndWait(conversation("importante"), for: botID) == nil)
+        makeRoom(folder)
+        #expect(store.readArchive(botID).isEmpty)
+    }
+
+    @Test @MainActor func aNewConversationKeepsTheCurrentOneOpenWhenItCannotBeArchived() async throws {
+        let (model, botID) = model(current: conversation("importante"))
+        let folder = archiveFolder(botID)
+        defer { makeRoom(folder) }
+        guard try fillUp(folder) else { return }
+        await model.newConversation(botID)?.value
+        makeRoom(folder)
+
+        #expect(model.transcript(botID).count == 2) // still there, in memory
+        #expect(store.loadConversation(botID)?.items.count == 2) // and on disk, not replaced by an empty one
+        #expect(!model.dataNotices.isEmpty)
+        // Once there is room again, the same request goes through.
+        await model.newConversation(botID)?.value
+        #expect(model.transcript(botID).isEmpty)
+        #expect(store.readArchive(botID).map(\.title) == ["importante"])
+    }
+
+    @Test @MainActor func reopeningGivesUpAndKeepsTheArchivedCopyWhenTheChatCannotBeWritten() async throws {
+        let (model, botID) = model(current: conversation("segunda"))
+        let first = store.archive(conversation("primeira"), for: botID)
+        store.flush()
+        let folder = root.appending(path: "conversations") // where the current chat's file is replaced
+        defer { makeRoom(folder) }
+        guard try fillUp(folder) else { return }
+        let reopened = await model.reopenConversation(first.id, of: botID)
+        makeRoom(folder)
+
+        #expect(!reopened)
+        #expect(store.readArchived(first.id, for: botID).value != nil) // the only copy of it is still there
+        #expect(model.transcript(botID).count == 2)
+        #expect(!model.dataNotices.isEmpty)
+        // The copy of the open chat made on the way is gone: nothing is listed twice.
+        #expect(store.readArchive(botID).map(\.title) == ["primeira"])
+        // Once there is room again, it opens.
+        #expect(await model.reopenConversation(first.id, of: botID))
+        #expect(store.readArchived(first.id, for: botID).value == nil)
+        #expect(store.readArchive(botID).map(\.title) == ["segunda"])
+    }
+
+    @Test @MainActor func newConversationGivenUpBecauseTheChatChangedLeavesNoExtraArchivedCopy() async throws {
+        let (model, botID) = model(current: conversation("primeira"))
+        let task = model.newConversation(botID)
+        // Said something before the archive was confirmed.
+        model.session(botID).conversation?.items.append(TranscriptItem(.user(text: "mais uma", attachments: [])))
+        await task?.value
+
+        store.flush()
+        #expect(store.readArchive(botID).isEmpty)
+        #expect(model.transcript(botID).count == 3)
+        #expect(!model.dataNotices.isEmpty)
+    }
+
+    @Test func aSealedFolderAnswersWritesWithFailureInsteadOfNeverAnswering() async {
+        let sealed = Store(directory: root)
+        let botID = UUID()
+        sealed.sealWrites()
+        #expect(await sealed.saveAndWait(conversation("oi"), for: botID) == false)
+        #expect(await sealed.archiveAndWait(conversation("oi"), for: botID) == nil)
     }
 
     // MARK: Reopening
@@ -146,14 +230,14 @@ import Testing
         await model.loadArchive(botID)
         model.setDraft("rascunho", for: botID)
 
-        // "Nova conversa" and, at once, back: the archived file is still waiting in the writer's queue, and so is the read.
+        // "Nova conversa" and, at once, back, with the writer busy: the reopened chat waits in its queue to be written.
+        await model.newConversation(botID)?.value
+        let entry = try #require(model.archives[botID]?.first)
         let release = DispatchSemaphore(value: 0)
         store.stallWriter(until: release)
-        model.newConversation(botID)
-        let entry = try #require(model.archives[botID]?.first)
         let reopened = Task { await model.reopenConversation(entry.id, of: botID) }
-        try await Task.sleep(for: .milliseconds(100)) // the main thread kept running while the read waited
-        #expect(model.transcript(botID).isEmpty) // nothing replaced yet
+        try await Task.sleep(for: .milliseconds(100)) // the main thread kept running while the write waited
+        #expect(model.transcript(botID).isEmpty) // nothing replaced yet: the chat is swapped once it is safe
         release.signal()
 
         #expect(await reopened.value)
@@ -163,10 +247,10 @@ import Testing
     @Test @MainActor func aConversationDeletedWhileItIsReadIsNotReopened() async throws {
         let (model, botID) = model(current: conversation("primeira"))
         await model.loadArchive(botID)
+        await model.newConversation(botID)?.value
+        let entry = try #require(model.archives[botID]?.first)
         let release = DispatchSemaphore(value: 0)
         store.stallWriter(until: release)
-        model.newConversation(botID)
-        let entry = try #require(model.archives[botID]?.first)
 
         let reopened = Task { await model.reopenConversation(entry.id, of: botID) }
         model.deleteArchivedConversation(entry.id, of: botID) // gone from the list before the read comes back
@@ -177,7 +261,7 @@ import Testing
 
     @Test @MainActor func reopeningWhenTheCurrentOneIsEmptyArchivesNothing() async throws {
         let (model, botID) = model(current: conversation("primeira"))
-        model.newConversation(botID)
+        await model.newConversation(botID)?.value
         let first = try #require(store.readArchive(botID).first)
         #expect(await model.reopenConversation(first.id, of: botID))
         #expect(store.readArchive(botID).isEmpty)
@@ -192,7 +276,7 @@ import Testing
         original.memorySavedCount = 4
         original.summary = "resumo"
         let (model, botID) = model(current: original)
-        model.newConversation(botID)
+        await model.newConversation(botID)?.value
         let entry = try #require(store.readArchive(botID).first)
 
         #expect(await model.reopenConversation(entry.id, of: botID))
@@ -201,7 +285,7 @@ import Testing
         #expect(reopened.claudeSeenCount == 4 && reopened.summary == "resumo")
         #expect(reopened.memorySavedCount == 4) // all of it was saved already: leaving again saves nothing new
 
-        model.newConversation(botID)
+        await model.newConversation(botID)?.value
         let again = try #require(store.readArchive(botID).first)
         #expect(store.readArchived(again.id, for: botID).value?.memorySavedCount == 4)
     }
@@ -356,9 +440,9 @@ import Testing
         #expect(!exists(shot))
     }
 
-    @Test @MainActor func deletingAnArchivedConversationRemovesItForGood() throws {
+    @Test @MainActor func deletingAnArchivedConversationRemovesItForGood() async throws {
         let (model, botID) = model(current: conversation("apagar"))
-        model.newConversation(botID)
+        await model.newConversation(botID)?.value
         let entry = try #require(store.readArchive(botID).first)
         let file = archiveFolder(botID).appending(path: "\(entry.id.uuidString).json")
         #expect(FileManager.default.fileExists(atPath: file.path))
@@ -462,7 +546,7 @@ import Testing
 
     @Test @MainActor func theArchiveIsThereAfterRelaunch() async throws {
         let (model, botID) = model(current: conversation("de ontem"))
-        model.newConversation(botID)
+        await model.newConversation(botID)?.value
         model.saveNow()
 
         let relaunched = AppModel(store: store, runsBackgroundWork: false)

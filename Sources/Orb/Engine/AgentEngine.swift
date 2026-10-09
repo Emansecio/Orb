@@ -162,6 +162,14 @@ actor AgentEngine {
         let maxSteps = max(2, request.maxSteps)
         var usage: TokenUsage?
         var requestsWithUsage = 0
+        /// A request that failed after the provider said what it used is billed anyway: counted, not shown as a reply.
+        func countDiscarded(_ used: TokenUsage) {
+            var total = usage ?? TokenUsage()
+            total.add(used)
+            usage = total
+            out.yield(.requestUsage(used))
+            out.yield(.usage(total))
+        }
         var warnedAboutCache = false
         var continuedAfterCut = false
         // Where in `messages` the "continue" after a cut reply went (it steers the turn; it starts none).
@@ -190,7 +198,7 @@ actor AgentEngine {
                             for report in announced.reports(after: fit, cut: cut, input: messages.dropFirst()) { out.yield(.compacted(report)) }
                         }
                         reply = try await respond(to: window, request: request, specs: specs,
-                                                  toolChoice: isLastStep ? .none : .auto, out: out)
+                                                  toolChoice: isLastStep ? .none : .auto, out: out, onDiscardedUsage: countDiscarded)
                         // The smaller history worked: that is what this model's window really is.
                         if let learned = learnedWindow {
                             learnedWindow = nil
@@ -376,38 +384,44 @@ actor AgentEngine {
 
     /// Streams one response, retrying transient provider failures while nothing has been shown yet.
     private func respond(to window: [ChatMessage], request: TurnRequest, specs: [ToolSpec], toolChoice: ToolChoice,
-                         out: AsyncStream<TurnEvent>.Continuation) async throws -> Reply {
+                         out: AsyncStream<TurnEvent>.Continuation, onDiscardedUsage: (TokenUsage) -> Void) async throws -> Reply {
         var reply = Reply()
-        try await withRetries(sleep: retrySleep, onWait: { seconds, _, error in
-            out.yield(.status(Retry.waitStatus(seconds: seconds, after: error)))
-        }, operation: {
-            reply = Reply() // an attempt that failed before showing anything leaves nothing behind
-            out.yield(.status("Pensando"))
-            do {
-                for try await event in request.client.stream(model: request.model, messages: window, tools: specs, toolChoice: toolChoice) {
-                    switch event {
-                    case .text(let delta):
-                        if reply.text.isEmpty { out.yield(.status("Escrevendo")) }
-                        reply.text += delta
-                        out.yield(.text(delta))
-                    case .reasoning(let trace):
-                        reply.reasoning = trace
-                    case .toolCalls(let requested):
-                        reply.calls = requested
-                    case .finished(let reason, let used):
-                        reply.stop = reason
-                        reply.usage = used
+        do {
+            try await withRetries(sleep: retrySleep, onWait: { seconds, _, error in
+                out.yield(.status(Retry.waitStatus(seconds: seconds, after: error)))
+            }, operation: {
+                if let used = reply.usage { onDiscardedUsage(used) } // an earlier attempt broke off after reporting its use
+                reply = Reply() // an attempt that failed before showing anything leaves nothing behind
+                out.yield(.status("Pensando"))
+                do {
+                    for try await event in request.client.stream(model: request.model, messages: window, tools: specs, toolChoice: toolChoice) {
+                        switch event {
+                        case .text(let delta):
+                            if reply.text.isEmpty { out.yield(.status("Escrevendo")) }
+                            reply.text += delta
+                            out.yield(.text(delta))
+                        case .reasoning(let trace):
+                            reply.reasoning = trace
+                        case .toolCalls(let requested):
+                            reply.calls = requested
+                        case .finished(let reason, let used):
+                            reply.stop = reason
+                            reply.usage = used
+                        }
                     }
+                    if case .contextExceeded = reply.stop, !reply.emitted { throw LLMError.contextExceeded("model_context_window_exceeded") }
+                } catch where reply.emitted && !(error is CancellationError) {
+                    throw StreamInterrupted(underlying: error, partialText: reply.text)
+                } catch where ContextOverflow.matches(error) {
+                    // Not transient: skip the retries and let `play` try again with less history.
+                    if case LLMError.contextExceeded = error { throw error }
+                    throw LLMError.contextExceeded(error.localizedDescription)
                 }
-                if case .contextExceeded = reply.stop, !reply.emitted { throw LLMError.contextExceeded("model_context_window_exceeded") }
-            } catch where reply.emitted && !(error is CancellationError) {
-                throw StreamInterrupted(underlying: error, partialText: reply.text)
-            } catch where ContextOverflow.matches(error) {
-                // Not transient: skip the retries and let `play` try again with less history.
-                if case LLMError.contextExceeded = error { throw error }
-                throw LLMError.contextExceeded(error.localizedDescription)
-            }
-        })
+            })
+        } catch {
+            if let used = reply.usage { onDiscardedUsage(used) } // the attempt that ended the response did not finish it
+            throw error
+        }
         return reply
     }
 

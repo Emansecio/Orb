@@ -381,7 +381,11 @@ modelo de provedor com formato desconhecido sai da lista. A gravação increment
   salvo, e `ChildProcessGroups.killAllNow` e `BackgroundJobs.killAllNow()` encerram os grupos de processos que o app iniciou: os comandos em
   segundo plano, o Claude Code e o `run_command` em primeiro plano (cada um lidera um grupo próprio, que a morte do app não alcança).
 - Leituras: fila concorrente própria, coordenada por arquivo (`FileGate`): uma leitura espera as gravações *daquele* arquivo
-  (nunca vê um arquivo pela metade nem uma versão velha) e não espera as dos outros.
+  (nunca vê um arquivo pela metade nem uma versão velha) e não espera as dos outros. O nome de um arquivo para o `FileGate`,
+  as filas de escrita e os selos (`FileKey`) sai só do texto do caminho: `standardizedFileURL` olha o disco (tira o `/private`
+  de um caminho que existe), então um arquivo que ainda não existia ao registrar a gravação ganhava outro nome ao terminá-la,
+  e uma leitura esperava para sempre ("Carregando a conversa" sem fim em `--snapshot` com `ORB_DATA_DIR` em `/private/tmp`).
+  Uma leitura que passa de 3 s esperando registra no log o que a segura.
 - Gravação incremental: `ConversationEncoder` reaproveita o JSON dos itens que não mudaram desde a última gravação do
   arquivo (cache por arquivo, no máximo 4 arquivos e 48 MB) e não grava quando nada mudou. Ao gravar, saídas antigas de
   ferramentas (anteriores à penúltima mensagem do usuário) ficam com começo e fim (~4 000 caracteres).

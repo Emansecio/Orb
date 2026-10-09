@@ -22,8 +22,17 @@ struct ChatGPTCredential: Codable, Sendable {
     }
 }
 
+extension Notification.Name {
+    /// Posted when the login was turned down for good (the refresh token was revoked) and removed: the settings
+    /// should offer "Entrar" again.
+    static let chatGPTSessionEnded = Notification.Name("app.orb.chatgpt.sessionEnded")
+}
+
 actor ChatGPTAuth {
     static let shared = ChatGPTAuth()
+
+    /// What the token endpoint's refusal of a refresh token says (`invalid_grant`, `invalid_client`).
+    static let sessionEndedMessage = "A sessão do ChatGPT expirou. Entre de novo em Ajustes → Modelos."
 
     private static let authorizeURL = URL(string: "https://auth.openai.com/api/accounts/authorize")!
     private static let defaultTokenURL = URL(string: "https://auth.openai.com/api/accounts/oauth/token")!
@@ -83,7 +92,17 @@ actor ChatGPTAuth {
         let justRefreshed = lastRefresh.map { -$0.timeIntervalSinceNow < 10 } ?? false
         let stale = expiring || (forceRefresh && !justRefreshed)
         if !stale && refreshing == nil { return current.accessToken }
-        return try await refresh(current).accessToken
+        do {
+            return try await refresh(current).accessToken
+        } catch where !forceRefresh && current.expiresAt > .now && Self.isPassing(error) {
+            // The endpoint is having a moment (5xx, 429, no network) and the token in hand still works: use it.
+            return current.accessToken
+        }
+    }
+
+    /// A failure that says nothing about the login itself.
+    private static func isPassing(_ error: Error) -> Bool {
+        (error as? LLMError)?.isRetryable == true || error is URLError
     }
 
     /// Joins the refresh in progress or starts one.
@@ -100,6 +119,7 @@ actor ChatGPTAuth {
             } catch {
                 // Signing out cancels this task: whoever awaits it is told the login is gone, not a raw cancellation.
                 if generation != started { throw LLMError.notConfigured }
+                if (error as? ToolError)?.message == Self.sessionEndedMessage { forget(current) }
                 throw error
             }
             // Signed out while the token endpoint was answering: keep the credential gone.
@@ -111,6 +131,19 @@ actor ChatGPTAuth {
         refreshing = task
         defer { if generation == started { refreshing = nil } }
         return try await task.value
+    }
+
+    /// The refresh token was turned down: the login is removed (unless another copy of the app already stored a newer
+    /// one), so the settings go back to "Entrar com ChatGPT" instead of showing a connection that cannot work.
+    private func forget(_ current: ChatGPTCredential) {
+        if let stored = storage.load().flatMap({ try? JSONDecoder().decode(ChatGPTCredential.self, from: Data($0.utf8)) }),
+           stored.refreshToken != current.refreshToken {
+            cached = stored
+            return
+        }
+        cached = nil
+        storage.save("")
+        NotificationCenter.default.post(name: .chatGPTSessionEnded, object: self)
     }
 
     /// Opens the browser, waits for the loopback callback and stores the credential.
@@ -164,10 +197,16 @@ actor ChatGPTAuth {
         request.httpBody = Data((body.percentEncodedQuery ?? "").replacingOccurrences(of: "+", with: "%2B").utf8)
         let (data, response) = try await session.data(for: request)
         let json = JSONValue.parse(String(decoding: data, as: UTF8.self))
-        guard (response as? HTTPURLResponse)?.statusCode == 200, let json,
+        let http = response as? HTTPURLResponse
+        guard http?.statusCode == 200, let json,
               let access = json["access_token"]?.string else {
-            if json?["error"]?.string == "invalid_grant" {
-                throw ToolError("A sessão do ChatGPT expirou. Entre de novo em Ajustes → Modelos.")
+            if let http, [408, 429].contains(http.statusCode) || http.statusCode >= 500 {
+                // The login service is busy or down (often with an HTML page): not a refusal, and worth trying again.
+                throw LLMError.http(status: http.statusCode, message: json?["error_description"]?.string ?? "o serviço de login não respondeu",
+                                    retryAfter: ProviderTransport.retryAfter(in: http))
+            }
+            if ["invalid_grant", "invalid_client"].contains(json?["error"]?.string ?? "") {
+                throw ToolError(Self.sessionEndedMessage)
             }
             throw ToolError("O ChatGPT recusou o login: \(json?["error_description"]?.string ?? json?["error"]?.string ?? "erro desconhecido")")
         }

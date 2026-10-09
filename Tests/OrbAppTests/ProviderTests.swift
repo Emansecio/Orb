@@ -132,6 +132,29 @@ struct CustomProviderTests {
 }
 
 struct ProviderClientTests {
+    @Test func aCustomGatewayWithoutAListedModelKeepsItsChosenFormat() throws {
+        var account = ProviderAccount(kind: .custom)
+        account.baseURL = "https://gw.test/v1"
+        account.format = .messages
+        #expect(account.client(for: nil, credentials: { _ in nil }, conversationID: "c") is AnthropicClient)
+        // Other providers keep the chat default for an unlisted model.
+        #expect(ProviderAccount(kind: .xai).client(for: nil, credentials: { _ in nil }, conversationID: "c") is OpenAIClient)
+    }
+
+    @Test func aRefreshedCustomListKeepsTheModelsAddedByHand() throws {
+        let fetched = [ProviderModel(id: "a", name: "a", format: .messages), ProviderModel(id: "b", name: "b", format: .messages)]
+        let previous = [ProviderModel(id: "old", name: "old", format: .messages),
+                        ProviderModel(id: "mine", name: "mine", format: .messages, isManual: true),
+                        ProviderModel(id: "b", name: "b", format: .messages, isManual: true)]
+        let merged = ModelCatalog.mergingManual(fetched: fetched, previous: previous)
+        #expect(merged.map(\.id) == ["a", "b", "mine"]) // listed order kept, no duplicate, the stale unmarked one gone
+        // The mark survives a save, and data from before it still loads.
+        let data = try JSONEncoder().encode(merged)
+        #expect(try JSONDecoder().decode([ProviderModel].self, from: data).last?.isManual == true)
+        let old = Data(#"{"id":"x","name":"x","format":"chat"}"#.utf8)
+        #expect(try JSONDecoder().decode(ProviderModel.self, from: old).isManual == nil)
+    }
+
     @Test func clientsKeyTheirPromptCacheToTheConversation() throws {
         var openai = ProviderAccount(kind: .openai)
         openai.models = [ProviderModel(id: "gpt-x", name: "x", format: .responses)]
@@ -228,17 +251,78 @@ struct ChatGPTAuthTests {
 
     @Test func aFailedRefreshReachesEveryWaiterAndCanBeRetried() async throws {
         let auth = auth(host: "auth-fail.test", disk: Disk(credential(expiresIn: 30)))
-        StubProtocol.queue(host: "auth-fail.test", [.init(status: 400, body: #"{"error":"invalid_grant"}"#), .init(body: Self.tokenReply)])
+        StubProtocol.queue(host: "auth-fail.test", [.init(status: 400, body: #"{"error":"access_denied","error_description":"não"}"#), .init(body: Self.tokenReply)])
         async let first: String = auth.accessToken()
         async let second: String = auth.accessToken()
         do {
             _ = try await (first, second)
             Issue.record("should have thrown")
         } catch let error as ToolError {
-            #expect(error.message.contains("expirou"))
+            #expect(error.message.contains("recusou"))
         }
         #expect(StubProtocol.sent(to: "auth-fail.test").count == 1)
         #expect(try await auth.accessToken() == "access-2")
+    }
+
+    @Test func aRevokedRefreshTokenRemovesTheLogin() async throws {
+        let disk = Disk(credential(expiresIn: 30))
+        let auth = auth(host: "auth-revoked.test", disk: disk)
+        StubProtocol.queue(host: "auth-revoked.test", [.init(status: 400, body: #"{"error":"invalid_grant"}"#)])
+        // The app listens to its own login only (`ChatGPTAuth.shared`), never to a copy made by a test.
+        let heard = OSAllocatedUnfairLock(initialState: false) // only a post whose sender is `auth` reaches this observer
+        let observer = NotificationCenter.default.addObserver(forName: .chatGPTSessionEnded, object: auth, queue: nil) { _ in heard.withLock { $0 = true } }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        do {
+            _ = try await auth.accessToken()
+            Issue.record("should have thrown")
+        } catch let error as ToolError {
+            #expect(error.message == ChatGPTAuth.sessionEndedMessage)
+        }
+        // So the settings can offer "Entrar" again.
+        #expect(await auth.credential == nil)
+        #expect(disk.saved == nil)
+        #expect(heard.withLock { $0 })
+    }
+
+    @Test func aRefreshTokenAnotherCopyOfTheAppAlreadyReplacedIsKept() async throws {
+        let disk = Disk(credential(expiresIn: 30))
+        let auth = auth(host: "auth-rotated.test", disk: disk)
+        StubProtocol.queue(host: "auth-rotated.test", [.init(status: 400, body: #"{"error":"invalid_grant"}"#)])
+        var rotated = credential(expiresIn: 3600)
+        rotated.refreshToken = "refresh-other"
+        _ = await auth.credential // loaded into memory before the other copy stored its own
+        disk.storage.save(String(decoding: try JSONEncoder().encode(rotated), as: UTF8.self))
+        _ = try? await auth.accessToken()
+        #expect(await auth.credential?.refreshToken == "refresh-other")
+        #expect(disk.saved?.contains("refresh-other") == true)
+    }
+
+    @Test func aBusyLoginServiceDoesNotSpoilAStillValidToken() async throws {
+        let disk = Disk(credential(expiresIn: 120)) // inside the refresh window, not expired
+        let auth = auth(host: "auth-busy.test", disk: disk)
+        StubProtocol.queue(host: "auth-busy.test", [.init(status: 503, body: "<html>try later</html>")])
+        #expect(try await auth.accessToken() == "access-1")
+        #expect(await auth.credential != nil)
+        // A token the API just turned down is not handed back: the failure is the (retryable) one of the service.
+        StubProtocol.queue(host: "auth-busy.test", [.init(status: 429, body: "{}")])
+        do {
+            _ = try await auth.accessToken(forceRefresh: true)
+            Issue.record("should have thrown")
+        } catch let error as LLMError {
+            #expect(error.isRetryable)
+        }
+    }
+
+    @Test func aBusyLoginServiceFailsAnExpiredTokenWithARetryableError() async throws {
+        let auth = auth(host: "auth-down.test", disk: Disk(credential(expiresIn: -10)))
+        StubProtocol.queue(host: "auth-down.test", [.init(status: 503, body: "<html>try later</html>")])
+        do {
+            _ = try await auth.accessToken()
+            Issue.record("should have thrown")
+        } catch let error as LLMError {
+            #expect(error.isRetryable)
+        }
+        #expect(await auth.credential != nil) // the login itself is untouched
     }
 
     @Test func signingOutDuringARefreshKeepsTheLoginGone() async throws {
@@ -305,4 +389,84 @@ private final class HeldProtocol: URLProtocol {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() { let me = Held(request: self); Self.held.withLock { $0.append(me) } }
     override func stopLoading() { let me = Held(request: self); Self.held.withLock { list in list.removeAll { $0.request === me.request } } }
+}
+
+struct ModelRefreshBackoffTests {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+    private func failure(_ count: Int, ago: TimeInterval, refused: Bool = false) -> ModelRefreshBackoff.Failure {
+        .init(at: now.addingTimeInterval(-ago), count: count, credentialRefused: refused)
+    }
+
+    @Test func aFailedListWaitsLongerEachTimeUpToTheUsualAge() {
+        #expect(ModelRefreshBackoff.wait(after: failure(1, ago: 0)) == 300)
+        #expect(ModelRefreshBackoff.wait(after: failure(2, ago: 0)) == 600)
+        #expect(ModelRefreshBackoff.wait(after: failure(5, ago: 0)) == 4_800)
+        #expect(ModelRefreshBackoff.wait(after: failure(30, ago: 0)) == ModelRefreshBackoff.maxAge)
+        #expect(ModelRefreshBackoff.wait(after: failure(1, ago: 0, refused: true)) == ModelRefreshBackoff.maxAge)
+    }
+
+    @Test func aListIsDueWhenOldAndNotWaitingOutAFailure() {
+        let old = now.addingTimeInterval(-7 * 3600)
+        #expect(ModelRefreshBackoff.isDue(updatedAt: nil, failure: nil, now: now))
+        #expect(ModelRefreshBackoff.isDue(updatedAt: old, failure: nil, now: now))
+        #expect(!ModelRefreshBackoff.isDue(updatedAt: now.addingTimeInterval(-3600), failure: nil, now: now))
+        // After a failure: not at the next tick, but after its wait.
+        #expect(!ModelRefreshBackoff.isDue(updatedAt: old, failure: failure(1, ago: 30), now: now))
+        #expect(ModelRefreshBackoff.isDue(updatedAt: old, failure: failure(1, ago: 301), now: now))
+        #expect(!ModelRefreshBackoff.isDue(updatedAt: nil, failure: failure(5, ago: 300), now: now))
+        #expect(!ModelRefreshBackoff.isDue(updatedAt: old, failure: failure(1, ago: 3600, refused: true), now: now))
+        #expect(ModelRefreshBackoff.isDue(updatedAt: old, failure: failure(1, ago: 6 * 3600 + 1, refused: true), now: now))
+    }
+
+    @MainActor private final class Calls {
+        var count = 0
+        var fails = true
+        var error: any Error = LLMError.http(status: 404, message: "sem /models")
+    }
+
+    @Test @MainActor func aListThatFailsIsNotAskedForAgainAtTheNextTick() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "OrbModelRefresh-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)
+        model.providers = [ProviderAccount(kind: .ollama)]
+        let calls = Calls()
+        model.loadModels = { _ in
+            calls.count += 1
+            if calls.fails { throw calls.error }
+            return [ProviderModel(id: "llama", name: "llama", format: .chat)]
+        }
+        await model.refreshAllModels(now: now)
+        await model.refreshAllModels(now: now.addingTimeInterval(30)) // the scheduler's next tick
+        await model.refreshAllModels(now: now.addingTimeInterval(120))
+        #expect(calls.count == 1)
+        // After the wait it tries once more (and the wait doubles); the user's own refresh always tries.
+        await model.refreshAllModels(now: now.addingTimeInterval(301))
+        await model.refreshAllModels(now: now.addingTimeInterval(400))
+        #expect(calls.count == 2)
+        await #expect(throws: LLMError.self) { try await model.refreshModels(.ollama) }
+        #expect(calls.count == 3)
+        // A success clears the wait; the list is then fresh for the usual age.
+        calls.fails = false
+        try await model.refreshModels(.ollama)
+        await model.refreshAllModels(now: .now.addingTimeInterval(60))
+        #expect(calls.count == 4 && model.providers[0].models.map(\.id) == ["llama"])
+    }
+
+    @Test @MainActor func aRefusedKeyIsNotAskedForAgainForSixHours() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "OrbModelRefresh-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)
+        model.providers = [ProviderAccount(kind: .ollama)]
+        let calls = Calls()
+        calls.error = LLMError.http(status: 401, message: "Incorrect API key")
+        model.loadModels = { _ in
+            calls.count += 1
+            throw calls.error
+        }
+        await model.refreshAllModels(now: now)
+        await model.refreshAllModels(now: now.addingTimeInterval(3600))
+        #expect(calls.count == 1)
+        await model.refreshAllModels(now: now.addingTimeInterval(6 * 3600 + 1))
+        #expect(calls.count == 2)
+    }
 }

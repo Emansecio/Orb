@@ -463,11 +463,11 @@ struct SessionConnectorTests {
         #expect(model.conversations[botID]?.messages[covered].role == .user)
     }
 
-    @Test @MainActor func startingAnotherConversationForgetsTheLastCompaction() throws {
+    @Test @MainActor func startingAnotherConversationForgetsTheLastCompaction() async throws {
         let (model, botID) = model(conversation(turns: 24, output: 20_000))
         _ = model.compactNow(botID: botID)
         #expect(model.lastCompaction[botID] != nil)
-        model.newConversation(botID)
+        await model.newConversation(botID)?.value
         #expect(model.lastCompaction[botID] == nil)
         #expect(model.contextSummary(for: botID) == nil)
     }

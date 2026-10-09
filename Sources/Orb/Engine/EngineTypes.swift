@@ -457,8 +457,9 @@ enum LLMError: LocalizedError, Equatable {
 
     /// " O provedor pediu para aguardar 5 min." when the wait is long enough to matter (a long one is not retried).
     private static func waitNote(_ seconds: TimeInterval?) -> String {
-        guard let seconds, seconds >= 1 else { return "" }
-        let wait = seconds >= 120 ? "\(Int((seconds / 60).rounded(.up))) min" : "\(Int(seconds.rounded(.up))) s"
+        guard let seconds, seconds.isFinite, seconds >= 1 else { return "" }
+        let shown: Double = min(seconds, ProviderTransport.maxRetryAfter) // `Int(_:)` traps on a huge or infinite value
+        let wait = shown >= 120 ? "\(Int((shown / 60).rounded(.up))) min" : "\(Int(shown.rounded(.up))) s"
         return " O provedor pediu para aguardar \(wait)."
     }
 

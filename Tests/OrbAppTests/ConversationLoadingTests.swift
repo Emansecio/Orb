@@ -87,6 +87,24 @@ import Testing
         #expect(!model.isLoadingConversation(bots[0].id))
     }
 
+    @Test @MainActor func aDamagedUsageFileDoesNotStopIdleConversationsFromBeingLetGoOf() async throws {
+        let bots = try orbs()
+        let model = launch(async: false)
+        model.conversationKeepAlive = .zero
+        // A month of usage that cannot be read is set aside when the recorder writes: news for the user, not a failed save.
+        try put(Data(#"{"buckets":[{"#.utf8), at: root.appending(path: "uso/\(Store.usageMonthID(of: .now)).json"))
+        model.usageLog.record(UsageTotals(requests: 1, input: 3), orb: bots[0].id, name: "Atlas", model: "openai/gpt-5", source: .chat)
+        model.usageLog.flush()
+        model.store.flush()
+        for _ in 0..<500 where model.dataNotices.isEmpty { try await Task.sleep(for: .milliseconds(10)) } // the notice hops to the main actor
+        #expect(model.dataNotices.count == 1)
+
+        await model.loadRemainingConversations()
+        Store(directory: root).flush()
+        await model.unloadIdleConversations()
+        #expect(model.conversations[bots[1].id] == nil)
+    }
+
     @Test @MainActor func aConversationLoadedOnDemandAndLetGoOfIsReadAgainNotLeftEmpty() async throws {
         let bots = try orbs()
         let model = launch(async: false)

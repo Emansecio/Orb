@@ -246,6 +246,26 @@ struct AnthropicClientTests {
         #expect(StubProtocol.sent(to: "anthropic-401.test").map { $0.request.value(forHTTPHeaderField: "x-api-key") } == ["old", "new"])
     }
 
+    @Test func aStreamThatBreaksOffAfterTheInputWasReportedStillReportsIt() async throws {
+        StubProtocol.queue(host: "anthropic-broken.test", [.init(body: """
+            data: {"type":"message_start","message":{"usage":{"input_tokens":1200,"output_tokens":1}}}
+
+            data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}
+
+
+            """)])
+        let client = client(host: "anthropic-broken.test") { _ in "k" }
+        var events: [LLMEvent] = []
+        do {
+            for try await event in client.stream(model: "m", messages: [.user("oi")], tools: []) { events.append(event) }
+            Issue.record("should have thrown")
+        } catch let error as LLMError {
+            #expect(error.isRetryable)
+        }
+        // The input is billed whether or not the answer arrives: it comes ahead of the error.
+        #expect(events == [.finished(.incomplete, TokenUsage(input: 1200, output: 1))])
+    }
+
     @Test func overloadedHTTPResponsesAreRetryableWithTheirDelay() async {
         StubProtocol.queue(host: "anthropic-529.test", [
             .init(status: 529, body: #"{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#, headers: ["retry-after": "3"]),

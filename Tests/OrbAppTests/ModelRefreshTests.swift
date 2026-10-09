@@ -16,9 +16,9 @@ import Testing
     @MainActor private func model(failing: Bool, asked: Asked) -> AppModel {
         let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)
         model.providers = [ProviderAccount(kind: .ollama)] // local: usable without a key
-        model.modelLoader = { _ in
+        model.loadModels = { _ in
             await asked.note()
-            if failing { throw LLMError.http(status: 401, message: "chave revogada") }
+            if failing { throw LLMError.http(status: 503, message: "gateway fora do ar") }
             return [ProviderModel(id: "m", name: "m", format: .chat)]
         }
         return model
@@ -34,11 +34,11 @@ import Testing
         await model.refreshAllModels(now: start.addingTimeInterval(60))
         #expect(await asked.count == 1)
 
-        await model.refreshAllModels(now: start.addingTimeInterval(AppModel.modelRetryBase + 1)) // after the first wait
+        await model.refreshAllModels(now: start.addingTimeInterval(ModelRefreshBackoff.firstWait + 1)) // after the first wait
         #expect(await asked.count == 2)
-        await model.refreshAllModels(now: start.addingTimeInterval(AppModel.modelRetryBase + 60)) // the wait doubled
+        await model.refreshAllModels(now: start.addingTimeInterval(ModelRefreshBackoff.firstWait + 60)) // the wait doubled
         #expect(await asked.count == 2)
-        await model.refreshAllModels(now: start.addingTimeInterval(AppModel.modelRetryBase * 4)) // 10 minutes after the second failure
+        await model.refreshAllModels(now: start.addingTimeInterval(ModelRefreshBackoff.firstWait * 4)) // 10 minutes after the second failure
         #expect(await asked.count == 3)
     }
 

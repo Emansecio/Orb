@@ -500,10 +500,11 @@ enum Schedule: Codable, Hashable, Sendable {
     func next(after date: Date, calendar: Calendar = .current) -> Date {
         switch self {
         case .daily(let hour, let minute):
-            calendar.nextDate(after: date, matching: DateComponents(hour: hour, minute: minute), matchingPolicy: .nextTime) ?? date
+            calendar.nextDate(after: date, matching: DateComponents(hour: hour, minute: minute), matchingPolicy: .nextTime)
+                ?? date.addingTimeInterval(24 * 3600) // out-of-range values from a hand-edited file: never "now"
         case .weekly(let weekday, let hour, let minute):
             calendar.nextDate(after: date, matching: DateComponents(hour: hour, minute: minute, weekday: weekday),
-                              matchingPolicy: .nextTime) ?? date
+                              matchingPolicy: .nextTime) ?? date.addingTimeInterval(7 * 24 * 3600)
         case .everyHours(let hours):
             date.addingTimeInterval(Double(max(1, hours)) * 3600)
         case .everyMinutes(let minutes):
@@ -516,7 +517,7 @@ enum Schedule: Codable, Hashable, Sendable {
         case .daily(let hour, let minute):
             "Todo dia às \(Self.time(hour, minute))"
         case .weekly(let weekday, let hour, let minute):
-            "\([1, 7].contains(weekday) ? "Todo" : "Toda") \(Calendar.current.weekdaySymbols[(weekday + 6) % 7]) às \(Self.time(hour, minute))"
+            "\([1, 7].contains(weekday) ? "Todo" : "Toda") \(Calendar.current.weekdaySymbols[((weekday - 1) % 7 + 7) % 7]) às \(Self.time(hour, minute))"
         case .everyHours(let hours):
             hours == 1 ? "A cada hora" : "A cada \(hours) horas"
         case .everyMinutes(let minutes):

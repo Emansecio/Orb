@@ -257,6 +257,8 @@ struct OpenAIReliabilityTests {
         #expect(message(0.2).contains("pediu para aguardar") == false)
         #expect(message(30).hasSuffix("O provedor pediu para aguardar 30 s."))
         #expect(message(600).hasSuffix("O provedor pediu para aguardar 10 min."))
+        #expect(message(.infinity) == message(nil)) // no wait is shown, and nothing traps
+        #expect(message(1e30).hasSuffix("O provedor pediu para aguardar 1440 min."))
     }
 
     @Test func parsesRetryAfterHeaders() throws {
@@ -269,6 +271,11 @@ struct OpenAIReliabilityTests {
         #expect(ProviderTransport.retryAfter(in: response(["Retry-After": "-3"])) == nil)
         #expect(ProviderTransport.retryAfter(in: response(["Retry-After": "soon"])) == nil)
         #expect(ProviderTransport.retryAfter(in: response([:])) == nil)
+        // A broken gateway's absurd values are neither trusted nor allowed to crash the message.
+        #expect(ProviderTransport.retryAfter(in: response(["Retry-After": "inf"])) == nil)
+        #expect(ProviderTransport.retryAfter(in: response(["Retry-After": "1e30"])) == 86_400)
+        #expect(ProviderTransport.retryAfter(in: response(["retry-after-ms": "1e25"])) == 86_400)
+        #expect(ProviderTransport.retryAfter(in: response(["retry-after-ms": "inf"])) == nil)
         let now = Date(timeIntervalSince1970: 1_800_000_000) // Fri, 15 Jan 2027 08:00:00 GMT
         #expect(ProviderTransport.retryAfter(in: response(["Retry-After": "Fri, 15 Jan 2027 08:00:30 GMT"]), now: now) == 30)
         #expect(ProviderTransport.retryAfter(in: response(["Retry-After": "Fri, 15 Jan 2027 07:00:00 GMT"]), now: now) == 0)

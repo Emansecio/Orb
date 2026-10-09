@@ -574,6 +574,42 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(model.queuedRoutines.isEmpty)
     }
 
+    @Test @MainActor func theMacIsKeptAwakeOnlyWhileARoutineRuns() async throws {
+        let gate = Gate()
+        let stub = StubModel(gate: gate)
+        let (model, bot, routine) = setUp(stub)
+        let activity = FakeActivity()
+        model.activity = activity
+        model.keepsAwakeForRoutines = true
+        model.syncActivities()
+        // A routine is switched on: the app is kept out of App Nap, the Mac may still sleep.
+        #expect(activity.open.map(\.level) == [.waiting])
+
+        model.runRoutine(routine.id)
+        await model.routineStarted()
+        await waitForModelCalls(stub)
+        #expect(activity.open.map(\.level).sorted { "\($0)" < "\($1)" } == [.running, .waiting])
+        #expect(activity.open.first { $0.level == .running }?.reason.contains("Resumo da manhã") == true)
+
+        await gate.open()
+        await waitUntilIdle(model, bot.id)
+        #expect(activity.open.map(\.level) == [.waiting]) // the run is over: nothing holds the Mac awake
+        model.routines[0].isEnabled = false
+        #expect(activity.open.isEmpty)
+        #expect(activity.began.count == activity.ended)
+    }
+
+    @Test @MainActor func aRoutineThatDidNotRunHoldsNothing() async throws {
+        let (model, _, routine) = setUp(StubModel())
+        model.providers = [] // no model connected: the routine does not happen
+        let activity = FakeActivity()
+        model.activity = activity
+        model.runRoutine(routine.id)
+        await model.routineStarted()
+        #expect(activity.open.isEmpty)
+        #expect(activity.began.count == activity.ended)
+    }
+
     @Test @MainActor func newConversationDuringARoutineArchivesTheChatAndLetsTheRoutineFinish() async throws {
         let gate = Gate()
         let stub = StubModel(gate: gate)
@@ -582,7 +618,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         await model.routineStarted()
         await waitForModelCalls(stub)
 
-        model.newConversation(bot.id)
+        await model.newConversation(bot.id)?.value
         #expect(model.isRoutineRunning(routine.id)) // not stopped
         #expect(model.transcript(bot.id).isEmpty)
         #expect(store.readArchive(bot.id).map(\.title) == ["oi"])
@@ -775,5 +811,33 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(marked.count == 3) // the last two and the new one
         #expect(marked[0].hasSuffix("3") && marked[1].hasSuffix("4"))
         if case .user(let text, _) = next.items[1].kind { #expect(text == "p3") } else { Issue.record("cut in the middle of a run") }
+    }
+}
+
+/// Counts what the app asked of macOS instead of asking it.
+@MainActor private final class FakeActivity: ActivityAsserting {
+    final class Token: NSObject {
+        let level: ActivityLevel
+        let reason: String
+        init(_ level: ActivityLevel, _ reason: String) {
+            self.level = level
+            self.reason = reason
+        }
+    }
+
+    private(set) var began: [Token] = []
+    private(set) var ended = 0
+    var open: [Token] { began.filter { token in !finished.contains { $0 === token } } }
+    private var finished: [Token] = []
+
+    func begin(_ level: ActivityLevel, reason: String) -> any NSObjectProtocol {
+        let token = Token(level, reason)
+        began.append(token)
+        return token
+    }
+
+    func end(_ token: any NSObjectProtocol) {
+        ended += 1
+        if let token = token as? Token { finished.append(token) }
     }
 }

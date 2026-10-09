@@ -220,7 +220,7 @@ final class StretchNoteFlowTests {
         model.writeStretchNote(of: botID)
         await waitUntil("the request") { await asked.notes.count == 1 }
         let task = try #require(model.session(botID).chunkTask)
-        model.newConversation(botID)
+        await model.newConversation(botID)?.value
         #expect(model.session(botID).chunkTask == nil)
         await task.value // it ends: cancelled, nothing kept
         #expect(model.conversations[botID]?.chunkSummaries == nil)

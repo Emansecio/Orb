@@ -69,10 +69,14 @@ struct Store: Sendable {
     let directory: URL
     /// Called (on the store's queue) when a write fails; the app turns it into a message for the user.
     var onSaveFailure: (@Sendable (StoreNotice) -> Void)?
+    /// Called (on the store's queue) with something worth telling that is not a failed write: a usage file that was
+    /// read with items left out, or set aside. Nothing was lost by saving, so it must not count as a save failure.
+    var onNotice: (@Sendable (StoreNotice) -> Void)?
 
-    init(directory: URL, onSaveFailure: (@Sendable (StoreNotice) -> Void)? = nil) {
+    init(directory: URL, onSaveFailure: (@Sendable (StoreNotice) -> Void)? = nil, onNotice: (@Sendable (StoreNotice) -> Void)? = nil) {
         self.directory = directory
         self.onSaveFailure = onSaveFailure
+        self.onNotice = onNotice
     }
 
     /// Every write, in order. One queue per data folder (the app has one; tests have one each, so a test that holds
@@ -178,12 +182,13 @@ struct Store: Sendable {
     // MARK: Writing
 
     /// Queues `work` on the writer, registering the files it touches first so that reads of them wait. Once the
-    /// folder is sealed (`sealWrites`) the work is dropped.
-    func enqueue(touching urls: [URL], _ work: @escaping @Sendable () -> Void) {
+    /// folder is sealed (`sealWrites`) the work is dropped, and `dropped` (if any) runs in its place, so that whoever
+    /// waits for the work is not left waiting.
+    func enqueue(touching urls: [URL], dropped: (@Sendable () -> Void)? = nil, _ work: @escaping @Sendable () -> Void) {
         Self.gate.willWrite(urls)
         let directory = directory
         queue.async {
-            if !WriteSeals.isSealed(directory) { work() }
+            if WriteSeals.isSealed(directory) { dropped?() } else { work() }
             Self.gate.didWrite(urls)
         }
     }
@@ -224,12 +229,22 @@ struct Store: Sendable {
     /// Old tool outputs are stored shortened (`Conversation.pruningOldToolOutputs`); the caller's copy is untouched.
     /// The file is the same document either way; what is cheaper is that only items that changed since the last
     /// save of this file are encoded again, and a save that changes nothing writes nothing.
-    func save(_ conversation: Conversation, for botID: UUID) {
+    /// `then` (on the store's queue) says whether the file is as written: false when the write failed.
+    func save(_ conversation: Conversation, for botID: UUID, then done: (@Sendable (Bool) -> Void)? = nil) {
         let url = conversationURL(botID), note = metaURL(botID)
-        enqueue(touching: [url, note]) {
+        enqueue(touching: [url, note], dropped: { done?(false) }) {
+            let result = writeConversation(conversation, to: url, cached: true)
             // A save that wrote nothing (nothing changed) leaves the note as it is.
-            guard writeConversation(conversation, to: url, cached: true) == .wrote else { return }
-            write(ConversationMeta(of: conversation, file: FileFingerprint(of: url)), to: note)
+            if result == .wrote { write(ConversationMeta(of: conversation, file: FileFingerprint(of: url)), to: note) }
+            done?(result != .failed)
+        }
+    }
+
+    /// Writes the conversation and says whether it is on disk (see `save`). For a caller that must not let go of
+    /// another copy before this one is safe.
+    func saveAndWait(_ conversation: Conversation, for botID: UUID) async -> Bool {
+        await withCheckedContinuation { continuation in
+            save(conversation, for: botID) { continuation.resume(returning: $0) }
         }
     }
 
@@ -267,17 +282,35 @@ struct Store: Sendable {
 
     /// Puts the conversation in the archive and returns its entry at once; the files follow on the store's queue.
     /// The conversation file goes first: a crash before the index is written leaves a file the next listing finds.
+    /// When that file can't be written the index is left alone, and `done` (on the queue) says so: the conversation
+    /// is then in no archive, so whoever is about to let go of it must not. The same when the folder is sealed.
     @discardableResult
-    func archive(_ conversation: Conversation, for botID: UUID) -> ConversationSummary {
+    func archive(_ conversation: Conversation, for botID: UUID, then done: (@Sendable (Bool) -> Void)? = nil) -> ConversationSummary {
         let summary = ConversationSummary(of: conversation)
-        let file = archivedURL(botID, summary.id)
-        enqueue(touching: [file, archiveIndexURL(botID)]) {
-            var entries = reconciledArchive(botID).entries
-            writeConversation(conversation, to: file, cached: false)
-            entries.append(summary)
-            write(ConversationIndex(entries: entries), to: archiveIndexURL(botID))
-        }
+        archive(conversation, as: summary, for: botID, then: done)
         return summary
+    }
+
+    /// Like `archive`, once the conversation is in the archive; nil when it could not be written.
+    func archiveAndWait(_ conversation: Conversation, for botID: UUID) async -> ConversationSummary? {
+        let summary = ConversationSummary(of: conversation)
+        let archived = await withCheckedContinuation { continuation in
+            archive(conversation, as: summary, for: botID) { continuation.resume(returning: $0) }
+        }
+        return archived ? summary : nil
+    }
+
+    private func archive(_ conversation: Conversation, as summary: ConversationSummary, for botID: UUID, then done: (@Sendable (Bool) -> Void)?) {
+        let file = archivedURL(botID, summary.id)
+        enqueue(touching: [file, archiveIndexURL(botID)], dropped: { done?(false) }) {
+            var entries = reconciledArchive(botID).entries
+            let archived = writeConversation(conversation, to: file, cached: false) == .wrote
+            if archived {
+                entries.append(summary)
+                write(ConversationIndex(entries: entries), to: archiveIndexURL(botID))
+            }
+            done?(archived)
+        }
     }
 
     /// The archived conversations of an Orb, newest first. A file that can't be read is left out of the list.
@@ -580,8 +613,8 @@ enum WriteSeals {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var sealed: Set<String> = []
 
-    static func seal(_ directory: URL) { lock.withLock { _ = sealed.insert(directory.standardizedFileURL.path) } }
-    static func isSealed(_ directory: URL) -> Bool { lock.withLock { sealed.contains(directory.standardizedFileURL.path) } }
+    static func seal(_ directory: URL) { lock.withLock { _ = sealed.insert(FileKey.of(directory)) } }
+    static func isSealed(_ directory: URL) -> Bool { lock.withLock { sealed.contains(FileKey.of(directory)) } }
 }
 
 /// The serial writer queue of each data folder.
@@ -591,7 +624,7 @@ enum WriterQueues {
 
     static func queue(for directory: URL) -> DispatchQueue {
         lock.withLock {
-            let key = directory.standardizedFileURL.path
+            let key = FileKey.of(directory)
             if let existing = queues[key] { return existing }
             let made = DispatchQueue(label: "app.orb.store", qos: .utility)
             queues[key] = made
@@ -607,7 +640,7 @@ final class EncoderCache: @unchecked Sendable {
 
     static func shared(for directory: URL) -> EncoderCache {
         lock.withLock {
-            let key = directory.standardizedFileURL.path
+            let key = FileKey.of(directory)
             if let existing = caches[key] { return existing }
             let made = EncoderCache()
             caches[key] = made
@@ -621,7 +654,7 @@ final class EncoderCache: @unchecked Sendable {
     static let maxFiles = 4
     static let maxBytes = 48 << 20
 
-    private static func key(_ url: URL) -> String { url.standardizedFileURL.path }
+    private static func key(_ url: URL) -> String { FileKey.of(url) }
 
     func encoder(for url: URL) -> ConversationEncoder {
         let key = Self.key(url)

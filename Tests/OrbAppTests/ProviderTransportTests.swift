@@ -207,6 +207,50 @@ struct ProviderTransportTests {
         }
     }
 
+    @Test func aReplyThatIsNotAStreamSaysWhatItWasInsteadOfLookingCut() async {
+        for format in Format.allCases {
+            // A gateway that ignored `stream: true` and answered with its error, with status 200.
+            do {
+                _ = try await run(format, host: "json-error-\(format).test", .init(body: #"{"error":{"message":"modelo inexistente"}}"#))
+                Issue.record("should have thrown")
+            } catch let error as LLMError {
+                #expect(error.localizedDescription.contains("modelo inexistente"))
+            } catch {
+                Issue.record("unexpected \(error)")
+            }
+            // A proxy's page.
+            do {
+                _ = try await run(format, host: "html-\(format).test", .init(body: "<html>entre no Wi-Fi</html>"))
+                Issue.record("should have thrown")
+            } catch let error as LLMError {
+                #expect(error == .invalidResponse("o provedor não respondeu em streaming: <html>entre no Wi-Fi</html>"))
+            } catch {
+                Issue.record("unexpected \(error)")
+            }
+        }
+        // Nothing at all, or comments only, stay the cut stream they always were.
+        for body in ["", ": keep-alive\n\n"] {
+            let events = try? await run(.chat, host: "empty-\(body.count).test", .init(body: body))
+            #expect(events == [.finished(.incomplete, nil)])
+        }
+    }
+
+    @Test func aConnectionClosedInTheMiddleOfAnEventCanBeTriedAgain() async {
+        let stream = #"data: {"choices":[{"delta":{"content":"oi"}}]}"# + "\n\n" + #"data: {"choices":[{"del"#
+        do {
+            _ = try await run(.chat, host: "cut-line.test", .init(body: stream))
+            Issue.record("should have thrown")
+        } catch let error as LLMError {
+            #expect(error.isRetryable) // not "resposta inválida", which is never retried
+            if case .network = error {} else { Issue.record("not a network error: \(error)") }
+        } catch {
+            Issue.record("unexpected \(error)")
+        }
+        // The last event complete but for its blank line is still delivered.
+        let whole = try? await run(.chat, host: "cut-whole.test", .init(body: #"data: {"choices":[{"delta":{"content":"a"}}]}"#))
+        #expect(whole?.first == .text("a"))
+    }
+
     @Test func transportFailuresBecomeNetworkErrorsForEveryFormat() async {
         for format in Format.allCases {
             do {

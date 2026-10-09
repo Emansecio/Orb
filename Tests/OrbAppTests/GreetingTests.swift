@@ -48,9 +48,9 @@ import Testing
         #expect(SessionSummary.page(from: conversation?.items ?? []) == nil) // nor does it become a memory page
     }
 
-    @Test @MainActor func aNewConversationDoesNotGreetAgain() {
+    @Test @MainActor func aNewConversationDoesNotGreetAgain() async {
         let (model, bot) = model()
-        model.newConversation(bot.id)
+        await model.newConversation(bot.id)?.value
         #expect(items(model, bot).isEmpty)
     }
 

@@ -238,7 +238,7 @@ struct AppModelCacheReportTests {
         #expect(model.requestUsage[bot.id]?.promptTokens == 8_000)
     }
 
-    @Test func theCacheWarningAppearsOncePerConversation() {
+    @Test func theCacheWarningAppearsOncePerConversation() async {
         let (model, bot, root) = model()
         defer { try? FileManager.default.removeItem(at: root) }
         model.apply(.notice(CacheHealth.notice), to: bot.id)
@@ -248,7 +248,7 @@ struct AppModelCacheReportTests {
         // Other notices are not collapsed; the cache one is.
         #expect(notices(model, bot) == [CacheHealth.notice, "Outro aviso", "Outro aviso"])
         // A new conversation can say it again.
-        model.newConversation(bot.id)
+        await model.newConversation(bot.id)?.value
         model.apply(.notice(CacheHealth.notice), to: bot.id)
         #expect(notices(model, bot) == [CacheHealth.notice])
     }

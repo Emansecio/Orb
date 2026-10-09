@@ -57,7 +57,7 @@ com os caminhos mais curtos (se você escrever antes, o texto fica no campo e o 
 | Colar uma chave de API | OpenAI, Claude, xAI ou OpenRouter |
 
 "Mais opções em Ajustes" (⌘, → **Modelos**) leva à lista completa. Os provedores aparecem em grupos; os modelos de cada um vêm
-**ao vivo** do provedor (ao abrir e a cada 6 h; uma lista que falha é tentada de novo depois de 5 min, 10 min e assim por diante, sem travar as rotinas) e valem para qualquer Orb.
+**ao vivo** do provedor (ao abrir e a cada 6 h; se a lista falha, o app tenta de novo depois de 5 min, 10 min, 20 min… até 6 h, e uma chave recusada espera as 6 h) e valem para qualquer Orb.
 
 | Grupo | Provedor | Como conectar | Observações |
 |---|---|---|---|
@@ -327,7 +327,7 @@ Detalhes: [docs/MEMORIA.md](docs/MEMORIA.md).
 
 ### Conversas
 
-**Nova conversa** (⇧⌘N) guarda a atual e começa outra, sem perder nada (uma conversa em que você não disse nada não é guardada). O que está escrito no campo (e as mensagens que estavam na fila) segue para a conversa nova.
+**Nova conversa** (⇧⌘N) guarda a atual e começa outra, sem perder nada (uma conversa em que você não disse nada não é guardada; se o disco não aceitar a gravação, por exemplo por falta de espaço, a conversa continua aberta e o app avisa, em vez de apagá-la). O que está escrito no campo (e as mensagens que estavam na fila) segue para a conversa nova.
 **Conversas** (botão da barra do chat, **⌘Y**) lista as anteriores deste Orb, agrupadas em Hoje, Ontem, Esta semana e Mais
 antigas, com busca a partir de 5. ↩ reabre (a atual é arquivada antes); Delete pede para apagar ("Apagar de vez? Não dá para
 desfazer."; ↩ confirma, Esc cancela). Apagar uma conversa apaga também as imagens que só ela usava; uma imagem que outra conversa
@@ -340,6 +340,9 @@ Uma **rotina** é uma tarefa que um Orb faz sozinho, no horário, **enquanto o a
 
 - **Quando**: todo dia, toda semana (com o dia), a cada X horas ou a cada X minutos (no mínimo 15); o editor mostra a próxima
   execução.
+- **Mac acordado.** Com alguma rotina ligada, o app avisa o macOS para não colocá-lo em App Nap (os horários não atrasam com a
+  janela fechada); durante uma execução, o Mac também não entra em repouso sozinho. Terminada a execução, ou sem rotinas
+  ligadas, o app não pede nada.
 - **Peça no chat.** "Verifique meus e-mails a cada 30 minutos" ou "todo dia às 9h me mande um resumo das notícias": o Orb cria a
   rotina sozinho (ferramenta `schedule`, nos dois motores) e também lista, pausa, retoma e apaga as dele quando você pede. Nada
   disso passa em branco: em "Perguntar antes" o cartão mostra o nome, quando roda e o que será pedido; em "Só leitura" só dá
