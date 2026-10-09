@@ -254,7 +254,9 @@ private struct ConnectorCard: View {
                     .help(usedBy.isEmpty ? "Ligue “Conectores” no painel de um Orb, ou escolha os Orbs em Editar" : "")
             }
             HStack(spacing: 6) {
+                // Ready, in use, connecting, error: the badge changes in place by fading.
                 statusBadge
+                    .animateChanges(of: StatusBadgeKey(isEnabled: connector.isEnabled, status: status))
                 Spacer(minLength: 0)
                 Menu {
                     Button("Testar conexão", action: runTest).disabled(!connector.isEnabled || test == .running)
@@ -502,6 +504,12 @@ private struct ConnectorCard: View {
             }
         }
     }
+}
+
+/// What the status badge depends on, as one value for its swaps to follow.
+private struct StatusBadgeKey: Equatable {
+    var isEnabled: Bool
+    var status: MCPStatus?
 }
 
 /// The connector is connected right now: a small green dot, nothing louder.

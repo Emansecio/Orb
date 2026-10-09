@@ -183,7 +183,7 @@ struct CatalogBadge: View {
     var body: some View {
         HStack(spacing: 4) {
             if let symbol { Image(systemName: symbol) }
-            Text(text).lineLimit(1)
+            Text(text).lineLimit(1).contentTransition(.opacity)
         }
         .font(.system(size: 11, weight: .medium))
         .foregroundStyle(tint)

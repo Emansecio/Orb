@@ -154,6 +154,7 @@ private struct InstalledSkillRow: View {
     let onEdit: () -> Void
     let onDelete: () -> Void
     @State private var copied = CopiedFlash()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(alignment: .center, spacing: 14) {
@@ -170,6 +171,10 @@ private struct InstalledSkillRow: View {
                         .buttonStyle(.plain)
                         .font(.system(size: 11))
                         .foregroundStyle(copied.isOn ? Palette.ok : Palette.faint)
+                        // The symbol is replaced by the check, as in the chat (a plain change under Reduce Motion); in on the
+                        // press curve, back on the content one.
+                        .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
+                        .animation(copied.isOn ? Motion.press : Motion.content, value: copied.isOn)
                         .help(Tip.copySlug(skill.slug))
                 }
                 if !skill.summary.isEmpty {
