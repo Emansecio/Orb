@@ -21,16 +21,21 @@ private enum RoutinesSheet: Identifiable {
 
 struct RoutinesView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var sheet: RoutinesSheet?
 
     var body: some View {
         @Bindable var model = model
         ScrollView {
-            Group {
+            // Empty and full cross-fade in a ZStack (§2.13), never side by side. A card that is born or goes away comes and
+            // leaves like a routine in the Orb's panel (`arrive`: rises 6 pt, leaves by fading), the others slide, bound to
+            // the ids, so a run or a clock tick moves nothing.
+            ZStack(alignment: .top) {
                 if model.routines.isEmpty {
                     RoutinesEmptyState(canCreate: !model.bots.isEmpty,
                                        onNew: { newRoutine(nil) },
                                        onTemplate: { newRoutine($0) })
+                        .transition(.opacity)
                 } else {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 14, alignment: .top)],
                               alignment: .leading, spacing: 14) {
@@ -42,11 +47,15 @@ struct RoutinesView: View {
                                             onEdit: { sheet = .edit(routine) },
                                             onOpen: { sheet = .conversation(routine.id) },
                                             onOpenRun: { sheet = .run(routine: routine.id, run: $0) })
+                                    .transition(.adapted(.arrive, reduceMotion: reduceMotion))
                             }
                         }
                     }
+                    .animateChanges(of: model.routines.map(\.id))
+                    .transition(.opacity)
                 }
             }
+            .motion(Motion.crossFade, value: model.routines.isEmpty)
             .frame(maxWidth: 980)
             .frame(maxWidth: .infinity)
             .padding(24)
@@ -261,22 +270,37 @@ private struct RoutineCard: View {
                 Button("Ver conversa", systemImage: "text.bubble", action: onOpen)
                     .help(Tip.routineConversation)
                 Spacer()
-                if isRunning {
-                    Label("Rodando…", systemImage: "hourglass").foregroundStyle(Palette.muted)
-                } else if isQueued {
-                    Label("Na fila", systemImage: "clock").foregroundStyle(Palette.muted)
-                        .help(Tip.queuedRoutine)
-                } else {
-                    Button("Rodar agora", systemImage: "play.fill", action: onRun)
-                        .help(Tip.runRoutineNow)
+                // "Rodar agora", "Rodando…" and "Na fila" swap in place: one over the other, cross-fading, for the
+                // card not to shift while they trade places.
+                ZStack(alignment: .trailing) {
+                    if isRunning {
+                        Label("Rodando…", systemImage: "hourglass").foregroundStyle(Palette.muted)
+                            .transition(.opacity)
+                    } else if isQueued {
+                        Label("Na fila", systemImage: "clock").foregroundStyle(Palette.muted)
+                            .help(Tip.queuedRoutine)
+                            .transition(.opacity)
+                    } else {
+                        Button("Rodar agora", systemImage: "play.fill", action: onRun)
+                            .help(Tip.runRoutineNow)
+                            .transition(.opacity)
+                    }
                 }
+                .animateChanges(of: RoutineRunState(isRunning: isRunning, isQueued: isQueued))
             }
             .controlSize(.small)
         }
         .padding(16)
         .card(radius: 12)
         .opacity(routine.isEnabled ? 1 : 0.6)
+        .animateChanges(of: routine.isEnabled)
     }
+}
+
+/// Which of "Rodar agora", "Rodando…" and "Na fila" a routine's card shows.
+struct RoutineRunState: Equatable {
+    let isRunning: Bool
+    let isQueued: Bool
 }
 
 /// "Próxima: em 3 h · hoje às 09:00", kept right as the minutes pass; "Pausada" when it is switched off.
