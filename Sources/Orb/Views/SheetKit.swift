@@ -130,6 +130,8 @@ struct SheetFooter: View {
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.muted)
                     .lineLimit(2)
+                    .contentTransition(.opacity)
+                    .transition(.opacity)
             }
             Spacer(minLength: 12)
             if showsCancel {
@@ -149,6 +151,8 @@ struct SheetFooter: View {
                 Button("", action: cancel).keyboardShortcut(.cancelAction).opacity(0).accessibilityHidden(true)
             }
         }
+        // The validation note comes, goes and changes by fading (§2.13); the buttons are on the other side and stay put.
+        .motion(Motion.content, value: message)
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
         .overlay(alignment: .top) { Divider().opacity(0.6) }

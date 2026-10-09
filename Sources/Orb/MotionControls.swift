@@ -37,6 +37,14 @@ extension Motion {
     }
 }
 
+extension View {
+    /// Text that is replaced by other text in place (a footer, a hint, a status): it cross-fades in `Motion.content`
+    /// (at once under Reduce Motion, no: in the 0.15 s fade) and nothing else around it is animated.
+    func textSwap(_ value: some Equatable) -> some View {
+        contentTransition(.opacity).motion(Motion.content, value: value)
+    }
+}
+
 /// A spinner that says nothing for the first 150 ms (`Motion.spinnerDelay`) and then fades in (`Motion.fade`): a read
 /// that finishes quickly shows nothing, and one that takes longer does not blink a spinner for a frame.
 struct DelayedSpinner: View {

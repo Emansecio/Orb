@@ -665,7 +665,7 @@ struct RoutineEditor: View {
             }
             if let bot, RoutineText.waitsForAnswer(orbMode: bot.permissionMode, routineMode: routine.permissionMode) {
                 // Right under the Orb it depends on, so it is seen before the rest of the form.
-                Section { waitingWarning(bot) }
+                Section { waitingWarning(bot).transition(.quiet) }
             }
             Section("Quando") {
                 Picker("Repetir", selection: $kind) {
@@ -674,21 +674,28 @@ struct RoutineEditor: View {
                     Text("A cada X horas").tag(Kind.hourly)
                     Text("A cada X minutos").tag(Kind.minutes)
                 }
+                // What the kind of repetition adds or swaps fades by itself (`.quiet`): a Form is a table, and its rows
+                // taking their new height at once looks calmer than a table sliding them.
                 if kind == .weekly {
                     Picker("Dia", selection: $weekday) {
                         ForEach(1...7, id: \.self) { Text(Calendar.current.weekdaySymbols[$0 - 1].capitalized).tag($0) }
                     }
+                    .transition(.quiet)
                 }
                 if kind == .hourly {
                     Stepper("A cada \(hours) h", value: $hours, in: 1...24)
+                        .transition(.quiet)
                 } else if kind == .minutes {
                     Stepper("A cada \(minutes) min", value: $minutes, in: Schedule.minuteRange, step: 5)
+                        .transition(.quiet)
                 } else {
                     DatePicker("Horário", selection: $time, displayedComponents: .hourAndMinute)
+                        .transition(.quiet)
                 }
                 Label(preview, systemImage: "clock")
                     .font(.caption)
                     .foregroundStyle(Palette.muted)
+                    .textSwap(preview)
             }
             Section("O que fazer") {
                 PlaceholderTextEditor(placeholder: "Ex.: Leia meus e-mails não lidos e resuma os importantes em 5 tópicos.",

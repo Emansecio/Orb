@@ -563,6 +563,7 @@ struct SkillEditor: View {
             } footer: {
                 Text(finalSlug.isEmpty ? "O comando é o que você escreve no chat para usar a skill."
                      : "Para usar, escreva /\(finalSlug) no começo da mensagem no chat.")
+                    .textSwap(finalSlug.isEmpty)
             }
             Section {
                 PlaceholderTextEditor(placeholder: "Quando eu pedir /\(finalSlug.isEmpty ? "resumir" : finalSlug), leia o texto e responda em 5 tópicos curtos.",
@@ -574,6 +575,7 @@ struct SkillEditor: View {
                     if skill.instructions.count > Self.longInstructions {
                         Text("Instruções longas gastam contexto em toda conversa que usar a skill. ")
                             .foregroundStyle(Palette.warn)
+                            .transition(.quiet)
                     }
                     Spacer(minLength: 8)
                     Text("\(skill.instructions.count.formatted()) caracteres").monospacedDigit()

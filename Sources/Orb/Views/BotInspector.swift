@@ -255,6 +255,7 @@ struct BotInspector: View {
         } footer: {
             Text(bot.permissionMode.summary)
                 .foregroundStyle(bot.permissionMode == .bypass ? Palette.warn : .secondary)
+                .textSwap(bot.permissionMode)
         }
         .bypassConfirmation(isPresented: $isConfirmingBypass) {
             model.update(bot.id) { $0.permissionMode = .bypass }
@@ -287,6 +288,7 @@ struct BotInspector: View {
                 Text(connectorsLine ?? CapabilityCopy.subtitle(capability))
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .textSwap(connectorsLine)
             }
         }
         if capability == .connectors && isOn {
@@ -294,6 +296,7 @@ struct BotInspector: View {
                 .buttonStyle(.link)
                 .help(Tip.manageConnectors)
                 .font(.caption)
+                .transition(.quiet)
         }
         if capability == .computerUse && isOn {
             // The macOS permissions (Automação, Acessibilidade, Gravação de Tela) this switch relies on live in Ajustes.
@@ -303,6 +306,7 @@ struct BotInspector: View {
             .buttonStyle(.link)
             .help(Tip.macPermissions)
             .font(.caption)
+            .transition(.quiet)
         }
     }
 

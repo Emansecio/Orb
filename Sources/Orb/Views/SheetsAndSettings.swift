@@ -168,12 +168,16 @@ struct NewBotSheet: View {
                 }
                 .onChange(of: keptChoice) { old, _ in
                     if !keptChoice.isEmpty { removeImport() }
-                    changeMemory(from: kept.first { $0.id == old })
+                    // The Orb on the stage changes look the way it does for an edit; the name and the role change by fading.
+                    withAnimation(reduceMotion ? nil : .snappy) {
+                        changeMemory(from: kept.first { $0.id == old })
+                    }
                 }
                 .help(Tip.startFromKeptMemory)
             }
             if let imported {
                 ImportSummaryRow(imported: imported, review: { draft = imported; isImporting = true }, remove: removeImport)
+                    .transition(.quiet)
             } else {
                 Button { isImporting = true } label: {
                     Label(ImportText.title, systemImage: "square.and.arrow.down")
@@ -181,18 +185,30 @@ struct NewBotSheet: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(Palette.accentText)
                 .help(Tip.importFromAssistant)
+                .transition(.quiet)
             }
         } header: {
             Text("Começar de")
         } footer: {
-            if let chosenMemory {
-                Text(chosenMemory.startingNote)
-            } else if imported == nil {
-                Text(ImportText.hint)
-            } else if importFill.isSet {
-                Text("O nome e o papel vieram da importação. Dá para mudar.")
+            // The footer changes with the choice: one text fades into the other, in the same place.
+            ZStack(alignment: .leading) {
+                if let chosenMemory {
+                    Text(chosenMemory.startingNote).transition(.opacity)
+                } else if imported == nil {
+                    Text(ImportText.hint).transition(.opacity)
+                } else if importFill.isSet {
+                    Text("O nome e o papel vieram da importação. Dá para mudar.").transition(.opacity)
+                }
             }
+            .motion(Motion.content, value: footerKey)
         }
+    }
+
+    /// Which of the "Começar de" footers shows (what its change animates).
+    private var footerKey: String {
+        if let chosenMemory { return "memoria-\(chosenMemory.id)" }
+        if imported == nil { return "dica" }
+        return importFill.isSet ? "importou" : "nada"
     }
 
     /// Leaves the old memory (what it gave and the person has not changed goes back) and takes the chosen one.
@@ -300,7 +316,7 @@ private struct NewBotFolderSection: View {
         } header: {
             Text("Pasta")
         } footer: {
-            Text(footer)
+            Text(footer).textSwap(footer)
         }
         .fileImporter(isPresented: $isPicking, allowedContentTypes: [.folder]) { result in
             if case .success(let url) = result { choice = .existing(url) }

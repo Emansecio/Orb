@@ -320,6 +320,7 @@ struct OrbScopePicker: View {
                     }
                 }
                 .padding(.top, 2)
+                .transition(.quiet)
             }
             Text(orbIDs == nil
                  ? "Todos os Orbs, inclusive os que você criar depois, podem usar \(noun).\(allNote.isEmpty ? "" : " " + allNote) Você pode mudar depois."
@@ -327,6 +328,7 @@ struct OrbScopePicker: View {
                 .font(.system(size: 11))
                 .foregroundStyle(Palette.faint)
                 .fixedSize(horizontal: false, vertical: true)
+                .textSwap(orbIDs == nil)
         }
     }
 }
