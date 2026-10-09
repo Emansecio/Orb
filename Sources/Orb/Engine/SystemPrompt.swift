@@ -198,7 +198,10 @@ enum PromptParts {
             let summary = MemoryText.clip(MemoryText.flatten(skill.summary), 160)
             return "- /\(skill.slug)" + (summary.isEmpty ? "" : ": \(summary)")
         }.joined(separator: "\n")
-        let intro = engine == .native ? "The user can invoke skills with /name" : "Orb skills the user can invoke with /name (the app expands them)"
+        // Only the line of each skill is here; its instructions come on demand, with recall "/name" (or the user's /name).
+        let recall = (engine == .native ? "" : ClaudeCodeTools.memoryPrefix) + "recall"
+        let intro = "Skills (the user invokes them with /name\(engine == .native ? "" : ", the app expands them"); "
+            + "when one fits your task, read it first with \(recall) \"/name\")"
         return "## Skills\n\(intro):\n\(list)"
     }
 }

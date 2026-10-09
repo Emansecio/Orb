@@ -18,6 +18,8 @@ documento descreve o que existe no código. Como a memória se combina com a com
     fatos/*.md                fatos sobre você e seu trabalho (não envelhecem)
     procedimentos/*.md        como fazer as tarefas que se repetem (não envelhecem)
     sessoes/*.md              um resumo de cada trecho de conversa (envelhecem e são compactadas)
+    _propostas/<comando>.md   skills que o Orb propôs e esperam a sua decisão (não são páginas de memória)
+    _skills.json              cópia das skills que o Orb pode usar, escrita pelo app (não é página de memória)
     _arquivo/                 texto completo das páginas de sessão compactadas (mesmos caminhos)
     index.sqlite              índice de busca (+ -wal e -shm); reconstruível a partir dos .md
   _guardadas/<nome> – <aaaa-mm-dd hh.mm>/    memória de Orbs apagados ou redefinidos com "guardar a memória"
@@ -134,8 +136,8 @@ Detalhes que importam:
 
 | Ferramenta | Argumentos | Risco |
 |---|---|---|
-| `remember` | `fact` (obrigatório), `tipo` (`fato` padrão, `preferencia`, `procedimento`, `identidade`), `titulo` | `fato`/`procedimento`: `.sensitive`. `identidade`/`preferencia`: `.instructs` |
-| `recall` | `query`, `limite` (padrão 5, máximo 10) | `.safe` |
+| `remember` | `fact` (obrigatório), `tipo` (`fato` padrão, `preferencia`, `procedimento`, `identidade`, `skill`), `titulo` | `fato`/`procedimento`: `.sensitive`. `identidade`/`preferencia`: `.instructs`. `skill`: `.safe` |
+| `recall` | `query` (com `/nome`: carrega a skill), `limite` (padrão 5, máximo 10) | `.safe` |
 
 `remember` com `fato` ou `procedimento` pede aprovação em "Perguntar antes". **Identidade e preferências pedem também em
 "Automático"**, e nem "Sempre permitir" pula esse cartão (só "Sem pedir permissão"), porque viram instruções permanentes
@@ -224,6 +226,67 @@ mudaram, a identidade e as preferências. O prompt de sistema só é reconstruí
 skills ou instruções da pasta mudam. O histórico do próprio Claude Code (`~/.claude/projects/`) guarda o que já foi dito;
 "Esquecer" no Orb não apaga esse histórico.
 
+## Skills aprendidas
+
+Uma skill é o fluxo inteiro de uma classe de tarefa (passos, armadilhas, como verificar); um procedimento é uma regra curta e
+solta ("para publicar: rode os testes e depois o deploy"). O Orb **propõe** skills e você aprova com um clique: nada vira skill
+sozinho, porque uma skill vira instrução. Não há ferramenta nova (o teto de caracteres das especificações não comporta): a
+skill vai dentro de `remember` e `recall`.
+
+- **Propor.** `remember` com `tipo` `skill` recebe um `SKILL.md` inteiro em `fact` e grava `_propostas/<comando>.md`, sem mudar
+  nenhuma memória. A mesma `name` sobrescreve a proposta (e uma skill sua ou aprendida com esse comando é *melhorada*: as
+  instruções novas substituem as atuais depois que você aprova). No máximo 5 propostas esperam ao mesmo tempo.
+- **A validação recusa proposta rasa** (`SkillProposal.validate`) e devolve ao modelo **todos** os motivos mais o formato, para
+  ele melhorar ou desistir: frontmatter com `name` (minúsculas, dígitos e hífens, até 32 caracteres, nome da classe de tarefa, não
+  de um incidente: `fix-`/`debug-`, um número com cara de ticket (segmento de 3 dígitos ou mais, 4 dígitos em qualquer lugar,
+  `bug123`), `-hoje`; `exportar-x265` e `mp3-para-wav` passam; nem largo demais: "geral", "qualquer", "misc" em qualquer posição, e
+  "ajuda", "help" ou "tudo" só quando são o nome inteiro ou "ajuda-geral": `ajuda-declaracao-irpf` e `help-desk-chamados` passam)
+  e `description` (20 a 160 caracteres, o que o prompt lista); corpo de 500 a 12 000 caracteres com as seções **Quando usar**,
+  **Passos** (3 ou mais itens numerados, 150+ caracteres, **pelo menos 2 concretos** e **pelo menos 1 âncora forte** no
+  conjunto), **Armadilhas** (2 ou mais itens, cada um regra e motivo) e **Como verificar** (títulos em português ou em inglês,
+  fora de blocos de código). Passo concreto: uma âncora forte (`comando`, arquivo ou caminho, URL, ferramenta do Orb como
+  `run_command`, opção, literal entre aspas com 2 palavras ou mais ou com cara de saída esperada: `"Ok"` sozinho não conta, `"Tudo certo"`, `"PASS"` e `"ok: 3"` sim), um número com unidade ou formato (`5 minutos`, `4 linhas`, `80%`; um dígito solto
+  não conta) ou uma decisão "Se X, faça Y" cuja condição diga algo ("se necessário", "se houver dúvida", "caso algo dê errado" e
+  "if needed" não dizem, nem as que falam da própria tarefa ou texto: "caso a tarefa seja grande", "se o texto for longo"). Os números e as decisões só ajudam ao lado de uma âncora forte: "reserve 5 minutos, revise 2 vezes" e
+  "planeje, execute, revise" não passam. Sem narrar um dia: datas, ids de sessão, número de PR ou ticket, "ontem", "nesta sessão"
+  (a palavra solta "hoje", uma cor `#333` ou "desta vez" não contam: "agenda de hoje" é uma classe de tarefa), nem o relato em
+  primeira pessoa no passado ("eu rodei", "a usuária me pediu", "hoje de manhã", "às 14h30"; formas só do passado contam mesmo sem o "eu": "primeiro rodei", "rodamos"; "a usuária pediu" depois de "o que", "que", "se" ou "quando" é regra no presente e não conta): um desses sinais pode ser exemplo
+  de uma regra, **dois** são um relato. Sem segredos **literais** (o que o `MemorySanitizer` mudaria; uma referência como
+  `$TOKEN`, `$(security find-generic-password …)` ou `<chave>` diz onde a credencial mora e passa). Nunca sobre uma skill do app
+  ou do catálogo; e sem repetir uma skill que já existe: nome e descrição parecidos, **corpo** com vocabulário parecido
+  (similaridade 0,4 ou mais) ou **os mesmos comandos** (50% ou mais dos trechos de código da proposta, comparados pelas duas
+  primeiras palavras, como `npm publish`, aparecem numa skill existente; comandos de todo dia como `git status` não contam; **um só** comando em comum já basta se o corpo tiver similaridade de 0,25 ou mais). A
+  recusa manda melhorar a existente com o mesmo nome (`Improve it… name: <existente>`).
+- **Carregar.** O app grava `_skills.json` (slug, nome, resumo, instruções, se pode ser melhorada) a cada mensagem, só quando muda,
+  pelo actor da memória. `recall "/nome"` devolve as instruções dessa skill, nos dois motores (o servidor MCP do Claude Code lê o
+  mesmo arquivo). A seção "Skills" do prompt continua com uma linha por skill e diz para ler a que serve com `recall "/nome"`
+  antes de começar; sem skills o prompt não muda.
+- **Revisão em segundo plano** (`SkillReview`, `AppModel+SkillReview`). Cada **passo** do modelo que pede ferramentas no motor
+  nativo, em conversa (não em rotina), sobe `BotSession.stepsSinceSkill` (como o `_iters_since_skill` do Hermes: dez leituras
+  paralelas numa resposta são um passo); uma proposta zera. Quando um turno bem-sucedido termina com 10 ou mais, e não parou no
+  limite de passos, o app pergunta ao Orb, em segundo plano, se o trabalho ensinou algo que valha uma skill. É a mesma requisição
+  do turno (mesmo system, mesmas ferramentas, o histórico que o turno mandou, já resumido ou condensado, mais o que o turno
+  acrescentou, e o prompt de revisão no fim), então o prefixo é o da última chamada do turno e o cache do provedor segue quente,
+  também em conversa compactada. Só `recall` e `remember` com `tipo` `skill` funcionam (`TurnRequest.onlyTools`; as outras
+  respondem "Not available in this review." sem rodar; `remember` de outro tipo, que pediria um cartão que ninguém veria, é
+  recusado na hora com "This review only proposes skills"; `ToolContext.skillReview` repete a recusa dentro da ferramenta). Até 6
+  chamadas ao modelo. Nada aparece no chat nem no histórico, mas o que ela gasta é registrado na página Uso com a origem `auxiliary` (cada
+  `requestUsage`, no modelo do turno). É cancelada quando você escreve (ou uma rotina começa) ou quando o Orb
+  é redefinido, nunca roda junto com um turno, nem num Orb "Só leitura", nem depois de turnos do Claude Code (que mantém a sua
+  sessão). O aviso de proposta não cai na conversa de uma rotina: espera o fim do próximo turno. O prompt pede skill no nível da classe de tarefa, "lições, não
+  registros", melhorar antes de criar, incorporar o procedimento da memória sobre o mesmo assunto e responder "Nothing to save."
+  quando não há técnica não trivial, correção sua ou skill errada. Em Ajustes → Geral dá para desligar.
+- **Aprovar.** Depois do turno ou da revisão, o chat ganha **um** aviso por proposta nova ("Skill proposta: /x — Nome" ou "Melhoria
+  proposta para /x") com o botão **Revisar**, que abre o editor de skills com o texto inteiro e editável. **Salvar skill** cria a
+  skill (origem `aprendida`, `learnedBy` e escopo só o Orb que propôs; você amplia em "Usar com") ou troca as instruções da que
+  existe, mantendo id, usos e escopo. **Descartar** apaga a proposta; fechar o editor a deixa esperando. Quem apaga o procedimento
+  que a skill absorveu é você.
+- **Segredos.** `MemorySanitizer.scrub` tira o valor literal de chaves, tokens, `usuário:senha@` em URL, `curl -u` e `CHAVE=valor`. Só
+  é referência (e passa) `$(…)`, `${…}`, uma variável inteira (`$NOME` em maiúsculas ou `$nome` em minúsculas, seguida de fim,
+  aspas, crase, espaço, `;`, `)`, `/`, vírgula, ponto, `&`, `]` ou `}`; numa URL, `$NOME` em maiúsculas seguido de `@`) e um `<…>` fechado. Um valor que só *começa*
+  com `$` ou `<` (`$enh@F0rte!`, `$3cr3t`, `$Lit3ral`, `<abc123def`) é segredo e sai.
+- Adotar uma memória guardada num Orb novo não leva `_propostas/` nem `_skills.json`.
+
 ## Concorrência e custo
 
 Cada Orb tem um `MemoryBank` (actor), então todas as escritas daquele Orb passam por uma fila só. `MemoryLibrary.at(pasta)`
@@ -244,13 +307,15 @@ trecho de conversa (página de sessão), na varredura diária e na conferência 
 | `Memory/KeptMemories.swift` | `_guardadas`: `KeptProfile` (`perfil.json`), `KeptMemory` (o que o menu "Começar de" e Ajustes listam), guardar, listar, contar, adotar |
 | `Memory/SessionSummary.swift` | trecho de conversa → página de sessão, por regras (mais a nota do modelo, se houver); `idleGap` |
 | `Memory/MemoryIntent.swift` | reconhece "memorize…" e o que guardar |
+| `Memory/SkillProposal.swift`, `Memory/MemoryBank+Skills.swift` | a proposta de skill e a validação; `_propostas/`, `_skills.json`, `skillText` |
+| `Engine/SkillReview.swift`, `AppModel+SkillReview.swift` | o prompt e o gatilho da revisão, avisos, editor |
 | `Memory/OrbToolsMCPServer.swift` | servidor MCP stdio (`--tools-mcp`) para o Claude Code |
 | `Engine/Tools/MacTools.swift` | ferramentas `remember` e `recall` |
 | `BotSession+Conversation.swift` | `pendingStretch`, `saveMemory` (com as notas da dobra), `keepRequestedMemory`, `scheduleMemorySave`, `announce` |
 | `AppModel.swift` (MARK: Memory) | criar, migrar (`prepareMemory`), esquecer, identidade, entrevista |
 | `AppModel+MemoryUI.swift` | `ForgottenMemory`, `MemoryUndo` |
 | `Views/MemoryViews.swift`, `Views/InspectorSupport.swift` | aba Memória, tela de memória, grupos e busca |
-| `Tests/OrbAppTests/MemoryTests.swift`, `RelatedMemoryTests.swift`, `PanelUITests.swift` | testes |
+| `Tests/OrbAppTests/MemoryTests.swift`, `RelatedMemoryTests.swift`, `PanelUITests.swift`, `SkillProposalTests.swift`, `SkillFlowTests.swift` | testes |
 
 Versões anteriores guardavam uma lista simples em `state.json` (`Bot.memory`); na abertura (`prepareMemory`) ela vira páginas
 em `fatos/` e só sai do `state.json` quando todas foram gravadas.

@@ -675,8 +675,42 @@ struct MemoryIntentTests {
                     && !scrubbed.contains("abc123def456") && !scrubbed.contains("wJalrXUtnFEMI") && !scrubbed.contains("ABCDEFG0123"),
                     "\(secret) → \(scrubbed)")
         }
+        for reference in ["export NPM_TOKEN=$(security find-generic-password -s npm -w)", #"curl -u "$USER:$SENHA" https://x"#,
+                          "API_KEY=${API_KEY}", "senha: <a senha do cofre>", "postgres://admin:$DB_PASSWORD@db.local/app"] {
+            #expect(MemorySanitizer.scrub(reference) == reference, "\(reference)")
+        }
         for prose in ["task-management-system-design", "docs/risk-management-for-startups.md", "O token de acesso expira amanhã"] {
             #expect(MemorySanitizer.scrub(prose) == prose, "\(prose)")
+        }
+    }
+
+    @Test func aReferenceFollowedByPunctuationOrAMarkdownMarkIsStillAReference() {
+        // The variable ends at a backtick, a comma, a period, `&`, `]` or `}` as well: prose, code spans and query strings.
+        for reference in ["Passe `--token=$NPM_TOKEN` ao script.", "Rode `export NPM_TOKEN=$NPM_TOKEN` antes.",
+                          "senha: $DB_PASSWORD, guardada no Keychain.", "?access_token=$API_TOKEN&page=2",
+                          "Use o token=$API_TOKEN. Depois confira.", "[token=$API_TOKEN]", "{\"token\": $API_TOKEN}"] {
+            #expect(MemorySanitizer.scrub(reference) == reference, "\(reference)")
+        }
+        // A literal with the same punctuation after it is still removed.
+        for literal in ["senha: $enh@F0rte!, guardada.", "DB_PASSWORD=$3cr3tXYZ`", "token=$Lit3ral&page=2", "password=<abc123def]",
+                        // Punctuation inside the value: a password that starts like a variable.
+                        "senha: $HUNTER.2024", "DB_PASSWORD=$PROD.x9Z", "token=$ABC]def9", "password=$ADMIN}42", "senha: $minha.senha99",
+                        "api_key=$KEY`x9", "curl -u bob:$PASS.123 https://x"] {
+            #expect(MemorySanitizer.scrub(literal).contains("removido"), "\(literal)")
+        }
+    }
+
+    @Test func aSecretThatStartsWithADollarOrAnAngleBracketIsStillASecret() {
+        let literals: [(String, String)] = [("senha: $enh@F0rte!", "enh@F0rte"), ("DB_PASSWORD=$3cr3tXYZ", "3cr3tXYZ"),
+                                            ("postgres://app:$Pa55w0rd@db", "Pa55w0rd"), ("curl -u bob:$Lit3ral https://x", "Lit3ral"),
+                                            ("password=<abc123def", "abc123def"), ("API_KEY=$Abc123", "Abc123"), ("token: <abc def", "abc def")]
+        for (text, value) in literals {
+            let scrubbed = MemorySanitizer.scrub(text)
+            #expect(!scrubbed.contains(value) && scrubbed.contains("removido"), "\(text) → \(scrubbed)")
+        }
+        for reference in ["TOKEN=$MY_TOKEN", "password=$senha", "senha: ${SENHA}", #"curl -u "bob:$PASS" https://x"#, "API_KEY=$KEY; echo",
+                          "password=<sua senha>", "postgres://app:${DB_PASS}@db", "SECRET=$(pass show x)", "token=$token/extra"] {
+            #expect(MemorySanitizer.scrub(reference) == reference, "\(reference)")
         }
     }
 

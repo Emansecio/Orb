@@ -555,6 +555,8 @@ struct ToolContext: Sendable {
     var canSaveFiles = true
     /// The Orb has "Controlar apps do Mac". Tools that are always offered (`open`) use it to refuse what only that switch allows.
     var computerUseAllowed = true
+    /// The tools run for the background review of the conversation (`SkillReview`): memory takes skill proposals only.
+    var skillReview = false
 }
 
 protocol AgentTool: Sendable {

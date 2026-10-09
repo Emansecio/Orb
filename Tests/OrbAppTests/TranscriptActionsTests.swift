@@ -17,6 +17,20 @@ private struct EchoModel: LLMClient {
 @Suite("Ações do transcript") struct TranscriptActionsTests {
     // MARK: Which action fits which notice
 
+    @Test func aSkillTheOrbProposedOffersToReviewIt() {
+        let created = "Skill proposta: /publicar-site — Publicar site"
+        let improved = "Melhoria proposta para /publicar-site"
+        #expect(NoticeAction.actions(for: created) == [.reviewSkill])
+        #expect(NoticeAction.actions(for: improved) == [.reviewSkill])
+        #expect(NoticeAction.proposedSlug(in: created) == "publicar-site" && NoticeAction.proposedSlug(in: improved) == "publicar-site")
+        #expect(NoticeAction.proposedSlug(in: "Pausei depois de 30 passos") == nil)
+        #expect(NoticeAction.proposedSlug(in: "Skill proposta: sem comando") == nil)
+        // Once the proposal is gone (saved, discarded) the button goes with it.
+        #expect(NoticeAction.actions(for: created, canCompact: false, hasProposal: false).isEmpty)
+        #expect(NoticeAction.actions(for: created, canCompact: false, hasProposal: true) == [.reviewSkill])
+        #expect(NoticeAction.reviewSkill.title == "Revisar" && NoticeAction.reviewSkill.symbol == "wand.and.stars")
+    }
+
     @Test func aFailureOffersToTryAgain() {
         #expect(NoticeAction.actions(for: "Não deu certo: Sem conexão com o provedor: tempo esgotado") == [.retry])
         #expect(NoticeAction.actions(for: "Não deu certo: O modelo não respondeu.") == [.retry])

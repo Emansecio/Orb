@@ -79,7 +79,8 @@ struct SystemPromptTests {
         // A budget, so the prompt does not grow back one sentence at a time (it was 3,270 characters before it was tightened;
         // 250 more were spent on telling web_fetch, browser_tab and open apart, and on how to search without a search tool;
         // this Orb has "Controlar apps do Mac", so it includes the ~900-character "Mac apps" recipes, and ~250 more went to
-        // read-only commands, keys and passwords, and confirming before sending messages). The prompt is cached across turns.
+        // read-only commands, keys and passwords, and confirming before sending messages; measured again with the skills in memory,
+        // it is 4,407 for this Orb: the list of skills is only added when there are skills). The prompt is cached across turns.
         #expect(system.count < 4_500, "the native system prompt is \(system.count) characters")
         for rule in ["Reply in the user's language", "Be brief", "Use tools to find out", "read before you change things",
                      "say in one short sentence what you are about to do", "never retry what the user denied",
@@ -102,6 +103,19 @@ struct SystemPromptTests {
         let system = SystemPrompt.make(bot: bot(), skills: skills, environment: mac)
         #expect(system.contains("- /resumir: Resume um texto em poucas linhas"))
         #expect(system.contains("- /vazio\n") || system.hasSuffix("- /vazio"))
+    }
+
+    @Test func tellsHowToLoadASkillOnlyWhenThereAreSkills() {
+        let plain = SystemPrompt.make(bot: bot(), skills: [], environment: mac)
+        #expect(!plain.contains("## Skills") && !plain.contains("\"/name\""))
+        let skills = [Skill(slug: "resumir", name: "Resumir", summary: "Resume um texto", instructions: "Resuma em 5 tópicos.")]
+        let native = SystemPrompt.make(bot: bot(), skills: skills, environment: mac)
+        #expect(native.contains("## Skills\nSkills (the user invokes them with /name; when one fits your task, read it first with recall \"/name\"):"))
+        // The instructions are not in the prompt: the index costs a line per skill.
+        #expect(!native.contains("Resuma em 5 tópicos."))
+        let claude = ClaudeCodePrompt.make(bot: bot(), skills: skills)
+        #expect(claude.contains("read it first with mcp__orb_memoria__recall \"/name\""))
+        #expect(claude.contains("- /resumir: Resume um texto"))
     }
 
     @Test func carriesTheGeneralRules() {

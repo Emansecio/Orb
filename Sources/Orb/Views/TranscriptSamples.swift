@@ -74,6 +74,10 @@ enum TranscriptSample {
                      TranscriptItem(.notice(AgentEngineNotice.paused))]
         case "transcript-failed":
             items = [user, TranscriptItem(.notice("Não deu certo: Chave ou login inválido (401). Confira em Ajustes → Modelos. Detalhe do provedor: invalid x-api-key"))]
+        case "transcript-skill-proposal":
+            items = [TranscriptItem(.user(text: "Publica o site de novo, agora com a versão 2.4", attachments: [])), tool,
+                     TranscriptItem(.bot(text: "Publicado: a versão 2.4 já está no ar e o rodapé confere.", isStreaming: false)),
+                     TranscriptItem(.notice("Skill proposta: /publicar-site — Publicar site"))]
         case "transcript-retry":
             items = [user, TranscriptItem(.notice("Não deu certo: Sem conexão com o provedor: A conexão com a Internet parece estar desligada."))]
         default:
@@ -81,6 +85,8 @@ enum TranscriptSample {
         }
         // After the Orb's own conversation has been read from disk, which would replace this one.
         return AnyView(ChatView(botID: bot.id).task {
+            // The notice offers "Revisar" only while the proposal it speaks of waits in the Orb's memory.
+            if screen == "transcript-skill-proposal" { _ = await model.memory.bank(for: bot.id).proposeSkill(SkillSnapshots.proposal) }
             try? await Task.sleep(for: .seconds(1))
             model.seedConversation(Conversation(items: items), for: bot.id)
         })

@@ -60,6 +60,14 @@ import Testing
         let builtInText = SkillDeleteCopy.message(for: builtIn)
         #expect(!builtInText.contains("catálogo"))
         #expect(builtInText.contains("vem com o app"))
+        let learned = SkillDeleteCopy.message(for: Skill(slug: "publicar-site", name: "Publicar site", summary: "", instructions: "x",
+                                                         source: Skill.learnedSource))
+        #expect(learned.contains("Não dá para desfazer") && learned.contains("aprendeu") && !learned.contains("catálogo"))
+    }
+
+    @Test func aLearnedSkillSaysWhichOrbLearnedIt() {
+        #expect(SkillBadge.learned(by: "Atlas") == "Aprendida por Atlas")
+        #expect(SkillBadge.learned(by: nil) == "Aprendida")
     }
 
     // MARK: Catalog tabs

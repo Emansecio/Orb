@@ -117,7 +117,12 @@ Detalhes que costumam surpreender:
   pasta (`diff .npmrc ~` mostraria `~/.npmrc`). Na dúvida a linha só vai ao cartão.
 - `web_fetch`, `open` e `remember` são `.sensitive` de propósito: são o caminho de **saída** de dados (ou o que fica no
   prompt de toda conversa). Um texto malicioso numa página não consegue ler um segredo e mandá-lo sem você aprovar.
-- `remember` com `tipo` `identidade` ou `preferencia` é `.instructs`. Com `fato` ou `procedimento` é `.sensitive`.
+- `remember` com `tipo` `identidade` ou `preferencia` é `.instructs`. Com `fato` ou `procedimento` é `.sensitive`. Com `skill` é
+  `.safe` em todos os modos, "Só leitura" incluída: só grava uma **proposta** (`_propostas/`), que não muda nada até você ler o
+  texto inteiro no editor de skills e salvar (a aprovação é essa, não um cartão no meio do turno). A revisão em segundo plano
+  só roda com `recall` e `remember` `tipo` `skill` (`TurnRequest.onlyTools`): as outras ferramentas não rodam, e um `remember` de outro
+  tipo, que num Orb em "Pedir permissão" abriria um cartão que ninguém vê, é recusado na hora ("This review only proposes
+  skills"), sem cartão. Não roda em Orb "Só leitura".
 - `schedule` tem família própria: uma tarefa agendada é uma mudança que **fica** e que roda sozinha depois, então criar, pausar,
   retomar e apagar são `.sensitive` (cartão em "Perguntar antes", `Sempre permitir` oferece "Gerenciar as tarefas agendadas";
   roda em "Automático" e "Sem pedir permissão"; **negado em "Só leitura"**). `list` é `.safe` e roda em todos os modos, e uma

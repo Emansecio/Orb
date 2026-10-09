@@ -144,7 +144,9 @@ linha, cartões) é em português (`AgentTool.summary`).
 
 `MemoryBank` (um actor por Orb) + `MemoryIndex` (SQLite/FTS5) + `MemoryPage`/`MemoryText`/`MemorySanitizer` +
 `SessionSummary` + `MemoryIntent` + `KeptMemories` (memórias guardadas e o perfil de cada uma) + `OrbToolsMCPServer`.
-Detalhes em [MEMORIA.md](MEMORIA.md).
+Detalhes em [MEMORIA.md](MEMORIA.md). As skills que o Orb propõe vivem aí também (`SkillProposal`, `MemoryBank+Skills`,
+`_propostas/`, `_skills.json`); a revisão que as propõe é `Engine/SkillReview.swift` + `AppModel+SkillReview.swift`, e o contador
+(`stepsSinceSkill`, de passos do modelo), o pedido guardado (`reviewBase`, com `reviewFrom`) e a tarefa (`skillReview`) ficam no `BotSession`.
 
 ### Importar de outro assistente (`Import/`)
 
@@ -180,7 +182,7 @@ O avatar e seu sistema de animação: `OrbModel` (config, catálogo, imagens), `
 | Ajustes | `SettingsView` (Geral, Modelos, Uso, Permissões do Mac), `ProfileSettings` (a seção "Você" e `ProfileAvatar`, que a barra lateral também usa), `ResetOrbSheet` ("Redefinir o Orb?" e o alerta), `ProviderSettings`, `ProviderPresentation`, `CustomProviderFields`, `ClaudeCodeSettings`, `MacPermissionsView`, `ContextSettings` |
 | Páginas | `RoutinesView`, `ConversationsMenu`, `SkillsView`, `ConnectorsView`, `CatalogParts` |
 | Sistema | `CommandPalette` (⌘K e a folha de atalhos; as teclas vêm de `ShortcutCatalog`, em `Shortcuts.swift`, a mesma lista que Ajustes → Geral mostra), `QuickAskView` (painel da barra de menus), `SheetKit`, `ImportPanel` (a importação de outro assistente, dentro da folha Novo Orb) |
-| Para revisão (só `--snapshot`) | `WelcomeSnapshots`, `CatalogSnapshots`, `ContextSnapshots`, `SystemSnapshots`, `TranscriptSamples`, `AttachmentSnapshots`, e `SnapshotComposerScenes.swift` (na raiz de `Sources/Orb/`) |
+| Para revisão (só `--snapshot`) | `WelcomeSnapshots`, `CatalogSnapshots` (com as cenas `skill-proposal`, `skill-proposal-update`), `ContextSnapshots`, `SystemSnapshots`, `TranscriptSamples` (`transcript-skill-proposal`), `AttachmentSnapshots`, e `SnapshotComposerScenes.swift` (na raiz de `Sources/Orb/`) |
 
 ## O caminho de um turno
 
@@ -219,7 +221,10 @@ ComposerView ── AppModel.submit ─┬─ Orb livre ─► AppModel.send ─
    uma por passo, nunca por token, cada uma por ao menos 0,7 s).
 8. **Fim** (`finishTurn`): zera status; agenda a página de sessão da memória (30 min depois); fecha a execução da rotina;
    notifica (se o app está em segundo plano) e conta não lidas; o Orb comemora (`happy`) ou erra (`error`); entrega a fila que
-   ficou; grava a conversa de uma vez; começa a próxima rotina que esperava por este Orb.
+   ficou; grava a conversa de uma vez; começa a próxima rotina que esperava por este Orb. Por último (fora de rotinas): avisa
+   da skill que o turno propôs e, se o motor foi o nativo e os passos do modelo com ferramentas chegaram a 10 (e a tarefa não parou no limite), começa em segundo plano a
+   revisão da conversa (`reviewSkillsIfDue`: mesmo pedido e histórico do turno, só `recall`/`remember` skill, cancelada por qualquer
+   mensagem e por redefinir).
 
 ## Persistência
 
@@ -233,7 +238,7 @@ conversations/<Orb>.meta.json    nota ao lado: quantos itens, quantos já foram 
 conversations/<Orb>/<id>.json    conversas anteriores ("Nova conversa"), com index.json (cache corrigido pelos arquivos)
 conversations/<Orb>/routine-<rotina>.json   a conversa de cada rotina
 conectores/<id>.json             catálogo do conector (`ConnectorCatalog`): o que o servidor ofereceu da última vez, sem segredos
-memoria/<Orb>/…                  a memória (páginas .md + index.sqlite); memoria/_guardadas/<nome> – <data>/ de Orbs apagados ou
+memoria/<Orb>/…                  a memória (páginas .md + index.sqlite, _propostas/ e _skills.json das skills); memoria/_guardadas/<nome> – <data>/ de Orbs apagados ou
                                  redefinidos, com perfil.json (nome, papel e aparência) ao lado das páginas
 anexos/<Orb>/<uuid>.jpg|png      imagens reduzidas (a conversa guarda o caminho); saem com o Orb ou com a conversa anterior que só elas usava (as cópias `.corrupt-…` também contam como uso)
 perfil/foto-<8 hex>.jpg|png      a foto da usuária (quadrada, até 256 px; nome novo a cada troca, a antiga é apagada); nunca vai a provedor nem a ferramenta; o Redefinir apaga a pasta
@@ -303,7 +308,8 @@ Cada resposta do provedor traz os tokens do pedido (`TokenUsage`); o app os soma
 - **Registro.** `BotSession.apply` entrega a `AppModel.recordUsage` cada `TurnEvent.requestUsage` (uma chamada do motor nativo) e, num
   turno do Claude Code, o `.usage` do turno (o CLI informa o turno inteiro: um "pedido") com o `.reportedCost` que vem logo depois
   (`total_cost_usd`, no mesmo balde). O modelo é o do turno (`BotSession.turnModel`); a origem é `routine` se há uma rotina rodando,
-  senão `chat`; `auxiliary` é para chamadas do próprio app (`recordAuxiliaryUsage`; hoje nenhuma, o resumo da compactação é por regras).
+  senão `chat`; `auxiliary` é para chamadas do próprio app fora de um turno: hoje a revisão de skills em segundo plano (`reviewSkillsIfDue` repassa cada
+  `.requestUsage` e `.reportedCost` a `recordUsage`; o resumo da compactação é por regras e não gasta nada).
   O `UsageRecorder` guarda o que chega num dicionário e o entrega ao `Store` a cada 10 s, ao fim do turno e no `saveNow`.
 - **Arquivo.** `Store.addUsage` lê o mês (decodificação tolerante, `.corrupt-…` se não decodifica), soma e grava na fila de
   gravação, então lotes e leituras (que esperam as gravações do mesmo arquivo) ficam em ordem. Um mês nunca passa de 20 000 linhas

@@ -35,6 +35,9 @@ enum CatalogSnapshots {
         case "skill-editor":
             guard let skill = model.skills.first(where: { $0.orbIDs != nil }) ?? model.skills.first else { return nil }
             return AnyView(SkillEditor(skill: skill))
+        case "skill-proposal", "skill-proposal-update":
+            guard let bot = model.bots.first, let draft = SkillSnapshots.draft(of: bot, update: screen.hasSuffix("update")) else { return nil }
+            return AnyView(SkillEditor(skill: draft.skill, proposal: draft))
         case "skill-preview", "skill-preview-installed":
             let id = screen == "skill-preview" ? "anthropics/skills/docx" : "anthropics/skills/pdf"
             let entry = CatalogSkill(id: id, repo: "anthropics/skills", skillId: id.split(separator: "/").last.map(String.init) ?? "", name: "Documentos", installs: 206_000)
@@ -88,5 +91,39 @@ enum CatalogSnapshots {
     private static func template(_ id: String, phase: ConnectorEditor.Phase = .form) -> AnyView? {
         guard let template = ConnectorTemplate.all.first(where: { $0.id == id }) else { return nil }
         return AnyView(ConnectorEditor(draft: ConnectorDraft(template: template), initialPhase: phase))
+    }
+}
+
+/// The skill the proposal scenes (`--snapshot skill-proposal`, `transcript-skill-proposal`) show.
+enum SkillSnapshots {
+    static let proposal = """
+        ---
+        name: publicar-site
+        description: Publica o site em produção com testes antes e conferência depois; use quando pedirem para publicar ou subir o site.
+        ---
+
+        ## Quando usar
+        Quando a usuária pedir para publicar, subir ou fazer deploy do site, em qualquer branch.
+
+        ## Passos
+        1. Rode `swift test --jobs 4` e pare se algum teste falhar.
+        2. Confirme que a branch é `main` com `git branch --show-current` e que `git status` está limpo.
+        3. Rode `./scripts/deploy.sh --prod` e acompanhe a saída até a linha "Deploy concluído".
+        4. Abra a URL de produção e confira a versão no rodapé.
+
+        ## Armadilhas
+        - Nunca rode o deploy com arquivos modificados: o script publica a pasta, não o commit.
+        - O script lê `.env.production` da pasta atual; rodar de outro lugar publica com as chaves erradas.
+
+        ## Como verificar
+        Abra o site e confira se a versão no rodapé é a do último commit (`git rev-parse --short HEAD`).
+        """
+
+    /// The proposal as the editor gets it: new, or, with `update`, replacing a skill of the same command.
+    static func draft(of bot: Bot, update: Bool) -> SkillDraft? {
+        guard case .success(let parsed) = SkillProposal.validate(proposal, among: []) else { return nil }
+        let skill = Skill(slug: parsed.slug, name: update ? "Publicar o site" : parsed.name, summary: parsed.summary,
+                          instructions: parsed.instructions, source: Skill.learnedSource, orbIDs: [bot.id], learnedBy: bot.id)
+        return SkillDraft(skill: skill, slug: parsed.slug, botID: bot.id, orbName: bot.name, isUpdate: update)
     }
 }

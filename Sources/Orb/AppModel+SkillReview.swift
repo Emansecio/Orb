@@ -1,0 +1,118 @@
+import AppKit
+
+// The Orb's skills as the Orb itself sees them, and the skills it proposes: it learns a procedure by doing a task,
+// proposes it as a skill, and you read it in the editor and save it, or not. Nothing is saved without you.
+
+/// A proposal on its way to the editor: the skill it would be (new, or an existing one with the proposed text).
+struct SkillDraft: Identifiable {
+    var id: String { slug }
+    var skill: Skill
+    /// The command of the proposal (the one in the file; the editor may rename the skill).
+    var slug: String
+    var botID: UUID
+    var orbName: String
+    /// It replaces the instructions of a skill that exists.
+    var isUpdate: Bool
+}
+
+extension AppModel {
+    // MARK: What the Orb's tools can load
+
+    /// Gives the Orb's tools (`recall "/name"`), in this process or in Claude Code's, the skills this Orb may use.
+    func publishSkills(for botID: UUID) {
+        let digests = skills(for: botID).map(SkillDigest.init)
+        let bank = memory.bank(for: botID)
+        Task { await bank.publishSkills(digests) }
+    }
+
+    // MARK: The review
+
+    /// Ajustes → Geral: the Orbs review their work and propose skills (on unless turned off).
+    var proposesSkills: Bool { preferences.object(forKey: SkillReview.settingKey) as? Bool ?? true }
+
+    /// Starts the review of the conversation when the turn that just ended took enough steps with tools: in the
+    /// background, without a word in the chat, with the system prompt, tools and history of the turn (so the provider's
+    /// cache is still warm).
+    /// Not in an Orb that only reads, not after Claude Code's turns (it keeps its own session) and not while anything else
+    /// has the Orb; a message from the user stops it (`send`).
+    func reviewSkillsIfDue(_ session: BotSession) {
+        guard proposesSkills, session.stepsSinceSkill >= SkillReview.threshold, session.skillReview == nil,
+              session.turnTask == nil, !isResetting, var request = session.reviewBase,
+              let current = bot(session.id), current.permissionMode != .readOnly,
+              let messages = session.conversation?.messages, session.reviewFrom <= messages.count else { return }
+        session.stepsSinceSkill = 0
+        // The history the turn sent (its summary and condensed stretch, not the raw messages) and what the turn added
+        // to it: the prefix of the turn's last model call, which is what the provider has in its cache.
+        request.history += messages[session.reviewFrom...]
+        request.prompt = SkillReview.prompt
+        request.maxSteps = SkillReview.maxSteps
+        request.onlyTools = SkillReview.tools
+        request.context.skillReview = true
+        request.picksUpTask = false
+        let botID = session.id
+        let usedModel = session.turnModel ?? modelRef(for: current)?.text
+        session.skillReview = Task {
+            // Nothing of it reaches the chat or the history, but what it costs is real: each call goes to the usage
+            // history as the app's own (`auxiliary`), so the Uso page shows it apart from the chat's.
+            for await event in engine.run(request) {
+                guard let usedModel else { continue }
+                switch event {
+                case .requestUsage(let used): recordUsage(UsageTotals(used), botID: botID, model: usedModel, source: .auxiliary)
+                case .reportedCost(let cost): recordUsage(UsageTotals(reportedCost: cost), botID: botID, model: usedModel, source: .auxiliary)
+                default: break
+                }
+            }
+            usageLog.flush()
+            guard !Task.isCancelled else { return }
+            session.skillReview = nil
+            await collectSkillProposals(botID)
+        }
+    }
+
+    /// Tells the chat about a proposal that waits for you: one at a time, each once (`announcedProposals`).
+    func collectSkillProposals(_ botID: UUID) async {
+        guard sessions[botID] != nil else { return }
+        let waiting = await memory.bank(for: botID).proposals()
+        // Not while a routine has the Orb: its conversation is on screen then, and the notice would land in it.
+        guard let session = sessions[botID], session.routineID == nil,
+              let next = waiting.first(where: { session.announcedProposals[$0.slug] != $0.modified }) else { return }
+        session.announcedProposals[next.slug] = next.modified
+        let isUpdate = skills(for: botID).contains { $0.slug == next.slug && $0.isImprovable }
+        append(.notice(isUpdate ? "\(NoticeAction.proposalUpdatePrefix) /\(next.slug)"
+                       : "\(NoticeAction.proposalPrefix) /\(next.slug) — \(next.name)"), to: botID)
+    }
+
+    // MARK: Deciding
+
+    func hasSkillProposal(_ slug: String, of botID: UUID) async -> Bool {
+        await memory.bank(for: botID).proposal(slug) != nil
+    }
+
+    /// The proposal as the editor shows it: nil when it is gone.
+    func skillDraft(_ slug: String, from botID: UUID) async -> SkillDraft? {
+        guard let proposal = await memory.bank(for: botID).proposal(slug) else { return nil }
+        let orb = bot(botID)?.name ?? "O Orb"
+        if var current = skills(for: botID).first(where: { $0.slug == slug && $0.isImprovable }) {
+            current.summary = proposal.summary
+            current.instructions = proposal.instructions
+            return SkillDraft(skill: current, slug: slug, botID: botID, orbName: orb, isUpdate: true)
+        }
+        var command = slug, suffix = 2
+        while skills.contains(where: { $0.slug == command }) {
+            command = "\(slug)-\(suffix)"
+            suffix += 1
+        }
+        let skill = Skill(slug: command, name: proposal.name, summary: proposal.summary, instructions: proposal.instructions,
+                          source: Skill.learnedSource, orbIDs: [botID], learnedBy: botID)
+        return SkillDraft(skill: skill, slug: slug, botID: botID, orbName: orb, isUpdate: false)
+    }
+
+    /// You decided: the proposal goes away. Saved, it is also said (VoiceOver) and the Orb is pleased.
+    func finishSkillDraft(_ draft: SkillDraft, saved skill: Skill? = nil) {
+        let bank = memory.bank(for: draft.botID)
+        Task { await bank.discardProposal(draft.slug) }
+        guard let skill else { return }
+        announceForAccessibility("Skill /\(skill.slug) salva")
+        sessions[draft.botID]?.flash(\.isCelebrating, seconds: 1.5)
+    }
+}

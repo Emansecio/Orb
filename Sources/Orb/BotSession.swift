@@ -141,6 +141,23 @@ final class BotSession {
     @ObservationIgnored var chunkTask: Task<Void, Never>?
     @ObservationIgnored var chunkAttempts: [Int: Int] = [:]
 
+    // MARK: Learning skills
+
+    /// Steps with tools (model answers that ask for tools) of the turns Orb's own engine answered since the Orb last
+    /// proposed a skill (not kept across launches, as in Hermes): at `SkillReview.threshold` the end of a turn starts a
+    /// review of the conversation.
+    @ObservationIgnored var stepsSinceSkill = 0
+    /// The request of the latest turn of Orb's own engine, with the history it sent but not its message: what a review
+    /// asks the model with, so the system prompt, the tools and the history are the ones the provider has in its cache.
+    /// Nil for a turn of Claude Code.
+    @ObservationIgnored var reviewBase: TurnRequest?
+    /// Where in the conversation's messages the turn began: what the turn added is what follows `reviewBase.history`.
+    @ObservationIgnored var reviewFrom = 0
+    /// The review that runs now, in the background. It stops when you write.
+    @ObservationIgnored var skillReview: Task<Void, Never>?
+    /// The proposals the chat already told about (the command and when it was written), so each is told once.
+    @ObservationIgnored var announcedProposals: [String: Date] = [:]
+
     // MARK: Composer
 
     /// What the composer holds that outlives its view (attachments not sent yet, messages queued during a turn,

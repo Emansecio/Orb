@@ -18,6 +18,8 @@ enum NoticeAction: Equatable, Sendable {
     case compact
     /// The app kept something in memory by itself: look at it in the Memória tab.
     case openMemory
+    /// The Orb proposed a skill (or a better version of one): read it and decide.
+    case reviewSkill
 
     var title: String {
         switch self {
@@ -27,6 +29,7 @@ enum NoticeAction: Equatable, Sendable {
         case .newConversation: "Nova conversa"
         case .compact: "Compactar e tentar de novo"
         case .openMemory: "Ver na memória"
+        case .reviewSkill: "Revisar"
         }
     }
 
@@ -38,6 +41,7 @@ enum NoticeAction: Equatable, Sendable {
         case .newConversation: "square.and.pencil"
         case .compact: "arrow.triangle.merge"
         case .openMemory: "brain"
+        case .reviewSkill: "wand.and.stars"
         }
     }
 
@@ -47,6 +51,18 @@ enum NoticeAction: Equatable, Sendable {
     static let failurePrefix = "Não deu certo: "
     /// How the notice for a fact the app kept by itself (not the model) starts.
     static let keptMemoryPrefix = "Guardado na memória:"
+    /// How the notices for a skill the Orb proposed start: a new one ("Skill proposta: /publicar-site — Publicar site") and
+    /// a better version of one that exists ("Melhoria proposta para /publicar-site").
+    static let proposalPrefix = "Skill proposta:"
+    static let proposalUpdatePrefix = "Melhoria proposta para"
+
+    /// The command a proposal notice is about.
+    static func proposedSlug(in notice: String) -> String? {
+        guard notice.hasPrefix(proposalPrefix) || notice.hasPrefix(proposalUpdatePrefix),
+              let start = notice.firstIndex(of: "/") else { return nil }
+        let slug = notice[notice.index(after: start)...].prefix { !$0.isWhitespace }
+        return slug.isEmpty ? nil : String(slug)
+    }
 
     /// The actions that fit a notice, most useful first; none for the notices that only inform.
     static func actions(for notice: String) -> [NoticeAction] {
@@ -54,6 +70,7 @@ enum NoticeAction: Equatable, Sendable {
         if notice.hasPrefix("Pausei depois de") || notice.hasPrefix("A resposta passou do limite") { return [.continueTurn] }
         // Wrongly detected, it is one click to the page to forget.
         if notice.hasPrefix(keptMemoryPrefix) { return [.openMemory] }
+        if proposedSlug(in: notice) != nil { return [.reviewSkill] }
         guard notice.hasPrefix(failurePrefix) else { return [] }
         // Only the app's own sentence decides: what follows "Detalhe do provedor:" (or "Detalhe do Claude Code:") is free text.
         let reason = ourSentence(of: notice.dropFirst(failurePrefix.count).lowercased())
@@ -63,9 +80,10 @@ enum NoticeAction: Equatable, Sendable {
         return isSettingsProblem(reason) ? [.openSettings, .retry] : [.retry]
     }
 
-    /// `actions(for:)` without "Compactar e tentar de novo" when the conversation has nothing older to summarize.
-    static func actions(for notice: String, canCompact: Bool) -> [NoticeAction] {
-        actions(for: notice).filter { $0 != .compact || canCompact }
+    /// `actions(for:)` without "Compactar e tentar de novo" when the conversation has nothing older to summarize, and
+    /// without "Revisar" once the proposal is gone (saved, discarded or deleted).
+    static func actions(for notice: String, canCompact: Bool, hasProposal: Bool = true) -> [NoticeAction] {
+        actions(for: notice).filter { ($0 != .compact || canCompact) && ($0 != .reviewSkill || hasProposal) }
     }
 
     /// The part of a failure the app wrote, before the provider's own words.

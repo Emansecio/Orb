@@ -557,9 +557,12 @@ private struct NoticeLine: View {
     let botID: UUID
     /// Whether the conversation has something older to summarize, read once for a notice that offers to compact.
     @State private var canCompact = false
+    /// Whether the skill a notice proposes still waits for a decision, read for a notice that offers to review it.
+    @State private var hasProposal = false
+    @State private var reviewing: SkillDraft?
 
     var body: some View {
-        let actions = NoticeAction.actions(for: text, canCompact: canCompact)
+        let actions = NoticeAction.actions(for: text, canCompact: canCompact, hasProposal: hasProposal)
         let failure = NoticeAction.failureDetail(of: text)
         VStack(spacing: 8) {
             if let failure {
@@ -597,8 +600,15 @@ private struct NoticeLine: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(TranscriptSpeech.notice(failure.map { "não deu certo. " + $0 } ?? text))
         .task(id: id) {
+            if let slug = NoticeAction.proposedSlug(in: text) { hasProposal = await model.hasSkillProposal(slug, of: botID) }
             guard NoticeAction.actions(for: text).contains(.compact), let input = model.contextInput(for: botID) else { return }
             canCompact = await Task.detached { ContextReading.make(input)?.canCompact ?? false }.value
+        }
+        .sheet(item: $reviewing, onDismiss: {
+            guard let slug = NoticeAction.proposedSlug(in: text) else { return }
+            Task { hasProposal = await model.hasSkillProposal(slug, of: botID) }
+        }) { draft in
+            SkillEditor(skill: draft.skill, proposal: draft)
         }
     }
 
@@ -615,6 +625,9 @@ private struct NoticeLine: View {
         case .newConversation: model.newConversation(botID)
         case .compact: model.compactAndRetry(botID)
         case .openMemory: model.showMemory(of: botID)
+        case .reviewSkill:
+            guard let slug = NoticeAction.proposedSlug(in: text) else { return }
+            Task { reviewing = await model.skillDraft(slug, from: botID) }
         }
     }
 }

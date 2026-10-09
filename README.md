@@ -441,6 +441,14 @@ Páginas **Conectores** (⌥⌘C) e **Skills** (⌥⌘K) na barra lateral, cada 
 - **Skills** são instruções reutilizáveis no formato aberto `SKILL.md`. *Explorar* busca no catálogo [Skills.sh](https://skills.sh)
   e lê o `SKILL.md` no GitHub de quem publicou, com **prévia completa antes de instalar** (instale só de fontes em que você
   confia: a skill vira instrução para o Orb). Use com `/comando` no começo da mensagem, ou pelo botão "Usar". "Nova skill" cria a sua.
+  O Orb também lê sozinho a skill que serve para a tarefa.
+- **Skills aprendidas.** Depois de uma tarefa longa, o Orb revisa o que fez e, se aprendeu algo que vale repetir (uma técnica,
+  uma correção sua, uma skill que estava errada), **propõe** uma skill, ou uma melhoria de uma que você já tem. O chat mostra
+  "Skill proposta: /nome" com o botão **Revisar**: abre o texto inteiro, que você edita, e **Salvar skill** ou **Descartar**.
+  Nada é salvo sem você, e a proposta rasa (genérica, sem passos concretos, armadilhas e como verificar, com data do dia ou segredo) nem chega a você.
+  A skill aprendida fica marcada "Aprendida por <Orb>" e vale só para ele até você ampliar em "Usar com". Você também pode
+  pedir "transforme isso numa skill". Em Ajustes → Geral dá para desligar ("Propor skills com o que os Orbs aprendem"); a revisão
+  usa uma chamada extra ao modelo, quase toda em cache.
 
 ## Atalhos
 

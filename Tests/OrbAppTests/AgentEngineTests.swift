@@ -190,6 +190,35 @@ struct AgentEngineTests {
         #expect(messages(events)[2].content.contains("read-only"))
     }
 
+    @Test func aTurnLimitedToSomeToolsRefusesTheOthersWithoutAskingOrRunningThem() async {
+        let runs = Counter()
+        let calls = LLMEvent.toolCalls([ToolCallRequest(id: "c1", name: "touch", arguments: "{}"),
+                                        ToolCallRequest(id: "c2", name: "look", arguments: "{}")])
+        let script = Script([[calls], [.text("Nothing to save.")]])
+        var limited = request(script, mode: .ask, runs: runs, tools: [TouchTool(runs: runs), LookTool(gauge: Gauge())])
+        limited.onlyTools = ["look"]
+        let events = await run(AgentEngine(), limited)
+        #expect(await runs.value == 0)
+        #expect(approvals(events).isEmpty)
+        let results = messages(events).filter { $0.role == .tool }
+        #expect(results.map(\.toolCallID) == ["c1", "c2"])
+        #expect(results[0].content == "Not available in this review." && results[0].isError)
+        #expect(results[1].content == "viu ?" && !results[1].isError)
+        #expect(events.filter { if case .toolStarted = $0 { true } else { false } }.count == 1)
+    }
+
+    @Test func aTurnLimitedToSomeToolsDoesNotOpenACardForOneThatWouldAsk() async {
+        let runs = Counter()
+        let script = Script([[touchCall], [.text("Nothing to save.")]])
+        var limited = request(script, mode: .ask, runs: runs)
+        limited.onlyTools = ["touch"]
+        let events = await run(AgentEngine(), limited)
+        #expect(await runs.value == 0)
+        #expect(approvals(events).isEmpty)
+        let result = messages(events).first { $0.role == .tool }
+        #expect(result?.isError == true && result?.content.contains("This review only proposes skills") == true)
+    }
+
     private let dangerousCall = LLMEvent.toolCalls([ToolCallRequest(id: "c1", name: "touch", arguments: #"{"command":"rm -rf ~/Projetos"}"#)])
 
     private func approvals(_ events: [TurnEvent]) -> [ApprovalRequest] {

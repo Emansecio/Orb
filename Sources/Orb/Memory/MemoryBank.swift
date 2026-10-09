@@ -112,7 +112,7 @@ actor MemoryBank {
     }
 
     nonisolated func close() { closedState.withLock { $0 = true } }
-    private var isClosed: Bool { closedState.withLock { $0 } }
+    var isClosed: Bool { closedState.withLock { $0 } }
 
     // MARK: Identity
 

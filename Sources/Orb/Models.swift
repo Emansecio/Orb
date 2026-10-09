@@ -550,6 +550,8 @@ struct Skill: Identifiable, Codable, Sendable {
     var folderURL: URL?
     /// The Orbs that may use this skill; nil means every Orb (what skills did before they were scoped).
     var orbIDs: Set<UUID>?
+    /// The Orb that proposed it, for a skill with `learnedSource` (you approved it before it was saved).
+    var learnedBy: UUID?
 }
 
 extension Skill {
@@ -565,6 +567,7 @@ extension Skill {
         source = try c.decodeIfPresent(String.self, forKey: .source).map { $0 == Self.legacyBuiltInSource ? Self.builtInSource : $0 }
         folderURL = try c.decodeIfPresent(URL.self, forKey: .folderURL)
         orbIDs = (try? c.decodeIfPresent(Set<UUID>.self, forKey: .orbIDs)) ?? nil
+        learnedBy = (try? c.decodeIfPresent(UUID.self, forKey: .learnedBy)) ?? nil
     }
 
     /// `source` of the skills that ship with the app (`legacyBuiltInSource` in files saved while it was OpenBot).
@@ -572,6 +575,12 @@ extension Skill {
     static let legacyBuiltInSource = "openbot"
     /// `source` of the skills made by "Importar de outro assistente".
     static let importedSource = "importado"
+
+    /// `source` of the skills an Orb proposed and you approved (`SkillProposal`).
+    static let learnedSource = "aprendida"
+
+    /// An Orb may propose a better version of it: written by you or learned, not shipped with the app or installed from the catalog.
+    var isImprovable: Bool { source == nil || source == Self.learnedSource }
 
     /// A slug from free text: lowercase letters, digits and dashes.
     static func slugify(_ text: String) -> String {

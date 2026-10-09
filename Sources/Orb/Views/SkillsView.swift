@@ -132,10 +132,17 @@ enum SkillDeleteCopy {
     static func message(for skill: Skill) -> String {
         switch skill.source {
         case nil: "As instruções que você escreveu serão apagadas. Não dá para desfazer."
+        case Skill.learnedSource?: "As instruções que o Orb aprendeu e você aprovou serão apagadas. Não dá para desfazer."
         case Skill.builtInSource?: "Ela vem com o app e não volta sozinha depois de apagada. Você pode escrever outra com o mesmo comando."
         default: "Você pode instalar de novo pelo catálogo depois."
         }
     }
+}
+
+/// The words on a skill's badge that depend on the skill, not on the screen.
+enum SkillBadge {
+    /// "Aprendida por Atlas" (just "Aprendida" when the Orb that proposed it is gone).
+    static func learned(by orb: String?) -> String { orb.map { "Aprendida por \($0)" } ?? "Aprendida" }
 }
 
 private struct InstalledSkillRow: View {
@@ -147,7 +154,7 @@ private struct InstalledSkillRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 14) {
-            CatalogIcon(symbol: skill.source == nil || skill.source == Skill.builtInSource ? "wand.and.stars" : "shippingbox")
+            CatalogIcon(symbol: skill.source == nil || skill.source == Skill.builtInSource || skill.source == Skill.learnedSource ? "wand.and.stars" : "shippingbox")
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
                     Text(skill.name)
@@ -171,6 +178,8 @@ private struct InstalledSkillRow: View {
                 HStack(spacing: 6) {
                     if skill.source == Skill.builtInSource {
                         CatalogBadge(text: "Incluída no app", symbol: "circle.hexagongrid")
+                    } else if skill.source == Skill.learnedSource {
+                        CatalogBadge(text: SkillBadge.learned(by: model.bots.first { $0.id == skill.learnedBy }?.name), symbol: "sparkles")
                     } else if let source = skill.source {
                         CatalogBadge(text: source.split(separator: "/").prefix(2).joined(separator: "/"), symbol: "shippingbox")
                     } else {
@@ -466,13 +475,16 @@ struct SkillEditor: View {
     @State var skill: Skill
     /// Whether the shortcut was typed by the user (until then it follows the name).
     @State private var slugEdited: Bool
+    /// The skill an Orb proposed, which this editor shows whole for you to save or discard (nil: a skill of yours).
+    let proposal: SkillDraft?
 
     /// Beyond this many characters the instructions weigh on every conversation that uses the skill.
     static let longInstructions = 4_000
 
-    init(skill: Skill) {
+    init(skill: Skill, proposal: SkillDraft? = nil) {
         _skill = State(initialValue: skill)
         _slugEdited = State(initialValue: !skill.slug.isEmpty)
+        self.proposal = proposal
     }
 
     private var isNew: Bool { !model.skills.contains { $0.id == skill.id } }
@@ -488,7 +500,15 @@ struct SkillEditor: View {
         if chosenNoOrb { return "Marque ao menos um Orb em “Usar com”." }
         return nil
     }
-    private var title: String { isNew ? "Nova skill" : "Editar \(skill.name.isEmpty ? "skill" : skill.name)" }
+    private var title: String {
+        if let proposal { return proposal.isUpdate ? "Melhoria de \(skill.name)" : "Skill proposta" }
+        return isNew ? "Nova skill" : "Editar \(skill.name.isEmpty ? "skill" : skill.name)"
+    }
+    private var subtitle: String {
+        guard let proposal else { return "Instruções que o Orb segue quando você começa a mensagem com o comando." }
+        return proposal.isUpdate ? "\(proposal.orbName) aprendeu isso fazendo a tarefa. Substitui as instruções atuais de /\(proposal.slug)."
+            : "\(proposal.orbName) aprendeu isso fazendo a tarefa. Revise antes de salvar."
+    }
 
     var body: some View {
         Form {
@@ -519,7 +539,7 @@ struct SkillEditor: View {
             }
             Section {
                 PlaceholderTextEditor(placeholder: "Quando eu pedir /\(finalSlug.isEmpty ? "resumir" : finalSlug), leia o texto e responda em 5 tópicos curtos.",
-                                      text: $skill.instructions, minHeight: 100)
+                                      text: $skill.instructions, minHeight: proposal == nil ? 100 : 260)
             } header: {
                 Text("Instruções para o Orb")
             } footer: {
@@ -539,8 +559,16 @@ struct SkillEditor: View {
             }
         }
         .formStyle(.grouped)
-        .orbSheet(title, subtitle: "Instruções que o Orb segue quando você começa a mensagem com o comando.", size: .medium) {
-            SheetFooter(message: message, cancel: { dismiss() }, primaryTitle: "Salvar", isPrimaryDisabled: !canSave, primary: save)
+        .orbSheet(title, subtitle: subtitle, size: .medium) {
+            if let proposal {
+                // Esc and "Fechar" leave the proposal waiting; only "Descartar" throws it away.
+                SheetFooter(message: message, destructiveTitle: "Descartar", destructive: {
+                    model.finishSkillDraft(proposal)
+                    dismiss()
+                }, cancelTitle: "Fechar", cancel: { dismiss() }, primaryTitle: "Salvar skill", isPrimaryDisabled: !canSave, primary: save)
+            } else {
+                SheetFooter(message: message, cancel: { dismiss() }, primaryTitle: "Salvar", isPrimaryDisabled: !canSave, primary: save)
+            }
         }
     }
 
@@ -552,6 +580,7 @@ struct SkillEditor: View {
         } else {
             model.skills.append(skill)
         }
+        if let proposal { model.finishSkillDraft(proposal, saved: skill) }
         dismiss()
     }
 }

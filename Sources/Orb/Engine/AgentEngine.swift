@@ -80,6 +80,10 @@ struct TurnRequest: Sendable {
     /// Messages the user sends while this turn runs. The engine hands them to the model at the next step boundary;
     /// nil means the turn takes none (they wait for the turn's end).
     var steering: SteeringQueue?
+    /// The only tools the turn may run (the background review of the conversation, `SkillReview`): a call to any other
+    /// is answered with "Not available" and never runs, and a call that would need the user's approval is refused with
+    /// no card, while `tools` still lists them all, so the request is the one the provider already has in its cache.
+    var onlyTools: Set<String>?
 
     func currentPermissions() async -> PermissionState {
         if let permissions { return await permissions() }
@@ -505,6 +509,7 @@ actor AgentEngine {
     /// to read-only while the card was open, leave both empty: every call then asks for itself, as without batching.
     private func confirmBatch(_ calls: [ToolCallRequest], request: TurnRequest, reason: String, allowed: inout [PermissionRule],
                               out: AsyncStream<TurnEvent>.Continuation) async -> (approved: Set<Int>, refused: [Int: ToolOutcome]) {
+        guard request.onlyTools == nil else { return ([], [:]) } // the calls that can run need no card
         let live = await request.currentPermissions()
         guard let batch = ApprovalBatch.plan(calls: calls, tools: request.tools, context: request.context, state: live, grants: allowed)
         else { return ([], [:]) }
@@ -594,6 +599,7 @@ actor AgentEngine {
     /// grants of this turn ("Só nesta tarefa"). `approved`: the user already allowed it on a card that grouped it.
     private func execute(_ call: ToolCallRequest, request: TurnRequest, reason: String, allowed: inout [PermissionRule],
                          approved: Bool = false, out: AsyncStream<TurnEvent>.Continuation) async -> ToolOutcome {
+        if let only = request.onlyTools, !only.contains(call.name) { return ToolOutcome("Not available in this review.", isError: true) }
         guard let tool = request.tools.first(where: { $0.spec.name == call.name }) else {
             return ToolOutcome("Error: unknown tool \(call.name).", isError: true)
         }
@@ -615,6 +621,8 @@ actor AgentEngine {
         case .deny(let message):
             return Self.block(tool, summary, message, out)
         case .ask(let why):
+            // A review shows no card (nobody would see it): what it may run asks nothing, and the rest is refused.
+            if request.onlyTools != nil { return ToolOutcome("This review only proposes skills: use remember with tipo skill.", isError: true) }
             // The model's own explanation is already on screen right above the card.
             let approval = ApprovalRequest(
                 toolName: call.name, title: summary.title, command: summary.detail,

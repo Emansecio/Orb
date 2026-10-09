@@ -102,6 +102,7 @@ struct GeneralSettings: View {
     @Environment(AppModel.self) private var model
     @State private var learnedWindows: [LearnedWindowRow] = []
     @AppStorage("notifyWhenDone") private var notifyWhenDone = true
+    @AppStorage(SkillReview.settingKey) private var proposeSkills = true
     @AppStorage(GlobalHotKey.defaultsKey) private var globalShortcut = false
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var loginError: String?
@@ -122,6 +123,14 @@ struct GeneralSettings: View {
                 }
                 Toggle("Me avisar quando um Orb terminar ou precisar de mim", isOn: $notifyWhenDone)
                 notificationState
+                Toggle(isOn: $proposeSkills) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Propor skills com o que os Orbs aprendem")
+                        Text("Depois de tarefas longas, o Orb revisa o que fez e pode propor uma skill. Usa uma chamada extra ao modelo, quase toda em cache. Nada é salvo sem você aprovar.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
             ContextMemorySettings()
             LearnedWindowsSettings(rows: $learnedWindows)

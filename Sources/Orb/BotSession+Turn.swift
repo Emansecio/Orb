@@ -16,10 +16,22 @@ extension BotSession {
 
     // MARK: Lifecycle
 
+    /// Keeps the request of a turn of Orb's own engine for the review that may follow it (see `reviewBase`).
+    func keepForReview(_ request: TurnRequest) {
+        var base = request
+        base.prompt = ""
+        base.images = []
+        base.turnGrants = []
+        base.steering = nil
+        reviewBase = base
+        reviewFrom = conversation?.messages.count ?? 0
+    }
+
     /// Registers a new turn of the Orb and returns its id.
     func beginTurn() -> UUID {
         let turn = UUID()
         turnID = turn
+        reviewBase = nil
         resetWork()
         model?.workAnnouncer.reset()
         return turn
@@ -141,6 +153,8 @@ extension BotSession {
             model.live(id).runningTool = call.kind
             runningCalls[call.id] = call
             actionsThisTurn += 1
+            // A proposal starts the review's count over (its step, counted from the message, was the proposing one).
+            if call.title == RememberTool.skillTitle { stepsSinceSkill = 0 }
             showWork(WorkPhrase.line(for: call), announcing: true)
         case .toolFinished(let id, let state, let output, let produced):
             model.live(self.id).runningTool = nil
@@ -169,6 +183,9 @@ extension BotSession {
                 $0.messages.append(message)
                 if message.role == .assistant { $0.lastModelCall = .now }
             }
+            // What the review counts, as Hermes does: steps of the model that ask for tools (ten reads at once are one),
+            // in Orb's own engine and in conversations (a routine's run is nobody's lesson).
+            if message.role == .assistant, !message.toolCalls.isEmpty, reviewBase != nil, routineID == nil { stepsSinceSkill += 1 }
             if message.role == .user {
                 conversation?.taskPaused = false
                 recordMarks(native: true)
@@ -236,6 +253,7 @@ extension BotSession {
     func finishTurn(_ turn: UUID, succeeded: Bool = true, startsQueuedRoutines: Bool = true) {
         guard turnID == turn, turnTask != nil, let model else { return }
         let botID = id
+        let ranRoutine = routineID != nil
         turnTask = nil
         turnID = nil
         pendingMarks = nil
@@ -287,6 +305,12 @@ extension BotSession {
         if routineID == nil { scheduleSave(delay: 0) } // a routine's was written by `finishRoutineRun`
         if routineID == nil { model.settleSteering(id, succeeded: succeeded) } // what you said during the turn, if anything
         if startsQueuedRoutines { model.startNextQueuedRoutine(for: id) }
+        // Last, so a message or a routine that took the Orb at once is not met by a review. A proposal the turn made
+        // (you asked for a skill, or the Orb proposed one) is told now; the review comes in the background.
+        if !ranRoutine {
+            Task { await model.collectSkillProposals(botID) }
+            if succeeded, !(conversation?.isTaskPaused ?? false) { model.reviewSkillsIfDue(self) } // a task left half way teaches little
+        }
     }
 
     /// The last thing the turn's conversation says (a routine's, while it runs; the transcript is always the chat).

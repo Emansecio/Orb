@@ -304,8 +304,19 @@ enum MemoryText {
     ]
 }
 
-/// Removes secrets before anything reaches memory (the transcript can contain commands and outputs with keys).
+/// Removes secrets before anything reaches memory (the transcript can contain commands and outputs with keys). Only
+/// literal ones: a value that is a reference (`$TOKEN`, `$(security find-generic-password …)`) or a placeholder
+/// (`<chave>`) is no secret, and says where the credential is kept.
 enum MemorySanitizer {
+    /// What a value that only points at the credential looks like: a command (`$(…)`), `${NAME}`, a variable (`$NAME` or
+    /// `$name`, whole: followed by the end, a quote, a space, `;`, `)`, `/` or `&`, or by a backtick, `,`, `.`, `]` or `}` that
+    /// itself ends there: `--token=$NPM_TOKEN`, `$DB_PASSWORD,`, but not `$HUNTER.2024`) or a closed placeholder (`<chave>`). A value that
+    /// merely starts with `$` or `<` is a literal one (`$enh@F0rte!`, `$3cr3t`, `$Lit3ral`, `<abc123def`): a variable is
+    /// UPPER_CASE or lower_case, and a name that mixes cases (or a lower-case one with digits) is a password. (The rules are case-insensitive; `(?-i:` keeps these two cases apart.)
+    private static let reference = #"(?-i:\$(?:\(|\{|(?:[A-Z_][A-Z0-9_]*|[a-z_]+)(?=["'\s;)/&]|[`,.\]}](?=["'`\s;)\]},.&]|$)|$))|<[^<>\n]{1,80}>)"#
+    /// In a URL the password ends at the `@`, so only an upper-case variable is told apart there (`:$DB_PASSWORD@`).
+    private static let urlReference = #"(?-i:\$(?:\(|\{|[A-Z_][A-Z0-9_]*(?=@))|<[^<>\n]{1,80}>)"#
+
     private static let rules: [(NSRegularExpression, String)] = [
         (#"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)"#, "[chave privada removida]"),
         (#"(?<![A-Za-z0-9])sk-(?:ant-|proj-)?[A-Za-z0-9_\-]{16,}"#, "[chave removida]"),
@@ -316,11 +327,11 @@ enum MemorySanitizer {
         (#"eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}"#, "[token removido]"),
         (#"(?i)\b(bearer|basic)\s+[A-Za-z0-9._\-+/=]{12,}"#, "$1 [removido]"),
         // user:password@ in URLs (postgres://, mysql://, https://…)
-        (#"(?i)\b([a-z][a-z0-9+.\-]*://[^\s:/@]+):[^\s@/]+@"#, "$1:[removido]@"),
+        (#"(?i)\b([a-z][a-z0-9+.\-]*://[^\s:/@]+):(?!\#(urlReference))[^\s@/]+@"#, "$1:[removido]@"),
         // curl -u user:pass
-        (#"(?i)(\s-u\s+[^\s:]+):\S+"#, "$1:[removido]"),
+        (#"(?i)(\s-u\s+[^\s:]+):(?!["']?\#(reference))\S+"#, "$1:[removido]"),
         // KEY=value, MY_TOKEN: value, "password": "value", ?access_token=value (names containing the words below)
-        (#"(?i)([\w.\-]*(?:password|passwd|senha|secret|segredo|token|api[_\-]?key|access[_\-]?key|private[_\-]?key|credential)[\w.\-]*["']?\s*[:=]\s*)(["']?)[^\s"',;&]+"#,
+        (#"(?i)([\w.\-]*(?:password|passwd|senha|secret|segredo|token|api[_\-]?key|access[_\-]?key|private[_\-]?key|credential)[\w.\-]*["']?\s*[:=]\s*)(["']?)(?!\#(reference))[^\s"',;&]+"#,
          "$1$2[removido]"),
     ].map { (try! NSRegularExpression(pattern: $0.0), $0.1) }
 

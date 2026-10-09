@@ -137,9 +137,11 @@ final class AppModel {
     @ObservationIgnored let usageLog: UsageRecorder
     /// Every Orb's own memory bank (`memoria/<id>/` in the data folder).
     @ObservationIgnored let memory: MemoryLibrary
+    /// Where Ajustes → Geral keeps the switches the app reads while it works (tests give it a suite of their own).
+    @ObservationIgnored var preferences = UserDefaults.standard
     /// The approval cards open in any turn, whichever engine runs it (internal so tests can open cards).
     @ObservationIgnored let gate: ApprovalGate
-    @ObservationIgnored private let engine: AgentEngine
+    @ObservationIgnored let engine: AgentEngine
     @ObservationIgnored private let claudeEngine: ClaudeCodeEngine
     @ObservationIgnored let mcp: MCPManager
     /// Keeps the tokens of connectors in the Keychain instead of the data file.
@@ -825,6 +827,7 @@ final class AppModel {
         }
         session.memoryIdle?.cancel()
         session.memoryIdle = nil
+        session.skillReview?.cancel()
         let library = memory
         var keeping: Task<URL?, Never>?
         if keepMemory {
@@ -882,6 +885,8 @@ final class AppModel {
             session.memoryIdle?.cancel()
             session.memoryIdle = nil
             session.memoryRequest = nil
+            session.skillReview?.cancel()
+            session.skillReview = nil
             session.saveTask?.cancel()
             session.saveTask = nil
             session.cancelChunkNote()
@@ -1204,6 +1209,9 @@ final class AppModel {
 
         session.memoryIdle?.cancel()
         session.memoryIdle = nil
+        session.skillReview?.cancel() // a review gives way to anything the user or a routine sends
+        session.skillReview = nil
+        publishSkills(for: botID)
         // Full paths: the bubble shows thumbnails of the pictures (a name alone, as older conversations have, still renders).
         let itemsBeforeMessage = session.conversation?.items.count ?? 0
         append(.user(text: typed, attachments: attachments.map(\.path) + pictures.map(\.path)), to: botID)
@@ -1313,6 +1321,7 @@ final class AppModel {
                                       },
                                       picksUpTask: paused,
                                       steering: steering)
+            session.keepForReview(request)
             await session.play(engine.run(request), turn: turn)
         }
         return true

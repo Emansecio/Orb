@@ -11,8 +11,9 @@ extension AppModel {
         usageLog.record(totals, orb: botID, name: name, model: model, source: source)
     }
 
-    /// For a call the app makes for itself (the note on a stretch the next fold will take, the review that proposes skills):
-    /// what the provider said it used.
+    /// For a call the app makes for itself whose reply is a single `TokenUsage` (the note on a stretch the next fold will
+    /// take). The skill review, which runs the engine in the background, reports each call through `recordUsage` with the
+    /// same `auxiliary` source.
     func recordAuxiliaryUsage(_ usage: TokenUsage, botID: UUID, model: String) {
         recordUsage(UsageTotals(usage), botID: botID, model: model, source: .auxiliary)
     }

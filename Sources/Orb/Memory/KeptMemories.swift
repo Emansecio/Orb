@@ -208,11 +208,12 @@ enum KeptMemories {
 
     /// Moves a kept memory to be the memory of a new Orb (`target` is `memoria/<id>`). The folder leaves
     /// `_guardadas`; the search index goes (it is rebuilt from the pages, so what it knew about the old Orb does not
-    /// matter) and so does the profile, which has been used. Throws when the folder cannot be moved.
+    /// matter) and so does the profile, which has been used, and what belonged to the old Orb's skills (proposals waiting for
+    /// its user, the copy of its skills). Throws when the folder cannot be moved.
     static func adopt(_ kept: URL, into target: URL, files: FileManager = .default) throws {
         try files.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
         try files.moveItem(at: kept, to: target)
-        for name in ["index.sqlite", "index.sqlite-wal", "index.sqlite-shm", KeptProfile.fileName] {
+        for name in ["index.sqlite", "index.sqlite-wal", "index.sqlite-shm", KeptProfile.fileName, MemoryBank.proposalsFolder, MemoryBank.skillsFile] {
             try? files.removeItem(at: target.appending(path: name))
         }
     }

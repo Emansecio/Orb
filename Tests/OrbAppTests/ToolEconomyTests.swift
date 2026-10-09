@@ -12,7 +12,8 @@ struct ToolSpecEconomyTests {
 
     /// The same measure (description + schema, in characters, of `ToolBox.all`) taken on commit 43a00a7, before the
     /// pass that shortened the descriptions: 22,382. It is history, not a figure the code can reproduce.
-    /// The specs measured 14,497 after the pass; the ceiling leaves room for a sentence or two in any tool.
+    /// The specs measured 14,497 after the pass, and 14,994 with the skills in `remember` and `recall` (measured again after
+    /// bringing in the on-demand connectors, the profile and the schedule); the ceiling leaves room for a sentence or two.
     private static let specCharsCeiling = 15_000
 
     @Test func theToolSpecsStayWellUnderTheirOldSize() {
@@ -52,8 +53,8 @@ struct ToolSpecEconomyTests {
             "browser_tab": ["logged-in", "web_fetch", "Permitir JavaScript de Eventos da Apple"],
             "ui_read": ["Accessibility", "400 lines", "passwords", "w1.3.2", "valid for this reading only"],
             "ui_act": ["ui_read", "interface mudou", "always asks the user first", "pick_menu", "Accessibility"],
-            "remember": ["long-term memory", "near-duplicates"],
-            "recall": ["long-term memory", "before asking"],
+            "remember": ["long-term memory", "near-duplicates", "tipo skill", "SKILL.md", "skill"],
+            "recall": ["long-term memory", "before asking", "/name"],
             "clipboard_write": ["replacing"], "notify": ["not for ordinary replies"], "processes": ["app_quit"],
         ]
         for (name, words) in needles {
