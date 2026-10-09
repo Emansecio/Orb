@@ -22,10 +22,12 @@ struct ConnectorsView: View {
             CatalogTabBar(tab: $tab, installedTitle: "Instalados", installedCount: model.connectors.count, galleryTitle: "Galeria")
                 .padding(.top, 16)
                 .padding(.bottom, 4)
-            switch tab {
-            case .gallery: ConnectorGalleryView(editing: $editing, settingUp: $settingUp, explore: { tab = .explore })
-            case .installed: InstalledConnectors(editing: $editing, settingUp: $settingUp, explore: { tab = .gallery })
-            case .explore: ExploreConnectors(editing: $editing)
+            CatalogTabContent(tab: tab) {
+                switch tab {
+                case .gallery: ConnectorGalleryView(editing: $editing, settingUp: $settingUp, explore: { tab = .explore })
+                case .installed: InstalledConnectors(editing: $editing, settingUp: $settingUp, explore: { tab = .gallery })
+                case .explore: ExploreConnectors(editing: $editing)
+                }
             }
         }
         .background(Palette.canvas)

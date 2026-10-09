@@ -18,6 +18,9 @@ struct CatalogTabBar: View {
     let installedCount: Int
     /// The title of the gallery pill; nil leaves the pill out.
     var galleryTitle: String?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The one dark pill slides to the chosen tab through this namespace.
+    @Namespace private var pillSpace
 
     var body: some View {
         HStack(spacing: 4) {
@@ -25,13 +28,15 @@ struct CatalogTabBar: View {
             pill(.installed, title: installedTitle, symbol: "checkmark.circle", count: installedCount)
             pill(.explore, title: "Explorar", symbol: "sparkle.magnifyingglass", count: nil)
         }
+        // Bound to the choice: the pill slides and the titles change color with it; it jumps under Reduce Motion.
+        .animation(Motion.selection(reduceMotion: reduceMotion), value: tab)
         .padding(3)
         .background(Color.white.opacity(0.06), in: .capsule)
         .background {
             // ⌘F outside the explore tab (the explore tab's header has its own button for it). Only the catalog has a
             // search field, so the page goes there (the field takes focus when it appears).
             if tab != .explore {
-                Button("Buscar no catálogo") { withAnimation(.snappy(duration: 0.2)) { tab = .explore } }
+                Button("Buscar no catálogo") { tab = .explore }
                     .keyboardShortcut(AppShortcut.find)
                     .opacity(0)
                     .frame(width: 0, height: 0)
@@ -42,7 +47,7 @@ struct CatalogTabBar: View {
 
     private func pill(_ value: CatalogTab, title: String, symbol: String, count: Int?) -> some View {
         Button {
-            withAnimation(.snappy(duration: 0.2)) { tab = value }
+            tab = value
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: symbol)
@@ -57,12 +62,32 @@ struct CatalogTabBar: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .foregroundStyle(tab == value ? Palette.onInk : Palette.secondary)
-            .background(tab == value ? Palette.ink : .clear, in: .capsule)
+            .background {
+                if tab == value {
+                    Capsule().fill(Palette.ink).matchedGeometryEffect(id: "pilula", in: pillSpace)
+                }
+            }
             .contentShape(.capsule)
         }
         .buttonStyle(.plain)
         .help(value == .installed ? Tip.showInstalled : value == .gallery ? Tip.showGallery : Tip.showCatalog)
         .accessibilityAddTraits(CatalogTab.traits(isSelected: tab == value))
+    }
+}
+
+/// What a catalog page shows under its tabs. Another tab cross-fades with the one before (§2.13), the two laid over each
+/// other instead of stacked while they swap; the page's `tab` is what the fade is bound to.
+struct CatalogTabContent<Content: View>: View {
+    let tab: CatalogTab
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        ZStack {
+            content
+                .id(tab)
+                .transition(.opacity)
+        }
+        .motion(Motion.crossFade, value: tab)
     }
 }
 

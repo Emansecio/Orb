@@ -16,9 +16,11 @@ struct SkillsView: View {
             CatalogTabBar(tab: $tab, installedTitle: "Instaladas", installedCount: model.skills.count)
                 .padding(.top, 16)
                 .padding(.bottom, 4)
-            switch tab {
-            case .installed, .gallery: InstalledSkills(editing: $editing, explore: { tab = .explore }) // only connectors have a gallery
-            case .explore: ExploreSkills()
+            CatalogTabContent(tab: tab) {
+                switch tab {
+                case .installed, .gallery: InstalledSkills(editing: $editing, explore: { tab = .explore }) // only connectors have a gallery
+                case .explore: ExploreSkills()
+                }
             }
         }
         .background(Palette.canvas)
