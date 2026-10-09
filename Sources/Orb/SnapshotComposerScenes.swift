@@ -10,7 +10,7 @@ extension Snapshot {
     static func composerScene(_ screen: String, model: AppModel) -> AnyView? {
         guard let bot = model.bots.first else { return nil }
         switch screen {
-        case "chat-working", "chat-working-wait", "chat-working-retry":
+        case "chat-working", "chat-working-wait", "chat-working-retry", "chat-attachments-queued":
             return workingTurn(screen, model: model, bot: bot)
         case "chat-typed":
             seedConversation(model, bot: bot)
@@ -127,6 +127,7 @@ extension Snapshot {
         }
         model.session(id).turnTask = Task { try? await Task.sleep(for: .seconds(3600)) }
         live.backdateWork(to: .now.addingTimeInterval(-16))
+        if screen == "chat-attachments-queued" { AttachmentSnapshots.queue(model.composerLane(id)) }
         if screen == "chat-working" {
             let lane = model.composerLane(id)
             lane.enqueue(SteeredMessage(text: "Na verdade, ignore a pasta node_modules.", prompt: ""))
@@ -143,7 +144,7 @@ extension Snapshot {
     /// A small gradient PNG in the run's data folder (which `DevRun` removes on exit when it is temporary), as a
     /// picture attached to the composer.
     @MainActor
-    private static func sampleImage(named name: String, hue: CGFloat) -> ImageAttachment {
+    static func sampleImage(named name: String, hue: CGFloat) -> ImageAttachment {
         let size = NSSize(width: 240, height: 180)
         let image = NSImage(size: size, flipped: false) { rect in
             NSGradient(colors: [NSColor(hue: hue, saturation: 0.6, brightness: 0.9, alpha: 1),

@@ -117,6 +117,7 @@ extension AnyTransition {
   em `Motion.enter`. Falha: a marca vermelha entra igual, sem tremer (o Orb já mostra o erro).
 - **Contadores** ("3 ações", tempos): `.contentTransition(.numericText())` com `Motion.content`.
 - **Reduzir movimento:** marca troca por opacidade; expandir sem deslocamento.
+- **Anexos** (cartões de arquivo, grade de imagens, arquivos que o Orb fez): só opacidade. O cartão tem hover com `Motion.hoverIn`/`hoverOut` (`hoverFill`) e não encolhe ao pressionar (o clique é um gesto de toque, não um `Button`, para o arrastar para fora funcionar), e o tamanho ou o "ausente" que chegam do disco entram com `Motion.fade`. A miniatura entra por fade sobre o fundo. A entrada é só a da linha (`RowEntrance`).
 
 ### 2.4 Cartões de aprovação
 

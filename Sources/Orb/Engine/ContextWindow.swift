@@ -20,6 +20,12 @@ struct ContextCut: Sendable, Equatable {
     /// What `summary` is rendered from (see `ConversationLedger`): a fold extends it with the messages leaving the
     /// window. nil with a summary: the summary is a text of an earlier version, read into a ledger once when extended.
     var ledger: ConversationLedger?
+    /// The model's notes on stretches not folded yet, in the input's own indexes (see `ChunkSummary`): a fold that
+    /// takes a stretch whole adds its note to the ledger. nil/empty: the summary is the rules' alone.
+    var chunks: [ChunkSummary] = []
+    /// The notes that folds through this cut added to the ledger so far, oldest first: what the memory page of the folded
+    /// stretch gets besides the rules' page (the ledger itself keeps only its newest `maxDigests`).
+    var attachedNotes: [String] = []
     /// The task all the fields below belong to starts at this index of the input; a new task starts them over.
     var anchor = -1
     /// Shortening level reached in a task too big for the window (see `ContextWindow.rungs`); it only goes up.
@@ -70,6 +76,8 @@ struct ContextWindow: Sendable, Equatable {
     /// how many outputs beyond the newest few it takes for that to happen (so it comes in batches).
     static let freshShare = 0.4
     static let freshBatch = 3
+    /// How much of the budget a fold may take beyond what it needs, to end where a stretch with a note ends.
+    static let noteSnapShare = 0.25
 
     /// How hard a task that alone outgrows the window is shortened, from the first level up: the previews of old outputs
     /// first, then the whole outputs of the task are capped, and only as a last resort the oldest steps are set aside.
@@ -117,8 +125,10 @@ struct ContextWindow: Sendable, Equatable {
     /// `nudge`: index in the input of a user message the engine added only to steer the turn (the "continue" after a
     /// reply cut by the output limit): part of the turn in progress, never the start of one, so the turn's request
     /// is never folded away from under it.
+    /// `foldAbove`: the share of the budget past which the history is folded down to the low-water mark (1: only when
+    /// it is over the budget; less when folding is free anyway, see `Conversation.isCacheCold`).
     static func fit(_ input: [ChatMessage], budget: ContextBudget, cut: inout ContextCut, condensing: Int = 0,
-                    continuing: Bool = false, paused: Bool = false, nudge: Int? = nil) -> ContextWindow {
+                    continuing: Bool = false, paused: Bool = false, nudge: Int? = nil, foldAbove: Double = 1) -> ContextWindow {
         let limit = budget.characters
         let covered = min(max(cut.covered, 0), input.count)
         var work = Array(input[covered...])
@@ -217,18 +227,27 @@ struct ContextWindow: Sendable, Equatable {
         // A task picked up again is one turn with its predecessor: its own request is not a place to cut.
         let turnStarts = users.filter { !(pickedUp && $0 == users.last) }
         var dropped = 0
-        func reserve() -> Int { previous != nil || carriedNote != nil || dropped > 0 ? ContextSummary.reserve : 0 }
+        // The model's notes ride in the summary pair too, in a room of their own.
+        let notesRoom = cut.chunks.isEmpty && cut.ledger?.digests.isEmpty != false ? 0 : ConversationLedger.digestRoom
+        func reserve() -> Int { previous != nil || carriedNote != nil || dropped > 0 ? ContextSummary.reserve + notesRoom : 0 }
         let charactersBefore = total + (previous != nil || carriedNote != nil ? ContextSummary.pair(
             [previous, carriedNote].compactMap { $0 }.joined(separator: "\n")).reduce(0) { $0 + $1.contextCharacters } : 0)
 
         // Over the limit: fold whole old turns away, down to the low-water mark.
         var turn = 0
-        let target = total + reserve() > limit ? Int(Double(limit) * budget.lowWater) : limit
+        let target = total + reserve() > Int(Double(limit) * foldAbove) ? Int(Double(limit) * budget.lowWater) : limit
         while total + reserve() > target, turn + 1 < turnStarts.count {
             let end = turnStarts[turn + 1]
             total -= sizes[dropped..<end].reduce(0, +)
             dropped = end
             turn += 1
+        }
+        // A fold that stops a little before the end of a stretch the model wrote a note on goes on to it, so the note is
+        // used (the real fold usually takes a bit more or less than the one the note was planned for).
+        if dropped > 0, let end = cut.chunks.map({ $0.end - origin }).filter({ $0 > dropped && turnStarts.contains($0) }).min(),
+           Double(sizes[dropped..<end].reduce(0, +)) <= Double(limit) * noteSnapShare {
+            total -= sizes[dropped..<end].reduce(0, +)
+            dropped = end
         }
         body.removeFirst(dropped)
 
@@ -297,7 +316,12 @@ struct ContextWindow: Sendable, Equatable {
         var summary = previous
         if !folded.isEmpty {
             let base = cut.ledger ?? previous.map { ConversationLedger(legacy: $0) } ?? ConversationLedger()
-            let extended = base.absorbing(folded)
+            var extended = base.absorbing(folded)
+            let foldedUpTo = origin + dropped
+            let carried = cut.chunks.filter { $0.end <= foldedUpTo }.map(\.text)
+            extended.attach(carried)
+            cut.attachedNotes += carried
+            cut.chunks.removeAll { $0.end <= foldedUpTo }
             ledger = extended
             summary = extended.render()
         }
@@ -524,7 +548,9 @@ extension Conversation {
     /// `reserving`: characters the request carries besides this history (the new message and what goes before it),
     /// left out of the room, so a fold at sending is not followed by another at the turn's first step.
     /// `focus`: something the summary should pay attention to (a manual compaction); kept only when this call folds.
-    mutating func prepareHistory(budget: ContextBudget, reserving characters: Int = 0, focus: String? = nil)
+    /// `now`: when given (a message being sent), a conversation whose provider cache has gone cold is folded early
+    /// (see `isCacheCold`).
+    mutating func prepareHistory(budget: ContextBudget, reserving characters: Int = 0, focus: String? = nil, now: Date? = nil)
         -> (history: [ChatMessage], firstCompaction: Bool, compaction: CompactionReport?) {
         let room = budget.leavingRoom(forCharacters: characters)
         let covered = coveredMessageCount
@@ -538,8 +564,14 @@ extension Conversation {
             seeded.focus = focus
             base = seeded
         }
-        var cut = ContextCut(summary: summary, ledger: base)
-        var window = ContextWindow.fit(slice, budget: room, cut: &cut, condensing: condensing, paused: paused)
+        let foldAbove = now.map(isCacheCold) == true ? ContextBudget.coldFoldShare : 1
+        func startingCut() -> ContextCut {
+            var cut = ContextCut(summary: summary, ledger: base)
+            cut.chunks = pendingChunks(after: covered)
+            return cut
+        }
+        var cut = startingCut()
+        var window = ContextWindow.fit(slice, budget: room, cut: &cut, condensing: condensing, paused: paused, foldAbove: foldAbove)
         let before = window.charactersBefore
 
         let frontier = ContextCondensing.frontier(in: slice)
@@ -547,8 +579,8 @@ extension Conversation {
             let saving = ContextCondensing.savings(in: slice, from: stored, to: frontier)
             if cut.covered > 0 || saving >= Int(Double(room.characters) * ContextBudget.condenseShare) {
                 condensing = frontier
-                cut = ContextCut(summary: summary, ledger: base)
-                window = ContextWindow.fit(slice, budget: room, cut: &cut, condensing: condensing, paused: paused)
+                cut = startingCut()
+                window = ContextWindow.fit(slice, budget: room, cut: &cut, condensing: condensing, paused: paused, foldAbove: foldAbove)
             }
         }
         if condensing > 0 { condensedCount = covered + condensing }
@@ -563,7 +595,17 @@ extension Conversation {
                                       tokensBefore: ContextBudget.tokens(forCharacters: before),
                                       tokensAfter: ContextBudget.tokens(forCharacters: window.charactersAfter))
         report.foldedRequests = requestCount(in: 0..<coveredMessageCount)
+        // The notes this fold carried into the summary also go to the memory with the stretch (see `SessionSummary`).
+        report.digests = cut.attachedNotes
         return (window.messages, first, report)
+    }
+
+    /// Whether the provider's cache of this conversation has gone cold: its last model call was `cacheColdAfter` ago or
+    /// more. The next request pays for the whole history anyway, so folding the start now costs no cache; the history
+    /// is folded already at `coldFoldShare` of the budget (what `prepareHistory` does with `now`). A conversation with
+    /// no recorded call is not cold.
+    func isCacheCold(now: Date) -> Bool {
+        lastModelCall.map { now.timeIntervalSince($0) >= ContextBudget.cacheColdAfter } ?? false
     }
 
     /// How many of `messages` the summary stands for.

@@ -264,7 +264,8 @@ final class LoopbackCallback: Sendable {
         // A handler must exist before start; the real one is installed right after.
         listener.newConnectionHandler = { $0.cancel() }
         listener.start(queue: .global())
-        _ = settled.wait(timeout: .now() + 3)
+        // Ready in milliseconds; the margin is for a Mac under load (it only ever waits that long when binding fails).
+        _ = settled.wait(timeout: .now() + 10)
         guard isReady else { listener.cancel(); return nil }
         listener.stateUpdateHandler = nil
         return listener

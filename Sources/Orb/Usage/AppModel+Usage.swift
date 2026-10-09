@@ -11,8 +11,8 @@ extension AppModel {
         usageLog.record(totals, orb: botID, name: name, model: model, source: source)
     }
 
-    /// For a call the app makes for itself (a summary written by the model when compacting, say): nothing does yet, the
-    /// summaries are made by rules. Whoever adds one reports what the provider said it used here.
+    /// For a call the app makes for itself (the note on a stretch the next fold will take, the review that proposes skills):
+    /// what the provider said it used.
     func recordAuxiliaryUsage(_ usage: TokenUsage, botID: UUID, model: String) {
         recordUsage(UsageTotals(usage), botID: botID, model: model, source: .auxiliary)
     }

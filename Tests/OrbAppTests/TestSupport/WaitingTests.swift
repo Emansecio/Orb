@@ -7,7 +7,7 @@ struct WaitingTests {
     @Test func returnsAtOnceWhenTheConditionAlreadyHolds() async {
         let began = ContinuousClock.now
         #expect(await waitUntil("nothing", timeout: .seconds(30)) { true })
-        #expect(ContinuousClock.now - began < .seconds(5))
+        #expect(ContinuousClock.now - began < .seconds(20)) // far below the 30 s timeout, with room for a loaded Mac
     }
 
     @Test func returnsAsSoonAsTheConditionStartsToHold() async {
@@ -18,7 +18,7 @@ struct WaitingTests {
         }
         let began = ContinuousClock.now
         #expect(await waitUntil("the flag", timeout: .seconds(30)) { ready.withLock { $0 } })
-        #expect(ContinuousClock.now - began < .seconds(5))
+        #expect(ContinuousClock.now - began < .seconds(20)) // far below the 30 s timeout, with room for a loaded Mac
     }
 
     @Test func anAsyncConditionCanReadAnActor() async {

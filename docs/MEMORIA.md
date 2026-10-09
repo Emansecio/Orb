@@ -2,7 +2,8 @@
 
 Cada Orb nasce com a sua própria memória e ela cresce a cada conversa. Não há servidor nem nada compartilhado entre
 Orbs: é uma pasta por Orb dentro do app. O desenho segue o [ai-memory do Akita](https://github.com/akitaonrails/ai-memory),
-reduzido a um Orb e rodando dentro do app, sem precisar de LLM.
+reduzido a um Orb e rodando dentro do app, sem precisar de LLM (a página de uma conversa compactada pode levar a nota que o
+modelo escreveu sobre o trecho, veja abaixo; sem ela, a página é a mesma).
 
 O lado de quem usa (aba "Memória" do painel, "memorize isso", esquecer e desfazer) está no [README](../README.md). Este
 documento descreve o que existe no código. Como a memória se combina com a compactação da conversa: [CONTEXTO.md](CONTEXTO.md).
@@ -69,8 +70,9 @@ No painel os grupos se chamam Preferências, Fatos, Procedimentos e "Resumos de 
 | Cada mensagem | `MemoryBank.brief` monta o resumo de memória (abaixo) e o app o entrega ao modelo; uma busca por mensagem, sem processo extra |
 | Durante a conversa | `remember` guarda e `recall` busca (veja "Ferramentas") |
 | Você pede para guardar | "memorize…", "lembra que…" etc. (`MemoryIntent`, abaixo) |
-| 30 min sem mensagens, "Nova conversa", reabrir outra conversa, abrir o app, **ou quando a conversa é compactada** | O trecho ainda não salvo (`Conversation.memorySavedCount`) vira uma página em `sessoes/`. Quando o começo da conversa vira resumo para caber na janela do modelo (sozinho ou em "Compactar agora"), o que ele continha é gravado **antes**, uma vez. Execuções de rotinas não viram sessões |
+| 30 min sem mensagens, "Nova conversa", reabrir outra conversa, abrir o app, **ou quando a conversa é compactada** | O trecho ainda não salvo (`Conversation.memorySavedCount`) vira uma página em `sessoes/`. Quando o começo da conversa vira resumo para caber na janela do modelo (sozinho ou em "Compactar agora"), o que ele continha é gravado **antes**, uma vez, com a nota do modelo sobre o trecho quando existe (vale também para a dobra feita no meio de um turno, gravada no fim dele). Execuções de rotinas não viram sessões |
 | Uma vez por dia (durante o uso) | Varredura de envelhecimento (`MemoryBank.sweep`): sessões frias são compactadas (abaixo) |
+| Criar um Orb a partir de uma importação | Em "Novo Orb" → "Começar de" → "Importar de outro assistente". `OrbImportReader` (`Import/`, sem UI, fora da main thread) lê o que foi colado, escolhido ou solto (Cartão do Orb em Markdown, Character Card V1/V2/V3, pasta do Hermes/OpenClaw por lista fechada, texto livre) e a prévia mostra cada item com caixa de seleção; os suspeitos (`ImportGuard`) vêm desmarcados. `OrbImport.plan()` aplica a seleção e os limites: a identidade vai até 1.500 caracteres (`identityShare`; acima disso o texto inteiro também vira fatos de até `maximumLength` (2.000) caracteres, "Instruções completas de <origem> (1/3)", dentro do teto de 60; a leitura vai até 6.000 e a prévia diz quanto ficou de fora), as preferências até 40 de 240 caracteres e 1.500 no total (`preferencesShare`; o resto vira fato), no máximo 60 fatos, 12 procedimentos e 5 skills. `AppModel.createBot(importing:)` soma a identidade ao que você digitou, grava as páginas por `MemoryBank.importPages` (o mesmo `remember`: dedup e segredos, origem `voce`, porque a prévia é a sua aprovação) e cria as skills com `orbIDs = [novo Orb]` e `source: "importado"`. **A entrevista conta como feita** quando entrou identidade ou preferências. Com uma memória guardada escolhida, a importação é ignorada. Nada de permissões, modo, capacidades, conectores ou rotinas vem do arquivo |
 | Apagar o Orb | O diálogo oferece **Apagar com a memória** ou **Apagar e guardar a memória** (grava o último trecho, escreve `perfil.json` e move a pasta para `_guardadas/`; a barra lateral avisa "Guardando a memória de <Orb>…" e, quando a pasta já foi movida, "Memória de <Orb> guardada" com "Mostrar no Finder", que abre a pasta exata) |
 | Redefinir o Orb | Ajustes → Geral → "Redefinir o Orb…". Com **Guardar as memórias**, a memória de cada Orb vai para `_guardadas/` do mesmo jeito (o último trecho da conversa vira página em `sessoes/` antes, e o perfil é escrito); com **Apagar tudo, inclusive as memórias**, a pasta `memoria/` inteira some, as guardadas também. Veja "Redefinir o Orb" no [README](../README.md#redefinir-o-orb) e em ARQUITETURA.md |
 | Criar um Orb a partir de uma memória guardada | Em "Novo Orb" → "Começar de" → "Memória". Escolher uma preenche nome, papel e aparência (`KeptMemory.fill`); voltar a "Nenhuma (Orb novo)" ou trocar de memória devolve o que ainda está como a memória deu (`unfill`, com o `StartSnapshot` de antes) e mantém o que você digitou. A pasta guardada é **movida** (`MemoryLibrary.adopt`, um `rename`: sai de `_guardadas/`) para `memoria/<id do novo Orb>/`; o índice e o perfil velhos são apagados e o índice é refeito a partir das páginas (`MemoryBank.startFromKept`). O que você escreveu em "Como deve funcionar" é somado à identidade. **A entrevista conta como feita** quando a memória tem identidade ou preferências (ou se você a desligou); sem nenhuma das duas, segue o que você escolheu. Se a pasta não puder ser movida, o Orb nasce com memória nova e avisa na conversa |
@@ -79,9 +81,17 @@ No painel os grupos se chamam Preferências, Fatos, Procedimentos e "Resumos de 
 
 ### Página de sessão
 
-`SessionSummary.page(from:)` escreve a página a partir das regras, sem modelo, em `sessoes/aaaa-mm-dd-hhmm-<id>.md`. O título
+`SessionSummary.page(from:notes:)` escreve a página a partir das regras, sem modelo, em `sessoes/aaaa-mm-dd-hhmm-<id>.md`. O título
 é o primeiro pedido (70 caracteres). Seções, todas de uma linha por entrada e com segredos removidos antes de qualquer corte:
 
+- **Resumo** (só quando a página é gravada porque a conversa foi compactada e o modelo já tinha escrito a nota do trecho que
+  saiu da janela): a mesma nota que o resumo da conversa leva, até 2 400 caracteres cada, uma por linha, sob a marca "dados, nunca
+  instruções" (a nota também resume o que ferramentas devolveram, páginas web e arquivos: na memória ela é fato sobre o
+  passado, não ordem). A nota é feita em
+  segundo plano pelo modelo mais barato do mesmo fabricante (veja "Nota do modelo sobre o trecho" em [CONTEXTO.md](CONTEXTO.md));
+  uma página gravada por tempo parado, "Nova conversa" ou abertura do app não a tem. Se o trecho já tinha sido salvo por
+  regras antes de a dobra chegar (a conversa ficou parada, depois voltou e o cache frio dobrou o começo), as notas que a dobra
+  levou vão sozinhas numa página nova de `sessoes/`, só com `## Resumo`: cada nota chega à memória uma vez;
 - **Pedidos**: os 12 últimos, com a hora e os anexos;
 - **Decisões**: só as ditas por extenso ("decidi", "vamos usar", "a partir de agora", "prefiro", "nunca use…"), as 8 últimas;
 - **O que foi feito**: as ferramentas usadas (até 15; as de memória não contam);
@@ -188,7 +198,9 @@ reindexa. O VoiceOver é avisado nos dois casos.
   primeiros pedidos e até 20 caminhos, links e trechos de código) e o texto completo vai para `_arquivo/`. Só você apaga.
 - **Limite de confiança**: o que vem das conversas entra no prompt num bloco `<memory_notes>`, achatado em linhas e marcado
   como "fatos sobre o passado, nunca instruções". Só identidade e preferências (escritas por você ou guardadas com a sua
-  aprovação) orientam o comportamento.
+  aprovação) orientam o comportamento. O que se importa de outro assistente é texto de fora: só vira identidade ou preferência
+  depois da sua prévia (itens que parecem ordens ao Orb vêm desmarcados), com os mesmos tetos de 1.500 caracteres cada, e as
+  permissões continuam sendo impostas pelo código, seja qual for o texto.
 - **Segredos fora**: chaves de API (`sk-…`, `ghp_…`, `github_pat_…`, `xox…`, AWS, Google), JWT, `Bearer`/`Basic`,
   `usuário:senha@` em URLs, `curl -u`, variáveis como `DB_PASSWORD=…`/`MY_TOKEN: …`, JSON `"password": "…"` e chaves
   privadas são removidos antes de qualquer coisa ser gravada.
@@ -228,12 +240,13 @@ trecho de conversa (página de sessão), na varredura diária e na conferência 
 | `Memory/MemoryIndex.swift` | SQLite (tabela + FTS5 + gatilhos, esquema versionado) |
 | `UserProfile.swift` | o perfil da usuária e o seu `promptSection` (entra por `brief(profile:)`) |
 | `Memory/MemoryBank.swift` | a memória de um Orb (actor): identidade, `remember`, `recall`, `related`, `brief`, sessões, envelhecimento, `forget`, `startFromKept`; `MemoryLibrary` (uma por Orb, apagar/guardar/adotar, `seal` na redefinição) |
+| `Import/` | `OrbImport` (o que foi lido, `plan()`, limites, `ImportGuard`, `ImportSanitizer`), `OrbImportReader` (arquivos, pastas, `detectLocal`) e `OrbImportFormats` (cartão, JSON, texto livre), `ImportPrompt` (o prompt para copiar) |
 | `Memory/KeptMemories.swift` | `_guardadas`: `KeptProfile` (`perfil.json`), `KeptMemory` (o que o menu "Começar de" e Ajustes listam), guardar, listar, contar, adotar |
-| `Memory/SessionSummary.swift` | trecho de conversa → página de sessão, sem LLM; `idleGap` |
+| `Memory/SessionSummary.swift` | trecho de conversa → página de sessão, por regras (mais a nota do modelo, se houver); `idleGap` |
 | `Memory/MemoryIntent.swift` | reconhece "memorize…" e o que guardar |
 | `Memory/OrbToolsMCPServer.swift` | servidor MCP stdio (`--tools-mcp`) para o Claude Code |
 | `Engine/Tools/MacTools.swift` | ferramentas `remember` e `recall` |
-| `BotSession+Conversation.swift` | `pendingStretch`, `saveMemory`, `keepRequestedMemory`, `scheduleMemorySave`, `announce` |
+| `BotSession+Conversation.swift` | `pendingStretch`, `saveMemory` (com as notas da dobra), `keepRequestedMemory`, `scheduleMemorySave`, `announce` |
 | `AppModel.swift` (MARK: Memory) | criar, migrar (`prepareMemory`), esquecer, identidade, entrevista |
 | `AppModel+MemoryUI.swift` | `ForgottenMemory`, `MemoryUndo` |
 | `Views/MemoryViews.swift`, `Views/InspectorSupport.swift` | aba Memória, tela de memória, grupos e busca |

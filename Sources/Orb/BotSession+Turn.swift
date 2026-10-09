@@ -142,14 +142,16 @@ extension BotSession {
             runningCalls[call.id] = call
             actionsThisTurn += 1
             showWork(WorkPhrase.line(for: call), announcing: true)
-        case .toolFinished(let id, let state, let output):
+        case .toolFinished(let id, let state, let output, let produced):
             model.live(self.id).runningTool = nil
             runningCalls[id] = nil
             mutateItems { items in
+                let files = Self.takeOver(produced, in: &items)
                 for index in items.indices {
                     if case .tool(var call) = items[index].kind, call.id == id {
                         call.state = state
                         call.output = output
+                        call.files = files.isEmpty ? nil : files
                         call.finishedAt = .now
                         items[index].kind = .tool(call)
                     }
@@ -163,7 +165,10 @@ extension BotSession {
             model.announceApproval(request, of: id)
         case .message(let message):
             ensureLoaded()
-            changeConversation { $0.messages.append(message) }
+            changeConversation {
+                $0.messages.append(message)
+                if message.role == .assistant { $0.lastModelCall = .now }
+            }
             if message.role == .user {
                 conversation?.taskPaused = false
                 recordMarks(native: true)
@@ -193,6 +198,7 @@ extension BotSession {
             if let fold = report.fold {
                 report.foldedMessages = keepFold(fold)
                 report.foldedRequests = conversation.map { $0.requestCount(in: 0..<$0.coveredMessageCount) }
+                if report.foldedMessages > 0 { foldedNotes += report.digests }
             }
             // Claude Code compacting its own session forgets details too: the memory is brought up to date after the turn.
             if report.kind == .claudeCode { compactedInTurn = true }
@@ -237,6 +243,8 @@ extension BotSession {
         Task { await WorkspaceSnapshots.shared.invalidate(botID) }
         let compacted = compactedInTurn
         compactedInTurn = false
+        let notes = foldedNotes
+        foldedNotes = []
         let turnFolder = claudeTurnFolder
         claudeTurnFolder = nil
         if isClaudeTurn {
@@ -255,8 +263,9 @@ extension BotSession {
         } else {
             keepRequestedMemory(succeeded: succeeded)
             // Older turns left the model's view during this turn: what they held goes to the memory now, once.
-            if compacted { saveMemory() }
+            if compacted { saveMemory(notes: notes) }
             scheduleMemorySave()
+            if succeeded { model.writeStretchNote(of: id) }
         }
         Task { await model.refreshMemory(botID) }
         model.usageLog.flush() // what the turn used is written now, not after the batch's delay
@@ -388,6 +397,30 @@ extension BotSession {
 
     func append(_ kind: TranscriptItem.Kind) {
         mutateItems { $0.append(TranscriptItem(kind)) }
+    }
+
+    /// A file shows under the last call of the turn that touched it: the earlier calls give it up, and one that was
+    /// made by an earlier call stays "novo" when a later one changes it. Returns `produced` as the new call keeps it.
+    nonisolated static func takeOver(_ produced: [ProducedFile], in items: inout [TranscriptItem]) -> [ProducedFile] {
+        guard !produced.isEmpty else { return [] }
+        var files = produced
+        for index in items.indices.reversed() {
+            switch items[index].kind {
+            case .user:
+                return files
+            case .tool(var call):
+                guard let earlier = call.files, earlier.contains(where: { old in files.contains { $0.path == old.path } }) else { continue }
+                for old in earlier where old.created {
+                    if let position = files.firstIndex(where: { $0.path == old.path }) { files[position].created = true }
+                }
+                let kept = earlier.filter { old in !files.contains { $0.path == old.path } }
+                call.files = kept.isEmpty ? nil : kept
+                items[index].kind = .tool(call)
+            default:
+                continue
+            }
+        }
+        return files
     }
 
     func mutateItems(_ change: (inout [TranscriptItem]) -> Void) {

@@ -176,6 +176,13 @@ As liberações, como o modo de permissão, ficam no Orb: apagar o Orb ou "Redef
 memória que se guarda (e o `perfil.json` dela) não leva liberações nem modo, então um Orb que começa de uma memória guardada
 nasce sem nenhuma e no modo que você escolher na folha.
 
+O mesmo vale para **Importar de outro assistente**: o importador só produz nome, papel, identidade, preferências, fatos,
+procedimentos e skills. Campos como `permissionMode`, `capabilities`, `permissionRules`, `workingDirectory`, `model`,
+`trustedInstructionsHash`, conectores, rotinas ou `extensions` de um arquivo são ignorados, e o Orb nasce no modo e com as
+capacidades que você escolheu na folha. Uma identidade ou preferência maliciosa não libera nenhuma ferramenta (isso é imposto
+por `PermissionPolicy`); por isso a prévia desmarca o que parece dar ordens, e as skills importadas só rodam quando você digita
+`/comando`, limitadas ao Orb novo.
+
 `isCovered` por família:
 
 - `shell`: **todos** os comandos da linha precisam começar com as palavras de alguma regra (`cd pasta &&` na frente é ignorado).

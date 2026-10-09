@@ -42,9 +42,13 @@ struct CompactionReport: Sendable, Equatable {
     /// Claude Code: "auto" or "manual".
     var trigger: String?
     var fold: Fold?
+    /// The model's notes on the stretches this fold took (see `ChunkSummary`): they go to the memory with them.
+    var digests: [String] = []
 
-    init(kind: Kind, foldedMessages: Int, tokensBefore: Int?, tokensAfter: Int?, trigger: String? = nil, fold: Fold? = nil) {
+    init(kind: Kind, foldedMessages: Int, tokensBefore: Int?, tokensAfter: Int?, trigger: String? = nil, fold: Fold? = nil,
+         digests: [String] = []) {
         self.kind = kind
+        self.digests = digests
         self.foldedMessages = foldedMessages
         self.tokensBefore = tokensBefore
         self.tokensAfter = tokensAfter

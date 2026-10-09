@@ -358,6 +358,8 @@ struct WelcomeView: View {
                     .transition(.adapted(.rise, reduceMotion: reduceMotion))
                     .entrance(WelcomeEntrance.keptCard, enters: entering)
             }
+            ImportLinkButton { model.startNewOrbImporting() }
+                .entrance(WelcomeEntrance.keptCard, enters: entering)
         }
     }
 
@@ -467,6 +469,27 @@ private struct SuggestedOrbButton: View {
         }
         .accessibilityLabel("Começar com o Atlas, pronto para usar")
         .accessibilityHint("Cria o Atlas agora. Dá para personalizar depois")
+    }
+}
+
+/// "ou importe de outro assistente": opens the new-Orb sheet on the import panel.
+private struct ImportLinkButton: View {
+    let action: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Text("ou importe de outro assistente")
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.accentText)
+                .opacity(isHovering ? 0.8 : 1)
+                .animation(Motion.hover(isHovering), value: isHovering)
+                .padding(.vertical, 2)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .accessibilityHint("Abre a folha Novo Orb para trazer o que outro assistente sabe de você")
     }
 }
 

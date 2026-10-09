@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// `Orb --snapshot transcript[-approvals|-notices|-failed] out.png`: a seeded conversation of the first Orb for visual
+/// `Orb --snapshot transcript[-approvals|-notices|-failed|-attachments|-outputs] out.png`: a seeded conversation of the first Orb for visual
 /// review of the replies' Markdown, the approval cards and the notices with an action. Dev aid; nothing is saved.
 @MainActor
 enum TranscriptSample {
@@ -64,6 +64,10 @@ enum TranscriptSample {
                                                               reason: "", suggestions: [.shell("brew", "upgrade"), .shell("brew")]))),
                      TranscriptItem(.approval(ApprovalRequest(toolName: "run_command", title: "Apagando arquivos", command: "rm -rf ~/Downloads/antigos",
                                                               reason: "Esta ação não pode ser desfeita.", isDangerous: true)))]
+        case "transcript-attachments":
+            items = AttachmentSnapshots.conversation()
+        case "transcript-outputs":
+            items = AttachmentSnapshots.outputs()
         case "transcript-notices":
             items = [user, reply,
                      TranscriptItem(.notice("Conversa compactada: o começo virou um resumo.")),

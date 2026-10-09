@@ -77,9 +77,10 @@ extension BotSession {
     }
 
     /// Whether the conversation can go back to disk: in memory, not the selected Orb's, not working, parked by a
-    /// routine, or waiting to be saved, and not used within `keepAlive`.
+    /// routine, waiting to be saved or for its stretch note (a local server's waits as long as the keep-alive), and not
+    /// used within `keepAlive`.
     func isIdle(now: ContinuousClock.Instant, keepAlive: Duration) -> Bool {
-        guard let model, conversation != nil, model.selection != .bot(id), turnTask == nil, routineID == nil,
+        guard let model, conversation != nil, model.selection != .bot(id), turnTask == nil, routineID == nil, chunkTask == nil,
               parkedChat == nil, model.live(id).status == nil, !model.live(id).isAwaitingApproval,
               !isDirty, saveTask == nil else { return false }
         return lastUsed.map { $0.duration(to: now) >= keepAlive } ?? true
@@ -87,6 +88,7 @@ extension BotSession {
 
     /// Lets go of the conversation (its file holds what was in memory); it is read again when it is needed.
     func unload() {
+        cancelChunkNote()
         conversation = nil
         isUnloaded = true
         loadEpoch += 1
@@ -96,6 +98,7 @@ extension BotSession {
     /// The Orb was deleted: its conversation, its streamed reply and the reads and writes that were pending go
     /// (nothing is written: its files are deleted next).
     func close() {
+        cancelChunkNote()
         liveText = nil
         conversation = nil
         parkedChat = nil
@@ -156,6 +159,8 @@ extension BotSession {
     /// Replaces the chat (which a running routine may have parked) and writes it at once, on the store's queue,
     /// so whatever is queued after it (deleting the archived copy of a reopened conversation) comes after it.
     func installChat(_ chat: Conversation) {
+        cancelChunkNote() // so is the note being written about it
+        chunkAttempts = [:]
         lastCompaction = nil // a notice of the conversation that was left
         clearRequestUsage() // so is the cache hit of its last request (the meter would show it for this chat)
         model?.live(id).setLastUsage(nil)
@@ -178,6 +183,7 @@ extension BotSession {
     /// first (its pending save would otherwise write the routine's conversation in its place): while the routine runs,
     /// only the routine's file changes.
     func startRoutineRun(_ routineID: UUID, conversation own: Conversation, at started: Date) {
+        cancelChunkNote() // the note being written is about the chat that is parked now
         let chat = conversation ?? Conversation()
         saveTask?.cancel()
         saveTask = nil
@@ -222,18 +228,25 @@ extension BotSession {
 
     /// Saves the conversation since the last saved stretch as a session page, built off the main thread (a long
     /// conversation takes a moment). Returns whether there was a stretch to save.
+    /// `notes`: what the model wrote about the stretches being folded (see `ChunkSummary`), for the page. When the
+    /// stretch itself was saved already (a long pause saved it by rules before the fold), the notes go to the memory on
+    /// a page of their own, so each one gets there exactly once.
     @discardableResult
-    func saveMemory(ifIdleFor gap: TimeInterval? = nil, upTo end: Int? = nil) -> Bool {
-        guard let stretch = pendingStretch(ifIdleFor: gap, upTo: end) else { return false }
-        persistStretch(stretch)
+    func saveMemory(ifIdleFor gap: TimeInterval? = nil, upTo end: Int? = nil, notes: [String] = []) -> Bool {
+        guard let stretch = pendingStretch(ifIdleFor: gap, upTo: end) else {
+            guard gap == nil, !notes.isEmpty else { return false }
+            persistStretch([], notes: notes)
+            return true
+        }
+        persistStretch(stretch, notes: notes)
         return true
     }
 
-    func persistStretch(_ stretch: [TranscriptItem]) {
+    func persistStretch(_ stretch: [TranscriptItem], notes: [String] = []) {
         guard let model else { return }
         let bank = model.memory.bank(for: id), botID = id
         Task.detached(priority: .utility) { [weak model] in
-            if let page = SessionSummary.page(from: stretch) { await bank.saveSession(page) }
+            if let page = SessionSummary.page(from: stretch, notes: notes) { await bank.saveSession(page) }
             await model?.refreshMemory(botID)
         }
     }
@@ -303,7 +316,7 @@ extension BotSession {
         model?.live(id).setCompactedTo(report.tokensAfter)
         // A routine's run is not a conversation with you: it stays out of the memory's sessions.
         guard routineID == nil else { return false }
-        return saveMemory(upTo: items)
+        return saveMemory(upTo: items, notes: report.digests)
     }
 
     /// A fold of older turns made during a turn (see `TurnEvent.compacted`): the next turn starts from its summary,

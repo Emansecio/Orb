@@ -87,14 +87,6 @@ struct ComposerSupportTests {
         #expect(QueuedMessages.whenText(needsYou: false, steersMidTurn: false) == "Na fila · segue quando a resposta terminar")
     }
 
-    @Test func aQueuedMessageShowsPicturesAsThumbnailsAndTheRestAsFiles() {
-        let split = QueuedMessages.split(["/Users/x/foto.PNG", "/Users/x/relatório.pdf", "foto-antiga.png", "/Users/x/b.jpg"])
-        #expect(split.images == ["/Users/x/foto.PNG", "/Users/x/b.jpg"])
-        // A name without a path (older conversations) cannot be shown as a picture.
-        #expect(split.others == ["/Users/x/relatório.pdf", "foto-antiga.png"])
-        #expect(QueuedMessages.split([]).images.isEmpty && QueuedMessages.split([]).others.isEmpty)
-    }
-
     @Test func pasteIsTakenOnlyInTheComposersOwnKeyWindowWithoutASheet() {
         func takes(window: Bool = true, key: Bool = true, sheet: Bool = false, focused: Bool = true) -> Bool {
             PasteGate.takes(eventIsInComposerWindow: window, isKey: key, hasSheet: sheet, isFocused: focused)

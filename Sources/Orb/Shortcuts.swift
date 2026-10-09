@@ -11,6 +11,7 @@ import SwiftUI
 /// What each command is called wherever it appears.
 enum CommandName {
     static let newBot = "Novo Orb…"
+    static let importOrb = "Importar de outro assistente…"
     static let goTo = "Ir para…"
     static let newConversation = "Nova conversa"
     static let writeMessage = "Escrever uma mensagem"

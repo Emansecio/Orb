@@ -64,6 +64,7 @@ enum ContextMeter {
         let frontier = max(ContextCondensing.frontier(in: slice), condensing)
         let smaller = manualBudget(for: conversation, budget: budget, share: compactingShare)
         var folding = ContextCut(summary: conversation.summary, ledger: conversation.currentLedger)
+        folding.chunks = conversation.pendingChunks(after: covered)
         let compacted = ContextWindow.fit(slice, budget: smaller, cut: &folding, condensing: frontier, paused: paused)
         if folding.covered > 0 {
             let foldedMessages = Array(slice.prefix(compacted.droppedCount))

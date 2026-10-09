@@ -46,7 +46,7 @@ enum ClaudeCodePrompt {
         let firstListed = chosen.min() ?? messages.count
         var ledger = useSummary ? conversation.currentLedger : nil
         if firstListed > 0 { ledger = (ledger ?? ConversationLedger()).absorbing(Array(messages[..<firstListed])) }
-        let recap = ledger.map { $0.render(limit: share) }.flatMap { $0.isEmpty ? nil : $0 }
+        let recap = ledger.map { $0.render(limit: share, digestRoom: 0) }.flatMap { $0.isEmpty ? nil : $0 }
 
         var body = chosen.sorted().map { units[$0].text }
         if firstListed > 0, !body.isEmpty { body.insert("[… \(firstListed) earlier messages are in the summary above …]", at: 0) }

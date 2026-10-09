@@ -605,7 +605,7 @@ struct AgentEngineGatingTests {
         var started: [UUID] = [], finished: [(UUID, ToolCall.State)] = []
         for event in events {
             if case .toolStarted(let call) = event { started.append(call.id) }
-            if case .toolFinished(let id, let state, _) = event { finished.append((id, state)) }
+            if case .toolFinished(let id, let state, _, _) = event { finished.append((id, state)) }
         }
         #expect(started.count == 1 && finished.count == 1)
         #expect(finished.first?.0 == started.first && finished.first?.1 == .failed)
@@ -625,7 +625,7 @@ struct AgentEngineGatingTests {
         }
         #expect(await runs.value == 0)
         #expect(toolMessages(events).first?.contains("read-only") == true)
-        #expect(events.contains { if case .toolFinished(_, .failed, let output) = $0 { output?.contains("Só leitura") == true } else { false } })
+        #expect(events.contains { if case .toolFinished(_, .failed, let output, _) = $0 { output?.contains("Só leitura") == true } else { false } })
     }
 
     @Test func switchingToNoQuestionsWhileACardIsOpenAllowsIt() async {

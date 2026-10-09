@@ -318,6 +318,12 @@ enum ClaudeCodeTools {
         }
     }
 
+    /// The file a Write, Edit or MultiEdit changes, when it names one by its full path.
+    static func writtenPath(_ name: String, _ input: JSONValue) -> String? {
+        guard ["Write", "Edit", "MultiEdit"].contains(name), let path = input["file_path"]?.string, path.hasPrefix("/") else { return nil }
+        return path
+    }
+
     /// Transcript and approval-card text, in Portuguese.
     static func summary(_ name: String, _ input: JSONValue) -> (title: String, detail: String) {
         // The Orb's own tools (memory, Mac) describe their calls themselves, as they do outside Claude Code.

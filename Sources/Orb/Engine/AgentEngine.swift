@@ -5,7 +5,8 @@ enum TurnEvent: Sendable {
     case status(String)
     case text(String)
     case toolStarted(ToolCall)
-    case toolFinished(id: UUID, state: ToolCall.State, output: String?)
+    /// `files`: what the tool created or changed (shown under its line).
+    case toolFinished(id: UUID, state: ToolCall.State, output: String?, files: [ProducedFile] = [])
     case approval(ApprovalRequest)
     /// A message to append to the model history (user, assistant or tool result).
     case message(ChatMessage)
@@ -47,6 +48,9 @@ struct TurnRequest: Sendable {
     /// What the summary at the start of `history` was rendered from, so folding more turns during the turn extends it
     /// instead of starting over from its text.
     var ledger: ConversationLedger?
+    /// The model's notes on stretches of `history` not folded yet, in the indexes of the engine's own input (see
+    /// `Conversation.chunks(inHistory:)`): a fold made during the turn that takes a stretch whole carries its note.
+    var chunks: [ChunkSummary] = []
     /// Upper bound on model calls in this turn, so a confused model cannot loop forever.
     var maxSteps = AgentEngine.defaultMaxSteps
     /// Grants for this turn only that the user's own request already gave (saving to memory when asked to remember).
@@ -138,6 +142,7 @@ actor AgentEngine {
         request.onOverheadMeasured?(overhead)
         // Where the fits of this turn cut the history, so the start of the request holds still between compactions.
         var cut = ContextCut(ledger: request.ledger)
+        cut.chunks = request.chunks
         // What of it was already told: every fold once (a summary the history starts with was told when it was made,
         // see `AppModel.send`), steps set aside once per turn.
         var announced = Announced()
@@ -559,6 +564,8 @@ actor AgentEngine {
         /// Messages of the fit's input already reported as folded.
         private var covered = 0
         private var steps = false
+        /// Notes of the cut already reported with a fold.
+        private var notes = 0
 
         mutating func reports(after window: ContextWindow, cut: ContextCut, input: ArraySlice<ChatMessage>) -> [CompactionReport] {
             var reports: [CompactionReport] = []
@@ -570,7 +577,9 @@ actor AgentEngine {
                 let own = Array(input.dropFirst(max(covered, pair)).prefix(max(cut.covered - max(covered, pair), 0)))
                 reports.append(CompactionReport(kind: .turns, foldedMessages: own.count, tokensBefore: before, tokensAfter: after,
                                                 fold: .init(summary: summary, ledger: cut.ledger,
-                                                            turns: own.filter { $0.role == .user }.count)))
+                                                            turns: own.filter { $0.role == .user }.count),
+                                                digests: Array(cut.attachedNotes.dropFirst(notes))))
+                notes = cut.attachedNotes.count
                 covered = cut.covered
             }
             if window.skippedSteps > 0, !steps {
@@ -646,14 +655,24 @@ actor AgentEngine {
                 try await tool.prepare(arguments)
                 out.yield(.status(summary.title))
             }
+            let target = Self.writeTarget(tool.spec.name, arguments, request.context)
             let result = try await tool.runWithImages(arguments, context: request.context)
-            out.yield(.toolFinished(id: started.id, state: .done, output: Self.preview(result.text)))
+            let files = (target.map { [ProducedFile(path: $0.url.path, created: !$0.existed)] } ?? [])
+                + result.images.map { ProducedFile(path: $0.path, created: true) }
+            out.yield(.toolFinished(id: started.id, state: .done, output: Self.preview(result.text), files: files))
             return ToolOutcome(result.text, images: result.images)
         } catch {
             let message = error.localizedDescription
             out.yield(.toolFinished(id: started.id, state: .failed, output: message))
             return ToolOutcome("Error: \(message)", isError: true)
         }
+    }
+
+    /// Where `write_file` or `edit_file` is about to write and whether a file was there already, to tell "novo" from "alterado".
+    static func writeTarget(_ name: String, _ arguments: JSONValue, _ context: ToolContext) -> (url: URL, existed: Bool)? {
+        guard name == "write_file" || name == "edit_file", let path = arguments["path"]?.string, !path.isEmpty else { return nil }
+        let url = context.url(for: path)
+        return (url, FileManager.default.fileExists(atPath: url.path))
     }
 
     /// A call refused by the mode: the row shows it as started and failed (so the Orb is not left "running" it).

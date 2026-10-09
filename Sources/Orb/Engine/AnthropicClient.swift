@@ -11,11 +11,22 @@ struct AnthropicClient: LLMClient {
     var maxTokens = 16_000
     /// Also sends the key as `Authorization: Bearer` (gateways that document that header on every route).
     var sendsBearer = false
+    /// Whether the last block of the last message gets a cache marker (the tail that the next step of the turn reads).
+    var marksTail = true
 
     static let apiVersion = "2023-06-01"
 
     /// The Messages format carries the cache markers itself (see `requestBody`).
     var arrangesPromptCache: Bool { true }
+
+    /// A note is about 700 tokens (1,200 leaves room); its request is read once, so it writes no cache for its tail
+    /// (a write costs a quarter more than a plain read of the input).
+    var forShortReply: any LLMClient {
+        var copy = self
+        copy.maxTokens = 1_200
+        copy.marksTail = false
+        return copy
+    }
 
     init(baseURL: URL, credentials: @escaping CredentialsProvider, extraHeaders: [String: String] = [:],
          session: URLSession = .shared) {
@@ -36,7 +47,7 @@ struct AnthropicClient: LLMClient {
         return ProviderTransport.stream(session: session, credentials: credentials, acceptsEventStream: false, body: {
             try WireEncoder.encode(Self.requestBody(
                 model: model, messages: messages, tools: tools, maxTokens: maxTokens, provider: provider, toolChoice: toolChoice,
-                stablePrefixTTL: Self.stablePrefixTTL(host: provider)), trailing: Self.trailingKeys)
+                stablePrefixTTL: Self.stablePrefixTTL(host: provider), marksTail: marksTail), trailing: Self.trailingKeys)
         }, request: { makeRequest("messages", key: $0) }, mapper: AnthropicStreamAssembler(provider: provider, model: model))
     }
 
@@ -115,7 +126,7 @@ extension AnthropicClient {
     /// `provider` is the endpoint's host: reasoning recorded by another endpoint or model is not sent back.
     static func requestBody(model: String, messages: [ChatMessage], tools: [ToolSpec], maxTokens: Int,
                             provider: String = "", toolChoice: ToolChoice = .auto,
-                            stablePrefixTTL: CacheTTL = .fiveMinutes) -> JSONValue {
+                            stablePrefixTTL: CacheTTL = .fiveMinutes, marksTail: Bool = true) -> JSONValue {
         let system = messages.filter { $0.role == .system }.map(\.content).joined(separator: "\n\n")
         var turns: [(role: String, blocks: [JSONValue])] = []
         let lastIndex = messages.lastIndex { $0.role != .system }
@@ -156,7 +167,7 @@ extension AnthropicClient {
             guard !blocks.isEmpty else { continue }
             if turns.last?.role == role { turns[turns.count - 1].blocks += blocks } else { turns.append((role, blocks)) }
         }
-        if let last = turns.indices.last, let block = turns[last].blocks.last,
+        if marksTail, let last = turns.indices.last, let block = turns[last].blocks.last,
            !["thinking", "redacted_thinking"].contains(block["type"]?.string ?? ""),
            case .object(var object) = block {
             object["cache_control"] = ephemeral

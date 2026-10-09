@@ -51,10 +51,7 @@ struct ContextWordsTests {
         #expect(ContextWords.wouldFree(requests: 3, alreadySummarized: true, tokens: 3_000).contains("mais 3 pedidos e"))
     }
 
-    @Test func theCardOffersCompactingOnlyWhenThereIsSomethingToFold() {
-        #expect(ContextWords.nudgeQuestion(canCompact: true) == "Esta conversa está ficando longa. Compactar agora ou começar uma nova?")
-        #expect(ContextWords.nudgeQuestion(canCompact: false) == "Esta conversa já ocupa quase todo o espaço do modelo. Começar uma nova?")
-        #expect(!ContextWords.nudgeQuestion(canCompact: false).contains("Compactar"))
+    @Test func nothingToFoldIsNotCalledShort() {
         #expect(!ContextWords.nothingToFold.contains("curta"))
     }
 
@@ -79,31 +76,28 @@ struct ContextReadingTests {
         let reading = try #require(ContextReading.make(input(conversation(turns: 1, characters: 300))))
         #expect(reading.percent >= 1 && reading.percent < 20)
         #expect(reading.tone == .calm)
-        #expect(!reading.isGettingLong)
         #expect(!reading.canCompact)
-        #expect(reading.conversationKey != nil)
         #expect(reading.usageWords?.hasPrefix("cerca de") == true)
     }
 
-    @Test func aLongConversationWarnsAndOffersToCompact() throws {
+    @Test func aLongConversationOffersToCompact() throws {
         // A small window: the history budget is what fills first.
         let reading = try #require(ContextReading.make(input(conversation(turns: 8), window: 16_000)))
-        #expect(reading.pressure >= ContextReading.suggestsCompactingAt)
-        #expect(reading.isGettingLong)
+        #expect(reading.fill?.budgetFraction ?? 0 >= 0.85)
         #expect(reading.tone == ContextTone(share: reading.fraction))
         #expect(reading.canCompact)
     }
 
-    @Test func aBigWindowWarnsByTheMemoryBudgetBeforeTheWindowFills() throws {
+    @Test func aBigWindowFillsTheMemoryBudgetBeforeTheWindow() throws {
         // 24 messages of about 1,000 tokens in a 1M window: 2% of the window, but 30% of the 80k budget.
         let reading = try #require(ContextReading.make(input(conversation(turns: 12), window: 1_000_000)))
         #expect(reading.percent <= 5)
-        #expect(reading.pressure > reading.fraction)
-        // More history than the budget: the next message starts a compaction, so the meter says so whatever the window.
+        #expect(try #require(reading.fill).budgetFraction > reading.fraction)
+        // Close to the budget: the next compaction is near, whatever the window.
         let heavy = try #require(ContextReading.make(input(conversation(turns: 12, characters: 10_000), window: 1_000_000)))
-        #expect(heavy.isGettingLong)
+        #expect(try #require(heavy.fill).budgetFraction >= 0.85)
+        // The ring says the window's share and is coloured by it: calm at a few percent.
         #expect(heavy.percent < 85)
-        // The ring says the window's share and is coloured by it: calm at a few percent, even though the card is due.
         #expect(heavy.tone == .calm)
     }
 
@@ -121,7 +115,6 @@ struct ContextReadingTests {
         #expect(reading.fill == nil)
         #expect(reading.isClaudeCode)
         #expect(reading.canCompact)
-        #expect(!reading.isGettingLong)
         #expect(reading.cacheHit == nil)
         #expect(reading.spokenState.contains("Claude Code"))
         var single = Conversation()
@@ -158,10 +151,9 @@ struct ContextReadingTests {
         #expect(reading.messageCount == 6 && reading.requestCount == 2)
     }
 
-    @Test func aSingleHugeRequestWarnsButHasNothingToCompact() throws {
+    @Test func aSingleHugeRequestHasNothingToCompact() throws {
         let chat = conversation(turns: 1, characters: 12_000)
         let reading = try #require(ContextReading.make(input(chat, window: 16_000)))
-        #expect(reading.isGettingLong)
         #expect(!reading.canCompact)
         #expect(reading.fill?.compaction == nil)
     }
@@ -194,71 +186,6 @@ struct ContextReadingTests {
                          .user("pedido " + String(repeating: "x", count: 300_000)), ChatMessage(role: .assistant, content: "ok")]
         let fill = chat.contextFill(budget: ContextBudget(modelWindow: 128_000))
         #expect(fill.compaction == nil)
-    }
-}
-
-@MainActor
-struct ContextNudgeTests {
-    private func defaults() -> UserDefaults {
-        let suite = "ContextNudgeTests-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite) ?? .standard
-        defaults.removePersistentDomain(forName: suite)
-        return defaults
-    }
-
-    @Test func showsOnceForALongConversation() throws {
-        let store = ContextNudgeStore(defaults: defaults())
-        let gauge = ContextGauge(nudges: store)
-        let long = try #require(ContextReading.make(input(conversation(turns: 8), window: 16_000)))
-        gauge.show(long)
-        #expect(gauge.showsNudge)
-        gauge.handleNudge()
-        #expect(!gauge.showsNudge)
-        // Still long, still the same conversation, and after a relaunch (a new gauge on the same preferences): not again.
-        gauge.show(long)
-        #expect(!gauge.showsNudge)
-        let relaunched = ContextGauge(nudges: store)
-        relaunched.show(long)
-        #expect(!relaunched.showsNudge)
-    }
-
-    /// A first message with a lot of text, or a small local model: the card is due at the first turn, and only offers a new chat.
-    @Test func aSingleHugeRequestShowsTheCardWithoutCompacting() throws {
-        let gauge = ContextGauge(nudges: ContextNudgeStore(defaults: defaults()))
-        let reading = try #require(ContextReading.make(input(conversation(turns: 1, characters: 12_000), window: 16_000)))
-        gauge.show(reading)
-        #expect(gauge.showsNudge)
-        #expect(gauge.reading?.canCompact == false)
-        let question = ContextWords.nudgeQuestion(canCompact: gauge.reading?.canCompact ?? true)
-        #expect(!question.contains("Compactar"))
-    }
-
-    @Test func aNewConversationGetsItsOwnCard() throws {
-        let gauge = ContextGauge(nudges: ContextNudgeStore(defaults: defaults()))
-        let first = try #require(ContextReading.make(input(conversation(turns: 8), window: 16_000)))
-        gauge.show(first)
-        gauge.handleNudge()
-        let second = try #require(ContextReading.make(input(conversation(turns: 8), window: 16_000)))
-        gauge.show(second)
-        #expect(gauge.showsNudge)
-    }
-
-    @Test func notShownForAShortConversationOrWhenCleared() throws {
-        let gauge = ContextGauge(nudges: ContextNudgeStore(defaults: defaults()))
-        let short = try #require(ContextReading.make(input(conversation(turns: 1, characters: 200))))
-        gauge.show(short)
-        #expect(!gauge.showsNudge)
-        gauge.show(nil)
-        #expect(gauge.reading == nil)
-        #expect(!gauge.showsNudge)
-    }
-
-    @Test func theStoreKeepsTheNewestOnly() {
-        let store = ContextNudgeStore(defaults: defaults())
-        let ids = (0..<(ContextNudgeStore.limit + 5)).map { _ in UUID() }
-        ids.forEach(store.insert)
-        #expect(!store.contains(ids[0]))
-        #expect(store.contains(ids[ids.count - 1]))
     }
 }
 

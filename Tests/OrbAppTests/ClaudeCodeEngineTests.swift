@@ -159,7 +159,7 @@ struct ClaudeCodeEngineTests {
         #expect(events.contains { if case .session("sess-1") = $0 { true } else { false } })
         let approvals = events.compactMap { if case .approval(let request) = $0 { request } else { nil } }
         #expect(approvals.map(\.toolName) == ["Bash"] && approvals.first?.command == "touch x")
-        let finished = events.compactMap { if case .toolFinished(_, let state, let output) = $0 { (state, output) } else { nil } }
+        let finished = events.compactMap { if case .toolFinished(_, let state, let output, _) = $0 { (state, output) } else { nil } }
         #expect(finished.count == 1 && finished[0].0 == .done && finished[0].1 == "a.txt")
         guard case .message(let reply) = events.last else { Issue.record("no reply"); return }
         #expect(reply.content.hasPrefix("Vou listar.\n\nPronto.\n\n(Actions taken in this turn: "))
@@ -185,7 +185,7 @@ struct ClaudeCodeEngineTests {
         let fake = try FakeClaude()
         defer { fake.remove() }
         let events = await run(ClaudeCodeEngine(), fake.turn(mode: .ask), decision: .deny)
-        let finished = events.compactMap { if case .toolFinished(_, let state, let output) = $0 { (state, output) } else { nil } }
+        let finished = events.compactMap { if case .toolFinished(_, let state, let output, _) = $0 { (state, output) } else { nil } }
         #expect(finished.count == 1 && finished[0].0 == .failed && finished[0].1 == "Você negou esta ação.")
         let lines = await fake.logLines(waitingFor: "eof")
         #expect(lines.contains { $0.contains(#""behavior":"deny""#) })
@@ -262,7 +262,7 @@ struct ClaudeCodeEngineTests {
         turn.permissions = { PermissionState(mode: .ask, rules: [.shell("touch")]) }
         let events = await run(ClaudeCodeEngine(), turn, decision: .deny)
         #expect(!events.contains { if case .approval = $0 { true } else { false } })
-        let finished = events.compactMap { if case .toolFinished(_, let state, _) = $0 { state } else { nil } }
+        let finished = events.compactMap { if case .toolFinished(_, let state, _, _) = $0 { state } else { nil } }
         #expect(finished == [.done])
     }
 
@@ -272,7 +272,7 @@ struct ClaudeCodeEngineTests {
         var turn = fake.turn(mode: .bypass)
         turn.permissions = { PermissionState(mode: .readOnly, rules: [.shell("touch")]) }
         let events = await run(ClaudeCodeEngine(), turn)
-        let finished = events.compactMap { if case .toolFinished(_, let state, let output) = $0 { (state, output) } else { nil } }
+        let finished = events.compactMap { if case .toolFinished(_, let state, let output, _) = $0 { (state, output) } else { nil } }
         #expect(finished.count == 1 && finished[0].0 == .failed && finished[0].1 == "Bloqueado: o Orb está em modo Só leitura.")
         let lines = await fake.logLines(waitingFor: "eof")
         #expect(lines.contains { $0.contains(#""behavior":"deny""#) })

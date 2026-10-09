@@ -89,7 +89,8 @@ mesmos caminhos do primeiro uso). Com um modelo pronto, são duas opções:
 Com [memórias guardadas](#memória) de Orbs apagados, um cartão "Começar de uma memória guardada" lista as três mais novas
 ("Continuar" abre a folha Novo Orb já com a memória escolhida; "Ver todas" mostra a lista completa). Depois de criar um Orb
 e apagar todos, o título vira "Hora de um Orb novo". A barra lateral mostra "Criar seu primeiro Orb" onde os Orbs ficam, e o
-clique nela traz a tela de volta. Com Orbs, o app sempre abre em um deles ("Escolha um Orb" deixou de existir).
+clique nela traz a tela de volta. Com Orbs, o app sempre abre em um deles ("Escolha um Orb" deixou de existir). Sob os botões,
+"ou importe de outro assistente" abre a folha Novo Orb já no painel de [importação](#criar-um-orb).
 
 ## A janela
 
@@ -109,6 +110,7 @@ nome, como te chamar e o texto em cada conversa (assim eles sabem como te chamar
 
 - **Começar de** (só aparece quando há [memórias guardadas](#memória)): "Nenhuma (Orb novo)" ou a memória de um Orb que você
   apagou ou redefiniu; escolher uma preenche nome, papel e aparência e dá ao novo Orb o que o antigo aprendeu.
+  Logo abaixo (sempre, com ou sem memórias guardadas) fica **Importar de outro assistente**; os dois se excluem.
 - **Nome** e **Papel** (o papel é uma frase de quem ele é: "Cuida da minha agenda").
 - **Inteligência**: o modelo deste Orb (ou o padrão do app).
 - **Pasta**: por padrão cada Orb ganha **uma pasta só dele**, `~/Orbs/<Nome>` (se o nome já existe, `~/Orbs/<Nome> 2`). É a
@@ -147,6 +149,13 @@ AppleScript, Atalhos, área de transferência, captura de tela nem controla outr
   são reduzidas (um chip "Preparando imagem…" aparece e o envio espera) e enviadas ao modelo se ele enxerga; se ele não enxerga, só o caminho vai e o app avisa. Outros arquivos
   vão como caminho: o Orb os lê com as ferramentas (precisa de "Terminal e arquivos"). A captura de tela que o Orb tira
   também chega a ele como imagem, quando o modelo enxerga.
+  No chat, os anexos aparecem do mesmo jeito na mensagem enviada, na fila e no compositor: imagens numa grade de largura fixa
+  (uma, duas ou três colunas; "+N" quando passam de nove) e arquivos como cartões com o ícone do tipo, o nome cortado no meio
+  (a extensão fica à vista) e "PDF · 2,1 MB". Arquivo que sumiu ou anexo antigo, que guardou só o nome, aparecem como tal.
+  Clicar abre o Quick Look (← e → passam de um anexo para o outro); o botão direito oferece Abrir, Mostrar no Finder, Copiar e Copiar
+  caminho; dá para arrastar o arquivo para fora. O que o Orb cria ou altera com as ferramentas de arquivo (e as capturas de
+  tela dele) aparece sob a linha da ferramenta, como cartão "novo" ou "alterado" ou como miniatura, uma vez só por turno.
+  Arquivos criados por comandos do Terminal não entram.
 - **Escrever com o Orb trabalhando.** O compositor continua livre: a mensagem entra como "Na fila" e chega ao Orb no próximo
   passo dele (no Claude Code, assim que a resposta termina). **⌘↩ para e envia agora**; com um pedido de permissão aberto,
   isso recusa o pedido (parar sempre recusa) e envia. Se o Orb espera sua resposta a um pedido, a fila só anda depois dela.
@@ -277,6 +286,38 @@ Cada Orb tem a **sua** memória, que nasce com ele e cresce a cada conversa: nad
   nome, o papel e a aparência (dá para mudar; voltar a "Nenhuma" desfaz o que a memória trouxe e mantém o que você digitou). Ao criar, a pasta guardada **é movida** para ser a memória do novo Orb (ela sai
   das guardadas) e, como já tem identidade ou preferências, ele não refaz a entrevista. Pastas guardadas antes dos perfis
   também aparecem; delas só vem o nome.
+- **Importar de outro assistente.** Em **Novo Orb** → "Começar de" → "Importar de outro assistente" (também por ⌘K, "Importar
+  de outro assistente…", e pelo link da tela de boas-vindas). O formulário dá lugar a um painel de três passos, ainda dentro da
+  folha: **1.** "Copiar prompt" (o texto pronto, em "Ver o prompt") para colar no ChatGPT, Gemini, Claude, Copilot ou no GPT,
+  Gem ou Projeto que já conhece você; **2.** colar a resposta, "Escolher arquivo…" ou soltar um arquivo ou pasta (a leitura
+  é automática, sem botão "Analisar"; em "Neste Mac" aparecem, só se existirem, `~/.hermes` e `~/.openclaw/workspace`, e nada
+  é lido antes do "Ler"); **3.** a **prévia**, com o texto inteiro e uma caixa de seleção por item, em grupos: "Como funciona",
+  "Preferências", "Sobre você", "Procedimentos" e "Skills" (com "Ver"); quando fica pronta, a prévia rola até a vista, mesmo
+  numa janela baixa. O que parece dar ordens ao Orb ("ignore as instruções",
+  "sem pedir permissão", `sudo`, `rm -rf`, "envie para"…) vem **desmarcado** e marcado "Revise: parece dar ordens ao Orb".
+  Apagar o texto colado tira a prévia que veio dele (a de um arquivo ou pasta fica). Subtítulos dentro de "Sobre você" ou
+  "Preferências" não viram itens, e texto solto em "Procedimentos" vira um procedimento só. Um cartão JSON colado dentro de um
+  bloco de código também é lido.
+  Texto colado sem títulos pergunta "Isto é: Instruções do assistente | Lembranças sobre você". "Usar esta importação" volta ao
+  formulário, que mostra "ChatGPT · 1 instrução, 9 lembranças, 2 skills" com **Revisar** e **Remover** (nome e papel que vieram
+  da importação só entram em campos vazios, e "Remover" os tira se você não os mudou). Nada é criado até **Criar Orb**.
+  - *O que se lê.* O "Cartão do Orb" (Markdown, o formato do prompt, mesmo dentro de um bloco de código ou com conversa em
+    volta, com títulos em inglês também), **Character Card** em JSON (V1, V2 e V3: só persona e lorebook ativo), uma **pasta
+    do Hermes ou do OpenClaw** (só `SOUL.md`, `IDENTITY.md`, `USER.md`, `MEMORY.md`, `AGENTS.md`, `memories/` e
+    `skills/**/SKILL.md`, sem abrir `.env`, `auth.json`, `config.yaml`, sessões, logs nem rotinas, sem seguir links, pulando as
+    skills que vieram com o app ou de um hub) e texto livre. O `conversations.json` do ChatGPT e cartões em PNG são
+    reconhecidos e recusados com orientação; arquivos acima de 1 MB também.
+  - *O que entra.* Só nome, papel, identidade, preferências, fatos, procedimentos e skills; **nunca** permissões, modo,
+    capacidades, pasta, modelo, conectores nem rotinas, mesmo que o arquivo traga esses campos. Chaves e senhas são removidas.
+    A identidade vai até 1.500 caracteres no prompt; quando o texto é maior, ele inteiro também vira fatos de até 2.000
+    caracteres ("Instruções completas de ChatGPT (1/3)"…), que o Orb consulta quando precisa. Lê-se até 6.000 caracteres de
+    instruções; o que passa disso fica de fora e a prévia diz quanto. Preferências até 40, 240
+    caracteres cada e 1.500 no total (o resto também vira fato); até 60 fatos, 12 procedimentos e 5 skills, que valem só para o
+    Orb novo e só rodam quando você digita `/comando`. A entrevista da primeira conversa deixa de ser pedida quando entra
+    identidade ou preferências, e o Orb novo continua se apresentando como sempre; a conversa ganha antes uma linha "Importei
+    de ChatGPT: 1 instrução, 9 lembranças e 2 skills. Veja na aba Memória." O que a importação traz de "Sobre você" fica na
+    memória do Orb novo (o perfil de Ajustes → Você é seu e não é tocado).
+  - *Nada sai do Mac.* Importar não faz rede: lê o que você colou ou escolheu, e o resultado vai para a memória local.
 - No **Claude Code**, a memória chega por um servidor de ferramentas que o próprio app oferece; o histórico do Claude Code
   (`~/.claude/projects/`) é dele, e "Esquecer" no Orb não o apaga.
 
@@ -326,8 +367,14 @@ janela vai antes para a memória do Orb. As mensagens continuam salvas na conver
 - **Compactar agora** (ou `/compactar` e, se quiser, um foco: `/compactar decisões sobre o banco`) resume já. Não roda com o
   Orb respondendo. O resultado vira um aviso na conversa: "Compactei a conversa: os 5 primeiros pedidos viraram um resumo (≈ 58
   mil → 19 mil tokens)."
-- Quando a conversa passa de 85% do que cabe, aparece uma vez "Esta conversa está ficando longa. Compactar agora ou começar uma
-  nova?".
+- Você não precisa decidir nada: o anel só informa, e o Orb sabe a hora e o jeito de compactar. Ele dobra o começo quando a
+  conversa passa do que cabe e também quando você volta depois de uns 5 minutos (o cache do provedor já esfriou, então dobrar
+  não custa nada a mais). Antes da dobra, em segundo plano, ele pede ao modelo mais barato do mesmo fabricante (um "haiku" na
+  Claude, um "mini" na OpenAI; num modelo aberto, num servidor local ou quando nada é mais barato, o próprio modelo do Orb)
+  uma nota curta do trecho que vai sair: o que foi pedido, feito, decidido, aprendido e o que ficou em aberto. Num servidor
+  local (Ollama, LM Studio) a nota cede a vez à sua próxima mensagem. A nota vai para o resumo, ao lado do pedido original, das
+  decisões e dos arquivos, e para a memória do Orb. É uma chamada pequena por trecho, não aparece na conversa, e sem rede
+  ou com o modelo ocupado o Orb resume do jeito de sempre.
 - **Ajustes → Geral → Contexto das conversas**: *Econômico* (cerca de 40 mil tokens palavra por palavra, gasta menos por
   mensagem), *Equilibrado* (80 mil, o padrão) ou *Amplo* (até 60% da janela, custa mais por mensagem). Vale para todos os Orbs.
 - Se um provedor recusa uma conversa por tamanho, o Orb aprende a janela real daquele modelo (**Janelas aprendidas**, com
@@ -479,6 +526,8 @@ Rodando pelo SwiftPM (sem um `.app`), ele só fecha: abra de novo. Nos modos de 
   abrir com `web_fetch`, os serviços dos conectores que você instalar e o login do ChatGPT.
 - **Notificações** mostram o começo da resposta do Orb (até 180 caracteres) e o comando de um pedido de permissão; quem vê sua
   tela de bloqueio pode ver isso, conforme as suas configurações de notificação do macOS.
+- **Importar de outro assistente** não faz rede e não lê o seu Mac sem você pedir (colar, escolher ou "Ler"); o que entra
+  vira dado na memória do Orb novo, depois da sua prévia.
 - **Segurança das ações**: um texto malicioso numa página ou arquivo não consegue fazer o Orb agir sem você. O que sai do Mac
   (`web_fetch`, `open`, guardar memória) e o que muda coisas passam pelas permissões; o prompt do Orb trata o que vem de
   páginas, arquivos, conectores e memórias como dado, nunca como instrução. Lembre que em "Sem pedir permissão" isso não vale.

@@ -191,12 +191,17 @@ struct Conversation: Codable, Sendable {
     var ledger: ConversationLedger?
     /// How many times this conversation has been compacted (automatically or on request).
     var compactions: Int?
+    /// What the model wrote about stretches of the conversation that were about to be folded (see `ChunkSummary`);
+    /// the summary carries the ones that were folded. Only helps the summary: a note that cannot be read is no loss.
+    var chunkSummaries: [ChunkSummary]?
     /// Messages before this index are sent to the model condensed (old prefaces, outputs and reasoning cut down; the
     /// messages themselves stay whole). It moves in batches (see `ContextCondensing`).
     var condensedCount: Int?
     /// Whether the last task stopped at the step limit and nothing was said since (set by the engine, cleared by the
     /// next user message). nil = recorded before this was tracked: then the record's marker in the last message decides.
     var taskPaused: Bool?
+    /// When the model last answered in this conversation (the provider's cache is cold some minutes after it).
+    var lastModelCall: Date?
     /// Hash of the workspace snapshot the model last got in this conversation (it is sent again only when it changes).
     var workspaceHash: String?
     /// The same for the current Claude Code session, which never sees the snapshots other models were given.
@@ -260,8 +265,10 @@ extension Conversation {
         // A ledger this version cannot read is dropped (the summary text still stands) instead of losing the conversation.
         ledger = (try? c.decodeIfPresent(ConversationLedger.self, forKey: .ledger)) ?? nil
         compactions = (try? c.decodeIfPresent(Int.self, forKey: .compactions)) ?? nil
+        chunkSummaries = (try? c.decodeIfPresent([ChunkSummary].self, forKey: .chunkSummaries)) ?? nil
         condensedCount = try c.decodeIfPresent(Int.self, forKey: .condensedCount)
         taskPaused = try c.decodeIfPresent(Bool.self, forKey: .taskPaused)
+        lastModelCall = (try? c.decodeIfPresent(Date.self, forKey: .lastModelCall)) ?? nil
         workspaceHash = try c.decodeIfPresent(String.self, forKey: .workspaceHash)
         claudeWorkspaceHash = try c.decodeIfPresent(String.self, forKey: .claudeWorkspaceHash)
         claudeStandingHash = try c.decodeIfPresent(String.self, forKey: .claudeStandingHash)
@@ -308,6 +315,8 @@ struct ToolCall: Identifiable, Codable, Sendable, Equatable {
     var output: String?
     var startedAt = Date.now
     var finishedAt: Date?
+    /// Files the tool created or changed, shown under its line (nil: none, which is what older conversations have).
+    var files: [ProducedFile]?
 
     var duration: TimeInterval? { finishedAt.map { $0.timeIntervalSince(startedAt) } }
 }
@@ -323,6 +332,8 @@ extension ToolCall {
         output = try c.decodeIfPresent(String.self, forKey: .output)
         startedAt = try c.value(.startedAt, default: Date.now)
         finishedAt = try c.decodeIfPresent(Date.self, forKey: .finishedAt)
+        // Only a convenience: whatever cannot be read leaves the line without cards instead of failing the conversation.
+        files = (try? c.decodeIfPresent([ProducedFile].self, forKey: .files)) ?? nil
     }
 }
 
@@ -559,6 +570,8 @@ extension Skill {
     /// `source` of the skills that ship with the app (`legacyBuiltInSource` in files saved while it was OpenBot).
     static let builtInSource = "orb"
     static let legacyBuiltInSource = "openbot"
+    /// `source` of the skills made by "Importar de outro assistente".
+    static let importedSource = "importado"
 
     /// A slug from free text: lowercase letters, digits and dashes.
     static func slugify(_ text: String) -> String {

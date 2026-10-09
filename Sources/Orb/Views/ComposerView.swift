@@ -52,7 +52,6 @@ struct ComposerView: View {
         let lane = lane
         let hintText = hint(lane)
         VStack(spacing: 0) {
-            ContextNudge(botID: botID, gauge: gauge) // adds nothing, not even spacing, while its card is not due
             card(lane)
             Text(hintText)
                 .font(.system(size: 11))
@@ -440,8 +439,8 @@ private struct PictureChip: View {
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Imagem anexada: " + name)
             .help(name)
-            // The bubble shows this picture at 96 pt: decode that copy now, so it is in the cache when the message goes.
-            .task(id: image.path) { _ = await Thumbnails.image(at: image.path, side: 96) }
+            // The bubble shows the grid's copy of this picture: decode it now, so it is in the cache when the message goes.
+            .task(id: image.path) { _ = await Thumbnails.image(at: image.path, side: Thumbnails.gridSide) }
     }
 }
 
@@ -466,26 +465,19 @@ private struct RemoveButton: View {
     }
 }
 
-/// A file waiting to be sent: an icon for its type, its name and its size.
+/// A file waiting to be sent: the same card the chat shows once it is sent, with a remove button.
 private struct AttachmentChip: View {
     let file: AttachedFile
     let onRemove: () -> Void
 
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: file.symbol).foregroundStyle(Palette.muted)
-            Text(file.name).lineLimit(1).truncationMode(.middle)
-            if let size = AttachmentKind.size(file.size) {
-                Text(size).foregroundStyle(Palette.muted)
+        FileCard(path: file.url.path, all: [file.url.path], style: .compact, minHeight: 56)
+            .frame(width: 220)
+            .overlay(alignment: .topTrailing) {
+                RemoveButton(label: "Remover " + file.name, symbol: "xmark.circle.fill", action: onRemove)
+                    .foregroundStyle(Palette.ink, Palette.canvas)
+                    .offset(x: 10, y: -10)
             }
-            RemoveButton(label: "Remover " + file.name, symbol: "xmark", size: 20, action: onRemove)
-        }
-        .font(.caption)
-        .padding(.leading, 8)
-        .padding(.trailing, 2)
-        .padding(.vertical, 1.5)
-        .background(Palette.raised, in: .capsule)
-        .help(file.url.path)
     }
 }
 

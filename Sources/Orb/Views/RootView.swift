@@ -38,9 +38,9 @@ struct RootView: View {
         }
         .environment(\.presentedEmptyChats, presentedEmptyChats)
         .environment(\.presentedQueued, presentedQueued)
-        .sheet(isPresented: $model.showNewBot, onDismiss: { model.newBotStart = nil }) {
-            // Opened from a kept memory on the welcome screen: the sheet starts from it.
-            NewBotSheet(kept: model.newBotStart.map { [$0] } ?? [], chosen: model.newBotStart)
+        .sheet(isPresented: $model.showNewBot, onDismiss: { model.newBotStart = nil; model.newBotImporting = false }) {
+            // Opened from a kept memory on the welcome screen: the sheet starts from it. Opened to import: on that panel.
+            NewBotSheet(kept: model.newBotStart.map { [$0] } ?? [], chosen: model.newBotStart, startsImporting: model.newBotImporting)
         }
         .systemSheets()
         .alert("Atenção com seus dados", isPresented: Binding(

@@ -25,21 +25,6 @@ struct QueuedMessages: View {
         }
     }
 
-    /// The attachments of a queued message by how the bubble shows them: pictures as thumbnails above it, as in
-    /// `UserBubble`, and the rest (or names without a path, from older data) in a line with a paperclip.
-    nonisolated static func split(_ paths: [String]) -> (images: [String], others: [String]) {
-        var images: [String] = []
-        var others: [String] = []
-        for path in paths {
-            if path.hasPrefix("/"), ImageProcessing.isImageFile(URL(fileURLWithPath: path)) {
-                images.append(path)
-            } else {
-                others.append(path)
-            }
-        }
-        return (images, others)
-    }
-
     private var needsYou: Bool { model.live(botID).needsYou }
 
     /// When it will be read: at the next step for Orb's own engine, after the answer for Claude Code; after your
@@ -64,40 +49,21 @@ private struct QueuedBubble: View {
     let interrupt: () -> Void
 
     var body: some View {
-        let attachments = QueuedMessages.split(message.attachmentPaths)
         HStack {
             Spacer(minLength: 120)
             VStack(alignment: .trailing, spacing: 6) {
-                if !attachments.images.isEmpty {
-                    HStack(spacing: 6) {
-                        ForEach(attachments.images, id: \.self) { path in
-                            ImageThumbnail(path: path, side: 96)
-                                // A little dimmed, like the bubble beside it: it is waiting, not sent.
-                                .opacity(0.75)
-                                .accessibilityLabel("Imagem anexada: " + (path as NSString).lastPathComponent)
-                        }
-                    }
-                }
-                if !attachments.others.isEmpty || !message.text.isEmpty {
-                    VStack(alignment: .trailing, spacing: 6) {
-                        if !attachments.others.isEmpty {
-                            Label(attachmentSummary(of: attachments.others), systemImage: "paperclip")
-                                .font(.system(size: 12))
-                                .foregroundStyle(Palette.muted)
-                        }
-                        if !message.text.isEmpty {
-                            Text(message.text)
-                                .font(Palette.conversationFont)
-                                .foregroundStyle(Palette.secondary)
-                                .multilineTextAlignment(.leading)
-                                .textSelection(.enabled)
-                        }
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 9)
-                    // The same shape as the bubble it becomes (`UserBubble`: radius 18).
-                    .background(Palette.userBubble.opacity(0.3), in: .rect(cornerRadius: 18))
-                    .overlay { RoundedRectangle(cornerRadius: 18).strokeBorder(Palette.lineStrong, style: StrokeStyle(lineWidth: 1, dash: [4, 3])) }
+                if !message.attachmentPaths.isEmpty { AttachmentStack(paths: message.attachmentPaths, dimmed: true) }
+                if !message.text.isEmpty {
+                    Text(message.text)
+                        .font(Palette.conversationFont)
+                        .foregroundStyle(Palette.secondary)
+                        .multilineTextAlignment(.leading)
+                        .textSelection(.enabled)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        // The same shape as the bubble it becomes (`UserBubble`: radius 18).
+                        .background(Palette.userBubble.opacity(0.3), in: .rect(cornerRadius: 18))
+                        .overlay { RoundedRectangle(cornerRadius: 18).strokeBorder(Palette.lineStrong, style: StrokeStyle(lineWidth: 1, dash: [4, 3])) }
                 }
                 HStack(spacing: 10) {
                     if isLast {
@@ -120,9 +86,5 @@ private struct QueuedBubble: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Mensagem na fila: \(message.text)")
-    }
-
-    private func attachmentSummary(of paths: [String]) -> String {
-        paths.count == 1 ? (paths[0] as NSString).lastPathComponent : "\(paths.count) anexos"
     }
 }

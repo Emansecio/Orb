@@ -400,6 +400,8 @@ struct ClaudeCodeTranscript {
     private var isWriting = false
     /// Claude Code tool-use id → transcript tool id, for calls still running.
     private var running: [String: UUID] = [:]
+    /// Claude Code tool-use id → the file a Write or Edit is changing, for calls still running.
+    private var writing: [String: ProducedFile] = [:]
     private var denials: [String: String] = [:]
     private var apiError: String?
     /// Short notes of what Claude Code did this turn, kept in the history so other models know.
@@ -430,12 +432,17 @@ struct ClaudeCodeTranscript {
             let summary = ClaudeCodeTools.summary(name, input)
             let call = ToolCall(kind: ClaudeCodeTools.kind(name), title: summary.title, detail: summary.detail)
             running[id] = call.id
+            if let path = ClaudeCodeTools.writtenPath(name, input) {
+                writing[id] = ProducedFile(path: path, created: name == "Write" && !FileManager.default.fileExists(atPath: path))
+            }
             if actions.count < 20 { actions.append("\(summary.title): \(summary.detail.prefix(120))") }
             return [.toolStarted(call), .status(summary.title)]
         case .toolResult(let id, let output, let isError):
             guard let callID = running.removeValue(forKey: id) else { return [] }
+            let file = writing.removeValue(forKey: id)
             let shown = denials[id] ?? (output.count > 4000 ? output.prefix(4000) + "\n…" : output)
-            return [.toolFinished(id: callID, state: isError ? .failed : .done, output: shown), .status("Pensando")]
+            return [.toolFinished(id: callID, state: isError ? .failed : .done, output: shown,
+                                  files: isError ? [] : file.map { [$0] } ?? []), .status("Pensando")]
         case .apiError(let code):
             apiError = code
             return []
@@ -527,7 +534,7 @@ struct ClaudeCodeTranscript {
     }
 
     private mutating func closeRunningTools() -> [TurnEvent] {
-        defer { running = [:] }
+        defer { running = [:]; writing = [:] }
         return running.values.map { .toolFinished(id: $0, state: .failed, output: "Interrompido.") }
     }
 }

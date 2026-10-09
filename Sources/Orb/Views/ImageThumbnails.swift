@@ -1,25 +1,36 @@
 import SwiftUI
 import ImageIO
 
-/// A small preview of a picture file, for the composer and the transcript. Falls back to an icon when the file is
-/// gone (a conversation can outlive the file it points at).
+/// A small preview of a picture file, for the composer and the transcript. A file that cannot be read (a conversation
+/// can outlive it) shows a warning mark instead of the picture.
 struct ImageThumbnail: View {
     let path: String
-    var side: CGFloat
+    var size: CGSize
+    /// The side the cached copy is decoded for. The grid of the chat shows one copy at every size (`Thumbnails.gridSide`).
+    var decodeSide: CGFloat
     @State private var image: NSImage?
+    /// Nothing could be decoded: the file is gone or is not a picture.
+    @State private var failed = false
 
     /// Starts with the picture when it is already decoded (it was seen, or warmed up), so a row that scrolls back
     /// into view or a bubble that comes in with its photo never shows the placeholder first.
-    init(path: String, side: CGFloat = 56) {
+    init(path: String, size: CGSize, decodeSide: CGFloat = Thumbnails.gridSide) {
         self.path = path
-        self.side = side
-        _image = State(initialValue: Thumbnails.cached(path: path, side: side))
+        self.size = size
+        self.decodeSide = decodeSide
+        _image = State(initialValue: Thumbnails.cached(path: path, side: decodeSide))
+    }
+
+    init(path: String, side: CGFloat = 56) {
+        self.init(path: path, size: CGSize(width: side, height: side), decodeSide: side)
     }
 
     var body: some View {
         ZStack {
             Palette.raised
-            Image(systemName: "photo").foregroundStyle(Palette.faint)
+            // Gone once the picture is there (it would show through a dimmed one).
+            Image(systemName: failed ? "photo.badge.exclamationmark" : "photo").foregroundStyle(Palette.faint)
+                .opacity(image == nil ? 1 : 0)
             if let image {
                 // Arrives over the placeholder by fading (opacity alone, so it also holds under Reduce Motion).
                 Image(nsImage: image).resizable().scaledToFill()
@@ -27,20 +38,29 @@ struct ImageThumbnail: View {
             }
         }
         .animation(Motion.fade, value: image != nil)
-        .frame(width: side, height: side)
+        .frame(width: size.width, height: size.height)
         .clipShape(.rect(cornerRadius: 10))
         .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.line) }
         .task(id: path) {
             // Born from the cache with this very picture: nothing to decode, and no second pass over the body.
             // (Compared with the cached copy of `path`, so a view reused for another path still loads it.)
-            if let image, image === Thumbnails.cached(path: path, side: side) { return }
-            image = await Thumbnails.image(at: path, side: side)
+            if let image, image === Thumbnails.cached(path: path, side: decodeSide) { return }
+            image = await Thumbnails.image(at: path, side: decodeSide)
+            failed = image == nil
         }
     }
 }
 
 enum Thumbnails {
-    nonisolated(unsafe) private static let cache = NSCache<NSString, NSImage>()
+    /// The side of the copy the chat's pictures share: the grid shows it at every size and the composer warms it up,
+    /// so a picture is decoded once and a sent message comes in with it already there.
+    static let gridSide = AttachmentLayout.gridWidth
+
+    nonisolated(unsafe) private static let cache: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.countLimit = 300
+        return cache
+    }()
 
     private static func key(_ path: String, _ side: CGFloat) -> NSString { "\(path)#\(Int(side))" as NSString }
 

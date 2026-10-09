@@ -56,6 +56,7 @@ Tudo em `Sources/Orb/`.
 | `Reset/ResetPlan.swift`, `Reset/ResetExecutor.swift`, `Reset/AppRelaunch.swift`, `AppModel+Reset.swift` | "Redefinir o Orb": o plano puro (`ResetPlan`, `ResetSummary`, `ResetGuard`), o executor com pasta, cofre e preferências injetáveis, o relançar e a orquestração (`AppModel.resetEverything`). Veja "Redefinir o Orb" abaixo |
 | `OrbFolder.swift` | pasta própria `~/Orbs/<Nome>`, estado da pasta, arquivos recentes e alterados do painel |
 | `MacPermissions.swift` | permissões do macOS (TCC), pré-voo de Automação (abre escondido o app conhecido que está fechado), tradução de erros |
+| `AttachmentInfo.swift` | o que o chat mostra de um anexo, em valores puros: `AttachmentLayout` (separar imagens de arquivos, o plano da grade: 232 pt, 1 / 2 / 3 colunas, até 9), `AttachmentInfo` (nome, extensão, ícone, tamanho e estado `ok`/`missing`/`legacy`; `quick` sem disco, `load` fora da thread principal, com cache de 500) e `ProducedFile` (arquivo que o Orb criou ou alterou, guardado em `ToolCall.files`, opcional e tolerante) |
 | `ImageAttachments.swift` | imagens do usuário e de ferramentas: reduzir (com `square:`, recorte quadrado central, para a foto do perfil), guardar em `anexos/`, formato de cada API |
 | `UserProfile.swift`, `AppModel+Profile.swift` | o perfil global da usuária (nome, como te chamar, sobre você, foto) em `state.json` com decodificação tolerante; `promptSection` (o texto curto que entra pelo `pinned` da memória, vazio quando não há texto) e `ProfilePhoto` (a foto em `perfil/`; só lê arquivos do Mac, nunca um link; a última escolha ou remoção vence uma troca ainda em preparo, por `profilePhotoGeneration`) |
 | `ApprovalNotifications.swift` | banners "Permitir / Não permitir", roteamento do toque, um só delegate de notificações |
@@ -145,6 +146,16 @@ linha, cartões) é em português (`AgentTool.summary`).
 `SessionSummary` + `MemoryIntent` + `KeptMemories` (memórias guardadas e o perfil de cada uma) + `OrbToolsMCPServer`.
 Detalhes em [MEMORIA.md](MEMORIA.md).
 
+### Importar de outro assistente (`Import/`)
+
+`OrbImport` (Sendable: fonte, nome, papel, identidade, itens com caixa de seleção, skills; `plan()` aplica a seleção e os
+limites e devolve o que será gravado) + `ImportGuard`/`ImportSanitizer` + `OrbImportReader` e `OrbImportFormats` (puro, sem
+UI, `nonisolated`: o Cartão do Orb, Character Card JSON, pastas do Hermes/OpenClaw por lista fechada sem seguir links, texto
+livre; `detectLocal(home:devRun:)`) + `ImportPrompt`. A interface é `Views/ImportPanel.swift`, dentro de `NewBotSheet`; a
+gravação é `AppModel.createBot(importing:)` + `MemoryBank.importPages`. Importar não faz rede e nunca produz permissões, modo,
+capacidades, conectores ou rotinas. Nos modos de desenvolvedor a detecção de `~/.hermes` e `~/.openclaw` fica desligada
+(`AppModel.readsRealMac`).
+
 ### Catálogos (`Catalog/`)
 
 `MCPRegistry` (registro oficial do MCP), `ConnectorTemplates` (conectores em destaque), `ConnectorCatalog` (o que cada conector ofereceu
@@ -163,13 +174,13 @@ O avatar e seu sistema de animação: `OrbModel` (config, catálogo, imagens), `
 | Área | Arquivos |
 |---|---|
 | Janela | `RootView` (`NavigationSplitView`, painel que se recolhe em janela estreita), `SidebarView`, `ChatView` (lista da conversa), `EmptyChatContent` (e `OrbGreeting`, a saudação de um Orb novo), `FirstRunCard`, `WelcomeView` (a tela sem Orbs: `WelcomeStage`, `WelcomeCopy`, `WelcomeLooks`, `WelcomeSelection`, `WelcomeLedger`, `WelcomeBackdrop`, `KeptStartCard`; o que ela pede ao modelo está em `AppModel+Welcome.swift`) |
-| Conversa | `TranscriptViews` (`TranscriptRow` Equatable, ferramentas, `ApprovalCard`, `WorkingLine`), `MarkdownBlockViews`, `QueuedMessages`, `ImageThumbnails`, `ApprovalKeyboard` |
+| Conversa | `TranscriptViews` (`TranscriptRow` Equatable, ferramentas, `ApprovalCard`, `WorkingLine`), `MarkdownBlockViews`, `QueuedMessages`, `ImageThumbnails`, `AttachmentViews` (`AttachmentStack` e `FileCard`, o mesmo componente na bolha, na fila, no compositor e sob a linha da ferramenta; `AttachmentGrid`, `ImageTile`, `ProducedFilesView`, cliques, menu e arrastar), `QuickLookPreview`, `ApprovalKeyboard` |
 | Compositor | `ComposerView`, `ComposerChips` (permissões, skills, modelo), `ComposerSupport`, `ModelPopover`, `ModelPicker`, `ContextMeterViews` |
 | Painel do Orb | `BotInspector` (abas Geral, Memória, Pasta e acessos, Rotinas), `InspectorSupport`, `MemoryViews`, `DeleteOrbDialog`, `PermissionConfirmation` |
 | Ajustes | `SettingsView` (Geral, Modelos, Uso, Permissões do Mac), `ProfileSettings` (a seção "Você" e `ProfileAvatar`, que a barra lateral também usa), `ResetOrbSheet` ("Redefinir o Orb?" e o alerta), `ProviderSettings`, `ProviderPresentation`, `CustomProviderFields`, `ClaudeCodeSettings`, `MacPermissionsView`, `ContextSettings` |
 | Páginas | `RoutinesView`, `ConversationsMenu`, `SkillsView`, `ConnectorsView`, `CatalogParts` |
-| Sistema | `CommandPalette` (⌘K e a folha de atalhos; as teclas vêm de `ShortcutCatalog`, em `Shortcuts.swift`, a mesma lista que Ajustes → Geral mostra), `QuickAskView` (painel da barra de menus), `SheetKit` |
-| Para revisão (só `--snapshot`) | `WelcomeSnapshots`, `CatalogSnapshots`, `ContextSnapshots`, `SystemSnapshots`, `TranscriptSamples`, e `SnapshotComposerScenes.swift` (na raiz de `Sources/Orb/`) |
+| Sistema | `CommandPalette` (⌘K e a folha de atalhos; as teclas vêm de `ShortcutCatalog`, em `Shortcuts.swift`, a mesma lista que Ajustes → Geral mostra), `QuickAskView` (painel da barra de menus), `SheetKit`, `ImportPanel` (a importação de outro assistente, dentro da folha Novo Orb) |
+| Para revisão (só `--snapshot`) | `WelcomeSnapshots`, `CatalogSnapshots`, `ContextSnapshots`, `SystemSnapshots`, `TranscriptSamples`, `AttachmentSnapshots`, e `SnapshotComposerScenes.swift` (na raiz de `Sources/Orb/`) |
 
 ## O caminho de um turno
 
@@ -200,7 +211,7 @@ ComposerView ── AppModel.submit ─┬─ Orb livre ─► AppModel.send ─
    "Conexão caiu, tentando de novo em N s", conforme o erro); trata o motivo de parada (recusa, resposta cortada, estouro de contexto); roda as chamadas
    (`runCalls`: um cartão para o que pergunta junto, leituras em paralelo, o resto em ordem); registra cada mensagem. O
    Claude Code faz o análogo num processo `claude -p`, com os pedidos `can_use_tool` vindo para o mesmo `ApprovalGate`.
-6. **Eventos.** `TurnEvent`: `status`, `text`, `toolStarted`/`toolFinished`, `approval`, `message` (vai para o histórico do
+6. **Eventos.** `TurnEvent`: `status`, `text`, `toolStarted`/`toolFinished` (com `files`: o que a ferramenta criou ou alterou; `write_file`/`edit_file` e Write/Edit/MultiEdit do Claude Code, mais as imagens que a ferramenta devolve; `BotSession.takeOver` deixa o arquivo só na última chamada do turno que o tocou), `approval`, `message` (vai para o histórico do
    modelo), `notice`, `failed`, `usage`/`requestUsage`/`reportedCost`, `compacted`, `taskPaused`, `steered`, `session`.
 7. **Aplicação** (`BotSession.apply`, na thread principal): o texto vai para `pendingText` e é publicado em `LiveText` a cada
    33 ms, **sem tocar na lista de itens**; ferramentas e cartões viram itens da conversa; `message` entra em
@@ -472,8 +483,8 @@ Modos (qualquer outro nome mostra o chat do primeiro Orb):
 
 | Área | Modos |
 |---|---|
-| Janela e painéis | `app`, `sidebar`, `sidebar-profile` (com o perfil de exemplo), `inspector` (= `inspector-general`), `inspector-memory`, `inspector-folder`, `inspector-routines`, `memory-sheet`, `new-orb`, `new-orb-kept` (com memórias guardadas, uma escolhida), `welcome` (sem modelo), `welcome-checking` (conexões ainda não verificadas), `welcome-ready`, `welcome-kept` (com duas memórias guardadas), `welcome-returning` (lista esvaziada), `welcome-narrow` (a pronta; use `ORB_SNAPSHOT_WIDTH=1000 ORB_SNAPSHOT_HEIGHT=620`) — todas com `ORB_DATA_DIR` numa pasta com `{"bots":[]}`, senão o modo de desenvolvedor cria o Atlas —, `editor`, `delete-orb`, `palette`, `shortcuts`, `menubar-icons` |
-| Conversa | `chat-working`, `chat-working-wait`, `chat-working-retry`, `chat-typed`, `chat-attachments`, `chat-slash`, `popover-permissions`, `popover-model`, `popover-skills`, `approvals`, `transcript`, `transcript-approvals`, `transcript-notices`, `transcript-failed`, `transcript-retry` |
+| Janela e painéis | `app`, `sidebar`, `sidebar-profile` (com o perfil de exemplo), `inspector` (= `inspector-general`), `inspector-memory`, `inspector-folder`, `inspector-routines`, `memory-sheet`, `new-orb`, `new-orb-kept` (com memórias guardadas, uma escolhida), `new-orb-import` (o painel de importação vazio), `new-orb-import-preview` (a prévia de um exemplo, com um item suspeito desmarcado; use `ORB_SNAPSHOT_HEIGHT=1300` para vê-la inteira), `new-orb-imported` (de volta ao formulário, com a importação confirmada), `welcome` (sem modelo), `welcome-checking` (conexões ainda não verificadas), `welcome-ready`, `welcome-kept` (com duas memórias guardadas), `welcome-returning` (lista esvaziada), `welcome-narrow` (a pronta; use `ORB_SNAPSHOT_WIDTH=1000 ORB_SNAPSHOT_HEIGHT=620`) — todas com `ORB_DATA_DIR` numa pasta com `{"bots":[]}`, senão o modo de desenvolvedor cria o Atlas —, `editor`, `delete-orb`, `palette`, `shortcuts`, `menubar-icons` |
+| Conversa | `chat-working`, `chat-working-wait`, `chat-working-retry`, `chat-typed`, `chat-attachments`, `chat-attachments-queued`, `chat-slash`, `popover-permissions`, `popover-model`, `popover-skills`, `approvals`, `transcript`, `transcript-approvals`, `transcript-notices`, `transcript-failed`, `transcript-retry`, `transcript-attachments` (uma, duas, cinco e doze imagens, arquivos longos, ausente e antigo), `transcript-outputs` (arquivo novo, alterado e captura sob a linha da ferramenta) |
 | Contexto | `context-meter`, `context-nudge`, `context-popover`, `context-popover-result`, `context-popover-short`, `context-popover-claude`, `settings-context` |
 | Ajustes | `settings-general`, `settings-profile` (Geral com um perfil de exemplo e foto desenhada na hora), `settings-reset` (a folha "Redefinir o Orb?"), | Ajustes | `settings-general`, `settings-profile` (Geral com um perfil de exemplo e foto desenhada na hora), `settings-reset` (a folha "Redefinir o Orb?"), `settings-models`, `settings-usage` (um mês de uso de exemplo escrito na pasta de dados; `-usagePeriod today\|week\|month30\|thisMonth` e `-usageChartBy model`, antes de `--snapshot`, escolhem outra vista sem salvar nada), `settings-usage-empty` (sem exemplo: mostra o que a pasta tiver), `settings-perms`, `first-run-banner`, `models` |
  `settings-perms`, `first-run-banner`, `models` |

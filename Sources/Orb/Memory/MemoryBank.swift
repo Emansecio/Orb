@@ -141,6 +141,19 @@ actor MemoryBank {
         if hasIdentity || hasPreferences || !interview { finishInterview() }
     }
 
+    /// The pages of a confirmed import (`OrbImport.plan`), kept as the person's own (they saw each one in the preview).
+    /// Same page rules as `remember`: near-duplicates are merged, secrets are scrubbed, a preference ends the interview.
+    /// Returns how many pages were kept.
+    @discardableResult
+    func importPages(_ pages: [ImportPlan.Page], now: Date = .now) -> Int {
+        pages.filter { page in
+            switch remember(page.text, kind: page.kind, title: page.title.isEmpty ? nil : page.title, origin: .voce, now: now) {
+            case .saved, .updated, .alreadyKnown: true
+            case .empty, .failed: false
+            }
+        }.count
+    }
+
     /// Your own edit of the identity notes (from the panel).
     @discardableResult
     func setIdentity(_ body: String, now: Date = .now) -> Bool {

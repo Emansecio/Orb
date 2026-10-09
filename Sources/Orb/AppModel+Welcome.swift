@@ -39,4 +39,11 @@ extension AppModel {
         newBotStart = memory
         showNewBot = true
     }
+
+    /// "ou importe de outro assistente": opens the new-Orb sheet already on the import panel.
+    func startNewOrbImporting() {
+        newBotStart = nil
+        newBotImporting = true
+        showNewBot = true
+    }
 }

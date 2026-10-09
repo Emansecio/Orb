@@ -3,7 +3,7 @@ import Observation
 
 // What the context meter in the composer shows, apart from how it is drawn: the numbers of the conversation turned
 // into a `ContextReading` (a pure function, computed off the main thread), the words that say them in Portuguese,
-// and the small object the composer's meter and its "conversation is getting long" card share.
+// and the small object the composer's meter reads from.
 
 // MARK: - Words
 
@@ -79,12 +79,6 @@ enum ContextWords {
         if alreadySummarized { return "O começo já está resumido; não há mais o que compactar agora." }
         return requests > 1 ? "A conversa ainda é curta: não há o que compactar." : nothingToFold
     }
-
-    /// The card above the composer. Without anything to fold, compacting is not offered: only a new conversation.
-    static func nudgeQuestion(canCompact: Bool) -> String {
-        canCompact ? "Esta conversa está ficando longa. Compactar agora ou começar uma nova?"
-            : "Esta conversa já ocupa quase todo o espaço do modelo. Começar uma nova?"
-    }
 }
 
 // MARK: - Reading
@@ -95,7 +89,7 @@ enum ContextTone: Equatable, Sendable {
     case calm, warming, full
 
     init(share: Double) {
-        self = share >= ContextReading.suggestsCompactingAt ? .full : (share >= ContextReading.warmsAt ? .warming : .calm)
+        self = share >= ContextReading.fullAt ? .full : (share >= ContextReading.warmsAt ? .warming : .calm)
     }
 }
 
@@ -117,13 +111,10 @@ struct ContextInput: Sendable {
 struct ContextReading: Equatable, Sendable {
     /// From this share of the window the ring turns warm (and the popover tells when the history budget gets there).
     static let warmsAt = 0.7
-    /// From this share of the window, or of the history budget, the conversation is "getting long": the card above the
-    /// composer appears (a big window keeps the card from waiting for a window that the memory level never lets fill).
-    static let suggestsCompactingAt = 0.85
+    /// From this share of the window the ring is "full" (its colour is at its warmest).
+    static let fullAt = 0.85
 
     var botID: UUID
-    /// Identifies the conversation (its first transcript item), so a card shown once is not shown again for it.
-    var conversationKey: UUID?
     var isClaudeCode: Bool
     /// nil for Claude Code.
     var fill: ContextFill?
@@ -145,7 +136,7 @@ struct ContextReading: Equatable, Sendable {
             guard let budget = input.budget else { return nil }
             fill = ContextMeter.fill(of: conversation, budget: budget)
         }
-        return ContextReading(botID: input.botID, conversationKey: conversation.items.first?.id, isClaudeCode: input.isClaudeCode,
+        return ContextReading(botID: input.botID, isClaudeCode: input.isClaudeCode,
                               fill: fill, windowIsStated: input.windowIsStated, messageCount: conversation.messages.count,
                               requestCount: conversation.requestCount(in: 0..<conversation.messages.count),
                               foldedRequests: conversation.requestCount(in: 0..<conversation.coveredMessageCount),
@@ -155,11 +146,6 @@ struct ContextReading: Equatable, Sendable {
     /// Share of the model's window the next request would take, 0 to 1.
     var fraction: Double { min(max(fill?.fraction ?? 0, 0), 1) }
 
-    /// How close the conversation is to being folded or to not fitting: the window's share or the history budget's,
-    /// whichever is further along (with a big window the memory level folds the start long before the window fills).
-    /// It decides the card above the composer; the ring's colour and percentage follow the window alone.
-    var pressure: Double { fill.map { max($0.fraction, $0.budgetFraction) } ?? 0 }
-
     /// The percentage on the meter, 1 to 100 (0 only for an empty request).
     var percent: Int {
         let share = (fill?.fraction ?? 0) * 100
@@ -168,9 +154,6 @@ struct ContextReading: Equatable, Sendable {
     }
 
     var tone: ContextTone { ContextTone(share: fraction) }
-
-    /// The conversation is long enough to suggest compacting or starting a new one. Claude Code has no measure for it.
-    var isGettingLong: Bool { fill != nil && pressure >= Self.suggestsCompactingAt }
 
     /// Messages the summary has swallowed so far.
     var foldedMessages: Int { fill?.foldedMessages ?? 0 }
@@ -193,59 +176,15 @@ struct ContextReading: Equatable, Sendable {
 
 // MARK: - Shared state
 
-/// The composer's context reading, kept where the meter in the bar and the card above the composer can both see it.
+/// The composer's context reading, kept where the meter in the bar can see it.
 /// Written by `ContextGaugeDriver`, which measures when something that changes the numbers does.
 @MainActor @Observable
 final class ContextGauge {
     private(set) var reading: ContextReading?
-    /// The card was dismissed, or acted on, for the reading's conversation.
-    private(set) var isNudgeHandled = false
-
-    @ObservationIgnored private let nudges: ContextNudgeStore
-
-    init(nudges: ContextNudgeStore = ContextNudgeStore()) {
-        self.nudges = nudges
-    }
 
     /// Shows `reading` (only when it differs: assigning an `@Observable` property notifies even for an equal value).
     func show(_ reading: ContextReading?) {
         if self.reading != reading { self.reading = reading }
-        let handled = reading?.conversationKey.map(nudges.contains) ?? false
-        if handled != isNudgeHandled { isNudgeHandled = handled }
-    }
-
-    /// The card is not shown again for this conversation.
-    func handleNudge() {
-        guard let key = reading?.conversationKey else { return }
-        nudges.insert(key)
-        isNudgeHandled = true
-    }
-
-    /// The card above the composer is due.
-    var showsNudge: Bool { (reading?.isGettingLong ?? false) && !isNudgeHandled }
-}
-
-/// The conversations whose "está ficando longa" card was already answered, remembered across launches in the
-/// preferences (the newest few hundred; anything unreadable is a card shown once more).
-struct ContextNudgeStore {
-    static let defaultsKey = "contextNudgeHandled"
-    static let limit = 300
-
-    private let defaults: UserDefaults
-
-    init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
-    }
-
-    private var keys: [String] { (defaults.array(forKey: Self.defaultsKey) as? [String]) ?? [] }
-
-    func contains(_ conversation: UUID) -> Bool { keys.contains(conversation.uuidString) }
-
-    func insert(_ conversation: UUID) {
-        var all = keys
-        guard !all.contains(conversation.uuidString) else { return }
-        all.append(conversation.uuidString)
-        defaults.set(Array(all.suffix(Self.limit)), forKey: Self.defaultsKey)
     }
 }
 

@@ -11,6 +11,8 @@ struct ResponsesClient: LLMClient {
     var toolsAsInputItem = false
     /// Sent as `prompt_cache_key`, so turns of one conversation land on the same cache (only to hosts that take it).
     var conversationID: String?
+    /// Upper bound on the reply (reasoning included), sent as `max_output_tokens`; nil sends none.
+    var maxOutputTokens: Int?
     let session: URLSession
 
     /// Hosts known to accept `prompt_cache_key`. A gateway that checks the body strictly rejects the whole request
@@ -19,6 +21,15 @@ struct ResponsesClient: LLMClient {
     static let cacheKeyHosts: Set<String> = ["api.openai.com", "chatgpt.com"]
     var sendsCacheKey: Bool { baseURL.host().map(Self.cacheKeyHosts.contains) ?? false }
     var arrangesPromptCache: Bool { sendsCacheKey }
+
+    /// OpenAI's own API takes `max_output_tokens`; the ChatGPT sign-in and other gateways are not known to, and a body
+    /// they reject would cost the note. The cap leaves room for the reasoning of a small reasoning model.
+    var forShortReply: any LLMClient {
+        guard baseURL.host() == "api.openai.com" else { return self }
+        var copy = self
+        copy.maxOutputTokens = 4_000
+        return copy
+    }
 
     init(baseURL: URL, credentials: @escaping CredentialsProvider, extraHeaders: [String: String] = [:],
          toolsAsInputItem: Bool = false, conversationID: String? = nil, session: URLSession = .shared) {
@@ -43,7 +54,8 @@ struct ResponsesClient: LLMClient {
         return ProviderTransport.stream(session: session, credentials: credentials, body: {
             try WireEncoder.encode(Self.requestBody(
                 model: model, messages: messages, tools: tools, toolsAsInputItem: toolsAsInputItem,
-                promptCacheKey: sendsCacheKey ? conversationID : nil, provider: provider, toolChoice: toolChoice), trailing: Self.trailingKeys)
+                promptCacheKey: sendsCacheKey ? conversationID : nil, provider: provider, toolChoice: toolChoice,
+                maxOutputTokens: maxOutputTokens), trailing: Self.trailingKeys)
         }, request: {
             ProviderTransport.authorizedRequest(baseURL.appending(path: "responses"), apiKey: $0, headers: extraHeaders)
         }, mapper: ResponsesStreamAssembler(provider: provider, model: model))
@@ -56,7 +68,8 @@ struct ResponsesClient: LLMClient {
     /// `function_call_output` items. Reasoning recorded by the same endpoint and model goes back as `reasoning`
     /// items right before what it produced (the API rejects one that is not followed by its output).
     static func requestBody(model: String, messages: [ChatMessage], tools: [ToolSpec], toolsAsInputItem: Bool = false,
-                            promptCacheKey: String? = nil, provider: String = "", toolChoice: ToolChoice = .auto) -> JSONValue {
+                            promptCacheKey: String? = nil, provider: String = "", toolChoice: ToolChoice = .auto,
+                            maxOutputTokens: Int? = nil) -> JSONValue {
         let instructions = messages.filter { $0.role == .system }.map(\.content).joined(separator: "\n\n")
         var input: [JSONValue] = []
         for message in messages.movingToolImagesToUserMessages() {
@@ -100,6 +113,7 @@ struct ResponsesClient: LLMClient {
         ]
         if !instructions.isEmpty { body["instructions"] = .string(instructions) }
         if let promptCacheKey, !promptCacheKey.isEmpty { body["prompt_cache_key"] = .string(promptCacheKey) }
+        if let maxOutputTokens { body["max_output_tokens"] = .number(Double(maxOutputTokens)) }
         let functions = JSONValue.array(tools.map {
             .object(["type": .string("function"), "name": .string($0.name), "description": .string($0.description),
                      "parameters": $0.parameters, "strict": .bool(false)])

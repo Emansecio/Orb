@@ -518,7 +518,7 @@ struct ClaudeCodeTranscriptTests {
         #expect(texts == ["Vou ", "olhar.", "Pronto."])
         let started = events.compactMap { if case .toolStarted(let call) = $0 { call } else { nil } }
         #expect(started.map(\.kind) == [.shell] && started.first?.detail == "ls")
-        let finished = events.compactMap { if case .toolFinished(let id, let state, let output) = $0 { (id, state, output) } else { nil } }
+        let finished = events.compactMap { if case .toolFinished(let id, let state, let output, _) = $0 { (id, state, output) } else { nil } }
         #expect(finished.count == 1 && finished[0].0 == started[0].id && finished[0].1 == .done && finished[0].2 == "a.txt")
         guard case .message(let reply) = events.last else { Issue.record("no reply message"); return }
         // The reply plus a short note of what was done, so other models taking over know.
@@ -592,12 +592,12 @@ struct ClaudeCodeTranscriptTests {
         _ = denied.apply(.toolUse(id: "t1", name: "Write", input: .object([:])))
         denied.noteDenied("t1", mode: .ask)
         let row = denied.apply(.toolResult(id: "t1", output: "The user denied…", isError: true))
-        guard case .toolFinished(_, .failed, "Você negou esta ação.") = row.first else { Issue.record("expected denial row"); return }
+        guard case .toolFinished(_, .failed, "Você negou esta ação.", _) = row.first else { Issue.record("expected denial row"); return }
 
         var crashed = ClaudeCodeTranscript(isResuming: false)
         _ = crashed.apply(.toolUse(id: "t2", name: "Bash", input: .object([:])))
         let ended = crashed.endedEarly(details: "error: unknown option")
-        guard case .toolFinished(_, .failed, _) = ended.first, case .failed(let why) = ended.last else { Issue.record("expected close + failure"); return }
+        guard case .toolFinished(_, .failed, _, _) = ended.first, case .failed(let why) = ended.last else { Issue.record("expected close + failure"); return }
         #expect(why.contains("unknown option"))
     }
 

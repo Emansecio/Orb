@@ -23,6 +23,9 @@ struct ProviderModel: Codable, Hashable, Identifiable, Sendable {
     var supportsImages: Bool?
     /// What the provider's own list charges for it, when the list says (OpenRouter, models.dev for OpenCode).
     var price: ModelPrice?
+    /// What a million input tokens cost, from `price` (only used to avoid picking a dearer model for a background note,
+    /// see `ChunkSummarizer.model`).
+    var inputPrice: Double? { price?.input }
 }
 
 extension ProviderModel {

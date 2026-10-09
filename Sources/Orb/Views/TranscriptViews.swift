@@ -51,6 +51,17 @@ enum TranscriptSpeech {
         return "Você: \(text)\(attached)"
     }
 
+    /// "Anexo: relatório.pdf, PDF, 2,1 MB", or why there is nothing to open.
+    static func attachment(_ info: AttachmentInfo) -> String {
+        let detail: String
+        switch info.state {
+        case .ok: detail = [info.ext, AttachmentKind.size(info.size)].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
+        case .missing: detail = "arquivo ausente"
+        case .legacy: detail = "anexo antigo, sem local salvo"
+        }
+        return "Anexo: " + info.name + (detail.isEmpty ? "" : ", " + detail)
+    }
+
     static func reply(of name: String) -> String { "Resposta de \(name)" }
 
     static func notice(_ text: String) -> String { "Aviso: \(text)" }
@@ -68,28 +79,7 @@ private struct UserBubble: View {
         HStack {
             Spacer(minLength: 120)
             VStack(alignment: .trailing, spacing: 6) {
-                if !attachments.isEmpty {
-                    HStack(spacing: 6) {
-                        ForEach(attachments, id: \.self) { attachment in
-                            if attachment.hasPrefix("/"), ImageProcessing.isImageFile(URL(fileURLWithPath: attachment)) {
-                                // Conversations from before this stored only the file name, which shows as a chip below.
-                                Button { NSWorkspace.shared.open(URL(fileURLWithPath: attachment)) } label: {
-                                    ImageThumbnail(path: attachment, side: 96)
-                                }
-                                .buttonStyle(.plain)
-                                .help("Abrir " + URL(fileURLWithPath: attachment).lastPathComponent)
-                                .accessibilityLabel("Imagem anexada: " + URL(fileURLWithPath: attachment).lastPathComponent)
-                            } else {
-                                Label((attachment as NSString).lastPathComponent, systemImage: "doc")
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(Palette.secondary)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-                                    .card(radius: 10)
-                            }
-                        }
-                    }
-                }
+                if !attachments.isEmpty { AttachmentStack(paths: attachments) }
                 if !text.isEmpty {
                     Text(text)
                         .font(Palette.conversationFont)
@@ -502,6 +492,10 @@ struct ToolCallLine: View {
 
             if let problem = permissionProblem {
                 OpenPrivacySettingsButton(problem: problem).padding(.leading, 22)
+            }
+
+            if call.state == .done, let files = call.files, !files.isEmpty {
+                ProducedFilesView(files: files).padding(.leading, 22)
             }
 
             if isExpanded, let output = call.output {

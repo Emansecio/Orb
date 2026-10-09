@@ -70,6 +70,11 @@ struct ContextBudget: Sendable, Equatable {
     static let defaultStepsLowWater = 0.6
     /// Old stretches are condensed in a batch once that would save this share of the budget.
     static let condenseShare = 0.08
+    /// Providers keep the start of a request in cache for about this long (seconds) after the last call: past it the
+    /// next request pays for the whole history anyway.
+    static let cacheColdAfter: TimeInterval = 300
+    /// With a cold cache the history is folded to the low-water mark once it passes this share of the budget.
+    static let coldFoldShare = 0.6
 
     /// Tokens of history: the level at which a compaction starts.
     var tokens: Int

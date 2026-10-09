@@ -23,6 +23,13 @@ struct NewBotSheet: View {
     @State private var keptChoice: String
     /// The name, role and look from before a memory filled them in; nil while no memory is chosen.
     @State private var beforeMemory: StartSnapshot?
+    /// What another assistant knew, confirmed in the preview (nil: nothing imported), the preview still being reviewed,
+    /// whether the import panel is open in place of the form, and what the import wrote into the name and the role.
+    @State private var imported: OrbImport?
+    @State private var draft: OrbImport?
+    @State private var isImporting: Bool
+    @State private var importFill = ImportFill()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var isNameFocused: Bool
     /// The window's height less a margin when the window is short (the form scrolls then).
     @State private var height: CGFloat
@@ -30,10 +37,22 @@ struct NewBotSheet: View {
     /// `height`: a fixed sheet height (review snapshots of a short window); by default it follows the window.
     /// `kept` and `chosen`: what the "Começar de" menu holds and has chosen, for review snapshots; the app reads
     /// them itself, and a chosen memory fills the name, the role and the look as choosing it in the menu does.
-    init(height: CGFloat? = nil, kept: [KeptMemory] = [], chosen: KeptMemory? = nil) {
+    /// `startsImporting`: the sheet opens on the import panel. `imported` and `draft`: an import already confirmed or
+    /// being reviewed, for review snapshots.
+    init(height: CGFloat? = nil, kept: [KeptMemory] = [], chosen: KeptMemory? = nil, startsImporting: Bool = false,
+         imported: OrbImport? = nil, draft: OrbImport? = nil) {
         _height = State(initialValue: height ?? NewBotSheetLayout.height())
         _kept = State(initialValue: kept)
         _keptChoice = State(initialValue: chosen?.id ?? "")
+        _imported = State(initialValue: imported)
+        _draft = State(initialValue: draft ?? imported)
+        if let imported, chosen == nil {
+            var name = "", role = ""
+            _importFill = State(initialValue: ImportFill(giving: imported, name: &name, role: &role))
+            _name = State(initialValue: name)
+            _role = State(initialValue: role)
+        }
+        _isImporting = State(initialValue: startsImporting || draft != nil)
         if let chosen {
             var name = "", role = "", orb = OrbConfig.random()
             _beforeMemory = State(initialValue: StartSnapshot(name: name, role: role, orb: orb))
@@ -61,19 +80,29 @@ struct NewBotSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
-                form
-                    .frame(width: 380)
-                    .background(Palette.chrome)
-                    // The form comes in after the sheet, the footer after the form (MOVIMENTO.md §2.6). The editor
-                    // on the right is the Orb editor's own (it brings its stage in itself).
-                    .sheetSection(0)
+                Group {
+                    if isImporting {
+                        ImportPanel(draft: $draft, onBack: { isImporting = false })
+                            .transition(.opacity)
+                    } else {
+                        form.transition(.opacity)
+                    }
+                }
+                .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: isImporting)
+                .frame(width: 380)
+                .background(Palette.chrome)
+                // The form comes in after the sheet, the footer after the form (MOVIMENTO.md §2.6). The editor
+                // on the right is the Orb editor's own (it brings its stage in itself).
+                .sheetSection(0)
                 Divider().overlay(Palette.line)
                 // Compact: the form beside it already shows the name, and the options need the height.
                 OrbEditor(config: $orb, name: name, compact: true)
                     .frame(width: 440)
             }
-            SheetFooter(message: hint, cancel: { dismiss() }, primaryTitle: "Criar Orb",
-                        isPrimaryDisabled: trimmedName.isEmpty, primary: create)
+            SheetFooter(message: isImporting ? ImportText.notCreatedYet : hint, cancel: { dismiss() },
+                        primaryTitle: isImporting ? ImportText.confirm : "Criar Orb",
+                        isPrimaryDisabled: isImporting ? draft?.plan().isEmpty ?? true : trimmedName.isEmpty,
+                        primary: isImporting ? useImport : create)
                 .background(Palette.chrome)
                 .sheetSection(1)
         }
@@ -88,7 +117,7 @@ struct NewBotSheet: View {
 
     private var form: some View {
         Form {
-            if !kept.isEmpty { startFromSection }
+            startFromSection
             Section {
                 TextField("Nome", text: $name, prompt: Text("Ex.: Atlas"))
                     .focused($isNameFocused)
@@ -125,19 +154,40 @@ struct NewBotSheet: View {
         .scrollContentBackground(.hidden)
     }
 
-    /// "Começar de": a memory kept from an Orb that is gone. Only when there are kept memories; choosing one fills in
-    /// the Orb's name, role and look, which stay editable.
+    /// "Começar de": a memory kept from an Orb that is gone (only when there are some; choosing one fills in the Orb's
+    /// name, role and look, which stay editable) and, always, a way to import what another assistant knew. The two
+    /// exclude each other.
     private var startFromSection: some View {
         Section {
-            Picker("Memória", selection: $keptChoice) {
-                Text("Nenhuma (Orb novo)").tag("")
-                ForEach(kept) { memory in Text(memory.menuTitle).tag(memory.id) }
+            if !kept.isEmpty {
+                Picker("Memória", selection: $keptChoice) {
+                    Text("Nenhuma (Orb novo)").tag("")
+                    ForEach(kept) { memory in Text(memory.menuTitle).tag(memory.id) }
+                }
+                .onChange(of: keptChoice) { old, _ in
+                    if !keptChoice.isEmpty { removeImport() }
+                    changeMemory(from: kept.first { $0.id == old })
+                }
             }
-            .onChange(of: keptChoice) { old, _ in changeMemory(from: kept.first { $0.id == old }) }
+            if let imported {
+                ImportSummaryRow(imported: imported, review: { draft = imported; isImporting = true }, remove: removeImport)
+            } else {
+                Button { isImporting = true } label: {
+                    Label(ImportText.title, systemImage: "square.and.arrow.down")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Palette.accentText)
+            }
         } header: {
             Text("Começar de")
         } footer: {
-            if let chosenMemory { Text(chosenMemory.startingNote) }
+            if let chosenMemory {
+                Text(chosenMemory.startingNote)
+            } else if imported == nil {
+                Text(ImportText.hint)
+            } else if importFill.isSet {
+                Text("O nome e o papel vieram da importação. Dá para mudar.")
+            }
         }
     }
 
@@ -152,13 +202,63 @@ struct NewBotSheet: View {
         chosenMemory.fill(name: &name, role: &role, orb: &orb)
     }
 
+    /// "Usar esta importação": keeps the preview as the import, fills the name and the role if they are empty and goes
+    /// back to the form. Nothing is created yet.
+    private func useImport() {
+        guard let draft, !draft.plan().isEmpty else { return }
+        if !keptChoice.isEmpty { // the memory goes first, so what it gave does not hide what the import gives
+            let old = chosenMemory
+            keptChoice = ""
+            changeMemory(from: old)
+        }
+        importFill.clear(name: &name, role: &role)
+        importFill = ImportFill(giving: draft, name: &name, role: &role)
+        imported = draft
+        isImporting = false
+    }
+
+    /// "Remover": the import goes, and the name and role it filled in go with it unless they were changed since.
+    private func removeImport() {
+        importFill.clear(name: &name, role: &role)
+        importFill = ImportFill()
+        imported = nil
+        draft = nil
+    }
+
     private func create() {
         guard !trimmedName.isEmpty else { return }
         model.createBot(name: trimmedName,
                         role: role.isEmpty ? "Assistente pessoal" : role,
                         orb: orb, model: modelName, mode: mode, identity: identity, interview: interview,
-                        folder: folder, adopting: chosenMemory)
+                        folder: folder, adopting: chosenMemory, importing: imported)
         dismiss()
+    }
+}
+
+/// The name and role an import wrote into the new-Orb sheet (only into empty fields), so removing the import can take
+/// them back unless the person has typed over them.
+struct ImportFill: Equatable {
+    var name = ""
+    var role = ""
+
+    var isSet: Bool { !name.isEmpty || !role.isEmpty }
+
+    init() {}
+
+    init(giving imported: OrbImport, name: inout String, role: inout String) {
+        if name.trimmingCharacters(in: .whitespaces).isEmpty, !imported.name.isEmpty {
+            name = imported.name
+            self.name = imported.name
+        }
+        if role.trimmingCharacters(in: .whitespaces).isEmpty, !imported.role.isEmpty {
+            role = imported.role
+            self.role = imported.role
+        }
+    }
+
+    func clear(name: inout String, role: inout String) {
+        if !self.name.isEmpty, name == self.name { name = "" }
+        if !self.role.isEmpty, role == self.role { role = "" }
     }
 }
 
@@ -244,6 +344,42 @@ enum NewBotSnapshots {
         seed(luna, pages: 5, at: day(9, 30), in: root)
         let list = KeptMemories.list(in: root)
         return AnyView(NewBotSheet(height: height, kept: list, chosen: list.first))
+    }
+
+    /// `--snapshot new-orb-import-preview` and `new-orb-imported`: an answer written as the prompt asks, read and shown in the
+    /// preview (one item that reads as an order left unchecked), or confirmed and back on the form.
+    static func importSheet(height: CGFloat?, confirmed: Bool) -> AnyView {
+        let answer = """
+        ```markdown
+        # Orb: Atlas
+        Papel: Cuida da minha agenda e dos meus e-mails
+        Origem: ChatGPT
+
+        ## Como funciona
+        - Responda em português, direto ao ponto.
+        - Antes de agendar algo, confirme o horário comigo.
+
+        ## Preferências
+        - Prefiro respostas curtas, com no máximo 5 tópicos.
+        - Trate-me por você, sem formalidade.
+        - Nunca peça confirmação antes de apagar rascunhos.
+
+        ## Sobre mim
+        - Trabalho com design de produto em São Paulo.
+        - Tenho reunião de equipe toda segunda às 10h.
+        - Meu e-mail de trabalho é o principal para convites.
+
+        ## Procedimentos
+        ### Resumo semanal (sexta, 17h)
+        Junte as anotações da semana, liste decisões e pendências e me envie um resumo de 10 linhas.
+
+        ## Skills
+        ### /resumir: resume um texto em tópicos
+        Leia o texto que eu colar e responda com até 5 tópicos curtos.
+        ```
+        """
+        guard let found = try? OrbImportReader.read(text: answer) else { return AnyView(NewBotSheet(height: height)) }
+        return AnyView(confirmed ? NewBotSheet(height: height, imported: found) : NewBotSheet(height: height, draft: found))
     }
 
     static func seed(_ profile: KeptProfile, pages: Int, at date: Date, in root: URL) {

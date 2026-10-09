@@ -380,10 +380,14 @@ protocol LLMClient: Sendable {
     /// itself), so a miss is the app's concern. A client that sends nothing for it (chat completions to a gateway
     /// that wants explicit markers) must not be blamed by `CacheHealth`.
     var arrangesPromptCache: Bool { get }
+    /// This client for a short side request (the note on a stretch of the conversation, see `ChunkSummary`): the reply
+    /// capped where the provider's API allows it, and no cache written for a tail that will never be read again.
+    var forShortReply: any LLMClient { get }
 }
 
 extension LLMClient {
     var arrangesPromptCache: Bool { false }
+    var forShortReply: any LLMClient { self }
 
     func stream(model: String, messages: [ChatMessage], tools: [ToolSpec]) -> AsyncThrowingStream<LLMEvent, Error> {
         stream(model: model, messages: messages, tools: tools, toolChoice: .auto)

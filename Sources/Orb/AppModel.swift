@@ -48,6 +48,8 @@ final class AppModel {
     var showNewBot = false
     /// The kept memory the new-Orb sheet starts from when it opens from the welcome screen (nil: no memory chosen).
     var newBotStart: KeptMemory?
+    /// The new-Orb sheet opens on "Importar de outro assistente" (from the welcome screen or the command palette).
+    var newBotImporting = false
     /// Where the welcome screen remembers that an Orb was made once (so an empty list reads "Hora de um Orb novo").
     /// The app's own preferences only in the running app; a developer run or a test keeps it in memory.
     @ObservationIgnored var welcomePreferences: any PreferenceStore = InMemoryPreferences()
@@ -176,7 +178,15 @@ final class AppModel {
     @ObservationIgnored private(set) var scheduler: Task<Void, Never>?
     /// Whether this is a developer mode (`--snapshot`, `--render-*`): it draws and exits, so nothing with an effect
     /// outside the process runs in it, not even over a data folder with routines or connectors (see `DevRun`).
-    @ObservationIgnored private let isDevRun: Bool
+    @ObservationIgnored let isDevRun: Bool
+    /// Whether this run may look at the real Mac (the folders of other assistants): not a developer run.
+    var readsRealMac: Bool { !isDevRun }
+    /// Whether a turn's end may start a note on the stretch the next fold will take (see `ChunkSummary`): only in the
+    /// running app. Tests that do not look at it do not want their fake model asked for more.
+    @ObservationIgnored var writesStretchNotes: Bool
+    /// How long a local server (one slot, one conversation in its cache) must have been left alone before a note is asked of
+    /// it: the time its cache takes to go cold anyway (`ContextBudget.cacheColdAfter`). A message sent before cancels it.
+    @ObservationIgnored var localNoteDelay: TimeInterval = ContextBudget.cacheColdAfter
 
     /// `runsBackgroundWork: false` skips the scheduler, Keychain checks and app-wide observers (tests).
     /// `devRun` (the process's own mode unless given) also skips the scheduler, the connectors' servers and the
@@ -191,6 +201,7 @@ final class AppModel {
         self.store = store
         isDevRun = devRun
         renewsCatalogs = runsBackgroundWork && !devRun
+        writesStretchNotes = runsBackgroundWork && !devRun
         let vault = secretVault ?? (runsBackgroundWork && !devRun ? KeychainVault() : MemoryVault())
         self.secretVault = vault
         let secrets = ConnectorSecrets(vault: vault)
@@ -672,7 +683,7 @@ final class AppModel {
     }
 
     /// Looked up again before every model request, so an expired sign-in is refreshed and a changed key is picked up.
-    private static func credentials(for kind: ProviderKind) -> CredentialsProvider {
+    static func credentials(for kind: ProviderKind) -> CredentialsProvider {
         { forceRefresh in
             kind == .chatgpt ? try await ChatGPTAuth.shared.accessToken(forceRefresh: forceRefresh) : Keychain.get(kind.rawValue)
         }
@@ -683,13 +694,16 @@ final class AppModel {
     /// A new Orb comes with its own memory, and says hello in its conversation (`OrbGreeting`). `identity` (how it should
     /// work, written by you) starts it; with `interview` it also asks about you in its first conversation and keeps the
     /// answers. Unless `folder` says otherwise it gets a folder of its own in `base` (`~/Orbs`); if that cannot be made it
-    /// works in the home folder and says so in its conversation.
+    /// works in the home folder and says so in its conversation. `importing` (what another assistant knew, as the person
+    /// confirmed it in the preview) is written into the new memory, and its skills are made for this Orb alone; it is
+    /// ignored when the Orb starts from a kept memory. Nothing in it reaches the Orb's mode, capabilities or folder.
     @discardableResult
     func createBot(name: String, role: String, orb: OrbConfig, model: String, mode: PermissionMode,
                    identity: String = "", interview: Bool = true, folder: OrbFolderChoice = .own,
-                   base: URL = OrbFolder.defaultBase, adopting kept: KeptMemory? = nil) -> Bot {
+                   base: URL = OrbFolder.defaultBase, adopting kept: KeptMemory? = nil, importing imported: OrbImport? = nil) -> Bot {
         let name = Self.clippedName(name)
         let kept = isResetting ? nil : kept // a kept memory is not moved while the reset walks through the folder
+        let plan = kept == nil ? imported?.plan() : nil
         var bot = Bot(name: name, role: role, orb: orb, model: model, permissionMode: mode)
         var folderProblem: String?
         switch folder {
@@ -715,14 +729,25 @@ final class AppModel {
         // When it cannot be moved the Orb starts with a memory of its own and says so.
         let adopted = kept.map { memory.adopt($0, as: bot.id) } ?? false
         if kept != nil, !adopted { append(.notice("Não foi possível usar a memória guardada. \(bot.name) começou com uma memória nova."), to: bot.id) }
+        if let plan, !plan.isEmpty, let imported {
+            for draft in plan.skills {
+                addSkill(slug: draft.slug, name: draft.name, summary: draft.summary, instructions: draft.instructions,
+                         source: Skill.importedSource, orbIDs: [bot.id])
+            }
+            append(.notice("Importei de \(imported.source): \(plan.sentence). Veja na aba Memória."), to: bot.id)
+        }
         // The Orb's first words, last so its quick replies are what the chat ends with (see `GreetingReplies`).
         append(.greeting(OrbGreeting.text(name: bot.name, temperament: orb.temperament, returning: adopted)), to: bot.id)
         let bank = memory.bank(for: bot.id)
+        // Imported instructions or preferences are what an interview would have asked for.
+        let notes = [identity.trimmingCharacters(in: .whitespacesAndNewlines), plan?.identity ?? ""].filter { !$0.isEmpty }.joined(separator: "\n\n")
+        let answered = !(plan?.identity.isEmpty ?? true) || plan?.pages.contains { $0.kind == .preferencia } == true
         Task {
             if adopted {
                 await bank.startFromKept(notes: identity, interview: interview)
             } else {
-                await bank.ensureIdentity(notes: identity, interview: interview)
+                await bank.ensureIdentity(notes: notes, interview: interview && !answered)
+                if let plan { await bank.importPages(plan.pages) }
             }
             await refreshMemory(bot.id)
         }
@@ -785,6 +810,7 @@ final class AppModel {
         session.memoryRequest = nil
         session.lastCompaction = nil
         session.compactedInTurn = false
+        session.foldedNotes = []
         // First, so that stopping a running routine does not start the next one waiting for this Orb.
         let ownRoutines = routines.filter { $0.botID == botID }.map(\.id)
         queuedRoutines.removeAll { ownRoutines.contains($0) }
@@ -858,6 +884,7 @@ final class AppModel {
             session.memoryRequest = nil
             session.saveTask?.cancel()
             session.saveTask = nil
+            session.cancelChunkNote()
             stop(session.id)
         }
         for bot in bots { await gate.cancelApprovals(for: bot.id) }
@@ -1219,9 +1246,11 @@ final class AppModel {
         let paused = session.conversation?.isTaskPaused ?? false
         // The message and what goes before it (workspace snapshot, memory notes) take room too.
         let reserve = prompt.count + Self.prefaceAllowance
-        let prepared = session.changeConversation { $0.prepareHistory(budget: budget, reserving: reserve) }
+        yieldStretchNote(to: botID, provider: ref.provider)
+        let prepared = session.changeConversation { $0.prepareHistory(budget: budget, reserving: reserve, now: .now) }
         let history = prepared.history
         let ledger = session.conversation?.currentLedger
+        let chunks = session.conversation?.chunks(inHistory: history) ?? []
         if let report = prepared.compaction { session.announce(report, memoryUpTo: itemsBeforeMessage) }
         let bank = memory.bank(for: botID)
         let context = ToolContext(workingDirectory: bot.workingURL, memory: bank, botID: botID, jobs: jobs,
@@ -1271,7 +1300,7 @@ final class AppModel {
             let request = TurnRequest(bot: bot, model: ref.model, system: system, history: history,
                                       prompt: TurnPreface.prepend(built.preface, to: prompt),
                                       client: client, tools: tools, context: context, budget: budget, ledger: ledger,
-                                      maxSteps: maxSteps,
+                                      chunks: chunks, maxSteps: maxSteps,
                                       turnGrants: turnGrants, permissions: permissionSource(for: bot),
                                       images: pictures, supportsImages: sees,
                                       onImagesRejected: { [weak self] in Task { @MainActor in self?.visionRejected.insert(ref.text) } },
@@ -1709,14 +1738,26 @@ final class AppModel {
     @discardableResult
     func install(_ document: SkillDocument, from entry: CatalogSkill) -> Skill? {
         if let existing = installedSkill(entry.id) { return existing }
-        let base = Skill.slugify(entry.skillId)
-        var slug = base, suffix = 2
-        while skills.contains(where: { $0.slug == slug }) {
-            slug = "\(base)-\(suffix)"
+        return addSkill(slug: Skill.slugify(entry.skillId), name: document.name, summary: document.description,
+                        instructions: document.instructions, source: entry.id, folderURL: document.folderURL)
+    }
+
+    /// `slug` with a numeric suffix when another skill already has it.
+    func uniqueSlug(_ slug: String) -> String {
+        var unique = slug, suffix = 2
+        while skills.contains(where: { $0.slug == unique }) {
+            unique = "\(slug)-\(suffix)"
             suffix += 1
         }
-        let skill = Skill(slug: slug, name: document.name, summary: document.description,
-                          instructions: document.instructions, source: entry.id, folderURL: document.folderURL)
+        return unique
+    }
+
+    /// Adds a skill under a free slug; `orbIDs` limits it to those Orbs (nil: every Orb).
+    @discardableResult
+    func addSkill(slug: String, name: String, summary: String, instructions: String, source: String? = nil,
+                  folderURL: URL? = nil, orbIDs: Set<UUID>? = nil) -> Skill {
+        let skill = Skill(slug: uniqueSlug(slug), name: name, summary: summary, instructions: instructions,
+                          source: source, folderURL: folderURL, orbIDs: orbIDs)
         skills.append(skill)
         return skill
     }

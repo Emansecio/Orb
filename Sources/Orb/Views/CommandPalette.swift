@@ -8,7 +8,7 @@ struct PaletteEntry: Identifiable, Equatable {
         case bot(UUID)
         case page(SidebarItem)
         case reopen(conversation: UUID, bot: UUID)
-        case newBot, newConversation, focusComposer, showConversations, openFolder, toggleInspector, shortcuts
+        case newBot, importOrb, newConversation, focusComposer, showConversations, openFolder, toggleInspector, shortcuts
     }
 
     /// The order of the groups when nothing was typed.
@@ -106,6 +106,8 @@ enum PaletteBuilder {
         }
         list.append(PaletteEntry(id: "new-bot", title: CommandName.newBot, subtitle: nil, symbol: "plus", section: .actions,
                                  shortcut: ShortcutCatalog.keys(for: .newBot), action: .newBot, keywords: "criar adicionar"))
+        list.append(PaletteEntry(id: "import-orb", title: CommandName.importOrb, subtitle: "Trazer o que outro assistente sabe", symbol: "square.and.arrow.down",
+                                 section: .actions, shortcut: nil, action: .importOrb, keywords: "chatgpt gemini hermes openclaw memória migrar"))
         list.append(PaletteEntry(id: "shortcuts", title: CommandName.shortcuts, subtitle: nil, symbol: "keyboard", section: .actions,
                                  shortcut: nil, action: .shortcuts, keywords: "ajuda teclas"))
         list.append(PaletteEntry(id: "page-routines", title: CommandName.routines, subtitle: "Tarefas que rodam sozinhas", symbol: "clock.arrow.circlepath",
@@ -278,6 +280,7 @@ struct CommandPalette: View {
             model.selection = .bot(bot)
             Task { await model.reopenConversation(conversation, of: bot) }
         case .newBot: model.showNewBot = true
+        case .importOrb: model.startNewOrbImporting()
         case .newConversation: if let id = model.commandBotID { model.selection = .bot(id); model.newConversation(id) }
         case .focusComposer: model.focusComposer()
         case .showConversations: model.showConversations()

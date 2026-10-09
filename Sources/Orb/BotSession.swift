@@ -126,6 +126,8 @@ final class BotSession {
     @ObservationIgnored var pendingMarks: DeliveryMarks?
     /// The running turn folded older turns into the summary: the conversation is saved to memory when it ends.
     @ObservationIgnored var compactedInTurn = false
+    /// The model's notes that folds made during this turn carried into the summary (they go to the memory at its end).
+    @ObservationIgnored var foldedNotes: [String] = []
     /// The running turn is one where you asked the Orb to remember something, and where its transcript starts.
     @ObservationIgnored var memoryRequest: (intent: MemoryIntent, from: Int)?
     /// Saves a conversation stretch to memory once the user has been away for `SessionSummary.idleGap`.
@@ -134,6 +136,10 @@ final class BotSession {
     @ObservationIgnored var measuredOverhead: Int?
     /// The model ("provider/model") the running turn uses, for the usage it records.
     @ObservationIgnored var turnModel: String?
+    /// The note on a stretch of the conversation being written in the background (see `ChunkSummary`), and how many
+    /// times each stretch (by the index of its first message) was asked for.
+    @ObservationIgnored var chunkTask: Task<Void, Never>?
+    @ObservationIgnored var chunkAttempts: [Int: Int] = [:]
 
     // MARK: Composer
 
