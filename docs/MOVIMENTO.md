@@ -1,6 +1,6 @@
 # Movimento da interface — especificação
 
-Para implementar nas views. **Estado:** o vocabulário (os tokens de `Motion` e as transições `rise`/`unfold`) está em
+Para implementar nas views. **Estado (§2.13: páginas, painéis, folhas e estados também seguem estes tokens):** o vocabulário (os tokens de `Motion` e as transições `rise`/`unfold`) está em
 [`Motion.swift`](../Sources/Orb/Motion.swift) e já é usado pela barra lateral, pelas mensagens e ferramentas, pelos
 cartões de aprovação, pelo chat vazio, pela linha de trabalho e pelo compositor (§2.5); cada seção diz o que ainda
 falta nela. Os ganchos de estado do Orb (§3) seguem o padrão atual de `speaking`, que
@@ -38,6 +38,10 @@ O `enum Motion` (em `Motion.swift`; `animateChanges` fica em `Theme.swift`):
 | `Motion.emphasis` | `.spring(response: 0.45, dampingFraction: 0.72)` | o que precisa de você (aprovação) |
 | `Motion.exit` | `.easeOut(duration: 0.16)` | algo que some |
 | `Motion.stagger` | 0,035 s por item, no máximo 6 itens (0,21 s) | listas curtas que entram juntas |
+| `Motion.crossFade` | `.easeInOut(duration: 0.18)` | uma página, Orb, aba ou categoria trocada por outra (§2.13) |
+| `Motion.fade` | `.easeOut(duration: 0.15)` | o que toma o lugar de todo movimento com Reduzir movimento |
+| `Motion.panel(reduceMotion:)` | `Motion.content`; nada com Reduzir movimento | a coluna do painel do Orb abrindo e fechando; uma seta que gira |
+| `Motion.spinnerDelay` | 150 ms | um spinner só aparece depois disso (`DelayedSpinner`) |
 
 Transições prontas (todas com versão Reduzir movimento = `.opacity`):
 
@@ -59,6 +63,14 @@ extension AnyTransition {
     static var unfold: AnyTransition {
         .asymmetric(insertion: .opacity.combined(with: .offset(y: -4)), removal: .opacity)
     }
+    /// Só opacidade, com a própria animação (`Motion.fade`, 0,15 s): para onde o contêiner não deve animar a altura
+    /// (janela da barra de menus, popover, linhas de `Form`). O contêiner toma a altura nova de uma vez.
+    static var quiet: AnyTransition { .opacity.animation(Motion.fade) }
+    /// A marca de estado do app inteiro (✓, aviso, o que vem depois de um spinner): cresce de 0,6 e aparece.
+    static var mark: AnyTransition { .scale(scale: 0.6).combined(with: .opacity) }
+    /// `transition`, ou `.quiet` com Reduzir movimento (uma linha que chega num `animateChanges`, que é instantâneo,
+    /// ainda faz fade de 0,15 s em vez de aparecer seca).
+    static func adapted(_ transition: AnyTransition, reduceMotion: Bool) -> AnyTransition
 }
 ```
 
@@ -157,10 +169,15 @@ extension AnyTransition {
 
 - A apresentação da folha é do sistema: não mexer.
 - **Conteúdo:** na primeira aparição, as seções sobem 6 pt e aparecem em `Motion.stagger` (no máximo 6), começando
-  0,08 s depois da folha. No editor do Orb, o palco entra primeiro e o Orb dá um pulinho de "oi" (`poke`).
-- **Trocar de aba no editor** (Cor → Olhos…): a grade troca com `.opacity` em 0,15 s; o indicador da aba desliza
-  (`matchedGeometryEffect`) com `Motion.content`.
-- **Reduzir movimento:** tudo aparece junto, sem deslocamento.
+  0,08 s depois da folha. No editor do Orb, o palco entra primeiro (`.sheetSection(0)`) e, ao pousar, o Orb dá um
+  pulinho de "oi" (`poke`, nada com Reduzir movimento); a barra de categorias e as opções vêm em `.sheetSection(1)` e o
+  rodapé em `.sheetSection(2)` (o "Pronto" da Personalizar e o "Criar Orb" do Novo Orb). No Novo Orb o formulário entra com o palco.
+- **Formulário e importar** (Novo Orb) trocam num `ZStack`, não num `Group` (que entregaria os modificadores a cada
+  filho: os dois painéis lado a lado e a cascata repetida).
+- **Trocar de categoria no editor** (Cor → Olhos…): as grades se cruzam em `Motion.crossFade` (0,18 s, num `ZStack` com
+  `.id(category)`); o destaque da categoria desliza (`matchedGeometryEffect`, `Motion.selection`) nas duas barras, e o
+  rótulo da barra compacta cresce na mesma curva.
+- **Reduzir movimento:** tudo aparece junto em fade de 0,15 s, sem poke; o destaque pula de lugar.
 
 ### 2.7 Hover
 
@@ -190,6 +207,10 @@ extension AnyTransition {
 
 - O conteúdo do chat troca com `.opacity` em 0,18 s (sem deslizar: navegação lateral não tem direção espacial
   clara aqui). O compositor não pisca (fica fora da troca).
+- **Troca de página** (Orb, Rotinas, Conectores, Skills, boas-vindas): o mesmo fade cruzado, num `ZStack` com
+  `.id(DetailPage)` e `.motion(Motion.crossFade, value: page)` (`RootView.swift`). A chave `DetailPage` não leva o id do
+  Orb: de um Orb para outro a página é a mesma e só a transcrição faz o fade. A saída das boas-vindas continua mais curta
+  (`Motion.exit`). O `.inspector` mora no `DetailView`, só na página do Orb, e fecha junto com ela.
 
 ### 2.10 Linha de trabalho (o que o Orb está fazendo)
 
@@ -287,6 +308,65 @@ Implementado em `BotInspector.swift` (`RoutineRow`) e `AppModel+Schedule.swift`.
 - **Reduzir movimento.** Nada desliza nem sobe: a linha aparece e some por opacidade (`AnyTransition.adapted`) e o destaque, o
   interruptor e a confirmação trocam na hora (`animateChanges` já é instantâneo).
 
+### 2.13 Páginas, painéis, folhas e estados
+
+Cada tipo de mudança tem um só jeito de se mover. A resposta começa no quadro do clique; nada espera, a não ser a
+cascata das folhas (0,08 s). Só opacidade e transformações; nada anima por token, por tecla digitada nem a altura de
+listas longas.
+
+| Padrão | Quando | Como | Reduzir movimento |
+|---|---|---|---|
+| **A. Troca de conteúdo** | página, Orb, aba, categoria, vazio e cheio | fade cruzado sem direção, num `ZStack { conteúdo.id(chave).transition(.opacity) }` (nunca num stack ou `Group`) com `.motion(Motion.crossFade, value: chave)` | fade de 0,15 s |
+| **B. Algo novo num fluxo** | linha, cartão, aviso, campo | `.arrive`/`.rise`, saída só por opacidade em `Motion.exit`, vizinhas deslizam em `Motion.content`; preso a ids ou a um booleano, nunca à contagem | só opacidade, vizinhas trocam na hora (`.adapted` devolve `.quiet`) |
+| **C. Troca no lugar** | texto, selo, rótulo | `.transition(.opacity)`/`.contentTransition(.opacity)` e `animateChanges`/`textSwap` | na hora (ou fade) |
+| **D. Carregando, depois pronto** | spinner que vira conteúdo | `DelayedSpinner` (150 ms) e o conteúdo por `.opacity` em `ZStack`, `.motion(Motion.content, value: fase)` | fade de 0,15 s |
+| **E. Hover** | fundo ao passar o mouse | `hoverFill`/`hoverCard` (0,10 s dentro, 0,22 s fora) | igual (é cor) |
+| **F. Seleção que desliza** | abas, pílulas, categorias | um fundo só, `matchedGeometryEffect`, `Motion.selection(reduceMotion:)` | pula de lugar |
+| **G. Aviso flutuante** | toast | `.arrive` (sobe 6 pt em `Motion.enter`, sai em `Motion.exit`) | fade de 0,15 s |
+| **H. Onde o contêiner não deve animar a altura** | janela da barra de menus, popover, linhas de `Form` | `.transition(.quiet)`: a altura muda de uma vez e o conteúdo aparece em 0,15 s | igual |
+
+O que usa cada padrão:
+
+- **Painel do Orb.** Abre e fecha por `AppModel.setInspector(_:)`/`toggleInspector()` em `Motion.panel` (a coluna desliza em 0,25 s, sem animação
+  com Reduzir movimento) a partir de todos os caminhos: botão da barra, ⌥⌘I, paleta, "Ver na memória", "Gerenciar", "Personalizar" e o
+  fechamento automático por largura. Ao trocar de Orb o painel faz o mesmo fade cruzado de 0,18 s do chat. As abas (Geral, Memória, Pasta e
+  acessos, Rotinas) são um `Form` cada, trocado em fade cruzado (a rolagem volta ao topo), e o destaque desliza (F).
+- **Conectores e Skills.** Galeria, Instalados e Explorar em fade cruzado (A), pílula que desliza (F). Explorar tem uma fase só
+  (`ExplorePhase`: dica, carregando, erro, nenhum resultado, resultados), e o texto digitado nunca é uma fase. Selo de status e "Copiar /slug" trocam no lugar (C).
+- **Rotinas.** Vazio e grade em fade cruzado; um cartão que nasce ou some usa `.arrive` preso aos ids; "Rodar agora", "Rodando…" e "Na fila"
+  trocam no lugar; o cartão pausado esmaece (`animateChanges(of: isEnabled)`).
+- **Barra lateral.** Um Orb novo sobe 6 pt e um apagado some em fade, com os vizinhos deslizando, preso à lista de ids. O destaque não desliza
+  nessa hora (`sidebarListChanged`). O convite some em fade.
+- **Banner "Conecte um modelo".** Sobe e some com o compositor acompanhando, preso a `shows`; as frases e os botões trocam no lugar (C). Na troca de Orb ele
+  é uma vista nova e aparece na hora. Se travar com uma conversa muito longa, ficar só com o fade (`.quiet`).
+- **Cartão de aprovação.** O campo de "Dizer o que fazer em vez disso" desce 4 pt (`unfold`) e o link some em fade; o cartão cresce em `Motion.content`.
+- **Barra de menus (QuickAsk) e popover "Conversas anteriores".** Nota, "Conecte um modelo", resposta, aprovações e linhas de "outros trabalhando" em `.quiet` (H);
+  o anel do Orb escolhido usa `Motion.press`. Nas conversas: carregando vira lista em `.quiet`, a lixeira vira "Apagar de vez?" por opacidade (a linha toma
+  a altura de uma vez), uma conversa apagada some em `Motion.exit` e as outras fecham o vão.
+- **Carregando, depois pronto nas folhas.** Ferramentas do conector, prévia de skill ("Instalar skill" vira "Instalada"), conversa e relatório da rotina,
+  importar e a contagem do "Some:" do Apagar Orb (D). A folha de Rotina que fecha e reabre ao virar conversa (ids diferentes) segue do sistema.
+- **Seções dentro de `Form`.** Dia, passos e relógio da folha de Rotina, "Gerenciar conectores" e "Permissões do macOS" do painel, "Usar com", o rodapé
+  de "Começar de" e o resumo da importação entram em `.quiet` (H, por ser tabela); rodapés e mensagens trocam de texto por `textSwap` (C), inclusive o
+  `SheetFooter`. Escolher uma memória no Novo Orb troca o Orb do palco com `.snappy`, como uma edição.
+- **Pasta e acessos e Memória.** As leituras do disco (instruções, arquivos, "Pasta não encontrada") entram em `.quiet` sem animar a altura da lista;
+  remover uma liberação, "Esquecer" e apagar uma conversa saem em `Motion.exit`. **A busca filtra na hora** (a saída por fade só vale sem busca) e expandir a
+  linha usa `Motion.content` no `lineLimit`. Na folha Memória, "Mostrar" troca o filtro em `Motion.crossFade`.
+- **Avisos flutuantes** ("Atlas esqueceu isso", "Memória de … guardada") em `.arrive`, no lugar do `.move(edge:)` e da curva literal; com Reduzir movimento fazem fade.
+- **Editor de conector.** As fases são uma só vista de resultado (o spinner vira a marca ✓ ou o aviso, com `.mark` em `Motion.enter`) e o conteúdo muda em `Motion.content`.
+- **Hover.** `OptionCell`, `TemperamentRow`, cartões do catálogo, do registro e dos modelos de rotina (`hoverCard`), linhas do popover de modelos e da paleta
+  (só no mouse; as setas movem a seleção na hora). Nos cartões e nas células a seleção troca em `Motion.press`.
+- **Ajustes.** Avisos de Geral e do cartão ↔ modelo padrão em `.quiet`; linhas de provedor em `Motion.exit`; expandir um provedor ou "Apps que o Orb controla" em
+  `Motion.content` (fade com Reduzir movimento); selos das Permissões com `.mark` (spinner para ✓ ou aviso); véu do Redefinir em fade.
+- **Paleta ⌘K e popover de modelos.** "Nada encontrado" e a lista em `.quiet`; recolher um provedor gira a seta em `Motion.content` (sem giro com Reduzir
+  movimento) e as linhas saem em `.quiet`. A digitação e as setas seguem instantâneas.
+- **Botões do aviso do chat** (`NoticeLine`): a transição já existia, agora há o gatilho (`offersActions && !actions.isEmpty`).
+- **Curvas literais.** Saíram todas as de página; ficam só o pulso do banner e do cartão de conectar (`easeOut(0.25)`, raro), o holofote do Orb no editor
+  (0,45 s) e o `.snappy` do próprio Orb, que são da zona do Orb.
+
+**Do sistema, sem mexer:** apresentação de toda `.sheet`; `NSAlert`, alertas e `confirmationDialog`; paleta ⌘K abrindo e fechando; a janela e as abas de
+Ajustes (incluindo o redimensionamento); popovers; `Menu` e `contextMenu`; `fileImporter`, `NSOpenPanel`, Quick Look e notificações; o `MenuBarExtra`; tooltips;
+o disclosure "Opções avançadas".
+
 ## 3. O Orb reagindo à interface (sistema do Orb)
 
 > **Implementado** em design-orbs: `OrbActivity.attentive`, `BotLive.noteComposing` (com `ComposingDeadline`;
@@ -325,4 +405,10 @@ Orb está trabalhando, continua trabalhando).
 | Rotinas no painel | linha sobe 6 pt, destaque de 2,5 s, vizinhas deslizam | linha só aparece e some por opacidade |
 | Boas-vindas | três Orbs caem em sequência, pontos em cascata, cartão sobe | tudo junto em 0,15 s, Orbs parados, halo fixo |
 | Linha de trabalho | frase sobe 4 pt, medidor desliza, contador rola | frase troca por opacidade (0,15 s), sem deslizar nem rolar |
+| Troca de página, aba, categoria | fade cruzado de 0,18 s, destaque que desliza | fade de 0,15 s, destaque que pula |
+| Painel do Orb abrindo e fechando | a coluna desliza em 0,25 s | sem animação |
+| Estados no lugar (texto, selo, interruptor) | fade em 0,25 s | na hora (ou fade de 0,15 s) |
+| Linha que nasce ou some (Rotinas, barra lateral, memória) | sobe 6 pt e aparece; sai por fade; vizinhas deslizam | fade de 0,15 s, vizinhas trocam na hora |
+| Janela da barra de menus, popovers, linhas de `Form` | fade de 0,15 s, altura de uma vez | igual |
+| Avisos flutuantes | sobem 6 pt | fade de 0,15 s |
 | Orb | vivo | estático (já é assim) |
