@@ -36,6 +36,12 @@ def chunk(delta):
     return "data: " + json.dumps({"choices": [{"index": 0, "delta": delta}]}) + "\n\n"
 
 
+def usage_chunk():
+    """What a real server reports last: the prompt (part of it read from the cache) and the reply, so the Uso page has numbers."""
+    usage = {"prompt_tokens": 1200, "completion_tokens": 30, "prompt_tokens_details": {"cached_tokens": 800}}
+    return "data: " + json.dumps({"choices": [], "usage": usage}) + "\n\n"
+
+
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.endswith("/models"):
@@ -62,7 +68,7 @@ class Handler(BaseHTTPRequestHandler):
                 chunk({"tool_calls": [call]}),
                 chunk({"tool_calls": [{"index": 0, "function": {"arguments": args[:20]}}]}),
                 chunk({"tool_calls": [{"index": 0, "function": {"arguments": args[20:]}}]})]
-        for event in events + ["data: [DONE]\n\n"]:
+        for event in events + [usage_chunk(), "data: [DONE]\n\n"]:
             self.wfile.write(event.encode())
             self.wfile.flush()
             if LONG:

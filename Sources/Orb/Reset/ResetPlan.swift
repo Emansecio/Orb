@@ -77,15 +77,15 @@ struct ResetSummary: Equatable, Sendable {
     /// Whether the user's profile (text or photo) is filled in: it goes too.
     var profile = false
 
-    /// "Some: 3 Orbs, 42 conversas, 5 rotinas, 2 conectores, 4 skills, o seu perfil e os ajustes." What is zero is left
-    /// out; the settings always go back to their defaults, so the sentence is never empty.
+    /// "Some: 3 Orbs, 42 conversas, 5 rotinas, 2 conectores, 4 skills, o seu perfil, o histórico de uso e os ajustes." What is zero
+    /// is left out; the settings always go back to their defaults, so the sentence is never empty.
     var goes: String {
         let conversationPart: String? = if let conversations { DeleteOrbSummary.counted(conversations, "conversa", "conversas") } else { "as conversas" }
         let parts = [DeleteOrbSummary.counted(orbs, "Orb", "Orbs"),
                      conversationPart,
                      DeleteOrbSummary.counted(routines, "rotina", "rotinas"),
                      DeleteOrbSummary.counted(connectors, "conector", "conectores"),
-                     DeleteOrbSummary.counted(skills, "skill", "skills")].compactMap { $0 } + (profile ? ["o seu perfil"] : []) + ["os ajustes"]
+                     DeleteOrbSummary.counted(skills, "skill", "skills")].compactMap { $0 } + (profile ? ["o seu perfil"] : []) + ["o histórico de uso", "os ajustes"]
         return "Some: " + DeleteOrbSummary.list(parts) + "."
     }
 
@@ -129,7 +129,7 @@ enum ResetGuard {
     /// The only things a reset removes from the data folder: what the app itself writes there. Anything else in the
     /// folder (a stranger's file, the migration marker) stays, so a folder chosen by mistake loses nothing it does
     /// not own.
-    static let ownedFolders: Set<String> = ["conversations", "memoria", "anexos", "saidas", "conectores", ProfilePhoto.folderName]
+    static let ownedFolders: Set<String> = ["conversations", "memoria", "anexos", "saidas", "conectores", "uso", ProfilePhoto.folderName]
 
     /// Whether the entry `name` of the data folder is the app's own (`state.json`, its set-aside copies, and the
     /// folders above).

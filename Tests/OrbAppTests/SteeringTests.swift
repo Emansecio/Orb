@@ -436,7 +436,8 @@ struct SteeringEngineTests {
         #expect(model.submit("veja", to: bot.id))
         #expect(lane.files.isEmpty)
         await waitUntilIdle(model, bot.id)
-        let sent = await client.seen.calls[0].last?.content ?? ""
+        let calls = await client.seen.calls
+        let sent = try #require(calls.first).last?.content ?? "" // a timed-out wait must fail here, not crash the run
         #expect(sent.contains(file.path))
     }
 

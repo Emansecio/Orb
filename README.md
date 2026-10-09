@@ -12,7 +12,7 @@ mensagem envia ao provedor do modelo está em [Privacidade](#privacidade).
 - [A janela](#a-janela) · [Criar um Orb](#criar-um-orb) · [Conversar](#conversar)
 - [Permissões](#permissões) · [Permissões do macOS](#permissões-do-macos)
 - [Memória](#memória) · [Conversas e rotinas](#conversas-e-rotinas) · [Contexto](#contexto-da-conversa)
-- [Conectores e skills](#conectores-e-skills) · [Atalhos](#atalhos) · [Barra de menus](#barra-de-menus-e-pergunta-rápida)
+- [Uso e custos](#uso-e-custos) · [Conectores e skills](#conectores-e-skills) · [Atalhos](#atalhos) · [Barra de menus](#barra-de-menus-e-pergunta-rápida)
 - [Redefinir o Orb](#redefinir-o-orb) · [Privacidade](#privacidade) · [Problemas comuns](#problemas-comuns) · [Para quem desenvolve](#para-quem-desenvolve)
 
 ## Instalar
@@ -337,6 +337,41 @@ janela vai antes para a memória do Orb. As mensagens continuam salvas na conver
 
 Detalhes técnicos: [docs/CONTEXTO.md](docs/CONTEXTO.md).
 
+## Uso e custos
+
+Ajustes (**⌘,**) → **Uso** mostra o que os seus Orbs gastaram, em dólares estimados. O **período** é Hoje, 7 dias, 30 dias ou Este
+mês, e a página mostra:
+
+- **O total** do período (grande), com os tokens e os pedidos. Abaixo, o que os planos cobriram, pelo preço da API, e um aviso
+  se parte do uso é de um modelo sem preço.
+- **O gráfico** por dia (por hora em "Hoje"), com as cores por Orb (a cor de cada um) ou por modelo.
+- **Por Orb** e **Por modelo**: custo, tokens, pedidos e a porcentagem do total. Um Orb apagado continua na lista, com o nome que
+  tinha.
+- **Por horário**: 24 barras com os tokens de cada hora do dia, somados no período, e a hora em que você mais usa.
+- A nota "Estimativa pelos preços públicos de 9 de outubro de 2026; o valor cobrado pelo provedor pode variar".
+
+Como o custo é dito:
+
+| Modelo | Aparece como |
+|---|---|
+| Chave de API (OpenAI, Claude, xAI, OpenRouter, OpenCode Zen, Command Code, gateway) | o valor em dólares, pelos tokens de cada pedido: o cache lido custa o preço do cache, não o da entrada |
+| Assinatura (login do ChatGPT, Claude Code, OpenCode Go) | **Incluído no plano**, com os tokens. O "≈ US$ x pela API" é o que o Claude Code informa de cada turno, ou o que a tabela de preços daria. Não entra no total |
+| Ollama, LM Studio, gateway em `localhost` | **Grátis** |
+| Modelo que ninguém conhece o preço | os tokens e **Sem preço** (e o aviso no alto) |
+
+O preço vem, em ordem, da sua correção, da lista do próprio provedor (OpenRouter e OpenCode dizem o preço de cada modelo) e de uma
+tabela do app, lida nas páginas oficiais de preço da Anthropic, OpenAI, Google, DeepSeek, xAI e OpenCode. O lápis na linha de um modelo
+**corrige o preço** (entrada, entrada do cache, gravação no cache e saída, em dólares por milhão de tokens); a correção vale também para
+o que já foi gasto, e "Restaurar" volta ao preço de antes. Salvar sem mudar nada não cria correção. A tabela usa a faixa de preço normal
+(prompts de até 200 ou 272 mil tokens). Na Anthropic o app separa a gravação de cache de 5 minutos (1,25 vez a entrada) da de 1 hora (2 vezes;
+é a do prefixo estável em `api.anthropic.com`). A DeepSeek cobra metade fora do pico (dias úteis, 01h-04h e 06h-10h UTC; feriados chineses
+contam como pico aqui, então erra para cima) e o Gemini 3.6, 3.7 e 3.8 Flash dobram em 1/1/2027: o preço é escolhido pela hora de cada
+linha. Um modelo cujo id só combina com a tabela por um nome que muda o preço (`-pro`, `-deep-research`, `-mini`) fica **sem preço**. Ainda
+assim o valor é uma estimativa.
+
+O registro fica em `uso/aaaa-mm.json` (um arquivo por mês, linhas por hora, Orb, modelo e origem: conversa, rotina ou chamada do app) na pasta
+de dados e só tem números: nada do que foi dito. **Redefinir o Orb** apaga o histórico de uso. Apagar um Orb não apaga: o dinheiro foi gasto.
+
 ## Conectores e skills
 
 Páginas **Conectores** (⌥⌘C) e **Skills** (⌥⌘K) na barra lateral, cada uma com as abas **Explorar** e **Instalados/Instaladas**.
@@ -413,7 +448,7 @@ Ajustes → Geral → Seus dados → **Redefinir o Orb…** volta o app ao prime
   nunca é tocado.
 
 Sempre somem: os Orbs, as conversas (atuais, anteriores e de rotinas), os anexos e as saídas de ferramentas, o seu perfil (texto e
-foto; nunca vai para as memórias guardadas), as rotinas, os
+foto; nunca vai para as memórias guardadas), o histórico de uso e custos, as rotinas, os
 conectores e os segredos deles no Keychain, as skills instaladas ou criadas, as liberações ("Sempre permitir") e os ajustes do
 app (voltam ao padrão, inclusive o primeiro uso). Nada fora da pasta de dados e do Keychain do app é tocado (dentro da pasta de
 dados, só o que o Orb mesmo grava), e a migração do OpenBot não roda de novo: as chaves que o Orb apagou não voltam do Keychain
@@ -427,7 +462,7 @@ Rodando pelo SwiftPM (sem um `.app`), ele só fecha: abra de novo. Nos modos de 
 
 ## Privacidade
 
-- **Local.** Conversas, memórias, ajustes, anexos e saídas de ferramentas são arquivos comuns, sem criptografia própria, em
+- **Local.** Conversas, memórias, ajustes, anexos, saídas de ferramentas e o histórico de uso (só números, por hora) são arquivos comuns, sem criptografia própria, em
   `~/Library/Application Support/Orb` (Ajustes → Geral → Pasta de dados → Mostrar no Finder). O Orb não envia estatísticas de
   uso nem relatórios de erro.
 - **Chaves.** As chaves de API, o login do ChatGPT e os segredos dos conectores ficam no **Keychain** do macOS (no arquivo de dados
@@ -477,7 +512,7 @@ swift test           # mais de 2.000 testes (motor, provedores, Claude Code, fer
 | Documento | Assunto |
 |---|---|
 | [docs/ARQUITETURA.md](docs/ARQUITETURA.md) | mapa dos módulos, caminho de um turno, persistência, concorrência, desempenho, testes e ferramentas de desenvolvimento |
-| [docs/CONTEXTO.md](docs/CONTEXTO.md) | orçamento, compactação, resumo estruturado, medidor e economia de tokens |
+| [docs/CONTEXTO.md](docs/CONTEXTO.md) | orçamento, compactação, resumo estruturado, medidor, economia de tokens e o registro de uso |
 | [docs/PERMISSOES.md](docs/PERMISSOES.md) | modos, liberações com escopo, comandos perigosos, aprovações, ponte com o Claude Code e permissões do macOS |
 | [docs/MEMORIA.md](docs/MEMORIA.md) | a memória por Orb |
 | [docs/ORBS.md](docs/ORBS.md) | o avatar: atividades, jeito, animação e desempenho |

@@ -202,8 +202,8 @@ struct SettingsRouterTests {
         #expect(defaults.string(forKey: SettingsRouter.requestKey) == "permissions")
     }
 
-    @Test func tabsAreInTheOrderGeralModelosPermissoes() {
-        #expect(SettingsTab.allCases.map(\.title) == ["Geral", "Modelos", "Permissões do Mac"])
+    @Test func tabsAreInTheOrderGeralModelosUsoPermissoes() {
+        #expect(SettingsTab.allCases.map(\.title) == ["Geral", "Modelos", "Uso", "Permissões do Mac"])
     }
 
     @Test func theVersionLineReadsTheBundleOrSaysItIsADevBuild() {

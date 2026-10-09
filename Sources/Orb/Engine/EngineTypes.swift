@@ -289,6 +289,8 @@ struct TokenUsage: Sendable, Equatable {
     var output: Int?
     var cacheRead: Int?
     var cacheWrite: Int?
+    /// Of `cacheWrite`, what was written for an hour (Anthropic reports it; it costs more than the five-minute write).
+    var cacheWrite1h: Int?
 
     /// Adds another response's counts (a count nobody reported stays unknown).
     mutating func add(_ other: TokenUsage) {
@@ -297,6 +299,7 @@ struct TokenUsage: Sendable, Equatable {
         output = sum(output, other.output)
         cacheRead = sum(cacheRead, other.cacheRead)
         cacheWrite = sum(cacheWrite, other.cacheWrite)
+        cacheWrite1h = sum(cacheWrite1h, other.cacheWrite1h)
     }
 
     /// The whole prompt: what was read from the cache, written to it and charged in full. nil when no count is known.

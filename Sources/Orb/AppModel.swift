@@ -19,6 +19,8 @@ final class AppModel {
     /// How much conversation the Orbs remember word for word before the start is folded into a summary.
     var contextMemory: ContextMemoryLevel { didSet { scheduleStateSave() } }
     var profile: UserProfile { didSet { scheduleStateSave() } }
+    /// Prices the user corrected on the Uso page, by "provider/model".
+    var priceCorrections: [String: ModelPrice] { didSet { scheduleStateSave() } }
     /// Each Orb's running machinery (see `BotSession`): its conversation in memory, its turn, its streamed reply.
     /// Conversations: at launch only the selected Orb's is read (off the main thread, `beginLoading`); the others are
     /// read when they are needed (`BotSession.isUnloaded`): when you switch to the Orb, or something has to change
@@ -129,6 +131,8 @@ final class AppModel {
     @ObservationIgnored private(set) var learnedContexts: [String: LearnedContext]
     /// Where outputs too big for a conversation are saved for the model to read back (`saidas/<id>/` in the data folder).
     @ObservationIgnored let outputsDirectory: URL
+    /// What the models are used for, kept by the hour (`uso/` in the data folder); see `recordUsage`.
+    @ObservationIgnored let usageLog: UsageRecorder
     /// Every Orb's own memory bank (`memoria/<id>/` in the data folder).
     @ObservationIgnored let memory: MemoryLibrary
     /// The approval cards open in any turn, whichever engine runs it (internal so tests can open cards).
@@ -198,6 +202,7 @@ final class AppModel {
         engine = AgentEngine(gate: gate)
         claudeEngine = ClaudeCodeEngine(gate: gate)
         memory = MemoryLibrary.at(store.directory.appending(path: "memoria"))
+        usageLog = UsageRecorder(store: store)
         var notices: [StoreNotice] = []
         let stateRead = store.readState()
         notices += stateRead.notice.map { [Self.described($0, bots: [], routines: [])] } ?? []
@@ -211,6 +216,7 @@ final class AppModel {
         contextMemory = state.contextMemory
         profile = state.profile
         learnedContexts = state.learnedContexts
+        priceCorrections = state.priceCorrections
         outputsDirectory = ToolOutputCap.directory(inDataFolder: store.directory)
         // Only the Orb shown first is read at launch, and the window does not wait for it (`beginLoading` below).
         let readsFirstLater = asyncLoading ?? runsBackgroundWork
@@ -313,6 +319,7 @@ final class AppModel {
         guard name.hasSuffix(".json") else { return nil }
         if name == "state.json" { return "os ajustes do app (Orbs, rotinas, provedores)" }
         let stem = String(name.dropLast(".json".count))
+        if folder == "uso" { return "o histórico de uso de \(stem)" }
         if folder == "conversations", let id = UUID(uuidString: stem) {
             return bots.first { $0.id == id }.map { "a conversa de \($0.name)" }
         }
@@ -1229,6 +1236,7 @@ final class AppModel {
         let lastWorkspace = session.conversation?.workspaceSeen
         let sentMemories = TurnPreface.relatedLines(in: history)
 
+        session.turnModel = ref.text
         let turn = session.beginTurn()
         let steering = composerLane(botID).queue // messages sent during the turn reach the model between its steps
         session.turnTask = Task {
@@ -1371,6 +1379,7 @@ final class AppModel {
         session.isClaudeTurn = true
         session.claudeTurnDelivered = false
         session.claudeTurnFolder = folder
+        session.turnModel = ModelRef(provider: .claudeCode, model: model).text
         let turn = session.beginTurn()
         session.turnTask = Task {
             guard !Task.isCancelled else { return } // stopped before it began
@@ -1774,7 +1783,7 @@ final class AppModel {
         for (id, live) in lives where live.unread > 0 { unread[id.uuidString] = live.unread }
         return AppState(bots: bots, routines: routines, skills: skills, connectors: connectorSecrets.redact(connectors),
                         providers: providers, defaultModel: defaultModel, unread: unread, contextMemory: contextMemory,
-                        learnedContexts: learnedContexts, profile: profile)
+                        learnedContexts: learnedContexts, profile: profile, priceCorrections: priceCorrections)
     }
 
     private func scheduleStateSave() {
@@ -1795,6 +1804,7 @@ final class AppModel {
         guard !isResetting else { return } // quitting after a reset must not write the old state back
         store.save(state)
         for session in sessions.values { session.saveNow() }
+        usageLog.flush()
         store.flush()
     }
 }

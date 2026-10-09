@@ -201,6 +201,7 @@ Medidas que não são "compactar" mas decidem quanto cada mensagem custa:
 | Corpo da requisição **determinístico** | `WireEncoder` (chaves ordenadas; `messages` e `tool_choice` por último) nos 3 clientes | O prefixo é idêntico byte a byte entre chamadas, então o cache do provedor acerta |
 | Marcadores de cache | Anthropic: `cache_control` na última ferramenta, no sistema e no fim da última mensagem (as duas primeiras com TTL de 1 h só em `api.anthropic.com`; o fim, 5 min). `prompt_cache_key` por conversa: chat só em `api.openai.com`; Responses em `api.openai.com` e `chatgpt.com`. O OpenCode recebe `x-opencode-session` por conversa | Chamadas seguidas leem o prefixo do cache |
 | **Cache medido** | `TokenUsage.promptTokens` / `cacheHitRatio`, `TurnEvent.requestUsage` | O medidor mostra o acerto do último pedido; `ORB_DEBUG_USAGE=1` imprime uma linha por passo no stderr |
+| **Uso registrado e custo** | `AppModel.recordUsage`, `uso/`, `PriceBook` | Os mesmos números de cada pedido (entrada, cache lido e gravado, saída) são somados por hora, Orb e modelo, e Ajustes → Uso diz o que custaram: o cache lido custa o preço do cache. Veja [ARQUITETURA.md](ARQUITETURA.md#uso-e-custos) |
 | Aviso de cache que não pega | `CacheHealth.isFailing`: pelo menos 3 chamadas, prompt médio ≥ 4 096 tokens e menos de 20% lido do cache | Um aviso por conversa, e só para clientes que de fato armam o cache (`arrangesPromptCache`: OpenAI, Responses em hosts com chave, Anthropic; chat em OpenRouter ou servidor local não é culpado) |
 | Prompt do sistema **estável** | `SystemPrompt`, `PromptParts` | Sem data nem hora: o texto é igual de um dia para o outro. O que muda a cada mensagem vai no prefácio |
 | **Prefácio por diferença** | `TurnPreface`, `WorkspaceSnapshot.report`, `WorkspaceChanges` | A pasta vai inteira uma vez; depois só `<workspace_changes>` (entradas, branch, mudanças e commits novos), ou nada. O hash exclui "arquivos recentes" (mudavam a cada escrita do próprio Orb). O snapshot completo volta quando o histórico não o tem mais |
@@ -237,7 +238,8 @@ par, `prepareHistory`, saídas grandes), `Engine/ContextCondensing.swift`, `Engi
 `Engine/ToolDigest.swift` (linhas por passo e registro de progresso), `Engine/Compaction.swift` (relatório, `compact`,
 `/compactar`), `Engine/ContextMeter.swift`, `Engine/ToolOutputSpill.swift`, `AppModel+ContextUI.swift`, `ContextGauge.swift`,
 `Views/ContextMeterViews.swift`, `Views/ContextSettings.swift`, `Engine/TurnPrompt.swift`, `Engine/WorkspaceChanges.swift`,
-`Engine/ConnectorGateway.swift`.
+`Engine/ConnectorGateway.swift`; o registro e o
+custo dos tokens, em `Usage/` (`UsageRecord`, `UsageStore`, `ModelPricing`, `UsageReport`).
 Testes: `ContextWindowTests`, `ContextBatchingTests`, `ContextEngineBatchingTests`, `ConversationLedgerTests`,
 `CompactionFlowTests`, `CompactionIntegrationTests`, `CompactionReviewTests`, `ContextUITests`, `CacheMetricsTests`,
 `PrefaceFlowTests`, `RelatedMemoryTests`, `ConnectorGatewayTests`.

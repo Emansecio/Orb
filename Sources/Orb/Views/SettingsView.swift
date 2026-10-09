@@ -5,7 +5,7 @@ import ServiceManagement
 // Ajustes: three tabs (Geral, Modelos, Permissões do Mac) that anything in the app can open directly.
 
 enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
-    case general, models, permissions
+    case general, models, usage, permissions
 
     var id: String { rawValue }
 
@@ -13,6 +13,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .general: "Geral"
         case .models: "Modelos"
+        case .usage: "Uso"
         case .permissions: "Permissões do Mac"
         }
     }
@@ -21,6 +22,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .general: "gearshape"
         case .models: "cpu"
+        case .usage: "chart.bar"
         case .permissions: "lock.shield"
         }
     }
@@ -30,6 +32,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .general: 760
         case .models, .permissions: 640
+        case .usage: 700
         }
     }
 }
@@ -72,6 +75,9 @@ struct SettingsView: View {
             ProviderSettings()
                 .tabItem { Label(SettingsTab.models.title, systemImage: SettingsTab.models.symbol) }
                 .tag(SettingsTab.models)
+            UsageSettings()
+                .tabItem { Label(SettingsTab.usage.title, systemImage: SettingsTab.usage.symbol) }
+                .tag(SettingsTab.usage)
             MacPermissionsView()
                 .tabItem { Label(SettingsTab.permissions.title, systemImage: SettingsTab.permissions.symbol) }
                 .tag(SettingsTab.permissions)
@@ -286,6 +292,7 @@ enum SettingsSnapshots {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading))
         case "settings-models": (tab, content) = (.models, AnyView(ProviderSettings()))
         case "settings-perms": (tab, content) = (.permissions, AnyView(MacPermissionsView()))
+        case let name where name.hasPrefix("settings-usage"): return nil // `UsageSnapshots` draws it (it needs the model)
         default: return nil
         }
         return AnyView(content

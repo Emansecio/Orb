@@ -21,6 +21,8 @@ struct ProviderModel: Codable, Hashable, Identifiable, Sendable {
     var contextLength: Int?
     /// Whether the model takes pictures, as its catalog says (nil: the catalog does not say).
     var supportsImages: Bool?
+    /// What the provider's own list charges for it, when the list says (OpenRouter, models.dev for OpenCode).
+    var price: ModelPrice?
 }
 
 extension ProviderModel {
@@ -36,6 +38,7 @@ extension ProviderModel {
         format = known
         contextLength = try c.decodeIfPresent(Int.self, forKey: .contextLength)
         supportsImages = try c.decodeIfPresent(Bool.self, forKey: .supportsImages)
+        price = try? c.decodeIfPresent(ModelPrice.self, forKey: .price)
     }
 }
 
@@ -239,9 +242,26 @@ enum ModelCatalog {
         var seen: Set<String> = []
         return entries.compactMap { entry -> ProviderModel? in
             guard let id = entry["id"]?.string, seen.insert(id).inserted else { return nil }
-            return ProviderModel(id: id, name: id, format: .chat, supportsImages: supportsImages(in: entry))
+            return ProviderModel(id: id, name: id, format: .chat, supportsImages: supportsImages(in: entry),
+                                 price: openRouterPrice(entry["pricing"]))
         }
         .sorted { $0.id < $1.id }
+    }
+
+    /// OpenRouter prices are dollars per token, as text ("0.000003"); a negative one ("-1", the routers) means none.
+    static func openRouterPrice(_ pricing: JSONValue?) -> ModelPrice? {
+        func perMillion(_ key: String) -> Double? {
+            guard let value = pricing?[key].flatMap({ $0.string.flatMap(Double.init) ?? $0.number }), value.isFinite, value >= 0 else { return nil }
+            return value * 1_000_000
+        }
+        guard let input = perMillion("prompt"), let output = perMillion("completion") else { return nil }
+        return ModelPrice(input: input, cacheRead: perMillion("input_cache_read"), cacheWrite: perMillion("input_cache_write"), output: output)
+    }
+
+    /// models.dev lists dollars per million tokens under `cost`.
+    static func modelsDevPrice(_ cost: JSONValue?) -> ModelPrice? {
+        guard let input = cost?["input"]?.number, let output = cost?["output"]?.number, input >= 0, output >= 0 else { return nil }
+        return ModelPrice(input: input, cacheRead: cost?["cache_read"]?.number, cacheWrite: cost?["cache_write"]?.number, output: output)
     }
 
     /// The API also lists embeddings, audio, image and moderation models; keep the ones that chat.
@@ -306,7 +326,8 @@ enum ModelCatalog {
             default: return nil
             }
             return ProviderModel(id: id, name: info["name"]?.string ?? id, format: format,
-                                 contextLength: info["limit"]?["context"]?.int, supportsImages: supportsImages(in: info))
+                                 contextLength: info["limit"]?["context"]?.int, supportsImages: supportsImages(in: info),
+                                 price: modelsDevPrice(cost))
         }
     }
 

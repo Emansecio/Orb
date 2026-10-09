@@ -311,6 +311,7 @@ struct AnthropicStreamAssembler: AssemblingMapper {
         if let value = usage["output_tokens"]?.int { total.output = value }
         if let value = usage["cache_read_input_tokens"]?.int { total.cacheRead = value }
         if let value = usage["cache_creation_input_tokens"]?.int { total.cacheWrite = value }
+        if let value = usage["cache_creation"]?["ephemeral_1h_input_tokens"]?.int { total.cacheWrite1h = value }
         self.usage = total
     }
 }

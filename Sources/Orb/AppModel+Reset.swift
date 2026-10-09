@@ -67,6 +67,7 @@ extension AppModel {
         // can follow the clean-up (and the window takes no new message or Orb: `isResetting`).
         isResetting = true
         store.sealWrites()
+        usageLog.close()
         let plan = ResetPlan.make(bots: bots, connectors: connectors, providers: providers, defaultModel: defaultModel,
                                   learnedContexts: learnedContexts, options: options)
         await stopForReset(wait: environment.waitForTurns)

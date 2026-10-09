@@ -132,6 +132,8 @@ final class BotSession {
     @ObservationIgnored var memoryIdle: Task<Void, Never>?
     /// Tokens of system prompt and tool specs the engine measured on the last turn (not kept across launches).
     @ObservationIgnored var measuredOverhead: Int?
+    /// The model ("provider/model") the running turn uses, for the usage it records.
+    @ObservationIgnored var turnModel: String?
 
     // MARK: Composer
 

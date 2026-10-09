@@ -179,9 +179,14 @@ extension BotSession {
             append(.notice(text))
         case .usage(let total):
             setUsage(total)
+            // Claude Code reports the turn as a whole, once; the native engine's calls are counted one by one below.
+            if isClaudeTurn { recordUsage(UsageTotals(total)) }
         case .requestUsage(let used):
             setRequestUsage(used)
             model.live(id).setLastUsage(used)
+            recordUsage(UsageTotals(used))
+        case .reportedCost(let cost):
+            recordUsage(UsageTotals(reportedCost: cost))
         case .compacted(var report):
             closeStreaming()
             // A fold of older turns is kept (the next turn starts from it), counted in the conversation's own messages.
@@ -211,6 +216,14 @@ extension BotSession {
             }
             scheduleSave(delay: Self.streamingSaveInterval)
         }
+    }
+
+    /// Hands what the running turn used to the usage history (see `AppModel.recordUsage`).
+    private func recordUsage(_ totals: UsageTotals) {
+        guard let model else { return }
+        let name = turnModel ?? model.bot(id).flatMap(model.modelRef(for:))?.text
+        guard let name else { return }
+        model.recordUsage(totals, botID: id, model: name, source: routineID == nil ? .chat : .routine)
     }
 
     /// Closes the turn `turn`; a turn that is no longer the Orb's current one (stopped, then replaced) is ignored.
@@ -246,6 +259,7 @@ extension BotSession {
             scheduleMemorySave()
         }
         Task { await model.refreshMemory(botID) }
+        model.usageLog.flush() // what the turn used is written now, not after the batch's delay
         model.live(id).runningTool = nil
         model.setAwaitingApproval(false, of: id)
         let reply = lastReply()

@@ -19,6 +19,9 @@ enum TurnEvent: Sendable {
     /// Tokens of the model call that just ended, alone (`.usage` follows with the new total): the size of the prompt
     /// the model reads now, and how much of it the provider served from its cache.
     case requestUsage(TokenUsage)
+    /// What the provider's own tool says the turn cost, in dollars (Claude Code's `total_cost_usd`; on a plan, what it would
+    /// cost at API prices). Follows the turn's `.usage`.
+    case reportedCost(Double)
     /// The task stopped at the step limit and left a progress record: the next message picks it up.
     case taskPaused
     /// A message the user sent during the turn (see `SteeringQueue`) was just handed to the model: the transcript

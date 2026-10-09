@@ -20,6 +20,8 @@ struct AppState: Codable, Sendable {
     var learnedContexts: [String: LearnedContext] = [:]
     /// Who the user is, for every Orb (Ajustes → Geral → Você).
     var profile = UserProfile()
+    /// Prices the user corrected on the Uso page, by "provider/model" (US$ per million tokens).
+    var priceCorrections: [String: ModelPrice] = [:]
 
     /// What the app starts with when there is no data yet (a new install, after "Redefinir o Orb"): no Orb, so the
     /// window opens on the welcome, where Atlas is one click away.
@@ -77,8 +79,8 @@ struct Store: Sendable {
     /// the writer cannot stall the others).
     private var queue: DispatchQueue { WriterQueues.queue(for: directory) }
     /// Reads of conversations and the state: concurrent, and at the priority of something the user is waiting for.
-    private static let readQueue = DispatchQueue(label: "app.orb.store.read", qos: .userInitiated, attributes: .concurrent)
-    private static let gate = FileGate()
+    static let readQueue = DispatchQueue(label: "app.orb.store.read", qos: .userInitiated, attributes: .concurrent)
+    static let gate = FileGate()
     /// The encoders of the conversation files saved most recently (the ones being streamed into), so a save redoes
     /// only what changed. One cache per data folder; touched only on `queue`.
     private var encoders: EncoderCache { EncoderCache.shared(for: directory) }
@@ -171,7 +173,7 @@ struct Store: Sendable {
 
     /// Queues `work` on the writer, registering the files it touches first so that reads of them wait. Once the
     /// folder is sealed (`sealWrites`) the work is dropped.
-    private func enqueue(touching urls: [URL], _ work: @escaping @Sendable () -> Void) {
+    func enqueue(touching urls: [URL], _ work: @escaping @Sendable () -> Void) {
         Self.gate.willWrite(urls)
         let directory = directory
         queue.async {
@@ -430,7 +432,7 @@ struct Store: Sendable {
     /// Waits for pending writes.
     func flush() { queue.sync {} }
 
-    private func read<T: Decodable & Sendable>(_ type: T.Type, from url: URL, ifUnreadable outcome: String) -> StoreRead<T> {
+    func read<T: Decodable & Sendable>(_ type: T.Type, from url: URL, ifUnreadable outcome: String) -> StoreRead<T> {
         guard FileManager.default.fileExists(atPath: url.path) else { return StoreRead() }
         let name = url.lastPathComponent
         // Taken before the bytes are: a note made from what is read can only be older than the file, never newer.
@@ -503,7 +505,7 @@ struct Store: Sendable {
         return nil
     }
 
-    private func write<T: Encodable>(_ value: T, to url: URL) {
+    func write<T: Encodable>(_ value: T, to url: URL) {
         writeFile(to: url) { try JSONEncoder().encode(value) }
     }
 
@@ -850,6 +852,12 @@ extension AppState {
         contextMemory = try c.value(.contextMemory, default: .balanced)
         learnedContexts = (try? c.decodeIfPresent([String: LearnedContext].self, forKey: .learnedContexts)) ?? [:]
         do { profile = try c.value(.profile, default: UserProfile()) } catch { DecodeLoss.record() }
+        // One damaged correction is dropped alone; the others stay.
+        struct Price: Decodable {
+            var value: ModelPrice?
+            init(from decoder: Decoder) throws { value = try? decoder.singleValueContainer().decode(ModelPrice.self) }
+        }
+        priceCorrections = ((try? c.decodeIfPresent([String: Price].self, forKey: .priceCorrections)) ?? nil)?.compactMapValues(\.value) ?? [:]
         try migrateSingleProvider(from: decoder)
     }
 

@@ -445,6 +445,7 @@ struct ClaudeCodeTranscript {
             costUSD = result.costUSD
             var events = closeRunningTools()
             if let used = result.usage { events.insert(.usage(used), at: 0) }
+            if let cost = result.costUSD { events.insert(.reportedCost(cost), at: result.usage == nil ? 0 : 1) }
             if !result.isError {
                 let reply = segments.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
                 var content = reply.joined(separator: "\n\n")

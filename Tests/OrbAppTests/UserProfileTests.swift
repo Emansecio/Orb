@@ -341,10 +341,10 @@ struct UserProfileResetTests {
 
     @Test func theSummaryMentionsTheProfileOnlyWhenThereIsOne() {
         let with = ResetSummary(orbs: 3, conversations: 42, routines: 5, connectors: 2, skills: 4, folder: "~/Orbs", profile: true)
-        #expect(with.goes == "Some: 3 Orbs, 42 conversas, 5 rotinas, 2 conectores, 4 skills, o seu perfil e os ajustes.")
+        #expect(with.goes == "Some: 3 Orbs, 42 conversas, 5 rotinas, 2 conectores, 4 skills, o seu perfil, o histórico de uso e os ajustes.")
         #expect(ResetSummary(orbs: 0, conversations: 0, routines: 0, connectors: 0, skills: 0, folder: "~", profile: true).goes
-            == "Some: o seu perfil e os ajustes.")
-        #expect(ResetSummary(orbs: 1, conversations: 1, routines: 0, connectors: 0, skills: 0, folder: "~").goes == "Some: 1 Orb, 1 conversa e os ajustes.")
+            == "Some: o seu perfil, o histórico de uso e os ajustes.")
+        #expect(ResetSummary(orbs: 1, conversations: 1, routines: 0, connectors: 0, skills: 0, folder: "~").goes == "Some: 1 Orb, 1 conversa, o histórico de uso e os ajustes.")
     }
 
     @Test @MainActor func theModelCountsAFilledProfileInTheSummary() {

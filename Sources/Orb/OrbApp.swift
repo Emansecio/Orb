@@ -311,6 +311,7 @@ enum Snapshot {
             AnyView(model.bots.first.map { TranscriptSample.view(name, model: model, bot: $0) })
         default:
             ContextSnapshots.view(screen, model: model)
+                ?? UsageSnapshots.view(screen, model: model)
                 ?? Snapshot.composerScene(screen, model: model)
                 ?? SettingsSnapshots.view(screen, firstBotID: model.bots.first?.id)
                 ?? CatalogSnapshots.view(screen, model: model)

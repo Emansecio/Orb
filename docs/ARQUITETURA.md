@@ -128,6 +128,17 @@ opcional seriam o caminho se isso virar requisito.
 Os nomes e as descrições das ferramentas para o modelo são em inglês; o que aparece para você (título e detalhe de cada
 linha, cartões) é em português (`AgentTool.summary`).
 
+### Uso e custos (`Usage/`)
+
+| Arquivo | Papel |
+|---|---|
+| `UsageRecord.swift` | o que se guarda: `UsageKey` (hora × Orb × modelo × origem), `UsageTotals` (pedidos, tokens de entrada, de cache lido e gravado, de saída, custo informado pelo CLI), `UsageBucket`, `UsageMonth` (o arquivo de um mês: linhas, nomes dos Orbs, `maxBuckets` = 20 000) com decodificação tolerante |
+| `UsageStore.swift` | `Store.addUsage` / `readUsage` (`uso/aaaa-mm.json`, na fila de gravação e na de leitura do `Store`) e o `UsageRecorder` (`@MainActor`, junta o que os turnos usaram e entrega em lote, a cada 10 s e ao fim de cada turno e ao sair) |
+| `AppModel+Usage.swift` | `AppModel.recordUsage`, o ponto único de registro; `recordAuxiliaryUsage` para chamadas do app fora de um turno; `priceBook` e `correctPrice` |
+| `ModelPricing.swift` | `ModelPrice` (US$ por milhão), `PriceTable` (tabela embutida, com o dia da consulta), `UsageBilling` (por uso, plano, local), `PriceBook` e `UsageCost` |
+| `UsageReport.swift` | a agregação pura da página: `UsagePeriod`, `UsageReport.make` (totais, por Orb, por modelo, séries do gráfico, 24 horas) |
+| `Views/UsageSettings.swift`, `Views/UsageSnapshots.swift` | a aba Uso (`UsageModel` lê e soma fora da thread principal), a folha de correção de preço e a cena de captura |
+
 ### Memória (`Memory/`)
 
 `MemoryBank` (um actor por Orb) + `MemoryIndex` (SQLite/FTS5) + `MemoryPage`/`MemoryText`/`MemorySanitizer` +
@@ -155,7 +166,7 @@ O avatar e seu sistema de animação: `OrbModel` (config, catálogo, imagens), `
 | Conversa | `TranscriptViews` (`TranscriptRow` Equatable, ferramentas, `ApprovalCard`, `WorkingLine`), `MarkdownBlockViews`, `QueuedMessages`, `ImageThumbnails`, `ApprovalKeyboard` |
 | Compositor | `ComposerView`, `ComposerChips` (permissões, skills, modelo), `ComposerSupport`, `ModelPopover`, `ModelPicker`, `ContextMeterViews` |
 | Painel do Orb | `BotInspector` (abas Geral, Memória, Pasta e acessos, Rotinas), `InspectorSupport`, `MemoryViews`, `DeleteOrbDialog`, `PermissionConfirmation` |
-| Ajustes | `SettingsView` (Geral, Modelos, Permissões do Mac), `ProfileSettings` (a seção "Você" e `ProfileAvatar`, que a barra lateral também usa), `ResetOrbSheet` ("Redefinir o Orb?" e o alerta), `ProviderSettings`, `ProviderPresentation`, `CustomProviderFields`, `ClaudeCodeSettings`, `MacPermissionsView`, `ContextSettings` |
+| Ajustes | `SettingsView` (Geral, Modelos, Uso, Permissões do Mac), `ProfileSettings` (a seção "Você" e `ProfileAvatar`, que a barra lateral também usa), `ResetOrbSheet` ("Redefinir o Orb?" e o alerta), `ProviderSettings`, `ProviderPresentation`, `CustomProviderFields`, `ClaudeCodeSettings`, `MacPermissionsView`, `ContextSettings` |
 | Páginas | `RoutinesView`, `ConversationsMenu`, `SkillsView`, `ConnectorsView`, `CatalogParts` |
 | Sistema | `CommandPalette` (⌘K e a folha de atalhos; as teclas vêm de `ShortcutCatalog`, em `Shortcuts.swift`, a mesma lista que Ajustes → Geral mostra), `QuickAskView` (painel da barra de menus), `SheetKit` |
 | Para revisão (só `--snapshot`) | `WelcomeSnapshots`, `CatalogSnapshots`, `ContextSnapshots`, `SystemSnapshots`, `TranscriptSamples`, e `SnapshotComposerScenes.swift` (na raiz de `Sources/Orb/`) |
@@ -190,7 +201,7 @@ ComposerView ── AppModel.submit ─┬─ Orb livre ─► AppModel.send ─
    (`runCalls`: um cartão para o que pergunta junto, leituras em paralelo, o resto em ordem); registra cada mensagem. O
    Claude Code faz o análogo num processo `claude -p`, com os pedidos `can_use_tool` vindo para o mesmo `ApprovalGate`.
 6. **Eventos.** `TurnEvent`: `status`, `text`, `toolStarted`/`toolFinished`, `approval`, `message` (vai para o histórico do
-   modelo), `notice`, `failed`, `usage`/`requestUsage`, `compacted`, `taskPaused`, `steered`, `session`.
+   modelo), `notice`, `failed`, `usage`/`requestUsage`/`reportedCost`, `compacted`, `taskPaused`, `steered`, `session`.
 7. **Aplicação** (`BotSession.apply`, na thread principal): o texto vai para `pendingText` e é publicado em `LiveText` a cada
    33 ms, **sem tocar na lista de itens**; ferramentas e cartões viram itens da conversa; `message` entra em
    `Conversation.messages`; o `BotLive` recebe status, ferramenta em uso, "falando" e "esperando você", e a frase da linha de trabalho (`work`,
@@ -205,7 +216,7 @@ Pasta de dados: `~/Library/Application Support/Orb/` (a variável `ORB_DATA_DIR`
 
 ```
 state.json                       AppState: Orbs, rotinas, skills, conectores (segredos viram "@keychain"), provedores,
-                                 modelo padrão, não lidas, nível de contexto das conversas, janelas aprendidas
+                                 modelo padrão, não lidas, nível de contexto das conversas, janelas aprendidas, correções de preço
 conversations/<Orb>.json         conversa atual: itens da tela + mensagens do modelo + resumo/ledger + marcas
 conversations/<Orb>.meta.json    nota ao lado: quantos itens, quantos já foram para a memória, impressão digital do arquivo
 conversations/<Orb>/<id>.json    conversas anteriores ("Nova conversa"), com index.json (cache corrigido pelos arquivos)
@@ -218,6 +229,7 @@ perfil/foto-<8 hex>.jpg|png      a foto da usuária (quadrada, até 256 px; nome
 saidas/<Orb>/*.txt               saídas grandes de ferramentas; limpas por idade (14 dias) e tamanho (200 MB)
 agendamentos/                    a caixa de correio do `schedule` no Claude Code (`<id>.json` pedido, `<id>.reply` resposta); vazia
                                  fora de uma chamada, e limpa quando o app começa a ouvir
+uso/aaaa-mm.json                 histórico de uso: uma linha por hora × Orb × modelo × origem, só números (veja "Uso e custos")
 *.corrupt-<aaaammdd-hhmmss>      cópia de um arquivo que não pôde ser lido (nunca sobrescrito)
 .migrado-do-openbot              marca de que a migração do OpenBot já foi feita
 ```
@@ -252,7 +264,7 @@ até o fim:
 5. **Limpa fora da thread principal** (`ResetExecutor.run`, em `Task.detached`): `store.flush()` (o que estava sendo gravado
    termina), `BackgroundJobs.killAllNow()`, e então, na ordem: move a memória de cada Orb para `_guardadas` com o perfil (ou, em
    "Apagar tudo", remove `memoria/` inteira); remove **só o que o app grava** na pasta de dados (`ResetGuard.removes(entry:)`:
-   `state.json` e suas cópias `state.json.…`, `conversations/`, `memoria/`, `anexos/`, `saidas/`, `perfil/`; qualquer outro arquivo, como
+   `state.json` e suas cópias `state.json.…`, `conversations/`, `memoria/`, `anexos/`, `saidas/`, `perfil/`, `uso/`; qualquer outro arquivo, como
    `.migrado-do-openbot`, fica); apaga os segredos pelo cofre injetável (`SecretVault.remove` = `Keychain.set("")`, o mesmo
    caminho público de apagar chave: conectores e, com "Também sair dos provedores", uma conta por provedor mais `chatgpt`;
    nunca o Claude Code); devolve as preferências ao padrão (`UserDefaults` do próprio app, menos `LegacyKeychainLedger.key`);
@@ -272,6 +284,37 @@ Os testes usam um Keychain de mentira com os itens do OpenBot.
 O alerta de confirmação é um `NSAlert` (`ResetConfirmation`): Esc aperta "Cancelar", Return não aperta nada e o botão
 destrutivo não tem tecla. Nos testes, `AppModel.resetEnvironment` (argumentos, preferências, pasta do OpenBot, o último passo)
 é "inerte" quando o modelo não é o app (`runsBackgroundWork: false`), então um teste nunca toca nas preferências reais.
+
+### Uso e custos
+
+Cada resposta do provedor traz os tokens do pedido (`TokenUsage`); o app os soma por hora, e o custo é calculado na hora de mostrar.
+
+- **Registro.** `BotSession.apply` entrega a `AppModel.recordUsage` cada `TurnEvent.requestUsage` (uma chamada do motor nativo) e, num
+  turno do Claude Code, o `.usage` do turno (o CLI informa o turno inteiro: um "pedido") com o `.reportedCost` que vem logo depois
+  (`total_cost_usd`, no mesmo balde). O modelo é o do turno (`BotSession.turnModel`); a origem é `routine` se há uma rotina rodando,
+  senão `chat`; `auxiliary` é para chamadas do próprio app (`recordAuxiliaryUsage`; hoje nenhuma, o resumo da compactação é por regras).
+  O `UsageRecorder` guarda o que chega num dicionário e o entrega ao `Store` a cada 10 s, ao fim do turno e no `saveNow`.
+- **Arquivo.** `Store.addUsage` lê o mês (decodificação tolerante, `.corrupt-…` se não decodifica), soma e grava na fila de
+  gravação, então lotes e leituras (que esperam as gravações do mesmo arquivo) ficam em ordem. Um mês nunca passa de 20 000 linhas
+  (as que não cabem são contadas em `dropped`). A hora é a hora local do relógio (`Calendar.current`) e o mês do arquivo, o do relógio.
+  Um Orb apagado continua no histórico: o arquivo guarda o nome que ele tinha.
+- **Preço.** `PriceBook.price(for:)`: correção da usuária (`AppState.priceCorrections`, lida entrada por entrada: uma estragada não leva as outras) → preço da lista do provedor
+  (`ProviderModel.price`, lido de OpenRouter `pricing` e de models.dev `cost`, os mesmos que o app já baixava) → `PriceTable`
+  (id normalizado: sem prefixo de provedor, data, `:thinking`, `-latest`; pontos viram traços; um id que a tabela não tem acha a
+  família mais longa só quando o que sobra são sufixos que não mudam o preço, `PriceTable.sameFamilySuffixes`: `codex`, `preview`,
+  `customtools`…, nunca uma versão nem `-pro`/`-mini`/`-deep-research`; a data só fica para `gpt-4o-2024-05-13`, que tem preço próprio).
+  Preços que mudam com o tempo ficam em `PriceTable.adjustments` (fator sobre o preço da tabela, escolhido pela hora da linha:
+  DeepSeek fora do pico = metade; Gemini Flash 3.6-3.8 = dobro a partir de 2027-01-01). A gravação de cache de 1 h
+  (`TokenUsage.cacheWrite1h`, lida de `usage.cache_creation` da Anthropic; subconjunto de `cacheWrite`) tem preço próprio
+  (`ModelPrice.cacheWrite1h`, 2× a entrada). A correção vence também sobre o valor do CLI nos planos. `PriceDraft` é o texto do editor
+  e conserva o que ele não mostra (a escrita de 1 h) para que salvar sem mudar nada não altere o preço. `UsageBilling.of(provedor)` diz se é por uso, plano (ChatGPT,
+  Claude Code, OpenCode Go: `incluído`, com o equivalente do CLI ou da tabela) ou local (Ollama, LM Studio, gateway em localhost: grátis).
+  O custo não é gravado (só o que o CLI informa): corrigir um preço corrige o passado.
+- **Página.** `UsageModel.reload` descarrega o recorder, lê os meses do período no `Store` e soma em `Task.detached`
+  (`UsageReport.make`, pura); um resultado de uma leitura mais velha nunca substitui o de uma mais nova. Só roda ao abrir, ao
+  trocar de período, ao corrigir um preço e ao voltar ao app; nada contínuo. Animações: `Motion.content` em valores e barras, nada com Reduzir movimento.
+- **Tabela de preços.** `PriceTable.consultedOn` é o dia em que as páginas oficiais foram lidas (a nota da página o mostra). Para
+  atualizar: leia as páginas citadas no comentário da tabela, troque os valores e o dia; `UsagePricingTests` confere o formato, não os números.
 
 ### Decodificação tolerante
 
@@ -374,7 +417,8 @@ São mais de 2.000 testes em `Tests/OrbAppTests`, em Swift Testing (`@Test`, `@S
 
 `scripts/fake-llm.py [porta] [--long]` serve uma API compatível com OpenAI em `http://127.0.0.1:8765/v1`: cada mensagem
 recebe um texto curto, uma chamada `run_command` (para ver o cartão de aprovação) e, depois do resultado, uma resposta final
-(`--long`: ~2 000 palavras de Markdown, uma a cada 15 ms, para medir o streaming). Para usar: abra o app com dados isolados e
+(`--long`: ~2 000 palavras de Markdown, uma a cada 15 ms, para medir o streaming). Ele também informa o uso de cada chamada
+(1 200 tokens de prompt, 800 do cache, 30 de saída), então a aba Uso tem números. Para usar: abra o app com dados isolados e
 aponte um provedor "Gateway próprio" para a URL.
 
 ```bash
@@ -431,7 +475,8 @@ Modos (qualquer outro nome mostra o chat do primeiro Orb):
 | Janela e painéis | `app`, `sidebar`, `sidebar-profile` (com o perfil de exemplo), `inspector` (= `inspector-general`), `inspector-memory`, `inspector-folder`, `inspector-routines`, `memory-sheet`, `new-orb`, `new-orb-kept` (com memórias guardadas, uma escolhida), `welcome` (sem modelo), `welcome-checking` (conexões ainda não verificadas), `welcome-ready`, `welcome-kept` (com duas memórias guardadas), `welcome-returning` (lista esvaziada), `welcome-narrow` (a pronta; use `ORB_SNAPSHOT_WIDTH=1000 ORB_SNAPSHOT_HEIGHT=620`) — todas com `ORB_DATA_DIR` numa pasta com `{"bots":[]}`, senão o modo de desenvolvedor cria o Atlas —, `editor`, `delete-orb`, `palette`, `shortcuts`, `menubar-icons` |
 | Conversa | `chat-working`, `chat-working-wait`, `chat-working-retry`, `chat-typed`, `chat-attachments`, `chat-slash`, `popover-permissions`, `popover-model`, `popover-skills`, `approvals`, `transcript`, `transcript-approvals`, `transcript-notices`, `transcript-failed`, `transcript-retry` |
 | Contexto | `context-meter`, `context-nudge`, `context-popover`, `context-popover-result`, `context-popover-short`, `context-popover-claude`, `settings-context` |
-| Ajustes | `settings-general`, `settings-profile` (Geral com um perfil de exemplo e foto desenhada na hora), `settings-reset` (a folha "Redefinir o Orb?"), `settings-models`, `settings-perms`, `first-run-banner`, `models` |
+| Ajustes | `settings-general`, `settings-profile` (Geral com um perfil de exemplo e foto desenhada na hora), `settings-reset` (a folha "Redefinir o Orb?"), | Ajustes | `settings-general`, `settings-profile` (Geral com um perfil de exemplo e foto desenhada na hora), `settings-reset` (a folha "Redefinir o Orb?"), `settings-models`, `settings-usage` (um mês de uso de exemplo escrito na pasta de dados; `-usagePeriod today\|week\|month30\|thisMonth` e `-usageChartBy model`, antes de `--snapshot`, escolhem outra vista sem salvar nada), `settings-usage-empty` (sem exemplo: mostra o que a pasta tiver), `settings-perms`, `first-run-banner`, `models` |
+ `settings-perms`, `first-run-banner`, `models` |
 | Barra de menus | `quickask`, `quickask-approvals`, `quickask-reply` |
 | Rotinas e conversas | `routines`, `routine-editor`, `routine-editor-new`, `routine-run`, `routine-run-failed`, `routine-conversation`, `conversations` |
 | Skills e conectores | `skills`, `skills-explore`, `skill-editor`, `skill-editor-new`, `skill-preview`, `skill-preview-installed`, `connectors`, `connectors-explore`, `connectors-lazy`, `conn-tools`, `conn-editor-github`, `conn-editor-files`, `conn-editor-slack`, `conn-editor-manual`, `conn-editor-edit`, `conn-editor-edit-registry`, `conn-editor-connecting`, `conn-editor-connected`, `conn-editor-failed` |

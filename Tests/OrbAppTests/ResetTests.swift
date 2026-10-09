@@ -58,6 +58,7 @@ import Testing
         try write("x", to: data.appending(path: "anexos/\(atlas.id.uuidString)/foto.jpg"))
         try write("x", to: data.appending(path: "saidas/\(atlas.id.uuidString)/saida.txt"))
         try write("{}", to: data.appending(path: "conectores/\(connectorID.uuidString).json"))
+        try write("{}", to: data.appending(path: "uso/2026-10.json"))
         try write("---\ntipo: identidade\n---\n## Como funcionar\n- Seja direto.", to: data.appending(path: "memoria/\(atlas.id.uuidString)/nucleo/identidade.md"))
         try write("---\ntipo: fato\n---\nGosta de café.", to: data.appending(path: "memoria/\(atlas.id.uuidString)/fatos/cafe.md"))
         try write("lixo", to: data.appending(path: "memoria/\(atlas.id.uuidString)/index.sqlite"))
@@ -120,15 +121,15 @@ import Testing
 
     @Test func theSummaryNamesWhatGoesAndLeavesOutWhatIsZero() {
         let full = ResetSummary(orbs: 3, conversations: 42, routines: 5, connectors: 2, skills: 4, folder: "~/Orbs")
-        #expect(full.goes == "Some: 3 Orbs, 42 conversas, 5 rotinas, 2 conectores, 4 skills e os ajustes.")
+        #expect(full.goes == "Some: 3 Orbs, 42 conversas, 5 rotinas, 2 conectores, 4 skills, o histórico de uso e os ajustes.")
         #expect(full.stays == "Fica: a pasta ~/Orbs com os arquivos dos Orbs e, se você quiser, as memórias.")
         let small = ResetSummary(orbs: 1, conversations: 1, routines: 0, connectors: 0, skills: 0, folder: "~/Orbs")
-        #expect(small.goes == "Some: 1 Orb, 1 conversa e os ajustes.")
+        #expect(small.goes == "Some: 1 Orb, 1 conversa, o histórico de uso e os ajustes.")
         #expect(ResetSummary(orbs: 1, conversations: 0, routines: 1, connectors: 1, skills: 1, folder: "~").goes
-            == "Some: 1 Orb, 1 rotina, 1 conector, 1 skill e os ajustes.")
-        #expect(ResetSummary(orbs: 0, conversations: 0, routines: 0, connectors: 0, skills: 0, folder: "~").goes == "Some: os ajustes.")
+            == "Some: 1 Orb, 1 rotina, 1 conector, 1 skill, o histórico de uso e os ajustes.")
+        #expect(ResetSummary(orbs: 0, conversations: 0, routines: 0, connectors: 0, skills: 0, folder: "~").goes == "Some: o histórico de uso e os ajustes.")
         #expect(ResetSummary(orbs: 2, conversations: nil, routines: 0, connectors: 0, skills: 0, folder: "~").goes
-            == "Some: 2 Orbs, as conversas e os ajustes.")
+            == "Some: 2 Orbs, as conversas, o histórico de uso e os ajustes.")
     }
 
     @Test func conversationsAreCountedByTheirFilesNotTheNotesBesideThem() throws {
@@ -148,7 +149,7 @@ import Testing
 
         #expect(report.isComplete && report.keptMemories == 2)
         // Gone: the conversations (current, archived, routines'), the attachments, the outputs, the old copies.
-        for gone in ["conversations", "anexos", "saidas", "conectores", "state.json.corrupt-20260101-000000",
+        for gone in ["conversations", "anexos", "saidas", "conectores", "uso", "state.json.corrupt-20260101-000000",
                      "memoria/\(atlas.id.uuidString)", "memoria/\(luna.id.uuidString)"] {
             #expect(!exists(gone), "\(gone) should be gone")
         }
