@@ -27,9 +27,11 @@ struct SidebarView: View {
                     } content: { _ in
                         FirstOrbInvitation(isSelected: model.selection == nil, title: model.welcomeCopy.invitationTitle)
                     }
+                    .transition(.opacity)
                 }
                 ForEach(Array(model.botIDs.enumerated()), id: \.element) { index, id in
                     SidebarBotRow(botID: id, index: index, selectionSpace: selectionSpace)
+                        .transition(.adapted(.arrive, reduceMotion: reduceMotion))
                 }
 
                 SectionTitle("Espaço de trabalho")
@@ -52,6 +54,12 @@ struct SidebarView: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
+            // A new or a deleted Orb: the row comes (rises 6 pt) or goes (fades) and the others slide, bound to the ids, so a
+            // status or an unread count moves nothing. Written before the selection's modifier below, which is the outer
+            // one: the animation of the list wins when both change in one update, and the highlight (which would slide
+            // with it) holds still then, see `SidebarRow`.
+            .animateChanges(of: model.botIDs)
+            .environment(\.sidebarListChanged, settledBotIDs.map { $0 != model.botIDs } ?? false)
             // Bound to the selection alone: the background slides to the new row and the title changes color with it,
             // while a status or an unread count that changes in a row does not animate along (no animation per Orb).
             // Not when the list itself changed in the same update (a new or a deleted Orb): then only the rows' own
@@ -121,6 +129,7 @@ private struct SidebarRow<Content: View>: View {
     var help = ""
     let action: () -> Void
     @ViewBuilder let content: (Bool) -> Content
+    @Environment(\.sidebarListChanged) private var listChanged
     @State private var isHovering = false
 
     var body: some View {
@@ -141,6 +150,9 @@ private struct SidebarRow<Content: View>: View {
                         RoundedRectangle(cornerRadius: 10)
                             .fill(Palette.ghostSelected)
                             .matchedGeometryEffect(id: SidebarSelection.id, in: selectionSpace)
+                            // The list changed in this update (a new Orb that is chosen, a deleted one): the rows come and
+                            // go, and the highlight does not slide to a row that is still arriving.
+                            .transaction { if listChanged { $0.animation = nil } }
                     }
                 }
                 .contentShape(.rect)
@@ -150,6 +162,11 @@ private struct SidebarRow<Content: View>: View {
         .onHover { isHovering = $0 }
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
+}
+
+extension EnvironmentValues {
+    /// The list of Orbs changed in the update being drawn (the rows are arriving or leaving).
+    @Entry fileprivate var sidebarListChanged = false
 }
 
 /// What the sidebar's selection is made of, as plain values the tests can read.
