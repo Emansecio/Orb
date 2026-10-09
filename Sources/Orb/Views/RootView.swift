@@ -11,6 +11,8 @@ struct RootView: View {
     @State private var presentedEmptyChats = PresentedOrbs()
     /// The queued messages that already came in (ids): reopening the chat does not bring them in again.
     @State private var presentedQueued = PresentedOrbs()
+    /// Whether the welcome screen's entrance already played for this empty list (§2.11).
+    @State private var welcomeLedger = WelcomeLedger()
 
     var body: some View {
         @Bindable var model = model
@@ -18,8 +20,14 @@ struct RootView: View {
             SidebarView()
                 .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 400)
         } detail: {
-            DetailView()
+            DetailView(welcomeLedger: welcomeLedger)
         }
+        // With Orbs there is always one chosen ("Escolha um Orb" is gone); with none, the welcome screen shows.
+        .onChange(of: model.botIDs, initial: true) { _, ids in
+            if !ids.isEmpty { welcomeLedger.reset() }
+            fixSelection()
+        }
+        .onChange(of: model.selection) { fixSelection() }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
             guard let open = autoClose.windowResized(to: width, isOpen: model.showInspector) else { return }
             autoChange = open
@@ -30,8 +38,9 @@ struct RootView: View {
         }
         .environment(\.presentedEmptyChats, presentedEmptyChats)
         .environment(\.presentedQueued, presentedQueued)
-        .sheet(isPresented: $model.showNewBot) {
-            NewBotSheet()
+        .sheet(isPresented: $model.showNewBot, onDismiss: { model.newBotStart = nil }) {
+            // Opened from a kept memory on the welcome screen: the sheet starts from it.
+            NewBotSheet(kept: model.newBotStart.map { [$0] } ?? [], chosen: model.newBotStart)
         }
         .systemSheets()
         .alert("Atenção com seus dados", isPresented: Binding(
@@ -48,8 +57,23 @@ struct RootView: View {
     }
 }
 
+extension RootView {
+    /// Keeps the selection pointing at something that exists (`WelcomeSelection`).
+    fileprivate func fixSelection() {
+        let fixed = WelcomeSelection.resolved(model.selection, botIDs: model.botIDs)
+        if fixed != model.selection { model.selection = fixed }
+    }
+}
+
 private struct DetailView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let welcomeLedger: WelcomeLedger
+
+    /// No Orbs and nothing else chosen: the front door.
+    private var showsWelcome: Bool {
+        model.botIDs.isEmpty && model.selection == nil
+    }
 
     var body: some View {
         Group {
@@ -67,11 +91,16 @@ private struct DetailView: View {
             case .skills:
                 SkillsView()
             case nil:
-                ContentUnavailableView("Escolha um Orb", systemImage: "circle.hexagongrid",
-                                       description: Text("Ou crie um novo com ⌘N."))
+                // With Orbs the root view picks the first one at once; with none this is the welcome screen.
+                if model.botIDs.isEmpty {
+                    WelcomeView(ledger: welcomeLedger)
+                        .transition(.asymmetric(insertion: .opacity, removal: .opacity.animation(Motion.exit)))
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.canvas)
+        // Coming in and out of the welcome screen is the chat's own cross-fade (§2.9).
+        .animation(Motion.adapted(Motion.crossFade, reduceMotion: reduceMotion), value: showsWelcome)
     }
 }

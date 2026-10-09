@@ -221,6 +221,48 @@ do chat, ao lado do Orb. O transcript acima dela é o histórico (a linha de uma
   VoiceOver ligado, o app ativo e o Orb escolhido, só frases com alvo, no máximo uma a cada 8 s. A espera já é
   anunciada pelo cartão de aprovação (prioridade alta); o fim do turno não ganha anúncio novo.
 
+### 2.11 Tela de boas-vindas (sem Orbs)
+
+Implementada em `WelcomeView.swift`. Aparece quando `botIDs` está vazio (primeiro uso com a lista vazia, ou depois de apagar todos).
+Só usa tokens que já existem; o fundo é estático (um gradiente desenhado uma vez, sem blur) e **só os Orbs se mexem**.
+
+- **Herói.** Lia (72 pt), Atlas (104 pt) e Bento (72 pt) são `OrbView` vivos e interativos, cada um com o seu jeito
+  (equilibrado, tímido, curioso): respiram, piscam, seguem o cursor; um clique faz o Orb pular e ficar feliz por 1,4 s. Nenhum laço
+  novo de animação. Pausam com a janela inativa e fora da parte visível (o `OrbView` já faz).
+- **Entrada** (`WelcomeEntrance`, cerca de 0,8 s). Atlas: `.drop` sem atraso; Lia: 0,06 s; Bento: 0,10 s, cada um pousa com um
+  `poke`. Título `.rise` em 0,16 s, subtítulo em 0,20 s, pontos em `Motion.stagger` a partir de 0,26 s, cartão ou ações
+  `.rise` em 0,40 s e o cartão de memórias em 0,44 s.
+- **Quando a entrada toca.** Na primeira aparição da sessão e cada vez que a lista acaba de ficar vazia. Voltar de Rotinas,
+  Conectores ou Skills não repete: o `WelcomeLedger` (referência no estado da `RootView`, como o `PresentedOrbs`) guarda que
+  já tocou e é zerado quando `botIDs` deixa de ser vazio. O que nasce depois do primeiro segundo (a lista de memórias que
+  terminou de carregar, as ações depois do cartão) entra por transição, não pela entrada.
+- **Trocas.** Entrar e sair da tela segue o §2.9 (`.opacity` em 0,18 s); depois de criar um Orb ela só apaga (`Motion.exit`) e o chat
+  vazio do Orb novo toca a própria queda (§2.8), então o Atlas "cai" no chat. Do cartão de modelo para as ações: o cartão sai
+  com `.opacity` em `Motion.exit` e as ações entram com `.rise` em `Motion.enter`, presas à mudança de estágio, não à lista.
+- **Causa e efeito.** Passar o ponteiro em "ou comece com o Atlas" faz o Atlas dar um pulinho (no máximo um a cada 1,5 s).
+  Ao conectar o modelo, o Atlas pula e fica `.happy` por 3 s, o prazo do flash da sessão.
+- **Botão principal** (`HeroPillStyle`). Cápsula branca com um halo índigo (sombra de 16 pt, opacidade 0,35); no hover só a opacidade do halo
+  anima (0,5, `Motion.hoverIn`/`hoverOut`); pressionado, escala 0,97 em `Motion.press`.
+- **Reduzir movimento.** Tudo entra junto em `Motion.fade` (0,15 s), sem queda nem pulos. Os Orbs ficam estáticos (o `OrbView`
+  já faz); a comemoração vira só o rosto `.happy` parado por 3 s; o halo do botão não anima; a troca cartão → ações é só opacidade.
+- **VoiceOver.** O herói é uma imagem ("Três Orbs sorrindo: Atlas, de óculos, no meio; Lia, com um laço; Bento, com fones"); a ordem de
+  leitura é título, subtítulo, os três pontos, cartão ou botão, alternativa e memórias. Ao conectar o modelo é anunciado "Pronto. Agora
+  crie seu primeiro Orb." e o foco vai para o botão principal.
+- **Abrir o app já com modelo.** `model.connected` só é preenchido por `refreshConnections` (Keychain, ChatGPT, `claude auth status`),
+  que leva de centenas de ms a alguns segundos. Até `hasCheckedConnections` ficar verdadeiro, o estágio é `.checking`: herói, texto e
+  pontos aparecem e só o lugar da ação é reservado. Depois a ação entra por transição (`.rise`), cartão ou botões, conforme o
+  resultado. Nada de mostrar o cartão de conectar e trocar. A comemoração e o anúncio do VoiceOver só valem quando o modelo foi
+  conectado no cartão (`WelcomeStage.celebrates(old:new:viaCard:)`), nunca quando a verificação inicial termina.
+- **Memória guardada que chega depois.** Ao apagar o último Orb guardando a memória, a cópia roda em segundo plano. A lista é lida
+  de novo quando ela termina (`keptMemoriesVersion`), e o cartão entra por transição.
+- **Texto da lista esvaziada.** A marca `orb.welcome.criouOrb` também é gravada quando o app abre com Orbs que já existem (feitos por
+  versões anteriores), então quem apaga todos vê "Hora de um Orb novo". "Redefinir" limpa a marca e volta sem Orbs (como uma instalação nova): a tela abre com o texto de primeiro uso.
+- **Convite na barra lateral.** Segue o texto da tela ("Criar seu primeiro Orb" ou "Criar um novo Orb"). Um clique mostra a boas-vindas;
+  com ela já na tela, o clique abre a folha Novo Orb.
+- **Fundo.** Vai atrás da coluna que rola, então a luz acompanha os Orbs quando o conteúdo é mais alto que a janela.
+- **Desempenho.** O Orb de 104 pt é "grande" (no máximo 30 fps, cerca de 14 parado) e os de 72 pt ficam perto de 12 fps; o
+  `OrbDriver` é compartilhado. Nada de `TimelineView`, `phaseAnimator` sem fim ou blur de superfície grande.
+
 ## 3. O Orb reagindo à interface (sistema do Orb)
 
 > **Implementado** em design-orbs: `OrbActivity.attentive`, `BotLive.noteComposing` (com `ComposingDeadline`;
@@ -254,6 +296,7 @@ A atividade "atento" seria um caso novo em `OrbActivity` (`attentive`: olhar par
 | Compositor | borda/fundo animados, símbolo troca com efeito; cartão cresce com lista, anexos e erro; chips deslizam com o Parar; percentual rola | troca direta; só fade de 0,15 s (Parar, miniatura, dica) |
 | Folhas | seções em cascata | tudo junto |
 | Chat vazio | Orb cai e amassa, cascata | tudo junto, Orb parado |
+| Boas-vindas | três Orbs caem em sequência, pontos em cascata, cartão sobe | tudo junto em 0,15 s, Orbs parados, halo fixo |
 | Linha de trabalho | frase sobe 4 pt, medidor desliza, contador rola | frase troca por opacidade (0,15 s), sem deslizar nem rolar |
 | Orb | vivo | estático (já é assim) |
 

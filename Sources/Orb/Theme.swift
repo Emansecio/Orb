@@ -53,6 +53,10 @@ enum Palette {
     static let danger = Color(hex: 0xFF263C)
     static let warn = Color(hex: 0xFF9800)
 
+    // The welcome screen's stage light (the indigo palette's glow, and a cool floor under the Orbs).
+    static let stageGlow = Color(hex: 0x6E5CFF)
+    static let stageFloor = Color(hex: 0x86DFFF)
+
     static let conversationFont = Font.system(size: 14)
     /// 22 pt line height at 14 pt.
     static let conversationLineSpacing: CGFloat = 5
@@ -244,6 +248,33 @@ struct PrimaryPillStyle: ButtonStyle {
             .padding(.horizontal, 14)
             .padding(.vertical, 7)
             .background(Palette.ink.opacity(configuration.isPressed ? 0.8 : (isEnabled ? 1 : 0.3)), in: .capsule)
+    }
+}
+
+/// The one big call to action of the welcome screen: a white pill with a soft indigo halo behind it. The halo grows
+/// a little on hover (opacity only, so the render server does it); pressed, the pill shrinks to 0.97. Under Reduce
+/// Motion the halo does not animate.
+struct HeroPillStyle: ButtonStyle {
+    @State private var isHovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(Palette.onInk)
+            .padding(.horizontal, 22)
+            .padding(.vertical, 11)
+            .background {
+                // The halo is the capsule's own shadow in the stage color; only its opacity changes with the hover.
+                Capsule()
+                    .fill(Palette.ink)
+                    .shadow(color: Palette.stageGlow.opacity(isHovering ? 0.5 : 0.35), radius: 16, y: 4)
+                    .animation(reduceMotion ? nil : Motion.hover(isHovering), value: isHovering)
+            }
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
+            .animation(reduceMotion ? nil : Motion.press, value: configuration.isPressed)
+            .contentShape(.capsule)
+            .onHover { isHovering = $0 }
     }
 }
 

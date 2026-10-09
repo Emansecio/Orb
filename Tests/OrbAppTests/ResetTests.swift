@@ -163,7 +163,7 @@ import Testing
         let state = try JSONDecoder().decode(AppState.self, from: Data(contentsOf: data.appending(path: "state.json")))
         #expect(state.providers == providers && state.defaultModel == "openai/gpt-x")
         #expect(state.learnedContexts["openai/gpt-x"]?.tokens == 8_000)
-        #expect(state.bots.map(\.name) == ["Atlas"] && state.routines.isEmpty && state.connectors.isEmpty)
+        #expect(state.bots.isEmpty && state.routines.isEmpty && state.connectors.isEmpty) // the welcome comes next
         // Keychain: the connector's secrets go; the keys and the sign-in stay; an item that is not ours is not touched.
         #expect(vault.accounts == ["openai", "anthropic", "chatgpt", "outro.item"])
         // Preferences: back to the default, but for the note of which Keychain accounts came over from OpenBot.

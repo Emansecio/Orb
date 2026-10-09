@@ -246,7 +246,7 @@ enum NewBotSnapshots {
         return AnyView(NewBotSheet(height: height, kept: list, chosen: list.first))
     }
 
-    private static func seed(_ profile: KeptProfile, pages: Int, at date: Date, in root: URL) {
+    static func seed(_ profile: KeptProfile, pages: Int, at date: Date, in root: URL) {
         let folder = KeptMemories.folder(in: root).appending(path: KeptMemories.folderName(for: profile.name, at: date))
         let facts = folder.appending(path: MemoryKind.fato.folder)
         try? FileManager.default.createDirectory(at: facts, withIntermediateDirectories: true)

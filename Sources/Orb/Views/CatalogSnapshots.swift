@@ -4,6 +4,7 @@ import SwiftUI
 @MainActor
 enum CatalogSnapshots {
     static func view(_ screen: String, model: AppModel) -> AnyView? {
+        if let welcome = WelcomeSnapshots.view(screen, model: model) { return welcome }
         switch screen {
         case "conn-editor-github":
             return template("github")

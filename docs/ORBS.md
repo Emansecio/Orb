@@ -385,8 +385,14 @@ do editor). Arte no app: 12 MB → 3,9 MB.
 ORB_DATA_DIR=/tmp/orb-design .build/debug/Orb --snapshot editor-hair /tmp/editor.png
 
 # Folhas de revisão de design (composição idêntica à do app): cabelos, cabelo-padrao, cabelo-acessorio,
-# acessorios, olhos, bocas, detalhes, cores, tamanhos (18/30/60/96/132 pt, fundo escuro e claro), quadros, reacoes
+# acessorios, olhos, bocas, detalhes, cores, tamanhos (18/30/60/96/132 pt, fundo escuro e claro), quadros, reacoes, icone
 ORB_DATA_DIR=/tmp/orb-design .build/debug/Orb --render-orbs /tmp/cabelos.png cabelos
+
+# O ícone do app é desenhado pelo próprio app (AppIcon): `--render-icon <png> [pixels]` (padrão 1024; até 64 px sai a variante
+# simples, sem poça de luz e com o rosto maior). A folha "icone" mostra 1024/512/256/128/64/32/16 no tamanho real e ampliados, sobre
+# papel de parede claro e escuro.
+ORB_DATA_DIR=/tmp/orb-design .build/debug/Orb --render-icon /tmp/icone-128.png 128
+ORB_DATA_DIR=/tmp/orb-design .build/debug/Orb --render-orbs /tmp/icone.png icone
 
 # Bench de CPU: N Orbs vivos numa janela invisível; imprime CPU do processo e da thread principal, instruções
 # (proc_pid_rusage), ticks do link e frames por segundo. Com a tela apagada, faz o papel do OrbDriver.
@@ -438,6 +444,7 @@ Swift, exceto quando ela precisa de uma cor padrão (`OrbConfig.defaultAccent`) 
 | `Orbs/OrbSpeech.swift` | visemas (`OrbViseme`, com boca reserva) e ritmo das sílabas (`Syllables`) |
 | `Orbs/OrbEditor.swift` | editor de personalização |
 | `Orbs/OrbDesignSheets.swift` | folhas de revisão de design (`--render-orbs saída.png <folha>`) |
+| `AppIcon.swift` | o ícone do app e o `GelShader` (corpo do gel por pixel, igual ao `BodyShader` do orbgen) |
 | `Orbs/OrbBench.swift` | bench de CPU dos Orbs (`--render-orbs bench`) |
 | `BotLive.swift` | `BotLive.activity` (a atividade de cada Orb), "digitando" (`noteComposing`, `ComposingDeadline`) e a olhada ao ser escolhido (`glance`) |
 | `Views/LiveBotAvatar.swift` | avatar que lê só a atividade e o pulo do Orb (painel, chat vazio, linha "trabalhando") |

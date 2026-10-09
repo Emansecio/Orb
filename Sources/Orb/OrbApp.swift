@@ -15,7 +15,7 @@ enum Launcher {
 
 struct OrbApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var model = AppModel()
+    @State private var model = AppModel(firstUse: DevRun.isActive ? .initial : .firstUse)
 
     var body: some Scene {
         Window("Orb", id: "main") {
@@ -107,9 +107,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             OrbSheet.render(to: URL(fileURLWithPath: arguments[flag + 1]))
             DevRun.finish()
         }
-        // `Orb --render-icon out.png` writes the 1024 px app icon (used by scripts/bundle.sh).
+        // `Orb --render-icon out.png [pixels]` writes the app icon (1024 px by default; used by scripts/bundle.sh).
         if let flag = arguments.firstIndex(of: "--render-icon"), arguments.indices.contains(flag + 1) {
-            OrbSheet.renderIcon(to: URL(fileURLWithPath: arguments[flag + 1]))
+            let pixels = arguments.indices.contains(flag + 2) ? Int(arguments[flag + 2]) : nil
+            AppIcon.render(to: URL(fileURLWithPath: arguments[flag + 1]), pixels: min(max(pixels ?? 1024, 16), 4096))
             DevRun.finish()
         }
         // So a tap on a banner reaches the app even when that tap is what launched it.
@@ -252,21 +253,6 @@ enum OrbSheet {
         .environment(\.colorScheme, .dark)
 
         write(sheet, scale: 2, to: url)
-    }
-
-    /// Atlas on the standard macOS icon tile (824 pt rounded square inside a 1024 canvas).
-    static func renderIcon(to url: URL) {
-        let orb = AppState.initial.bots[0].orb
-        let icon = ZStack {
-            RoundedRectangle(cornerRadius: 185, style: .continuous)
-                .fill(LinearGradient(colors: [Color(hex: 0x24233A), Color(hex: 0x09090F)], startPoint: .top, endPoint: .bottom))
-                .overlay(RoundedRectangle(cornerRadius: 185, style: .continuous).strokeBorder(.white.opacity(0.08), lineWidth: 2))
-                .frame(width: 824, height: 824)
-            OrbView(config: orb, size: 420, animated: false)
-                .offset(y: -20)
-        }
-        .frame(width: 1024, height: 1024)
-        write(icon, scale: 1, to: url)
     }
 
     private static func write(_ view: some View, scale: CGFloat, to url: URL) {

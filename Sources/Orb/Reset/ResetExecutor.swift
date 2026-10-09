@@ -111,10 +111,10 @@ struct ResetExecutor {
         do { try files.removeItem(at: url) } catch { report.failures.append(url.lastPathComponent) }
     }
 
-    /// The `state.json` of a first use that keeps the providers' setup (the Orb starts as it does without a file).
+    /// The `state.json` of a first use that keeps the providers' setup: no Orb, so the app opens on the welcome.
     private func writeSurvivors(_ survivors: ResetPlan.Survivors?, report: inout ResetReport) {
         guard let survivors else { return }
-        var state = AppState.initial
+        var state = AppState.firstUse
         state.providers = survivors.providers
         state.defaultModel = survivors.defaultModel
         state.learnedContexts = survivors.learnedContexts

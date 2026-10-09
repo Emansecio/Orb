@@ -43,6 +43,11 @@ final class AppModel {
     var drafts: [UUID: String] = [:]
     var showInspector = true
     var showNewBot = false
+    /// The kept memory the new-Orb sheet starts from when it opens from the welcome screen (nil: no memory chosen).
+    var newBotStart: KeptMemory?
+    /// Where the welcome screen remembers that an Orb was made once (so an empty list reads "Hora de um Orb novo").
+    /// The app's own preferences only in the running app; a developer run or a test keeps it in memory.
+    @ObservationIgnored var welcomePreferences: any PreferenceStore = InMemoryPreferences()
     // Commands and shortcuts (see AppModel+Commands.swift).
     var showCommandPalette = false
     var showShortcuts = false
@@ -65,6 +70,12 @@ final class AppModel {
     var connectorStatus: [UUID: MCPStatus] = [:]
     /// Providers with a key in the Keychain (or, for ChatGPT and Claude Code, a sign-in).
     private(set) var connected: Set<ProviderKind> = []
+    /// True once the first `refreshConnections` has finished (Keychain, ChatGPT, `claude auth status`): before that,
+    /// `connected` is empty only because nobody has looked yet, and a screen that depends on it must not guess.
+    private(set) var hasCheckedConnections = false
+    /// Counts the memories that finished being kept after an Orb was deleted with `keepMemory` (the copy runs in the
+    /// background, so the list of kept memories changes some time after the Orb is gone).
+    private(set) var keptMemoriesVersion = 0
     /// What the local Claude Code reports (checked while that provider is set up).
     private(set) var claudeCode = ClaudeCodeStatus()
     /// Counts the times you tried to send before any model was connected (the first-use card pulses on each).
@@ -156,8 +167,10 @@ final class AppModel {
     /// `asyncLoading` says whether the first Orb's conversation is read off the main thread after `init` returns
     /// (the window does not wait for it; the app) or before it returns (what tests rely on); it follows
     /// `runsBackgroundWork` unless given.
+    /// `firstUse` is the state when there is no data yet: the app passes `.firstUse` (no Orb, the welcome); tests and
+    /// the developer modes keep `.initial`, with Atlas.
     init(store: Store = .standard, runsBackgroundWork: Bool = true, asyncLoading: Bool? = nil, secretVault: (any SecretVault)? = nil,
-         devRun: Bool = DevRun.isActive) {
+         devRun: Bool = DevRun.isActive, firstUse: AppState = .initial) {
         self.store = store
         isDevRun = devRun
         let vault = secretVault ?? (runsBackgroundWork && !devRun ? KeychainVault() : MemoryVault())
@@ -173,7 +186,7 @@ final class AppModel {
         var notices: [StoreNotice] = []
         let stateRead = store.readState()
         notices += stateRead.notice.map { [Self.described($0, bots: [], routines: [])] } ?? []
-        let state = stateRead.value ?? .initial
+        let state = stateRead.value ?? firstUse
         bots = state.bots
         routines = state.routines
         skills = state.skills
@@ -195,6 +208,11 @@ final class AppModel {
             shown.lastUsed = .now
         }
         dataNotices = notices
+        if runsBackgroundWork && !devRun { welcomePreferences = UserDefaults.standard }
+        // Nothing will ever look at the connections in a model that is not the running app (tests, developer runs).
+        hasCheckedConnections = !runsBackgroundWork || devRun
+        // Orbs made by an earlier version: if they are all deleted, the welcome screen says "Hora de um Orb novo".
+        if !state.bots.isEmpty { noteOrbCreated() }
         if !runsBackgroundWork { resetEnvironment = .inert } // a model that is not the running app never resets the app's preferences
         selection = state.bots.first.map { .bot($0.id) }
         self.store.onSaveFailure = { [weak self] notice in
@@ -560,7 +578,10 @@ final class AppModel {
     }
 
     func refreshConnections() async {
-        guard !isResetting else { return } // a read of a key that was just removed could bring OpenBot's copy back
+        guard !isResetting else { // a read of a key that was just removed could bring OpenBot's copy back
+            hasCheckedConnections = true
+            return
+        }
         var found = await keyedProviders()
         if await ChatGPTAuth.shared.credential != nil { found.insert(.chatgpt) }
         if !isDevRun, account(.claudeCode) != nil { // the status runs the real `claude`
@@ -568,6 +589,7 @@ final class AppModel {
             if claudeCode.isLoggedIn { found.insert(.claudeCode) }
         }
         connected = found
+        hasCheckedConnections = true
     }
 
     /// Providers with a key in the Keychain. Each read takes milliseconds (and the system may ask permission for an
@@ -660,6 +682,7 @@ final class AppModel {
         session.lastUsed = .now
         bots.append(bot)
         selection = .bot(bot.id)
+        noteOrbCreated()
         if let folderProblem { append(.notice("\(folderProblem). \(bot.name) vai trabalhar na pasta pessoal."), to: bot.id) }
         // Starting from a kept memory: its folder becomes this Orb's (a rename, so it is as quick as making a folder).
         // When it cannot be moved the Orb starts with a memory of its own and says so.
@@ -752,9 +775,15 @@ final class AppModel {
         if keepMemory {
             let stretch = session.pendingStretch()
             let bank = library.bank(for: botID)
-            keeping = Task.detached(priority: .utility) {
+            let copying = Task.detached(priority: .utility) {
                 if let stretch, let page = SessionSummary.page(from: stretch) { await bank.saveSession(page) }
                 return library.keep(botID, name: name, profile: profile)
+            }
+            keeping = copying
+            // The welcome screen lists the kept memories: it reads again when this one has arrived.
+            Task { [weak self] in
+                _ = await copying.value
+                self?.keptMemoriesVersion += 1
             }
         } else {
             library.delete(botID)

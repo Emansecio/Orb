@@ -47,6 +47,22 @@ struct KeptMemory: Identifiable, Equatable, Sendable {
         return "\(name) · \(Self.dayFormat.string(from: date)) · \(count)"
     }
 
+    /// "12 lembranças" (or "1 lembrança").
+    var countText: String { pageCount == 1 ? "1 lembrança" : "\(pageCount) lembranças" }
+
+    /// "Cuida da minha agenda · 8 de out. · 12 lembranças": the line under the name on the welcome screen. Without a
+    /// role (or a profile) it is only the day and the count.
+    var shortDetail: String {
+        let role = profile?.role.trimmingCharacters(in: .whitespaces) ?? ""
+        let parts = [role, Self.shortDay.string(from: date), countText].filter { !$0.isEmpty }
+        return parts.joined(separator: " · ")
+    }
+
+    /// "Continuar com a memória de Nina, 12 lembranças, 8 de outubro": what VoiceOver says for the row.
+    var spokenSummary: String {
+        "Continuar com a memória de \(name), \(countText), \(Self.longDay.string(from: date))"
+    }
+
     /// What choosing this memory in "Começar de" fills in: the Orb's name and, when the folder has a profile, its role
     /// and look (a folder from before profiles gives only the name; what is not given stays as it is).
     func fill(name: inout String, role: inout String, orb: inout OrbConfig) {
@@ -72,6 +88,16 @@ struct KeptMemory: Identifiable, Equatable, Sendable {
         profile == nil ? "O nome veio da memória. Dá para mudar."
             : "Nome, papel e aparência vieram da memória. Dá para mudar."
     }
+
+    private static func dayFormatter(_ format: String) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "pt_BR")
+        formatter.dateFormat = format
+        return formatter
+    }
+
+    private static let shortDay = dayFormatter("d 'de' MMM")
+    private static let longDay = dayFormatter("d 'de' MMMM")
 
     private static let dayFormat: DateFormatter = {
         let format = DateFormatter()

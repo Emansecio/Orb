@@ -19,6 +19,11 @@ struct AppState: Codable, Sendable {
     /// Context windows models turned out to have (a request was refused for its size), by "provider/model".
     var learnedContexts: [String: LearnedContext] = [:]
 
+    /// What the app starts with when there is no data yet (a new install, after "Redefinir o Orb"): no Orb, so the
+    /// window opens on the welcome, where Atlas is one click away.
+    static let firstUse = AppState(bots: [])
+
+    /// A state with Atlas ready, for tests and the developer modes' sample data.
     static let initial = AppState(bots: [
         Bot(name: "Atlas", role: "Assistente do seu Mac",
             orb: OrbConfig(color: "indigo", eyes: "pilulas", mouth: "sorriso", accessories: ["oculos-redondos"]))

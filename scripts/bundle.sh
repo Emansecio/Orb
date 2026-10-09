@@ -16,13 +16,12 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Orb"
 cp -R Sources/Orb/Resources/Orbs "$APP/Contents/Resources/Orbs"
 
-# App icon: rendered by the app itself from Atlas's Orb.
+# App icon: rendered by the app itself (AppIcon), straight at each size.
 ICONSET="$(mktemp -d)/AppIcon.iconset"
 mkdir -p "$ICONSET"
-"$BIN" --render-icon "$ICONSET/icon_512x512@2x.png"
 for size in 16 32 128 256 512; do
-  sips -z $size $size "$ICONSET/icon_512x512@2x.png" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
-  sips -z $((size * 2)) $((size * 2)) "$ICONSET/icon_512x512@2x.png" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
+  "$BIN" --render-icon "$ICONSET/icon_${size}x${size}.png" $size
+  "$BIN" --render-icon "$ICONSET/icon_${size}x${size}@2x.png" $((size * 2))
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 

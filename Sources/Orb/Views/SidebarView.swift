@@ -14,6 +14,19 @@ struct SidebarView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 1) {
                 SectionTitle("Orbs")
+                if model.botIDs.isEmpty {
+                    // No Orbs: an invitation in the list's own place. It shows the welcome screen (what you get with
+                    // nothing selected); when that is already on screen, the click opens the New Orb sheet instead.
+                    SidebarRow(isSelected: model.selection == nil, selectionSpace: selectionSpace, isDashed: true) {
+                        if model.selection == nil {
+                            model.startNewOrb(from: nil)
+                        } else {
+                            model.selection = nil
+                        }
+                    } content: { _ in
+                        FirstOrbInvitation(isSelected: model.selection == nil, title: model.welcomeCopy.invitationTitle)
+                    }
+                }
                 ForEach(Array(model.botIDs.enumerated()), id: \.element) { index, id in
                     SidebarBotRow(botID: id, index: index, selectionSpace: selectionSpace)
                 }
@@ -101,6 +114,8 @@ private struct SectionTitle: View {
 private struct SidebarRow<Content: View>: View {
     let isSelected: Bool
     let selectionSpace: Namespace.ID
+    /// A dashed outline: the row that invites you to make the first Orb.
+    var isDashed = false
     let action: () -> Void
     @ViewBuilder let content: (Bool) -> Content
     @State private var isHovering = false
@@ -112,6 +127,12 @@ private struct SidebarRow<Content: View>: View {
                 .padding(.vertical, 6)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .hoverFill(isHovering && !isSelected, in: .rect(cornerRadius: 10))
+                .overlay {
+                    if isDashed {
+                        RoundedRectangle(cornerRadius: 10)
+                            .strokeBorder(Palette.line, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    }
+                }
                 .background {
                     if isSelected {
                         RoundedRectangle(cornerRadius: 10)
@@ -208,6 +229,37 @@ private struct NavLabel: View {
                     .accessibilityHidden(true)
             }
         }
+    }
+}
+
+/// The row that stands where the Orbs go when there are none: a dashed circle with a plus, what it is for and where
+/// the Orbs will be. Selected while the welcome screen shows.
+private struct FirstOrbInvitation: View {
+    let isSelected: Bool
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ZStack {
+                Circle().strokeBorder(Palette.lineStrong, style: StrokeStyle(lineWidth: 1.2, dash: [3, 3]))
+                Image(systemName: "plus")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Palette.muted)
+            }
+            .frame(width: 30, height: 30)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(isSelected ? Palette.ink : Palette.secondary)
+                Text("Seus Orbs aparecem aqui")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.faint)
+            }
+            Spacer(minLength: 4)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title)
+        .accessibilityHint(isSelected ? "Abre a folha Novo Orb" : "Mostra a tela de boas-vindas")
     }
 }
 

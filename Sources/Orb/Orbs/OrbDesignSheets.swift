@@ -6,7 +6,7 @@ import AppKit
 /// `Orb --render-orbs out.png <sheet>`. Without a sheet name, `--render-orbs` writes the Orbs × activities sheet.
 @MainActor
 enum OrbDesignSheet {
-    static let names = ["cabelos", "cabelo-padrao", "cabelo-acessorio", "acessorios", "olhos", "bocas", "detalhes", "cores", "tamanhos", "quadros", "reacoes"]
+    static let names = ["cabelos", "cabelo-padrao", "cabelo-acessorio", "acessorios", "olhos", "bocas", "detalhes", "cores", "tamanhos", "quadros", "reacoes", "icone"]
 
     /// Writes the sheet `name` (one of `names`); false for an unknown name.
     @discardableResult
@@ -23,6 +23,7 @@ enum OrbDesignSheet {
         case "tamanhos": sizes(to: url)
         case "quadros": frames(to: url)
         case "reacoes": reactions(to: url)
+        case "icone": appIcon(to: url)
         default: return false
         }
         return true
@@ -207,6 +208,42 @@ enum OrbDesignSheet {
         .padding(24)
         .background(Palette.canvas)
         write(sheet, to: url)
+    }
+
+    /// The app icon at every size it ships in (`AppIcon`), drawn pixel for pixel on a light and a dark wallpaper:
+    /// each size at its real size (the two big ones shrunk), and the small ones again magnified without smoothing (128 ×2, the rest ×4). Written at 1× (no 2× pass),
+    /// so what is seen is what the Dock and Finder get.
+    private static func appIcon(to url: URL) {
+        let pixels = [1024, 512, 256, 128, 64, 32, 16]
+        let icons = pixels.map { ($0, AppIcon.image(pixels: $0)) }
+        let band = CGSize(width: 1040, height: 520)
+        let space = CGColorSpace(name: CGColorSpace.sRGB)!
+        guard let ctx = CGContext(data: nil, width: Int(band.width), height: Int(band.height) * 2, bitsPerComponent: 8,
+                                  bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return }
+        for (index, wallpaper) in [(0.93, 0.93, 0.93), (0.118, 0.118, 0.118)].enumerated() {
+            let y0 = CGFloat(1 - index) * band.height
+            ctx.setFillColor(CGColor(srgbRed: wallpaper.0, green: wallpaper.1, blue: wallpaper.2, alpha: 1))
+            ctx.fill(CGRect(x: 0, y: y0, width: band.width, height: band.height))
+            var x: CGFloat = 20
+            // Row 1 (top): every size, 1024 and 512 shrunk to fit; the rest at their real size (256 included).
+            for (px, icon) in icons {
+                let shown: CGFloat = px >= 512 ? 180 : CGFloat(px)
+                ctx.interpolationQuality = px >= 512 ? .high : .none
+                ctx.draw(icon, in: CGRect(x: x, y: y0 + band.height - 20 - shown, width: shown, height: shown))
+                x += shown + 24
+            }
+            // Row 2: the small sizes magnified without smoothing.
+            x = 20
+            for (px, icon) in icons where px <= 128 {
+                let shown = CGFloat(px) * (px == 128 ? 2 : 4)
+                ctx.interpolationQuality = .none
+                ctx.draw(icon, in: CGRect(x: x, y: y0 + 20, width: shown, height: shown))
+                x += shown + 24
+            }
+        }
+        guard let image = ctx.makeImage() else { return }
+        try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: url)
     }
 
     // MARK: Helpers

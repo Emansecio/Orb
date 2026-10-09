@@ -69,6 +69,9 @@ final class FirstRunModel {
     private var task: Task<Bool, Never>?
     private var generation = 0
 
+    /// `claude`: what Claude Code already reported (snapshots show the card as it looks once it has looked).
+    init(claude: ClaudeCodeStatus? = nil) { self.claude = claude }
+
     /// Wires `isReady` and `adoptDefault` to the app model.
     func attach(_ model: AppModel) {
         isReady = { [weak model] in model?.isProviderReady ?? false }
@@ -207,14 +210,17 @@ private extension FirstRunModel.Choice {
 
 // MARK: - The card
 
-/// Where the card is shown: in the empty chat (it speaks about the Orb) or in Ajustes → Modelos.
+/// Where the card is shown: in the empty chat (it speaks about the Orb), on the welcome screen (no Orb yet) or in
+/// Ajustes → Modelos.
 enum FirstRunStyle {
     case chat(botName: String)
+    case welcome
     case settings
 
     var title: String {
         switch self {
         case .chat(let name): "Vamos preparar \(name.isEmpty ? "seu Orb" : name)"
+        case .welcome: "Primeiro, conecte um modelo"
         case .settings: "Conecte um modelo"
         }
     }
@@ -222,8 +228,14 @@ enum FirstRunStyle {
     var subtitle: String {
         switch self {
         case .chat: "Escolha de onde vem a inteligência do Orb. Você pode mudar quando quiser em Ajustes."
+        case .welcome: "É de onde vem a inteligência dos seus Orbs. Leva um minuto, e dá para trocar depois em Ajustes."
         case .settings: "Escolha de onde vem a inteligência dos seus Orbs. Você pode mudar quando quiser."
         }
+    }
+
+    /// The "Mais opções em Ajustes" link under the paths (Ajustes itself is already there in the settings form).
+    var showsSettingsLink: Bool {
+        if case .settings = self { false } else { true }
     }
 }
 
@@ -234,7 +246,7 @@ private struct FirstRunFrame: ViewModifier {
 
     func body(content: Content) -> some View {
         switch style {
-        case .chat:
+        case .chat, .welcome:
             content
                 .padding(18)
                 .frame(maxWidth: 460, alignment: .leading)
@@ -254,6 +266,9 @@ struct FirstRunCard: View {
     let style: FirstRunStyle
     /// The owner's model, so it can keep the card on screen for the "Pronto" beat. Created here when not given.
     var run: FirstRunModel?
+    /// Looks for Claude Code and local servers when it appears (`claude auth status`, two local ports). Snapshots turn
+    /// it off, so a capture asks nothing of the machine.
+    var detectsOnAppear = true
     @State private var ownRun = FirstRunModel()
     @State private var isKeyOpen = false
     @State private var keyKind = ProviderKind.openai
@@ -301,7 +316,7 @@ struct FirstRunCard: View {
                     }
                     keyRow(steps)
                 }
-                if case .chat = style {
+                if style.showsSettingsLink {
                     Button("Mais opções em Ajustes") { SettingsRouter.open(.models, using: openSettings) }
                         .buttonStyle(.plain)
                         .font(.system(size: 12))
@@ -314,7 +329,7 @@ struct FirstRunCard: View {
         .animateChanges(of: steps.connectedName)
         .task {
             steps.attach(model)
-            await steps.detect()
+            if detectsOnAppear { await steps.detect() }
         }
         .onChange(of: model.setupNudge) { pulse() }
         .accessibilityElement(children: .contain)

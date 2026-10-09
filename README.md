@@ -76,6 +76,21 @@ O **modelo padrão** (Ajustes → Modelos) vale para os Orbs sem modelo próprio
 dele ou no botão de modelo do compositor (⇧⌘M, com busca e os recentes). "Desativar este provedor" (reticências da linha) tira o
 provedor das listas sem apagar a chave; "Remover…" apaga a chave (ou sai da conta, no ChatGPT).
 
+## A tela de boas-vindas
+
+Sem nenhum Orb na lista (se você apagou todos), a janela mostra a **tela de boas-vindas** em vez de um chat vazio: três Orbs que
+piscam e olham para o ponteiro, o que o app faz em três pontos ("Conversa e faz", "Pede antes de agir", "Lembra de você") e o
+caminho mais curto até o primeiro Orb. Sem modelo conectado, o cartão "Primeiro, conecte um modelo" aparece ali mesmo (os
+mesmos caminhos do primeiro uso). Com um modelo pronto, são duas opções:
+
+- **Criar meu primeiro Orb** (⌘N, ou Return): abre a folha Novo Orb.
+- **ou comece com o Atlas, pronto para usar**: cria o Atlas na hora, com uma pasta própria em `~/Orbs`.
+
+Com [memórias guardadas](#memória) de Orbs apagados, um cartão "Começar de uma memória guardada" lista as três mais novas
+("Continuar" abre a folha Novo Orb já com a memória escolhida; "Ver todas" mostra a lista completa). Depois de criar um Orb
+e apagar todos, o título vira "Hora de um Orb novo". A barra lateral mostra "Criar seu primeiro Orb" onde os Orbs ficam, e o
+clique nela traz a tela de volta. Com Orbs, o app sempre abre em um deles ("Escolha um Orb" deixou de existir).
+
 ## A janela
 
 A **barra lateral** tem os seus Orbs, o **Espaço de trabalho** (Rotinas, Conectores, Skills), **Novo Orb** e **Ajustes**. Uma
