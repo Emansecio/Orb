@@ -1053,9 +1053,8 @@ struct ConnectorEditor: View {
 
     @ViewBuilder private func inputFields(_ rows: [KeyValueRow]) -> some View {
         ForEach(rows) { row in
-            if let index = values.firstIndex(where: { $0.id == row.id }) {
-                KeyValueField(row: $values[index], input: inputsByName[row.key], secretNames: config.secretKeys) {}
-            }
+            KeyValueField(row: KeyValueRow.binding(in: $values, id: row.id, fallback: row), input: inputsByName[row.key],
+                          secretNames: config.secretKeys) {}
         }
     }
 
@@ -1086,10 +1085,9 @@ struct ConnectorEditor: View {
         }
         Section {
             ForEach(values.filter { inputsByName[$0.key] == nil }) { row in
-                if let index = values.firstIndex(where: { $0.id == row.id }) {
-                    KeyValueField(row: $values[index], input: nil, secretNames: config.secretKeys) {
-                        values.removeAll { $0.id == row.id }
-                    }
+                KeyValueField(row: KeyValueRow.binding(in: $values, id: row.id, fallback: row), input: nil,
+                              secretNames: config.secretKeys) {
+                    values.removeAll { $0.id == row.id }
                 }
             }
             Button(isRemote ? "Adicionar cabeçalho" : "Adicionar variável", systemImage: "plus") {
@@ -1302,6 +1300,17 @@ struct KeyValueRow: Identifiable {
     let id = UUID()
     var key: String
     var value: String
+
+    /// A binding to the row with this id that looks it up on every access: a field that still pushes its text after
+    /// the row was removed finds nothing (reads `fallback`, writes nowhere) instead of indexing a stale position.
+    static func binding(in rows: Binding<[KeyValueRow]>, id: UUID, fallback: KeyValueRow) -> Binding<KeyValueRow> {
+        Binding(
+            get: { rows.wrappedValue.first { $0.id == id } ?? fallback },
+            set: { new in
+                if let index = rows.wrappedValue.firstIndex(where: { $0.id == id }) { rows.wrappedValue[index] = new }
+            }
+        )
+    }
 }
 
 /// One variable/header: the name (fixed when it comes from the registry), its value and what it is for.

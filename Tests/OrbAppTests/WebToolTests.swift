@@ -175,6 +175,55 @@ final class WebToolTests {
         }
     }
 
+    @Test func fetchReadsAPDFServedWithAGenericType() async throws {
+        let pdf = try Fixtures.pdf(pages: ["olá pdf"])
+        var context = workspace.context
+        context.canSaveFiles = false // without save_to, a PDF that is not read is lost
+        for (index, type) in ["binary/octet-stream", "application/force-download", "application/x-download", "application/download"].enumerated() {
+            let host = "generic\(index).test"
+            let tool = WebFetchTool(session: WebStubProtocol.session(host: host, .init(headers: ["Content-Type": type], body: pdf)), cache: WebPageCache())
+            let output = try await tool.run(.object(["url": .string("https://\(host)/doc.pdf")]), context: context)
+            #expect(output.contains("olá pdf") && output.contains("--- Página 1 ---"), "\(type): \(output)")
+        }
+        // Not a PDF: the answer is the same as for any binary.
+        let other = WebFetchTool(session: WebStubProtocol.session(host: "blob.test", .init(headers: ["Content-Type": "binary/octet-stream"], body: Data(repeating: 1, count: 64))),
+                                 cache: WebPageCache())
+        let output = try await other.run(.object(["url": .string("https://blob.test/x")]), context: context)
+        #expect(output.contains("não é texto"))
+    }
+
+    @Test func aGenericTypeKeepsThePDFLimitOnlyForAPDF() async throws {
+        let pdf = try Fixtures.pdf(pages: ["relatório grande"])
+        var context = workspace.context
+        context.canSaveFiles = false
+        // A PDF over the limit for other types (5 MB in the app) is still read whole under a generic type.
+        let small = pdf.count / 2
+        let session = WebStubProtocol.session(host: "bigpdf.test", .init(headers: ["Content-Type": "binary/octet-stream"], body: pdf))
+        let output = try await WebFetchTool(session: session, textLimit: small, cache: WebPageCache())
+            .run(.object(["url": .string("https://bigpdf.test/r")]), context: context)
+        #expect(output.contains("relatório grande"), "\(output)")
+        // Anything else stops at the lower limit: the answer says "more than", not that it was read whole.
+        let blob = Data(repeating: 1, count: 4_000)
+        let other = WebFetchTool(session: WebStubProtocol.session(host: "bigblob.test", .init(headers: ["Content-Type": "binary/octet-stream"], body: blob)),
+                                 textLimit: 1_000, cache: WebPageCache())
+        let text = try await other.run(.object(["url": .string("https://bigblob.test/x")]), context: context)
+        #expect(text.contains("mais de") && text.contains("não é texto"), "\(text)")
+    }
+
+    @Test func aPDFCutBySizeWithoutTheTerminalDoesNotSuggestAnotherTry() async throws {
+        let pdf = try Fixtures.pdf(pages: ["Relatório longo"])
+        let stub = WebStubProtocol.Stub(headers: ["Content-Type": "application/pdf"], body: pdf.prefix(pdf.count / 2))
+        let tool = WebFetchTool(session: WebStubProtocol.session(host: "cutnoterm.test", stub), pdfLimit: pdf.count / 2, cache: WebPageCache())
+        var context = workspace.context
+        context.canSaveFiles = false
+        do {
+            _ = try await tool.run(.object(["url": .string("https://cutnoterm.test/")]), context: context)
+            Issue.record("a truncated PDF should not read as complete")
+        } catch let error as ToolError {
+            #expect(!error.message.contains("conexão melhor") && error.message.contains("Terminal"), "\(error.message)")
+        }
+    }
+
     @Test func fetchSurvivesHugeOffsets() async throws {
         let stub = html("<p>curta</p>")
         for value in [JSONValue.number(1e19), .number(Double(Int.max)), .string("1e19"), .string("99999999999999999999")] {
@@ -687,7 +736,8 @@ final class EndlessResponseTests {
 
     @Test func unreadableTypesAreRecognisedFromTheirMimeType() {
         for readable in ["", "text/plain", "text/event-stream", "application/json", "application/pdf", "application/xhtml+xml", "image/svg+xml",
-                         "application/octet-stream", "application/javascript"] {
+                         "application/octet-stream", "application/javascript", "binary/octet-stream", "application/force-download",
+                         "application/x-download", "application/download"] {
             #expect(WebFetchTool.isReadable(readable, wantsImage: false), "\(readable)")
         }
         for unreadable in ["audio/mpeg", "video/mp4", "application/zip", "image/png", "font/woff2"] {
@@ -695,4 +745,92 @@ final class EndlessResponseTests {
         }
         #expect(WebFetchTool.isReadable("image/png", wantsImage: true))
     }
+
+    @Test func aPDFWhoseSizeIsAnnouncedIsReadToTheEndOnASlowLink() async throws {
+        let pdf = try Fixtures.pdf(pages: ["Relatório lento"])
+        let host = "slowpdf.test"
+        let session = SlowBodyProtocol.session(host: host, .init(mime: "application/pdf", body: pdf, piece: max(pdf.count / 5, 1), interval: 0.2, announcesLength: true))
+        // The deadline for a body of unknown length would cut this one (it takes about a second).
+        let tool = WebFetchTool(session: session, cache: WebPageCache(), readDeadline: .milliseconds(300))
+        let output = try await tool.run(arguments(host), context: workspace.context)
+        #expect(output.contains("Relatório lento"), "\(output)")
+        #expect(!output.contains("não terminou"))
+    }
+
+    @Test func aPDFOfUnknownLengthCutByTimeSaysSoAndSuggestsSaveTo() async throws {
+        let host = "endlesspdf.test"
+        let session = EndlessStreamProtocol.session(host: host, .init(mime: "application/pdf", chunk: Data("%PDF-1.4 ".utf8), interval: 0.05))
+        let tool = WebFetchTool(session: session, cache: WebPageCache(), readDeadline: .seconds(1))
+        do {
+            _ = try await tool.run(arguments(host), context: workspace.context)
+            Issue.record("a PDF cut by time should not read as complete")
+        } catch let error as ToolError {
+            #expect(error.message.contains("save_to") && error.message.contains("não terminou"), "\(error.message)")
+        }
+        var context = workspace.context
+        context.canSaveFiles = false
+        do {
+            _ = try await tool.run(arguments(host), context: context)
+            Issue.record("a PDF cut by time should not read as complete")
+        } catch let error as ToolError {
+            #expect(!error.message.contains("save_to") && error.message.contains("não terminou"), "\(error.message)")
+        }
+    }
+
+    @Test func aPageCutByTimeKeepsTheNoteWhenItIsReadInPieces() async throws {
+        let host = "slowpage.test"
+        let session = EndlessStreamProtocol.session(host: host, .init(mime: "text/html", chunk: Data("<p>palavra palavra</p>".utf8), interval: 0.05))
+        let tool = WebFetchTool(session: session, cache: WebPageCache(), readDeadline: .seconds(1))
+        let first = try await tool.run(arguments(host), context: workspace.context)
+        #expect(first.contains("não terminou"))
+        let again = try await tool.run(.object(["url": .string("https://\(host)/events"), "offset": .number(5)]), context: workspace.context)
+        #expect(again.contains("[... a resposta não terminou em 1 s; o resto não foi lido ...]"), "\(again)")
+    }
+}
+
+/// Serves a body in pieces, one every `interval`, like a slow link; with or without announcing its length.
+final class SlowBodyProtocol: URLProtocol {
+    struct Body: Sendable {
+        var mime: String
+        var body: Data
+        var piece: Int
+        var interval: TimeInterval
+        var announcesLength: Bool
+    }
+
+    static let bodies = OSAllocatedUnfairLock<[String: Body]>(initialState: [:])
+
+    static func session(host: String, _ body: Body) -> URLSession {
+        bodies.withLock { $0[host] = body }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [SlowBodyProtocol.self]
+        return URLSession(configuration: configuration)
+    }
+
+    private let running = OSAllocatedUnfairLock(initialState: true)
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let url = request.url, let host = url.host(), let served = Self.bodies.withLock({ $0[host] }) else {
+            client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
+            return
+        }
+        var headers = ["Content-Type": served.mime]
+        if served.announcesLength { headers["Content-Length"] = String(served.body.count) }
+        guard let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: headers) else { return }
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        DispatchQueue.global().async { [self] in
+            var start = 0
+            while start < served.body.count, running.withLock({ $0 }) {
+                client?.urlProtocol(self, didLoad: served.body.subdata(in: start..<min(start + served.piece, served.body.count)))
+                start += served.piece
+                Thread.sleep(forTimeInterval: served.interval)
+            }
+            if running.withLock({ $0 }) { client?.urlProtocolDidFinishLoading(self) }
+        }
+    }
+
+    override func stopLoading() { running.withLock { $0 = false } }
 }

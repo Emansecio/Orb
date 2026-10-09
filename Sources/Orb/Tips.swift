@@ -181,6 +181,7 @@ enum Tip {
     static let removeProvider = "Remove o provedor e a chave; Orbs com esses modelos passam a usar o padrão"
     static let signOutChatGPT = "Desconecta sua conta do ChatGPT neste Mac"
     static let replaceKey = "Troca a chave de API guardada no Keychain"
+    static let deleteKey = "Apaga a chave guardada no Keychain; o provedor continua na lista"
     static let saveKey = "Guarda a chave no Keychain deste Mac"
     static let keepKey = "Mantém a chave que já está salva"
     static let getKey = "Abre a página do provedor onde a chave é criada"
@@ -259,7 +260,7 @@ enum Tip {
          launchAtLogin, notifyWhenDone, proposeSkills, dataFolder, keptMemoriesFolder, orbsFolder, resetOrb,
          openSystemNotifications, askNotifications, globalShortcut,
          profilePhotoAvatar, profilePhotoChoose, profilePhotoRemove,
-         addProvider, refreshModels, removeProvider, signOutChatGPT, replaceKey, saveKey, keepKey, getKey, listAllModels,
+         addProvider, refreshModels, removeProvider, signOutChatGPT, replaceKey, deleteKey, saveKey, keepKey, getKey, listAllModels,
          addModelByID, removeModelFromList, gatewayFormat, checkClaudeCode, installClaudeCode, signOutClaudeCode,
          usagePeriod, usageChartBy, priceCorrected, priceCorrect, priceMissing, priceRestore, copyCode,
          recheckPermissions, resetConfirm,

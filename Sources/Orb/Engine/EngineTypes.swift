@@ -294,7 +294,7 @@ struct TokenUsage: Sendable, Equatable {
 
     /// Adds another response's counts (a count nobody reported stays unknown).
     mutating func add(_ other: TokenUsage) {
-        func sum(_ a: Int?, _ b: Int?) -> Int? { a == nil && b == nil ? nil : (a ?? 0) + (b ?? 0) }
+        func sum(_ a: Int?, _ b: Int?) -> Int? { a == nil && b == nil ? nil : Self.saturatingSum(a ?? 0, b ?? 0) }
         input = sum(input, other.input)
         output = sum(output, other.output)
         cacheRead = sum(cacheRead, other.cacheRead)
@@ -305,7 +305,22 @@ struct TokenUsage: Sendable, Equatable {
     /// The whole prompt: what was read from the cache, written to it and charged in full. nil when no count is known.
     var promptTokens: Int? {
         guard input != nil || cacheRead != nil || cacheWrite != nil else { return nil }
-        return (input ?? 0) + (cacheRead ?? 0) + (cacheWrite ?? 0)
+        return Self.saturatingSum(Self.saturatingSum(input ?? 0, cacheRead ?? 0), cacheWrite ?? 0)
+    }
+
+    /// No real response comes near this many tokens; a count outside 0...maxCount is a broken server's.
+    static let maxCount = 1_000_000_000_000
+
+    /// A reported count as the app keeps it: a negative or absurd one reads as unknown, so it never reaches a sum.
+    static func sane(_ count: Int?) -> Int? {
+        guard let count, (0...maxCount).contains(count) else { return nil }
+        return count
+    }
+
+    /// A server may report absurd counts: they add up to the limit of an Int instead of overflowing.
+    private static func saturatingSum(_ a: Int, _ b: Int) -> Int {
+        let (sum, overflow) = a.addingReportingOverflow(b)
+        return overflow ? (b > 0 ? Int.max : Int.min) : sum
     }
 
     /// Whether the provider says anything about its cache. Servers that have none (or do not report it) leave both
@@ -369,6 +384,9 @@ enum LLMEvent: Sendable, Equatable {
     case reasoning(ReasoningTrace)
     /// Tool calls requested in this response, fully assembled (emitted once, before the stream ends).
     case toolCalls([ToolCallRequest])
+    /// What the provider has already said it used, before the response ends (Anthropic reports the input tokens first); a
+    /// stopped response is still billed for it. `.finished` carries the final numbers.
+    case usage(TokenUsage)
     /// How the response ended and what it cost; the last event of every stream.
     case finished(StopReason, TokenUsage?)
 }

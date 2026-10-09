@@ -79,7 +79,7 @@ Tudo em `Sources/Orb/`.
 | `PermissionPolicy.swift`, `ApprovalGate.swift`, `ApprovalBatch.swift`, `DangerousCommand.swift`, `ShellCommandLine.swift` | permissões: veja [PERMISSOES.md](PERMISSOES.md) |
 | `Steering.swift` | a fila de mensagens enviadas durante um turno (`SteeringQueue`) |
 | `ClaudeCode.swift`, `ClaudeCodeEngine.swift`, `ClaudeCodePrompt.swift`, `ClaudeCodeProtocol.swift` | provedor Claude Code: achar o `claude`, login/status, um processo `claude -p` por turno, protocolo `stream-json` e `can_use_tool`, prompt anexado e catch-up |
-| `MCPConnection.swift`, `MCPTransport.swift`, `MCPTool.swift` | conectores MCP: stdio (com o ambiente do Terminal da usuária, de `ShellEnvironment`, para achar `npx`/`uvx` do `.zshrc`) e HTTP (Streamable HTTP com recuo para SSE). `MCPManager` só registra os conectores; o servidor sobe na primeira chamada (`ensureStarted`, uma subida compartilhada) e um ceifador (acorda a cada 60 s) desliga o que ficou 10 min sem uso e sem chamada pendente. Duas chamadas seguidas sem nenhuma resposta (`MCPConnection.stuckAfter`), ou um `tools/list` que estoura o prazo, fecham a conexão (o servidor está vivo mas travado) e a próxima sobe um processo novo; o timeout manda `notifications/cancelled`. O prazo de uma chamada é 60 s, ou o `LocalConnector.callTimeout` quando o conector é local (Gmail: 200 s, mais que os dois scripts de 90 s). Um 404 de sessão HTTP (`MCPSessionExpired`) repete a chamada uma vez numa sessão nova. `StdioTransport` escreve no stdin fora do actor (um servidor que não lê não impede o `close`), acha o fim da linha só nos bytes novos, lê uma resposta que veio depois de lixo sem quebra de linha e fecha a conexão se passar de 32 MB sem `\n`; `StdioServerRegistry` guarda os processos: `close` manda SIGTERM e, 3 s depois, SIGKILL, e `killAllNow` (no `willTerminate`) encerra todos ao fechar o app. O pedido de "Permitir mais" fica na entrada do conector (`asksMoreScope`) até `scopeGranted`, em vez de se perder quando o servidor reinicia. `MCPTool` (`Servidor__ferramenta`) guarda o id do conector e chama o gerente |
+| `MCPConnection.swift`, `MCPTransport.swift`, `MCPTool.swift` | conectores MCP: stdio (com o ambiente do Terminal da usuária, de `ShellEnvironment`, para achar `npx`/`uvx` do `.zshrc`) e HTTP (Streamable HTTP com recuo para SSE). `MCPManager` só registra os conectores; o servidor sobe na primeira chamada (`ensureStarted`, uma subida compartilhada) e um ceifador (acorda a cada 60 s) desliga o que ficou 10 min sem uso e sem chamada pendente. Duas chamadas seguidas sem nenhuma resposta (`MCPConnection.stuckAfter`; qualquer mensagem do servidor, até a resposta tardia de uma chamada que já estourou, zera a conta, e chamadas paralelas que estouram juntas contam como uma), ou um `tools/list` que estoura o prazo, fecham a conexão (o servidor está vivo mas travado; as outras chamadas pendentes ouvem que o conector foi reiniciado, não o timeout delas) e a próxima sobe um processo novo; o timeout manda `notifications/cancelled`. O prazo de uma chamada é 60 s, ou o `LocalConnector.callTimeout` quando o conector é local (Gmail: 200 s, mais que os dois scripts de 90 s). Um 404 de sessão HTTP (`MCPSessionExpired`) repete uma vez numa sessão nova só a chamada que recebeu o 404 (ou que chegou depois, sem ter sido enviada); as demais já em andamento no servidor falham com "pode ter sido executada" e não são repetidas, para não duplicar efeitos. `StdioTransport` escreve no stdin fora do actor (um servidor que não lê não impede o `close`), acha o fim da linha só nos bytes novos, lê uma resposta que veio depois de lixo sem quebra de linha e fecha a conexão se passar de 32 MB sem `\n` (`HTTPTransport` tem o mesmo teto por resposta e por evento SSE, com o erro "resposta grande demais"); `StdioServerRegistry` guarda os servidores, cada um líder de um grupo de processos próprio (`SpawnedProcess`), e os sinais vão ao grupo, para que o que fica no grupo (o node que o `npx`/`uvx` abriu e os filhos dele) não sobreviva; quem cria sessão própria (o Chromium do Playwright, por exemplo) sai do grupo e depende de o servidor fechá-lo ao receber o SIGTERM: `close` manda SIGTERM e, 3 s depois, SIGKILL, e `killAllNow` (no `willTerminate`) encerra todos ao fechar o app. O pedido de "Permitir mais" fica na entrada do conector (`asksMoreScope`) até `scopeGranted`, em vez de se perder quando o servidor reinicia. `MCPTool` (`Servidor__ferramenta`) guarda o id do conector e chama o gerente |
 | `LocalConnector.swift`, `Tools/CalendarConnector.swift`, `Tools/MailConnector.swift` | conectores que rodam dentro do app (Google Agenda e Lembretes por EventKit, Gmail pelo Mail.app com AppleScript), atrás do mesmo porteiro. `MCPServerConfig.local` os marca; `LocalTransport` responde o JSON-RPC em processo (`LocalConnectorServer.respond`), então catálogo, cartão, ceifador e permissões funcionam como em qualquer conector. Para o Claude Code o mesmo servidor sai de `Orb --local-connector <agenda\|lembretes\|gmail>` por stdio (`mcpConfig` troca o conector local por essa entrada). `LocalConnectorEnvironment` agrupa o que eles tocam (`CalendarBackend`, `MailBackend`): testes e capturas põem fakes e nenhuma permissão do macOS é pedida |
 | `ConnectorGateway.swift` | o porteiro dos conectores: `connector_tools` (índice dos conectores do Orb na descrição, lista as ferramentas e os argumentos) e `connector_call` (roda uma). Ficam fora de `ToolBox.all`; `AgentEngine.resolved` troca cada `connector_call` pela chamada do `MCPTool` de verdade antes da política de permissão |
 
@@ -90,7 +90,7 @@ Tudo em `Sources/Orb/`.
 
 | Capacidade | Ferramentas | Arquivos |
 |---|---|---|
-| Terminal e arquivos | `run_command` (`background: true`; saída acima de 20 KB é salva inteira em `saidas/<orb>/comando-….txt`), `job_output`, `job_list`, `job_stop`, `read_file` (texto, PDF, Word/RTF/ODT, Excel .xlsx, PowerPoint .pptx, imagens com OCR), `write_file`, `edit_file`, `list_directory`, `search_files` (Spotlight), `grep` (um arquivo informado em `path` vai até 200 MB, em streaming), `glob` (aceita padrão absoluto), `trash` (também com Controlar apps) | `ShellTool`, `BackgroundJobs`, `ProcessRunner`, `ShellEnvironment`, `FileTools`, `SearchTools`, `TextFile`, `DocumentReader`, `OfficeReader`, `ReadOnlyCommand` |
+| Terminal e arquivos | `run_command` (`background: true`; saída acima de 20 KB é salva inteira em `saidas/<orb>/comando-….txt`), `job_output`, `job_list`, `job_stop`, `read_file` (texto, PDF, Word/RTF/ODT, Excel .xlsx, PowerPoint .pptx, imagens com OCR), `write_file`, `edit_file`, `list_directory`, `search_files` (Spotlight), `grep` (um arquivo informado em `path` vai até 200 MB, em streaming), `glob` (aceita padrão absoluto), `trash` (também com Controlar apps); o ambiente vem do shell `-lic` da usuária (5 s) e, se ele estoura, o perfil de login responde na hora e a nova tentativa roda em segundo plano (15 s), com espera que dobra de 30 s até 5 min | `ShellTool`, `BackgroundJobs`, `ProcessRunner`, `ShellEnvironment`, `FileTools`, `SearchTools`, `TextFile`, `DocumentReader`, `OfficeReader`, `ReadOnlyCommand` |
 | Navegar na web | `web_fetch` (páginas, PDF, JSON, imagens; `offset`/`find` para páginas longas; `save_to`) | `WebTools`, `HTMLText` |
 | Controlar apps do Mac | `applescript`, `shortcuts_list/run`, `clipboard_read/write`, `screenshot` (com OCR), `apps_list`, `processes`, `app_quit`, `trash`, `browser_tab`, `ui_read`, `ui_act` | `MacTools`, `MacAppTools`, `BrowserTools`, `ScreenshotTool`, `AccessibilityTools`/`Elements`/`Outline`, `AppleScriptSupport` |
 | Sempre | `open`, `notify`, `remember`, `recall`, `schedule` | `MacTools`, `MacAppTools`, `ScheduleTool`, `ScheduleMailbox` |
@@ -99,8 +99,9 @@ Tudo em `Sources/Orb/`.
 **Codificação dos arquivos de texto.** `TextFile.decode` tenta UTF-8, depois BOM (UTF-16/32), UTF-16 sem marca e por fim Windows-1252
 (Latin-1 se houver byte indefinido). Um arquivo UTF-8 com poucos bytes soltos (um caractere cortado no fim de um log) continua
 UTF-8: se as sequências multibyte válidas superam em 3 para 1 os bytes inválidos, o texto sai com U+FFFD no lugar deles e
-`invalidUTF8Bytes` conta quantos são. `read_file` avisa e o `grep` acha os acentos; o `edit_file` recusa o arquivo (regravar
-perderia esses bytes) e manda usar `run_command`.
+`invalidUTF8Bytes` conta quantos são. `read_file` avisa e o `grep` acha os acentos; o `edit_file` guarda cada byte solto
+como um caractere de uso privado (U+F780–U+F7FF, como o `surrogateescape` do Python) e o devolve como estava ao gravar: só muda o
+trecho editado, e recusa (com a dica de `run_command`) um `old_text` que inclua U+FFFD ou esses caracteres.
 `read_file`, `edit_file` e o `grep` com `path` recusam o que não é arquivo comum (dispositivo, pipe, socket; `requireRegularFile`): um
 FIFO sem escritor trava a leitura sem que Parar a solte, e `/dev/zero` não acaba.
 O texto convertido de Word/RTF/ODT, Excel e PowerPoint fica em `DocumentTextCache` (6 documentos, 50 milhões de caracteres, chave
@@ -108,7 +109,7 @@ caminho + data + tamanho): ler uma planilha por páginas (`offset`) converte uma
 
 **Processos filhos ao sair.** Cada comando e cada `claude` lidera um grupo de processos próprio (`SpawnedProcess`), então não morre
 junto com o app. `ChildProcessGroups` registra os grupos do `ProcessRunner` (até o comando voltar) e do `LineProcess` (até o
-processo sair); no `willTerminate`, `killAllNow` manda SIGTERM a todos, mais os dos jobs em segundo plano, e SIGKILL ao que sobrar
+processo sair; `SpawnedProcess.watch` espera a saída por um `DispatchSource`, sem prender uma thread por filho); no `willTerminate`, `killAllNow` manda SIGTERM a todos, mais os dos jobs em segundo plano, e SIGKILL ao que sobrar
 meio segundo depois. Sobras de um `cmd &` que o `run_command` já devolveu, avisadas no resultado, continuam fora do registro.
 
 **`schedule`.** Uma tarefa agendada **é** uma `Routine` do Orb (a mesma página, o mesmo agendador de 30 s, a mesma fila e o mesmo
@@ -133,8 +134,12 @@ só pelo caminho (`texto (/wiki/X)`) e o endereço do site no cabeçalho. Se o r
 scripts, vem uma nota dizendo que ela precisa de JavaScript (com o texto do `<noscript>`). JSON, XML e texto vêm como
 estão; PDF vira texto (até 25 MB) com marcador de página; imagem vira imagem quando o modelo enxerga (`runWithImages`).
 A leitura do corpo tem prazo total de 30 s (`readDeadline`; o limite de 20 s é só de silêncio): um stream que não acaba (eventos
-do servidor, rádio) devolve o que chegou, com uma nota no cabeçalho. Áudio, vídeo, arquivos compactados e outros tipos que só
-se salvam são respondidos pelos cabeçalhos ("não é texto"), sem baixar nada.
+do servidor, rádio) devolve o que chegou, com uma nota no cabeçalho (e no fim da página, nas leituras com `offset`). Um corpo com
+tamanho anunciado (`Content-Length`, PDF ou tipo genérico) acaba sozinho e tem 180 s (`finiteReadDeadline`), para um PDF
+grande numa conexão lenta; um PDF cortado por tempo ou por tamanho erra com a dica de `save_to` (sem a chave Terminal, a
+resposta diz que o arquivo é grande demais, ou, se foi só o tempo, sugere tentar de novo). Áudio, vídeo, arquivos
+compactados e outros tipos que só se salvam são respondidos pelos cabeçalhos ("não é texto"), sem baixar nada; tipos genéricos
+(`octet-stream`, `binary/…`, `…download…`, ou nenhum) são lidos e o PDF é reconhecido pelos primeiros bytes (`%PDF`): até lá o limite é o de PDF (25 MB) e, se não for PDF, volta aos 5 MB.
 A resposta é paginada (12 000 caracteres, até 24 000) cortando na última quebra de linha ou espaço, e a página convertida
 fica 10 minutos em memória (`WebPageCache`, 8 páginas) para `offset` e `find` (trechos com o offset de cada um) não
 baixarem de novo. `save_to` baixa até 100 MB num arquivo temporário e move no fim; recusa antes se o `Content-Length` já
@@ -154,7 +159,7 @@ linha, cartões) é em português (`AgentTool.summary`).
 
 | Arquivo | Papel |
 |---|---|
-| `UsageRecord.swift` | o que se guarda: `UsageKey` (hora × Orb × modelo × origem), `UsageTotals` (pedidos, tokens de entrada, de cache lido e gravado, de saída, custo informado pelo CLI), `UsageBucket`, `UsageMonth` (o arquivo de um mês: linhas, nomes dos Orbs, `maxBuckets` = 20 000) com decodificação tolerante |
+| `UsageRecord.swift` | o que se guarda: `UsageKey` (hora × Orb × modelo × origem), `UsageTotals` (pedidos, tokens de entrada, de cache lido e gravado, de saída, custo informado pelo CLI), `UsageBucket`, `UsageMonth` (o arquivo de um mês: linhas, nomes dos Orbs, `maxBuckets` = 20 000) com decodificação tolerante. Toda contagem de `UsageTotals` fica em 0...`TokenUsage.maxCount` (10¹²), na criação, na soma e na leitura do arquivo, e os clientes de provedor tratam como desconhecida (`TokenUsage.sane`) uma contagem fora dessa faixa: um servidor com números absurdos não estoura nenhuma soma, nem a da página de Uso |
 | `UsageStore.swift` | `Store.addUsage` / `readUsage` (`uso/aaaa-mm.json`, na fila de gravação e na de leitura do `Store`) e o `UsageRecorder` (`@MainActor`, junta o que os turnos usaram e entrega em lote, a cada 10 s e ao fim de cada turno e ao sair) |
 | `AppModel+Usage.swift` | `AppModel.recordUsage`, o ponto único de registro; `recordAuxiliaryUsage` para chamadas do app fora de um turno; `priceBook` e `correctPrice` |
 | `ModelPricing.swift` | `ModelPrice` (US$ por milhão), `PriceTable` (tabela embutida, com o dia da consulta), `UsageBilling` (por uso, plano, local), `PriceBook` e `UsageCost` |
@@ -222,8 +227,9 @@ ComposerView ── AppModel.submit ─┬─ Orb livre ─► AppModel.send ─
 1. **Envio.** `ComposerView.send` chama `AppModel.submit`. Com o Orb trabalhando na sua conversa, a mensagem entra numa fila
    (`ComposerLane.enqueue`) e aparece como "Na fila"; senão vai para `AppModel.send`. Uma rotina trabalhando bloqueia o envio
    (o compositor avisa).
-2. **`AppModel.send`** valida (texto, turno em andamento, provedor pronto; sem provedor, `setupNudge` faz o cartão de primeiro
-   uso pulsar e o texto fica no compositor), trata `/compactar`, grava a mensagem do usuário na conversa, limpa o rascunho,
+2. **`AppModel.send`** valida (texto ou anexo, turno em andamento, provedor pronto; sem provedor, `setupNudge` faz o cartão de primeiro
+   uso pulsar e o texto fica no compositor; enquanto `hasCheckedConnections` é falso nada pulsa nem avisa: o compositor espera
+   `connectionsChecked()` e envia; arquivos sozinhos recebem `attachmentsOnlyPrompt`), trata `/compactar`, grava a mensagem do usuário na conversa, limpa o rascunho,
    põe o status "Pensando" e a "agitação" do Orb (`poke`, `isListening`), detecta pedido de memória (`MemoryIntent`), expande
    `/skill`, acrescenta os caminhos dos anexos e a nota das imagens e, numa rotina, o aviso de que ninguém está presente.
 3. **Histórico.** `Conversation.prepareHistory(budget:reserving:)` corta e condensa se passou do orçamento (um aviso
@@ -238,7 +244,7 @@ ComposerView ── AppModel.submit ─┬─ Orb livre ─► AppModel.send ─
    (`runCalls`: um cartão para o que pergunta junto, leituras em paralelo, o resto em ordem); registra cada mensagem. O
    Claude Code faz o análogo num processo `claude -p`, com os pedidos `can_use_tool` vindo para o mesmo `ApprovalGate`.
 6. **Eventos.** `TurnEvent`: `status`, `text`, `toolStarted`/`toolFinished` (com `files`: o que a ferramenta criou ou alterou; `write_file`/`edit_file` e Write/Edit/MultiEdit do Claude Code, mais as imagens que a ferramenta devolve; `BotSession.takeOver` deixa o arquivo só na última chamada do turno que o tocou), `approval`, `message` (vai para o histórico do
-   modelo), `notice`, `failed`, `usage`/`requestUsage`/`reportedCost`, `compacted`, `taskPaused`, `steered`, `session`.
+   modelo), `notice`, `failed`, `usage`/`requestUsage`/`pendingUsage`/`reportedCost`, `compacted`, `taskPaused`, `steered`, `session`.
 7. **Aplicação** (`BotSession.apply`, na thread principal): o texto vai para `pendingText` e é publicado em `LiveText` a cada
    33 ms, **sem tocar na lista de itens**; ferramentas e cartões viram itens da conversa; `message` entra em
    `Conversation.messages`; o `BotLive` recebe status, ferramenta em uso, "falando" e "esperando você", e a frase da linha de trabalho (`work`,
@@ -262,6 +268,7 @@ conversations/<Orb>.json         conversa atual: itens da tela + mensagens do mo
 conversations/<Orb>.meta.json    nota ao lado: quantos itens, quantos já foram para a memória, impressão digital do arquivo
 conversations/<Orb>/<id>.json    conversas anteriores ("Nova conversa"), com index.json (cache corrigido pelos arquivos)
 conversations/<Orb>/routine-<rotina>.json   a conversa de cada rotina
+rascunhos.json                   o que cada compositor guarda sem enviar (`ComposerDraft`: texto e caminhos de arquivos e imagens); gravado ao sair, depois que o turno interrompido devolveu a fila, e a cada rodada do agendador; lido na abertura
 conectores/<id>.json             catálogo do conector (`ConnectorCatalog`): o que o servidor ofereceu da última vez, sem segredos
 memoria/<Orb>/…                  a memória (páginas .md + index.sqlite, _propostas/ e _skills.json das skills); memoria/_guardadas/<nome> – <data>/ de Orbs apagados ou
                                  redefinidos, com perfil.json (nome, papel e aparência) ao lado das páginas
@@ -305,7 +312,7 @@ até o fim:
 5. **Limpa fora da thread principal** (`ResetExecutor.run`, em `Task.detached`): `store.flush()` (o que estava sendo gravado
    termina), `BackgroundJobs.killAllNow()`, e então, na ordem: move a memória de cada Orb para `_guardadas` com o perfil (ou, em
    "Apagar tudo", remove `memoria/` inteira); remove **só o que o app grava** na pasta de dados (`ResetGuard.removes(entry:)`:
-   `state.json` e suas cópias `state.json.…`, `conversations/`, `memoria/`, `anexos/`, `conectores/`, `saidas/`, `perfil/`, `uso/`; qualquer outro arquivo, como
+   `state.json` e suas cópias `state.json.…`, `rascunhos.json`, `conversations/`, `memoria/`, `anexos/`, `conectores/`, `saidas/`, `perfil/`, `uso/`; qualquer outro arquivo, como
    `.migrado-do-openbot`, fica); apaga os segredos pelo cofre injetável (`SecretVault.remove` = `Keychain.set("")`, o mesmo
    caminho público de apagar chave: conectores e, com "Também sair dos provedores", uma conta por provedor mais `chatgpt`;
    nunca o Claude Code); devolve as preferências ao padrão (`UserDefaults` do próprio app, menos `LegacyKeychainLedger.key`);
@@ -335,7 +342,10 @@ Cada resposta do provedor traz os tokens do pedido (`TokenUsage`); o app os soma
   turno do Claude Code, o `.usage` do turno (o CLI informa o turno inteiro: um "pedido") com o `.reportedCost` que vem logo depois
   (`total_cost_usd`, no mesmo balde). O modelo é o do turno (`BotSession.turnModel`); a origem é `routine` se há uma rotina rodando,
   senão `chat`; `auxiliary` é para chamadas do próprio app fora de um turno: hoje a revisão de skills em segundo plano (`reviewSkillsIfDue` repassa cada
-  `.requestUsage` e `.reportedCost` a `recordUsage`; o resumo da compactação é por regras e não gasta nada).
+  `.requestUsage` e `.reportedCost` a `recordUsage`; o resumo da compactação é por regras e não gasta nada). Um pedido interrompido
+  pelo botão Parar também é cobrado: o transporte anuncia os tokens de entrada assim que o provedor os informa (`LLMEvent.usage`,
+  o `message_start` da Anthropic, antes de qualquer saída), o motor repassa como `TurnEvent.pendingUsage` e `BotSession.play`, que
+  é quem ainda lê o fluxo depois do Parar, registra o último que não foi seguido de um `.requestUsage`.
   O `UsageRecorder` guarda o que chega num dicionário e o entrega ao `Store` a cada 10 s, ao fim do turno e no `saveNow`.
 - **Arquivo.** `Store.addUsage` lê o mês (decodificação tolerante, `.corrupt-…` se não decodifica), soma e grava na fila de
   gravação, então lotes e leituras (que esperam as gravações do mesmo arquivo) ficam em ordem. Um mês nunca passa de 20 000 linhas
@@ -376,9 +386,11 @@ modelo de provedor com formato desconhecido sai da lista. A gravação increment
 - Gravações: **uma fila serial por pasta de dados** (`WriterQueues`), em ordem, fora da thread principal. O estado é salvo
   400 ms depois da última mudança (`scheduleStateSave`); uma conversa, no máximo a cada 5 s enquanto uma resposta chega (um
   pouco mais em conversas longas) e na hora ao fim do turno; ao sair, só o que mudou (`saveNow`). Uma gravação que falha marca a
-  conversa como não salva de novo (`reportSaveFailure`), para o `saveNow` ao sair tentar outra vez.
-- Ao sair (`willTerminate`): `stopTurnsForQuit` interrompe os turnos (os cartões fecham e a conversa diz "Você interrompeu"), o estado é
-  salvo, e `ChildProcessGroups.killAllNow` e `BackgroundJobs.killAllNow()` encerram os grupos de processos que o app iniciou: os comandos em
+  conversa como não salva de novo (`reportSaveFailure`), para o `saveNow` ao sair tentar outra vez. A conversa de uma execução de
+  rotina que já terminou (o chat voltou) fica em `unsavedRoutineConversations` se a gravação falha, e é gravada de novo ao sair; a próxima execução da rotina parte dela, não do arquivo mais antigo.
+- Ao sair (`willTerminate`): `stopTurnsForQuit` interrompe os turnos (os cartões fecham e a conversa diz "Você interrompeu"), `undoChatChangesForQuit` desfaz uma "Nova conversa" ou
+  reabertura cujo arquivamento ainda está na fila (a conversa aberta volta ao disco e a cópia recém-arquivada some, para ela não
+  aparecer duas vezes), o estado e os rascunhos são salvos, e `ChildProcessGroups.killAllNow` e `BackgroundJobs.killAllNow()` encerram os grupos de processos que o app iniciou: os comandos em
   segundo plano, o Claude Code e o `run_command` em primeiro plano (cada um lidera um grupo próprio, que a morte do app não alcança).
 - Leituras: fila concorrente própria, coordenada por arquivo (`FileGate`): uma leitura espera as gravações *daquele* arquivo
   (nunca vê um arquivo pela metade nem uma versão velha) e não espera as dos outros. O nome de um arquivo para o `FileGate`,

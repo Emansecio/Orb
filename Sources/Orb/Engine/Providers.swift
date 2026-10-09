@@ -122,6 +122,8 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
 
     var usesSignIn: Bool { self == .chatgpt || self == .claudeCode }
     var needsKey: Bool { ![.chatgpt, .claudeCode, .ollama, .lmstudio, .custom].contains(self) }
+    /// Keeps a key in the Keychain: the ones that need it, and the gateway, where it is optional.
+    var storesKey: Bool { needsKey || self == .custom }
     var hasEditableURL: Bool { [.ollama, .lmstudio, .custom].contains(self) }
 }
 
@@ -205,6 +207,25 @@ enum ModelRefreshBackoff {
 }
 
 enum ModelCatalog {
+    /// Words of a model id that mark a model that does not chat: embeddings, rerankers, speech and moderation. Local servers
+    /// list everything they hold, so a user of RAG has `bge-m3` next to `qwen3`.
+    static let notForChat: Set<String> = ["embed", "embedding", "embeddings", "minilm", "bge", "rerank", "reranker", "tts", "whisper",
+                                          "transcribe", "realtime", "audio", "image", "moderation"]
+
+    /// The id's words: letters and digits, lowercased (`nomic-embed-text:latest` → nomic, embed, text, latest).
+    static func words(of id: String) -> Set<String> {
+        Set(id.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init))
+    }
+
+    /// False for an embedding, reranking, speech or moderation model: not one to talk to.
+    static func isChatModel(_ id: String) -> Bool { words(of: id).isDisjoint(with: notForChat) }
+
+    /// The model a provider just connected gets as the default: the first one that chats (the lists come in
+    /// alphabetical order, where an embedding model often leads), else the first of all.
+    static func preferredDefault(_ models: [ProviderModel]) -> ProviderModel? {
+        models.first { isChatModel($0.id) } ?? models.first
+    }
+
     /// A refreshed list for a custom gateway: what the gateway lists, then the models added by hand that it does not name.
     static func mergingManual(fetched: [ProviderModel], previous: [ProviderModel]) -> [ProviderModel] {
         let listed = Set(fetched.map(\.id))

@@ -54,6 +54,9 @@ struct ContextBudget: Sendable, Equatable {
     static let windowShare = 0.9
     /// What `ContextMemoryLevel.wide` takes of the window.
     static let wideShare = 0.6
+    /// A window past this is taken as this: no model has one that large, and a catalog that says so is wrong (and its
+    /// arithmetic would overflow).
+    static let largestWindow = 50_000_000
     /// History never gets less than this, however crowded the window is.
     static let minimumTokens = 2_000
     /// System prompt plus tool specs of an ordinary Orb (about 1,250 and 6,900 tokens measured), for callers that
@@ -94,7 +97,7 @@ struct ContextBudget: Sendable, Equatable {
         lowWaterShare ?? (tokens < Self.smallBudgetTokens ? Self.smallBudgetLowWater : Self.defaultLowWater)
     }
 
-    var characters: Int { Int(Double(tokens) * Self.charactersPerToken) }
+    var characters: Int { Int(min(Double(tokens) * Self.charactersPerToken, Double(Int.max / 4))) }
 
     /// Used when nothing is known about the model (and by callers that don't care, like the Claude Code catch-up).
     static let fallback = ContextBudget(modelWindow: 128_000)
@@ -149,6 +152,7 @@ struct ContextBudget: Sendable, Equatable {
     /// 90% of the window, minus what each request carries besides the history, capped by the memory level and kept
     /// above the minimum.
     static func historyTokens(window: Int, overhead: Int, reply: Int, level: ContextMemoryLevel) -> Int {
+        let window = min(window, largestWindow)
         let free = Int(Double(window) * windowShare) - overhead - reply
         return max(minimumTokens, min(free, level.cap(window: window)))
     }

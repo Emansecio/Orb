@@ -132,10 +132,10 @@ enum ResetGuard {
     /// not own.
     static let ownedFolders: Set<String> = ["conversations", "memoria", "anexos", "saidas", "conectores", "uso", ProfilePhoto.folderName]
 
-    /// Whether the entry `name` of the data folder is the app's own (`state.json`, its set-aside copies, and the
-    /// folders above).
+    /// Whether the entry `name` of the data folder is the app's own (`state.json`, its set-aside copies, the unsent
+    /// drafts and the folders above).
     static func removes(entry name: String) -> Bool {
-        name == "state.json" || name.hasPrefix("state.json.") || ownedFolders.contains(name)
+        name == "state.json" || name.hasPrefix("state.json.") || name == Store.draftsFileName || ownedFolders.contains(name)
     }
 
     /// Preferences that survive a reset: the note of which Keychain accounts were already dealt with, so a key the

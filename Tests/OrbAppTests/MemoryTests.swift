@@ -689,6 +689,32 @@ struct MemoryIntentTests {
         #expect(await bank.identity()!.body == edited)
     }
 
+    @Test func identityNotesThatFitAreNotRefusedBecauseScrubbingLengthenedThem() async {
+        let bank = bank()
+        let secret = "senha: 1234\n"
+        let body = secret + String(repeating: "x", count: MemoryBank.identityMaximumLength - secret.count)
+        #expect(body.count == MemoryBank.identityMaximumLength)
+        #expect(await bank.setIdentity(body))
+        let saved = await bank.identity()!.body
+        #expect(saved.contains("[removido]") && !saved.contains("1234"))
+    }
+
+    @Test func aNewOrbsIdentityNotesAreNotCutAtTheShortMemoryLimit() async {
+        let bank = bank()
+        await bank.ensureIdentity(notes: String(repeating: "a", count: 5_000), interview: false)
+        #expect(await bank.identity()?.body.count == 5_000)
+    }
+
+    @Test @MainActor func anIdentityThatCouldNotBeSavedIsAnnounced() async {
+        let model = AppModel(store: Store(directory: root.appending(path: "dados")), runsBackgroundWork: false)
+        let botID = model.bots[0].id
+        #expect(await model.setIdentity("Seja direto.", of: botID))
+        #expect(model.dataNotices.isEmpty)
+        model.memory.bank(for: botID).close()
+        #expect(!(await model.setIdentity("Outra coisa.", of: botID)))
+        #expect(!model.dataNotices.isEmpty) // and the editor, which closes only on success, stays open with the text
+    }
+
     @Test func anIndexThatFailsToOpenIsTriedAgainLaterAndNeverDeleted() async throws {
         let bank = bank()
         let blocker = root.appending(path: "orb/index.sqlite")

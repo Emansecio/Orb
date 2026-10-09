@@ -259,6 +259,8 @@ Só usa tokens que já existem; o fundo é estático (um gradiente desenhado uma
   pontos aparecem e só o lugar da ação é reservado. Depois a ação entra por transição (`.rise`), cartão ou botões, conforme o
   resultado. Nada de mostrar o cartão de conectar e trocar. A comemoração e o anúncio do VoiceOver só valem quando o modelo foi
   conectado no cartão (`WelcomeStage.celebrates(old:new:viaCard:)`), nunca quando a verificação inicial termina.
+  O mesmo vale para o banner e o cartão do chat (`SetupPrompt.shows`), para o aviso do atalho rápido e para o envio: enquanto a verificação
+  não termina nada pulsa nem avisa, e o compositor espera por ela. Depois dela, `AppModel.hasModelSetup(for:)` (modelo do Orb ou padrão utilizável) decide se o cartão e o banner aparecem.
 - **Memória guardada que chega depois.** Ao apagar o último Orb guardando a memória, a cópia roda em segundo plano. A lista é lida
   de novo quando ela termina (`keptMemoriesVersion`), e o cartão entra por transição.
 - **Texto da lista esvaziada.** A marca `orb.welcome.criouOrb` também é gravada quando o app abre com Orbs que já existem (feitos por

@@ -236,6 +236,8 @@ struct AnthropicStreamAssembler: AssemblingMapper {
     private var thinking: [Int: ReasoningPart] = [:]
     private var stop: String?
     private(set) var usage: TokenUsage?
+    /// `message_start` carries the input tokens.
+    var reportsUsageUpFront: Bool { true }
     private(set) var isFinished = false
 
     init(provider: String = "", model: String = "") {
@@ -318,11 +320,11 @@ struct AnthropicStreamAssembler: AssemblingMapper {
     private mutating func record(usage: JSONValue?) {
         guard let usage, case .object = usage else { return }
         var total = self.usage ?? TokenUsage()
-        if let value = usage["input_tokens"]?.int { total.input = value }
-        if let value = usage["output_tokens"]?.int { total.output = value }
-        if let value = usage["cache_read_input_tokens"]?.int { total.cacheRead = value }
-        if let value = usage["cache_creation_input_tokens"]?.int { total.cacheWrite = value }
-        if let value = usage["cache_creation"]?["ephemeral_1h_input_tokens"]?.int { total.cacheWrite1h = value }
+        if let value = TokenUsage.sane(usage["input_tokens"]?.int) { total.input = value }
+        if let value = TokenUsage.sane(usage["output_tokens"]?.int) { total.output = value }
+        if let value = TokenUsage.sane(usage["cache_read_input_tokens"]?.int) { total.cacheRead = value }
+        if let value = TokenUsage.sane(usage["cache_creation_input_tokens"]?.int) { total.cacheWrite = value }
+        if let value = TokenUsage.sane(usage["cache_creation"]?["ephemeral_1h_input_tokens"]?.int) { total.cacheWrite1h = value }
         self.usage = total
     }
 }

@@ -179,8 +179,7 @@ enum ChunkSummarizer {
     /// Words of a model id that mark a small, cheap model of its family, best first.
     private static let cheapWords = ["haiku", "mini", "flash", "lite", "nano"]
     /// Words that mark a model that is not for text chat.
-    private static let notForText = ["embed", "embedding", "tts", "whisper", "transcribe", "realtime", "audio", "image", "moderation",
-                                     "search", "codex"]
+    private static let notForText = ModelCatalog.notForChat.union(["search", "codex"])
     /// The cheap model needs room for the longest input.
     private static let minimumWindow = 40_000
 
@@ -215,9 +214,7 @@ enum ChunkSummarizer {
     /// is a small one already. Local servers never switch: loading another model would cost more than it saves. Pure.
     static func model(in account: ProviderAccount, orb orbID: String) -> ProviderModel? {
         guard account.kind != .ollama, account.kind != .lmstudio, account.kind != .claudeCode, let maker = maker(of: orbID) else { return nil }
-        func words(_ id: String) -> Set<String> {
-            Set(id.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init))
-        }
+        let words = ModelCatalog.words(of:)
         guard words(orbID).isDisjoint(with: cheapWords) else { return nil }
         let orbPrice = account.models.first { $0.id == orbID }?.inputPrice.flatMap { $0 > 0 ? $0 : nil }
         let candidates = account.models.compactMap { model -> (model: ProviderModel, rank: Int)? in
@@ -254,7 +251,7 @@ enum ChunkSummarizer {
                 text += piece
             case .finished(_, let used):
                 usage = used
-            case .reasoning, .toolCalls:
+            case .reasoning, .toolCalls, .usage:
                 break
             }
             if text.count > ChunkSummary.maxLength + 400 { break }

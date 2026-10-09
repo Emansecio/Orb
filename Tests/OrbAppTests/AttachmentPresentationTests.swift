@@ -133,6 +133,17 @@ final class AttachmentPresentationTests {
         #expect(QuickLookPreview.items(["/gone.png"], at: 0, exists: { _ in false }).urls.isEmpty)
     }
 
+    @MainActor @Test func theQuickLookPanelAskingForAnOldIndexGetsTheNearestItem() throws {
+        let preview = QuickLookPreview.shared
+        preview.urls = [URL(fileURLWithPath: "/unico.png")]
+        #expect(preview.numberOfPreviewItems(in: nil) == 1)
+        // The panel was on the fifth item of another message when the list was swapped.
+        #expect((preview.previewPanel(nil, previewItemAt: 4) as? NSURL)?.path == "/unico.png")
+        #expect((preview.previewPanel(nil, previewItemAt: -1) as? NSURL)?.path == "/unico.png")
+        preview.urls = []
+        #expect(preview.previewPanel(nil, previewItemAt: 0) == nil)
+    }
+
     // MARK: Files the Orb makes
 
     @Test func aToolCallWithoutFilesReadsAndWritesAsBefore() throws {

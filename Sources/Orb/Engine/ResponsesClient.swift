@@ -265,9 +265,9 @@ struct ResponsesStreamAssembler: AssemblingMapper {
     /// `usage` with cached tokens split out of the input count.
     static func usage(in usage: JSONValue?) -> TokenUsage? {
         guard let usage, case .object = usage else { return nil }
-        let cached = usage["input_tokens_details"]?["cached_tokens"]?.int
-        return TokenUsage(input: usage["input_tokens"]?.int.map { max(0, $0 - (cached ?? 0)) },
-                          output: usage["output_tokens"]?.int, cacheRead: cached, cacheWrite: nil)
+        let cached = TokenUsage.sane(usage["input_tokens_details"]?["cached_tokens"]?.int)
+        return TokenUsage(input: TokenUsage.sane(usage["input_tokens"]?.int).map { max(0, $0 - (cached ?? 0)) },
+                          output: TokenUsage.sane(usage["output_tokens"]?.int), cacheRead: cached, cacheWrite: nil)
     }
 
     private static func failure(code: String?, message: String) -> LLMError {

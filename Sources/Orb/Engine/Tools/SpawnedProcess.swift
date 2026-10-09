@@ -58,9 +58,15 @@ enum SpawnedProcess {
         return pid
     }
 
-    /// Calls `onExit` once, when `pid` (a child of this app) ends. Reaps it.
+    /// Calls `onExit` once, when `pid` (a child of this app) ends. Reaps it. No thread waits for it: a process source (kqueue)
+    /// reports the exit, so many long-lived children (dev servers, watchers) do not use up the threads of the global queues.
     static func watch(_ pid: pid_t, onExit: @escaping @Sendable (ChildExit) -> Void) {
-        DispatchQueue.global(qos: .utility).async {
+        let source = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: .global(qos: .utility))
+        let claimed = OSAllocatedUnfairLock(initialState: false)
+        // The event and the check below can both see the exit; only the first one reaps and reports.
+        let finish: @Sendable () -> Void = {
+            guard claimed.withLock({ taken in defer { taken = true }; return !taken }) else { return }
+            source.cancel()
             var raw: Int32 = 0
             while waitpid(pid, &raw, 0) < 0 {
                 if errno != EINTR { return onExit(ChildExit(status: -1, signaled: false)) }
@@ -69,6 +75,11 @@ enum SpawnedProcess {
             let signal = raw & 0x7f
             onExit(signal == 0 ? ChildExit(status: (raw >> 8) & 0xff, signaled: false) : ChildExit(status: signal, signaled: true))
         }
+        source.setEventHandler(handler: finish)
+        source.resume()
+        // A child that ended before the source was listening (it is a zombie by now) never produces the event.
+        var info = siginfo_t()
+        if waitid(P_PID, id_t(pid), &info, WEXITED | WNOHANG | WNOWAIT) != 0 || info.si_pid != 0 { finish() }
     }
 
     private static func cStrings(_ strings: [String]) throws -> [UnsafeMutablePointer<CChar>?] {

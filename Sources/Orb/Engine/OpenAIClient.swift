@@ -148,11 +148,11 @@ extension OpenAIClient {
     static func usage(in usage: JSONValue?) -> TokenUsage? {
         guard let usage, case .object = usage else { return nil }
         let details = usage["prompt_tokens_details"]
-        let cacheRead = details?["cached_tokens"]?.int ?? usage["prompt_cache_hit_tokens"]?.int
-        let cacheWrite = details?["cache_write_tokens"]?.int
-        let prompt = usage["prompt_tokens"]?.int
+        let cacheRead = TokenUsage.sane(details?["cached_tokens"]?.int ?? usage["prompt_cache_hit_tokens"]?.int)
+        let cacheWrite = TokenUsage.sane(details?["cache_write_tokens"]?.int)
+        let prompt = TokenUsage.sane(usage["prompt_tokens"]?.int)
         return TokenUsage(input: prompt.map { max(0, $0 - (cacheRead ?? 0) - (cacheWrite ?? 0)) },
-                          output: usage["completion_tokens"]?.int, cacheRead: cacheRead, cacheWrite: cacheWrite)
+                          output: TokenUsage.sane(usage["completion_tokens"]?.int), cacheRead: cacheRead, cacheWrite: cacheWrite)
     }
 }
 

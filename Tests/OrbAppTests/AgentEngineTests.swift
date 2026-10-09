@@ -360,6 +360,16 @@ extension AgentEngineTests {
         #expect(totals.last == TokenUsage(input: 100, output: 3))
     }
 
+    @Test func whatTheProviderReportsAheadOfTheAnswerIsAnnouncedButCountedOnce() async {
+        let final = TokenUsage(input: 150_000, output: 4)
+        let script = Script([[.usage(TokenUsage(input: 150_000, output: 1)), .text("oi"), .finished(.done, final)]])
+        let events = await run(AgentEngine(), request(script, mode: .ask, runs: Counter()))
+        let pending = events.compactMap { event -> TokenUsage? in if case .pendingUsage(let used) = event { used } else { nil } }
+        #expect(pending == [TokenUsage(input: 150_000, output: 1)])
+        let requests = events.compactMap { event -> TokenUsage? in if case .requestUsage(let used) = event { used } else { nil } }
+        #expect(requests == [final])
+    }
+
     @Test func eachAttemptThatBrokeOffAfterReportingItsUseIsCounted() async {
         let (engine, _) = quickEngine()
         let script = Script(responses: [

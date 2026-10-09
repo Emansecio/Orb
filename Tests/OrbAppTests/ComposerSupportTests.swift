@@ -3,6 +3,15 @@ import Testing
 @testable import Orb
 
 struct ComposerSupportTests {
+    @Test func aFileAloneIsSomethingToSendAndWhileWorkingItQueuesInsteadOfStopping() {
+        #expect(ComposerAction.hasContent(hasText: false, pictures: 0, files: 1))
+        #expect(ComposerAction.hasContent(hasText: false, pictures: 1, files: 0))
+        #expect(!ComposerAction.hasContent(hasText: false, pictures: 0, files: 0))
+        let canSend = ComposerAction.canSend(hasContent: ComposerAction.hasContent(hasText: false, pictures: 0, files: 1),
+                                             isWorking: true, canSteer: true, pendingPictures: 0)
+        #expect(ComposerAction.current(isWorking: true, canSend: canSend) == .queue)
+    }
+
     // MARK: Keys and pictures
 
     @Test func theQueueHintHasAShortFormForANarrowComposer() {

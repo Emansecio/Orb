@@ -111,12 +111,7 @@ struct CustomProviderFields<KeyRow: View>: View {
     private func addModel() {
         let id = newModel.trimmingCharacters(in: .whitespaces)
         guard !id.isEmpty else { return }
-        model.updateProvider(.custom) {
-            if !$0.models.contains(where: { $0.id == id }) {
-                $0.models.append(ProviderModel(id: id, name: id, format: $0.format, isManual: true))
-                $0.modelsUpdatedAt = .now
-            }
-        }
+        model.addManualModel(id)
         health.record(nil, for: .custom)
         newModel = ""
     }

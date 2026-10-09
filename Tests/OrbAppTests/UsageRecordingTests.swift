@@ -149,6 +149,28 @@ struct UsageStoreTests {
         #expect(month.buckets.map(\.totals.input) == [3])
     }
 
+    @Test func aMonthThatCannotBeReadIsReportedOnceNotAtEveryFlush() throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        final class Heard: @unchecked Sendable {
+            private let lock = NSLock()
+            private var items: [String] = []
+            func add(_ message: String) { lock.withLock { items.append(message) } }
+            var all: [String] { lock.withLock { items } }
+        }
+        let failures = Heard(), notices = Heard()
+        let store = Store(directory: root, onSaveFailure: { failures.add($0.message) }, onNotice: { notices.add($0.message) })
+        // A folder where the file goes: it exists but cannot be read, with no permissions involved.
+        let file = root.appending(path: "uso/2026-10.json")
+        try FileManager.default.createDirectory(at: file, withIntermediateDirectories: true)
+        let key = UsageKey(hour: utcDate(2026, 10, 9, 10), orb: orb, model: "openai/gpt-5", source: .chat)
+        for _ in 0..<3 {
+            store.addUsage([key: UsageTotals(requests: 1, input: 3)], names: [:], calendar: utc)
+            store.flush()
+        }
+        #expect(notices.all.count == 1)
+        #expect(failures.all.isEmpty) // nothing is written to it, so nothing fails (and idle conversations keep unloading)
+    }
+
     @Test func aFileThatCannotBeDecodedIsSetAsideAndTheHistoryStartsAgain() async throws {
         defer { try? FileManager.default.removeItem(at: root) }
         let store = store()
@@ -258,6 +280,60 @@ struct UsageEventsTests {
         #expect(found.first?.totals == UsageTotals(requests: 2, input: 150, cacheRead: 8_100, cacheWrite: 30, output: 30))
     }
 
+    /// The stopped stream drops what the engine would still say, so the input the provider announced is counted by the reader.
+    @Test func aCallStoppedAfterTheProviderReportedItsInputIsStillCounted() async {
+        let (model, id, root) = makeModel()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = model.session(id)
+        let turn = session.beginTurn()
+        let (events, feed) = AsyncStream<TurnEvent>.makeStream()
+        let playing = Task { await session.play(events, turn: turn) }
+        session.turnTask = playing
+        feed.yield(.pendingUsage(TokenUsage(input: 150_000)))
+        feed.yield(.notice("lido"))
+        await waitUntil("the events to be read") { model.transcript(id).contains { $0.kind == .notice("lido") } }
+        session.stop()
+        await playing.value
+        let found = await rows(model, root: root)
+        #expect(found.first?.totals == UsageTotals(requests: 1, input: 150_000), "\(found)")
+    }
+
+    @Test func aStoppedRoutinesCallKeepsItsSourceEvenWhenTheTurnIsClosedFirst() async {
+        let (model, id, root) = makeModel()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = model.session(id)
+        let turn = session.beginTurn()
+        session.routineID = UUID()
+        let (events, feed) = AsyncStream<TurnEvent>.makeStream()
+        let playing = Task { await session.play(events, turn: turn) }
+        session.turnTask = playing
+        feed.yield(.pendingUsage(TokenUsage(input: 150_000)))
+        feed.yield(.notice("lido"))
+        await waitUntil("the events to be read") { model.transcript(id).contains { $0.kind == .notice("lido") } }
+        session.stop()
+        await playing.value
+        let found = await rows(model, root: root)
+        #expect(found.first?.key.source == .routine, "\(found)")
+    }
+
+    @Test func aCallThatEndedIsNotCountedAgainWhenTheTurnIsStopped() async {
+        let (model, id, root) = makeModel()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = model.session(id)
+        let turn = session.beginTurn()
+        let (events, feed) = AsyncStream<TurnEvent>.makeStream()
+        let playing = Task { await session.play(events, turn: turn) }
+        session.turnTask = playing
+        feed.yield(.pendingUsage(TokenUsage(input: 150_000)))
+        feed.yield(.requestUsage(TokenUsage(input: 150_000, output: 20)))
+        feed.yield(.notice("lido"))
+        await waitUntil("the events to be read") { model.transcript(id).contains { $0.kind == .notice("lido") } }
+        session.stop()
+        await playing.value
+        let found = await rows(model, root: root)
+        #expect(found.first?.totals == UsageTotals(requests: 1, input: 150_000, output: 20), "\(found)")
+    }
+
     @Test func theBatchIsWrittenWhenTheTurnEnds() {
         let (model, id, root) = makeModel()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -344,5 +420,56 @@ struct UsageEventsTests {
         _ = await model.resetEverything(ResetOptions(memories: .erase, leavesProviders: true))
         #expect(!FileManager.default.fileExists(atPath: root.appending(path: "uso").path))
         #expect(!model.usageLog.hasPending)
+    }
+}
+
+/// A broken server or a damaged file may carry absurd counts: they never overflow a sum on the way to the history or the page.
+@MainActor
+struct AbsurdUsageCountsTests {
+    private let orb = UUID()
+
+    @Test func providersDropACountOutsideTheRealRange() throws {
+        let chat = try #require(JSONValue.parse(#"{"prompt_tokens":9223372036854775807,"completion_tokens":10,"prompt_tokens_details":{"cached_tokens":-9223372036854775807}}"#))
+        let usage = try #require(OpenAIClient.usage(in: chat))
+        #expect(usage.input == nil && usage.cacheRead == nil && usage.output == 10)
+
+        let responses = try #require(JSONValue.parse(#"{"input_tokens":9223372036854775806,"output_tokens":-5,"input_tokens_details":{"cached_tokens":4}}"#))
+        let reported = try #require(ResponsesStreamAssembler.usage(in: responses))
+        #expect(reported.input == nil && reported.output == nil && reported.cacheRead == 4)
+
+        #expect(TokenUsage.sane(5) == 5)
+        #expect(TokenUsage.sane(TokenUsage.maxCount) == TokenUsage.maxCount)
+        #expect(TokenUsage.sane(TokenUsage.maxCount + 1) == nil && TokenUsage.sane(-1) == nil && TokenUsage.sane(nil) == nil)
+    }
+
+    @Test func anAbsurdUseGoesThroughTheTotalsAndTheRecorderWithoutTrapping() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "OrbAbsurdUsage-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let used = UsageTotals(TokenUsage(input: Int.max - 1, output: 10, cacheRead: Int.max, cacheWrite: Int.max))
+        #expect(!used.isEmpty)
+        #expect(used.tokens <= 4 * TokenUsage.maxCount)
+        var sum = used
+        sum.add(used)
+        sum.add(UsageTotals(requests: Int.max, input: Int.max, output: Int.max))
+        #expect(sum.input == TokenUsage.maxCount && sum.requests == TokenUsage.maxCount)
+
+        let store = Store(directory: root)
+        let recorder = UsageRecorder(store: store, now: { utcDate(2026, 10, 9, 14, 5) }, calendar: utc)
+        for _ in 0..<3 { recorder.record(used, orb: orb, name: "Atlas", model: "openai/gpt-5", source: .chat) }
+        recorder.flush()
+        store.flush()
+        let read = await store.readUsage(from: utcDate(2026, 10, 9), to: utcDate(2026, 10, 10), calendar: utc)
+        #expect(read.buckets.count == 1)
+        let report = UsageReport.make(buckets: read.buckets, period: .today, now: utcDate(2026, 10, 9, 15), calendar: utc, book: PriceBook(),
+                                      orbNames: [orb: "Atlas"])
+        #expect(report.totalTokens > 0)
+    }
+
+    @Test func aMonthFileWithAbsurdCountsReadsBackWithinTheLimit() throws {
+        let json = #"{"hour":1760000000,"orb":"\#(orb.uuidString)","model":"m","input":9223372036854775807,"output":-3,"cacheRead":9223372036854775807,"cacheWrite":9223372036854775807,"cacheWrite1h":9223372036854775807,"requests":9223372036854775807}"#
+        let bucket = try JSONDecoder().decode(UsageBucket.self, from: Data(json.utf8))
+        #expect(bucket.totals.input == TokenUsage.maxCount && bucket.totals.output == 0)
+        #expect(bucket.totals.cacheWrite1h <= bucket.totals.cacheWrite)
+        #expect(bucket.totals.tokens <= 4 * TokenUsage.maxCount)
     }
 }

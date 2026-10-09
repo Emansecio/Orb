@@ -26,10 +26,15 @@ actor ShellEnvironment {
     private let shellPath: String
     private let base: [String: String]
     private let timeout: Duration
-    private var cached: (value: Resolved, at: ContinuousClock.Instant, retryAfter: Duration)?
+    private var cached: (value: Resolved, at: ContinuousClock.Instant, retryAfter: Duration, timedOut: Bool)?
     private var resolving: Task<(Resolved, timedOut: Bool), Never>?
+    /// The asking again of a shell known to be slow, running in the background.
+    private var retrying: Task<Void, Never>?
+    /// Answers in a row that ran out of time: each one doubles the wait before the next try.
+    private var consecutiveTimeouts = 0
 
     private let retryAfterTimeout: Duration
+    private let retryTimeout: Duration
 
     /// A fallback is retried after this long; a real answer is kept until the app quits.
     private static let retryAfter = Duration.seconds(300)
@@ -37,23 +42,50 @@ actor ShellEnvironment {
     static let retryAfterTimeout = Duration.seconds(30)
 
     /// `shell` defaults to the user's login shell; `base` is the environment used as fallback and as a starting point.
+    /// `timeout` is how long the first answer is waited for; `retryTimeout`, how long the background tries are given.
     init(shell: String? = nil, base: [String: String] = ProcessInfo.processInfo.environment, timeout: Duration = .seconds(5),
-         retryAfterTimeout: Duration = ShellEnvironment.retryAfterTimeout) {
+         retryAfterTimeout: Duration = ShellEnvironment.retryAfterTimeout, retryTimeout: Duration = .seconds(15)) {
         shellPath = shell ?? Self.loginShell(in: base)
         self.base = base
         self.timeout = timeout
         self.retryAfterTimeout = retryAfterTimeout
+        self.retryTimeout = retryTimeout
     }
 
     func resolved() async -> Resolved {
-        if let cached, cached.value.isFromUserShell || ContinuousClock.now - cached.at < cached.retryAfter { return cached.value }
+        if let cached {
+            if cached.value.isFromUserShell || ContinuousClock.now - cached.at < cached.retryAfter { return cached.value }
+            if cached.timedOut {
+                // A shell that was too slow is not waited for again: the fallback answers now and the new try, with more
+                // patience since nobody is held up by it, runs in the background.
+                retryInBackground()
+                return cached.value
+            }
+        }
         if let resolving { return await resolving.value.0 }
-        let task = Task { await self.resolve() }
+        let task = Task { await self.resolve(timeout: timeout) }
         resolving = task
         let (value, timedOut) = await task.value
         resolving = nil
-        cached = (value, .now, timedOut ? retryAfterTimeout : Self.retryAfter)
+        remember(value, timedOut: timedOut)
         return value
+    }
+
+    private func retryInBackground() {
+        guard retrying == nil else { return }
+        retrying = Task {
+            let (value, timedOut) = await self.resolve(timeout: retryTimeout)
+            self.remember(value, timedOut: timedOut)
+            self.retrying = nil
+        }
+    }
+
+    /// Keeps an answer. Timeouts back off (30 s, 1 min, 2 min… up to the wait of any other fallback): a shell that is always
+    /// slow is asked ever less often instead of every 30 s for as long as the app runs.
+    private func remember(_ value: Resolved, timedOut: Bool) {
+        consecutiveTimeouts = timedOut ? consecutiveTimeouts + 1 : 0
+        let wait = timedOut ? min(retryAfterTimeout * (1 << min(consecutiveTimeouts - 1, 10)), Self.retryAfter) : Self.retryAfter
+        cached = (value, .now, wait, timedOut)
     }
 
     // MARK: Resolving
@@ -61,7 +93,7 @@ actor ShellEnvironment {
     private static let marker = "__ORB_ENV_BEGIN__"
 
     /// The environment, and whether the fallback stands in because the shell took too long.
-    private func resolve() async -> (Resolved, timedOut: Bool) {
+    private func resolve(timeout: Duration) async -> (Resolved, timedOut: Bool) {
         let runner = Self.commandShell(for: shellPath)
         let fallback = Resolved(environment: Self.prepared(base), shell: runner, isFromUserShell: false)
         guard FileManager.default.isExecutableFile(atPath: shellPath),

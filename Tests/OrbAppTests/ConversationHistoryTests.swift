@@ -194,6 +194,103 @@ import Testing
         #expect(!model.dataNotices.isEmpty)
     }
 
+    /// Answers at once; only to see whether a send starts a turn.
+    private struct QuickModel: LLMClient {
+        func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
+            AsyncThrowingStream { continuation in
+                continuation.yield(.text("ok"))
+                continuation.yield(.finished(.done, nil))
+                continuation.finish()
+            }
+        }
+    }
+
+    @Test @MainActor func nothingIsSentWhileTheChatIsBeingArchivedAndTheDraftStays() async {
+        let (model, botID) = model(current: conversation("primeira"))
+        model.providers = [ProviderAccount(kind: .custom)]
+        model.defaultModel = "custom/modelo"
+        model.clientOverride = { QuickModel() }
+        let task = model.newConversation(botID)
+        #expect(model.changingChat.contains(botID))
+        // It would land in the chat about to be replaced, and undo the change.
+        #expect(!model.send("assunto novo", to: botID, fromUser: true))
+        #expect(model.transcript(botID).count == 2 && model.turns[botID] == nil)
+        await task?.value
+        store.flush()
+        #expect(model.dataNotices.isEmpty)
+        #expect(model.transcript(botID).isEmpty) // the new conversation did open
+        #expect(!model.changingChat.contains(botID))
+        #expect(model.send("assunto novo", to: botID, fromUser: true)) // and now it is sent
+        #expect(store.readArchive(botID).count == 1)
+    }
+
+    @Test @MainActor func aQuickAskDuringTheChangeGoesBackToTheDraftInsteadOfBeingLost() async {
+        let (model, botID) = model(current: conversation("primeira"))
+        model.providers = [ProviderAccount(kind: .custom)]
+        model.defaultModel = "custom/modelo"
+        model.clientOverride = { QuickModel() }
+        let task = model.newConversation(botID)
+        model.sendWhenLoaded("pergunta rápida", to: botID)
+        #expect(model.drafts[botID] == "pergunta rápida")
+        #expect(model.transcript(botID).count == 2)
+        await task?.value
+        store.flush()
+        #expect(model.dataNotices.isEmpty)
+    }
+
+    @Test @MainActor func reopeningGivenUpBecauseTheChatChangedSaysSo() async throws {
+        let (model, botID) = model(current: conversation("segunda"))
+        let first = store.archive(conversation("primeira"), for: botID)
+        store.flush()
+        let release = DispatchSemaphore(value: 0)
+        store.stallWriter(until: release)
+        let reopening = Task { await model.reopenConversation(first.id, of: botID) }
+        // The current chat's archive writes the Orb's archive index, and is registered with the store's gate the moment
+        // it is queued (behind the stalled writer): the chat it leaves was looked at by then. The path carries the
+        // test's folder because the first Orb has the same id in every test.
+        await waitUntil("the current chat's archive to be queued") { Store.gate.queuedWrites(containing: "\(root.lastPathComponent)/conversations/\(botID.uuidString)/index.json") > 0 }
+        model.session(botID).conversation?.items.append(TranscriptItem(.user(text: "mais uma", attachments: [])))
+        release.signal()
+        #expect(await reopening.value == false)
+        #expect(!model.dataNotices.isEmpty)
+    }
+
+    @Test @MainActor func quittingRightAfterNewConversationLeavesTheChatOpenAndListedOnce() async throws {
+        let (model, botID) = model(current: conversation("primeira"))
+        let release = DispatchSemaphore(value: 0)
+        store.stallWriter(until: release)
+        let task = model.newConversation(botID)
+        await waitUntil("the archive write to be queued") { model.hasQueuedChatArchive } // installing the empty chat has not run
+        model.undoChatChangesForQuit() // what the quit notification does before saving
+        release.signal()
+        model.saveNow()
+        await task?.value // the step that would have finished the change gives way
+
+        let next = AppModel(store: store, runsBackgroundWork: false)
+        #expect(next.transcript(botID).count == 2, "the conversation is still the open one")
+        #expect(store.readArchive(botID).isEmpty, "and not also listed as an earlier one")
+        #expect(model.transcript(botID).count == 2)
+    }
+
+    @Test @MainActor func quittingWhileAConversationIsBeingReopenedLeavesNoCopy() async throws {
+        let (model, botID) = model(current: conversation("segunda"))
+        let first = store.archive(conversation("primeira"), for: botID)
+        store.flush()
+        let release = DispatchSemaphore(value: 0)
+        store.stallWriter(until: release) // the archive of the open chat waits in the queue
+        let reopened = Task { await model.reopenConversation(first.id, of: botID) }
+        await waitUntil("the archive write to be queued") { model.hasQueuedChatArchive }
+        model.undoChatChangesForQuit()
+        release.signal()
+        model.saveNow()
+        #expect(await reopened.value == false)
+
+        let next = AppModel(store: store, runsBackgroundWork: false)
+        #expect(next.transcript(botID).count == 2)
+        #expect(next.session(botID).conversation?.archiveTitle == "segunda")
+        #expect(store.readArchive(botID).map(\.title) == ["primeira"], "the chosen one is still only in the archive, once")
+    }
+
     @Test func aSealedFolderAnswersWritesWithFailureInsteadOfNeverAnswering() async {
         let sealed = Store(directory: root)
         let botID = UUID()

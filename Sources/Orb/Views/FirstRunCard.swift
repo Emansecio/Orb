@@ -34,6 +34,18 @@ enum LocalServerProbe {
     }
 }
 
+/// When the "connect a model" card or banner is offered: never while the connections are still being looked at (at
+/// launch `connected` is empty only because nobody has looked yet), and only when neither this Orb's model (it may
+/// differ from the default one) nor the default one can be used: the card connects a provider as the default model, so
+/// it cannot fix an Orb whose own model is down while the default one works.
+enum SetupPrompt {
+    /// `hasItems` is read last, and only when it matters, so a streaming chat is not redrawn by a banner that is off.
+    static func shows(connectionsChecked: Bool, orbHasModel: Bool, connectedName: String?, hasItems: @autoclosure () -> Bool,
+                      alwaysShown: Bool = false) -> Bool {
+        alwaysShown || connectedName != nil || (connectionsChecked && !orbHasModel && hasItems())
+    }
+}
+
 private struct FirstRunError: LocalizedError {
     var message: String
     var errorDescription: String? { message }
@@ -65,9 +77,13 @@ final class FirstRunModel {
     var isReady: () -> Bool = { true }
     /// Makes a connected provider's first model the default when the old default cannot be used.
     var adoptDefault: (ProviderKind) -> Void = { _ in }
+    /// The browser login of ChatGPT; stands in for the real one in tests.
+    var signInChatGPT: (AppModel) async throws -> Void = { try await $0.signIn(.chatgpt) }
 
     private var task: Task<Bool, Never>?
     private var generation = 0
+    /// The last browser login of ChatGPT worked and only the model list failed: one retry reuses that login.
+    private var reusesChatGPTLogin = false
 
     /// `claude`: what Claude Code already reported (snapshots show the card as it looks once it has looked).
     init(claude: ClaudeCodeStatus? = nil) { self.claude = claude }
@@ -102,7 +118,25 @@ final class FirstRunModel {
 
     @discardableResult
     func connectChatGPT(model: AppModel) -> Task<Bool, Never> {
-        connect(.chatgpt, kind: .chatgpt, name: "ChatGPT") { try await model.signIn(.chatgpt) }
+        connect(.chatgpt, kind: .chatgpt, name: "ChatGPT") {
+            // A retry after a failed model list must not ask for another login. Only once: a token the list keeps
+            // refusing is signed in again, not retried forever.
+            let reuses = self.reusesChatGPTLogin
+            self.reusesChatGPTLogin = false
+            if reuses, await model.hasChatGPTLogin() {
+                model.addProvider(.chatgpt)
+                await model.refreshConnections()
+                try await model.refreshModels(.chatgpt)
+            } else {
+                do {
+                    try await self.signInChatGPT(model)
+                } catch {
+                    let kept = await model.hasChatGPTLogin()
+                    self.reusesChatGPTLogin = kept && !(error is CancellationError)
+                    throw error
+                }
+            }
+        }
     }
 
     @discardableResult
@@ -637,7 +671,9 @@ struct FirstRunBanner: View {
 
     /// With a model connected this reads nothing of the conversation, so streaming does not redraw it.
     private var shows: Bool {
-        alwaysShown || steps.connectedName != nil || (!model.isProviderReady && !model.orbTranscript(botID).items.isEmpty)
+        SetupPrompt.shows(connectionsChecked: model.hasCheckedConnections, orbHasModel: model.hasModelSetup(for: botID),
+                          connectedName: steps.connectedName, hasItems: !model.orbTranscript(botID).items.isEmpty,
+                          alwaysShown: alwaysShown)
     }
 
     private var subtitle: String {

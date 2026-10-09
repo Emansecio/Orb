@@ -154,7 +154,7 @@ actor MemoryBank {
     func ensureIdentity(notes: String, interview: Bool, now: Date = .now) {
         prepare(now: now)
         guard !FileManager.default.fileExists(atPath: directory.appending(path: Self.identityPath).path) else { return }
-        write(MemoryPage(path: Self.identityPath, kind: .identidade, title: "Identidade", body: Self.clean(notes),
+        write(MemoryPage(path: Self.identityPath, kind: .identidade, title: "Identidade", body: Self.clean(notes, limit: Self.identityMaximumLength),
                          created: now, updated: now, origin: .voce, interviewPending: interview))
     }
 
@@ -193,8 +193,8 @@ actor MemoryBank {
     func setIdentity(_ body: String, now: Date = .now) -> Bool {
         // The editor counts what was typed, so that is what the limit is on (and a huge paste is not scrubbed first).
         guard body.count <= Self.identityMaximumLength else { return false }
+        // Scrubbing may lengthen a short secret ("senha: 1234" becomes "senha: [removido]"): that is not refused again.
         let cleaned = Self.clean(body, limit: nil)
-        guard cleaned.count <= Self.identityMaximumLength else { return false }
         prepare(now: now)
         var page = identity() ?? MemoryPage(path: Self.identityPath, kind: .identidade, title: "Identidade", body: "",
                                             created: now, updated: now, origin: .voce)

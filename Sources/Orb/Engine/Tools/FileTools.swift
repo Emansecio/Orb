@@ -271,12 +271,19 @@ struct EditFileTool: AgentTool {
         guard old != new else { throw ToolError("old_text e new_text são idênticos; não há nada para alterar.") }
         let size = try target.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
         guard size <= maxTextFileBytes else { throw ToolError("\(url.path) é grande demais para editar (\(size) bytes).") }
-        guard let file = TextFile.decode(try FileAccess.translating(target, writing: false) { try Data(contentsOf: target) }) else {
+        let data = try FileAccess.translating(target, writing: false) { try Data(contentsOf: target) }
+        guard var file = TextFile.decode(data) else {
             throw ToolError("\(url.path) é um arquivo binário; edit_file só edita texto.")
         }
-        guard file.invalidUTF8Bytes == 0 else {
-            throw ToolError("\(url.path) é UTF-8 com \(file.invalidUTF8Bytes) bytes inválidos; editá-lo regravaria o arquivo sem eles. "
-                + "Use run_command (sed, python) para mudar só o trecho, ou corrija esses bytes antes.")
+        if file.invalidUTF8Bytes > 0 {
+            // The stray bytes stay as stand-ins and go back as they were; only a stretch that includes one cannot be edited.
+            guard !old.contains("\u{FFFD}"), !TextFile.containsEscapes(old), !TextFile.containsEscapes(new),
+                  let escaped = TextFile.decodeEscapingInvalidUTF8(data) else {
+                throw ToolError("\(url.path) é UTF-8 com \(file.invalidUTF8Bytes) bytes inválidos (o read_file os mostra como \u{FFFD}); "
+                    + "edite um trecho que não os inclua, ou use run_command (sed, python) para mudar esse trecho.")
+            }
+            file.text = escaped
+            file.escapesInvalidBytes = true
         }
 
         let text = file.text as NSString

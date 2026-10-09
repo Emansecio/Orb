@@ -202,6 +202,32 @@ struct Store: Sendable {
         enqueue(touching: [stateURL]) { write(state, to: stateURL) }
     }
 
+    // MARK: Composer drafts
+
+    /// What each Orb's composer holds that was not sent (`ComposerDraft`), so quitting does not lose it.
+    static let draftsFileName = "rascunhos.json"
+    private var draftsURL: URL { directory.appendingPathComponent(Self.draftsFileName) }
+
+    /// Empty when there is none or it cannot be read: a draft is a convenience, and the next save writes the file again.
+    func readDrafts() -> [UUID: ComposerDraft] {
+        let url = draftsURL
+        return Self.gate.reading(url) {
+            guard let data = try? Data(contentsOf: url),
+                  let raw = try? JSONDecoder().decode([String: ComposerDraft].self, from: data) else { return [:] }
+            return Dictionary(raw.compactMap { key, draft in UUID(uuidString: key).map { ($0, draft) } }) { first, _ in first }
+        }
+    }
+
+    /// Writes the drafts; none at all removes the file.
+    func saveDrafts(_ drafts: [UUID: ComposerDraft]) {
+        let url = draftsURL
+        enqueue(touching: [url]) {
+            if drafts.isEmpty { try? FileManager.default.removeItem(at: url) } else {
+                write(Dictionary(uniqueKeysWithValues: drafts.map { ($0.key.uuidString, $0.value) }), to: url)
+            }
+        }
+    }
+
     // MARK: Connector catalogs
 
     private func connectorCatalogURL(_ id: UUID) -> URL {
@@ -300,7 +326,7 @@ struct Store: Sendable {
         return archived ? summary : nil
     }
 
-    private func archive(_ conversation: Conversation, as summary: ConversationSummary, for botID: UUID, then done: (@Sendable (Bool) -> Void)?) {
+    func archive(_ conversation: Conversation, as summary: ConversationSummary, for botID: UUID, then done: (@Sendable (Bool) -> Void)?) {
         let file = archivedURL(botID, summary.id)
         enqueue(touching: [file, archiveIndexURL(botID)], dropped: { done?(false) }) {
             var entries = reconciledArchive(botID).entries
@@ -411,9 +437,14 @@ struct Store: Sendable {
         }
     }
 
-    func saveRoutineConversation(_ conversation: Conversation, routine routineID: UUID, for botID: UUID) {
+    /// `then` (on the store's queue) says whether the file is as written: false when the write failed or was dropped.
+    func saveRoutineConversation(_ conversation: Conversation, routine routineID: UUID, for botID: UUID,
+                                 then done: (@Sendable (Bool) -> Void)? = nil) {
         let url = routineConversationURL(botID, routineID)
-        enqueue(touching: [url]) { writeConversation(conversation, to: url, cached: true) }
+        enqueue(touching: [url], dropped: { done?(false) }) {
+            let result = writeConversation(conversation, to: url, cached: true)
+            done?(result != .failed)
+        }
     }
 
     func readRoutineConversation(routine routineID: UUID, for botID: UUID) -> StoreRead<Conversation> {

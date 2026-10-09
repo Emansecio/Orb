@@ -31,6 +31,7 @@ enum OfficeReader {
             let rows = SheetParser.parse(data, strings: strings, maxRows: maxRows + 1)
             var lines = rows.rows.prefix(maxRows).map { row in "\(row.number): " + row.cells.joined(separator: "\t") }
             if rows.rows.count > maxRows { lines.append("[... a aba tem mais linhas; leia o resto com run_command ...]") }
+            if rows.cutColumns { lines.append("[... colunas além da \(SheetParser.maxColumns)ª foram omitidas; leia o resto com run_command ...]") }
             blocks.append("## Aba \(index + 1): \(sheet.name) (\(rows.rows.count > maxRows ? "mais de \(maxRows)" : String(rows.rows.count)) linhas com dados)\n"
                           + (lines.isEmpty ? "(vazia)" : lines.joined(separator: "\n")))
         }
@@ -191,12 +192,17 @@ private final class RelationshipsParser: NSObject, XMLParserDelegate {
 }
 
 /// The rows of one worksheet as text, columns kept in place (an empty cell is an empty string).
-private final class SheetParser: NSObject, XMLParserDelegate {
+final class SheetParser: NSObject, XMLParserDelegate {
     struct Row { var number: Int; var cells: [String] }
+
+    /// Columns kept per row: the cells beyond are dropped, so a stray far-right value cannot make a row of millions.
+    static let maxColumns = 1_024
 
     private let strings: [String]
     private let maxRows: Int
     private(set) var rows: [Row] = []
+    /// Whether a cell beyond `maxColumns` was dropped.
+    private(set) var cutColumns = false
     private var cells: [Int: String] = [:]
     private var rowNumber = 0
     private var column = 0
@@ -220,12 +226,13 @@ private final class SheetParser: NSObject, XMLParserDelegate {
         return delegate
     }
 
-    /// "AB12" → 27 (zero-based).
-    private static func columnIndex(_ reference: String) -> Int {
+    /// "AB12" → 27 (zero-based); nil for a reference past Excel's last column (XFD), which is not a real one.
+    private static func columnIndex(_ reference: String) -> Int? {
         var index = 0
         for scalar in reference.unicodeScalars {
             guard scalar.value >= 65, scalar.value <= 90 else { break }
             index = index * 26 + Int(scalar.value - 64)
+            if index > 16_384 { return nil }
         }
         return max(index - 1, 0)
     }
@@ -236,7 +243,7 @@ private final class SheetParser: NSObject, XMLParserDelegate {
             cells = [:]
             rowNumber = attributes["r"].flatMap { Int($0) } ?? (rows.last.map { $0.number + 1 } ?? 1)
         case "c":
-            column = attributes["r"].map(Self.columnIndex) ?? ((cells.keys.max() ?? -1) + 1)
+            column = attributes["r"].flatMap(Self.columnIndex) ?? ((cells.keys.max() ?? -1) + 1)
             type = attributes["t"] ?? ""
             value = ""
             inline = ""
@@ -265,7 +272,9 @@ private final class SheetParser: NSObject, XMLParserDelegate {
             default: text = value
             }
             text = text.replacingOccurrences(of: "\t", with: " ").replacingOccurrences(of: "\n", with: " ")
-            if !text.isEmpty { cells[column] = text }
+            if !text.isEmpty {
+                if column < Self.maxColumns { cells[column] = text } else { cutColumns = true }
+            }
         case "row":
             if let last = cells.keys.max() {
                 rows.append(Row(number: rowNumber, cells: (0...last).map { cells[$0] ?? "" }))

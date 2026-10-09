@@ -14,6 +14,8 @@ struct TextFile: Sendable {
     /// UTF-8 files with a few stray bytes (a character cut at the end of a log, a pasted fragment) are read as UTF-8
     /// with these bytes shown as U+FFFD; writing `text` back would lose them.
     var invalidUTF8Bytes = 0
+    /// `text` holds those stray bytes as private-use stand-ins (`escapeRange`), which `encoded` turns back into the bytes.
+    var escapesInvalidBytes = false
 
     var encodingName: String {
         switch encoding {
@@ -77,25 +79,61 @@ struct TextFile: Sendable {
         data.withUnsafeBytes { raw in
             let bytes = raw.bindMemory(to: UInt8.self)
             var index = 0
-            func isContinuation(_ at: Int, _ range: ClosedRange<UInt8> = 0x80...0xBF) -> Bool { at < bytes.count && range.contains(bytes[at]) }
             while index < bytes.count {
-                let byte = bytes[index]
-                var length = 0
-                switch byte {
-                case 0x00...0x7F: index += 1; continue
-                case 0xC2...0xDF: length = isContinuation(index + 1) ? 2 : 0
-                case 0xE0: length = isContinuation(index + 1, 0xA0...0xBF) && isContinuation(index + 2) ? 3 : 0
-                case 0xE1...0xEC, 0xEE...0xEF: length = isContinuation(index + 1) && isContinuation(index + 2) ? 3 : 0
-                case 0xED: length = isContinuation(index + 1, 0x80...0x9F) && isContinuation(index + 2) ? 3 : 0
-                case 0xF0: length = isContinuation(index + 1, 0x90...0xBF) && isContinuation(index + 2) && isContinuation(index + 3) ? 4 : 0
-                case 0xF1...0xF3: length = isContinuation(index + 1) && isContinuation(index + 2) && isContinuation(index + 3) ? 4 : 0
-                case 0xF4: length = isContinuation(index + 1, 0x80...0x8F) && isContinuation(index + 2) && isContinuation(index + 3) ? 4 : 0
-                default: length = 0
-                }
-                if length == 0 { invalid += 1; index += 1 } else { multibyte += 1; index += length }
+                let length = sequenceLength(bytes, at: index)
+                if length == 0 { invalid += 1; index += 1 } else { if length > 1 { multibyte += 1 }; index += length }
             }
         }
         return (multibyte, invalid)
+    }
+
+    /// Length of the valid UTF-8 sequence that starts at `index` (1 for ASCII), or 0 when the byte belongs to none.
+    private static func sequenceLength(_ bytes: UnsafeBufferPointer<UInt8>, at index: Int) -> Int {
+        func isContinuation(_ at: Int, _ range: ClosedRange<UInt8> = 0x80...0xBF) -> Bool { at < bytes.count && range.contains(bytes[at]) }
+        switch bytes[index] {
+        case 0x00...0x7F: return 1
+        case 0xC2...0xDF: return isContinuation(index + 1) ? 2 : 0
+        case 0xE0: return isContinuation(index + 1, 0xA0...0xBF) && isContinuation(index + 2) ? 3 : 0
+        case 0xE1...0xEC, 0xEE...0xEF: return isContinuation(index + 1) && isContinuation(index + 2) ? 3 : 0
+        case 0xED: return isContinuation(index + 1, 0x80...0x9F) && isContinuation(index + 2) ? 3 : 0
+        case 0xF0: return isContinuation(index + 1, 0x90...0xBF) && isContinuation(index + 2) && isContinuation(index + 3) ? 4 : 0
+        case 0xF1...0xF3: return isContinuation(index + 1) && isContinuation(index + 2) && isContinuation(index + 3) ? 4 : 0
+        case 0xF4: return isContinuation(index + 1, 0x80...0x8F) && isContinuation(index + 2) && isContinuation(index + 3) ? 4 : 0
+        default: return 0
+        }
+    }
+
+    /// Stand-ins for bytes that are not UTF-8 (0x80–0xFF), in the private-use area, like Python's `surrogateescape`.
+    static let escapeRange: ClosedRange<UInt32> = 0xF780...0xF7FF
+
+    static func containsEscapes(_ text: String) -> Bool { text.unicodeScalars.contains { escapeRange.contains($0.value) } }
+
+    /// `data` as UTF-8 where every stray byte becomes its stand-in, so that an edit elsewhere writes the file back byte for byte.
+    /// Nil if the file already uses those private-use characters (the stand-ins could not be told from them).
+    static func decodeEscapingInvalidUTF8(_ data: Data) -> String? {
+        var scalars = String.UnicodeScalarView()
+        var clash = false
+        data.withUnsafeBytes { raw in
+            let bytes = raw.bindMemory(to: UInt8.self)
+            var index = 0
+            var runStart = 0
+            func flush(to end: Int) {
+                guard end > runStart else { return }
+                let run = String(decoding: UnsafeBufferPointer(rebasing: bytes[runStart..<end]), as: UTF8.self)
+                if containsEscapes(run) { clash = true }
+                scalars.append(contentsOf: run.unicodeScalars)
+            }
+            while index < bytes.count {
+                let length = sequenceLength(bytes, at: index)
+                if length > 0 { index += length; continue }
+                flush(to: index)
+                scalars.append(Unicode.Scalar(0xF700 + UInt32(bytes[index]))!)
+                index += 1
+                runStart = index
+            }
+            flush(to: bytes.count)
+        }
+        return clash ? nil : String(scalars)
     }
 
     /// ASCII-heavy UTF-16 has a zero in every other byte; which side the zeros fall on gives the byte order.
@@ -152,6 +190,14 @@ struct TextFile: Sendable {
             case .utf32BigEndian: data.append(contentsOf: [0x00, 0x00, 0xFE, 0xFF])
             default: break
             }
+        }
+        if escapesInvalidBytes {
+            for scalar in newText.unicodeScalars {
+                if scalar.value < 0x80 { data.append(UInt8(scalar.value)) }
+                else if Self.escapeRange.contains(scalar.value) { data.append(UInt8(scalar.value - 0xF700)) }
+                else { data.append(contentsOf: UTF8.encode(scalar)!) }
+            }
+            return data
         }
         guard let body = newText.data(using: encoding) else {
             throw ToolError("O arquivo está em \(encodingName) e o novo texto tem caracteres que essa codificação não suporta.")

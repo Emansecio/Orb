@@ -356,7 +356,8 @@ actor MCPManager {
             do {
                 return try await connection.call(tool, arguments: arguments, timeout: timeout)
             } catch is MCPSessionExpired {
-                // The server dropped the session before the request reached it: a new session takes it, once.
+                // The server dropped the session before this request reached it (calls already at the server get another error, so
+                // they never run twice): a new session takes it, once.
                 return try await ensureStarted(id).call(tool, arguments: arguments, timeout: timeout)
             }
         } catch let required as MCPAuthRequired {

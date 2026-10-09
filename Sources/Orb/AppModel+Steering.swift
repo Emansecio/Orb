@@ -23,6 +23,16 @@ struct AttachedFile: Identifiable, Equatable, Sendable {
     var name: String { url.lastPathComponent }
 }
 
+/// What an Orb's composer holds that was not sent, as it is kept between launches (`rascunhos.json`): the text, and the
+/// paths of the files and pictures attached to it.
+struct ComposerDraft: Codable, Equatable, Sendable {
+    var text = ""
+    var files: [String] = []
+    var pictures: [ImageAttachment] = []
+
+    var isEmpty: Bool { files.isEmpty && pictures.isEmpty && text.allSatisfy(\.isWhitespace) }
+}
+
 /// What one Orb's composer holds that is not text: files and pictures to send, an attachment error, and the
 /// messages queued during a turn. One observable object per Orb (like `BotLive`), so a change in one Orb's composer
 /// re-renders nothing of another.
@@ -84,6 +94,39 @@ extension SteeredMessage {
 }
 
 extension AppModel {
+    /// The unsent drafts of the Orbs that exist: the text of the composer and its attachments. A message still queued
+    /// for a running turn is in neither until the turn ends (`settleSteering` gives it back).
+    func composerDrafts() -> [UUID: ComposerDraft] {
+        var result: [UUID: ComposerDraft] = [:]
+        for bot in bots {
+            let lane = sessions[bot.id]?.lane
+            let draft = ComposerDraft(text: drafts[bot.id] ?? "", files: lane?.files.map(\.url.path) ?? [], pictures: lane?.pictures ?? [])
+            if !draft.isEmpty { result[bot.id] = draft }
+        }
+        return result
+    }
+
+    /// Takes back what the last launch left in the composers, without the files and pictures that are gone.
+    func restoreDrafts() {
+        let saved = store.readDrafts()
+        savedDrafts = saved
+        for bot in bots {
+            guard let draft = saved[bot.id] else { continue }
+            if !draft.text.isEmpty { drafts[bot.id] = draft.text }
+            let lane = composerLane(bot.id)
+            lane.files = draft.files.filter { FileManager.default.fileExists(atPath: $0) }.map { AttachedFile(url: URL(fileURLWithPath: $0)) }
+            lane.pictures = draft.pictures.filter { FileManager.default.fileExists(atPath: $0.path) }
+        }
+    }
+
+    /// Writes the drafts when they differ from what is on disk (quit, and the scheduler's rounds).
+    func saveDraftsIfChanged() {
+        let current = composerDrafts()
+        guard current != savedDrafts else { return }
+        savedDrafts = current
+        store.saveDrafts(current)
+    }
+
     /// The composer state of one Orb, made when first asked for (it lives in the Orb's session).
     func composerLane(_ botID: UUID) -> ComposerLane { session(botID).composerLane() }
 
@@ -133,7 +176,7 @@ extension AppModel {
     func queueMessage(_ text: String, to botID: UUID) -> Bool {
         let lane = composerLane(botID)
         let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard canSteer(botID), !typed.isEmpty || !lane.pictures.isEmpty else { return false }
+        guard canSteer(botID), !typed.isEmpty || !lane.pictures.isEmpty || !lane.files.isEmpty else { return false }
         enqueue(typed, files: lane.files.map(\.url), pictures: lane.pictures, to: botID)
         // Attachments alone (nothing typed) must not take a draft with real text along; a blank one is cleared.
         if !typed.isEmpty || (drafts[botID] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { setDraft("", for: botID) }
@@ -157,7 +200,8 @@ extension AppModel {
         let lane = composerLane(botID)
         // The skill's use is counted when the message is delivered (here or by `send`, which expands it again), not
         // now: a queued message may be delivered by either path and must count once.
-        var prompt = SystemPrompt.expandSkill(in: typed, skills: skills(for: botID))?.prompt ?? typed
+        var prompt = SystemPrompt.expandSkill(in: typed, skills: skills(for: botID))?.prompt
+            ?? (typed.isEmpty && pictures.isEmpty ? Self.attachmentsOnlyPrompt : typed)
         if !files.isEmpty {
             prompt += "\n\nAttached files (read them with your tools):\n" + files.map { "- \($0.path)" }.joined(separator: "\n")
         }

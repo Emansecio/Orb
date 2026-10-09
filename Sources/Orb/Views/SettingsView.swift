@@ -84,7 +84,7 @@ struct SettingsView: View {
         }
         .frame(width: 640, height: tab.height)
         .onAppear {
-            tab = SettingsRouter.initialTab(request: request, stored: storedTab, isProviderReady: model.isProviderReady)
+            tab = SettingsRouter.initialTab(request: request, stored: storedTab, isProviderReady: model.isProviderReady || !model.hasCheckedConnections)
             request = ""
         }
         .onChange(of: request) {

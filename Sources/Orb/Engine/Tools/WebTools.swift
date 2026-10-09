@@ -18,19 +18,25 @@ struct WebFetchTool: AgentTool {
     /// The longest a page is read for: the request's own timeout only covers silence between packets, so an endless
     /// stream (server-sent events, a radio) with the odd keep-alive would hold the turn forever.
     static let readDeadline = Duration.seconds(30)
+    /// A body whose size the server announced ends by itself, so a slow link (a big PDF on hotel Wi-Fi) may take longer than
+    /// for one that could go on forever. The byte limit and the silence timeout still apply.
+    static let finiteReadDeadline = Duration.seconds(180)
 
     let session: URLSession
     /// Bytes read from a PDF response before cutting it; a parameter so tests need not serve 25 MB.
     let pdfLimit: Int
+    /// Bytes read from anything else before cutting it; a parameter for the same reason.
+    let textLimit: Int
     /// Converted pages, so that reading a long one in pieces downloads it once.
     let cache: WebPageCache
     /// How long the body is read for before what arrived is used; a parameter so tests need not wait 30 s.
     let readDeadline: Duration
 
-    init(session: URLSession = .shared, pdfLimit: Int = WebFetchTool.maxPDFBytes, cache: WebPageCache = .shared,
-         readDeadline: Duration = WebFetchTool.readDeadline) {
+    init(session: URLSession = .shared, pdfLimit: Int = WebFetchTool.maxPDFBytes, textLimit: Int = WebFetchTool.maxBytes,
+         cache: WebPageCache = .shared, readDeadline: Duration = WebFetchTool.readDeadline) {
         self.session = session
         self.pdfLimit = pdfLimit
+        self.textLimit = textLimit
         self.cache = cache
         self.readDeadline = readDeadline
     }
@@ -124,16 +130,29 @@ struct WebFetchTool: AgentTool {
                 ? ByteCountFormatter.string(fromByteCount: response.expectedContentLength, countStyle: .file) + " " : ""
             return ToolResult(text: header + "\nConteúdo \(mimeType) de \(size)(não é texto). Use save_to para baixá-lo.")
         }
-        let limit = mimeType.contains("pdf") ? pdfLimit : Self.maxBytes
-        let (data, cutByTime) = try await Self.read(bytes, limit: limit, deadline: readDeadline)
+        // A generic type may hide a PDF, so it is read up to the PDF limit until the first bytes show it is not one.
+        let generic = !mimeType.contains("pdf") && Self.isGeneric(mimeType)
+        let finite = response.expectedContentLength > 0 && (mimeType.contains("pdf") || generic)
+        let deadline = finite ? max(readDeadline, Self.finiteReadDeadline) : readDeadline
+        let (data, cutByTime) = try await Self.read(bytes, limit: mimeType.contains("pdf") || generic ? pdfLimit : textLimit,
+                                                    unlessPDF: generic ? textLimit : nil, deadline: deadline)
+        let isPDF = mimeType.contains("pdf") || data.starts(with: Array("%PDF".utf8))
+        let limit = isPDF ? pdfLimit : textLimit
         let cut = data.count >= limit
+        let seconds = Int(max(1, deadline.components.seconds))
 
         var text: String
-        if mimeType.contains("pdf") || data.starts(with: Array("%PDF".utf8)) {
+        if isPDF {
             do {
                 text = try await runDetached { [data] in try DocumentReader.allPDFText(data) }
-            } catch let error as ToolError where cut {
-                throw ToolError("\(error.message) A resposta passa de \(limit / 1_000_000) MB e foi lida só em parte, o que costuma impedir a abertura de um PDF. Baixe com save_to e leia com read_file (use pages para escolher as páginas).")
+            } catch let error as ToolError where cut || cutByTime {
+                let why = cut ? "A resposta passa de \(limit / 1_000_000) MB" : "O download não terminou em \(seconds) s"
+                // A retry only helps when the link was the problem; a file over the limit needs save_to, hence the Terminal.
+                let advice = context.canSaveFiles
+                    ? "Baixe com save_to e leia com read_file (use pages para escolher as páginas)."
+                    : cut ? "O arquivo é grande demais para o web_fetch; para lê-lo, o Orb precisa da chave Terminal (save_to e read_file)."
+                          : "Tente de novo mais tarde, com uma conexão melhor."
+                throw ToolError("\(error.message) \(why) e foi lido só em parte, o que costuma impedir a abertura de um PDF. \(advice)")
             }
         } else if mimeType.contains("html") {
             let charset = response.textEncodingName
@@ -156,31 +175,39 @@ struct WebFetchTool: AgentTool {
             return ToolResult(text: header + "\nConteúdo \(mimeType.isEmpty ? "de tipo desconhecido" : mimeType) de \(cut ? "mais de " : "")\(bytes) (não é texto). Use save_to para baixá-lo.")
         }
 
-        if cutByTime { header += "\n[a resposta não terminou em \(max(1, readDeadline.components.seconds)) s; o texto é só o que chegou até lá]" }
-        let entry = WebPageCache.Entry(header: header, text: text, truncatedDownload: cut ? limit : nil)
+        if cutByTime { header += "\n[a resposta não terminou em \(seconds) s; o texto é só o que chegou até lá]" }
+        let entry = WebPageCache.Entry(header: header, text: text, truncatedDownload: cut ? limit : nil, cutAfter: cutByTime ? seconds : nil)
         await cache.store(entry, for: url.absoluteString)
         return ToolResult(text: entry.render(arguments: arguments, find: find))
     }
 
     // MARK: Reading
 
-    /// Whether a body of this type is worth reading: text, a PDF, a picture the model can see, or a type the server
-    /// did not say (a PDF is told apart by its first bytes).
+    /// Whether a body of this type is worth reading: text, a PDF, a picture the model can see, or a generic type
+    /// (`octet-stream`, `binary/…`, `…/force-download`: what S3 or a download script sends for a PDF) or none at all,
+    /// where a PDF is told apart by its first bytes.
     static func isReadable(_ mimeType: String, wantsImage: Bool) -> Bool {
-        mimeType.isEmpty || mimeType == "application/octet-stream" || mimeType.hasPrefix("text/") || mimeType.contains("pdf")
+        isGeneric(mimeType)
+            || mimeType.hasPrefix("text/") || mimeType.contains("pdf")
             || mimeType.contains("html") || mimeType.contains("json") || mimeType.contains("xml") || mimeType.contains("javascript")
             || (wantsImage && mimeType.hasPrefix("image/"))
     }
 
-    /// The body, up to `limit` bytes or until `deadline`, whichever comes first (`timedOut` then). A read that fails
-    /// partway still throws; cancelling the turn does too.
-    static func read(_ bytes: URLSession.AsyncBytes, limit: Int, deadline: Duration) async throws -> (data: Data, timedOut: Bool) {
+    /// A type that says nothing about the content: what S3 or a download script sends for a PDF.
+    static func isGeneric(_ mimeType: String) -> Bool {
+        mimeType.isEmpty || mimeType.hasSuffix("octet-stream") || mimeType.hasPrefix("binary/") || mimeType.contains("download")
+    }
+
+    /// The body, up to `limit` bytes or until `deadline`, whichever comes first (`timedOut` then); `unlessPDF` lowers
+    /// the limit once the first bytes show the body is not a PDF. A read that fails partway still throws; cancelling the turn does too.
+    static func read(_ bytes: URLSession.AsyncBytes, limit: Int, unlessPDF: Int? = nil, deadline: Duration) async throws -> (data: Data, timedOut: Bool) {
         enum Outcome { case finished, timedOut, failed(any Error) }
         let received = OSAllocatedUnfairLock(initialState: Data())
         let outcome = await withTaskGroup(of: Outcome.self) { group in
             group.addTask {
                 var chunk = Data()
                 var total = 0
+                var limit = limit
                 // What arrived is handed over in pieces (a lock per byte is wasteful) and once more on the way out.
                 func hand() {
                     let piece = chunk
@@ -192,6 +219,8 @@ struct WebFetchTool: AgentTool {
                     for try await byte in bytes {
                         chunk.append(byte)
                         total += 1
+                        // The first four bytes are still all in `chunk`.
+                        if total == 4, let plain = unlessPDF, !chunk.starts(with: Array("%PDF".utf8)) { limit = min(limit, plain) }
                         if total >= limit { break }
                         if chunk.count >= 16_384 { hand() }
                     }
@@ -216,7 +245,7 @@ struct WebFetchTool: AgentTool {
 
     /// `max_chars` characters from `offset`, with a note on where to continue. A page is cut at the last line
     /// break (or space) near its end, not in the middle of a word or an address, and the note says where it really stopped.
-    static func page(of text: String, arguments: JSONValue, truncatedDownload: Int?) -> String {
+    static func page(of text: String, arguments: JSONValue, truncatedDownload: Int?, cutAfter: Int? = nil) -> String {
         let total = text.count
         let offset = arguments.integer("offset", default: 0, in: 0...Int.max)
         let length = arguments.integer("max_chars", default: defaultCharacters, in: 1...maxCharacters)
@@ -234,6 +263,8 @@ struct WebFetchTool: AgentTool {
             result += "\n[... mais \(total - offset - shown) caracteres; use offset=\(offset + shown) para continuar ...]"
         } else if let limit = truncatedDownload {
             result += "\n[... a resposta passa de \(limit / 1_000_000) MB; o resto não foi lido ...]"
+        } else if let seconds = cutAfter {
+            result += "\n[... a resposta não terminou em \(seconds) s; o resto não foi lido ...]"
         }
         return result
     }
@@ -382,12 +413,14 @@ actor WebPageCache {
         var header: String
         var text: String
         var truncatedDownload: Int?
+        /// Seconds the download was given when it was cut by time instead of size.
+        var cutAfter: Int?
         var date = Date()
 
         /// What the model gets: the header, then the page from `offset`, or the passages around `find`.
         func render(arguments: JSONValue, find: String?) -> String {
             let body = find.map { WebFetchTool.passages(of: $0, in: text) }
-                ?? WebFetchTool.page(of: text, arguments: arguments, truncatedDownload: truncatedDownload)
+                ?? WebFetchTool.page(of: text, arguments: arguments, truncatedDownload: truncatedDownload, cutAfter: cutAfter)
             return header + "\n\n" + body
         }
     }

@@ -454,6 +454,36 @@ struct OldOutputsTests {
         }
     }
 
+    @Test func aForgedMarkerCountNeverOverflowsThePreview() {
+        // Any page or file can imitate the marker: a count out of range reads as plain text.
+        let forged = ["\n[… 9223372036854775807 characters omitted from the middle …]\n",
+                      "\n[… 9223372036854775000 characters omitted from the middle …]\n",
+                      "\n[… -9223372036854775808 characters omitted from the middle …]\n",
+                      ContextText.marker(Int.max)]
+        for marker in forged {
+            let text = String(repeating: "a", count: 3_000) + marker + String(repeating: "b", count: 3_000)
+            let short = ContextText.preview(text, limit: 800)
+            #expect(short.count < 800 + 100)
+            let count = short.split(separator: "[… ").dropFirst().first.flatMap { Int($0.prefix { $0.isNumber }) }
+            #expect((0...Int(Int32.max)).contains(count ?? -1))
+        }
+        // An honest marker still adds up.
+        let honest = String(repeating: "a", count: 3_000) + ContextText.marker(5_000) + String(repeating: "b", count: 3_000)
+        #expect(ContextText.preview(honest, limit: 800).contains("10200 characters omitted"))
+    }
+
+    @Test func anOldOutputWithAForgedMarkerStillFitsTheWindow() {
+        let page = String(repeating: "a", count: 3_000) + ContextText.marker(Int.max - 807) + String(repeating: "b", count: 3_000)
+        var messages: [ChatMessage] = [.user("leia a página")]
+        for step in 0..<6 {
+            let id = "c\(step)"
+            messages.append(ChatMessage(role: .assistant, content: "", toolCalls: [ToolCallRequest(id: id, name: "web_fetch", arguments: "{}")]))
+            messages.append(.tool(id, step == 0 ? page : String(repeating: "x", count: 2_000)))
+        }
+        let window = ContextWindow.fit(messages, budget: ContextBudget(tokens: 1_500))
+        #expect(window.messages.contains { $0.role == .tool })
+    }
+
     @Test func anOutputWithoutANoteIsCutAsBefore() {
         let text = String(repeating: "a", count: 10_000)
         let short = ContextText.preview(text, limit: 800)

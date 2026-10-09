@@ -38,11 +38,11 @@ struct ComposerView: View {
     private var isWorking: Bool { model.live(botID).isWorking }
     /// Stops at the first character that is not a blank: no copy of a long pasted draft, however often the body asks.
     private var hasText: Bool { draft.wrappedValue.contains { !$0.isWhitespace } }
-    private var hasContent: Bool { hasText || !lane.pictures.isEmpty }
+    private var hasContent: Bool { ComposerAction.hasContent(hasText: hasText, pictures: lane.pictures.count, files: lane.files.count) }
     /// A message can be sent: any time the Orb is free, and while it works on your chat (it is queued). Not while a
     /// picture is still being prepared: it would miss this message and ride along with the next one.
     private var canSend: Bool {
-        ComposerAction.canSend(hasContent: hasContent, isWorking: isWorking, canSteer: model.canSteer(botID),
+        !model.changingChat.contains(botID) && ComposerAction.canSend(hasContent: hasContent, isWorking: isWorking, canSteer: model.canSteer(botID),
                                pendingPictures: lane.pendingPictures)
     }
     private var isQueueing: Bool { isWorking && model.canSteer(botID) }
@@ -160,6 +160,7 @@ struct ComposerView: View {
     }
 
     private var placeholder: LocalizedStringKey {
+        if model.changingChat.contains(botID) { return "Guardando a conversa…" }
         if isQueueing { return "Escreva para orientar o Orb enquanto ele trabalha" }
         if isWorking { return LocalizedStringKey(ComposerAction.routinePlaceholder(routineName: model.runningRoutineName(botID))) }
         return "Pergunte qualquer coisa ou solte um arquivo"
@@ -404,6 +405,14 @@ struct ComposerView: View {
             }
             return
         }
+        if !model.hasCheckedConnections, !model.hasUsableModel(botID) {
+            // Launch: the connections are still being looked at, so "no model" would be a guess. Send once they are known.
+            Task {
+                await model.connectionsChecked()
+                send()
+            }
+            return
+        }
         // If the message wasn't sent (no model connected), the attachments stay with the draft.
         model.submit(draft.wrappedValue, to: botID)
     }
@@ -535,6 +544,9 @@ enum ComposerAction: Equatable {
         guard pressed else { return (1, 1) }
         return reduceMotion ? (1, 0.8) : (pressedScale, 1)
     }
+
+    /// There is something to send: text, or an attachment of any kind (a file alone is a message: "veja isto").
+    static func hasContent(hasText: Bool, pictures: Int, files: Int) -> Bool { hasText || pictures > 0 || files > 0 }
 
     /// A message can be sent: something is written, the Orb is free or working on your chat (the message is queued),
     /// and no picture is still being prepared.

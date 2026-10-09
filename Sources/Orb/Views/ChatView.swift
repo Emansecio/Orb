@@ -400,7 +400,8 @@ private struct EmptyChatView: View {
 
     var body: some View {
         let live = model.live(look.id)
-        let showsFirstRun = !model.isProviderReady || firstRun.connectedName != nil
+        let showsFirstRun = SetupPrompt.shows(connectionsChecked: model.hasCheckedConnections, orbHasModel: model.hasModelSetup(for: look.id),
+                                              connectedName: firstRun.connectedName, hasItems: true)
         VStack(spacing: 16) {
             LiveBotAvatar(botID: look.id, orb: look.orb, size: 96, interactive: true, landing: landed)
                 .padding(.top, 72)

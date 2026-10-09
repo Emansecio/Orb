@@ -90,12 +90,22 @@ extension BotSession {
 
     func play(_ events: AsyncStream<TurnEvent>, turn: UUID) async {
         var succeeded = true
+        // A call the provider already bills for (its input tokens are known) and that has not ended.
+        // The model and source are kept with it: by the time the stream ends, a stop may already have started another turn.
+        var unfinished: (usage: TokenUsage, label: UsageLabel?)?
         for await event in events {
             // A stopped stream still delivers queued events; `stop` already closed the turn.
             guard isCurrent(turn) else { break }
-            if case .failed = event { succeeded = false }
+            switch event {
+            case .failed: succeeded = false
+            case .pendingUsage(let used): unfinished = (used, usageLabel)
+            case .requestUsage: unfinished = nil
+            default: break
+            }
             apply(event)
         }
+        // The user stopped the turn in the middle of a call: the engine can no longer report it, but the provider charges it.
+        if let unfinished { recordUsage(UsageTotals(unfinished.usage), label: unfinished.label) }
         if !Task.isCancelled { finishTurn(turn, succeeded: succeeded) }
     }
 
@@ -217,6 +227,8 @@ extension BotSession {
             setRequestUsage(used)
             model.live(id).setLastUsage(used)
             recordUsage(UsageTotals(used))
+        case .pendingUsage:
+            break // `play` keeps it for a call that is stopped
         case .reportedCost(let cost):
             recordUsage(UsageTotals(reportedCost: cost))
         case .compacted(var report):
@@ -252,11 +264,20 @@ extension BotSession {
     }
 
     /// Hands what the running turn used to the usage history (see `AppModel.recordUsage`).
-    private func recordUsage(_ totals: UsageTotals) {
-        guard let model else { return }
-        let name = turnModel ?? model.bot(id).flatMap(model.modelRef(for:))?.text
-        guard let name else { return }
-        model.recordUsage(totals, botID: id, model: name, source: routineID == nil ? .chat : .routine)
+    private func recordUsage(_ totals: UsageTotals, label: UsageLabel? = nil) {
+        guard let model, let label = label ?? usageLabel else { return }
+        model.recordUsage(totals, botID: id, model: label.model, source: label.source)
+    }
+
+    /// The model and source of the running turn, as the usage history files them.
+    private var usageLabel: UsageLabel? {
+        guard let model, let name = turnModel ?? model.bot(id).flatMap(model.modelRef(for:))?.text else { return nil }
+        return UsageLabel(model: name, source: routineID == nil ? .chat : .routine)
+    }
+
+    private struct UsageLabel {
+        var model: String
+        var source: UsageSource
     }
 
     /// Closes the turn `turn`; a turn that is no longer the Orb's current one (stopped, then replaced) is ignored.

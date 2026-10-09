@@ -43,6 +43,8 @@ final class AppModel {
     // MARK: UI state
 
     var drafts: [UUID: String] = [:]
+    /// The drafts as last written to `rascunhos.json` (see `saveDraftsIfChanged`).
+    @ObservationIgnored var savedDrafts: [UUID: ComposerDraft] = [:]
     var showInspector = true
     var showNewBot = false
     /// The kept memory the new-Orb sheet starts from when it opens from the welcome screen (nil: no memory chosen).
@@ -87,9 +89,15 @@ final class AppModel {
     var localStates: [LocalConnectorKind: LocalConnectorState] = [:]
     /// Providers with a key in the Keychain (or, for ChatGPT and Claude Code, a sign-in).
     private(set) var connected: Set<ProviderKind> = []
+    /// Providers with a key in the Keychain, the gateway's optional one included (`connected` has only the ones that
+    /// need a key to work, so the gateway's row can say "Chave salva").
+    private(set) var storedKeys: Set<ProviderKind> = []
     /// True once the first `refreshConnections` has finished (Keychain, ChatGPT, `claude auth status`): before that,
     /// `connected` is empty only because nobody has looked yet, and a screen that depends on it must not guess.
-    private(set) var hasCheckedConnections = false
+    private(set) var hasCheckedConnections = false {
+        didSet { if hasCheckedConnections { releaseConnectionWaiters() } }
+    }
+    @ObservationIgnored private var connectionWaiters: [CheckedContinuation<Void, Never>] = []
     /// Counts the memories that finished being kept after an Orb was deleted with `keepMemory` (the copy runs in the
     /// background, so the list of kept memories changes some time after the Orb is gone).
     private(set) var keptMemoriesVersion = 0
@@ -195,12 +203,33 @@ final class AppModel {
     /// How long "going to sleep" holds the routines back without a wake.
     nonisolated static let sleepHold: TimeInterval = 120
     /// Orbs whose chat is being replaced (a new or a reopened conversation): the archive is written first, and a second
-    /// request meanwhile would archive the same chat twice.
-    @ObservationIgnored private var changingChat: Set<UUID> = []
+    /// request meanwhile would archive the same chat twice. Observed: the composer holds sending until it is over, or a
+    /// message would land in the chat that is about to be replaced.
+    private(set) var changingChat: Set<UUID> = []
+    /// Conversations of finished routine runs whose file could not be written, by routine.
+    @ObservationIgnored var unsavedRoutineConversations: [UUID: (botID: UUID, conversation: Conversation)] = [:]
+    /// A change of the open chat ("Nova conversa", a reopened one) whose archive write is on the store's queue, by Orb:
+    /// the step that installs the other chat comes later, and quitting in between must not leave both (`undoChatChangesForQuit`).
+    @ObservationIgnored private var pendingChatChanges: [UUID: PendingChatChange] = [:]
+    private struct PendingChatChange {
+        var token = UUID()
+        /// The archive entry of the chat that is leaving, once its write is queued.
+        var summaryID: UUID?
+    }
     /// The Keychain reads of a `refreshConnections` under way, and which state of the Keychain they started from
     /// (`keychainGeneration` changes when the app itself changes a key).
     @ObservationIgnored private var keyReads: (generation: Int, task: Task<Set<ProviderKind>, Never>)?
     @ObservationIgnored private var keychainGeneration = 0
+    /// Counts the starts of `refreshConnections` and the sign-outs, in one sequence: a refresh only publishes its result if no
+    /// newer one started meanwhile (`latestConnectionsRefresh`; one that is outdated waits for it, so its caller sees the result), and drops a provider that was signed out after it began.
+    @ObservationIgnored private var connectionsEvents = 0
+    @ObservationIgnored private var latestConnectionsRefresh: (run: Int, task: Task<Void, Never>)?
+    @ObservationIgnored private var signedOutAt: [ProviderKind: Int] = [:]
+    /// ChatGPT's sign-out runs apart from `signOut`; a refresh waits for it so it cannot read the credential it is erasing.
+    @ObservationIgnored private var chatGPTSignOut: Task<Void, Never>?
+    /// Where the sign-ins are read from and written to: the Keychain, ChatGPT's session and the `claude` CLI in the app; tests
+    /// replace them.
+    @ObservationIgnored var connectionSources = ConnectionSources.live
     @ObservationIgnored private(set) var scheduler: Task<Void, Never>?
     /// What the app asks of macOS for its routines (see `syncActivities`): the real thing in the running app, nothing elsewhere.
     @ObservationIgnored var activity: any ActivityAsserting = InertActivity()
@@ -247,6 +276,7 @@ final class AppModel {
          connectorSession: URLSession? = nil, devRun: Bool = DevRun.isActive, firstUse: AppState = .initial) {
         self.store = store
         isDevRun = devRun
+        if devRun { connectionSources.claudeCodeStatus = nil } // a developer run never runs the real `claude`
         renewsCatalogs = runsBackgroundWork && !devRun
         writesStretchNotes = runsBackgroundWork && !devRun
         let vault = secretVault ?? (runsBackgroundWork && !devRun ? KeychainVault() : MemoryVault())
@@ -280,6 +310,7 @@ final class AppModel {
         // Only the Orb shown first is read at launch, and the window does not wait for it (`beginLoading` below).
         let readsFirstLater = asyncLoading ?? runsBackgroundWork
         for bot in state.bots { session(bot.id).isUnloaded = true }
+        restoreDrafts()
         if !readsFirstLater, let first = state.bots.first {
             let read = store.readConversation(first.id)
             notices += Self.labeled(read.notice, for: first).map { [$0] } ?? []
@@ -339,6 +370,7 @@ final class AppModel {
                 await self?.refreshConnections()
                 while !Task.isCancelled {
                     self?.runDueRoutines()
+                    self?.saveDraftsIfChanged()
                     self?.startModelRefresh() // apart: a provider that does not answer must not hold up the routines
                     await self?.unloadIdleConversations()
                     try? await Task.sleep(for: .seconds(30))
@@ -357,6 +389,7 @@ final class AppModel {
             MainActor.assumeIsolated {
                 ApprovalNotifications.clear(self?.pendingApprovals.map(\.id) ?? [])
                 self?.stopTurnsForQuit() // before the save: the cards close and "Você interrompeu" is written
+                self?.undoChatChangesForQuit()
                 self?.saveNow()
                 // Commands and CLIs in the middle of a turn lead process groups of their own and would outlive the app.
                 ChildProcessGroups.killAllNow(including: self?.jobs.runningGroups ?? [])
@@ -388,8 +421,9 @@ final class AppModel {
 
     private func reportSaveFailure(_ notice: StoreNotice) {
         // The write already cleared the session's "unsaved" mark; memory holds the only copy, so quitting writes it again.
+        // A run's conversation already finished is not the session's (the chat is back): `unsavedRoutineConversations` has it.
         if let file = notice.file, let session = sessions.values.first(where: { store.isConversationFile(file, of: $0.id) }),
-           session.conversation != nil {
+           session.conversation != nil, session.routineID != nil || !file.lastPathComponent.hasPrefix("routine-") {
             session.isDirty = true
         }
         guard !didReportSaveFailure else { return } // once: a full disk would otherwise repeat on every save
@@ -447,12 +481,12 @@ final class AppModel {
     func unloadIdleConversations(now: ContinuousClock.Instant = .now, only: UUID? = nil) async {
         guard !didReportSaveFailure else { return }
         let keepAlive = conversationKeepAlive
-        let candidates = sessions.values.filter { (only == nil || $0.id == only) && $0.isIdle(now: now, keepAlive: keepAlive) }
+        let candidates = sessions.values.filter { (only == nil || $0.id == only) && !changingChat.contains($0.id) && $0.isIdle(now: now, keepAlive: keepAlive) }
         for session in candidates {
             let botID = session.id
             guard let meta = await store.readMetaAsync(botID) else { continue }
             // Looked at again after waiting: it may have been used, changed or started a turn meanwhile.
-            guard sessions[botID] === session, session.isIdle(now: now, keepAlive: keepAlive),
+            guard sessions[botID] === session, !changingChat.contains(botID), session.isIdle(now: now, keepAlive: keepAlive),
                   let conversation = session.conversation, meta.matches(conversation) else { continue }
             session.unload()
             store.releaseCache(for: botID)
@@ -522,6 +556,24 @@ final class AppModel {
         return account.isEnabled && isUsable(account)
     }
 
+    /// Returns once the first look at the connections is over (at once when it already is).
+    func connectionsChecked() async {
+        guard !hasCheckedConnections else { return }
+        await withCheckedContinuation { connectionWaiters.append($0) }
+    }
+
+    /// How many callers wait for the first look at the connections (internal for tests).
+    var connectionWaiterCount: Int { connectionWaiters.count }
+
+    private func releaseConnectionWaiters() {
+        let waiting = connectionWaiters
+        connectionWaiters = []
+        for waiter in waiting { waiter.resume() }
+    }
+
+    /// Puts the model back in the state of a launch whose connections nobody has looked at yet (internal for tests).
+    func beginConnectionCheck() { hasCheckedConnections = false }
+
     /// What the bot's Orb is doing right now (expression, gaze and motion follow this).
     func activity(for botID: UUID) -> OrbActivity { live(botID).activity }
 
@@ -575,7 +627,10 @@ final class AppModel {
         let live = live(botID)
         let was = live.needsYou
         live.setAwaitingApproval(isWaiting)
-        if live.needsYou != was { refreshPresence() }
+        if live.needsYou != was {
+            refreshPresence()
+            syncActivities()
+        }
     }
 
     /// The unread count is saved with the app's state, so a change schedules a save.
@@ -638,9 +693,12 @@ final class AppModel {
     /// it belongs to the user's Claude Code, not to Orb (see `signOutOfClaudeCode`).
     func signOut(_ kind: ProviderKind) {
         keychainGeneration += 1
-        Keychain.set("", account: kind.rawValue)
-        if kind == .chatgpt { Task { await ChatGPTAuth.shared.signOut() } }
+        connectionSources.storeKey("", kind)
+        if kind == .chatgpt { chatGPTSignOut = Task { await connectionSources.signOutOfChatGPT() } }
+        connectionsEvents += 1
+        signedOutAt[kind] = connectionsEvents
         if connected.contains(kind) { connected.remove(kind) }
+        storedKeys.remove(kind)
         updateProvider(kind) { $0.models = [] }
     }
 
@@ -652,9 +710,10 @@ final class AppModel {
     /// Saves (or, when empty, removes) the provider's key and reloads its models.
     func setKey(_ key: String, for kind: ProviderKind) async throws {
         keychainGeneration += 1
-        Keychain.set(key.trimmingCharacters(in: .whitespacesAndNewlines), account: kind.rawValue)
+        connectionSources.storeKey(key.trimmingCharacters(in: .whitespacesAndNewlines), kind)
         await refreshConnections()
         try await refreshModels(kind)
+        adoptDefaultModel(from: kind) // a default that cannot be used (its login was revoked) gives way to the key just saved
     }
 
     /// Browser sign-in (ChatGPT's, or Claude Code's own `claude auth login`), then loads the plan's models.
@@ -671,6 +730,21 @@ final class AppModel {
         await refreshConnections()
         if kind == .claudeCode && !connected.contains(kind) { throw ToolError("O login do Claude Code não foi concluído.") }
         try await refreshModels(kind)
+        adoptDefaultModel(from: kind)
+    }
+
+    /// A model of a custom gateway added by hand (the list may not have a `/models`): the first one also becomes the
+    /// default when nothing usable is.
+    func addManualModel(_ id: String) {
+        let id = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return }
+        updateProvider(.custom) {
+            if !$0.models.contains(where: { $0.id == id }) {
+                $0.models.append(ProviderModel(id: id, name: id, format: $0.format, isManual: true))
+                $0.modelsUpdatedAt = .now
+            }
+        }
+        adoptDefaultModel(from: .custom, turningOn: false)
     }
 
     /// Runs `claude auth logout`: Claude Code signs out on this Mac (in the Terminal too).
@@ -680,19 +754,57 @@ final class AppModel {
     }
 
     func refreshConnections() async {
+        connectionsEvents += 1
+        let run = connectionsEvents
+        let task = Task { await readConnections(run) }
+        latestConnectionsRefresh = (run, task)
+        await task.value
+        // An outdated refresh published nothing: whoever asked reads the state once the newest has published it.
+        while let newest = latestConnectionsRefresh, newest.run > run {
+            await newest.task.value
+            if latestConnectionsRefresh?.run == newest.run { break }
+        }
+    }
+
+    private func readConnections(_ run: Int) async {
         guard !isResetting else { // a read of a key that was just removed could bring OpenBot's copy back
             hasCheckedConnections = true
             return
         }
-        var found = await keyedProviders()
-        if await ChatGPTAuth.shared.credential != nil { found.insert(.chatgpt) }
-        if !isDevRun, account(.claudeCode) != nil { // the status runs the real `claude`
-            claudeCode = await ClaudeCode.shared.status()
-            if claudeCode.isLoggedIn { found.insert(.claudeCode) }
+        let keys = await keyedProviders()
+        var found = keys.filter(\.needsKey)
+        await chatGPTSignOut?.value
+        if await connectionSources.hasChatGPTCredential() { found.insert(.chatgpt) }
+        // A newer refresh started meanwhile publishes its own result; a provider signed out after this one began stays out.
+        func current(_ kinds: Set<ProviderKind>) -> Set<ProviderKind> { kinds.filter { (signedOutAt[$0] ?? 0) < run } }
+        guard run == latestConnectionsRefresh?.run else {
+            hasCheckedConnections = true
+            return
         }
+        storedKeys = current(keys)
+        // Keys and ChatGPT are known now, `claude auth status` may take a while: the Orbs that do not use Claude Code
+        // can already send (its place stays as it was, so a refresh does not make it blink).
+        connected = current(found).union(connected.intersection([.claudeCode]))
+        var status: ClaudeCodeStatus?
+        if let reader = connectionSources.claudeCodeStatus, account(.claudeCode) != nil { // the status runs the real `claude`
+            status = await reader()
+            if status?.isLoggedIn == true { found.insert(.claudeCode) }
+        }
+        hasCheckedConnections = true
+        // The status took a while; what changed meanwhile wins over it (see above).
+        guard run == latestConnectionsRefresh?.run else { return }
+        if let status { claudeCode = status }
+        publishConnections(current(found))
+    }
+
+    /// The end of a look at the connections (internal for tests, which never read the Keychain).
+    func publishConnections(_ found: Set<ProviderKind>) {
         connected = found
         hasCheckedConnections = true
     }
+
+    /// Whether ChatGPT has a login on this Mac (the first-run card asks before signing in again).
+    func hasChatGPTLogin() async -> Bool { await connectionSources.hasChatGPTCredential() }
 
     /// Providers with a key in the Keychain. Each read takes milliseconds (and the system may ask permission for an
     /// item another app made), so they run off the main thread; a refresh asked for while another is under way
@@ -700,9 +812,8 @@ final class AppModel {
     private func keyedProviders() async -> Set<ProviderKind> {
         if let running = keyReads, running.generation == keychainGeneration { return await running.task.value }
         let generation = keychainGeneration
-        let task = Task.detached(priority: .userInitiated) {
-            Set(ProviderKind.allCases.filter { $0.needsKey && Keychain.get($0.rawValue) != nil })
-        }
+        let keyed = connectionSources.keyedProviders
+        let task = Task.detached(priority: .userInitiated) { keyed() }
         keyReads = (generation, task)
         let found = await task.value
         if keyReads?.task == task { keyReads = nil }
@@ -719,7 +830,7 @@ final class AppModel {
             $0.models = kind == .custom ? ModelCatalog.mergingManual(fetched: fetched, previous: $0.models) : fetched
             $0.modelsUpdatedAt = .now
         }
-        if ModelRef(defaultModel).flatMap({ account($0.provider) }) == nil, let first = fetched.first {
+        if ModelRef(defaultModel).flatMap({ account($0.provider) }) == nil, let first = ModelCatalog.preferredDefault(fetched) {
             defaultModel = ModelRef(provider: kind, model: first.id).text
         }
     }
@@ -727,11 +838,15 @@ final class AppModel {
     /// After the user connected `kind` on purpose (the first-use card): when the default model cannot be used
     /// (its provider is signed out, has no key, or was turned off) the new provider's first model takes its place,
     /// and the provider is turned on if it was off. `refreshModels` alone only replaces a default whose provider is
-    /// gone from the list, so a stale default would keep the new connection from ever counting as ready.
+    /// gone from the list, so a stale default would keep the new connection from ever counting as ready. Ajustes
+    /// does the same when a key or a sign-in is saved, a gateway gets its first model by hand, or a refresh is asked for.
     @discardableResult
-    func adoptDefaultModel(from kind: ProviderKind) -> Bool {
-        guard !isProviderReady, let account = account(kind), isUsable(account), let first = account.models.first else { return false }
-        if !account.isEnabled { updateProvider(kind) { $0.isEnabled = true } }
+    func adoptDefaultModel(from kind: ProviderKind, turningOn: Bool = true) -> Bool {
+        guard !isProviderReady, let account = account(kind), isUsable(account), let first = ModelCatalog.preferredDefault(account.models) else { return false }
+        if !account.isEnabled {
+            guard turningOn else { return false } // a refresh does not switch back on what the user switched off
+            updateProvider(kind) { $0.isEnabled = true }
+        }
         defaultModel = ModelRef(provider: kind, model: first.id).text
         return true
     }
@@ -998,24 +1113,34 @@ final class AppModel {
     @discardableResult
     func newConversation(_ botID: UUID) -> Task<Void, Never>? {
         guard bot(botID) != nil, !changingChat.contains(botID) else { return nil }
+        // Before the turn stops: a routine waiting for this Orb would take it in between, over the chat being archived.
+        changingChat.insert(botID)
         leaveChat(botID)
         guard let leaving = chatToArchive(botID) else {
             session(botID).installChat(Conversation())
+            endChatChange(botID)
             return nil
         }
         guard leaving.chat.hasUserMessages else {
             leaving.keepStretch(in: session(botID))
             session(botID).installChat(Conversation())
+            endChatChange(botID)
             return nil
         }
-        changingChat.insert(botID)
+        let change = PendingChatChange()
+        pendingChatChanges[botID] = change
         return Task { [weak self] in
             guard let self else { return }
-            defer { changingChat.remove(botID) }
-            guard let summary = await store.archiveAndWait(leaving.chat, for: botID) else {
+            defer {
+                if pendingChatChanges[botID]?.token == change.token { pendingChatChanges[botID] = nil }
+                endChatChange(botID)
+            }
+            guard pendingChatChanges[botID]?.token == change.token else { return } // undone before it began
+            guard let summary = await archiveForChange(leaving.chat, of: botID) else {
                 addNotice(Self.couldNotArchive)
                 return
             }
+            guard pendingChatChanges[botID]?.token == change.token else { return } // the app was quitting: undone
             // Said something meanwhile: the new conversation would throw that away. The chat stays open, and the
             // copy just archived goes, or the next attempt would list the same conversation twice.
             guard bot(botID) != nil, isUnchanged(botID, since: leaving) else {
@@ -1041,7 +1166,7 @@ final class AppModel {
         changingChat.insert(botID)
         defer {
             reopening.remove(id)
-            changingChat.remove(botID)
+            endChatChange(botID)
         }
         let read = await store.readArchivedAsync(id, for: botID)
         // The Orb was deleted, or the conversation was deleted from the list, while it was being read.
@@ -1053,26 +1178,35 @@ final class AppModel {
         }
         leaveChat(botID)
         let leaving = chatToArchive(botID)
+        let change = PendingChatChange()
+        pendingChatChanges[botID] = change
+        defer { if pendingChatChanges[botID]?.token == change.token { pendingChatChanges[botID] = nil } }
         var summary: ConversationSummary?
         if let leaving, leaving.chat.hasUserMessages {
-            summary = await store.archiveAndWait(leaving.chat, for: botID)
+            summary = await archiveForChange(leaving.chat, of: botID)
             guard summary != nil else {
                 addNotice(Self.couldNotArchive)
                 return false
             }
         }
+        guard pendingChatChanges[botID]?.token == change.token else { return false } // the app was quitting: undone
         let reopened = chosen.closingInterruptedTurn()
         // Given up after the current chat was archived: that copy goes, the chat is still open and would be archived again.
         func giveUp() -> Bool {
             if let summary { store.deleteArchived(summary.id, for: botID) }
             return false
         }
-        guard bot(botID) != nil, isUnchanged(botID, since: leaving) else { return giveUp() }
+        guard bot(botID) != nil, isUnchanged(botID, since: leaving) else {
+            if bot(botID) != nil { addNotice(Self.changedMeanwhile) }
+            return giveUp()
+        }
         guard await store.saveAndWait(reopened, for: botID) else {
             addNotice(Self.couldNotReopen)
             return giveUp()
         }
+        guard pendingChatChanges[botID]?.token == change.token else { return false } // the app was quitting: undone
         guard bot(botID) != nil, isUnchanged(botID, since: leaving) else {
+            if bot(botID) != nil { addNotice(Self.changedMeanwhile) }
             // The file holds the reopened chat by now: the one still open goes back on disk before its archived copy goes.
             if let session = sessions[botID] {
                 session.isDirty = true
@@ -1087,6 +1221,36 @@ final class AppModel {
         store.deleteArchived(id, for: botID) // the reopened chat is on disk by now: only then does its archived copy go
         archives[botID]?.removeAll { $0.id == id }
         return true
+    }
+
+    /// `archiveAndWait` for a change of the open chat: the entry is noted as soon as its write is queued, so that
+    /// quitting before the change is finished can take it back.
+    private func archiveForChange(_ chat: Conversation, of botID: UUID) async -> ConversationSummary? {
+        let summary = ConversationSummary(of: chat)
+        pendingChatChanges[botID]?.summaryID = summary.id
+        let store = store
+        let archived = await withCheckedContinuation { continuation in
+            store.archive(chat, as: summary, for: botID) { continuation.resume(returning: $0) }
+        }
+        return archived ? summary : nil
+    }
+
+    /// Quitting while a new or reopened conversation waits for its archive write: the step that would finish the
+    /// change (opening the other chat) will not run, and the file would still hold the old chat beside its archived
+    /// copy. The change is given up instead: the open chat goes back on disk (the file may already hold the reopened
+    /// one) and the entry just archived goes. Nothing is lost, nothing is listed twice.
+    var hasQueuedChatArchive: Bool { pendingChatChanges.values.contains { $0.summaryID != nil } } // internal for tests
+
+    func undoChatChangesForQuit() {
+        guard !isResetting else { return }
+        for (botID, change) in pendingChatChanges {
+            if let session = sessions[botID] {
+                session.isDirty = true
+                session.saveNow()
+            }
+            if let id = change.summaryID { store.deleteArchived(id, for: botID) }
+        }
+        pendingChatChanges = [:]
     }
 
     /// Permanently deletes an archived conversation, and the pictures (`anexos/`) only it pointed to.
@@ -1178,13 +1342,17 @@ final class AppModel {
         if bot(botID) != nil { live(botID).setMemory(snapshot) }
     }
 
-    func setIdentity(_ text: String, of botID: UUID) {
+    /// Saves your edit of the identity notes. False (with a notice) when they could not be written: the editor stays open.
+    func setIdentity(_ text: String, of botID: UUID) async -> Bool {
         let bank = memory.bank(for: botID)
-        Task {
-            await bank.setIdentity(text)
-            await refreshMemory(botID)
-        }
+        let saved = await bank.setIdentity(text)
+        if !saved && bot(botID) != nil { addNotice(Self.couldNotSaveIdentity) }
+        await refreshMemory(botID)
+        return saved
     }
+
+    private static let couldNotSaveIdentity = StoreNotice(
+        message: "Não foi possível salvar as notas do Orb (talvez falte espaço no disco, ou as notas sejam longas demais). O que você escreveu continua no editor.")
 
     /// The identity notes as they are on disk now (the editor starts from these, not from an older snapshot).
     func identityText(of botID: UUID) async -> String {
@@ -1326,15 +1494,19 @@ final class AppModel {
     /// main thread first, instead of making the window wait for it.
     func sendWhenLoaded(_ text: String, to botID: UUID) {
         guard sessions[botID]?.isUnloaded == true else {
-            send(text, to: botID)
+            if !send(text, to: botID) { returnToDraft(text, of: botID) }
             return
         }
         Task {
             await loadedConversation(botID)
             ensureLoaded(botID)
-            // Refused after the caller let go of the text: it goes back to the Orb's draft instead of being lost.
-            if !send(text, to: botID) { setDraft(drafts[botID].map { $0.isEmpty ? text : text + "\n" + $0 } ?? text, for: botID) }
+            if !send(text, to: botID) { returnToDraft(text, of: botID) }
         }
+    }
+
+    /// Refused after the caller let go of the text: it goes back to the Orb's draft instead of being lost.
+    private func returnToDraft(_ text: String, of botID: UUID) {
+        setDraft(drafts[botID].map { $0.isEmpty ? text : text + "\n" + $0 } ?? text, for: botID)
     }
 
     /// The model this Orb would use is connected and on (`send` refuses otherwise).
@@ -1342,6 +1514,13 @@ final class AppModel {
         guard let bot = bot(botID), let ref = modelRef(for: bot), let account = account(ref.provider) else { return false }
         return account.isEnabled && isUsable(account)
     }
+
+    /// The card that connects a model has nothing to do for this Orb: its own model works, or the default one does
+    /// (`send` then only reports the Orb's own model down, which the card cannot fix).
+    func hasModelSetup(for botID: UUID) -> Bool { hasUsableModel(botID) || isProviderReady }
+
+    /// What the model is asked when the message is only files.
+    nonisolated static let attachmentsOnlyPrompt = "Veja o(s) arquivo(s) anexado(s)."
 
     /// Starts a turn. Returns false when nothing was sent (empty text, a turn already running, no usable model),
     /// so the composer keeps what you wrote. Only a message typed in the composer (`fromUser`) clears its draft:
@@ -1351,7 +1530,10 @@ final class AppModel {
               fromUser: Bool = false) -> Bool {
         let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let session = session(botID)
-        guard !isResetting, !typed.isEmpty || !pictures.isEmpty, session.turnTask == nil, let bot = effectiveBot(botID) else { return false }
+        // A routine's prompt goes to its own conversation (the chat is parked), so a chat being swapped is no obstacle to it.
+        guard !isResetting, !typed.isEmpty || !pictures.isEmpty || !attachments.isEmpty, session.turnTask == nil,
+              session.routineID != nil || !changingChat.contains(botID),
+              let bot = effectiveBot(botID) else { return false }
         ensureLoaded(botID)
         // "/compactar [foco]" is a command of the composer, not a message for the model.
         if fromUser, attachments.isEmpty, pictures.isEmpty, let focus = CompactionCommand.parse(typed) {
@@ -1360,7 +1542,10 @@ final class AppModel {
             return true
         }
         guard let ref = modelRef(for: bot), let account = account(ref.provider), account.isEnabled, isUsable(account) else {
-            if fromUser && !isProviderReady {
+            if !hasCheckedConnections {
+                // `connected` is empty only because nobody has looked yet: no card, no notice. The composer waits for the
+                // look and sends then (`ComposerView.send`); what was typed stays.
+            } else if fromUser && !isProviderReady {
                 // The first-use card or banner is on screen: it pulses, and what you typed stays in the composer.
                 setupNudge += 1
             } else {
@@ -1394,7 +1579,7 @@ final class AppModel {
         let rememberTool = ref.provider == .claudeCode ? ClaudeCodeTools.memoryPrefix + "remember" : "remember"
         let turnGrants = intent == nil ? [] : [PermissionRule(family: .memory)]
 
-        var prompt = typed
+        var prompt = typed.isEmpty && pictures.isEmpty ? Self.attachmentsOnlyPrompt : typed
         if let expansion = SystemPrompt.expandSkill(in: typed, skills: skills(for: botID)) {
             prompt = expansion.prompt
             if let index = skills.firstIndex(where: { $0.id == expansion.skill.id }) { skills[index].uses += 1 }
@@ -1722,11 +1907,17 @@ final class AppModel {
             startIdleQueuedRoutines() // waiting, but its Orb may be free by now (the routine was moved to another Orb)
             return
         }
-        guard !isWorking(routine.botID), startingRoutines[routine.botID] == nil else {
+        guard !isWorking(routine.botID), startingRoutines[routine.botID] == nil, !changingChat.contains(routine.botID) else {
             queuedRoutines.append(routineID)
             return
         }
         startRoutine(routine)
+    }
+
+    /// The chat change is over: a routine that came due meanwhile runs now, over the chat that stayed (see `beginRoutine`).
+    private func endChatChange(_ botID: UUID) {
+        changingChat.remove(botID)
+        startNextQueuedRoutine(for: botID)
     }
 
     /// Reads the list of Orbs, then each one's session: a view that asks is told when any Orb starts or ends a run,
@@ -1755,6 +1946,7 @@ final class AppModel {
         guard let routine = routines.first(where: { $0.id == routineID }) else { return }
         queuedRoutines.removeAll { $0 == routineID }
         routines.removeAll { $0.id == routineID }
+        unsavedRoutineConversations[routineID] = nil
         if sessions[routine.botID]?.routineID == routineID { stop(routine.botID) }
         store.deleteRoutineConversation(routine: routineID, for: routine.botID)
     }
@@ -1784,7 +1976,9 @@ final class AppModel {
         }
         let session = session(botID)
         // A message (or a routine of its own) took the Orb meanwhile: this one waits for the turn to end, as any other.
-        guard session.turnTask == nil else {
+        // So it does while the chat is being archived or reopened: its notice at the end would read as the chat having
+        // changed, and the change would be given up.
+        guard session.turnTask == nil, !changingChat.contains(botID) else {
             if !queuedRoutines.contains(routineID) { queuedRoutines.append(routineID) }
             return
         }
@@ -1795,7 +1989,9 @@ final class AppModel {
         addNotice(Self.labeled(read.notice, for: bot(botID)))
 
         // The routine's own conversation takes the chat's place while it runs (the chat is written and parked).
-        session.startRoutineRun(routine.id, conversation: (read.value?.closingInterruptedTurn() ?? Conversation()).startingRoutineRun(at: started),
+        // The previous run's conversation, when it could not be written, is only in memory: the file is older.
+        let previous = unsavedRoutineConversations[routine.id]?.conversation ?? read.value
+        session.startRoutineRun(routine.id, conversation: (previous?.closingInterruptedTurn() ?? Conversation()).startingRoutineRun(at: started),
                                 at: started)
         let hasPrompt = !routine.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         if hasPrompt, send(routine.prompt, to: botID) {
@@ -1813,7 +2009,7 @@ final class AppModel {
 
     /// Runs the routines that were waiting for this Orb, one at a time, as it becomes free.
     func startNextQueuedRoutine(for botID: UUID) {
-        while sessions[botID]?.turnTask == nil, startingRoutines[botID] == nil,
+        while sessions[botID]?.turnTask == nil, startingRoutines[botID] == nil, !changingChat.contains(botID),
               let next = queuedRoutines.first(where: { id in routines.first { $0.id == id }?.botID == botID }) {
             queuedRoutines.removeAll { $0 == next }
             if let routine = routines.first(where: { $0.id == next }) { startRoutine(routine) }
@@ -1850,7 +2046,7 @@ final class AppModel {
         session.routineStart = nil
         let own = session.conversation ?? Conversation()
         let routine = routines.first { $0.id == routineID }
-        if routine != nil { store.saveRoutineConversation(own, routine: routineID, for: botID) }
+        if routine != nil { saveRoutineConversation(own, routine: routineID, for: botID) }
         session.unparkChat()
         if session.hasUnsavedStretch() { session.scheduleMemorySave() } // the run cancelled the chat's pending save
         guard let routine, let bot = bot(botID) else { return }
@@ -1876,6 +2072,16 @@ final class AppModel {
         }
         let outcome = succeeded ? "terminou: \(run.summary)" : "não terminou: \(run.summary)"
         append(.notice("Rotina “\(routine.name)” \(outcome)" + (run.reportFile.map { " (relatório em \($0))" } ?? "")), to: botID)
+    }
+
+    /// Writes a finished run's conversation. One that could not be written (a full disk) is kept here, the only copy,
+    /// and written again when the app quits.
+    private func saveRoutineConversation(_ conversation: Conversation, routine routineID: UUID, for botID: UUID) {
+        unsavedRoutineConversations[routineID] = nil // this one starts from the one that failed (`beginRoutine`), so it holds it
+        store.saveRoutineConversation(conversation, routine: routineID, for: botID) { [weak self] saved in
+            guard !saved else { return }
+            Task { @MainActor in self?.unsavedRoutineConversations[routineID] = (botID, conversation) }
+        }
     }
 
     private func recordRun(_ run: RoutineRun, routineID: UUID) {
@@ -2051,8 +2257,31 @@ final class AppModel {
     func saveNow() {
         guard !isResetting else { return } // quitting after a reset must not write the old state back
         store.save(state)
+        saveDraftsIfChanged() // after the turns stopped for quitting gave their queued messages back
         for session in sessions.values { session.saveNow() }
+        for (routineID, unsaved) in unsavedRoutineConversations {
+            unsavedRoutineConversations[routineID] = nil
+            saveRoutineConversation(unsaved.conversation, routine: routineID, for: unsaved.botID)
+        }
         usageLog.flush()
         store.flush()
     }
+}
+
+/// Where `AppModel.refreshConnections` reads the sign-ins from.
+struct ConnectionSources: Sendable {
+    /// The providers with a key stored. Blocking (the Keychain), so it runs off the main thread.
+    var keyedProviders: @Sendable () -> Set<ProviderKind>
+    var storeKey: @Sendable (_ key: String, _ kind: ProviderKind) -> Void
+    var hasChatGPTCredential: @Sendable () async -> Bool
+    var signOutOfChatGPT: @Sendable () async -> Void
+    /// `claude auth status`; nil where the real `claude` must not run.
+    var claudeCodeStatus: (@Sendable () async -> ClaudeCodeStatus)?
+
+    static let live = ConnectionSources(
+        keyedProviders: { Set(ProviderKind.allCases.filter { $0.storesKey && Keychain.get($0.rawValue) != nil }) },
+        storeKey: { Keychain.set($0, account: $1.rawValue) },
+        hasChatGPTCredential: { await ChatGPTAuth.shared.credential != nil },
+        signOutOfChatGPT: { await ChatGPTAuth.shared.signOut() },
+        claudeCodeStatus: { await ClaudeCode.shared.status() })
 }

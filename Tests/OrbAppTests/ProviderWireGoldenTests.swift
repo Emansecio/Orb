@@ -77,7 +77,8 @@ struct ProviderWireGoldenTests {
         let (events, sent) = try await run(client, host: "golden-messages.test", sse: sse)
         let trace = ReasoningTrace(format: .messages, provider: "golden-messages.test", model: "m-1",
                                    parts: [ReasoningPart(kind: .thinking, text: "Hmm.", signature: "sig")])
-        #expect(events == [.text("Olá"), .reasoning(trace),
+        #expect(events == [.usage(TokenUsage(input: 12, cacheRead: 3)), // the input, announced at message_start
+                           .text("Olá"), .reasoning(trace),
                            .toolCalls([ToolCallRequest(id: "tu_1", name: "ls", arguments: #"{"path":"."}"#)]),
                            .finished(.toolUse, TokenUsage(input: 12, output: 9, cacheRead: 3, cacheWrite: nil))])
         #expect(sent == Self.messagesSnapshot)

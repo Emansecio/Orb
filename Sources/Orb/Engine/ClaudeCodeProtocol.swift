@@ -189,9 +189,9 @@ struct ClaudeCodeParser {
     /// Anthropic's counting, like `TokenUsage` itself: `input_tokens` leaves out what the cache served or stored.
     static func usage(in usage: JSONValue?) -> TokenUsage? {
         guard let usage, case .object = usage else { return nil }
-        let result = TokenUsage(input: usage["input_tokens"]?.int, output: usage["output_tokens"]?.int,
-                                cacheRead: usage["cache_read_input_tokens"]?.int,
-                                cacheWrite: usage["cache_creation_input_tokens"]?.int)
+        let result = TokenUsage(input: TokenUsage.sane(usage["input_tokens"]?.int), output: TokenUsage.sane(usage["output_tokens"]?.int),
+                                cacheRead: TokenUsage.sane(usage["cache_read_input_tokens"]?.int),
+                                cacheWrite: TokenUsage.sane(usage["cache_creation_input_tokens"]?.int))
         return result == TokenUsage() ? nil : result
     }
 

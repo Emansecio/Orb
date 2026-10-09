@@ -17,8 +17,11 @@ protocol MCPTransport: Sendable {
 /// A local server process: newline-delimited JSON-RPC over stdin/stdout.
 actor StdioTransport: MCPTransport {
     private let config: MCPServerConfig
-    private var process: Process?
+    /// The server's pid, which is also its process group.
+    private var pid: pid_t?
     private var input: FileHandle?
+    /// Kept so the readers' descriptors stay open for as long as the server may write.
+    private var outputs: [Pipe] = []
     private var stderrReader: Task<Void, Never>?
     private var closed: (@Sendable (Error) async -> Void)?
     private var buffer = Data()
@@ -45,10 +48,10 @@ actor StdioTransport: MCPTransport {
         self.maxLineBytes = maxLineBytes
     }
 
-    deinit { process.map { registry.end($0, grace: killGrace) } }
+    deinit { pid.map { registry.end($0, grace: killGrace) } }
 
     /// The server's process id while it runs.
-    var processID: pid_t? { process?.processIdentifier }
+    var processID: pid_t? { pid }
 
     func open(receive: @escaping @Sendable (JSONValue) async -> Void,
               closed: @escaping @Sendable (Error) async -> Void) async throws {
@@ -57,26 +60,36 @@ actor StdioTransport: MCPTransport {
         // when the app is opened from the Finder, as for commands and for Claude Code.
         let resolved = await shell.resolved()
         guard self.closed != nil else { throw ToolError("O conector \(config.name) foi desligado.") } // stopped while asking
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: resolved.shell)
-        // Command and arguments stay argv, never script text. The resolved environment already carries the profile files'
-        // PATH; when the user's shell could not be asked, a login shell stands in so the system paths are still found.
-        process.arguments = [resolved.isFromUserShell ? "-c" : "-lc", #"exec "$0" "$@""#, config.command] + config.arguments
-        process.environment = resolved.environment.merging(config.environment) { $1 }
+        let env = resolved.environment.merging(config.environment) { $1 }
         let stdin = Pipe(), stdout = Pipe(), stderr = Pipe()
-        process.standardInput = stdin
-        process.standardOutput = stdout
-        process.standardError = stderr
         // Writing to a dead server must fail with EPIPE instead of killing the app with SIGPIPE.
         _ = fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+        // Command and arguments stay argv, never script text. The resolved environment already carries the profile files'
+        // PATH; when the user's shell could not be asked, a login shell stands in so the system paths are still found.
+        // The server leads a process group of its own, so ending it also ends what `npx`/`uvx` and the server launched.
+        let pid: pid_t
         do {
-            try process.run()
+            pid = try SpawnedProcess.start(resolved.shell, [resolved.isFromUserShell ? "-c" : "-lc", #"exec "$0" "$@""#, config.command] + config.arguments,
+                                           directory: nil, environment: env,
+                                           output: stdout.fileHandleForWriting.fileDescriptor,
+                                           error: stderr.fileHandleForWriting.fileDescriptor,
+                                           input: stdin.fileHandleForReading.fileDescriptor)
         } catch {
+            for handle in [stdin.fileHandleForReading, stdin.fileHandleForWriting, stdout.fileHandleForReading, stdout.fileHandleForWriting,
+                           stderr.fileHandleForReading, stderr.fileHandleForWriting] {
+                try? handle.close()
+            }
             throw ToolError("Não foi possível iniciar o conector \(config.name): \(error.localizedDescription)")
         }
-        self.process = process
-        registry.add(process)
+        // Only the server holds these ends now, so the readers see the end of the streams when it is gone.
+        try? stdin.fileHandleForReading.close()
+        try? stdout.fileHandleForWriting.close()
+        try? stderr.fileHandleForWriting.close()
+        SpawnedProcess.watch(pid) { _ in } // reaps it
+        self.pid = pid
+        registry.add(pid)
         input = stdin.fileHandleForWriting
+        outputs = [stdout, stderr]
 
         let output = Self.chunks(stdout.fileHandleForReading)
         let errors = Self.chunks(stderr.fileHandleForReading)
@@ -113,8 +126,8 @@ actor StdioTransport: MCPTransport {
             writes.async { try? input.close() }
         }
         input = nil
-        if let process { registry.end(process, grace: killGrace) }
-        process = nil
+        if let pid { registry.end(pid, grace: killGrace) }
+        pid = nil
     }
 
     var diagnostics: String {
@@ -200,7 +213,8 @@ actor StdioTransport: MCPTransport {
 
 // MARK: - HTTP
 
-/// The server forgot the session (HTTP 404 with a session id). The request never ran there, so a new session can take it again.
+/// The server forgot the session (HTTP 404 with a session id). The request that got the 404 never ran there, so a new session
+/// can take it again; the others in flight may have, and are not repeated.
 struct MCPSessionExpired: Error, LocalizedError, Equatable {
     let name: String
     var errorDescription: String? { "A sessão com o conector \(name) expirou." }
@@ -217,9 +231,13 @@ actor HTTPTransport: MCPTransport {
     /// The connector was made to sign in (a 401 without a Bearer challenge is still a request to sign in).
     private let declaresLogin: Bool
     private let session: URLSession
+    /// The most a reply (or one event of a stream) may hold before the link is dropped, as for a local server.
+    private let maxMessageBytes: Int
     private var receive: (@Sendable (JSONValue) async -> Void)?
     private var closed: (@Sendable (Error) async -> Void)?
     private var sessionID: String?
+    /// The server answered 404 to the session: there is nothing left to end with a DELETE.
+    private var sessionExpired = false
     private var protocolVersion: String?
     /// Legacy mode: the POST endpoint announced by the server and the task reading its event stream.
     private var legacyEndpoint: URL?
@@ -229,7 +247,8 @@ actor HTTPTransport: MCPTransport {
     static let defaultSession = URLSession(configuration: .ephemeral, delegate: RedirectGuard(), delegateQueue: nil)
 
     /// `token`: gives the access token of a connector that signs in. `session`: tests put a fake one here.
-    init(config: MCPServerConfig, token: MCPTokenProvider? = nil, session: URLSession = HTTPTransport.defaultSession) throws {
+    init(config: MCPServerConfig, token: MCPTokenProvider? = nil, session: URLSession = HTTPTransport.defaultSession,
+         maxMessageBytes: Int = 32 << 20) throws {
         guard let url = URL(string: config.url.trimmingCharacters(in: .whitespaces)),
               ["http", "https"].contains(url.scheme?.lowercased()), url.host != nil else {
             // The URL itself is not quoted: it may carry an API key in its query.
@@ -241,6 +260,7 @@ actor HTTPTransport: MCPTransport {
         self.token = token
         declaresLogin = config.oauth != nil
         self.session = session
+        self.maxMessageBytes = maxMessageBytes
     }
 
     deinit { legacyStream?.cancel() }
@@ -279,7 +299,7 @@ actor HTTPTransport: MCPTransport {
         closed = nil
         legacyStream?.cancel()
         legacyStream = nil
-        guard legacyEndpoint == nil, sessionID != nil else { return }
+        guard legacyEndpoint == nil, sessionID != nil, !sessionExpired else { return }
         _ = try? await load(url, method: "DELETE", timeout: 5)
         sessionID = nil
     }
@@ -298,10 +318,9 @@ actor HTTPTransport: MCPTransport {
             return try await send(message)
         }
         if response.statusCode == 404, sessionID != nil {
-            sessionID = nil
-            let error = MCPSessionExpired(name: name)
-            await closed?(error)
-            throw error
+            // The connection decides what this means for the other requests in flight; only this one is known not to have run.
+            sessionExpired = true
+            throw MCPSessionExpired(name: name)
         }
         try await check(response, bytes)
         if isInitialize { sessionID = response.value(forHTTPHeaderField: "Mcp-Session-Id") }
@@ -316,11 +335,16 @@ actor HTTPTransport: MCPTransport {
             }
         } else {
             var data = Data()
-            for try await byte in bytes { data.append(byte) }
+            for try await byte in bytes {
+                data.append(byte)
+                if data.count > maxMessageBytes { throw tooLarge }
+            }
             answered = await deliver(String(decoding: data, as: UTF8.self), replyTo: message)
         }
         guard answered else { throw ToolError("O conector \(name) encerrou a resposta sem resultado.") }
     }
+
+    private var tooLarge: ToolError { ToolError("O conector \(name) mandou uma resposta grande demais.") }
 
     /// Hands a message to the connection; true if it is the response to `request`.
     private func deliver(_ text: String, replyTo request: JSONValue? = nil) async -> Bool {
@@ -439,8 +463,13 @@ actor HTTPTransport: MCPTransport {
     private func readEvents(_ bytes: URLSession.AsyncBytes,
                             _ handle: (String, String) async throws -> Bool) async throws {
         var line = Data(), event = "", data: [String] = []
+        var pending = 0   // bytes of the event being read: its data lines so far and the line in progress
         for try await byte in bytes {
-            guard byte == 0x0A else { line.append(byte); continue }
+            guard byte == 0x0A else {
+                line.append(byte)
+                if pending + line.count > maxMessageBytes { throw tooLarge }
+                continue
+            }
             if line.last == 0x0D { line.removeLast() }
             let text = String(decoding: line, as: UTF8.self)
             line.removeAll(keepingCapacity: true)
@@ -448,12 +477,18 @@ actor HTTPTransport: MCPTransport {
                 if !data.isEmpty, try await !handle(event.isEmpty ? "message" : event, data.joined(separator: "\n")) { return }
                 event = ""
                 data = []
+                pending = 0
                 continue
             }
             let field = text.prefix { $0 != ":" }
             var value = text.dropFirst(field.count + 1)
             if value.hasPrefix(" ") { value = value.dropFirst() }
-            if field == "data" { data.append(String(value)) } else if field == "event" { event = String(value) }
+            if field == "data" {
+                data.append(String(value))
+                pending += value.utf8.count + 1   // the joining newline counts too, so empty data lines are not free
+            } else if field == "event" {
+                event = String(value)
+            }
         }
     }
 }

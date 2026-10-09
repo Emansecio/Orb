@@ -49,6 +49,7 @@ actor MCPConnection {
         let continuation: CheckedContinuation<JSONValue, Error>
         let timer: Task<Void, Never>
         let sender: Task<Void, Never>
+        let sentAt: ContinuousClock.Instant
     }
 
     private var started = false
@@ -60,6 +61,9 @@ actor MCPConnection {
     private var nextID = 1
     /// Requests in a row that ran out of time with nothing heard from the server in between.
     private var silentTimeouts = 0
+    /// When the last request that counted in `silentTimeouts` ran out of time: requests sent before it were waiting in
+    /// parallel with it, so their timeouts are the same silence and do not count again.
+    private var lastCountedTimeout: ContinuousClock.Instant?
     /// After this many in a row the server is taken for stuck: the connection closes, and the next use starts a new one.
     static let stuckAfter = 2
     /// The annotations of each tool from the last `tools/list`, by the server's own tool name.
@@ -181,9 +185,15 @@ actor MCPConnection {
                 }
                 // The reply arrives through `handle`; over HTTP the sender lives until it does.
                 let sender = Task {
-                    do { try await transport.send(message) } catch { self.fail(id, error) }
+                    do {
+                        try await transport.send(message)
+                    } catch let expired as MCPSessionExpired {
+                        self.sessionExpired(id, expired)
+                    } catch {
+                        self.fail(id, error)
+                    }
                 }
-                pending[id] = Pending(continuation: continuation, timer: timer, sender: sender)
+                pending[id] = Pending(continuation: continuation, timer: timer, sender: sender, sentAt: .now)
             }
         } onCancel: {
             Task { await self.cancel(id) }
@@ -197,7 +207,16 @@ actor MCPConnection {
     /// Fire-and-forget message (cancellations, replies to the server).
     private func sendDetached(_ message: JSONValue) {
         guard let transport else { return }
-        Task { try? await transport.send(message) }
+        Task {
+            do { try await transport.send(message) } catch let expired as MCPSessionExpired { self.sessionExpired(nil, expired) } catch {}
+        }
+    }
+
+    /// The server forgot the session on the POST of request `id` (nil: a message sent in the background). Only that request
+    /// is known not to have run, so only it is told to repeat; the others may have been accepted already and are not repeated.
+    private func sessionExpired(_ id: Int?, _ error: MCPSessionExpired) {
+        if let id { fail(id, error) }
+        shutdown(error, others: ToolError("A sessão do conector \(config.name) caiu durante a chamada; ela pode ter sido executada. Confira antes de repetir."))
     }
 
     private func fail(_ id: Int, _ error: Error) {
@@ -211,14 +230,16 @@ actor MCPConnection {
     /// row, or that cannot even list its tools, is stuck (alive, but not answering): the connection closes so that the next
     /// use starts a new process instead of waiting for the deadline again.
     private func timedOut(_ id: Int, method: String, _ error: Error) {
-        guard pending[id] != nil else { return }
+        guard let entry = pending[id] else { return }
         sendDetached(notification("notifications/cancelled", .object(["requestId": .number(Double(id)),
                                                                        "reason": .string("timeout")])))
-        silentTimeouts += 1
+        if lastCountedTimeout.map({ entry.sentAt > $0 }) ?? true {
+            silentTimeouts += 1
+            lastCountedTimeout = .now
+        }
+        fail(id, error)
         if method == "tools/list" || silentTimeouts >= Self.stuckAfter {
-            shutdown(error)
-        } else {
-            fail(id, error)
+            shutdown(error, others: ToolError("O conector \(config.name) foi reiniciado porque parou de responder; a chamada pode não ter terminado."))
         }
     }
 
@@ -231,6 +252,8 @@ actor MCPConnection {
     // MARK: Receiving
 
     private func handle(_ message: JSONValue) {
+        // Anything from the server proves it is alive, even a late reply to a request that already ran out of time.
+        silentTimeouts = 0
         if let method = message["method"]?.string {
             // Server→client request: answer pings, refuse the rest. Notifications are ignored, but for a change of tools.
             if method == "notifications/tools/list_changed", let onToolsChanged { Task { await onToolsChanged() } }
@@ -242,7 +265,6 @@ actor MCPConnection {
             return
         }
         guard let id = message["id"]?.int, let entry = pending.removeValue(forKey: id) else { return }
-        silentTimeouts = 0
         entry.timer.cancel()
         if let error = message["error"] {
             let detail = error["message"]?.string ?? "erro desconhecido"
@@ -252,7 +274,9 @@ actor MCPConnection {
         }
     }
 
-    private func shutdown(_ error: Error) {
+    /// Closes the connection. `error` is why (and what later requests report); `others` is what the requests still pending are
+    /// told when it is not their own fault.
+    private func shutdown(_ error: Error, others: Error? = nil) {
         if let transport {
             Task { await transport.close() }
             if let onClosed { Task { await onClosed() } }
@@ -264,7 +288,7 @@ actor MCPConnection {
         for entry in entries {
             entry.timer.cancel()
             entry.sender.cancel()
-            entry.continuation.resume(throwing: error)
+            entry.continuation.resume(throwing: others ?? error)
         }
     }
 

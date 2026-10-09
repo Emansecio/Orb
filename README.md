@@ -68,13 +68,19 @@ com os caminhos mais curtos (se você escrever antes, o texto fica no campo e o 
 | | **OpenCode Go** | a mesma chave da OpenCode | Assinatura da OpenCode (Go US$ 10/mês, Go Plus US$ 40/mês) com modelos abertos (GLM, Kimi, DeepSeek, Qwen…). O uso tem limite por modelo em janelas de 5 horas, semana e mês; passando do limite, os modelos gratuitos seguem funcionando, e o saldo do Zen cobre se você ativar "Use balance" no console |
 | | **Command Code** | colar a chave de [commandcode.ai/settings/keys](https://commandcode.ai/settings/keys) | Precisa de um plano com acesso à API: Provider (pago por uso), GOAT, Pro, Max ou Team. **O plano Go não inclui a API** (o app avisa se for o caso). Modelos gratuitos ou promocionais ficam fora da lista |
 | No seu Mac | **Ollama**, **LM Studio** | abra o app e deixe o servidor ligado | Nada sai do Mac. Endereços padrão `http://localhost:11434/v1` e `http://localhost:1234/v1` (dá para trocar). Sem modelo baixado ou carregado, a linha avisa |
-| Avançado | **Gateway próprio** | URL base (`http://` ou `https://`), formato e, se precisar, cabeçalhos | Formatos: Chat (OpenAI), Responses (OpenAI) ou Messages (Anthropic / Claude). Os modelos vêm da lista do servidor ou você os adiciona pelo id |
+| Avançado | **Gateway próprio** | URL base (`http://` ou `https://`), formato e, se precisar, cabeçalhos | Formatos: Chat (OpenAI), Responses (OpenAI) ou Messages (Anthropic / Claude). Os modelos vêm da lista do servidor ou você os adiciona pelo id (o primeiro vira o padrão se o atual não serve). A chave é opcional: salva, a linha diz "Chave salva" e "Apagar" tira só a chave |
 
 Os preços e planos acima são os que o app descreve hoje; confira no site do provedor, que pode mudar.
 
 O **modelo padrão** (Ajustes → Modelos) vale para os Orbs sem modelo próprio. Cada Orb pode ter o seu: na aba Geral do painel
 dele ou no botão de modelo do compositor (⇧⌘M, com busca e os recentes). "Desativar este provedor" (reticências da linha) tira o
 provedor das listas sem apagar a chave; "Remover…" apaga a chave (ou sai da conta, no ChatGPT).
+Ao conectar um provedor (chave, login, modelo do gateway adicionado à mão ou "Atualizar modelos"), se o modelo padrão não
+serve (login revogado, provedor sem chave), os modelos novos assumem o lugar; um padrão que funciona nunca muda. Nas listas
+de Ollama e LM Studio, modelos de embedding (`bge-m3`, `all-minilm`, `nomic-embed-text`…) não são escolhidos como padrão.
+Nos primeiros segundos de cada abertura, enquanto o app confere as conexões (Keychain, ChatGPT, `claude auth status`), o
+cartão e o banner de "Conecte um modelo" não aparecem e Return no compositor espera a conferência em vez de recusar.
+Depois dela, o cartão e o banner só aparecem se nem o modelo do Orb nem o padrão servem (conectar pelo cartão define o padrão); um Orb cujo modelo próprio caiu, com o padrão funcionando, recebe o aviso para trocar em Ajustes.
 
 ## A tela de boas-vindas
 
@@ -147,7 +153,7 @@ AppleScript, Atalhos, área de transferência, captura de tela nem controla outr
   botão "Copiar". Passe o mouse sobre uma resposta para "Copiar" ou "Copiar como Markdown".
 - **Anexos.** O botão `+` (ou arrastar para a janela, ou ⌘V) anexa. Imagens (PNG, JPEG, HEIC, GIF, WebP, TIFF; até 20 MB cada)
   são reduzidas (um chip "Preparando imagem…" aparece e o envio espera) e enviadas ao modelo se ele enxerga; se ele não enxerga, só o caminho vai e o app avisa. Outros arquivos
-  vão como caminho: o Orb os lê com as ferramentas (precisa de "Terminal e arquivos"). A captura de tela que o Orb tira
+  vão como caminho: o Orb os lê com as ferramentas (precisa de "Terminal e arquivos"); um arquivo sozinho, sem texto, já pode ser enviado (o Orb recebe "Veja o(s) arquivo(s) anexado(s).") ou colocado na fila. A captura de tela que o Orb tira
   também chega a ele como imagem, quando o modelo enxerga.
   No chat, os anexos aparecem do mesmo jeito na mensagem enviada, na fila e no compositor: imagens numa grade de largura fixa
   (uma, duas ou três colunas; "+N" quando passam de nove) e arquivos como cartões com o ícone do tipo, o nome cortado no meio
@@ -159,7 +165,7 @@ AppleScript, Atalhos, área de transferência, captura de tela nem controla outr
 - **Escrever com o Orb trabalhando.** O compositor continua livre: a mensagem entra como "Na fila" e chega ao Orb no próximo
   passo dele (no Claude Code, assim que a resposta termina). **⌘↩ para e envia agora**; com um pedido de permissão aberto,
   isso recusa o pedido (parar sempre recusa) e envia. Se o Orb espera sua resposta a um pedido, a fila só anda depois dela.
-  Dá para tirar uma mensagem da fila ("Editar"). Se o turno falhar ou for parado, o que estava na fila volta para o campo.
+  Dá para tirar uma mensagem da fila ("Editar"). Se o turno falhar ou for parado, o que estava na fila volta para o campo. O que está no campo (texto, arquivos e imagens anexados) e o que voltou da fila ficam guardados em `rascunhos.json` ao fechar o app e voltam na próxima abertura (arquivos que sumiram ficam de fora).
 - **Parar.** O botão Parar ou **⌘.**; o Orb avisa "Você interrompeu esta resposta".
 - **O que o Orb está fazendo.** Uma linha no fim da conversa, ao lado dele, diz o verbo e o alvo ("Rodando `swift build`",
   "Lendo README.md", "Procurando “TODO”", "Abrindo github.com") com o tempo do turno e, a partir da segunda ferramenta,
@@ -327,7 +333,7 @@ Detalhes: [docs/MEMORIA.md](docs/MEMORIA.md).
 
 ### Conversas
 
-**Nova conversa** (⇧⌘N) guarda a atual e começa outra, sem perder nada (uma conversa em que você não disse nada não é guardada; se o disco não aceitar a gravação, por exemplo por falta de espaço, a conversa continua aberta e o app avisa, em vez de apagá-la). O que está escrito no campo (e as mensagens que estavam na fila) segue para a conversa nova.
+**Nova conversa** (⇧⌘N) guarda a atual e começa outra, sem perder nada (uma conversa em que você não disse nada não é guardada; se o disco não aceitar a gravação, por exemplo por falta de espaço, a conversa continua aberta e o app avisa, em vez de apagá-la). O que está escrito no campo (e as mensagens que estavam na fila) segue para a conversa nova. Enquanto a conversa é guardada (o campo mostra "Guardando a conversa…"), o envio fica parado e o rascunho não se perde (uma rotina que começa nesse intervalo roda normalmente, na conversa própria dela).
 **Conversas** (botão da barra do chat, **⌘Y**) lista as anteriores deste Orb, agrupadas em Hoje, Ontem, Esta semana e Mais
 antigas, com busca a partir de 5. ↩ reabre (a atual é arquivada antes); Delete pede para apagar ("Apagar de vez? Não dá para
 desfazer."; ↩ confirma, Esc cancela). Apagar uma conversa apaga também as imagens que só ela usava; uma imagem que outra conversa
@@ -341,8 +347,8 @@ Uma **rotina** é uma tarefa que um Orb faz sozinho, no horário, **enquanto o a
 - **Quando**: todo dia, toda semana (com o dia), a cada X horas ou a cada X minutos (no mínimo 15); o editor mostra a próxima
   execução.
 - **Mac acordado.** Com alguma rotina ligada, o app avisa o macOS para não colocá-lo em App Nap (os horários não atrasam com a
-  janela fechada); durante uma execução, o Mac também não entra em repouso sozinho. Terminada a execução, ou sem rotinas
-  ligadas, o app não pede nada.
+  janela fechada); durante uma execução, o Mac também não entra em repouso sozinho. Enquanto a execução espera uma
+  aprovação sua, o Mac volta a poder dormir. Terminada a execução, ou sem rotinas ligadas, o app não pede nada.
 - **Peça no chat.** "Verifique meus e-mails a cada 30 minutos" ou "todo dia às 9h me mande um resumo das notícias": o Orb cria a
   rotina sozinho (ferramenta `schedule`, nos dois motores) e também lista, pausa, retoma e apaga as dele quando você pede. Nada
   disso passa em branco: em "Perguntar antes" o cartão mostra o nome, quando roda e o que será pedido; em "Só leitura" só dá
@@ -536,7 +542,7 @@ Ajustes → Geral → Seus dados → **Redefinir o Orb…** volta o app ao prime
   configuração dos provedores. Desligado, provedores, chaves e modelo padrão continuam. O login do Claude Code no Terminal
   nunca é tocado.
 
-Sempre somem: os Orbs, as conversas (atuais, anteriores e de rotinas), os anexos e as saídas de ferramentas, o seu perfil (texto e
+Sempre somem: os Orbs, as conversas (atuais, anteriores e de rotinas), os rascunhos não enviados, os anexos e as saídas de ferramentas, o seu perfil (texto e
 foto; nunca vai para as memórias guardadas), o histórico de uso e custos, as rotinas, os
 conectores e os segredos deles no Keychain, as skills instaladas ou criadas, as liberações ("Sempre permitir") e os ajustes do
 app (voltam ao padrão, inclusive o primeiro uso). Nada fora da pasta de dados e do Keychain do app é tocado (dentro da pasta de

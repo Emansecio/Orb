@@ -61,6 +61,25 @@ struct ContextBudgetTests {
         #expect(ContextBudget(modelWindow: 30_000, level: .wide).tokens == 15_250)
     }
 
+    @Test func anAbsurdWindowFromACatalogDoesNotOverflowTheBudget() {
+        for window in [9_000_000_000_000_000_000, Int.max] {
+            let model = ProviderModel(id: "x", name: "x", format: .chat, contextLength: window)
+            let wide = ContextBudget(model: model, provider: .custom, level: .wide)
+            #expect(wide.tokens == Int(Double(ContextBudget.largestWindow) * ContextBudget.wideShare))
+            #expect(wide.characters > 0)
+            #expect(ContextBudget(model: model, provider: .custom).resized(window: window).characters > 0)
+        }
+        #expect(ContextBudget(tokens: Int.max / 2).characters > 0)
+    }
+
+    @Test func absurdTokenCountsFromAServerSaturateInsteadOfOverflowing() {
+        var usage = TokenUsage(input: Int.max - 1)
+        usage.add(TokenUsage(input: 10))
+        #expect(usage.input == Int.max)
+        #expect(TokenUsage(input: Int.max, cacheRead: 5, cacheWrite: 7).promptTokens == Int.max)
+        #expect(TokenUsage(input: 100, cacheRead: 5).promptTokens == 105)
+    }
+
     @Test func aWiderLevelNeverGivesLessHistory() {
         for window in [16_000, 32_000, 64_000, 100_000, 128_000, 131_072, 200_000, 1_000_000] {
             let economical = ContextBudget(modelWindow: window, level: .economical).tokens

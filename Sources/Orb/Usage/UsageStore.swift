@@ -24,10 +24,15 @@ extension Store {
             let url = usageURL(month)
             let batch = Dictionary(uniqueKeysWithValues: rows.map { ($0.key, $0.value) })
             enqueue(touching: [url]) {
+                // Blocked by an earlier read that could not open it: that was said once, and reading again would say it at
+                // every flush.
+                guard !Self.gate.isBlocked(url) else { return }
                 let existing: StoreRead<UsageMonth> = read(UsageMonth.self, from: url, ifUnreadable: "o histórico do mês começou vazio")
                 // What the read found (items left out, a file set aside) is news, not a failed write: the write below goes through.
                 if let notice = existing.notice { onNotice?(notice) }
-                // A file that exists but could not be read nor set aside is blocked for writes (`writeFile` says so).
+                // A file that exists but could not be read nor set aside is blocked for writes: the notice above said so,
+                // and a write that fails by design would only report a save failure on top (which stops idle unloading).
+                guard !Self.gate.isBlocked(url) else { return }
                 var file = existing.value ?? UsageMonth()
                 file.merge(batch, names: names)
                 write(file, to: url)

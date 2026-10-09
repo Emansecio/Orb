@@ -220,6 +220,7 @@ struct AnthropicClientTests {
             ReasoningPart(kind: .redactedThinking, data: "opaque=="),
         ])
         #expect(events == [
+            .usage(TokenUsage(input: 5)), // the input tokens, announced as soon as message_start is read
             .text("Vou ler."), .reasoning(trace),
             .toolCalls([ToolCallRequest(id: "toolu_1", name: "read_file", arguments: #"{"path":"a.txt"}"#)]),
             .finished(.toolUse, TokenUsage(input: 5, output: 9, cacheRead: nil, cacheWrite: nil)),
@@ -262,8 +263,9 @@ struct AnthropicClientTests {
         } catch let error as LLMError {
             #expect(error.isRetryable)
         }
-        // The input is billed whether or not the answer arrives: it comes ahead of the error.
-        #expect(events == [.finished(.incomplete, TokenUsage(input: 1200, output: 1))])
+        // The input is billed whether or not the answer arrives: it is announced as soon as it is read, and comes again ahead of the error.
+        let used = TokenUsage(input: 1200, output: 1)
+        #expect(events == [.usage(used), .finished(.incomplete, used)])
     }
 
     @Test func overloadedHTTPResponsesAreRetryableWithTheirDelay() async {

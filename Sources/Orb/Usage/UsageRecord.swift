@@ -32,6 +32,9 @@ struct UsageKey: Hashable, Codable, Sendable {
 struct UsageTotals: Codable, Equatable, Sendable {
     /// Calls to the model (one per turn for Claude Code, whose CLI reports the turn as a whole).
     var requests = 0
+    /// A count is kept within 0...TokenUsage.maxCount: one absurd number (a damaged file, a broken server) never overflows a sum.
+    private static func capped(_ count: Int) -> Int { min(max(0, count), TokenUsage.maxCount) }
+
     /// Prompt tokens charged in full, read from the cache, written to it, and tokens written by the model.
     var input = 0
     var cacheRead = 0
@@ -47,12 +50,12 @@ struct UsageTotals: Codable, Equatable, Sendable {
 
     init(requests: Int = 0, input: Int = 0, cacheRead: Int = 0, cacheWrite: Int = 0, cacheWrite1h: Int = 0, output: Int = 0,
          reportedCost: Double? = nil) {
-        self.requests = requests
-        self.input = input
-        self.cacheRead = cacheRead
-        self.cacheWrite = cacheWrite
-        self.cacheWrite1h = min(max(0, cacheWrite1h), cacheWrite)
-        self.output = output
+        self.requests = Self.capped(requests)
+        self.input = Self.capped(input)
+        self.cacheRead = Self.capped(cacheRead)
+        self.cacheWrite = Self.capped(cacheWrite)
+        self.cacheWrite1h = min(Self.capped(cacheWrite1h), self.cacheWrite)
+        self.output = Self.capped(output)
         self.reportedCost = reportedCost
     }
 
@@ -63,19 +66,19 @@ struct UsageTotals: Codable, Equatable, Sendable {
     }
 
     mutating func add(_ other: UsageTotals) {
-        requests += other.requests
-        input += other.input
-        cacheRead += other.cacheRead
-        cacheWrite += other.cacheWrite
-        cacheWrite1h += other.cacheWrite1h
-        output += other.output
+        requests = Self.capped(requests + other.requests)
+        input = Self.capped(input + other.input)
+        cacheRead = Self.capped(cacheRead + other.cacheRead)
+        cacheWrite = Self.capped(cacheWrite + other.cacheWrite)
+        cacheWrite1h = min(Self.capped(cacheWrite1h + other.cacheWrite1h), cacheWrite)
+        output = Self.capped(output + other.output)
         if let cost = other.reportedCost { reportedCost = (reportedCost ?? 0) + cost }
     }
 
     /// A count that is missing, negative or not a number reads as zero, so one damaged row never breaks a sum.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        func count(_ key: CodingKeys) -> Int { max(0, (try? c.decodeIfPresent(Int.self, forKey: key)) ?? 0) }
+        func count(_ key: CodingKeys) -> Int { Self.capped((try? c.decodeIfPresent(Int.self, forKey: key)) ?? 0) }
         requests = count(.requests)
         input = count(.input)
         cacheRead = count(.cacheRead)

@@ -240,6 +240,73 @@ struct SteeringEngineTests {
         #expect(second.last?.content == "segundo")
     }
 
+    @Test @MainActor func aFileAloneIsSentAsAMessageWithTheDefaultRequest() async throws {
+        let client = HeldModel()
+        let (model, bot) = setUp(client)
+        let file = root.appending(path: "relatorio.pdf")
+        try Data("pdf".utf8).write(to: file)
+        #expect(model.send("", attachments: [file], to: bot.id, fromUser: true))
+        await waitUntilIdle(model, bot.id)
+        let seen = try #require(await client.seen.calls.first?.last)
+        #expect(seen.content.contains(AppModel.attachmentsOnlyPrompt))
+        #expect(seen.content.contains("Attached files") && seen.content.contains(file.path))
+        let attached = model.transcript(bot.id).compactMap { item -> [String]? in
+            if case .user(_, let attachments) = item.kind { attachments } else { nil }
+        }
+        #expect(attached == [[file.path]])
+    }
+
+    @Test @MainActor func aFileAloneIsQueuedWhileTheOrbWorks() async throws {
+        let gate = Latch()
+        let client = HeldModel(gate: gate)
+        let (model, bot) = setUp(client)
+        model.submit("primeiro", to: bot.id)
+        await waitUntil("the model call") { await client.seen.count >= 1 }
+        let file = root.appending(path: "dados.csv")
+        try Data("a,b".utf8).write(to: file)
+        let lane = model.composerLane(bot.id)
+        lane.files = [AttachedFile(url: file)]
+        #expect(model.submit("", to: bot.id))
+        #expect(lane.queued.count == 1 && lane.queued[0].files == [file])
+        #expect(lane.files.isEmpty)
+        await gate.open()
+        await waitUntilIdle(model, bot.id)
+        #expect(await client.seen.count == 2)
+        #expect(await client.seen.calls[1].last?.content.contains(file.path) == true)
+    }
+
+    @Test @MainActor func quittingKeepsTheQueueTheDraftAndTheirFilesForTheNextLaunch() async throws {
+        let gate = Latch()
+        let client = HeldModel(gate: gate)
+        let (model, bot) = setUp(client)
+        model.submit("primeiro", to: bot.id)
+        await waitUntil("the model call") { await client.seen.count >= 1 }
+        let file = root.appending(path: "nota.txt")
+        try Data("nota".utf8).write(to: file)
+        let gone = root.appending(path: "some.txt")
+        try Data("x".utf8).write(to: gone)
+        model.composerLane(bot.id).files = [AttachedFile(url: file)]
+        #expect(model.submit("depois disso, gere o PDF", to: bot.id)) // queued, with the file
+        model.setDraft("ainda escrevendo", for: bot.id)
+        model.composerLane(bot.id).files = [AttachedFile(url: gone)] // attached to the draft, deleted before the next launch
+
+        model.stopTurnsForQuit() // gives the queue back to the composer
+        model.saveNow()
+        try FileManager.default.removeItem(at: gone)
+        await gate.open()
+
+        let next = AppModel(store: Store(directory: root), runsBackgroundWork: false)
+        #expect(next.drafts[bot.id] == "depois disso, gere o PDF\n\nainda escrevendo")
+        #expect(next.composerLane(bot.id).files.map(\.url) == [file], "the queued message's file comes back, the deleted one does not")
+        // Sent or cleared, the next save leaves nothing behind.
+        next.setDraft("", for: bot.id)
+        next.composerLane(bot.id).files = []
+        next.saveNow()
+        let again = AppModel(store: Store(directory: root), runsBackgroundWork: false)
+        #expect(again.drafts[bot.id] == nil)
+        #expect(!FileManager.default.fileExists(atPath: root.appending(path: Store.draftsFileName).path))
+    }
+
     @Test @MainActor func takingAMessageBackReturnsItToTheDraft() async throws {
         let gate = Latch()
         let client = HeldModel(gate: gate)

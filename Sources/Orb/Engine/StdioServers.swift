@@ -1,45 +1,43 @@
 import Foundation
 import os
 
-/// The local servers (stdio) running now. `close` ends one for good (SIGTERM, then SIGKILL for the one that ignores it) and
+/// The local servers (stdio) running now. `end` ends one for good (SIGTERM, then SIGKILL for the one that ignores it) and
 /// `killAllNow` is for the app quitting, when nothing else would end them: a server that holds other handles open (a browser,
 /// a connection pool) does not leave on EOF alone.
+///
+/// Each server leads a process group of its own (`SpawnedProcess`), and the signals go to the group: `npx`/`uvx` start the
+/// real server as a child, and none of them may outlive the connection. A group is alive while any member is, even after its
+/// leader was reaped, so `kill(-pid, 0)` also tells whether grandchildren are left. A process that starts a session of its own
+/// (a browser launched detached) leaves the group: it only ends if the server closes it on SIGTERM.
 final class StdioServerRegistry: Sendable {
     static let shared = StdioServerRegistry()
 
-    /// A `Process` is not `Sendable`; it is only asked `isRunning` and signalled, which is thread-safe.
-    private final class Entry: @unchecked Sendable {
-        let process: Process
-        init(_ process: Process) { self.process = process }
-    }
-
-    private let live = OSAllocatedUnfairLock(initialState: [ObjectIdentifier: Entry]())
+    private let live = OSAllocatedUnfairLock(initialState: Set<pid_t>())
 
     var count: Int { live.withLock { $0.count } }
 
-    func add(_ process: Process) {
-        live.withLock { $0[ObjectIdentifier(process)] = Entry(process) }
+    /// `pid` leads the group of a server just started.
+    func add(_ pid: pid_t) {
+        live.withLock { _ = $0.insert(pid) }
     }
 
-    /// Asks the server to end now and, if it is still there after `grace`, kills it. Forgotten once gone.
-    func end(_ process: Process, grace: Duration) {
-        if process.isRunning { process.terminate() }
-        let entry = Entry(process)
+    /// Asks the server's group to end now and, if anything is still there after `grace`, kills it. Forgotten once gone.
+    func end(_ pid: pid_t, grace: Duration) {
+        if kill(-pid, 0) == 0 { kill(-pid, SIGTERM) }
         let seconds = Double(grace.components.seconds) + Double(grace.components.attoseconds) / 1e18
         DispatchQueue.global().asyncAfter(deadline: .now() + seconds) { [self] in
-            // The Process object tells whether it is the same process: a pid alone could have been reused.
-            if entry.process.isRunning { kill(entry.process.processIdentifier, SIGKILL) }
-            live.withLock { _ = $0.removeValue(forKey: ObjectIdentifier(entry.process)) }
+            if kill(-pid, 0) == 0 { kill(-pid, SIGKILL) }
+            live.withLock { _ = $0.remove(pid) }
         }
     }
 
     /// Ends every server now, synchronously (the app is quitting): SIGTERM, a moment to leave, then SIGKILL.
     func killAllNow(wait: TimeInterval = 0.3) {
-        let running = live.withLock { Array($0.values) }.filter(\.process.isRunning)
-        running.forEach { $0.process.terminate() }
+        let groups = live.withLock { Array($0) }.filter { kill(-$0, 0) == 0 }
+        groups.forEach { kill(-$0, SIGTERM) }
         let deadline = Date.now.addingTimeInterval(wait)
-        while Date.now < deadline, running.contains(where: \.process.isRunning) { usleep(20_000) }
-        for entry in running where entry.process.isRunning { kill(entry.process.processIdentifier, SIGKILL) }
+        while Date.now < deadline, groups.contains(where: { kill(-$0, 0) == 0 }) { usleep(20_000) }
+        groups.filter { kill(-$0, 0) == 0 }.forEach { kill(-$0, SIGKILL) }
         live.withLock { $0.removeAll() }
     }
 }

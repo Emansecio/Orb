@@ -21,9 +21,14 @@ protocol AssemblingMapper: SSEMapper {
     var toolCalls: [ToolCallRequest] { get }
     var stopReason: StopReason { get }
     var usage: TokenUsage? { get }
+    /// The provider reports what it used (the input tokens) at the start of the response, ahead of any output: the
+    /// transport announces it with `.usage`, so that a response that is stopped is still counted.
+    var reportsUsageUpFront: Bool { get }
 }
 
 extension AssemblingMapper {
+    var reportsUsageUpFront: Bool { false }
+
     mutating func finish(sawDone: Bool) -> [LLMEvent] {
         var events: [LLMEvent] = []
         if !reasoning.isEmpty {
@@ -70,6 +75,9 @@ enum ProviderTransport {
                     // The start of the body while no event has been read: if the stream turns out not to be one, it says why.
                     var sawEvent = false
                     var head = Data()
+                    // What the provider says it used up front goes ahead too: if the response is stopped, the closing event
+                    // below never reaches the reader.
+                    var announcedUsage = false
                     /// Maps one event; true when reading can stop.
                     func handle(_ event: SSEEvent) throws -> Bool {
                         sawEvent = true
@@ -79,6 +87,11 @@ enum ProviderTransport {
                             throw LLMError.invalidResponse(String(data.prefix(200)))
                         }
                         for output in try mapper.ingest(value) { continuation.yield(output) }
+                        if !announcedUsage, let assembling = mapper as? any AssemblingMapper, assembling.reportsUsageUpFront,
+                           let used = assembling.usage {
+                            announcedUsage = true
+                            continuation.yield(.usage(used))
+                        }
                         return mapper.isFinished
                     }
                     reading: do {

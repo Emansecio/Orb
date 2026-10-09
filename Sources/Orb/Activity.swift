@@ -32,9 +32,10 @@ struct InertActivity: ActivityAsserting {
 
 extension AppModel {
     /// Takes or lets go of the activities so they match what the app is doing: one while a routine runs, one while
-    /// any routine is switched on. Called wherever either changes (`routines`, a session's `routineID`).
+    /// any routine is switched on. Called wherever either changes (`routines`, a session's `routineID`, an approval
+    /// card opening or closing). A routine stopped at a card waits for you, not for the Mac: it does not hold it awake.
     func syncActivities() {
-        let running = isResetting ? nil : sessions.values.compactMap(\.routineID).first
+        let running = isResetting ? nil : sessions.values.first { $0.routineID != nil && !needsYou($0.id) }?.routineID
         if let running, runningActivity == nil {
             let name = routines.first { $0.id == running }?.name ?? ""
             runningActivity = activity.begin(.running, reason: "Rotina “\(name)” em andamento")

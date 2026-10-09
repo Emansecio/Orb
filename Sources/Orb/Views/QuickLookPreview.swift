@@ -6,7 +6,8 @@ import QuickLookUI
 @MainActor
 final class QuickLookPreview: NSObject, @preconcurrency QLPreviewPanelDataSource {
     static let shared = QuickLookPreview()
-    private var urls: [URL] = []
+    /// What the panel shows (tests set it directly; `show` is the only other writer).
+    var urls: [URL] = []
 
     /// Opens the panel on `paths[index]`. Files that are gone are left out (the click looks again); with nothing left
     /// there is nothing to show.
@@ -38,5 +39,9 @@ final class QuickLookPreview: NSObject, @preconcurrency QLPreviewPanelDataSource
 
     func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int { urls.count }
 
-    func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> (any QLPreviewItem)! { urls[index] as NSURL }
+    /// The panel may still ask for its old index while the list is being swapped: it gets the nearest item, never a crash.
+    func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> (any QLPreviewItem)! {
+        guard !urls.isEmpty else { return nil }
+        return urls[min(max(index, 0), urls.count - 1)] as NSURL
+    }
 }

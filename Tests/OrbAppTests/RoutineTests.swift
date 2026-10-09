@@ -599,6 +599,52 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(activity.began.count == activity.ended)
     }
 
+    @Test @MainActor func aRoutineStoppedAtAnApprovalCardLetsTheMacSleep() async throws {
+        let gate = Gate()
+        let stub = StubModel(gate: gate)
+        let (model, bot, routine) = setUp(stub)
+        let activity = FakeActivity()
+        model.activity = activity
+        model.keepsAwakeForRoutines = true
+        model.syncActivities()
+        model.runRoutine(routine.id)
+        await model.routineStarted()
+        await waitForModelCalls(stub)
+        #expect(activity.open.contains { $0.level == .running })
+
+        // Waiting for you is not work: nobody is there to answer at 3 a.m., and the Mac may sleep meanwhile.
+        model.setAwaitingApproval(true, of: bot.id)
+        #expect(activity.open.map(\.level) == [.waiting])
+        model.setAwaitingApproval(false, of: bot.id)
+        #expect(activity.open.contains { $0.level == .running })
+
+        await gate.open()
+        await waitUntilIdle(model, bot.id)
+        #expect(activity.open.map(\.level) == [.waiting])
+        model.routines[0].isEnabled = false
+        #expect(activity.began.count == activity.ended)
+    }
+
+    @Test @MainActor func aRoutineConversationThatCouldNotBeWrittenIsWrittenAgainOnQuit() async throws {
+        let (model, bot, routine) = setUp()
+        // A plain file where the Orb's folder of run conversations goes: the write fails with no full disk needed.
+        let file = root.appending(path: "conversations/\(bot.id.uuidString)")
+        try Data("x".utf8).write(to: file)
+        model.runRoutine(routine.id)
+        await model.routineStarted()
+        await waitUntilIdle(model, bot.id)
+        model.store.flush()
+        // The chat is back, so it is not the one to write again; the run's conversation is kept for that.
+        await waitUntil("the run's conversation to be kept") { model.unsavedRoutineConversations[routine.id] != nil }
+        #expect(!model.dataNotices.isEmpty)
+
+        try FileManager.default.removeItem(at: file)
+        model.saveNow()
+        let saved = try #require(model.store.readRoutineConversation(routine: routine.id, for: bot.id).value)
+        #expect(!saved.items.isEmpty)
+        #expect(model.unsavedRoutineConversations.isEmpty)
+    }
+
     @Test @MainActor func aRoutineThatDidNotRunHoldsNothing() async throws {
         let (model, _, routine) = setUp(StubModel())
         model.providers = [] // no model connected: the routine does not happen
@@ -667,6 +713,48 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(!chatFile.items.contains { if case .user(let t, _) = $0.kind { t == "resuma os arquivos novos" } else { false } })
         await later.open()
         await waitUntilIdle(model, bot.id)
+    }
+
+    @Test @MainActor func aQueuedRoutineStartsWhileTheChatIsBeingArchivedAndRunsAllTheSame() async throws {
+        let gate = Gate()
+        let (model, bot, routine) = setUp(StubModel(gate: gate))
+        #expect(model.send("pergunta", to: bot.id))
+        model.runRoutine(routine.id)
+        await model.routineStarted()
+        #expect(model.queuedRoutines == [routine.id])
+
+        // "Nova conversa" with the writer busy: the turn stops, and the routine waits for the chat to be archived.
+        let release = DispatchSemaphore(value: 0)
+        model.store.stallWriter(until: release)
+        let change = model.newConversation(bot.id)
+        #expect(model.changingChat.contains(bot.id))
+        await gate.open()
+        await waitUntil("the stopped turn to end") { model.session(bot.id).turnTask == nil }
+        #expect(model.queuedRoutines == [routine.id] && !model.isRoutineRunning(routine.id))
+
+        release.signal()
+        await change?.value
+        await waitUntil("the routine to run") { !model.routines[0].runs.isEmpty }
+        await waitUntilIdle(model, bot.id)
+
+        // The new conversation opened (the routine's notice did not read as a change), and the run happened after it.
+        #expect(model.routines[0].runs.count == 1 && model.routines[0].runs[0].succeeded)
+        #expect(model.dataNotices.isEmpty)
+        #expect(!model.transcript(bot.id).contains { if case .user(let t, _) = $0.kind { t == "pergunta" } else { false } })
+    }
+
+    @Test @MainActor func aRunStartsFromTheConversationThatCouldNotBeWrittenNotFromTheOlderFile() async throws {
+        let (model, bot, routine) = setUp()
+        var earlier = Conversation().startingRoutineRun(at: .now.addingTimeInterval(-3_600))
+        earlier.items.append(TranscriptItem(.bot(text: "rodada anterior", isStreaming: false)))
+        model.unsavedRoutineConversations[routine.id] = (bot.id, earlier)
+        model.runRoutine(routine.id)
+        await model.routineStarted()
+        await waitUntilIdle(model, bot.id)
+        model.saveNow()
+        let saved = try #require(model.store.readRoutineConversation(routine: routine.id, for: bot.id).value)
+        #expect(saved.items.contains { if case .bot(let t, _) = $0.kind { t == "rodada anterior" } else { false } })
+        #expect(model.unsavedRoutineConversations.isEmpty)
     }
 
     @Test @MainActor func aQueuedRoutineMovedToAnotherOrbRunsWhenThatOrbIsFree() async throws {

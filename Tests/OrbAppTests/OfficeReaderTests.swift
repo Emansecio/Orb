@@ -194,6 +194,36 @@ final class DocumentTextCacheTests {
         #expect(calls.withLock { $0 } == before + 2)
     }
 
+    private func rows(_ cellsXML: String) -> [SheetParser.Row] {
+        let xml = "<worksheet><sheetData><row r=\"1\">\(cellsXML)</row></sheetData></worksheet>"
+        return SheetParser.parse(Data(xml.utf8), strings: [], maxRows: 10).rows
+    }
+
+    private func cell(_ reference: String, _ text: String = "x") -> String {
+        "<c r=\"\(reference)\" t=\"inlineStr\"><is><t>\(text)</t></is></c>"
+    }
+
+    @Test func aFarOrAbsurdColumnReferenceNeitherCrashesNorBuildsAHugeRow() {
+        for reference in ["ZZZZZZZZZZZZZZZ1", "AAAAAAAAAAAAAA1", "ZZZZZZZ1", "XFE1", "XFD1"] {
+            let width = rows(cell("A1", "a") + cell(reference)).first?.cells.count ?? 0
+            #expect(width >= 1 && width <= SheetParser.maxColumns, Comment(rawValue: "\(reference): \(width)"))
+        }
+    }
+
+    @Test func aCellBeyondTheColumnLimitIsReportedAsCut() {
+        func parsed(_ cells: String) -> SheetParser {
+            let xml = "<worksheet><sheetData><row r=\"1\">\(cells)</row></sheetData></worksheet>"
+            return SheetParser.parse(Data(xml.utf8), strings: [], maxRows: 10)
+        }
+        #expect(parsed(cell("A1", "a") + cell("XFD1")).cutColumns)
+        #expect(parsed(cell("A1", "a") + cell("ZZZZZZZ1")).cutColumns == false)   // not a real reference: placed next to the last cell
+        #expect(parsed(cell("A1", "a") + cell("D1")).cutColumns == false)
+    }
+
+    @Test func smallGapsBetweenColumnsStayFilled() {
+        #expect(rows(cell("B1", "b") + cell("D1", "d")).first?.cells == ["", "b", "", "d"])
+    }
+
     /// The tool pages over one conversion, and a document that changed is read again.
     @Test func readFilePagesAndNoticesWhenTheFileChanges() async throws {
         let workspace = try ToolWorkspace()

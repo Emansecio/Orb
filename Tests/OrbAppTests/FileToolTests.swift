@@ -79,11 +79,28 @@ final class FileToolTests {
         #expect(read.contains("coração") && read.contains("1 bytes inválidos") && !read.contains("Windows-1252"))
     }
 
-    @Test func editRefusesAUTF8FileWithInvalidBytesAndLeavesItUntouched() async throws {
-        let bytes = Data("coração\nfim\n".utf8) + Data([0xC3, 0x0A]) + Data("Ásia e ação\n".utf8)
+    /// The stray byte is not near the edit: the rest of the file must come back byte for byte, the stray byte included.
+    @Test func editChangesOnlyTheStretchOfAUTF8FileWithInvalidBytes() async throws {
+        let before = Data("// ação, função, coração\nlet x = 1\n// fim ".utf8) + Data([0xC3, 0x0A]) + Data("Ásia e ação\n".utf8)
+        try workspace.write("sujo.txt", before)
+        _ = try await run(EditFileTool(), ["path": .string("sujo.txt"), "old_text": .string("let x = 1"), "new_text": .string("let x = 2 // atenção")])
+        let after = Data("// ação, função, coração\nlet x = 2 // atenção\n// fim ".utf8) + Data([0xC3, 0x0A]) + Data("Ásia e ação\n".utf8)
+        #expect(try workspace.read("sujo.txt") == after)
+        // Every occurrence, on both sides of the stray byte.
+        _ = try await run(EditFileTool(), ["path": .string("sujo.txt"), "old_text": .string("ação"), "new_text": .string("acao"), "replace_all": .bool(true)])
+        let all = Data("// acao, função, coracao\nlet x = 2 // atenção\n// fim ".utf8) + Data([0xC3, 0x0A]) + Data("Ásia e acao\n".utf8)
+        #expect(try workspace.read("sujo.txt") == all)
+    }
+
+    @Test func editRefusesAStretchThatIncludesAnInvalidByteAndLeavesTheFileUntouched() async throws {
+        let bytes = Data("coração\nfim ".utf8) + Data([0xC3, 0x0A]) + Data("Ásia e ação\n".utf8)
         try workspace.write("sujo.txt", bytes)
-        let message = await failure(EditFileTool(), ["path": .string("sujo.txt"), "old_text": .string("fim"), "new_text": .string("atenção")])
+        let message = await failure(EditFileTool(), ["path": .string("sujo.txt"), "old_text": .string("fim \u{FFFD}"), "new_text": .string("atenção")])
         #expect(message.contains("bytes inválidos"))
+        #expect(try workspace.read("sujo.txt") == bytes)
+        // Text that borrows the private-use characters standing in for the bytes cannot smuggle bytes in.
+        let smuggled = await failure(EditFileTool(), ["path": .string("sujo.txt"), "old_text": .string("fim"), "new_text": .string("\u{F7C3}")])
+        #expect(smuggled.contains("bytes inválidos"))
         #expect(try workspace.read("sujo.txt") == bytes)
     }
 

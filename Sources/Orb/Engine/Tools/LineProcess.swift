@@ -11,7 +11,11 @@ final class LineProcess: Sendable {
     let pid: pid_t
     /// Kept so the readers' descriptors stay open for as long as the child may write.
     private let pipes: [Pipe]
+    /// Only the choice of handle happens under the lock, never the I/O.
     private let input: OSAllocatedUnfairLock<FileHandle?>
+    /// Writes to the child's stdin happen here, in call order and never on the caller's thread: a child that stops reading
+    /// blocks `write(2)` once the pipe is full, and `send`/`closeInput` run on the main thread when a turn is cancelled.
+    private let writes = DispatchQueue(label: "app.orb.line-process.writes")
     private let errors: OSAllocatedUnfairLock<OutputBuffer>
     private let exited: OSAllocatedUnfairLock<Bool>
     /// Finishes when the child's stderr reaches its end.
@@ -89,19 +93,20 @@ final class LineProcess: Sendable {
         input = OSAllocatedUnfairLock(initialState: stdin.fileHandleForWriting)
     }
 
-    /// Writes one line (a newline is appended). Ignored once input is closed or the child is gone.
+    /// Queues one line (a newline is appended). Ignored once input is closed or the child is gone. Never blocks.
     func send(_ line: String) {
-        input.withLock { handle in
-            guard let current = handle else { return }
-            do { try current.write(contentsOf: Data((line + "\n").utf8)) } catch { handle = nil }
+        guard let handle = input.withLock({ $0 }) else { return }
+        let data = Data((line + "\n").utf8)
+        writes.async { [input] in
+            do { try handle.write(contentsOf: data) } catch { input.withLock { if $0 === handle { $0 = nil } } }
         }
     }
 
+    /// Closes stdin after the lines already queued. Behind a write that is stuck, if there is one: the child ending
+    /// (`terminate`) is what frees it. Never blocks.
     func closeInput() {
-        input.withLock { handle in
-            try? handle?.close()
-            handle = nil
-        }
+        guard let handle = input.withLock({ current in defer { current = nil }; return current }) else { return }
+        writes.async { try? handle.close() }
     }
 
     /// The last few KB the child wrote to stderr.

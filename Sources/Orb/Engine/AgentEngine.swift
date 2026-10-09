@@ -20,6 +20,9 @@ enum TurnEvent: Sendable {
     /// Tokens of the model call that just ended, alone (`.usage` follows with the new total): the size of the prompt
     /// the model reads now, and how much of it the provider served from its cache.
     case requestUsage(TokenUsage)
+    /// The provider has begun to bill a model call (its input tokens are known before the answer ends). `.requestUsage` follows
+    /// with the final numbers; only a call that never ends (the user stopped it) is counted from this one.
+    case pendingUsage(TokenUsage)
     /// What the provider's own tool says the turn cost, in dollars (Claude Code's `total_cost_usd`; on a plan, what it would
     /// cost at API prices). Follows the turn's `.usage`.
     case reportedCost(Double)
@@ -404,6 +407,9 @@ actor AgentEngine {
                             reply.reasoning = trace
                         case .toolCalls(let requested):
                             reply.calls = requested
+                        case .usage(let used):
+                            reply.usage = used
+                            out.yield(.pendingUsage(used))
                         case .finished(let reason, let used):
                             reply.stop = reason
                             reply.usage = used

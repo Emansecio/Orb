@@ -152,17 +152,44 @@ struct ShellEnvironmentTests {
         let slowOnce = directory.appending(path: "slow-once")
         let shell = try FakeShell.make(in: directory, exports: ["FROM_PROFILE": "late"],
                                        preamble: "[ -e '\(slowOnce.path)' ] || { touch '\(slowOnce.path)'; sleep 30; }")
-        let environment = ShellEnvironment(shell: shell, base: basicEnvironment, timeout: .seconds(1), retryAfterTimeout: .milliseconds(300))
+        let environment = ShellEnvironment(shell: shell, base: basicEnvironment, timeout: .seconds(1), retryAfterTimeout: .milliseconds(300),
+                                           retryTimeout: .seconds(2))
         let first = await environment.resolved()
         #expect(!first.isFromUserShell)
-        // A few tries: a loaded machine may kill the first run before it marks itself as slow.
+        // A few tries: a loaded machine may kill the first run before it marks itself as slow, and the new answer
+        // comes from the background try that the first of these calls starts.
         var second = first
-        for _ in 0..<4 where !second.isFromUserShell {
+        for _ in 0..<20 where !second.isFromUserShell {
             try await Task.sleep(for: .milliseconds(400))
             second = await environment.resolved()
         }
         #expect(second.isFromUserShell)
         #expect(second.environment["FROM_PROFILE"] == "late")
+    }
+
+    /// A shell that is always slow is not waited for again at every try, and is asked ever less often.
+    @Test func anAlwaysSlowShellIsRetriedInTheBackgroundWithBackoff() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let counter = directory.appending(path: "count")
+        let shell = try FakeShell.make(in: directory, preamble: "echo x >> '\(counter.path)'; sleep 5")
+        let environment = ShellEnvironment(shell: shell, base: basicEnvironment, timeout: .milliseconds(400),
+                                           retryAfterTimeout: .milliseconds(100), retryTimeout: .milliseconds(400))
+        _ = await environment.resolved()
+        var slowest = Duration.zero
+        let end = ContinuousClock.now + .seconds(4)
+        while ContinuousClock.now < end {
+            let started = ContinuousClock.now
+            let resolved = await environment.resolved()
+            slowest = max(slowest, ContinuousClock.now - started)
+            #expect(!resolved.isFromUserShell)
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        // Nobody waits for the new tries (a slow machine allows some margin), and doubling the wait keeps them few.
+        #expect(slowest < .milliseconds(300), "\(slowest)")
+        // A machine too busy to start the script at all runs it fewer times, never more (a constant wait would make 8).
+        let runs = ((try? String(contentsOf: counter, encoding: .utf8)) ?? "").split(separator: "\n").count
+        #expect(runs <= 6, "\(runs) runs")
     }
 
     /// A shell that fails (rather than being slow) keeps the long wait, whatever the short one is.

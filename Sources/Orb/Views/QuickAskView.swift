@@ -122,6 +122,8 @@ enum QuickAskSend: Equatable {
 
     static func blockedNote(name: String) -> String { "\(name) está rodando uma rotina. Envie quando terminar." }
 
+    static let checkingNote = "Verificando as conexões. Tente de novo em instantes."
+
     static func noModelNote(name: String) -> String { "O modelo de \(name) não está conectado. Veja em Ajustes → Modelos." }
 
     /// What the app shows after a question: the asked Orb's chat, unless a sheet of the main window is open (switching
@@ -190,7 +192,7 @@ struct QuickAskView: View {
                     .foregroundStyle(Palette.warn)
             }
 
-            if !model.isProviderReady {
+            if model.hasCheckedConnections, !(selectedID.map(model.hasUsableModel) ?? false) {
                 HStack(spacing: 8) {
                     Image(systemName: "cpu").foregroundStyle(Palette.warn)
                     Text("Conecte um modelo.")
@@ -243,7 +245,11 @@ struct QuickAskView: View {
     private func send() {
         guard let id = selectedID else { return }
         let name = model.liveBot(id)?.look.name ?? "O Orb"
-        switch QuickAskSend.action(isWorking: model.isWorking(id), canSteer: model.canSteer(id), isReady: model.isProviderReady,
+        guard model.hasCheckedConnections || model.hasUsableModel(id) else {
+            note = QuickAskSend.checkingNote // what was typed stays
+            return
+        }
+        switch QuickAskSend.action(isWorking: model.isWorking(id), canSteer: model.canSteer(id), isReady: model.hasUsableModel(id) || model.isProviderReady,
                                    hasText: !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                                    orbHasModel: model.hasUsableModel(id)) {
         case .nothing: return

@@ -400,7 +400,8 @@ enum ContextText {
         let head = limit * 5 / 8, tail = limit - head
         if let close = text.range(of: omissionClose, options: .backwards),
            let open = text.range(of: omissionOpen, options: .backwards, range: text.startIndex..<close.lowerBound),
-           let earlier = Int(text[open.upperBound..<close.lowerBound]) {
+           // The count is only a hint (any page can imitate the marker): one out of range reads as plain text.
+           let earlier = Int(text[open.upperBound..<close.lowerBound]), (0...Int(Int32.max)).contains(earlier) {
             let before = text[..<open.lowerBound], after = text[close.upperBound...]
             let keptHead = before.prefix(head), keptTail = after.suffix(tail)
             let omitted = earlier + (before.count - keptHead.count) + (after.count - keptTail.count)

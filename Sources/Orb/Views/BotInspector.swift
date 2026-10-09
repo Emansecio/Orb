@@ -14,6 +14,8 @@ struct BotInspector: View {
     /// The kind the memory sheet opens on (nil: all of it).
     @State private var memorySheetKind: MemoryKind?
     @State private var identityDraft = ""
+    @State private var isSavingIdentity = false
+    @State private var identitySaveFailed = false
     /// The instruction file in the Orb's folder, if any (read off the main thread when the folder changes).
     @State private var instructionFile: FolderInstructions?
     /// The folder's state and its recent and changed files (read off the main thread, see `WorkspaceFiles`).
@@ -86,9 +88,15 @@ struct BotInspector: View {
             .onAppear { takeRequests() }
             .onChange(of: model.pendingChatRequest) { takeRequests() }
             .sheet(isPresented: $isEditingIdentity) {
-                IdentityEditor(name: bot.name, text: $identityDraft) {
-                    model.setIdentity(identityDraft, of: bot.id)
-                    isEditingIdentity = false
+                IdentityEditor(name: bot.name, text: $identityDraft, isSaving: isSavingIdentity, failed: identitySaveFailed) {
+                    guard !isSavingIdentity else { return }
+                    isSavingIdentity = true
+                    identitySaveFailed = false
+                    Task {
+                        let saved = await model.setIdentity(identityDraft, of: bot.id)
+                        isSavingIdentity = false
+                        if saved { isEditingIdentity = false } else { identitySaveFailed = true }
+                    }
                 } cancel: {
                     isEditingIdentity = false
                 }
@@ -490,6 +498,7 @@ struct BotInspector: View {
             Task {
                 // From the file, not the panel's snapshot: the Orb may have added notes meanwhile.
                 identityDraft = await model.identityText(of: bot.id)
+                identitySaveFailed = false
                 isEditingIdentity = true
             }
         }, showAll: { kind in
@@ -808,11 +817,19 @@ enum InstructionsText {
 private struct IdentityEditor: View {
     let name: String
     @Binding var text: String
+    /// A save is under way (the button waits), or the last one failed (the editor stays open, and says why).
+    let isSaving: Bool
+    let failed: Bool
     let save: () -> Void
     let cancel: () -> Void
 
     /// Notes above the limit are not saved (they would lose their end), so the editor says so instead.
     private var excess: Int { text.count - MemoryBank.identityMaximumLength }
+
+    private var footerMessage: String? {
+        if excess > 0 { return "Muito longo: tire \(excess) caracteres para salvar." }
+        return failed ? "Não foi possível salvar (talvez falte espaço no disco). O texto continua aqui." : nil
+    }
 
     var body: some View {
         PlaceholderTextEditor(placeholder: "Ex.: Seja direto e me lembre de fazer pausas.", text: $text, minHeight: 220)
@@ -821,14 +838,14 @@ private struct IdentityEditor: View {
             .orbSheet("Como \(name) funciona",
                       subtitle: "Vai em toda conversa. O que \(name) aprender na entrevista entra no fim destas notas. ⌘↩ salva.",
                       size: .medium) {
-                SheetFooter(message: excess > 0 ? "Muito longo: tire \(excess) caracteres para salvar." : nil,
-                            cancel: cancel, primaryTitle: "Salvar", isPrimaryDisabled: excess > 0, primary: save)
+                SheetFooter(message: footerMessage, cancel: cancel, primaryTitle: "Salvar",
+                            isPrimaryDisabled: excess > 0 || isSaving, primary: save)
             }
             // Return adds a line in the editor; ⌘↩ saves.
             .background {
                 Button("Salvar", action: save)
                     .keyboardShortcut(AppShortcut.commandReturn)
-                    .disabled(excess > 0)
+                    .disabled(excess > 0 || isSaving)
                     .frame(width: 0, height: 0)
                     .opacity(0)
                     .accessibilityHidden(true)

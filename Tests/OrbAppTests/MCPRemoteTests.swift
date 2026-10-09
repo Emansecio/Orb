@@ -26,7 +26,7 @@ def handle(msg):
                   "serverInfo": {"name": "fake", "version": "0"}}
     elif method == "tools/list":
         result = {"tools": [{"name": "echo", "inputSchema": {"type": "object"}}, {"name": "fail"},
-                            {"name": "slow"}, {"name": "expire"}]}
+                            {"name": "slow"}, {"name": "expire"}, {"name": "pinglate"}]}
     elif method == "tools/call":
         name, args = msg["params"]["name"], msg["params"]["arguments"]
         state["calls"].append(name)
@@ -106,6 +106,14 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(event(json.dumps({"jsonrpc": "2.0", "method": "notifications/progress", "params": {}})))
         # Not for "expire": the client's reply to a ping goes out on its own, and after the session expired it would be
         # the request that finds it out, racing the call the test wants to see fail.
+        if msg["params"]["name"] == "pinglate":
+            # Pings only once the session is gone: the client's reply is then the request that meets the 404.
+            for _ in range(100):
+                if state["session"] == "gone": break
+                time.sleep(0.05)
+            self.wfile.write(event(json.dumps({"jsonrpc": "2.0", "id": "srv-2", "method": "ping"})))
+            time.sleep(3)
+            return
         if msg["params"]["name"] != "expire":
             self.wfile.write(event(json.dumps({"jsonrpc": "2.0", "id": "srv-1", "method": "ping"})))
         self.wfile.write(b"id: 7\r\n" + event(json.dumps(response, indent=1)).replace(b"\n", b"\r\n"))
@@ -179,7 +187,7 @@ struct MCPRemoteTests {
         defer { server.stop() }
         let connection = MCPConnection(config: server.config(path: "/mcp"))
         let tools = try await connection.start()
-        #expect(tools.map(\.name) == ["echo", "fail", "slow", "expire"])
+        #expect(tools.map(\.name) == ["echo", "fail", "slow", "expire", "pinglate"])
         #expect(tools[1].parameters == .schema([:]))
 
         // SSE reply with a notification, a server ping, CRLF line endings and multi-line data before the result.
@@ -247,7 +255,7 @@ struct MCPRemoteTests {
         #expect(try await manager.call(config.id, tool: "expire", arguments: .object([:])) == "ok")
         // The server forgot the session; the request never ran there, so the model never hears about it.
         #expect(try await manager.call(config.id, tool: "echo", arguments: .object(["text": .string("oi")])) == "oi")
-        #expect(await manager.status()[config.id] == .ready(toolCount: 4))
+        #expect(await manager.status()[config.id] == .ready(toolCount: 5))
         await manager.sync([])
     }
 
@@ -274,12 +282,61 @@ struct MCPRemoteTests {
         }
     }
 
+    @Test func aCallAlreadyAtTheServerIsNotRepeatedWhenAnotherRequestFindsTheSessionExpired() async throws {
+        let server = try FakeHTTPServer(mode: "streamable")
+        defer { server.stop() }
+        let config = server.config(path: "/mcp")
+        let manager = MCPManager()
+        await manager.sync([config])
+        _ = try await manager.call(config.id, tool: "echo", arguments: .object(["text": .string("x")]))
+
+        // "slow" was accepted and is running at the server when the session expires.
+        let slow = Task { try await manager.call(config.id, tool: "slow", arguments: .object([:])) }
+        _ = try await server.state { $0["calls"]?.array?.contains(.string("slow")) == true }
+        #expect(try await manager.call(config.id, tool: "expire", arguments: .object([:])) == "ok")
+        // This one never reached the server (404), so it is repeated on a new session; "slow" is not.
+        #expect(try await manager.call(config.id, tool: "echo", arguments: .object(["text": .string("oi")])) == "oi")
+        do {
+            _ = try await slow.value
+            Issue.record("expected an error")
+        } catch {
+            #expect(message(error).contains("pode ter sido executada"), "\(message(error))")
+        }
+        let state = try await server.state()
+        #expect(state["calls"]?.array?.filter { $0 == .string("slow") }.count == 1)
+        await manager.sync([])
+    }
+
+    @Test func aCallAlreadyAtTheServerIsNotRepeatedWhenTheReplyToAPingFindsTheSessionExpired() async throws {
+        let server = try FakeHTTPServer(mode: "streamable")
+        defer { server.stop() }
+        let config = server.config(path: "/mcp")
+        let manager = MCPManager()
+        await manager.sync([config])
+        _ = try await manager.call(config.id, tool: "echo", arguments: .object(["text": .string("x")]))
+
+        // The server pings inside this call's own stream after the session is gone; the answer goes out on its own,
+        // gets the 404, and the call that is still running there must not be sent again.
+        let pending = Task { try await manager.call(config.id, tool: "pinglate", arguments: .object([:])) }
+        _ = try await server.state { $0["calls"]?.array?.contains(.string("pinglate")) == true }
+        #expect(try await manager.call(config.id, tool: "expire", arguments: .object([:])) == "ok")
+        do {
+            _ = try await pending.value
+            Issue.record("expected an error")
+        } catch {
+            #expect(message(error).contains("pode ter sido executada"), "\(message(error))")
+        }
+        let state = try await server.state()
+        #expect(state["calls"]?.array?.filter { $0 == .string("pinglate") }.count == 1)
+        await manager.sync([])
+    }
+
     @Test func legacySSEFallback() async throws {
         let server = try FakeHTTPServer(mode: "legacy")
         defer { server.stop() }
         let connection = MCPConnection(config: server.config(path: "/sse"))
         let tools = try await connection.start()
-        #expect(tools.count == 4)
+        #expect(tools.count == 5)
         #expect(try await connection.call("echo", arguments: .object(["text": .string("legado")])) == "legado")
         await #expect(throws: ToolError("deu ruim")) {
             try await connection.call("fail", arguments: .object([:]))

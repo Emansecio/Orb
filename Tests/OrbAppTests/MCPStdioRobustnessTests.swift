@@ -40,13 +40,16 @@ while True:
         if mode == "list-once" and os.environ.get("LISTED"):
             continue  # never answers the second listing
         os.environ["LISTED"] = "1"
-        result(id, {"tools": [{"name": n} for n in ["pid", "hang", "echo", "noisy", "big"]]})
+        result(id, {"tools": [{"name": n} for n in ["pid", "hang", "late", "echo", "noisy", "big"]]})
     elif method == "tools/call":
         name, args = msg["params"]["name"], msg["params"]["arguments"]
         if name == "pid":
             text(id, str(os.getpid()))
         elif name == "hang":
             time.sleep(30)  # alive, and not reading its input
+        elif name == "late":
+            time.sleep(1); text(id, "late")  # answers, but after the client gave up
+            open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "late.done"), "w").close()
         elif name == "echo":
             text(id, args.get("text", ""))
         elif name == "noisy":
@@ -122,6 +125,51 @@ struct MCPStdioRobustnessTests {
         await manager.sync([])
     }
 
+    @Test func aLateReplyShowsTheServerIsAliveAndKeepsItRunning() async throws {
+        let server = try config()
+        let connection = MCPConnection(config: server)
+        _ = try await connection.start()
+        let first = try pid(try await connection.call("pid", arguments: .object([:])))
+        await #expect(throws: ToolError.self) { try await connection.call("late", arguments: .object([:]), timeout: .milliseconds(200)) }
+        // The reply of the first one arrives, with nobody waiting for it (the server leaves a mark once it has sent it).
+        let mark = URL(fileURLWithPath: server.arguments[0]).deletingLastPathComponent().appendingPathComponent("late.done")
+        await waitUntil("the late reply to be sent") { FileManager.default.fileExists(atPath: mark.path) }
+        try await Task.sleep(for: .milliseconds(200))
+        await #expect(throws: ToolError.self) { try await connection.call("late", arguments: .object([:]), timeout: .milliseconds(200)) }
+        #expect(await connection.isRunning)
+        #expect(try pid(try await connection.call("pid", arguments: .object([:]))) == first)
+        await connection.stop()
+    }
+
+    @Test func slowCallsRunningInParallelCountAsOneSilence() async throws {
+        let connection = MCPConnection(config: try config())
+        _ = try await connection.start()
+        // Both are sent well inside the first one's timeout, so they are one silence, not two.
+        let one = Task { try await connection.call("hang", arguments: .object([:]), timeout: .milliseconds(800)) }
+        let two = Task { try await connection.call("hang", arguments: .object([:]), timeout: .milliseconds(800)) }
+        await #expect(throws: ToolError.self) { try await one.value }
+        await #expect(throws: ToolError.self) { try await two.value }
+        #expect(await connection.isRunning)
+        await connection.stop()
+    }
+
+    @Test func aCallPendingWhenTheServerIsReplacedIsToldSoNotThatItRanOutOfTime() async throws {
+        let connection = MCPConnection(config: try config())
+        _ = try await connection.start()
+        await #expect(throws: ToolError.self) { try await connection.call("hang", arguments: .object([:]), timeout: .milliseconds(200)) }
+        // The second silent call closes the connection while this one is still waiting for its turn at the server.
+        let waiting = Task { try await connection.call("echo", arguments: .object(["text": .string("x")]), timeout: .seconds(20)) }
+        await #expect(throws: ToolError.self) { try await connection.call("hang", arguments: .object([:]), timeout: .milliseconds(800)) }
+        do {
+            _ = try await waiting.value
+            Issue.record("expected an error")
+        } catch {
+            let text = (error as? ToolError)?.message ?? "\(error)"
+            #expect(text.contains("reiniciado"), "\(text)")
+            #expect(!text.contains("a tempo"), "\(text)")
+        }
+    }
+
     @Test func aServerThatCannotListItsToolsAnymoreIsClosedAtOnce() async throws {
         let connection = MCPConnection(config: try config("list-once"))
         _ = try await connection.start()
@@ -147,6 +195,42 @@ struct MCPStdioRobustnessTests {
         registry.killAllNow()
         await waitUntil("both servers to end") { !processIsAlive(plain.pid) && !processIsAlive(deaf.pid) }
         #expect(registry.count == 0)
+    }
+
+    // MARK: A server that launches others (concorrencia-1)
+
+    /// A server (`npx`, `uvx`) whose own child does the work: both ignore SIGTERM, so only SIGKILL to the group ends the child.
+    private func openWithGrandchild(registry: StdioServerRegistry, grace: Duration) async throws
+        -> (transport: StdioTransport, grandchild: pid_t) {
+        let pidFile = FileManager.default.temporaryDirectory.appendingPathComponent("grandchild-\(UUID().uuidString)")
+        let script = #"(trap "" TERM; exec sleep 60) & echo $! > "$PIDFILE"; trap "" TERM; while :; do sleep 1; done"#
+        let server = MCPServerConfig(name: "Neto", command: "/bin/sh", arguments: ["-c", script], environment: ["PIDFILE": pidFile.path])
+        let transport = StdioTransport(config: server, registry: registry, killGrace: grace)
+        try await transport.open(receive: { _ in }, closed: { _ in })
+        var grandchild: pid_t?
+        await waitUntil("the server to start its child") {
+            grandchild = (try? String(contentsOf: pidFile, encoding: .utf8)).flatMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            return grandchild != nil
+        }
+        return (transport, try #require(grandchild))
+    }
+
+    @Test func quittingTheAppAlsoEndsWhatTheServerLaunched() async throws {
+        let registry = StdioServerRegistry()
+        let (transport, grandchild) = try await openWithGrandchild(registry: registry, grace: .seconds(30))
+        defer { kill(grandchild, SIGKILL) }
+        registry.killAllNow(wait: 0.1)
+        await waitUntil("the server's child to end", timeout: .seconds(2)) { !processIsAlive(grandchild) }
+        await transport.close()
+    }
+
+    @Test func closingAServerAlsoEndsWhatItLaunched() async throws {
+        let registry = StdioServerRegistry()
+        let (transport, grandchild) = try await openWithGrandchild(registry: registry, grace: .milliseconds(200))
+        defer { kill(grandchild, SIGKILL) }
+        await transport.close()
+        await waitUntil("the server's child to end", timeout: .seconds(3)) { !processIsAlive(grandchild) }
+        await waitUntil("the registry to forget the server") { registry.count == 0 }
     }
 
     // MARK: Writing to a server that does not read (conectores-7)

@@ -62,7 +62,9 @@ struct ProviderSettings: View {
                 } footer: {
                     Text(model.modelChoices.isEmpty
                          ? "Conecte um provedor abaixo: os modelos dele aparecem aqui."
-                         : "Usado por Orbs sem modelo próprio.")
+                         : model.isProviderReady || !model.hasCheckedConnections
+                         ? "Usado por Orbs sem modelo próprio."
+                         : "O modelo padrão não está disponível. Escolha outro.")
                 }
             }
             ForEach(ProviderGroup.allCases) { group in
@@ -123,7 +125,7 @@ private struct ProviderRow: View {
 
     private var account: ProviderAccount? { model.account(kind) }
     private var isConnected: Bool { account.map(model.isUsable) ?? false }
-    private var hasKey: Bool { model.connected.contains(kind) }
+    private var hasKey: Bool { model.storedKeys.contains(kind) }
     private var isDefault: Bool { ModelRef(model.defaultModel)?.provider == kind }
     /// The user's choice, else open only the provider of the default model.
     private var isExpanded: Bool { ProviderExpansion.parse(expansion)[kind] ?? isDefault }
@@ -225,7 +227,7 @@ private struct ProviderRow: View {
         }
         HStack {
             Button(health.isChecking(kind) ? "Atualizando…" : "Atualizar modelos", systemImage: "arrow.clockwise") {
-                run(inStatus: true) { try await health.refresh(kind, model: model) }
+                refreshByHand()
             }
             .help(Tip.refreshModels)
             .disabled(isWorking || health.isChecking(kind) || !canRefresh(account))
@@ -243,6 +245,14 @@ private struct ProviderRow: View {
         }
     }
 
+    /// A refresh the user asked for: when the default model cannot be used, the models just listed take its place.
+    private func refreshByHand() {
+        run(inStatus: true) {
+            try await health.refresh(kind, model: model)
+            model.adoptDefaultModel(from: kind, turningOn: false)
+        }
+    }
+
     private func canRefresh(_ account: ProviderAccount) -> Bool {
         if kind == .custom { return GatewayForm.urlState(account.baseURL) == .valid }
         return isConnected
@@ -253,7 +263,7 @@ private struct ProviderRow: View {
             TextField("URL base", text: Binding(get: { account.baseURL },
                                                 set: { url in model.updateProvider(kind) { $0.baseURL = url } }),
                       prompt: Text(kind == .custom ? "https://meu-gateway.exemplo/v1" : kind.defaultBaseURL))
-                .onSubmit { run(inStatus: true) { try await health.refresh(kind, model: model) } }
+                .onSubmit(refreshByHand)
             if GatewayForm.urlState(account.baseURL) == .invalid {
                 Label("Use um endereço que comece com http:// ou https://", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
@@ -315,6 +325,11 @@ private struct ProviderRow: View {
                     }
                     .buttonStyle(.borderless)
                     .help(Tip.replaceKey)
+                    if kind == .custom { // the gateway's key is optional: it can go without removing the provider
+                        Button("Apagar") { run(inStatus: true) { try await model.setKey("", for: kind) } }
+                            .buttonStyle(.borderless)
+                            .help(Tip.deleteKey)
+                    }
                 }
             } else {
                 HStack {
