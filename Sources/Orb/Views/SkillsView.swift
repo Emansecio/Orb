@@ -415,34 +415,61 @@ struct SkillPreview: View {
                         }
                     }
                 }
-                if let document {
-                    if !document.description.isEmpty {
-                        Text(document.description)
-                            .font(.system(size: 13))
-                            .foregroundStyle(Palette.secondary)
-                    }
-                    Text("Instruções que o Orb vai seguir")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Palette.muted)
-                        .textCase(.uppercase)
-                    Text(document.instructions)
-                        .font(.system(size: 12).monospaced())
-                        .foregroundStyle(Palette.secondary)
-                        .textSelection(.enabled)
-                        .padding(12)
+                // The spinner (after 150 ms), the error and the text cross-fade in the same place (§2.13).
+                ZStack(alignment: .top) {
+                    if let document {
+                        VStack(alignment: .leading, spacing: 14) {
+                            if !document.description.isEmpty {
+                                Text(document.description)
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(Palette.secondary)
+                            }
+                            Text("Instruções que o Orb vai seguir")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Palette.muted)
+                                .textCase(.uppercase)
+                            Text(document.instructions)
+                                .font(.system(size: 12).monospaced())
+                                .foregroundStyle(Palette.secondary)
+                                .textSelection(.enabled)
+                                .padding(12)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Palette.raised, in: .rect(cornerRadius: 10))
+                        }
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Palette.raised, in: .rect(cornerRadius: 10))
-                } else if let error {
-                    Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(Palette.warn)
-                } else {
-                    ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
+                        .transition(.opacity)
+                    } else if let error {
+                        Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(Palette.warn)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .transition(.opacity)
+                    } else {
+                        DelayedSpinner().frame(maxWidth: .infinity).padding(.top, 40)
+                            .transition(.opacity)
+                    }
                 }
+                .motion(Motion.content, value: PreviewPhase(isReady: document != nil, error: error))
             }
             .padding(20)
         }
     }
 
-    @ViewBuilder private var footer: some View {
+    /// The footer: "Instalar skill" turns into "Instalada" in place, cross-fading.
+    private var footer: some View {
+        ZStack {
+            footerContent
+                .id(installed != nil)
+                .transition(.opacity)
+        }
+        .motion(Motion.content, value: installed != nil)
+    }
+
+    /// What the preview shows below its badges, as one value for the animation to follow.
+    private struct PreviewPhase: Equatable {
+        var isReady: Bool
+        var error: String?
+    }
+
+    @ViewBuilder private var footerContent: some View {
         if let installed {
             HStack(spacing: 10) {
                 Label("Instalada. Use com /\(installed.slug)", systemImage: "checkmark.circle.fill")

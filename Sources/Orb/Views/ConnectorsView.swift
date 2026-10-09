@@ -541,8 +541,22 @@ struct ConnectorToolsSheet: View {
         return "\(ConnectorStatusText.toolCount(catalog.tools.count)) · atualizada \(catalog.updatedAt.formatted(.relative(presentation: .named)))"
     }
 
+    /// What the sheet shows: loading, the tools, or why there are none.
+    private enum Phase { case loading, tools, none }
+
+    private var phase: Phase {
+        if !didLoad { return .loading }
+        return catalog.map { $0.tools.isEmpty } == false ? .tools : .none
+    }
+
     var body: some View {
-        content
+        // Loading turns into the list by cross-fading (§2.13), the spinner waiting 150 ms before it shows.
+        ZStack {
+            content
+                .id(phase)
+                .transition(.opacity)
+        }
+            .motion(Motion.content, value: phase)
             .task {
                 guard !didLoad else { return }
                 catalog = await model.mcp.catalog(connector.id)
@@ -555,7 +569,7 @@ struct ConnectorToolsSheet: View {
 
     @ViewBuilder private var content: some View {
         if !didLoad {
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).padding(30)
+            DelayedSpinner().frame(maxWidth: .infinity, maxHeight: .infinity).padding(30)
         } else if let catalog, !catalog.tools.isEmpty {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {

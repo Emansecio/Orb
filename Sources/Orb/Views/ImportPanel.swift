@@ -175,7 +175,10 @@ struct ImportPanel: View {
                     .font(.system(size: 11))
                     .foregroundStyle(Palette.faint)
                 Spacer(minLength: 0)
-                if isReading { ProgressView().controlSize(.small) }
+                ZStack {
+                    if isReading { DelayedSpinner().transition(.opacity) }
+                }
+                .motion(Motion.content, value: isReading)
             }
             if let error {
                 Text(error)

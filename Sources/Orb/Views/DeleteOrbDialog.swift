@@ -91,7 +91,10 @@ struct SummaryLine: View {
                 .font(.system(size: 13))
                 .foregroundStyle(Palette.ink)
                 .fixedSize(horizontal: false, vertical: true)
+                // The count that arrives once the archive is read ("as conversas anteriores" → "12 conversas anteriores").
+                .contentTransition(.opacity)
         }
+        .motion(Motion.content, value: text)
     }
 }
 

@@ -425,6 +425,11 @@ private struct RoutineRunSheet: View {
     private var run: RoutineRun? { routine?.runs.first { $0.id == runID } }
 
     var body: some View {
+        ZStack { sheet }
+            .motion(Motion.content, value: routine != nil && run != nil)
+    }
+
+    @ViewBuilder private var sheet: some View {
         if let routine, let run {
             let title = "\(routine.name) · \(RoutineText.stamp(run.date))"
             let how = run.succeeded ? "Deu certo" : "Não deu certo"
@@ -571,10 +576,20 @@ private struct RoutineConversationSheet: View {
                     }
                     .padding(20)
                 }
+                // The conversation fades in when it arrives; until then (after the 150 ms) a spinner, and if it never ran, the
+                // empty message (§2.13).
+                .motion(Motion.content, value: items.isEmpty)
                 .overlay {
-                    if items.isEmpty {
-                        ContentUnavailableView(isLoading ? "Carregando…" : "Ainda não rodou", systemImage: "text.bubble")
+                    ZStack {
+                        if items.isEmpty {
+                            if isLoading {
+                                DelayedSpinner().transition(.opacity)
+                            } else {
+                                ContentUnavailableView("Ainda não rodou", systemImage: "text.bubble").transition(.opacity)
+                            }
+                        }
                     }
+                    .motion(Motion.content, value: isLoading)
                 }
             }
         }

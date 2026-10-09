@@ -37,6 +37,23 @@ extension Motion {
     }
 }
 
+/// A spinner that says nothing for the first 150 ms (`Motion.spinnerDelay`) and then fades in (`Motion.fade`): a read
+/// that finishes quickly shows nothing, and one that takes longer does not blink a spinner for a frame.
+struct DelayedSpinner: View {
+    var size: ControlSize = .small
+    @State private var isVisible = false
+
+    var body: some View {
+        ProgressView()
+            .controlSize(size)
+            .opacity(isVisible ? 1 : 0)
+            .task {
+                try? await Task.sleep(for: Motion.spinnerDelay)
+                withAnimation(Motion.fade) { isVisible = true }
+            }
+    }
+}
+
 extension View {
     /// A fill behind the view that fades in when `visible` (hover, pressed, highlighted) and out again, with the
     /// hover curves (in 0.10 s, out 0.22 s). `resting` is a fill that shows while it is not visible (a chip's

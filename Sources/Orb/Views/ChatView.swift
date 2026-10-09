@@ -364,7 +364,7 @@ private struct LoadingTranscript: View {
             .opacity(isVisible ? 1 : 0)
             .accessibilityLabel("Carregando a conversa")
             .task {
-                try? await Task.sleep(for: .milliseconds(150))
+                try? await Task.sleep(for: Motion.spinnerDelay)
                 withAnimation(Motion.fade) { isVisible = true }
             }
     }

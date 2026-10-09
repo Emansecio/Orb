@@ -20,6 +20,9 @@ enum Motion {
     static let exit = Animation.easeOut(duration: 0.16)
     /// What replaces every movement under Reduce Motion.
     static let fade = Animation.easeOut(duration: 0.15)
+    /// A spinner stays invisible this long: what loads faster than that shows no spinner at all (the chat's, and every
+    /// "loading, then ready" in a sheet).
+    static let spinnerDelay = Duration.milliseconds(150)
     /// Delay between the items of a short list that enter together; at most `staggerLimit` items are staggered.
     static let stagger: Double = 0.035
     static let staggerLimit = 6
