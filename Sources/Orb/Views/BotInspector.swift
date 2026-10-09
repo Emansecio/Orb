@@ -582,7 +582,7 @@ private struct InspectorTabBar: View {
                         if isSelected {
                             RoundedRectangle(cornerRadius: 8)
                                 .fill(Palette.ghostSelected)
-                                .matchedGeometryEffect(id: SidebarSelection.id, in: highlight)
+                                .matchedGeometryEffect(id: "destaque", in: highlight)
                         }
                     }
                     .contentShape(.rect(cornerRadius: 8))
