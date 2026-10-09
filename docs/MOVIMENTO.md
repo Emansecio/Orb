@@ -328,7 +328,7 @@ listas longas.
 O que usa cada padrão:
 
 - **Painel do Orb.** Abre e fecha por `AppModel.setInspector(_:)`/`toggleInspector()` em `Motion.panel` (a coluna desliza em 0,25 s, sem animação
-  com Reduzir movimento) a partir de todos os caminhos: botão da barra, ⌥⌘I, paleta, "Ver na memória", "Gerenciar", "Personalizar" e o
+  com Reduzir movimento) a partir de todos os caminhos: botão da barra, o atalho do painel, paleta, "Ver na memória", "Gerenciar", "Personalizar" e o
   fechamento automático por largura. Ao trocar de Orb o painel faz o mesmo fade cruzado de 0,18 s do chat. As abas (Geral, Memória, Pasta e
   acessos, Rotinas) são um `Form` cada, trocado em fade cruzado (a rolagem volta ao topo), e o destaque desliza (F).
 - **Conectores e Skills.** Galeria, Instalados e Explorar em fade cruzado (A), pílula que desliza (F). Explorar tem uma fase só
