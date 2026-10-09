@@ -229,7 +229,7 @@ struct AppleScriptTool: AgentTool {
         name: "applescript",
         description: """
         Run an AppleScript (or JavaScript for Automation, language "javascript") with osascript to automate Mac \
-        apps (Mail, Calendar, Notes, Finder, Safari, System Events…). Output "structured" keeps strings and numbers \
+        apps (Mail, Calendar, Finder…). Output "structured" keeps strings and numbers \
         apart. Stops after 60 seconds (timeout_seconds up to 300). macOS asks the user for Automation permission on \
         the first use of each app and the call waits; on a permission error, pass the message on instead of \
         retrying. Prefer a dedicated tool (open, browser_tab, clipboard_read, screenshot…) when one exists.
@@ -273,7 +273,7 @@ struct RememberTool: AgentTool {
     let spec = ToolSpec(
         name: "remember",
         description: """
-        Save something worth keeping to your long-term memory (used in every future conversation): a fact about \
+        Save something worth keeping to your long-term memory: a fact about \
         the user or their work, a preference, a procedure they want followed, or how they want you to work. One \
         short, self-contained item per call; near-duplicates refresh the existing memory.
         """,

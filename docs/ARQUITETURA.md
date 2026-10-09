@@ -44,7 +44,7 @@ Tudo em `Sources/Orb/`.
 | `OrbApp.swift` | `Launcher` (`@main`: com `--tools-mcp` roda só o servidor MCP, sem janela), `OrbApp` (janela, Ajustes, barra de menus), `AppDelegate`, `AppCommands` (menu "Orbs"), `OrbSheet` (`--render-orbs`), `Snapshot` (`--snapshot`) |
 | `AppIcon.swift` | o ícone do app (`--render-icon`): CoreGraphics puro, desenhado direto em cada tamanho na grade do macOS (ladrilho de 824 em 1024, sombra padrão), o Orb índigo da marca com o `GelShader` (port de `art/orbgen/Body.swift`, por pixel na CPU), rosto sem óculos e uma variante simples até 64 px |
 | `AppModel.swift` | `@MainActor @Observable`: Orbs, rotinas, skills, conectores, provedores, modelo padrão, nível de contexto das conversas; criar/apagar Orb, `send`, `runClaudeCode`, `compactNow`, rotinas e fila, conexão de provedores, salvar |
-| `AppModel+Approvals / +Commands / +ContextUI / +MemoryUI / +RoutinesUI / +Steering / +Transcript` | o que cada área pede ao modelo: `decide` e banners; comandos, paleta e barra de menus; dados do medidor; esquecer/desfazer; modelos de rotina e listas; fila "enquanto trabalha"; "Tentar de novo"/"Continuar" |
+| `AppModel+Approvals / +Commands / +ContextUI / +MemoryUI / +RoutinesUI / +Schedule / +Steering / +Transcript` | o que cada área pede ao modelo: `decide` e banners; comandos, paleta e barra de menus; dados do medidor; esquecer/desfazer; modelos de rotina e listas; a ferramenta `schedule` (o Orb cria, lista, pausa e apaga as próprias rotinas); fila "enquanto trabalha"; "Tentar de novo"/"Continuar" |
 | `BotSession.swift`, `BotSession+Turn.swift`, `BotSession+Conversation.swift` | a maquinaria de um Orb: conversa em memória (carregar, descarregar, salvar, estacionar durante rotina), turno (id, eventos, texto em stream, cartões), uso de tokens, trechos para a memória |
 | `BotLive.swift` | o que as telas leem de um Orb: configurações, `status`, `activity` (com "digitando" e a olhada ao ser escolhido), `needsYou`, não lidas, memória, medidor. `WritesOnlyChanges` (`assign`, `writeIfChanged`) |
 | `WorkLine.swift` | o que o Orb diz que está fazendo: `WorkLine` (verbo, alvo, tom, rotina, ações), `WorkPhrase` (a frase de cada ferramenta e dos status dos motores), `WorkMeter` ("16 s · 3 ações", "em 8 s"), `StatusDwell` (tempo mínimo de 0,7 s por frase) e `WorkAnnouncer` (anúncios ao VoiceOver, no máximo um a cada 8 s). `BotLive.work` é a frase; `status` continua o texto cru dos motores |
@@ -79,7 +79,7 @@ Tudo em `Sources/Orb/`.
 
 ### Ferramentas (`Engine/Tools/`)
 
-`ToolBox.all` = `shellTools + fileTools + webTools + macTools + memoryTools`; cada família lista as suas no próprio arquivo.
+`ToolBox.all` = `shellTools + fileTools + webTools + macTools + memoryTools + scheduleTools`; cada família lista as suas no próprio arquivo.
 `ToolBox.offered(for:accessibilityGranted:)` filtra por capacidade do Orb e esconde `ui_read`/`ui_act` sem Acessibilidade.
 
 | Capacidade | Ferramentas | Arquivos |
@@ -87,8 +87,20 @@ Tudo em `Sources/Orb/`.
 | Terminal e arquivos | `run_command` (`background: true`; saída acima de 20 KB é salva inteira em `saidas/<orb>/comando-….txt`), `job_output`, `job_list`, `job_stop`, `read_file` (texto, PDF, Word/RTF/ODT, Excel .xlsx, PowerPoint .pptx, imagens com OCR), `write_file`, `edit_file`, `list_directory`, `search_files` (Spotlight), `grep` (um arquivo informado em `path` vai até 200 MB, em streaming), `glob` (aceita padrão absoluto), `trash` (também com Controlar apps) | `ShellTool`, `BackgroundJobs`, `ProcessRunner`, `ShellEnvironment`, `FileTools`, `SearchTools`, `TextFile`, `DocumentReader`, `OfficeReader`, `ReadOnlyCommand` |
 | Navegar na web | `web_fetch` (páginas, PDF, JSON, imagens; `offset`/`find` para páginas longas; `save_to`) | `WebTools`, `HTMLText` |
 | Controlar apps do Mac | `applescript`, `shortcuts_list/run`, `clipboard_read/write`, `screenshot` (com OCR), `apps_list`, `processes`, `app_quit`, `trash`, `browser_tab`, `ui_read`, `ui_act` | `MacTools`, `MacAppTools`, `BrowserTools`, `ScreenshotTool`, `AccessibilityTools`/`Elements`/`Outline`, `AppleScriptSupport` |
-| Sempre | `open`, `notify`, `remember`, `recall` | `MacTools`, `MacAppTools` |
+| Sempre | `open`, `notify`, `remember`, `recall`, `schedule` | `MacTools`, `MacAppTools`, `ScheduleTool`, `ScheduleMailbox` |
 | Conectores | uma por ferramenta MCP | `MCPTool` |
+
+**`schedule`.** Uma tarefa agendada **é** uma `Routine` do Orb (a mesma página, o mesmo agendador de 30 s, a mesma fila e o mesmo
+relatório): a ferramenta só dá ao Orb o jeito de criá-la, listá-la, pausá-la, retomá-la e apagá-la. `ScheduleCommand` confere a
+chamada (`daily`, `weekly`, `every_minutes` de 15 a 720, `every_hours` de 1 a 24; nome, prompt de até 4.000 caracteres); quem
+executa é `AppModel.schedule(_:orb:)`, que só vê as rotinas do Orb que chamou, recusa o 21º, o nome repetido e a criação vinda
+de dentro de uma rotina, e responde em português ("Agendei “X”: a cada 30 minutos. Próxima execução: …"), que é também o que o
+chat mostra como resultado da ferramenta. No motor nativo a chamada chega por `ToolContext.schedule` (um fecho preso ao Orb); no
+Claude Code, o servidor de ferramentas é **outro processo** e não alcança o modelo, então ele deixa `<id>.json` na pasta
+`agendamentos/` do app e espera o `<id>.reply` (`ScheduleMailbox`: o app acorda com a pasta mudando, sem sondar, e responde com o
+mesmo código; 20 s de limite; o app começa a ouvir no primeiro turno do Claude Code e limpa a pasta ao começar). O servidor
+recebe a pasta e o Orb por `--schedule-mailbox <pasta> --orb <id>`. Uma execução que passa do próprio intervalo (a cada 15 min,
+levando 20) conta a próxima a partir do fim dela (`finishRoutineRun`), então nada se acumula.
 
 **`web_fetch`.** Lê HTTP(S) com o User-Agent do Safari (gzip/br, `Accept-Language: pt-BR`, 20 s de limite) e decodifica pelo BOM,
 pelo cabeçalho, pelo `<meta charset>` e por UTF-8/Windows-1252. HTML (até 5 MB) vira um Markdown leve (`HTMLText`): só o
@@ -135,7 +147,7 @@ O avatar e seu sistema de animação: `OrbModel` (config, catálogo, imagens), `
 
 | Área | Arquivos |
 |---|---|
-| Janela | `RootView` (`NavigationSplitView`, painel que se recolhe em janela estreita), `SidebarView`, `ChatView` (lista da conversa), `EmptyChatContent`, `FirstRunCard`, `WelcomeView` (a tela sem Orbs: `WelcomeStage`, `WelcomeCopy`, `WelcomeLooks`, `WelcomeSelection`, `WelcomeLedger`, `WelcomeBackdrop`, `KeptStartCard`; o que ela pede ao modelo está em `AppModel+Welcome.swift`) |
+| Janela | `RootView` (`NavigationSplitView`, painel que se recolhe em janela estreita), `SidebarView`, `ChatView` (lista da conversa), `EmptyChatContent` (e `OrbGreeting`, a saudação de um Orb novo), `FirstRunCard`, `WelcomeView` (a tela sem Orbs: `WelcomeStage`, `WelcomeCopy`, `WelcomeLooks`, `WelcomeSelection`, `WelcomeLedger`, `WelcomeBackdrop`, `KeptStartCard`; o que ela pede ao modelo está em `AppModel+Welcome.swift`) |
 | Conversa | `TranscriptViews` (`TranscriptRow` Equatable, ferramentas, `ApprovalCard`, `WorkingLine`), `MarkdownBlockViews`, `QueuedMessages`, `ImageThumbnails`, `ApprovalKeyboard` |
 | Compositor | `ComposerView`, `ComposerChips` (permissões, skills, modelo), `ComposerSupport`, `ModelPopover`, `ModelPicker`, `ContextMeterViews` |
 | Painel do Orb | `BotInspector` (abas Geral, Memória, Pasta e acessos, Rotinas), `InspectorSupport`, `MemoryViews`, `DeleteOrbDialog`, `PermissionConfirmation` |
@@ -198,6 +210,8 @@ memoria/<Orb>/…                  a memória (páginas .md + index.sqlite); mem
                                  redefinidos, com perfil.json (nome, papel e aparência) ao lado das páginas
 anexos/<Orb>/<uuid>.jpg|png      imagens reduzidas (a conversa guarda o caminho); saem com o Orb ou com a conversa anterior que só elas usava (as cópias `.corrupt-…` também contam como uso)
 saidas/<Orb>/*.txt               saídas grandes de ferramentas; limpas por idade (14 dias) e tamanho (200 MB)
+agendamentos/                    a caixa de correio do `schedule` no Claude Code (`<id>.json` pedido, `<id>.reply` resposta); vazia
+                                 fora de uma chamada, e limpa quando o app começa a ouvir
 *.corrupt-<aaaammdd-hhmmss>      cópia de um arquivo que não pôde ser lido (nunca sobrescrito)
 .migrado-do-openbot              marca de que a migração do OpenBot já foi feita
 ```
@@ -369,7 +383,7 @@ open -n build/Orb.app --env ORB_DATA_DIR=/tmp/orb-teste --env ORB_SEND="Como est
 
 | Argumento | Efeito |
 |---|---|
-| `--tools-mcp <memória> [--mac] [--folder <pasta>] [--accessibility\|--no-accessibility]` | roda só o servidor MCP de ferramentas do Orb para o Claude Code (`--memory-mcp` ainda vale); sem janela |
+| `--tools-mcp <memória> [--mac] [--folder <pasta>] [--accessibility\|--no-accessibility] [--schedule-mailbox <pasta> --orb <id>]` | roda só o servidor MCP de ferramentas do Orb para o Claude Code (`--memory-mcp` ainda vale); sem janela |
 | `--snapshot <modo> <arquivo.png>` | desenha uma tela fora da vista e sai (abaixo) |
 | `--render-orbs <arquivo.png>` | folha de Orbs × atividades (`docs/orbs-activities.png`) |
 | `--render-icon <arquivo.png> [pixels]` | o ícone do app, desenhado no tamanho pedido (padrão 1024; `scripts/bundle.sh` chama um por tamanho do iconset) |
@@ -435,7 +449,7 @@ A arte (camadas dos Orbs) tem o seu próprio gerador, descrito em [art/README.md
 - **Nova ferramenta.** Um `struct` que implementa `AgentTool` (`spec`, `kind`, `capability`, `risk`, `summary`, `run`; `danger`
   se alguma chamada é destrutiva), na lista da família em `ToolBox` (`fileTools`, `shellTools`…). Decida a **família de
   permissão** em `PermissionPolicy.family(ofTool:kind:)` (sem isso ela cai pelo `kind`) e o `legacyRule` se precisar. Se o
-  Claude Code deve ter a ferramenta, ela entra em `ToolBox.macTools` ou `memoryTools` (o que `OrbToolsMCPServer` serve). Texto
+  Claude Code deve ter a ferramenta, ela entra em `ToolBox.macTools`, `memoryTools` ou `scheduleTools` (o que `OrbToolsMCPServer` serve); uma que muda o estado do app precisa de um jeito de chegar até ele (veja `schedule`). Texto
   da ferramenta para o modelo em inglês, curto (cada palavra é cobrada em toda requisição); título e detalhe para o usuário em português.
 - **Novo provedor.** Um `case` em `ProviderKind` com `label`, `summary`, `defaultBaseURL`, `keyPage`, `shortName`, `tagline` e
   `group`; a lista de modelos em `ModelCatalog.fetch`; o formato de cada modelo decide o cliente (`ProviderAccount.client`).

@@ -8,7 +8,7 @@ struct RunCommandTool: AgentTool {
     let spec = ToolSpec(
         name: "run_command",
         description: """
-        Run a shell command as the user's own Terminal would (their PATH and tools: npm, adb, java…); returns \
+        Run a shell command as the user's own Terminal would (their PATH); returns \
         the exit code and combined stdout/stderr. For git, builds, scripts and anything without a dedicated \
         tool. Non-interactive (stdin is empty).
         Each call is a fresh shell: cd, export and aliases do NOT persist; use cwd or chain steps (cd x && make).
@@ -20,7 +20,7 @@ struct RunCommandTool: AgentTool {
         parameters: .schema([
             "command": .property("string"),
             "cwd": .property("string", "Directory to run in (default: the working directory)."),
-            "timeout_seconds": .property("integer", "Seconds before the kill (default 120, max 600); ignored with background."),
+            "timeout_seconds": .property("integer", "Default 120, max 600; not with background."),
             "background": .property("boolean", "Leave it running and return at once (servers, watchers)."),
         ], required: ["command"]))
 
@@ -168,7 +168,7 @@ struct JobOutputTool: AgentTool {
 struct JobListTool: AgentTool {
     let spec = ToolSpec(
         name: "job_list",
-        description: "List the background processes (run_command with background: true), running or finished.",
+        description: "List the background processes, running or finished.",
         parameters: .schema([:]))
 
     var kind: ToolCall.Kind { .shell }
@@ -190,7 +190,7 @@ struct JobListTool: AgentTool {
 struct JobStopTool: AgentTool {
     let spec = ToolSpec(
         name: "job_stop",
-        description: "Stop a background process (run_command with background: true) and all it launched.",
+        description: "Stop a background process and all it launched.",
         parameters: .schema([
             "id": .property("string"),
         ], required: ["id"]))

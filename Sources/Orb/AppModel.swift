@@ -63,6 +63,17 @@ final class AppModel {
     /// The routine whose conversation the Routines page opens when it appears (a routine waiting for an answer: "Ver pedido",
     /// a tap on its banner). Taken by the page, like `pendingChatRequest`.
     var routineToShow: UUID?
+    /// The task the Orb just scheduled from the chat: its row in the panel is highlighted for a moment (`AppModel.schedule`).
+    var freshRoutine: UUID?
+    /// How long that highlight lasts.
+    @ObservationIgnored var freshDuration = Duration.seconds(2.5)
+    /// Where Claude Code's tools server asks for the same (see `ScheduleMailbox`); it starts listening with the first
+    /// Claude Code turn.
+    @ObservationIgnored private(set) lazy var scheduleMailbox = ScheduleMailbox.Server(
+        directory: store.directory.appending(path: "agendamentos")) { [weak self] orb, arguments in
+            guard let self else { throw ToolError("O app está fechando.") }
+            return try self.schedule(arguments, orb: orb)
+        }
     /// The "Esqueceu isso. Desfazer" of the memory screens: here so it outlives the panel being rebuilt (switching Orbs).
     @ObservationIgnored let memoryUndo = MemoryUndo()
     /// Which phrases of the working line VoiceOver is told (not more often than every 8 s).
@@ -653,10 +664,10 @@ final class AppModel {
 
     // MARK: Bots
 
-    /// A new Orb comes with its own memory. `identity` (how it should work, written by you) starts it; with
-    /// `interview` it also asks about you in its first conversation and keeps the answers. Unless `folder` says
-    /// otherwise it gets a folder of its own in `base` (`~/Orbs`); if that cannot be made it works in the home
-    /// folder and says so in its conversation.
+    /// A new Orb comes with its own memory, and says hello in its conversation (`OrbGreeting`). `identity` (how it should
+    /// work, written by you) starts it; with `interview` it also asks about you in its first conversation and keeps the
+    /// answers. Unless `folder` says otherwise it gets a folder of its own in `base` (`~/Orbs`); if that cannot be made it
+    /// works in the home folder and says so in its conversation.
     @discardableResult
     func createBot(name: String, role: String, orb: OrbConfig, model: String, mode: PermissionMode,
                    identity: String = "", interview: Bool = true, folder: OrbFolderChoice = .own,
@@ -688,6 +699,8 @@ final class AppModel {
         // When it cannot be moved the Orb starts with a memory of its own and says so.
         let adopted = kept.map { memory.adopt($0, as: bot.id) } ?? false
         if kept != nil, !adopted { append(.notice("Não foi possível usar a memória guardada. \(bot.name) começou com uma memória nova."), to: bot.id) }
+        // The Orb's first words, last so its quick replies are what the chat ends with (see `GreetingReplies`).
+        append(.greeting(OrbGreeting.text(name: bot.name, temperament: orb.temperament, returning: adopted)), to: bot.id)
         let bank = memory.bank(for: bot.id)
         Task {
             if adopted {
@@ -1196,7 +1209,7 @@ final class AppModel {
         if let report = prepared.compaction { session.announce(report, memoryUpTo: itemsBeforeMessage) }
         let bank = memory.bank(for: botID)
         let context = ToolContext(workingDirectory: bot.workingURL, memory: bank, botID: botID, jobs: jobs,
-                                  imageStore: images, acceptsImages: sees != false,
+                                  schedule: scheduleHandler(for: botID), imageStore: images, acceptsImages: sees != false,
                                   outputsDirectory: outputsDirectory,
                                   canSaveFiles: bot.capabilities.contains(.terminal),
                                   computerUseAllowed: bot.capabilities.contains(.computerUse))
@@ -1332,8 +1345,10 @@ final class AppModel {
         let usesMac = bot.capabilities.contains(.computerUse)
         let accessibility = usesMac ? accessibilityProbe() : nil
         let connectors = connectorServers(for: bot)
+        scheduleMailbox.start()
         let servers = [OrbToolsMCPServer.config(directory: bank.directory, mac: usesMac, files: bot.capabilities.contains(.terminal),
-                                                folder: bot.workingURL, accessibilityGranted: accessibility)]
+                                                folder: bot.workingURL, accessibilityGranted: accessibility,
+                                                scheduleMailbox: scheduleMailbox.directory, orb: botID)]
             + connectors
         let connectorIDs = Set(connectors.map(\.id))
         let cliNames = ClaudeCodeTurn.mcpNames(servers) // what the CLI will call each server
@@ -1597,6 +1612,8 @@ final class AppModel {
         recordRun(run, routineID: routineID)
         if let index = routines.firstIndex(where: { $0.id == routineID }) {
             routines[index].lastResult = succeeded ? reply.map { String($0.prefix(160)) } : "Não terminou: veja a conversa."
+            // A run that outlasted its slot (every 15 minutes, taking 20) must not start the next one at once: count from now.
+            if routines[index].nextRun <= finished { routines[index].lastRun = finished }
         }
         let outcome = succeeded ? "terminou: \(run.summary)" : "não terminou: \(run.summary)"
         append(.notice("Rotina “\(routine.name)” \(outcome)" + (run.reportFile.map { " (relatório em \($0))" } ?? "")), to: botID)

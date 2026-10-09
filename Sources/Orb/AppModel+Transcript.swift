@@ -103,7 +103,7 @@ enum RetryPlan: Equatable, Sendable {
         let after = items[(lastUser + 1)...]
         for item in after {
             switch item.kind {
-            case .notice: continue
+            case .notice, .greeting: continue
             case .user: return .none
             case .bot, .tool, .approval: return .continueTurn
             }
@@ -113,6 +113,18 @@ enum RetryPlan: Equatable, Sendable {
 }
 
 extension AppModel {
+    /// One of the quick replies under a new Orb's greeting. The message goes as the person's own (`fromUser`: with no
+    /// model connected it pulses the connect card instead of leaving a notice, and the replies stay).
+    func answerGreeting(_ reply: OrbGreeting.Reply, for botID: UUID) {
+        switch reply {
+        case .tell:
+            setDraft(OrbGreeting.draft, for: botID)
+            request(.focusComposer, of: botID)
+        case .interview: send(EmptyChatContent.interviewRequest, to: botID, fromUser: true)
+        case .abilities: send(OrbGreeting.Reply.abilities.title, to: botID, fromUser: true)
+        }
+    }
+
     /// "Continuar": says "continua" to the Orb, which goes on from where it paused or was cut.
     @discardableResult
     func continueTurn(_ botID: UUID) -> Bool {

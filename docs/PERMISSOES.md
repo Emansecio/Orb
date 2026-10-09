@@ -77,6 +77,7 @@ Cada ferramenta declara três coisas (`AgentTool`):
 | `appInterface` | `ui_act` | |
 | `connector` | ferramentas de conectores (`Servidor__ferramenta`) | `mcp__servidor__ferramenta` |
 | `memory` | `remember` | `mcp__orb_memoria__remember` |
+| `schedule` | `schedule` (criar, pausar, retomar, apagar) | `mcp__orb_memoria__schedule` |
 | `jobs` | `job_output`, `job_list`, `job_stop` | `BashOutput`, `KillShell`, `KillBash` (`TaskOutput` e `TaskStop` nos CLIs novos) |
 
 Detalhes que costumam surpreender:
@@ -117,6 +118,19 @@ Detalhes que costumam surpreender:
 - `web_fetch`, `open` e `remember` são `.sensitive` de propósito: são o caminho de **saída** de dados (ou o que fica no
   prompt de toda conversa). Um texto malicioso numa página não consegue ler um segredo e mandá-lo sem você aprovar.
 - `remember` com `tipo` `identidade` ou `preferencia` é `.instructs`. Com `fato` ou `procedimento` é `.sensitive`.
+- `schedule` tem família própria: uma tarefa agendada é uma mudança que **fica** e que roda sozinha depois, então criar, pausar,
+  retomar e apagar são `.sensitive` (cartão em "Perguntar antes", `Sempre permitir` oferece "Gerenciar as tarefas agendadas";
+  roda em "Automático" e "Sem pedir permissão"; **negado em "Só leitura"**). `list` é `.safe` e roda em todos os modos, e uma
+  chamada que nomeia a ação mas não passa na conferência (intervalo de 5 minutos, `when` faltando) também é `.safe`: não muda nada,
+  então vai direto ao erro, sem cartão para aprovar só para ouvir um não (sem `action` nenhuma, que é o que o Claude Code pergunta
+  ao anunciar a ferramenta, vale `.sensitive`, para o `readOnlyHint` sair falso). O cartão mostra o nome, quando roda e o que será pedido, numa linha. A tarefa criada **nunca** é mais permissiva que o Orb: nasce com
+  `permissionMode` nil (usa o modo do Orb na hora de rodar, como uma rotina feita à mão sem "Avançado"). Um Orb só enxerga e
+  muda as rotinas dele, tem no máximo 20 (`AppModel.scheduledTaskLimit`) e uma execução de rotina não cria outras (um e-mail ou
+  uma página lidos numa rotina não conseguem plantar tarefas que sobrevivem a ela; pausar, retomar e apagar continuam valendo).
+  **Limite conhecido (Claude Code):** a caixa de correio `agendamentos/` não autentica o `orb` do pedido, que vem no próprio
+  arquivo. Quem escreve nessa pasta já é um processo da sua conta, e um Orb com shell liberado (Automático) já faz tudo o que
+  uma rotina faria; um token por turno não o impediria de lê-lo no `ps` ou no arquivo de configuração do turno. Por isso não há
+  token: o "só as dele" e o "rotina não cria tarefas" valem para as chamadas da ferramenta, não contra um shell liberado.
 - Ferramentas de conectores (`MCPTool`) são `.sensitive`, **exceto** quando o servidor as anuncia como somente leitura
   (`readOnlyHint`), de mundo fechado (`openWorldHint` não verdadeiro) e não destrutivas. Uma ferramenta anunciada como
   destrutiva (`destructiveHint`) tem perigo: pergunta até no "Automático". No Claude Code o mapa dessas ferramentas vem das
@@ -168,7 +182,7 @@ nasce sem nenhuma e no modo que você escolher na folha.
   liberaria todo `WebFetch`. Sem "Terminal e arquivos" o `web_fetch` recusa `save_to` (`ToolContext.canSaveFiles`).
 - `connector`: a chave da ferramenta (`PermissionPolicy.connectorKey`, igual para `GitHub__create_issue` e
   `mcp__github__create_issue`).
-- `open`, `appleScript`, `macApps`, `appInterface`, `memory`, `jobs`: só o escopo `any`.
+- `open`, `appleScript`, `macApps`, `appInterface`, `memory`, `jobs`, `schedule`: só o escopo `any`.
 
 **Sugestões do cartão.** `PermissionPolicy.suggestions` oferece até 3 regras, da mais estreita para a mais larga:
 `git push` antes de `git`; a pasta do projeto (a mais próxima com `.git`) antes da pasta do arquivo; o site. Nunca sugere
@@ -353,7 +367,7 @@ lista de `--help` mostra `manual`, que o próprio CLI converte em `default`).
 - O motivo que o CLI manda junto do pedido (`decision_reason`) vem em inglês e não aparece no cartão: vale o motivo do próprio
   Orb ou, sem ele, a frase "<Orb> precisa da sua permissão para continuar." quando o modelo ainda não escreveu nada. Os nomes
   das ferramentas próprias do CLI (`TodoWrite`, `Task`, `ExitPlanMode`, `Skill`…) também aparecem em português (`ClaudeCodeTools.summary`).
-- As ferramentas do próprio Orb (memória e Mac), que o Claude Code vê como `mcp__orb_memoria__…`, passam pela mesma política
+- As ferramentas do próprio Orb (memória, agendamento e Mac), que o Claude Code vê como `mcp__orb_memoria__…`, passam pela mesma política
   que as gêmeas nativas: risco, perigo (`app_quit` forçado, `do shell script`) e família. As seguras rodam em todos os modos.
 - Uma negação aparece na linha da ferramenta em português ("Você negou esta ação." / "Bloqueado: o Orb está em modo Só
   leitura.").

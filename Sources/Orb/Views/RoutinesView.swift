@@ -275,7 +275,7 @@ private struct RoutineCard: View {
 }
 
 /// "Próxima: em 3 h · hoje às 09:00", kept right as the minutes pass; "Pausada" when it is switched off.
-private struct NextRunLine: View {
+struct NextRunLine: View {
     let routine: Routine
 
     var body: some View {
@@ -576,17 +576,22 @@ struct RoutineEditor: View {
     @Environment(\.dismiss) private var dismiss
     @State var routine: Routine
 
-    private enum Kind: String, CaseIterable { case daily, weekly, hourly }
+    private enum Kind: String, CaseIterable { case daily, weekly, hourly, minutes }
 
     @State private var kind = Kind.daily
     @State private var time = Calendar.current.date(from: DateComponents(hour: 9, minute: 0)) ?? .now
     @State private var weekday = 2
     @State private var hours = 4
+    @State private var minutes = 30
     @State private var showsAdvanced = false
     @State private var runsNow = false
     @State private var isConfirmingDelete = false
 
-    private var isNew: Bool { !model.routines.contains { $0.id == routine.id } }
+    private var isStored: Bool { model.routines.contains { $0.id == routine.id } }
+    /// Fixed when the editor opens: the routine may be deleted meanwhile (the Orb can do it from the chat) and it is
+    /// still the one being edited, not a new one.
+    @State private var opensNew: Bool?
+    private var isNew: Bool { opensNew ?? !isStored }
     private var hasPrompt: Bool { !routine.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var bot: Bot? { model.bot(routine.botID) }
 
@@ -598,6 +603,7 @@ struct RoutineEditor: View {
         case .daily: .daily(hour: hour, minute: minute)
         case .weekly: .weekly(weekday: weekday, hour: hour, minute: minute)
         case .hourly: .everyHours(hours)
+        case .minutes: .everyMinutes(minutes)
         }
     }
 
@@ -618,6 +624,7 @@ struct RoutineEditor: View {
                     Text("Todo dia").tag(Kind.daily)
                     Text("Toda semana").tag(Kind.weekly)
                     Text("A cada X horas").tag(Kind.hourly)
+                    Text("A cada X minutos").tag(Kind.minutes)
                 }
                 if kind == .weekly {
                     Picker("Dia", selection: $weekday) {
@@ -626,6 +633,8 @@ struct RoutineEditor: View {
                 }
                 if kind == .hourly {
                     Stepper("A cada \(hours) h", value: $hours, in: 1...24)
+                } else if kind == .minutes {
+                    Stepper("A cada \(minutes) min", value: $minutes, in: Schedule.minuteRange, step: 5)
                 } else {
                     DatePicker("Horário", selection: $time, displayedComponents: .hourAndMinute)
                 }
@@ -726,6 +735,7 @@ struct RoutineEditor: View {
     }
 
     private func load() {
+        opensNew = !isStored
         let calendar = Calendar.current
         showsAdvanced = routine.permissionMode != nil
         switch routine.schedule {
@@ -739,6 +749,9 @@ struct RoutineEditor: View {
         case .everyHours(let value):
             kind = .hourly
             hours = value
+        case .everyMinutes(let value):
+            kind = .minutes
+            minutes = Schedule.clampedMinutes(value)
         }
     }
 
@@ -752,18 +765,19 @@ struct RoutineEditor: View {
             routine.createdAt = .now
             routine.lastRun = nil
         }
-        let wasNew = isNew
         if let index = model.routines.firstIndex(where: { $0.id == routine.id }) {
-            // A run may have ended while the editor was open: its history is not the editor's to overwrite.
+            // The Orb or a run may have changed it while the editor was open: its history and its on/off switch are
+            // not the editor's to overwrite.
             let current = model.routines[index]
             routine.runs = current.runs
             routine.lastResult = current.lastResult
+            routine.isEnabled = current.isEnabled
             if routine.schedule == current.schedule { routine.lastRun = current.lastRun }
             model.routines[index] = routine
-        } else {
+        } else if isNew {
             model.routines.append(routine)
-        }
-        if wasNew && runsNow { model.runRoutine(routine.id) }
+            if runsNow { model.runRoutine(routine.id) }
+        } // else deleted while open: saving does not bring it back
         dismiss()
     }
 }

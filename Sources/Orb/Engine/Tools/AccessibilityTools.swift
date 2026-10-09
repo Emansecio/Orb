@@ -129,15 +129,15 @@ struct UIReadTool: AgentTool {
         Read an app's interface through Accessibility, for apps without AppleScript or Shortcuts support. \
         Returns an indented outline of one window, a line per element: id (w1.3.2 = window 1, 3rd child, its 2nd \
         child; m2 = 2nd menu), role, title, value (cut at 80 characters; passwords never read) and flags \
-        [desativado, foco, selecionado]. Layout-only and invisible elements are left out; stops at 400 lines. \
-        Ids are valid for this reading only. Needs Accessibility.
+        [desativado, foco, selecionado]. Stops at 400 lines. Ids are valid for this reading only. Needs \
+        Accessibility.
         """,
         parameters: .schema([
-            "app": .property("string", "Name or bundle identifier (default: the frontmost)."),
-            "window": .property("string", "Window number (1 = frontmost) or part of its title (default: focused)."),
-            "query": .property("string", "Only elements whose role, title or value contain this text."),
-            "max_depth": .property("integer", "Tree depth (1-12, default 12)."),
-            "include_menus": .property("boolean", "Also the menu bar's top-level menus (ids m1, m2…)."),
+            "app": .property("string", "Name or bundle id (default: the frontmost)."),
+            "window": .property("string", "Number (1 = frontmost) or part of the title."),
+            "query": .property("string", "Only elements containing this text."),
+            "max_depth": .property("integer", "1-12 (default 12)."),
+            "include_menus": .property("boolean", "Also the top-level menus (m1, m2…)."),
         ]))
 
     let system: any AccessibilitySystem
@@ -483,16 +483,15 @@ struct UIActTool: AgentTool {
         name: "ui_act",
         description: """
         Operate one element found with ui_read: press (click), focus, set_value (field text, slider number), \
-        increment, decrement, show_menu (open a menu and list its items) or pick_menu (menu_path such as \
+        increment, decrement, show_menu (list a menu's items) or pick_menu (menu_path such as \
         ["Arquivo", "Exportar…"] clicks menu bar items by title, no id). Use ids from the latest ui_read of that \
-        app; if the screen changed the call fails with "a interface mudou" and you read again. It then says in \
-        one line what changed. Anything that deletes, sends, buys or discards always asks the user first. Needs \
-        Accessibility.
+        app; if the screen changed the call fails with "a interface mudou" and you read again. Anything that \
+        deletes, sends, buys or discards always asks the user first. Needs Accessibility.
         """,
         parameters: .schema([
             "app": .property("string"),
             "action": .object(["type": .string("string"), "enum": .array(Action.allCases.map { JSONValue.string($0.rawValue) })]),
-            "id": .property("string", "Element id from ui_read (w1.3.2, m2); not for pick_menu."),
+            "id": .property("string", "From ui_read (w1.3.2, m2); not for pick_menu."),
             "value": .property("string"),
             "menu_path": .object(["type": .string("array"), "items": .object(["type": .string("string")])]),
         ], required: ["action"]))

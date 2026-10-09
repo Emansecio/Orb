@@ -179,6 +179,12 @@ extension AnyTransition {
 - **Quando:** só na primeira vez que o chat vazio de um Orb aparece na sessão (trocar de Orb e voltar não repete;
   guardar um `Set<UUID>` de "já apresentados" no estado da view raiz).
 - **Reduzir movimento:** tudo aparece junto em 0,15 s, Orb parado.
+- **Saudação do Orb novo.** Um Orb recém-criado não tem chat vazio: o chat começa com a saudação dele (`GreetingMessage`, uma
+  resposta como as outras, com o avatar vivo) e, enquanto ela é o último item, três respostas rápidas (`GreetingReplies`,
+  os mesmos botões das sugestões). A saudação sobe (`.rise`) e as respostas entram em `Motion.stagger`, uma vez por sessão (o
+  mesmo `PresentedOrbs` do chat vazio). Elas saem em `.opacity` com `Motion.exit` quando uma é escolhida, quando algo é dito
+  depois ou quando a pessoa começa a escrever (voltam só em `.opacity` se o rascunho for apagado, sem a subida escalonada de
+  novo); só a view das respostas lê os rascunhos.
 
 ### 2.9 Troca de Orb ou de conversa
 
@@ -263,6 +269,22 @@ Só usa tokens que já existem; o fundo é estático (um gradiente desenhado uma
 - **Desempenho.** O Orb de 104 pt é "grande" (no máximo 30 fps, cerca de 14 parado) e os de 72 pt ficam perto de 12 fps; o
   `OrbDriver` é compartilhado. Nada de `TimelineView`, `phaseAnimator` sem fim ou blur de superfície grande.
 
+### 2.12 Rotinas no painel do Orb
+
+Implementado em `BotInspector.swift` (`RoutineRow`) e `AppModel+Schedule.swift`. Só tokens que já existem; nada contínuo.
+
+- **Entrar e sair.** Uma linha nova (a tarefa que o Orb criou no chat, ou "Nova rotina…") chega com `AnyTransition.arrive` (sobe 6 pt em
+  `Motion.enter`) e uma que sai (apagar, no painel ou no chat) só apaga em `Motion.exit`; as vizinhas deslizam com
+  `Motion.content`, presa aos ids das rotinas do Orb (`animateChanges(of:)` na seção da aba Rotinas, então só ela observa), nunca a cada execução ou relógio.
+- **Destaque da nova.** Só a tarefa criada pelo Orb: um fundo de acento a 12% que aparece em `Motion.content` e some sozinho depois de
+  2,5 s (`AppModel.freshRoutine`, uma `Task` curta, nenhum laço). Só se o painel do Orb que pediu está à vista (nada é marcado nem vibra no painel de outro Orb): a aba Rotinas abre.
+- **Interruptor.** Ativa/Pausada troca a opacidade da linha (0,6) e a linha "Pausada" em `Motion.content`; um toque no trackpad
+  (`.sensoryFeedback(.alignment)`). Criar pelo chat dá outro (`.levelChange`), uma vez, só com o painel à vista.
+- **Apagar.** O ícone de lixeira troca a barra de botões por "Apagar esta rotina? Cancelar · Apagar" na própria linha
+  (`.opacity` em `Motion.content`; "Apagar" em vermelho), sem diálogo e sem mudar a altura; apagar tira a linha como acima.
+- **Reduzir movimento.** Nada desliza nem sobe: a linha aparece e some por opacidade (`AnyTransition.adapted`) e o destaque, o
+  interruptor e a confirmação trocam na hora (`animateChanges` já é instantâneo).
+
 ## 3. O Orb reagindo à interface (sistema do Orb)
 
 > **Implementado** em design-orbs: `OrbActivity.attentive`, `BotLive.noteComposing` (com `ComposingDeadline`;
@@ -296,6 +318,7 @@ A atividade "atento" seria um caso novo em `OrbActivity` (`attentive`: olhar par
 | Compositor | borda/fundo animados, símbolo troca com efeito; cartão cresce com lista, anexos e erro; chips deslizam com o Parar; percentual rola | troca direta; só fade de 0,15 s (Parar, miniatura, dica) |
 | Folhas | seções em cascata | tudo junto |
 | Chat vazio | Orb cai e amassa, cascata | tudo junto, Orb parado |
+| Rotinas no painel | linha sobe 6 pt, destaque de 2,5 s, vizinhas deslizam | linha só aparece e some por opacidade |
 | Boas-vindas | três Orbs caem em sequência, pontos em cascata, cartão sobe | tudo junto em 0,15 s, Orbs parados, halo fixo |
 | Linha de trabalho | frase sobe 4 pt, medidor desliza, contador rola | frase troca por opacidade (0,15 s), sem deslizar nem rolar |
 | Orb | vivo | estático (já é assim) |

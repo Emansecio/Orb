@@ -4,8 +4,8 @@ import os
 /// The Orb's own tools for Claude Code turns. Claude Code only takes extra tools through MCP, so each turn's MCP
 /// config starts the app's own binary as `Orb --tools-mcp <memory folder> [--mac] [--folder <working folder>]`: a
 /// small stdio server offering `remember` and `recall` on the same files as the app (SQLite WAL lets it share the
-/// index) and, for an Orb with "Controlar apps do Mac", the Mac tools (`open`, `applescript`, `shortcuts_*`, `clipboard_*`,
-/// `screenshot`, `notify`, `apps_list`, `processes`, `app_quit`, `trash`, `browser_tab`) with the same schemas.
+/// index), `schedule` (which reaches the app through `ScheduleMailbox`) and, for an Orb with "Controlar apps do Mac",
+/// the Mac tools (`open`, `applescript`, `shortcuts_*`, `clipboard_*`, `screenshot`, `notify`, `apps_list`, `processes`, `app_quit`, `trash`, `browser_tab`) with the same schemas.
 enum OrbToolsMCPServer {
     static let flag = "--tools-mcp"
     /// What the server was called when it only served memory; still accepted.
@@ -25,7 +25,7 @@ enum OrbToolsMCPServer {
     static let protocolVersions = ["2024-11-05", "2025-03-26", "2025-06-18"]
 
     /// Every tool the server can offer, for naming and summarizing the calls Claude Code reports.
-    static let allTools: [any AgentTool] = ToolBox.memoryTools + ToolBox.macTools
+    static let allTools: [any AgentTool] = ToolBox.memoryTools + ToolBox.scheduleTools + ToolBox.macTools
 
     /// What one server process offers, gated like the native tools: memory always, and each Mac tool when the Orb has
     /// "Controlar apps do Mac" or the tool needs no capability (`open`, `notify`).
@@ -33,7 +33,7 @@ enum OrbToolsMCPServer {
         var capabilities: Set<Capability> = []
         if mac { capabilities.insert(.computerUse) }
         if files { capabilities.insert(.terminal) }
-        return ToolBox.memoryTools + ToolBox.macTools.filter { $0.capability == nil || $0.isOffered(for: capabilities) }
+        return ToolBox.memoryTools + ToolBox.scheduleTools + ToolBox.macTools.filter { $0.capability == nil || $0.isOffered(for: capabilities) }
     }
 
     /// What `tools/list` shows: `tools(mac:)` without `ui_read` and `ui_act` while the app lacks Accessibility (they
@@ -65,17 +65,23 @@ enum OrbToolsMCPServer {
         var folder: URL?
         /// Whether the app has Accessibility, as the app said it when it started the server. Nil (no flag) asks macOS.
         var accessibilityGranted: Bool?
+        /// Where `schedule` reaches the app, and the Orb it speaks for. Nil without them: the tool says it is unavailable.
+        var scheduleMailbox: URL?
+        var orb: UUID?
 
-        init(memoryDirectory: URL, mac: Bool = false, files: Bool = false, folder: URL? = nil, accessibilityGranted: Bool? = nil) {
+        init(memoryDirectory: URL, mac: Bool = false, files: Bool = false, folder: URL? = nil, accessibilityGranted: Bool? = nil,
+             scheduleMailbox: URL? = nil, orb: UUID? = nil) {
             self.memoryDirectory = memoryDirectory
             self.mac = mac
             self.files = files
             self.folder = folder
             self.accessibilityGranted = accessibilityGranted
+            self.scheduleMailbox = scheduleMailbox
+            self.orb = orb
         }
 
-        /// Reads `--tools-mcp <dir>` (or `--memory-mcp <dir>`) with the optional `--mac`, `--folder <dir>` and
-        /// `--accessibility` / `--no-accessibility`;
+        /// Reads `--tools-mcp <dir>` (or `--memory-mcp <dir>`) with the optional `--mac`, `--folder <dir>`,
+        /// `--accessibility` / `--no-accessibility` and `--schedule-mailbox <dir> --orb <id>`;
         /// nil when the arguments do not ask for the server.
         init?(arguments: [String]) {
             guard let start = arguments.firstIndex(where: { $0 == OrbToolsMCPServer.flag || $0 == OrbToolsMCPServer.legacyFlag }),
@@ -86,9 +92,10 @@ enum OrbToolsMCPServer {
             files = rest.contains(OrbToolsMCPServer.filesFlag)
             if rest.contains(OrbToolsMCPServer.noAccessibilityFlag) { accessibilityGranted = false }
             else if rest.contains(OrbToolsMCPServer.accessibilityFlag) { accessibilityGranted = true }
-            if let folder = rest.firstIndex(of: OrbToolsMCPServer.folderFlag), rest.indices.contains(folder + 1) {
-                self.folder = URL(fileURLWithPath: rest[folder + 1])
-            }
+            func value(of flag: String) -> String? { rest.firstIndex(of: flag).flatMap { rest.indices.contains($0 + 1) ? rest[$0 + 1] : nil } }
+            folder = value(of: OrbToolsMCPServer.folderFlag).map { URL(fileURLWithPath: $0) }
+            scheduleMailbox = value(of: ScheduleMailbox.flag).map { URL(fileURLWithPath: $0) }
+            orb = value(of: ScheduleMailbox.orbFlag).flatMap(UUID.init(uuidString:))
         }
 
         var context: ToolContext {
@@ -101,6 +108,7 @@ enum OrbToolsMCPServer {
                 context.botID = pictureOwner
                 context.acceptsImages = true
             }
+            if let scheduleMailbox, let orb { context.schedule = ScheduleMailbox.client(directory: scheduleMailbox, orb: orb) }
             return context
         }
     }
@@ -108,11 +116,12 @@ enum OrbToolsMCPServer {
     /// The stdio server entry for one Orb.
     /// `accessibilityGranted` is the app's own answer for `listedTools`; nil leaves the server to ask macOS.
     static func config(directory: URL, mac: Bool = false, files: Bool = false, folder: URL? = nil,
-                       accessibilityGranted: Bool? = nil) -> MCPServerConfig {
+                       accessibilityGranted: Bool? = nil, scheduleMailbox: URL? = nil, orb: UUID? = nil) -> MCPServerConfig {
         var server = MCPServerConfig(name: name, command: Bundle.main.executablePath ?? CommandLine.arguments[0])
         server.arguments = [flag, directory.path] + (mac ? [macFlag] : []) + (files ? [filesFlag] : [])
             + (folder.map { [folderFlag, $0.path] } ?? [])
             + (accessibilityGranted.map { [$0 ? accessibilityFlag : noAccessibilityFlag] } ?? [])
+        if let scheduleMailbox, let orb { server.arguments += [ScheduleMailbox.flag, scheduleMailbox.path, ScheduleMailbox.orbFlag, orb.uuidString] }
         return server
     }
 

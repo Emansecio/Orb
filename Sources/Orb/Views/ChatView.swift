@@ -78,7 +78,7 @@ private struct TranscriptList: View {
         let generation = entrances.observe(items, isLoading: isLoading, swaps: transcript.swaps)
         // The Orb's reply at the end of the chat carries its living avatar; the working line below gives up its own
         // then, so there is one Orb in view at a time. Only the two rows whose answer changed are drawn again.
-        let lastReplyID: UUID? = if let last = items.last, case .bot = last.kind { last.id } else { nil }
+        let lastReplyID: UUID? = if let last = items.last, last.kind.isReply { last.id } else { nil }
 
         // A conversation swapped for another (a new one, one reopened from Conversas) cross-fades; the scroll view is
         // a new one then, as it was when the whole chat was rebuilt.
@@ -429,9 +429,8 @@ private struct EmptyChatView: View {
                         let suggestions = EmptyChatContent.suggestions(for: bot, interviewPending: live.memory.interviewPending)
                         ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, suggestion in
                             SuggestionButton(symbol: suggestion.symbol, text: suggestion.text) {
-                                model.send(suggestion.symbol == "questionmark.bubble"
-                                           ? "Oi! Antes de começarmos, me faça algumas perguntas para entender como você pode me ajudar."
-                                           : suggestion.text, to: look.id)
+                                model.send(suggestion.symbol == "questionmark.bubble" ? EmptyChatContent.interviewRequest : suggestion.text,
+                                           to: look.id)
                             }
                             .entrance(.staggered(index, start: EmptyChatEntrance.suggestionsStart), enters: enters)
                         }
@@ -466,7 +465,7 @@ private struct OrbContextLine: View {
     }
 }
 
-private struct SuggestionButton: View {
+struct SuggestionButton: View {
     let symbol: String
     let text: String
     let action: () -> Void

@@ -234,6 +234,14 @@ extension TranscriptItem.Kind {
         if case .approval = self { return .emphasis }
         return .rise
     }
+
+    /// What the Orb said (its reply, its greeting): the last of these at the end of the chat carries the living avatar.
+    var isReply: Bool {
+        switch self {
+        case .bot, .greeting: true
+        default: false
+        }
+    }
 }
 
 /// Fades and moves a row of the transcript in when it is new, then forgets it was.

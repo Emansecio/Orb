@@ -15,14 +15,14 @@ struct ReadFileTool: AgentTool {
         Read a file as numbered lines (`<number><tab><text>`); the number prefix is not file content, never \
         include it in edits. One call returns up to ~24,000 characters or `limit` lines; a note at the end gives \
         the `offset` to continue. Also reads PDFs (`pages`), Word/RTF/ODT, Excel (.xlsx) and PowerPoint (.pptx) as \
-        text, and images (size plus OCR text). HTML is returned as source. Files over 20 MB are refused: use grep \
+        text, and images (size plus OCR text). Files over 20 MB are refused: use grep \
         (one file up to 200 MB) or head/tail/sed.
         """,
         parameters: .schema([
             "path": .property("string"),
             "offset": .property("integer", "1-based first line (default 1)."),
             "limit": .property("integer", "Maximum lines (default 2000)."),
-            "pages": .property("string", "PDFs: page or range, \"3\", \"2-5\" or \"4-\" (default: from page 1)."),
+            "pages": .property("string", "PDFs: \"3\", \"2-5\" or \"4-\"."),
         ], required: ["path"]))
 
     var kind: ToolCall.Kind { .file }
@@ -337,8 +337,7 @@ struct ListDirectoryTool: AgentTool {
         name: "list_directory",
         description: """
         List a directory sorted by name; folders end with "/". Files show their size, and at depth 1 every entry \
-        also shows its modification date. `depth` up to 3 lists recursively (skipping .git, node_modules and the \
-        like). `pattern` filters names (glob, e.g. "*.swift"). Returns up to `limit` entries (default 200, max \
+        also shows its modification date. `depth` up to 3 lists recursively. `pattern` filters names (glob, e.g. "*.swift"). Returns up to `limit` entries (default 200, max \
         500).
         """,
         parameters: .schema([

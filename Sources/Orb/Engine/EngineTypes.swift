@@ -534,6 +534,8 @@ struct ToolContext: Sendable {
     var botID: UUID?
     /// Background jobs of every Orb (one per app); nil where the app does not offer them.
     var jobs: BackgroundJobs?
+    /// What `schedule` asks of the app on this Orb's behalf; nil where the app offers no scheduling (some tests).
+    var schedule: ScheduleHandler?
     /// The user's Terminal environment that commands run in.
     var shell: ShellEnvironment = .shared
     /// Where pictures a tool returns are saved (nil: tools return text only).

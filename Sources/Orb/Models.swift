@@ -146,6 +146,9 @@ struct TranscriptItem: Identifiable, Codable, Sendable, Equatable {
         case tool(ToolCall)
         case approval(ApprovalRequest)
         case notice(String)
+        /// What a new Orb says first, written by the app (`OrbGreeting`). Like a notice it is only for the screen: it is
+        /// never one of the conversation's `messages`, so the model does not see it and nothing counts it.
+        case greeting(String)
     }
 
     var id = UUID()
@@ -273,7 +276,7 @@ extension Conversation {
 
 struct ToolCall: Identifiable, Codable, Sendable, Equatable {
     enum Kind: String, Codable, Sendable {
-        case shell, browser, file, search, computer, connector, memory
+        case shell, browser, file, search, computer, connector, memory, schedule
 
         init(from decoder: Decoder) throws { self = try decoder.rawValue(Self.self, fallback: .connector) }
 
@@ -286,6 +289,7 @@ struct ToolCall: Identifiable, Codable, Sendable, Equatable {
             case .computer: "macwindow"
             case .connector: "puzzlepiece.extension"
             case .memory: "brain"
+            case .schedule: "clock.arrow.circlepath"
             }
         }
     }
@@ -477,6 +481,10 @@ enum Schedule: Codable, Hashable, Sendable {
     /// `weekday` uses Calendar numbering (1 = domingo).
     case weekly(weekday: Int, hour: Int, minute: Int)
     case everyHours(Int)
+    case everyMinutes(Int)
+
+    /// What `everyMinutes` accepts: never under 15, or a task would keep the Orb (and the provider's bill) busy.
+    static let minuteRange = 15...720
 
     func next(after date: Date, calendar: Calendar = .current) -> Date {
         switch self {
@@ -487,6 +495,8 @@ enum Schedule: Codable, Hashable, Sendable {
                               matchingPolicy: .nextTime) ?? date
         case .everyHours(let hours):
             date.addingTimeInterval(Double(max(1, hours)) * 3600)
+        case .everyMinutes(let minutes):
+            date.addingTimeInterval(Double(Self.clampedMinutes(minutes)) * 60)
         }
     }
 
@@ -498,8 +508,13 @@ enum Schedule: Codable, Hashable, Sendable {
             "\([1, 7].contains(weekday) ? "Todo" : "Toda") \(Calendar.current.weekdaySymbols[(weekday + 6) % 7]) às \(Self.time(hour, minute))"
         case .everyHours(let hours):
             hours == 1 ? "A cada hora" : "A cada \(hours) horas"
+        case .everyMinutes(let minutes):
+            "A cada \(Self.clampedMinutes(minutes)) minutos"
         }
     }
+
+    /// A file edited by hand (or by a version with another limit) never makes a task run every minute.
+    static func clampedMinutes(_ minutes: Int) -> Int { min(max(minutes, minuteRange.lowerBound), minuteRange.upperBound) }
 
     private static func time(_ hour: Int, _ minute: Int) -> String {
         String(format: "%02d:%02d", hour, minute)

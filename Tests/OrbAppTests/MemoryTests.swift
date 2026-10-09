@@ -221,7 +221,7 @@ import Testing
         #expect(initialize["result"]?["protocolVersion"] == .string("2025-06-18"))
         let list = try #require(await OrbToolsMCPServer.handle(
             .object(["jsonrpc": .string("2.0"), "id": .number(2), "method": .string("tools/list")]), context: context))
-        #expect(list["result"]?["tools"]?.array?.compactMap { $0["name"]?.string } == ["remember", "recall", "open", "notify"])
+        #expect(list["result"]?["tools"]?.array?.compactMap { $0["name"]?.string } == ["remember", "recall", "schedule", "open", "notify"])
         _ = await OrbToolsMCPServer.handle(.object([
             "jsonrpc": .string("2.0"), "id": .number(3), "method": .string("tools/call"),
             "params": .object(["name": .string("remember"), "arguments": .object(["fact": .string("Usa o Claude Code.")])]),
@@ -263,12 +263,12 @@ import Testing
         let context = ToolContext(workingDirectory: root, memory: bank())
         let plain = try await call("tools/list", mac: false, context: context)
         // Without "Controlar apps do Mac" the tools that need no capability stay, as they do for a native Orb.
-        #expect(plain["result"]?["tools"]?.array?.compactMap { $0["name"]?.string } == ["remember", "recall", "open", "notify"])
+        #expect(plain["result"]?["tools"]?.array?.compactMap { $0["name"]?.string } == ["remember", "recall", "schedule", "open", "notify"])
 
         let mac = try await call("tools/list", mac: true, context: context)
         let tools = try #require(mac["result"]?["tools"]?.array)
-        // Memory first, then every Mac tool, under the names Claude Code will show as mcp__orb_memoria__<name>.
-        #expect(tools.compactMap { $0["name"]?.string } == (ToolBox.memoryTools + ToolBox.macTools).map(\.spec.name))
+        // Memory and scheduling first, then every Mac tool, under the names Claude Code will show as mcp__orb_memoria__<name>.
+        #expect(tools.compactMap { $0["name"]?.string } == (ToolBox.memoryTools + ToolBox.scheduleTools + ToolBox.macTools).map(\.spec.name))
         for name in ["open", "applescript", "shortcuts_list", "shortcuts_run", "clipboard_read", "clipboard_write", "screenshot",
                      "notify", "apps_list", "processes", "app_quit", "trash", "browser_tab"] {
             #expect(tools.contains { $0["name"]?.string == name }, "\(name)")

@@ -451,7 +451,8 @@ private struct WritingModel: LLMClient {
 
         model.deleteBot(luna)
         #expect(model.sessions[luna] == nil)
-        #expect(session == nil) // nothing held it: the pending flush cannot write a conversation for the deleted Orb
+        // Nothing holds it (but the greeting's cancelled save timer, until it ends): the pending flush cannot write a conversation for the deleted Orb
+        #expect(await waitUntil("the session to be released") { session == nil })
         #expect(model.conversations[luna] == nil)
     }
 

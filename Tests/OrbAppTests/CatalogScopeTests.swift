@@ -279,12 +279,12 @@ struct ConnectorToolFilteringTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)
         // Far apart, so a loaded machine starting the quick server slowly is not mistaken for waiting on the slow one.
-        let slow = try fakeServer(name: "Lento", count: 1, delay: 12)
+        let slow = try fakeServer(name: "Lento", count: 1, delay: 40)
         let quick = try fakeServer(name: "Rápido", count: 2)
         model.connectors = [slow, quick]
         let start = ContinuousClock.now
         #expect(await model.connectAndWait(quick.id) == .ready(toolCount: 2))
-        #expect(ContinuousClock.now - start < .seconds(9), "the quick connector waited for the slow one")
+        #expect(ContinuousClock.now - start < .seconds(30), "the quick connector waited for the slow one")
         if case .ready? = model.connectorStatus[slow.id] { Issue.record("the slow one should still be starting") }
     }
 }

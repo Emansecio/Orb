@@ -126,6 +126,8 @@ import Testing
         // It has an identity and a preference: the first conversation does not interview again.
         #expect(await !bank.snapshot().interviewPending)
         #expect(await bank.snapshot().identity.contains("Seja direto"))
+        // It greets as someone who already knows you.
+        #expect(model.transcript(bot.id).last?.kind == .greeting(OrbGreeting.text(name: "Atlas", temperament: profile.orb.temperament, returning: true)))
     }
 
     @Test @MainActor func startingFromAFolderWithNothingLearnedStillInterviewsWhenAsked() async throws {
@@ -170,5 +172,7 @@ import Testing
             if case .notice(let text) = item.kind { text.contains("Não foi possível usar a memória guardada") } else { false }
         }
         #expect(notice)
+        // The memory did not come along: the greeting is the one of a new Orb, after the notice.
+        #expect(model.transcript(bot.id).last?.kind == .greeting(OrbGreeting.text(name: "Novo", temperament: .equilibrado, returning: false)))
     }
 }

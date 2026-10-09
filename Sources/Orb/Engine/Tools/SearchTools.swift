@@ -163,10 +163,9 @@ struct GrepTool: AgentTool {
     let spec = ToolSpec(
         name: "grep",
         description: """
-        Search file contents with an ICU regex; returns `path:line: text` (many matches in one file are grouped \
-        under a `path:` header). Recursive in a folder, or one file; skips .git, node_modules, build/dist/target-style \
+        Search file contents with an ICU regex; returns `path:line: text`. Recursive in a folder, or one file; skips .git, node_modules, build/dist/target-style \
         folders (pass one as `path` to search it) and binaries. In a folder, files over 5 MB are skipped and named; \
-        pass such a file as `path` (up to 200 MB, e.g. a log). Narrow with `path` or `include` before raising \
+        pass such a file as `path` (up to 200 MB). Narrow with `path` or `include` before raising \
         `max_results`. Prefer it over run_command grep; for file names use glob.
         """,
         parameters: .schema([
@@ -174,7 +173,7 @@ struct GrepTool: AgentTool {
             "path": .property("string", "Folder or file (default: the working directory)."),
             "include": .property("string", "Glob on file names, e.g. \"*.swift\"."),
             "case_insensitive": .property("boolean"),
-            "context": .property("integer", "Context lines around matches (0-10, default 0)."),
+            "context": .property("integer", "Lines around matches (0-10)."),
             "mode": .property("string", "content (default), files or count."),
             "max_results": .property("integer", "Matches or files (default 100, max 1000)."),
         ], required: ["pattern"]))

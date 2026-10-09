@@ -33,6 +33,8 @@ struct TranscriptRow: View, Equatable {
             ApprovalCard(request: request, botID: botID, pulses: entering)
         case .notice(let text):
             NoticeLine(id: item.id, text: text, botID: botID)
+        case .greeting(let text):
+            GreetingMessage(orb: orb, botID: botID, text: text, isLast: isLastReply)
         }
     }
 }
@@ -193,6 +195,57 @@ private struct BotMessage: View {
         } else {
             MarkdownChunk(source: text).equatable()
         }
+    }
+}
+
+/// A new Orb's first words: a reply like any other, and, while nothing was said after it, the ways to begin. It
+/// comes in the first time the chat shows in the session (like the empty chat it replaces), never again.
+private struct GreetingMessage: View {
+    @Environment(\.presentedEmptyChats) private var presented
+    let orb: OrbConfig
+    let botID: UUID
+    let text: String
+    let isLast: Bool
+
+    var body: some View {
+        let enters = isLast && EmptyChatEntrance.plays(for: botID, in: presented)
+        VStack(alignment: .leading, spacing: 10) {
+            BotMessage(orb: orb, botID: botID, text: text, live: nil, isLastReply: isLast)
+                .entrance(.rise, enters: enters)
+            if isLast {
+                GreetingReplies(botID: botID)
+                    .transition(.opacity)
+            }
+        }
+        .motion(Motion.exit, value: isLast)
+        .onAppear { if isLast { presented?.insert(botID) } }
+    }
+}
+
+/// The three quick replies. They go away when one is chosen or when the person starts to write (a draft), and come
+/// back (fading) if the draft is erased; the only part of the chat that reads the drafts, so typing redraws nothing else.
+private struct GreetingReplies: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.presentedEmptyChats) private var presented
+    let botID: UUID
+
+    var body: some View {
+        // Read here, not handed down: once the greeting is on screen the Orb counts as presented, so the buttons that
+        // come back after an erased draft only fade in.
+        let enters = EmptyChatEntrance.plays(for: botID, in: presented)
+        let isTyping = !(model.drafts[botID] ?? "").isEmpty
+        VStack(spacing: 6) {
+            if !isTyping {
+                ForEach(Array(OrbGreeting.Reply.allCases.enumerated()), id: \.element) { index, reply in
+                    SuggestionButton(symbol: reply.symbol, text: reply.title) { model.answerGreeting(reply, for: botID) }
+                        .entrance(.staggered(index, start: EmptyChatEntrance.suggestionsStart), enters: enters)
+                }
+                .transition(.opacity)
+            }
+        }
+        .frame(maxWidth: 360)
+        .padding(.leading, 40)
+        .motion(Motion.exit, value: isTyping)
     }
 }
 

@@ -10,8 +10,8 @@ struct ShortcutsListTool: AgentTool {
     let spec = ToolSpec(
         name: "shortcuts_list",
         description: """
-        List the user's Shortcuts by name. See which automations exist before building something with \
-        applescript; run one with shortcuts_run.
+        List the user's Shortcuts by name, to see what exists before using applescript; run one with \
+        shortcuts_run.
         """,
         parameters: .schema([
             "filter": .property("string"),
@@ -383,7 +383,7 @@ struct ProcessesTool: AgentTool {
         name: "processes",
         description: """
         Show the processes using the most CPU or memory now (PID, CPU %, memory, name), to find what slows or \
-        heats the Mac. Quit a culprit with app_quit. A snapshot, not a history.
+        heats the Mac. Quit a culprit with app_quit.
         """,
         parameters: .schema([
             "sort": .object(["type": .string("string"),

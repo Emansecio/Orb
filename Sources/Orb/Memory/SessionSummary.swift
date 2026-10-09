@@ -41,7 +41,7 @@ enum SessionSummary {
                 }
             case .approval(let request):
                 if request.decision == .deny { open.append("Você negou: " + line(request.title + " " + request.command, 140)) }
-            case .notice:
+            case .notice, .greeting:
                 break
             }
         }

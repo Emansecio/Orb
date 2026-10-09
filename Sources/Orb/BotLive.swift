@@ -231,7 +231,7 @@ final class BotLive {
             case .browser, .computer: return .browsing
             case .file: return .reading
             case .search: return .searching
-            case .connector, .memory: return .thinking
+            case .connector, .memory, .schedule: return .thinking
             }
         }
         if speaking { return .speaking }

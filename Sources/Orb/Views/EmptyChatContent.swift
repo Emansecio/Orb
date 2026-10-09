@@ -13,6 +13,9 @@ enum EmptyChatContent {
     /// The most prompts shown (the interview offer counts).
     static let limit = 4
 
+    /// What "Me conheça" and the greeting's "Me entreviste" send: the Orb's first conversation is its interview.
+    static let interviewRequest = "Oi! Antes de começarmos, me faça algumas perguntas para entender como você pode me ajudar."
+
     /// Prompts for what this Orb can do and where it works. A folder of its own or a chosen folder gets prompts about
     /// that folder; the home folder gets the everyday ones; a capability that is off offers nothing that needs it.
     static func suggestions(for bot: Bot, interviewPending: Bool) -> [EmptyChatSuggestion] {
@@ -79,4 +82,42 @@ enum EmptyChatContent {
         EmptyChatSuggestion(symbol: "text.alignleft", text: "Me ajude a escrever uma mensagem difícil"),
         EmptyChatSuggestion(symbol: "book", text: "Explique um assunto de forma simples"),
     ]
+}
+
+/// What a new Orb says first, in its own voice and with its own name, and the three ways to answer. Written by the app,
+/// so it costs no model call; the temperament only tints the tone.
+enum OrbGreeting {
+    static func text(name: String, temperament: OrbTemperament, returning: Bool) -> String {
+        if returning { return "Que bom te ver de novo! Já sei algumas coisas sobre você. Como posso ajudar hoje?" }
+        switch temperament {
+        case .calmo: return "Oi, eu sou \(name). Sem pressa: estou à sua disposição. Como prefere começar?"
+        case .equilibrado: return "Oi! Eu sou \(name). Estou à sua disposição. Como prefere começar?"
+        case .animado: return "Oi, oi! Eu sou \(name) e estou à sua disposição. Como vamos começar?"
+        case .timido: return "Oi… eu sou \(name). Estou à sua disposição, se quiser. Como prefere começar?"
+        case .curioso: return "Oi! Eu sou \(name) e quero saber como posso ajudar. Como prefere começar?"
+        }
+    }
+
+    enum Reply: CaseIterable {
+        case tell, interview, abilities
+
+        var title: String {
+            switch self {
+            case .tell: "Vou te contar o que preciso"
+            case .interview: "Me entreviste"
+            case .abilities: "O que você sabe fazer?"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .tell: "text.cursor"
+            case .interview: "questionmark.bubble"
+            case .abilities: "sparkles"
+            }
+        }
+    }
+
+    /// Where "Vou te contar o que preciso" starts the message box.
+    static let draft = "Quero que você me ajude com "
 }

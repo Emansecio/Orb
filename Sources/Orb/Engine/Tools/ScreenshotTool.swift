@@ -8,7 +8,7 @@ struct ScreenshotTool: AgentTool {
         description: """
         Capture a display or the front window of another app (PNG); returns its path, size and the text on it \
         (OCR), plus the picture itself if your model sees images. target "window" skips the Orb's own window; \
-        `app` picks that app's window. Needs Screen Recording (the error says how to allow it).
+        `app` picks that app's window. Needs Screen Recording.
         """,
         parameters: .schema([
             "target": .object(["type": .string("string"),

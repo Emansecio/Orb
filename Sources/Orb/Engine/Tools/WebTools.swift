@@ -30,17 +30,17 @@ struct WebFetchTool: AgentTool {
     let spec = ToolSpec(
         name: "web_fetch",
         description: """
-        Fetch a web page over http(s) as readable light Markdown (main content only; headings #, code fenced, tables as \
-        rows, links as "text (url)") with the final URL and title. JSON, XML and text come back as is, PDFs as text, \
+        Fetch a web page over http(s) as readable light Markdown (main content; links as "text (url)") with the final \
+        URL and title. JSON, XML and text come back as is, PDFs as text, \
         images as a picture; no JavaScript. Returns 12,000 characters (`max_chars` up to 24,000); the closing note gives \
-        the `offset` to continue (the page stays cached a few minutes); `find` locates a word in a long page. To keep a \
+        the `offset` to continue; `find` locates a word in a long page. To keep a \
         file (image, archive, PDF…) pass `save_to`.
         """,
         parameters: .schema([
             "url": .property("string"),
             "offset": .property("integer", "First character, to continue a long page (default 0)."),
             "max_chars": .property("integer"),
-            "find": .property("string", "Instead of the page, up to 8 passages around this text (any case), each with its offset."),
+            "find": .property("string", "Instead of the page, up to 8 passages around this text, each with its offset."),
             "save_to": .property("string", "Download to this path instead (up to 100 MB; replaces a file)."),
         ], required: ["url"]))
 

@@ -108,9 +108,10 @@ struct ToolSpecEconomyTests {
         let terminalOnly = ToolBox.offered(for: [.terminal], accessibilityGranted: false)
         #expect(terminalOnly.map(\.spec.name) == ToolBox.offered(for: [.terminal], accessibilityGranted: true).map(\.spec.name))
         #expect(!terminalOnly.contains { $0.capability == .computerUse })
-        // The tools that need no capability (memory, open, notify) are always there.
+        // The tools that need no capability (memory, scheduling, open, notify) are always there.
         let none = ToolBox.offered(for: [], accessibilityGranted: true).map(\.spec.name)
-        #expect(none == ["open", "notify", "remember", "recall"] || Set(none) == ["open", "notify", "remember", "recall"])
+        let always: Set = ["open", "notify", "remember", "recall", "schedule"]
+        #expect(Set(none) == always && none.count == always.count)
     }
 
     @Test func holdingTheToolsBackSavesTheirWholeSpec() {

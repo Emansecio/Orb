@@ -35,6 +35,16 @@ extension Snapshot {
                             Skill(slug: "traduzir", name: "Traduzir", summary: "Traduz mantendo o tom.", instructions: "x")]
             model.setDraft("/re", for: bot.id)
             return AnyView(ChatView(botID: bot.id))
+        case "chat-greeting", "chat-greeting-returning", "chat-greeting-typed":
+            // A new Orb as the app makes it (it works in the home folder, so no folder is made), with its greeting.
+            let lia = model.createBot(name: "Lia", role: "Assistente pessoal", orb: OrbConfig(color: "rosa", eyes: "ovais", mouth: "sorriso", temperament: .calmo),
+                                      model: "", mode: .ask, folder: .home)
+            if screen.hasSuffix("returning") {
+                let text = OrbGreeting.text(name: lia.name, temperament: lia.orb.temperament, returning: true)
+                model.editConversation(lia.id) { $0.items = [TranscriptItem(.greeting(text))] }
+            }
+            if screen.hasSuffix("typed") { model.setDraft(OrbGreeting.draft, for: lia.id) } // the replies are gone
+            return AnyView(ChatView(botID: lia.id))
         case "popover-permissions":
             return AnyView(popover(PermissionPopover(permission: PermissionState(mode: .ask, rules: [.shell("git"), .shell("brew"), .folder("/Users/x/Projetos")]),
                                                      choose: { _ in }, manage: {})))

@@ -111,7 +111,7 @@ rotinas, apagar). No meio fica o chat; à direita, o painel do Orb.
   outra pasta, usar a pasta pessoal ou criar a própria depois. A pasta **não confina** o Orb: ele continua podendo ler e agir
   no resto do Mac dentro das permissões. Apagar o Orb não apaga a pasta.
 - **Opções avançadas**: as permissões (veja abaixo), "Como funciona" (as instruções dele, que vão em toda conversa) e
-  "Na primeira conversa, me fazer perguntas" (ligado por padrão: o Orb se apresenta e conhece você).
+  "Na primeira conversa, me fazer perguntas" (ligado por padrão: o Orb conhece você).
 - O **editor de aparência** ao lado: Cor (18), Jeito (calmo, equilibrado, animado, tímido, curioso: como ele se mexe e reage
   ao mouse, não o que faz), Olhos, Boca, Sobrancelhas, Bochechas, Bigode, Cabelo e Acessórios (vários ao mesmo tempo), com
   **Sortear**. Os olhos seguem o cursor; o Orb mostra o que está fazendo (pensando, digitando no terminal, lendo, precisando de
@@ -124,7 +124,7 @@ O **painel do Orb** (⌥⌘B mostra ou esconde) tem quatro abas:
 | Geral | modelo, **Permissões** (modo) e "O que `<Orb>` pode usar" (as chaves: Terminal e arquivos, Navegar na web, Controlar apps do Mac, Conectores), "Apagar…" |
 | Memória | o que o Orb sabe de você (veja [Memória](#memória)) |
 | Pasta e acessos | a pasta (abrir no Finder ou no Terminal, mudar, recriar se sumiu), "Confiar nas instruções desta pasta", as **Liberações** e os arquivos alterados e recentes |
-| Rotinas | as rotinas deste Orb |
+| Rotinas | as rotinas deste Orb: ativar e pausar, editar, apagar, rodar agora (veja [Rotinas](#rotinas)) |
 
 No alto do painel: nome e papel (clique para editar; mudar o nome não renomeia a pasta), "Personalizar…" (aparência), "Abrir
 pasta", "Terminal" e "Nova conversa". O painel se recolhe sozinho em janelas estreitas (menos de 1180 pt) e volta quando há espaço.
@@ -250,8 +250,11 @@ Cada Orb tem a **sua** memória, que nasce com ele e cresce a cada conversa: nad
   O pedido vale como a sua aprovação para fatos e procedimentos; identidade e preferências ainda pedem o cartão. Se o
   Orb não guardar, o app guarda o que você disse e avisa na conversa, com "Ver na memória" para abrir a página (e esquecê-la, se
   o pedido foi entendido errado). Se você negou o cartão, o app respeita o "não". "Memorize isso" sozinho guarda o que veio antes.
-- **Primeira conversa.** Com a entrevista ligada, ele se apresenta e faz 2 a 4 perguntas; o chat vazio também oferece "Me
-  conheça". Na aba Memória, o menu "Mais opções" tem "Fazer a entrevista de novo".
+- **Primeira conversa.** Ao nascer, o Orb cumprimenta no chat com o próprio nome (texto do app, sem gastar o modelo; vindo de
+  memória guardada, "Que bom te ver de novo!") e oferece três respostas rápidas: "Vou te contar o que preciso" (começa a
+  mensagem para você), "Me entreviste" e "O que você sabe fazer?". Elas somem ao escolher uma ou ao começar a escrever. Com a
+  entrevista ligada, ele faz 2 a 4 perguntas; uma conversa nova e vazia também oferece "Me conheça". Na aba Memória, o
+  menu "Mais opções" tem "Fazer a entrevista de novo".
 - **A aba Memória** do painel mostra as páginas por tipo (com busca, quando há muitas). **Editar…** muda a identidade.
   **Esquecer** apaga uma página; um aviso "`<Orb>` esqueceu isso" com **Desfazer** (ou **⌘Z**) fica por cerca de 10 segundos.
   **Abrir pasta da memória** mostra os arquivos.
@@ -289,7 +292,14 @@ do mesmo Orb (a atual, outra arquivada ou de uma rotina) ainda usa fica.
 Uma **rotina** é uma tarefa que um Orb faz sozinho, no horário, **enquanto o app está aberto** (página **Rotinas**,
 ⌥⌘R; também na aba Rotinas do painel). Há modelos prontos: "Resumo da manhã", "Organizar arquivos" e "Revisar a semana".
 
-- **Quando**: todo dia, toda semana (com o dia) ou a cada X horas; o editor mostra a próxima execução.
+- **Quando**: todo dia, toda semana (com o dia), a cada X horas ou a cada X minutos (no mínimo 15); o editor mostra a próxima
+  execução.
+- **Peça no chat.** "Verifique meus e-mails a cada 30 minutos" ou "todo dia às 9h me mande um resumo das notícias": o Orb cria a
+  rotina sozinho (ferramenta `schedule`, nos dois motores) e também lista, pausa, retoma e apaga as dele quando você pede. Nada
+  disso passa em branco: em "Perguntar antes" o cartão mostra o nome, quando roda e o que será pedido; em "Só leitura" só dá
+  para listar. A rotina roda no modo do próprio Orb (nunca num mais permissivo), cada Orb tem no máximo 20 e só mexe nas suas, e
+  uma rotina em execução não cria outras. A nova aparece na aba Rotinas do painel (que abre sozinha se estiver à vista), com um
+  destaque suave; ali cada uma tem o interruptor Ativa/Pausada e o botão de apagar (com confirmação na própria linha).
 - **Conversa própria.** Cada rotina roda numa conversa só dela, nunca no seu chat: o chat ganha só uma linha no fim ("Rotina
   'Resumo da manhã' terminou: …"). Em **Ver conversa** você lê a execução. Fica o histórico das últimas 10 execuções, com
   relatório, e a próxima execução sabe o que a anterior encontrou.

@@ -297,6 +297,38 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(notices(chat).last?.hasPrefix("Rotina “Resumo da manhã” terminou") == true)
     }
 
+    @Test @MainActor func anIntervalRoutineIsDueOnceAndNeverPilesUp() async throws {
+        let gate = Gate()
+        let (model, bot, routine) = setUp(StubModel(gate: gate))
+        model.routines[0].schedule = .everyMinutes(15)
+        model.routines[0].lastRun = .now.addingTimeInterval(-16 * 60)
+        #expect(model.routines[0].nextRun < .now)
+
+        model.runRoutine(routine.id)
+        await model.routineStarted()
+        // Started: the next one counts from the start, so the scheduler's checks while it runs find nothing due.
+        #expect(model.routines[0].nextRun > .now.addingTimeInterval(14 * 60))
+        model.runRoutine(routine.id) // a check during the run
+        #expect(!model.isRoutineQueued(routine.id))
+
+        // The run outlasts its slot: the next starts 15 minutes after this one ends, not at once.
+        model.routines[0].lastRun = .now.addingTimeInterval(-20 * 60)
+        await gate.open()
+        await waitUntilIdle(model, bot.id)
+        #expect(model.routines[0].runs.count == 1)
+        #expect(model.routines[0].nextRun > .now.addingTimeInterval(14 * 60))
+    }
+
+    @Test @MainActor func aRunThatEndsInsideItsSlotKeepsItsStartAsTheCount() async throws {
+        let (model, bot, routine) = setUp()
+        model.routines[0].schedule = .everyHours(2)
+        model.runRoutine(routine.id)
+        await model.routineStarted()
+        let started = try #require(model.routines[0].lastRun)
+        await waitUntilIdle(model, bot.id)
+        #expect(model.routines[0].lastRun == started)
+    }
+
     @Test @MainActor func twoRoutinesOfTheSameOrbTakeTurns() async throws {
         let (model, bot, first) = setUp()
         let second = Routine(name: "Outra", botID: bot.id, prompt: "faça outra coisa", schedule: .daily(hour: 8, minute: 0))

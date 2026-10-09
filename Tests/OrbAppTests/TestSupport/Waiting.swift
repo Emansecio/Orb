@@ -15,7 +15,7 @@ import Testing
 @discardableResult
 func waitUntil(
     _ what: @autoclosure () -> String = "a condition",
-    timeout: Duration = .seconds(10),
+    timeout: Duration = .seconds(30),
     poll: Duration = .milliseconds(20),
     isolation: isolated (any Actor)? = #isolation,
     sourceLocation: SourceLocation = #_sourceLocation,

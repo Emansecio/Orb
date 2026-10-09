@@ -49,6 +49,9 @@ struct BotInspector: View {
                 }
                 .formStyle(.grouped)
                 .scrollContentBackground(.hidden)
+                // The task the Orb just scheduled from the chat (`AppModel.freshRoutine`, only set with this panel on screen)
+                // arrives with a tap you can feel.
+                .sensoryFeedback(.levelChange, trigger: model.freshRoutine) { _, new in new != nil }
             }
             .overlay(alignment: .bottom) { MemoryUndoToast(undo: model.memoryUndo).padding(.bottom, 14) }
             .onChange(of: tab) { _, new in InspectorTabMemory.remember(new, for: botID) }
@@ -441,7 +444,7 @@ struct BotInspector: View {
         let routines = model.routines(for: bot.id)
         Section {
             if routines.isEmpty {
-                Text("Nenhuma rotina ainda. Uma rotina faz um pedido a \(bot.name) sozinho, todo dia ou toda semana.")
+                Text("Nenhuma rotina ainda. Peça a \(bot.name) no chat, como “verifique meus e-mails a cada 30 minutos”, ou crie uma aqui.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -460,6 +463,8 @@ struct BotInspector: View {
                 Text("\(bot.name) faz isso sozinho, no horário, enquanto o app está aberto.")
             }
         }
+        // Rows come and go in place (also the ones the Orb schedules or deletes from the chat). Only this tab watches.
+        .animateChanges(of: routines.map(\.id))
         Section {
             Button("Ver todas as rotinas", systemImage: "arrow.up.right") { model.selection = .routines }
                 .buttonStyle(.link)
@@ -672,11 +677,13 @@ private struct WorkspaceFileRow: View {
     }
 }
 
-/// One of the Orb's routines in its panel: on/off, when it runs next, how the last run went.
+/// One of the Orb's routines in its panel: on/off, when it runs next, how the last run went, and a way to delete it.
 private struct RoutineRow: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let routine: Routine
     let edit: () -> Void
+    @State private var isConfirmingDelete = false
 
     var body: some View {
         // The routine as it is now (the toggle and the runs change it in the model, not in this copy).
@@ -690,31 +697,51 @@ private struct RoutineRow: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Toggle("Ativa", isOn: Binding(
-                    get: { model.routines.first { $0.id == routine.id }?.isEnabled ?? current.isEnabled },
-                    set: { isOn in
-                        if let index = model.routines.firstIndex(where: { $0.id == routine.id }) {
-                            model.routines[index].setEnabled(isOn)
-                        }
-                    }))
+                Toggle("Ativa", isOn: Binding(get: { current.isEnabled }, set: { model.setRoutineEnabled(routine.id, $0) }))
                     .toggleStyle(.switch)
                     .labelsHidden()
                     .controlSize(.small)
+                    .help(current.isEnabled ? "Pausar esta rotina" : "Ativar esta rotina")
             }
-            if current.isEnabled {
-                // The same words as the Rotinas page ("Próxima: em 3 h · hoje às 09:00"), kept right as minutes pass.
-                TimelineView(.periodic(from: .now, by: 60)) { context in
-                    Text(RoutineText.nextRun(of: current, now: context.date) ?? "")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
+            // The same words as the Rotinas page ("Próxima: em 3 h · hoje às 09:00", "Pausada").
+            NextRunLine(routine: current)
             Text(current.lastResult ?? "Ainda não rodou.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .lineLimit(2)
-            HStack {
+            footer(current)
+                .controlSize(.small)
+        }
+        .opacity(current.isEnabled ? 1 : 0.6)
+        // The task the Orb just scheduled is marked for a moment (`AppModel.freshRoutine`).
+        .background {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Palette.accent.opacity(model.freshRoutine == routine.id ? 0.12 : 0))
+                .padding(.horizontal, -8).padding(.vertical, -5)
+        }
+        .animateChanges(of: current.isEnabled)
+        .animateChanges(of: model.freshRoutine)
+        .animateChanges(of: isConfirmingDelete)
+        .sensoryFeedback(.alignment, trigger: current.isEnabled)
+        .transition(.adapted(.arrive, reduceMotion: reduceMotion))
+    }
+
+    @ViewBuilder
+    private func footer(_ current: Routine) -> some View {
+        HStack {
+            if isConfirmingDelete {
+                Text("Apagar esta rotina?")
+                    .lineLimit(1)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Cancelar") { isConfirmingDelete = false }
+                Button("Apagar", role: .destructive) { model.deleteRoutine(routine.id) }
+                    .foregroundStyle(.red)
+            } else {
                 Button("Editar", action: edit)
+                Button(role: .destructive) { isConfirmingDelete = true } label: { Image(systemName: "trash") }
+                    .help("Apagar esta rotina")
+                    .accessibilityLabel("Apagar “\(current.name)”")
                 Spacer()
                 // Like the Rotinas page: with the Orb busy the run waits for it (`runRoutine` queues it).
                 if model.isRoutineRunning(routine.id) {
@@ -726,9 +753,8 @@ private struct RoutineRow: View {
                     Button("Rodar agora", systemImage: "play.fill") { model.runRoutine(routine.id) }
                 }
             }
-            .controlSize(.small)
         }
-        .opacity(current.isEnabled ? 1 : 0.6)
+        .transition(.opacity)
     }
 }
 

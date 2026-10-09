@@ -321,8 +321,8 @@ actor MemoryBank {
         if identity()?.interviewPending == true, userTurns <= 4 {
             take("""
             ## Getting to know the user
-            This is your first conversation with the user. Introduce yourself in one line and ask 2–4 short questions \
-            to learn how they want you to work (what to help with, tone, what to avoid). If they open with a concrete \
+            This is your first conversation with the user and the app has already greeted them, so do not introduce yourself \
+            again. Ask 2–4 short questions to learn how they want you to work (what to help with, tone, what to avoid). If they open with a concrete \
             request, help with it first and ask afterwards. Save each answer with \(tools.remember): tipo "identidade" for \
             how you should work, "preferencia" for their preferences.
             """, into: &pinned)

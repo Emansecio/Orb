@@ -1,0 +1,613 @@
+import Foundation
+import Testing
+@testable import Orb
+
+// Tasks the Orb schedules itself: the interval schedule, the `schedule` tool (checking, results, limits, only the
+// Orb's own), its permissions in each mode and in both engines, and the mailbox Claude Code's server uses.
+
+private func call(_ action: String, name: String? = nil, prompt: String? = nil, when: JSONValue? = nil) -> JSONValue {
+    var object: [String: JSONValue] = ["action": .string(action)]
+    if let name { object["name"] = .string(name) }
+    if let prompt { object["prompt"] = .string(prompt) }
+    if let when { object["when"] = when }
+    return .object(object)
+}
+
+private func every(minutes: Int) -> JSONValue { .object(["kind": .string("every_minutes"), "n": .number(Double(minutes))]) }
+private let daily9: JSONValue = .object(["kind": .string("daily"), "hour": .number(9)])
+
+// MARK: - The schedule
+
+struct IntervalScheduleTests {
+    @Test func nextRunIsTheIntervalAfterTheLastRun() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        #expect(Schedule.everyMinutes(30).next(after: start) == start.addingTimeInterval(30 * 60))
+        #expect(Schedule.everyMinutes(15).next(after: start) == start.addingTimeInterval(15 * 60))
+    }
+
+    @Test func anIntervalUnderTheMinimumNeverRunsMoreOften() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        #expect(Schedule.minuteRange.lowerBound == 15)
+        #expect(Schedule.everyMinutes(1).next(after: start) == start.addingTimeInterval(15 * 60))
+        #expect(Schedule.everyMinutes(-5).next(after: start) == start.addingTimeInterval(15 * 60))
+        #expect(Schedule.everyMinutes(1).label == "A cada 15 minutos")
+        #expect(Schedule.everyMinutes(100_000).label == "A cada 720 minutos")
+    }
+
+    @Test func theLabelIsInPortuguese() {
+        #expect(Schedule.everyMinutes(30).label == "A cada 30 minutos")
+        #expect(Schedule.everyHours(1).label == "A cada hora")
+    }
+
+    @Test func theScheduleIsWrittenAndReadBackAndAFileEditedByHandIsKept() throws {
+        let data = try JSONEncoder().encode(Schedule.everyMinutes(45))
+        #expect(try JSONDecoder().decode(Schedule.self, from: data) == .everyMinutes(45))
+        // A routine file from this version, with an interval nobody should have written, still loads; it runs at the minimum.
+        let json = #"{"botID":"\#(UUID().uuidString)","schedule":{"everyMinutes":{"_0":2}}}"#
+        let routine = try JSONDecoder().decode(Routine.self, from: Data(json.utf8))
+        #expect(routine.schedule.label == "A cada 15 minutos")
+        #expect(routine.nextRun == routine.createdAt.addingTimeInterval(15 * 60))
+    }
+}
+
+// MARK: - Checking a call
+
+struct ScheduleCommandTests {
+    @Test func aCreateNeedsAPromptAndAWhen() throws {
+        #expect(try ScheduleCommand(call("create", name: "E-mails", prompt: "veja meus e-mails", when: every(minutes: 30)))
+                == .create(name: "E-mails", prompt: "veja meus e-mails", schedule: .everyMinutes(30)))
+        #expect(throws: ToolError.self) { try ScheduleCommand(call("create", when: daily9)) }
+        #expect(throws: ToolError.self) { try ScheduleCommand(call("create", prompt: "oi")) }
+        #expect(throws: ToolError.self) { try ScheduleCommand(call("create", prompt: "   ", when: daily9)) }
+        #expect(throws: ToolError.self) { try ScheduleCommand(call("create", prompt: String(repeating: "a", count: 4_001), when: daily9)) }
+        #expect(throws: ToolError.self) { try ScheduleCommand(call("explode")) }
+        #expect(throws: ToolError.self) { try ScheduleCommand(.object([:])) }
+    }
+
+    @Test func theNameDefaultsToTheStartOfThePromptAndIsKeptShort() throws {
+        guard case .create(let name, _, _) = try ScheduleCommand(call("create", prompt: "Resuma meus e-mails novos de hoje", when: daily9)) else {
+            Issue.record("not a create"); return
+        }
+        #expect(name == "Resuma meus e-mails novos…")
+        guard case .create(let long, _, _) = try ScheduleCommand(call("create", name: String(repeating: "n", count: 200), prompt: "x", when: daily9)) else {
+            Issue.record("not a create"); return
+        }
+        #expect(long.count == ScheduleCommand.nameLimit)
+    }
+
+    @Test func eachKindOfWhenIsReadAndItsLimitsAreEnforced() throws {
+        func when(_ fields: [String: JSONValue]) throws -> Schedule {
+            guard case .create(_, _, let schedule) = try ScheduleCommand(call("create", prompt: "x", when: .object(fields))) else { throw ToolError("") }
+            return schedule
+        }
+        #expect(try when(["kind": .string("daily"), "hour": .number(9), "minute": .number(30)]) == .daily(hour: 9, minute: 30))
+        #expect(try when(["kind": .string("daily"), "hour": .string("7")]) == .daily(hour: 7, minute: 0)) // numbers as text, minute 0
+        #expect(try when(["kind": .string("weekly"), "weekday": .number(2), "hour": .number(8)]) == .weekly(weekday: 2, hour: 8, minute: 0))
+        #expect(try when(["kind": .string("every_hours"), "n": .number(6)]) == .everyHours(6))
+        #expect(try when(["kind": .string("every_minutes"), "n": .number(15)]) == .everyMinutes(15))
+        for bad: [String: JSONValue] in [
+            ["kind": .string("daily"), "hour": .number(24)],
+            ["kind": .string("daily")],
+            ["kind": .string("weekly"), "hour": .number(8)],
+            ["kind": .string("weekly"), "weekday": .number(8), "hour": .number(8)],
+            ["kind": .string("every_hours"), "n": .number(0)],
+            ["kind": .string("every_hours"), "n": .number(25)],
+            ["kind": .string("every_minutes"), "n": .number(14)],
+            ["kind": .string("every_minutes"), "n": .number(721)],
+            ["kind": .string("every_minutes")],
+            ["kind": .string("monthly")],
+            ["hour": .number(9)],
+        ] {
+            #expect(throws: ToolError.self, "\(bad)") { try when(bad) }
+        }
+    }
+
+    @Test func theWordsAreReadWhateverTheCaseAndANameIsOneLine() throws {
+        #expect(try ScheduleCommand(.object(["action": .string("LIST")])) == .list)
+        let when: JSONValue = .object(["kind": .string("Every_Hours"), "n": .number(2)])
+        #expect(try ScheduleCommand(call("create", name: "Duas\nlinhas", prompt: "x", when: when))
+                == .create(name: "Duas linhas", prompt: "x", schedule: .everyHours(2)))
+    }
+
+    @Test func tooShortAnIntervalIsRefusedWithTheReason() {
+        do {
+            _ = try ScheduleCommand(call("create", prompt: "x", when: every(minutes: 5)))
+            Issue.record("accepted 5 minutes")
+        } catch {
+            #expect(error.localizedDescription.contains("15 minutos"))
+        }
+    }
+
+    @Test func theOtherActionsTakeANameExceptList() throws {
+        #expect(try ScheduleCommand(call("list")) == .list)
+        #expect(try ScheduleCommand(call("pause", name: "A")) == .setEnabled("A", false))
+        #expect(try ScheduleCommand(call("resume", name: "A")) == .setEnabled("A", true))
+        #expect(try ScheduleCommand(call("delete", name: "A")) == .delete("A"))
+        for action in ["pause", "resume", "delete"] { #expect(throws: ToolError.self) { try ScheduleCommand(call(action)) } }
+    }
+}
+
+// MARK: - The tool
+
+struct ScheduleToolSpecTests {
+    private let tool = ScheduleTool()
+
+    @Test func listingIsSafeAndEverythingElseChangesWhatTheOrbDoesLater() {
+        #expect(tool.risk(call("list")) == .safe)
+        for action in ["create", "pause", "resume", "delete"] {
+            #expect(tool.risk(call(action, name: "A", prompt: "x", when: daily9)) == .sensitive, "\(action)")
+        }
+        // The tool as a whole (Claude Code's readOnlyHint, asked without an action) is not read-only.
+        #expect(tool.risk(.object([:])) == .sensitive)
+    }
+
+    @Test func aCallThatWillBeRefusedAsksNothingOfYou() {
+        // It changes nothing, so there is no card to approve just to be told no.
+        #expect(tool.risk(call("create", name: "E-mails", prompt: "x", when: every(minutes: 5))) == .safe)
+        #expect(tool.risk(call("create", prompt: "x")) == .safe)
+        #expect(tool.risk(call("pause")) == .safe)
+        #expect(tool.risk(call("explode")) == .safe)
+    }
+
+    @Test func theCardSaysWhatWillRunAndWhen() {
+        let card = tool.summary(call("create", name: "E-mails", prompt: "Veja meus e-mails e me avise dos urgentes.", when: every(minutes: 30)))
+        #expect(card.title == "Agendando tarefa")
+        #expect(card.detail == "“E-mails” · A cada 30 minutos · Veja meus e-mails e me avise dos urgentes.")
+        // One line, whatever the prompt has in it.
+        #expect(!tool.summary(call("create", name: "N", prompt: "a\n\nb\n- c", when: daily9)).detail.contains("\n"))
+        #expect(tool.summary(call("pause", name: "E-mails")) == ("Pausando tarefa agendada", "E-mails"))
+        #expect(tool.summary(call("resume", name: "E-mails")) == ("Retomando tarefa agendada", "E-mails"))
+        #expect(tool.summary(call("delete", name: "E-mails")) == ("Apagando tarefa agendada", "E-mails"))
+        #expect(tool.summary(call("list")).title == "Listando tarefas agendadas")
+        // A call that will be refused still gets a card that says nothing false.
+        #expect(tool.summary(call("create", prompt: "x")).detail == "")
+    }
+
+    @Test func aLongPromptIsShortenedOnTheCardOnly() {
+        let prompt = String(repeating: "a", count: 900)
+        let detail = tool.summary(call("create", name: "N", prompt: prompt, when: daily9)).detail
+        #expect(detail.hasSuffix("…") && detail.count < 450)
+    }
+
+    @Test func theToolIsOfferedToBothEnginesUnderOneNameAndKindAndNeedsNoCapability() {
+        #expect(ToolBox.all.contains { $0.spec.name == "schedule" })
+        #expect(OrbToolsMCPServer.tool(claudeCodeName: "mcp__orb_memoria__schedule")?.spec.name == "schedule")
+        #expect(tool.kind == .schedule && tool.capability == nil)
+        #expect(ClaudeCodeTools.kind("mcp__orb_memoria__schedule") == .schedule)
+        #expect(ClaudeCodeTools.summary("mcp__orb_memoria__schedule", call("delete", name: "A")).title == "Apagando tarefa agendada")
+    }
+
+    @Test func withoutTheAppBehindItTheToolSaysSo() async {
+        await #expect(throws: ToolError.self) { try await tool.run(call("list"), context: ToolContext(workingDirectory: .temporaryDirectory)) }
+    }
+}
+
+// MARK: - Permissions
+
+struct SchedulePermissionTests {
+    private let tool = ScheduleTool()
+    private let home = URL(fileURLWithPath: "/Users/teste")
+
+    private func verdict(_ mode: PermissionMode, _ action: String, rules: [PermissionRule] = [], claudeCode: Bool = false) -> PermissionVerdict {
+        let arguments = call(action, name: "A", prompt: "x", when: daily9)
+        let permission = claudeCode
+            ? PermissionPolicy.call(claudeCodeTool: "mcp__orb_memoria__schedule", input: arguments, workspace: nil, home: home)
+            : PermissionPolicy.call(for: tool, arguments: arguments, context: ToolContext(workingDirectory: home), home: home)
+        return PermissionPolicy.evaluate(mode: mode, call: permission, rules: rules, workspace: nil, home: home)
+    }
+
+    @Test func eachModeDecidesLikeItDoesForAnyChangeThatStays() {
+        for claudeCode in [false, true] {
+            for action in ["create", "pause", "resume", "delete"] {
+                #expect(verdict(.ask, action, claudeCode: claudeCode) == .ask(.needsPermission), "\(action)")
+                #expect(verdict(.auto, action, claudeCode: claudeCode) == .allow, "\(action)")
+                #expect(verdict(.bypass, action, claudeCode: claudeCode) == .allow, "\(action)")
+                #expect(verdict(.readOnly, action, claudeCode: claudeCode) == .deny(PermissionPolicy.readOnlyDenial), "\(action)")
+            }
+            // Looking is not changing: it runs even in read-only.
+            for mode in PermissionMode.allCases { #expect(verdict(mode, "list", claudeCode: claudeCode) == .allow, "\(mode)") }
+        }
+    }
+
+    @Test func aStandingGrantOfTheirOwnCoversThemAndNothingElseDoes() {
+        let rule = PermissionRule(family: .schedule)
+        #expect(verdict(.ask, "create", rules: [rule]) == .allow)
+        #expect(verdict(.ask, "create", rules: [PermissionRule(family: .jobs), PermissionRule(family: .memory)]) == .ask(.needsPermission))
+        #expect(rule.title == "Gerenciar as tarefas agendadas")
+        let call = PermissionPolicy.call(for: tool, arguments: call("create", prompt: "x", when: daily9), context: ToolContext(workingDirectory: home), home: home)
+        #expect(PermissionPolicy.suggestions(for: call) == [rule])
+    }
+}
+
+// MARK: - What the app does
+
+@Suite final class ScheduledTasksTests {
+    let root = FileManager.default.temporaryDirectory.appending(path: "OrbSchedule-\(UUID().uuidString)")
+
+    deinit { try? FileManager.default.removeItem(at: root) }
+
+    /// A model with two Orbs, Atlas (the one asking) and Lia.
+    @MainActor private func setUp() -> (AppModel, Bot, Bot) {
+        var state = AppState.initial
+        state.bots.append(Bot(name: "Lia", role: "Outra", orb: OrbConfig(color: "rosa", eyes: "pilulas", mouth: "sorriso", accessories: [])))
+        Store(directory: root).save(state)
+        Store(directory: root).flush()
+        let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)
+        return (model, model.bots[0], model.bots[1])
+    }
+
+    @MainActor private func run(_ model: AppModel, _ bot: Bot, _ arguments: JSONValue) throws -> String {
+        try model.schedule(arguments, orb: bot.id)
+    }
+
+    @Test @MainActor func aTaskIsCreatedAsARoutineOfTheOrbInItsOwnMode() throws {
+        let (model, atlas, _) = setUp()
+        let said = try run(model, atlas, call("create", name: "E-mails", prompt: "veja meus e-mails", when: every(minutes: 30)))
+
+        let routine = try #require(model.routines.first)
+        #expect(model.routines.count == 1)
+        #expect(routine.name == "E-mails" && routine.botID == atlas.id && routine.prompt == "veja meus e-mails")
+        #expect(routine.schedule == .everyMinutes(30) && routine.isEnabled)
+        #expect(routine.permissionMode == nil) // never more permissive than the Orb: it uses the Orb's
+        #expect(said.hasPrefix("Agendei “E-mails”: a cada 30 minutos. Próxima execução: "))
+        #expect(said.contains("aba Rotinas"))
+    }
+
+    @Test @MainActor func inAskModeTheResultWarnsThatEachRunWaitsForYou() throws {
+        let (model, atlas, _) = setUp()
+        model.update(atlas.id) { $0.permissionMode = .ask }
+        #expect(try run(model, atlas, call("create", name: "A", prompt: "x", when: daily9)).contains("espera a sua aprovação"))
+        model.update(atlas.id) { $0.permissionMode = .auto }
+        #expect(!(try run(model, atlas, call("create", name: "B", prompt: "x", when: daily9)).contains("aprovação")))
+    }
+
+    @Test @MainActor func aDailyTaskSaysWhenItRunsInWords() throws {
+        let (model, atlas, _) = setUp()
+        let said = try run(model, atlas, call("create", name: "Notícias", prompt: "resuma as notícias",
+                                              when: .object(["kind": .string("daily"), "hour": .number(9)])))
+        #expect(said.hasPrefix("Agendei “Notícias”: todo dia às 09:00. Próxima execução: "))
+    }
+
+    @Test @MainActor func theRowIsHighlightedAndThePanelOpensOnItsTab() throws {
+        let (model, atlas, _) = setUp()
+        model.selection = .bot(atlas.id)
+        model.showInspector = true
+        model.freshDuration = .seconds(60) // no fading under the test's feet
+        _ = try run(model, atlas, call("create", prompt: "x", when: daily9))
+        #expect(model.freshRoutine == model.routines[0].id)
+        #expect(model.takeTabRequest(of: atlas.id) == .routines)
+
+        // With the panel closed nothing is asked of it and nothing is marked: no row to highlight, no tap to feel.
+        model.freshRoutine = nil
+        model.showInspector = false
+        _ = try run(model, atlas, call("create", name: "Outra", prompt: "y", when: daily9))
+        #expect(model.takeTabRequest(of: atlas.id) == nil && model.freshRoutine == nil)
+    }
+
+    @Test @MainActor func theChatOfAnotherOrbIsNotSwitchedAway() throws {
+        let (model, atlas, lia) = setUp()
+        model.selection = .bot(lia.id)
+        model.showInspector = true
+        _ = try run(model, atlas, call("create", prompt: "x", when: daily9))
+        #expect(model.selectedBotID == lia.id && model.pendingChatRequest == nil)
+        #expect(model.freshRoutine == nil && model.takeTabRequest(of: lia.id) == nil) // no tap in Lia's panel for Atlas's task
+    }
+
+    @Test @MainActor func listShowsTheOrbsTasksAndOnlyThoseOfTheOrb() throws {
+        let (model, atlas, lia) = setUp()
+        #expect(try run(model, atlas, call("list")) == "Nenhuma tarefa agendada.")
+        _ = try run(model, atlas, call("create", name: "Manhã", prompt: "resuma", when: daily9))
+        _ = try run(model, lia, call("create", name: "Da Lia", prompt: "outra", when: daily9))
+        _ = try run(model, atlas, call("pause", name: "Manhã"))
+
+        let list = try run(model, atlas, call("list"))
+        #expect(list.contains("“Manhã”") && list.contains("todo dia às 09:00") && list.contains("pausada") && list.contains("Faz: resuma"))
+        #expect(!list.contains("Da Lia"))
+    }
+
+    @Test @MainActor func pauseAndResumeSwitchTheRoutineAndCountFromNow() throws {
+        let (model, atlas, _) = setUp()
+        _ = try run(model, atlas, call("create", name: "Manhã", prompt: "resuma", when: every(minutes: 30)))
+        #expect(try run(model, atlas, call("pause", name: "manhã")).hasPrefix("Pausei “Manhã”"))
+        // The model copies the name the way the results show it, quotes and all.
+        #expect(try run(model, atlas, call("resume", name: "“Manhã”")).hasPrefix("Retomei “Manhã”"))
+        _ = try run(model, atlas, call("pause", name: "\"Manhã\""))
+        #expect(!model.routines[0].isEnabled)
+        #expect(try run(model, atlas, call("pause", name: "Manhã")) == "“Manhã” já estava pausada.")
+
+        let said = try run(model, atlas, call("resume", name: "MANHA"))
+        #expect(said.hasPrefix("Retomei “Manhã”. Próxima execução: "))
+        #expect(model.routines[0].isEnabled)
+        // Switching it back on counts from now: its old last run must not make it due at once.
+        #expect(model.routines[0].nextRun > Date.now.addingTimeInterval(29 * 60))
+        #expect(try run(model, atlas, call("resume", name: "Manhã")) == "“Manhã” já estava ativa.")
+    }
+
+    @Test @MainActor func deleteRemovesTheRoutineAndItsConversation() throws {
+        let (model, atlas, _) = setUp()
+        _ = try run(model, atlas, call("create", name: "Manhã", prompt: "resuma", when: daily9))
+        let id = model.routines[0].id
+        model.store.saveRoutineConversation(Conversation(), routine: id, for: atlas.id)
+        model.store.flush()
+
+        #expect(try run(model, atlas, call("delete", name: "Manhã")) == "Apaguei “Manhã”.")
+        model.store.flush()
+        #expect(model.routines.isEmpty)
+        #expect(model.store.readRoutineConversation(routine: id, for: atlas.id).value == nil)
+    }
+
+    @Test @MainActor func anOrbNeverTouchesAnotherOrbsTasks() throws {
+        let (model, atlas, lia) = setUp()
+        _ = try run(model, lia, call("create", name: "Da Lia", prompt: "x", when: daily9))
+        for action in ["pause", "resume", "delete"] {
+            #expect(throws: ToolError.self, "\(action)") { try run(model, atlas, call(action, name: "Da Lia")) }
+        }
+        #expect(model.routines.count == 1 && model.routines[0].isEnabled)
+    }
+
+    @Test @MainActor func aNameIsMatchedWhateverTheCaseAndAccentsButNeverGuessed() throws {
+        let (model, atlas, _) = setUp()
+        _ = try run(model, atlas, call("create", name: "Resumo de e-mails", prompt: "x", when: daily9))
+        _ = try run(model, atlas, call("create", name: "Notícias", prompt: "y", when: daily9))
+        #expect(try run(model, atlas, call("pause", name: "  noticias ")).contains("Notícias"))
+        for wrong in ["Resumo", "notic", "inexistente"] {
+            do {
+                _ = try run(model, atlas, call("delete", name: wrong))
+                Issue.record("deleted “\(wrong)”")
+            } catch {
+                // It says which names there are, so the Orb can try again with one of them.
+                #expect(error.localizedDescription.contains("Resumo de e-mails") && error.localizedDescription.contains("Notícias"))
+            }
+        }
+        #expect(model.routines.count == 2)
+        #expect(throws: ToolError.self) { try ScheduleCommand(call("delete", name: "   ")) }
+    }
+
+    @Test @MainActor func twoTasksDoNotShareAName() throws {
+        let (model, atlas, lia) = setUp()
+        _ = try run(model, atlas, call("create", name: "Manhã", prompt: "x", when: daily9))
+        #expect(throws: ToolError.self) { try run(model, atlas, call("create", name: "manhã", prompt: "y", when: daily9)) }
+        _ = try run(model, lia, call("create", name: "Manhã", prompt: "z", when: daily9)) // another Orb's namespace
+        #expect(model.routines.count == 2)
+    }
+
+    @Test @MainActor func anOrbHasAtMostTwentyTasks() throws {
+        let (model, atlas, lia) = setUp()
+        for number in 1...AppModel.scheduledTaskLimit {
+            _ = try run(model, atlas, call("create", name: "Tarefa \(number)", prompt: "x", when: daily9))
+        }
+        #expect(throws: ToolError.self) { try run(model, atlas, call("create", name: "A 21ª", prompt: "x", when: daily9)) }
+        #expect(model.routines.count == AppModel.scheduledTaskLimit)
+        _ = try run(model, lia, call("create", name: "Da Lia", prompt: "x", when: daily9)) // the limit is per Orb
+        _ = try run(model, atlas, call("delete", name: "Tarefa 3"))
+        _ = try run(model, atlas, call("create", name: "A 21ª", prompt: "x", when: daily9))
+    }
+
+    @Test @MainActor func aRunOfATaskCannotCreateMoreTasksButCanStillLookAndPause() throws {
+        let (model, atlas, _) = setUp()
+        _ = try run(model, atlas, call("create", name: "Manhã", prompt: "x", when: daily9))
+        model.session(atlas.id).routineID = model.routines[0].id // as during its run
+        #expect(throws: ToolError.self) { try run(model, atlas, call("create", name: "Outra", prompt: "y", when: daily9)) }
+        #expect(model.routines.count == 1)
+        _ = try run(model, atlas, call("list"))
+        _ = try run(model, atlas, call("pause", name: "Manhã"))
+    }
+
+    @Test @MainActor func anOrbThatIsGoneCannotSchedule() {
+        let (model, _, _) = setUp()
+        #expect(throws: ToolError.self) { try model.schedule(call("list"), orb: UUID()) }
+    }
+
+    @Test @MainActor func theNativeToolReachesTheModelThroughItsHandler() async throws {
+        let (model, atlas, _) = setUp()
+        var context = ToolContext(workingDirectory: root, botID: atlas.id)
+        context.schedule = model.scheduleHandler(for: atlas.id)
+        let said = try await ScheduleTool().run(call("create", name: "Manhã", prompt: "x", when: daily9), context: context)
+        #expect(said.hasPrefix("Agendei “Manhã”") && model.routines.count == 1)
+        await #expect(throws: ToolError.self) { try await ScheduleTool().run(call("create", name: "Manhã", prompt: "x", when: daily9), context: context) }
+    }
+
+    // The panel's own words and actions, which the tool shares with it.
+
+    @Test func theRowSaysWhenAnIntervalTaskRunsNextAndNothingWhilePaused() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        var routine = Routine(name: "E-mails", botID: UUID(), prompt: "x", schedule: .everyMinutes(30), createdAt: start)
+        #expect(RoutineText.nextRun(of: routine, now: start)?.hasPrefix("Próxima: em 30 min") == true)
+        #expect(RoutineText.nextRun(of: routine, now: start.addingTimeInterval(20 * 60))?.hasPrefix("Próxima: em 10 min") == true)
+        routine.isEnabled = false
+        #expect(RoutineText.nextRun(of: routine, now: start) == nil) // the row says "Pausada" instead
+    }
+
+    @Test @MainActor func theToggleAndTheTrashButtonDoWhatTheToolDoes() throws {
+        let (model, atlas, _) = setUp()
+        _ = try run(model, atlas, call("create", name: "Manhã", prompt: "x", when: every(minutes: 30)))
+        let id = model.routines[0].id
+        model.setRoutineEnabled(id, false)
+        #expect(!model.routines[0].isEnabled)
+        model.setRoutineEnabled(id, true)
+        #expect(model.routines[0].isEnabled && model.routines[0].nextRun > .now.addingTimeInterval(29 * 60))
+        model.setRoutineEnabled(UUID(), false) // a row that was deleted meanwhile
+        model.deleteRoutine(id)
+        #expect(model.routines.isEmpty)
+        #expect(try run(model, atlas, call("list")) == "Nenhuma tarefa agendada.")
+    }
+
+    @Test @MainActor func theHighlightGoesAwayByItself() async throws {
+        let (model, atlas, _) = setUp()
+        model.selection = .bot(atlas.id)
+        model.showInspector = true
+        model.freshDuration = .milliseconds(50)
+        _ = try run(model, atlas, call("create", prompt: "x", when: daily9))
+        #expect(model.freshRoutine != nil)
+        await waitUntil("the highlight to fade") { model.freshRoutine == nil }
+    }
+}
+
+// MARK: - From a chat message to a row in the panel
+
+/// A model that asks for one `schedule` call and then says it is done.
+private struct SchedulingModel: LLMClient {
+    let arguments: JSONValue
+    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
+        let answered = messages.contains { $0.role == .tool }
+        return AsyncThrowingStream { continuation in
+            if answered {
+                continuation.yield(.text("Pronto."))
+            } else {
+                continuation.yield(.toolCalls([ToolCallRequest(id: "c1", name: "schedule", arguments: arguments.jsonString)]))
+            }
+            continuation.yield(.finished(answered ? .done : .toolUse, nil))
+            continuation.finish()
+        }
+    }
+}
+
+extension ScheduledTasksTests {
+    @MainActor private func chat(_ mode: PermissionMode) throws -> (AppModel, Bot) {
+        let (model, atlas, _) = setUp()
+        model.providers = [ProviderAccount(kind: .custom)]
+        model.defaultModel = "custom/modelo"
+        model.update(atlas.id) { $0.permissionMode = mode }
+        model.clientOverride = { SchedulingModel(arguments: call("create", name: "E-mails", prompt: "veja meus e-mails", when: every(minutes: 30))) }
+        return (model, atlas)
+    }
+
+    @MainActor private func toolRows(_ model: AppModel, _ bot: Bot) -> [ToolCall] {
+        model.transcript(bot.id).compactMap { if case .tool(let call) = $0.kind { call } else { nil } }
+    }
+
+    @Test @MainActor func askingInTheChatSchedulesATaskAndTheChatSaysSo() async throws {
+        let (model, atlas) = try chat(.auto)
+        #expect(model.send("verifique meus e-mails a cada 30 minutos", to: atlas.id))
+        await waitUntil("the turn to end") { !model.isWorking(atlas.id) && model.routines.count == 1 }
+
+        let row = try #require(toolRows(model, atlas).first)
+        #expect(row.kind == .schedule && row.state == .done && row.title == "Agendando tarefa")
+        #expect(row.output?.hasPrefix("Agendei “E-mails”: a cada 30 minutos.") == true)
+        #expect(model.routines[0].botID == atlas.id && model.routines[0].permissionMode == nil)
+    }
+
+    @Test @MainActor func inAskModeTheCardSaysWhatWillRunAndWhenAndNothingExistsUntilYouAllow() async throws {
+        let (model, atlas) = try chat(.ask)
+        #expect(model.send("verifique meus e-mails a cada 30 minutos", to: atlas.id))
+        await waitUntil("the card") { !model.pendingApprovals(of: atlas.id).isEmpty }
+        let card = try #require(model.pendingApprovals(of: atlas.id).first)
+        #expect(card.title == "Agendando tarefa")
+        #expect(card.command == "“E-mails” · A cada 30 minutos · veja meus e-mails")
+        #expect(card.suggestions == [PermissionRule(family: .schedule)])
+        #expect(model.routines.isEmpty)
+
+        model.decide(.once, approvalID: card.id, botID: atlas.id)
+        await waitUntil("the task") { model.routines.count == 1 }
+        await waitUntil("the turn to end") { !model.isWorking(atlas.id) }
+    }
+
+    @Test @MainActor func inAskModeACallThatWillBeRefusedShowsNoCardAndTheChatSaysWhy() async throws {
+        let (model, atlas) = try chat(.ask)
+        model.clientOverride = { SchedulingModel(arguments: call("create", name: "E-mails", prompt: "veja", when: every(minutes: 5))) }
+        #expect(model.send("verifique meus e-mails a cada 5 minutos", to: atlas.id))
+        await waitUntil("the turn to end") { !model.isWorking(atlas.id) && !toolRows(model, atlas).isEmpty }
+        #expect(model.pendingApprovals(of: atlas.id).isEmpty && model.routines.isEmpty)
+        let row = try #require(toolRows(model, atlas).first)
+        #expect(row.state == .failed && row.output?.contains("15 a 720") == true)
+    }
+
+    @Test @MainActor func denyingTheCardSchedulesNothing() async throws {
+        let (model, atlas) = try chat(.ask)
+        #expect(model.send("verifique meus e-mails a cada 30 minutos", to: atlas.id))
+        await waitUntil("the card") { !model.pendingApprovals(of: atlas.id).isEmpty }
+        model.decide(.deny, approvalID: model.pendingApprovals(of: atlas.id)[0].id, botID: atlas.id)
+        await waitUntil("the turn to end") { !model.isWorking(atlas.id) }
+        #expect(model.routines.isEmpty)
+    }
+
+    @Test @MainActor func readOnlyRefusesToScheduleButCanStillList() async throws {
+        let (model, atlas) = try chat(.readOnly)
+        #expect(model.send("verifique meus e-mails a cada 30 minutos", to: atlas.id))
+        await waitUntil("the turn to end") { !model.isWorking(atlas.id) && !toolRows(model, atlas).isEmpty }
+        #expect(model.routines.isEmpty)
+        #expect(toolRows(model, atlas).first?.state == .failed)
+    }
+}
+
+// MARK: - Claude Code's end
+
+@Suite final class ScheduleMailboxTests {
+    let root = FileManager.default.temporaryDirectory.appending(path: "OrbMailbox-\(UUID().uuidString)")
+
+    deinit { try? FileManager.default.removeItem(at: root) }
+
+    @Test @MainActor func aCallFromTheServerIsAnsweredByTheApp() async throws {
+        let orb = UUID()
+        var seen: [(UUID, JSONValue)] = []
+        let server = ScheduleMailbox.Server(directory: root.appending(path: "caixa")) { id, arguments in
+            seen.append((id, arguments))
+            if arguments["action"]?.string == "delete" { throw ToolError("Não achei a tarefa.") }
+            return "Agendei."
+        }
+        server.start()
+        defer { server.stop() }
+        let handler = ScheduleMailbox.client(directory: server.directory, orb: orb)
+
+        #expect(try await handler(call("create", prompt: "x", when: daily9)) == "Agendei.")
+        #expect(seen.count == 1 && seen[0].0 == orb && seen[0].1["action"]?.string == "create")
+        do {
+            _ = try await handler(call("delete", name: "A"))
+            Issue.record("an error went through as an answer")
+        } catch {
+            #expect(error.localizedDescription == "Não achei a tarefa.")
+        }
+        // Nothing is left behind once the calls are over.
+        #expect(try FileManager.default.contentsOfDirectory(atPath: server.directory.path).isEmpty)
+    }
+
+    @Test @MainActor func requestsLeftByAnEarlierRunAreSweptWhenTheAppStartsListening() throws {
+        let directory = root.appending(path: "caixa")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: directory.appending(path: "velho.json"))
+        let server = ScheduleMailbox.Server(directory: directory) { _, _ in "" }
+        server.start()
+        defer { server.stop() }
+        #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
+    }
+
+    @Test @MainActor func aMailboxThatIsGoneIsReportedNotThrownAsAFileError() async {
+        let handler = ScheduleMailbox.client(directory: root.appending(path: "nao-existe"), orb: UUID())
+        do {
+            _ = try await handler(call("list"))
+            Issue.record("answered from nowhere")
+        } catch {
+            #expect(error.localizedDescription.hasPrefix("Não consegui falar com o app"))
+        }
+    }
+
+    @Test @MainActor func theServerGivesUpWhenNobodyAnswers() async throws {
+        let directory = root.appending(path: "vazia")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let handler = ScheduleMailbox.client(directory: directory, orb: UUID(), timeout: .milliseconds(200))
+        await #expect(throws: ToolError.self) { try await handler(call("list")) }
+        #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).count == 1) // the unanswered request; the app sweeps it
+    }
+
+    @Test func theServerProcessIsToldWhereTheMailboxIsAndForWhichOrb() throws {
+        let orb = UUID()
+        let config = OrbToolsMCPServer.config(directory: root, scheduleMailbox: root.appending(path: "caixa"), orb: orb)
+        let options = try #require(OrbToolsMCPServer.Options(arguments: config.arguments))
+        #expect(options.scheduleMailbox == root.appending(path: "caixa") && options.orb == orb)
+        #expect(options.context.schedule != nil)
+        // Without them the tool is there but says it is unavailable.
+        let plain = try #require(OrbToolsMCPServer.Options(arguments: OrbToolsMCPServer.config(directory: root).arguments))
+        #expect(plain.scheduleMailbox == nil && plain.orb == nil && plain.context.schedule == nil)
+    }
+
+    @Test func theToolIsCalledThroughTheMcpServerLikeTheOthers() async throws {
+        var context = ToolContext(workingDirectory: root)
+        context.schedule = { arguments in "ok: \(arguments["action"]?.string ?? "")" }
+        let reply = try #require(await OrbToolsMCPServer.handle(.object([
+            "jsonrpc": .string("2.0"), "id": .number(1), "method": .string("tools/call"),
+            "params": .object(["name": .string("schedule"), "arguments": call("list")]),
+        ]), context: context))
+        #expect(reply["result"]?["content"]?.array?.first?["text"]?.string == "ok: list")
+        #expect(reply["result"]?["isError"] == .bool(false))
+    }
+}
