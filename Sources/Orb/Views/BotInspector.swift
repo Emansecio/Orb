@@ -41,16 +41,24 @@ struct BotInspector: View {
                 header(bot)
                 quickActions(bot)
                 InspectorTabBar(selection: $tab)
-                Form {
-                    switch tab {
-                    case .general: generalTab(bot)
-                    case .memory: memoryTab(bot)
-                    case .folder: folderTab(bot)
-                    case .routines: routinesTab(bot)
+                // The tab's content swaps in a ZStack, cross-fading (§2.13): a grouped Form's own diff is unpredictable, so
+                // each tab is a Form of its own. The scroll returns to the top with every tab, and the tasks below live on
+                // the outer stack, so they do not run again.
+                ZStack {
+                    Form {
+                        switch tab {
+                        case .general: generalTab(bot)
+                        case .memory: memoryTab(bot)
+                        case .folder: folderTab(bot)
+                        case .routines: routinesTab(bot)
+                        }
                     }
+                    .formStyle(.grouped)
+                    .scrollContentBackground(.hidden)
+                    .id(tab)
+                    .transition(.opacity)
                 }
-                .formStyle(.grouped)
-                .scrollContentBackground(.hidden)
+                .motion(Motion.crossFade, value: tab)
                 // The task the Orb just scheduled from the chat (`AppModel.freshRoutine`, only set with this panel on screen)
                 // arrives with a tap you can feel.
                 .sensoryFeedback(.levelChange, trigger: model.freshRoutine) { _, new in new != nil }
@@ -546,13 +554,15 @@ struct BotInspector: View {
 private struct InspectorTabBar: View {
     @Binding var selection: InspectorTab
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The one highlight slides from the old tab to the new one through this namespace.
+    @Namespace private var highlight
 
     var body: some View {
         HStack(alignment: .top, spacing: 2) {
             ForEach(InspectorTab.allCases) { tab in
                 let isSelected = tab == selection
                 Button {
-                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { selection = tab }
+                    selection = tab
                 } label: {
                     VStack(spacing: 3) {
                         Image(systemName: tab.symbol)
@@ -568,7 +578,13 @@ private struct InspectorTabBar: View {
                     .padding(.top, 6)
                     .frame(maxWidth: .infinity, minHeight: 56, maxHeight: 56, alignment: .top)
                     .padding(.horizontal, 2)
-                    .background(isSelected ? Palette.ghostSelected : .clear, in: .rect(cornerRadius: 8))
+                    .background {
+                        if isSelected {
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Palette.ghostSelected)
+                                .matchedGeometryEffect(id: SidebarSelection.id, in: highlight)
+                        }
+                    }
                     .contentShape(.rect(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
@@ -577,6 +593,9 @@ private struct InspectorTabBar: View {
                 .help(tab.title)
             }
         }
+        // Bound to the selection alone, as in the sidebar: the highlight slides and the lit title changes with it; it
+        // jumps under Reduce Motion.
+        .animation(Motion.selection(reduceMotion: reduceMotion), value: selection)
         .padding(.horizontal, 12)
         .padding(.bottom, 4)
         // For VoiceOver and the keyboard this is one group of tabs, which a segmented picker already is.
