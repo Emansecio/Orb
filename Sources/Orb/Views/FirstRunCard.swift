@@ -595,76 +595,91 @@ struct FirstRunBanner: View {
     @State private var isPulsing = false
 
     var body: some View {
-        if shows {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: steps.connectedName == nil ? "cpu" : "checkmark.circle.fill")
-                        .foregroundStyle(steps.connectedName == nil ? Palette.muted : Palette.ok)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(steps.connectedName.map { "Pronto: \($0) conectado." } ?? "Conecte um modelo para começar")
-                            .font(.system(size: 13, weight: .semibold))
-                        Text(subtitle)
-                            .font(.system(size: 12))
-                            .foregroundStyle(steps.failure == nil ? Palette.muted : Palette.warn)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    Spacer(minLength: 0)
+        // The banner is a row of its own above the composer: it rises in and fades out, and the composer goes up and
+        // down with it (§2.13). It is bound to the one fact that decides it, never to the conversation. A new Orb's chat is
+        // a new view (`.id(botID)`), so there the banner is simply there.
+        VStack(spacing: 0) {
+            if shows { banner.transition(.adapted(.rise, reduceMotion: reduceMotion)) }
+        }
+        .motion(Motion.enter, value: shows)
+    }
+
+    private var banner: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: steps.connectedName == nil ? "cpu" : "checkmark.circle.fill")
+                    .foregroundStyle(steps.connectedName == nil ? Palette.muted : Palette.ok)
+                    .contentTransition(.opacity)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(steps.connectedName.map { "Pronto: \($0) conectado." } ?? "Conecte um modelo para começar")
+                        .font(.system(size: 13, weight: .semibold))
+                        .contentTransition(.opacity)
+                    Text(subtitle)
+                        .font(.system(size: 12))
+                        .foregroundStyle(steps.failure == nil ? Palette.muted : Palette.warn)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .contentTransition(.opacity)
                 }
-                if steps.connectedName == nil {
-                    WrappingLayout(spacing: 8) {
-                        if steps.claude?.isInstalled == true {
-                            Button(steps.claude?.isLoggedIn == true ? "Usar Claude Code" : "Entrar com Claude Code") {
-                                steps.connectClaudeCode(model: model)
-                            }
-                            .buttonStyle(PrimaryPillStyle())
-                            .help(steps.claude?.isLoggedIn == true ? Tip.useClaudeCode : Tip.signInClaudeCode)
-                            .disabled(steps.working == .claudeCode)
+                Spacer(minLength: 0)
+            }
+            if steps.connectedName == nil {
+                WrappingLayout(spacing: 8) {
+                    if steps.claude?.isInstalled == true {
+                        Button(steps.claude?.isLoggedIn == true ? "Usar Claude Code" : "Entrar com Claude Code") {
+                            steps.connectClaudeCode(model: model)
                         }
-                        Button("Entrar com ChatGPT") { steps.connectChatGPT(model: model) }
-                            .buttonStyle(steps.claude?.isInstalled == true ? AnyButtonStyle(SecondaryPillStyle()) : AnyButtonStyle(PrimaryPillStyle()))
-                            .help(Tip.signInChatGPT)
-                            .disabled(steps.working == .chatgpt)
-                        ForEach(steps.localServers) { kind in
-                            Button("Usar \(kind.shortName)") { steps.connectLocal(kind, model: model) }
-                                .buttonStyle(SecondaryPillStyle())
-                                .help(Tip.useLocalServer(kind.shortName))
-                                .disabled(steps.working == .local(kind))
-                        }
-                        Button("Colar chave de API…") { isAskingKey = true }
+                        .buttonStyle(PrimaryPillStyle())
+                        .help(steps.claude?.isLoggedIn == true ? Tip.useClaudeCode : Tip.signInClaudeCode)
+                        .disabled(steps.working == .claudeCode)
+                    }
+                    Button("Entrar com ChatGPT") { steps.connectChatGPT(model: model) }
+                        .buttonStyle(steps.claude?.isInstalled == true ? AnyButtonStyle(SecondaryPillStyle()) : AnyButtonStyle(PrimaryPillStyle()))
+                        .help(Tip.signInChatGPT)
+                        .disabled(steps.working == .chatgpt)
+                    ForEach(steps.localServers) { kind in
+                        Button("Usar \(kind.shortName)") { steps.connectLocal(kind, model: model) }
                             .buttonStyle(SecondaryPillStyle())
-                            .popover(isPresented: $isAskingKey, arrowEdge: .top) { keyPopover }
-                            .help(Tip.pasteKey)
-                            .disabled(steps.working == .key)
-                        if steps.working != nil {
-                            Button("Cancelar") { steps.cancel() }
-                                .buttonStyle(GhostStyle())
-                                .help(Tip.stopConnecting)
-                        } else if steps.failure != nil {
-                            Button("Tentar de novo", action: retry)
-                                .buttonStyle(GhostStyle())
-                                .help(Tip.retryConnecting)
-                        }
-                        Button("Ajustes") { SettingsRouter.open(.models, using: openSettings) }
-                            .buttonStyle(GhostStyle())
-                            .help(Tip.modelSettings)
+                            .help(Tip.useLocalServer(kind.shortName))
+                            .disabled(steps.working == .local(kind))
                     }
+                    Button("Colar chave de API…") { isAskingKey = true }
+                        .buttonStyle(SecondaryPillStyle())
+                        .popover(isPresented: $isAskingKey, arrowEdge: .top) { keyPopover }
+                        .help(Tip.pasteKey)
+                        .disabled(steps.working == .key)
+                    if steps.working != nil {
+                        Button("Cancelar") { steps.cancel() }
+                            .buttonStyle(GhostStyle())
+                            .help(Tip.stopConnecting)
+                            .transition(.opacity)
+                    } else if steps.failure != nil {
+                        Button("Tentar de novo", action: retry)
+                            .buttonStyle(GhostStyle())
+                            .help(Tip.retryConnecting)
+                            .transition(.opacity)
+                    }
+                    Button("Ajustes") { SettingsRouter.open(.models, using: openSettings) }
+                        .buttonStyle(GhostStyle())
+                        .help(Tip.modelSettings)
                 }
             }
-            .padding(14)
-            .card(radius: 14, stroke: isPulsing ? Palette.accent : Palette.line, lineWidth: isPulsing ? 2 : 1)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: isPulsing)
-            .frame(maxWidth: 760)
-            .padding(.horizontal, 28)
-            .task {
-                steps.attach(model)
-                await steps.detect()
-            }
-            .onChange(of: model.setupNudge) {
-                isPulsing = true
-                Task {
-                    try? await Task.sleep(for: .milliseconds(900))
-                    isPulsing = false
-                }
+        }
+        .padding(14)
+        .card(radius: 14, stroke: isPulsing ? Palette.accent : Palette.line, lineWidth: isPulsing ? 2 : 1)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: isPulsing)
+        // The phrases and the buttons that change as the connection goes (waiting, failed, ready) swap in place.
+        .animateChanges(of: BannerPhase(connectedName: steps.connectedName, working: steps.working, failure: steps.failure?.message))
+        .frame(maxWidth: 760)
+        .padding(.horizontal, 28)
+        .task {
+            steps.attach(model)
+            await steps.detect()
+        }
+        .onChange(of: model.setupNudge) {
+            isPulsing = true
+            Task {
+                try? await Task.sleep(for: .milliseconds(900))
+                isPulsing = false
             }
         }
     }
@@ -718,6 +733,13 @@ struct FirstRunBanner: View {
     private func retry() {
         if steps.failure?.choice == .key { isAskingKey = true } else { steps.retry(model: model) }
     }
+}
+
+/// What the banner's phrases and buttons depend on, as one value (the animation of their swaps is bound to it).
+private struct BannerPhase: Equatable {
+    var connectedName: String?
+    var working: FirstRunModel.Choice?
+    var failure: String?
 }
 
 /// Lets two different button styles be chosen at run time.
