@@ -94,7 +94,7 @@ struct ConversationsMenu: View {
                                                     onDelete: { delete(entry.id) })
                                         .id(entry.id)
                                         // A deleted conversation just fades, quickly; the others close the gap (see `delete`).
-                                        .transition(.adapted(.opacity.animation(Motion.exit), reduceMotion: reduceMotion))
+                                        .transition(query.isEmpty ? .adapted(.opacity.animation(Motion.exit), reduceMotion: reduceMotion) : .identity)
                                 }
                             }
                         }

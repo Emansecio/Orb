@@ -601,6 +601,9 @@ private struct NoticeLine: View {
                 .transition(.opacity)
             }
         }
+        // The buttons come with the notice's turn to be the last thing in the chat (and go when something follows): the
+        // transition was there, the trigger was not (§2.13).
+        .motion(Motion.content, value: offersActions && !actions.isEmpty)
         .frame(maxWidth: .infinity)
         .padding(.vertical, 4)
         .padding(.horizontal, 24)

@@ -181,6 +181,7 @@ struct CommandPalette: View {
                     .font(.system(size: 13))
                     .foregroundStyle(Palette.muted)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(.quiet)
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
@@ -210,6 +211,7 @@ struct CommandPalette: View {
                         proxy.scrollTo(results[selected].id)
                     }
                 }
+                .transition(.quiet)
             }
             Divider().opacity(0.6)
             HStack(spacing: 14) {

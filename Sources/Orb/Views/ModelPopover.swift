@@ -13,6 +13,7 @@ struct ModelPopover: View {
     /// Providers the user folded (or that start folded because the list is long).
     @State private var folded: Set<ProviderKind> = []
     @State private var didSetFolds = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let selection = model.live(botID).modelID
@@ -39,6 +40,8 @@ struct ModelPopover: View {
                             ForEach(group.models) { item in
                                 let ref = ModelRef(provider: group.provider, model: item.id).text
                                 ModelPopoverRow(name: item.name, detail: "", isSelected: selection == ref, help: item.id) { choose(ref) }
+                                    // Folding a provider fades its rows (the popover keeps its size); typing in the search does not.
+                                    .transition(isSearch ? .identity : .quiet)
                             }
                         }
                     }
@@ -54,6 +57,7 @@ struct ModelPopover: View {
                             .foregroundStyle(Palette.muted)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 16)
+                            .transition(.quiet)
                     }
                 }
                 .padding(.bottom, 4)
@@ -121,6 +125,8 @@ struct ModelPopover: View {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 8, weight: .bold))
                         .rotationEffect(.degrees(isFolded ? 0 : 90))
+                        // The arrow turns in the content curve; under Reduce Motion it just takes its new direction.
+                        .animation(Motion.panel(reduceMotion: reduceMotion), value: isFolded)
                         .frame(width: 10)
                 }
                 Text(group.provider.label)

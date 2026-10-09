@@ -58,7 +58,7 @@ struct MemoryTab: View {
             Section {
                 ForEach(shown) { item in
                     MemoryRow(item: item) { model.memoryUndo.forget(item, of: botID, in: model) }
-                        .transition(MemoryMotion.forgotten(reduceMotion: reduceMotion))
+                        .transition(MemoryMotion.forgotten(reduceMotion: reduceMotion, isSearching: !query.isEmpty))
                 }
                 if shown.count < group.items.count {
                     Button("Ver todos (\(group.items.count))…") { showAll(group.kind) }
@@ -274,7 +274,7 @@ struct MemorySheet: View {
                 Section {
                     ForEach(group.items) { item in
                         MemoryRow(item: item, lineLimit: 4) { model.memoryUndo.forget(item, of: botID, in: model) }
-                            .transition(MemoryMotion.forgotten(reduceMotion: reduceMotion))
+                            .transition(MemoryMotion.forgotten(reduceMotion: reduceMotion, isSearching: !query.isEmpty))
                     }
                 } header: {
                     Text("\(group.title) · \(group.items.count)")
@@ -312,8 +312,9 @@ struct MemorySheet: View {
 
 enum MemoryMotion {
     /// A page of memory that was forgotten: it only fades, quickly; the others close the gap.
-    static func forgotten(reduceMotion: Bool) -> AnyTransition {
-        .adapted(.opacity.animation(Motion.exit), reduceMotion: reduceMotion)
+    /// While a search is typed the rows that stop matching leave at once (typing is not an animation).
+    static func forgotten(reduceMotion: Bool, isSearching: Bool = false) -> AnyTransition {
+        isSearching ? .identity : .adapted(.opacity.animation(Motion.exit), reduceMotion: reduceMotion)
     }
 }
 
