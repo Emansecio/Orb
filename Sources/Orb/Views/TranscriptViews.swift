@@ -138,12 +138,12 @@ private struct BotMessage: View {
             .foregroundStyle(Palette.ink)
             .lineSpacing(Palette.conversationLineSpacing)
             .textSelection(.enabled)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-            .background(Palette.agentBubble, in: .rect(cornerRadius: 18))
+            // No bubble: the reply is text beside its Orb, the first line level with the avatar's middle.
+            .padding(.top, 5)
+            .padding(.bottom, 2)
             .overlay(alignment: .bottomTrailing) {
-                // Beside the bubble, in the space its right padding leaves; the row's hover keeps it up while the
-                // pointer travels to it.
+                // Past the text's last line end, in the space the right padding leaves; the row's hover keeps it up
+                // while the pointer travels to it.
                 if live == nil {
                     MessageActions(text: text)
                         .offset(x: 62)
@@ -151,10 +151,10 @@ private struct BotMessage: View {
                         .allowsHitTesting(hovering)
                 }
             }
-            .padding(.leading, 40)
+            .padding(.leading, 44)
             .padding(.trailing, 90)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(alignment: .bottomLeading) {
+            .overlay(alignment: .topLeading) {
                 // The last reply of the chat has the one living Orb in view (it works, celebrates, watches you type, and
                 // rests once idle); the ones above are still, in the same resting pose. When it stops being the last (a tool
                 // line or a new message came in) the live one may be mid-expression: the two cross-fade (0.15 s) instead
