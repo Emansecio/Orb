@@ -773,6 +773,7 @@ struct ApprovalCard: View {
                     .padding(.vertical, 7)
                     .background(Palette.raised.opacity(0.6), in: .rect(cornerRadius: 8))
                     .accessibilityLabel("Instrução ao negar")
+                    .transition(.adapted(.unfold, reduceMotion: reduceMotion))
             } else {
                 Button { showsNote = true } label: {
                     Label("Dizer o que fazer em vez disso", systemImage: "text.bubble")
@@ -782,6 +783,7 @@ struct ApprovalCard: View {
                 }
                 .buttonStyle(.plain)
                 .help(Tip.denyWithNote)
+                .transition(.opacity)
             }
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 6) { denyButton; Spacer(minLength: 8); allowControl }
@@ -791,6 +793,9 @@ struct ApprovalCard: View {
                 }
             }
         }
+        // The field opens under the text (4 pt down) and the link gives way by fading; the card grows in `Motion.content`
+        // (§2.13). Focus goes to the field at once.
+        .motion(Motion.content, value: showsNote)
         .padding(14)
         .card(radius: 12, stroke: Palette.lineStrong)
         .overlay {
