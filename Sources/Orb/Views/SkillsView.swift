@@ -224,7 +224,7 @@ private struct InstalledSkillRow: View {
         .padding(14)
         .card(radius: 14)
         .opacity(skill.isEnabled ? 1 : 0.55)
-        .animation(.snappy(duration: 0.2), value: skill.isEnabled)
+        .animateChanges(of: skill.isEnabled)
     }
 
     private func copy() {

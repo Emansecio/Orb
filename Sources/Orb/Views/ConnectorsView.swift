@@ -285,7 +285,7 @@ private struct ConnectorCard: View {
         .padding(14)
         .card(radius: 14)
         .opacity(connector.isEnabled ? 1 : 0.55)
-        .animation(.snappy(duration: 0.2), value: connector.isEnabled)
+        .animateChanges(of: connector.isEnabled)
         .animateChanges(of: status)
         .animateChanges(of: test)
     }
