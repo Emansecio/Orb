@@ -265,6 +265,7 @@ private struct MacPermissionsHeader: View {
             Spacer()
             Button("Verificar de novo", action: recheck)
                 .controlSize(.small)
+                .help(Tip.recheckPermissions)
         }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
@@ -285,6 +286,7 @@ private struct MacPermissionRow: View {
                 if let action {
                     Button(action.title) { perform(action) }
                         .controlSize(.small)
+                        .help(Tip.permissionAction(action))
                         .disabled(isAsking)
                 }
             }
@@ -325,9 +327,11 @@ private struct NotificationRow: View {
                 switch state {
                 case .notDetermined?:
                     Button("Pedir agora") { Task { await model.askNotifications() } }.controlSize(.small)
+                        .help(Tip.askNotifications)
                 case .denied?:
                     Button("Abrir Ajustes do Sistema") { NSWorkspace.shared.open(NotificationPermission.settingsURL) }
                         .controlSize(.small)
+                        .help(Tip.openSystemNotifications)
                 default:
                     EmptyView()
                 }
@@ -379,7 +383,7 @@ struct OpenPrivacySettingsButton: View {
         .buttonStyle(.plain)
         .foregroundStyle(Palette.accentText)
         .disabled(isWorking)
-        .help("Pede a permissão ao macOS ou abre Ajustes do Sistema → \(problem.settingsPath)")
+        .help("Pede a permissão ao macOS ou abre Ajustes do Sistema, em \(problem.settingsPath)")
         .accessibilityLabel("Permitir: \(problem.paneTitle)")
     }
 

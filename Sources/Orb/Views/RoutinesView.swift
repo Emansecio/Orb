@@ -70,7 +70,7 @@ struct RoutinesView: View {
                     newRoutine(nil)
                 }
                 .disabled(model.bots.isEmpty)
-                .help("Nova rotina")
+                .help(Tip.newRoutine)
             }
         }
         .onAppear(perform: takeRequest)
@@ -126,6 +126,7 @@ private struct RoutinesEmptyState: View {
             }
             Button("Nova rotina", systemImage: "plus", action: onNew)
                 .buttonStyle(PrimaryPillStyle())
+                .help(Tip.newRoutine)
                 .disabled(!canCreate)
             if !canCreate {
                 Text("Crie um Orb primeiro: é ele quem faz a rotina.")
@@ -193,6 +194,7 @@ private struct TemplateCard: View {
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
+        .help(Tip.routineTemplate)
         .onHover { isHovering = $0 }
         .accessibilityLabel("\(template.title), \(template.whenText)")
         .accessibilityHint("Abre o editor já preenchido")
@@ -234,7 +236,7 @@ private struct RoutineCard: View {
                     .toggleStyle(.switch)
                     .labelsHidden()
                     .controlSize(.small)
-                    .help(routine.isEnabled ? "Pausar esta rotina" : "Ativar esta rotina")
+                    .help(Tip.routineToggle(isOn: routine.isEnabled))
             }
             Text(routine.name)
                 .font(.system(size: 15, weight: .semibold))
@@ -255,15 +257,18 @@ private struct RoutineCard: View {
             }
             HStack {
                 Button("Editar", action: onEdit)
+                    .help(Tip.editRoutine)
                 Button("Ver conversa", systemImage: "text.bubble", action: onOpen)
+                    .help(Tip.routineConversation)
                 Spacer()
                 if isRunning {
                     Label("Rodando…", systemImage: "hourglass").foregroundStyle(Palette.muted)
                 } else if isQueued {
                     Label("Na fila", systemImage: "clock").foregroundStyle(Palette.muted)
-                        .help("Roda assim que o Orb terminar o que está fazendo")
+                        .help(Tip.queuedRoutine)
                 } else {
                     Button("Rodar agora", systemImage: "play.fill", action: onRun)
+                        .help(Tip.runRoutineNow)
                 }
             }
             .controlSize(.small)
@@ -351,6 +356,7 @@ private struct RunLine: View {
             .contentShape(.rect(cornerRadius: 6))
         }
         .buttonStyle(RunLineStyle())
+        .help(Tip.openRunReport)
         .padding(.horizontal, -6)
         .accessibilityLabel("\(run.succeeded ? "Deu certo" : "Não deu certo"), \(RoutineText.stamp(run.date)). \(run.summary)")
         .accessibilityHint("Abre o relatório desta execução")
@@ -444,18 +450,22 @@ private struct RoutineRunSheet: View {
         HStack(spacing: 4) {
             Button("Copiar", systemImage: "doc.on.doc") { copy(run) }
                 .buttonStyle(GhostStyle())
+                .help(Tip.copyReport)
             if let fileURL {
                 Button("Abrir arquivo", systemImage: "doc.text") { NSWorkspace.shared.open(fileURL) }
                     .buttonStyle(GhostStyle())
+                    .help(Tip.openReportFile)
             }
             Button("Ver conversa", systemImage: "text.bubble", action: onConversation)
                 .buttonStyle(GhostStyle())
+                .help(Tip.routineConversation)
             if !run.succeeded {
                 Button("Rodar de novo", systemImage: "arrow.clockwise") {
                     model.runRoutine(routineID)
                     dismiss()
                 }
                 .buttonStyle(GhostStyle())
+                .help(Tip.runRoutineAgain)
                 .disabled(model.isRoutineRunning(routineID))
             }
             Spacer(minLength: 8)
@@ -647,6 +657,7 @@ struct RoutineEditor: View {
                                       text: $routine.prompt, minHeight: 70)
                 if isNew {
                     Toggle("Rodar uma vez agora, para testar", isOn: $runsNow)
+                        .help(Tip.runOnceNow)
                 }
             }
             Section {
@@ -656,6 +667,7 @@ struct RoutineEditor: View {
                         Text(PermissionMode.auto.label).tag(PermissionMode?.some(.auto))
                         Text(PermissionMode.readOnly.label).tag(PermissionMode?.some(.readOnly))
                     }
+                    .help(Tip.routinePermissions)
                     Text(advancedExplanation)
                         .font(.caption)
                         .foregroundStyle(Palette.muted)
@@ -720,7 +732,9 @@ struct RoutineEditor: View {
             .foregroundStyle(Palette.warn)
             HStack(spacing: 8) {
                 Button("Usar Automático") { choose(.auto) }
+                    .help(Tip.routineUseAuto)
                 Button("Usar Só leitura") { choose(.readOnly) }
+                    .help(Tip.routineUseReadOnly)
             }
             .buttonStyle(SecondaryPillStyle())
             .controlSize(.small)

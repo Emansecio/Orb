@@ -60,6 +60,7 @@ struct MemoryTab: View {
                 if shown.count < group.items.count {
                     Button("Ver todos (\(group.items.count))…") { showAll(group.kind) }
                         .buttonStyle(.link)
+                        .help(Tip.memoryShowKind)
                 }
             } header: {
                 Text("\(group.title) · \(group.items.count)")
@@ -68,15 +69,18 @@ struct MemoryTab: View {
 
         Section {
             Button("Ver tudo…", systemImage: "list.bullet.rectangle") { showAll(nil) }
+                .help(Tip.memoryShowAll)
                 .disabled(memory.items.isEmpty)
             Button("Abrir pasta da memória", systemImage: "folder") {
                 NSWorkspace.shared.open(model.memory.directory(for: botID))
             }
+            .help(Tip.memoryFolder)
         } footer: {
             HStack(spacing: 4) {
                 Text("Só \(name) vê isso. São arquivos .md na sua pasta de dados.")
                 Button("Como funciona") { isShowingHelp = true }
                     .buttonStyle(.link)
+                    .help(Tip.memoryHow)
                     .popover(isPresented: $isShowingHelp, arrowEdge: .top) { MemoryHelp(name: name) }
             }
         }
@@ -111,18 +115,19 @@ private struct IdentityBlock: View {
             }
             HStack {
                 Button("Editar…", action: edit)
+                    .help(Tip.editIdentity)
                 Spacer()
                 if !memory.interviewPending {
                     Menu {
                         Button("Fazer a entrevista de novo", systemImage: "questionmark.bubble", action: restartInterview)
-                            .help("Na próxima conversa, \(name) faz algumas perguntas para entender como ajudar você")
+                            .help(Tip.restartInterview(name))
                     } label: {
                         Image(systemName: "ellipsis.circle")
                     }
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
                     .fixedSize()
-                    .help("Mais opções de \(name)")
+                    .help(Tip.moreOptions(of: name))
                     .accessibilityLabel("Mais opções de \(name)")
                 }
             }
@@ -147,6 +152,7 @@ private struct MemorySearchField: View {
                     .labelStyle(.iconOnly)
                     .buttonStyle(.borderless)
                     .foregroundStyle(.secondary)
+                    .help(Tip.clearSearch)
             }
         }
     }
@@ -195,11 +201,12 @@ struct MemoryRow: View {
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
                 .opacity(isHovering ? 1 : 0.45)
-                .help("Esquecer. Dá para desfazer por alguns segundos.")
+                .help(Tip.forget)
                 .accessibilityLabel("Esquecer: \(item.title)")
         }
         .contentShape(Rectangle())
         .onTapGesture { isExpanded.toggle() }
+        .help(isExpanded ? Tip.collapseMemory : Tip.expandMemory)
         .onHover { isHovering = $0 }
         .contextMenu {
             Button("Esquecer", systemImage: "trash", action: forget)
@@ -269,6 +276,7 @@ struct MemorySheet: View {
                     NSWorkspace.shared.open(model.memory.directory(for: botID))
                 }
                 .buttonStyle(GhostStyle())
+                .help(Tip.memoryFolder)
                 Text("Arquivos .md: dá para abrir no Obsidian.")
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.muted)

@@ -193,6 +193,7 @@ struct QuickAskView: View {
                     }
                     .buttonStyle(.link)
                     .font(.system(size: 12))
+                    .help(Tip.connectModel)
                 }
             }
 
@@ -209,6 +210,7 @@ struct QuickAskView: View {
             }
             HStack {
                 Button("Abrir o app") { open() }
+                    .help(Tip.openMainWindow)
                 Spacer()
                 Text(QuickAskSend.hint(isWorking: selectedID.map(model.isWorking) ?? false,
                                        canSteer: selectedID.map(model.canSteer) ?? false))
@@ -279,7 +281,7 @@ private struct QuickAskOrbButton: View {
                 }
         }
         .buttonStyle(.plain)
-        .help(live.look.name)
+        .help(Tip.chooseOrb(named: live.look.name))
         .accessibilityLabel(live.look.name)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
@@ -337,6 +339,7 @@ struct QuickAskReply: View {
                 Button("Fechar resposta", systemImage: "xmark", action: dismiss)
                     .labelStyle(.iconOnly)
                     .buttonStyle(.plain)
+                    .help(Tip.closeReply)
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(Palette.muted)
             }
@@ -344,6 +347,7 @@ struct QuickAskReply: View {
                 ReplyExcerpt(botID: botID, reply: reply)
             }
             Button("Ver conversa", action: openChat)
+                .help(Tip.openChatInApp)
                 .buttonStyle(.link)
                 .font(.system(size: 12))
         }
@@ -470,15 +474,18 @@ struct QuickAskApprovalCard: View {
                     model.decide(.deny, approvalID: request.id, botID: entry.bot.id)
                 }
                 .buttonStyle(GhostStyle())
+                .help(Tip.deny)
                 Spacer()
                 if request.isDangerous {
                     Button("Abrir o app", action: openApp)
                         .buttonStyle(SecondaryPillStyle())
+                        .help(Tip.reviewRiskyInApp)
                 } else {
                     Button(request.isBatch ? "Permitir as \(request.items.count)" : "Permitir") {
                         model.decide(.once, approvalID: request.id, botID: entry.bot.id)
                     }
                     .buttonStyle(PrimaryPillStyle())
+                    .help(request.isBatch ? Tip.allowBatchOnce : Tip.allowOnce)
                 }
             }
         }

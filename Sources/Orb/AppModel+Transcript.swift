@@ -33,6 +33,19 @@ enum NoticeAction: Equatable, Sendable {
         }
     }
 
+    /// The hover text of the button.
+    var help: String {
+        switch self {
+        case .retry: "Refaz o pedido que não deu certo"
+        case .continueTurn: "Envia “\(Self.continueMessage)” para o Orb seguir de onde parou"
+        case .openSettings: "Abre os Ajustes para ver o modelo, a chave ou o login"
+        case .newConversation: "Começa uma conversa nova; a atual fica em conversas anteriores"
+        case .compact: "Resume o começo da conversa e envia a última mensagem de novo"
+        case .openMemory: "Abre a aba Memória, no painel do Orb"
+        case .reviewSkill: "Abre a skill proposta para você ler e decidir"
+        }
+    }
+
     var symbol: String {
         switch self {
         case .retry: "arrow.clockwise"

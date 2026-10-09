@@ -31,6 +31,7 @@ struct AttachmentStack: View {
                             QuickLookPreview.show(all, at: parts.images.count + shown.count)
                         }
                         .buttonStyle(.plain)
+                        .help(Tip.moreAttachments)
                         .font(.system(size: 11))
                         .foregroundStyle(Palette.muted)
                     }
@@ -97,7 +98,7 @@ struct ImageTile: View {
             }
             .opacity(info.state == .missing ? 0.55 : 1)
             .attachmentActions(path: path, all: all, info: info, label: label + (info.state == .missing ? ", arquivo ausente" : ""),
-                               help: info.state == .ok ? "Ver imagem" : "Imagem não está mais aqui")
+                               help: info.state == .ok ? Tip.previewImage : Tip.missingAttachment)
             .task(id: path) { info = await AttachmentInfo.load(path: path) }
     }
 }
@@ -157,7 +158,8 @@ struct FileCard: View {
         .opacity(info.state == .missing ? 0.55 : 1)
         .motion(Motion.fade, value: info)
         .onHover { isHovering = $0 }
-        .attachmentActions(path: path, all: all, info: info, label: TranscriptSpeech.attachment(info), help: path)
+        .attachmentActions(path: path, all: all, info: info, label: TranscriptSpeech.attachment(info),
+                               help: info.state == .ok ? Tip.previewAttachment : Tip.missingAttachment)
         .task(id: path) { info = await AttachmentInfo.load(path: path) }
     }
 }

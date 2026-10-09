@@ -87,6 +87,7 @@ struct UsageSettings: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                .help(Tip.usagePeriod)
             }
             if let report = usage.report {
                 if report.isEmpty {
@@ -180,6 +181,7 @@ struct UsageSettings: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+            .help(Tip.usageChartBy)
             Chart(points) { point in
                 BarMark(x: .value(unit == .hour ? "Hora" : "Dia", point.date, unit: unit),
                         y: .value(report.measure == .cost ? "Dólares" : "Tokens", point.value))
@@ -331,7 +333,7 @@ private struct UsageRowView: View {
                     }
                     .buttonStyle(.borderless)
                     .foregroundStyle(row.isCorrected ? Palette.accentText : Palette.muted)
-                    .help(row.isCorrected ? "Preço corrigido por você. Clique para mudar." : "Corrigir o preço deste modelo")
+                    .help(row.isCorrected ? Tip.priceCorrected : Tip.priceCorrect)
                     .accessibilityLabel("Corrigir o preço de \(row.name)")
                 }
             }
@@ -358,6 +360,7 @@ private struct UsageRowView: View {
         case .unpriced:
             if isModel {
                 Button("Sem preço", action: editPrice).buttonStyle(.link).foregroundStyle(Palette.warn)
+                    .help(Tip.priceMissing)
             } else {
                 Text("Sem preço").foregroundStyle(Palette.warn)
             }
@@ -434,6 +437,7 @@ private struct PriceEditor: View {
             HStack {
                 if model.priceCorrections[modelID] != nil {
                     Button("Restaurar") { model.correctPrice(of: modelID, to: nil); close() }
+                        .help(Tip.priceRestore)
                 }
                 Spacer()
                 Button("Cancelar", action: close).keyboardShortcut(.cancelAction)

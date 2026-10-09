@@ -247,6 +247,7 @@ struct ContextPopover: View {
             if !reading.isClaudeCode {
                 Button("Ajustar o contexto das conversas…", action: adjustMemory)
                     .buttonStyle(.link)
+                    .help(Tip.adjustContext)
                     .font(.system(size: 11))
             }
         }

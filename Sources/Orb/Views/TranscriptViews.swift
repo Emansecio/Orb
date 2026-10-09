@@ -245,10 +245,10 @@ private struct MessageActions: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            CopyButton(symbol: "doc.on.doc", help: "Copiar resposta", copiedHelp: "Copiado") {
+            CopyButton(symbol: "doc.on.doc", help: Tip.copyReply, copiedHelp: "Copiado") {
                 Clipboard.copy(MarkdownBlocks.plainText(of: text))
             }
-            CopyButton(symbol: "number", help: "Copiar como Markdown", copiedHelp: "Markdown copiado") {
+            CopyButton(symbol: "number", help: Tip.copyMarkdown, copiedHelp: "Markdown copiado") {
                 Clipboard.copy(text)
             }
         }
@@ -484,6 +484,7 @@ struct ToolCallLine: View {
             }
             .buttonStyle(.plain)
             .disabled(call.output == nil)
+            .help(call.output == nil ? "" : Tip.toggleOutput(isExpanded: isExpanded))
             // Running -> done or failed: the mark of the state comes in (see `stateMark`).
             .motion(Motion.enter, value: call.state)
             .accessibilityLabel("\(call.title) \(call.detail)")
@@ -589,6 +590,7 @@ private struct NoticeLine: View {
                             Label(action.title, systemImage: action.symbol)
                         }
                         .buttonStyle(NoticeActionStyle(prominent: action == actions.first))
+                        .help(action.help)
                     }
                 }
                 .transition(.opacity)
@@ -774,7 +776,7 @@ struct ApprovalCard: View {
                         .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
-                .help("Nega e diz ao Orb o que fazer no lugar")
+                .help(Tip.denyWithNote)
             }
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 6) { denyButton; Spacer(minLength: 8); allowControl }
@@ -869,7 +871,7 @@ struct ApprovalCard: View {
                         .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
-                .help("Mostrar todas as ações")
+                .help(Tip.showAllActions)
                 .accessibilityHint("Mostra todas as ações")
                 .transition(.opacity)
             }
@@ -893,7 +895,7 @@ struct ApprovalCard: View {
         .background(pressed == .deny ? Palette.ghostSelected : .clear, in: .capsule)
         .scaleEffect(pressed == .deny ? ApprovalShortcut.pressScale : 1)
         .animation(Motion.press, value: pressed)
-        .help("Não permitir (esc)")
+        .help("\(Tip.deny) (\(ShortcutCatalog.keys(for: .denyApproval)))")
         .accessibilityLabel("Não permitir")
         .accessibilityHint("Atalho: Esc")
     }
@@ -957,7 +959,7 @@ struct ApprovalCard: View {
                 .buttonStyle(.plain)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .help("Só nesta tarefa, sempre permitir… Você pode remover em Liberações, no painel do Orb.")
+                .help(Tip.allowOptions)
                 .accessibilityLabel("Sempre permitir e outras opções")
             }
         }
@@ -996,6 +998,7 @@ struct ApprovalCard: View {
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
+            .help(Tip.toggleRequest(isOpen: isOpen))
             .accessibilityLabel("\(ApprovalSummary.label(request.decision ?? .deny)): \(ApprovalSummary.title(request)). \(ApprovalSummary.detail(request))")
             .accessibilityValue(isOpen ? "expandido" : "recolhido")
             .accessibilityHint("Mostra o pedido")

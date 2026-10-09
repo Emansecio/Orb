@@ -580,6 +580,13 @@ final class AppModel {
         signOut(kind)
         providers.removeAll { $0.kind == kind }
         if ModelRef(defaultModel)?.provider == kind { defaultModel = "" }
+        // Orbs that used one of its models go back to the default model instead of asking to connect one.
+        for id in Self.bots(using: kind, in: bots) { update(id) { $0.model = "" } }
+    }
+
+    /// The Orbs whose own model is one of `kind`'s.
+    nonisolated static func bots(using kind: ProviderKind, in bots: [Bot]) -> [UUID] {
+        bots.filter { ModelRef($0.model)?.provider == kind }.map(\.id)
     }
 
     /// Forgets the key or sign-in (the provider stays listed). Claude Code's own login is left alone:

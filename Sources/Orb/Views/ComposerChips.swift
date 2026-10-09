@@ -43,7 +43,7 @@ struct PermissionChip: View {
             .foregroundStyle(Self.tint(permission.mode))
         }
         .buttonStyle(ComposerChipStyle())
-        .help("Permissões: \(PermissionChipText.spoken(permission)). \(permission.mode.shortSummary)" + grantsHelp(permission))
+        .help("Permissões: \(PermissionChipText.spoken(permission)) · \(Tip.withoutFullStop(permission.mode.shortSummary))" + grantsHelp(permission))
         .accessibilityLabel("Permissões")
         .accessibilityValue(PermissionChipText.spoken(permission))
         .popover(isPresented: $isOpen, arrowEdge: .bottom) {
@@ -107,6 +107,7 @@ struct PermissionPopover: View {
                         Spacer()
                         Button("Gerenciar", action: manage)
                             .buttonStyle(.link)
+                            .help(Tip.manageGrants)
                             .font(.system(size: 12))
                     }
                     Text(PermissionMode.grantsNote)
@@ -180,7 +181,7 @@ struct SkillsChip: View {
             }
         }
         .buttonStyle(ComposerChipStyle())
-        .help("Usar uma skill: escolha uma ou digite / no começo da mensagem")
+        .help(Tip.skills)
         .accessibilityLabel("Skills")
         .popover(isPresented: $isOpen, arrowEdge: .bottom) {
             SkillsPopover(skills: model.skills(for: botID)) { slug in

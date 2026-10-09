@@ -37,11 +37,11 @@ struct ChatView: View {
                 Button("Nova conversa", systemImage: "square.and.pencil") {
                     model.newConversation(botID)
                 }
-                .help("\(CommandName.newConversation) (\(AppShortcut.newConversation.label)). A atual fica em Conversas anteriores.")
+                .help(Tip.newConversation())
                 Button("Painel do Orb", systemImage: "sidebar.right") {
                     model.showInspector.toggle()
                 }
-                .help("\(CommandName.toggleInspector) (\(AppShortcut.toggleInspector.label))")
+                .help(Tip.inspector(isShowing: model.showInspector))
             }
         }
         .inspector(isPresented: $model.showInspector) {
@@ -496,6 +496,7 @@ struct SuggestionButton: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .help(Tip.suggestion)
         .onHover { isHovering = $0 }
     }
 }
@@ -551,7 +552,7 @@ private struct WorkingLine: View {
                 Button("Ver pedido") { model.showRoutineRequest(of: look.id) }
                     .buttonStyle(.link)
                     .font(.system(size: 12))
-                    .help("Abrir a conversa da rotina, onde está o pedido de permissão")
+                    .help(Tip.routineRequest)
             }
         }
     }

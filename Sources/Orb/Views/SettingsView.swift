@@ -116,12 +116,14 @@ struct GeneralSettings: View {
             ProfileSettings()
             Section("Geral") {
                 Toggle("Abrir ao iniciar sessão", isOn: Binding(get: { launchAtLogin }, set: { setLaunchAtLogin($0) }))
+                    .help(Tip.launchAtLogin)
                 if let loginError {
                     Label(loginError, systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
                         .foregroundStyle(Palette.warn)
                 }
                 Toggle("Me avisar quando um Orb terminar ou precisar de mim", isOn: $notifyWhenDone)
+                    .help(Tip.notifyWhenDone)
                 notificationState
                 Toggle(isOn: $proposeSkills) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -131,23 +133,25 @@ struct GeneralSettings: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                .help(Tip.proposeSkills)
             }
             ContextMemorySettings()
             LearnedWindowsSettings(rows: $learnedWindows)
             Section {
-                dataRow("Pasta de dados", "Conversas, memórias e ajustes", button: "Mostrar no Finder", isEnabled: true) {
+                dataRow("Pasta de dados", "Conversas, memórias e ajustes", button: "Mostrar no Finder", isEnabled: true,
+                        help: Tip.dataFolder) {
                     NSWorkspace.shared.activateFileViewerSelecting([Store.standard.directory])
                 }
                 dataRow("Memórias guardadas", GeneralSettings.keptMemoriesDetail(count: keptCount),
-                        button: "Mostrar no Finder", isEnabled: keptCount > 0) {
+                        button: "Mostrar no Finder", isEnabled: keptCount > 0, help: Tip.keptMemoriesFolder) {
                     NSWorkspace.shared.activateFileViewerSelecting([GeneralSettings.keptMemoriesFolder])
                 }
                 dataRow("Pasta dos Orbs", OrbFolder.display(OrbFolder.defaultBase), button: "Mostrar no Finder",
-                        isEnabled: hasOrbsFolder) {
+                        isEnabled: hasOrbsFolder, help: Tip.orbsFolder) {
                     NSWorkspace.shared.activateFileViewerSelecting([OrbFolder.defaultBase])
                 }
                 dataRow("Redefinir o Orb", "Volta ao primeiro uso. Você escolhe se guarda as memórias.", button: "Redefinir…",
-                        isEnabled: true, tint: Palette.danger) {
+                        isEnabled: true, tint: Palette.danger, help: Tip.resetOrb) {
                     isShowingReset = true
                 }
             } header: {
@@ -165,6 +169,7 @@ struct GeneralSettings: View {
                         if wanted && !works { GlobalHotKey.showUnavailableAlert() }
                     }
                 ))
+                .help(Tip.globalShortcut)
             }
             // The whole list, from the same catalog as the "Atalhos do teclado" sheet (Ajuda → Atalhos do teclado).
             ForEach(ShortcutCatalog.groups) { group in
@@ -196,6 +201,7 @@ struct GeneralSettings: View {
         case .denied?:
             LabeledContent {
                 Button("Abrir Ajustes do Sistema") { NSWorkspace.shared.open(NotificationPermission.settingsURL) }
+                    .help(Tip.openSystemNotifications)
             } label: {
                 Label("O macOS está bloqueando as notificações do Orb.", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
@@ -204,6 +210,7 @@ struct GeneralSettings: View {
         case .notDetermined? where notifyWhenDone:
             LabeledContent {
                 Button("Pedir agora") { Task { notifications = await NotificationPermission.request() } }
+                    .help(Tip.askNotifications)
             } label: {
                 Text("O macOS ainda não deixou o Orb avisar.")
                     .font(.caption)
@@ -216,7 +223,7 @@ struct GeneralSettings: View {
 
     /// `tint`: a color for the button's text only (the one that redefines the app is the tone of danger).
     private func dataRow(_ title: String, _ detail: String, button: String, isEnabled: Bool, tint: Color? = nil,
-                         action: @escaping () -> Void) -> some View {
+                         help: String, action: @escaping () -> Void) -> some View {
         LabeledContent {
             Group {
                 // The label is as wide as "Mostrar no Finder", so the buttons of the rows are one size, whatever they say.
@@ -226,6 +233,7 @@ struct GeneralSettings: View {
                     Button(action: action) { Text(button).frame(minWidth: Self.dataButtonLabelWidth) }
                 }
             }
+            .help(help)
             .disabled(!isEnabled)
         } label: {
             VStack(alignment: .leading, spacing: 2) {

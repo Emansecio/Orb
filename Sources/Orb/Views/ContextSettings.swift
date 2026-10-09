@@ -68,6 +68,7 @@ struct LearnedWindowsSettings: View {
                 ForEach(rows) { row in
                     LabeledContent {
                         Button("Esquecer") { forget(row) }
+                            .help(Tip.forgetWindow)
                             .accessibilityLabel("Esquecer a janela de \(row.name)")
                     } label: {
                         VStack(alignment: .leading, spacing: 2) {

@@ -64,6 +64,7 @@ struct CatalogTabBar: View {
             .contentShape(.capsule)
         }
         .buttonStyle(.plain)
+        .help(value == .installed ? Tip.showInstalled : Tip.showCatalog)
         .accessibilityAddTraits(CatalogTab.traits(isSelected: tab == value))
     }
 }
@@ -92,6 +93,7 @@ struct CatalogSearchHeader: View {
                         .labelStyle(.iconOnly)
                         .buttonStyle(.plain)
                         .foregroundStyle(Palette.faint)
+                        .help(Tip.clearSearch)
                 }
                 if let info {
                     Button("Sobre a busca", systemImage: "info.circle") { isShowingInfo.toggle() }
@@ -126,6 +128,7 @@ struct CatalogSearchHeader: View {
                         ForEach(suggestions, id: \.self) { suggestion in
                             Button(suggestion) { query = suggestion }
                                 .buttonStyle(ChipStyle(isSelected: query.lowercased() == suggestion.lowercased()))
+                                .help(Tip.searchFor(suggestion))
                         }
                     }
                 }

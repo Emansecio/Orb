@@ -35,6 +35,7 @@ struct CustomProviderFields<KeyRow: View>: View {
                 Text("Responses (OpenAI)").tag(APIFormat.responses)
                 Text("Messages (Anthropic / Claude)").tag(APIFormat.messages)
             }
+            .help(Tip.gatewayFormat)
             Text(GatewayForm.formatSubtitle(account.format))
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -81,12 +82,14 @@ struct CustomProviderFields<KeyRow: View>: View {
                 if account.models.count > chipsShown {
                     Button("Ver todos os \(account.models.count) modelos…", systemImage: "list.bullet") { isListingAll = true }
                         .buttonStyle(.borderless)
+                        .help(Tip.listAllModels)
                 }
             }
             HStack {
                 TextField("Adicionar modelo pelo id", text: $newModel, prompt: Text("ex.: claude-fable-5-1"))
                     .onSubmit(addModel)
                 Button("Adicionar", action: addModel).disabled(newModel.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .help(Tip.addModelByID)
             }
         }
         .task(id: account.kind) { headersText = serialize(account.headers) }
@@ -138,6 +141,7 @@ private struct ModelChips: View {
                         .font(.system(size: 9, weight: .bold))
                         .buttonStyle(.plain)
                         .foregroundStyle(Palette.muted)
+                        .help(Tip.removeModelFromList)
                 }
                 .padding(.leading, 8)
                 .padding(.trailing, 6)
@@ -194,6 +198,7 @@ private struct ModelIDRow: View {
                 .labelStyle(.iconOnly)
                 .buttonStyle(.borderless)
                 .foregroundStyle(Palette.muted)
+                .help(Tip.removeModelFromList)
         }
     }
 }

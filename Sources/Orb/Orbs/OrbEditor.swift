@@ -169,6 +169,7 @@ struct OrbEditor: View {
                             .background(previewActivity == activity ? Palette.ink : Color.white.opacity(0.07), in: .capsule)
                     }
                     .buttonStyle(.plain)
+                    .help(Tip.previewActivity(activity.label))
                     .accessibilityLabel("Prévia: \(activity.label)")
                     .accessibilityAddTraits(previewActivity == activity ? .isSelected : [])
                 }
@@ -198,7 +199,7 @@ struct OrbEditor: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
         .background(Color.white.opacity(0.07), in: .capsule)
-        .help("Mostra o Orb numa atividade")
+        .help(Tip.previewActivity(previewActivity.label))
         .accessibilityLabel("Prévia: \(previewActivity.label)")
     }
 
@@ -212,7 +213,7 @@ struct OrbEditor: View {
             }
         }
         .buttonStyle(SecondaryPillStyle())
-        .help("Sorteia um visual combinando cores, rosto e estilo")
+        .help(Tip.randomLook)
     }
 
     private var undoButton: some View {
@@ -563,6 +564,7 @@ private struct TintPicker: View {
                     .fixedSize()
                 }
                 .buttonStyle(.plain)
+                .help(Tip.autoColor)
                 .accessibilityLabel("Cor automática")
                 .accessibilityAddTraits(value == nil ? .isSelected : [])
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 24, maximum: 24), spacing: 7)], alignment: .leading, spacing: 7) {

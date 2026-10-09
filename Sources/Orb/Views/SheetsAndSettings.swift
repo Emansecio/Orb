@@ -168,6 +168,7 @@ struct NewBotSheet: View {
                     if !keptChoice.isEmpty { removeImport() }
                     changeMemory(from: kept.first { $0.id == old })
                 }
+                .help(Tip.startFromKeptMemory)
             }
             if let imported {
                 ImportSummaryRow(imported: imported, review: { draft = imported; isImporting = true }, remove: removeImport)
@@ -177,6 +178,7 @@ struct NewBotSheet: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Palette.accentText)
+                .help(Tip.importFromAssistant)
             }
         } header: {
             Text("Começar de")
@@ -291,6 +293,7 @@ private struct NewBotFolderSection: View {
                 .menuStyle(.button)
                 .controlSize(.small)
                 .fixedSize()
+                .help(Tip.changeFolder)
             }
         } header: {
             Text("Pasta")

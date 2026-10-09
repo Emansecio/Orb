@@ -224,7 +224,7 @@ struct ComposerView: View {
             Button("Anexar", systemImage: "plus") { isImporting = true }
                 .labelStyle(.iconOnly)
                 .buttonStyle(IconGhostStyle())
-                .help("Anexar arquivos (ou solte aqui)")
+                .help(Tip.attach)
             SkillsChip(botID: botID, compact: isCompact) { insert("/\($0) ") }
             PermissionChip(botID: botID, compact: isCompact) { isFocused = true }
             Spacer(minLength: 8)
@@ -457,6 +457,7 @@ private struct RemoveButton: View {
         Button(label, systemImage: symbol, action: action)
             .labelStyle(.iconOnly)
             .buttonStyle(.plain)
+            .help(Tip.removeAttachment)
             .frame(width: size, height: size)
             // The fill is a little smaller than the target, so the strip's edges never clip it.
             .hoverFill(isHovering, in: .circle, color: Palette.ghostSelected)

@@ -151,7 +151,7 @@ struct BotInspector: View {
                     .buttonStyle(.link)
                     .font(.caption)
                     .fixedSize()
-                    .help("Mudar cor, olhos, jeito e acessórios")
+                    .help(Tip.customizeOrb)
                 }
                 .help(summary)
             }
@@ -174,15 +174,15 @@ struct BotInspector: View {
 
     private func quickActionRow(_ bot: Bot, showsTitles: Bool, folderIsMissing: Bool) -> some View {
         HStack(spacing: 6) {
-            quickAction("Abrir pasta", "folder", showsTitle: showsTitles, help: "Abrir a pasta de \(bot.name) no Finder") {
+            quickAction("Abrir pasta", "folder", showsTitle: showsTitles, help: Tip.openFolderInFinder(bot.name)) {
                 OrbFolder.showInFinder(bot.workingURL)
             }
             .disabled(folderIsMissing)
-            quickAction("Terminal", "terminal", showsTitle: showsTitles, help: "Abrir o Terminal na pasta de \(bot.name)") {
+            quickAction("Terminal", "terminal", showsTitle: showsTitles, help: Tip.openFolderInTerminal(bot.name)) {
                 OrbFolder.openInTerminal(bot.workingURL)
             }
             .disabled(folderIsMissing)
-            quickAction("Nova conversa", "square.and.pencil", showsTitle: showsTitles, help: "Começar uma conversa nova (⇧⌘N)") {
+            quickAction("Nova conversa", "square.and.pencil", showsTitle: showsTitles, help: Tip.newConversation()) {
                 model.newConversation(bot.id)
             }
             if !showsTitles { Spacer(minLength: 0) }
@@ -274,6 +274,7 @@ struct BotInspector: View {
         if capability == .connectors && isOn {
             Button("Gerenciar conectores", systemImage: "arrow.up.right") { model.selection = .connectors }
                 .buttonStyle(.link)
+                .help(Tip.manageConnectors)
                 .font(.caption)
         }
         if capability == .computerUse && isOn {
@@ -282,6 +283,7 @@ struct BotInspector: View {
                 SettingsRouter.open(.permissions, using: openSettings)
             }
             .buttonStyle(.link)
+            .help(Tip.macPermissions)
             .font(.caption)
         }
     }
@@ -323,6 +325,7 @@ struct BotInspector: View {
                 Button("Ver \(file.fileName) no Finder", systemImage: "doc.text.magnifyingglass") {
                     NSWorkspace.shared.activateFileViewerSelecting([bot.workingURL.appending(path: file.fileName)])
                 }
+                .help(Tip.showInstructions)
                 .controlSize(.small)
             } header: {
                 Text("Instruções da pasta")
@@ -342,6 +345,7 @@ struct BotInspector: View {
                 LabeledContent {
                     Button("Remover") { model.update(bot.id) { $0.permissionRules.removeAll { $0 == rule } } }
                         .controlSize(.small)
+                        .help(Tip.removeGrant)
                 } label: {
                     Text(rule.title)
                 }
@@ -349,6 +353,7 @@ struct BotInspector: View {
             if bot.permissionRules.count > 1 {
                 Button("Remover todas", role: .destructive) { model.update(bot.id) { $0.permissionRules = [] } }
                     .controlSize(.small)
+                    .help(Tip.removeAllGrants)
             }
         } header: {
             Text("Liberações")
@@ -370,10 +375,13 @@ struct BotInspector: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Button("Recriar", systemImage: "folder.badge.plus") { attempt { try model.recreateFolder(of: bot.id) } }
+                .help(Tip.recreateFolder)
         } else {
             HStack(spacing: 8) {
                 Button("Abrir no Finder", systemImage: "folder") { OrbFolder.showInFinder(bot.workingURL) }
+                    .help(Tip.openFolderInFinder(bot.name))
                 Button("Abrir no Terminal", systemImage: "terminal") { OrbFolder.openInTerminal(bot.workingURL) }
+                    .help(Tip.openFolderInTerminal(bot.name))
             }
             .controlSize(.small)
         }
@@ -393,6 +401,7 @@ struct BotInspector: View {
         .menuStyle(.button)
         .controlSize(.small)
         .fixedSize()
+        .help(Tip.changeFolder)
         if state == .ownFolder {
             Text("Se usar a pasta pessoal, \(bot.name) volta a trabalhar nela. A pasta atual e o que há nela ficam como estão.")
                 .font(.caption)
@@ -427,7 +436,7 @@ struct BotInspector: View {
                     Button("Atualizar", systemImage: "arrow.clockwise") { filesRefresh += 1 }
                         .labelStyle(.iconOnly)
                         .buttonStyle(.borderless)
-                        .help("Ler a pasta de novo")
+                        .iconTip(Tip.refreshFolder)
                 }
             } footer: {
                 if !listing.files.isEmpty {
@@ -456,6 +465,7 @@ struct BotInspector: View {
             Button("Nova rotina…", systemImage: "plus") {
                 editingRoutine = Routine(name: "", botID: bot.id, prompt: "", schedule: .daily(hour: 9, minute: 0))
             }
+            .help(Tip.newRoutine)
         } header: {
             Text("Rotinas")
         } footer: {
@@ -468,6 +478,7 @@ struct BotInspector: View {
         Section {
             Button("Ver todas as rotinas", systemImage: "arrow.up.right") { model.selection = .routines }
                 .buttonStyle(.link)
+                .help(Tip.allRoutines)
         }
     }
 
@@ -701,7 +712,7 @@ private struct RoutineRow: View {
                     .toggleStyle(.switch)
                     .labelsHidden()
                     .controlSize(.small)
-                    .help(current.isEnabled ? "Pausar esta rotina" : "Ativar esta rotina")
+                    .help(Tip.routineToggle(isOn: current.isEnabled))
             }
             // The same words as the Rotinas page ("Próxima: em 3 h · hoje às 09:00", "Pausada").
             NextRunLine(routine: current)
@@ -739,18 +750,19 @@ private struct RoutineRow: View {
                     .foregroundStyle(.red)
             } else {
                 Button("Editar", action: edit)
+                    .help(Tip.editRoutine)
                 Button(role: .destructive) { isConfirmingDelete = true } label: { Image(systemName: "trash") }
-                    .help("Apagar esta rotina")
-                    .accessibilityLabel("Apagar “\(current.name)”")
+                    .iconTip(Tip.deleteRoutine, label: "Apagar “\(current.name)”")
                 Spacer()
                 // Like the Rotinas page: with the Orb busy the run waits for it (`runRoutine` queues it).
                 if model.isRoutineRunning(routine.id) {
                     Label("Rodando…", systemImage: "hourglass").foregroundStyle(.secondary)
                 } else if model.isRoutineQueued(routine.id) {
                     Label("Na fila", systemImage: "clock").foregroundStyle(.secondary)
-                        .help("Roda assim que o Orb terminar o que está fazendo")
+                        .help(Tip.queuedRoutine)
                 } else {
                     Button("Rodar agora", systemImage: "play.fill") { model.runRoutine(routine.id) }
+                        .help(Tip.runRoutineNow)
                 }
             }
         }

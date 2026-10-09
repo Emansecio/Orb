@@ -164,6 +164,7 @@ struct CodeBlockView: View, Equatable {
                     .animation(copied ? Motion.press : Motion.content, value: copied)
                 }
                 .buttonStyle(.plain)
+                .help(Tip.copyCode)
                 .accessibilityLabel(copied ? "Código copiado" : "Copiar código")
             }
             .padding(.horizontal, 10)

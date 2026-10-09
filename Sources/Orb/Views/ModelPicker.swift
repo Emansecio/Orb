@@ -79,6 +79,7 @@ private struct SearchableModelField: View {
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
+            .help(Tip.chooseModel)
             .popover(isPresented: $isOpen, arrowEdge: .bottom) {
                 ModelChooser(selection: $selection, allowsDefault: allowsDefault, defaultLabel: defaultLabel,
                              choices: choices) { isOpen = false }

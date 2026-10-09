@@ -28,7 +28,7 @@ struct SkillsView: View {
             Button("Nova skill", systemImage: "plus") {
                 editing = Skill(slug: "", name: "", summary: "", instructions: "")
             }
-            .help("Criar uma skill sua")
+            .help(Tip.newSkill)
         }
         .sheet(item: $editing) { skill in
             SkillEditor(skill: skill)
@@ -52,13 +52,13 @@ struct UseSkillButton: View {
         if let preferred = model.preferredBot(for: skill) ?? (candidates.count == 1 ? candidates.first : nil) {
             Button(title) { use(preferred) }
                 .buttonStyle(SecondaryPillStyle())
-                .help("Abrir a conversa com \(preferred.name) com /\(skill.slug) pronto")
+                .help(Tip.useSkill(orb: preferred.name, slug: skill.slug))
                 .disabled(!skill.isEnabled)
         } else if candidates.isEmpty {
             Button(title) {}
                 .buttonStyle(SecondaryPillStyle())
                 .disabled(true)
-                .help("Nenhum Orb pode usar esta skill")
+                .help(Tip.noOrbForSkill)
         } else {
             Menu(title) {
                 ForEach(candidates) { bot in
@@ -70,7 +70,7 @@ struct UseSkillButton: View {
             .menuIndicator(.hidden)
             .fixedSize()
             .disabled(!skill.isEnabled)
-            .help("Escolher o Orb que vai usar /\(skill.slug)")
+            .help(Tip.chooseOrbForSkill(slug: skill.slug))
         }
     }
 
@@ -112,6 +112,7 @@ private struct InstalledSkills: View {
                     Text("Encontre skills prontas no catálogo ou crie a sua.")
                 } actions: {
                     Button("Explorar catálogo", action: explore).buttonStyle(PrimaryPillStyle())
+                        .help(Tip.exploreSkills)
                 }
             }
         }
@@ -167,7 +168,7 @@ private struct InstalledSkillRow: View {
                         .buttonStyle(.plain)
                         .font(.system(size: 11))
                         .foregroundStyle(didCopy ? Palette.ok : Palette.faint)
-                        .help("Copiar /\(skill.slug)")
+                        .help(Tip.copySlug(skill.slug))
                 }
                 if !skill.summary.isEmpty {
                     Text(skill.summary)
@@ -199,7 +200,7 @@ private struct InstalledSkillRow: View {
                 .toggleStyle(.switch)
                 .labelsHidden()
                 .controlSize(.small)
-                .help(skill.isEnabled ? "Desativar (fica instalada, mas não pode ser usada)" : "Ativar")
+                .help(Tip.skillToggle(isOn: skill.isEnabled))
             Menu {
                 Button("Editar…", action: onEdit)
                 if let folder = skill.folderURL {
@@ -215,6 +216,7 @@ private struct InstalledSkillRow: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            .help(Tip.moreOptions(of: skill.name))
             .accessibilityLabel("Mais opções de \(skill.name)")
         }
         .padding(14)
@@ -338,7 +340,7 @@ private struct CatalogSkillCard: View {
                     if model.installedSkill(entry.id) != nil {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundStyle(Palette.ok)
-                            .help("Instalada")
+                            .help(Tip.installed)
                     }
                 }
                 Group {
@@ -367,6 +369,7 @@ private struct CatalogSkillCard: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .help(Tip.openSkillDetails)
         .onHover { isHovering = $0 }
         .task { document = try? await SkillCatalog.shared.document(for: entry) }
     }
@@ -565,7 +568,8 @@ struct SkillEditor: View {
                 SheetFooter(message: message, destructiveTitle: "Descartar", destructive: {
                     model.finishSkillDraft(proposal)
                     dismiss()
-                }, cancelTitle: "Fechar", cancel: { dismiss() }, primaryTitle: "Salvar skill", isPrimaryDisabled: !canSave, primary: save)
+                }, cancelTitle: "Fechar", cancel: { dismiss() }, primaryTitle: "Salvar skill", isPrimaryDisabled: !canSave,
+                destructiveHelp: Tip.discardProposal, cancelHelp: Tip.keepProposal, primaryHelp: Tip.saveProposal, primary: save)
             } else {
                 SheetFooter(message: message, cancel: { dismiss() }, primaryTitle: "Salvar", isPrimaryDisabled: !canSave, primary: save)
             }

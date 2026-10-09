@@ -17,7 +17,8 @@ struct SidebarView: View {
                 if model.botIDs.isEmpty {
                     // No Orbs: an invitation in the list's own place. It shows the welcome screen (what you get with
                     // nothing selected); when that is already on screen, the click opens the New Orb sheet instead.
-                    SidebarRow(isSelected: model.selection == nil, selectionSpace: selectionSpace, isDashed: true) {
+                    SidebarRow(isSelected: model.selection == nil, selectionSpace: selectionSpace, isDashed: true,
+                               help: model.selection == nil ? Tip.createFirstOrb : Tip.showWelcome) {
                         if model.selection == nil {
                             model.startNewOrb(from: nil)
                         } else {
@@ -33,20 +34,20 @@ struct SidebarView: View {
 
                 SectionTitle("Espaço de trabalho")
                     .padding(.top, 16)
-                SidebarRow(isSelected: model.selection == .routines, selectionSpace: selectionSpace) {
+                SidebarRow(isSelected: model.selection == .routines, selectionSpace: selectionSpace, help: Tip.allRoutines) {
                     model.selection = .routines
                 } content: { hovering in
-                    NavLabel(title: "Rotinas", isSelected: model.selection == .routines, symbol: "clock.arrow.circlepath", hint: hovering ? "⌥⌘R" : nil)
+                    NavLabel(title: "Rotinas", isSelected: model.selection == .routines, symbol: "clock.arrow.circlepath", hint: hovering ? AppShortcut.routines.label : nil)
                 }
-                SidebarRow(isSelected: model.selection == .connectors, selectionSpace: selectionSpace) {
+                SidebarRow(isSelected: model.selection == .connectors, selectionSpace: selectionSpace, help: Tip.manageConnectors) {
                     model.selection = .connectors
                 } content: { hovering in
-                    NavLabel(title: "Conectores", isSelected: model.selection == .connectors, symbol: "point.3.filled.connected.trianglepath.dotted", hint: hovering ? "⌥⌘C" : nil)
+                    NavLabel(title: "Conectores", isSelected: model.selection == .connectors, symbol: "point.3.filled.connected.trianglepath.dotted", hint: hovering ? AppShortcut.connectors.label : nil)
                 }
-                SidebarRow(isSelected: model.selection == .skills, selectionSpace: selectionSpace) {
+                SidebarRow(isSelected: model.selection == .skills, selectionSpace: selectionSpace, help: Tip.skillsPage) {
                     model.selection = .skills
                 } content: { hovering in
-                    NavLabel(title: "Skills", isSelected: model.selection == .skills, symbol: "wand.and.stars", hint: hovering ? "⌥⌘K" : nil)
+                    NavLabel(title: "Skills", isSelected: model.selection == .skills, symbol: "wand.and.stars", hint: hovering ? AppShortcut.skills.label : nil)
                 }
             }
             .padding(.horizontal, 8)
@@ -72,19 +73,19 @@ struct SidebarView: View {
                                 .font(.system(size: 12, weight: .semibold))
                             Text("Novo Orb")
                             Spacer(minLength: 4)
-                            Text("⌘N")
+                            Text(AppShortcut.newBot.label)
                                 .font(.system(size: 11))
                                 .foregroundStyle(Palette.muted)
                         }
                         .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(SecondaryPillStyle())
-                    .help("Criar um novo Orb (⌘N)")
+                    .help(Tip.newBot())
                     Button("Ajustes", systemImage: "gearshape") { openSettings() }
                         .labelStyle(.iconOnly)
                         .buttonStyle(SidebarIconStyle())
                         .foregroundStyle(Palette.muted)
-                        .help("Ajustes (⌘,)")
+                        .iconTip(Tip.settings(), label: "Ajustes")
                 }
                 .padding(.horizontal, 8)
             }
@@ -117,6 +118,7 @@ private struct SidebarRow<Content: View>: View {
     let selectionSpace: Namespace.ID
     /// A dashed outline: the row that invites you to make the first Orb.
     var isDashed = false
+    var help = ""
     let action: () -> Void
     @ViewBuilder let content: (Bool) -> Content
     @State private var isHovering = false
@@ -144,6 +146,7 @@ private struct SidebarRow<Content: View>: View {
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .help(help)
         .onHover { isHovering = $0 }
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
@@ -181,7 +184,7 @@ private struct ProfileAvatarButton: View {
             ProfileAvatar(photoPath: model.profilePhotoPath, initial: profile.initial, size: 28)
         }
         .buttonStyle(SidebarIconStyle())
-        .help(profile.callName.map { "Perfil de \($0)" } ?? "Seu perfil")
+        .help(Tip.profile(callName: profile.callName))
         .accessibilityLabel("Seu perfil")
         .accessibilityHint("Abre os Ajustes")
     }
@@ -204,7 +207,7 @@ private struct SidebarBotRow: View {
         } content: { isHovering in
             BotRowContent(row: BotRow(look: live.look, workText: live.shownWork?.text, shimmers: live.shownWork?.shimmers ?? false, activity: live.activity, isSelected: isSelected,
                                       poke: live.poke, glance: live.glance, needsYou: live.needsYou, unread: live.unread,
-                                      hint: isHovering && index < 9 ? "⌘\(index + 1)" : nil))
+                                      hint: isHovering && index < 9 ? AppShortcut.bot(at: index).label : nil))
                 .equatable()
         }
         .contextMenu {

@@ -109,6 +109,10 @@ struct SheetFooter: View {
     var primaryIsDefault = true
     /// False when the only button closes the sheet anyway (a finished connection): Esc still does it.
     var showsCancel = true
+    /// Hover texts for the buttons whose label alone does not say what they do (the plain "Cancelar" and "Salvar" need none).
+    var destructiveHelp = ""
+    var cancelHelp = ""
+    var primaryHelp = ""
     let primary: () -> Void
 
     /// Return's shortcut for the primary button, or none when the sheet keeps it from being the default.
@@ -119,6 +123,7 @@ struct SheetFooter: View {
             if let destructiveTitle, let destructive {
                 Button(destructiveTitle, role: .destructive, action: destructive)
                     .buttonStyle(GhostStyle(tint: Palette.danger))
+                    .help(destructiveHelp)
             }
             if let message {
                 Text(message)
@@ -131,10 +136,12 @@ struct SheetFooter: View {
                 Button(cancelTitle, action: cancel)
                     .buttonStyle(GhostStyle())
                     .keyboardShortcut(.cancelAction)
+                    .help(cancelHelp)
             }
             Button(primaryTitle, action: primary)
                 .buttonStyle(PrimaryPillStyle())
                 .keyboardShortcut(SheetFooter.primaryShortcut(isDefault: primaryIsDefault))
+                .help(primaryHelp)
                 .disabled(isPrimaryDisabled)
         }
         .background {

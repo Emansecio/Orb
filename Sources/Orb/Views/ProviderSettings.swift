@@ -99,6 +99,7 @@ struct ProviderSettings: View {
         } label: {
             Label(model.providers.isEmpty ? "Outros provedores" : "Adicionar provedor", systemImage: "plus")
         }
+        .help(Tip.addProvider)
         .disabled(ProviderKind.allCases.allSatisfy { model.account($0) != nil })
     }
 }
@@ -148,6 +149,7 @@ private struct ProviderRow: View {
                     optionsMenu(account)
                 }
                 .contentShape(.rect)
+                .help(isExpanded ? Tip.hideProviderDetails : Tip.showProviderDetails)
                 .onTapGesture {
                     withAnimation(.snappy(duration: 0.2)) { ProviderExpansion.set(kind, expanded: !isExpanded) }
                 }
@@ -155,7 +157,7 @@ private struct ProviderRow: View {
             .confirmationDialog("Remover o provedor \(kind.shortName)?", isPresented: $isConfirmingRemoval) {
                 Button(kind.removeButtonTitle, role: .destructive) { model.removeProvider(kind) }
             } message: {
-                Text("Orbs que usam estes modelos passam a usar o modelo padrão.")
+                Text("Os Orbs que usam estes modelos passam a usar o modelo padrão.")
             }
             .task(id: kind) { email = kind == .chatgpt ? await ChatGPTAuth.shared.credential?.email : nil }
         }
@@ -192,7 +194,7 @@ private struct ProviderRow: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Mais opções de \(kind.shortName)")
+        .help(Tip.moreOptions(of: kind.shortName))
         .accessibilityLabel("Mais opções de \(kind.shortName)")
     }
 
@@ -225,9 +227,11 @@ private struct ProviderRow: View {
             Button(health.isChecking(kind) ? "Atualizando…" : "Atualizar modelos", systemImage: "arrow.clockwise") {
                 run(inStatus: true) { try await health.refresh(kind, model: model) }
             }
+            .help(Tip.refreshModels)
             .disabled(isWorking || health.isChecking(kind) || !canRefresh(account))
             Spacer()
             Button("Remover…", role: .destructive) { isConfirmingRemoval = true }
+                .help(Tip.removeProvider)
         }
         .buttonStyle(.borderless)
         if let error {
@@ -264,18 +268,20 @@ private struct ProviderRow: View {
                 HStack {
                     Text(email ?? "ChatGPT").foregroundStyle(.secondary)
                     Button("Sair") { isConfirmingSignOut = true }
+                        .help(Tip.signOutChatGPT)
                 }
             }
             .confirmationDialog("Sair do ChatGPT?", isPresented: $isConfirmingSignOut) {
                 Button("Sair", role: .destructive) { model.signOut(kind) }
             } message: {
-                Text("Os Orbs que usam estes modelos passam a usar o modelo padrão até você entrar de novo.")
+                Text("Os Orbs que usam estes modelos não respondem até você entrar de novo ou escolher outro modelo.")
             }
         } else {
             LabeledContent {
                 HStack(spacing: 10) {
                     if isWorking {
                         Button("Cancelar") { signInTask?.cancel() }.buttonStyle(GhostStyle())
+                            .help(Tip.stopConnecting)
                     }
                     Button(isWorking ? "Aguardando o navegador…" : "Entrar com ChatGPT") {
                         signInTask = run {
@@ -283,6 +289,7 @@ private struct ProviderRow: View {
                             email = await ChatGPTAuth.shared.credential?.email
                         }
                     }
+                    .help(Tip.signInChatGPT)
                     .disabled(isWorking)
                 }
             } label: {
@@ -307,6 +314,7 @@ private struct ProviderRow: View {
                         keyFocused = true
                     }
                     .buttonStyle(.borderless)
+                    .help(Tip.replaceKey)
                 }
             } else {
                 HStack {
@@ -316,10 +324,13 @@ private struct ProviderRow: View {
                         .onSubmit(saveKey)
                     if !key.isEmpty {
                         Button("Salvar", action: saveKey).disabled(isWorking)
+                            .help(Tip.saveKey)
                     } else if isReplacingKey {
                         Button("Cancelar") { isReplacingKey = false }
+                            .help(Tip.keepKey)
                     } else if let page = kind.keyPage {
                         Link("Obter chave", destination: page)
+                            .help(Tip.getKey)
                     }
                 }
             }

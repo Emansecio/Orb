@@ -75,6 +75,7 @@ struct ModelPopover: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
+            .help(Tip.modelSettings)
             .foregroundStyle(Palette.secondary)
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
@@ -142,6 +143,7 @@ struct ModelPopover: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .help(isSearch ? "" : (isFolded ? "Mostra os modelos deste provedor" : "Recolhe os modelos deste provedor"))
         .accessibilityLabel("\(group.provider.label), \(group.models.count) \(group.models.count == 1 ? "modelo" : "modelos")")
         .accessibilityHint(isSearch ? "" : (isFolded ? "Mostrar modelos" : "Recolher modelos"))
         .accessibilityAddTraits(.isHeader)

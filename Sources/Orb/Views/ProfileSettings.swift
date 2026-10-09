@@ -19,6 +19,7 @@ struct ProfileSettings: View {
                         .animation(Motion.press, value: isDropTarget)
                 }
                 .buttonStyle(.plain)
+                .help(Tip.profilePhotoAvatar)
                 .accessibilityLabel("Foto do perfil")
                 .accessibilityHint("Escolhe uma imagem")
                 .dropDestination(for: URL.self) { urls, _ in
@@ -29,9 +30,11 @@ struct ProfileSettings: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 10) {
                         Button(model.profile.photo.isEmpty ? "Escolher foto…" : "Trocar foto…") { isImporting = true }
+                            .help(Tip.profilePhotoChoose)
                         if !model.profile.photo.isEmpty {
                             Button("Remover foto") { model.removeProfilePhoto(); photoError = nil }
                                 .foregroundStyle(.secondary)
+                                .help(Tip.profilePhotoRemove)
                         }
                     }
                     Text("Ou arraste uma imagem para o círculo.")

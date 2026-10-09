@@ -319,6 +319,7 @@ struct FirstRunCard: View {
                 if style.showsSettingsLink {
                     Button("Mais opções em Ajustes") { SettingsRouter.open(.models, using: openSettings) }
                         .buttonStyle(.plain)
+                        .help(Tip.modelSettings)
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.accentText)
                 }
@@ -404,6 +405,7 @@ struct FirstRunCard: View {
                         if let page = keyKind.keyPage {
                             Link("Obter chave de \(keyKind.shortName)", destination: page)
                                 .font(.system(size: 12))
+                                .help(Tip.getKey)
                         }
                         Spacer()
                     }
@@ -509,6 +511,7 @@ private struct FirstRunRow: View {
                     .buttonStyle(.plain)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Palette.accentText)
+                    .help(Tip.stopConnecting)
                     .padding(.trailing, 40)
             }
         }
@@ -580,29 +583,36 @@ struct FirstRunBanner: View {
                                 steps.connectClaudeCode(model: model)
                             }
                             .buttonStyle(PrimaryPillStyle())
+                            .help(steps.claude?.isLoggedIn == true ? Tip.useClaudeCode : Tip.signInClaudeCode)
                             .disabled(steps.working == .claudeCode)
                         }
                         Button("Entrar com ChatGPT") { steps.connectChatGPT(model: model) }
                             .buttonStyle(steps.claude?.isInstalled == true ? AnyButtonStyle(SecondaryPillStyle()) : AnyButtonStyle(PrimaryPillStyle()))
+                            .help(Tip.signInChatGPT)
                             .disabled(steps.working == .chatgpt)
                         ForEach(steps.localServers) { kind in
                             Button("Usar \(kind.shortName)") { steps.connectLocal(kind, model: model) }
                                 .buttonStyle(SecondaryPillStyle())
+                                .help(Tip.useLocalServer(kind.shortName))
                                 .disabled(steps.working == .local(kind))
                         }
                         Button("Colar chave de API…") { isAskingKey = true }
                             .buttonStyle(SecondaryPillStyle())
                             .popover(isPresented: $isAskingKey, arrowEdge: .top) { keyPopover }
+                            .help(Tip.pasteKey)
                             .disabled(steps.working == .key)
                         if steps.working != nil {
                             Button("Cancelar") { steps.cancel() }
                                 .buttonStyle(GhostStyle())
+                                .help(Tip.stopConnecting)
                         } else if steps.failure != nil {
                             Button("Tentar de novo", action: retry)
                                 .buttonStyle(GhostStyle())
+                                .help(Tip.retryConnecting)
                         }
                         Button("Ajustes") { SettingsRouter.open(.models, using: openSettings) }
                             .buttonStyle(GhostStyle())
+                            .help(Tip.modelSettings)
                     }
                 }
             }

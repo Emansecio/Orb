@@ -63,6 +63,7 @@ struct MenuBarLabel: View {
         let state = model.menuBarState
         Image(nsImage: MenuBarIcon.image(for: state))
             .accessibilityLabel(state.accessibilityLabel)
+            .help(Tip.menuBarItem)
     }
 }
 

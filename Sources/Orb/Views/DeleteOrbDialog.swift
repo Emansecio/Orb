@@ -123,6 +123,7 @@ struct DeleteOrbSheet: View {
                             cancel: { model.deletingBotID = nil },
                             primaryTitle: "Apagar e guardar a memória",
                             primaryIsDefault: false, // deleting is never what a reflex Return does; Esc still cancels
+                            destructiveHelp: Tip.deleteWithMemory, primaryHelp: Tip.deleteKeepingMemory,
                             primary: { model.confirmDelete(botID, keepMemory: true) })
             }
             .task {
@@ -152,6 +153,7 @@ struct KeptMemoryBanner: View {
                         // Not before the memory has moved: the folder it goes to does not exist until then.
                         Button("Mostrar no Finder") { model.revealKeptMemory(notice) }
                             .buttonStyle(.link)
+                            .help(Tip.keptMemoryInFinder)
                             .font(.system(size: 12))
                             .disabled(!notice.isKept)
                     }
@@ -159,6 +161,7 @@ struct KeptMemoryBanner: View {
                     Button("Fechar", systemImage: "xmark") { model.dismissKeptMemoryNotice() }
                         .labelStyle(.iconOnly)
                         .buttonStyle(.plain)
+                        .help(Tip.dismissNotice)
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(Palette.muted)
                 }

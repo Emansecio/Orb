@@ -333,7 +333,7 @@ struct WelcomeView: View {
                 Button { model.startNewOrb(from: nil) } label: {
                     HStack(spacing: 10) {
                         Text(copy.createTitle)
-                        Text("⌘N")
+                        Text(AppShortcut.newBot.label)
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(Palette.onInk.opacity(0.5))
                             .accessibilityHidden(true)
@@ -341,6 +341,7 @@ struct WelcomeView: View {
                 }
                 .buttonStyle(HeroPillStyle())
                 .keyboardShortcut(.defaultAction)
+                .help(Tip.createOrbSheet())
                 .accessibilityHint("Abre a folha Novo Orb")
                 .accessibilityFocused($createFocused)
 
@@ -463,6 +464,7 @@ private struct SuggestedOrbButton: View {
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .help(Tip.createAtlas)
         .onHover {
             isHovering = $0
             if $0 { onHover() }
@@ -488,6 +490,7 @@ private struct ImportLinkButton: View {
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .help(Tip.importFromAssistant)
         .onHover { isHovering = $0 }
         .accessibilityHint("Abre a folha Novo Orb para trazer o que outro assistente sabe de você")
     }
@@ -532,6 +535,7 @@ struct KeptStartCard: View {
                         .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
+                .help(Tip.allKeptMemories)
             }
         }
         .padding(.bottom, 2)
@@ -570,6 +574,7 @@ private struct KeptStartRow: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .help(Tip.continueFromMemory)
         .onHover { isHovering = $0 }
         .accessibilityLabel(memory.spokenSummary)
     }

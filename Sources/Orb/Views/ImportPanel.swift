@@ -119,6 +119,7 @@ struct ImportPanel: View {
                 Label("Voltar", systemImage: "chevron.left").font(.system(size: 12))
             }
             .buttonStyle(GhostStyle())
+            .help(Tip.importBack)
             Text(ImportText.title)
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(Palette.ink)
@@ -141,6 +142,7 @@ struct ImportPanel: View {
                 .animation(Motion.press, value: copied)
             }
             .buttonStyle(SecondaryPillStyle())
+            .help(Tip.importCopyPrompt)
             DisclosureGroup("Ver o prompt") {
                 ScrollView {
                     Text(ImportPrompt.text)
@@ -168,6 +170,7 @@ struct ImportPanel: View {
             HStack(spacing: 8) {
                 Button("Escolher arquivo…") { isPicking = true }
                     .buttonStyle(SecondaryPillStyle())
+                    .help(Tip.importChooseFile)
                 Text("ou solte um arquivo ou pasta aqui")
                     .font(.system(size: 11))
                     .foregroundStyle(Palette.faint)
@@ -189,6 +192,7 @@ struct ImportPanel: View {
                             Text("\(local.name) · \(local.display)").font(.system(size: 12)).foregroundStyle(Palette.muted)
                             Spacer()
                             Button("Ler") { read(local.url) }.buttonStyle(GhostStyle())
+                                .help(Tip.importReadLocal)
                         }
                     }
                 }
@@ -300,6 +304,7 @@ private struct ImportPreview: View {
                     Text("Lembranças sobre você").tag(false)
                 }
                 .pickerStyle(.segmented)
+                .help(Tip.importKind)
             }
             LazyVStack(alignment: .leading, spacing: 8) {
                 if imported.identity != nil {
@@ -383,6 +388,7 @@ private struct ImportRow: View {
             }
         }
         .toggleStyle(.checkbox)
+        .help(Tip.importItem)
         .accessibilityElement(children: .combine)
     }
 }
@@ -404,9 +410,11 @@ private struct ImportSkillRow: View {
                     }
                 }
                 .toggleStyle(.checkbox)
+                .help(Tip.importItem)
                 Spacer(minLength: 4)
                 Button(isShowing ? "Ocultar" : "Ver") { isShowing.toggle() }
                     .buttonStyle(GhostStyle())
+                    .help(Tip.importToggleSkill(isShowing: isShowing))
             }
             if isShowing {
                 Text(skill.instructions)
@@ -442,7 +450,9 @@ struct ImportSummaryRow: View {
             }
             HStack(spacing: 4) {
                 Button("Revisar", action: review).buttonStyle(GhostStyle())
+                    .help(Tip.importReview)
                 Button("Remover", action: remove).buttonStyle(GhostStyle())
+                    .help(Tip.importRemove)
             }
         }
         .accessibilityElement(children: .contain)

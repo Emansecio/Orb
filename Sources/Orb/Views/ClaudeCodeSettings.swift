@@ -17,17 +17,20 @@ struct ClaudeCodeAccountRow: View {
             } else if !model.claudeCode.isInstalled {
                 line("exclamationmark.triangle.fill", Palette.warn, "Claude Code não encontrado neste Mac") {
                     Button("Verificar de novo") { run { await model.refreshConnections() } }.disabled(isWorking)
-                    if let page = ClaudeCode.setupPage { Link("Como instalar", destination: page) }
+                        .help(Tip.checkClaudeCode)
+                    if let page = ClaudeCode.setupPage { Link("Como instalar", destination: page).help(Tip.installClaudeCode) }
                 }
             } else if model.claudeCode.isLoggedIn {
                 line("checkmark.circle.fill", Palette.ok, "Conectado como \(model.claudeCode.accountLabel)\(modelCount)") {
                     Button("Sair") { isConfirmingSignOut = true }.disabled(isWorking)
+                        .help(Tip.signOutClaudeCode)
                 }
             } else {
                 line("person.crop.circle.badge.questionmark", Palette.muted, "Entre na sua conta Claude (Pro ou Max)") {
                     Button(isWorking ? "Aguardando o navegador…" : "Entrar") {
                         run { try await model.signIn(.claudeCode) }
                     }
+                    .help(Tip.signInClaudeCode)
                     .disabled(isWorking)
                 }
                 Text("O próprio Claude Code abre o navegador para você entrar.")

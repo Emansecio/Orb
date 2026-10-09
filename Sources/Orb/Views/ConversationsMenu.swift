@@ -9,7 +9,7 @@ struct ConversationsMenuButton: View {
     var body: some View {
         Button("Conversas anteriores", systemImage: "clock.arrow.circlepath") { isOpen.toggle() }
             .keyboardShortcut(AppShortcut.conversations)
-            .help("Conversas anteriores deste Orb (\(AppShortcut.conversations.label))")
+            .help(Tip.conversations())
             .popover(isPresented: $isOpen, arrowEdge: .bottom) {
                 ConversationsMenu(botID: botID) { isOpen = false }
             }
@@ -193,6 +193,7 @@ private struct ConversationRow: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("\(entry.title), \(ConversationListing.subtitle(entry))")
+                .help(Tip.reopenConversation)
                 .accessibilityHint("Reabre esta conversa")
                 // The trash is invisible (and out of VoiceOver's reach) except on the hovered or selected row.
                 .accessibilityAction(named: "Apagar", onAskDelete)
