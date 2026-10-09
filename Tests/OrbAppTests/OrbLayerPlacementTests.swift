@@ -264,6 +264,48 @@ extension OrbDriverTests {
         }
     }
 
+    /// Steps the orb until it stops running, or `seconds` pass; returns the seconds it took.
+    private func stepUntilItRests(_ view: OrbAnimationView, from start: Double, seconds: Double = 3) -> Double {
+        var time = start
+        while view.isRunning && time - start < seconds {
+            time += 1.0 / 30
+            view.stepIfDue(at: time)
+        }
+        return time - start
+    }
+
+    @Test func aSmileThatOutlastsTheSettlingDoesNotFreezeOnTheFace() async throws {
+        try #require(NSScreen.main != nil)
+        let (view, win) = reactionOrb()
+        defer { closePlacement(win) }
+        // Working for a while first: a new orb starts at rest and would have nothing to settle.
+        let start = step(view, from: CACurrentMediaTime() - 1, seconds: 1)   // ends at about the real clock, where the click is
+        let event = NSEvent.mouseEvent(with: .leftMouseDown, location: NSPoint(x: 20, y: 20), modifierFlags: [], timestamp: 0,
+                                       windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+        view.mouseDown(with: try #require(event))
+        #expect(view.shownForTesting.activity == .happy)
+        // The window goes inactive right after the click: the orb settles in about half a second, inside the 1.4 s smile.
+        configure(view, .idle, live: false)
+        let took = stepUntilItRests(view, from: start)
+        #expect(!view.isRunning)
+        #expect(took > 0 && took < OrbCelebration.smile.seconds - 0.3, "the settling must end before the smile would")
+        #expect(view.shownForTesting.activity == .idle)
+    }
+
+    @Test func aHeldToolPoseDoesNotFreezeWhenTheOrbSettlesBeforeItEnds() async throws {
+        try #require(NSScreen.main != nil)
+        let (view, win) = reactionOrb(activity: .typing)
+        defer { closePlacement(win) }
+        let time = step(view, from: CACurrentMediaTime() - 1, seconds: 1)   // ends at about the real clock
+        // The tool ends and the model thinks, and the window goes inactive at once: the pose is held for 0.6 s.
+        configure(view, .thinking, live: false)
+        #expect(view.shownForTesting.activity == .typing)
+        let took = stepUntilItRests(view, from: time)
+        #expect(!view.isRunning)
+        #expect(took > 0 && took < OrbActivityHold.wait, "the settling must end before the hold would")
+        #expect(view.shownForTesting.activity == .thinking)
+    }
+
     @Test func theCelebrationOnScreenFollowsTheLevelAndCanGrow() async throws {
         try #require(NSScreen.main != nil)
         let (view, win) = reactionOrb()

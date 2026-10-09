@@ -76,9 +76,11 @@ struct OrbFrame: View {
     @Environment(\.displayScale) private var displayScale
     /// Counts bitmap batches that finished decoding: the canvas draws again when one arrives.
     @State private var decodedBatches = 0
-    /// The last set of layers that was entirely decoded: drawn while the wanted set is still loading, so the
-    /// orb never shows up half made (without eyes or mouth) and keeps its old face until the new one is ready.
-    @State private var complete: Bitmaps?
+    /// The last set of layers that was entirely decoded, with the bitmaps themselves: drawn while the wanted set is still
+    /// loading, so the orb never shows up half made (without eyes or mouth) and keeps its old face until the new one is
+    /// ready. It holds the images, not only their keys: the shared cache is bounded and may drop them at any time (the
+    /// editor makes dozens of variants), and a still orb must not go blank for that.
+    @State private var complete: Complete?
 
     /// What the canvas needs decoded: the same layers at the same pixel size draw the same bitmaps.
     struct Bitmaps: Hashable {
@@ -86,13 +88,27 @@ struct OrbFrame: View {
         let pixels: CGFloat
     }
 
-    /// The layers to draw now: the wanted ones when they are all decoded, else the last complete set (if its
-    /// bitmaps are still around and match the pixel size), else nothing. Never a part of a set.
-    static func drawable(wanted: Bitmaps, complete: Bitmaps?) -> [OrbLayer] {
-        if OrbImages.decodesSynchronously || OrbImages.isCached(wanted.layers, pixels: wanted.pixels) { return wanted.layers }
-        guard let complete, complete.pixels == wanted.pixels, OrbImages.isCached(complete.layers, pixels: complete.pixels)
-        else { return [] }
-        return complete.layers
+    /// A set whose bitmaps were all decoded (`images[i]` is `bitmaps.layers[i]`'s).
+    struct Complete {
+        let bitmaps: Bitmaps
+        let images: [CGImage]
+    }
+
+    /// A layer and its bitmap. `image` is nil only when snapshots and sheets draw in place (`OrbImages.decodesSynchronously`).
+    struct Drawn {
+        let layer: OrbLayer
+        let image: CGImage?
+    }
+
+    /// The layers to draw now, with their bitmaps: the wanted ones when they are all decoded, else the last complete set
+    /// (if its pixel size matches), else nothing. Never a part of a set, and drawing never looks at the cache again.
+    static func drawable(wanted: Bitmaps, complete: Complete?) -> [Drawn] {
+        if OrbImages.decodesSynchronously { return wanted.layers.map { Drawn(layer: $0, image: nil) } }
+        if let images = OrbImages.cachedImages(wanted.layers, pixels: wanted.pixels) {
+            return zip(wanted.layers, images).map { Drawn(layer: $0, image: $1) }
+        }
+        guard let complete, complete.bitmaps.pixels == wanted.pixels else { return [] }
+        return zip(complete.bitmaps.layers, complete.images).map { Drawn(layer: $0, image: $1) }
     }
 
     /// The activity's expression; a talking Orb shows an open mouth shape.
@@ -130,7 +146,9 @@ struct OrbFrame: View {
                     guard !Task.isCancelled else { return }
                     decodedBatches += 1
                 }
-                if OrbImages.isCached(wanted.layers, pixels: wanted.pixels) { complete = wanted }
+                if let images = OrbImages.cachedImages(wanted.layers, pixels: wanted.pixels) {
+                    complete = Complete(bitmaps: wanted, images: images)
+                }
             }
     }
 }
@@ -138,7 +156,7 @@ struct OrbFrame: View {
 private struct OrbPainter {
     let config: OrbConfig
     let activity: OrbActivity
-    let layers: [OrbLayer]
+    let layers: [OrbFrame.Drawn]
     let size: CGFloat
     /// Side of the rendered layer images (the orb fills ~51% of it), see `OrbGeometry.imageSide`.
     let side: CGFloat
@@ -179,10 +197,10 @@ private struct OrbPainter {
         orb.scaleBy(x: (1 + pose.squash + pose.hover * 0.04) * turn, y: 1 - pose.squash + pose.hover * 0.04)
         orb.translateBy(x: -anchor.x, y: -anchor.y)
 
-        for layer in layers {
-            let image = OrbImages.decodesSynchronously
-                ? OrbImages.cgImage(layer.path, pixels: side * scale, tint: layer.tint)
-                : OrbImages.cached(layer.path, pixels: side * scale, tint: layer.tint)
+        for item in layers {
+            let layer = item.layer
+            let image = item.image ?? (OrbImages.decodesSynchronously
+                ? OrbImages.cgImage(layer.path, pixels: side * scale, tint: layer.tint) : nil)
             guard let image else { continue }
             var layerContext = orb
             let shift = parallax(layer)

@@ -229,6 +229,8 @@ as molas e `OrbActivity.motion`). Ao escolher um jeito, o Orb faz o seu gesto ca
 Calmo e Curioso mantêm a piscada de antes (expoente 2, `Traits.blinkSkew`); os outros pedem gaps curtos um pouco menos
 (expoente 1,5). As frequências por minuto da tabela são as medidas em `OrbRhythmTests` (duas horas simuladas de cada jeito). Orbs salvos antes desta versão (sem a chave
 `temperament`) carregam como equilibrados: `OrbConfig` decodifica de forma tolerante.
+O Orb aplica os traços do jeito já na primeira configuração (também o Equilibrado: antes só quem mudava de jeito os recebia
+e o Equilibrado ficava com a fixação × 1,0 dos auxiliares).
 
 ## 4. Interação com o mouse
 
@@ -258,7 +260,9 @@ Tudo em [`Orbs/OrbMotion.swift`](../Sources/Orb/Orbs/OrbMotion.swift) (funções
   0,06 s e abre em 0,14 s, e 12 % das vezes pisca duas vezes. Também pisca quando a expressão muda (esconde a troca de
   camadas) e, parado, em ~35 % das olhadas largas (`Saccades.isGlance`), como as pessoas fazem; esses pedidos só piscam se
   a última piscada terminou há mais de 1,5 s (`Blinker.minimumGap`), e a troca de rosto só dá o balanço de gelatina se o
-  rosto novo é mais agitado (`OrbActivity.energy`: de parado para feliz sim, de feliz para parado não). Olhos fechados
+  rosto novo é mais agitado (`OrbActivity.energy`: de parado para feliz sim, de feliz para parado não) e se o Orb pode mostrar quadros: com a
+  janela oculta ou o Orb rolado para fora o chute não vale, porque a mola só anda em quadros e os chutes se acumulariam e
+  estourariam na volta (a mola também zera quando o Orb para de rodar). Olhos fechados
   não piscam: felizes e sono 0, tontos 35 %, os demais 1 (`Blinker.factor`), e quem não pisca também não pede os 30 fps.
 - **Sombra no chão** (`OrbShadow`): fica mais estreita, mais achatada e mais fraca conforme o Orb sobe, e mais
   larga quando ele amassa no pouso ou cresce no hover. Em repouso é igual à de antes; o Orb estático usa a mesma.
@@ -325,7 +329,9 @@ atual:
   por Orb, todos os Orbs de uma tela são passos de um só link, e os passos de um tick ficam numa única `CATransaction`.
   Cada Orb decide o próprio ritmo (`OrbFrameClock`: um Orb que quer 10 fps num link de 30 Hz toma um tick em três, sem
   rajada de quadros atrasados depois de uma pausa). O link roda na menor taxa de 10/15/20/30/60 que todas as taxas dos Orbs
-  em movimento dividem (`OrbLinkRate`): 20 fps num link de 30 Hz alternaria intervalos de 33 e 67 ms. Ele pausa quando
+  em movimento dividem (`OrbLinkRate`): 20 fps num link de 30 Hz alternaria intervalos de 33 e 67 ms. Até 30 fps o
+  link nunca passa de 30 Hz: um Orb cuja taxa o link não divide (20 num link de 30) anda na taxa de cima que o divide
+  (`OrbLinkRate.stepRate`: 30; mais suave, nunca mais travado), em vez de o link subir a 60 Hz. Ele pausa quando
   nenhum Orb roda, segue o Orb que muda de tela (`NSWindow.didChangeScreenNotification`) e some com o último Orb da tela.
 - **Taxa guiada pelo movimento** (`OrbFrameRate`): a cada frame mede-se quanto a pose andou na tela
   (`OrbPose.pixelDistance`, em pixels do dispositivo) e escolhe-se a menor taxa entre 10/15/20/30/60 fps
@@ -351,10 +357,13 @@ atual:
   app escondido e Orb parado não acordam a CPU. Com a janela inativa (`appearsActive`) ou `paused`, o Orb assenta na pose
   de repouso e para (0 % de CPU medido, a mesma view continua montada). Na barra lateral só o selecionado e os que não
   estão parados rodam; no painel da barra de menus, só o escolhido e os que trabalham. Respeita **Reduzir movimento**.
+  Um Orb que ficou pausado enquanto estava fora da vista vai direto ao repouso (sem quadros ele nunca assentaria e o timer
+  de 0,5 s ficaria ligado), e ao entrar em repouso o sorriso do clique e a pose segurada da ferramenta, se ainda não
+  venceram, são descartados: com os quadros parados nada reavaliaria o prazo e o rosto congelaria.
 - **Imagens decodificadas fora da thread principal.** `OrbImages.cached` nunca decodifica; `OrbImages.load` decodifica em
   segundo plano (`.needed`, em paralelo; `.prewarm`, um por vez em prioridade baixa) e avisa na thread principal. A view
   mantém o que mostra até as camadas novas chegarem, e o `OrbFrame` estático nunca desenha parte de um conjunto: mostra o
-  último conjunto completo (ou nada). Depois da abertura, `OrbImages.prewarmResting` prepara as camadas de repouso de
+  último conjunto completo (ou nada). Ele guarda as próprias imagens desse conjunto (o cache é limitado e pode despejá-las). Depois da abertura, `OrbImages.prewarmResting` prepara as camadas de repouso de
   todos os Orbs nos tamanhos das primeiras telas (o Orb selecionado primeiro); ao montar um Orb animado, as expressões das
   atividades são pré-decodificadas (um Orb grande, só as prováveis: parado, pensando, falando, feliz, esperando).
 - **Imagens no tamanho exato.** `OrbImages` decodifica com ImageIO direto no tamanho em pixels em que a camada é desenhada
@@ -422,10 +431,13 @@ grande, o de 60 pt e dez de 30 pt; `draws/s` são os quadros que de fato moveram
 | pedindo aprovação | 39,0 M → 25,2 M (−36 %) | 360 → 150 (−58 %) | 313 → 130 |
 | em erro (depois do "não") | 40,1 M → 27,2 M (−32 %) | 360 → 165 (−54 %) | 330 → 153 |
 
-No terminal o ganho é pequeno porque o piso de 20 fps (Orbs de 30 pt) não divide os 30 fps das piscadas: quando um Orb
-pisca, o link compartilhado sobe a 60 Hz (`OrbLinkRate`) e acorda a thread principal mais vezes. Numa rodada com a tela
-ligada, antes de um ajuste de contagem, o terminal chegou a custar ~5 % mais instruções que antes, apesar de 26 % menos
-quadros; vale revisitar (piscada a 20 fps nos Orbs pequenos, por exemplo).
+Antes desse ajuste, no terminal o ganho era pequeno porque o piso de 20 fps (Orbs de 30 pt) não divide os 30 fps das
+piscadas (nem os 15 do "pensando" grande): quando um Orb piscava, o link compartilhado subia a 60 Hz e acordava a
+thread principal o dobro das vezes. Agora o link fica em 30 Hz e o Orb de 20 fps anda a 30 (`OrbLinkRate.stepRate`).
+Medido com o link real (tela ligada, 3 rodadas alternadas de 12 s, `bench 12 typing all`): 27,1 M → 24,5 M instr/s
+(−9 %), CPU de ~0,93 % → ~0,67 %, ao custo de mais quadros (268 → 360/s: cada Orb de 20 fps passa a 30). `bench 12 working all`:
+16,9 M → 16,0 M (−5 %), mesmos quadros. Com a tela apagada o bench não mede isso (o relógio emulado de 240 Hz acorda
+sempre): lá os ticks caem de 60 para 30/s, mas as instruções sobem ~3 % pelos quadros extras.
 
 `ORB_STATIC=1` desliga toda a animação. `ORB_ANIMATE_INACTIVE=1` mantém os Orbs animando com a
 janela inativa ou coberta, só para medir CPU sem trazer o app para a frente.

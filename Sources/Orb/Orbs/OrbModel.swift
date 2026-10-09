@@ -427,6 +427,21 @@ enum OrbImages {
         cache.object(forKey: key(relativePath, side: bitmapSide(for: pixels), tint: tint))
     }
 
+    /// The bitmaps of `layers` (in order) when every one is decoded, else nil: a set is whole or nothing.
+    static func cachedImages(_ layers: [OrbLayer], pixels: CGFloat) -> [CGImage]? {
+        var images: [CGImage] = []
+        for layer in layers {
+            guard let image = cached(layer.path, pixels: pixels, tint: layer.tint) else { return nil }
+            images.append(image)
+        }
+        return images
+    }
+
+    /// For tests: drops these bitmaps from the shared cache, as its byte limit or memory pressure would.
+    static func evictForTesting(_ layers: [OrbLayer], pixels: CGFloat) {
+        for layer in layers { cache.removeObject(forKey: key(layer.path, side: bitmapSide(for: pixels), tint: layer.tint)) }
+    }
+
     /// Whether every layer is decoded for a drawing `pixels` wide.
     static func isCached(_ layers: [OrbLayer], pixels: CGFloat) -> Bool {
         layers.allSatisfy { cached($0.path, pixels: pixels, tint: $0.tint) != nil }

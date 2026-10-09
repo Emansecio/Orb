@@ -36,17 +36,32 @@ struct OrbFrameClock {
 
 /// The rate the shared link runs at for the orbs that are running: the lowest one every orb's rate divides
 /// evenly, so each takes every n-th tick at a regular pace (20 fps on a 30 Hz link would alternate 33 and
-/// 67 ms; on a 60 Hz one it is steady at 50).
+/// 67 ms; on a 60 Hz one it is steady at 50). Rates that do not divide each other (20 with 15 or 30) would meet
+/// at 60 Hz, which wakes the main thread twice as often as the fastest orb needs: up to 30 the link stops at 30
+/// instead, and an orb whose rate does not divide it steps at `stepRate` (a little faster, never slower).
 enum OrbLinkRate {
     static let candidates: [Float] = [10, 15, 20, 30, 60]
+    private static let fastestLinkForSmallOrbs: Float = 30
 
     static func rate(forOrbsAt orbRates: [Float]) -> Float {
         let rates = orbRates.filter { $0 > 0 }
         guard let fastest = rates.max() else { return candidates[0] }
         let fits = { (link: Float) in
-            link >= fastest && rates.allSatisfy { abs(link / $0 - (link / $0).rounded()) < 0.01 }
+            link >= fastest && rates.allSatisfy { divides(link, by: $0) }
         }
-        return candidates.first(where: fits) ?? max(fastest, candidates[candidates.count - 1])
+        let meeting = candidates.first(where: fits) ?? max(fastest, candidates[candidates.count - 1])
+        return fastest <= fastestLinkForSmallOrbs ? min(meeting, fastestLinkForSmallOrbs) : meeting
+    }
+
+    /// The rate an orb that wants `wanted` fps actually steps at on a link of `link` Hz: the lowest one at or above what
+    /// it wants that the link divides evenly (20 fps on a 30 Hz link takes every tick: 30 fps, smoother, never choppier).
+    static func stepRate(_ wanted: Float, onLink link: Float) -> Float {
+        guard link > 0 else { return wanted }
+        return candidates.first { $0 >= wanted && $0 <= link && divides(link, by: $0) } ?? link
+    }
+
+    private static func divides(_ link: Float, by rate: Float) -> Bool {
+        abs(link / rate - (link / rate).rounded()) < 0.01
     }
 }
 

@@ -153,6 +153,12 @@ final class OrbAnimationView: NSView {
     var currentJumpForTesting: OrbJump? { jump?.kind }
     var currentFlourishForTesting: OrbFlourish? { flourishes.current }
     var shownForTesting: (activity: OrbActivity, celebration: OrbCelebration) { (shown, crossover.shownStyle) }
+    /// For tests: the rhythm the blinks and saccades run at.
+    var rhythmForTesting: [Double] {
+        [blinker.gap.lowerBound, blinker.gap.upperBound, blinker.skew, blinker.doubleChance, saccades.reach, saccades.hold]
+    }
+    /// For tests: how fast the jelly wobble spring is going (kicks pile up here while no frames run).
+    var wobbleVelocityForTesting: Double { wobble.velocity }
     /// For tests: the placed layers, back to front, with what they show.
     var placedLayersForTesting: [(layer: OrbLayer, view: CALayer)] { placed.map { ($0.layer, $0.view) } }
     private var rng = SystemRandomNumberGenerator()
@@ -179,6 +185,8 @@ final class OrbAnimationView: NSView {
     private lazy var glances = Glances(firstAt: now)
     private lazy var syllables = Syllables(firstAt: now)
     private var traits = OrbTemperament.Traits()
+    /// The temperament `traits` and the helpers were set for (nil: not configured yet).
+    private var appliedTemperament: OrbTemperament?
     /// Body motion time, advancing at the temperament's pace (continuous when the temperament changes).
     private var bodyClock = 0.0
     /// Activity on screen (the bot's, or `happy` for a moment after a click) and the one it is blending from.
@@ -251,7 +259,6 @@ final class OrbAnimationView: NSView {
     func configure(config: OrbConfig, activity: OrbActivity, celebration: OrbCelebration = .big, size: CGFloat,
                    followsPointer: Bool, interactive: Bool, live: Bool) {
         let resized = size != self.size, restyled = config != self.config
-        let retempered = config.temperament != self.config.temperament
         let resumed = live && !self.live
         self.config = config
         self.activity = activity
@@ -263,7 +270,12 @@ final class OrbAnimationView: NSView {
         // A paused orb gets no mouseExited when its window loses focus; don't come back staring at the old spot.
         if !live { hoverPoint = nil }
         if resized { invalidateIntrinsicContentSize() }
-        if retempered { applyTemperament(showcase: window != nil && live) }
+        // The first configuration too: the motion helpers start with their own defaults, which are not all the default
+        // temperament's. Only a change of temperament plays the showcase.
+        if config.temperament != appliedTemperament {
+            applyTemperament(showcase: appliedTemperament != nil && window != nil && live)
+            appliedTemperament = config.temperament
+        }
         if resized || restyled {
             visemeImages = [:]
             rebuild(resize: resized)
@@ -346,10 +358,12 @@ final class OrbAnimationView: NSView {
         } else {
             let calmer = target.energy <= shown.energy
             crossover.change(to: target, at: time, body: bodyClock + phase, traits: traits, celebration: style)
-            // At rest nothing moves, so a kick would pile up and burst out on resume.
+            // At rest nothing moves, so a kick would pile up and burst out on resume. Nor does it where no frames run
+            // (a hidden window, an orb scrolled away): the spring only moves in frames, so a long task would stack
+            // dozens of kicks and the orb would squash flat when it comes back.
             if !isResting {
                 if !sameFace || target == .attentive { blinker.trigger(at: time) }
-                if !sameFace && !calmer { wobble.velocity += 0.5 }
+                if !sameFace && !calmer && canShowFrames { wobble.velocity += 0.5 }
             }
             if !sameFace { liven(at: time) }
         }
@@ -608,6 +622,14 @@ final class OrbAnimationView: NSView {
         }
     }
 
+    /// Not hidden, and in a window someone can see (or one that animates regardless, for measuring).
+    private var isVisibleOnScreen: Bool {
+        window.map { !isHiddenOrHasHiddenAncestor && (OrbView.animateInactive || $0.occlusionState.contains(.visible)) } ?? false
+    }
+
+    /// Whether frames would run for this orb if it moved: on screen and inside the visible part of its scroll view.
+    private var canShowFrames: Bool { isVisibleOnScreen && isInView }
+
     /// False while the orb is outside the part of its scroll view that shows (`visibleRect` does not account
     /// for the clip view, which does not clip layers here).
     private var isInView: Bool {
@@ -637,19 +659,38 @@ final class OrbAnimationView: NSView {
     /// Frames only while someone can see them (no occluded or minimized window, no hidden view) and there is
     /// motion to show: a paused orb runs until it has settled into its resting pose.
     @objc private func updateRunning() {
-        let visible = window.map { !isHiddenOrHasHiddenAncestor && (OrbView.animateInactive || $0.occlusionState.contains(.visible)) }
+        let visible = isVisibleOnScreen
         let inView = isInView
-        let wouldRun = visible == true && !isResting
+        // Paused while out of sight: the settling only moves in frames, which this orb will not get, so it would never
+        // rest and would look again twice a second for good. Nobody sees the jump to rest.
+        if !live, !inView, window != nil, settle.value < 0.995 { restNow() }
+        let wouldRun = visible && !isResting
         // Only an orb that would run if it were in view needs to look again: hidden, covered or settled ones
         // have nothing to come back to (a change of window or of activity calls this again).
         watchForReturn(wouldRun && !inView)
         let running = wouldRun && inView
         if running != isRunning {
             isRunning = running
-            if running { clock.reset() }
+            if running { clock.reset() } else { wobble = Spring() }   // nobody sees it: a half-done wobble does not come back
             driver?.refresh()
         }
         if !running { lastTime = nil }
+    }
+
+    /// Skips the settling: the orb is in its resting pose right away (for one that nobody is looking at).
+    private func restNow() {
+        settle = Spring(value: 1)
+        // As in step()'s rest: no deadline would be looked at again, so the real activity shows.
+        tickleUntil = 0
+        hold = OrbActivityHold()
+        syncActivity(at: now)
+        wobble = Spring()
+        jump = nil
+        glanceStart = nil
+        cueBlinkStart = nil
+        bubbleIn.value = shown.bubble == nil || size < 26 ? 0 : 1
+        lastPose = restPose
+        apply(lastPose)
     }
 
     override func layout() {
@@ -664,7 +705,7 @@ final class OrbAnimationView: NSView {
 
     /// Called by the driver on every tick of the shared clock: a frame only when this orb's own rate asks for one.
     func stepIfDue(at time: Double) {
-        guard clock.isDue(at: time, rate: frameRate) else { return }
+        guard clock.isDue(at: time, rate: OrbLinkRate.stepRate(frameRate, onLink: driver?.rate ?? frameRate)) else { return }
         step(at: time)
         steps += 1
         // Layout can move the orb without the scroll view noticing.
@@ -704,6 +745,11 @@ final class OrbAnimationView: NSView {
         }
         if resting {
             settle = Spring(value: 1)
+            // Frames stop here, and nothing would look at a deadline again: a click's smile or a tool's held pose that
+            // outlived the settling would stay on the face. At rest the real activity shows.
+            tickleUntil = 0
+            hold = OrbActivityHold()
+            syncActivity(at: time)
             updateRunning()
         } else {
             pace(speed: speed, at: time)
