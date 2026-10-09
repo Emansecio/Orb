@@ -90,13 +90,13 @@ caminho mais curto até o primeiro Orb. Sem modelo conectado, o cartão "Primeir
 mesmos caminhos do primeiro uso). Com um modelo pronto, são duas opções:
 
 - **Criar meu primeiro Orb** (⌘N, ou Return): abre a folha Novo Orb.
-- **ou comece com o Atlas, pronto para usar**: cria o Atlas na hora, com uma pasta própria em `~/Orbs`.
+- **Começar com o Atlas**: cria o Atlas na hora, pronto para usar, com uma pasta própria em `~/Orbs`.
 
 Com [memórias guardadas](#memória) de Orbs apagados, um cartão "Começar de uma memória guardada" lista as três mais novas
 ("Continuar" abre a folha Novo Orb já com a memória escolhida; "Ver todas" mostra a lista completa). Depois de criar um Orb
 e apagar todos, o título vira "Hora de um Orb novo". A barra lateral mostra "Criar seu primeiro Orb" onde os Orbs ficam, e o
 clique nela traz a tela de volta. Com Orbs, o app sempre abre em um deles ("Escolha um Orb" deixou de existir). Sob os botões,
-"ou importe de outro assistente" abre a folha Novo Orb já no painel de [importação](#criar-um-orb).
+"Importar de outro assistente" abre a folha Novo Orb já no painel de [importação](#criar-um-orb).
 
 ## A janela
 
@@ -238,7 +238,7 @@ arquivo mudar depois, volta a ser só referência até você confiar de novo.
 
 ## Permissões do macOS
 
-Ajustes (**⌘,**) → **Permissões do Mac** mostra o que o macOS já deixa o Orb fazer, com o estado de cada uma:
+Ajustes (**⌘,**) → **Permissões** mostra o que o macOS já deixa o Orb fazer, com o estado de cada uma:
 
 - **Essenciais**: Acessibilidade (ler e operar a interface de outros apps), Gravação do Áudio do Sistema e da Tela, Acesso Total ao Disco (é uma
   estimativa: o macOS não informa; o Orb tenta abrir uma pasta protegida) e **Notificações**.
@@ -255,7 +255,7 @@ atualiza quando você volta ao app e tem **Verificar de novo**. Gravação do Á
   uma vez e abrir scripts, instaladores ou links que rodam Atalhos perguntam antes, como os outros comandos perigosos.
 - O Orb recebe receitas curtas para as tarefas comuns do Mac (datas sem depender do idioma, rascunho no Mail, Lembretes, Notas,
   Calendário, Música) e conselhos para os erros típicos do AppleScript. No Claude Code, a captura de tela chega como imagem.
-- No painel do Orb, a chave "Controlar apps do Mac" ligada traz o atalho **Permissões do Mac**.
+- No painel do Orb, a chave "Controlar apps do Mac" ligada traz o atalho **Permissões**.
 - Quando uma ferramenta falha por falta de permissão, o Orb não tenta de novo: diz o que ligar e onde, e a linha da ferramenta
   ganha o botão **Permitir…** (pede ao macOS ou abre o painel certo).
 - As permissões valem para esta cópia do app; veja [Assinatura estável](#assinatura-estável-recomendado).
@@ -600,7 +600,7 @@ Rodando pelo SwiftPM (sem um `.app`), ele só fecha: abra de novo. Nos modos de 
 | Claude Code "não encontrado neste Mac" | Instale o `claude` ([guia](https://code.claude.com/docs/en/setup)) e use "Verificar de novo" em Ajustes → Modelos |
 | Ollama ou LM Studio "Servidor não encontrado" | Abra o app e ligue o servidor local (LM Studio: o servidor precisa estar ligado e com um modelo carregado); baixe pelo menos um modelo |
 | "A conversa ficou grande demais para este modelo" | Compactar agora, Nova conversa, ou escolha o Contexto das conversas "Econômico" |
-| O Orb diz que falta uma permissão do macOS | Ajustes → Permissões do Mac (ou o botão "Permitir…" na linha da ferramenta). Reabra o app depois de Gravação do Áudio do Sistema e da Tela e Acesso Total ao Disco |
+| O Orb diz que falta uma permissão do macOS | Ajustes → Permissões (ou o botão "Permitir…" na linha da ferramenta). Reabra o app depois de Gravação do Áudio do Sistema e da Tela e Acesso Total ao Disco |
 | As permissões do macOS somem a cada compilação | [Assinatura estável](#assinatura-estável-recomendado) |
 | O Orb parou numa pergunta | Veja o cartão na conversa, o ponto na barra de menus ou a notificação |
 | Não aparecem notificações | Ajustes → Geral mostra o estado; "Abrir Ajustes do Sistema" leva ao painel de notificações |

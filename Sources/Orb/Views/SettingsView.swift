@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 import ServiceManagement
 
-// Ajustes: four tabs (Geral, Modelos, Uso, Permissões do Mac) that anything in the app can open directly.
+// Ajustes: four tabs (Geral, Modelos, Uso, Permissões) that anything in the app can open directly.
 
 enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
     case general, models, usage, permissions
@@ -14,7 +14,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
         case .general: "Geral"
         case .models: "Modelos"
         case .usage: "Uso"
-        case .permissions: "Permissões do Mac"
+        case .permissions: "Permissões"
         }
     }
 

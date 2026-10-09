@@ -422,7 +422,7 @@ lista de `--help` mostra `manual`, que o próprio CLI converte em `default`).
 
 ## Permissões do macOS (TCC)
 
-Separadas das anteriores: dizem o que o **macOS** deixa o app fazer. Ficam em Ajustes → Permissões do Mac
+Separadas das anteriores: dizem o que o **macOS** deixa o app fazer. Ficam em Ajustes → Permissões
 (`MacPermissionsView`, `MacPermissions.swift`).
 
 | Permissão | Como o app descobre | Quem usa |
@@ -459,7 +459,7 @@ Separadas das anteriores: dizem o que o **macOS** deixa o app fazer. Ficam em Aj
   aparece quando uma captura de tela sai só com o papel de parede ou o `browser_tab` traz a recusa dentro do resultado.
   O nome do app recusado é lido também do texto em português do sistema ("eventos Apple para Mail") e, se nada o nomeia e o
   script fala com um só app, esse é o app. No painel do Orb (Geral → "O que o Orb pode usar"), a chave "Controlar apps do Mac"
-  ligada mostra o atalho **Permissões do Mac**.
+  ligada mostra o atalho **Permissões**.
 - `ui_read` e `ui_act` só são oferecidos ao modelo com a Acessibilidade concedida (o prompt avisa quando ficam de fora). O
   servidor de ferramentas do Claude Code recebe a resposta do app (`--accessibility` / `--no-accessibility`) em vez de
   perguntar ao macOS de dentro de um processo filho.

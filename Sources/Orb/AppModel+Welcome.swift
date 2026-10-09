@@ -25,7 +25,7 @@ extension AppModel {
     /// What the welcome screen says, first use or an emptied list.
     var welcomeCopy: WelcomeCopy { hasCreatedOrb ? .returning : .firstUse }
 
-    /// "ou comece com o Atlas": the suggested Orb, made in one click with a folder of its own (`~/Orbs/Atlas`, or the
+    /// "Começar com o Atlas": the suggested Orb, made in one click with a folder of its own (`~/Orbs/Atlas`, or the
     /// next free name) and the interview on, like the Orb the app used to start with.
     @discardableResult
     func createSuggestedOrb(base: URL = OrbFolder.defaultBase) -> Bot {
@@ -40,7 +40,7 @@ extension AppModel {
         showNewBot = true
     }
 
-    /// "ou importe de outro assistente": opens the new-Orb sheet already on the import panel.
+    /// "Importar de outro assistente": opens the new-Orb sheet already on the import panel.
     func startNewOrbImporting() {
         newBotStart = nil
         newBotImporting = true

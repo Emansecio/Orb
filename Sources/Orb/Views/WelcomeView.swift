@@ -3,7 +3,7 @@ import SwiftUI
 // The welcome screen: what the window shows when there are no Orbs (the first launch with nothing made yet, or after
 // the last Orb was deleted). It is the front door: it says what the product is in a few seconds, with three Orbs that
 // live and look back at you, and leads to the first Orb in as few clicks as possible: connect a model, then "Criar
-// meu primeiro Orb" (the New Orb sheet) or "ou comece com o Atlas" (one click). docs/MOVIMENTO.md §2.11.
+// meu primeiro Orb" (the New Orb sheet) or "Começar com o Atlas" (one click). docs/MOVIMENTO.md §2.11.
 
 // MARK: - What the screen is in
 
@@ -145,6 +145,8 @@ enum WelcomeEntrance {
     static let pointsStart = 0.26
     static let actions = EntranceStyle.rise.delayed(0.40)
     static let keptCard = EntranceStyle.rise.delayed(0.44)
+    /// The two other ways in, side by side under the main button, one after the other.
+    static func choice(_ index: Int) -> EntranceStyle { .staggered(index, start: 0.46) }
     /// After this long the screen is "settled": what appears later comes in with a transition, not the entrance.
     static let duration: Duration = .seconds(1)
 
@@ -345,13 +347,6 @@ struct WelcomeView: View {
                 .accessibilityHint("Abre a folha Novo Orb")
                 .accessibilityFocused($createFocused)
 
-                VStack(spacing: 4) {
-                    SuggestedOrbButton(onHover: hoverAtlas) { _ = model.createSuggestedOrb() }
-                    Text("Um assistente para o seu Mac. Dá para personalizar depois.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Palette.faint)
-                        .multilineTextAlignment(.center)
-                }
             }
             if stage == .createWithKept {
                 KeptStartCard(memories: kept, onContinue: { model.startNewOrb(from: $0) }, onShowAll: { model.startNewOrb(from: nil) })
@@ -359,8 +354,26 @@ struct WelcomeView: View {
                     .transition(.adapted(.rise, reduceMotion: reduceMotion))
                     .entrance(WelcomeEntrance.keptCard, enters: entering)
             }
-            ImportLinkButton { model.startNewOrbImporting() }
-                .entrance(WelcomeEntrance.keptCard, enters: entering)
+            otherWaysIn
+                .padding(.horizontal, 6) // room for the capsules' edges (and their growth under the pointer)
+                .padding(.top, 4)
+        }
+    }
+
+    /// The other two ways in, quiet beside the main button: side by side, stacked when the window is narrow.
+    private var otherWaysIn: some View {
+        let atlas = WelcomeChoice(symbol: "sparkle", title: "Começar com o Atlas", help: Tip.createAtlas,
+                                  onHover: hoverAtlas) { _ = model.createSuggestedOrb() }
+            .accessibilityLabel("Começar com o Atlas, pronto para usar")
+            .accessibilityHint("Cria o Atlas agora. Dá para personalizar depois")
+            .entrance(WelcomeEntrance.choice(0), enters: entering)
+        let importing = WelcomeChoice(symbol: "square.and.arrow.down", title: "Importar de outro assistente",
+                                      help: Tip.importFromAssistant) { model.startNewOrbImporting() }
+            .accessibilityHint("Abre a folha Novo Orb para trazer o que outro assistente sabe de você")
+            .entrance(WelcomeEntrance.choice(1), enters: entering)
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) { atlas; importing }
+            VStack(spacing: 8) { atlas; importing }
         }
     }
 
@@ -381,7 +394,7 @@ struct WelcomeView: View {
         loadedKept = await Task.detached(priority: .userInitiated) { KeptMemories.list(in: root) }.value
     }
 
-    /// The Atlas gives a little hop when the pointer is on "ou comece com o Atlas": cause and effect, at most once
+    /// The Atlas gives a little hop when the pointer is on "Começar com o Atlas": cause and effect, at most once
     /// every 1.5 s.
     private func hoverAtlas() {
         guard !reduceMotion, Date.now.timeIntervalSince(lastHoverPoke) > 1.5 else { return }
@@ -447,52 +460,42 @@ private struct WelcomePointView: View {
     }
 }
 
-/// "ou comece com o Atlas, pronto para usar": the one-click way in. The pointer on it makes the Atlas hop.
-private struct SuggestedOrbButton: View {
-    let onHover: () -> Void
+/// One of the quieter ways in under the main button: an icon and a few words in a soft capsule that lights up and
+/// grows a little under the pointer (opacity and scale only). What it does in full is in the tooltip.
+private struct WelcomeChoice: View {
+    let symbol: String
+    let title: String
+    let help: String
+    var onHover: (() -> Void)?
     let action: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
 
     var body: some View {
         Button(action: action) {
-            Text("ou comece com o Atlas, pronto para usar")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Palette.accentText)
-                .opacity(isHovering ? 0.8 : 1)
-                .animation(Motion.hover(isHovering), value: isHovering)
-                .padding(.vertical, 2)
-                .contentShape(.rect)
+            HStack(spacing: 7) {
+                Image(systemName: symbol)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(isHovering ? Palette.accentText : Palette.muted)
+                Text(title)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(isHovering ? Palette.ink : Palette.secondary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(Color.white.opacity(isHovering ? 0.08 : 0.04), in: .rect(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(isHovering ? Palette.lineStrong : Palette.line))
+            .scaleEffect(isHovering && !reduceMotion ? 1.03 : 1)
+            .animation(Motion.hover(isHovering), value: isHovering)
+            .contentShape(.rect(cornerRadius: 12))
         }
         .buttonStyle(.plain)
-        .help(Tip.createAtlas)
+        .focusEffectDisabled()
+        .help(help)
         .onHover {
             isHovering = $0
-            if $0 { onHover() }
+            if $0 { onHover?() }
         }
-        .accessibilityLabel("Começar com o Atlas, pronto para usar")
-        .accessibilityHint("Cria o Atlas agora. Dá para personalizar depois")
-    }
-}
-
-/// "ou importe de outro assistente": opens the new-Orb sheet on the import panel.
-private struct ImportLinkButton: View {
-    let action: () -> Void
-    @State private var isHovering = false
-
-    var body: some View {
-        Button(action: action) {
-            Text("ou importe de outro assistente")
-                .font(.system(size: 12))
-                .foregroundStyle(Palette.accentText)
-                .opacity(isHovering ? 0.8 : 1)
-                .animation(Motion.hover(isHovering), value: isHovering)
-                .padding(.vertical, 2)
-                .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .help(Tip.importFromAssistant)
-        .onHover { isHovering = $0 }
-        .accessibilityHint("Abre a folha Novo Orb para trazer o que outro assistente sabe de você")
     }
 }
 

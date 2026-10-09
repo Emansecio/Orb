@@ -413,7 +413,7 @@ enum MacPermissionProblem: Equatable, Sendable {
         default: ""
         }
         return "Do not retry and do not try another way around it (another script, the shell, another tool). Tell the user to open "
-            + "Ajustes do Sistema → \(settingsPath) and \(enable)\(restart); the Settings tab \"Permissões do Mac\" in Orb has a "
+            + "Ajustes do Sistema → \(settingsPath) and \(enable)\(restart); the Settings tab \"Permissões\" in Orb has a "
             + "button that opens that pane. Then ask them to request it again."
     }
 

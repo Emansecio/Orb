@@ -245,7 +245,7 @@ Só usa tokens que já existem; o fundo é estático (um gradiente desenhado uma
 - **Trocas.** Entrar e sair da tela segue o §2.9 (`.opacity` em 0,18 s); depois de criar um Orb ela só apaga (`Motion.exit`) e o chat
   vazio do Orb novo toca a própria queda (§2.8), então o Atlas "cai" no chat. Do cartão de modelo para as ações: o cartão sai
   com `.opacity` em `Motion.exit` e as ações entram com `.rise` em `Motion.enter`, presas à mudança de estágio, não à lista.
-- **Causa e efeito.** Passar o ponteiro em "ou comece com o Atlas" faz o Atlas dar um pulinho (no máximo um a cada 1,5 s).
+- **Causa e efeito.** Passar o ponteiro em "Começar com o Atlas" faz o Atlas dar um pulinho (no máximo um a cada 1,5 s).
   Ao conectar o modelo, o Atlas pula e fica `.happy` por 3 s, o prazo do flash da sessão.
 - **Botão principal** (`HeroPillStyle`). Cápsula branca com um halo índigo (sombra de 16 pt, opacidade 0,35); no hover só a opacidade do halo
   anima (0,5, `Motion.hoverIn`/`hoverOut`); pressionado, escala 0,97 em `Motion.press`.

@@ -203,7 +203,7 @@ struct SettingsRouterTests {
     }
 
     @Test func tabsAreInTheOrderGeralModelosUsoPermissoes() {
-        #expect(SettingsTab.allCases.map(\.title) == ["Geral", "Modelos", "Uso", "Permissões do Mac"])
+        #expect(SettingsTab.allCases.map(\.title) == ["Geral", "Modelos", "Uso", "Permissões"])
     }
 
     @Test func theVersionLineReadsTheBundleOrSaysItIsADevBuild() {
@@ -213,7 +213,7 @@ struct SettingsRouterTests {
     }
 }
 
-// MARK: Permissões do Mac
+// MARK: Permissões
 
 @MainActor
 struct MacPermissionsSummaryTests {
