@@ -385,7 +385,7 @@ struct ConnectorTemplateTests {
 
     @Test func categoriesFilter() {
         let code = ConnectorTemplate.all.filter { $0.matches(.code) }
-        #expect(code.map(\.id) == ["github"])
+        #expect(code.map(\.id) == ["github", "linear", "atlassian", "sentry"])
         #expect(ConnectorTemplate.all.filter { $0.matches(nil) }.count == ConnectorTemplate.all.count)
     }
 

@@ -46,6 +46,12 @@ enum CatalogSnapshots {
             return template("github", phase: .failed("Não foi possível iniciar o conector GitHub: HTTP 401: Bad credentials\nWWW-Authenticate: Bearer realm=github"))
         case "connectors-lazy":
             return lazyConnectors(model)
+        case "conn-editor-notion":
+            return template("notion-oficial")
+        case "conn-signin":
+            return template("notion-oficial", phase: .signingIn)
+        case "conn-needs-signin":
+            return needsSignIn(model)
         case "conn-tools":
             return toolsSheet()
         case "skill-editor-new":
@@ -85,6 +91,18 @@ enum CatalogSnapshots {
                                  slack.id: .failed("Não foi possível iniciar o conector Slack: invalid_auth"),
                                  memory.id: .idle(toolCount: 9), thinking.id: .stopped, agenda.id: .idle(toolCount: 6)]
         model.localStates = [.agenda: .noAccount]
+        return AnyView(ConnectorsView(tab: .installed))
+    }
+
+    /// Connectors that sign in with the account, in the three states that ask for something: no login yet, the login ended, more
+    /// permission wanted. A fourth one is signed in, for contrast.
+    private static func needsSignIn(_ model: AppModel) -> AnyView {
+        func installed(_ id: String) -> MCPServerConfig { ConnectorTemplate.all.first { $0.id == id }!.config.withNewID() }
+        let notion = installed("notion-oficial"), linear = installed("linear"), slack = installed("slack-oficial"), sentry = installed("sentry")
+        model.connectors = [notion, linear, slack, sentry]
+        model.allowConnectors(for: model.bots.map(\.id))
+        model.connectorStatus = [notion.id: .needsSignIn(nil), linear.id: .needsSignIn("A sessão do Linear expirou. Entre de novo."),
+                                 slack.id: .needsMorePermission("chat:write"), sentry.id: .ready(toolCount: 16)]
         return AnyView(ConnectorsView(tab: .installed))
     }
 

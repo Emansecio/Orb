@@ -146,6 +146,10 @@ final class AppModel {
     @ObservationIgnored let engine: AgentEngine
     @ObservationIgnored private let claudeEngine: ClaudeCodeEngine
     @ObservationIgnored let mcp: MCPManager
+    /// The logins of the remote connectors (tokens in the vault, account `mcp.<id>.oauth`).
+    @ObservationIgnored let connectorAuth: MCPAuth
+    /// Opens the page a login continues on (the browser; tests put a stand-in).
+    @ObservationIgnored var opensLoginPage: @Sendable (URL) async -> Void = { url in await MainActor.run { _ = NSWorkspace.shared.open(url) } }
     /// Keeps the tokens of connectors in the Keychain instead of the data file.
     @ObservationIgnored let connectorSecrets: ConnectorSecrets
     /// The registrations of connectors, one after another: waiting for the last one means `mcp` knows every connector.
@@ -209,7 +213,7 @@ final class AppModel {
     /// `firstUse` is the state when there is no data yet: the app passes `.firstUse` (no Orb, the welcome); tests and
     /// the developer modes keep `.initial`, with Atlas.
     init(store: Store = .standard, runsBackgroundWork: Bool = true, asyncLoading: Bool? = nil, secretVault: (any SecretVault)? = nil,
-         devRun: Bool = DevRun.isActive, firstUse: AppState = .initial) {
+         connectorSession: URLSession? = nil, devRun: Bool = DevRun.isActive, firstUse: AppState = .initial) {
         self.store = store
         isDevRun = devRun
         renewsCatalogs = runsBackgroundWork && !devRun
@@ -218,7 +222,8 @@ final class AppModel {
         self.secretVault = vault
         let secrets = ConnectorSecrets(vault: vault)
         connectorSecrets = secrets
-        mcp = MCPManager(store: store)
+        connectorAuth = MCPAuth(vault: vault, session: connectorSession ?? MCPAuth.liveSession)
+        mcp = MCPManager(store: store, auth: connectorAuth, session: connectorSession)
         images = ImageStore(dataFolder: store.directory)
         let gate = ApprovalGate()
         self.gate = gate
@@ -1459,6 +1464,8 @@ final class AppModel {
                 return
             }
             let environment = await ClaudeCode.shared.environment(for: installation)
+            // The CLI cannot renew a login in the middle of a turn: it gets a token with time left.
+            let servers = await connectorAuth.withBearer(servers)
             // What the connectors mark destructive, from their catalogs: the CLI's own connections never reach the Orb. A
             // connector with no catalog yet is asked about tool by tool.
             let annotations = await connectorAnnotations(for: connectorIDs, cliNames: cliNames)

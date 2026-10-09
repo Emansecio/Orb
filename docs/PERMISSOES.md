@@ -142,6 +142,13 @@ Detalhes que costumam surpreender:
   `github__create_issue`, as mesmas de antes) valem como se o modelo tivesse chamado a ferramenta direto. O histórico guarda a
   chamada original. Se a chamada não resolve (conector ou ferramenta que não existe), `connector_call` mesmo devolve o erro
   e nunca executa nada.
+- O login de um conector (OAuth) não muda a política: `connector_call` continua resolvendo para a mesma `connectorKey`, e o token
+  nunca passa pelo Orb nem pelo modelo. Se o servidor responde 401 ou 403 `insufficient_scope`, a ferramenta devolve uma frase
+  dizendo à pessoa para clicar em **Entrar de novo** ou **Permitir mais** em Conectores: o modelo não abre o navegador nem repete a
+  chamada em laço, e é a pessoa quem concede a permissão a mais (cada clique abre o login uma vez, com os escopos já dados mais os pedidos).
+  O navegador abre sempre por clique dela. O app recusa um servidor de login sem PKCE `S256` ou sem HTTPS, e um conector remoto sem HTTPS (fora do loopback) não faz login nem recebe o token, e uma resposta do login
+  com `iss` ou `state` errados não chega a trocar o código. O token fica só no Keychain (conta `mcp.<id>.oauth`), vai em
+  `Authorization` (nunca na URL, no `state.json` nem em mensagens de erro) e, no Claude Code, no arquivo temporário 0600 do turno. Apagar o conector ou "Sair da conta" apaga o login do Keychain e o revoga no serviço (melhor esforço, se o servidor anuncia `revocation_endpoint`); um login que ainda estava no navegador nessa hora é cancelado e não grava nada.
 - Ferramentas de conectores (`MCPTool`) são `.sensitive`, **exceto** quando o servidor as anuncia como somente leitura
   (`readOnlyHint`), de mundo fechado (`openWorldHint` não verdadeiro) e não destrutivas. Uma ferramenta anunciada como
   destrutiva (`destructiveHint`) tem perigo: pergunta até no "Automático". O mesmo vale para a ferramenta que **envia, publica ou

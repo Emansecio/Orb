@@ -103,7 +103,8 @@ import Testing
     @Test func theSecretsToRemoveAreTheConnectorsOwnAndTheProvidersOnlyWhenTheyGo() {
         let staying = plan(ResetOptions(memories: .keep, leavesProviders: false))
         #expect(staying.secretAccounts == [ConnectorSecrets.account(id: connectorID, name: "Authorization"),
-                                            ConnectorSecrets.account(id: connectorID, name: "GITHUB_TOKEN")].sorted())
+                                            ConnectorSecrets.account(id: connectorID, name: "GITHUB_TOKEN"),
+                                            ConnectorSecrets.oauthAccount(id: connectorID)].sorted()) // the login too, if it has one
         #expect(staying.survivors?.defaultModel == "openai/gpt-x")
         #expect(staying.survivors?.providers == providers)
 

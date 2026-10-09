@@ -3,8 +3,9 @@ import Foundation
 /// The Slack app the person creates for the Orb. Slack's official MCP server (`mcp.slack.com/mcp`) only answers apps that
 /// are registered: published in the Marketplace, or internal to one workspace. The Orb has no server to be the first, so the
 /// person creates an internal app in one click, from a manifest that already holds everything: MCP turned on, the scopes of
-/// a user token in one of two sizes, and PKCE with the redirect the Orb will use when it learns to sign in by itself. The app
-/// then gives a User OAuth Token (`xoxp-…`), which goes in the Keychain like any other connector secret.
+/// a user token in one of two sizes, and PKCE with the redirect the Orb signs in with (`MCPAuth`: the person gives the app's Client ID
+/// and signs in in the browser, with nothing to copy). The User OAuth Token (`xoxp-…`) the app also shows can be pasted instead,
+/// and goes in the Keychain like any other connector secret.
 enum SlackApp {
     enum Preset: String, CaseIterable, Identifiable, Sendable {
         case readOnly, readAndSend
@@ -37,7 +38,7 @@ enum SlackApp {
     /// The user-token scopes of a preset.
     static func scopes(_ preset: Preset) -> [String] { preset == .readOnly ? readScopes : readScopes + writeScopes }
 
-    /// Where Slack sends the person back after the Orb signs in by itself (the next batch). A loopback address on a fixed
+    /// Where Slack sends the person back after the login in the browser. A loopback address on a fixed
     /// port: Slack compares the redirect exactly, port included, and with PKCE it allows plain `http://localhost`.
     static let redirectURL = "http://localhost:47821/slack/callback"
 

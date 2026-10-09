@@ -45,6 +45,7 @@ struct ResetPlan: Sendable {
                      learnedContexts: [String: LearnedContext], options: ResetOptions) -> ResetPlan {
         var accounts = Set<String>()
         for connector in connectors {
+            accounts.insert(ConnectorSecrets.oauthAccount(id: connector.id)) // the login, if it has one
             for name in ConnectorSecrets.secretNames(of: connector) {
                 accounts.insert(ConnectorSecrets.account(id: connector.id, name: name))
             }

@@ -72,6 +72,8 @@ Tudo em `Sources/Orb/`.
 | `OpenAIClient.swift`, `ResponsesClient.swift`, `AnthropicClient.swift` | os três formatos (chat completions, Responses, Messages): corpo da requisição e mapeamento dos eventos |
 | `ProviderTransport.swift`, `SSE.swift`, `Retry.swift`, `WireEncoder.swift` | o que os clientes dividem: requisição autorizada (renova 401), erros legíveis, `Retry-After`, leitor SSE incremental, retentativa com recuo, JSON ordenado |
 | `ChatGPTAuth.swift` | login "Sign in with ChatGPT" (registro dinâmico, PKCE, retorno em 127.0.0.1), token no Keychain |
+| `OAuthLoopback.swift` | o que os logins dividem: `randomToken`, o desafio PKCE `S256` e o `LoopbackCallback` (ouvinte único em 127.0.0.1, com portas preferidas e a opção de não aceitar outra; abre sem prender uma thread) |
+| `MCPAuth.swift` | `actor` do login OAuth 2.1 dos conectores remotos. O `HTTPTransport` recebe um `MCPTokenProvider` e põe `Authorization: Bearer` em todo pedido; um 401 renova uma vez e repete, depois vira `MCPAuthRequired` (`signIn`, `expired`, `moreScope`), que o `MCPManager` transforma em `MCPStatus.needsSignIn`/`.needsMorePermission`. O 401 sem token lê o `WWW-Authenticate` (`MCPChallenge`). `signIn` sonda o servidor, descobre a PRM (RFC 9728: o endereço do desafio, depois o caminho do endpoint, depois a raiz) e os metadados do servidor de login (RFC 8414 e OIDC, na ordem da spec), recusa sem `S256`, usa o app pré-registrado do modelo ou do editor (`MCPServerConfig.oauth`), reaproveita o que o Orb registrou antes (mesmo issuer e mesma porta) ou registra de novo (RFC 7591: `application_type` native, `token_endpoint_auth_method` none), monta a URL (`state`, `code_challenge`, `resource`, parâmetros extras), espera o retorno, confere `iss` (RFC 9207, pela tabela da spec 2026-07-28) e `state` antes de usar o código, e troca. A credencial (`MCPOAuthCredential`: issuer, cliente, segredo, porta registrada, tokens, validade, escopos, endpoint, método, resource) é um JSON só na conta `mcp.<id>.oauth` do Keychain. A renovação é única por conector (as chamadas simultâneas compartilham uma), grava a rotação e, quando o serviço encerra o login (`invalid_grant`, `invalid_client`, `unauthorized_client`, `invalid_refresh_token`), apaga os tokens e pede o login; um `invalid_client` apaga também o cliente que o Orb registrou. Um erro passageiro não apaga nada, e um token que ainda não venceu continua valendo quando não há como renová-lo. `withBearer` entrega ao Claude Code um token renovado se tiver menos de 30 min de vida e há refresh token; sem ele, ou se a renovação falha, vai o token atual enquanto valer. Um login que termina depois de "Sair da conta" ou de apagar o conector é cancelado (nada é gravado). Só entra em HTTPS (ou loopback): o conector `http://` fora do loopback não faz login nem recebe Bearer, e um redirect nunca desce de HTTPS para HTTP. Sair da conta e apagar o conector pedem a revogação (RFC 7009) em segundo plano quando o servidor de login anuncia `revocation_endpoint`. Sem escopo no desafio vale o do modelo ou do editor, depois o `scopes_supported` da PRM (a escolha explícita da pessoa vence um palpite do servidor) |
 | `ContextBudget.swift`, `ContextWindow.swift`, `ContextCondensing.swift`, `ConversationLedger.swift`, `ContextMeter.swift`, `Compaction.swift`, `ToolDigest.swift`, `ToolOutputSpill.swift` | janela, compactação e medidor: veja [CONTEXTO.md](CONTEXTO.md) |
 | `TurnPrompt.swift`, `SystemPrompt.swift`, `WorkspaceSnapshot.swift`, `WorkspaceChanges.swift`, `FolderInstructions.swift` | o prompt: sistema estável + prefácio por mensagem (`<orb_context>`: hora, pasta, memória); instruções da pasta (`ORB.md`/`AGENTS.md`/`CLAUDE.md`) |
 | `PermissionPolicy.swift`, `ApprovalGate.swift`, `ApprovalBatch.swift`, `DangerousCommand.swift`, `ShellCommandLine.swift` | permissões: veja [PERMISSOES.md](PERMISSOES.md) |
@@ -167,7 +169,7 @@ atenção, em breve), `LocalConnectorSetup` (estados "sem permissão", "negado",
 diálogo do macOS), `SlackApp` (manifesto e link de criação do app do Slack, presets de escopos), `ConnectorCatalog` (o que cada conector ofereceu
 da última vez, em `conectores/<id>.json`: serve ao índice, à resolução das chamadas, às anotações do Claude Code, à contagem do cartão e
 a "Ver ferramentas"), `SkillCatalog` (Skills.sh + GitHub),
-`ConnectorSecrets` (segredos de conectores no Keychain, `@keychain` no `state.json`), `OrbScope` (conectores e skills por
+`ConnectorSecrets` (segredos de conectores no Keychain, `@keychain` no `state.json`; `oauthAccount` é a conta do login), `AppModel+ConnectorLogin` (`signIn(connector:)`, `signOut`, `removeConnector`, que apaga a conta do login), `OrbScope` (conectores e skills por
 Orb: "Usar com").
 
 ### Orbs (`Orbs/`)
@@ -255,7 +257,7 @@ uso/aaaa-mm.json                 histórico de uso: uma linha por hora × Orb ×
 ```
 
 Fora dela: o **Keychain** (serviço `app.orb.mac`; uma conta por provedor com chave, `chatgpt` com o JSON do login e
-`mcp.<id do conector>.<NOME>` para segredos de conectores), as **preferências** (`UserDefaults`: `notifyWhenDone`,
+`mcp.<id do conector>.<NOME>` para segredos de conectores e `mcp.<id>.oauth` para o login de um conector), as **preferências** (`UserDefaults`: `notifyWhenDone`,
 `quickAskGlobalShortcut`, `keychainAccountsFromOpenBot`, aba de Ajustes e do painel de cada Orb, modelos recentes…) e a **pasta de cada Orb**
 (`~/Orbs/<Nome>/`, com `Rotinas/<nome>/…md`), que o app não apaga ao apagar o Orb. Há ainda um arquivo temporário por turno do
 Claude Code, `$TMPDIR/orb-mcp-p<pid>-<uuid>.json` (0600), com a configuração dos conectores já com os segredos: o fim do turno o apaga, e
@@ -371,7 +373,7 @@ modelo de provedor com formato desconhecido sai da lista. A gravação increment
 | O que | Onde roda |
 |---|---|
 | `AppModel`, `BotSession`, `BotLive`, `LiveText`, `OrbTranscript`, `ComposerLane`, `ConnectorSecrets`, as telas | `@MainActor` |
-| `AgentEngine`, `ClaudeCodeEngine`, `ApprovalGate`, `MCPManager`/`MCPConnection`/transportes, `ChatGPTAuth`, `ClaudeCode`, `WorkspaceSnapshots`, `BackgroundJobs`, `ShellEnvironment`, `SkillCatalog` | `actor` |
+| `AgentEngine`, `ClaudeCodeEngine`, `ApprovalGate`, `MCPManager`/`MCPConnection`/transportes, `ChatGPTAuth`, `MCPAuth`, `ClaudeCode`, `WorkspaceSnapshots`, `BackgroundJobs`, `ShellEnvironment`, `SkillCatalog` | `actor` |
 | `MemoryBank` | um `actor` por Orb: todas as escritas daquele Orb em fila; `MemoryLibrary` (sem estado mutável fora do lock) guarda os bancos |
 | Disco, Keychain, SQLite, decodificação de imagens, leitura de pasta e git | fila do `Store`, tarefas desprendidas (`Task.detached`), `DispatchQueue` próprias, `runDetached` (cancelável) para `grep`/`glob`/documentos, `Blocking.run` para chamadas bloqueantes do TCC |
 
@@ -500,7 +502,7 @@ Modos (qualquer outro nome mostra o chat do primeiro Orb):
  `settings-perms`, `first-run-banner`, `models` |
 | Barra de menus | `quickask`, `quickask-approvals`, `quickask-reply` |
 | Rotinas e conversas | `routines`, `routine-editor`, `routine-editor-new`, `routine-run`, `routine-run-failed`, `routine-conversation`, `conversations` |
-| Skills e conectores | `skills`, `skills-explore`, `skill-editor`, `skill-editor-new`, `skill-preview`, `skill-preview-installed`, `connectors` (instalados), `connectors-gallery`, `connectors-explore`, `connectors-lazy`, `conn-tools`, `conn-google-intro`, `conn-google-account`, `conn-google-account-agenda`, `conn-google-denied`, `conn-google-working`, `conn-google-done`, `conn-editor-supabase`, `conn-editor-github`, `conn-editor-files`, `conn-editor-slack`, `conn-editor-manual`, `conn-editor-edit`, `conn-editor-edit-registry`, `conn-editor-connecting`, `conn-editor-connected`, `conn-editor-failed` |
+| Skills e conectores | `skills`, `skills-explore`, `skill-editor`, `skill-editor-new`, `skill-preview`, `skill-preview-installed`, `connectors` (instalados), `connectors-gallery`, `connectors-explore`, `connectors-lazy`, `conn-tools`, `conn-signin`, `conn-needs-signin`, `conn-editor-notion`, `conn-google-intro`, `conn-google-account`, `conn-google-account-agenda`, `conn-google-denied`, `conn-google-working`, `conn-google-done`, `conn-editor-supabase`, `conn-editor-github`, `conn-editor-files`, `conn-editor-slack`, `conn-editor-manual`, `conn-editor-edit`, `conn-editor-edit-registry`, `conn-editor-connecting`, `conn-editor-connected`, `conn-editor-failed` |
 
 Com `ORB_SEND`, o snapshot envia o prompt e espera `ORB_SNAPSHOT_WAIT` segundos antes de fotografar. Para medir o streaming sem
 abrir janela, use o modelo falso com `--long`, `ORB_SEND` e `ORB_SNAPSHOT_WAIT=40` e observe o processo (`ps -o %cpu=`,

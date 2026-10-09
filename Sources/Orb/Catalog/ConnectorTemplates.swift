@@ -19,7 +19,7 @@ enum ConnectorCategory: String, CaseIterable, Identifiable, Sendable {
 
 /// A step-by-step guide the connector sheet shows before it asks for the key.
 enum ConnectorGuide: Equatable, Sendable {
-    /// Slack: create the app from a manifest, install it, paste the User OAuth Token (`SlackApp`).
+    /// Slack: create the app from a manifest, install it, then sign in with its Client ID (or paste the User OAuth Token) (`SlackApp`).
     case slack
 }
 
@@ -43,15 +43,24 @@ struct ConnectorTemplate: Identifiable, Sendable {
 
     var needsKey: Bool { inputs.contains { $0.isRequired && $0.isSecret } }
     var isRemote: Bool { config.isRemote }
+    /// Enters with the person's account (a login in the browser) instead of a key.
+    var usesLogin: Bool { config.oauth != nil }
 
     /// What the card says it needs: "Pede 1 chave", "Sem chave" or "Remoto". Only secrets are "chaves": an ID or a
     /// region is just something to fill in.
     var badges: [String] {
         let keys = inputs.filter { $0.isRequired && $0.isSecret }.count
-        return [keys == 0 ? "Sem chave" : keys == 1 ? "Pede 1 chave" : "Pede \(keys) chaves"] + (isRemote ? ["Remoto"] : [])
+        return [usesLogin ? "Entra com sua conta" : keys == 0 ? "Sem chave" : keys == 1 ? "Pede 1 chave" : "Pede \(keys) chaves"] + (isRemote ? ["Remoto"] : [])
     }
 
     func matches(_ category: ConnectorCategory?) -> Bool { category == nil || self.category == category }
+
+    /// A hosted server that lets the Orb register itself (OAuth with dynamic registration): one click, sign in with the account.
+    private static func loginTemplate(_ id: String, name: String, url: String, category: ConnectorCategory, summary: String) -> ConnectorTemplate {
+        var config = MCPServerConfig(name: name, url: url)
+        config.oauth = MCPOAuthSettings()
+        return ConnectorTemplate(id: id, config: config, summary: summary, category: category)
+    }
 
     static let all: [ConnectorTemplate] = [
         ConnectorTemplate(
@@ -73,7 +82,9 @@ struct ConnectorTemplate: Identifiable, Sendable {
             helpURL: URL(string: "https://github.com/settings/tokens")),
         ConnectorTemplate(
             id: "slack-oficial", config: {
+                // Signs in with the Client ID of the person's own app (PKCE, no token to copy); the token pasted by hand is the other way.
                 var config = MCPServerConfig(name: "Slack", url: SlackApp.serverURL)
+                config.oauth = MCPOAuthSettings(scopes: SlackApp.scopes(.readOnly).joined(separator: " "), redirect: SlackApp.redirectURL)
                 config.headers["Authorization"] = ""
                 config.secretKeys = ["Authorization"]
                 return config
@@ -83,6 +94,14 @@ struct ConnectorTemplate: Identifiable, Sendable {
             inputs: [.init(name: "Authorization", summary: "User OAuth Token do app do Slack que você cria no passo a passo (começa com xoxp-).",
                            isSecret: true, isRequired: true, prefix: "Bearer ")],
             helpURL: SlackApp.appsURL, guide: .slack),
+        loginTemplate("notion-oficial", name: "Notion", url: "https://mcp.notion.com/mcp", category: .notes,
+                      summary: "Buscar e editar páginas e bancos de dados do Notion. Você entra com a sua conta."),
+        loginTemplate("linear", name: "Linear", url: "https://mcp.linear.app/mcp", category: .code,
+                      summary: "Ver e atualizar issues, projetos e ciclos do Linear. Você entra com a sua conta."),
+        loginTemplate("atlassian", name: "Atlassian", url: "https://mcp.atlassian.com/v2/mcp", category: .code,
+                      summary: "Buscar e editar issues do Jira e páginas do Confluence. Você entra com a sua conta."),
+        loginTemplate("sentry", name: "Sentry", url: "https://mcp.sentry.dev/mcp", category: .code,
+                      summary: "Ver erros, issues e projetos do Sentry. Você entra com a sua conta."),
         ConnectorTemplate(
             id: "supabase", config: {
                 // Read-only until the person decides otherwise: the server runs queries with the permissions of the token.

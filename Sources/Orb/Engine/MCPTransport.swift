@@ -143,6 +143,11 @@ actor HTTPTransport: MCPTransport {
     private let name: String
     private let url: URL
     private let headers: [String: String]
+    /// The login of the connector, when it has one: its access token goes in `Authorization` of every request.
+    private let token: MCPTokenProvider?
+    /// The connector was made to sign in (a 401 without a Bearer challenge is still a request to sign in).
+    private let declaresLogin: Bool
+    private let session: URLSession
     private var receive: (@Sendable (JSONValue) async -> Void)?
     private var closed: (@Sendable (Error) async -> Void)?
     private var sessionID: String?
@@ -152,9 +157,10 @@ actor HTTPTransport: MCPTransport {
     private var legacyStream: Task<Void, Never>?
 
     /// Dedicated session: no disk cache, cookies kept in memory only, cross-host redirects refused.
-    private static let session = URLSession(configuration: .ephemeral, delegate: RedirectGuard(), delegateQueue: nil)
+    static let defaultSession = URLSession(configuration: .ephemeral, delegate: RedirectGuard(), delegateQueue: nil)
 
-    init(config: MCPServerConfig) throws {
+    /// `token`: gives the access token of a connector that signs in. `session`: tests put a fake one here.
+    init(config: MCPServerConfig, token: MCPTokenProvider? = nil, session: URLSession = HTTPTransport.defaultSession) throws {
         guard let url = URL(string: config.url.trimmingCharacters(in: .whitespaces)),
               ["http", "https"].contains(url.scheme?.lowercased()), url.host != nil else {
             // The URL itself is not quoted: it may carry an API key in its query.
@@ -163,6 +169,9 @@ actor HTTPTransport: MCPTransport {
         name = config.name
         self.url = url
         headers = config.headers
+        self.token = token
+        declaresLogin = config.oauth != nil
+        self.session = session
     }
 
     deinit { legacyStream?.cancel() }
@@ -184,6 +193,8 @@ actor HTTPTransport: MCPTransport {
                 try await post(message)
             }
         } catch let error as ToolError {
+            throw error
+        } catch let error as MCPAuthRequired {
             throw error
         } catch {
             if Task.isCancelled || (error as? URLError)?.code == .cancelled { throw CancellationError() }
@@ -297,26 +308,47 @@ actor HTTPTransport: MCPTransport {
 
     private func load(_ target: URL, method: String, body: JSONValue? = nil,
                       timeout: TimeInterval = 300) async throws -> (URLSession.AsyncBytes, HTTPURLResponse) {
-        var request = URLRequest(url: target, timeoutInterval: timeout)
-        request.httpMethod = method
-        // Per-request deadlines are enforced by MCPConnection, which cancels the request when they pass.
-        for (field, value) in headers { request.setValue(value, forHTTPHeaderField: field) }
-        if let body {
-            request.httpBody = Data(body.jsonString.utf8)
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.setValue("application/json, text/event-stream", forHTTPHeaderField: "Accept")
-        } else if method == "GET" {
-            request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        // A refused token is renewed once and the request repeated; a second refusal means the login is over.
+        var renewing = false
+        while true {
+            var request = URLRequest(url: target, timeoutInterval: timeout)
+            request.httpMethod = method
+            // Per-request deadlines are enforced by MCPConnection, which cancels the request when they pass.
+            for (field, value) in headers where token == nil || field.lowercased() != "authorization" {
+                request.setValue(value, forHTTPHeaderField: field)
+            }
+            let bearer = try await token?(renewing)
+            if let bearer { request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization") }
+            if let body {
+                request.httpBody = Data(body.jsonString.utf8)
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.setValue("application/json, text/event-stream", forHTTPHeaderField: "Accept")
+            } else if method == "GET" {
+                request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+            }
+            if legacyEndpoint == nil {
+                if let sessionID { request.setValue(sessionID, forHTTPHeaderField: "Mcp-Session-Id") }
+                if let protocolVersion { request.setValue(protocolVersion, forHTTPHeaderField: "MCP-Protocol-Version") }
+            }
+            let (bytes, response) = try await session.bytes(for: request)
+            guard let response = response as? HTTPURLResponse else {
+                throw ToolError("O conector \(name) enviou uma resposta inválida.")
+            }
+            guard token != nil, [401, 403].contains(response.statusCode) else { return (bytes, response) }
+            let challenge = MCPChallenge(header: response.value(forHTTPHeaderField: "WWW-Authenticate"))
+            if response.statusCode == 403 {
+                // Signed in, but not for this: more permission, asked for by the person, never repeated here.
+                guard challenge.error == "insufficient_scope" else { return (bytes, response) }
+                throw MCPAuthRequired(reason: .moreScope, challenge: challenge)
+            }
+            if bearer != nil && !renewing {
+                renewing = true
+                continue
+            }
+            // Without a token, only a Bearer challenge (or a connector made to sign in) asks for a login; any other 401 is the server's own message.
+            if bearer == nil && !(challenge.isBearer || challenge.resourceMetadata != nil || declaresLogin) { return (bytes, response) }
+            throw MCPAuthRequired(reason: bearer == nil ? .signIn : .expired, challenge: challenge)
         }
-        if legacyEndpoint == nil {
-            if let sessionID { request.setValue(sessionID, forHTTPHeaderField: "Mcp-Session-Id") }
-            if let protocolVersion { request.setValue(protocolVersion, forHTTPHeaderField: "MCP-Protocol-Version") }
-        }
-        let (bytes, response) = try await Self.session.bytes(for: request)
-        guard let response = response as? HTTPURLResponse else {
-            throw ToolError("O conector \(name) enviou uma resposta inválida.")
-        }
-        return (bytes, response)
     }
 
     /// Throws for non-2xx responses, quoting the start of the body (e.g. why a token was refused).
@@ -355,10 +387,16 @@ actor HTTPTransport: MCPTransport {
     }
 }
 
-/// Follows redirects only within the same host, so configured headers never reach another server.
-private final class RedirectGuard: NSObject, URLSessionTaskDelegate, Sendable {
+/// Follows redirects only within the same host and never from HTTPS down to HTTP, so configured headers and tokens never reach
+/// another server or travel in the clear.
+final class RedirectGuard: NSObject, URLSessionTaskDelegate, Sendable {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest) async -> URLRequest? {
-        request.url?.host?.lowercased() == task.originalRequest?.url?.host?.lowercased() ? request : nil
+        Self.follows(from: task.originalRequest?.url, to: request.url) ? request : nil
+    }
+
+    static func follows(from original: URL?, to target: URL?) -> Bool {
+        let downgrade = original?.scheme?.lowercased() == "https" && target?.scheme?.lowercased() != "https"
+        return target?.host != nil && target?.host?.lowercased() == original?.host?.lowercased() && !downgrade
     }
 }

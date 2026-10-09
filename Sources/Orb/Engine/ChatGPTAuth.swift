@@ -1,6 +1,4 @@
 import Foundation
-import CryptoKit
-import Network
 
 /// "Sign in with ChatGPT" for locally hosted apps (OpenAI's documented token-sharing flow):
 /// dynamic client registration, PKCE with a 127.0.0.1 loopback callback, and the resulting token used on the
@@ -117,9 +115,9 @@ actor ChatGPTAuth {
 
     /// Opens the browser, waits for the loopback callback and stores the credential.
     func signIn(open: @Sendable (URL) async -> Void) async throws -> ChatGPTCredential {
-        let verifier = Self.randomToken()
-        let state = Self.randomToken()
-        let callback = try LoopbackCallback(path: Self.callbackPath)
+        let verifier = OAuthLoopback.randomToken()
+        let state = OAuthLoopback.randomToken()
+        let callback = try await LoopbackCallback.open(path: Self.callbackPath)
         defer { callback.stop() }
         let redirect = "http://127.0.0.1:\(callback.port)\(Self.callbackPath)"
         let reuse = credential?.clientID
@@ -128,7 +126,7 @@ actor ChatGPTAuth {
         var items = [
             ("client_id", reuse ?? "dynamic_agent_client"), ("ext_agent_host_id", Self.hostID),
             ("response_type", "code"), ("redirect_uri", redirect), ("scope", Self.scope), ("resource", Self.resource),
-            ("state", state), ("nonce", Self.randomToken()), ("code_challenge", Self.challenge(for: verifier)),
+            ("state", state), ("nonce", OAuthLoopback.randomToken()), ("code_challenge", OAuthLoopback.challenge(for: verifier)),
             ("code_challenge_method", "S256"),
         ]
         if reuse == nil { items.append(("agent_name_hint", "Orb")) }
@@ -199,96 +197,5 @@ actor ChatGPTAuth {
         let id = UserDefaults.standard.string(forKey: key) ?? UUID().uuidString.lowercased()
         UserDefaults.standard.set(id, forKey: key)
         return "urn:uuid:\(id)"
-    }
-
-    private static func randomToken() -> String {
-        base64URL(Data((0..<32).map { _ in UInt8.random(in: .min ... .max) }))
-    }
-
-    static func challenge(for verifier: String) -> String {
-        base64URL(Data(SHA256.hash(data: Data(verifier.utf8))))
-    }
-
-    private static func base64URL(_ data: Data) -> String {
-        data.base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "=", with: "")
-    }
-}
-
-/// One-shot HTTP listener on 127.0.0.1 that captures the OAuth redirect's query string.
-/// Tries the conventional port 1455 first, then any free port (the docs allow the port to vary).
-final class LoopbackCallback: Sendable {
-    private let listener: NWListener
-    private let result: AsyncStream<[String: String]>
-    private let continuation: AsyncStream<[String: String]>.Continuation
-    let port: UInt16
-
-    init(path: String) throws {
-        (result, continuation) = AsyncStream.makeStream(of: [String: String].self)
-        guard let listener = Self.bind(1455) ?? Self.bind(nil), let bound = listener.port?.rawValue else {
-            throw ToolError("Não foi possível abrir a porta local para o login.")
-        }
-        self.listener = listener
-        port = bound
-        let continuation = continuation
-        listener.newConnectionHandler = { connection in
-            connection.start(queue: .global())
-            connection.receive(minimumIncompleteLength: 1, maximumLength: 16_384) { data, _, _, _ in
-                let request = data.map { String(decoding: $0, as: UTF8.self) } ?? ""
-                let target = request.split(separator: " ").dropFirst().first.map(String.init) ?? ""
-                let page = "<html><body style=\"font-family:-apple-system;background:#070707;color:#fcfcfc;text-align:center;padding-top:80px\"><h2>Pronto!</h2><p>Pode voltar para o app.</p></body></html>"
-                let reply = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: \(page.utf8.count)\r\nConnection: close\r\n\r\n\(page)"
-                connection.send(content: Data(reply.utf8), completion: .contentProcessed { _ in connection.cancel() })
-                guard let components = URLComponents(string: target), components.path == path else { return }
-                var query: [String: String] = [:]
-                for item in components.queryItems ?? [] { query[item.name] = item.value ?? "" }
-                continuation.yield(query)
-            }
-        }
-    }
-
-    /// A listener on 127.0.0.1 that reached `.ready` (nil port = any free port).
-    private static func bind(_ port: UInt16?) -> NWListener? {
-        let parameters = NWParameters.tcp
-        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: port.flatMap(NWEndpoint.Port.init(rawValue:)) ?? .any)
-        guard let listener = try? NWListener(using: parameters) else { return nil }
-        let settled = DispatchSemaphore(value: 0)
-        nonisolated(unsafe) var isReady = false
-        listener.stateUpdateHandler = { state in
-            switch state {
-            case .ready: isReady = true; settled.signal()
-            case .failed, .cancelled: settled.signal()
-            default: break
-            }
-        }
-        // A handler must exist before start; the real one is installed right after.
-        listener.newConnectionHandler = { $0.cancel() }
-        listener.start(queue: .global())
-        // Ready in milliseconds; the margin is for a Mac under load (it only ever waits that long when binding fails).
-        _ = settled.wait(timeout: .now() + 10)
-        guard isReady else { listener.cancel(); return nil }
-        listener.stateUpdateHandler = nil
-        return listener
-    }
-
-    func wait(timeout: Duration) async throws -> [String: String] {
-        try await withThrowingTaskGroup(of: [String: String].self) { group in
-            group.addTask { [result] in
-                for await query in result { return query }
-                throw CancellationError()
-            }
-            group.addTask {
-                try await Task.sleep(for: timeout)
-                throw ToolError("O login demorou demais; tente de novo.")
-            }
-            defer { group.cancelAll() }
-            guard let first = try await group.next() else { throw CancellationError() }
-            return first
-        }
-    }
-
-    func stop() {
-        listener.cancel()
-        continuation.finish()
     }
 }

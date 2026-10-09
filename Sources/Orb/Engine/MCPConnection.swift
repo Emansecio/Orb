@@ -69,12 +69,18 @@ actor MCPConnection {
 
     private let shell: ShellEnvironment
     private let locals: LocalConnectorEnvironment?
+    private let token: MCPTokenProvider?
+    private let session: URLSession?
 
     /// `locals`: what the app's own connectors (Agenda, Lembretes, Gmail) talk to; nil is the Mac itself.
-    init(config: MCPServerConfig, shell: ShellEnvironment = .shared, locals: LocalConnectorEnvironment? = nil) {
+    /// `token`: the login of a remote connector. `session`: tests put a fake network here.
+    init(config: MCPServerConfig, shell: ShellEnvironment = .shared, locals: LocalConnectorEnvironment? = nil,
+         token: MCPTokenProvider? = nil, session: URLSession? = nil) {
         self.config = config
         self.shell = shell
         self.locals = locals
+        self.token = token
+        self.session = session
     }
 
     var isRunning: Bool { transport != nil }
@@ -94,7 +100,8 @@ actor MCPConnection {
             guard let connector = (locals ?? .live).connector(for: config) else { throw ToolError("O conector \(config.name) não existe nesta versão do Orb.") }
             transport = LocalTransport(connector: connector)
         } else {
-            transport = config.isRemote ? try HTTPTransport(config: config) : StdioTransport(config: config, shell: shell)
+            transport = config.isRemote ? try HTTPTransport(config: config, token: token, session: session ?? HTTPTransport.defaultSession)
+                : StdioTransport(config: config, shell: shell)
         }
         self.transport = transport
         do {
@@ -111,7 +118,7 @@ actor MCPConnection {
             let detail = await transport.diagnostics
             stop()
             // Transport errors already name the connector; stderr explains a local server's failure best.
-            if detail.isEmpty, error is ToolError { throw error }
+            if detail.isEmpty, error is ToolError || error is MCPAuthRequired { throw error }
             throw ToolError("Não foi possível iniciar o conector \(config.name): \(detail.isEmpty ? error.localizedDescription : detail)")
         }
     }

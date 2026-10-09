@@ -52,6 +52,7 @@ enum Tip {
     static let recreateFolder = "Cria a pasta de novo, no mesmo lugar"
     static let changeFolder = "Escolhe outra pasta de trabalho para o Orb"
     static let manageConnectors = "Abre a página Conectores"
+    static let cancelLogin = "Para de esperar o navegador; o login não é feito"
     static let macPermissions = "Abre os Ajustes de permissões do macOS"
     static let showInstructions = "Mostra o arquivo de instruções da pasta no Finder"
     static func openFolderInFinder(_ name: String) -> String { "Abre a pasta de \(name) no Finder" }
@@ -237,7 +238,7 @@ enum Tip {
          newRoutine, editRoutine, deleteRoutine, runRoutineNow, runRoutineAgain, queuedRoutine, routineConversation,
          copyReport, openReportFile, runOnceNow, routinePermissions, allRoutines,
          routineToggle(isOn: true), routineToggle(isOn: false),
-         customizeOrb, refreshFolder, removeGrant, removeAllGrants, recreateFolder, changeFolder, manageConnectors,
+         customizeOrb, refreshFolder, removeGrant, removeAllGrants, recreateFolder, changeFolder, manageConnectors, cancelLogin,
          macPermissions, showInstructions, openFolderInFinder("Orb"), openFolderInTerminal("Orb"),
          createFirstOrb, showWelcome, skillsPage, keptMemoryInFinder, dismissNotice, deleteWithMemory,
          deleteKeepingMemory, profile(callName: "Ana"), profile(callName: nil),

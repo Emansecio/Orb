@@ -442,7 +442,16 @@ tem a **Galeria**, os **Instalados** e **Explorar**.
     escopos de usuário (*Só leitura* ou *Leitura e envio*) e PKCE; você instala o app no seu workspace e cola o **User OAuth
     Token** (`xoxp-…`), que vai para o Keychain. Só funciona onde o workspace deixa instalar apps (e o admin pode exigir
     aprovação). O Slack antigo (pacote `server-slack`, arquivado) e o Notion por npm saíram da galeria; quem já os instalou continua
-    usando. **Notion** e **Linear** aparecem como *Em breve*: pedem um login que ainda não existe no Orb.
+    usando.
+  - **Notion**, **Linear**, **Atlassian** (Jira e Confluence) e **Sentry** entram **com a sua conta**, em um clique: *Entrar com
+    Notion* abre o navegador, você termina o login lá e volta; o Orb se registra sozinho no serviço (nenhuma chave para copiar).
+    **Slack** usa o mesmo app criado pelo manifesto: cole só o **Client ID** (Basic Information → App Credentials) e clique em
+    *Entrar com Slack*; colar o token continua valendo como alternativa. O login segue o OAuth 2.1 do MCP (PKCE obrigatório: um
+    serviço sem PKCE é recusado). O token fica no Keychain, nunca no arquivo de dados, e **Sair da conta** (no menu do cartão)
+    o apaga (e pede ao serviço que o revogue, quando o servidor de login anuncia o endereço da revogação; o `auth.revoke` do Slack ainda não é chamado, então o token dele só deixa de valer ao expirar ou ao desinstalar o app). O cartão mostra **Entrar**, **Sessão expirou** (a renovação foi recusada) ou **Precisa de mais permissão** (o
+    servidor pediu um escopo a mais: **Permitir mais** abre o login de novo, uma vez por clique). Em **Avançado** dá para dar o
+    Client ID e o Client Secret de um app seu, para serviços que não deixam o Orb se registrar. Com o Claude Code, o token vai
+    renovado (com pelo menos 30 minutos de vida, quando o serviço dá refresh token) para cada turno. Só entra em conectores HTTPS.
   - **GitHub** e **Supabase** (`mcp.supabase.com/mcp`, token de acesso pessoal; começa com `read_only=true`) pedem uma chave.
 - **Carregam sob demanda.** Um conector não liga com o app nem manda as suas ferramentas a cada mensagem: o Orb recebe só duas
   ferramentas fixas, uma para ver o que cada conector oferece e outra para usá-lo. O servidor sobe na primeira vez que um Orb
@@ -458,7 +467,8 @@ tem a **Galeria**, os **Instalados** e **Explorar**.
   Automático, a não ser que o servidor a declare só de leitura. O que vem de um conector não vira memória de longo prazo: a
   página de sessão guarda só que o conector foi usado. O Claude Code roda sempre com `--strict-mcp-config`: os conectores do
   claude.ai e os servidores do `~/.claude.json` não entram, só os conectores do Orb.
-- **Chaves e tokens** dos conectores ficam no **Keychain**, não no arquivo de dados.
+- **Chaves e tokens** dos conectores (inclusive o login, conta `mcp.<id>.oauth`) ficam no **Keychain**, não no arquivo de dados;
+  apagar o conector ou redefinir o Orb apaga também o login.
 - **Skills** são instruções reutilizáveis no formato aberto `SKILL.md`. *Explorar* busca no catálogo [Skills.sh](https://skills.sh)
   e lê o `SKILL.md` no GitHub de quem publicou, com **prévia completa antes de instalar** (instale só de fontes em que você
   confia: a skill vira instrução para o Orb). Use com `/comando` no começo da mensagem, ou pelo botão "Usar". "Nova skill" cria a sua.

@@ -94,6 +94,10 @@ enum MCPStatus: Sendable, Equatable {
     /// Connected, running now.
     case ready(toolCount: Int)
     case failed(String)
+    /// Needs a login: nil the first time, or the sentence to show when the login it had stopped working.
+    case needsSignIn(String?)
+    /// Logged in, but the server wants more permission (the scopes it named, for "Permitir mais").
+    case needsMorePermission(String?)
     /// Switched off by the user.
     case stopped
 }
@@ -120,6 +124,9 @@ actor MCPManager {
     private var entries: [UUID: Entry] = [:]
     private let store: Store?
     private let shell: ShellEnvironment
+    /// The logins of the remote connectors, and the network they use (tests put a fake one).
+    private let auth: MCPAuth?
+    private let session: URLSession?
     private let idleLimit: Duration
     private let sweepInterval: Duration
     private var locals: LocalConnectorEnvironment?
@@ -129,9 +136,11 @@ actor MCPManager {
     /// `store`: where the catalogs are kept (nil: only in memory, as in tests). `idleLimit`: how long a server may sit
     /// unused; `sweepInterval`: how often that is checked.
     init(store: Store? = nil, shell: ShellEnvironment = .shared, idleLimit: Duration = .seconds(600), sweepInterval: Duration = .seconds(60),
-         locals: LocalConnectorEnvironment? = nil) {
+         locals: LocalConnectorEnvironment? = nil, auth: MCPAuth? = nil, session: URLSession? = nil) {
         self.store = store
         self.shell = shell
+        self.auth = auth
+        self.session = session
         self.locals = locals
         self.idleLimit = idleLimit
         self.sweepInterval = sweepInterval
@@ -173,7 +182,10 @@ actor MCPManager {
         }
         for config in configs where entries[config.id] == nil {
             let catalog = store?.readConnectorCatalog(config.id) // also when off, so switching it on knows its tools
-            entries[config.id] = Entry(config: config, status: config.isEnabled ? .idle(toolCount: catalog?.tools.count) : .stopped,
+            // A connector made to sign in, with no login yet, asks for it rather than saying it is ready.
+            var needsLogin = false
+            if let auth, config.oauth != nil, config.canSignIn { needsLogin = await !auth.isSignedIn(config.id) }
+            entries[config.id] = Entry(config: config, status: !config.isEnabled ? .stopped : needsLogin ? .needsSignIn(nil) : .idle(toolCount: catalog?.tools.count),
                                        catalog: catalog, lastUsed: .now)
         }
         publish()
@@ -226,8 +238,10 @@ actor MCPManager {
                 if entries[id]?.connection === connection { entries[id]?.connection = nil }
                 continue
             }
-            let connection = MCPConnection(config: entry.config, shell: shell, locals: locals)
-            let task = Task { try await self.start(id, connection) }
+            let connection = MCPConnection(config: entry.config, shell: shell, locals: locals,
+                                           token: auth?.tokenProvider(for: entry.config), session: session)
+            let previously = entry.status
+            let task = Task { try await self.start(id, connection, previously: previously) }
             entries[id]?.connection = connection
             entries[id]?.starting = task
             entries[id]?.status = .starting
@@ -236,7 +250,8 @@ actor MCPManager {
         }
     }
 
-    private func start(_ id: UUID, _ connection: MCPConnection) async throws -> MCPConnection {
+    /// `previously`: what the card said before this attempt (a login that ended keeps saying so until there is a new one).
+    private func start(_ id: UUID, _ connection: MCPConnection, previously: MCPStatus) async throws -> MCPConnection {
         // Weak: the handlers live in the connection, which would otherwise keep itself alive.
         await connection.setHandlers(
             toolsChanged: { [weak self, weak connection] in
@@ -263,13 +278,16 @@ actor MCPManager {
             publish()
             return connection
         } catch {
+            let required = error as? MCPAuthRequired
+            // Read before `entries` is written: both in one statement is an overlapping access.
+            let failure = required.map { status(for: $0, of: id, previously: previously) } ?? .failed(error.localizedDescription)
             if entries[id]?.connection === connection {
                 entries[id]?.connection = nil
                 entries[id]?.starting = nil
-                entries[id]?.status = .failed(error.localizedDescription)
+                entries[id]?.status = failure
                 publish()
             }
-            throw error
+            throw required.map { explained($0, of: id) } ?? error
         }
     }
 
@@ -311,7 +329,43 @@ actor MCPManager {
         let token = beginCall(id)
         defer { endCall(id, token) }
         let connection = try await ensureStarted(id)
-        return try await connection.call(tool, arguments: arguments, timeout: timeout)
+        do {
+            return try await connection.call(tool, arguments: arguments, timeout: timeout)
+        } catch let required as MCPAuthRequired {
+            // The login ended (or falls short) in the middle of the use: the server stops, the card asks, the model is told once.
+            await stopServer(id, becoming: status(for: required, of: id))
+            publish()
+            throw explained(required, of: id)
+        }
+    }
+
+    /// What the card says when the server asks for a login.
+    private func status(for required: MCPAuthRequired, of id: UUID, previously: MCPStatus? = nil) -> MCPStatus {
+        let name = entries[id]?.config.name ?? "conector"
+        switch required.reason {
+        case .signIn:
+            if case .needsSignIn(let message?)? = previously { return .needsSignIn(message) }
+            return .needsSignIn(nil)
+        case .expired: return .needsSignIn("A sessão do \(name) expirou. Entre de novo.")
+        case .moreScope: return .needsMorePermission(required.challenge.scope)
+        }
+    }
+
+    /// What the model reads when a tool could not run for lack of a login: it cannot sign in, so it is told whom to ask.
+    private func explained(_ required: MCPAuthRequired, of id: UUID) -> ToolError {
+        let name = entries[id]?.config.name ?? "O conector"
+        switch required.reason {
+        case .signIn: return ToolError("\(name) precisa de login. Peça para a pessoa clicar em Entrar em Conectores.")
+        case .expired: return ToolError("A sessão do \(name) expirou. Peça para a pessoa clicar em Entrar de novo em Conectores.")
+        case .moreScope: return ToolError("\(name) pediu mais permissão. Peça para a pessoa clicar em Permitir mais em Conectores.")
+        }
+    }
+
+    /// The person signed out: the server stops and the card asks for a login again.
+    func signedOut(_ id: UUID) async {
+        guard entries[id] != nil else { return }
+        await stopServer(id, becoming: .needsSignIn(nil))
+        publish()
     }
 
     /// Counts a call in flight; the token tells `endCall` which registration it was.

@@ -650,6 +650,8 @@ struct MCPServerConfig: Codable, Hashable, Identifiable, Sendable {
     /// The person connected Google Agenda knowing no calendar account is named Google or Gmail (a Workspace account is named by
     /// its address): the card then stops asking for a Google account.
     var anyAccount = false
+    /// How a remote connector signs in with a login (OAuth), when it does; nil: a key, or nothing.
+    var oauth: MCPOAuthSettings?
 
     var isRemote: Bool { !url.isEmpty }
 }
@@ -672,5 +674,6 @@ extension MCPServerConfig {
         summary = (try? c.decodeIfPresent(String.self, forKey: .summary)) ?? nil
         local = (try? c.decodeIfPresent(String.self, forKey: .local)) ?? nil
         anyAccount = (try? c.decodeIfPresent(Bool.self, forKey: .anyAccount)) ?? false
+        oauth = (try? c.decodeIfPresent(MCPOAuthSettings.self, forKey: .oauth)) ?? nil
     }
 }

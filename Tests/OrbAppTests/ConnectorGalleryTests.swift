@@ -9,15 +9,15 @@ struct ConnectorGalleryTests {
         let services = ConnectorGallery.services
         #expect(Set(services.map(\.id)).count == services.count)
         let names = services.map(\.name)
-        for wanted in ["Gmail", "Google Agenda", "Slack", "Notion", "GitHub", "Supabase", "Linear", "Lembretes"] { #expect(names.contains(wanted), Comment(rawValue: wanted)) }
+        for wanted in ["Gmail", "Google Agenda", "Slack", "Notion", "GitHub", "Supabase", "Linear", "Lembretes", "Atlassian", "Sentry"] { #expect(names.contains(wanted), Comment(rawValue: wanted)) }
         for service in services {
             #expect(!service.summary.isEmpty && !service.how.isEmpty && service.mark.symbol != nil || !service.mark.monogram.isEmpty, Comment(rawValue: service.id))
             // A template card points at a template that is offered; every local connector has a card.
             if case .template(let id) = service.source { #expect(ConnectorTemplate.all.contains { $0.id == id }, Comment(rawValue: id)) }
         }
         #expect(Set(services.compactMap(\.localKind)) == Set(LocalConnectorKind.allCases))
-        // Notion and Linear need a login the Orb does not do yet.
-        #expect(services.filter { $0.source == .soon }.map(\.name) == ["Notion", "Linear"])
+        // Nothing waits for a login any more: Notion and Linear are installable.
+        #expect(services.filter { $0.source == .soon }.isEmpty)
         // Nothing the gallery offers runs an abandoned package.
         #expect(!services.compactMap(\.template).contains { $0.config.arguments.joined().contains("server-slack") || $0.config.arguments.joined().contains("notion-mcp-server") })
         // Every template is on the page, so none is only reachable by a code path nobody can click.
@@ -32,7 +32,7 @@ struct ConnectorGalleryTests {
             ConnectorGallery.status(of: service(id), connectors: connectors, statuses: statuses, local: local)
         }
         #expect(status("github", []) == .available && status("gmail", []) == .available)
-        #expect(status("notion", []) == .soon)
+        #expect(status("notion", []) == .available)
         #expect(status("github", [github]) == .connected)
         #expect(status("github", [github], [github.id: .ready(toolCount: 3)]) == .connected)
         guard case .needsAttention(let why) = status("github", [github], [github.id: .failed("Não foi possível conectar ao conector GitHub: HTTP 401: Bad credentials")]) else {
@@ -80,10 +80,37 @@ struct ConnectorGalleryTests {
         #expect(ConnectorSecrets.secretNames(of: slack.config) == ["Authorization"])
     }
 
-    @Test func theServicesThatNeedALoginAreNotInstallable() {
-        // The next batch brings the login; until then the card is "Em breve" and no template stands behind it.
-        let soon = ConnectorGallery.services.filter { $0.source == .soon }
-        #expect(soon.allSatisfy { $0.template == nil && $0.localKind == nil && $0.summary.contains("em breve") })
+    @Test func theServicesThatSignInWithTheAccountAreOneClickAndRegisterThemselves() throws {
+        for id in ["notion", "linear", "atlassian", "sentry"] {
+            let template = try #require(ConnectorGallery.services.first { $0.id == id }?.template, Comment(rawValue: id))
+            // Remote over HTTPS, no key to copy, and no app the person has to register: the Orb registers itself.
+            #expect(template.usesLogin && template.isRemote && template.inputs.isEmpty && !template.needsKey, Comment(rawValue: id))
+            #expect(template.config.url.hasPrefix("https://") && template.config.headers.isEmpty && template.config.oauth == MCPOAuthSettings(), Comment(rawValue: id))
+            #expect(template.badges == ["Entra com sua conta", "Remoto"] && ConnectorGallery.services.first { $0.id == id }?.how == "Login com a conta")
+        }
+        let urls = Dictionary(uniqueKeysWithValues: ["notion-oficial", "linear", "atlassian", "sentry"].compactMap { id in
+            ConnectorTemplate.all.first { $0.id == id }.map { (id, $0.config.url) }
+        })
+        #expect(urls == ["notion-oficial": "https://mcp.notion.com/mcp", "linear": "https://mcp.linear.app/mcp",
+                         "atlassian": "https://mcp.atlassian.com/v2/mcp", "sentry": "https://mcp.sentry.dev/mcp"])
+    }
+
+    @Test func slackSignsInWithTheAppsClientIDAndKeepsTheTokenAsTheOtherWay() throws {
+        let slack = try #require(ConnectorTemplate.all.first { $0.id == "slack-oficial" })
+        // The same app the manifest creates: its redirect, exactly, and the scopes of the preset; no secret (PKCE makes it public).
+        #expect(slack.config.oauth?.redirect == SlackApp.redirectURL && slack.config.oauth?.needsClientSecret == false)
+        #expect(slack.config.oauth?.scopes == SlackApp.scopes(.readOnly).joined(separator: " ") && slack.config.oauth?.clientID == nil)
+        #expect(slack.usesLogin && slack.needsKey) // the pasted token is still there
+    }
+
+    @Test func aConnectorThatNeedsALoginAsksForAttentionOnItsCard() throws {
+        let notion = try #require(ConnectorTemplate.all.first { $0.id == "notion-oficial" }).config.withNewID()
+        let service = try #require(ConnectorGallery.services.first { $0.id == "notion" })
+        func status(_ mcp: MCPStatus) -> ServiceStatus { ConnectorGallery.status(of: service, connectors: [notion], statuses: [notion.id: mcp], local: [:]) }
+        #expect(status(.needsSignIn(nil)) == .needsAttention("Falta entrar com a sua conta."))
+        #expect(status(.needsSignIn("A sessão do Notion expirou. Entre de novo.")) == .needsAttention("A sessão do Notion expirou. Entre de novo."))
+        #expect(status(.needsMorePermission("x")) == .needsAttention("Precisa de mais permissão."))
+        #expect(status(.ready(toolCount: 3)) == .connected)
     }
 }
 

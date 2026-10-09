@@ -15,7 +15,7 @@ struct ConnectorService: Identifiable, Sendable {
         case template(String)
         /// A connector that runs on this Mac.
         case local(LocalConnectorKind)
-        /// Needs a sign-in the Orb does not do yet; the next batch brings it.
+        /// Not available yet.
         case soon
     }
 
@@ -54,16 +54,20 @@ enum ConnectorGallery {
         ConnectorService(id: "agenda", name: "Google Agenda", summary: LocalConnectorKind.agenda.summary,
                          mark: ServiceMark(symbol: "calendar", monogram: "A", color: 0x4285F4), source: .local(.agenda), how: "Pelo Mac"),
         ConnectorService(id: "slack", name: "Slack", summary: "Buscar e ler mensagens e canais e, se você liberar, enviar. Servidor oficial do Slack.",
-                         mark: ServiceMark(symbol: "number", monogram: "S", color: 0x611F69), source: .template("slack-oficial"), how: "App seu no Slack"),
-        ConnectorService(id: "notion", name: "Notion", summary: "Buscar e editar páginas e bancos de dados. Entra com a sua conta, em breve.",
-                         mark: ServiceMark(symbol: nil, monogram: "N", color: 0x2F3437), source: .soon, how: "Login com a conta"),
+                         mark: ServiceMark(symbol: "number", monogram: "S", color: 0x611F69), source: .template("slack-oficial"), how: "Login com app seu"),
+        ConnectorService(id: "notion", name: "Notion", summary: "Buscar e editar páginas e bancos de dados. Você entra com a sua conta.",
+                         mark: ServiceMark(symbol: nil, monogram: "N", color: 0x2F3437), source: .template("notion-oficial"), how: "Login com a conta"),
         ConnectorService(id: "github", name: "GitHub", summary: "Ler repositórios, issues e pull requests do GitHub.",
                          mark: ServiceMark(symbol: "chevron.left.forwardslash.chevron.right", monogram: "G", color: 0x30363D),
                          source: .template("github"), how: "Chave de acesso"),
         ConnectorService(id: "supabase", name: "Supabase", summary: "Consultar os projetos e as tabelas do seu Supabase, em leitura.",
                          mark: ServiceMark(symbol: "bolt.fill", monogram: "S", color: 0x1E9E6A), source: .template("supabase"), how: "Chave de acesso"),
-        ConnectorService(id: "linear", name: "Linear", summary: "Ver e atualizar issues e projetos. Entra com a sua conta, em breve.",
-                         mark: ServiceMark(symbol: nil, monogram: "L", color: 0x5E6AD2), source: .soon, how: "Login com a conta"),
+        ConnectorService(id: "linear", name: "Linear", summary: "Ver e atualizar issues e projetos. Você entra com a sua conta.",
+                         mark: ServiceMark(symbol: nil, monogram: "L", color: 0x5E6AD2), source: .template("linear"), how: "Login com a conta"),
+        ConnectorService(id: "atlassian", name: "Atlassian", summary: "Buscar e editar issues do Jira e páginas do Confluence. Você entra com a sua conta.",
+                         mark: ServiceMark(symbol: nil, monogram: "A", color: 0x0052CC), source: .template("atlassian"), how: "Login com a conta"),
+        ConnectorService(id: "sentry", name: "Sentry", summary: "Ver erros, issues e projetos do Sentry. Você entra com a sua conta.",
+                         mark: ServiceMark(symbol: nil, monogram: "S", color: 0x362D59), source: .template("sentry"), how: "Login com a conta"),
         ConnectorService(id: "lembretes", name: "Lembretes", summary: LocalConnectorKind.lembretes.summary,
                          mark: ServiceMark(symbol: "checklist", monogram: "L", color: 0xFF9500), source: .local(.lembretes), how: "Pelo Mac"),
         ConnectorService(id: "arquivos", name: "Arquivos", summary: "Ler e organizar arquivos de uma pasta do Mac. Você escolhe qual pasta fica liberada.",
@@ -92,7 +96,12 @@ enum ConnectorGallery {
         if case .soon = service.source { return .soon }
         guard let connector = installed(service, in: connectors) else { return .available }
         guard connector.isEnabled else { return .off }
-        if case .failed(let message)? = statuses[connector.id] { return .needsAttention(ConnectorStatusText.shortError(message, limit: 90)) }
+        switch statuses[connector.id] {
+        case .failed(let message)?: return .needsAttention(ConnectorStatusText.shortError(message, limit: 90))
+        case .needsSignIn(let expired)?: return .needsAttention(expired ?? "Falta entrar com a sua conta.")
+        case .needsMorePermission?: return .needsAttention("Precisa de mais permissão.")
+        default: break
+        }
         if let kind = service.localKind, let state = local[kind], state.needsAttention { return .needsAttention(state.message) }
         return .connected
     }

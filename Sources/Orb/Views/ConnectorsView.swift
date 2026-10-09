@@ -127,6 +127,10 @@ private struct InstalledConnectors: View {
                             }
                         }, onTest: {
                             await model.testConnector(connector.id)
+                        }, onSignIn: { moreScope in
+                            await model.signIn(connector: connector.id, moreScope: moreScope)
+                        }, onSignOut: {
+                            await model.signOut(connector: connector.id)
                         }, onViewTools: {
                             viewingTools = connector
                         }, onDelete: {
@@ -157,7 +161,7 @@ private struct InstalledConnectors: View {
             get: { deleting != nil }, set: { if !$0 { deleting = nil } }
         )) {
             Button("Apagar", role: .destructive) {
-                if let id = deleting?.id { model.connectors.removeAll { $0.id == id } }
+                if let id = deleting?.id { model.removeConnector(id) }
             }
         } message: {
             Text("As chaves e variáveis dele também serão apagadas.")
@@ -189,12 +193,19 @@ private struct ConnectorCard: View {
     let onEdit: () -> Void
     /// Starts the server (if it is off), lists its tools and says how it went.
     let onTest: () async -> ConnectorTestOutcome
+    /// Signs in through the browser (the scopes to add, for "Permitir mais"), then starts the server.
+    let onSignIn: (String?) async -> ConnectorTestOutcome
+    let onSignOut: () async -> Void
     let onViewTools: () -> Void
     let onDelete: () -> Void
     @State private var isShowingDetail = false
     @State private var test = TestState.none
+    /// The login under way (the browser is open) or the last one that failed.
+    @State private var login = LoginState.none
+    @State private var loginTask: Task<Void, Never>?
 
     private enum TestState: Equatable { case none, running, done(String), failed(String) }
+    private enum LoginState: Equatable { case none, waiting, failed(String) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -222,6 +233,8 @@ private struct ConnectorCard: View {
                 failure(message)
             } else if let attention {
                 needsAttention(attention)
+            } else if connector.isEnabled, let ask = loginAsk {
+                loginBlock(ask)
             }
             if showsTestLine { testLine }
             if let usedBy {
@@ -240,6 +253,10 @@ private struct ConnectorCard: View {
                     Button("Ver ferramentas…", action: onViewTools)
                     Divider()
                     Button("Editar…", action: onEdit)
+                    if signsIn {
+                        Button("Sair da conta") { Task { await onSignOut() } }
+                            .help("Esquece o login deste Mac e o revoga no serviço, se ele permitir")
+                    }
                     Divider()
                     Button("Apagar…", role: .destructive, action: onDelete)
                 } label: {
@@ -259,6 +276,94 @@ private struct ConnectorCard: View {
         .animation(.snappy(duration: 0.2), value: connector.isEnabled)
         .animateChanges(of: status)
         .animateChanges(of: test)
+    }
+
+    /// A connector that signs in with the person's account (a login, not a key).
+    private var signsIn: Bool {
+        connector.isRemote && !connector.hasStaticAuthorization && (connector.oauth != nil || loginAsk != nil)
+    }
+
+    /// What the card asks for when the server wants a login: which one, and the words.
+    private enum LoginAsk: Equatable {
+        case signIn, expired(String), morePermission(String?)
+    }
+
+    private var loginAsk: LoginAsk? {
+        switch status {
+        case .needsSignIn(let message)?: message.map(LoginAsk.expired) ?? .signIn
+        case .needsMorePermission(let scope)?: .morePermission(scope)
+        default: nil
+        }
+    }
+
+    /// "Entrar" · "Sessão expirou" · "Precisa de mais permissão", with the button that fixes it. Waiting for the browser can be cancelled.
+    private func loginBlock(_ ask: LoginAsk) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            switch login {
+            case .waiting:
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.mini)
+                    Text("Abrimos o navegador. Termine o login lá e volte.").foregroundStyle(Palette.muted)
+                }
+                .font(.system(size: 12))
+                Button("Cancelar") { loginTask?.cancel() }.buttonStyle(GhostStyle()).controlSize(.small).help(Tip.cancelLogin)
+            default:
+                Label(loginMessage(ask), systemImage: ask == .signIn ? "person.crop.circle.badge.exclamationmark" : "exclamationmark.triangle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.warn)
+                    .lineLimit(3)
+                    .multilineTextAlignment(.leading)
+                if case .failed(let message) = login {
+                    Text(ConnectorStatusText.shortError(message))
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.muted)
+                        .lineLimit(2)
+                }
+                Button(loginButton(ask), action: { signIn(moreScope: scope(of: ask)) }).buttonStyle(SecondaryPillStyle()).controlSize(.small)
+                    .help(loginHelp(ask))
+            }
+        }
+        .transition(.opacity)
+        .animateChanges(of: login)
+    }
+
+    private func loginMessage(_ ask: LoginAsk) -> String {
+        switch ask {
+        case .signIn: "Entre com a sua conta para usar \(connector.name)."
+        case .expired(let message): message
+        case .morePermission: "\(connector.name) pediu mais permissão para fazer isso."
+        }
+    }
+
+    private func loginButton(_ ask: LoginAsk) -> String {
+        switch ask {
+        case .signIn: "Entrar com \(connector.name)"
+        case .expired: "Entrar de novo"
+        case .morePermission: "Permitir mais"
+        }
+    }
+
+    private func loginHelp(_ ask: LoginAsk) -> String {
+        switch ask {
+        case .signIn: "Abre o navegador para entrar com a sua conta do \(connector.name)"
+        case .expired: "Abre o navegador para entrar de novo; a sessão acabou"
+        case .morePermission: "Abre o navegador para você liberar a permissão que faltou"
+        }
+    }
+
+    private func scope(of ask: LoginAsk) -> String? {
+        if case .morePermission(let scope) = ask { scope } else { nil }
+    }
+
+    private func signIn(moreScope: String?) {
+        guard login != .waiting else { return }
+        loginTask = Task { @MainActor in
+            login = .waiting
+            switch await onSignIn(moreScope) {
+            case .connected: login = .none
+            case .failed(let message): login = .failed(message)
+            }
+        }
     }
 
     private func runTest() {
@@ -370,6 +475,10 @@ private struct ConnectorCard: View {
                 CatalogBadge(text: "Erro", symbol: "exclamationmark.triangle.fill", tint: Palette.warn)
             case .starting:
                 CatalogBadge(text: "Conectando…", symbol: "hourglass")
+            case .needsSignIn(let expired):
+                CatalogBadge(text: expired == nil ? "Entrar" : "Sessão expirou", symbol: "person.crop.circle.badge.exclamationmark", tint: Palette.warn)
+            case .needsMorePermission:
+                CatalogBadge(text: "Precisa de mais permissão", symbol: "lock.trianglebadge.exclamationmark", tint: Palette.warn)
             case .stopped:
                 CatalogBadge(text: "Desligado", symbol: "pause.circle")
             case nil:
@@ -623,7 +732,8 @@ struct ConnectorEditor: View {
     var initialPhase: Phase = .form
 
     enum Phase: Equatable {
-        case form, connecting, connected(Int), failed(String)
+        /// `signingIn`: the browser is open and the Orb waits for the way back.
+        case form, connecting, signingIn, connected(Int), failed(String)
     }
 
     @State private var config = MCPServerConfig(name: "")
@@ -633,7 +743,13 @@ struct ConnectorEditor: View {
     @State private var orbIDs: Set<UUID>?
     @State private var showsAdvanced = false
     @State private var slackPreset = SlackApp.Preset.readOnly
+    /// Slack: the token is pasted instead of signing in with the app's Client ID.
+    @State private var pastesToken = false
+    /// The app registered with the service (Client ID, and the Secret when it has one), for a login that cannot register the Orb itself.
+    @State private var clientID = ""
+    @State private var clientSecret = ""
     @State private var phase = Phase.form
+    @State private var signInTask: Task<Void, Never>?
     @State private var didLoad = false
     /// Whether it was new when the sheet opened: saving adds it to `connectors`, but the sheet keeps saying "Instalar".
     @State private var openedAsNew: Bool?
@@ -644,10 +760,16 @@ struct ConnectorEditor: View {
         Dictionary(draft.inputs.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
     }
     private var missingRequired: [String] {
-        draft.inputs.filter(\.isRequired).map(\.name).filter { name in
+        guard !signsInWithApp else { return [] }
+        return draft.inputs.filter(\.isRequired).map(\.name).filter { name in
             values.first { $0.key == name }?.value.trimmingCharacters(in: .whitespaces).isEmpty ?? true
         }
     }
+    /// Slack, signing in with the Client ID of the person's own app (not pasting a token).
+    private var signsInWithApp: Bool { draft.guide == .slack && !pastesToken }
+    /// The connector enters with the person's account: the primary button signs in.
+    private var signsIn: Bool { isRemote && config.oauth != nil && !(draft.guide == .slack && pastesToken) }
+    private var clientIDMissing: Bool { signsInWithApp && clientID.trimmingCharacters(in: .whitespaces).isEmpty }
     /// "Só alguns" with nobody ticked, or only Orbs that no longer exist.
     private var chosenNoOrb: Bool {
         guard let orbIDs else { return false }
@@ -664,12 +786,12 @@ struct ConnectorEditor: View {
     }
     /// The Slack guide asks for a User OAuth Token (`xoxp-…`): a bot token (`xoxb-`) cannot use the MCP server.
     private var slackTokenProblem: Bool {
-        guard draft.guide == .slack, let token = values.first(where: { $0.key == "Authorization" })?.value,
+        guard draft.guide == .slack, pastesToken, let token = values.first(where: { $0.key == "Authorization" })?.value,
               !token.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
         return !SlackApp.looksLikeUserToken(token)
     }
     private var canSave: Bool {
-        !config.name.trimmingCharacters(in: .whitespaces).isEmpty && missingRequired.isEmpty && !chosenNoOrb && !slackTokenProblem
+        !config.name.trimmingCharacters(in: .whitespaces).isEmpty && missingRequired.isEmpty && !chosenNoOrb && !slackTokenProblem && !clientIDMissing
             && !(isRemote ? config.url : config.command).trimmingCharacters(in: .whitespaces).isEmpty
     }
     private var title: String {
@@ -684,11 +806,13 @@ struct ConnectorEditor: View {
     }
     private var primaryTitle: String {
         guard config.isEnabled else { return "Salvar" }
+        if signsIn { return "Entrar com \(draft.config.name.isEmpty ? config.name : draft.config.name)" }
         return isNew ? "Instalar e conectar" : "Salvar e conectar"
     }
 
     private var footerMessage: String? {
         if chosenNoOrb { return "Marque ao menos um Orb em “Usar com”." }
+        if clientIDMissing { return "Cole o Client ID do app do Slack." }
         if slackTokenProblem { return "O token do Slack é o User OAuth Token e começa com xoxp-." }
         if !missingRequired.isEmpty { return "Preencha \(missingRequired.map { $0 == "Authorization" ? "a chave" : $0 }.joined(separator: ", "))." }
         return nil
@@ -699,6 +823,7 @@ struct ConnectorEditor: View {
             // A guide makes the form longer: the key it leads to should not be hidden under the fold.
             .orbSheet(title, subtitle: subtitle, size: .medium, maxHeight: draft.guide == nil ? SheetSize.maxHeight : 700) { footer }
             .onAppear(perform: load)
+            .onDisappear { signInTask?.cancel() }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: phase)
             .onChange(of: phase) { announce(phase) }
     }
@@ -710,7 +835,7 @@ struct ConnectorEditor: View {
             AccessibilityNotification.Announcement("Conectado. \(ConnectorStatusText.toolsAvailable(count))").post()
         case .failed(let message):
             AccessibilityNotification.Announcement("Não conectou. \(ConnectorStatusText.shortError(message))").post()
-        case .form, .connecting:
+        case .form, .connecting, .signingIn:
             break
         }
     }
@@ -720,6 +845,8 @@ struct ConnectorEditor: View {
         case .form: form
         case .connecting: result(symbol: nil, tint: Palette.muted, title: "Conectando…",
                                  detail: "Na primeira vez pode levar alguns segundos: o conector às vezes precisa ser baixado.")
+        case .signingIn: result(symbol: nil, tint: Palette.muted, title: "Entrar com \(config.name)",
+                                detail: "Abrimos o navegador. Termine o login lá e volte.")
         case .connected(let count): result(symbol: "checkmark.circle.fill", tint: Palette.ok, title: "Conectado",
                                            detail: ConnectorStatusText.toolsAvailable(count))
         case .failed(let message): result(symbol: "exclamationmark.triangle.fill", tint: Palette.warn, title: "Não conectou",
@@ -734,11 +861,17 @@ struct ConnectorEditor: View {
                         isPrimaryDisabled: !canSave, primary: save)
         case .connecting:
             SheetFooter(cancelTitle: "Fechar", cancel: { dismiss() }, primaryTitle: "Conectando…", isPrimaryDisabled: true, primary: {})
+        case .signingIn:
+            SheetFooter(cancel: { signInTask?.cancel() }, primaryTitle: "Esperando o navegador…", isPrimaryDisabled: true, cancelHelp: Tip.cancelLogin, primary: {})
         case .connected:
             SheetFooter(cancel: { dismiss() }, primaryTitle: "Fechar", showsCancel: false, primary: { dismiss() })
         case .failed:
             SheetFooter(message: "O conector foi salvo. Corrija e tente de novo.", cancelTitle: "Fechar", cancel: { dismiss() },
-                        primaryTitle: "Editar", primary: { phase = .form })
+                        primaryTitle: "Editar", primary: {
+                // A service that wants an app registered by the person: the fields for it are the next thing to see.
+                if case .failed(let message) = phase, message.contains("app registrado") { showsAdvanced = true }
+                phase = .form
+            })
         }
     }
 
@@ -760,6 +893,7 @@ struct ConnectorEditor: View {
             }
             Form {
                 if isGuided {
+                    if signsIn && draft.guide != .slack { loginSection }
                     if draft.guide == .slack { slackGuide }
                     if config.source != nil && !draft.isOfficial {
                         Section {
@@ -768,7 +902,7 @@ struct ConnectorEditor: View {
                                 .foregroundStyle(Palette.warn)
                         }
                     }
-                    if !secretRows.isEmpty {
+                    if !secretRows.isEmpty && !signsInWithApp {
                         Section {
                             inputFields(secretRows)
                         } header: {
@@ -818,7 +952,8 @@ struct ConnectorEditor: View {
         }
     }
 
-    /// Slack asks for more than a token: the person creates an app (a link fills in everything), installs it, and copies its token.
+    /// Slack asks for more than a login: the person creates an app (a link fills in everything) and installs it. Then the app's Client ID
+    /// is enough to sign in (PKCE, nothing to copy), or the User OAuth Token can be pasted instead.
     @ViewBuilder private var slackGuide: some View {
         Section {
             VStack(alignment: .leading, spacing: 8) {
@@ -837,15 +972,52 @@ struct ConnectorEditor: View {
                 Text("O Slack abre no navegador com tudo preenchido. Escolha o seu workspace e clique em Create. Depois, em Install App, clique em Install to Workspace e em Allow.")
                     .font(.system(size: 11)).foregroundStyle(Palette.faint)
             }
-            VStack(alignment: .leading, spacing: 4) {
-                Text("3. Cole o token").font(.system(size: 13, weight: .semibold))
-                Text("Em OAuth & Permissions, copie o User OAuth Token (começa com xoxp-) e cole na chave abaixo.")
-                    .font(.system(size: 11)).foregroundStyle(Palette.faint)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("3. Como entrar").font(.system(size: 13, weight: .semibold))
+                Picker("Como entrar", selection: $pastesToken) {
+                    Text("Entrar com o app").tag(false)
+                    Text("Colar o token").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                if pastesToken {
+                    Text("Em OAuth & Permissions, copie o User OAuth Token (começa com xoxp-) e cole na chave abaixo.")
+                        .font(.system(size: 11)).foregroundStyle(Palette.faint)
+                } else {
+                    TextField("Client ID", text: $clientID, prompt: Text("Em Basic Information → App Credentials"))
+                        .textFieldStyle(.roundedBorder)
+                    Text("Copie o Client ID do app e clique em Entrar com Slack: o Slack pede a sua licença no navegador. Não precisa copiar token.")
+                        .font(.system(size: 11)).foregroundStyle(Palette.faint)
+                }
             }
         } header: {
             Text("Passo a passo")
         } footer: {
             Text("O app é seu, só do seu workspace: o Orb age como você e vê só o que você vê. Se o workspace exige aprovação de apps, peça ao administrador.")
+        }
+    }
+
+    /// A service that enters with the account: what happens, and where the token stays.
+    private var loginSection: some View {
+        Section {
+            Label("Ao continuar, o navegador abre para você entrar com a sua conta do \(config.name).", systemImage: "person.crop.circle")
+                .foregroundStyle(Palette.secondary)
+        } footer: {
+            Text("O token fica no Keychain do Mac. Você pode sair a qualquer momento.")
+        }
+    }
+
+    /// The app registered with the service, for a login the Orb cannot register itself for (the service asks for one).
+    @ViewBuilder private var loginApp: some View {
+        Section {
+            TextField("Client ID", text: $clientID)
+                .textFieldStyle(.roundedBorder)
+            SecureField("Client Secret", text: $clientSecret, prompt: Text("Só se o app tiver um"))
+                .textFieldStyle(.roundedBorder)
+        } header: {
+            Text("App registrado (login)")
+        } footer: {
+            Text("Só para serviços que não deixam o Orb se registrar sozinho. O Client Secret fica no Keychain do Mac; deixe em branco para manter o atual.")
         }
     }
 
@@ -879,6 +1051,7 @@ struct ConnectorEditor: View {
         } footer: {
             if let source = config.source { Text("Do registro: \(source)") }
         }
+        if isRemote && draft.guide != .slack { loginApp }
         if !isRemote {
             Section("Argumentos (um por linha)") {
                 PlaceholderTextEditor(placeholder: "-y\n@exemplo/servidor", text: $arguments, minHeight: 60)
@@ -996,6 +1169,10 @@ struct ConnectorEditor: View {
             return KeyValueRow(key: name, value: value)
         }
         openedAsNew = !model.connectors.contains { $0.id == draft.config.id }
+        clientID = draft.config.oauth?.clientID ?? ""
+        // Slack: an installed one that holds a token (no login settings) is edited as it was made; a new one starts with the login.
+        pastesToken = draft.guide == .slack && draft.config.oauth == nil
+        if draft.config.oauth?.scopes?.contains("chat:write") == true { slackPreset = .readAndSend }
         // A new connector from the catalog starts with the Orb the user was talking to, so installing it is enough.
         orbIDs = draft.config.orbIDs ?? (isNew ? model.defaultScopeForNewConnector() : nil)
         showsAdvanced = !isNew
@@ -1016,15 +1193,16 @@ struct ConnectorEditor: View {
             config.command = ""
             config.arguments = []
             config.environment = [:]
-            config.headers = dictionary
+            config.headers = signsInWithApp ? [:] : dictionary // signing in with the app's Client ID, there is no token to keep
         } else {
             config.url = ""
             config.headers = [:]
             config.arguments = arguments.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
             config.environment = dictionary
         }
-        config.secretKeys = Set(dictionary.keys.filter(isSecret))
+        config.secretKeys = Set((isRemote ? config.headers : config.environment).keys.filter(isSecret))
         config.orbIDs = orbIDs
+        config.oauth = oauthSettings()
         if !draft.summary.isEmpty { config.summary = String(draft.summary.prefix(200)) }
 
         let before = alreadyUsing
@@ -1037,20 +1215,53 @@ struct ConnectorEditor: View {
         model.allowConnectors(for: (orbIDs ?? []).subtracting(before))
 
         guard config.isEnabled else { dismiss(); return }
-        phase = .connecting
-        let id = config.id
-        Task { @MainActor in
-            switch await model.connectAndWait(id) {
-            case .ready(let count)?:
-                phase = .connected(count)
-                try? await Task.sleep(for: .seconds(1.6))
-                if phase == .connected(count) { dismiss() }
-            case .failed(let message)?:
-                phase = .failed(message)
-            default:
-                phase = .failed("O conector não respondeu.")
+        let id = config.id, secret = clientSecret.trimmingCharacters(in: .whitespaces)
+        let appChanged = clientID.trimmingCharacters(in: .whitespaces) != (draft.config.oauth?.clientID ?? "") || !secret.isEmpty
+        let wantsLogin = signsIn
+        phase = wantsLogin && isNew ? .signingIn : .connecting
+        signInTask = Task { @MainActor in
+            if !secret.isEmpty { await model.connectorAuth.setClientSecret(secret, clientID: clientID, for: id) }
+            // A new login, or a new app to sign in with; otherwise the one it has is used.
+            let signedIn = await model.connectorAuth.isSignedIn(id)
+            if wantsLogin, appChanged || !signedIn { return await signIn(id) }
+            let status = await model.connectAndWait(id)
+            if case .needsSignIn? = status { return await signIn(id) } // the server asked for a login the form did not know about
+            switch status {
+            case .ready(let count)?: await show(.connected(count))
+            case .failed(let message)?: phase = .failed(message)
+            default: phase = .failed("O conector não respondeu.")
             }
         }
+    }
+
+    /// Opens the browser for the login and waits for the way back; then the connector is started.
+    private func signIn(_ id: UUID) async {
+        phase = .signingIn
+        switch await model.signIn(connector: id) {
+        case .connected(let tools, _): await show(.connected(tools))
+        case .failed(let message): phase = .failed(message)
+        }
+    }
+
+    /// A connection that worked is shown for a moment, then the sheet closes.
+    private func show(_ done: Phase) async {
+        phase = done
+        try? await Task.sleep(for: .seconds(1.6))
+        if phase == done { dismiss() }
+    }
+
+    /// How the connector signs in, from the form: the Client ID typed (and Slack's redirect and scopes), kept only for a connector that
+    /// signs in; nil for one that does not.
+    private func oauthSettings() -> MCPOAuthSettings? {
+        let typed = clientID.trimmingCharacters(in: .whitespaces)
+        guard isRemote, !(draft.guide == .slack && pastesToken), config.oauth != nil || !typed.isEmpty else { return nil }
+        var settings = config.oauth ?? MCPOAuthSettings()
+        settings.clientID = typed.isEmpty ? nil : typed
+        if draft.guide == .slack {
+            settings.scopes = SlackApp.scopes(slackPreset).joined(separator: " ")
+            settings.redirect = SlackApp.redirectURL
+        }
+        return settings
     }
 }
 
