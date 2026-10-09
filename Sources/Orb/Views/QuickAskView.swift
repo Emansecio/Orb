@@ -187,10 +187,13 @@ struct QuickAskView: View {
                 .accessibilityLabel("Mensagem para \(selected?.name ?? "um Orb")")
                 .onChange(of: text) { note = nil }
                 .onChange(of: selectedID) { note = nil }
+            // What appears here fades in by itself (`.quiet`, 0.15 s) and the panel, a window that fits its content, takes its
+            // new height at once: animating the height would resize the window on every frame (§2.13).
             if let note {
                 Text(note)
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.warn)
+                    .transition(.quiet)
             }
 
             if model.hasCheckedConnections, !(selectedID.map(model.hasUsableModel) ?? false) {
@@ -208,17 +211,20 @@ struct QuickAskView: View {
                     .font(.system(size: 12))
                     .help(Tip.connectModel)
                 }
+                .transition(.quiet)
             }
 
             if let replyBotID, model.liveBot(replyBotID) != nil {
                 QuickAskReply(botID: replyBotID, openChat: { openChat(replyBotID) }, dismiss: { self.replyBotID = nil })
+                    .transition(.quiet)
             }
 
             let others = model.workingIDs.filter { $0 != replyBotID }
             if !others.isEmpty {
-                Divider()
+                Divider().transition(.quiet)
                 ForEach(others, id: \.self) { id in
                     QuickAskWorkingRow(botID: id)
+                        .transition(.quiet)
                 }
             }
             HStack {
@@ -296,6 +302,8 @@ private struct QuickAskOrbButton: View {
                 .opacity(isSelected ? 1 : 0.5)
                 .padding(3)
                 .overlay(Circle().strokeBorder(isSelected ? Palette.ink.opacity(0.85) : .clear, lineWidth: 1.5))
+                // A chip chosen: the ring and the opacity answer with the press curve (colors only, also under Reduce Motion).
+                .animation(Motion.press, value: isSelected)
                 .overlay(alignment: .topTrailing) {
                     if live.needsYou {
                         Circle().fill(Palette.warn).frame(width: 8, height: 8)
@@ -426,6 +434,7 @@ private struct PendingApprovalsSection: View {
                 ScrollView { cards(pending) }
                     .frame(maxHeight: 300)
             }
+            .transition(.quiet)
         }
     }
 
@@ -436,6 +445,7 @@ private struct PendingApprovalsSection: View {
                     model.selection = QuickAskSend.selection(after: entry.bot.id, current: model.selection, hasOpenSheet: model.hasOpenSheet)
                     openApp()
                 })
+                .transition(.quiet)
             }
         }
     }
