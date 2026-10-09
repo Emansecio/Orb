@@ -282,11 +282,11 @@ struct WelcomeView: View {
 
     private var hero: some View {
         HStack(alignment: .bottom, spacing: 44) {
-            heroOrb(WelcomeLooks.lia, size: 72, poke: liaPoke, style: WelcomeEntrance.lia) { liaPoke += 1 }
-            heroOrb(WelcomeLooks.atlas, size: 104, poke: atlasPoke, style: WelcomeEntrance.atlas, activity: celebrating ? .happy : .idle) {
+            heroOrb(WelcomeLooks.lia, size: 72, landing: liaPoke, style: WelcomeEntrance.lia) { liaPoke += 1 }
+            heroOrb(WelcomeLooks.atlas, size: 104, landing: atlasPoke, style: WelcomeEntrance.atlas, activity: celebrating ? .happy : .idle) {
                 atlasPoke += 1
             }
-            heroOrb(WelcomeLooks.bento, size: 72, poke: bentoPoke, style: WelcomeEntrance.bento) { bentoPoke += 1 }
+            heroOrb(WelcomeLooks.bento, size: 72, landing: bentoPoke, style: WelcomeEntrance.bento) { bentoPoke += 1 }
         }
         .padding(.top, 40)
         .padding(.bottom, 28)
@@ -296,11 +296,11 @@ struct WelcomeView: View {
         .accessibilityAddTraits(.isImage)
     }
 
-    private func heroOrb(_ config: OrbConfig, size: CGFloat, poke: Int, style: EntranceStyle,
+    private func heroOrb(_ config: OrbConfig, size: CGFloat, landing: Int, style: EntranceStyle,
                          activity: OrbActivity = .idle, landed: @escaping @MainActor () -> Void) -> some View {
-        OrbView(config: config, activity: activity, size: size, animated: true, poke: poke, interactive: true)
+        OrbView(config: config, activity: activity, size: size, animated: true, landing: landing, interactive: true)
             .entrance(style, enters: entering) {
-                // Touches the floor: one poke. Still under Reduce Motion.
+                // Touches the floor: it lands. Still under Reduce Motion.
                 if !reduceMotion { landed() }
             }
     }

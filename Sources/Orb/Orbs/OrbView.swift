@@ -19,11 +19,19 @@ struct OrbView: View {
     /// same happens while the window is inactive.
     var paused = false
     var followsPointer = true
-    /// Changing this value makes the orb jump (e.g. when a prompt is sent).
+    /// Changing this value makes the orb jump (a click on it, a button that makes it hop).
     var poke = 0
+    /// Changing this value makes the orb give its small "got it" jump (a prompt was sent).
+    var ack = 0
+    /// Changing this value makes the orb squash and wobble as it lands (an entrance ended).
+    var landing = 0
     /// Changing this value makes the orb blink and glance toward the chat (e.g. when it is selected). Not with
     /// Reduce Motion: the static orb ignores it.
     var glance = 0
+    /// A new cue makes the orb blink or sigh once (you stopped its reply, a task stopped half way).
+    var cue = OrbCueSignal()
+    /// How big its joy is while `activity` is `happy`.
+    var celebration = OrbCelebration.big
     var interactive = false
     /// What VoiceOver says (default: "Orb" and what it is doing).
     var accessibilityText: String?
@@ -35,7 +43,8 @@ struct OrbView: View {
         Group {
             if animated && !reduceMotion && !OrbView.forceStatic {
                 AnimatedOrb(config: config, activity: activity, size: size, followsPointer: followsPointer,
-                            poke: poke, glance: glance, interactive: interactive,
+                            poke: poke, ack: ack, landing: landing, glance: glance, cue: cue, celebration: celebration,
+                            interactive: interactive,
                             live: !paused && (appearsActive || OrbView.animateInactive))
             } else {
                 OrbFrame(config: config, activity: activity, size: size, pose: .rest)
@@ -232,15 +241,19 @@ struct BotAvatar: View {
     let orb: OrbConfig
     var size: CGFloat = 28
     var activity: OrbActivity = .idle
+    var celebration = OrbCelebration.big
     var animated = true
     var paused = false
     var poke = 0
+    var ack = 0
+    var landing = 0
     var glance = 0
+    var cue = OrbCueSignal()
     var interactive = false
 
     var body: some View {
-        OrbView(config: orb, activity: activity, size: size, animated: animated, paused: paused, poke: poke,
-                glance: glance, interactive: interactive)
+        OrbView(config: orb, activity: activity, size: size, animated: animated, paused: paused, poke: poke, ack: ack,
+                landing: landing, glance: glance, cue: cue, celebration: celebration, interactive: interactive)
     }
 }
 
@@ -249,5 +262,11 @@ extension BotAvatar {
          poke: Int = 0, interactive: Bool = false) {
         self.init(orb: bot.orb, size: size, activity: activity, animated: animated, paused: paused, poke: poke,
                   interactive: interactive)
+    }
+
+    /// The Orb as it is now: what it does, how much it celebrates and the cue it was given.
+    init(live: BotLive, size: CGFloat, paused: Bool = false) {
+        self.init(orb: live.look.orb, size: size, activity: live.activity, celebration: live.celebration, paused: paused,
+                  cue: live.cue)
     }
 }

@@ -274,7 +274,7 @@ actor AgentEngine {
                         messages.append(.user(Self.continueNudge))
                         continue
                     }
-                    out.yield(.notice("A resposta passou do limite do modelo e foi cortada. Diga “continua” para seguir."))
+                    out.yield(.notice(Self.cutShortNotice))
                     return
                 case .done, .toolUse, .unknown:
                     break
@@ -403,6 +403,8 @@ actor AgentEngine {
 
     static let interruptedMarker = "\n\n[resposta interrompida]"
     static let continueNudge = "continue"
+    /// What the turn says when the model's reply was cut off at its limit (the Orb sighs at the end of such a turn).
+    static let cutShortNotice = "A resposta passou do limite do modelo e foi cortada. Diga “continua” para seguir."
     static let cutOffResult = "Error: your reply hit the output limit while writing this call, so it was NOT run. Split the work into "
         + "smaller steps: write long files in parts (write_file with append: true), change existing files with edit_file, "
         + "and keep each call short."

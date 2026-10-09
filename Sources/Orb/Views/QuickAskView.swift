@@ -269,7 +269,7 @@ private struct QuickAskOrbButton: View {
         let isSelected = selectedID == botID
         Button { chosen = botID } label: {
             // Only the chosen Orb and those with something going on move; the rest rest (no frames).
-            BotAvatar(orb: live.look.orb, size: 28, activity: live.activity, paused: !isSelected && live.activity == .idle)
+            BotAvatar(live: live, size: 28, paused: !isSelected && live.activity == .idle)
                 .opacity(isSelected ? 1 : 0.5)
                 .padding(3)
                 .overlay(Circle().strokeBorder(isSelected ? Palette.ink.opacity(0.85) : .clear, lineWidth: 1.5))
@@ -295,7 +295,7 @@ private struct QuickAskWorkingRow: View {
     var body: some View {
         let live = model.live(botID)
         HStack(spacing: 8) {
-            BotAvatar(orb: live.look.orb, size: 18, activity: live.activity)
+            BotAvatar(live: live, size: 18)
             let work = live.shownWork
             Text("\(live.look.name): \(work?.text ?? "")")
                 .font(.caption)
@@ -322,7 +322,8 @@ struct QuickAskReply: View {
         let reply = sample ?? QuickAskReplyText.latestReply(in: model.orbTranscript(botID).items)
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                BotAvatar(orb: live.look.orb, size: 18, activity: live.activity)
+                // Rests when the Orb is idle (the finished reply stays on screen for a while).
+                BotAvatar(live: live, size: 18, paused: live.activity == .idle)
                 if let work = live.shownWork, reply == nil || reply?.isStreaming == true {
                     Text("\(live.look.name): \(work.text)")
                         .shimmer(active: work.shimmers)
@@ -429,7 +430,7 @@ struct QuickAskApprovalCard: View {
         let preview = ApprovalPreview.of(request)
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                BotAvatar(orb: entry.bot.orb, size: 18, activity: model.live(entry.bot.id).activity)
+                BotAvatar(live: model.live(entry.bot.id), size: 18)
                 Text(entry.bot.name)
                     .font(.system(size: 12, weight: .semibold))
                 Text("precisa de você")

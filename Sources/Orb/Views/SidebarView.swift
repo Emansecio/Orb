@@ -192,7 +192,7 @@ private struct SidebarBotRow: View {
             model.selection = .bot(botID)
         } content: { isHovering in
             BotRowContent(row: BotRow(look: live.look, workText: live.shownWork?.text, shimmers: live.shownWork?.shimmers ?? false, activity: live.activity, isSelected: isSelected,
-                                      poke: live.poke, glance: live.glance, needsYou: live.needsYou, unread: live.unread,
+                                      celebration: live.celebration, ack: live.poke, cue: live.cue, glance: live.glance, needsYou: live.needsYou, unread: live.unread,
                                       hint: isHovering && index < 9 ? AppShortcut.bot(at: index).label : nil))
                 .equatable()
         }
@@ -280,7 +280,12 @@ private struct BotRow: Equatable {
     let shimmers: Bool
     let activity: OrbActivity
     let isSelected: Bool
-    let poke: Int
+    /// How big its joy is while it is happy.
+    let celebration: OrbCelebration
+    /// Changes when a prompt is sent: the Orb gives its small "got it" jump.
+    let ack: Int
+    /// A new cue makes the Orb blink or sigh once.
+    let cue: OrbCueSignal
     /// Changes when the Orb is selected: it glances toward the chat.
     let glance: Int
     /// An approval card is open: the Orb is stopped until the user answers.
@@ -297,8 +302,8 @@ private struct BotRowContent: View, Equatable {
         let (look, workText, activity, needsYou) = (row.look, row.workText, row.activity, row.needsYou)
         HStack(spacing: 8) {
             // Only the selected bot and bots with something going on move; the rest rest (no frames at all).
-            BotAvatar(orb: look.orb, size: 30, activity: activity, paused: !row.isSelected && activity == .idle, poke: row.poke,
-                      glance: row.glance)
+            BotAvatar(orb: look.orb, size: 30, activity: activity, celebration: row.celebration,
+                      paused: !row.isSelected && activity == .idle, ack: row.ack, glance: row.glance, cue: row.cue)
             VStack(alignment: .leading, spacing: 1) {
                 Text(look.name)
                     .font(.system(size: 13, weight: .medium))

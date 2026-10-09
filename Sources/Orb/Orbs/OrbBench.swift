@@ -5,12 +5,12 @@ import QuartzCore
 import Darwin
 
 /// Dev aid, in debug builds and in release builds made with `-Xswiftc -DORB_DEV_TOOLS` (measure in release):
-/// `ORB_ANIMATE_INACTIVE=1 Orb --render-orbs bench <count> [working|typing] [seconds]` hosts live orbs in an
+/// `ORB_ANIMATE_INACTIVE=1 Orb --render-orbs bench <count> [working|typing|waiting|error] [all] [seconds]` hosts live orbs in an
 /// invisible window (never activates the app or takes focus), lets them settle for 3 s, then prints the process's
 /// CPU time, the main thread's CPU time and instructions retired (`proc_pid_rusage`, reproducible even on a busy
 /// machine) over `seconds` (default 20), plus the shared link's ticks and the orbs' frames per second, and exits.
-/// `working`: the first orb (96 pt) is thinking; `typing`: it runs a terminal command (the busiest activity); the
-/// rest are idle.
+/// `working`: the first orb (96 pt) is thinking; `typing`: it runs a terminal command (the busiest activity); `waiting`:
+/// it asks for approval; `error`: it failed (a still orb after its "no"); the rest are idle, unless `all` is there too: then every orb does it (the sidebar rows of Orbs that work are 30 pt).
 ///
 /// With the display asleep (or the session locked) display links never fire, so the bench then stands in for
 /// `OrbDriver`: a 240 Hz timer ticks at the rate `OrbLinkRate` picks for the running orbs and steps them in one
@@ -27,12 +27,14 @@ enum OrbBench {
 
     static func run(arguments: [String]) {
         let count = arguments.first.flatMap(Int.init) ?? 1
-        let busy: OrbActivity? = arguments.contains("working") ? .thinking : arguments.contains("typing") ? .typing : nil
+        let busy: OrbActivity? = ["working": .thinking, "typing": .typing, "waiting": .waiting, "error": .error]
+            .first { arguments.contains($0.key) }?.value
+        let everyone = arguments.contains("all")
         let seconds = arguments.compactMap(Double.init).dropFirst().first ?? 20
         // Sizes as the app shows them: the chat's empty state, the panel, then sidebar rows.
         let sizes: [CGFloat] = [96, 60] + Array(repeating: 30, count: max(0, count - 2))
         let orbs = (0..<count).map { index in
-            (config: looks[index % looks.count], size: sizes[index], activity: index == 0 ? busy ?? .idle : .idle)
+            (config: looks[index % looks.count], size: sizes[index], activity: index == 0 || everyone ? busy ?? .idle : .idle)
         }
         let grid = LazyVGrid(columns: Array(repeating: GridItem(.fixed(110)), count: 6), spacing: 16) {
             ForEach(Array(orbs.enumerated()), id: \.offset) { _, orb in
@@ -54,22 +56,28 @@ enum OrbBench {
         Task {
             driver?.start()
             try? await Task.sleep(for: .seconds(3))
-            let start = Sample(main: main), ticks = driver?.ticks ?? 0, frames = Self.frames(in: window)
+            let start = Sample(main: main), ticks = driver?.ticks ?? 0, frames = Self.frames(in: window), draws = Self.draws(in: window)
             try? await Task.sleep(for: .seconds(seconds))
             let end = Sample(main: main)
             let elapsed = end.wall - start.wall
             let tickRate = Double((driver?.ticks ?? 0) - ticks) / elapsed
             let frameRate = Double(Self.frames(in: window) - frames) / elapsed
+            let drawRate = Double(Self.draws(in: window) - draws) / elapsed
             let instructions = Double(end.instructions - start.instructions) / elapsed
-            print(String(format: "orbs=%d atividade=%@ link=%@ s=%.1f cpu=%.2f%% main=%.2f%% instr/s=%.2fM ticks/s=%.1f frames/s=%.1f",
-                         count, busy?.rawValue ?? "idle", emulated ? "emulado" : "real", elapsed,
+            print(String(format: "orbs=%d atividade=%@%@ link=%@ s=%.1f cpu=%.2f%% main=%.2f%% instr/s=%.2fM ticks/s=%.1f frames/s=%.1f draws/s=%.1f",
+                         count, busy?.rawValue ?? "idle", everyone ? "(todos)" : "", emulated ? "emulado" : "real", elapsed,
                          (end.cpu - start.cpu) / elapsed * 100, (end.mainCPU - start.mainCPU) / elapsed * 100,
-                         instructions / 1e6, tickRate, frameRate))
+                         instructions / 1e6, tickRate, frameRate, drawRate))
             DevRun.finish()
         }
     }
 
-    /// Frames the orbs drew so far (read once per sample, not per frame).
+    /// Times the orbs drew so far.
+    private static func draws(in window: NSWindow) -> Int {
+        Driver.orbViews(in: window.contentView).reduce(0) { $0 + $1.draws }
+    }
+
+    /// Frames the orbs stepped so far (read once per sample, not per frame).
     private static func frames(in window: NSWindow) -> Int {
         Driver.orbViews(in: window.contentView).reduce(0) { total, orb in
             total + orb.steps

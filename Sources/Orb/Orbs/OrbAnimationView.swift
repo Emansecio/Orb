@@ -12,9 +12,18 @@ struct AnimatedOrb: NSViewRepresentable {
     let activity: OrbActivity
     let size: CGFloat
     let followsPointer: Bool
+    /// Changing this value makes the orb give its big jump (what a click does).
     let poke: Int
+    /// Changing this value makes the orb give its small "got it" jump (a prompt was sent).
+    var ack = 0
+    /// Changing this value makes the orb squash and wobble as it lands (it just arrived on the floor).
+    var landing = 0
     /// Changing this value makes the orb blink and glance toward the chat (it was selected).
     var glance = 0
+    /// Each new cue makes the orb blink or sigh once.
+    var cue = OrbCueSignal()
+    /// How big its joy is while `activity` is `happy`.
+    var celebration = OrbCelebration.big
     let interactive: Bool
     /// false: the orb eases into its resting pose and stops producing frames (inactive window, idle sidebar row).
     let live: Bool
@@ -22,7 +31,10 @@ struct AnimatedOrb: NSViewRepresentable {
     func makeNSView(context: Context) -> OrbAnimationView {
         let view = OrbAnimationView()
         view.lastPoke = poke
+        view.lastAck = ack
+        view.lastLanding = landing
         view.lastGlance = glance
+        view.lastCue = cue
         update(view)
         return view
     }
@@ -35,7 +47,19 @@ struct AnimatedOrb: NSViewRepresentable {
         update(view)
         if view.lastPoke != poke {
             view.lastPoke = poke
-            view.pokeNow()
+            view.jumpNow(.play)
+        }
+        if view.lastAck != ack {
+            view.lastAck = ack
+            view.jumpNow(.ack)
+        }
+        if view.lastLanding != landing {
+            view.lastLanding = landing
+            view.jumpNow(.landing)
+        }
+        if view.lastCue != cue {
+            view.lastCue = cue
+            view.cueNow(cue.kind)
         }
         if view.lastGlance != glance {
             view.lastGlance = glance
@@ -44,7 +68,7 @@ struct AnimatedOrb: NSViewRepresentable {
     }
 
     private func update(_ view: OrbAnimationView) {
-        view.configure(config: config, activity: activity, size: size,
+        view.configure(config: config, activity: activity, celebration: celebration, size: size,
                        followsPointer: followsPointer, interactive: interactive, live: live)
     }
 }
@@ -62,12 +86,16 @@ struct AnimatedOrb: NSViewRepresentable {
 final class OrbAnimationView: NSView {
     private(set) var config = OrbConfig()
     private(set) var activity: OrbActivity = .idle
+    private var celebration = OrbCelebration.big
     private var size: CGFloat = 28
     private var followsPointer = true
     private var interactive = false
     private var live = true
     var lastPoke = 0
+    var lastAck = 0
+    var lastLanding = 0
     var lastGlance = 0
+    var lastCue = OrbCueSignal()
 
     /// A composited image layer and what `apply` needs to place it (computed once, not per frame).
     private struct Placed {
@@ -108,6 +136,8 @@ final class OrbAnimationView: NSView {
     private var clock = OrbFrameClock()
     /// Frames drawn so far (read by the bench, `OrbBench`).
     private(set) var steps = 0
+    /// Frames that moved the layers (the others were skipped as too small to see), read by the bench.
+    private(set) var draws = 0
     private weak var clipView: NSClipView?
     private var outOfViewTimer: Timer?
     /// For tests: the timer that waits for the orb to come back into view, and the layers on screen.
@@ -117,6 +147,12 @@ final class OrbAnimationView: NSView {
     var isBubbleShown: Bool { !bubble.isHidden }
     /// For tests: a selection glance is playing.
     var isGlancing: Bool { glanceStart != nil }
+    /// For tests: a cue's blink is playing, the jump and the flourish that play, and the activity and joy on screen (not
+    /// the ones asked for, which can be waiting out the pause between two tools).
+    var isCueBlinking: Bool { cueBlinkStart != nil }
+    var currentJumpForTesting: OrbJump? { jump?.kind }
+    var currentFlourishForTesting: OrbFlourish? { flourishes.current }
+    var shownForTesting: (activity: OrbActivity, celebration: OrbCelebration) { (shown, crossover.shownStyle) }
     /// For tests: the placed layers, back to front, with what they show.
     var placedLayersForTesting: [(layer: OrbLayer, view: CALayer)] { placed.map { ($0.layer, $0.view) } }
     private var rng = SystemRandomNumberGenerator()
@@ -153,9 +189,16 @@ final class OrbAnimationView: NSView {
     private var previousStart: Double { crossover.previousStart }
     private static let transition = OrbActivityBlend.duration
     private var hoverPoint: CGPoint?
-    private var pokeStart: Double?
+    private var hoverGate = HoverGate()
+    /// The jump playing and when it started (a landing starts a moment after it was asked for).
+    private var jump: (kind: OrbJump, start: Double)?
     private var glanceStart: Double?
+    private var lastGlanceStart = -Double.infinity
+    /// A blink asked for by a cue (over the pose, like the glance's).
+    private var cueBlinkStart: Double?
     private var tickleUntil = 0.0
+    /// Waits out the short thinking between two tools.
+    private var hold = OrbActivityHold()
     private var trackingArea: NSTrackingArea?
 
     // Frame pacing
@@ -205,13 +248,14 @@ final class OrbAnimationView: NSView {
 
     // MARK: Configuration
 
-    func configure(config: OrbConfig, activity: OrbActivity, size: CGFloat, followsPointer: Bool, interactive: Bool,
-                   live: Bool) {
+    func configure(config: OrbConfig, activity: OrbActivity, celebration: OrbCelebration = .big, size: CGFloat,
+                   followsPointer: Bool, interactive: Bool, live: Bool) {
         let resized = size != self.size, restyled = config != self.config
         let retempered = config.temperament != self.config.temperament
         let resumed = live && !self.live
         self.config = config
         self.activity = activity
+        self.celebration = celebration
         self.size = size
         self.followsPointer = followsPointer
         self.interactive = interactive
@@ -225,6 +269,7 @@ final class OrbAnimationView: NSView {
             rebuild(resize: resized)
         }
         if resized || restyled || resumed { prewarmExpressions() }
+        updateBlinkFactor()
         syncActivity(at: now)
         if resumed { liven(at: now) }
         updateRunning()
@@ -244,6 +289,7 @@ final class OrbAnimationView: NSView {
         traits = config.temperament.traits
         blinker.gap = shown.blinkGap(traits.blinkGap)
         blinker.doubleChance = traits.doubleBlink
+        blinker.skew = traits.blinkSkew
         saccades.reach = traits.saccadeReach
         saccades.hold = traits.saccadeHold
         if showcase {
@@ -252,17 +298,30 @@ final class OrbAnimationView: NSView {
         }
     }
 
-    func pokeNow() {
+    /// A jump of the body: a click, a prompt sent, a landing (see `OrbJump`).
+    func jumpNow(_ kind: OrbJump) {
         // A paused orb would replay a stale jump when it resumes.
         guard live else { return }
-        pokeStart = now
+        jump = (kind, now + kind.delay)
         liven(at: now)
     }
 
     /// A blink and a quick look toward the chat (`OrbGlance`), over whatever the orb is doing.
     func glanceNow() {
-        guard live, window != nil else { return }
+        guard live, window != nil, now - lastGlanceStart >= OrbGlance.minimumGap else { return }
         glanceStart = now
+        lastGlanceStart = now
+        liven(at: now)
+    }
+
+    /// A one-time reaction: a blink (you stopped the reply) or a sigh (a task stopped half way). The orb may be easing into
+    /// its rest as it happens (the turn that ended is what lets it rest); one that is already at rest has no one watching.
+    func cueNow(_ cue: OrbCue) {
+        guard window != nil, !isResting else { return }
+        switch cue {
+        case .blink: cueBlinkStart = now
+        case .sigh: flourishes.play(.sigh, at: now)
+        }
         liven(at: now)
     }
 
@@ -271,22 +330,30 @@ final class OrbAnimationView: NSView {
     /// activities with the same face (idle, attentive, listening) only motion and gaze blend: no blink (except one as
     /// the Orb starts watching you type), no wobble and nothing to rebuild, so typing bursts never twitch.
     private func syncActivity(at time: Double) {
-        let target = time < tickleUntil ? OrbActivity.happy : activity
-        guard target != shown else { return }
+        // A click makes a calm Orb smile for a moment; anything busier or more urgent keeps its own face.
+        let tickling = time < tickleUntil && Self.smilesWhenTickled.contains(activity)
+        var target = tickling ? OrbActivity.happy : activity
+        // How big the joy is: the turn's own celebration, or only the smile of a click.
+        let style = target == .happy ? (activity == .happy ? celebration : .smile) : OrbCelebration.big
+        // A tool ending and another starting a moment later: keep the pose of the first through the gap.
+        target = hold.resolve(wanted: target, shown: shown, at: time, applies: window != nil && !isResting)
+        guard target != shown || (target == .happy && style != crossover.shownStyle) else { return }
         let sameFace = target.hasSameFace(as: shown, mouth: config.mouth)
         if window == nil {
             // Not on screen yet: start in the right state instead of animating into it.
-            crossover.jump(to: target)
+            crossover.jump(to: target, celebration: style)
             bubbleIn.value = target.bubble == nil ? 0 : 1
         } else {
-            crossover.change(to: target, at: time, body: bodyClock + phase, traits: traits)
+            let calmer = target.energy <= shown.energy
+            crossover.change(to: target, at: time, body: bodyClock + phase, traits: traits, celebration: style)
             // At rest nothing moves, so a kick would pile up and burst out on resume.
             if !isResting {
                 if !sameFace || target == .attentive { blinker.trigger(at: time) }
-                if !sameFace { wobble.velocity += 0.5 }
+                if !sameFace && !calmer { wobble.velocity += 0.5 }
             }
             if !sameFace { liven(at: time) }
         }
+        updateBlinkFactor()
         blinker.gap = shown.blinkGap(traits.blinkGap)
         // A resting orb runs no frames to move its bubble or open its mouth: it gets the new rest pose right here.
         let resting = window != nil && isResting
@@ -300,6 +367,15 @@ final class OrbAnimationView: NSView {
             apply(lastPose)
         }
     }
+
+    /// The activities a click makes smile (the others are busy, or asking, or failing: they stay as they are).
+    private static let smilesWhenTickled: Set<OrbActivity> = [.idle, .attentive, .listening, .speaking]
+
+    /// How much of a blink this orb's eyes make: the ones on screen now (the activity's, or the bot's own). Kept from the
+    /// last time the eyes could have changed (the activity or the look), not worked out at every frame.
+    private var blinkFactor = 1.0
+
+    private func updateBlinkFactor() { blinkFactor = Blinker.factor(eyes: shown.eyes ?? config.eyes) }
 
     /// Builds the layer tree for the current config, activity and size. Only on screen: bitmaps depend on the
     /// window's backing scale, and `viewDidMoveToWindow` builds everything once the orb gets one.
@@ -606,7 +682,16 @@ final class OrbAnimationView: NSView {
         var pose = resting ? rest : OrbPose.mix(self.pose(at: time, dt: dt), rest, min(1, max(0, settle.value)))
         // Over the settling, so an orb selected while resting glances at full strength as it wakes up.
         if let start = glanceStart {
-            if resting || time - start >= OrbGlance.total { glanceStart = nil } else { OrbGlance.apply(to: &pose, elapsed: time - start) }
+            if resting || time - start >= OrbGlance.total {
+                glanceStart = nil
+            } else {
+                OrbGlance.apply(to: &pose, elapsed: time - start, blinkFactor: blinkFactor)
+            }
+        }
+        if let start = cueBlinkStart {
+            if resting || time - start >= Blinker.duration { cueBlinkStart = nil } else {
+                pose.blink = max(pose.blink, Blinker.closure(time - start) * blinkFactor)
+            }
         }
         var moved = pose
         moved.blink = lastPose.blink    // blinks are paced as short bursts, not as motion
@@ -628,7 +713,7 @@ final class OrbAnimationView: NSView {
     /// The rate the motion needs: raised as soon as it speeds up, lowered only after it stayed slow for a bit.
     /// Blinks and events get the full rate only while they last.
     private func pace(speed: Double, at time: Double) {
-        let lively = time < livelyUntil || hoverPoint != nil || pokeStart != nil || glanceStart != nil
+        let lively = time < livelyUntil || hoverPoint != nil || jump != nil || glanceStart != nil || cueBlinkStart != nil
             || flourishes.current != nil || time - transitionStart < Self.transition
         let cap = OrbFrameRate.cap(forSize: size, lively: lively)
         let wanted = OrbFrameRate.rate(forSpeed: speed, cap: cap)
@@ -639,9 +724,12 @@ final class OrbAnimationView: NSView {
             motionRate = wanted
         }
         let blending = time - transitionStart < Self.transition
-        var floor = max(shown.minFrameRate(elapsed: time - transitionStart),
-                        blending ? previous.minFrameRate(elapsed: time - previousStart) : 0)
-        if blinker.isBlinking || blinker.nextBlink - time < 0.1 || glanceStart != nil { floor = max(floor, 30) }
+        var floor = max(shown.minFrameRate(elapsed: time - transitionStart, size: size, celebration: crossover.shownStyle),
+                        blending ? previous.minFrameRate(elapsed: time - previousStart, size: size,
+                                                         celebration: crossover.previousStyle) : 0)
+        // Blinks need 30 fps to show their shape; eyes that are closed already have none.
+        let blinks = blinkFactor > 0 && (blinker.isBlinking || blinker.nextBlink - time < 0.1)
+        if blinks || glanceStart != nil || cueBlinkStart != nil { floor = max(floor, 30) }
         if let flourish = flourishes.current { floor = max(floor, flourish.minFrameRate) }
         if time < livelyUntil { floor = maxFrameRate }
         setFrameRate(min(cap, max(floor, motionRate)))
@@ -688,18 +776,16 @@ final class OrbAnimationView: NSView {
         pose.shake = motion.shake
         pose.glow = motion.glow
 
-        // Poke: anticipation squash, then a stretched jump; the landing feeds the wobble spring.
-        if let start = pokeStart {
+        // The jump (a click's, a prompt's nod, a landing's squash): the landing feeds the wobble spring.
+        if let (kind, start) = jump {
             let e = time - start
-            if e < 0.1 {
-                pose.squash += 0.12 * sin(.pi * e / 0.1)
-            } else if e < 0.55 {
-                let p = (e - 0.1) / 0.45
-                pose.lift += 0.16 * traits.jump * sin(.pi * p)
-                pose.squash -= 0.06 * sin(.pi * p)
+            if e >= kind.duration {
+                jump = nil
+                wobble.velocity += kind.kick
             } else {
-                pokeStart = nil
-                wobble.velocity += 1.6
+                let offset = kind.offset(at: e, jump: traits.jump)
+                pose.lift += offset.lift
+                pose.squash += offset.squash
             }
         }
         wobble.step(toward: 0, dt: dt, response: 0.32, damping: 0.3)
@@ -707,7 +793,7 @@ final class OrbAnimationView: NSView {
 
         // Flourishes: the temperament's spontaneous moves (only while idle and left alone) and its showcase.
         _ = flourishes.update(at: time, kinds: traits.flourishes, gap: traits.flourishGap,
-                              allowed: shown == .idle && hoverPoint == nil && pokeStart == nil, using: &rng)
+                              allowed: shown == .idle && hoverPoint == nil && jump == nil, using: &rng)
         let flourish = flourishes.current.map { $0.offset(at: flourishes.elapsed(at: time)) } ?? OrbFlourish.Offset()
         pose.lift += flourish.lift * traits.jump
         pose.squash += flourish.squash
@@ -744,7 +830,7 @@ final class OrbAnimationView: NSView {
         hover.step(toward: hoverPoint == nil ? 0 : 1, dt: dt, response: 0.35 * springs, damping: 0.6)
         pose.hover = hover.value * (1 + 0.75 * traits.lean)
 
-        pose.blink = max(blinker.amount(at: time, using: &rng), flourish.squint)
+        pose.blink = max(blinker.amount(at: time, using: &rng) * blinkFactor, flourish.squint)
         speak(&pose, at: time, dt: dt)
 
         bubbleIn.step(toward: shown.bubble != nil && size >= 26 ? 1 : 0, dt: dt, response: 0.35, damping: 0.6)
@@ -804,6 +890,7 @@ final class OrbAnimationView: NSView {
     /// Moves layers only: positions, transforms and opacities (y grows upward here).
     private func apply(_ pose: OrbPose) {
         drawnPose = pose
+        draws += 1
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
@@ -924,12 +1011,16 @@ final class OrbAnimationView: NSView {
 
     override func mouseExited(with event: NSEvent) {
         hoverPoint = nil
+        hoverGate.reset()
         liven(at: now)
     }
 
+    /// The gaze follows every move, but the frame rate only goes up when the pointer really went somewhere (a few points,
+    /// at most ten times a second): a hand resting on the mouse is not motion to draw.
     private func setHover(_ event: NSEvent) {
-        hoverPoint = convert(event.locationInWindow, from: nil)
-        liven(at: now)
+        let point = convert(event.locationInWindow, from: nil)
+        hoverPoint = point
+        if hoverGate.shouldSpeedUp(at: point, time: now) { liven(at: now) }
     }
 
     /// Non-interactive orbs let clicks through (e.g. to select a sidebar row).
@@ -939,8 +1030,8 @@ final class OrbAnimationView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         guard interactive else { return super.mouseDown(with: event) }
-        pokeNow()
-        tickleUntil = now + 1.4
+        jumpNow(.play)
+        if Self.smilesWhenTickled.contains(activity) { tickleUntil = now + OrbCelebration.smile.seconds }
         syncActivity(at: now)
     }
 }

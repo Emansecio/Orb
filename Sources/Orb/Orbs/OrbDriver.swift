@@ -82,6 +82,8 @@ final class OrbDriver: NSObject {
     private let screen: NSScreen
     private var link: CADisplayLink?
     private let orbs = NSHashTable<OrbAnimationView>.weakObjects()
+    /// The orbs that run, found when something changes (`refresh`) and not at every tick.
+    private var running: [OrbAnimationView] = []
     private(set) var rate: Float = 0
 
     /// For tests: whether the link is stopped, and how many orbs and drivers there are.
@@ -112,12 +114,13 @@ final class OrbDriver: NSObject {
         link?.invalidate()
         link = nil
         rate = 0
+        running = []
         Self.drivers.removeValue(forKey: ObjectIdentifier(screen))
     }
 
     /// Pauses the link when no orb runs; otherwise runs it as fast as the fastest one wants.
     func refresh() {
-        let running = orbs.allObjects.filter(\.isRunning)
+        running = orbs.allObjects.filter(\.isRunning)
         link?.isPaused = running.isEmpty
         let wanted = OrbLinkRate.rate(forOrbsAt: running.map(\.frameRate))
         guard wanted != rate else { return }
@@ -127,11 +130,12 @@ final class OrbDriver: NSObject {
 
     @objc private func tick(_ link: CADisplayLink) {
         let time = link.targetTimestamp
-        // Orbs that stop or change rate while stepping touch the driver: iterate a copy.
-        let running = orbs.allObjects.filter(\.isRunning)
+        // Orbs that stop or change rate while stepping touch the driver (`refresh` replaces the list): iterate a copy, and
+        // skip one that stopped meanwhile.
+        let running = running
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        for orb in running { orb.stepIfDue(at: time) }
+        for orb in running where orb.isRunning { orb.stepIfDue(at: time) }
         CATransaction.commit()
     }
 }

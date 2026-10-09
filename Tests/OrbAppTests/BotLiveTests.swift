@@ -193,7 +193,8 @@ import Testing
 
         model.stop(id)
         #expect(!live.isWorking && live.status == nil && !live.needsYou)
-        #expect(live.hasFailed && live.activity == .error)
+        // Stopping is no failure: only a blink (a turn that fails shows the error, see `OrbReactionTests`).
+        #expect(!live.hasFailed && live.activity != .error && live.cue.count == 1)
         #expect(live.unread == 1) // the app is not active in a test: the turn ended while you were elsewhere
     }
 

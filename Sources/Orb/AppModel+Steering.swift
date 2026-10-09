@@ -167,7 +167,7 @@ extension AppModel {
             prompt += MemoryIntent.instruction(tool: "remember")
         }
         lane.enqueue(SteeredMessage(text: typed, files: files, pictures: pictures, prompt: prompt))
-        live(botID).poked() // scrolls the chat down to the "na fila" bubble, which changes no transcript revision
+        live(botID).scrolled() // scrolls the chat down to the "na fila" bubble, which changes no transcript revision
     }
 
     /// Takes a queued message back into the composer (its text before what is typed now, its attachments with the
@@ -203,7 +203,7 @@ extension AppModel {
         countSkillUse(in: message.text)
         closeStreaming(botID)
         append(.user(text: message.text, attachments: message.attachmentPaths), to: botID)
-        live(botID).poked()
+        live(botID).scrolled()
     }
 
     /// Counts one use of the skill a message starts with (`/slug`), if it does.

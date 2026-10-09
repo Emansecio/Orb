@@ -6,7 +6,7 @@ import AppKit
 /// `Orb --render-orbs out.png <sheet>`. Without a sheet name, `--render-orbs` writes the Orbs × activities sheet.
 @MainActor
 enum OrbDesignSheet {
-    static let names = ["cabelos", "cabelo-padrao", "cabelo-acessorio", "acessorios", "olhos", "bocas", "detalhes", "cores", "tamanhos", "quadros", "reacoes", "icone"]
+    static let names = ["cabelos", "cabelo-padrao", "cabelo-acessorio", "acessorios", "olhos", "bocas", "detalhes", "cores", "tamanhos", "quadros", "reacoes", "polimento", "icone"]
 
     /// Writes the sheet `name` (one of `names`); false for an unknown name.
     @discardableResult
@@ -23,6 +23,7 @@ enum OrbDesignSheet {
         case "tamanhos": sizes(to: url)
         case "quadros": frames(to: url)
         case "reacoes": reactions(to: url)
+        case "polimento": polish(to: url)
         case "icone": appIcon(to: url)
         default: return false
         }
@@ -191,6 +192,59 @@ enum OrbDesignSheet {
         write(sheet, to: url)
     }
 
+    /// The reactions of the polishing round, frame by frame: the three sizes of joy, "precisa de você" over a minute
+    /// (its first 3 s, then the hops every 7 s, then after a minute), the error and its "no", and the three jumps.
+    private static func polish(to url: URL) {
+        let orb = OrbConfig(color: "rosa", eyes: "ovais", mouth: "sorriso", cheeks: "blush", hair: "coque")
+        func at(_ step: Double, count: Int = 13) -> [Double] { (0..<count).map { Double($0) * step } }
+        func jump(_ kind: OrbJump) -> [OrbPose] {
+            let times = at(kind.duration / 12)
+            return zip(OrbPosePreview.poses(activity: .idle, at: times.map { $0 + 3 }), times).map { pose, time in
+                var pose = pose
+                let offset = kind.offset(at: time, jump: 1)
+                pose.lift += offset.lift
+                pose.squash += offset.squash
+                return pose
+            }
+        }
+        let landing = OrbJump.landing
+        let landingTimes = at(0.01, count: 13)
+        let landed: [OrbPose] = zip(OrbPosePreview.poses(activity: .idle, at: landingTimes.map { $0 + 3 }), landingTimes).map { pose, time in
+            var pose = pose
+            pose.squash += landing.offset(at: time, jump: 1).squash
+            return pose
+        }
+        let rows: [(String, OrbActivity, [OrbPose])] = [
+            ("Feliz leve", .happy, OrbPosePreview.poses(activity: .happy, at: at(1.6 / 12), celebration: .light)),
+            ("Feliz normal", .happy, OrbPosePreview.poses(activity: .happy, at: at(2.2 / 12), celebration: .normal)),
+            ("Feliz grande", .happy, OrbPosePreview.poses(activity: .happy, at: at(3.0 / 12), celebration: .big)),
+            ("Precisa 0-3 s", .waiting, OrbPosePreview.poses(activity: .waiting, at: at(0.25))),
+            ("Precisa 3-10 s", .waiting, OrbPosePreview.poses(activity: .waiting, at: at(0.6).map { $0 + 3 })),
+            ("Precisa 60 s", .waiting, OrbPosePreview.poses(activity: .waiting, at: at(0.6).map { $0 + 66 })),
+            ("Erro 0-2,4 s", .error, OrbPosePreview.poses(activity: .error, at: at(0.2))),
+            ("Envio", .idle, jump(.ack)),
+            ("Clique", .idle, jump(.play)),
+            ("Aterrissagem", .idle, landed),
+        ]
+        let sheet = VStack(alignment: .leading, spacing: 8) {
+            ForEach(rows, id: \.0) { label, activity, poses in
+                HStack(spacing: 4) {
+                    Text(label)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Palette.muted)
+                        .frame(width: 96, alignment: .leading)
+                    ForEach(Array(poses.enumerated()), id: \.offset) { _, pose in
+                        OrbFrame(config: orb, activity: activity, size: 64, pose: pose)
+                            .frame(width: 84, height: 108)
+                    }
+                }
+            }
+        }
+        .padding(24)
+        .background(Palette.canvas)
+        write(sheet, to: url)
+    }
+
     /// The app icon at every size it ships in (`AppIcon`), drawn pixel for pixel on a light and a dark wallpaper:
     /// each size at its real size (the two big ones shrunk), and the small ones again magnified without smoothing (128 ×2, the rest ×4). Written at 1× (no 2× pass),
     /// so what is seen is what the Dock and Finder get.
@@ -286,7 +340,7 @@ enum OrbDesignSheet {
 /// Poses of an activity over time for review sheets: the activity's body motion and gaze, a blink and the
 /// hair's follow-through spring, simulated at 60 fps like the live orb (no pointer, no randomness).
 enum OrbPosePreview {
-    static func poses(activity: OrbActivity, at times: [Double]) -> [OrbPose] {
+    static func poses(activity: OrbActivity, at times: [Double], celebration: OrbCelebration = .big) -> [OrbPose] {
         var loose = SpringPoint(), head = SpringPoint(), swing = Spring()
         var result: [OrbPose] = []
         var time = 0.0
@@ -294,7 +348,7 @@ enum OrbPosePreview {
         for target in times {
             var pose = OrbPose()
             repeat {
-                let motion = activity.motion(at: time, elapsed: time)
+                let motion = activity.motion(at: time, elapsed: time, celebration: celebration)
                 pose = OrbPose()
                 pose.lift = motion.lift
                 pose.squash = motion.squash
@@ -306,7 +360,7 @@ enum OrbPosePreview {
                 pose.look = head.value
                 pose.hairLag = OrbSprings.hairLag(&loose, anchor: OrbSprings.hairAnchor(look: pose.look, lift: pose.lift), dt: dt)
                 pose.hairSwing = OrbSprings.hairSwing(&swing, tilt: pose.tilt, dt: dt)
-                pose.blink = Blinker.closure(time - 1.5)
+                pose.blink = Blinker.closure(time - 1.5) * Blinker.factor(eyes: activity.eyes ?? "")
                 time += dt
             } while time < target
             result.append(pose)

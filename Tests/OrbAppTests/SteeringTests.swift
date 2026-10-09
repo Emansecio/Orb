@@ -447,9 +447,10 @@ struct SteeringEngineTests {
         let (model, bot) = setUp(client)
         model.submit("primeiro", to: bot.id)
         await waitUntil("the model call") { await client.seen.count >= 1 }
-        let before = model.live(bot.id).poke
+        let before = model.live(bot.id).scrollNudge, jumps = model.live(bot.id).poke
         model.submit("segundo", to: bot.id)
-        #expect(model.live(bot.id).poke > before) // the queued bubble changes no transcript revision; the poke follows it
+        #expect(model.live(bot.id).scrollNudge > before) // the queued bubble changes no transcript revision; the nudge follows it
+        #expect(model.live(bot.id).poke == jumps) // ...and the Orb does not jump for it
         await gate.open()
         await waitUntilIdle(model, bot.id)
     }

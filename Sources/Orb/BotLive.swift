@@ -57,10 +57,17 @@ final class BotLive {
     private(set) var activity = OrbActivity.idle
     /// An approval card is open: the Orb is stopped until you answer.
     private(set) var needsYou = false
-    /// Incremented when a prompt is sent; Orbs jump when it changes.
+    /// Incremented when a prompt is sent; Orbs give their small "got it" jump when it changes.
     private(set) var poke = 0
+    /// Incremented when the chat should scroll to something that is not in the transcript yet (a message queued while the
+    /// Orb works, one delivered to the model). The Orb does not jump for it.
+    private(set) var scrollNudge = 0
     /// Incremented when the Orb is selected; its sidebar Orb blinks and glances toward the chat when it changes.
     private(set) var glance = 0
+    /// How much the Orb celebrates while `activity` is `happy`.
+    private(set) var celebration = OrbCelebration.big
+    /// A one-time reaction for the Orb's avatars (a blink when you stop the reply, a sigh when a task stopped half way).
+    private(set) var cue = OrbCueSignal()
     /// Messages from turns that ended while you were elsewhere. Saved with the app's state.
     private(set) var unread = 0
     /// What the inspector's memory section shows, refreshed after changes.
@@ -91,7 +98,7 @@ final class BotLive {
     @ObservationIgnored private(set) var isComposing = false
     @ObservationIgnored private var composing = ComposingDeadline(quiet: BotLive.composingQuiet)
     @ObservationIgnored private var composingWatch: Task<Void, Never>?
-    static let composingQuiet = Duration.milliseconds(1500)
+    static let composingQuiet = Duration.milliseconds(3000)
     /// How long each phrase of `work` stays before the next one replaces it.
     static let workDwell = Duration.milliseconds(700)
     @ObservationIgnored private var dwell = StatusDwell(minDwell: BotLive.workDwell)
@@ -175,6 +182,12 @@ final class BotLive {
     func setMemory(_ snapshot: MemorySnapshot) { assign(\.memory, to: snapshot) }
 
     func poked() { poke += 1 }
+
+    func scrolled() { scrollNudge += 1 }
+
+    func cued(_ kind: OrbCue) { cue = OrbCueSignal(count: cue.count + 1, kind: kind) }
+
+    func setCelebration(_ level: OrbCelebration) { assign(\.celebration, to: level) }
 
     func glanced() { glance += 1 }
 

@@ -52,13 +52,15 @@ enum OrbTemperament: String, Codable, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Motion parameters. `equilibrado` reproduces the Orb's original behavior (all multipliers 1).
+    /// Motion parameters. `equilibrado` is the default temperament (its values are the defaults below).
     struct Traits: Equatable, Sendable {
         /// Seconds between blinks (short gaps are more likely) and the chance of a double blink.
-        var blinkGap: ClosedRange<Double> = 2...7
+        var blinkGap: ClosedRange<Double> = 2.5...8
         var doubleBlink = 0.12
+        /// How short gaps are favored (see `Blinker.skew`).
+        var blinkSkew = 1.5
         /// Multipliers on the time an idle fixation is held and on how far saccades go.
-        var saccadeHold = 1.0
+        var saccadeHold = 1.25
         var saccadeReach = 1.0
         /// Multiplier on the response time of the gaze and hover springs (lower = snappier).
         var springResponse = 1.0
@@ -86,21 +88,21 @@ enum OrbTemperament: String, Codable, CaseIterable, Identifiable, Sendable {
         case .equilibrado:
             Traits()
         case .calmo:
-            Traits(blinkGap: 3.5...9, doubleBlink: 0.05, saccadeHold: 1.8, saccadeReach: 0.6, springResponse: 1.5,
+            Traits(blinkGap: 3.5...9, doubleBlink: 0.05, blinkSkew: 2, saccadeHold: 1.8, saccadeReach: 0.6, springResponse: 1.5,
                    jump: 0.7, bob: 0.75, pace: 0.7, pointerReach: 0.85, pointerInterest: 0.7,
-                   flourishes: [.sigh], flourishGap: 25...50, syllableRate: 4.2, mouthOpening: 0.75)
+                   flourishes: [.sigh], flourishGap: 40...90, syllableRate: 4.2, mouthOpening: 0.75)
         case .animado:
-            Traits(blinkGap: 1.4...4.5, doubleBlink: 0.2, saccadeHold: 0.6, saccadeReach: 1.2, springResponse: 0.75,
+            Traits(blinkGap: 1.8...5.5, doubleBlink: 0.15, saccadeHold: 0.75, saccadeReach: 1.2, springResponse: 0.75,
                    jump: 1.4, bob: 1.25, pace: 1.2, pointerReach: 1.2, pointerInterest: 1.2, lean: 0.4,
-                   flourishes: [.hop, .wiggle], flourishGap: 8...20, syllableRate: 6.6, mouthOpening: 1.3)
+                   flourishes: [.hop, .wiggle], flourishGap: 18...40, syllableRate: 6.6, mouthOpening: 1.3)
         case .timido:
-            Traits(blinkGap: 1.8...6, doubleBlink: 0.25, saccadeReach: 0.7, springResponse: 1.1,
+            Traits(blinkGap: 2.2...7, doubleBlink: 0.25, saccadeHold: 1.25, saccadeReach: 0.7, springResponse: 1.1,
                    jump: 0.65, bob: 0.8, pace: 0.9, lean: -1, avertsGaze: true,
-                   syllableRate: 4.6, mouthOpening: 0.7)
+                   flourishes: [.bashful], flourishGap: 45...90, syllableRate: 4.6, mouthOpening: 0.7)
         case .curioso:
-            Traits(blinkGap: 2...6.5, doubleBlink: 0.1, saccadeHold: 0.8, saccadeReach: 1.25, springResponse: 0.8,
+            Traits(blinkGap: 2...6.5, doubleBlink: 0.1, blinkSkew: 2, saccadeHold: 0.95, saccadeReach: 1.25, springResponse: 0.8,
                    jump: 1.1, pace: 1.1, pointerReach: 1.7, pointerInterest: 1.6, lean: 1,
-                   flourishes: [.lookAround], flourishGap: 10...24, syllableRate: 5.6, mouthOpening: 1.05)
+                   flourishes: [.lookAround], flourishGap: 14...30, syllableRate: 5.6, mouthOpening: 1.05)
         }
     }
 
@@ -170,7 +172,7 @@ enum OrbFlourish: Sendable, CaseIterable {
             }
             return offset
         case .wiggle:
-            return Offset(squash: 0.025 * sin(.pi * 6 * p) * envelope, tilt: 9 * sin(.pi * 6 * p) * envelope,
+            return Offset(squash: 0.025 * sin(.pi * 6 * p) * envelope, tilt: 7 * sin(.pi * 6 * p) * envelope,
                           look: CGPoint(x: 0, y: 0.15), lookWeight: 0.5 * envelope)
         case .lookAround:
             // Left, then right, then back, with a curious head tilt.

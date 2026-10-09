@@ -116,29 +116,51 @@ A atividade de cada Orb é calculada no `BotLive` do Orb (`BotLive.activity`, um
 | Situação no app | Atividade | Olhos / boca / sobrancelhas | Olhar | Corpo | Balão |
 |---|---|---|---|---|---|
 | Nada acontecendo | `idle` | do Orb | passeia devagar; segue o mouse | respira e flutua | — |
-| Você está digitando para ele (parado) | `attentive` (até 1,5 s depois da última tecla) | do Orb; pisca menos | para baixo, para o campo; sacadas a 20 %, mouse a 30 % | respira e flutua (sem pulo) | — |
+| Você está digitando para ele (parado) | `attentive` (até 3 s depois da última tecla) | do Orb; pisca menos | para baixo, para o campo; sacadas a 20 %, mouse a 30 % | respira e flutua (sem pulo) | — |
 | A resposta está chegando | `speaking` | do Orb; a boca **fala** | para você, com pequenas sacadas | balança no ritmo da fala | — |
-| Você acabou de enviar um prompt | `listening` (1,4 s) + **pulo** | do Orb | olha para baixo (para o texto) | pulo com amassa-e-estica | — |
+| Você acabou de enviar um prompt | `listening` (1,4 s) + **aceno** de envio (`.ack`) | do Orb | olha para baixo (para o texto) | aceno curto de 0,35 s, sem balanço | — |
 | Pensando / conectores / memória | `thinking` | boca “assobio” | para cima e para o lado | balança | … |
 | Ferramenta de terminal | `typing` | olhos “fendas”, boca neutra, sobrancelhas retas | para baixo, tremendo | vibra (digitando) | — |
 | Navegador / controlar o Mac | `browsing` | do Orb | varre esquerda ↔ direita | balança | — |
 | Lendo arquivos | `reading` | do Orb | lê linha por linha | balança | — |
 | Buscando | `searching` | olhos “ovais” | círculos | balança | — |
-| Pedindo aprovação | `waiting` | “grandes”, boca “surpresa”, “preocupadas” | para você | pulinhos | ? |
-| Terminou o turno | `happy` (3 s) | “felizes”, “sorrisão” | para você | explosão de alegria que acalma: pulos cada vez mais baixos, depois um balanço contente | — |
-| Você parou / deu erro | `error` (2,5 s) | “tontos”, “triste”, “preocupadas” | treme | chacoalha | ! |
+| Pedindo aprovação | `waiting` | “grandes”, boca “surpresa”, “preocupadas” | para você | em ciclos: 3 pulos nos primeiros 3 s, depois 2 pulinhos a cada 7 s e só a respiração no intervalo (altura × 0,6 depois de 60 s) | ? |
+| Terminou o turno | `happy` em três níveis (1,6 / 2,2 / 3 s) | “felizes”, “sorrisão” | para você | alegria que acalma: pulos cada vez mais baixos, depois um balanço contente (leve: um pulo só) | — |
+| Deu erro (falha do motor ou do setup) | `error` (2,5 s) | “tontos”, “triste”, “preocupadas” | treme | um “não” de 3 Hz que se apaga em ~1,2 s; depois fica caído (−3°) | ! |
+| Você parou a resposta | uma piscada (`OrbCue.blink`), sem mudar de atividade | — | — | — | — |
+| Tarefa que parou no meio, resposta cortada | um suspiro (`OrbCue.sigh`), sem alegria | — | — | respira fundo | — |
 | Rotina pausada (cartão na página Rotinas) | `sleepy` | “sono” | baixo | inclinado, respirando | z |
 
-O brilho (aura e sombra no chão) pulsa enquanto o Orb trabalha. "Conectores" e "memória" (`remember`/`recall`) mostram
+O brilho (aura e sombra no chão) pulsa enquanto o Orb trabalha (`0,89 + 0,11·sin(2,4 t)`: abaixo de 1, para a opacidade
+não saturar, e devagar o bastante para um quadro a 10 fps mudar menos de ¼ de pixel). "Conectores" e "memória" (`remember`/`recall`) mostram
 `thinking`, como o raciocínio; ler arquivos mostra `reading`; `search_files`, `grep` e `glob` mostram `searching`.
 
 Prioridade em `BotLive.activity`: esperando > erro > feliz > ferramenta > falando > ouvindo/pensando > atento > parado.
 Um Orb trabalhando continua trabalhando enquanto você escreve para ele. Os rastros curtos (`listening` 1,4 s, `happy`
-3 s, `error` 2,5 s) são sinais que a sessão liga por um prazo (`BotSession.flash`).
+1,6 / 2,2 / 3 s, `error` 2,5 s) são sinais que a sessão liga por um prazo (`BotSession.flash`): cada sinal tem a sua
+`Task`, e ligar o mesmo de novo cancela a anterior (a velha apagaria o novo antes da hora). Começar um turno
+(`BotSession.clearBeats`, ao enviar e em `beginTurn`) limpa a alegria e o erro do turno anterior.
+
+**Parar não é erro.** `finishTurn(…, userStopped: true)` (Parar e Parar e enviar) não liga `hasFailed`: o Orb só pisca
+uma vez (`BotLive.cued(.blink)`). Só falha do motor (`.failed`) e do setup (`failSetup`) mostram o erro. Quem tem a vista
+em movimento recebe o sinal (`OrbAnimationView.cueNow`): um avatar que ainda está assentando (o que acaba de ser
+solto pelo fim do turno) pisca por cima da pose de repouso; um que já descansa não tem quem o veja e ignora.
+
+**Comemoração por tamanho** (`OrbCelebration.level`, com a duração do turno, as ações e se era rotina):
+
+| Nível | Quando | Duração | Corpo |
+|---|---|---|---|
+| Leve | menos de 8 s e no máximo 1 ação; rotina com o Orb não selecionado | 1,6 s | rosto feliz e um único pulo de 0,05 |
+| Normal | o resto | 2,2 s | pulos até 1,6 s depois do amassado, pulo de 0,08 |
+| Grande | mais de 45 s, 8 ações ou mais, ou rotina concluída com o Orb selecionado | 3 s | o de sempre: pulo de 0,1, calma em 2,2 s |
+
+Tarefa que parou no meio (`isTaskPaused`) ou resposta cortada pelo limite do modelo (`AgentEngine.cutShortNotice`) não
+comemora: só o suspiro (`OrbFlourish.sigh`). O clique num Orb parado, atento, ouvindo ou falando mostra só o rosto feliz
+(`OrbCelebration.smile`, 1,4 s, sem os pulos do feliz); em pensando, espera ou erro o Orb mantém a cara.
 
 ### Reagindo à interface
 
-- **Atento** (`attentive`): `BotLive.noteComposing` liga na primeira tecla do compositor e desliga 1,5 s depois
+- **Atento** (`attentive`): `BotLive.noteComposing` liga na primeira tecla do compositor e desliga 3 s depois
   da última, ou na hora quando o campo fica vazio (apagou tudo, enviou ou o Orb foi apagado). Como `speaking`, só o
   começo e o fim da rajada mudam o que as views leem; cada tecla só empurra um prazo que ninguém observa
   (`ComposingDeadline`, conferido por uma `Task` por Orb). O gancho é o setter do campo do compositor
@@ -149,17 +171,26 @@ Um Orb trabalhando continua trabalhando enquanto você escreve para ele. Os rast
   não dão tique. Só o avatar segue a atividade (`LiveBotAvatar`): o painel do Orb e o chat vazio não se redesenham
   quando você começa ou para de digitar.
 - **Selecionado**: ao escolher um Orb, `BotLive.glance` aumenta e o Orb da barra lateral olha rápido para o chat, à
-  direita, e pisca ao chegar (`OrbGlance`: vira em 0,12 s, segura, volta até 0,6 s; os olhos chegam 50 ms antes da
-  cabeça e o cabelo 70 ms depois). A olhada é aplicada por cima do assentamento, então aparece inteira mesmo no Orb
+  direita, e pisca ao chegar (`OrbGlance`: vira em 0,16 s, olha 0,6 para o lado, segura, volta até 0,6 s; os olhos
+  chegam 50 ms antes da cabeça e o cabelo 70 ms depois). Uma seleção que vem menos de 1,2 s depois da última olhada é
+  ignorada (descer a lista com as setas não faz os Orbs olharem o tempo todo). A olhada é aplicada por cima do assentamento, então aparece inteira mesmo no Orb
   que estava pausado e acabou de acordar. Um Orb pausado ignora a olhada (não a repete ao voltar).
-- Com **Reduzir movimento**, o Orb é estático: atento fica igual a parado (não tem expressão própria) e a olhada
-  não acontece.
+- **Três pulos** (`OrbJump`): o **envio** (`ack`, `BotLive.poke`) é um aceno de 0,35 s com elevação de 0,08 e amassado de
+  0,05, sem balanço; o **clique** (`play`) fica com o pulo de 0,16, 0,55 s, e o balanço de 1,6; a **aterrissagem** do chat
+  vazio e da boas-vindas (`landing`) é só um amassado de 0,06 em 0,08 s, 0,12 s depois de pedida, com balanço de 1,0 e sem
+  subida. Quem pede para o chat rolar até a bolha "na fila" ou até a mensagem entregue ao modelo (steering) usa o contador
+  `BotLive.scrollNudge`, que não faz o Orb pular.
+- **Ferramentas em paralelo**: `runningTool` é a última chamada ainda aberta (`BotSession.openTool`), então terminar uma
+  das duas não devolve o Orb a "pensando". E o Orb só confirma "pensando" depois de 0,6 s sem ferramenta
+  (`OrbActivityHold`): entre uma ferramenta e a seguinte ele guarda a pose da primeira. Espera, erro e feliz entram na hora.
+- Com **Reduzir movimento**, o Orb é estático: atento fica igual a parado (não tem expressão própria), e a olhada, os
+  pulos, o suspiro e a piscada de parar não acontecem.
 - Folha de revisão: `Orb --render-orbs reacoes.png reacoes` (parado, atento e a olhada quadro a quadro).
 
 ### Falando
 
 `BotSession.markSpeaking` marca o Orb como falando (`BotLive.isSpeaking`) quando chega um trecho de texto da resposta
-(que não seja só espaço) e `stopSpeaking` desmarca depois de 600 ms sem texto novo (`BotSession.speakingQuiet`), ao
+(que não seja só espaço) e `stopSpeaking` desmarca depois de 1,2 s sem texto novo (`BotSession.speakingQuiet`), ao
 começar uma ferramenta, ao pedir aprovação e ao terminar o turno. O estado só muda no começo e no fim de cada rajada de
 texto (um prazo por Orb, conferido por uma única `Task`), então o streaming não ganha nenhuma invalidação de SwiftUI por
 token. Uma resposta de um Orb já apagado não cria vigia nova.
@@ -189,13 +220,14 @@ as molas e `OrbActivity.motion`). Ao escolher um jeito, o Orb faz o seu gesto ca
 
 | Jeito | Piscadas | Sacadas | Molas | Pulos / balanço | Ponteiro | Gestos espontâneos | Ao escolher |
 |---|---|---|---|---|---|---|---|
-| Calmo | 3,5–9 s, raramente duplas | raras e curtas | 1,5× mais lentas | 0,7× / balanço baixo e lento | menos interesse | suspiro (25–50 s) | suspiro |
-| **Equilibrado** (padrão) | 2–7 s | normais | normais | normais | normal | — | pulinho |
-| Animado | 1,4–4,5 s, mais duplas | frequentes e largas | mais rápidas | 1,4× / mais vivo | um pouco mais | pulinho ou rebolado (8–20 s) | rebolado |
-| Tímido | 1,8–6 s, duplas nervosas | curtas | um pouco mais lentas | 0,65× | **desvia o olhar** para baixo e para o lado quando o ponteiro chega perto, espia de volta por 0,4–0,7 s a cada 1,6–3,8 s; inclina-se para trás no hover e cresce menos | — | olha para baixo e espia |
-| Curioso | 2–6,5 s | mais frequentes | mais rápidas | 1,1× | nota o ponteiro de 1,7× mais longe, com mais vontade, **inclina a cabeça** para ele e cresce mais no hover | olha em volta (10–24 s) | olha em volta |
+| Calmo | 3,5–9 s, raramente duplas (~12/min) | raras e curtas, fixação × 1,8 (~19/min) | 1,5× mais lentas | 0,7× / balanço baixo e lento | menos interesse | suspiro (40–90 s) | suspiro |
+| **Equilibrado** (padrão) | 2,5–8 s, expoente 1,5 (~14/min) | normais, fixação × 1,25 (~29/min) | normais | normais | normal | — | pulinho |
+| Animado | 1,8–5,5 s, duplas de 0,15 (~21/min) | frequentes e largas, fixação × 0,75 (~50/min) | mais rápidas | 1,4× / mais vivo | um pouco mais | pulinho ou rebolado de 7° (18–40 s) | rebolado |
+| Tímido | 2,2–7 s, duplas nervosas de 0,25 (~19/min) | curtas, fixação × 1,25 (~28/min) | um pouco mais lentas | 0,65× | **desvia o olhar** para baixo e para o lado quando o ponteiro chega perto, espia de volta por 0,4–0,7 s a cada 1,6–3,8 s; inclina-se para trás no hover e cresce menos | gesto tímido (45–90 s) | olha para baixo e espia |
+| Curioso | 2–6,5 s (~19/min) | mais frequentes, fixação × 0,95 (~40/min) | mais rápidas | 1,1× | nota o ponteiro de 1,7× mais longe, com mais vontade, **inclina a cabeça** para ele e cresce mais no hover | olha em volta (14–30 s) | olha em volta |
 
-`Equilibrado` reproduz exatamente o comportamento anterior. Orbs salvos antes desta versão (sem a chave
+Calmo e Curioso mantêm a piscada de antes (expoente 2, `Traits.blinkSkew`); os outros pedem gaps curtos um pouco menos
+(expoente 1,5). As frequências por minuto da tabela são as medidas em `OrbRhythmTests` (duas horas simuladas de cada jeito). Orbs salvos antes desta versão (sem a chave
 `temperament`) carregam como equilibrados: `OrbConfig` decodifica de forma tolerante.
 
 ## 4. Interação com o mouse
@@ -207,7 +239,9 @@ as molas e `OrbActivity.motion`). Ao escolher um jeito, o Orb faz o seu gesto ca
   totalmente; digitando no terminal quase não tira o olho do trabalho; com erro ou dormindo, ignora.
 - **Passar o mouse por cima**: o Orb cresce um pouco (com uma leve sobra de mola), encara o ponteiro e,
   enquanto o ponteiro se mexe, roda a 60 fps (grandes) ou 30 fps (pequenos).
-- **Clicar** (Orbs interativos: painel do Orb, estado vazio do chat, editor): pula e fica feliz por 1,4 s.
+- **Clicar** (Orbs interativos: painel do Orb, estado vazio do chat, editor): pula e, se está parado, atento, ouvindo ou
+  falando, mostra o rosto feliz por 1,4 s (sem os pulos do feliz). O hover só sobe a taxa de quadros quando o mouse andou
+  mais de 3 pt desde a última subida e passaram 100 ms (`HoverGate`); o olhar segue o mouse de qualquer jeito.
 
 ### Movimento natural
 
@@ -220,9 +254,12 @@ Tudo em [`Orbs/OrbMotion.swift`](../Sources/Orb/Orbs/OrbMotion.swift) (funções
 - **Sacadas** (`Saccades`) quando parado: fixa um ponto por 0,8–2,8 s, salta para outro (quase sempre
   perto do centro, às vezes uma olhada mais longe) e tem uma deriva mínima durante a fixação. Ouvindo,
   esperando e feliz usam 30 % disso; as demais atividades seguem só o próprio padrão.
-- **Piscadas** (`Blinker`): intervalo irregular de 2–7 s, fecha em 0,06 s e abre em 0,14 s, e 12 % das
-  vezes pisca duas vezes. Também pisca quando a expressão muda (esconde a troca de camadas) e, parado,
-  em ~35 % das olhadas largas (`Saccades.isGlance`), como as pessoas fazem.
+- **Piscadas** (`Blinker`): intervalo irregular de 2,5–8 s (expoente 1,5: os curtos são mais prováveis), fecha em
+  0,06 s e abre em 0,14 s, e 12 % das vezes pisca duas vezes. Também pisca quando a expressão muda (esconde a troca de
+  camadas) e, parado, em ~35 % das olhadas largas (`Saccades.isGlance`), como as pessoas fazem; esses pedidos só piscam se
+  a última piscada terminou há mais de 1,5 s (`Blinker.minimumGap`), e a troca de rosto só dá o balanço de gelatina se o
+  rosto novo é mais agitado (`OrbActivity.energy`: de parado para feliz sim, de feliz para parado não). Olhos fechados
+  não piscam: felizes e sono 0, tontos 35 %, os demais 1 (`Blinker.factor`), e quem não pisca também não pede os 30 fps.
 - **Sombra no chão** (`OrbShadow`): fica mais estreita, mais achatada e mais fraca conforme o Orb sobe, e mais
   larga quando ele amassa no pouso ou cresce no hover. Em repouso é igual à de antes; o Orb estático usa a mesma.
 - **Troca de atividade sem saltos**: corpo, olhar, brilho e peso do ponteiro misturam a atividade anterior e
@@ -233,12 +270,17 @@ Tudo em [`Orbs/OrbMotion.swift`](../Sources/Orb/Orbs/OrbMotion.swift) (funções
   pouco nas viradas e nos pulos e **giram atrás da inclinação do corpo** em torno do alto da cabeça
   (`OrbGeometry.crownLine`), como cabelo pendurado: rabo de cavalo, chiquinhas e chapéus balançam (mola com sobra,
   até 3°, `OrbSprings`); o pouso do pulo vira uma mola subamortecida (amassa, estica, assenta).
+- **Respiração**: elevação 0,018 (ω 1,3, ~4,8 s), amassado 0,016 (~3,1 s); o cabelo e os chapéus voltam com amortecimento 0,5.
 - **Parado**: além da respiração e da flutuação, um balanço de ~1° com período de ~11 s, fora de fase com os
   dois, então o Orb nunca parece estar em loop (lento demais para mudar a taxa de quadros).
-- **Reações de uma vez** (`OrbActivity.motion(at:elapsed:)`): `happy` usa o tempo desde que começou: o primeiro
+- **Reações de uma vez** (`OrbActivity.motion(at:elapsed:celebration:)`): `happy` usa o tempo desde que começou: o primeiro
   pulo vem depois de 0,3 s de amassado (a antecipação, que aparece apesar da mistura de 0,35 s entre atividades),
   cada pulo é mais baixo e no fim volta à flutuação de repouso com um balanço contente, já no piso de 10 fps
-  (`minFrameRate(elapsed:)`): a prévia do editor não fica a 30 fps para sempre.
+  (`minFrameRate(elapsed:size:celebration:)`): a prévia do editor não fica a 30 fps para sempre. `waiting` conta em
+  segundos de parede (`OrbWaiting`): 3 pulos que perdem energia nos primeiros 3 s, depois 2 pulinhos de 0,4 da altura a
+  cada 7 s e só a respiração no intervalo, com o amassado do pouso entrando e saindo suave em volta de cada grupo; só
+  nos pulos o piso é 30 fps (10 no resto). `error` é um "não" de 3 Hz que se apaga com exp(−2,2 e), cai a −3° e fica com
+  o brilho fixo em 0,85, a 10 fps depois de 1,3 s.
   Nos pulinhos de `waiting`/`happy` o amassado no chão passa suave para o esticado no ar (`bounce`).
 - **Balão** entra e sai com escala e opacidade em mola, em vez de aparecer de uma vez. Trocar de símbolo com
   ele aberto (… → ?) dá um pulinho de escala em vez de só trocar o texto. O fundo é quase opaco (cor do chrome,
@@ -252,7 +294,7 @@ Tudo em [`Orbs/OrbMotion.swift`](../Sources/Orb/Orbs/OrbMotion.swift) (funções
 - **Reduzir movimento** continua mostrando o Orb estático.
 - Orbs pequenos não interativos deixam o clique passar (selecionar a linha da barra lateral continua funcionando).
 
-- Os gestos do jeito (`OrbFlourish`: pulinho, rebolado, olhar em volta, timidez, suspiro) são funções puras do
+- Os gestos do jeito (`OrbFlourish`: pulinho, rebolado de 7°, olhar em volta, timidez, suspiro) são funções puras do
   tempo, começam e terminam em repouso e só acontecem com o Orb parado e sem o mouse em cima.
 
 ## 5. Onde aparecem
@@ -289,9 +331,17 @@ atual:
   (`OrbPose.pixelDistance`, em pixels do dispositivo) e escolhe-se a menor taxa entre 10/15/20/30/60 fps
   em que cada passo fica abaixo de ~0,8 px. Sobe na hora, desce depois de 0,3 s calmo. Piscadas sobem para
   30 fps só enquanto duram; clique, hover com o ponteiro mexendo e troca de atividade vão ao máximo
-  (60 grandes / 30 pequenos) por 0,4 s. Cada atividade tem um piso (`minFrameRate`): digitando/erro
-  tremem a ~6 Hz e pulos precisam de 30 fps, senão a vibração vira um balanço lento (aliasing). **Orbs grandes** (80 pt ou
+  (60 grandes / 30 pequenos) por 0,4 s. Cada atividade tem um piso (`minFrameRate(elapsed:size:celebration:)`), o que o
+  movimento precisa *agora*, senão a vibração vira um balanço lento (aliasing): digitando tremia a ~6 Hz e agora a
+  ~4,5 Hz (sin(28 t)), então 20 fps bastam abaixo de 80 pt (30 acima); o erro precisa de 20/30 só durante o "não" e
+  10 depois de 1,3 s; "precisa de você" e `happy` precisam de 30 só nos pulos (o feliz leve e o sorriso do clique, nem
+  isso); pensando, lendo, buscando e navegando ficam em 10 abaixo de 40 pt (onde um passo é uma fração de pixel) e em
+  15 acima. O brilho de status em movimento pesava 8 no `pixelDistance` e saturava em 1; com a amplitude de 0,11 não
+  satura e, a 10 fps, muda ~0,21 px por quadro, abaixo do limiar de 0,25 px. **Orbs grandes** (80 pt ou
   mais: estado vazio do chat e editor) ficam limitados a 30 fps e só chegam a 60 durante algo vivo.
+- **A lista de Orbs que rodam** fica no `OrbDriver` e é refeita quando algo muda (`refresh`), não a cada tick do link;
+  o brilho do texto (`ShimmerBandView`) pede de 24 a 30 fps ao Core Animation; a resposta de 18 pt na barra de menus
+  descansa quando o Orb está parado.
 - **Frames sem mudança visível não são enviados**: se a pose mudou menos de 0,25 px desde o último frame
   desenhado, nada é tocado.
 - **Pausa quando ninguém vê.** Um Orb só "roda" (`isRunning`) com a janela visível (não coberta nem minimizada,
@@ -348,6 +398,35 @@ e a mola da mandíbula não contam como velocidade (assim como as piscadas) e a 
 isso a mandíbula mantinha o Orb grande a 60 fps (110 frames/s somados). CPU com a tela ligada (uma rodada,
 janela invisível): parado ~0,9 % antes → ~0,75 % equilibrado (ruído; a tela apagou antes das demais rodadas).
 
+**Polimento das reações** (`--render-orbs bench`, release com `ORB_DEV_TOOLS`, janela invisível, 12 s por cenário depois de
+3 s de assentamento, 2 rodadas por versão; "antes" é a `main` de antes do polimento, "depois" é esta). O contador mais
+estável é instruções por segundo (`instr/s`); a CPU em % varia de rodada para rodada em um Mac em uso.
+
+Tela ligada (link real), um Orb de 96 pt ocupado e o resto parado (média das 2 rodadas):
+
+| Cenário | instr/s antes → depois | frames/s antes → depois |
+|---|---|---|
+| 1 Orb parado | 3,94 M → 3,42 M (−13 %) | 15,1 → 13,9 |
+| 5 Orbs parados | 7,71 M → 7,28 M (−6 %) | 62,6 → 63,5 |
+| 12 Orbs parados | 13,53 M → 11,95 M (−12 %) | 155,9 → 144,2 |
+| 12 Orbs, o grande pensando | 14,81 M → 13,92 M (−6 %) | 164,3 → 157,5 |
+| 5 Orbs, o grande no terminal | 10,61 M → 9,80 M (−8 %) | 81,3 → 80,0 |
+
+Tela apagada (o bench faz o papel do `OrbDriver`), os 12 Orbs fazendo a mesma atividade (`bench 12 <atividade> all`: o
+grande, o de 60 pt e dez de 30 pt; `draws/s` são os quadros que de fato moveram camadas):
+
+| Os 12 Orbs | instr/s antes → depois | frames/s | draws/s |
+|---|---|---|---|
+| pensando | 28,7 M → 25,3 M (−12 %) | 206 → 150 (−27 %) | 184 → 133 |
+| no terminal | 33,6 M → 32,6 M (−3 %) | 360 → 268 (−25 %) | 265 → 212 |
+| pedindo aprovação | 39,0 M → 25,2 M (−36 %) | 360 → 150 (−58 %) | 313 → 130 |
+| em erro (depois do "não") | 40,1 M → 27,2 M (−32 %) | 360 → 165 (−54 %) | 330 → 153 |
+
+No terminal o ganho é pequeno porque o piso de 20 fps (Orbs de 30 pt) não divide os 30 fps das piscadas: quando um Orb
+pisca, o link compartilhado sobe a 60 Hz (`OrbLinkRate`) e acorda a thread principal mais vezes. Numa rodada com a tela
+ligada, antes de um ajuste de contagem, o terminal chegou a custar ~5 % mais instruções que antes, apesar de 26 % menos
+quadros; vale revisitar (piscada a 20 fps nos Orbs pequenos, por exemplo).
+
 `ORB_STATIC=1` desliga toda a animação. `ORB_ANIMATE_INACTIVE=1` mantém os Orbs animando com a
 janela inativa ou coberta, só para medir CPU sem trazer o app para a frente.
 
@@ -385,7 +464,7 @@ do editor). Arte no app: 12 MB → 3,9 MB.
 ORB_DATA_DIR=/tmp/orb-design .build/debug/Orb --snapshot editor-hair /tmp/editor.png
 
 # Folhas de revisão de design (composição idêntica à do app): cabelos, cabelo-padrao, cabelo-acessorio,
-# acessorios, olhos, bocas, detalhes, cores, tamanhos (18/30/60/96/132 pt, fundo escuro e claro), quadros, reacoes, icone
+# acessorios, olhos, bocas, detalhes, cores, tamanhos (18/30/60/96/132 pt, fundo escuro e claro), quadros, reacoes, polimento, icone
 ORB_DATA_DIR=/tmp/orb-design .build/debug/Orb --render-orbs /tmp/cabelos.png cabelos
 
 # O ícone do app é desenhado pelo próprio app (AppIcon): `--render-icon <png> [pixels]` (padrão 1024; até 64 px sai a variante
@@ -399,7 +478,7 @@ ORB_DATA_DIR=/tmp/orb-design .build/debug/Orb --render-orbs /tmp/icone.png icone
 # Folhas e bench só existem em debug ou num release feito com ORB_DEV_TOOLS (o app distribuído não os leva).
 # Num release sem ORB_DEV_TOOLS, `--render-orbs bench` ou `--render-orbs saída.png <folha>` avisa e sai com erro.
 swift build -c release -Xswiftc -DORB_DEV_TOOLS
-ORB_DATA_DIR=/tmp/orb-bench ORB_ANIMATE_INACTIVE=1 .build/release/Orb --render-orbs bench 12 [working|typing] [segundos]
+ORB_DATA_DIR=/tmp/orb-bench ORB_ANIMATE_INACTIVE=1 .build/release/Orb --render-orbs bench 12 [working|typing|waiting|error] [all] [segundos]   # imprime instr/s, frames/s e draws/s
 
 # Envia um prompt ao abrir, para ver ouvir → tarefas → aprovação → feliz (use com scripts/fake-llm.py)
 open -n build/Orb.app --env ORB_SEND="Como está meu Mac?"
@@ -435,18 +514,18 @@ Swift, exceto quando ela precisa de uma cor padrão (`OrbConfig.autoAccentColor(
 | `art/orbs.py`, `art/orbkit/` | Blender: traços planos (gravados em `art/orbgen/flat/`), catálogo, personas |
 | `Resources/Orbs/` | camadas PNG + `options.json` (gerados; veja [art/README.md](../art/README.md)) |
 | `Orbs/OrbModel.swift` | `OrbConfig` (cores automáticas, ids antigos, sorteio), `OrbCatalog`, `OrbSwatch`, `OrbImages` (decodificação, cache, tinta), `OrbLayer`, `OrbGeometry`, ordem das camadas |
-| `Orbs/OrbActivity.swift` | atividades: expressão, olhar, movimento, brilho, balão |
+| `Orbs/OrbActivity.swift` | atividades: expressão, olhar, movimento, brilho, balão; `OrbCelebration` (níveis do feliz), `OrbWaiting` (ciclos de "precisa de você"), `OrbActivityHold` (pausa entre ferramentas), `OrbCue` |
 | `Orbs/OrbView.swift` | `OrbView` (escolhe animado ou estático), `OrbFrame` (Canvas), `BotAvatar` |
 | `Orbs/OrbAnimationView.swift` | `AnimatedOrb` e `OrbAnimationView`: Core Animation, ritmo de frames, mouse, pulo, visibilidade |
 | `Orbs/OrbDriver.swift` | `OrbDriver` (um link por tela), `OrbFrameClock`, `OrbLinkRate`, `OrbVisibility` |
-| `Orbs/OrbMotion.swift` | `OrbPose`, molas, piscadas, sacadas, `OrbFrameRate` (puro, testado em `OrbTests` e `OrbDriverTests`) |
+| `Orbs/OrbMotion.swift` | `OrbPose`, molas, piscadas, sacadas, os três pulos (`OrbJump`), `HoverGate`, `OrbFrameRate` (puro, testado em `OrbTests`, `OrbRhythmTests`, `OrbPolishTests` e `OrbDriverTests`) |
 | `Orbs/OrbTemperament.swift` | jeitos (`Traits`), gestos (`OrbFlourish`, `Flourishes`), olhar tímido (`shyGaze`, `Glances`) |
 | `Orbs/OrbSpeech.swift` | visemas (`OrbViseme`, com boca reserva) e ritmo das sílabas (`Syllables`) |
 | `Orbs/OrbEditor.swift` | editor de personalização |
 | `Orbs/OrbDesignSheets.swift` | folhas de revisão de design (`--render-orbs saída.png <folha>`) |
 | `AppIcon.swift` | o ícone do app e o `GelShader` (corpo do gel por pixel, igual ao `BodyShader` do orbgen) |
 | `Orbs/OrbBench.swift` | bench de CPU dos Orbs (`--render-orbs bench`) |
-| `BotLive.swift` | `BotLive.activity` (a atividade de cada Orb), "digitando" (`noteComposing`, `ComposingDeadline`) e a olhada ao ser escolhido (`glance`) |
-| `Views/LiveBotAvatar.swift` | avatar que lê só a atividade e o pulo do Orb (painel, chat vazio, linha "trabalhando") |
-| `BotSession+Turn.swift` | `markSpeaking` / `stopSpeaking`, `flash` (ouvindo, feliz, erro) |
+| `BotLive.swift` | `BotLive.activity` (a atividade de cada Orb), "digitando" (`noteComposing`, `ComposingDeadline`), a olhada ao ser escolhido (`glance`), o nível da comemoração (`celebration`), os sinais de parar e de suspirar (`cue`) e o contador que rola o chat (`scrollNudge`) |
+| `Views/LiveBotAvatar.swift` | avatar que lê só a atividade, o envio, a comemoração e os sinais do Orb (painel, chat vazio, linha "trabalhando") |
+| `BotSession+Turn.swift` | `markSpeaking` / `stopSpeaking`, `flash` com um prazo por sinal (ouvindo, feliz, erro), `celebrate`, `finishTurn(userStopped:)` |
 | `Theme.swift` | `shimmer()` e `ShimmerBandView` (brilho em Core Animation) |

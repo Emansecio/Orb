@@ -11,8 +11,9 @@ extension BotSession {
     static let streamingSaveInterval = 5.0
     /// Streamed text is published at most this often.
     static let textFlushInterval = Duration.milliseconds(33)
-    /// The Orb stops `speaking` when no text arrived for this long.
-    static let speakingQuiet = Duration.milliseconds(600)
+    /// The Orb stops `speaking` when no text arrived for this long (the pause between two bursts of text is not the end of
+    /// the speech).
+    static let speakingQuiet = Duration.milliseconds(1200)
 
     // MARK: Lifecycle
 
@@ -32,6 +33,7 @@ extension BotSession {
         let turn = UUID()
         turnID = turn
         reviewBase = nil
+        clearBeats()
         resetWork()
         model?.workAnnouncer.reset()
         return turn
@@ -43,6 +45,7 @@ extension BotSession {
     func resetWork() {
         runningCalls = [:]
         actionsThisTurn = 0
+        turnCutShort = false
     }
 
     /// Publishes a phrase of the working line, with this turn's routine and count of actions. Changed once per step of
@@ -54,6 +57,11 @@ extension BotSession {
         line.actions = actionsThisTurn
         model.live(id).setWork(line)
         if announcing { model.announceWork(line, of: id) }
+    }
+
+    /// The tool the Orb shows: the call that started last among those still running (nil when none runs).
+    var openTool: ToolCall.Kind? {
+        runningCalls.values.max { $0.startedAt < $1.startedAt }?.kind
     }
 
     /// The phrase for a status line of the engine. One that repeats the title of a call that is running is that call's,
@@ -119,7 +127,7 @@ extension BotSession {
             }
         }
         append(.notice("Você interrompeu esta resposta"))
-        finishTurn(turn, succeeded: false, startsQueuedRoutines: startsQueuedRoutines)
+        finishTurn(turn, succeeded: false, userStopped: true, startsQueuedRoutines: startsQueuedRoutines)
     }
 
     /// Records the marks of the turn's prompt when it has been delivered: for Orb's own engine, when the user message (with
@@ -157,8 +165,9 @@ extension BotSession {
             if call.title == RememberTool.skillTitle { stepsSinceSkill = 0 }
             showWork(WorkPhrase.line(for: call), announcing: true)
         case .toolFinished(let id, let state, let output, let produced):
-            model.live(self.id).runningTool = nil
             runningCalls[id] = nil
+            // Calls in parallel: the Orb keeps showing a tool while any is still running.
+            model.live(self.id).runningTool = openTool
             mutateItems { items in
                 let files = Self.takeOver(produced, in: &items)
                 for index in items.indices {
@@ -195,6 +204,7 @@ extension BotSession {
             closeStreaming()
             append(.notice("Não deu certo: \(message)"))
         case .notice(let text):
+            if text == AgentEngine.cutShortNotice { turnCutShort = true }
             // The cache warning is said once per conversation, not at every turn that still has the problem.
             if text == CacheHealth.notice, conversation?.items.contains(where: { $0.kind == .notice(text) }) == true { break }
             closeStreaming()
@@ -250,10 +260,16 @@ extension BotSession {
     }
 
     /// Closes the turn `turn`; a turn that is no longer the Orb's current one (stopped, then replaced) is ignored.
-    func finishTurn(_ turn: UUID, succeeded: Bool = true, startsQueuedRoutines: Bool = true) {
+    /// `userStopped`: you ended it (Parar, Parar e enviar). That is no failure: the Orb only blinks, where a failed turn
+    /// shows the error.
+    func finishTurn(_ turn: UUID, succeeded: Bool = true, userStopped: Bool = false, startsQueuedRoutines: Bool = true) {
         guard turnID == turn, turnTask != nil, let model else { return }
         let botID = id
         let ranRoutine = routineID != nil
+        // What the celebration is measured by, before the end of the turn clears it.
+        let turnSeconds = model.live(id).workingSince.map { Date.now.timeIntervalSince($0) } ?? 0
+        let turnActions = actionsThisTurn
+        let cutShort = turnCutShort
         turnTask = nil
         turnID = nil
         pendingMarks = nil
@@ -293,8 +309,15 @@ extension BotSession {
         let routineID = routineID
         self.routineID = nil
         if let routineID { model.finishRoutineRun(id, routineID: routineID, succeeded: succeeded, reply: reply) }
-        if succeeded {
-            flash(\.isCelebrating, seconds: 3)
+        if userStopped {
+            model.live(id).cued(.blink)
+        } else if succeeded {
+            if cutShort || (conversation?.isTaskPaused ?? false) {
+                model.live(id).cued(.sigh) // left half way: no joy
+            } else {
+                celebrate(OrbCelebration.level(seconds: turnSeconds, actions: turnActions, ranRoutine: ranRoutine,
+                                               selected: model.selection == .bot(id)))
+            }
             if let bot = model.bot(id), let reply { model.notify(bot.name, RoutineRun.preview(of: reply)) }
         } else {
             flash(\.hasFailed, seconds: 2.5)
@@ -322,15 +345,38 @@ extension BotSession {
         return nil
     }
 
-    /// Puts the Orb in a transient state set for a few seconds.
+    /// Puts the Orb in a transient state set for a few seconds. Each flag has its own timer: a new flash of the same
+    /// flag replaces the one running (the old one would clear it before its time).
     func flash(_ flag: ReferenceWritableKeyPath<BotLive, Bool>, seconds: Double) {
         guard let model else { return }
         let live = model.live(id)
+        flashes[flag]?.cancel()
         live[keyPath: flag] = true
-        Task {
+        flashes[flag] = Task { [weak self] in
             try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled else { return }
             live[keyPath: flag] = false
+            self?.flashes[flag] = nil
         }
+    }
+
+    /// Ends a flash now.
+    func cancelFlash(_ flag: ReferenceWritableKeyPath<BotLive, Bool>) {
+        flashes.removeValue(forKey: flag)?.cancel()
+        if let live = model?.liveBot(id) { live[keyPath: flag] = false }
+    }
+
+    /// A new turn starts without the last one's joy or error.
+    func clearBeats() {
+        cancelFlash(\.isCelebrating)
+        cancelFlash(\.hasFailed)
+    }
+
+    /// The Orb celebrates the end of a turn as much as the turn deserved.
+    func celebrate(_ level: OrbCelebration) {
+        guard let model else { return }
+        model.live(id).setCelebration(level)
+        flash(\.isCelebrating, seconds: level.seconds)
     }
 
     // MARK: Speaking

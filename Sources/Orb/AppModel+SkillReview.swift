@@ -113,6 +113,6 @@ extension AppModel {
         Task { await bank.discardProposal(draft.slug) }
         guard let skill else { return }
         announceForAccessibility("Skill /\(skill.slug) salva")
-        sessions[draft.botID]?.flash(\.isCelebrating, seconds: 1.5)
+        sessions[draft.botID]?.celebrate(.light)
     }
 }

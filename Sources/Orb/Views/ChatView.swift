@@ -144,15 +144,8 @@ private struct TranscriptList: View {
             .onChange(of: transcript.revision) {
                 if !BottomFollower.anchorsItself { follower.follow { scrollToBottom(proxy) } }
             }
-            .onChange(of: live.poke) {
-                // The user just sent a message: always show it. The list glides to it if it was at the end already;
-                // from higher up it goes there at once.
-                let wasAtBottom = followsBottom
-                followsBottom = true
-                withAnimation(wasAtBottom ? ScrollMotion.animation(reduceMotion: reduceMotion) : nil) {
-                    scrollToBottom(proxy)
-                }
-            }
+            .onChange(of: live.poke) { showSentMessage(proxy) }
+            .onChange(of: live.scrollNudge) { showSentMessage(proxy) }
             .onAppear {
                 guard !BottomFollower.anchorsItself else { return }
                 scrollToBottom(proxy)
@@ -184,6 +177,16 @@ private struct TranscriptList: View {
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
         proxy.scrollTo(BottomAnchor.id, anchor: .bottom)
+    }
+
+    /// The user just sent a message (or one was queued or delivered): always show it. The list glides to it if it was at
+    /// the end already; from higher up it goes there at once.
+    private func showSentMessage(_ proxy: ScrollViewProxy) {
+        let wasAtBottom = followsBottom
+        followsBottom = true
+        withAnimation(wasAtBottom ? ScrollMotion.animation(reduceMotion: reduceMotion) : nil) {
+            scrollToBottom(proxy)
+        }
     }
 
     private enum BottomAnchor { static let id = "bottom" }
@@ -386,7 +389,7 @@ private struct EmptyChatView: View {
     @State private var firstRun = FirstRunModel()
     /// The first time this Orb's empty chat shows in the session it comes in (§2.8); never again after that.
     @State private var enters: Bool
-    /// Set when the Orb lands, which is one poke of its own spring.
+    /// Set when the Orb lands (its own squash and wobble).
     @State private var landed = 0
 
     init(look: BotLook, presented: PresentedOrbs?) {
@@ -400,10 +403,10 @@ private struct EmptyChatView: View {
         let live = model.live(look.id)
         let showsFirstRun = !model.isProviderReady || firstRun.connectedName != nil
         VStack(spacing: 16) {
-            LiveBotAvatar(botID: look.id, orb: look.orb, size: 96, interactive: true, extraPoke: landed)
+            LiveBotAvatar(botID: look.id, orb: look.orb, size: 96, interactive: true, landing: landed)
                 .padding(.top, 72)
                 .entrance(.drop, enters: enters) {
-                    // Touches the floor: one poke (the Orb's own spring lands it). The Orb stays still under Reduce Motion.
+                    // Touches the floor: the Orb's own landing. The Orb stays still under Reduce Motion.
                     if !reduceMotion { landed = 1 }
                 }
             VStack(spacing: 16) {

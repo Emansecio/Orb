@@ -76,8 +76,8 @@ enum OrbSprings {
     /// The head turning toward where the eyes look.
     static let head = (response: 0.4, damping: 0.9)
     /// Hair and hats trailing the head and body (position), and swinging behind the body's tilt (rotation).
-    static let loose = (response: 0.28, damping: 0.4)
-    static let swing = (response: 0.3, damping: 0.42)
+    static let loose = (response: 0.28, damping: 0.5)
+    static let swing = (response: 0.3, damping: 0.5)
     /// Largest trailing offset (fraction of the orb) and swing (degrees).
     static let maxLag = 0.02, maxSwing = 3.0
 
@@ -171,15 +171,22 @@ struct SpringPoint: Equatable {
     }
 }
 
-/// Natural blinking: irregular intervals, quick close and slower open, and an occasional double blink.
+/// Natural blinking: irregular intervals, quick close and slower open, and an occasional double blink. A blink asked for
+/// (the face changes, a wide glance) waits until the last one ended `minimumGap` ago, so changes in a row do not flutter.
 struct Blinker {
     private(set) var nextBlink: Double
     private var start: Double?
-    /// Seconds between blinks (short gaps are more likely) and the chance of a double blink.
-    var gap: ClosedRange<Double> = 2...7
+    /// When the last blink ended.
+    private var lastEnd = -Double.infinity
+    /// Seconds between blinks (short gaps are more likely: the draw is raised to `skew`, 1 uniform, higher shorter) and the
+    /// chance of a double blink.
+    var gap: ClosedRange<Double> = 2.5...8
+    var skew = 1.5
     var doubleChance = 0.12
     static let close = 0.06, hold = 0.03, open = 0.14
     static var duration: Double { close + hold + open }
+    /// A requested blink starts only this long after the previous one ended.
+    static let minimumGap = 1.5
 
     init(firstAt time: Double) { nextBlink = time }
 
@@ -190,18 +197,32 @@ struct Blinker {
         if start == nil, time >= nextBlink {
             start = time
             let double = Double.random(in: 0..<1, using: &rng) < doubleChance
-            let pause = gap.lowerBound + (gap.upperBound - gap.lowerBound) * pow(Double.random(in: 0..<1, using: &rng), 2)
+            let pause = gap.lowerBound + (gap.upperBound - gap.lowerBound) * pow(Double.random(in: 0..<1, using: &rng), skew)
             nextBlink = time + (double ? Self.duration + 0.06 : pause)
         }
         guard let start else { return 0 }
         let amount = Self.closure(time - start)
-        if time - start >= Self.duration { self.start = nil }
+        if time - start >= Self.duration {
+            self.start = nil
+            lastEnd = time
+        }
         return amount
     }
 
-    /// Blink now (e.g. as the expression changes), unless already blinking.
+    /// Blink now (e.g. as the expression changes), unless already blinking or one ended less than `minimumGap` ago.
     mutating func trigger(at time: Double) {
-        if start == nil { nextBlink = time }
+        guard start == nil, time - lastEnd >= Self.minimumGap else { return }
+        nextBlink = time
+    }
+
+    /// How much of its blink an Orb with these eyes makes: the closed ones (happy, sleeping) have nothing to close, the dizzy
+    /// ones blink a little.
+    static func factor(eyes: String) -> Double {
+        switch eyes {
+        case "felizes", "sono": 0
+        case "tontos": 0.35
+        default: 1
+        }
     }
 
     /// 0 → 1 (eased in) → hold → 0 (eased out).
@@ -257,15 +278,18 @@ struct Saccades {
 enum OrbGlance {
     static let duration = 0.6
     /// Where it looks (gaze x right, y up): the chat, beside the sidebar.
-    static let look = CGPoint(x: 0.75, y: -0.05)
+    static let look = CGPoint(x: 0.6, y: -0.05)
     /// Seconds the eyes lead the head by, and the hair trails it by.
     static let eyeLead = 0.05, hairDelay = 0.07
     /// Until the hair is back too.
     static let total = duration + hairDelay
     /// Seconds to turn and to come back.
-    private static let turn = 0.12, back = 0.22
+    private static let turn = 0.16, back = 0.22
     /// The blink starts as the head arrives, so the turn itself (eyes first) shows.
-    static let blinkAt = 0.12
+    static let blinkAt = 0.16
+    /// A selection that comes sooner than this after the last glance is ignored (going down the list with the arrow keys
+    /// would make the Orbs look around all the time).
+    static let minimumGap = 1.2
 
     /// How far the head has turned toward `look`, 0...1, `elapsed` seconds into the glance: a quick turn, a short
     /// hold, an unhurried return, smooth at both ends.
@@ -275,7 +299,8 @@ enum OrbGlance {
     }
 
     /// Lays the glance over `pose`: the look, the eyes leading it, the hair trailing it and the blink.
-    static func apply(to pose: inout OrbPose, elapsed: Double) {
+    /// `blinkFactor`: how much of the blink the Orb's eyes make (`Blinker.factor`).
+    static func apply(to pose: inout OrbPose, elapsed: Double, blinkFactor: Double = 1) {
         let head = weight(elapsed), eyes = weight(elapsed + eyeLead), hair = weight(elapsed - hairDelay)
         let from = pose.look
         let dx = Double(look.x - from.x), dy = Double(look.y - from.y)
@@ -290,7 +315,7 @@ enum OrbGlance {
         let lagY: Double = Double(pose.hairLag.y) + dy * trail
         pose.hairLag.x = CGFloat(max(-lag, min(lag, lagX)))
         pose.hairLag.y = CGFloat(max(-lag, min(lag, lagY)))
-        pose.blink = max(pose.blink, Blinker.closure(elapsed - blinkAt))
+        pose.blink = max(pose.blink, Blinker.closure(elapsed - blinkAt) * blinkFactor)
     }
 }
 
@@ -324,4 +349,74 @@ enum OrbMath {
     static func mix(_ a: CGPoint, _ b: CGPoint, _ t: Double) -> CGPoint {
         CGPoint(x: mix(a.x, b.x, t), y: mix(a.y, b.y, t))
     }
+}
+
+// MARK: - Jumps
+
+/// The three jumps an Orb makes, each for its own reason. The body adds the squash and the lift to its pose; when the jump
+/// ends, the wobble spring gets `kick` (the jelly landing).
+enum OrbJump: Sendable {
+    /// A click: it gets ready, jumps high and lands with a good wobble.
+    case play
+    /// You sent a prompt: a short nod, "got it", with no wobble.
+    case ack
+    /// The Orb touched the floor after an entrance: a squash only, then a wobble.
+    case landing
+
+    /// Seconds from the call to the start of the jump (the entrance lands a moment after it ends).
+    var delay: Double { self == .landing ? 0.12 : 0 }
+
+    var duration: Double {
+        switch self {
+        case .play: 0.55
+        case .ack: 0.35
+        case .landing: 0.08
+        }
+    }
+
+    /// The wobble velocity given at the end.
+    var kick: Double {
+        switch self {
+        case .play: 1.6
+        case .ack: 0
+        case .landing: 1
+        }
+    }
+
+    /// Lift (fraction of the size) and squash `elapsed` seconds into the jump (`jump`: the temperament's height).
+    func offset(at elapsed: Double, jump: Double) -> (lift: Double, squash: Double) {
+        guard elapsed >= 0, elapsed < duration else { return (0, 0) }
+        switch self {
+        case .play:
+            if elapsed < 0.1 { return (0, 0.12 * sin(.pi * elapsed / 0.1)) }
+            let p = sin(.pi * (elapsed - 0.1) / 0.45)
+            return (0.16 * jump * p, -0.06 * p)
+        case .ack:
+            if elapsed < 0.07 { return (0, 0.05 * sin(.pi * elapsed / 0.07)) }
+            let p = sin(.pi * (elapsed - 0.07) / 0.28)
+            return (0.08 * jump * p, -0.03 * p)
+        case .landing:
+            return (0, 0.06 * sin(.pi * elapsed / duration))
+        }
+    }
+}
+
+// MARK: - Hover
+
+/// Decides when the pointer moving over an Orb is worth a faster frame rate: when it moved more than 3 points since the
+/// last time, and at most every 100 ms. The gaze follows the pointer either way (the pointer's position is read as it is).
+struct HoverGate {
+    static let distance = 3.0, interval = 0.1
+    private var last: (point: CGPoint, time: Double)?
+
+    mutating func shouldSpeedUp(at point: CGPoint, time: Double) -> Bool {
+        if let last, hypot(point.x - last.point.x, point.y - last.point.y) <= Self.distance || time - last.time < Self.interval {
+            return false
+        }
+        last = (point, time)
+        return true
+    }
+
+    /// The pointer left: the next entry counts.
+    mutating func reset() { last = nil }
 }

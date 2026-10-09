@@ -228,6 +228,8 @@ final class ShimmerBandView: NSView {
         sweep.duration = ShimmerSweep.duration
         sweep.repeatCount = .infinity
         sweep.timingFunction = CAMediaTimingFunction(name: .linear)
+        // A slow sweep of a band of light needs no more than 30 frames a second (24 is already smooth).
+        sweep.preferredFrameRateRange = CAFrameRateRange(minimum: 24, maximum: 30, preferred: 30)
         // The sweep follows one clock for every band, so a new one (the text changed width) picks up where the
         // last was instead of restarting at the left.
         sweep.timeOffset = CACurrentMediaTime().truncatingRemainder(dividingBy: ShimmerSweep.duration)

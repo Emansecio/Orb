@@ -167,6 +167,159 @@ extension OrbDriverTests {
         #expect(!view.isGlancing)
     }
 
+    /// A live orb in a window, and the way to configure it again.
+    private func reactionOrb(live: Bool = true, size: CGFloat = 30, activity: OrbActivity = .idle) -> (view: OrbAnimationView, window: NSWindow) {
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 300))
+        let view = OrbAnimationView(frame: NSRect(x: 40, y: 40, width: 60, height: 60))
+        view.configure(config: OrbConfig(), activity: activity, size: size, followsPointer: false, interactive: true, live: live)
+        content.addSubview(view)
+        return (view, placementWindow(content))
+    }
+
+    private func configure(_ view: OrbAnimationView, _ activity: OrbActivity, celebration: OrbCelebration = .big, live: Bool = true) {
+        view.configure(config: OrbConfig(), activity: activity, celebration: celebration, size: 30, followsPointer: false,
+                       interactive: true, live: live)
+    }
+
+    /// Steps the orb on a synthetic clock from `start`, 30 frames a second.
+    private func step(_ view: OrbAnimationView, from start: Double, seconds: Double) -> Double {
+        var time = start
+        for _ in 0..<Int(seconds * 30) {
+            time += 1.0 / 30
+            view.stepIfDue(at: time)
+        }
+        return time
+    }
+
+    @Test func anOrbThatAppearsInTheErrorWaitingOrHappyStateDrawsFiniteFrames() async throws {
+        try #require(NSScreen.main != nil)
+        for activity in [OrbActivity.error, .waiting, .happy] {
+            let (view, win) = reactionOrb(activity: activity)
+            defer { closePlacement(win) }
+            _ = step(view, from: CACurrentMediaTime(), seconds: 1)
+            for item in view.placedLayersForTesting {
+                #expect(item.view.position.x.isFinite && item.view.position.y.isFinite, "\(activity)")
+            }
+        }
+    }
+
+    @Test func aSecondGlanceRightAfterTheFirstIsIgnored() async throws {
+        try #require(NSScreen.main != nil)
+        let (view, win) = reactionOrb()
+        defer { closePlacement(win) }
+        view.glanceNow()
+        #expect(view.isGlancing)
+        _ = step(view, from: CACurrentMediaTime(), seconds: 1)
+        #expect(!view.isGlancing)
+        view.glanceNow() // less than 1.2 s after the first (the test's clock is the real one for the call)
+        #expect(!view.isGlancing)
+    }
+
+    @Test func toolsInARowKeepTheirPoseThroughAShortThought() async throws {
+        try #require(NSScreen.main != nil)
+        // The tool ends and the model thinks: still the terminal for a while, then thinking for real.
+        let (view, win) = reactionOrb(activity: .typing)
+        defer { closePlacement(win) }
+        #expect(view.shownForTesting.activity == .typing)
+        configure(view, .thinking)
+        let time = step(view, from: CACurrentMediaTime(), seconds: 0.3)
+        #expect(view.shownForTesting.activity == .typing)
+        _ = step(view, from: time, seconds: 0.5)
+        #expect(view.shownForTesting.activity == .thinking)
+
+        // The next tool comes in at once, and the pause leaves nothing behind.
+        let (second, secondWindow) = reactionOrb(activity: .typing)
+        defer { closePlacement(secondWindow) }
+        configure(second, .thinking)
+        configure(second, .reading)
+        #expect(second.shownForTesting.activity == .reading)
+
+        // Urgent changes never wait.
+        let (third, thirdWindow) = reactionOrb(activity: .typing)
+        defer { closePlacement(thirdWindow) }
+        configure(third, .waiting)
+        #expect(third.shownForTesting.activity == .waiting)
+    }
+
+    @Test func aClickMakesOnlyACalmOrbSmile() async throws {
+        try #require(NSScreen.main != nil)
+        func click(on view: OrbAnimationView) {
+            let event = NSEvent.mouseEvent(with: .leftMouseDown, location: NSPoint(x: 20, y: 20), modifierFlags: [], timestamp: 0,
+                                           windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+            if let event { view.mouseDown(with: event) }
+        }
+        for calm in [OrbActivity.idle, .attentive, .listening, .speaking] {
+            let (view, win) = reactionOrb(activity: calm)
+            defer { closePlacement(win) }
+            click(on: view)
+            #expect(view.shownForTesting.activity == .happy && view.shownForTesting.celebration == .smile, "\(calm)")
+            #expect(view.currentJumpForTesting == .play) // the body keeps the click's jump, but not the hops of joy
+        }
+        for busy in [OrbActivity.thinking, .typing, .waiting, .error] {
+            let (view, win) = reactionOrb(activity: busy)
+            defer { closePlacement(win) }
+            click(on: view)
+            #expect(view.shownForTesting.activity == busy, "\(busy)")
+            #expect(view.currentJumpForTesting == .play)
+        }
+    }
+
+    @Test func theCelebrationOnScreenFollowsTheLevelAndCanGrow() async throws {
+        try #require(NSScreen.main != nil)
+        let (view, win) = reactionOrb()
+        defer { closePlacement(win) }
+        configure(view, .happy, celebration: .light)
+        #expect(view.shownForTesting == (.happy, .light))
+        // A bigger celebration while still happy takes over (it blends from the smaller one).
+        configure(view, .happy, celebration: .big)
+        #expect(view.shownForTesting == (.happy, .big))
+        configure(view, .idle)
+        #expect(view.shownForTesting.activity == .idle)
+    }
+
+    @Test func eachJumpKindPlaysAndEndsOnItsOwn() async throws {
+        try #require(NSScreen.main != nil)
+        let (view, win) = reactionOrb()
+        defer { closePlacement(win) }
+        let start = CACurrentMediaTime()
+        view.jumpNow(.ack)
+        #expect(view.currentJumpForTesting == .ack)
+        var time = step(view, from: start, seconds: 0.2)
+        #expect(view.currentJumpForTesting == .ack)
+        time = step(view, from: time, seconds: 0.3)
+        #expect(view.currentJumpForTesting == nil) // 0.35 s
+        view.jumpNow(.landing)
+        #expect(view.currentJumpForTesting == .landing)
+        _ = step(view, from: time, seconds: 0.5)
+        #expect(view.currentJumpForTesting == nil)
+        // A paused orb jumps for nobody.
+        configure(view, .idle, live: false)
+        _ = step(view, from: time, seconds: 9)
+        view.jumpNow(.play)
+        #expect(view.currentJumpForTesting == nil)
+    }
+
+    @Test func aCueBlinksOrSighsWhileTheOrbIsStillMovingAndNotAtRest() async throws {
+        try #require(NSScreen.main != nil)
+        let (view, win) = reactionOrb()
+        defer { closePlacement(win) }
+        view.cueNow(.blink)
+        #expect(view.isCueBlinking && view.frameRate >= 30)
+        var time = step(view, from: CACurrentMediaTime(), seconds: 0.5)
+        #expect(!view.isCueBlinking) // one blink
+        view.cueNow(.sigh)
+        #expect(view.currentFlourishForTesting == .sigh)
+        // The turn that ended is what lets the avatar rest: the cue still shows while it settles...
+        configure(view, .idle, live: false)
+        view.cueNow(.blink)
+        #expect(view.isCueBlinking)
+        // ...but one that is already at rest has no one watching.
+        time = step(view, from: time, seconds: 9)
+        #expect(!view.isRunning)
+        view.cueNow(.blink)
+        #expect(!view.isCueBlinking)
+    }
+
     @Test func looseLayersHangFromTheCrownAndSwingTogetherAfterARebuild() async throws {
         try #require(NSScreen.main != nil)
         let content = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 300))

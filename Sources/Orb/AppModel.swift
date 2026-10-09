@@ -1199,6 +1199,7 @@ final class AppModel {
         setStatus("Pensando", of: botID)
         session.resetWork()
         session.showWork(WorkPhrase.line(status: "Pensando"))
+        session.clearBeats() // the last turn's joy or error does not hide this one
         live(botID).poked()
         session.flash(\.isListening, seconds: 1.4)
 

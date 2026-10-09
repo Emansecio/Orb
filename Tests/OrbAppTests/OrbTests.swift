@@ -67,7 +67,7 @@ struct OrbTests {
         let regular = gaps.filter { $0 >= 0.5 }
         #expect(starts.count > 80 && starts.count < 300)
         #expect(doubles > 0 && doubles < gaps.count / 4)
-        #expect(regular.allSatisfy { $0 > 1.9 && $0 < 7.5 })
+        #expect(regular.allSatisfy { $0 > 2.4 && $0 < 8.1 })
         #expect((regular.max() ?? 0) - (regular.min() ?? 0) > 2)
     }
 
@@ -302,7 +302,7 @@ struct OrbTests {
         #expect(calm.bob < 1 && calm.pace < 1 && lively.bob > 1 && lively.pace > 1)
         #expect(shy.avertsGaze && shy.lean < 0)
         #expect(curious.pointerReach > 1 && curious.pointerInterest > 1 && curious.lean > 0)
-        #expect(Set(lively.flourishes) == [.hop, .wiggle] && lively.flourishGap == 8...20)
+        #expect(Set(lively.flourishes) == [.hop, .wiggle] && lively.flourishGap == 18...40)
         #expect(curious.flourishes == [.lookAround])
         #expect(lively.syllableRate > balanced.syllableRate && calm.syllableRate < balanced.syllableRate)
         // Hops scale with the temperament.
@@ -333,6 +333,7 @@ struct OrbTests {
             var rng = SeededRandom(seed: 3)
             var blinker = Blinker(firstAt: 0)
             blinker.gap = temperament.traits.blinkGap
+            blinker.skew = temperament.traits.blinkSkew
             blinker.doubleChance = temperament.traits.doubleBlink
             var starts: [Double] = []
             var wasClosed = false
@@ -346,8 +347,8 @@ struct OrbTests {
         }
         let calm = gaps(.calmo), lively = gaps(.animado)
         #expect(calm.allSatisfy { $0 > 3.4 && $0 < 9.1 })
-        #expect(lively.allSatisfy { $0 > 1.3 && $0 < 4.6 })
-        #expect(lively.count > calm.count * 2)
+        #expect(lively.allSatisfy { $0 > 1.7 && $0 < 5.6 })
+        #expect(lively.count * 2 > calm.count * 3)
     }
 
     @Test func saccadeReachAndHoldScale() {
@@ -417,7 +418,7 @@ struct OrbTests {
         let lively = OrbTemperament.animado.traits
         var flourishes = Flourishes(firstAt: 5)
         var starts: [Double] = []
-        for frame in 0..<(300 * 30) {
+        for frame in 0..<(900 * 30) {
             let time = Double(frame) / 30
             if let kind = flourishes.update(at: time, kinds: lively.flourishes, gap: lively.flourishGap, allowed: true, using: &rng) {
                 #expect(lively.flourishes.contains(kind))
@@ -425,8 +426,8 @@ struct OrbTests {
             }
         }
         let gaps = zip(starts.dropFirst(), starts).map { $0 - $1 }
-        #expect(gaps.allSatisfy { $0 >= 7.95 && $0 <= 20.05 })
-        #expect(starts.count >= 14 && starts.count <= 38)
+        #expect(gaps.allSatisfy { $0 >= 17.95 && $0 <= 40.05 })
+        #expect(starts.count >= 21 && starts.count <= 51)
 
         // None while busy or for temperaments without them; a requested one always plays.
         var calm = Flourishes(firstAt: 0)

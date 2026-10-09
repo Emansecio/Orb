@@ -85,7 +85,8 @@ extension AnyTransition {
 - **Resposta do Orb:** o **bloco** da mensagem aparece com `.rise` quando o primeiro texto chega (uma vez por
   mensagem). O texto que vai chegando **não** anima (sem transição por token): o streaming tem custo constante e
   deve continuar assim (`Transaction(animation: nil)` nas atualizações de texto).
-- **Fim da resposta:** nada na mensagem; quem comemora é o Orb (`happy`).
+- **Fim da resposta:** nada na mensagem; quem comemora é o Orb (`happy`, em três níveis conforme o turno: leve, normal ou grande;
+  parar a resposta não é erro, é uma piscada; tarefa que parou no meio, um suspiro).
 - **Um Orb vivo por vez.** A resposta que é o último item do chat leva o avatar vivo (`LiveBotAvatar` com
   `restsWhenIdle`: vive no turno, no `happy` e na atenção à digitação, e descansa na pose de repouso, sem gerar
   quadros, quando o Orb fica ocioso); as de cima têm o avatar parado, na pose de repouso. Quando uma resposta deixa de
@@ -172,7 +173,7 @@ extension AnyTransition {
 ### 2.8 Chat vazio (entrada)
 
 - **Orb:** entra caindo de 10 pt acima, escala 0,92 → 1, opacidade 0 → 1, em `.spring(response: 0.55,
-  dampingFraction: 0.68)`; ao tocar o "chão", amassa (um `poke` no fim da entrada, já com a mola de pouso do Orb).
+  dampingFraction: 0.68)`; ao tocar o "chão", amassa e balança (a aterrissagem, `landing`: só um amassado de 0,06, sem subida, 0,12 s depois do fim da entrada).
 - **Nome e papel:** 0,08 s depois, `.rise` em `Motion.enter`.
 - **Sugestões:** em seguida, `Motion.stagger` (0,035 s cada), `.rise`.
 - **Quando:** só na primeira vez que o chat vazio de um Orb aparece na sessão (trocar de Orb e voltar não repete;
@@ -232,10 +233,10 @@ Implementada em `WelcomeView.swift`. Aparece quando `botIDs` está vazio (primei
 Só usa tokens que já existem; o fundo é estático (um gradiente desenhado uma vez, sem blur) e **só os Orbs se mexem**.
 
 - **Herói.** Lia (72 pt), Atlas (104 pt) e Bento (72 pt) são `OrbView` vivos e interativos, cada um com o seu jeito
-  (equilibrado, tímido, curioso): respiram, piscam, seguem o cursor; um clique faz o Orb pular e ficar feliz por 1,4 s. Nenhum laço
+  (equilibrado, tímido, curioso): respiram, piscam, seguem o cursor; um clique faz o Orb pular e mostrar o rosto feliz por 1,4 s (só o rosto). Nenhum laço
   novo de animação. Pausam com a janela inativa e fora da parte visível (o `OrbView` já faz).
-- **Entrada** (`WelcomeEntrance`, cerca de 0,8 s). Atlas: `.drop` sem atraso; Lia: 0,06 s; Bento: 0,10 s, cada um pousa com um
-  `poke`. Título `.rise` em 0,16 s, subtítulo em 0,20 s, pontos em `Motion.stagger` a partir de 0,26 s, cartão ou ações
+- **Entrada** (`WelcomeEntrance`, cerca de 0,8 s). Atlas: `.drop` sem atraso; Lia: 0,06 s; Bento: 0,10 s, cada um pousa com uma
+  aterrissagem (`landing`). Título `.rise` em 0,16 s, subtítulo em 0,20 s, pontos em `Motion.stagger` a partir de 0,26 s, cartão ou ações
   `.rise` em 0,40 s e o cartão de memórias em 0,44 s.
 - **Quando a entrada toca.** Na primeira aparição da sessão e cada vez que a lista acaba de ficar vazia. Voltar de Rotinas,
   Conectores ou Skills não repete: o `WelcomeLedger` (referência no estado da `RootView`, como o `PresentedOrbs`) guarda que
@@ -295,12 +296,14 @@ padrão de `speaking` (o conjunto só muda no começo e no fim da rajada, nunca 
 
 | Evento | Reação do Orb | Gancho |
 |---|---|---|
-| Começou a digitar no compositor | olha para baixo, para o campo (`look.y = -0,45`), sacadas reduzidas, pisca menos; como `listening` mas sem pulo | um sinal em `BotLive`, ligado como `isSpeaking` (`BotSession.markSpeaking`): entra na 1ª tecla, sai 1,5 s depois da última (um prazo por Orb, conferido por uma única `Task`) |
+| Começou a digitar no compositor | olha para baixo, para o campo (`look.y = -0,45`), sacadas reduzidas, pisca menos; como `listening` mas sem pulo | um sinal em `BotLive`, ligado como `isSpeaking` (`BotSession.markSpeaking`): entra na 1ª tecla, sai 3 s depois da última (um prazo por Orb, conferido por uma única `Task`) |
 | Apagou tudo | volta ao normal | o mesmo conjunto |
-| Enviou | pulo + `listening` (já existe) | — |
-| Selecionado na barra | piscada + olhar rápido para o chat (0,6 s) | `pokes` com um tipo (`.glance`) ou um contador separado |
-| Resposta terminou | `happy` (alegria que acalma, já existe) | — |
-| Pediu aprovação | `waiting` (já existe) | — |
+| Enviou | aceno de 0,35 s (`ack`, sem balanço) + `listening` | — |
+| Selecionado na barra | piscada + olhar rápido para o chat (0,6 s, ignorado se vier menos de 1,2 s depois do anterior) | um contador separado (`glance`) |
+| Resposta terminou | `happy` no nível do turno (leve 1,6 s, normal 2,2 s, grande 3 s) | `OrbCelebration.level` |
+| Parou a resposta | uma piscada | `BotLive.cued(.blink)` |
+| Tarefa parou no meio | um suspiro | `BotLive.cued(.sigh)` |
+| Pediu aprovação | `waiting` em ciclos: 3 pulos, depois 2 pulinhos a cada 7 s | — |
 
 A atividade "atento" é `OrbActivity.attentive` (olhar para baixo, `wander` 0,2, `pointerWeight` 0,3, sem expressão
 própria, `minFrameRate` 10). Custo: igual a `listening`. Prioridade em `activity(for:)`: abaixo de trabalhando (se o
