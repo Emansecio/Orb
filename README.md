@@ -316,6 +316,27 @@ atualiza quando você volta ao app e tem **Verificar de novo**. Gravação do Á
   ganha o botão **Permitir…** (pede ao macOS ou abre o painel certo).
 - As permissões valem para esta cópia do app; veja [Assinatura estável](#assinatura-estável-recomendado).
 
+### Apps em segundo plano
+
+Com "Controlar apps do Mac" ligado e a Acessibilidade liberada, o Orb opera outros apps **sem tomar a sua tela**: você continua
+usando o Mac e o app da frente, o foco e o cursor ficam onde estavam.
+
+- **O que funciona em segundo plano**: ler a interface do app (mesmo coberto, em outro Espaço ou minimizado), apertar botões,
+  preencher campos, digitar, atalhos de teclado (pelo menu do app), escolher itens de menu, selecionar linhas, rolar e clicar em
+  um ponto da janela quando o app aceita o primeiro clique. A captura de tela vem da própria janela, também quando está coberta.
+- **O cartão "Usar a tela"**: o que só funciona com o mouse e o teclado de verdade (arrastar e soltar, menus de contexto, passar o
+  mouse, apps sem Acessibilidade) o Orb **pede** antes. Você aprova o cartão (ele lista as etapas), o Orb traz o app para a frente
+  por até 10 s, faz o que precisa e **devolve** o app que estava na frente, a janela e o cursor. Um aviso "Orb está usando a tela
+  — mexa o mouse para parar" fica na tela; mexer o mouse interrompe. Só um Orb usa a tela por vez, em todo o Mac. Em "Só leitura"
+  o Orb não assume a tela.
+- **Limites conhecidos**: arrastar e soltar só vale assumindo a tela; apps que desenham tudo num canvas (jogos, alguns editores)
+  não expõem elementos, então o Orb olha a captura e precisa de coordenadas; popups e menus de contexto abertos aparecem à parte
+  e pedem a tela; menus dinâmicos (Recentes, Janela, Serviços) só se preenchem abertos; apps travados respondem "não respondeu"
+  em poucos segundos em vez de segurar o Orb; conteúdo de páginas web vai para o navegador do Orb, não para a leitura de interface.
+- **macOS 15 e Gravação de Tela**: o macOS volta a pedir a confirmação de Gravação da Tela de tempos em tempos. Sem ela o Orb ainda
+  lê a interface e usa a legenda numerada, só não vê a imagem; confirme em Ajustes do Sistema → Privacidade e Segurança →
+  Gravação de Tela e reabra o Orb se a captura voltar a falhar.
+
 ## Memória
 
 Cada Orb tem a **sua** memória, que nasce com ele e cresce a cada conversa: nada é compartilhado entre Orbs. São arquivos

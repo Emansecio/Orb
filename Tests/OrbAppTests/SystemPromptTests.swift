@@ -80,8 +80,9 @@ struct SystemPromptTests {
         // 250 more were spent on telling web_fetch, browser_tab and open apart, and on how to search without a search tool;
         // this Orb has "Controlar apps do Mac", so it includes the ~900-character "Mac apps" recipes, and ~250 more went to
         // read-only commands, keys and passwords, and confirming before sending messages; measured again with the skills in memory,
-        // it is 4,407 for this Orb: the list of skills is only added when there are skills). The prompt is cached across turns.
-        #expect(system.count < 4_500, "the native system prompt is \(system.count) characters")
+        // it is 4,407 for this Orb: the list of skills is only added when there are skills; ~170 more went to working with apps in the
+        // background). The prompt is cached across turns.
+        #expect(system.count < 4_650, "the native system prompt is \(system.count) characters")
         for rule in ["Reply in the user's language", "Be brief", "Use tools to find out", "read before you change things",
                      "say in one short sentence what you are about to do", "never retry what the user denied",
                      "Do not emulate a switched-off capability", "sudo cannot work", "prefer the trash tool over rm",

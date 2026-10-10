@@ -10,9 +10,14 @@ let package = Package(
             path: "Sources/Orb",
             exclude: ["Resources"]
         ),
+        // A small AppKit app the Accessibility smoke tests (`AXSmokeTests`) drive; it is not part of the app.
+        .executableTarget(
+            name: "OrbAXFixture",
+            path: "Tests/OrbAXFixture"
+        ),
         .testTarget(
             name: "OrbAppTests",
-            dependencies: ["Orb"],
+            dependencies: ["Orb", "OrbAXFixture"],
             path: "Tests/OrbAppTests"
         )
     ]

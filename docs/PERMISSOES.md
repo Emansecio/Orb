@@ -187,6 +187,15 @@ Detalhes que costumam surpreender:
   que está ausente ou tem mais de 24 h.
 - `ui_act` tem perigo quando o rótulo do elemento (ou o item de menu) fala em excluir, enviar, comprar ou descartar, ou
   quando preenche um campo de senha. `app_quit` com `force` tem perigo ("encerra o app à força").
+- **Perigos novos do `ui_act` em segundo plano** (desenho em [USO-DO-COMPUTADOR.md](USO-DO-COMPUTADOR.md)): o perigo é recalculado na
+  execução, depois de resolver o elemento real, com o rótulo vivo (o que o cartão mostrou pode estar defasado): se agora é
+  perigoso e o cartão não avisou, a ação é recusada e o modelo é orientado a repetir por `id` ou `pick_menu`. Vale também para
+  Return/Enter em app de mensagem (envia), `cmd+delete` no Finder (apaga), `click` por coordenada, `key` e a primeira etapa
+  perigosa de `steps`. `type`, `key` e `set_value` em campo de senha têm perigo (o valor nunca é lido de volta). **Assumir a
+  tela** (`takeover`) tem perigo sempre: pergunta em "Perguntar antes" e "Automático" (o cartão lista as etapas), é recusado em "Só
+  leitura" e roda em "Sem pedir permissão" com o aviso na tela. Um takeover é global ao Mac (uma trava de arquivo em
+  `~/Library/Caches/<bundle id>/takeover.lock`: o app e o servidor do Claude Code são processos diferentes), dura no máximo 10 s,
+  se interrompe se o mouse real se mexer e sempre devolve o app da frente, a janela e o cursor.
 - A família `appInterface` (`ui_read`, `ui_act`) só pergunta pelo `ui_act`: uma liberação antiga de Atalhos ou da área de transferência (`macApps`) não passa a
   cobrir "clicar e preencher campos em qualquer app".
 

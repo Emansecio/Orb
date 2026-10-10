@@ -141,6 +141,11 @@ enum PromptParts {
     build or tests, reread the file), and finish with what changed and what is left.
     """
 
+    /// How to work with other apps without taking over the person's Mac. Only for an Orb that may control apps: in the
+    /// `computerUse` line of `nativeToolHints` (native engine) and in `macApps` (Claude Code, which has no tool hints).
+    static let appControl = "Work with apps in the background: prefer ids and marks to coordinates; [precisa_assumir_tela] means ask the user "
+        + "for a takeover of the screen; web content goes to the browser tools."
+
     /// Only the tools this Orb has: hints for a switched-off capability would send it to tools that are not there. What
     /// each tool does is in its own description; this is only the choice between them. It follows `workHabits`, under the
     /// same heading.
@@ -162,7 +167,8 @@ enum PromptParts {
         }
         uses.append("open to open files and links for the user" + (bot.capabilities.contains(.browser) ? ", not to read a page" : ""))
         let background = hasFiles ? " Long commands can run in the background (job_output)." : ""
-        return uses.joined(separator: "; ") + "." + background
+        let control = bot.capabilities.contains(.computerUse) ? " " + appControl : ""
+        return uses.joined(separator: "; ") + "." + background + control
     }
 
     /// Recipes for the Mac tasks people ask most, and the mistakes models make in them, only for an Orb that may control apps.
@@ -186,7 +192,7 @@ enum PromptParts {
             let tools = ClaudeCodeTools.memoryPrefix
             lines.append("- Prefer \(tools)applescript, \(tools)screenshot and \(tools)browser_tab over osascript, screencapture or "
                          + "scripted Chrome in Bash: they settle the macOS permission first and explain failures. Use "
-                         + "\(tools)ui_read and \(tools)ui_act for apps without AppleScript, when they are offered.")
+                         + "\(tools)ui_read and \(tools)ui_act for apps without AppleScript, when they are offered. " + appControl)
         }
         return lines.joined(separator: "\n")
     }

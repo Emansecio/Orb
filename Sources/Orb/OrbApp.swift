@@ -76,6 +76,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // The panel that says an Orb has the screen (any process holding a takeover tells the app).
+        if snapshot == nil, !CommandLine.arguments.contains(where: ["--render-orbs", "--render-icon"].contains) { TakeoverHUD.shared.install() }
         // Dev aid: `Orb --snapshot skills-explore out.png` renders one screen offscreen and exits.
         if let snapshot {
             NSApp.windows.forEach { $0.orderOut(nil) }

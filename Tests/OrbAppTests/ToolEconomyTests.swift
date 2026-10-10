@@ -15,7 +15,11 @@ struct ToolSpecEconomyTests {
     /// The specs measured 14,497 after the pass, and 14,994 with the skills in `remember` and `recall` (measured again after
     /// bringing in the on-demand connectors, the profile and the schedule); the ceiling leaves room for a sentence or two.
     /// (`web_search`, always offered with "Navegar na web", came after and fits the same ceiling, raised from 15,000.)
-    private static let specCharsCeiling = 15_700
+    /// Raised to 17,500 for background computer use (docs/USO-DO-COMPUTADOR.md): `ui_read`, `ui_act` and `screenshot` grow, within
+    /// their own ceiling below, and the rest stays as it was.
+    private static let specCharsCeiling = 17_500
+    /// `ui_read`, `ui_act` and `screenshot` together: waiting, steps, takeover, marks and OCR all have to fit here.
+    private static let appControlSpecCharsCeiling = 4_800
     /// The tools of the Orb's own browser are offered only when an engine is installed, so they have a ceiling of their own.
     private static let browseSpecCharsCeiling = 4_200
 
@@ -23,6 +27,13 @@ struct ToolSpecEconomyTests {
         let now = specChars(ToolBox.all.filter { !ToolBox.browseToolNames.contains($0.spec.name) })
         // Every character is billed (or cached) in every request of every turn: this is a ceiling to keep, not a goal.
         #expect(now <= Self.specCharsCeiling, "\(now) characters")
+    }
+
+    @Test func theAppControlToolSpecsStayWithinTheirOwnCeiling() {
+        let tools = ToolBox.all.filter { ["ui_read", "ui_act", "screenshot"].contains($0.spec.name) }
+        #expect(tools.count == 3)
+        let now = specChars(tools)
+        #expect(now <= Self.appControlSpecCharsCeiling, "\(now) characters")
     }
 
     @Test func theBrowserToolSpecsStayTerse() {
