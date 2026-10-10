@@ -216,6 +216,9 @@ struct LiveAccessibilitySystem: AccessibilitySystem {
         let kinds: [CGEventType] = [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]
         return kinds.map { CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: $0) }.min() ?? .infinity
     }
+
+    var input: any SyntheticInput { LiveSyntheticInput.shared }
+    var capturer: any WindowCapturer { LiveWindowCapturer.shared }
 }
 
 /// An `AXUIElement`. The reference is only a handle, and the API may be called from any thread (one call sequence at a
