@@ -203,6 +203,7 @@ struct CatalogIcon: View {
             .foregroundStyle(Palette.secondary)
             .frame(width: 36, height: 36)
             .background(Palette.raised, in: .rect(cornerRadius: 10))
+            .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.line, lineWidth: 1) }
     }
 }
 

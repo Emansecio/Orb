@@ -157,21 +157,29 @@ struct BrowserPickerRows: View {
                 set: { model.setSearchProvider($0, for: botID) })
     }
 
+    /// The engine's and the provider's descriptions: the same line as under "Terminal e arquivos" and its siblings.
     private func caption(_ text: String) -> some View {
         Text(text)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
+            .capabilityCaption()
             .textSwap(text)
     }
 
     private func statusLine(_ line: BrowserPickerCopy.Line) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Label(line.text, systemImage: line.symbol)
-                .font(.caption)
-                .foregroundStyle(line.tone == .warning ? Palette.warn : line.tone == .ready ? Palette.ok : Color.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSwap(line.text)
+            Label {
+                Text(line.text)
+            } icon: {
+                // Looking is work in progress, not a state: the app's own spinner (after its short delay), never an empty circle.
+                if line.tone == .neutral {
+                    DelayedSpinner().scaleEffect(0.6).frame(width: 14, height: 14)
+                } else {
+                    Image(systemName: line.symbol)
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(line.tone == .warning ? Palette.warn : line.tone == .ready ? Palette.ok : Color.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .textSwap(line.text)
             if let action = line.action {
                 Button(action.title, systemImage: "arrow.up.right") { SettingsRouter.openBrowser(using: openSettings) }
                     .buttonStyle(.link)

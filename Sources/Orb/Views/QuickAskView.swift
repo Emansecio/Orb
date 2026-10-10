@@ -228,13 +228,15 @@ struct QuickAskView: View {
                 }
             }
             HStack {
+                // Same link, same size as "Abrir Ajustes" above; the key hint is one step smaller, as in the composer.
                 Button("Abrir o app") { open() }
+                    .font(.system(size: 12))
                     .help(Tip.openMainWindow)
                 Spacer()
                 Text(QuickAskSend.hint(isWorking: selectedID.map(model.isWorking) ?? false,
                                        canSteer: selectedID.map(model.canSteer) ?? false,
                                        midTurn: selectedID.map(model.steersMidTurn) ?? true))
-                    .font(.caption)
+                    .font(.system(size: 11))
                     .foregroundStyle(Palette.muted)
             }
             .buttonStyle(.link)

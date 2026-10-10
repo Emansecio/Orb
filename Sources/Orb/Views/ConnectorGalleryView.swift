@@ -60,54 +60,41 @@ struct ConnectorGalleryView: View {
     }
 }
 
-/// The icon of a service: the brand's logo when `BrandMarks` has it, else a symbol or a letter on the brand's colour.
+/// The icon of a service, the same everywhere (the gallery, the installed list, the sheets): one dark tile, and on it the
+/// brand's logo, or the SF Symbol of an Apple app or a generic tool, drawn in the brand's (or the tool's) colour, or in
+/// white when that colour would not be read on the dark tile. The name sits beside it, so it is hidden from VoiceOver.
 struct ServiceTile: View {
     let mark: ServiceMark
     var size: CGFloat = 36
 
-    var body: some View {
-        if let logo = mark.logo, let glyph = BrandMarks.glyph(logo.slug) {
-            BrandTile(logo: logo, glyph: glyph, size: size)
-        } else {
-            fallback
-        }
-    }
-
-    private var fallback: some View {
-        Group {
-            if let symbol = mark.symbol {
-                Image(systemName: symbol).font(.system(size: size * 0.44, weight: .semibold))
-            } else {
-                Text(mark.monogram).font(.system(size: size * 0.5, weight: .bold, design: .rounded))
-            }
-        }
-        .foregroundStyle(.white)
-        .frame(width: size, height: size)
-        .background(Color(hex: mark.color), in: .rect(cornerRadius: size * 0.28))
-        .accessibilityHidden(true)
-    }
-}
-
-/// A brand mark on a rounded tile: in the brand's colour on the dark surface, or white (on the dark surface for a
-/// near-black brand, on a tile of the brand's colour for a dark one). The name sits beside it, so it is hidden from
-/// VoiceOver.
-struct BrandTile: View {
-    let logo: BrandMark
-    let glyph: BrandGlyph
-    var size: CGFloat = 36
-
-    /// The share of the tile the mark's longer side takes.
-    private static let fill: CGFloat = 0.5
+    /// The share of the tile the longer side of a brand mark takes: the same for all of them, whatever box each one
+    /// draws in (`BrandShape` scales by the mark's own bounding box).
+    private static let markFill: CGFloat = 0.5
+    /// The size of a symbol, as a share of the tile, so it weighs about as much as a brand mark.
+    private static let symbolSize: CGFloat = 0.46
 
     var body: some View {
-        let treatment = logo.treatment
+        let ink = mark.inkHex.map { Color(hex: $0) } ?? Palette.ink
         let corner = size * 0.28
-        BrandShape(glyph: glyph, fill: Self.fill)
-            .fill(treatment == .brandOnDark ? Color(hex: logo.hex) : Palette.ink)
+        content(ink: ink)
             .frame(width: size, height: size)
-            .background(treatment == .whiteOnBrand ? Color(hex: logo.hex) : Palette.raised, in: .rect(cornerRadius: corner))
-            .overlay { RoundedRectangle(cornerRadius: corner).strokeBorder(Palette.line, lineWidth: treatment == .whiteOnBrand ? 0 : 1) }
+            .background(Palette.raised, in: .rect(cornerRadius: corner))
+            .overlay { RoundedRectangle(cornerRadius: corner).strokeBorder(Palette.line, lineWidth: 1) }
             .accessibilityHidden(true)
+    }
+
+    @ViewBuilder private func content(ink: Color) -> some View {
+        if let logo = mark.logo, let glyph = BrandMarks.glyph(logo.slug) {
+            BrandShape(glyph: glyph, fill: Self.markFill).fill(ink)
+        } else if let symbol = mark.symbol {
+            Image(systemName: symbol)
+                .font(.system(size: size * Self.symbolSize, weight: .medium))
+                .foregroundStyle(ink)
+        } else {
+            Text(mark.monogram)
+                .font(.system(size: size * 0.5, weight: .bold, design: .rounded))
+                .foregroundStyle(ink)
+        }
     }
 }
 
@@ -127,13 +114,13 @@ struct BrandShape: Shape {
     }
 }
 
-/// The icon of an installed connector: its service's logo (or tile) when the gallery knows it as a brand, else the
-/// generic symbol for where it runs.
+/// The icon of an installed connector: the one its gallery card has (a brand's logo, or the symbol of Arquivos, Memória,
+/// Lembretes…), else the generic symbol for where a custom one runs.
 struct ConnectorIcon: View {
     let connector: MCPServerConfig
 
     var body: some View {
-        if let mark = ConnectorGallery.service(for: connector)?.mark.ifBranded {
+        if let mark = ConnectorGallery.service(for: connector)?.mark {
             ServiceTile(mark: mark)
         } else {
             CatalogIcon(symbol: connector.local != nil ? "desktopcomputer" : connector.isRemote ? "cloud" : "puzzlepiece.extension")

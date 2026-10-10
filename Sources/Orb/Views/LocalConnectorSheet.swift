@@ -30,7 +30,7 @@ struct LocalConnectorSheet: View {
     var body: some View {
         content
             .orbSheet(installed == nil ? "Conectar \(kind.title)" : kind.title, subtitle: kind.summary, size: .medium,
-                      icon: ConnectorGallery.services.first { $0.localKind == kind }?.mark.ifBranded) { footer }
+                      icon: ConnectorGallery.services.first { $0.localKind == kind }?.mark) { footer }
             .onAppear(perform: load)
             .animation(reduceMotion ? nil : Motion.content, value: phase)
             .onChange(of: phase) { announce(phase) }
@@ -48,9 +48,9 @@ struct LocalConnectorSheet: View {
                     }
                 } header: {
                     Text("O que acontece")
-                } footer: {
+                } footer: { FormFootnote {
                     Text(privacyNote)
-                }
+                } }
                 if phase == .intro || phase == .working {
                     Section {
                         OrbScopePicker(orbIDs: $orbIDs, allNote: "Cada Orb precisa estar com “Conectores” ligado no painel dele.")

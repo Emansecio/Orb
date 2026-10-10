@@ -176,28 +176,34 @@ struct OrbEditor: View {
 
     /// The activities the stage can preview, as a row of chips.
     private var previewChips: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 6) {
-                ForEach(previewActivities) { activity in
-                    Button {
-                        previewActivity = activity
-                    } label: {
-                        Label(activity.label, systemImage: activity.symbol)
-                            .font(.system(size: 11, weight: .medium))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .foregroundStyle(previewActivity == activity ? Palette.onInk : Palette.secondary)
-                            .background(previewActivity == activity ? Palette.ink : Color.white.opacity(0.07), in: .capsule)
-                    }
-                    .buttonStyle(.plain)
-                    .help(Tip.previewActivity(activity.label))
-                    .accessibilityLabel("Prévia: \(activity.label)")
-                    .accessibilityAddTraits(previewActivity == activity ? .isSelected : [])
-                }
-            }
-            .padding(.horizontal, 16)
+        // Centered on the stage's axis when they all fit; when they do not, the same row scrolls.
+        ViewThatFits(in: .horizontal) {
+            previewChipRow.frame(maxWidth: .infinity)
+            ScrollView(.horizontal) { previewChipRow }
+                .scrollIndicators(.never)
         }
-        .scrollIndicators(.never)
+    }
+
+    private var previewChipRow: some View {
+        HStack(spacing: 6) {
+            ForEach(previewActivities) { activity in
+                Button {
+                    previewActivity = activity
+                } label: {
+                    Label(activity.label, systemImage: activity.symbol)
+                        .font(.system(size: 11, weight: .medium))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .foregroundStyle(previewActivity == activity ? Palette.onInk : Palette.secondary)
+                        .background(previewActivity == activity ? Palette.ink : Color.white.opacity(0.07), in: .capsule)
+                }
+                .buttonStyle(.plain)
+                .help(Tip.previewActivity(activity.label))
+                .accessibilityLabel("Prévia: \(activity.label)")
+                .accessibilityAddTraits(previewActivity == activity ? .isSelected : [])
+            }
+        }
+        .padding(.horizontal, 16)
     }
 
     /// The same choice in a menu (compact stage).
@@ -274,7 +280,7 @@ struct OrbEditor: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .center)
         // The highlight slides and the chosen one's name grows its width in the content curve; under Reduce Motion the
         // highlight jumps and the width changes at once.
         .animation(Motion.selection(reduceMotion: reduceMotion), value: category)
@@ -315,7 +321,7 @@ struct OrbEditor: View {
                 group(Self.faceGroup)
                 group(Self.styleGroup)
             }
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .center, spacing: 6) {
                 HStack(alignment: .top, spacing: 12) {
                     group(Self.bodyGroup)
                     group(Self.styleGroup)
@@ -326,7 +332,8 @@ struct OrbEditor: View {
         .animation(Motion.selection(reduceMotion: reduceMotion), value: category)
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // On the same axis as the stage above (the preview, the name, the chips): centered, not left-anchored.
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 
     /// The highlight of the chosen category: drawn by that button alone, the same view for all of them.

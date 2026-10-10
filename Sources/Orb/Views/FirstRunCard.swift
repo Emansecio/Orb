@@ -681,6 +681,10 @@ struct FirstRunBanner: View {
     @State private var key = ""
     @State private var isPulsing = false
 
+    /// While a message of the chat is being edited the card above the field steps back: one line less and tighter, so the
+    /// editing banner, the field and this one fit together without crowding the conversation.
+    private var isCompact: Bool { model.composerLane(botID).editing != nil }
+
     var body: some View {
         // The banner is a row of its own above the composer: it rises in and fades out, and the composer goes up and
         // down with it (§2.13). It is bound to the one fact that decides it, never to the conversation. A new Orb's chat is
@@ -692,7 +696,7 @@ struct FirstRunBanner: View {
     }
 
     private var banner: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: isCompact ? 8 : 10) {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: steps.connectedName == nil ? "cpu" : "checkmark.circle.fill")
                     .foregroundStyle(steps.connectedName == nil ? Palette.muted : Palette.ok)
@@ -701,11 +705,13 @@ struct FirstRunBanner: View {
                     Text(steps.connectedName.map { "Pronto: \($0) conectado." } ?? "Conecte um modelo para começar")
                         .font(.system(size: 13, weight: .semibold))
                         .contentTransition(.opacity)
-                    Text(subtitle)
-                        .font(.system(size: 12))
-                        .foregroundStyle(steps.failure == nil ? Palette.muted : Palette.warn)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .contentTransition(.opacity)
+                    if !(isCompact && steps.failure == nil && steps.working == nil && steps.connectedName == nil) {
+                        Text(subtitle)
+                            .font(.system(size: 12))
+                            .foregroundStyle(steps.failure == nil ? Palette.muted : Palette.warn)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .contentTransition(.opacity)
+                    }
                 }
                 Spacer(minLength: 0)
             }
@@ -751,7 +757,8 @@ struct FirstRunBanner: View {
                 }
             }
         }
-        .padding(14)
+        .padding(isCompact ? 10 : 14)
+        .animation(reduceMotion ? nil : Motion.content, value: isCompact)
         .card(radius: 14, stroke: isPulsing ? Palette.accent : Palette.line, lineWidth: isPulsing ? 2 : 1)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: isPulsing)
         // The phrases and the buttons that change as the connection goes (waiting, failed, ready) swap in place.

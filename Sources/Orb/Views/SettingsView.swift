@@ -163,9 +163,9 @@ struct GeneralSettings: View {
                 }
             } header: {
                 Text("Seus dados")
-            } footer: {
+            } footer: { FormFootnote {
                 Text("Tudo fica neste Mac. As chaves ficam no Keychain.")
-            }
+            } }
             Section("Atalhos") {
                 Toggle(CommandName.globalShortcut, isOn: GlobalHotKey.toggleBinding($globalShortcut))
                 .help(Tip.globalShortcut)

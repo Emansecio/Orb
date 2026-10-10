@@ -7,6 +7,10 @@ import AppKit
 /// A compact bar at the top of the chat, like the one of Safari or Xcode: the field, "3 de 12", the arrows, the list of
 /// results and "Fechar". ↩ / ↓ / ⌘G go to the next result, ⇧↩ / ↑ / ⇧⌘G to the previous one, Esc closes.
 struct FindBar: View {
+    /// How far the chat's content is pushed down while the bar is open: the bar sits 10 pt from the top and is about 34 pt
+    /// tall, the list already has 20 pt of its own above the first message, and a gap of 8 pt is left under the bar.
+    static let clearance: CGFloat = 32
+
     @Environment(AppModel.self) private var model
     let find: ConversationFind
     let botID: UUID

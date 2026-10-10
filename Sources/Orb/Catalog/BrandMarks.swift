@@ -14,7 +14,7 @@ struct BrandMark: Sendable, Equatable {
 /// The logos of the services the gallery names, embedded as source so that nothing is downloaded or bundled (the app
 /// ships no resource folder for them). The marks come from Simple Icons 16.34.0 (https://simpleicons.org, CC0 1.0:
 /// public domain); the trademarks belong to their owners and the Orb only uses them to say which service a connector is.
-/// `SVGPathData` turns a path into a shape; `BrandTile` draws it.
+/// `SVGPathData` turns a path into a shape; `ServiceTile` draws it on the one dark tile every service has.
 ///
 /// To refresh one, copy `icons/<slug>.svg`'s `d` and `data/simple-icons.json`'s `hex` from the pinned version.
 enum BrandMarks {

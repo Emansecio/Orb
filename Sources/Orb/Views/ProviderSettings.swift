@@ -61,14 +61,14 @@ struct ProviderSettings: View {
                     } else {
                         ModelPicker(selection: $model.defaultModel, title: "Modelo padrão", allowsDefault: false)
                     }
-                } footer: {
+                } footer: { FormFootnote {
                     Text(model.modelChoices.isEmpty
                          ? "Conecte um provedor abaixo: os modelos dele aparecem aqui."
                          : model.isProviderReady || !model.hasCheckedConnections
                          ? "Usado por Orbs sem modelo próprio."
                          : "O modelo padrão não está disponível. Escolha outro.")
                         .textSwap(model.modelChoices.isEmpty ? 0 : model.isProviderReady || !model.hasCheckedConnections ? 1 : 2)
-                }
+                } }
             }
             ForEach(ProviderGroup.allCases) { group in
                 let kinds = group.kinds.filter { model.account($0) != nil }

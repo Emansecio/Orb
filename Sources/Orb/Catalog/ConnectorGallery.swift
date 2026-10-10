@@ -15,9 +15,12 @@ struct ServiceMark: Sendable, Equatable {
     /// The logo to draw, when the brand has one.
     var logo: BrandMark? { brand.flatMap(BrandMarks.mark) }
 
-    /// Itself when it stands for a brand: where the generic symbol of a connector is better than a tile (a sheet's header,
-    /// the installed list) only brands get one.
-    var ifBranded: ServiceMark? { brand == nil ? nil : self }
+    /// The colour of the mark on the dark tile: the brand's own (or the generic connector's), or nil (white) when that
+    /// would not be read there.
+    var inkHex: UInt32? {
+        let hex = logo?.hex ?? color
+        return BrandMark.readsOnDarkTile(hex) ? hex : nil
+    }
 }
 
 struct ConnectorService: Identifiable, Sendable {

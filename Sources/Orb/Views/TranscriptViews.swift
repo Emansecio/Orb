@@ -976,17 +976,19 @@ struct ApprovalCard: View {
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.warn)
                     .accessibilityLabel("Ação arriscada")
-            } else if request.isHandoff {
-                Image(systemName: "macwindow")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Palette.accentText)
-                    .accessibilityHidden(true)
             }
             Text(request.title)
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(Palette.ink)
                 .contentTransition(.numericText())
             Spacer()
+            // At the end of the line, so the title starts where every other card's title does.
+            if request.isHandoff {
+                Image(systemName: "macwindow")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.accentText)
+                    .accessibilityHidden(true)
+            }
         }
         if !request.reason.isEmpty {
             Text(request.reason)

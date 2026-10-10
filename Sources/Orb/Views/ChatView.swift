@@ -176,6 +176,11 @@ private struct TranscriptList: View {
                 .id(isLoading)
             }
             .scrollIndicators(.automatic)
+            // The bar floats over the chat (nothing is laid out again to open it), so a conversation at its top would sit
+            // under it: while it is open the content starts below it. It glides in `Motion.content` (at once under
+            // Reduce Motion), and the margin is only room: the scroll position is untouched.
+            .contentMargins(.top, find.isOpen ? FindBar.clearance : 0, for: .scrollContent)
+            .motion(Motion.content, value: find.isOpen)
             .modifier(BottomFollowing(isFollowing: $followsBottom, resumed: {
                 // The list grew while a finger rested on it: glide to the end again.
                 withAnimation(ScrollMotion.animation(reduceMotion: reduceMotion)) { scrollToBottom(proxy) }

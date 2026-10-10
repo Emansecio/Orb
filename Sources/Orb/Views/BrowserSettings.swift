@@ -13,10 +13,10 @@ struct BrowserSettings: View {
                 ForEach(setup.rows) { row in BrowserEngineRowView(row: row, setup: setup) }
             } header: {
                 Text("Navegadores")
-            } footer: {
+            } footer: { FormFootnote {
                 Text("Cada Orb escolhe o seu no painel dele. O modo Leitura simples lê páginas sem JavaScript e não precisa de nada instalado. "
                      + "O que você instala aqui fica na pasta de dados do Orb, sem Homebrew, sem Node e sem pedir senha.")
-            }
+            } }
             SearchKeySection()
             Section("Privacidade") {
                 Text("Os navegadores rodam neste Mac, em segundo plano, e guardam os logins de cada Orb em uma pasta separada. "
@@ -191,9 +191,9 @@ private struct SearchKeySection: View {
             }
         } header: {
             Text("Pesquisa na web")
-        } footer: {
+        } footer: { FormFootnote {
             Text(SearchKeyCopy.footer)
-        }
+        } }
         .task { hasKey = await Self.read(keys) }
     }
 

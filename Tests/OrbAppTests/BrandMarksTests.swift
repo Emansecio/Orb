@@ -191,18 +191,40 @@ struct BrandMarksTests {
             let comment = Comment(rawValue: slug)
             switch mark.treatment {
             case .brandOnDark: #expect(BrandMark.contrast(mark.hex, BrandMark.darkTileHex) >= BrandMark.minimumContrast, comment)
-            case .inkOnDark: #expect(BrandMark.luminance(mark.hex) < BrandMark.nearBlackLuminance, comment)
-            case .whiteOnBrand:
-                // White has to read on the brand's colour.
-                #expect(BrandMark.contrast(0xFFFFFF, mark.hex) >= BrandMark.minimumContrast, comment)
+            case .whiteOnDark:
+                // Every tile is the dark one: the brand's colour is given up only where it would not be read there, and white is.
+                #expect(BrandMark.contrast(mark.hex, BrandMark.darkTileHex) < BrandMark.minimumContrast, comment)
+                #expect(BrandMark.contrast(0xFCFCFC, BrandMark.darkTileHex) >= BrandMark.minimumContrast, comment)
             }
         }
-        #expect(BrandMarks.mark("notion")?.treatment == .inkOnDark)
-        #expect(BrandMarks.mark("github")?.treatment == .inkOnDark)
-        #expect(BrandMarks.mark("sentry")?.treatment == .whiteOnBrand)
-        #expect(BrandMarks.mark("atlassian")?.treatment == .whiteOnBrand)
-        #expect(BrandMarks.mark("gmail")?.treatment == .brandOnDark)
-        #expect(BrandMarks.mark("supabase")?.treatment == .brandOnDark)
+        for slug in ["notion", "github", "sentry", "atlassian", "slack"] {
+            #expect(BrandMarks.mark(slug)?.treatment == .whiteOnDark, Comment(rawValue: slug))
+        }
+        for slug in ["gmail", "googlecalendar", "supabase", "linear"] {
+            #expect(BrandMarks.mark(slug)?.treatment == .brandOnDark, Comment(rawValue: slug))
+        }
+    }
+
+    @Test func theInkOfEveryServiceReadsOnTheDarkTile() {
+        for service in ConnectorGallery.services {
+            let mark = service.mark
+            if let ink = mark.inkHex {
+                // A colour is only used when it reads on the tile.
+                #expect(BrandMark.contrast(ink, BrandMark.darkTileHex) >= BrandMark.minimumContrast, Comment(rawValue: service.id))
+            }
+            // A brand follows its logo's treatment; a generic connector keeps its own colour when that reads (Lembretes' orange).
+            if let logo = mark.logo { #expect((mark.inkHex != nil) == (logo.treatment == .brandOnDark), Comment(rawValue: service.id)) }
+        }
+        let byID = Dictionary(uniqueKeysWithValues: ConnectorGallery.services.map { ($0.id, $0.mark) })
+        #expect(byID["lembretes"]?.inkHex == 0xFF9500)
+        #expect(byID["github"]?.inkHex == nil && byID["slack"]?.inkHex == nil)
+        #expect(byID["gmail"]?.inkHex == 0xEA4335)
+    }
+
+    @Test func aColourReadsOnTheDarkTileFromThreeToOne() {
+        #expect(BrandMark.readsOnDarkTile(0xFFFFFF) && BrandMark.readsOnDarkTile(0xFF9500) && BrandMark.readsOnDarkTile(0x3FCF8E))
+        // Black, the aubergine of Slack and the grey of the folder would vanish on it.
+        #expect(!BrandMark.readsOnDarkTile(0x000000) && !BrandMark.readsOnDarkTile(0x4A154B) && !BrandMark.readsOnDarkTile(0x636366))
     }
 
     @Test func contrastIsTheWebOnes() {
@@ -240,8 +262,14 @@ struct BrandMarksTests {
         // A server of the registry or typed by hand has no card, so it keeps the generic icon.
         #expect(service(MCPServerConfig(name: "Meu servidor", command: "node", arguments: ["server.js"])) == nil)
         #expect(service(MCPServerConfig(name: "Outro", url: "https://example.com/mcp")) == nil)
-        // Only a brand gets a tile in the installed list and the sheets: Arquivos and Lembretes keep their symbols.
-        #expect(ConnectorGallery.service(for: LocalConnectorKind.lembretes.config)?.mark.ifBranded == nil)
-        #expect(ConnectorGallery.service(for: LocalConnectorKind.gmail.config)?.mark.ifBranded?.brand == "gmail")
+        // The installed list and the sheets draw the very mark of the gallery card, brand or not: Arquivos and Memória
+        // keep their folder and brain instead of a generic puzzle piece.
+        #expect(ConnectorGallery.service(for: LocalConnectorKind.lembretes.config)?.mark.symbol == "checklist")
+        #expect(ConnectorGallery.service(for: LocalConnectorKind.gmail.config)?.mark.brand == "gmail")
+        for id in ["arquivos", "memoria"] {
+            let template = try #require(ConnectorGallery.services.first { $0.id == id }?.template)
+            let card = try #require(ConnectorGallery.service(for: template.config.withNewID()))
+            #expect(card.id == id && card.mark.brand == nil && card.mark.symbol != nil)
+        }
     }
 }

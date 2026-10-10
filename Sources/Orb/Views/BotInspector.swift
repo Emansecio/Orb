@@ -205,8 +205,7 @@ struct BotInspector: View {
             }
             if !showsTitles { Spacer(minLength: 0) }
         }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
+        .chipButton()
         .fixedSize(horizontal: showsTitles, vertical: false)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -253,11 +252,11 @@ struct BotInspector: View {
             }
         } header: {
             Text("Permissões")
-        } footer: {
+        } footer: { FormFootnote {
             Text(bot.permissionMode.summary)
                 .foregroundStyle(bot.permissionMode == .bypass ? Palette.warn : .secondary)
                 .textSwap(bot.permissionMode)
-        }
+        } }
         .bypassConfirmation(isPresented: $isConfirmingBypass) {
             model.update(bot.id) { $0.permissionMode = .bypass }
         }
@@ -285,10 +284,14 @@ struct BotInspector: View {
             : nil
         Toggle(isOn: capabilityBinding(capability, of: bot)) {
             VStack(alignment: .leading, spacing: 1) {
-                Label(capability.label, systemImage: capability.symbol)
+                // The icons share one width, so the titles start on one x whatever the symbol (terminal, globe, window…).
+                Label {
+                    Text(capability.label)
+                } icon: {
+                    Image(systemName: capability.symbol).frame(width: 20)
+                }
                 Text(connectorsLine ?? CapabilityCopy.subtitle(capability))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .capabilityCaption()
                     .textSwap(connectorsLine)
             }
         }
@@ -330,11 +333,11 @@ struct BotInspector: View {
             folderControls(bot)
         } header: {
             Text("Pasta")
-        } footer: {
+        } footer: { FormFootnote {
             if let folderProblem {
                 Text(folderProblem).foregroundStyle(Palette.warn)
             }
-        }
+        } }
 
         if let file = instructionFile {
             Section {
@@ -353,13 +356,13 @@ struct BotInspector: View {
                     NSWorkspace.shared.activateFileViewerSelecting([bot.workingURL.appending(path: file.fileName)])
                 }
                 .help(Tip.showInstructions)
-                .controlSize(.small)
+                .chipButton()
             } header: {
                 Text("Instruções da pasta")
-            } footer: {
+            } footer: { FormFootnote {
                 Text(InstructionsText.footer(for: file, name: bot.name, trustedHash: bot.trustedInstructionsHash,
                                              usesClaudeCode: usesClaudeCode(bot)))
-            }
+            } }
             // What is read from the folder arrives by fading (`.quiet`), never by animating the height of a list that may
             // be long (§2.13).
             .transition(.quiet)
@@ -375,7 +378,7 @@ struct BotInspector: View {
             ForEach(bot.permissionRules, id: \.self) { rule in
                 LabeledContent {
                     Button("Remover") { model.update(bot.id) { $0.permissionRules.removeAll { $0 == rule } } }
-                        .controlSize(.small)
+                        .chipButton()
                         .help(Tip.removeGrant)
                 } label: {
                     Text(rule.title)
@@ -385,15 +388,15 @@ struct BotInspector: View {
             }
             if bot.permissionRules.count > 1 {
                 Button("Remover todas", role: .destructive) { model.update(bot.id) { $0.permissionRules = [] } }
-                    .controlSize(.small)
+                    .chipButton()
                     .help(Tip.removeAllGrants)
                     .transition(.quiet)
             }
         } header: {
             Text("Liberações")
-        } footer: {
+        } footer: { FormFootnote {
             Text(PermissionMode.grantsNote)
-        }
+        } }
         // Bound to the rules themselves (a short list), so only a grant coming or going moves anything.
         .animateChanges(of: bot.permissionRules)
 
@@ -413,6 +416,7 @@ struct BotInspector: View {
                 .foregroundStyle(.secondary)
                 .transition(.quiet)
             Button("Recriar", systemImage: "folder.badge.plus") { attempt { try model.recreateFolder(of: bot.id) } }
+                .chipButton()
                 .help(Tip.recreateFolder)
                 .transition(.quiet)
         } else {
@@ -422,7 +426,7 @@ struct BotInspector: View {
                 Button("Abrir no Terminal", systemImage: "terminal") { OrbFolder.openInTerminal(bot.workingURL) }
                     .help(Tip.openFolderInTerminal(bot.name))
             }
-            .controlSize(.small)
+            .chipButton()
             .transition(.quiet)
         }
         Menu {
@@ -439,7 +443,7 @@ struct BotInspector: View {
             Text("Mudar pasta")
         }
         .menuStyle(.button)
-        .controlSize(.small)
+        .chipButton()
         .fixedSize()
         .help(Tip.changeFolder)
         if state == .ownFolder {
@@ -482,11 +486,11 @@ struct BotInspector: View {
                         .buttonStyle(.borderless)
                         .iconTip(Tip.refreshFolder)
                 }
-            } footer: {
+            } footer: { FormFootnote {
                 if !listing.files.isEmpty {
                     Text("Alterados no git primeiro, depois os mais recentes. Clique para mostrar no Finder, duas vezes para abrir.")
                 }
-            }
+            } }
             // The list is read off the main thread and arrives later: it fades in, and its height (it may be long) is not
             // animated; a refresh that changes the files swaps them at once.
             .transition(.quiet)
@@ -512,14 +516,15 @@ struct BotInspector: View {
             Button("Nova rotina…", systemImage: "plus") {
                 editingRoutine = Routine(name: "", botID: bot.id, prompt: "", schedule: .daily(hour: 9, minute: 0))
             }
+            .chipButton()
             .help(Tip.newRoutine)
         } header: {
             Text("Rotinas")
-        } footer: {
+        } footer: { FormFootnote {
             if !routines.isEmpty {
                 Text("\(bot.name) faz isso sozinho, no horário, enquanto o app está aberto.")
             }
-        }
+        } }
         // Rows come and go in place (also the ones the Orb schedules or deletes from the chat). Only this tab watches.
         .animateChanges(of: routines.map(\.id))
         Section {
@@ -780,7 +785,7 @@ private struct RoutineRow: View {
                 .foregroundStyle(.tertiary)
                 .lineLimit(2)
             footer(current)
-                .controlSize(.small)
+                .chipButton()
         }
         .opacity(current.isEnabled ? 1 : 0.6)
         // The task the Orb just scheduled is marked for a moment (`AppModel.freshRoutine`).
@@ -808,7 +813,7 @@ private struct RoutineRow: View {
                 Button("Apagar", role: .destructive) { model.deleteRoutine(routine.id) }
                     .foregroundStyle(.red)
             } else {
-                Button("Editar", action: edit)
+                Button("Editar", systemImage: "pencil", action: edit)
                     .help(Tip.editRoutine)
                 Button(role: .destructive) { isConfirmingDelete = true } label: { Image(systemName: "trash") }
                     .iconTip(Tip.deleteRoutine, label: "Apagar “\(current.name)”")
