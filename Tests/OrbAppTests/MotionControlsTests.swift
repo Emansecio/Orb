@@ -90,6 +90,21 @@ struct MotionControlsTests {
         #expect(ComposerAction.current(isWorking: true, canSend: true) == .queue)
     }
 
+    /// MultiOrb (WP2): an Orb idle on a chain of requests to other Orbs can still be stopped from the composer and with ⌘.
+    @Test @MainActor func anOrbWaitingOnAChainCanBeStopped() throws {
+        #expect(ComposerAction.current(isWorking: false, canSend: false, waitsOnChain: true) == .stop)
+        #expect(ComposerAction.current(isWorking: false, canSend: true, waitsOnChain: true) == .send)
+        let folder = FileManager.default.temporaryDirectory.appending(path: "OrbStop-\(UUID().uuidString)")
+        defer { removeTestFolder(folder) }
+        let model = AppModel(store: Store(directory: folder), runsBackgroundWork: false, secretVault: MemoryVault())
+        let bot = model.createBot(name: "Atlas", role: "", orb: OrbConfig(), model: "", mode: .ask, identity: "",
+                                  interview: false, folder: .home)
+        model.selection = .bot(bot.id)
+        #expect(!model.canStopCurrent)
+        model.live(bot.id).setChainWork(WorkPhrase.waiting(for: ["Lia"]))
+        #expect(model.canStopCurrent)
+    }
+
     @Test func theSymbolSwapsOnlyBetweenSendingAndStopping() {
         #expect(ComposerAction.send.symbol == "arrow.up")
         #expect(ComposerAction.queue.symbol == "arrow.up")

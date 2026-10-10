@@ -11,6 +11,14 @@ struct ExchangeSheet: View {
     let parties: [OrbRef]
     /// Opens the work of the Orb that answered (its side conversation), when the app can show it.
     var onOpenWork: (() -> Void)?
+    @State private var showsWork = false
+
+    /// The side conversation of the Orb that answered (`pedido-<id>.json`): the request addressed to it, when the Orb still exists.
+    private var work: (botID: UUID, requestID: UUID)? {
+        guard let answered = parties.last, model.bot(answered.id) != nil,
+              let request = messages.last(where: { $0.to?.id == answered.id })?.requestID else { return nil }
+        return (answered.id, request)
+    }
 
     var body: some View {
         let title = parties.map(\.name).joined(separator: " e ")
@@ -55,6 +63,9 @@ struct ExchangeSheet: View {
         .orbSheet(title, subtitle: "Somente leitura", size: .medium) {
             footer
         }
+        .sheet(isPresented: $showsWork) {
+            if let work { SideWorkSheet(botID: work.botID, requestID: work.requestID) }
+        }
     }
 
     /// The two Orbs as a centred pair: 48 pt avatars 24 pt apart, joined by a 1 pt connector across that gap at their middle, and
@@ -91,8 +102,8 @@ struct ExchangeSheet: View {
     private var footer: some View {
         HStack(spacing: 8) {
             Spacer(minLength: 0)
-            if let onOpenWork, let answered = parties.last {
-                Button("Ver o trabalho \(Self.ofThe(answered.name))") { onOpenWork() }
+            if let answered = parties.last, onOpenWork != nil || work != nil {
+                Button("Ver o trabalho \(Self.ofThe(answered.name))") { if let onOpenWork { onOpenWork() } else { showsWork = true } }
                     .buttonStyle(SecondaryPillStyle())
             }
             Button("Voltar \(Self.toThe(parties.first?.name ?? ""))") { dismiss() }
@@ -122,4 +133,61 @@ struct ExchangeSheet: View {
         case .lost: ("Sem resposta", Palette.faint)
         }
     }
+}
+
+/// The work an Orb did for a request from another Orb (`pedido-<id>.json`), read-only; live while the Orb is still on it.
+struct SideWorkSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    let botID: UUID
+    let requestID: UUID
+    @State private var saved: [TranscriptItem] = []
+    @State private var isLoading = true
+
+    private var isLive: Bool { model.sessions[botID]?.servingRequest == requestID }
+
+    var body: some View {
+        let live = isLive ? model.sessions[botID]?.conversation?.items : nil
+        let items = live ?? saved
+        let bot = model.bot(botID)
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 12) {
+                if let bot {
+                    ForEach(items) { item in
+                        TranscriptRow(item: item, botID: botID, orb: bot.orb).equatable()
+                    }
+                }
+            }
+            .padding(20)
+        }
+        .overlay {
+            if items.isEmpty {
+                if isLoading { DelayedSpinner() } else { ContentUnavailableView("Sem registro do trabalho", systemImage: "text.bubble") }
+            }
+        }
+        .frame(height: 400)
+        .background(Palette.canvas)
+        .orbSheet(bot?.name ?? "Orb", subtitle: live == nil ? "Trabalho do pedido, só para ler" : "Trabalhando agora", size: .large) {
+            HStack {
+                Spacer()
+                Button("Fechar") { dismiss() }
+                    .buttonStyle(PrimaryPillStyle())
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+            .overlay(alignment: .top) { Divider().opacity(0.6) }
+        }
+        .task(id: isLive) {
+            saved = await model.store.readSideConversationAsync(prefix: Store.pedidoPrefix, id: requestID, for: botID).value?.items ?? []
+            isLoading = false
+        }
+    }
+}
+
+/// A request's side conversation to open (see `AppModel.sideWorkToShow`).
+struct SideWorkTarget: Identifiable, Equatable {
+    let botID: UUID
+    let requestID: UUID
+    var id: UUID { requestID }
 }

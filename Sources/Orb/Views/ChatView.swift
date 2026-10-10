@@ -37,6 +37,10 @@ struct ChatView: View {
             bindFind()
         }
         .onChange(of: model.pendingChatRequest) { takeFindRequest() }
+        // MARK: MultiOrb (WP2): a banner for an approval raised while the Orb works on another Orb's request opens that work.
+        .sheet(item: Bindable(model).sideWorkToShow) { target in
+            if target.botID == botID { SideWorkSheet(botID: target.botID, requestID: target.requestID) }
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
                 FirstRunBanner(botID: botID)

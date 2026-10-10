@@ -120,10 +120,13 @@ extension AppModel {
 
     /// ⌘.: stops the open Orb's answer.
     func stopCurrent() {
-        if let id = selectedBotID, isWorking(id) { stop(id) }
+        if let id = selectedBotID, canStop(id) { stop(id) }
     }
 
-    var canStopCurrent: Bool { selectedBotID.map { isWorking($0) } ?? false }
+    var canStopCurrent: Bool { selectedBotID.map { canStop($0) } ?? false }
+
+    /// The Orb works, or idles waiting on a chain of requests to other Orbs (`chainWork`): either can be stopped.
+    private func canStop(_ botID: UUID) -> Bool { isWorking(botID) || live(botID).chainWork != nil }
 
     /// ⇧⌘O: the Orb's folder in the Finder.
     func openFolder(of botID: UUID) {

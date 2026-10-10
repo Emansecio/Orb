@@ -41,7 +41,26 @@ extension AppModel {
     /// What a tap on a banner opens: the Orb's chat, or, for a routine waiting for an answer, its conversation.
     func showApprovalOwner(_ botID: UUID) {
         guard bot(botID) != nil else { return }
-        if routineWaitingForYou(botID) != nil { showRoutineRequest(of: botID) } else { selection = .bot(botID) }
+        if routineWaitingForYou(botID) != nil { showRoutineRequest(of: botID); return }
+        // MARK: MultiOrb (WP2): an approval raised inside a side run is in that run's conversation, not in the Orb's chat.
+        if let session = sessions[botID], live(botID).needsYou {
+            switch session.sideKind {
+            case .delegation:
+                if let request = session.servingRequest {
+                    selection = .bot(botID)
+                    sideWorkToShow = SideWorkTarget(botID: botID, requestID: request)
+                    return
+                }
+            case .group:
+                if let group = session.chain?.groupID, groups.contains(where: { $0.id == group }) {
+                    selection = .group(group)
+                    return
+                }
+            default: break
+            }
+        }
+        // MARK: end MultiOrb (WP2)
+        selection = .bot(botID)
     }
 
     /// Opens the routine's conversation, where its card is (Rotinas page, conversation sheet).

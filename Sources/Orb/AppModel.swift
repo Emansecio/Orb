@@ -45,6 +45,10 @@ final class AppModel {
     /// Where the Orbs an Orb proposes get their own folder (`~/Orbs`; tests point it at a temporary folder).
     @ObservationIgnored var proposedOrbFolderBase = OrbFolder.defaultBase
     // MARK: end MultiOrb (WP3)
+    // MARK: MultiOrb (WP2)
+    /// The work of a request the person is taken to (an approval raised in a side run): the chat of that Orb opens it, read-only.
+    var sideWorkToShow: SideWorkTarget?
+    // MARK: end MultiOrb (WP2)
     /// Each Orb's running machinery (see `BotSession`): its conversation in memory, its turn, its streamed reply.
     /// Conversations: at launch only the selected Orb's is read (off the main thread, `beginLoading`); the others are
     /// read when they are needed (`BotSession.isUnloaded`): when you switch to the Orb, or something has to change

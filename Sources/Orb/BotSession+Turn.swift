@@ -55,6 +55,7 @@ extension BotSession {
         guard let model else { return }
         var line = phrase
         line.routine = model.routineName(for: id)
+        line.prefix = model.requesterName(of: id).map { "Pedido de \($0)" } // MultiOrb (WP2): whose request this turn answers
         line.actions = actionsThisTurn
         model.live(id).setWork(line)
         if announcing { model.announceWork(line, of: id) }

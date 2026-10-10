@@ -255,7 +255,7 @@ struct ComposerView: View {
     // MARK: Bar
 
     private var bar: some View {
-        let action = ComposerAction.current(isWorking: isWorking, canSend: canSend)
+        let action = ComposerAction.current(isWorking: isWorking, canSend: canSend, waitsOnChain: model.live(botID).chainWork != nil)
         return HStack(spacing: 2) {
             Button("Anexar", systemImage: "plus") { isImporting = true }
                 .labelStyle(.iconOnly)
@@ -674,8 +674,9 @@ enum ComposerAction: Equatable {
         routineName.map { "A rotina “\($0)” está rodando. Envie quando ela terminar." } ?? "Uma rotina está rodando. Envie quando ela terminar."
     }
 
-    static func current(isWorking: Bool, canSend: Bool) -> ComposerAction {
-        if !isWorking { return .send }
+    /// `waitsOnChain` (MultiOrb, WP2): the Orb is idle but waits on other Orbs' answers; with nothing typed the button stops that chain.
+    static func current(isWorking: Bool, canSend: Bool, waitsOnChain: Bool = false) -> ComposerAction {
+        if !isWorking { return waitsOnChain && !canSend ? .stop : .send }
         return canSend ? .queue : .stop
     }
 

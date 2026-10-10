@@ -363,10 +363,13 @@ private struct ScriptedLLM: LLMClient {
     @Test @MainActor func theToolIsOfferedOnlyInTheOrbsOwnChat() {
         let (model, atlas) = setUp()
         let session = model.session(atlas.id)
-        #expect(model.multiOrbOffering(for: session).propose)
+        #expect(model.multiOrbOffering(for: atlas.id).propose)
         session.routineID = UUID()
-        #expect(!model.multiOrbOffering(for: session).propose)
+        #expect(!model.multiOrbOffering(for: atlas.id).propose)
         session.routineID = nil
+        session.sideKind = .delegation
+        #expect(!model.multiOrbOffering(for: atlas.id).propose)
+        session.sideKind = nil
     }
 
     @Test @MainActor func aCardLeftOpenWhenTheAppClosesIsRecordedAsNotCreated() async throws {
@@ -420,10 +423,10 @@ struct OrbProposeServerTests {
 
         #expect(OrbToolsMCPServer.Options(arguments: ["--tools-mcp", "/tmp/memoria", "--propose"])?.propose == true)
         #expect(OrbToolsMCPServer.Options(arguments: ["--tools-mcp", "/tmp/memoria"])?.propose == false)
-        let names = { (propose: Bool) in Set(OrbToolsMCPServer.tools(mac: false, propose: propose).map(\.spec.name)) }
+        let names = { (propose: Bool) in Set(OrbToolsMCPServer.tools(mac: false, extras: .init(propose: propose)).map(\.spec.name)) }
         #expect(names(true).contains("orb_propose") && !names(false).contains("orb_propose"))
         #expect(!names(true).contains("orbs") && !names(true).contains("orb_draft"))
-        #expect(OrbToolsMCPServer.listedTools(mac: false, propose: true).contains { $0.spec.name == "orb_propose" })
+        #expect(OrbToolsMCPServer.listedTools(mac: false, extras: .init(propose: true)).contains { $0.spec.name == "orb_propose" })
     }
 
     @Test func aForgedResultIsNeverTakenForTheApps() async throws {
