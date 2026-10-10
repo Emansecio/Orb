@@ -338,7 +338,23 @@ private struct LastParagraph: View {
 
 extension EnvironmentValues {
     /// Called when the reply being streamed grows, by a list that has to scroll to follow it itself.
-    @Entry var replyGrew: (@MainActor () -> Void)?
+    @Entry var replyGrew: ReplyGrewAction?
+}
+
+/// What a growing reply calls. Equatable by `id` (whoever provides it, e.g. the follower it scrolls for), not by the
+/// closure, so a provider that rebuilds the action on every body pass does not invalidate the rows that read it.
+struct ReplyGrewAction: Equatable {
+    let id: ObjectIdentifier
+    private let action: @MainActor () -> Void
+
+    init(id: ObjectIdentifier, _ action: @escaping @MainActor () -> Void) {
+        self.id = id
+        self.action = action
+    }
+
+    @MainActor func callAsFunction() { action() }
+
+    static func == (lhs: ReplyGrewAction, rhs: ReplyGrewAction) -> Bool { lhs.id == rhs.id }
 }
 
 /// The parsed Markdown of text that is done changing, so a row the LazyVStack recreates while scrolling (or a

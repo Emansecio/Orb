@@ -15,7 +15,8 @@ enum ApprovalShortcut: Equatable {
     /// the card's own note field but not while something is typed in the composer (`isTypingInComposer`).
     static func resolve(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, isEditingText: Bool,
                         isTypingInComposer: Bool = false) -> ApprovalShortcut? {
-        let held = modifiers.intersection(.deviceIndependentFlagsMask).subtracting([.numericPad, .function, .capsLock])
+        // Only the real modifiers count: caps lock, numeric pad and fn (set by arrows and F-keys) are ignored.
+        let held = modifiers.intersection([.shift, .control, .option, .command, .help])
         switch keyCode {
         case returnKey, enterKey:
             return held == .command && !isTypingInComposer ? .allow : nil

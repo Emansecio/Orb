@@ -353,7 +353,7 @@ final class AppModel {
         }
         if !devRun { // a developer run starts no server, and its screens set the statuses themselves
             let manager = mcp
-            Task { await manager.observe { [weak self] statuses in Task { @MainActor in self?.connectorStatus = statuses } } }
+            Task { [weak self] in await manager.observe { statuses in Task { @MainActor in self?.connectorStatus = statuses } } }
         }
         syncConnectors()
         // Tokens an older version left in the data file move to the Keychain with the next save.
@@ -1636,7 +1636,7 @@ final class AppModel {
         session.turnModel = ref.text
         let turn = session.beginTurn()
         let steering = composerLane(botID).queue // messages sent during the turn reach the model between its steps
-        session.turnTask = Task {
+        session.turnTask = Task { [self] in
             guard !Task.isCancelled else { return } // stopped before it began
             let brief = await bank.brief(for: typed, conversationIsNew: history.isEmpty, userTurns: userTurns,
                                          canSave: bot.permissionMode != .readOnly, alreadySent: sentMemories,

@@ -162,10 +162,10 @@ private struct TranscriptList: View {
     }
 
     /// What a growing reply calls: nothing where the scroll view keeps the bottom itself.
-    private func replyGrew(_ proxy: ScrollViewProxy) -> (@MainActor () -> Void)? {
+    private func replyGrew(_ proxy: ScrollViewProxy) -> ReplyGrewAction? {
         guard !BottomFollower.anchorsItself else { return nil }
         let follower = follower
-        return { follower.follow { proxy.scrollTo(BottomAnchor.id, anchor: .bottom) } }
+        return ReplyGrewAction(id: ObjectIdentifier(follower)) { follower.follow { proxy.scrollTo(BottomAnchor.id, anchor: .bottom) } }
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {

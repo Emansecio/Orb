@@ -314,7 +314,7 @@ struct ComposerView: View {
     /// ⇥ completes the highlighted skill while the suggestions are open; otherwise, with the Orb working and a message
     /// ready, it queues the message for after the task. Anywhere else it is the plain Tab (see `ComposerAction.tab`).
     private func handleTab(_ press: KeyPress) -> KeyPress.Result {
-        switch ComposerAction.tab(slashIsOpen: !slashMatches.isEmpty, isQueueing: isQueueing, canSend: canSend, isPlain: press.modifiers.subtracting([.capsLock, .numericPad, .function]).isEmpty) {
+        switch ComposerAction.tab(slashIsOpen: !slashMatches.isEmpty, isQueueing: isQueueing, canSend: canSend, isPlain: press.modifiers.intersection([.shift, .control, .option, .command]).isEmpty) {
         case .completeSkill: return completeSlash() ? .handled : .ignored
         case .queueAfterTask:
             send(delivery: .afterTask)
