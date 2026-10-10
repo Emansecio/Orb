@@ -3,7 +3,8 @@ import SwiftUI
 import simd
 
 /// The app icon, drawn by the app itself (`Orb --render-icon out.png [pixels]`, used by scripts/bundle.sh): the brand
-/// Orb on a deep indigo night with stage light, on the standard macOS icon grid. Pure CoreGraphics, drawn straight at
+/// Orb, as big as the tile allows, on pearl glass, on the standard macOS icon grid. The tile is ours on purpose: since
+/// macOS 26 the system puts any icon that is not this rounded square in a grey one. Pure CoreGraphics, drawn straight at
 /// the final size (nothing is scaled down afterwards), and the gel body comes from `GelShader`, a port of the shader
 /// that made the art in Resources/Orbs/body, so it is as sharp as the Orbs in the app at any size.
 ///
@@ -16,20 +17,26 @@ enum AppIcon {
     static let canvas: CGFloat = 1024
     static let tile = CGRect(x: 100, y: 100, width: 824, height: 824)
     static let cornerRadius: CGFloat = 185.4
+    /// The Orb fills the tile but for a margin that keeps its frosted rim off the corners, and room for its light below.
+    static let diameter: CGFloat = 690
+    static let center = CGPoint(x: 512, y: 494)
+    /// Up to 64 px: a bigger Orb, centered.
+    static let smallDiameter: CGFloat = 760
     /// At this size or below, the small variant is drawn.
     static let smallVariantLimit = 64
 
     enum Colors {
-        /// The tile's night, top to bottom (locations 0, 0.55, 1). It stays an indigo even at the bottom, never near black, so the
-        /// tile's silhouette holds on dark wallpapers.
-        static let night: [UInt32] = [0x2A2370, 0x16123D, 0x0E0C28]
-        static let nightStops: [CGFloat] = [0, 0.55, 1]
-        /// Halo behind the Orb (opacity at the center of the ramp).
+        /// The pearl glass, top to bottom (locations 0, 0.55, 1): white into a faint lavender, light enough to read as
+        /// white, tinted enough that the tile holds on a white window.
+        static let pearl: [UInt32] = [0xFFFFFF, 0xF4F2FF, 0xE6E3FA]
+        static let pearlStops: [CGFloat] = [0, 0.55, 1]
+        /// The Orb's light tinting the glass around it (opacity at the center of the ramp).
         static let aura: UInt32 = 0x6E5CFF
-        static let auraAlpha: CGFloat = 0.38
-        /// The light that leaves through the bottom of the gel and pools on the floor (the palette's glow).
+        static let auraAlpha: CGFloat = 0.20
+        /// The light that leaves through the bottom of the gel and pools on the glass (the palette's glow).
         static let floorAlpha: CGFloat = 0.55
-        static let contact: UInt32 = 0x05040F
+        static let contact: UInt32 = 0x2A1E8C
+        static let contactAlpha: CGFloat = 0.38
         /// Inks of the face (the palette's deep, darkened) and the eye's inner gradient.
         static let faceShadow: UInt32 = 0x1A0E80
         static let eyeBottom: UInt32 = 0xE6E2FF
@@ -58,13 +65,13 @@ enum AppIcon {
 
         let hexes = OrbCatalog.shared.palette("indigo").hexes
         let squircle = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).path(in: tile).cgPath
+        let d = small ? smallDiameter : diameter
+        let center = small ? CGPoint(x: 512, y: 512) : center
 
         drawShadows(ctx, tile: squircle, scale: k)
         ctx.saveGState()
         ctx.addPath(squircle)
         ctx.clip()
-        let d: CGFloat = small ? 640 : 560
-        let center = CGPoint(x: 512, y: small ? 500 : 482)
         drawBackground(ctx, space: space, center: center, diameter: d, glow: hexes[3], withFloor: !small)
         ctx.restoreGState()
 
@@ -79,51 +86,45 @@ enum AppIcon {
 
     /// The standard macOS drop shadow, in two passes, filled with the tile's own color.
     private static func drawShadows(_ ctx: CGContext, tile: CGPath, scale k: CGFloat) {
-        for (dy, blur, alpha) in [(12.0, 28.0, 0.32), (2.0, 4.0, 0.18)] as [(CGFloat, CGFloat, CGFloat)] {
+        for (dy, blur, alpha) in [(12.0, 28.0, 0.24), (2.0, 4.0, 0.14)] as [(CGFloat, CGFloat, CGFloat)] {
             ctx.saveGState()
             // Core Graphics shadows live in device space, unaffected by the transform: scale them by hand, and note that
             // the bitmap's y goes up, so a shadow that falls (y down in the design) has a negative offset.
             ctx.setShadow(offset: CGSize(width: 0, height: -dy * k), blur: blur * k, color: color(0x000000, alpha))
             ctx.addPath(tile)
-            ctx.setFillColor(color(Colors.night[2]))
+            ctx.setFillColor(color(Colors.pearl[2]))
             ctx.fillPath()
             ctx.restoreGState()
         }
     }
 
-    /// Night gradient, halo, floor light and contact shadow, and the glass sheen on top (clipped to the tile by the caller).
+    /// Pearl gradient, the Orb's light around it, the glow and contact under it (clipped to the tile by the caller).
     private static func drawBackground(_ ctx: CGContext, space: CGColorSpace, center: CGPoint, diameter d: CGFloat, glow: UInt32,
                                        withFloor: Bool) {
-        let night = CGGradient(colorsSpace: space, colors: Colors.night.map { color($0) } as CFArray, locations: Colors.nightStops)!
-        ctx.drawLinearGradient(night, start: CGPoint(x: 512, y: tile.minY), end: CGPoint(x: 512, y: tile.maxY), options: [])
+        let pearl = CGGradient(colorsSpace: space, colors: Colors.pearl.map { color($0) } as CFArray, locations: Colors.pearlStops)!
+        ctx.drawLinearGradient(pearl, start: CGPoint(x: 512, y: tile.minY), end: CGPoint(x: 512, y: tile.maxY), options: [])
 
         let aura = CGGradient(colorsSpace: space,
-                              colors: [color(Colors.aura, Colors.auraAlpha), color(Colors.aura, Colors.auraAlpha * 0.35), color(Colors.aura, 0)] as CFArray,
+                              colors: [color(Colors.aura, Colors.auraAlpha), color(Colors.aura, Colors.auraAlpha * 0.3), color(Colors.aura, 0)] as CFArray,
                               locations: [0, 0.5, 1])!
-        ctx.drawRadialGradient(aura, startCenter: center, startRadius: d * 0.3, endCenter: center, endRadius: d * 0.92, options: [])
+        ctx.drawRadialGradient(aura, startCenter: center, startRadius: d * 0.3, endCenter: center, endRadius: d * 0.85, options: [])
 
-        if withFloor {
-            // The pool of cool light under the Orb: what comes out of the bottom of the gel.
+        guard withFloor else { return }
+        // The pool of cool light under the Orb, what comes out of the bottom of the gel, and the contact shadow in it.
+        let pools: [(dy: CGFloat, rx: CGFloat, ry: CGFloat, hex: UInt32, alpha: CGFloat)] = [
+            (0.52, 0.5, 0.09, glow, Colors.floorAlpha),
+            (0.49, 0.3, 0.045, Colors.contact, Colors.contactAlpha),
+        ]
+        for pool in pools {
             ctx.saveGState()
-            ctx.translateBy(x: 512, y: center.y + d * 0.5 + 18)
-            ctx.scaleBy(x: 1, y: 0.2)
-            let pool = CGGradient(colorsSpace: space,
-                                  colors: [color(glow, Colors.floorAlpha), color(glow, Colors.floorAlpha * 0.3), color(glow, 0)] as CFArray,
+            ctx.translateBy(x: center.x, y: center.y + d * pool.dy)
+            ctx.scaleBy(x: 1, y: pool.ry / pool.rx)
+            let ramp = CGGradient(colorsSpace: space,
+                                  colors: [color(pool.hex, pool.alpha), color(pool.hex, pool.alpha * 0.35), color(pool.hex, 0)] as CFArray,
                                   locations: [0, 0.45, 1])!
-            ctx.drawRadialGradient(pool, startCenter: .zero, startRadius: 0, endCenter: .zero, endRadius: d * 0.62, options: [])
-            ctx.restoreGState()
-
-            ctx.saveGState()
-            ctx.translateBy(x: 512, y: center.y + d * 0.485)
-            ctx.scaleBy(x: 1, y: 0.12)
-            let contact = CGGradient(colorsSpace: space, colors: [color(Colors.contact, 0.55), color(Colors.contact, 0)] as CFArray,
-                                     locations: [0, 1])!
-            ctx.drawRadialGradient(contact, startCenter: .zero, startRadius: 0, endCenter: .zero, endRadius: d * 0.36, options: [])
+            ctx.drawRadialGradient(ramp, startCenter: .zero, startRadius: 0, endCenter: .zero, endRadius: d * pool.rx, options: [])
             ctx.restoreGState()
         }
-
-        let sheen = CGGradient(colorsSpace: space, colors: [color(0xFFFFFF, 0.10), color(0xFFFFFF, 0)] as CFArray, locations: [0, 1])!
-        ctx.drawLinearGradient(sheen, start: CGPoint(x: 512, y: tile.minY), end: CGPoint(x: 512, y: 420), options: [])
     }
 
     /// The gel, rendered at the exact pixel size it lands on.
@@ -180,8 +181,7 @@ enum AppIcon {
         ctx.restoreGState()
     }
 
-    /// The glass edge of the tile, on top of everything, inside the tile: light at the top, fading toward the bottom, and still
-    /// visible at the base so the silhouette holds on dark wallpapers.
+    /// The glass edge of the tile, on top of everything, inside the tile: bright at the top, fading toward the bottom.
     private static func drawEdge(_ ctx: CGContext, space: CGColorSpace, tile squircle: CGPath) {
         ctx.saveGState()
         // Clipped to the tile first, then to the stroke: only the inner half of the line is drawn.
@@ -191,9 +191,7 @@ enum AppIcon {
         ctx.setLineWidth(3)
         ctx.replacePathWithStrokedPath()
         ctx.clip()
-        let edge = CGGradient(colorsSpace: space,
-                              colors: [color(0xFFFFFF, 0.22), color(0xFFFFFF, 0.06), color(0xFFFFFF, 0.14)] as CFArray,
-                              locations: [0, 0.6, 1])!
+        let edge = CGGradient(colorsSpace: space, colors: [color(0xFFFFFF, 0.9), color(0xFFFFFF, 0.25)] as CFArray, locations: [0, 1])!
         ctx.drawLinearGradient(edge, start: CGPoint(x: 512, y: tile.minY), end: CGPoint(x: 512, y: tile.maxY), options: [])
         ctx.restoreGState()
     }
