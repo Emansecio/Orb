@@ -78,7 +78,8 @@ private struct GroupHeaderBar: View {
 
     var body: some View {
         let looks = model.groupLooks(group)
-        GroupHeader(members: looks.map { StackedAvatars.Member(id: $0.id, orb: $0.orb, activity: model.live($0.id).activity) },
+        GroupHeader(name: group.name,
+                    members: looks.map { StackedAvatars.Member(id: $0.id, orb: $0.orb, activity: model.live($0.id).activity) },
                     orbCount: looks.count, usage: live.usage, isActive: live.runState != .idle,
                     onStop: { model.stopGroup(group.id) }, onPanel: { model.toggleInspector() })
     }
@@ -105,7 +106,7 @@ private struct GroupThread: View {
 
     var body: some View {
         let items = transcript.items
-        let lastSpeaker = items.last { Self.isAnswer($0) }?.id
+        let lastSpeaker = items.last { Self.answerer($0) != nil }?.id
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
@@ -113,8 +114,10 @@ private struct GroupThread: View {
                         GroupEmptyState(group: group)
                             .transition(.opacity)
                     }
-                    ForEach(items) { item in
-                        row(item, isLastSpeaker: item.id == lastSpeaker)
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                        let previous = index > 0 ? items[index - 1] : nil
+                        row(item, isLastSpeaker: item.id == lastSpeaker, continuesPrevious: Self.answerer(item) != nil
+                            && Self.answerer(item) == previous.flatMap(Self.answerer))
                     }
                     Color.clear.frame(height: 1).id(bottomID)
                 }
@@ -132,20 +135,23 @@ private struct GroupThread: View {
         }
     }
 
-    /// A member's answer (a reply to whoever asked), the words the bubble speaks in.
-    private static func isAnswer(_ item: TranscriptItem) -> Bool {
-        if case .orbMessage(let message) = item.kind { return message.direction == .post && message.kind == .reply }
-        return false
+    /// The Orb that spoke an answer (a reply, a post in the thread), nil for anything else.
+    private static func answerer(_ item: TranscriptItem) -> UUID? {
+        if case .orbMessage(let message) = item.kind, message.direction == .post, message.kind == .reply { return message.from.id }
+        return nil
     }
 
-    @ViewBuilder private func row(_ item: TranscriptItem, isLastSpeaker: Bool) -> some View {
+    @ViewBuilder private func row(_ item: TranscriptItem, isLastSpeaker: Bool, continuesPrevious: Bool) -> some View {
         switch item.kind {
         case .user(let text, let attachments):
             GroupUserBubble(text: text, attachmentCount: attachments.count)
         case .orbMessage(let message):
-            if Self.isAnswer(item) {
+            if Self.answerer(item) != nil {
                 GroupMessageBubble(message: message, look: model.liveBot(message.from.id)?.look,
-                                   isOrchestrator: message.from.id == group.orchestratorID, isLastSpeaker: isLastSpeaker)
+                                   isOrchestrator: message.from.id == group.orchestratorID, isLastSpeaker: isLastSpeaker,
+                                   showsHeader: !continuesPrevious)
+                // Words of the same Orb that follow each other sit under the first, 6 pt apart (the list gives 14).
+                .padding(.top, continuesPrevious ? -8 : 0)
             } else {
                 GroupAssignmentLine(message: message, from: model.liveBot(message.from.id)?.look,
                                     to: message.to.flatMap { model.liveBot($0.id)?.look })
@@ -167,34 +173,51 @@ private struct GroupThread: View {
     }
 }
 
-/// The first view of a group: its Orbs standing together like the welcome screen's, the orchestrator in the middle and
-/// larger. Sent to the Orbs' sizes of the scale (72 and 48). Under Reduce Motion they stand still.
+/// The first view of a group: its Orbs standing together on one stage like the welcome screen's. The orchestrator stands
+/// exactly on the middle line; the others split to both sides with the same room, so the group is centered on it. A soft
+/// glow in the orchestrator's color lies under them (a gradient that fades to nothing, so it has no edge). Under Reduce
+/// Motion they stand still.
 struct GroupEmptyState: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let group: OrbGroup
 
+    /// The space each Orb takes beside the next, and the gap between the Orbs and the title.
+    private static let step: CGFloat = 66
+    private static let titleGap: CGFloat = 38
+
     var body: some View {
         let looks = model.groupLooks(group)
         let orchestrator = looks.first { $0.id == group.orchestratorID } ?? looks.first
         let others = looks.filter { $0.id != orchestrator?.id }
-        let left = Array(others.prefix(others.count / 2 + others.count % 2))
-        let right = Array(others.dropFirst(left.count))
-        VStack(spacing: 18) {
-            ZStack(alignment: .bottom) {
-                Ellipse()
-                    .fill(RadialGradient(colors: [OrbColor.core(orchestrator?.orb).opacity(0.22), .clear],
-                                         center: .center, startRadius: 4, endRadius: 150))
-                    .frame(width: 320, height: 120)
-                    .offset(y: 6)
-                    .accessibilityHidden(true)
+        let leftCount = (others.count + 1) / 2
+        let left = Array(others.prefix(leftCount))
+        let right = Array(others.dropFirst(leftCount))
+        let side = CGFloat(max(left.count, right.count)) * Self.step
+        VStack(spacing: Self.titleGap) {
+            HStack(alignment: .bottom, spacing: 18) {
+                // Both sides get the same width, so the orchestrator is exactly in the middle whatever the count.
                 HStack(alignment: .bottom, spacing: 18) {
                     ForEach(left, id: \.id) { member in standing(member, size: 48) }
-                    if let orchestrator { standing(orchestrator, size: 72) }
+                }
+                .frame(width: side, alignment: .trailing)
+                if let orchestrator { standing(orchestrator, size: 72) }
+                HStack(alignment: .bottom, spacing: 18) {
                     ForEach(right, id: \.id) { member in standing(member, size: 48) }
                 }
+                .frame(width: side, alignment: .leading)
             }
-            .frame(height: 96)
+            .background {
+                // The glow of the orchestrator's color, fading to nothing before the rectangle's edge.
+                Rectangle()
+                    .fill(EllipticalGradient(colors: [OrbColor.core(orchestrator?.orb).opacity(0.22),
+                                                      OrbColor.core(orchestrator?.orb).opacity(0.08),
+                                                      OrbColor.core(orchestrator?.orb).opacity(0)],
+                                             center: .center, startRadiusFraction: 0, endRadiusFraction: 0.5))
+                    .frame(width: 560, height: 200)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
             VStack(spacing: 8) {
                 Text("Fale com o grupo.")
                     .font(.system(size: 15, weight: .semibold))
@@ -204,9 +227,6 @@ struct GroupEmptyState: View {
                     .foregroundStyle(Palette.muted)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 420)
-                Text("Use @ para chamar um Orb.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Palette.faint)
             }
         }
         .frame(maxWidth: .infinity)

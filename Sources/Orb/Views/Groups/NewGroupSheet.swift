@@ -10,18 +10,15 @@ enum NewGroupRules {
     /// One more Orb may be chosen.
     static func canSelectMore(selectedCount: Int) -> Bool { selectedCount < limits.upperBound }
 
-    /// The name a group gets when the person has not written one: the first word of each Orb's role, two at most, joined
-    /// ("Pesquisa e Revisa"); an Orb without a role counts by its name. "Grupo novo" when nothing is chosen.
+    /// The name a group is suggested from the Orbs chosen, in the order chosen: "Atlas e Pesquisador", "Atlas, Pesquisador e
+    /// Revisor", "Atlas e mais 3". Nothing until two Orbs are chosen (the field keeps its example).
     static func suggestedName(for looks: [BotLook]) -> String {
-        let words = looks.prefix(2).map { look -> String in
-            let role = look.role.split(separator: " ").first.map(String.init)
-            return (role?.isEmpty == false ? role : look.name) ?? look.name
-        }
-        .filter { !$0.isEmpty }
-        switch words.count {
-        case 0: return "Grupo novo"
-        case 1: return words[0]
-        default: return words.joined(separator: " e ")
+        let names = looks.map(\.name).filter { !$0.isEmpty }
+        switch names.count {
+        case ..<2: return ""
+        case 2: return names.joined(separator: " e ")
+        case 3: return names.dropLast().joined(separator: ", ") + " e " + names[2]
+        default: return "\(names[0]) e mais \(names.count - 1)"
         }
     }
 
@@ -31,10 +28,12 @@ enum NewGroupRules {
         return selected.first
     }
 
-    /// The name the group is created with: what was written, or the suggestion.
+    /// The name the group is created with: what was written, else the suggestion, else "Grupo novo".
     static func name(written: String, suggested: String) -> String {
         let trimmed = written.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? suggested : trimmed
+        if !trimmed.isEmpty { return trimmed }
+        let fallback = suggested.trimmingCharacters(in: .whitespacesAndNewlines)
+        return fallback.isEmpty ? "Grupo novo" : fallback
     }
 }
 
@@ -66,8 +65,9 @@ enum GroupBudgetPreset: String, CaseIterable, Identifiable {
     }
 }
 
-/// "Novo grupo": a name, the Orbs (two to eight, one of them the orchestrator), an objective and a budget. Opened from the
-/// sidebar's "+", ⌥⌘G, the palette, or an Orb's menu ("Criar grupo com…", which starts with that Orb as orchestrator).
+/// "Novo grupo": a name, the Orbs (two to eight, one of them the orchestrator), an objective and a budget. The Orbs scroll
+/// above a fixed footer. Opened from the sidebar's "+", ⌥⌘G, the palette, or an Orb's menu ("Criar grupo com…", which starts
+/// with that Orb as orchestrator).
 struct NewGroupSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -85,59 +85,58 @@ struct NewGroupSheet: View {
     private var looks: [BotLook] { model.botIDs.map { model.live($0).look } }
     private var chosenLooks: [BotLook] { chosen.compactMap { id in looks.first { $0.id == id } } }
     private var suggested: String { NewGroupRules.suggestedName(for: chosenLooks) }
+    /// What the field shows: what the person wrote, or the suggestion until they write (their text is never replaced).
     private var nameShown: String { isNameEdited ? written : suggested }
     private var canCreate: Bool { NewGroupRules.canCreate(selectedCount: chosen.count) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    field("Nome") {
-                        TextField(suggested, text: Binding(get: { nameShown }, set: { written = $0; isNameEdited = true }))
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 14))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Palette.surface, in: .rect(cornerRadius: 10))
-                            .accessibilityLabel("Nome do grupo")
-                    }
-                    field("Orbs") {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 128), spacing: 10)], spacing: 10) {
-                            ForEach(looks, id: \.id) { look in
-                                OrbChoiceCard(look: look, isChosen: chosen.contains(look.id),
-                                              isOrchestrator: orchestrator == look.id,
-                                              isEnabled: chosen.contains(look.id) || NewGroupRules.canSelectMore(selectedCount: chosen.count),
-                                              starSpace: starSpace,
-                                              toggle: { toggle(look.id) },
-                                              makeOrchestrator: { makeOrchestrator(look.id) })
-                            }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                field("Nome") {
+                    TextField("Ex.: Lançamento", text: Binding(get: { nameShown }, set: { written = $0; isNameEdited = true }))
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 14))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Palette.surface, in: .rect(cornerRadius: 10))
+                        .accessibilityLabel("Nome do grupo")
+                }
+                field("Orbs") {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 128), spacing: 10, alignment: .top)], alignment: .leading, spacing: 10) {
+                        ForEach(looks, id: \.id) { look in
+                            OrbChoiceCard(look: look, isChosen: chosen.contains(look.id),
+                                          isOrchestrator: orchestrator == look.id,
+                                          isEnabled: chosen.contains(look.id) || NewGroupRules.canSelectMore(selectedCount: chosen.count),
+                                          starSpace: starSpace,
+                                          toggle: { toggle(look.id) },
+                                          makeOrchestrator: { makeOrchestrator(look.id) })
                         }
-                        Text("Escolha de 2 a 8 Orbs. O orquestrador recebe cada pedido e divide o trabalho.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Palette.faint)
-                    }
-                    field("Objetivo (opcional)") {
-                        TextField("O que o grupo deve entregar", text: $objective, axis: .vertical)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 13))
-                            .lineLimit(2...3)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Palette.surface, in: .rect(cornerRadius: 10))
-                    }
-                    field("Orçamento por pedido") {
-                        Picker("Orçamento", selection: $preset) {
-                            ForEach(GroupBudgetPreset.allCases) { Text($0.title).tag($0) }
-                        }
-                        .pickerStyle(.segmented)
-                        .labelsHidden()
-                        Text("\(preset.budget.maxTurns) turnos · \(GroupBudgetText.thousands(preset.budget.maxTokens)) tokens por pedido. Ao chegar ao limite, o grupo pergunta se deve continuar.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Palette.faint)
                     }
                 }
-                .padding(20)
+                field("Objetivo (opcional)") {
+                    TextField("O que o grupo deve entregar", text: $objective, axis: .vertical)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13))
+                        .lineLimit(2...3)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Palette.surface, in: .rect(cornerRadius: 10))
+                }
+                field("Orçamento por pedido") {
+                    Picker("Orçamento", selection: $preset) {
+                        ForEach(GroupBudgetPreset.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    Text("\(preset.budget.maxTurns) turnos · \(GroupBudgetText.thousands(preset.budget.maxTokens)) tokens por pedido. Ao chegar ao limite, o grupo pergunta se deve continuar.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.faint)
+                }
             }
+            .padding(20)
+        }
+        // Taller than the default sheet: the grid, the objective and the budget fit without scrolling at the usual window size.
+        .orbSheet("Novo grupo", subtitle: "O orquestrador recebe cada pedido e divide o trabalho.", size: .medium, maxHeight: 700) {
             HStack(spacing: 10) {
                 if !canCreate {
                     Text("Escolha pelo menos 2 Orbs")
@@ -155,10 +154,6 @@ struct NewGroupSheet: View {
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 14)
-            .overlay(alignment: .top) { Rectangle().fill(Palette.line).frame(height: 1) }
-        }
-        .orbSheet("Novo grupo", subtitle: "Orbs que trabalham juntos num pedido, com um orquestrador", size: .medium) {
-            EmptyView()
         }
         .onAppear(perform: start)
     }
@@ -207,8 +202,10 @@ struct NewGroupSheet: View {
     }
 }
 
-/// One Orb to choose: a live 48 pt avatar, its name and role, a border in its color when chosen, a check, and the star of the
-/// orchestrator (one star, which slides to the chosen Orb when the role moves).
+/// One Orb to choose, compact: the live 48 pt avatar, its name and role, a border in its color when chosen, a check at the
+/// top right, and the orchestrator's star at the top left with the word "Orquestrador" under the role. The star is one view
+/// that slides from card to card (matched geometry; under Reduce Motion it fades). A chosen Orb that is not the orchestrator
+/// shows an empty star that makes it the orchestrator.
 private struct OrbChoiceCard: View {
     let look: BotLook
     let isChosen: Bool
@@ -221,71 +218,75 @@ private struct OrbChoiceCard: View {
 
     var body: some View {
         let core = OrbColor.core(look.orb)
-        VStack(spacing: 6) {
-            ZStack(alignment: .topTrailing) {
-                Button(action: toggle) {
-                    VStack(spacing: 6) {
-                        BotAvatar(orb: look.orb, size: 48)
-                            .frame(width: 48, height: 48)
-                        Text(look.name)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Palette.ink)
-                            .lineLimit(1)
-                        Text(look.role.isEmpty ? " " : look.role)
-                            .font(.system(size: 11))
-                            .foregroundStyle(Palette.faint)
-                            .lineLimit(1)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .padding(.horizontal, 6)
-                    .background(isChosen ? Palette.surface : Palette.chrome, in: .rect(cornerRadius: 14))
-                    .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(isChosen ? core : Palette.line, lineWidth: isChosen ? 2 : 1))
-                    .opacity(isEnabled || isChosen ? 1 : 0.45)
-                    .contentShape(.rect(cornerRadius: 14))
+        ZStack(alignment: .topLeading) {
+            Button(action: toggle) {
+                VStack(spacing: 5) {
+                    BotAvatar(orb: look.orb, size: 48)
+                        .frame(width: 48, height: 48)
+                    Text(look.name)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Palette.ink)
+                        .lineLimit(1)
+                    Text(look.role.isEmpty ? " " : look.role)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.faint)
+                        .lineLimit(1)
+                    // Always one line, so the cards of a row keep the same height.
+                    Text(isOrchestrator ? "Orquestrador" : " ")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Palette.warn)
+                        .lineLimit(1)
                 }
-                .buttonStyle(.plain)
-                .disabled(!isEnabled && !isChosen)
-                .accessibilityLabel("\(look.name), \(look.role)")
-                .accessibilityAddTraits(isChosen ? .isSelected : [])
-                .accessibilityValue(isOrchestrator ? "Orquestrador" : (isChosen ? "Escolhido" : ""))
-                if isChosen {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 16))
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(Palette.onInk, core)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .padding(.horizontal, 6)
+                .background(isChosen ? Palette.surface : Palette.chrome, in: .rect(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(isChosen ? core : Palette.line, lineWidth: isChosen ? 2 : 1))
+                .opacity(isEnabled || isChosen ? 1 : 0.45)
+                .contentShape(.rect(cornerRadius: 14))
+            }
+            .buttonStyle(.plain)
+            .disabled(!isEnabled && !isChosen)
+            .accessibilityLabel("\(look.name), \(look.role)")
+            .accessibilityAddTraits(isChosen ? .isSelected : [])
+            .accessibilityValue(isOrchestrator ? "Orquestrador" : (isChosen ? "Escolhido" : ""))
+
+            // The star sits beside the button, not inside it: a button inside a button would take the other's taps.
+            if isChosen {
+                if isOrchestrator {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Palette.warn)
+                        .frame(width: 22, height: 22)
+                        .background(Palette.raised, in: .circle)
+                        .modifier(StarSlide(space: starSpace, reduceMotion: reduceMotion))
                         .padding(6)
-                        .transition(.adapted(.mark, reduceMotion: reduceMotion))
-                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                } else {
+                    Button(action: makeOrchestrator) {
+                        Image(systemName: "star")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Palette.muted)
+                            .frame(width: 22, height: 22)
+                            .background(Palette.raised, in: .circle)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(6)
+                    .help("Tornar \(look.name) o orquestrador")
+                    .accessibilityLabel("Tornar \(look.name) orquestrador")
                 }
             }
             if isChosen {
-                orchestratorStar
-            } else {
-                Color.clear.frame(height: 18)
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 16))
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(Palette.onInk, core)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .padding(6)
+                    .transition(.adapted(.mark, reduceMotion: reduceMotion))
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             }
-        }
-    }
-
-    @ViewBuilder private var orchestratorStar: some View {
-        if isOrchestrator {
-            Label("Orquestrador", systemImage: "star.fill")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(Palette.warn)
-                .labelStyle(.titleAndIcon)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(Palette.raised, in: .capsule)
-                .modifier(StarSlide(space: starSpace, reduceMotion: reduceMotion))
-        } else {
-            Button(action: makeOrchestrator) {
-                Label("Tornar orquestrador", systemImage: "star")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Palette.muted)
-                    .labelStyle(.titleAndIcon)
-            }
-            .buttonStyle(.plain)
-            .help("Tornar \(look.name) o orquestrador")
         }
     }
 }

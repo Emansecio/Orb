@@ -113,11 +113,27 @@ struct NewGroupRulesTests {
         #expect(NewGroupRules.canSelectMore(selectedCount: 7))
     }
 
-    @Test func theSuggestedNameComesFromTheRoles() {
-        #expect(NewGroupRules.suggestedName(for: [look("Pesquisador", "Pesquisa na web"), look("Revisor", "Revisa código")])
-            == "Pesquisa e Revisa")
-        #expect(NewGroupRules.suggestedName(for: [look("Lia", "")]) == "Lia")
-        #expect(NewGroupRules.suggestedName(for: []) == "Grupo novo")
+    @Test func theSuggestedNameJoinsTheChosenOrbsInOrder() {
+        #expect(NewGroupRules.suggestedName(for: []) == "")
+        #expect(NewGroupRules.suggestedName(for: [look("Atlas", "")]) == "")
+        #expect(NewGroupRules.suggestedName(for: [look("Atlas", ""), look("Pesquisador", "")]) == "Atlas e Pesquisador")
+        #expect(NewGroupRules.suggestedName(for: [look("Atlas", ""), look("Pesquisador", ""), look("Revisor", "")])
+            == "Atlas, Pesquisador e Revisor")
+        #expect(NewGroupRules.suggestedName(for: [look("Atlas", ""), look("Pesquisador", ""), look("Revisor", ""), look("Lia", "")])
+            == "Atlas e mais 3")
+        #expect(NewGroupRules.name(written: "", suggested: "") == "Grupo novo")
+        #expect(NewGroupRules.name(written: "", suggested: "Atlas e Lia") == "Atlas e Lia")
+    }
+
+    /// Words in an Orb's color must read on the canvas: every palette's name tint reaches 4.5 : 1.
+    @Test func everyOrbNameReadsOnTheCanvas() {
+        for palette in OrbCatalog.shared.palettes {
+            let tint = OrbInk.readableHex(of: palette.hexes[1])
+            #expect(OrbInk.contrast(tint, OrbInk.canvas) >= OrbInk.minimumContrast, "\(palette.id)")
+        }
+        // A color that already reads is kept as it is; the lift only goes toward white.
+        #expect(OrbInk.readableHex(of: 0xFFFFFF) == 0xFFFFFF)
+        #expect(OrbInk.mix(0x000000, toward: 0xFFFFFF, by: 0.5) == 0x808080)
     }
 
     @Test func aWrittenNameWinsOverTheSuggestion() {

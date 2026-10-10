@@ -92,11 +92,11 @@ private struct SampleGroups {
                                                       groupID: group)))
         }
         return Conversation(items: [
+            TranscriptItem(.event(OrbEvent(kind: .groupCreated, detail: "Lançamento · 3", groupID: group))),
             TranscriptItem(.user(text: "Quero preparar o lançamento do app de tarefas: pesquisa de concorrentes e um texto para a página inicial.",
                                  attachments: [])),
             post(.ask, from: atlas, to: research, "Levante três concorrentes e o preço de cada um."),
             post(.ask, from: atlas, to: review, "Quando houver um rascunho, revise o tom e os erros."),
-            TranscriptItem(.event(OrbEvent(kind: .groupCreated, detail: "Lançamento · 3", groupID: group))),
             post(.reply, from: research, to: atlas, """
             Três concorrentes, com o preço de cada um:
 

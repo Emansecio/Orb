@@ -43,6 +43,7 @@ enum GroupBudgetText {
 /// The top bar of a group's chat: its Orbs one over the other and "N Orbs". While a request runs it also shows the budget
 /// (text from 80 %, a 2 pt bar always), Parar grupo and the panel's button.
 struct GroupHeader: View {
+    let name: String
     let members: [StackedAvatars.Member]
     let orbCount: Int
     let usage: GroupUsage?
@@ -55,9 +56,14 @@ struct GroupHeader: View {
     var body: some View {
         HStack(spacing: 10) {
             StackedAvatars(members: members, size: 24)
-            Text(orbCount == 1 ? "1 Orb" : "\(orbCount) Orbs")
+            Text(name)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Palette.ink)
+                .lineLimit(1)
+            Text(orbCount == 1 ? "· 1 Orb" : "· \(orbCount) Orbs")
                 .font(.system(size: 12))
-                .foregroundStyle(Palette.muted)
+                .foregroundStyle(Palette.faint)
+                .lineLimit(1)
                 .accessibilityIdentifier("group-orb-count")
             Spacer(minLength: 12)
             if let usage {
