@@ -359,7 +359,7 @@ struct MultiOrbInvariantTests {
         #expect(!draft.canCreate)
         draft.name = "Lia"
         #expect(draft.canCreate)
-        #expect(draft.mode == .ask && draft.capabilities.isEmpty && draft.revision == 0 && !draft.ready)
+        #expect(draft.mode == .ask && draft.capabilities == [.terminal, .browser, .computerUse] && draft.revision == 0 && !draft.ready)
     }
 }
 
@@ -619,8 +619,8 @@ struct MultiOrbScreenTests {
         let folder = FileManager.default.temporaryDirectory.appending(path: "OrbSnap-\(UUID().uuidString)")
         defer { removeTestFolder(folder) }
         let model = AppModel(store: Store(directory: folder), runsBackgroundWork: false, secretVault: MemoryVault())
-        // "events" and the delegation screens belong to WP2, the creation card's to WP3, the groups' to WP6; the rest still have no package.
-        for screen in ["wizard", "settings-general-orbs", "transcript"] {
+        // "events" and the delegation screens belong to WP2, the creation card's to WP3, the groups' to WP6, the wizard's to WP4.
+        for screen in ["settings-general-orbs", "transcript"] {
             #expect(MultiOrbSnapshots.view(screen, model: model) == nil, "\(screen)")
         }
         #expect(MultiOrbSnapshots.view("group-chat", model: model) != nil) // WP6

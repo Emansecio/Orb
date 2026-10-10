@@ -51,8 +51,10 @@ extension AppModel {
             // (`ClaudeCodeEngine.proposeOrb`, marked with `ORB_PROPOSE_TOKEN`) and the server just reports it. The server never
             // asks the mailbox for this tool, so a call that arrives here would be a second handling of the same card.
             throw ToolError("Essa ferramenta não está disponível agora.")
+        case OrbDraftTool.name:
+            // The creation assistant's tool (WP4): `orb` is the stand-in Orb of the sheet that is open.
+            return try wizardDraft(orb, arguments)
         default:
-            // `orb_draft` is the creation assistant's (it answers through its own handler where that exists).
             throw ToolError("Essa ferramenta não está disponível agora.")
         }
     }
