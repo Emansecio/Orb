@@ -102,9 +102,7 @@ private struct InstalledSkills: View {
                     }
                 }
             }
-            .padding(24)
-            .frame(maxWidth: 860)
-            .frame(maxWidth: .infinity)
+            .pageColumn()
         }
         .overlay {
             if model.skills.isEmpty {
@@ -274,9 +272,7 @@ private struct ExploreSkills: View {
             }
             // The hint, the loading, the error, "no result" and the results swap by fading, bound to the one phase.
             .animateChanges(of: ExplorePhase.of(isSearching: isSearching, isLoading: isLoading, error: error, isEmpty: results.isEmpty))
-            .padding(24)
-            .frame(maxWidth: 980)
-            .frame(maxWidth: .infinity)
+            .pageColumn()
         }
         .task(id: query) {
             try? await Task.sleep(for: .milliseconds(350))
@@ -479,7 +475,7 @@ struct SkillPreview: View {
 
     @ViewBuilder private var footerContent: some View {
         if let installed {
-            HStack(spacing: 10) {
+            SheetFooterBar {
                 Label("Instalada. Use com /\(installed.slug)", systemImage: "checkmark.circle.fill")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Palette.ok)
@@ -489,9 +485,6 @@ struct SkillPreview: View {
                     .keyboardShortcut(.cancelAction)
                 UseSkillButton(skill: installed, onUsed: { dismiss() }, title: "Usar agora")
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
-            .overlay(alignment: .top) { Divider().opacity(0.6) }
         } else {
             SheetFooter(message: "Instale só de fontes em que você confia: a skill vira instrução para o Orb.",
                         cancelTitle: "Fechar", cancel: { dismiss() }, primaryTitle: "Instalar skill",

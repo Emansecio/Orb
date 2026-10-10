@@ -291,24 +291,23 @@ struct MemorySheet: View {
         }
         .formStyle(.grouped)
         .orbSheet("Memória de \(name)", subtitle: MemoryGroups.summary(memory.items), size: .large) {
-            HStack(spacing: 8) {
+            SheetFooterBar {
                 Button("Abrir pasta da memória", systemImage: "folder") {
                     NSWorkspace.shared.open(model.memory.directory(for: botID))
                 }
                 .buttonStyle(GhostStyle())
+                .labelStyle(FixedIconLabelStyle())
                 .help(Tip.memoryFolder)
+                .hangsOnLeadingEdge()
                 Text("Arquivos .md: dá para abrir no Obsidian.")
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.muted)
                     .lineLimit(1)
-                Spacer(minLength: 12)
+                Spacer(minLength: Spacing.m)
                 Button("Fechar") { dismiss() }
                     .buttonStyle(PrimaryPillStyle())
                     .keyboardShortcut(.defaultAction)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
-            .overlay(alignment: .top) { Divider().opacity(0.6) }
         }
         .overlay(alignment: .bottom) { MemoryUndoToast(undo: model.memoryUndo).padding(.bottom, 64) }
     }

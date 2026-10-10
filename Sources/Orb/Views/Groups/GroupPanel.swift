@@ -81,6 +81,8 @@ private struct GroupMembersTab: View {
                 .disabled(looks.count >= OrbGroup.memberLimits.upperBound || candidates.isEmpty)
                 .help(looks.count >= OrbGroup.memberLimits.upperBound ? "Um grupo tem até 8 Orbs" : "Põe mais um Orb neste grupo")
                 .padding(.top, 8)
+                // The "+" lines up with the avatars above (the rows' own 8 pt), not with the button's hover shape.
+                .padding(.leading, Spacing.s - Spacing.ghostInset)
             }
             .padding(.horizontal, 14)
             .padding(.bottom, 16)
@@ -115,6 +117,7 @@ private struct MemberRow: View {
                 Image(systemName: "star.fill")
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.warn)
+                    .frame(width: 26, height: 26) // as wide as the round buttons beside it, so the stars line up
                     .accessibilityLabel("Orquestrador")
             } else {
                 Button("Tornar orquestrador", systemImage: "star") {

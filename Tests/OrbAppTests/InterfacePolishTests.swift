@@ -84,6 +84,24 @@ import Testing
         #expect(SheetFooter.primaryShortcut(isDefault: false) == nil)
     }
 
+    @Test func theButtonsOfARowShareOneHeightPerControlSize() {
+        // Primary, secondary and ghost pills read the same measures, so none is taller than its neighbour; the small
+        // control size (the buttons inside cards) is the compact one.
+        #expect(PillMetrics.of(.regular).height == ControlHeight.regular)
+        #expect(PillMetrics.of(.large).height == ControlHeight.regular)
+        #expect(PillMetrics.of(.small).height == ControlHeight.compact)
+        #expect(PillMetrics.of(.mini).height == ControlHeight.compact)
+        #expect(ControlHeight.compact < ControlHeight.regular && ControlHeight.regular < ControlHeight.hero)
+    }
+
+    @Test func theSpacingScaleStepsUpAndTheSheetUsesItsEdge() {
+        let scale = [Spacing.hairline, Spacing.xs, Spacing.s, Spacing.m, Spacing.l, Spacing.xl, Spacing.xxl]
+        #expect(scale == scale.sorted())
+        #expect(Spacing.sheetEdge == Spacing.xl)
+        // A ghost button at the start of a row hangs exactly its own side padding outside it.
+        #expect(Spacing.ghostInset == 12)
+    }
+
     // MARK: Permissions chip
 
     @Test @MainActor func manageInThePermissionsChipOpensTheFolderTabOfThatOrb() {

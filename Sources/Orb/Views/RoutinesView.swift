@@ -37,8 +37,8 @@ struct RoutinesView: View {
                                        onTemplate: { newRoutine($0) })
                         .transition(.opacity)
                 } else {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 14, alignment: .top)],
-                              alignment: .leading, spacing: 14) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 340), spacing: Spacing.cardSpacing, alignment: .top)],
+                              alignment: .leading, spacing: Spacing.cardSpacing) {
                         ForEach($model.routines) { $routine in
                             if let bot = model.bot(routine.botID) {
                                 RoutineCard(routine: $routine, bot: bot, isRunning: model.isRoutineRunning(routine.id),
@@ -56,9 +56,7 @@ struct RoutinesView: View {
                 }
             }
             .motion(Motion.crossFade, value: model.routines.isEmpty)
-            .frame(maxWidth: 980)
-            .frame(maxWidth: .infinity)
-            .padding(24)
+            .pageColumn()
         }
         .background(Palette.canvas)
         .navigationTitle("Rotinas")
@@ -264,7 +262,8 @@ private struct RoutineCard: View {
             } else {
                 RunHistory(runs: routine.runs, onOpen: onOpenRun)
             }
-            HStack {
+            Spacer(minLength: 0)
+            HStack(spacing: Spacing.controlGap) {
                 Button("Editar", systemImage: "pencil", action: onEdit)
                     .help(Tip.editRoutine)
                 Button("Ver conversa", systemImage: "text.bubble", action: onOpen)
@@ -290,7 +289,9 @@ private struct RoutineCard: View {
             }
             .chipButton()
         }
-        .padding(16)
+        .padding(Spacing.cardPadding)
+        // The cards of one row are as tall as the tallest, with their buttons on the same line at the bottom.
+        .frame(maxHeight: .infinity, alignment: .top)
         .card(radius: 12)
         .opacity(routine.isEnabled ? 1 : 0.6)
         .animateChanges(of: routine.isEnabled)
@@ -476,10 +477,11 @@ private struct RoutineRunSheet: View {
     }
 
     private func footer(run: RoutineRun) -> some View {
-        HStack(spacing: 4) {
+        SheetFooterBar {
             Button("Copiar", systemImage: "doc.on.doc") { copy(run) }
                 .buttonStyle(GhostStyle())
                 .help(Tip.copyReport)
+                .hangsOnLeadingEdge()
             if let fileURL {
                 Button("Abrir arquivo", systemImage: "doc.text") { NSWorkspace.shared.open(fileURL) }
                     .buttonStyle(GhostStyle())
@@ -497,15 +499,12 @@ private struct RoutineRunSheet: View {
                 .help(Tip.runRoutineAgain)
                 .disabled(model.isRoutineRunning(routineID))
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: Spacing.s)
             Button("Fechar") { dismiss() }
                 .buttonStyle(PrimaryPillStyle())
                 .keyboardShortcut(.cancelAction)
         }
-        .labelStyle(.titleAndIcon)
-        .padding(.horizontal, 20)
-        .padding(.vertical, 14)
-        .overlay(alignment: .top) { Divider().opacity(0.6) }
+        .labelStyle(FixedIconLabelStyle())
     }
 
     private func copy(_ run: RoutineRun) {
@@ -599,15 +598,12 @@ private struct RoutineConversationSheet: View {
                   subtitle: live == nil ? "Conversa da rotina, só para ler"
                       : routine.map { model.needsYou($0.botID) } == true ? "Esperando sua resposta" : "Rodando agora",
                   size: .large) {
-            HStack {
+            SheetFooterBar {
                 Spacer()
                 Button("Fechar") { dismiss() }
                     .buttonStyle(PrimaryPillStyle())
                     .keyboardShortcut(.cancelAction)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
-            .overlay(alignment: .top) { Divider().opacity(0.6) }
         }
         .task(id: live == nil) {
             saved = await model.routineTranscript(routineID)
@@ -846,6 +842,24 @@ struct RoutineEditor: View {
 /// Screens of this file for `Orb --snapshot <mode> out.png` (see `Snapshot`).
 @MainActor
 enum RoutinesSnapshots {
+    /// Two routines of the first Orb (one with a good and a failed run) so the routine screens have something to show.
+    static func seed(_ model: AppModel) {
+        guard model.routines.isEmpty, let bot = model.bots.first else { return }
+        var morning = Routine(name: "Resumo da manhã", botID: bot.id,
+                              prompt: "Faça um resumo da minha manhã usando a agenda e o e-mail.", schedule: .daily(hour: 8, minute: 30))
+        morning.lastRun = Date.now.addingTimeInterval(-3600)
+        morning.lastResult = "3 reuniões hoje, 12 e-mails novos."
+        morning.runs = [
+            RoutineRun(date: Date.now.addingTimeInterval(-3600), finishedAt: Date.now.addingTimeInterval(-3500), succeeded: true,
+                       summary: "3 reuniões hoje, 12 e-mails novos.", report: "Hoje: 3 reuniões (10h, 14h, 16h).\n12 e-mails novos, 2 pedem resposta."),
+            RoutineRun(date: Date.now.addingTimeInterval(-90_000), finishedAt: Date.now.addingTimeInterval(-89_900), succeeded: false,
+                       summary: "O conector de agenda não respondeu.", report: nil),
+        ]
+        let weekly = Routine(name: "Revisar a semana", botID: bot.id, prompt: "Revise a minha semana.",
+                             schedule: .weekly(weekday: 6, hour: 17, minute: 0))
+        model.routines = [morning, weekly]
+    }
+
     static func view(_ screen: String, model: AppModel) -> AnyView? {
         switch screen {
         case "routine-editor":

@@ -29,9 +29,7 @@ struct ConnectorGalleryView: View {
                 }
                 .font(.system(size: 12))
             }
-            .padding(24)
-            .frame(maxWidth: 980)
-            .frame(maxWidth: .infinity)
+            .pageColumn()
         }
         .task { await model.refreshLocalStates() }
     }

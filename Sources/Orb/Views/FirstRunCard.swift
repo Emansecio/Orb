@@ -657,9 +657,11 @@ private struct FirstRunRow: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(Palette.accentText)
         } else if trailingLink == nil {
+            // One column for the right/down/up chevrons, so the rows line up whichever one they show.
             Image(systemName: trailingSymbol)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Palette.hint)
+                .frame(width: Spacing.iconColumn)
         }
     }
 }

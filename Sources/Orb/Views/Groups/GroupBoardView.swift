@@ -33,7 +33,7 @@ struct GroupBoardView: View {
         let agreements = MemoryGroups.make(memory.items, matching: query, kind: .preferencia, cache: folded).flatMap(\.items)
         let groups = MemoryGroups.make(memory.items.filter { $0.kind != .preferencia }, matching: query, cache: folded)
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: Spacing.xl) {
                 section("Objetivo") {
                     TextField("Para que o grupo existe", text: $objective, axis: .vertical)
                         .textFieldStyle(.plain)
@@ -72,19 +72,22 @@ struct GroupBoardView: View {
                             .font(.system(size: 12))
                             .foregroundStyle(Palette.muted)
                     }
-                    ForEach(groups) { group in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("\(group.title) · \(group.items.count)")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(Palette.faint)
-                            ForEach(group.items) { item in
-                                MemoryRow(item: item, lineLimit: 3) { forgetItem(item) }
+                    // The kinds of memory are told apart by the space between them, wider than the one inside a kind.
+                    VStack(alignment: .leading, spacing: Spacing.m) {
+                        ForEach(groups) { group in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("\(group.title) · \(group.items.count)")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(Palette.faint)
+                                ForEach(group.items) { item in
+                                    MemoryRow(item: item, lineLimit: 3) { forgetItem(item) }
+                                }
                             }
                         }
                     }
                 }
             }
-            .padding(16)
+            .padding(Spacing.l)
         }
         .overlay(alignment: .bottom) {
             if let forgotten {

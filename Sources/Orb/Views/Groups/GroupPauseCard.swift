@@ -35,17 +35,19 @@ struct GroupPauseCard: View {
                 Text("Usados: \(pause.turnsUsed) turnos · \(GroupBudgetText.thousands(pause.tokensUsed)) tokens")
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.muted)
-                HStack(spacing: 8) {
-                    Button("Continuar (+\(more) turnos)") { model.continueRun(pause.groupID) }
-                        .buttonStyle(PrimaryPillStyle())
+                ActionRow {
                     Button("Encerrar") { model.stopGroup(pause.groupID) }
                         .buttonStyle(GhostStyle())
+                        .hangsOnLeadingEdge()
+                } trailing: {
+                    Button("Continuar (+\(more) turnos)") { model.continueRun(pause.groupID) }
+                        .buttonStyle(PrimaryPillStyle())
                 }
-                .padding(.top, 4)
+                .padding(.top, Spacing.s)
             }
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(14)
+        .padding(Spacing.cardPadding)
         .frame(maxWidth: 680, alignment: .leading)
         .card(radius: 14)
         .accessibilityElement(children: .contain)

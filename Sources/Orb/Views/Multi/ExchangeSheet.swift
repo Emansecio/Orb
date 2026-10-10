@@ -56,8 +56,8 @@ struct ExchangeSheet: View {
                     }
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 16)
+            .padding(.horizontal, Spacing.sheetEdge)
+            .padding(.vertical, Spacing.l)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .orbSheet(title, subtitle: "Somente leitura", size: .medium) {
@@ -100,7 +100,7 @@ struct ExchangeSheet: View {
     }
 
     private var footer: some View {
-        HStack(spacing: 8) {
+        SheetFooterBar {
             Spacer(minLength: 0)
             if let answered = parties.last, onOpenWork != nil || work != nil {
                 Button("Ver o trabalho \(Self.ofThe(answered.name))") { if let onOpenWork { onOpenWork() } else { showsWork = true } }
@@ -168,15 +168,12 @@ struct SideWorkSheet: View {
         .frame(height: 400)
         .background(Palette.canvas)
         .orbSheet(bot?.name ?? "Orb", subtitle: live == nil ? "Trabalho do pedido, só para ler" : "Trabalhando agora", size: .large) {
-            HStack {
+            SheetFooterBar {
                 Spacer()
                 Button("Fechar") { dismiss() }
                     .buttonStyle(PrimaryPillStyle())
                     .keyboardShortcut(.cancelAction)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
-            .overlay(alignment: .top) { Divider().opacity(0.6) }
         }
         .task(id: isLive) {
             saved = await model.store.readSideConversationAsync(prefix: Store.pedidoPrefix, id: requestID, for: botID).value?.items ?? []

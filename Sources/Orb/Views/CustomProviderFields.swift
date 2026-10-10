@@ -230,7 +230,7 @@ private struct AllModelsSheet: View {
             .frame(minHeight: 260, idealHeight: 330, maxHeight: .infinity)
         }
         .orbSheet("Modelos do gateway", subtitle: "\(models.count) modelos · remova os que não usa", size: .small) {
-            HStack {
+            SheetFooterBar {
                 Spacer()
                 // Esc closes; Return does too, as the old "OK" did.
                 Button("Fechar") { dismiss() }
@@ -244,9 +244,6 @@ private struct AllModelsSheet: View {
                             .accessibilityHidden(true)
                     }
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
-            .overlay(alignment: .top) { Divider().opacity(0.6) }
         }
     }
 }

@@ -413,11 +413,13 @@ struct OrbProposalCard: View {
     // MARK: Buttons
 
     private var buttons: some View {
+        // The same row as an approval's: the quiet "Não criar" at the leading edge, the buttons at the trailing one, the
+        // primary one last.
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) { createButton; editButton; denyButton; Spacer(minLength: 0) }
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) { createButton; editButton; Spacer(minLength: 0) }
-                HStack(spacing: 8) { denyButton; Spacer(minLength: 0) }
+            ActionRow { denyButton.hangsOnLeadingEdge() } trailing: { editButton; createButton }
+            VStack(alignment: .trailing, spacing: Spacing.controlGap) {
+                ActionRow { denyButton.hangsOnLeadingEdge() } trailing: { EmptyView() }
+                ActionRow { EmptyView() } trailing: { editButton; createButton }
             }
         }
     }
@@ -433,7 +435,7 @@ struct OrbProposalCard: View {
             .font(.system(size: 13, weight: .medium))
             .foregroundStyle(Palette.onInk)
             .padding(.horizontal, 14)
-            .padding(.vertical, 7)
+            .frame(minHeight: ControlHeight.regular)
             .background(Palette.ink, in: .capsule)
             .contentShape(.capsule)
         }

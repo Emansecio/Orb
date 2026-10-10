@@ -388,15 +388,12 @@ struct ShortcutsSheet: View {
             .padding(.bottom, 12)
         }
         .orbSheet("Atalhos do teclado", subtitle: "Os comandos de Navegar também estão no menu Orbs e em Ir para… (⌘K).") {
-            HStack {
+            SheetFooterBar {
                 Spacer()
                 Button("Fechar") { model.showShortcuts = false }
                     .buttonStyle(PrimaryPillStyle())
                     .keyboardShortcut(.defaultAction)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
-            .overlay(alignment: .top) { Divider().opacity(0.6) }
         }
     }
 }
