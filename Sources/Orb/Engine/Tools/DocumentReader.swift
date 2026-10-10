@@ -112,11 +112,19 @@ enum DocumentReader {
         let supported = Set((try? request.supportedRecognitionLanguages()) ?? [])
         let languages = ["pt-BR", "en-US"].filter(supported.contains)
         if !languages.isEmpty { request.recognitionLanguages = languages }
-        do {
-            try VNImageRequestHandler(cgImage: image).perform([request])
-        } catch {
-            return output + "\nNão foi possível fazer OCR: \(error.localizedDescription)"
+        // Vision now and then refuses a request while others run (CRImageReaderError under load): try twice more, briefly.
+        var failure: (any Error)?
+        for attempt in 0..<3 {
+            if attempt > 0 { Thread.sleep(forTimeInterval: 0.25 * Double(attempt)) }
+            do {
+                try VNImageRequestHandler(cgImage: image).perform([request])
+                failure = nil
+                break
+            } catch {
+                failure = error
+            }
         }
+        if let failure { return output + "\nNão foi possível fazer OCR: \(failure.localizedDescription)" }
         let lines = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
         guard !lines.isEmpty else { return output + "\nNenhum texto reconhecido na imagem (OCR)." }
         output += "\nTexto reconhecido (OCR):\n" + lines.joined(separator: "\n")
