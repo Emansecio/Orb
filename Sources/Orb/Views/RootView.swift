@@ -45,6 +45,11 @@ struct RootView: View {
             // Opened from a kept memory on the welcome screen: the sheet starts from it. Opened to import: on that panel.
             NewBotSheet(kept: model.newBotStart.map { [$0] } ?? [], chosen: model.newBotStart, startsImporting: model.newBotImporting)
         }
+        // MARK: MultiOrb (WP6)
+        .sheet(isPresented: $model.showNewGroup, onDismiss: { model.newGroupStart = nil }) {
+            NewGroupSheet(startingWith: model.newGroupStart)
+        }
+        // MARK: end MultiOrb (WP6)
         .systemSheets()
         .alert("Atenção com seus dados", isPresented: Binding(
             get: { !model.dataNotices.isEmpty },
@@ -63,6 +68,10 @@ struct RootView: View {
 extension RootView {
     /// Keeps the selection pointing at something that exists (`WelcomeSelection`).
     fileprivate func fixSelection() {
+        // MARK: MultiOrb (WP6): a group that was deleted is no selection; the first Orb takes its place.
+        if case .group(let id)? = model.selection, !model.groups.contains(where: { $0.id == id }) {
+            model.selection = model.botIDs.first.map { .bot($0) }
+        }
         let fixed = WelcomeSelection.resolved(model.selection, botIDs: model.botIDs)
         if fixed != model.selection { model.selection = fixed }
     }
@@ -113,7 +122,7 @@ private struct DetailView: View {
         // The Orb's panel belongs to the Orb's page: it is here, not in the chat, so it closes with the page rather than
         // staying a fade-length behind it and vanishing. The user's choice (`showInspector`) is left as it was.
         .inspector(isPresented: Binding(
-            get: { model.showInspector && page == .orb && selectedBotID != nil },
+            get: { model.showInspector && page == .orb && (selectedBotID != nil || selectedGroupID != nil) },
             set: { if page == .orb { model.showInspector = $0 } }
         )) {
             ZStack {
@@ -121,10 +130,15 @@ private struct DetailView: View {
                     BotInspector(botID: id)
                         .id(id)
                         .transition(.opacity)
+                } else if let id = selectedGroupID {
+                    // MARK: MultiOrb (WP6): a group's panel in the same column
+                    GroupPanel(groupID: id)
+                        .id(id)
+                        .transition(.opacity)
                 }
             }
             // The two sides of one click (the chat and the panel) change at the same pace.
-            .motion(Motion.crossFade, value: selectedBotID)
+            .motion(Motion.crossFade, value: selectedBotID ?? selectedGroupID)
             .inspectorColumnWidth(min: 244, ideal: 300, max: 420)
         }
     }
@@ -133,6 +147,9 @@ private struct DetailView: View {
         if case .bot(let id)? = model.selection, model.botIDs.contains(id) { return id }
         return nil
     }
+
+    // MARK: MultiOrb (WP6)
+    private var selectedGroupID: UUID? { model.selectedGroupID }
 
     @ViewBuilder private var content: some View {
         switch model.selection {
@@ -148,8 +165,13 @@ private struct DetailView: View {
             ConnectorsView()
         case .skills:
             SkillsView()
-        case .group:
-            EmptyView() // MARK: MultiOrb (WP6): GroupChatView(groupID:)
+        case .group(let id):
+            // MARK: MultiOrb (WP6)
+            if model.groups.contains(where: { $0.id == id }) {
+                GroupChatView(groupID: id)
+                    .id(id)
+                    .transition(.opacity)
+            }
         case nil:
             // With Orbs the root view picks the first one at once; with none this is the welcome screen.
             if model.botIDs.isEmpty {

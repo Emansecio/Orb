@@ -146,7 +146,8 @@ private struct IdentityBlock: View {
     }
 }
 
-private struct MemorySearchField: View {
+/// The search line of a memory (an Orb's, or a group's board: the same field).
+struct MemorySearchField: View {
     @Binding var query: String
 
     var body: some View {

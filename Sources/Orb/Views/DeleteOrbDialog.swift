@@ -8,21 +8,25 @@ struct DeleteOrbSummary: Equatable {
     var routineCount: Int
     /// The Orb's own working folder as shown to the user ("~/Orbs/Atlas"); nil when it works in the home folder.
     var folder: String?
+    /// The groups it belongs to: it leaves them (MultiOrb).
+    var groupCount: Int
 
-    init(name: String, archivedCount: Int?, routineCount: Int, folder: String?) {
+    init(name: String, archivedCount: Int?, routineCount: Int, folder: String?, groupCount: Int = 0) {
         self.name = name
         self.archivedCount = archivedCount
         self.routineCount = routineCount
         self.folder = folder
+        self.groupCount = groupCount
     }
 
     @MainActor
-    init(bot: Bot, archivedCount: Int?, routineCount: Int, home: String = NSHomeDirectory()) {
+    init(bot: Bot, archivedCount: Int?, routineCount: Int, groupCount: Int = 0, home: String = NSHomeDirectory()) {
         let shown = bot.workingDirectory.isEmpty ? nil : OrbFolder.display(bot.workingURL, home: home)
-        self.init(name: bot.name, archivedCount: archivedCount, routineCount: routineCount, folder: shown == "~" ? nil : shown)
+        self.init(name: bot.name, archivedCount: archivedCount, routineCount: routineCount, folder: shown == "~" ? nil : shown,
+                  groupCount: groupCount)
     }
 
-    /// "Some: a conversa, as 12 conversas anteriores e as 2 rotinas."
+    /// "Some: a conversa, as 12 conversas anteriores, as 2 rotinas e sai de 2 grupos."
     var goes: String {
         var parts = ["a conversa atual"]
         switch archivedCount {
@@ -32,6 +36,8 @@ struct DeleteOrbSummary: Equatable {
         case let count?: parts.append("\(count) conversas anteriores")
         }
         if routineCount == 1 { parts.append("1 rotina") } else if routineCount > 1 { parts.append("\(routineCount) rotinas") }
+        // MARK: MultiOrb (WP6): it also leaves the groups it is in ("também sai de N grupos").
+        if groupCount == 1 { parts.append("sai de 1 grupo") } else if groupCount > 1 { parts.append("sai de \(groupCount) grupos") }
         return "Some: " + Self.list(parts) + "."
     }
 
@@ -107,7 +113,8 @@ struct DeleteOrbSheet: View {
 
     var body: some View {
         if let bot = model.bot(botID) {
-            let summary = DeleteOrbSummary(bot: bot, archivedCount: archivedCount, routineCount: model.routines(for: botID).count)
+            let summary = DeleteOrbSummary(bot: bot, archivedCount: archivedCount, routineCount: model.routines(for: botID).count,
+                                           groupCount: model.groups.filter { $0.memberIDs.contains(botID) }.count)
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 12) {
                     SummaryLine(.goes, summary.goes)

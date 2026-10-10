@@ -42,6 +42,14 @@ struct SidebarView: View {
                         .transition(.adapted(.arrive, reduceMotion: reduceMotion))
                 }
 
+                // MARK: MultiOrb (WP6): the groups, between the Orbs and the workspace; hidden while there is none.
+                if !model.groups.isEmpty {
+                    SidebarGroupsSection(selectionSpace: selectionSpace)
+                        .padding(.top, 16)
+                        .transition(.adapted(.arrive, reduceMotion: reduceMotion))
+                }
+                // MARK: end MultiOrb (WP6)
+
                 SectionTitle("Espaço de trabalho")
                     .padding(.top, 16)
                 SidebarRow(isSelected: model.selection == .routines, selectionSpace: selectionSpace, help: Tip.allRoutines) {
@@ -249,6 +257,12 @@ private struct SidebarBotRow: View {
             }
             Button(CommandName.openFolder, systemImage: "folder") { model.openFolder(of: botID) }
             Button("Personalizar…", systemImage: "paintpalette") { model.showLookEditor(of: botID) }
+            // MARK: MultiOrb (WP6)
+            Button("Criar grupo com…", systemImage: "person.3") {
+                model.newGroupStart = botID
+                model.showNewGroup = true
+            }
+            .disabled(model.botIDs.count < 2)
             Button("Ver todas as rotinas", systemImage: "clock") { model.selection = .routines }
             Divider()
             Button("Apagar \(live.look.name)…", systemImage: "trash", role: .destructive) { model.askToDelete(botID) }
