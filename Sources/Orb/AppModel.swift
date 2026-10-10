@@ -23,12 +23,21 @@ final class AppModel {
     // MARK: MultiOrb (WP0)
     /// The groups of Orbs (`normalizeGroups` keeps them true to `bots`).
     var groups: [OrbGroup] { didSet { scheduleStateSave() } }
-    /// Orbs asking each other for work (a shell that refuses everything until the runtime lands).
-    @ObservationIgnored var delegation: DelegationHub = DelegationHub()
+    /// Orbs asking each other for work.
+    @ObservationIgnored lazy var delegation: DelegationHub = DelegationHub(model: self)
     /// A group's thread and its live state, made when the group is first opened.
     @ObservationIgnored var groupSessions: [UUID: GroupSession] = [:]
     @ObservationIgnored var groupLives: [UUID: GroupLive] = [:]
     // MARK: end MultiOrb (WP0)
+    // MARK: MultiOrb (WP1)
+    /// Where Claude Code's tools server asks for `orbs` (and the creation assistant's `orb_draft`): see `OrbBridge`. It starts
+    /// listening with the first Claude Code turn.
+    @ObservationIgnored private(set) lazy var orbBridge = OrbBridge.Server(directory: store.directory.appending(path: "ponte")) {
+        [weak self] orb, tool, arguments, callID in
+        guard let self else { throw ToolError("O app está fechando.") }
+        return try await self.bridgeCall(tool: tool, orb: orb, arguments: arguments, callID: callID)
+    }
+    // MARK: end MultiOrb (WP1)
     /// Each Orb's running machinery (see `BotSession`): its conversation in memory, its turn, its streamed reply.
     /// Conversations: at launch only the selected Orb's is read (off the main thread, `beginLoading`); the others are
     /// read when they are needed (`BotSession.isUnloaded`): when you switch to the Orb, or something has to change
@@ -458,7 +467,7 @@ final class AppModel {
         // The write already cleared the session's "unsaved" mark; memory holds the only copy, so quitting writes it again.
         // A run's conversation already finished is not the session's (the chat is back): `unsavedRoutineConversations` has it.
         if let file = notice.file, let session = sessions.values.first(where: { store.isConversationFile(file, of: $0.id) }),
-           session.conversation != nil, session.routineID != nil || !file.lastPathComponent.hasPrefix("routine-") {
+           session.conversation != nil, session.routineID != nil || !Store.isSideConversationName(file.lastPathComponent) {
             session.isDirty = true
         }
         guard !didReportSaveFailure else { return } // once: a full disk would otherwise repeat on every save
@@ -490,6 +499,8 @@ final class AppModel {
         if stem.hasPrefix("routine-"), let id = UUID(uuidString: String(stem.dropFirst("routine-".count))) {
             return routines.first { $0.id == id }.map { "o histórico da rotina \($0.name)" } ?? "o histórico de uma rotina de \(owner.name)"
         }
+        if stem.hasPrefix(Store.pedidoPrefix + "-") { return "a conversa de um pedido de outro Orb a \(owner.name)" }
+        if stem.hasPrefix(Store.grupoPrefix + "-") { return "a conversa de \(owner.name) num grupo" }
         return UUID(uuidString: stem) == nil ? nil : "uma conversa antiga de \(owner.name)"
     }
 
@@ -1054,6 +1065,7 @@ final class AppModel {
         let ownRoutines = routines.filter { $0.botID == botID }.map(\.id)
         queuedRoutines.removeAll { ownRoutines.contains($0) }
         routines.removeAll { $0.botID == botID }
+        delegation.orbDeleted(botID) // before the stop: whoever waited for this Orb is told, and what it asked is dropped
         stop(botID)
         let jobs = jobs
         Task { await jobs.forget(botID: botID) }
@@ -1119,6 +1131,7 @@ final class AppModel {
         modelRefresh = nil
         queuedRoutines = []
         routines = [] // the end of a running routine finds nothing to record
+        delegation.cancelAll(by: .switchOff, includingGroups: true) // no request between Orbs outlives the reset
         var ending: [Task<Void, Never>] = loop.map { [$0] } ?? []
         if let reads = keyReads?.task { ending.append(Task { _ = await reads.value }) }
         ending += sessions.values.compactMap(\.turnTask)
@@ -1577,9 +1590,12 @@ final class AppModel {
     /// routines and quick ask must not wipe what you are typing for that Orb. `bubble` is the id of the message's row in
     /// the chat (an edited message keeps its row); `endsEdit: false` is for the send of the edit itself, which any other
     /// turn that starts while a message is being edited ends (see below).
+    /// `origin`: where the text comes from. A request from another Orb or the answers to the Orb's own requests (`SendOrigin`)
+    /// enter the conversation as `.orbMessage` lines, not as your bubble; they read no memory request, expand no skill, and
+    /// the turn carries the grant for `orbs` (see `DelegationHub`).
     @discardableResult
     func send(_ text: String, attachments: [URL] = [], images pictures: [ImageAttachment] = [], to botID: UUID,
-              fromUser: Bool = false, bubble: UUID = UUID(), endsEdit: Bool = true) -> Bool {
+              fromUser: Bool = false, bubble: UUID = UUID(), endsEdit: Bool = true, origin: SendOrigin = .user) -> Bool {
         let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let session = session(botID)
         // A routine's prompt goes to its own conversation (the chat is parked), so a chat being swapped is no obstacle to it.
@@ -1620,7 +1636,14 @@ final class AppModel {
         publishSkills(for: botID)
         // Full paths: the bubble shows thumbnails of the pictures (a name alone, as older conversations have, still renders).
         let itemsBeforeMessage = session.conversation?.items.count ?? 0
-        append(.user(text: typed, attachments: attachments.map(\.path) + pictures.map(\.path)), to: botID, id: bubble)
+        if origin.isUser {
+            append(.user(text: typed, attachments: attachments.map(\.path) + pictures.map(\.path)), to: botID, id: bubble)
+        } else {
+            // Another Orb's words are never your bubble: lines of their own (the first takes the id the model's message points to).
+            for (index, item) in origin.items.enumerated() {
+                append(.orbMessage(item), to: botID, id: index == 0 ? bubble : nil)
+            }
+        }
         if fromUser { setDraft("", for: botID) }
         setStatus("Pensando", of: botID)
         session.resetWork()
@@ -1628,16 +1651,22 @@ final class AppModel {
         session.clearBeats() // the last turn's joy or error does not hide this one
         live(botID).poked()
         if fromUser { live(botID).scrolled() } // a routine or a quick ask must not drag a chat you are reading to its end
-        session.flash(\.isListening, seconds: 1.4)
+        if origin.isUser { session.flash(\.isListening, seconds: 1.4) }
 
-        let intent = session.routineID == nil ? MemoryIntent.detect(typed) : nil // a routine's prompt is not a request to remember
+        // A routine's prompt, and the words of another Orb, are not a request to remember.
+        let intent = session.routineID == nil && origin.isUser ? MemoryIntent.detect(typed) : nil
         session.memoryRequest = intent.map { ($0, max(0, (session.conversation?.items.count ?? 1) - 1)) }
         // Your request is the approval: this turn saves to memory without asking (the Orb's saved settings don't change).
         let rememberTool = ref.provider == .claudeCode ? ClaudeCodeTools.memoryPrefix + "remember" : "remember"
-        let turnGrants = intent == nil ? [] : [PermissionRule(family: .memory)]
+        var turnGrants = intent == nil ? [] : [PermissionRule(family: .memory)]
+        // MARK: MultiOrb (WP1)
+        // Asking and telling other Orbs needs no card per message (a mode that reads only still refuses it): the turn grants it.
+        let multi = multiOrbOffering(for: botID)
+        if multi.orbs { turnGrants.append(PermissionRule(family: .delegation)) }
+        // MARK: end MultiOrb (WP1)
 
         var prompt = typed.isEmpty && pictures.isEmpty ? Self.attachmentsOnlyPrompt : typed
-        if let expansion = SystemPrompt.expandSkill(in: typed, skills: skills(for: botID)) {
+        if origin.isUser, let expansion = SystemPrompt.expandSkill(in: typed, skills: skills(for: botID)) {
             prompt = expansion.prompt
             if let index = skills.firstIndex(where: { $0.id == expansion.skill.id }) { skills[index].uses += 1 }
         }
@@ -1652,7 +1681,8 @@ final class AppModel {
             prompt += MemoryIntent.instruction(tool: rememberTool)
         }
         if ref.provider == .claudeCode {
-            runClaudeCode(bot, model: ref.model, prompt: prompt, images: pictures, message: typed, bubble: bubble, turnGrants: turnGrants)
+            runClaudeCode(bot, model: ref.model, prompt: prompt, images: pictures, message: typed, bubble: bubble, turnGrants: turnGrants,
+                          multi: multi)
             return true
         }
         let skills = self.skills(for: botID)
@@ -1669,13 +1699,20 @@ final class AppModel {
         let chunks = session.conversation?.chunks(inHistory: history) ?? []
         if let report = prepared.compaction { session.announce(report, memoryUpTo: itemsBeforeMessage) }
         let bank = memory.bank(for: botID)
-        let context = ToolContext(workingDirectory: bot.workingURL, memory: bank, botID: botID, jobs: jobs,
+        var context = ToolContext(workingDirectory: bot.workingURL, memory: bank, botID: botID, jobs: jobs,
                                   schedule: scheduleHandler(for: botID), imageStore: images, acceptsImages: sees != false,
                                   outputsDirectory: outputsDirectory,
                                   canSaveFiles: bot.capabilities.contains(.terminal),
                                   computerUseAllowed: bot.capabilities.contains(.computerUse))
         let userTurns = session.userTurnCount()
-        let maxSteps = session.routineID != nil ? AgentEngine.routineMaxSteps : AgentEngine.defaultMaxSteps
+        // MARK: MultiOrb (WP1)
+        if multi.orbs { context.orbs = delegationHandler(for: botID) }
+        context.sideRun = session.routineID.flatMap { id in session.sideKind.map { SideRunInfo(kind: $0, id: id, chain: session.chain) } }
+        let teammates = multi.orbs ? orbsSection(for: bot, claudeCode: false) : ""
+        let maxSteps = session.sideKind == .delegation || session.sideKind == .group ? DelegationLimits.sideRunMaxSteps
+            : session.routineID != nil ? AgentEngine.routineMaxSteps : AgentEngine.defaultMaxSteps
+        let baseContext = context
+        // MARK: end MultiOrb (WP1)
         let lastWorkspaceHash = session.conversation?.workspaceHash
         let sessionID = session.gatewaySessionID()
         let lastWorkspace = session.conversation?.workspaceSeen
@@ -1706,10 +1743,11 @@ final class AppModel {
             let browserStatus = bot.capabilities.contains(.browser) && bot.browserEngine.drivesABrowser
                 ? await browserHub.status(for: bot.browserEngine) : nil
             let browserAvailability = BrowserAvailability(capabilities: bot.capabilities, engine: bot.browserEngine, status: browserStatus)
-            var context = context
+            var context = baseContext
             context.browser = BrowserAccess(hub: browserHub, engine: browserAvailability == .browser ? bot.browserEngine : .simple,
                                             searchProvider: bot.searchProvider, searchKeys: SearchKeys(vault: secretVault))
-            var tools = ToolBox.offered(for: bot.capabilities, accessibilityGranted: accessibilityGranted, browser: browserAvailability)
+            var tools = ToolBox.offered(for: bot.capabilities, accessibilityGranted: accessibilityGranted, browser: browserAvailability,
+                                        multi: multi)
             // The connectors' own tools do not travel with the request: the model lists and calls them through two fixed ones.
             if bot.capabilities.contains(.connectors), !allowedConnectors.isEmpty {
                 await connectorSync?.value // one added a moment ago is known to `mcp` before the model may name it
@@ -1722,6 +1760,7 @@ final class AppModel {
             var system = accessibilityGranted ? built.system : built.system + "\n\n" + ToolBox.accessibilityUnavailableNote
             let browserSection = BrowserPrompt.section(bot: bot, availability: browserAvailability, status: browserStatus)
             if !browserSection.isEmpty { system += "\n\n" + browserSection }
+            if !teammates.isEmpty { system += "\n\n" + teammates }
             let request = TurnRequest(bot: bot, model: ref.model, system: system, history: history,
                                       prompt: TurnPreface.prepend(built.preface, to: prompt),
                                       client: client, tools: tools, context: context, budget: budget, ledger: ledger,
@@ -1804,7 +1843,8 @@ final class AppModel {
     }
 
     /// A turn run by the user's Claude Code, continuing the conversation's Claude Code session.
-    private func runClaudeCode(_ bot: Bot, model: String, prompt: String, images pictures: [ImageAttachment], message: String, bubble: UUID, turnGrants: [PermissionRule]) {
+    private func runClaudeCode(_ bot: Bot, model: String, prompt: String, images pictures: [ImageAttachment], message: String, bubble: UUID, turnGrants: [PermissionRule],
+                               multi: MultiOrbOffering) {
         let botID = bot.id
         let session = session(botID)
         let conversation = session.conversation ?? Conversation()
@@ -1823,9 +1863,15 @@ final class AppModel {
         let accessibility = usesMac ? accessibilityProbe() : nil
         let connectors = connectorServers(for: bot)
         scheduleMailbox.start()
+        // MARK: MultiOrb (WP1)
+        if multi.orbs { orbBridge.start() }
+        let bridge = multi.orbs ? orbBridge.directory : nil
+        let teammates = multi.orbs ? orbsSection(for: bot, claudeCode: true) : ""
+        // MARK: end MultiOrb (WP1)
         let servers = [OrbToolsMCPServer.config(directory: bank.directory, mac: usesMac, files: bot.capabilities.contains(.terminal),
                                                 folder: bot.workingURL, accessibilityGranted: accessibility,
-                                                scheduleMailbox: scheduleMailbox.directory, orb: botID)]
+                                                scheduleMailbox: scheduleMailbox.directory, orb: botID,
+                                                bridge: bridge, orbs: multi.orbs)]
             + connectors
         let connectorIDs = Set(connectors.map(\.id))
         let cliNames = ClaudeCodeTurn.mcpNames(servers) // what the CLI will call each server
@@ -1872,7 +1918,8 @@ final class AppModel {
                                                       folder: bot.workingURL, accessibilityGranted: accessibility,
                                                       scheduleMailbox: scheduleMailbox.directory, orb: botID, browser: browserAvailability,
                                                       engine: bot.browserEngine, searchProvider: bot.searchProvider,
-                                                      browserProfiles: browserHub.profilesDirectory, tinyFishKey: tinyFishKey)
+                                                      browserProfiles: browserHub.profilesDirectory, tinyFishKey: tinyFishKey,
+                                                      bridge: bridge, orbs: multi.orbs)
             // The CLI cannot renew a login in the middle of a turn: it gets a token with time left.
             let (servers, ended) = await connectorAuth.bearers(for: toolServers)
             // A login that could not be renewed is told to the cards now, not only when an Orb with the native engine meets it.
@@ -1882,8 +1929,9 @@ final class AppModel {
             let annotations = await connectorAnnotations(for: connectorIDs, cliNames: cliNames)
             renewOldCatalogs(of: connectorIDs)
             guard session.isCurrent(turn) else { return }
-            let system = ClaudeCodePrompt.withBrowserNote(ClaudeCodePrompt.withAccessibilityNote(built.system, accessibilityGranted: accessibility),
+            var system = ClaudeCodePrompt.withBrowserNote(ClaudeCodePrompt.withAccessibilityNote(built.system, accessibilityGranted: accessibility),
                                                           bot: bot, availability: browserAvailability, status: browserStatus)
+            if !teammates.isEmpty { system += "\n\n" + teammates }
             var claudeTurn = ClaudeCodeTurn(bot: bot, executable: installation.executable, model: model,
                                             system: system,
                                             prompt: prompt, images: pictures, requestItem: bubble, context: context, sessionID: sessionID, connectors: servers,
@@ -1934,10 +1982,16 @@ final class AppModel {
     /// Quitting: stops every running turn, so nothing is left running unwatched (the app no longer answers permission
     /// requests) and the transcript says it was interrupted.
     func stopTurnsForQuit() {
+        delegation.isShuttingDown = true // the turns that end now answer nobody and start nothing
         for id in sessions.keys where sessions[id]?.turnTask != nil { stop(id, startsQueuedRoutines: false) }
     }
 
-    func stop(_ botID: UUID, startsQueuedRoutines: Bool = true) { sessions[botID]?.stop(startsQueuedRoutines: startsQueuedRoutines) }
+    /// Stops the Orb's running turn. Stopping is for the whole conversation between Orbs it takes part in: whatever the Orb asked
+    /// and is waiting for, and whatever it was asked and is working on, stops too (even when its own turn is over and it only waits).
+    func stop(_ botID: UUID, startsQueuedRoutines: Bool = true) {
+        for chain in delegation.chains(involving: botID) { delegation.cancelChain(chain, by: .user) }
+        sessions[botID]?.stop(startsQueuedRoutines: startsQueuedRoutines)
+    }
 
     func apply(_ event: TurnEvent, to botID: UUID) { session(botID).apply(event) } // internal for tests
 
@@ -2003,7 +2057,7 @@ final class AppModel {
     /// The chat change is over: a routine that came due meanwhile runs now, over the chat that stayed (see `beginRoutine`).
     private func endChatChange(_ botID: UUID) {
         changingChat.remove(botID)
-        startNextQueuedRoutine(for: botID)
+        startNextQueuedWork(for: botID)
     }
 
     /// Reads the list of Orbs, then each one's session: a view that asks is told when any Orb starts or ends a run,
@@ -2092,6 +2146,24 @@ final class AppModel {
         routines[index].lastResult = reason
         recordRun(RoutineRun(date: started, finishedAt: started, succeeded: false, summary: reason), routineID: routine.id)
     }
+
+    // MARK: MultiOrb (WP1)
+
+    /// Whether nothing holds the Orb: no turn, no routine or request being started, no chat being swapped.
+    func canTakeSideWork(_ botID: UUID) -> Bool {
+        !isResetting && bot(botID) != nil && sessions[botID]?.turnTask == nil && startingRoutines[botID] == nil
+            && !changingChat.contains(botID) && !delegation.isStarting(botID)
+    }
+
+    /// The Orb became free: what waits for it runs now, in this order: the answers to what it asked (they wake it), a request from
+    /// another Orb, a routine. One at a time; each one's end comes back here.
+    func startNextQueuedWork(for botID: UUID) {
+        guard canTakeSideWork(botID) else { return }
+        if delegation.deliverInbox(for: botID) { return }
+        if delegation.startNextRequest(for: botID) { return }
+        startNextQueuedRoutine(for: botID)
+    }
+    // MARK: end MultiOrb (WP1)
 
     /// Runs the routines that were waiting for this Orb, one at a time, as it becomes free.
     func startNextQueuedRoutine(for botID: UUID) {
@@ -2211,6 +2283,7 @@ final class AppModel {
     /// the wake notification winning that race: it also holds back while the Mac is known to be asleep, and when the
     /// time since its last pass shows that it slept.
     func runDueRoutines(now: Date = .now) {
+        delegation.sweep(now: now)
         if let last = lastRoutinePass, now.timeIntervalSince(last) > Self.sleepGap { wokeAt = max(wokeAt ?? now, now) }
         lastRoutinePass = now
         if let asleepSince {

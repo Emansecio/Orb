@@ -139,9 +139,16 @@ extension BotSession {
         let conversation = withLiveText(current)
         isDirty = false
         guard let routineID else { return model.store.save(conversation, for: id) }
-        // A running routine's conversation goes to its own file, never over the chat's.
-        if model.routines.contains(where: { $0.id == routineID }) {
-            model.store.saveRoutineConversation(conversation, routine: routineID, for: id)
+        // A running side run's conversation goes to its own file, never over the chat's.
+        switch sideKind ?? .routine {
+        case .routine:
+            if model.routines.contains(where: { $0.id == routineID }) {
+                model.store.saveRoutineConversation(conversation, routine: routineID, for: id)
+            }
+        case .delegation:
+            model.store.saveSideConversation(conversation, prefix: Store.pedidoPrefix, id: routineID, for: id)
+        case .group:
+            model.store.saveSideConversation(conversation, prefix: Store.grupoPrefix, id: routineID, for: id)
         }
     }
 
@@ -183,7 +190,9 @@ extension BotSession {
     /// The turn machinery works on `conversation`: the routine's own goes there, the chat waits. The chat is written
     /// first (its pending save would otherwise write the routine's conversation in its place): while the routine runs,
     /// only the routine's file changes.
-    func startRoutineRun(_ routineID: UUID, conversation own: Conversation, at started: Date) {
+    /// The same for a request from another Orb or a turn in a group (`kind`, `chain`, `serving`: see `sideKind`).
+    func startRoutineRun(_ routineID: UUID, conversation own: Conversation, at started: Date, kind: SideRunKind? = nil,
+                         chain: ChainContext? = nil, serving: UUID? = nil) {
         cancelChunkNote() // the note being written is about the chat that is parked now
         model?.cancelEditing(id) // the edit belongs to the chat that is parked now
         let chat = conversation ?? Conversation()
@@ -193,8 +202,21 @@ extension BotSession {
         if !chat.items.isEmpty { model?.store.save(chat, for: id) }
         parkedChat = chat
         conversation = own
+        sideKind = kind
+        self.chain = chain
+        servingRequest = serving
         self.routineID = routineID
         routineStart = started
+    }
+
+    /// The side run is over (or never began): nothing of it is left in the session, and the chat comes back.
+    func endSideRun() {
+        routineID = nil
+        routineStart = nil
+        sideKind = nil
+        chain = nil
+        servingRequest = nil
+        unparkChat()
     }
 
     /// The chat comes back from where a routine's run parked it.
