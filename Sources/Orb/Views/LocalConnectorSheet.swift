@@ -29,7 +29,8 @@ struct LocalConnectorSheet: View {
 
     var body: some View {
         content
-            .orbSheet(installed == nil ? "Conectar \(kind.title)" : kind.title, subtitle: kind.summary, size: .medium) { footer }
+            .orbSheet(installed == nil ? "Conectar \(kind.title)" : kind.title, subtitle: kind.summary, size: .medium,
+                      icon: ConnectorGallery.services.first { $0.localKind == kind }?.mark.ifBranded) { footer }
             .onAppear(perform: load)
             .animation(reduceMotion ? nil : Motion.content, value: phase)
             .onChange(of: phase) { announce(phase) }

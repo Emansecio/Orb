@@ -60,12 +60,20 @@ struct ConnectorGalleryView: View {
     }
 }
 
-/// A brand's colour with a symbol or a letter: the icon of a service (nothing downloaded, no logos).
+/// The icon of a service: the brand's logo when `BrandMarks` has it, else a symbol or a letter on the brand's colour.
 struct ServiceTile: View {
     let mark: ServiceMark
     var size: CGFloat = 36
 
     var body: some View {
+        if let logo = mark.logo, let glyph = BrandMarks.glyph(logo.slug) {
+            BrandTile(logo: logo, glyph: glyph, size: size)
+        } else {
+            fallback
+        }
+    }
+
+    private var fallback: some View {
         Group {
             if let symbol = mark.symbol {
                 Image(systemName: symbol).font(.system(size: size * 0.44, weight: .semibold))
@@ -77,6 +85,59 @@ struct ServiceTile: View {
         .frame(width: size, height: size)
         .background(Color(hex: mark.color), in: .rect(cornerRadius: size * 0.28))
         .accessibilityHidden(true)
+    }
+}
+
+/// A brand mark on a rounded tile: in the brand's colour on the dark surface, or white (on the dark surface for a
+/// near-black brand, on a tile of the brand's colour for a dark one). The name sits beside it, so it is hidden from
+/// VoiceOver.
+struct BrandTile: View {
+    let logo: BrandMark
+    let glyph: BrandGlyph
+    var size: CGFloat = 36
+
+    /// The share of the tile the mark's longer side takes.
+    private static let fill: CGFloat = 0.5
+
+    var body: some View {
+        let treatment = logo.treatment
+        let corner = size * 0.28
+        BrandShape(glyph: glyph, fill: Self.fill)
+            .fill(treatment == .brandOnDark ? Color(hex: logo.hex) : Palette.ink)
+            .frame(width: size, height: size)
+            .background(treatment == .whiteOnBrand ? Color(hex: logo.hex) : Palette.raised, in: .rect(cornerRadius: corner))
+            .overlay { RoundedRectangle(cornerRadius: corner).strokeBorder(Palette.line, lineWidth: treatment == .whiteOnBrand ? 0 : 1) }
+            .accessibilityHidden(true)
+    }
+}
+
+/// A brand mark centred in its rect, its longer side taking `fill` of the shorter side of the rect.
+struct BrandShape: Shape {
+    let glyph: BrandGlyph
+    var fill: CGFloat = 0.5
+
+    func path(in rect: CGRect) -> Path {
+        let box = glyph.bounds
+        guard box.width > 0, box.height > 0 else { return Path() }
+        let scale = min(rect.width, rect.height) * fill / max(box.width, box.height)
+        let transform = CGAffineTransform(translationX: -box.midX, y: -box.midY)
+            .concatenating(CGAffineTransform(scaleX: scale, y: scale))
+            .concatenating(CGAffineTransform(translationX: rect.midX, y: rect.midY))
+        return glyph.path.applying(transform)
+    }
+}
+
+/// The icon of an installed connector: its service's logo (or tile) when the gallery knows it as a brand, else the
+/// generic symbol for where it runs.
+struct ConnectorIcon: View {
+    let connector: MCPServerConfig
+
+    var body: some View {
+        if let mark = ConnectorGallery.service(for: connector)?.mark.ifBranded {
+            ServiceTile(mark: mark)
+        } else {
+            CatalogIcon(symbol: connector.local != nil ? "desktopcomputer" : connector.isRemote ? "cloud" : "puzzlepiece.extension")
+        }
     }
 }
 

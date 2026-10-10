@@ -218,7 +218,7 @@ private struct ConnectorCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 12) {
-                CatalogIcon(symbol: connector.local != nil ? "desktopcomputer" : connector.isRemote ? "cloud" : "puzzlepiece.extension")
+                ConnectorIcon(connector: connector)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(connector.name)
                         .font(.system(size: 14, weight: .semibold))
@@ -570,7 +570,8 @@ struct ConnectorToolsSheet: View {
                 catalog = await model.mcp.catalog(connector.id)
                 didLoad = true
             }
-            .orbSheet("Ferramentas de \(connector.name)", subtitle: subtitle, size: .medium) {
+            .orbSheet("Ferramentas de \(connector.name)", subtitle: subtitle, size: .medium,
+                      icon: ConnectorGallery.service(for: connector)?.mark.ifBranded) {
                 SheetFooter(cancel: { dismiss() }, primaryTitle: "Fechar", showsCancel: false, primary: { dismiss() })
             }
     }
@@ -868,7 +869,8 @@ struct ConnectorEditor: View {
     var body: some View {
         content
             // A guide makes the form longer: the key it leads to should not be hidden under the fold.
-            .orbSheet(title, subtitle: subtitle, size: .medium, maxHeight: draft.guide == nil ? SheetSize.maxHeight : 700) { footer }
+            .orbSheet(title, subtitle: subtitle, size: .medium, maxHeight: draft.guide == nil ? SheetSize.maxHeight : 700,
+                      icon: ConnectorGallery.service(for: draft.config)?.mark.ifBranded) { footer }
             .onAppear(perform: load)
             .onDisappear { signInTask?.cancel() }
             .motion(Motion.content, value: phase)

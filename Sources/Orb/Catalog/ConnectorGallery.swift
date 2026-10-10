@@ -1,12 +1,23 @@
 import Foundation
 
-/// A service in the gallery of the Conectores page: a card with a name, a line about it and one button. The icon is a SF
-/// Symbol or a letter on the brand's colour (no logo is downloaded or bundled).
+/// A service in the gallery of the Conectores page: a card with a name, a line about it and one button. The icon is the
+/// brand's logo when there is one (`BrandMarks`, embedded in the source: nothing is downloaded), else a SF Symbol or a
+/// letter on the brand's colour.
 struct ServiceMark: Sendable, Equatable {
     var symbol: String?
     var monogram: String
     /// The brand's colour, as 0xRRGGBB.
     var color: UInt32
+    /// The brand's key in `BrandMarks` (its Simple Icons slug); nil for Apple's apps and the generic tools, which keep
+    /// their symbol. A key `BrandMarks` does not hold (`BrandMarks.withoutLogo`) keeps the symbol or letter as well.
+    var brand: String?
+
+    /// The logo to draw, when the brand has one.
+    var logo: BrandMark? { brand.flatMap(BrandMarks.mark) }
+
+    /// Itself when it stands for a brand: where the generic symbol of a connector is better than a tile (a sheet's header,
+    /// the installed list) only brands get one.
+    var ifBranded: ServiceMark? { brand == nil ? nil : self }
 }
 
 struct ConnectorService: Identifiable, Sendable {
@@ -50,24 +61,24 @@ enum ConnectorGallery {
     /// The gallery, in the order the page shows it: the services people ask for first.
     static let services: [ConnectorService] = [
         ConnectorService(id: "gmail", name: "Gmail", summary: LocalConnectorKind.gmail.summary,
-                         mark: ServiceMark(symbol: "envelope.fill", monogram: "G", color: 0xEA4335), source: .local(.gmail), how: "Pelo Mac"),
+                         mark: ServiceMark(symbol: "envelope.fill", monogram: "G", color: 0xEA4335, brand: "gmail"), source: .local(.gmail), how: "Pelo Mac"),
         ConnectorService(id: "agenda", name: "Google Agenda", summary: LocalConnectorKind.agenda.summary,
-                         mark: ServiceMark(symbol: "calendar", monogram: "A", color: 0x4285F4), source: .local(.agenda), how: "Pelo Mac"),
+                         mark: ServiceMark(symbol: "calendar", monogram: "A", color: 0x4285F4, brand: "googlecalendar"), source: .local(.agenda), how: "Pelo Mac"),
         ConnectorService(id: "slack", name: "Slack", summary: "Buscar e ler mensagens e canais e, se você liberar, enviar. Servidor oficial do Slack.",
-                         mark: ServiceMark(symbol: "number", monogram: "S", color: 0x611F69), source: .template("slack-oficial"), how: "Login com app seu"),
+                         mark: ServiceMark(symbol: "number", monogram: "S", color: 0x611F69, brand: "slack"), source: .template("slack-oficial"), how: "Login com app seu"),
         ConnectorService(id: "notion", name: "Notion", summary: "Buscar e editar páginas e bancos de dados. Você entra com a sua conta.",
-                         mark: ServiceMark(symbol: nil, monogram: "N", color: 0x2F3437), source: .template("notion-oficial"), how: "Login com a conta"),
+                         mark: ServiceMark(symbol: nil, monogram: "N", color: 0x2F3437, brand: "notion"), source: .template("notion-oficial"), how: "Login com a conta"),
         ConnectorService(id: "github", name: "GitHub", summary: "Ler repositórios, issues e pull requests do GitHub.",
-                         mark: ServiceMark(symbol: "chevron.left.forwardslash.chevron.right", monogram: "G", color: 0x30363D),
+                         mark: ServiceMark(symbol: "chevron.left.forwardslash.chevron.right", monogram: "G", color: 0x30363D, brand: "github"),
                          source: .template("github"), how: "Chave de acesso"),
         ConnectorService(id: "supabase", name: "Supabase", summary: "Consultar os projetos e as tabelas do seu Supabase, em leitura.",
-                         mark: ServiceMark(symbol: "bolt.fill", monogram: "S", color: 0x1E9E6A), source: .template("supabase"), how: "Chave de acesso"),
+                         mark: ServiceMark(symbol: "bolt.fill", monogram: "S", color: 0x1E9E6A, brand: "supabase"), source: .template("supabase"), how: "Chave de acesso"),
         ConnectorService(id: "linear", name: "Linear", summary: "Ver e atualizar issues e projetos. Você entra com a sua conta.",
-                         mark: ServiceMark(symbol: nil, monogram: "L", color: 0x5E6AD2), source: .template("linear"), how: "Login com a conta"),
+                         mark: ServiceMark(symbol: nil, monogram: "L", color: 0x5E6AD2, brand: "linear"), source: .template("linear"), how: "Login com a conta"),
         ConnectorService(id: "atlassian", name: "Atlassian", summary: "Buscar e editar issues do Jira e páginas do Confluence. Você entra com a sua conta.",
-                         mark: ServiceMark(symbol: nil, monogram: "A", color: 0x0052CC), source: .template("atlassian"), how: "Login com a conta"),
+                         mark: ServiceMark(symbol: nil, monogram: "A", color: 0x0052CC, brand: "atlassian"), source: .template("atlassian"), how: "Login com a conta"),
         ConnectorService(id: "sentry", name: "Sentry", summary: "Ver erros, issues e projetos do Sentry. Você entra com a sua conta.",
-                         mark: ServiceMark(symbol: nil, monogram: "S", color: 0x362D59), source: .template("sentry"), how: "Login com a conta"),
+                         mark: ServiceMark(symbol: nil, monogram: "S", color: 0x362D59, brand: "sentry"), source: .template("sentry"), how: "Login com a conta"),
         ConnectorService(id: "lembretes", name: "Lembretes", summary: LocalConnectorKind.lembretes.summary,
                          mark: ServiceMark(symbol: "checklist", monogram: "L", color: 0xFF9500), source: .local(.lembretes), how: "Pelo Mac"),
         ConnectorService(id: "arquivos", name: "Arquivos", summary: "Ler e organizar arquivos de uma pasta do Mac. Você escolhe qual pasta fica liberada.",
@@ -88,6 +99,19 @@ enum ConnectorGallery {
         case .soon: nil
         }
     }
+
+    /// The gallery card an installed connector stands for, if any: a connector of this Mac by its kind, a ready-made server
+    /// by the template it came from (the retired Notion and Slack models stand for today's cards), whatever it was renamed
+    /// to. A custom or registry connector has none.
+    static func service(for connector: MCPServerConfig) -> ConnectorService? {
+        if let local = connector.local { return services.first { $0.localKind?.rawValue == local } }
+        guard let template = ConnectorTemplate.matching(connector)?.id else { return nil }
+        let id = retiredTemplates[template] ?? template
+        return services.first { $0.source == .template(id) }
+    }
+
+    /// Models the gallery no longer offers (`ConnectorTemplate.retired`) and the template of the card that replaced each.
+    private static let retiredTemplates = ["notion": "notion-oficial", "slack": "slack-oficial"]
 
     /// What the card says. A failed connection and a local connector that lacks a permission or an account both ask for
     /// attention; one that is only closed (Mail not open) does not.

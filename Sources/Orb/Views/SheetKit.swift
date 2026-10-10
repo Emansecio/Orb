@@ -21,10 +21,11 @@ enum SheetSize {
 extension View {
     /// A sheet with a title, a one-line explanation under it and the app's background; `footer` sits under the
     /// content (usually a `SheetFooter`).
+    /// `icon` puts a service's tile before the title (the connector sheets).
     func orbSheet<Footer: View>(_ title: String, subtitle: String? = nil, size: SheetSize = .medium,
-                                maxHeight: CGFloat = SheetSize.maxHeight,
+                                maxHeight: CGFloat = SheetSize.maxHeight, icon: ServiceMark? = nil,
                                 @ViewBuilder footer: () -> Footer) -> some View {
-        modifier(OrbSheetFrame(title: title, subtitle: subtitle, size: size, maxHeight: maxHeight, footer: footer()))
+        modifier(OrbSheetFrame(title: title, subtitle: subtitle, size: size, maxHeight: maxHeight, icon: icon, footer: footer()))
     }
 
     func orbSheet(_ title: String, subtitle: String? = nil, size: SheetSize = .medium) -> some View {
@@ -42,22 +43,26 @@ private struct OrbSheetFrame<Footer: View>: ViewModifier {
     let subtitle: String?
     let size: SheetSize
     let maxHeight: CGFloat
+    let icon: ServiceMark?
     let footer: Footer
 
     // On the sheet's first appearance its parts come in one after another (`sheetSection`): the heading, what it holds,
     // the footer. The presentation itself is the system's and is left alone.
     func body(content: Content) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Palette.ink)
-                    .accessibilityAddTraits(.isHeader)
-                if let subtitle {
-                    Text(subtitle)
-                        .font(.system(size: 12))
-                        .foregroundStyle(Palette.muted)
-                        .fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .center, spacing: 12) {
+                if let icon { ServiceTile(mark: icon) }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Palette.ink)
+                        .accessibilityAddTraits(.isHeader)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Palette.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
             .padding(.horizontal, 20)
