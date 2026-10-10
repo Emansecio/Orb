@@ -616,8 +616,13 @@ struct MultiOrbScreenTests {
         let folder = FileManager.default.temporaryDirectory.appending(path: "OrbSnap-\(UUID().uuidString)")
         defer { removeTestFolder(folder) }
         let model = AppModel(store: Store(directory: folder), runsBackgroundWork: false, secretVault: MemoryVault())
-        for screen in ["events", "wizard", "group-chat", "orb-proposal", "settings-general-orbs", "transcript"] {
+        for screen in ["events", "wizard", "group-chat", "settings-general-orbs", "transcript"] {
             #expect(MultiOrbSnapshots.view(screen, model: model) == nil, "\(screen)")
+        }
+        // The creation card's modes are registered (WP3).
+        for screen in ["orb-proposal", "orb-proposal-editing", "orb-proposal-created", "orb-proposal-dismissed", "orb-proposal-narrow",
+                       "orb-created-sidebar"] {
+            #expect(MultiOrbSnapshots.view(screen, model: model) != nil, "\(screen)")
         }
     }
 }

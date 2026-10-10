@@ -236,7 +236,8 @@ private struct SidebarBotRow: View {
         } content: { isHovering in
             BotRowContent(row: BotRow(look: live.look, workText: live.shownWork?.text, shimmers: live.shownWork?.shimmers ?? false, activity: live.activity, isSelected: isSelected,
                                       celebration: live.celebration, ack: live.poke, cue: live.cue, glance: live.glance, needsYou: live.needsYou, unread: live.unread,
-                                      hint: isHovering && index < 9 ? AppShortcut.bot(at: index).label : nil))
+                                      hint: isHovering && index < 9 ? AppShortcut.bot(at: index).label : nil,
+                                      landing: live.landing))
                 .equatable()
         }
         .contextMenu {
@@ -336,6 +337,8 @@ private struct BotRow: Equatable {
     let unread: Int
     /// The shortcut shown while the pointer is on the row.
     var hint: String?
+    /// Changes once when the Orb was just born from another Orb's proposal: its avatar gives the birth hop (MultiOrb, WP3).
+    var landing = 0
 }
 
 private struct BotRowContent: View, Equatable {
@@ -346,7 +349,7 @@ private struct BotRowContent: View, Equatable {
         HStack(spacing: 8) {
             // Only the selected bot and bots with something going on move; the rest rest (no frames at all).
             BotAvatar(orb: look.orb, size: 30, activity: activity, celebration: row.celebration,
-                      paused: !row.isSelected && activity == .idle, ack: row.ack, glance: row.glance, cue: row.cue)
+                      paused: !row.isSelected && activity == .idle, ack: row.ack, landing: row.landing, glance: row.glance, cue: row.cue)
             VStack(alignment: .leading, spacing: 1) {
                 Text(look.name)
                     .font(.system(size: 13, weight: .medium))

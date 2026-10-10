@@ -48,6 +48,10 @@ struct ClaudeCodeTurn: Sendable {
     /// window and the card of `browse_show` (see `ClaudeCodeEngine.handOff`). Without a hub, or with an engine that has no window,
     /// the tool of the Orb's server answers by itself.
     var browser = BrowserAccess()
+    // MARK: MultiOrb (WP3)
+    /// What `orb_propose` needs from the app (who proposes, which Orbs exist, how to create one); nil where the tool is not offered.
+    var orbCreation: OrbCreationSupport?
+    // MARK: end MultiOrb (WP3)
     /// How long Claude Code has to answer `initialize` before the turn is given up. Generous: a cold first launch
     /// may be starting the Orb's tools server and the user's connectors (some remote) before it answers.
     var initializeTimeout: TimeInterval = 60
@@ -316,6 +320,8 @@ actor ClaudeCodeEngine {
     static let browseShow = ClaudeCodeTools.memoryPrefix + "browse_show"
     /// The Orb's `ui_act`, as the CLI names it.
     static let uiAct = ClaudeCodeTools.memoryPrefix + "ui_act"
+    /// The Orb's `orb_propose`, as the CLI names it.
+    static let orbPropose = ClaudeCodeTools.memoryPrefix + OrbProposeTool.name
 
     /// Answers a `can_use_tool` request: by the Orb's mode and rules as they are now, or by asking the user. `browse_show`, once
     /// allowed, also waits for the person to finish in the window (the app opens it, and the card, itself).
@@ -330,6 +336,9 @@ actor ClaudeCodeEngine {
             fields[UIActTool.cardKey] = .string(UIActTool.cardMark(dangerous: judged != nil))
             return .allowUpdating(.object(fields))
         }
+        // MARK: MultiOrb (WP3)
+        if case .allow = answer, request.toolName == Self.orbPropose { return await proposeOrb(request, turn: turn, out: out) }
+        // MARK: end MultiOrb (WP3)
         guard case .allow = answer, request.toolName == Self.browseShow, !request.input.flag("hide"), turn.browser.drivesABrowser else {
             return answer
         }
@@ -363,6 +372,41 @@ actor ClaudeCodeEngine {
         fields[BrowseShowTool.handledKey] = .string(BrowseShowTool.handledDone)
         return .allowUpdating(.object(fields))
     }
+
+    // MARK: MultiOrb (WP3)
+    /// `orb_propose` in a Claude Code turn. The tools server is another process and cannot show a card or create an Orb, so the app runs
+    /// the tool itself (the creation card, the wait, the Orb) and lets the call through carrying the result in `orb_handled`, marked with the
+    /// turn's token: the server only reports it, and a value the model wrote into the call never carries the token. A refusal
+    /// (read-only, a limit) is the call's denial.
+    private func proposeOrb(_ request: ClaudeCodePermissionRequest, turn: ClaudeCodeTurn,
+                            out: AsyncStream<TurnEvent>.Continuation) async -> ClaudeCodePermissionAnswer {
+        var context = ToolContext(workingDirectory: turn.bot.workingURL)
+        context.botID = turn.bot.id
+        if var creation = turn.orbCreation {
+            creation.creator.permissionMode = await turn.currentPermissions().mode
+            context.orbCreation = creation
+            let support = creation, gate = self.gate, bot = turn.bot
+            context.proposeOrb = { proposal in
+                let outcome = await gate.proposeAndCreate(proposal, creation: support, botName: bot.name, botID: bot.id) { card in
+                    out.yield(.approval(card))
+                    out.yield(.status("Esperando sua resposta"))
+                }
+                out.yield(.status("Pensando"))
+                return outcome
+            }
+        }
+        guard case .object(var fields) = request.input else { return .deny("The arguments of orb_propose are not an object.") }
+        fields[OrbProposeTool.handledKey] = nil // the app's own run must not take a value the model wrote for its own
+        let result: String
+        do {
+            result = try await OrbProposeTool().run(.object(fields), context: context)
+        } catch {
+            return .deny(error.localizedDescription)
+        }
+        fields[OrbProposeTool.handledKey] = .string(OrbProposeTool.handledMark(result))
+        return .allowUpdating(.object(fields))
+    }
+    // MARK: end MultiOrb (WP3)
 
     /// `judged`: the danger the check found in the call (what the card showed), whatever the answer.
     private func authorize(_ request: ClaudeCodePermissionRequest, turn: ClaudeCodeTurn, hasText: Bool, fromSubagent: Bool,

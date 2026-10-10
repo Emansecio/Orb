@@ -29,6 +29,10 @@ final class AppModel {
     @ObservationIgnored var groupSessions: [UUID: GroupSession] = [:]
     @ObservationIgnored var groupLives: [UUID: GroupLive] = [:]
     // MARK: end MultiOrb (WP0)
+    // MARK: MultiOrb (WP3)
+    /// Where the Orbs an Orb proposes get their own folder (`~/Orbs`; tests point it at a temporary folder).
+    @ObservationIgnored var proposedOrbFolderBase = OrbFolder.defaultBase
+    // MARK: end MultiOrb (WP3)
     /// Each Orb's running machinery (see `BotSession`): its conversation in memory, its turn, its streamed reply.
     /// Conversations: at launch only the selected Orb's is read (off the main thread, `beginLoading`); the others are
     /// read when they are needed (`BotSession.isUnloaded`): when you switch to the Orb, or something has to change
@@ -1709,7 +1713,12 @@ final class AppModel {
             var context = context
             context.browser = BrowserAccess(hub: browserHub, engine: browserAvailability == .browser ? bot.browserEngine : .simple,
                                             searchProvider: bot.searchProvider, searchKeys: SearchKeys(vault: secretVault))
-            var tools = ToolBox.offered(for: bot.capabilities, accessibilityGranted: accessibilityGranted, browser: browserAvailability)
+            // MARK: MultiOrb (WP3)
+            let multi = multiOrbOffering(for: session)
+            if multi.propose { context.orbCreation = orbCreationSupport(for: bot) }
+            // MARK: end MultiOrb (WP3)
+            var tools = ToolBox.offered(for: bot.capabilities, accessibilityGranted: accessibilityGranted, browser: browserAvailability,
+                                        multi: multi)
             // The connectors' own tools do not travel with the request: the model lists and calls them through two fixed ones.
             if bot.capabilities.contains(.connectors), !allowedConnectors.isEmpty {
                 await connectorSync?.value // one added a moment ago is known to `mcp` before the model may name it
@@ -1823,9 +1832,10 @@ final class AppModel {
         let accessibility = usesMac ? accessibilityProbe() : nil
         let connectors = connectorServers(for: bot)
         scheduleMailbox.start()
+        let proposes = multiOrbOffering(for: session).propose // MultiOrb (WP3)
         let servers = [OrbToolsMCPServer.config(directory: bank.directory, mac: usesMac, files: bot.capabilities.contains(.terminal),
                                                 folder: bot.workingURL, accessibilityGranted: accessibility,
-                                                scheduleMailbox: scheduleMailbox.directory, orb: botID)]
+                                                scheduleMailbox: scheduleMailbox.directory, orb: botID, propose: proposes)]
             + connectors
         let connectorIDs = Set(connectors.map(\.id))
         let cliNames = ClaudeCodeTurn.mcpNames(servers) // what the CLI will call each server
@@ -1872,7 +1882,8 @@ final class AppModel {
                                                       folder: bot.workingURL, accessibilityGranted: accessibility,
                                                       scheduleMailbox: scheduleMailbox.directory, orb: botID, browser: browserAvailability,
                                                       engine: bot.browserEngine, searchProvider: bot.searchProvider,
-                                                      browserProfiles: browserHub.profilesDirectory, tinyFishKey: tinyFishKey)
+                                                      browserProfiles: browserHub.profilesDirectory, tinyFishKey: tinyFishKey,
+                                                      propose: proposes)
             // The CLI cannot renew a login in the middle of a turn: it gets a token with time left.
             let (servers, ended) = await connectorAuth.bearers(for: toolServers)
             // A login that could not be renewed is told to the cards now, not only when an Orb with the native engine meets it.
@@ -1893,6 +1904,7 @@ final class AppModel {
                                             permissions: permissionSource(for: bot))
             claudeTurn.browser = BrowserAccess(hub: browserHub, engine: browserAvailability == .browser ? bot.browserEngine : .simple,
                                                searchProvider: bot.searchProvider)
+            if proposes { claudeTurn.orbCreation = orbCreationSupport(for: bot) } // MultiOrb (WP3)
             // Recorded when the session answers (see `apply`): a turn that fails before that sent nothing.
             session.pendingMarks = built.marks
             await session.play(claudeEngine.run(claudeTurn), turn: turn)

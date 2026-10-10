@@ -172,6 +172,7 @@ struct BotInspector: View {
                     .help(Tip.customizeOrb)
                 }
                 .help(summary)
+                CreatedByLine(bot: bot) // MultiOrb (WP3)
             }
         }
         .padding(.horizontal, 16)

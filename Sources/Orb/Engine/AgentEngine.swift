@@ -723,6 +723,17 @@ actor AgentEngine {
             context.handoff = { [self] page in
                 await handoff(page: page, resuming: summary.title, request: request, out: out)
             }
+            // MARK: MultiOrb (WP3)
+            if tool.spec.name == OrbProposeTool.name, var creation = context.orbCreation {
+                // The mode as it is now, not as it was when the turn began: the tool refuses to propose in read-only.
+                creation.creator.permissionMode = live.mode
+                context.orbCreation = creation
+                let support = creation
+                context.proposeOrb = { [self] proposal in
+                    await propose(proposal, creation: support, resuming: summary.title, request: request, out: out)
+                }
+            }
+            // MARK: end MultiOrb (WP3)
             let result = try await tool.runWithImages(arguments, context: context)
             let files = (target.map { [ProducedFile(path: $0.url.path, created: !$0.existed)] } ?? [])
                 + result.images.map { ProducedFile(path: $0.path, created: true) }
@@ -745,6 +756,20 @@ actor AgentEngine {
         out.yield(.status(title))
         return done
     }
+
+    // MARK: MultiOrb (WP3)
+    /// The creation card of `orb_propose`: it waits like an approval, even in "Sem pedir permissão", and the Orb is created when the
+    /// person says "Criar".
+    private func propose(_ proposal: OrbProposal, creation: OrbCreationSupport, resuming title: String, request: TurnRequest,
+                         out: AsyncStream<TurnEvent>.Continuation) async -> ProposalOutcome {
+        let outcome = await gate.proposeAndCreate(proposal, creation: creation, botName: request.bot.name, botID: request.bot.id) { card in
+            out.yield(.approval(card))
+            out.yield(.status("Esperando sua resposta"))
+        }
+        out.yield(.status(title))
+        return outcome
+    }
+    // MARK: end MultiOrb (WP3)
 
     /// Where `write_file` or `edit_file` is about to write and whether a file was there already, to tell "novo" from "alterado".
     static func writeTarget(_ name: String, _ arguments: JSONValue, _ context: ToolContext) -> (url: URL, existed: Bool)? {

@@ -55,7 +55,8 @@ extension AppModel {
     func announceApproval(_ request: ApprovalRequest, of botID: UUID) {
         // For VoiceOver, when the card appears in the chat being shown (the banner covers the other cases).
         if selectedBot?.id == botID, let name = bot(botID)?.name {
-            announceForAccessibility(request.isHandoff ? "\(name) espera você terminar no navegador" : "\(name) precisa da sua permissão")
+            announceForAccessibility(request.isProposal ? "\(name) quer criar um Orb"
+                                     : request.isHandoff ? "\(name) espera você terminar no navegador" : "\(name) precisa da sua permissão")
         }
         guard let bot = bot(botID),
               ApprovalNotifications.shouldPost(appIsActive: NSApp?.isActive ?? false, selectedBotID: selectedBot?.id,
