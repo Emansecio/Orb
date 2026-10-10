@@ -54,7 +54,7 @@ struct WizardPreviewPane: View {
                     if hasDraft {
                         identity
                         // What it will get, from the start (the form's own defaults until the assistant says otherwise).
-                        chips(leading: true)
+                        chips(leading: false)
                         if !draft.instructions.isEmpty { howItWorks.transition(.adapted(.unfold, reduceMotion: reduceMotion)) }
                     } else {
                         Text("\(emptyText)")
@@ -246,8 +246,8 @@ struct WizardPreviewPane: View {
         return items
     }
 
-    /// Under the name and role the chips share the left edge of the boxes around them; with nothing drafted yet they sit
-    /// centered under the line of copy.
+    /// The chips sit centered, under the centered name and role (or the line of copy before there is a draft); `leading`
+    /// is kept for a layout that puts them against the boxes' left edge.
     private func chips(leading: Bool) -> some View {
         WizardWrap(spacing: 6, alignment: leading ? .leading : .center) {
             ForEach(Array(chipItems.enumerated()), id: \.element.id) { index, item in

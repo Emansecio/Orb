@@ -10,7 +10,7 @@ struct WizardFooter: View {
     let create: () -> Void
 
     var body: some View {
-        HStack(alignment: .center, spacing: 8) {
+        SheetFooterBar {
             if !canCreate {
                 Text("O assistente ainda não escolheu um nome.")
                     .font(.system(size: 12))
@@ -18,7 +18,7 @@ struct WizardFooter: View {
                     .lineLimit(1)
                     .transition(.opacity)
             }
-            Spacer(minLength: 12)
+            Spacer(minLength: Spacing.m)
             Button("Cancelar", action: cancel)
                 .buttonStyle(GhostStyle())
                 .keyboardShortcut(.cancelAction)
@@ -37,8 +37,5 @@ struct WizardFooter: View {
                 .accessibilityIdentifier("wizard-create")
         }
         .motion(Motion.content, value: canCreate)
-        .padding(.horizontal, 20)
-        .padding(.vertical, 14)
-        .overlay(alignment: .top) { Divider().opacity(0.6) }
     }
 }
