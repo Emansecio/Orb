@@ -124,18 +124,27 @@ final class OrbTranscript {
     /// Counts the times the whole chat was replaced by another conversation (a new one, one reopened): the chat cross-fades
     /// then, whatever the length of what it shows, instead of guessing from the shape of the list.
     private(set) var swaps = 0
+    // MARK: MultiOrb (WP2)
+    /// The chat folded into rows (exchanges between Orbs, repeated events, `TranscriptFolding`); nil when it holds neither, and
+    /// then its rows are its items. Made once per change of `items`, not per view pass.
+    private(set) var rows: [TranscriptRowModel]?
+    // MARK: end MultiOrb (WP2)
 
     /// The chat is now another conversation (call before `show`).
     func swapped() { swaps &+= 1 }
 
     init(items: [TranscriptItem] = []) {
         self.items = items
+        rows = TranscriptFolding.hasFoldableItems(items) ? TranscriptFolding.rows(for: items) : nil
     }
 
     /// Shows `items`. The same array again (one conversation mutation that left the items alone) changes nothing.
     func show(_ items: [TranscriptItem]) {
         guard !self.items.isSameStorage(as: items) else { return }
         self.items = items
+        // MARK: MultiOrb (WP2)
+        rows = TranscriptFolding.hasFoldableItems(items) ? TranscriptFolding.rows(for: items) : nil
+        // MARK: end MultiOrb (WP2)
         revision &+= 1
     }
 }

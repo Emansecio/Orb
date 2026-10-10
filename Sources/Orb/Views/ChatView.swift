@@ -144,19 +144,20 @@ private struct TranscriptList: View {
                         EmptyChatView(look: look, presented: presentedEmptyChats)
                             .transition(.opacity)
                     }
-                    ForEach(items) { item in
-                        let isNew = entrances.isNew(item.id)
-                        TranscriptRow(item: item, botID: look.id, orb: look.orb, entering: isNew,
-                                      isLastReply: item.id == lastReplyID, offersRedo: item.id == redoID,
-                                      isDropping: dropping.contains(item.id), find: item.id == found?.itemID ? found : nil)
-                            .equatable()
-                            // The row comes in by itself, not through an animation of the list (which would lay every row
-                            // out again); the list's own animation must not add a transition of its own.
-                            .modifier(RowEntrance(id: item.id, style: item.kind.entrance, isNew: isNew, entrances: entrances))
-                            .transition(.identity)
+                    // MARK: MultiOrb (WP2): a chat with exchanges between Orbs or repeated events is drawn from its folded rows.
+                    if let rows = transcript.rows {
+                        ForEach(rows) { row in
+                            foldedRow(row, lastReplyID: lastReplyID, redoID: redoID, dropping: dropping, found: found)
+                        }
+                    } else {
+                        ForEach(items) { item in
+                            itemRow(item, lastReplyID: lastReplyID, redoID: redoID, dropping: dropping, found: found)
+                        }
                     }
+                    // end MultiOrb (WP2)
                     QueuedMessages(botID: look.id)
-                    if isWorking {
+                    // A chain of requests the Orb waits on (`chainWork`) keeps its line too, with the button that stops it.
+                    if isWorking || live.chainWork != nil {
                         WorkingLine(look: look, avatarHidden: lastReplyID != nil)
                             .transition(.adapted(.arrive, reduceMotion: reduceMotion))
                     }
@@ -218,6 +219,47 @@ private struct TranscriptList: View {
     }
 
     /// What a growing reply calls: nothing where the scroll view keeps the bottom itself.
+    /// One item of the chat as a row, entering by itself when it is new.
+    @ViewBuilder
+    private func itemRow(_ item: TranscriptItem, lastReplyID: UUID?, redoID: UUID?, dropping: Set<UUID>, found: FindFocus?) -> some View {
+        let isNew = entrances.isNew(item.id)
+        TranscriptRow(item: item, botID: look.id, orb: look.orb, entering: isNew,
+                      isLastReply: item.id == lastReplyID, offersRedo: item.id == redoID,
+                      isDropping: dropping.contains(item.id), find: item.id == found?.itemID ? found : nil)
+            .equatable()
+            // The row comes in by itself, not through an animation of the list (which would lay every row out again); the
+            // list's own animation must not add a transition of its own.
+            .modifier(RowEntrance(id: item.id, style: item.kind.entrance, isNew: isNew, entrances: entrances))
+            .transition(.identity)
+    }
+
+    /// A folded row (MultiOrb, WP2): one item as it is, or a run of events or of messages between Orbs that folds into one
+    /// line and unfolds into its items. Those items are drawn as rows of their own, without an entrance (the fold has one).
+    @ViewBuilder
+    private func foldedRow(_ row: TranscriptRowModel, lastReplyID: UUID?, redoID: UUID?, dropping: Set<UUID>,
+                           found: FindFocus?) -> some View {
+        switch row {
+        case .single(let item):
+            itemRow(item, lastReplyID: lastReplyID, redoID: redoID, dropping: dropping, found: found)
+        case .events(let kind, let items):
+            FoldedThread(items: items, summary: { EventsSummary(kind: kind, items: items, unfolded: $0) },
+                         child: { plainRow($0) })
+                .modifier(RowEntrance(id: row.id, style: items[0].kind.entrance, isNew: entrances.isNew(row.id), entrances: entrances))
+                .transition(.identity)
+        case .exchange(let items):
+            FoldedThread(items: items, summary: { ExchangeSummary(items: items, botID: look.id, unfolded: $0) },
+                         child: { plainRow($0) })
+                .modifier(RowEntrance(id: row.id, style: items[0].kind.entrance, isNew: entrances.isNew(row.id), entrances: entrances))
+                .transition(.identity)
+        }
+    }
+
+    /// A row inside a folded one: no entrance of its own.
+    private func plainRow(_ item: TranscriptItem) -> some View {
+        TranscriptRow(item: item, botID: look.id, orb: look.orb)
+            .equatable()
+    }
+
     private func replyGrew(_ proxy: ScrollViewProxy) -> ReplyGrewAction? {
         guard !BottomFollower.anchorsItself else { return nil }
         let follower = follower
@@ -598,6 +640,11 @@ private struct WorkingLine: View {
                     .opacity(avatarHidden ? 0 : 1)
                     .animation(Motion.fade, value: avatarHidden)
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    // MARK: MultiOrb (WP2): the two Orbs of an exchange, joined by an arrow, before the phrase.
+                    if let partner = live.partner {
+                        ExchangeGlyph(from: look.id, to: partner.botID)
+                            .transition(.quiet)
+                    }
                     ZStack(alignment: .leading) {
                         WorkPhraseView(work: work)
                             .id(work.phraseKey)
@@ -610,6 +657,16 @@ private struct WorkingLine: View {
                     // instead of staying drawn where the line used to be.
                     .geometryGroup()
                     WorkMeterView(work: work, since: live.workingSince)
+                    // MARK: MultiOrb (WP2): the Orb waits for other Orbs' answers: the line stops the conversation.
+                    if live.chainWork != nil {
+                        Button("Parar", systemImage: "stop.fill") { model.stop(look.id) }
+                            .buttonStyle(GhostStyle(tint: nil))
+                            .lineLimit(1)
+                            .fixedSize()
+                            .layoutPriority(1)
+                            .help("Parar a conversa entre Orbs (\(AppShortcut.stop.label))")
+                            .transition(.adapted(.swap, reduceMotion: reduceMotion))
+                    }
                 }
                 // The meter slides along with the width of the phrase.
                 .animation(reduceMotion ? nil : Motion.content, value: work.phraseKey)
@@ -641,6 +698,14 @@ struct WorkPhraseView: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
+            if let prefix = work.prefix, work.routine == nil {
+                // MARK: MultiOrb (WP2): "Pedido de Atlas:" in front of what the Orb does for it.
+                Text("\(prefix):")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Palette.faint)
+                    .lineLimit(1)
+                    .layoutPriority(-1)
+            }
             if let routine = work.routine {
                 Text("\(routine) ·")
                     .font(.system(size: 13))

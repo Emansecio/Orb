@@ -236,6 +236,8 @@ private struct SidebarBotRow: View {
         } content: { isHovering in
             BotRowContent(row: BotRow(look: live.look, workText: live.shownWork?.text, shimmers: live.shownWork?.shimmers ?? false, activity: live.activity, isSelected: isSelected,
                                       celebration: live.celebration, ack: live.poke, cue: live.cue, glance: live.glance, needsYou: live.needsYou, unread: live.unread,
+                                      // MARK: MultiOrb (WP2): the ring of the Orb it is exchanging messages with
+                                      partner: live.partner,
                                       hint: isHovering && index < 9 ? AppShortcut.bot(at: index).label : nil))
                 .equatable()
         }
@@ -334,6 +336,8 @@ private struct BotRow: Equatable {
     /// An approval card is open: the Orb is stopped until the user answers.
     let needsYou: Bool
     let unread: Int
+    /// The Orb it is exchanging messages with now: its avatar gets a ring in that Orb's color.
+    var partner: PartnerTint?
     /// The shortcut shown while the pointer is on the row.
     var hint: String?
 }
@@ -347,6 +351,17 @@ private struct BotRowContent: View, Equatable {
             // Only the selected bot and bots with something going on move; the rest rest (no frames at all).
             BotAvatar(orb: look.orb, size: 30, activity: activity, celebration: row.celebration,
                       paused: !row.isSelected && activity == .idle, ack: row.ack, glance: row.glance, cue: row.cue)
+                // MARK: MultiOrb (WP2): a 1.5 pt ring in the partner's color while the two exchange messages. It fades in and out
+                // (opacity only, so it is the same under Reduce Motion).
+                .overlay {
+                    if let partner = row.partner {
+                        Circle()
+                            .strokeBorder(OrbCatalog.shared.palette(partner.color).core.opacity(0.55), lineWidth: 1.5)
+                            .frame(width: 36, height: 36)
+                            .transition(.opacity)
+                    }
+                }
+                .animation(Motion.fade, value: row.partner)
             VStack(alignment: .leading, spacing: 1) {
                 Text(look.name)
                     .font(.system(size: 13, weight: .medium))
