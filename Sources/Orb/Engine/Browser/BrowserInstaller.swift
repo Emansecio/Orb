@@ -31,7 +31,7 @@ final class BrowserInstaller: Sendable {
     init(layout: BrowserInstallLayout, platform: BrowserPlatform = .current, network: any InstallNetwork = URLSessionInstallNetwork(),
          run: @escaping InstallCommandRunner = BrowserInstaller.processRunner,
          freeSpace: @escaping @Sendable (URL) -> Int64? = BrowserInstaller.availableSpace,
-         findPython: @escaping @Sendable (InstallCommandRunner) async throws -> String = BrowserInstaller.locatePython,
+         findPython: @escaping @Sendable (InstallCommandRunner) async throws -> String = { try await BrowserInstaller.locatePython(run: $0) },
          chromeAvailable: @escaping @Sendable (BrowserInstallLayout) -> Bool = { BrowserEngineLocator.live(path: nil, managedRoot: $0.root).chromeAvailable() }) {
         self.layout = layout
         self.platform = platform
@@ -357,18 +357,19 @@ final class BrowserInstaller: Sendable {
 
     /// A Python 3.9+ with `venv` and `ssl`. `/usr/bin/python3` is only a stub that opens a dialog to install the Command Line
     /// Tools until they are installed, so it is asked about only when `xcode-select -p` says they are.
-    static func locatePython(run: InstallCommandRunner) async throws -> String {
+    static func locatePython(run: InstallCommandRunner,
+                             isExecutable: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }) async throws -> String {
         let environment = ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()]
         var candidates = ["/opt/homebrew/bin/python3", "/usr/local/bin/python3"]
         let tools = try? await run("/usr/bin/xcode-select", ["-p"], environment, .seconds(15), { _ in })
         let hasTools = tools?.status == 0
         if hasTools { candidates.insert("/usr/bin/python3", at: 0) }
-        for candidate in candidates where FileManager.default.isExecutableFile(atPath: candidate) {
+        for candidate in candidates where isExecutable(candidate) {
             let check = try? await run(candidate, ["-c", "import sys, venv, ssl; sys.exit(0 if sys.version_info >= (3, 9) else 1)"],
                                        environment, .seconds(30), { _ in })
             if check?.status == 0 { return candidate }
         }
-        if !hasTools, FileManager.default.isExecutableFile(atPath: "/usr/bin/python3") { throw BrowserInstallError.needsCommandLineTools }
+        if !hasTools, isExecutable("/usr/bin/python3") { throw BrowserInstallError.needsCommandLineTools }
         throw BrowserInstallError.noPython
     }
 

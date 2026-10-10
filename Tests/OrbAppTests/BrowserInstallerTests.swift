@@ -371,7 +371,10 @@ import Testing
             ran.value.append(call.executable + " " + call.arguments.joined(separator: " "))
             return call.executable == "/usr/bin/xcode-select" ? FakeInstallRunner.failed("xcode-select: error: unable to get active developer directory", status: 2) : nil
         }
-        await #expect(throws: BrowserInstallError.self) { _ = try await BrowserInstaller.locatePython(run: fake.runner) }
+        // Only the system stub exists here, whatever this machine has (a CI runner has Homebrew's Python).
+        await #expect(throws: BrowserInstallError.self) {
+            _ = try await BrowserInstaller.locatePython(run: fake.runner, isExecutable: { $0 == "/usr/bin/python3" })
+        }
         #expect(!ran.value.contains { $0.hasPrefix("/usr/bin/python3") }, "\(ran.value)")
         #expect(BrowserInstallError.needsCommandLineTools.errorDescription?.contains("xcode-select --install") == true)
         #expect(BrowserInstallError.noPython.errorDescription?.contains("Python 3.9") == true)
