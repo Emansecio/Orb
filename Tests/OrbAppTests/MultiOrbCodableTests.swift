@@ -616,9 +616,14 @@ struct MultiOrbScreenTests {
         let folder = FileManager.default.temporaryDirectory.appending(path: "OrbSnap-\(UUID().uuidString)")
         defer { removeTestFolder(folder) }
         let model = AppModel(store: Store(directory: folder), runsBackgroundWork: false, secretVault: MemoryVault())
-        // "events" and the delegation screens belong to WP2 now; the rest still have no package.
-        for screen in ["wizard", "group-chat", "orb-proposal", "settings-general-orbs", "transcript"] {
+        // "events" and the delegation screens belong to WP2, the creation card's to WP3; the rest still have no package.
+        for screen in ["wizard", "group-chat", "settings-general-orbs", "transcript"] {
             #expect(MultiOrbSnapshots.view(screen, model: model) == nil, "\(screen)")
+        }
+        // The creation card's modes are registered (WP3).
+        for screen in ["orb-proposal", "orb-proposal-editing", "orb-proposal-created", "orb-proposal-dismissed", "orb-proposal-narrow",
+                       "orb-created-sidebar"] {
+            #expect(MultiOrbSnapshots.view(screen, model: model) != nil, "\(screen)")
         }
     }
 }

@@ -38,6 +38,10 @@ final class AppModel {
         return try await self.bridgeCall(tool: tool, orb: orb, arguments: arguments, callID: callID)
     }
     // MARK: end MultiOrb (WP1)
+    // MARK: MultiOrb (WP3)
+    /// Where the Orbs an Orb proposes get their own folder (`~/Orbs`; tests point it at a temporary folder).
+    @ObservationIgnored var proposedOrbFolderBase = OrbFolder.defaultBase
+    // MARK: end MultiOrb (WP3)
     /// Each Orb's running machinery (see `BotSession`): its conversation in memory, its turn, its streamed reply.
     /// Conversations: at launch only the selected Orb's is read (off the main thread, `beginLoading`); the others are
     /// read when they are needed (`BotSession.isUnloaded`): when you switch to the Orb, or something has to change
@@ -1746,6 +1750,9 @@ final class AppModel {
             var context = baseContext
             context.browser = BrowserAccess(hub: browserHub, engine: browserAvailability == .browser ? bot.browserEngine : .simple,
                                             searchProvider: bot.searchProvider, searchKeys: SearchKeys(vault: secretVault))
+            // MARK: MultiOrb (WP3)
+            if multi.propose { context.orbCreation = orbCreationSupport(for: bot) }
+            // MARK: end MultiOrb (WP3)
             var tools = ToolBox.offered(for: bot.capabilities, accessibilityGranted: accessibilityGranted, browser: browserAvailability,
                                         multi: multi)
             // The connectors' own tools do not travel with the request: the model lists and calls them through two fixed ones.
@@ -1941,6 +1948,7 @@ final class AppModel {
                                             permissions: permissionSource(for: bot))
             claudeTurn.browser = BrowserAccess(hub: browserHub, engine: browserAvailability == .browser ? bot.browserEngine : .simple,
                                                searchProvider: bot.searchProvider)
+            if multi.propose { claudeTurn.orbCreation = orbCreationSupport(for: bot) } // MultiOrb (WP3)
             // Recorded when the session answers (see `apply`): a turn that fails before that sent nothing.
             session.pendingMarks = built.marks
             await session.play(claudeEngine.run(claudeTurn), turn: turn)

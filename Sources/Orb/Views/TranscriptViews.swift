@@ -46,7 +46,11 @@ struct TranscriptRow: View, Equatable {
         case .tool(let call):
             ToolCallLine(call: call)
         case .approval(let request):
-            ApprovalCard(request: request, botID: botID, pulses: entering)
+            if let proposal = request.proposal { // MultiOrb (WP3): an Orb proposes a new Orb
+                OrbProposalCard(request: request, proposal: proposal, botID: botID, pulses: entering)
+            } else {
+                ApprovalCard(request: request, botID: botID, pulses: entering)
+            }
         case .notice(let text):
             NoticeLine(id: item.id, text: text, botID: botID)
         case .greeting(let text):

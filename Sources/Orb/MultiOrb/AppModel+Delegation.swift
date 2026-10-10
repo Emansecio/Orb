@@ -22,12 +22,13 @@ extension AppModel {
     }
 
     /// Which multi-Orb tools the Orb's next turn is offered. `orbs`: the switch is on and there is a teammate, or the turn is a
-    /// group's. The other two belong to the packages that own the tools (`propose`: the Orb's own chat only; `groupMemory`: a group's
-    /// turn only) and are off here.
+    /// group's. `propose` (WP3): the Orb's own chat only, not a routine's or a request's side conversation, which nobody
+    /// watches to answer the card. `groupMemory` belongs to the groups' package and is off here.
     func multiOrbOffering(for botID: UUID) -> MultiOrbOffering {
         let inGroup = turnGroup(of: botID) != nil
         let hasTeam = inGroup || (orbsCanTalk && bots.count > 1)
-        return MultiOrbOffering(orbs: hasTeam, propose: false, groupMemory: false)
+        let ownChat = sessions[botID].map { $0.routineID == nil && $0.sideKind == nil } ?? true
+        return MultiOrbOffering(orbs: hasTeam, propose: ownChat, groupMemory: false)
     }
 
     /// The system prompt's section about the teammates (empty when there are none).
@@ -42,6 +43,11 @@ extension AppModel {
         switch tool {
         case "orbs":
             return try await delegation.handleTool(arguments, orb: orb, messageID: callID)
+        case OrbProposeTool.name:
+            // One path only: in a Claude Code turn the app runs the proposal when the CLI asks permission for the call
+            // (`ClaudeCodeEngine.proposeOrb`, marked with `ORB_PROPOSE_TOKEN`) and the server just reports it. The server never
+            // asks the mailbox for this tool, so a call that arrives here would be a second handling of the same card.
+            throw ToolError("Essa ferramenta não está disponível agora.")
         default:
             // `orb_draft` is the creation assistant's (it answers through its own handler where that exists).
             throw ToolError("Essa ferramenta não está disponível agora.")

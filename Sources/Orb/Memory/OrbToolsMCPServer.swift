@@ -268,6 +268,10 @@ enum OrbToolsMCPServer {
             + (accessibilityGranted.map { [$0 ? accessibilityFlag : noAccessibilityFlag] } ?? [])
         // The token that lets `ui_act` there trust the card's verdict the app passes along with the call.
         if mac { server.environment[UIActTool.cardTokenVariable] = UIActTool.cardToken }
+        if propose {
+            server.arguments.append(proposeFlag)
+            server.environment[OrbProposeTool.handledTokenVariable] = OrbProposeTool.handledToken
+        }
         if let scheduleMailbox, let orb { server.arguments += [ScheduleMailbox.flag, scheduleMailbox.path, ScheduleMailbox.orbFlag, orb.uuidString] }
         if let bridge {
             server.arguments += [bridgeFlag, bridge.path]
@@ -275,7 +279,6 @@ enum OrbToolsMCPServer {
             if scheduleMailbox == nil, let orb { server.arguments += [OrbBridge.orbFlag, orb.uuidString] }
         }
         if orbs { server.arguments.append(orbsFlag) }
-        if propose { server.arguments.append(proposeFlag) }
         if wizard { server.arguments.append(wizardFlag) }
         if let groupMemory { server.arguments += [groupMemoryFlag, groupMemory.path] }
         if browser != .off {

@@ -606,6 +606,10 @@ struct ToolContext: Sendable {
     /// The turn is a side run (a routine, a request from another Orb, a group's turn) and where it stands in its chain.
     var sideRun: SideRunInfo?
     // MARK: end MultiOrb (WP0)
+    // MARK: MultiOrb (WP3)
+    /// What `orb_propose` knows about the Orb that proposes and the others (see `OrbCreationSupport`); nil where it cannot run.
+    var orbCreation: OrbCreationSupport?
+    // MARK: end MultiOrb (WP3)
 }
 
 /// Opens the hand-off card for the page shown (its address and title) and waits: true when the person clicked "Pronto", false

@@ -59,6 +59,31 @@ extension ApprovalGate {
     }
 }
 
+// MARK: MultiOrb (WP3)
+extension ApprovalGate {
+    /// The creation card of `orb_propose`: `show` puts it in the conversation, and this waits for "Criar" (`.once`) or "Não criar" and
+    /// Parar (`.deny`). Like a hand-off it asks whatever the permission mode is, and a change of mode never answers it.
+    /// Returns the card (the app finds the possibly edited proposal by its id) and the answer.
+    func propose(_ proposal: OrbProposal, botName: String, botID: UUID,
+                 show: (ApprovalRequest) -> Void) async -> (card: ApprovalRequest, answer: ApprovalAnswer) {
+        let card = ApprovalRequest(toolName: OrbProposeTool.name, title: "\(botName) quer criar um Orb", command: proposal.name,
+                                   reason: proposal.reason ?? "", proposal: proposal)
+        open(card.id, botID: botID, alwaysAsks: true, isHandoff: true)
+        show(card)
+        return (card, await wait(for: card.id))
+    }
+
+    /// The whole of `orb_propose` once the engine has the proposal: the card, the wait, and, on "Criar", the creation. A refusal
+    /// (or Parar) is the model's "o usuário não quis criar esse Orb"; the app says what it made, or why it could not.
+    func proposeAndCreate(_ proposal: OrbProposal, creation: OrbCreationSupport, botName: String, botID: UUID,
+                          show: (ApprovalRequest) -> Void) async -> ProposalOutcome {
+        let (card, answer) = await propose(proposal, botName: botName, botID: botID, show: show)
+        guard answer.decision != .deny, !Task.isCancelled else { return .declined }
+        return await creation.create(card.id, proposal)
+    }
+}
+// MARK: end MultiOrb (WP3)
+
 /// The open approval cards of every Orb, shared by both engines: a turn opens one, shows it and waits; the UI
 /// (or a change of permission mode) answers it. Waiting is safe against cancellation, and an answer that
 /// arrives before the engine starts waiting is kept.

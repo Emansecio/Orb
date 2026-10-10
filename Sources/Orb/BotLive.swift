@@ -218,6 +218,13 @@ final class BotLive {
 
     func glanced() { glance += 1 }
 
+    // MARK: MultiOrb (WP3)
+    /// Incremented when the Orb was just born from another Orb's proposal: its sidebar avatar gives the birth hop.
+    private(set) var landing = 0
+
+    func landed() { landing += 1 }
+    // MARK: end MultiOrb (WP3)
+
     // MARK: Composing
 
     /// The draft in the Orb's composer changed: the Orb watches you type (`attentive`) from the first keystroke

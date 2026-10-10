@@ -506,13 +506,13 @@ struct QuickAskApprovalCard: View {
                     .foregroundStyle(Palette.warn)
             }
             HStack(spacing: 6) {
-                Button(request.isHandoff ? "Cancelar" : "Não permitir") {
+                Button(request.isProposal ? "Não criar" : request.isHandoff ? "Cancelar" : "Não permitir") {
                     model.decide(.deny, approvalID: request.id, botID: entry.bot.id)
                 }
                 .buttonStyle(GhostStyle())
                 .help(request.isHandoff ? Tip.handoffCancel : Tip.deny)
                 Spacer()
-                if request.isDangerous {
+                if request.isDangerous || request.isProposal { // a new Orb is read in the app before it is created
                     Button("Abrir o app", action: openApp)
                         .buttonStyle(SecondaryPillStyle())
                         .help(Tip.reviewRiskyInApp)
