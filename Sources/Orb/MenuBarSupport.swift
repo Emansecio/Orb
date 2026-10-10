@@ -5,10 +5,25 @@ import Carbon.HIToolbox
 // The Orb icon in the menu bar: it says whether an Orb is working or waiting for you, and an optional global
 // shortcut (⌃⌥Espaço) opens the panel from any app.
 
-/// The icon's pictures, one per state, made once. All are template images the menu bar tints itself (white or black
-/// as the wallpaper needs); "waiting for you" adds a solid dot instead of a color.
+/// The icon's pictures, one per state, made once. They are the brand Orb in one ink, drawn as vectors on an 18 pt square
+/// (sharp at @1x and @2x), and all are template images: the menu bar tints them white or black as the wallpaper needs.
+/// Idle is the Orb's outline with its face solid; working is the Orb filled, its face cut out of it; "waiting for you"
+/// is the filled Orb with a solid dot on its rim (a cut-out, not an orange one, since a template cannot keep a color).
 @MainActor
 enum MenuBarIcon {
+    /// The square of the icon, in points.
+    static let side: CGFloat = 18
+
+    /// The Orb: a 16 pt circle, centered.
+    private static let center = CGPoint(x: 9, y: 9)
+    private static let radius: CGFloat = 8
+    private static let outlineWidth: CGFloat = 1.2
+    private static let smileWidth: CGFloat = 0.9
+    /// The badge: a dot on the upper-right rim, behind a clear ring that makes it its own mark.
+    private static let badgeCenter = CGPoint(x: 14.8, y: 14.8)
+    private static let badgeRadius: CGFloat = 2.8
+    private static let badgeRing: CGFloat = 1.2
+
     private static var cache: [String: NSImage] = [:]
 
     static func image(for state: MenuBarState) -> NSImage {
@@ -25,33 +40,76 @@ enum MenuBarIcon {
     }
 
     private static func make(_ state: MenuBarState) -> NSImage {
-        let name = state == .idle ? "circle.hexagongrid" : "circle.hexagongrid.fill"
-        let configuration = NSImage.SymbolConfiguration(pointSize: 15, weight: .regular)
-        let base = NSImage(systemSymbolName: name, accessibilityDescription: nil)?.withSymbolConfiguration(configuration)
-            ?? NSImage(size: NSSize(width: 18, height: 18))
-        guard state.hasBadge else {
-            base.isTemplate = true
-            return base
-        }
-        // A template image is tinted by the menu bar itself (white or black as the wallpaper needs), which a hand-colored
-        // image cannot follow. So the "waiting for you" badge is a solid dot cut out of the symbol, not an orange one.
-        // The dot sits mostly outside the glyph, behind a wide clear ring, so it reads as its own mark and not as one more
-        // circle of the symbol.
-        let diameter: CGFloat = 8, ring: CGFloat = 2.6
-        let glyph = base.size
-        let size = NSSize(width: glyph.width + 4, height: glyph.height + 3)
-        let picture = NSImage(size: size, flipped: false) { rect in
-            base.draw(in: NSRect(x: 0, y: 0, width: glyph.width, height: glyph.height))
-            let dot = NSRect(x: rect.maxX - diameter, y: rect.maxY - diameter, width: diameter, height: diameter)
-            NSGraphicsContext.current?.compositingOperation = .destinationOut
-            NSBezierPath(ovalIn: dot.insetBy(dx: -ring, dy: -ring)).fill()
-            NSGraphicsContext.current?.compositingOperation = .sourceOver
-            NSColor.black.setFill()
-            NSBezierPath(ovalIn: dot).fill()
+        let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { _ in
+            guard let context = NSGraphicsContext.current?.cgContext else { return false }
+            paint(state, in: context)
             return true
         }
-        picture.isTemplate = true
-        return picture
+        image.isTemplate = true
+        return image
+    }
+
+    /// Only the alpha of the ink counts (the menu bar supplies the color), so it is drawn in black.
+    private static func paint(_ state: MenuBarState, in context: CGContext) {
+        let ink = CGColor(gray: 0, alpha: 1)
+        let disk = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
+        context.setFillColor(ink)
+        context.setStrokeColor(ink)
+        context.setLineCap(.round)
+
+        if state == .idle {
+            context.setLineWidth(outlineWidth)
+            context.strokeEllipse(in: disk.insetBy(dx: outlineWidth / 2, dy: outlineWidth / 2))
+            context.addPath(eyes())
+            context.fillPath()
+            context.setLineWidth(smileWidth)
+            context.addPath(smile())
+            context.strokePath()
+        } else {
+            context.fillEllipse(in: disk)
+            context.setBlendMode(.clear)
+            context.addPath(eyes())
+            context.fillPath()
+            context.setLineWidth(smileWidth)
+            context.addPath(smile())
+            context.strokePath()
+            context.setBlendMode(.normal)
+        }
+
+        if state.hasBadge {
+            let dot = CGRect(x: badgeCenter.x - badgeRadius, y: badgeCenter.y - badgeRadius,
+                             width: badgeRadius * 2, height: badgeRadius * 2)
+            context.setBlendMode(.clear)
+            context.fillEllipse(in: dot.insetBy(dx: -badgeRing, dy: -badgeRing))
+            context.setBlendMode(.normal)
+            context.fillEllipse(in: dot)
+        }
+    }
+
+    /// The two pill eyes, in the proportions of `AppIcon`'s face at its small size (bigger eyes), above the center.
+    private static func eyes() -> CGPath {
+        let d = radius * 2
+        let width = d * 0.081 * 1.3, height = d * 0.15 * 1.3
+        let spread = d * 0.151 * 1.12
+        let y = center.y + d * 0.08
+        let path = CGMutablePath()
+        for side in [-1.0, 1.0] as [CGFloat] {
+            let rect = CGRect(x: center.x + side * spread - width / 2, y: y - height / 2, width: width, height: height)
+            path.addRoundedRect(in: rect, cornerWidth: width / 2, cornerHeight: width / 2)
+        }
+        return path
+    }
+
+    /// The smile under the eyes: the same curve as `AppIcon`'s, its ends higher than its middle.
+    private static func smile() -> CGPath {
+        let d = radius * 2
+        let width = d * 0.15 * 1.15
+        let y = center.y - d * 0.085
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: center.x - width / 2, y: y + width * 0.12))
+        path.addQuadCurve(to: CGPoint(x: center.x + width / 2, y: y + width * 0.12),
+                          control: CGPoint(x: center.x, y: y - width * 0.42))
+        return path
     }
 }
 

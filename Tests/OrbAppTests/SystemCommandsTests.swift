@@ -21,6 +21,62 @@ import Testing
         #expect(MenuBarState.working(1).accessibilityLabel == "Orb: 1 Orb trabalhando")
     }
 
+    /// The Orb's icon is a template at 18 pt, so the menu bar tints it for a light or a dark bar.
+    @MainActor @Test func menuBarIconIsATemplateOf18Points() {
+        for state in [MenuBarState.idle, .working(1), .waiting(1)] {
+            let image = MenuBarIcon.image(for: state)
+            #expect(image.isTemplate)
+            #expect(image.size == NSSize(width: 18, height: 18))
+        }
+    }
+
+    /// The three states are three pictures, and the count of working Orbs does not change the picture.
+    @MainActor @Test func menuBarIconStatesDrawDifferentPictures() {
+        let idle = menuBarAlphas(.idle), working = menuBarAlphas(.working(1)), waiting = menuBarAlphas(.waiting(1))
+        #expect(idle != working)
+        #expect(working != waiting)
+        #expect(idle != waiting)
+        #expect(menuBarAlphas(.working(2)) == working)
+    }
+
+    /// Idle is an outline (its middle is empty), working is the Orb filled (its middle is ink) with the face cut out of it.
+    @MainActor @Test func menuBarIconIdleIsAnOutlineAndWorkingIsFilledWithAFace() {
+        let idle = menuBarAlphas(.idle), working = menuBarAlphas(.working(1))
+        let middle = CGPoint(x: 9, y: 9), leftEye = CGPoint(x: 6.3, y: 7.7)
+        #expect(menuBarAlpha(idle, at: middle) < 64)
+        #expect(menuBarAlpha(working, at: middle) > 200)
+        #expect(menuBarAlpha(idle, at: leftEye) > 200)
+        #expect(menuBarAlpha(working, at: leftEye) < 64)
+    }
+
+    /// Waiting for you is the filled Orb with a solid dot on its upper-right rim, outside the Orb, behind a clear ring.
+    @MainActor @Test func menuBarIconWaitingHasADotOnTheRim() {
+        let waiting = menuBarAlphas(.waiting(1)), working = menuBarAlphas(.working(1))
+        let beyondTheRim = CGPoint(x: 16.2, y: 1.8)
+        #expect(menuBarAlpha(waiting, at: beyondTheRim) > 200)
+        #expect(menuBarAlpha(working, at: beyondTheRim) < 64)
+    }
+
+    /// Premultiplied alpha of the icon drawn on a 2x (36 px) bitmap, row by row from the top.
+    @MainActor private func menuBarAlphas(_ state: MenuBarState, scale: Int = 2) -> [UInt8] {
+        let pixels = 18 * scale
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: pixels, pixelsHigh: pixels, bitsPerSample: 8,
+                                   samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                                   bytesPerRow: 0, bitsPerPixel: 0)!
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        MenuBarIcon.image(for: state).draw(in: NSRect(x: 0, y: 0, width: pixels, height: pixels))
+        NSGraphicsContext.restoreGraphicsState()
+        let data = rep.bitmapData!
+        // Rows are padded: each starts at `bytesPerRow`, not at 4 bytes per pixel.
+        return (0..<pixels).flatMap { y in (0..<pixels).map { x in data[y * rep.bytesPerRow + x * 4 + 3] } }
+    }
+
+    /// The alpha of the pixel under a point (in points, from the top-left) of a 2x render.
+    private func menuBarAlpha(_ alphas: [UInt8], at point: CGPoint) -> Int {
+        Int(alphas[Int(point.y * 2) * 36 + Int(point.x * 2)])
+    }
+
     // MARK: Shortcuts
 
     @Test func noTwoShortcutsOfAGroupShareAKey() {
