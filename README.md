@@ -89,7 +89,11 @@ Depois dela, o cartão e o banner só aparecem se nem o modelo do Orb nem o padr
 Sem nenhum Orb na lista (se você apagou todos), a janela mostra a **tela de boas-vindas** em vez de um chat vazio: três Orbs que
 piscam e olham para o ponteiro, o que o app faz em três pontos ("Conversa e faz", "Pede antes de agir", "Lembra de você") e o
 caminho mais curto até o primeiro Orb. Sem modelo conectado, o cartão "Primeiro, conecte um modelo" aparece ali mesmo (os
-mesmos caminhos do primeiro uso). Com um modelo pronto, são duas opções:
+mesmos caminhos do primeiro uso). Se o **Claude Code** já está instalado e com login, o cartão dá lugar a um botão só,
+**Usar meu Claude Code e começar** (com a conta que ele achou, por exemplo "Claude Max"): um clique conecta, cria o Atlas e
+abre a conversa com ele. As outras formas ficam em "Outras formas de conectar", fechadas. Nos primeiros segundos a tela só
+guarda o lugar da ação (o app confere as conexões e procura o Claude Code), então o botão nunca aparece e some. Havendo
+memórias guardadas, o botão só conecta e a tela segue para elas. Com um modelo pronto, são duas opções:
 
 - **Criar meu primeiro Orb** (⌘N, ou Return): abre a folha Novo Orb.
 - **Começar com o Atlas**: cria o Atlas na hora, pronto para usar, com uma pasta própria em `~/Orbs`.
@@ -97,12 +101,13 @@ mesmos caminhos do primeiro uso). Com um modelo pronto, são duas opções:
 Com [memórias guardadas](#memória) de Orbs apagados, um cartão "Começar de uma memória guardada" lista as três mais novas
 ("Continuar" abre a folha Novo Orb já com a memória escolhida; "Ver todas" mostra a lista completa). Depois de criar um Orb
 e apagar todos, o título vira "Hora de um Orb novo". A barra lateral mostra "Criar seu primeiro Orb" onde os Orbs ficam, e o
-clique nela traz a tela de volta. Com Orbs, o app sempre abre em um deles ("Escolha um Orb" deixou de existir). Sob os botões,
+clique nela traz a tela de volta (e "Novo Orb" no pé da barra lateral só aparece quando há Orbs: sem eles, a linha
+"Criar seu primeiro Orb" é o caminho; o ⌘N continua valendo). Com Orbs, o app sempre abre em um deles ("Escolha um Orb" deixou de existir). Sob os botões,
 "Importar de outro assistente" abre a folha Novo Orb já no painel de [importação](#criar-um-orb).
 
 ## A janela
 
-A **barra lateral** tem os seus Orbs, o **Espaço de trabalho** (Rotinas, Conectores, Skills), **Novo Orb** e **Ajustes**. Uma
+A **barra lateral** tem os seus Orbs, o **Espaço de trabalho** (Rotinas, Conectores, Skills), **Novo Orb** (só com Orbs na lista) e **Ajustes**. Uma
 linha mostra o que o Orb está fazendo ("Pensando…"), "Precisa de você" quando ele espera uma permissão e um ponto quando há
 mensagens não lidas; o botão direito abre o menu do Orb (nova conversa, conversas anteriores, abrir pasta, personalizar, ver
 rotinas, apagar). No meio fica o chat; à direita, o painel do Orb.
@@ -352,6 +357,9 @@ do mesmo Orb (a atual, outra arquivada ou de uma rotina) ainda usa fica.
 
 Uma **rotina** é uma tarefa que um Orb faz sozinho, no horário, **enquanto o app está aberto** (página **Rotinas**,
 ⌥⌘R; também na aba Rotinas do painel). Há modelos prontos: "Resumo da manhã", "Organizar arquivos" e "Revisar a semana".
+Sem nenhum Orb, "Nova rotina" e os modelos continuam valendo: com um modelo conectado o app cria o Atlas (como "Começar com o
+Atlas") e abre o editor para ele, sem sair de Rotinas; sem modelo, abre a tela de boas-vindas no cartão que conecta um, com um
+aviso dizendo por quê.
 
 - **Quando**: todo dia, toda semana (com o dia), a cada X horas ou a cada X minutos (no mínimo 15); o editor mostra a próxima
   execução.

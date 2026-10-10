@@ -10,6 +10,18 @@ final class InMemoryPreferences: PreferenceStore {
     func set(_ value: Any?, forKey key: String) { values[key] = value }
 }
 
+/// Why the welcome screen was opened by something other than the empty list, so it can say so above the connect card.
+enum WelcomeReason: Equatable {
+    /// "Nova rotina" with no Orb and no model.
+    case routine
+
+    var message: String {
+        switch self {
+        case .routine: "Para criar uma rotina, primeiro conecte um modelo. Depois é só voltar em Rotinas."
+        }
+    }
+}
+
 extension AppModel {
     /// The preference that says an Orb was made here once. "Redefinir o Orb" clears the app's preferences, so after a
     /// reset the welcome screen speaks as it does on first use.

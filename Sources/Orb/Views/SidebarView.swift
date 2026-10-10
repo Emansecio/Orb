@@ -13,6 +13,9 @@ struct SidebarView: View {
     /// view, it is applied twice and "Orbs" starts a whole toolbar below the window's buttons.
     @State private var toolbarHeight: CGFloat = 0
 
+    /// With no Orbs the dashed invitation at the top is the way to make one: no second button for the same thing.
+    private var showsNewOrb: Bool { SidebarFooter.showsNewOrb(botCount: model.botIDs.count) }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 1) {
@@ -81,26 +84,34 @@ struct SidebarView: View {
                 KeptMemoryBanner()
                 HStack(spacing: 6) {
                     ProfileAvatarButton()
-                    Button { model.showNewBot = true } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "plus")
-                                .font(.system(size: 12, weight: .semibold))
-                            Text("Novo Orb")
-                            Spacer(minLength: 4)
-                            Text(AppShortcut.newBot.label)
-                                .font(.system(size: 11))
-                                .foregroundStyle(Palette.muted)
+                    if showsNewOrb {
+                        Button { model.showNewBot = true } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "plus")
+                                    .font(.system(size: 12, weight: .semibold))
+                                Text("Novo Orb")
+                                Spacer(minLength: 4)
+                                Text(AppShortcut.newBot.label)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(Palette.muted)
+                            }
+                            .frame(maxWidth: .infinity)
                         }
-                        .frame(maxWidth: .infinity)
+                        .buttonStyle(SecondaryPillStyle())
+                        .help(Tip.newBot())
+                        .transition(.adapted(.rise, reduceMotion: reduceMotion))
+                    } else {
+                        // Ajustes stays at the right edge while the button is away.
+                        Spacer(minLength: 0)
                     }
-                    .buttonStyle(SecondaryPillStyle())
-                    .help(Tip.newBot())
                     Button("Ajustes", systemImage: "gearshape") { openSettings() }
                         .labelStyle(.iconOnly)
                         .buttonStyle(CircleGhostStyle(side: 32, fontSize: 14))
                         .foregroundStyle(Palette.muted)
                         .iconTip(Tip.settings(), label: "Ajustes")
                 }
+                // The button comes back when the first Orb is made, and leaves with the last one (§2.13).
+                .motion(Motion.enter, value: showsNewOrb)
                 .padding(.horizontal, 8)
             }
             .padding(.vertical, 8)
@@ -173,6 +184,13 @@ private struct SidebarRow<Content: View>: View {
 extension EnvironmentValues {
     /// The list of Orbs changed in the update being drawn (the rows are arriving or leaving).
     @Entry fileprivate var sidebarListChanged = false
+}
+
+/// What the foot of the sidebar shows, as plain values the tests can read.
+enum SidebarFooter {
+    /// "Novo Orb" (⌘N) at the foot is hidden while the list is empty, because the invitation "Criar seu primeiro Orb" is
+    /// there for the same thing. ⌘N itself (the menu) works either way.
+    static func showsNewOrb(botCount: Int) -> Bool { botCount > 0 }
 }
 
 /// What the sidebar's selection is made of, as plain values the tests can read.

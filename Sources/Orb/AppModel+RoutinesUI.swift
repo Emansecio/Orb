@@ -41,7 +41,68 @@ struct RoutineTemplate: Identifiable, Equatable, Sendable {
     ]
 }
 
+/// What "Nova rotina" (or a template) does, given what the app has: the routines page never shows a dead end.
+enum RoutineStart: Equatable {
+    /// There is an Orb: the editor opens.
+    case ready
+    /// No Orb yet but a model is connected: the Atlas is made (as "Começar com o Atlas" does) and the editor opens for it.
+    case createsAtlas
+    /// No Orb and no model: the welcome screen opens on the connect card, with a note saying why.
+    case needsModel
+    /// No Orb and the connections are still being looked at (the first seconds): the click waits for the answer.
+    case waiting
+
+    static func resolve(hasOrbs: Bool, isProviderReady: Bool, connectionsChecked: Bool = true) -> RoutineStart {
+        if hasOrbs { return .ready }
+        if !connectionsChecked { return .waiting }
+        return isProviderReady ? .createsAtlas : .needsModel
+    }
+
+    /// The line under the empty page's button; nil when the click needs no explanation.
+    var caption: String? {
+        switch self {
+        case .ready, .waiting: nil
+        case .createsAtlas: "Você ainda não tem Orbs: criamos o Atlas para fazer esta rotina."
+        case .needsModel: "Falta conectar um modelo: levamos você até lá antes de criar a rotina."
+        }
+    }
+
+    /// What VoiceOver hears after the template's name.
+    var templateHint: String {
+        switch self {
+        case .ready, .waiting: "Abre o editor já preenchido"
+        case .createsAtlas: "Cria o Atlas e abre o editor já preenchido"
+        case .needsModel: "Leva a conectar um modelo, antes de abrir o editor"
+        }
+    }
+}
+
 extension AppModel {
+    /// What a click on "Nova rotina" does now.
+    var routineStart: RoutineStart {
+        .resolve(hasOrbs: !bots.isEmpty, isProviderReady: isProviderReady, connectionsChecked: hasCheckedConnections)
+    }
+
+    /// "Nova rotina" or a template: the routine to open in the editor. With no Orb, the Atlas is made first (the chosen
+    /// page stays: the editor opens over Rotinas, not over a chat); with no model either, nothing is made and the
+    /// welcome screen opens on the connect card with a note (nil then).
+    func beginRoutine(from template: RoutineTemplate? = nil, base: URL = OrbFolder.defaultBase) async -> Routine? {
+        if bots.isEmpty { await connectionsChecked() }
+        switch RoutineStart.resolve(hasOrbs: !bots.isEmpty, isProviderReady: isProviderReady) {
+        case .ready, .waiting:
+            return draftRoutine(from: template)
+        case .createsAtlas:
+            let page = selection
+            let atlas = createSuggestedOrb(base: base)
+            selection = page
+            return draftRoutine(from: template, botID: atlas.id)
+        case .needsModel:
+            welcomeReason = .routine
+            selection = nil
+            return nil
+        }
+    }
+
     /// The Orb a new routine starts with: the one you are looking at, or the first.
     var routineDefaultBot: Bot? { selectedBot ?? bots.first }
 

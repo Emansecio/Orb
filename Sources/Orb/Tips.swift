@@ -32,6 +32,27 @@ enum Tip {
     // MARK: Routines and scheduled tasks
 
     static let newRoutine = "Cria uma tarefa que o Orb faz sozinho, no horário"
+    static let newRoutineCreatingAtlas = "Cria o Atlas, seu primeiro Orb, e abre o editor da rotina"
+    static let newRoutineNeedingModel = "Leva a conectar um modelo; depois você volta e cria a rotina"
+    static let routineTemplateCreatingAtlas = "Cria o Atlas, seu primeiro Orb, e abre o editor com este modelo"
+
+    /// "Nova rotina" with no Orb yet: what the click will do.
+    static func newRoutine(for start: RoutineStart) -> String {
+        switch start {
+        case .ready, .waiting: newRoutine
+        case .createsAtlas: newRoutineCreatingAtlas
+        case .needsModel: newRoutineNeedingModel
+        }
+    }
+
+    /// A template card with no Orb yet.
+    static func routineTemplate(for start: RoutineStart) -> String {
+        switch start {
+        case .ready, .waiting: routineTemplate
+        case .createsAtlas: routineTemplateCreatingAtlas
+        case .needsModel: newRoutineNeedingModel
+        }
+    }
     static let editRoutine = "Edita o horário e o pedido da rotina"
     static let deleteRoutine = "Apaga esta rotina e o histórico dela"
     static let runRoutineNow = "Roda a rotina agora, sem esperar o horário"
@@ -147,6 +168,10 @@ enum Tip {
     // MARK: Welcome and first use
 
     static let createAtlas = "Cria o Atlas agora; dá para personalizar depois"
+    static let startWithClaudeCode = "Conecta o Claude Code e cria o Atlas, seu primeiro Orb"
+    static func otherWaysToConnect(isShowing: Bool) -> String {
+        "\(isShowing ? "Esconde" : "Mostra") os outros caminhos para conectar um modelo"
+    }
     static let allKeptMemories = "Abre a folha Novo Orb com todas as memórias guardadas"
     static let continueFromMemory = "Cria um Orb a partir desta memória guardada"
     static let modelSettings = "Abre os Ajustes de provedores e modelos"
@@ -257,7 +282,8 @@ enum Tip {
          copySlug("resumir"), skillToggle(isOn: true), skillToggle(isOn: false), moreOptions(of: "Orb"), searchFor("pdf"),
          memoryShowKind, memoryShowAll, memoryFolder, memoryHow, editIdentity, forget, expandMemory, collapseMemory,
          restartInterview("Orb"),
-         createAtlas, allKeptMemories, continueFromMemory, modelSettings, useClaudeCode, signInClaudeCode, signInChatGPT,
+         createAtlas, startWithClaudeCode, otherWaysToConnect(isShowing: true), otherWaysToConnect(isShowing: false),
+         newRoutineCreatingAtlas, newRoutineNeedingModel, routineTemplateCreatingAtlas, allKeptMemories, continueFromMemory, modelSettings, useClaudeCode, signInClaudeCode, signInChatGPT,
          pasteKey, stopConnecting, retryConnecting, useLocalServer("Ollama"), createOrbSheet(),
          launchAtLogin, notifyWhenDone, proposeSkills, dataFolder, keptMemoriesFolder, orbsFolder, resetOrb,
          openSystemNotifications, askNotifications, globalShortcut,

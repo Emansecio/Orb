@@ -196,3 +196,31 @@ struct RoutinesUITests {
         #expect(ConversationListing.searchFrom == 5)
     }
 }
+
+/// "Nova rotina" with no Orb is not a dead end: what each start says (the paths that make the Atlas are in WelcomeTests).
+struct RoutineStartTests {
+    @Test func onlyTheStartsWithNoOrbExplainThemselves() {
+        #expect(RoutineStart.ready.caption == nil)
+        #expect(RoutineStart.waiting.caption == nil, "the first seconds say nothing that may change")
+        #expect(RoutineStart.createsAtlas.caption?.contains("Atlas") == true)
+        #expect(RoutineStart.needsModel.caption?.contains("modelo") == true)
+        #expect(RoutineStart.needsModel.caption != RoutineStart.createsAtlas.caption)
+    }
+
+    @Test func theTipsFollowWhatTheClickWillDo() {
+        for start in [RoutineStart.ready, .waiting] {
+            #expect(Tip.newRoutine(for: start) == Tip.newRoutine)
+            #expect(Tip.routineTemplate(for: start) == Tip.routineTemplate)
+        }
+        #expect(Tip.newRoutine(for: .createsAtlas) == Tip.newRoutineCreatingAtlas)
+        #expect(Tip.routineTemplate(for: .createsAtlas) == Tip.routineTemplateCreatingAtlas)
+        #expect(Tip.newRoutine(for: .needsModel) == Tip.newRoutineNeedingModel)
+        #expect(Tip.routineTemplate(for: .needsModel) == Tip.newRoutineNeedingModel)
+    }
+
+    @Test func theAccessibilityHintOfATemplateSaysWhatWillHappen() {
+        #expect(RoutineStart.ready.templateHint == "Abre o editor já preenchido")
+        #expect(RoutineStart.createsAtlas.templateHint.contains("Cria o Atlas"))
+        #expect(RoutineStart.needsModel.templateHint.contains("conectar um modelo"))
+    }
+}

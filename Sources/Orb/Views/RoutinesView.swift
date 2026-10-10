@@ -32,7 +32,7 @@ struct RoutinesView: View {
             // the ids, so a run or a clock tick moves nothing.
             ZStack(alignment: .top) {
                 if model.routines.isEmpty {
-                    RoutinesEmptyState(canCreate: !model.bots.isEmpty,
+                    RoutinesEmptyState(start: model.routineStart,
                                        onNew: { newRoutine(nil) },
                                        onTemplate: { newRoutine($0) })
                         .transition(.opacity)
@@ -78,8 +78,7 @@ struct RoutinesView: View {
                 } primaryAction: {
                     newRoutine(nil)
                 }
-                .disabled(model.bots.isEmpty)
-                .help(Tip.newRoutine)
+                .help(Tip.newRoutine(for: model.routineStart))
             }
         }
         .onAppear(perform: takeRequest)
@@ -98,7 +97,10 @@ struct RoutinesView: View {
     }
 
     private func newRoutine(_ template: RoutineTemplate?) {
-        if let draft = model.draftRoutine(from: template) { sheet = .edit(draft) }
+        // With no Orb the Atlas is made first, or the welcome screen asks for a model (no draft then).
+        Task {
+            if let draft = await model.beginRoutine(from: template) { sheet = .edit(draft) }
+        }
     }
 
     /// A routine waiting for an answer was asked for ("Ver pedido", its banner): its conversation opens.
@@ -113,7 +115,7 @@ struct RoutinesView: View {
 
 /// Nothing yet: what a routine is, one button, and three to start from.
 private struct RoutinesEmptyState: View {
-    let canCreate: Bool
+    let start: RoutineStart
     let onNew: () -> Void
     let onTemplate: (RoutineTemplate) -> Void
 
@@ -135,10 +137,9 @@ private struct RoutinesEmptyState: View {
             }
             Button("Nova rotina", systemImage: "plus", action: onNew)
                 .buttonStyle(PrimaryPillStyle())
-                .help(Tip.newRoutine)
-                .disabled(!canCreate)
-            if !canCreate {
-                Text("Crie um Orb primeiro: é ele quem faz a rotina.")
+                .help(Tip.newRoutine(for: start))
+            if let caption = start.caption {
+                Text(caption)
                     .font(.caption)
                     .foregroundStyle(Palette.muted)
             }
@@ -164,7 +165,7 @@ private struct RoutinesEmptyState: View {
 extension RoutinesEmptyState {
     @ViewBuilder fileprivate func templateCards(width: CGFloat?) -> some View {
         ForEach(RoutineTemplate.all) { template in
-            TemplateCard(template: template, isEnabled: canCreate) { onTemplate(template) }
+            TemplateCard(template: template, start: start) { onTemplate(template) }
                 .frame(width: width)
         }
     }
@@ -172,7 +173,7 @@ extension RoutinesEmptyState {
 
 private struct TemplateCard: View {
     let template: RoutineTemplate
-    let isEnabled: Bool
+    let start: RoutineStart
     let action: () -> Void
     @State private var isHovering = false
 
@@ -202,11 +203,10 @@ private struct TemplateCard: View {
             .contentShape(.rect(cornerRadius: 12))
         }
         .buttonStyle(.plain)
-        .disabled(!isEnabled)
-        .help(Tip.routineTemplate)
+        .help(Tip.routineTemplate(for: start))
         .onHover { isHovering = $0 }
         .accessibilityLabel("\(template.title), \(template.whenText)")
-        .accessibilityHint("Abre o editor já preenchido")
+        .accessibilityHint(start.templateHint)
     }
 }
 

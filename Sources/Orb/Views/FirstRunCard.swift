@@ -46,6 +46,37 @@ enum SetupPrompt {
     }
 }
 
+/// The one path that is already ready to use when the welcome screen opens, so it can be offered as a single big
+/// button instead of a list of three: Claude Code installed and logged in (the user's own subscription, nothing to
+/// type). nil when nothing is ready: the card with its paths stays as it is.
+struct FirstRunOffer: Equatable {
+    /// "fulano@x.com · Claude Max".
+    var account: String
+    /// The click also makes the Atlas. Not when memories kept from deleted Orbs wait: those can start the new Orb, so
+    /// the click only connects and the screen moves on to them.
+    var createsAtlas: Bool
+
+    static func resolve(claude: ClaudeCodeStatus?, keptCount: Int = 0) -> FirstRunOffer? {
+        guard let claude, claude.isInstalled, claude.isLoggedIn else { return nil }
+        return FirstRunOffer(account: claude.accountLabel, createsAtlas: keptCount == 0)
+    }
+
+    var buttonTitle: String { createsAtlas ? "Usar meu Claude Code e começar" : "Usar meu Claude Code" }
+    var workingTitle: String { "Conectando…" }
+
+    var detail: String {
+        createsAtlas
+            ? "Você já está conectado como \(account). Um clique conecta e cria o Atlas, seu primeiro Orb."
+            : "Você já está conectado como \(account). Um clique conecta."
+    }
+
+    var accessibilityHint: String {
+        createsAtlas ? "Conecta o Claude Code, cria o Atlas e abre a conversa com ele" : "Conecta o Claude Code"
+    }
+
+    static let othersTitle = "Outras formas de conectar"
+}
+
 private struct FirstRunError: LocalizedError {
     var message: String
     var errorDescription: String? { message }
@@ -70,6 +101,15 @@ final class FirstRunModel {
     private(set) var failure: Failure?
     /// Set when a model was just connected: "Claude Code". The card shows "Pronto" for a moment.
     private(set) var connectedName: String?
+    /// Claude Code and the local servers have been looked for (or were given): until then the welcome screen keeps
+    /// the place of its action, so the big button is never shown and then taken back.
+    private(set) var hasDetected: Bool
+    /// "Usar meu Claude Code e começar" is under way: the screen stays on the card until the Atlas exists, instead of
+    /// showing "Criar meu primeiro Orb" for the instant between the model being ready and the Orb being made.
+    private(set) var isStarting = false
+    /// Claude Code was installed and logged in when `detect` looked. Decided there, not by later changes of `claude`
+    /// (connecting rereads it), so the big button stays through a failure and "Tentar de novo".
+    private var readyPath: Bool
 
     /// How long "Pronto" stays on screen.
     var readyDelay: Duration = .seconds(1.4)
@@ -86,7 +126,16 @@ final class FirstRunModel {
     private var reusesChatGPTLogin = false
 
     /// `claude`: what Claude Code already reported (snapshots show the card as it looks once it has looked).
-    init(claude: ClaudeCodeStatus? = nil) { self.claude = claude }
+    init(claude: ClaudeCodeStatus? = nil) {
+        self.claude = claude
+        hasDetected = claude != nil
+        readyPath = FirstRunOffer.resolve(claude: claude) != nil
+    }
+
+    /// What the welcome screen offers as its one big button (nil: nothing was ready, the card shows).
+    func offer(keptCount: Int) -> FirstRunOffer? {
+        readyPath ? FirstRunOffer.resolve(claude: claude, keptCount: keptCount) : nil
+    }
 
     /// Wires `isReady` and `adoptDefault` to the app model.
     func attach(_ model: AppModel) {
@@ -100,11 +149,14 @@ final class FirstRunModel {
         async let servers = LocalServerProbe.running()
         claude = await status
         localServers = await servers
+        readyPath = FirstRunOffer.resolve(claude: claude) != nil
+        hasDetected = true
     }
 
+    /// `showsReady: false` skips the "Pronto" beat: the caller moves on at once.
     @discardableResult
-    func connectClaudeCode(model: AppModel) -> Task<Bool, Never> {
-        connect(.claudeCode, kind: .claudeCode, name: "Claude Code") {
+    func connectClaudeCode(model: AppModel, showsReady: Bool = true) -> Task<Bool, Never> {
+        connect(.claudeCode, kind: .claudeCode, name: "Claude Code", showsReady: showsReady) {
             model.addProvider(.claudeCode)
             await model.refreshConnections()
             if model.claudeCode.isLoggedIn {
@@ -113,6 +165,28 @@ final class FirstRunModel {
                 try await model.signIn(.claudeCode)
             }
             self.claude = model.claudeCode
+        }
+    }
+
+    /// "Usar meu Claude Code e começar": connects Claude Code and, once a model is ready, makes the Atlas (the same Orb
+    /// as "Começar com o Atlas"), which opens its chat. The task answers whether the Atlas was made. Nothing is made
+    /// when another path took over meanwhile or when an Orb appeared by another way.
+    @discardableResult
+    func connectClaudeCodeAndStart(model: AppModel, base: URL = OrbFolder.defaultBase) -> Task<Bool, Never> {
+        startingAtlas(after: connectClaudeCode(model: model, showsReady: false), model: model, base: base)
+    }
+
+    /// The second half of the click, once `connecting` (the path just started) is under way (internal for tests,
+    /// which connect without the real `claude`).
+    func startingAtlas(after connecting: Task<Bool, Never>, model: AppModel, base: URL) -> Task<Bool, Never> {
+        let mine = generation
+        isStarting = true
+        return Task {
+            let connected = await connecting.value
+            defer { if mine == generation { isStarting = false } }
+            guard connected, mine == generation, model.bots.isEmpty else { return false }
+            model.createSuggestedOrb(base: base)
+            return true
         }
     }
 
@@ -194,11 +268,13 @@ final class FirstRunModel {
         working = nil
         failure = nil
         connectedName = nil
+        isStarting = false
     }
 
-    /// Starts one path; the latest wins. The task answers whether a model got connected.
+    /// Starts one path; the latest wins. The task answers whether a model got connected. `showsReady: false` goes
+    /// straight on once the model is ready, without the "Pronto" beat (the caller has somewhere to go).
     @discardableResult
-    func connect(_ choice: Choice, kind: ProviderKind, name: String,
+    func connect(_ choice: Choice, kind: ProviderKind, name: String, showsReady: Bool = true,
                  _ work: @escaping @MainActor () async throws -> Void) -> Task<Bool, Never> {
         task?.cancel()
         generation += 1
@@ -206,12 +282,13 @@ final class FirstRunModel {
         working = choice
         failure = nil
         connectedName = nil
-        let started = Task { await self.run(choice, kind: kind, name: name, generation: mine, work) }
+        isStarting = false
+        let started = Task { await self.run(choice, kind: kind, name: name, generation: mine, showsReady: showsReady, work) }
         task = started
         return started
     }
 
-    private func run(_ choice: Choice, kind: ProviderKind, name: String, generation mine: Int,
+    private func run(_ choice: Choice, kind: ProviderKind, name: String, generation mine: Int, showsReady: Bool,
                      _ work: @MainActor () async throws -> Void) async -> Bool {
         do {
             try await work()
@@ -221,6 +298,10 @@ final class FirstRunModel {
                 throw FirstRunError(message: choice.isLocal
                     ? "\(name) respondeu, mas não tem nenhum modelo. Baixe um nele e tente de novo."
                     : "Conectou, mas não encontrei nenhum modelo para usar.")
+            }
+            guard showsReady else {
+                working = nil
+                return true
             }
             connectedName = name
             try? await Task.sleep(for: readyDelay)
@@ -303,6 +384,9 @@ struct FirstRunCard: View {
     /// Looks for Claude Code and local servers when it appears (`claude auth status`, two local ports). Snapshots turn
     /// it off, so a capture asks nothing of the machine.
     var detectsOnAppear = true
+    /// Under "Outras formas de conectar" on the welcome screen: no title (the disclosure above is it) and without the
+    /// Claude Code row (the big button is that path).
+    var asAlternatives = false
     @State private var ownRun = FirstRunModel()
     @State private var isKeyOpen = false
     @State private var keyKind = ProviderKind.openai
@@ -315,15 +399,17 @@ struct FirstRunCard: View {
     var body: some View {
         let steps = steps
         VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(style.title)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Palette.ink)
-                    .accessibilityAddTraits(.isHeader)
-                Text(style.subtitle)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Palette.muted)
-                    .fixedSize(horizontal: false, vertical: true)
+            if !asAlternatives {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(style.title)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Palette.ink)
+                        .accessibilityAddTraits(.isHeader)
+                    Text(style.subtitle)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             if let name = steps.connectedName {
                 Label("Pronto: \(name) conectado.", systemImage: "checkmark.circle.fill")
@@ -333,7 +419,7 @@ struct FirstRunCard: View {
                     .transition(.opacity)
             } else {
                 VStack(spacing: 8) {
-                    claudeCodeRow(steps)
+                    if !asAlternatives { claudeCodeRow(steps) }
                     FirstRunRow(symbol: "bubble.left.and.bubble.right", title: "Entrar com ChatGPT",
                                 subtitle: "Para quem tem ChatGPT Plus ou Pro. Abre o navegador para você entrar.",
                                 phase: phase(.chatgpt, steps), isEnabled: steps.working != .chatgpt,

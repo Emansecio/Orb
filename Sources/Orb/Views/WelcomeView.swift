@@ -21,9 +21,15 @@ enum WelcomeStage: Equatable {
     case createWithKept
 
     /// The card stays through the "Pronto" beat of a model that was just connected, as the empty chat's does.
-    static func resolve(providerReady: Bool, connectedName: String?, keptCount: Int, connectionsChecked: Bool = true) -> WelcomeStage {
+    ///
+    /// `detected`: Claude Code and the local servers have been looked for. Without a model the card (or the one big
+    /// button it can become) waits for the answer, so what shows first is what stays. `starting`: "Usar meu Claude Code e
+    /// começar" is under way and the Atlas is not made yet, so the card stays until it is.
+    static func resolve(providerReady: Bool, connectedName: String?, keptCount: Int, connectionsChecked: Bool = true,
+                        detected: Bool = true, starting: Bool = false) -> WelcomeStage {
         if !connectionsChecked { return .checking }
-        if !providerReady || connectedName != nil { return .connect }
+        if !providerReady && !detected { return .checking }
+        if !providerReady || connectedName != nil || starting { return .connect }
         return keptCount > 0 ? .createWithKept : .create
     }
 
@@ -145,6 +151,8 @@ enum WelcomeEntrance {
     static let pointsStart = 0.26
     static let actions = EntranceStyle.rise.delayed(0.40)
     static let keptCard = EntranceStyle.rise.delayed(0.44)
+    /// How long the card waits for the look at Claude Code and the local servers before it shows anyway.
+    static let detectionPatience: Duration = .seconds(2)
     /// The two other ways in, side by side under the main button, one after the other.
     static func choice(_ index: Int) -> EntranceStyle { .staggered(index, start: 0.46) }
     /// After this long the screen is "settled": what appears later comes in with a transition, not the entrance.
@@ -177,6 +185,9 @@ struct WelcomeView: View {
     @State private var atlasPoke = 0
     @State private var bentoPoke = 0
     @State private var celebrating = false
+    /// The look for Claude Code and the local servers took longer than `WelcomeEntrance.detectionPatience`: the card
+    /// shows without waiting for it (the big button comes in later if it turns out to be there).
+    @State private var detectionWaitOver = false
     /// A model was connected on the card during this stay on the screen (only that makes the Atlas celebrate).
     @State private var connectedOnCard = false
     @State private var lastHoverPoke = Date.distantPast
@@ -197,8 +208,13 @@ struct WelcomeView: View {
 
     private var stage: WelcomeStage {
         forcedStage ?? .resolve(providerReady: model.isProviderReady, connectedName: firstRun.connectedName, keptCount: kept.count,
-                                connectionsChecked: model.hasCheckedConnections)
+                                connectionsChecked: model.hasCheckedConnections,
+                                detected: firstRun.hasDetected || !detectsProviders || detectionWaitOver,
+                                starting: firstRun.isStarting)
     }
+
+    /// The one big button, when a path is ready to use (nil: the card with its paths).
+    private var offer: FirstRunOffer? { firstRun.offer(keptCount: kept.count) }
 
     private var copy: WelcomeCopy { forcedCopy ?? model.welcomeCopy }
 
@@ -219,6 +235,17 @@ struct WelcomeView: View {
             .background(Palette.canvas)
         }
         .onAppear(perform: begin)
+        .onDisappear { model.welcomeReason = nil }
+        .task {
+            // Looks as soon as the screen is up, in step with the first look at the connections.
+            firstRun.attach(model)
+            guard forcedStage == nil, detectsProviders, !firstRun.hasDetected else { return }
+            await firstRun.detect()
+        }
+        .task {
+            try? await Task.sleep(for: WelcomeEntrance.detectionPatience)
+            detectionWaitOver = true
+        }
         .task(id: WelcomeKeptKey(listIsEmpty: model.botIDs.isEmpty, keptVersion: model.keptMemoriesVersion)) { await loadKept() }
         .onChange(of: firstRun.connectedName) { _, name in
             if name != nil { connectedOnCard = true }
@@ -257,7 +284,7 @@ struct WelcomeView: View {
                     // Keeps the place of what comes: the card or the buttons enter here once the answer is known.
                     Color.clear.frame(height: 150)
                 } else if stage.showsConnectCard {
-                    FirstRunCard(style: .welcome, run: firstRun, detectsOnAppear: detectsProviders)
+                    connect
                         .transition(.opacity.animation(reduceMotion ? Motion.fade : Motion.exit))
                         .entrance(WelcomeEntrance.actions, enters: entering)
                 } else {
@@ -271,6 +298,19 @@ struct WelcomeView: View {
         }
         .frame(maxWidth: 560)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+    }
+
+    /// No model yet: the note of why the screen came up (if something sent you here), then the one big button when
+    /// Claude Code is ready, or the card with its paths.
+    private var connect: some View {
+        VStack(spacing: 18) {
+            if let reason = model.welcomeReason { WelcomeReasonNote(reason: reason) }
+            if let offer {
+                WelcomeOfferView(offer: offer, run: firstRun, onStarted: startedWithOffer)
+            } else {
+                FirstRunCard(style: .welcome, run: firstRun, detectsOnAppear: detectsProviders && !firstRun.hasDetected)
+            }
+        }
     }
 
     /// Where the middle of the Atlas is, from the top of the area: the glow is centered there.
@@ -400,6 +440,11 @@ struct WelcomeView: View {
         guard !reduceMotion, Date.now.timeIntervalSince(lastHoverPoke) > 1.5 else { return }
         lastHoverPoke = .now
         atlasPoke += 1
+    }
+
+    /// "Usar meu Claude Code e começar" made the Atlas: VoiceOver says where the person is now (the chat opens).
+    private func startedWithOffer() {
+        AccessibilityNotification.Announcement("Claude Code conectado. Atlas criado.").post()
     }
 
     /// A model just got connected: the Atlas celebrates for 3 s (the session's own flash time), VoiceOver says what is

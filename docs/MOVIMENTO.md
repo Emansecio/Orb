@@ -282,6 +282,13 @@ Só usa tokens que já existem; o fundo é estático (um gradiente desenhado uma
   conectado no cartão (`WelcomeStage.celebrates(old:new:viaCard:)`), nunca quando a verificação inicial termina.
   O mesmo vale para o banner e o cartão do chat (`SetupPrompt.shows`), para o aviso do atalho rápido e para o envio: enquanto a verificação
   não termina nada pulsa nem avisa, e o compositor espera por ela. Depois dela, `AppModel.hasModelSetup(for:)` (modelo do Orb ou padrão utilizável) decide se o cartão e o banner aparecem.
+- **Um clique com o Claude Code pronto.** O estágio `.checking` também cobre a procura pelo Claude Code e pelos servidores locais
+  (`FirstRunModel.hasDetected`, no máximo `WelcomeEntrance.detectionPatience`), então o botão `HeroPillStyle` ("Usar meu Claude Code e
+  começar", em `WelcomeOffer.swift`) ou o cartão aparece uma vez e fica. Enquanto o clique cria o Atlas (`isStarting`) o estágio segue
+  `.connect`: sem o "Pronto" de 1,4 s e sem piscar "Criar meu primeiro Orb". "Outras formas de conectar" abre com `Motion.panel` e
+  `.unfold` (só opacidade sob Reduzir movimento). Um aviso (`WelcomeReason`) sobe junto com o cartão quando algo mandou a pessoa para cá.
+- **Botão Novo Orb da barra lateral.** Sai com a lista vazia (o convite faz o mesmo papel) e volta com `.rise` em `Motion.enter`
+  quando nasce o primeiro Orb; Ajustes fica no canto direito nos dois casos.
 - **Memória guardada que chega depois.** Ao apagar o último Orb guardando a memória, a cópia roda em segundo plano. A lista é lida
   de novo quando ela termina (`keptMemoriesVersion`), e o cartão entra por transição.
 - **Texto da lista esvaziada.** A marca `orb.welcome.criouOrb` também é gravada quando o app abre com Orbs que já existem (feitos por

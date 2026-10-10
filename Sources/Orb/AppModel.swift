@@ -60,6 +60,8 @@ final class AppModel {
     var newBotStart: KeptMemory?
     /// The new-Orb sheet opens on "Importar de outro assistente" (from the welcome screen or the command palette).
     var newBotImporting = false
+    /// Why the welcome screen is on (nil: it simply is the empty list). Cleared when the screen goes or an Orb is made.
+    var welcomeReason: WelcomeReason?
     /// Where the welcome screen remembers that an Orb was made once (so an empty list reads "Hora de um Orb novo").
     /// The app's own preferences only in the running app; a developer run or a test keeps it in memory.
     @ObservationIgnored var welcomePreferences: any PreferenceStore = InMemoryPreferences()
@@ -928,6 +930,7 @@ final class AppModel {
         session.lastUsed = .now
         bots.append(bot)
         selection = .bot(bot.id)
+        welcomeReason = nil
         noteOrbCreated()
         if let folderProblem { append(.notice("\(folderProblem). \(bot.name) vai trabalhar na pasta pessoal."), to: bot.id) }
         // Starting from a kept memory: its folder becomes this Orb's (a rename, so it is as quick as making a folder).
