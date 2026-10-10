@@ -233,6 +233,7 @@ enum ClaudeCodeWire {
     static func permissionResponse(requestID: String, answer: ClaudeCodePermissionAnswer, input: JSONValue) -> String {
         let body: JSONValue = switch answer {
         case .allow: .object(["behavior": .string("allow"), "updatedInput": input])
+        case .allowUpdating(let updated): .object(["behavior": .string("allow"), "updatedInput": updated])
         case .deny(let message): .object(["behavior": .string("deny"), "message": .string(message)])
         }
         return JSONValue.object(["type": .string("control_response"), "response": .object([
@@ -266,6 +267,8 @@ enum ClaudeCodeWire {
 
 enum ClaudeCodePermissionAnswer: Equatable, Sendable {
     case allow
+    /// Allowed, with this input in place of the model's (the app did part of the work and says so in the arguments).
+    case allowUpdating(JSONValue)
     case deny(String)
 }
 

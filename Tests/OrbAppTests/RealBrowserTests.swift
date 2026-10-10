@@ -33,7 +33,7 @@ enum RealBrowsers {
     }()
 
     /// The tests that start real browsers take turns (they look at the processes of the same folder).
-    static let gate = AsyncMutex()
+    static let gate = RealBrowserGate()
 
     static let skipped = environment["ORB_SKIP_REAL_BROWSER_TESTS"] == "1"
 
@@ -75,6 +75,19 @@ struct RealBrowserInstallTests {
         let records = installer.records()
         for (name, record) in records.sorted(by: { $0.key < $1.key }) { print("instalado \(name) \(record.version) \(record.detail ?? "")") }
     }
+}
+
+/// One turn at a time. A holder that never gives the turn back (its test was cut short by the time limit) loses it after four minutes,
+/// so one stuck test cannot hold up all the others.
+actor RealBrowserGate {
+    private var heldSince: Date?
+
+    func lock() async {
+        while let since = heldSince, Date().timeIntervalSince(since) < 240 { try? await Task.sleep(for: .milliseconds(100)) }
+        heldSince = Date()
+    }
+
+    func unlock() { heldSince = nil }
 }
 
 final class LockedBox<Value: Sendable>: @unchecked Sendable {

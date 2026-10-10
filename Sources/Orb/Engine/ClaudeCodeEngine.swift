@@ -44,6 +44,10 @@ struct ClaudeCodeTurn: Sendable {
     /// Folder that gets `--add-dir` when the Orb works somewhere else, so reading across the user's files does not
     /// prompt for every folder (Claude Code only trusts the folder it starts in).
     var homeDirectory = FileManager.default.homeDirectoryForCurrentUser
+    /// The Orb's browser (its hub, engine and search), for the one thing the app does itself in a Claude Code turn: opening the
+    /// window and the card of `browse_show` (see `ClaudeCodeEngine.handOff`). Without a hub, or with an engine that has no window,
+    /// the tool of the Orb's server answers by itself.
+    var browser = BrowserAccess()
     /// How long Claude Code has to answer `initialize` before the turn is given up. Generous: a cold first launch
     /// may be starting the Orb's tools server and the user's connectors (some remote) before it answers.
     var initializeTimeout: TimeInterval = 60
@@ -308,10 +312,51 @@ actor ClaudeCodeEngine {
         }
     }
 
-    /// Answers a `can_use_tool` request: by the Orb's mode and rules as they are now, or by asking the user.
+    /// The Orb's `browse_show`, as the CLI names it.
+    static let browseShow = ClaudeCodeTools.memoryPrefix + "browse_show"
+
+    /// Answers a `can_use_tool` request: by the Orb's mode and rules as they are now, or by asking the user. `browse_show`, once
+    /// allowed, also waits for the person to finish in the window (the app opens it, and the card, itself).
     /// `granted` holds the grants of this turn ("Só nesta tarefa").
     private func permission(_ request: ClaudeCodePermissionRequest, turn: ClaudeCodeTurn, hasText: Bool, fromSubagent: Bool,
                             granted: inout [PermissionRule], out: AsyncStream<TurnEvent>.Continuation) async -> ClaudeCodePermissionAnswer {
+        let answer = await authorize(request, turn: turn, hasText: hasText, fromSubagent: fromSubagent, granted: &granted, out: out)
+        guard case .allow = answer, request.toolName == Self.browseShow, !request.input.flag("hide"), turn.browser.drivesABrowser else {
+            return answer
+        }
+        return await handOff(request, turn: turn, out: out)
+    }
+
+    /// `browse_show` in a Claude Code turn. The tools server is another process and cannot show a card, so the app does what the
+    /// native tool does (opens the Orb's session in a window, puts the "Pronto / Cancelar" card in the chat and waits, like an
+    /// approval) and then lets the call through with `handoff: done`, which makes the server report the result instead of
+    /// opening the window again. Cancelar, or a browser that cannot show a window, is the call's denial.
+    private func handOff(_ request: ClaudeCodePermissionRequest, turn: ClaudeCodeTurn,
+                         out: AsyncStream<TurnEvent>.Continuation) async -> ClaudeCodePermissionAnswer {
+        var context = ToolContext(workingDirectory: turn.bot.workingURL)
+        context.botID = turn.bot.id
+        context.browser = turn.browser
+        let gate = self.gate, bot = turn.bot
+        context.handoff = { page in
+            let done = await gate.handoff(page: page, botName: bot.name, botID: bot.id) { card in
+                out.yield(.approval(card))
+                out.yield(.status("Esperando sua resposta"))
+            }
+            out.yield(.status("Pensando"))
+            return done
+        }
+        do {
+            _ = try await BrowseShowTool().run(request.input, context: context)
+        } catch {
+            return .deny(error.localizedDescription)
+        }
+        guard case .object(var fields) = request.input else { return .allow }
+        fields[BrowseShowTool.handledKey] = .string(BrowseShowTool.handledDone)
+        return .allowUpdating(.object(fields))
+    }
+
+    private func authorize(_ request: ClaudeCodePermissionRequest, turn: ClaudeCodeTurn, hasText: Bool, fromSubagent: Bool,
+                           granted: inout [PermissionRule], out: AsyncStream<TurnEvent>.Continuation) async -> ClaudeCodePermissionAnswer {
         let live = await turn.currentPermissions()
         let workspace = turn.bot.workingURL
         var call = PermissionPolicy.call(claudeCodeTool: request.toolName, input: request.input, workspace: workspace,

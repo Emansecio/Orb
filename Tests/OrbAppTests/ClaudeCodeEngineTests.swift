@@ -181,6 +181,97 @@ struct ClaudeCodeEngineTests {
         #expect(lines.last == "eof")
     }
 
+    // MARK: browse_show
+
+    private func handoffCards(_ events: [TurnEvent]) -> [ApprovalRequest] {
+        events.compactMap { if case .approval(let request) = $0 { request } else { nil } }
+    }
+
+    /// The reply the fake CLI got to its permission request.
+    private func permissionReply(_ fake: FakeClaude) async throws -> JSONValue {
+        let lines = await fake.logLines(waitingFor: "eof")
+        let answer = try #require(lines.dropFirst().compactMap { JSONValue.parse($0) }.first { $0["type"] == .string("control_response") })
+        return try #require(answer["response"]?["response"])
+    }
+
+    /// The tools server is another process and cannot show a card: the app opens the window and asks itself, and the call goes
+    /// through marked as done, so the server only reports what the person answered.
+    @Test func browseShowOpensTheWindowAsksForProntoAndLetsTheServerReportIt() async throws {
+        let fake = try FakeClaude()
+        defer { fake.remove() }
+        let browser = FakeBrowserSetup()
+        var turn = fake.turn(mode: .bypass, tool: (name: ClaudeCodeEngine.browseShow, input: "{}"))
+        turn.browser = browser.context().browser
+        let events = await run(ClaudeCodeEngine(), turn)
+
+        let cards = handoffCards(events)
+        #expect(cards.map(\.isHandoff) == [true] && cards.map(\.title) == ["Atlas abriu o navegador para você"])
+        #expect(cards.map(\.command) == ["https://example.com/ — “Example”"])
+        #expect(browser.driver.calls == ["setHeaded true"])
+        let reply = try await permissionReply(fake)
+        #expect(reply["behavior"] == .string("allow"))
+        #expect(reply["updatedInput"] == .object([BrowseShowTool.handledKey: .string(BrowseShowTool.handledDone)]))
+        #expect(events.contains { if case .status("Esperando sua resposta") = $0 { true } else { false } })
+    }
+
+    @Test func cancelarDeniesTheCallWithTheDeclineAndClosesTheWindow() async throws {
+        let fake = try FakeClaude()
+        defer { fake.remove() }
+        let browser = FakeBrowserSetup()
+        var turn = fake.turn(mode: .bypass, tool: (name: ClaudeCodeEngine.browseShow, input: "{}"))
+        turn.browser = browser.context().browser
+        let events = await run(ClaudeCodeEngine(), turn, decision: .deny)
+
+        #expect(handoffCards(events).count == 1)
+        let reply = try await permissionReply(fake)
+        #expect(reply["behavior"] == .string("deny") && reply["message"]?.string?.contains("cancelled") == true)
+        #expect(browser.driver.calls == ["setHeaded true", "setHeaded false"])
+    }
+
+    @Test func inPerguntarAntesThePermissionCardComesBeforeTheHandoffCard() async throws {
+        let fake = try FakeClaude()
+        defer { fake.remove() }
+        let browser = FakeBrowserSetup()
+        var turn = fake.turn(mode: .ask, tool: (name: ClaudeCodeEngine.browseShow, input: "{}"))
+        turn.browser = browser.context().browser
+        let events = await run(ClaudeCodeEngine(), turn)
+        #expect(handoffCards(events).map(\.isHandoff) == [false, true])
+        // Denying the permission never opens the window.
+        let refusedBrowser = FakeBrowserSetup()
+        var refused = fake.turn(mode: .ask, tool: (name: ClaudeCodeEngine.browseShow, input: "{}"))
+        refused.browser = refusedBrowser.context().browser
+        let denied = await run(ClaudeCodeEngine(), refused, decision: .deny)
+        #expect(handoffCards(denied).map(\.isHandoff) == [false] && refusedBrowser.driver.calls.isEmpty)
+    }
+
+    @Test func hidingTheBrowserAsksNothingAndAnOrbWithoutABrowserIsLeftToTheServer() async throws {
+        let fake = try FakeClaude()
+        defer { fake.remove() }
+        let browser = FakeBrowserSetup()
+        var hide = fake.turn(mode: .bypass, tool: (name: ClaudeCodeEngine.browseShow, input: #"{"hide": true}"#))
+        hide.browser = browser.context().browser
+        #expect(handoffCards(await run(ClaudeCodeEngine(), hide)).isEmpty && browser.driver.calls.isEmpty)
+        #expect(try await permissionReply(fake)["updatedInput"] == .object(["hide": .bool(true)]))
+
+        // No hub (Claude Code turn without a ready browser): the call goes through as it came.
+        let other = try FakeClaude()
+        defer { other.remove() }
+        let plain = other.turn(mode: .bypass, tool: (name: ClaudeCodeEngine.browseShow, input: "{}"))
+        #expect(handoffCards(await run(ClaudeCodeEngine(), plain)).isEmpty)
+        #expect(try await permissionReply(other)["updatedInput"] == .object([:]))
+    }
+
+    @Test func aBrowserWithoutAWindowDeniesWithWhatToTellTheUser() async throws {
+        let fake = try FakeClaude()
+        defer { fake.remove() }
+        let obscura = FakeBrowserSetup(engine: .obscura)
+        var turn = fake.turn(mode: .bypass, tool: (name: ClaudeCodeEngine.browseShow, input: "{}"))
+        turn.browser = obscura.context().browser
+        #expect(handoffCards(await run(ClaudeCodeEngine(), turn)).isEmpty)
+        let reply = try await permissionReply(fake)
+        #expect(reply["behavior"] == .string("deny") && reply["message"]?.string?.contains("no window") == true)
+    }
+
     @Test func deniedToolIsReportedInPortuguese() async throws {
         let fake = try FakeClaude()
         defer { fake.remove() }

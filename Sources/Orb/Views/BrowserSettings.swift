@@ -14,7 +14,7 @@ struct BrowserSettings: View {
             } header: {
                 Text("Navegadores")
             } footer: {
-                Text("Cada Orb escolhe o seu no painel dele. O modo Simples lê páginas sem JavaScript e não precisa de nada instalado. "
+                Text("Cada Orb escolhe o seu no painel dele. O modo Leitura simples lê páginas sem JavaScript e não precisa de nada instalado. "
                      + "O que você instala aqui fica na pasta de dados do Orb, sem Homebrew, sem Node e sem pedir senha.")
             }
             SearchKeySection()

@@ -284,6 +284,26 @@ enum UIOutlineBuilder {
 
 // MARK: - Snapshot
 
+/// Where a screenshot sits, to turn its pixels back into points on screen.
+struct ShotGeometry: Codable, Sendable, Equatable {
+    var pixelWidth: Int
+    var pixelHeight: Int
+    /// Pixels per point.
+    var scale: Double
+    /// The window's frame on screen, in points, when the image was taken.
+    var windowFrame: CGRect
+    /// The `CGWindowID` that was captured.
+    var windowID: UInt32
+
+    init(pixelWidth: Int, pixelHeight: Int, scale: Double, windowFrame: CGRect, windowID: UInt32) {
+        self.pixelWidth = pixelWidth
+        self.pixelHeight = pixelHeight
+        self.scale = scale
+        self.windowFrame = windowFrame
+        self.windowID = windowID
+    }
+}
+
 /// What one `ui_read` showed: for each id its role and name, and which window it came from. `ui_act` finds the element
 /// again from the id and refuses to act when the live element no longer looks like this.
 struct UISnapshot: Codable, Sendable, Equatable {
@@ -293,11 +313,17 @@ struct UISnapshot: Codable, Sendable, Equatable {
         /// Title, else description, as shown in the outline.
         var label: String
         var secure: Bool
+        /// Position and size in points relative to the window's top-left corner; nil when not read.
+        var frame: CGRect?
+        /// Whether the element has an action a click can trigger (press, pick, confirm…).
+        var actionable: Bool
 
-        init(rawRole: String, label: String, secure: Bool) {
+        init(rawRole: String, label: String, secure: Bool, frame: CGRect? = nil, actionable: Bool = false) {
             self.rawRole = rawRole
             self.label = label
             self.secure = secure
+            self.frame = frame
+            self.actionable = actionable
         }
 
         init(from decoder: Decoder) throws {
@@ -305,6 +331,8 @@ struct UISnapshot: Codable, Sendable, Equatable {
             rawRole = try c.value(.rawRole, default: "")
             label = try c.value(.label, default: "")
             secure = try c.value(.secure, default: false)
+            frame = try? c.decodeIfPresent(CGRect.self, forKey: .frame)
+            actionable = (try? c.decodeIfPresent(Bool.self, forKey: .actionable)) ?? false
         }
     }
 
@@ -314,15 +342,30 @@ struct UISnapshot: Codable, Sendable, Equatable {
     var windowTitle: String
     var entries: [String: Entry]
     var takenAt: Date
+    /// Counts the readings of this app by this Orb, so a live reference can be tied to the reading it came from.
+    var generation: Int
+    /// Screenshot mark number → element id, for the marks drawn on the last screenshot of this window.
+    var marks: [Int: String]
+    /// Where that screenshot sits; nil when no screenshot goes with this reading.
+    var shot: ShotGeometry?
 
-    init(app: AccessibilityApp, windowIndex: Int?, windowTitle: String, entries: [String: Entry], takenAt: Date = .now) {
+    init(app: AccessibilityApp, windowIndex: Int?, windowTitle: String, entries: [String: Entry], takenAt: Date = .now,
+         generation: Int = 0, marks: [Int: String] = [:], shot: ShotGeometry? = nil) {
         self.app = app
         self.windowIndex = windowIndex
         self.windowTitle = windowTitle
         self.entries = entries
         self.takenAt = takenAt
+        self.generation = generation
+        self.marks = marks
+        self.shot = shot
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case app, windowIndex, windowTitle, entries, takenAt, generation, marks, shot
+    }
+
+    // Fields added later fall back to defaults, so a snapshot stored by an older version still decodes.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         app = try c.decode(AccessibilityApp.self, forKey: .app)
@@ -330,6 +373,23 @@ struct UISnapshot: Codable, Sendable, Equatable {
         windowTitle = try c.value(.windowTitle, default: "")
         entries = (try? c.decodeIfPresent([String: Entry].self, forKey: .entries)) ?? [:]
         takenAt = try c.value(.takenAt, default: .distantPast)
+        generation = (try? c.decodeIfPresent(Int.self, forKey: .generation)) ?? 0
+        let stored = (try? c.decodeIfPresent([String: String].self, forKey: .marks)) ?? [:]
+        marks = Dictionary(stored.compactMap { key, id in Int(key).map { ($0, id) } }, uniquingKeysWith: { first, _ in first })
+        shot = try? c.decodeIfPresent(ShotGeometry.self, forKey: .shot)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(app, forKey: .app)
+        try c.encodeIfPresent(windowIndex, forKey: .windowIndex)
+        try c.encode(windowTitle, forKey: .windowTitle)
+        try c.encode(entries, forKey: .entries)
+        try c.encode(takenAt, forKey: .takenAt)
+        try c.encode(generation, forKey: .generation)
+        // JSON keys are strings: an Int-keyed dictionary would be written as a flat array.
+        try c.encode(Dictionary(uniqueKeysWithValues: marks.map { (String($0.key), $0.value) }), forKey: .marks)
+        try c.encodeIfPresent(shot, forKey: .shot)
     }
 
     /// Whether a call naming `name` may be about this app: the same test that finds the app (`RunningAppMatcher`),

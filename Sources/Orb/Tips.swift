@@ -108,6 +108,14 @@ enum Tip {
     static let showAllActions = "Mostra todas as ações deste pedido"
     static let deny = "Recusa o pedido"
     static let allowOptions = "Permite só nesta tarefa ou sempre; remova depois em Liberações"
+    static let handoffDone = "Você terminou no navegador: o Orb continua de onde parou"
+    static let handoffCancel = "Você não vai fazer isso: o Orb segue sem esse passo"
+
+    // MARK: Orb panel: browser
+    static let browserEngine = "Qual navegador o Orb usa para páginas com JavaScript e logins"
+    static let searchProvider = "Onde o Orb pesquisa quando você pede uma busca na web"
+    static let installBrowserEngine = "Abre os Ajustes do navegador, onde está o comando de instalação"
+    static let addSearchKey = "Abre os Ajustes do navegador, onde a chave do TinyFish é guardada"
 
     // MARK: Menu bar panel
 
@@ -281,6 +289,7 @@ enum Tip {
          deleteKeepingMemory, profile(callName: "Ana"), profile(callName: nil),
          copyReply, copyMarkdown, redoReply, editMessage, cancelEdit, toggleOutput(isExpanded: true), toggleOutput(isExpanded: false), toggleRequest(isOpen: true), toggleRequest(isOpen: false),
          routineUseAuto, routineUseReadOnly, randomLook, denyWithNote, showAllActions, deny, allowOptions,
+         handoffDone, handoffCancel, browserEngine, searchProvider, installBrowserEngine, addSearchKey,
          menuBarItem, connectModel, openMainWindow, closeReply, openChatInApp, reviewRiskyInApp, allowOnce, allowBatchOnce,
          routineRequest, chooseOrb(named: "Orb"),
          importFromAssistant, startFromKeptMemory, importBack, importCopyPrompt, importChooseFile, importReadLocal, importKind, importItem, importReview, importRemove,

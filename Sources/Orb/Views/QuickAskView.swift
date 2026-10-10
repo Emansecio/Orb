@@ -504,28 +504,28 @@ struct QuickAskApprovalCard: View {
                     .foregroundStyle(Palette.warn)
             }
             HStack(spacing: 6) {
-                Button("Não permitir") {
+                Button(request.isHandoff ? "Cancelar" : "Não permitir") {
                     model.decide(.deny, approvalID: request.id, botID: entry.bot.id)
                 }
                 .buttonStyle(GhostStyle())
-                .help(Tip.deny)
+                .help(request.isHandoff ? Tip.handoffCancel : Tip.deny)
                 Spacer()
                 if request.isDangerous {
                     Button("Abrir o app", action: openApp)
                         .buttonStyle(SecondaryPillStyle())
                         .help(Tip.reviewRiskyInApp)
                 } else {
-                    Button(request.isBatch ? "Permitir as \(request.items.count)" : "Permitir") {
+                    Button(request.isHandoff ? "Pronto" : request.isBatch ? "Permitir as \(request.items.count)" : "Permitir") {
                         model.decide(.once, approvalID: request.id, botID: entry.bot.id)
                     }
                     .buttonStyle(PrimaryPillStyle())
-                    .help(request.isBatch ? Tip.allowBatchOnce : Tip.allowOnce)
+                    .help(request.isHandoff ? Tip.handoffDone : request.isBatch ? Tip.allowBatchOnce : Tip.allowOnce)
                 }
             }
         }
         .padding(10)
         .card(radius: 10, stroke: Palette.lineStrong)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(entry.bot.name) precisa da sua permissão")
+        .accessibilityLabel(request.isHandoff ? "\(entry.bot.name) espera você terminar no navegador" : "\(entry.bot.name) precisa da sua permissão")
     }
 }

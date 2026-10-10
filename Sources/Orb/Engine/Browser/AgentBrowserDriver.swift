@@ -426,7 +426,12 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
         state.withLock { $0.headed = false }
         closed.withLock { $0 = true }
         do {
-            try await send(["close"])
+            do {
+                try await send(["close"])
+            } catch BrowserDriverError.timedOut {
+                // A machine too busy to answer in time (the command was cut short): once more, or the browser stays behind.
+                try await send(["close"])
+            }
         } catch BrowserDriverError.noPage {
             return
         }

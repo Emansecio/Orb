@@ -139,7 +139,11 @@ wrapper dele; sem `--no-sandbox`, que o macOS não precisa). O Chrome leva `--ex
 Limpeza: ao sair (`willTerminate`) `BrowserHub.terminateAllNow` roda `agent-browser close` de cada sessão e espera (até 4 s); `AppModel.update` fecha o navegador do Orb quando o motor muda ou "Navegar na web" é desligado; o agent-browser fecha sozinho um navegador parado há 30 minutos (`AGENT_BROWSER_IDLE_TIMEOUT_MS`).
 `BrowserHub` guarda um `BrowserSession` por Orb (sessão `orb-<id>-<motor>`, perfil em `navegador/<orb>/<motor>` na pasta de dados, headless), serializa
 os comandos (`AsyncMutex`: ferramentas que só olham rodam juntas no turno) e lembra os refs do último snapshot, para dar nome ao clique no cartão e
-recusar senha. A janela (`browse_show`) fecha a sessão e a reabre no mesmo endereço com `--headed` e o mesmo perfil. A sessão e o `BrowserAccess` do turno
+recusar senha. A janela (`browse_show`) fecha a sessão e a reabre no mesmo endereço com `--headed` e o mesmo perfil, e então **espera a pessoa**:
+`ToolContext.handoff` (que o motor define a cada chamada) abre um cartão de aprovação com `ApprovalRequest.isHandoff` ("Pronto" = `.once`, "Cancelar" = `.deny`)
+pelo mesmo `ApprovalGate` (`ApprovalGate.handoff`), então Parar, o selo "precisa de você", o aviso (categoria `orb.approval.handoff`) e o painel da barra de menus
+valem sem código novo; só `applyModeChange` o ignora (uma troca de modo não responde por ela). Trocar o motor de um Orb (`AppModel.setBrowserEngine`) fecha o
+navegador do motor que ele deixa (`BrowserHub.close(botID:leaving:)`, também quando a sessão foi aberta pelo servidor de ferramentas do Claude Code). A sessão e o `BrowserAccess` do turno
 chegam às ferramentas por `ToolContext.browser`; `AppModel` monta isso a cada turno com o motor do Orb (`Bot.browserEngine`, `Bot.searchProvider`) e acrescenta ao prompt a
 seção `BrowserPrompt` (ou a linha de "falta instalar"). A busca (`web_search`) abre a página de resultados numa aba própria do navegador (e a fecha), lê o resultado por
 script e cai no DuckDuckGo pelo HTTP simples quando o motor é `simple`; o TinyFish é uma API (`SearchKeys` guarda a chave no Keychain) com queda para o DuckDuckGo.
@@ -522,7 +526,7 @@ open -n build/Orb.app --env ORB_DATA_DIR=/tmp/orb-teste --env ORB_SEND="Como est
 
 | Argumento | Efeito |
 |---|---|
-| `--tools-mcp <memória> [--mac] [--files] [--folder <pasta>] [--accessibility\|--no-accessibility] [--schedule-mailbox <pasta> --orb <id>]` | roda só o servidor MCP de ferramentas do Orb para o Claude Code (`--memory-mcp` ainda vale); sem janela |
+| `--tools-mcp <memória> [--mac] [--files] [--folder <pasta>] [--accessibility\|--no-accessibility] [--schedule-mailbox <pasta> --orb <id>] [--web \| --browser <motor>] [--search <provedor>] [--browser-profiles <pasta>]` | roda só o servidor MCP de ferramentas do Orb para o Claude Code (`--memory-mcp` ainda vale); sem janela |
 | `--snapshot <modo> <arquivo.png>` | desenha uma tela fora da vista e sai (abaixo) |
 | `--render-orbs <arquivo.png>` | folha de Orbs × atividades (`docs/orbs-activities.png`) |
 | `--render-icon <arquivo.png> [pixels]` | o ícone do app, desenhado no tamanho pedido (padrão 1024; `scripts/bundle.sh` chama um por tamanho do iconset) |
