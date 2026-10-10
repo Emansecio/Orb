@@ -699,6 +699,7 @@ private final class Hooks: GroupTurnHooks {
         defer { team.cleanUp() }
         let hooks = Hooks()
         let hub = team.model.delegation
+        _ = team.model.groupHub // made (and hooked up) now, so the hooks below are the ones left in place
         hub.groupHooks = hooks
         let group = OrbGroup(name: "Equipe", memberIDs: [team.atlas.id, team.pesquisador.id], orchestratorID: team.atlas.id)
         team.model.groups = [group]
@@ -713,5 +714,135 @@ private final class Hooks: GroupTurnHooks {
         #expect(side.items.contains { if case .bot(let text, _) = $0.kind { text == "Falei no grupo." } else { false } })
         #expect(team.botTexts(team.pesquisador).isEmpty) // its chat is untouched
         #expect(team.model.delegation.inbox.isEmpty) // the person asked: nobody to answer
+    }
+}
+
+// MARK: Groups over the real delegation hub (WP1 + WP5)
+
+private func twoCalls(_ calls: [(to: String, message: String)]) -> [LLMEvent] {
+    [.toolCalls(calls.enumerated().map { index, call in
+        ToolCallRequest(id: "c\(index)", name: "orbs",
+                        arguments: JSONValue.object(["action": .string("ask"), "to": .string(call.to), "message": .string(call.message)]).jsonString)
+    })]
+}
+
+private actor Names {
+    private var names: Set<String> = []
+    func add(_ name: String) -> Int { names.insert(name); return names.count }
+}
+
+@Suite @MainActor struct GroupsOverTheRealHubTests {
+    private func group(_ team: Team, budget: GroupBudget = GroupBudget()) -> OrbGroup {
+        let hub = team.model.groupHub
+        hub.settle = .zero
+        hub.isAppActive = { false }
+        return team.model.createGroup(name: "Lançamento", members: [team.atlas.id, team.pesquisador.id, team.revisor.id], budget: budget)!
+    }
+
+    private func finalPosts(_ team: Team, _ group: OrbGroup, _ text: String) -> Int {
+        (team.model.groupSession(group.id)?.items ?? []).filter {
+            if case .orbMessage(let message) = $0.kind { message.direction == .post && message.kind == .reply && message.text == text } else { false }
+        }.count
+    }
+
+    @Test func theOrchestratorAssignsTwoMembersTheyTalkAndTheWrapUpPostsOnce() async throws {
+        let replies = Names()
+        let team = Team { seen in
+            switch seen.who {
+            case "Atlas":
+                if seen.user.contains("<orb_reply") {
+                    var count = 0
+                    for name in ["Pesquisador", "Revisor"] where seen.user.contains("from=\"\(name)\"") { count = await replies.add(name) }
+                    return say(count >= 2 ? "Pronto: mercado levantado e texto revisado." : "Ainda falta o outro.")
+                }
+                if seen.toolResult != nil { return say("Pedi aos dois.") }
+                return twoCalls([("Pesquisador", "Levante o mercado."), ("Revisor", "Revise o texto.")])
+            case "Pesquisador":
+                if seen.user.contains("<orb_reply") { return say("Três concorrentes, preços conferidos.") }
+                if seen.toolResult != nil { return say("Perguntei ao Revisor.") }
+                return orbsCall("ask", to: "Revisor", "Os preços estão coerentes?")
+            case "Revisor":
+                return say(seen.user.contains("Os preços") ? "Estão coerentes." : "Texto revisado.")
+            default: return say("?")
+            }
+        }
+        defer { team.cleanUp() }
+        let group = group(team)
+        #expect(team.model.postUserMessage("Preparar o lançamento", to: group.id))
+        await waitUntil("the request to end") { team.model.groupHub.run(group.id) == nil && !(team.model.groupSession(group.id)?.items.isEmpty ?? true)
+            && self.finalPosts(team, group, "Pronto: mercado levantado e texto revisado.") > 0 }
+        await team.settle()
+        let items = team.model.groupSession(group.id)?.items ?? []
+        let posts: [(String, String?, OrbMessageItem.Kind, String)] = items.compactMap {
+            if case .orbMessage(let message) = $0.kind, message.direction == .post { (message.from.name, message.to?.name, message.kind, message.text) } else { nil }
+        }
+        #expect(finalPosts(team, group, "Pronto: mercado levantado e texto revisado.") == 1)
+        #expect(posts.contains { $0.0 == "Atlas" && $0.1 == "Pesquisador" && $0.2 == .ask })
+        #expect(posts.contains { $0.0 == "Atlas" && $0.1 == "Revisor" && $0.2 == .ask })
+        #expect(posts.contains { $0.0 == "Pesquisador" && $0.1 == "Revisor" && $0.2 == .ask }) // members talk to each other
+        #expect(posts.contains { $0.0 == "Revisor" && $0.1 == "Pesquisador" && $0.3 == "Estão coerentes." })
+        let done = items.filter { if case .event(let event) = $0.kind { event.kind == .groupRunDone } else { false } }
+        #expect(done.count == 1)
+        #expect(team.model.groupLive(group.id).runState == .idle && !team.model.isGroupWorking(group.id))
+        #expect(team.model.delegation.requests.values.allSatisfy { !DelegationHub.isOpen($0.state) } && team.model.delegation.inbox.isEmpty)
+        // The members' own chats are untouched: the work is in their group conversations.
+        #expect(team.botTexts(team.pesquisador).isEmpty && team.botTexts(team.revisor).isEmpty)
+        let side = team.model.store.readSideConversation(prefix: Store.grupoPrefix, id: group.id, for: team.pesquisador.id).value
+        #expect(side != nil)
+    }
+
+    @Test func aSpentBudgetPausesAndContinuarResumesTheHeldAnswer() async throws {
+        let team = Team { seen in
+            switch seen.who {
+            case "Atlas":
+                if seen.user.contains("<orb_reply") { return say("Fechado com o que o Pesquisador achou.") }
+                if seen.toolResult != nil { return say("Pedi ao Pesquisador.") }
+                return orbsCall("ask", to: "Pesquisador", "Pesquise.")
+            default: return say("Achei 42.")
+            }
+        }
+        defer { team.cleanUp() }
+        let group = group(team, budget: GroupBudget(maxTurns: 2, maxTokens: 1_000_000))
+        team.model.postUserMessage("Descubra o número", to: group.id)
+        await waitUntil("the group to pause") { team.model.groupLive(group.id).runState == .paused(.turns) }
+        // The answer is held, not delivered: Atlas is not woken while the group waits for the person.
+        #expect(team.model.groupSession(group.id)?.items.contains { if case .groupPause(let pause) = $0.kind { pause.state == .open } else { false } } == true)
+        #expect(!team.botTexts(team.atlas).contains("Fechado com o que o Pesquisador achou."))
+        #expect(await team.log.calls(by: "Atlas").count == 2) // its first turn (the ask and the words after it), not the wake
+        team.model.continueRun(group.id)
+        await waitUntil("the held answer to wake the orchestrator") { self.finalPosts(team, group, "Fechado com o que o Pesquisador achou.") == 1 }
+        await waitUntil("the request to end") { team.model.groupHub.run(group.id) == nil }
+        await team.settle()
+        #expect(finalPosts(team, group, "Fechado com o que o Pesquisador achou.") == 1)
+        #expect(team.model.groupSession(group.id)?.items.contains { if case .groupPause(let pause) = $0.kind { pause.state == .continued } else { false } } == true)
+    }
+
+    @Test func stoppingTheGroupCancelsEveryTurnAndPostsNothingMore() async throws {
+        let valve = Valve()
+        let team = Team { seen in
+            switch seen.who {
+            case "Atlas":
+                if seen.user.contains("<orb_reply") { return say("Isto não devia aparecer.") }
+                if seen.toolResult != nil { return say("Pedi aos dois.") }
+                return twoCalls([("Pesquisador", "Levante o mercado."), ("Revisor", "Revise o texto.")])
+            default:
+                await valve.wait()
+                return say("Isto também não.")
+            }
+        }
+        defer { team.cleanUp() }
+        let group = group(team)
+        team.model.postUserMessage("Preparar o lançamento", to: group.id)
+        await waitUntil("both members to work") { team.model.isWorking(team.pesquisador.id) && team.model.isWorking(team.revisor.id) }
+        team.model.stopGroup(group.id)
+        await valve.open()
+        await team.settle()
+        await waitUntil("the group to be idle") { !team.model.isGroupWorking(group.id) }
+        #expect(team.model.groupHub.run(group.id) == nil && team.model.groupLive(group.id).runState == .idle)
+        #expect(team.model.delegation.requests.values.allSatisfy { !DelegationHub.isOpen($0.state) } && team.model.delegation.inbox.isEmpty)
+        let items = team.model.groupSession(group.id)?.items ?? []
+        #expect(items.contains { if case .event(let event) = $0.kind { event.kind == .groupStopped } else { false } })
+        #expect(!items.contains { if case .orbMessage(let message) = $0.kind { message.text.contains("não") && message.direction == .post && message.kind == .reply } else { false } })
+        #expect(team.botTexts(team.atlas).isEmpty)
     }
 }

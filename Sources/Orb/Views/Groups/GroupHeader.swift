@@ -7,9 +7,9 @@ enum GroupBudgetText {
     static let textFrom = 0.8
 
     /// The share spent: the larger of turns and tokens, as a fraction (it can pass 1).
-    static func fraction(_ usage: GroupUsage) -> Double {
-        let turns = Double(usage.turns) / Double(max(1, usage.turnLimit))
-        let tokens = Double(usage.tokens) / Double(max(1, usage.tokenLimit))
+    static func fraction(_ usage: GroupBudgetUsage) -> Double {
+        let turns = Double(usage.turnsUsed) / Double(max(1, usage.turnLimit))
+        let tokens = Double(usage.tokensUsed) / Double(max(1, usage.tokenLimit))
         return max(turns, tokens)
     }
 
@@ -19,16 +19,16 @@ enum GroupBudgetText {
     static func isWarning(_ fraction: Double) -> Bool { fraction > textFrom }
 
     /// "3/12 turnos", or the tokens when they are the ones running out: "42 mil/150 mil tokens".
-    static func label(_ usage: GroupUsage) -> String {
-        let turns = Double(usage.turns) / Double(max(1, usage.turnLimit))
-        let tokens = Double(usage.tokens) / Double(max(1, usage.tokenLimit))
-        if turns >= tokens { return "\(usage.turns)/\(usage.turnLimit) turnos" }
-        return "\(thousands(usage.tokens))/\(thousands(usage.tokenLimit)) tokens"
+    static func label(_ usage: GroupBudgetUsage) -> String {
+        let turns = Double(usage.turnsUsed) / Double(max(1, usage.turnLimit))
+        let tokens = Double(usage.tokensUsed) / Double(max(1, usage.tokenLimit))
+        if turns >= tokens { return "\(usage.turnsUsed)/\(usage.turnLimit) turnos" }
+        return "\(thousands(usage.tokensUsed))/\(thousands(usage.tokenLimit)) tokens"
     }
 
     /// The full sentence for the tooltip and VoiceOver: "Usados: 3 de 12 turnos · 42 mil de 150 mil tokens".
-    static func detail(_ usage: GroupUsage) -> String {
-        "Usados: \(usage.turns) de \(usage.turnLimit) turnos · \(thousands(usage.tokens)) de \(thousands(usage.tokenLimit)) tokens"
+    static func detail(_ usage: GroupBudgetUsage) -> String {
+        "Usados: \(usage.turnsUsed) de \(usage.turnLimit) turnos · \(thousands(usage.tokensUsed)) de \(thousands(usage.tokenLimit)) tokens"
     }
 
     /// 950 → "950", 42_300 → "42 mil", 1_500_000 → "1500 mil".
@@ -46,7 +46,7 @@ struct GroupHeader: View {
     let name: String
     let members: [StackedAvatars.Member]
     let orbCount: Int
-    let usage: GroupUsage?
+    let usage: GroupBudgetUsage?
     /// A request is running or waits for the person: Parar grupo is offered.
     let isActive: Bool
     let onStop: () -> Void
@@ -98,7 +98,7 @@ struct GroupHeader: View {
 
 /// "3/12 turnos" and a 2 pt bar, while a request runs. The text is hidden under 80 %; its own tooltip gives the detail.
 private struct BudgetCounter: View {
-    let usage: GroupUsage
+    let usage: GroupBudgetUsage
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {

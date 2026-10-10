@@ -72,10 +72,10 @@ private struct SampleGroups {
         let live = model.groupLive(launch.id)
         if working {
             live.update(runState: .running, typing: [research.id, review.id], work: nil, needsYou: false, unread: 0,
-                        usage: GroupUsage(turns: 9, turnLimit: 12, tokens: 96_000, tokenLimit: 150_000))
+                        usage: GroupBudgetUsage(turnsUsed: 9, turnLimit: 12, tokensUsed: 96_000, tokenLimit: 150_000))
         } else if paused {
             live.update(runState: .paused(.turns), typing: [], work: nil, needsYou: false, unread: 0,
-                        usage: GroupUsage(turns: 12, turnLimit: 12, tokens: 148_000, tokenLimit: 150_000))
+                        usage: GroupBudgetUsage(turnsUsed: 12, turnLimit: 12, tokensUsed: 148_000, tokenLimit: 150_000))
         } else {
             live.update(runState: .idle, typing: [], work: nil, needsYou: false, unread: 0, usage: nil)
         }
@@ -127,5 +127,17 @@ private struct SampleGroups {
                                                       title: "Revisar antes de publicar", body: "Revisar o texto antes de publicar.",
                                                       date: now, compacted: false),
                               ])
+    }
+}
+
+extension GroupLive {
+    /// Sets the whole live state at once, for the snapshot modes and the screen tests (the runtime uses the single setters).
+    func update(runState: GroupRunState, typing: [UUID], work: WorkLine?, needsYou: Bool, unread: Int, usage: GroupBudgetUsage?) {
+        setRunState(runState)
+        setTyping(typing)
+        setWork(work)
+        setWaiting(needsYou ? typing : [])
+        setUnread(unread)
+        setBudget(usage)
     }
 }

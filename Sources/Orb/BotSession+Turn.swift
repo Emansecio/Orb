@@ -274,8 +274,10 @@ extension BotSession {
     /// The model and source of the running turn, as the usage history files them.
     private var usageLabel: UsageLabel? {
         guard let model, let name = turnModel ?? model.bot(id).flatMap(model.modelRef(for:))?.text else { return nil }
-        // MARK: MultiOrb (WP1)
+        // MARK: MultiOrb (WP1, WP5)
+        // A turn of a member in a group is filed as the group's, and so is one of the side runs of a group's chain.
         let source: UsageSource = switch (routineID, sideKind) {
+        case _ where model.groupHub.activeGroup(of: id) != nil: .group
         case (nil, _): .chat
         case (_, .delegation): .delegation
         case (_, .group): .group

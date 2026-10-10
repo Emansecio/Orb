@@ -22,6 +22,11 @@ protocol DelegationService: AnyObject {
     func roster(for botID: UUID, groupID: UUID?) -> [OrbRef]
     /// Adds tokens a turn used to its chain's budget.
     func tokensUsed(_ n: Int, chain: UUID)
+    // MARK: MultiOrb (WP5)
+    /// Starts the queued turns of `chain` that `GroupTurnHooks.canStartTurn` held back (a group's pause ended with "Continuar").
+    /// The default does nothing, for a service that holds nothing back.
+    func resumeHeldWork(chain: UUID)
+    // MARK: end MultiOrb (WP5)
 }
 
 /// What a group's runtime does around the turns the hub runs for its members (implemented by the group hub, called by the
@@ -32,4 +37,24 @@ protocol GroupTurnHooks: AnyObject {
     func prompt(for request: DelegationRequest, member: UUID) async -> String
     func turnStarted(_ request: DelegationRequest)
     func turnFinished(_ request: DelegationRequest, reply: String?, outcome: OrbEnvelope.ReplyStatus)
+    // MARK: MultiOrb (WP5)
+    /// Asked before a queued turn of a group's chain starts, a wake-up after replies included: false keeps the request queued
+    /// (the group's budget is spent or it is paused). The delegation hub starts it later, on `resumeHeldWork`. The default says yes.
+    func canStartTurn(_ request: DelegationRequest) -> Bool
+    /// Asked by `submit` for a request inside a group's chain, after its own checks: a refusal (`.budgetSpent` when the request's
+    /// budget is spent, `.notInGroup` when the group's policy keeps members from asking each other) replaces the send. The default allows.
+    func refusal(forRequestFrom asker: UUID, to member: UUID, chain: UUID) -> DelegationRefusal?
+    // MARK: end MultiOrb (WP5)
 }
+
+// MARK: MultiOrb (WP5)
+// Optional parts of the contract: a class that conforms gets these when it does not write its own.
+extension DelegationService {
+    func resumeHeldWork(chain: UUID) {}
+}
+
+extension GroupTurnHooks {
+    func canStartTurn(_ request: DelegationRequest) -> Bool { true }
+    func refusal(forRequestFrom asker: UUID, to member: UUID, chain: UUID) -> DelegationRefusal? { nil }
+}
+// MARK: end MultiOrb (WP5)

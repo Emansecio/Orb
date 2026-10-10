@@ -10,46 +10,45 @@ enum GroupRunState: Equatable, Sendable {
     case paused(GroupPauseItem.Reason)
 }
 
-/// What the running request has spent against its budget (the header's counter and bar). nil when no request runs.
-struct GroupUsage: Equatable, Sendable {
-    var turns: Int
-    var turnLimit: Int
-    var tokens: Int
-    var tokenLimit: Int
-
-    init(turns: Int, turnLimit: Int, tokens: Int, tokenLimit: Int) {
-        self.turns = turns
-        self.turnLimit = turnLimit
-        self.tokens = tokens
-        self.tokenLimit = tokenLimit
-    }
-}
-
 /// One group as the views see it: what changes while the app runs (who is typing, whether the group waits for you, the
-/// messages you have not read). The shell the group runtime fills in; the group screens only read it.
+/// messages you have not read). Written by `GroupHub` only, and each property only when its value differs: writing an
+/// `@Observable` property notifies its readers even when nothing changed.
 @MainActor
 @Observable
 final class GroupLive {
     let id: UUID
     private(set) var unread = 0
     private(set) var runState = GroupRunState.idle
-    /// The members in a turn right now.
+    /// The members in a turn right now, in the order they began.
     private(set) var typing: [UUID] = []
+    /// What the group says it is doing ("Atlas coordena…", "Pesquisador e Revisor trabalhando…", "Pausado: continuar?"); nil
+    /// when it does nothing.
     private(set) var work: WorkLine?
     /// A member waits for your answer (an approval card).
     private(set) var needsYou = false
-    /// What the running request has spent; nil when none runs.
-    private(set) var usage: GroupUsage?
+    /// The members that wait for your answer.
+    private(set) var waiting: [UUID] = []
+    /// What the running request has spent of its budget; nil when none runs.
+    private(set) var budget: GroupBudgetUsage?
 
     init(id: UUID) { self.id = id }
 
-    // WP5 replaces: the runtime writes the state of the group as the request moves on (never per token).
-    func update(runState: GroupRunState, typing: [UUID], work: WorkLine?, needsYou: Bool, unread: Int, usage: GroupUsage?) {
-        if self.runState != runState { self.runState = runState }
-        if self.typing != typing { self.typing = typing }
-        if self.work != work { self.work = work }
-        if self.needsYou != needsYou { self.needsYou = needsYou }
-        if self.unread != unread { self.unread = unread }
-        if self.usage != usage { self.usage = usage }
+    var isWorking: Bool { runState != .idle }
+
+    // MARK: Written by the group runtime
+
+    func setUnread(_ count: Int) { if unread != count { unread = count } }
+
+    func setRunState(_ state: GroupRunState) { if runState != state { runState = state } }
+
+    func setTyping(_ members: [UUID]) { if typing != members { typing = members } }
+
+    func setWork(_ line: WorkLine?) { if work != line { work = line } }
+
+    func setWaiting(_ members: [UUID]) {
+        if waiting != members { waiting = members }
+        if needsYou != !members.isEmpty { needsYou = !members.isEmpty }
     }
+
+    func setBudget(_ usage: GroupBudgetUsage?) { if budget != usage { budget = usage } }
 }

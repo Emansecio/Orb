@@ -62,13 +62,13 @@ struct GroupPresenceTests {
 
 @Suite("Orçamento do grupo")
 struct GroupBudgetTextTests {
-    private func usage(turns: Int, tokens: Int = 0) -> GroupUsage {
-        GroupUsage(turns: turns, turnLimit: 100, tokens: tokens, tokenLimit: 100_000)
+    private func usage(turns: Int, tokensUsed: Int = 0) -> GroupBudgetUsage {
+        GroupBudgetUsage(turnsUsed: turns, turnLimit: 100, tokensUsed: tokensUsed, tokenLimit: 100_000)
     }
 
     @Test func theShareIsTheLargerOfTurnsAndTokens() {
-        #expect(GroupBudgetText.fraction(usage(turns: 10, tokens: 50_000)) == 0.5)
-        #expect(GroupBudgetText.fraction(usage(turns: 10, tokens: 90_000)) == 0.9)
+        #expect(GroupBudgetText.fraction(usage(turns: 10, tokensUsed: 50_000)) == 0.5)
+        #expect(GroupBudgetText.fraction(usage(turns: 10, tokensUsed: 90_000)) == 0.9)
     }
 
     /// 0, 79, 80 and 100 %: the text shows from 80 %, the warning color only past it.
@@ -89,8 +89,8 @@ struct GroupBudgetTextTests {
     }
 
     @Test func labelNamesTheTurnsOrTheTokensThatRunOut() {
-        #expect(GroupBudgetText.label(GroupUsage(turns: 3, turnLimit: 12, tokens: 0, tokenLimit: 150_000)) == "3/12 turnos")
-        #expect(GroupBudgetText.label(GroupUsage(turns: 3, turnLimit: 12, tokens: 120_000, tokenLimit: 150_000))
+        #expect(GroupBudgetText.label(GroupBudgetUsage(turnsUsed: 3, turnLimit: 12, tokensUsed: 0, tokenLimit: 150_000)) == "3/12 turnos")
+        #expect(GroupBudgetText.label(GroupBudgetUsage(turnsUsed: 3, turnLimit: 12, tokensUsed: 120_000, tokenLimit: 150_000))
             == "120 mil/150 mil tokens")
         #expect(GroupBudgetText.thousands(950) == "950")
         #expect(GroupBudgetText.thousands(42_300) == "42 mil")

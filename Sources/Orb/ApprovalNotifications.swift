@@ -73,14 +73,21 @@ enum ApprovalNotifications {
         case decide(ApprovalDecision, botID: UUID, approvalID: UUID)
         /// A plain click: show the Orb it came from (nil: any other banner of the app, just bring the app forward).
         case open(botID: UUID?)
+        /// A group's banner (its pause, its end): show the group.
+        case openGroup(UUID)
         case ignore
     }
+
+    /// The key a group's banner carries its group under.
+    static let groupKey = "groupID"
 
     static func route(actionIdentifier: String, userInfo: [AnyHashable: Any]) -> Route {
         let botID = (userInfo[botKey] as? String).flatMap(UUID.init(uuidString:))
         let approvalID = (userInfo[approvalKey] as? String).flatMap(UUID.init(uuidString:))
+        let groupID = (userInfo[groupKey] as? String).flatMap(UUID.init(uuidString:))
         switch actionIdentifier {
         case UNNotificationDefaultActionIdentifier:
+            if let groupID { return .openGroup(groupID) }
             return .open(botID: botID)
         case allowAction, denyAction:
             guard let botID, let approvalID else { return .ignore }

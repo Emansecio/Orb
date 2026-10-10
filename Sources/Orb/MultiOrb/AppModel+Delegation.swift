@@ -25,6 +25,9 @@ extension AppModel {
     /// group's. `propose` (WP3): the Orb's own chat only, not a routine's or a request's side conversation, which nobody
     /// watches to answer the card. `groupMemory` belongs to the groups' package and is off here.
     func multiOrbOffering(for botID: UUID) -> MultiOrbOffering {
+        // MultiOrb (WP5): in a member's turn the group decides: `orbs` when it lets members talk (the orchestrator always may),
+        // and the board's tools.
+        if let group = groupTurnExtras(for: botID) { return group.offering }
         let inGroup = turnGroup(of: botID) != nil
         let hasTeam = inGroup || (orbsCanTalk && bots.count > 1)
         let ownChat = sessions[botID].map { $0.routineID == nil && $0.sideKind == nil } ?? true

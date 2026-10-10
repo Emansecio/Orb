@@ -193,10 +193,8 @@ struct NewGroupSheet: View {
 
     private func create() {
         guard canCreate, let orchestrator else { return }
-        let group = model.createGroup(name: NewGroupRules.name(written: nameShown, suggested: suggested), memberIDs: chosen,
-                                      orchestratorID: orchestrator, budget: preset.budget)
-        let text = objective.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !text.isEmpty { model.setGroupObjective(group.id, to: text) }
+        guard let group = model.createGroup(name: NewGroupRules.name(written: nameShown, suggested: suggested), members: chosen,
+                                            orchestrator: orchestrator, objective: objective, budget: preset.budget) else { return }
         model.selection = .group(group.id)
         dismiss()
     }

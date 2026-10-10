@@ -42,8 +42,8 @@ struct GroupChatView: View {
     let groupID: UUID
 
     var body: some View {
-        if let group = model.groups.first(where: { $0.id == groupID }) {
-            GroupConversation(group: group, session: model.groupSession(groupID), live: model.groupLive(groupID))
+        if let group = model.groups.first(where: { $0.id == groupID }), let session = model.groupSession(groupID) {
+            GroupConversation(group: group, session: session, live: model.groupLive(groupID))
                 .navigationTitle(group.name)
         }
     }
@@ -59,10 +59,10 @@ private struct GroupConversation: View {
         let names = model.groupLooks(group).map(\.name)
         VStack(spacing: 0) {
             GroupHeaderBar(group: group, live: live)
-            GroupThread(group: group, transcript: session.transcript)
+            GroupThreadView(group: group, transcript: session.transcript)
             GroupPresenceBar(group: group, live: live)
             GroupComposer(names: names) { message in
-                model.postUserMessage(group.id, text: message)
+                model.postUserMessage(message, to: group.id)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -80,7 +80,7 @@ private struct GroupHeaderBar: View {
         let looks = model.groupLooks(group)
         GroupHeader(name: group.name,
                     members: looks.map { StackedAvatars.Member(id: $0.id, orb: $0.orb, activity: model.live($0.id).activity) },
-                    orbCount: looks.count, usage: live.usage, isActive: live.runState != .idle,
+                    orbCount: looks.count, usage: live.budget, isActive: live.runState != .idle,
                     onStop: { model.stopGroup(group.id) }, onPanel: { model.toggleInspector() })
     }
 }
@@ -97,7 +97,7 @@ private struct GroupPresenceBar: View {
 }
 
 /// The thread: the person's messages, the members' answers, the assignments, the events and the budget's pause.
-private struct GroupThread: View {
+private struct GroupThreadView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let group: OrbGroup

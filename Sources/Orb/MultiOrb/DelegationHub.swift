@@ -50,6 +50,11 @@ final class DelegationHub: DelegationService {
     /// The side conversation of a request that waits for its children, kept in memory so it resumes without a read.
     private var suspended: [UUID: Conversation] = [:]
     private var waitingSince: [UUID: Date] = [:]
+    // MARK: MultiOrb (WP5)
+    /// Queued group turns the group's runtime said not to start yet (its budget is spent or it is paused), by request id. They go
+    /// back to their targets' queues on `resumeHeldWork` ("Continuar"); a stopped chain cancels them where they stand.
+    private var held: [UUID] = []
+    // MARK: end MultiOrb (WP5)
     /// Orbs whose group turn is being prepared (its opening text is asked of the group, which may take a moment).
     private var starting: Set<UUID> = []
 
@@ -90,6 +95,10 @@ final class DelegationHub: DelegationService {
             if let when = state.recent[key], now.timeIntervalSince(when) < DelegationRules.duplicateWindow { input.recentSameText = true }
         }
         let plan = try DelegationRules.validate(input)
+        // MARK: MultiOrb (WP5): a request inside a group's chain also answers to the group's budget and policy.
+        if groupID ?? context?.groupID != nil,
+           let refusal = groupHooks?.refusal(forRequestFrom: from, to: plan.target.id, chain: plan.chainID) { throw refusal }
+        // MARK: end MultiOrb (WP5)
 
         var chain = chainStates[plan.chainID] ?? newChain(startedBy: sender, session: session, groupID: groupID ?? context?.groupID)
         chain.messages += 1
@@ -157,6 +166,11 @@ final class DelegationHub: DelegationService {
             }
             guard model.bot(botID) != nil else { fail(request, "Esse Orb foi apagado"); continue }
             if request.envelope.groupID != nil {
+                // MultiOrb (WP5): the group's budget or pause may keep the turn waiting; it stays queued, off the queue, until "Continuar".
+                if groupHooks?.canStartTurn(request) == false {
+                    if !held.contains(id) { held.append(id) }
+                    continue
+                }
                 startGroupRun(request)
                 return true
             }
@@ -176,7 +190,12 @@ final class DelegationHub: DelegationService {
         starting.insert(botID)
         Task { @MainActor [weak self] in
             guard let self else { return }
-            let prompt = await self.groupHooks?.prompt(for: request, member: botID) ?? OrbEnvelopeText.request(request.envelope)
+            // The group's runtime writes the preface (the group, the thread since this Orb last spoke, the board); the request follows:
+            // an assignment from another Orb as a request, the person's own message as it was typed.
+            let preface = await self.groupHooks?.prompt(for: request, member: botID) ?? ""
+            let envelope = request.envelope
+            let body = envelope.from.id == envelope.to.id ? envelope.text : OrbEnvelopeText.request(envelope)
+            let prompt = preface.isEmpty ? body : preface + "\n\n" + body
             self.starting.remove(botID)
             guard let current = self.requests[request.id], current.state == .queued else { return self.schedulePump(botID) }
             if self.chainStates[current.envelope.chainID]?.cancelled == true {
@@ -283,6 +302,10 @@ final class DelegationHub: DelegationService {
             waiting.state = .awaitingChildren
             requests[requestID] = waiting
             waitingSince[requestID] = .now
+            if kind == .group { // MultiOrb (WP5): what it said before waiting is interim speech (the request is `awaitingChildren`)
+                let said = reply.map { OrbEnvelopeText.sanitize($0) } ?? ""
+                groupHooks?.turnFinished(waiting, reply: succeeded && !said.isEmpty ? said : nil, outcome: succeeded ? .ok : .failed)
+            }
         } else if let outcome, finished {
             var done = current
             done.state = outcome.status == .ok ? .replied : .failed
@@ -338,11 +361,20 @@ final class DelegationHub: DelegationService {
     func deliverInbox(for botID: UUID) -> Bool {
         guard let model, !isShuttingDown else { return false }
         var waiting = (inbox[botID] ?? []).filter { chainStates[$0.chainID]?.cancelled != true }
+        var heldBack: [OrbEnvelope] = [] // MultiOrb (WP5): answers inside a group's chain that the group does not let start a turn yet
         while let first = waiting.first {
+            if let serving = first.servingRequest, first.groupID != nil, let request = requests[serving],
+               groupHooks?.canStartTurn(request) == false {
+                let same = waiting.filter { $0.servingRequest == serving }
+                heldBack += same
+                waiting.removeAll { reply in same.contains { $0.id == reply.id } }
+                inbox[botID] = heldBack + waiting
+                continue
+            }
             let batch = Array(waiting.filter { $0.servingRequest == first.servingRequest }.prefix(DelegationLimits.wakeBatch))
             let taken = Set(batch.map(\.id))
             waiting.removeAll { taken.contains($0.id) }
-            inbox[botID] = waiting.isEmpty ? nil : waiting
+            inbox[botID] = (heldBack + waiting).isEmpty ? nil : heldBack + waiting
             if let serving = first.servingRequest {
                 guard var request = requests[serving], request.state == .awaitingChildren, var conversation = suspended[serving] else {
                     continue // the request it belonged to is gone (stopped, timed out): nobody waits for this answer
@@ -372,9 +404,27 @@ final class DelegationHub: DelegationService {
             session.chain = nil // no model: the notice says so, and the answers have nobody to wake
             continue
         }
-        inbox[botID] = nil
+        inbox[botID] = heldBack.isEmpty ? nil : heldBack
         return false
     }
+
+    // MARK: MultiOrb (WP5)
+
+    /// The group's pause ended ("Continuar"): the turns it held back go to their targets' queues again, and the answers it held
+    /// wake their Orbs.
+    func resumeHeldWork(chain: UUID) {
+        let ready = held.filter { requests[$0]?.envelope.chainID == chain }
+        held.removeAll { id in ready.contains(id) || requests[id]?.state != .queued }
+        var targets: [UUID] = []
+        for id in ready {
+            guard let request = requests[id], request.state == .queued else { continue }
+            queues[request.envelope.to.id, default: []].insert(id, at: 0)
+            if !targets.contains(request.envelope.to.id) { targets.append(request.envelope.to.id) }
+        }
+        for (botID, replies) in inbox where replies.contains(where: { $0.chainID == chain }) && !targets.contains(botID) { targets.append(botID) }
+        for botID in targets { schedulePump(botID) }
+    }
+    // MARK: end MultiOrb (WP5)
 
     // MARK: Stopping
 
@@ -504,6 +554,7 @@ final class DelegationHub: DelegationService {
         for (id, chain) in chainStates where !busy.contains(id) && now.timeIntervalSince(chain.touched) > Self.chainRetention {
             chainStates[id] = nil
         }
+        held.removeAll { requests[$0]?.state != .queued }
         pruneRequests()
     }
 

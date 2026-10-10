@@ -85,7 +85,10 @@ struct MultiOrbRoundTripTests {
         let folder = FileManager.default.temporaryDirectory.appending(path: "OrbGroups-\(UUID().uuidString)")
         defer { removeTestFolder(folder) }
         let model = AppModel(store: Store(directory: folder), runsBackgroundWork: false, secretVault: MemoryVault())
-        let group = OrbGroup(name: "Time", memberIDs: [atlas.id, revisor.id], orchestratorID: atlas.id)
+        // The members are Orbs that exist (a group of Orbs that are gone is dropped when the app opens, see `normalizeGroups`).
+        let second = Bot(name: "Revisor", role: "Revisa código", orb: OrbConfig())
+        model.bots.append(second)
+        let group = OrbGroup(name: "Time", memberIDs: [model.bots[0].id, second.id], orchestratorID: model.bots[0].id)
         model.groups = [group]
         await waitUntil("the state with the group is saved") { Store(directory: folder).readState().value?.groups == [group] }
         let again = AppModel(store: Store(directory: folder), runsBackgroundWork: false, secretVault: MemoryVault())

@@ -120,10 +120,14 @@ extension AppModel {
 
     /// ⌘.: stops the open Orb's answer.
     func stopCurrent() {
+        if case .group(let id) = selection, isGroupWorking(id) { stopGroup(id); return } // MultiOrb (WP5): the open group
         if let id = selectedBotID, canStop(id) { stop(id) }
     }
 
-    var canStopCurrent: Bool { selectedBotID.map { canStop($0) } ?? false }
+    var canStopCurrent: Bool {
+        if case .group(let id) = selection { return isGroupWorking(id) }
+        return selectedBotID.map { canStop($0) } ?? false
+    }
 
     /// The Orb works, or idles waiting on a chain of requests to other Orbs (`chainWork`): either can be stopped.
     private func canStop(_ botID: UUID) -> Bool { isWorking(botID) || live(botID).chainWork != nil }

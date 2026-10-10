@@ -69,7 +69,7 @@ private struct GroupMembersTab: View {
                 }
                 Menu {
                     ForEach(candidates, id: \.self) { id in
-                        Button(model.live(id).look.name) { model.addGroupMember(group.id, memberID: id) }
+                        Button(model.live(id).look.name) { model.addMember(id, to: group.id) }
                     }
                 } label: {
                     Label("Adicionar Orb", systemImage: "plus")
@@ -118,7 +118,7 @@ private struct MemberRow: View {
                     .accessibilityLabel("Orquestrador")
             } else {
                 Button("Tornar orquestrador", systemImage: "star") {
-                    model.setGroupOrchestrator(group.id, to: look.id)
+                    model.setOrchestrator(look.id, of: group.id)
                 }
                 .labelStyle(.iconOnly)
                 .buttonStyle(CircleGhostStyle(side: 26, fontSize: 12))
@@ -126,7 +126,7 @@ private struct MemberRow: View {
                 .help("Tornar \(look.name) o orquestrador")
             }
             Button("Remover do grupo", systemImage: "minus.circle") {
-                model.removeGroupMember(group.id, memberID: look.id)
+                model.removeMember(look.id, from: group.id)
             }
             .labelStyle(.iconOnly)
             .buttonStyle(CircleGhostStyle(side: 26, fontSize: 12))
@@ -155,6 +155,8 @@ private struct GroupBoardTab: View {
                        remember: { model.rememberGroupAgreement(groupID, text: $0) },
                        forget: { model.forgetGroupNote($0, of: groupID) },
                        restore: { model.restoreGroupNote($0, of: groupID) })
+            .id(model.groupBoard(groupID).identity) // the objective field starts from the board once it is read
+            .task { await model.refreshGroupBoard(groupID) }
     }
 }
 
@@ -182,7 +184,7 @@ private struct GroupSettingsTab: View {
                 field("Orçamento por pedido") {
                     Picker("Orçamento", selection: Binding(
                         get: { preset ?? .balanced },
-                        set: { model.setGroupBudget(group.id, to: $0.budget) })) {
+                        set: { model.setGroupBudget($0.budget, of: group.id) })) {
                         ForEach(GroupBudgetPreset.allCases) { Text($0.title).tag($0) }
                     }
                     .pickerStyle(.segmented)
@@ -202,7 +204,7 @@ private struct GroupSettingsTab: View {
                 field("Conversa") {
                     Toggle(isOn: Binding(
                         get: { group.policy.membersMayTalk },
-                        set: { model.setGroupPolicy(group.id, to: GroupPolicy(membersMayTalk: $0)) })) {
+                        set: { model.setGroupPolicy(GroupPolicy(membersMayTalk: $0), of: group.id) })) {
                         Text("Membros podem conversar entre si").font(.system(size: 13))
                     }
                     .toggleStyle(.switch)
@@ -241,8 +243,8 @@ private struct GroupSettingsTab: View {
     }
 
     private func setBudget(turns: Int? = nil, tokens: Int? = nil) {
-        model.setGroupBudget(group.id, to: GroupBudget(maxTurns: turns ?? group.budget.maxTurns,
-                                                       maxTokens: tokens ?? group.budget.maxTokens))
+        model.setGroupBudget(GroupBudget(maxTurns: turns ?? group.budget.maxTurns, maxTokens: tokens ?? group.budget.maxTokens),
+                             of: group.id)
     }
 
     private func delete() {
