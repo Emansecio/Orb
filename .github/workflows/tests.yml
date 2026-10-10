@@ -22,7 +22,7 @@ jobs:
 
     steps:
       - name: Baixar o código
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # O pacote exige Swift 6 (swift-tools-version 6.0). Em vez de fixar uma versão, escolhe o Xcode estável mais novo
       # instalado na imagem: /Applications/Xcode_<versão>.app, sem beta nem release candidate.
@@ -47,5 +47,7 @@ jobs:
       - name: Compilar
         run: swift build
 
+      # Em série: a máquina do CI tem poucos núcleos, e com ~3000 testes em paralelo os que esperam por algo (processos,
+      # servidores falsos, prazos de rede) estouram o tempo. Aqui leva ~2 min; no CI, alguns minutos.
       - name: Rodar os testes
-        run: swift test
+        run: swift test --no-parallel
