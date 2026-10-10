@@ -367,7 +367,7 @@ private struct RedoReplyButton: View {
             .confirmationDialog(RewindWords.redoTitle, isPresented: $isConfirming, titleVisibility: .visible) {
                 Button(RewindWords.redoConfirm, role: .destructive) { model.regenerateLastReply(botID, animated: true) }
             } message: {
-                Text(RewindWords.redoMessage)
+                Text(RewindWords.redoMessage(savedToMemory: model.regenerateSavedToMemory(botID)))
             }
         }
     }

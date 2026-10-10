@@ -142,13 +142,15 @@ enum RetryPlan: Equatable, Sendable {
         return .resend(text: text, attachments: attachments, itemRange: lastUser..<items.count)
     }
 
-    /// Whether `message` (the last one in the model's history) is the one `typed` produced. A skill's "/slug request"
-    /// is stored expanded into the skill's instructions, so it does not hold what was typed.
+    /// Whether `message` is the one `typed` produced: its words, without the preface and the lists the app adds, are
+    /// exactly the typed ones (searching for them inside the message would find "2" in the preface's date). A skill's
+    /// "/slug request" is stored expanded into the skill's instructions, so it does not hold what was typed.
     static func isMessage(_ message: ChatMessage, from typed: String, skills: [Skill]) -> Bool {
         guard message.role == .user else { return false }
-        if message.content.contains(typed) { return true }
+        let words = TurnPreface.requestWords(message.content)
+        if words == typed { return true }
         guard let expanded = SystemPrompt.expandSkill(in: typed, skills: skills)?.prompt else { return false }
-        return message.content.contains(expanded)
+        return words == expanded
     }
 }
 
@@ -191,8 +193,11 @@ extension AppModel {
             let removedItems = Array(items[range])
             var removedMessage: ChatMessage?
             let skillsForRetry = skills(for: botID)
+            let failedBubble = items[range.lowerBound].id
             editConversation(botID) { conversation in
-                if let last = conversation.messages.last, RetryPlan.isMessage(last, from: text, skills: skillsForRetry) {
+                // The failed attempt's own message, if it got that far: by its link, or (an older conversation) by its words.
+                if let last = conversation.messages.last, last.role == .user,
+                   last.itemID.map({ $0 == failedBubble }) ?? RetryPlan.isMessage(last, from: text, skills: skillsForRetry) {
                     removedMessage = last
                     conversation.messages.removeLast()
                 }

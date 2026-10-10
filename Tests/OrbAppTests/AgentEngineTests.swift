@@ -159,6 +159,32 @@ struct AgentEngineTests {
         #expect(messages(events).last?.content == "Olá!")
     }
 
+    @Test func theRecordedRequestCarriesTheRowOfTheChatItCameFrom() async {
+        let row = UUID()
+        var turn = request(Script([[.text("Olá")]]), mode: .ask, runs: Counter())
+        turn.requestItem = row
+        let recorded = messages(await run(AgentEngine(), turn))
+        #expect(recorded.first?.itemID == row && recorded.last?.itemID == nil) // the reply is no request
+        // What the model is sent is the same message (the link is not part of the request).
+        let withoutLink = messages(await run(AgentEngine(), request(Script([[.text("Olá")]]), mode: .ask, runs: Counter())))
+        #expect(withoutLink.first?.content == recorded.first?.content && withoutLink.first?.itemID == nil)
+    }
+
+    @Test func aMessageSteeredIntoTheTaskIsRecordedWithTheIdOfItsQueuedBubble() async {
+        let queue = SteeringQueue()
+        let queued = SteeredMessage(text: "e o rodapé", prompt: "e o rodapé")
+        queue.push(queued)
+        var history = [ChatMessage.user("pedido")]
+        var events: [TurnEvent] = []
+        let stream = AsyncStream<TurnEvent> { continuation in
+            AgentEngine.deliverSteering(queue, into: &history, out: continuation)
+            continuation.finish()
+        }
+        for await event in stream { events.append(event) }
+        #expect(history.last?.itemID == queued.id && history.last?.content == "e o rodapé")
+        #expect(messages(events).first?.itemID == queued.id)
+    }
+
     @Test func autoModeRunsToolAndFeedsResultBack() async {
         let runs = Counter()
         let script = Script([[touchCall], [.text("Feito")]])

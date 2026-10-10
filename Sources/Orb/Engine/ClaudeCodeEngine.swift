@@ -13,6 +13,8 @@ struct ClaudeCodeTurn: Sendable {
     /// The user's pictures, recorded with the message so a later turn by another model still has them as pictures
     /// (Claude Code itself opens the files named in `prompt`).
     var images: [ImageAttachment] = []
+    /// The row of the chat that holds the message: the model's copy of it is recorded tied to that row (`ChatMessage.itemID`).
+    var requestItem: UUID?
     /// What happened in the conversation that this Claude Code session has not seen; sent before the prompt.
     var context = ""
     /// Claude Code session to resume; nil starts a new one.
@@ -173,7 +175,9 @@ actor ClaudeCodeEngine {
 
     private func play(_ turn: ClaudeCodeTurn, out: AsyncStream<TurnEvent>.Continuation) async {
         defer { out.finish() }
-        out.yield(.message(.user(turn.prompt, images: turn.images)))
+        var user = ChatMessage.user(turn.prompt, images: turn.images)
+        user.itemID = turn.requestItem
+        out.yield(.message(user))
         out.yield(.status("Pensando"))
         // Without the folder the spawn fails with a bare "No such file or directory" that reads as if the CLI were missing.
         guard turn.bot.workingURL.isExistingDirectory else {

@@ -36,15 +36,17 @@ extension AppModel {
               let index = conversation.items.firstIndex(where: { $0.id == itemID }),
               case .user = conversation.items[index].kind else { return .missing }
         if conversation.items[index].duringTask == true { return .steered }
-        guard let cut = conversation.rewindCut(atItem: index, skills: skills(for: botID)) else { return .missing }
-        return conversation.isSummarized(cut) ? .summarized : nil
+        switch conversation.rewindPoint(atItem: index, skills: skills(for: botID)) {
+        case .failure(let refusal): return refusal
+        case .success(let cut): return conversation.isSummarized(cut) ? .summarized : nil
+        }
     }
 
     /// Why the last reply cannot be redone now, or nil.
     func regenerateRefusal(_ botID: UUID, ignoringFade: Bool = false) -> RewindRefusal? {
         if let refusal = rewindRefusal(botID, ignoringFade: ignoringFade) { return refusal }
-        guard let conversation = sessions[botID]?.conversation,
-              let start = conversation.lastTurnStart(skills: skills(for: botID)) else { return .noReply }
+        guard let conversation = sessions[botID]?.conversation, conversation.lastTurnRequestItem() != nil else { return .noReply }
+        guard let start = conversation.lastTurnStart(skills: skills(for: botID)) else { return .unmatched }
         if start.hasSteeredMessages { return .steeredTurn }
         return conversation.isSummarized(start.cut) ? .summarized : nil
     }
@@ -61,6 +63,20 @@ extension AppModel {
         guard let conversation = sessions[botID]?.conversation,
               let start = conversation.lastTurnStart(skills: skills(for: botID)) else { return false }
         return conversation.dropsChanges(from: start.cut.itemIndex + 1)
+    }
+
+    /// Whether editing `itemID` drops something already saved to the memory (the confirmation says it stays).
+    func editSavedToMemory(itemID: UUID, of botID: UUID) -> Bool {
+        guard let conversation = sessions[botID]?.conversation,
+              let index = conversation.items.firstIndex(where: { $0.id == itemID }) else { return false }
+        return conversation.dropsSavedMemory(from: index)
+    }
+
+    /// The same for "Refazer": from the request on (the request itself stays and runs again).
+    func regenerateSavedToMemory(_ botID: UUID) -> Bool {
+        guard let conversation = sessions[botID]?.conversation,
+              let start = conversation.lastTurnStart(skills: skills(for: botID)) else { return false }
+        return conversation.dropsSavedMemory(from: start.cut.itemIndex + 1)
     }
 
     // MARK: Refazer
@@ -177,16 +193,12 @@ extension AppModel {
         session.cancelChunkNote() // a note on a stretch of the conversation that is going
         session.chunkAttempts = [:]
         editConversation(botID) { $0.rewind(to: cut) }
-        guard send(request.text, attachments: request.files, images: request.pictures, to: botID) else {
+        // The new message takes the row of the old one (no bubble leaves and another arrives), and the model's copy of it
+        // is tied to that row.
+        guard send(request.text, attachments: request.files, images: request.pictures, to: botID, bubble: row.id, endsEdit: false) else {
             session.conversation = before // nothing was sent (no usable model): the chat is as it was
             scheduleConversationSave(botID, delay: 0.3)
             return false
-        }
-        // The new message takes the row of the old one: no bubble leaves and another arrives.
-        editConversation(botID) { conversation in
-            guard let last = conversation.items.lastIndex(where: { if case .user = $0.kind { true } else { false } }),
-                  last == cut.itemIndex else { return }
-            conversation.items[last].id = row.id
         }
         if request.repeatsSkillUse, let skill = SystemPrompt.expandSkill(in: request.text, skills: skills(for: botID))?.skill,
            let at = skills.firstIndex(where: { $0.id == skill.id }), skills[at].uses > 0 {
@@ -203,8 +215,17 @@ extension AppModel {
         // The model's copy of the message knows which attachments were pictures (the transcript keeps only paths).
         let message = conversation.requestMessageIndices(skills: skills(for: botID))[index].map { conversation.messages[$0] }
         let isThere: (String) -> Bool = { keepingMissingFiles || FileManager.default.fileExists(atPath: $0) }
-        let pictures = (message?.images ?? []).filter { isThere($0.path) }
-        let pictured = Set((message?.images ?? []).map(\.path))
+        var pictures = (message?.images ?? []).filter { isThere($0.path) }
+        var pictured = Set((message?.images ?? []).map(\.path))
+        if message == nil {
+            // A request that never reached the model has no copy to say which of its attachments were pictures: the ones in
+            // the store of pictures are (files are never kept there).
+            for path in attachments {
+                guard let picture = images.attachment(forStoredPath: path) else { continue }
+                pictured.insert(path)
+                if isThere(path) { pictures.append(picture) }
+            }
+        }
         // A name with no folder is an attachment from before paths were kept: there is nothing to attach again.
         let files = attachments.filter { !pictured.contains($0) && $0.hasPrefix("/") && isThere($0) }
         return RewindRequest(text: text, files: files.map { URL(fileURLWithPath: $0) }, pictures: pictures, repeatsSkillUse: repeatsSkillUse)

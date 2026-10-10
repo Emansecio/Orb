@@ -1518,8 +1518,13 @@ final class AppModel {
         }
     }
 
-    /// Refused after the caller let go of the text: it goes back to the Orb's draft instead of being lost.
+    /// Refused after the caller let go of the text: it goes back to the Orb's draft instead of being lost. While a
+    /// message is being edited it goes to what the composer held before (the edit's text is not a draft).
     private func returnToDraft(_ text: String, of botID: UUID) {
+        if sessions[botID]?.lane?.editing != nil {
+            sessions[botID]?.lane?.editing?.stash.putBack(text: text, separator: "\n")
+            return
+        }
         setDraft(drafts[botID].map { $0.isEmpty ? text : text + "\n" + $0 } ?? text, for: botID)
     }
 
@@ -1538,10 +1543,12 @@ final class AppModel {
 
     /// Starts a turn. Returns false when nothing was sent (empty text, a turn already running, no usable model),
     /// so the composer keeps what you wrote. Only a message typed in the composer (`fromUser`) clears its draft:
-    /// routines and quick ask must not wipe what you are typing for that Orb.
+    /// routines and quick ask must not wipe what you are typing for that Orb. `bubble` is the id of the message's row in
+    /// the chat (an edited message keeps its row); `endsEdit: false` is for the send of the edit itself, which any other
+    /// turn that starts while a message is being edited ends (see below).
     @discardableResult
     func send(_ text: String, attachments: [URL] = [], images pictures: [ImageAttachment] = [], to botID: UUID,
-              fromUser: Bool = false) -> Bool {
+              fromUser: Bool = false, bubble: UUID = UUID(), endsEdit: Bool = true) -> Bool {
         let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let session = session(botID)
         // A routine's prompt goes to its own conversation (the chat is parked), so a chat being swapped is no obstacle to it.
@@ -1570,6 +1577,11 @@ final class AppModel {
         let modelInfo = account.models.first { $0.id == ref.model }
         let sees: Bool? = visionRejected.contains(ref.text) ? false : modelInfo?.supportsImages
 
+        // A turn begins here. If a message of the chat is being edited, the turn is not the edit's own send (that one cuts the
+        // chat first and passes `endsEdit: false`): a notice's "Continuar", a greeting's reply, the menu bar panel. The edit
+        // would otherwise outlive a chat it no longer fits (the cut point moves with the new turn, and what comes back to the
+        // composer would mix with the edit), so it is given up and the composer gets back what it held.
+        if endsEdit { cancelEditing(botID) }
         session.memoryIdle?.cancel()
         session.memoryIdle = nil
         session.skillReview?.cancel() // a review gives way to anything the user or a routine sends
@@ -1577,7 +1589,7 @@ final class AppModel {
         publishSkills(for: botID)
         // Full paths: the bubble shows thumbnails of the pictures (a name alone, as older conversations have, still renders).
         let itemsBeforeMessage = session.conversation?.items.count ?? 0
-        append(.user(text: typed, attachments: attachments.map(\.path) + pictures.map(\.path)), to: botID)
+        append(.user(text: typed, attachments: attachments.map(\.path) + pictures.map(\.path)), to: botID, id: bubble)
         if fromUser { setDraft("", for: botID) }
         setStatus("Pensando", of: botID)
         session.resetWork()
@@ -1609,7 +1621,7 @@ final class AppModel {
             prompt += MemoryIntent.instruction(tool: rememberTool)
         }
         if ref.provider == .claudeCode {
-            runClaudeCode(bot, model: ref.model, prompt: prompt, images: pictures, message: typed, turnGrants: turnGrants)
+            runClaudeCode(bot, model: ref.model, prompt: prompt, images: pictures, message: typed, bubble: bubble, turnGrants: turnGrants)
             return true
         }
         let skills = self.skills(for: botID)
@@ -1675,7 +1687,7 @@ final class AppModel {
                                       client: client, tools: tools, context: context, budget: budget, ledger: ledger,
                                       chunks: chunks, maxSteps: maxSteps,
                                       turnGrants: turnGrants, permissions: permissionSource(for: bot),
-                                      images: pictures, supportsImages: sees,
+                                      images: pictures, requestItem: bubble, supportsImages: sees,
                                       onImagesRejected: { [weak self] in Task { @MainActor in self?.visionRejected.insert(ref.text) } },
                                       outputsDirectory: outputsDirectory,
                                       onContextLearned: { [weak self] tokens, stated in
@@ -1752,7 +1764,7 @@ final class AppModel {
     }
 
     /// A turn run by the user's Claude Code, continuing the conversation's Claude Code session.
-    private func runClaudeCode(_ bot: Bot, model: String, prompt: String, images pictures: [ImageAttachment], message: String, turnGrants: [PermissionRule]) {
+    private func runClaudeCode(_ bot: Bot, model: String, prompt: String, images pictures: [ImageAttachment], message: String, bubble: UUID, turnGrants: [PermissionRule]) {
         let botID = bot.id
         let session = session(botID)
         let conversation = session.conversation ?? Conversation()
@@ -1818,7 +1830,7 @@ final class AppModel {
             guard session.isCurrent(turn) else { return }
             let claudeTurn = ClaudeCodeTurn(bot: bot, executable: installation.executable, model: model,
                                             system: ClaudeCodePrompt.withAccessibilityNote(built.system, accessibilityGranted: accessibility),
-                                            prompt: prompt, images: pictures, context: context, sessionID: sessionID, connectors: servers,
+                                            prompt: prompt, images: pictures, requestItem: bubble, context: context, sessionID: sessionID, connectors: servers,
                                             environment: environment, destructiveConnectors: annotations.destructive,
                                             knownConnectorTools: annotations.known, connectorPrefixes: annotations.prefixes,
                                             turnGrants: turnGrants,
@@ -1878,7 +1890,9 @@ final class AppModel {
 
     func closeStreaming(_ botID: UUID) { session(botID).closeStreaming() }
 
-    func append(_ kind: TranscriptItem.Kind, to botID: UUID, duringTask: Bool = false) { session(botID).append(kind, duringTask: duringTask) }
+    func append(_ kind: TranscriptItem.Kind, to botID: UUID, duringTask: Bool = false, id: UUID? = nil) {
+        session(botID).append(kind, duringTask: duringTask, id: id)
+    }
 
     /// The Orb's conversation, read from disk first if it was not in memory. For the transcript's "Tentar de novo".
     func loadedConversation(_ botID: UUID) -> Conversation? {

@@ -194,6 +194,21 @@ struct ImageStore: Sendable {
         try await Task.detached { try self.add(data, name: name, botID: botID) }.value
     }
 
+    /// The picture a path stands for when the file is one this store saved (nil for any other file).
+    func attachment(forStoredPath path: String) -> ImageAttachment? {
+        let file = URL(fileURLWithPath: path).standardizedFileURL
+        guard file.path.hasPrefix(directory.standardizedFileURL.path + "/") else { return nil }
+        let mediaType: String
+        switch file.pathExtension.lowercased() {
+        case "jpg", "jpeg": mediaType = "image/jpeg"
+        case "png": mediaType = "image/png"
+        default: return nil
+        }
+        let properties = CGImageSourceCreateWithURL(file as CFURL, nil).flatMap { CGImageSourceCopyPropertiesAtIndex($0, 0, nil) } as? [CFString: Any]
+        return ImageAttachment(path: path, mediaType: mediaType, width: properties?[kCGImagePropertyPixelWidth] as? Int ?? 0,
+                               height: properties?[kCGImagePropertyPixelHeight] as? Int ?? 0)
+    }
+
     /// Deletes a saved picture (one attached and then removed before sending). Files outside the store are never touched.
     func remove(_ image: ImageAttachment) {
         let file = URL(fileURLWithPath: image.path).standardizedFileURL

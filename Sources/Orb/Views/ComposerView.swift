@@ -82,7 +82,7 @@ struct ComposerView: View {
         .confirmationDialog(RewindWords.editTitle, isPresented: $isConfirmingEdit, titleVisibility: .visible) {
             Button(RewindWords.editConfirm, role: .destructive) { submitEdit() }
         } message: {
-            Text(RewindWords.editMessage)
+            Text(RewindWords.editMessage(savedToMemory: lane.editing.map { model.editSavedToMemory(itemID: $0.itemID, of: botID) } ?? false))
         }
         .fileImporter(isPresented: $isImporting, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { attach(urls) }
@@ -313,14 +313,12 @@ struct ComposerView: View {
             Button("Parar e enviar") { model.stopAndSend(botID, draft: draft.wrappedValue) }
                 .keyboardShortcut(AppShortcut.commandReturn)
                 .disabled(!ComposerAction.stopAndSendEnabled(isQueueing: isQueueing, canSend: canSend, queuedCount: lane.queued.count,
-                                                             pendingPictures: lane.pendingPictures))
+                                                             pendingPictures: lane.pendingPictures, isEditing: isEditing))
             Button("Escolher modelo") { isModelOpen.toggle() }
                 .keyboardShortcut(AppShortcut.chooseModel)
-            // Esc gives the edit up even when the field has lost the focus.
-            if isEditing {
-                Button("Cancelar a edição") { model.cancelEditing(botID) }
-                    .keyboardShortcut(.cancelAction)
-            }
+            // No button takes Esc for the edit (as `.cancelAction`): a key equivalent runs before the field that has the
+            // focus sees the key, so it would also have taken the Esc of the skill list, of the search bar and of the
+            // permission card's note. The field's own handler (`handleEscape`) and the banner's button give the edit up.
         }
         .opacity(0)
         .frame(width: 0, height: 0)
@@ -387,10 +385,13 @@ struct ComposerView: View {
 
     /// Esc closes the skill suggestions first; with none open, it gives up the edit of a message.
     private func handleEscape() -> KeyPress.Result {
-        if dismissSlash() == .handled { return .handled }
-        guard isEditing else { return .ignored }
-        model.cancelEditing(botID)
-        return .handled
+        switch ComposerAction.escape(slashIsOpen: !slashMatches.isEmpty, isEditing: isEditing) {
+        case .closeSkillList: return dismissSlash()
+        case .cancelEdit:
+            model.cancelEditing(botID)
+            return .handled
+        case .ignore: return .ignored
+        }
     }
 
     private func complete(_ skill: Skill) {
@@ -626,9 +627,27 @@ enum ComposerAction: Equatable {
     }
 
     /// ⌘↩ "stop and send" works with something to send: what is typed, or what already waits in the queue (the
-    /// queue bubble's own "Parar e enviar" offers that key with an empty field).
-    static func stopAndSendEnabled(isQueueing: Bool, canSend: Bool, queuedCount: Int, pendingPictures: Int = 0) -> Bool {
-        isQueueing && pendingPictures == 0 && (canSend || queuedCount > 0)
+    /// queue bubble's own "Parar e enviar" offers that key with an empty field). Not while a message is being edited:
+    /// the field then holds the edit, which is no message to queue (the edit ends when a turn starts anyway).
+    static func stopAndSendEnabled(isQueueing: Bool, canSend: Bool, queuedCount: Int, pendingPictures: Int = 0,
+                                   isEditing: Bool = false) -> Bool {
+        isQueueing && pendingPictures == 0 && !isEditing && (canSend || queuedCount > 0)
+    }
+
+    /// What Esc does in the message field.
+    enum EscapeKey: Equatable {
+        /// Closes the skill suggestions (what was typed stays).
+        case closeSkillList
+        /// Gives up the edit of a message.
+        case cancelEdit
+        /// Not ours: the key goes on (nothing is open).
+        case ignore
+    }
+
+    /// The skill suggestions go first: with them open Esc closes only them, and a second Esc gives the edit up.
+    static func escape(slashIsOpen: Bool, isEditing: Bool) -> EscapeKey {
+        if slashIsOpen { return .closeSkillList }
+        return isEditing ? .cancelEdit : .ignore
     }
 
     /// What ⇥ does in the message field.

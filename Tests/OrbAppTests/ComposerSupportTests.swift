@@ -81,6 +81,27 @@ struct ComposerSupportTests {
         #expect(!ComposerAction.stopAndSendEnabled(isQueueing: true, canSend: false, queuedCount: 1, pendingPictures: 1))
     }
 
+    @Test func stopAndSendIsOffWhileAMessageIsBeingEdited() {
+        // The field holds the edit then: it is not a message to queue.
+        #expect(!ComposerAction.stopAndSendEnabled(isQueueing: true, canSend: true, queuedCount: 0, isEditing: true))
+        #expect(!ComposerAction.stopAndSendEnabled(isQueueing: true, canSend: false, queuedCount: 2, isEditing: true))
+        #expect(ComposerAction.stopAndSendEnabled(isQueueing: true, canSend: true, queuedCount: 0, isEditing: false))
+    }
+
+    @Test func escClosesTheSkillListBeforeItGivesTheEditUp() {
+        #expect(ComposerAction.escape(slashIsOpen: true, isEditing: true) == .closeSkillList) // the first Esc
+        #expect(ComposerAction.escape(slashIsOpen: true, isEditing: false) == .closeSkillList)
+        #expect(ComposerAction.escape(slashIsOpen: false, isEditing: true) == .cancelEdit) // the second one
+        #expect(ComposerAction.escape(slashIsOpen: false, isEditing: false) == .ignore) // nothing of ours: the key goes on
+    }
+
+    @Test func theCatalogSaysTheEscOfTheEditNeedsTheCursorInTheField() {
+        // The Esc of the edit lives in the field (a key equivalent would run before the field, the search bar or the note
+        // of a permission card saw the key): the catalog says where it works.
+        let item = ShortcutCatalog.groups.flatMap(\.items).first { $0.command == .cancelEdit }
+        #expect(item?.title.contains("cursor no campo") == true)
+    }
+
     @Test func theComposerNamesTheRoutineThatHoldsTheOrb() {
         #expect(ComposerAction.routinePlaceholder(routineName: "Resumo diário") == "A rotina “Resumo diário” está rodando. Envie quando ela terminar.")
         #expect(ComposerAction.routinePlaceholder(routineName: nil) == "Uma rotina está rodando. Envie quando ela terminar.")

@@ -63,6 +63,8 @@ struct TurnRequest: Sendable {
     var permissions: PermissionSource?
     /// Pictures the user attached to this message.
     var images: [ImageAttachment] = []
+    /// The row of the chat that holds the message: the model's copy of it is recorded tied to that row (`ChatMessage.itemID`).
+    var requestItem: UUID?
     /// Whether the model takes pictures: false never sends them (their paths go instead), nil is unknown (they are
     /// sent, and dropped for the rest of the turn if the provider says it cannot read them).
     var supportsImages: Bool?
@@ -141,7 +143,8 @@ actor AgentEngine {
 
     private func play(_ request: TurnRequest, out: AsyncStream<TurnEvent>.Continuation) async {
         defer { out.finish() }
-        let user = ChatMessage.user(request.prompt, images: request.images)
+        var user = ChatMessage.user(request.prompt, images: request.images)
+        user.itemID = request.requestItem
         var messages = [ChatMessage.system(request.system)] + request.history + [user]
         out.yield(.message(user))
         // Where the message that opened this turn sits; the ones the user queues later come after it and open nothing.
@@ -360,7 +363,9 @@ actor AgentEngine {
         guard let queue else { return [] }
         var indexes: [Int] = []
         for steered in queue.drainSteering() { // the ones meant for after the task stay
-            let message = ChatMessage.user(steered.prompt, images: steered.pictures)
+            // The chat shows it under the id it has in the queue (`AppModel.deliverSteered`).
+            var message = ChatMessage.user(steered.prompt, images: steered.pictures)
+            message.itemID = steered.id
             indexes.append(messages.count)
             messages.append(message)
             out.yield(.message(message))

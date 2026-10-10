@@ -97,6 +97,10 @@ struct ChatMessage: Codable, Hashable, Sendable {
     /// User messages: pictures the user attached. Tool messages: pictures the tool returned. Only the paths are
     /// kept here; the bytes are read from the files when a request is built (see `ImageAttachment`).
     var images: [ImageAttachment] = []
+    /// User messages: the transcript item (the user's bubble) this message is the model's copy of, recorded when the
+    /// request reaches the model. It is how "Refazer" and "Editar" tell which message is which; nil for messages
+    /// that have no bubble (the nudge to go on, pictures a tool returned) and for conversations from before it existed.
+    var itemID: UUID?
 
     static func system(_ text: String) -> ChatMessage { ChatMessage(role: .system, content: text) }
     static func user(_ text: String, images: [ImageAttachment] = []) -> ChatMessage {
@@ -137,7 +141,7 @@ struct ImageAttachment: Codable, Hashable, Sendable {
 
 extension ChatMessage {
     private enum CodingKeys: String, CodingKey {
-        case role, content, toolCalls, toolCallID, reasoning, isError, images
+        case role, content, toolCalls, toolCallID, reasoning, isError, images, itemID
     }
 
     /// `images` is left out when there are none, so conversations without pictures are written as before.
@@ -150,6 +154,7 @@ extension ChatMessage {
         try c.encodeIfPresent(reasoning, forKey: .reasoning)
         try c.encode(isError, forKey: .isError)
         if !images.isEmpty { try c.encode(images, forKey: .images) }
+        try c.encodeIfPresent(itemID, forKey: .itemID)
     }
 
     /// Tolerant decoding (see Store.swift): conversations saved before `reasoning` existed still load, a trace this
@@ -164,6 +169,7 @@ extension ChatMessage {
         reasoning = try? c.decodeIfPresent(ReasoningTrace.self, forKey: .reasoning)
         isError = try c.value(.isError, default: false)
         images = try c.lossyArray(.images)
+        itemID = try? c.decodeIfPresent(UUID.self, forKey: .itemID) // a link that cannot be read is no loss: the message is matched by its words
     }
 }
 

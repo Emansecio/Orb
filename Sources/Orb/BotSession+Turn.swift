@@ -22,6 +22,7 @@ extension BotSession {
         var base = request
         base.prompt = ""
         base.images = []
+        base.requestItem = nil
         base.turnGrants = []
         base.steering = nil
         reviewBase = base
@@ -486,8 +487,11 @@ extension BotSession {
 
     // MARK: The transcript
 
-    func append(_ kind: TranscriptItem.Kind, duringTask: Bool = false) {
-        mutateItems { $0.append(TranscriptItem(kind, duringTask: duringTask)) }
+    /// `id`: the new row takes this id (the bubble of an edited message keeps the one it had).
+    func append(_ kind: TranscriptItem.Kind, duringTask: Bool = false, id: UUID? = nil) {
+        var item = TranscriptItem(kind, duringTask: duringTask)
+        if let id { item.id = id }
+        mutateItems { $0.append(item) }
     }
 
     /// A file shows under the last call of the turn that touched it: the earlier calls give it up, and one that was

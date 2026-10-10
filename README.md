@@ -192,14 +192,21 @@ AppleScript, Atalhos, área de transferência, captura de tela nem controla outr
 - **Refazer e Editar** (com o Orb parado). Passe o mouse sobre a **última resposta**: ao lado de "Copiar" há o botão
   **Refazer**, que descarta a resposta e tudo o que o pedido acrescentou (linhas de ferramenta, avisos) e faz o mesmo pedido de novo, como se
   fosse a primeira vez. Sobre **qualquer mensagem sua** aparece o lápis **Editar**: a mensagem (e os anexos que ainda existem) vai para o
-  campo, sob a faixa "Editando mensagem · Esc cancela", e o que estava no campo espera e volta ao enviar ou cancelar. Ao enviar, a mensagem é
+  campo, sob a faixa "Editando mensagem · Esc cancela" (o Esc vale com o cursor no campo; com a lista de skills aberta ele fecha a lista
+  primeiro; o botão "Cancelar" da faixa também desiste), e o que estava no campo espera e volta ao enviar ou cancelar. Qualquer outro envio
+  que comece com a edição aberta (um "Continuar" de aviso, uma resposta da saudação, o painel da barra de menus) desiste da edição e
+  devolve o que estava no campo; ⌘↩ "parar e enviar" fica desligado durante a edição. Ao enviar, a mensagem é
   trocada e **tudo o que veio depois sai da conversa** (do chat e do histórico do modelo; no Claude Code começa uma sessão nova com o que
   sobrou); as linhas que saem esmaecem e o Orb responde a partir dali. Se o que sai inclui ações que podem ter mudado algo (arquivo gravado,
   comando que não é só de olhar), o app confirma antes: "Os passos depois desta mensagem saem da conversa; o que o Orb já fez no Mac não é
   desfeito." Conversa só de texto não pergunta. Os botões não aparecem com o Orb trabalhando, esperando permissão ou numa rotina; uma
   mensagem que já virou parte do resumo da conversa (depois de compactar) ou que entrou no meio de uma tarefa fica apagada, com o motivo na
-  dica (para esta, edite o pedido que começou a tarefa; "Refazer" também pede isso se houve mensagens no meio). O uso e o custo já
-  registrados, e o que o Orb guardou na memória, ficam como estão.
+  dica (para esta, edite o pedido que começou a tarefa; "Refazer" também pede isso se houve mensagens no meio). Cada mensagem sua guarda a
+  ligação com a cópia que o modelo recebeu, então mensagens repetidas ("2", "sim") e pedidos que falharam antes de chegar ao modelo não
+  se confundem; numa conversa de antes disso, a ligação é feita pelas palavras e, se não der para ter certeza, o botão fica apagado
+  ("Não consegui ligar esta mensagem ao histórico do Orb"). O uso e o custo já registrados ficam como estão, e **o que já foi para a
+  memória do Orb também continua lá** (a página da conversa, o que ele guardou com "lembre"): o corte não apaga memória, e o aviso de
+  confirmação lembra disso quando o trecho que sai já foi guardado.
 - **O que o Orb está fazendo.** Uma linha no fim da conversa, ao lado dele, diz o verbo e o alvo ("Rodando `swift build`",
   "Lendo README.md", "Procurando “TODO”", "Abrindo github.com") com o tempo do turno e, a partir da segunda ferramenta,
   quantas ações ele já fez ("16 s · 3 ações"). Entre um passo e outro ela diz "Pensando…". Quando espera por você, ela fica
@@ -544,8 +551,8 @@ tem a **Galeria**, os **Instalados** e **Explorar**.
 | ⌘, | Ajustes |
 | ↩ / ⌥↩ | Enviar (com o Orb trabalhando, direciona a tarefa) / nova linha |
 | ⇥ | Com o Orb trabalhando e algo escrito: pôr na fila para depois da tarefa. Com a lista de skills aberta: completar a skill |
-| ⌘↩ | Com o Orb trabalhando e algo escrito: parar e enviar agora (recusa o pedido aberto, se houver). Num cartão de aprovação, com o campo de mensagem vazio: permitir. No painel de contexto: compactar |
-| Esc | Num cartão de aprovação: não permitir (não vale enquanto você digita). Também fecha a paleta e a lista de skills |
+| ⌘↩ | Com o Orb trabalhando e algo escrito: parar e enviar agora (recusa o pedido aberto, se houver; desligado durante a edição de uma mensagem). Num cartão de aprovação, com o campo de mensagem vazio: permitir. No painel de contexto: compactar |
+| Esc | Num cartão de aprovação: não permitir (não vale enquanto você digita). Também fecha a paleta e a lista de skills; com o cursor no campo, desiste da edição de uma mensagem (depois de fechar a lista de skills, se estiver aberta) |
 | ⇧⌘M | Escolher o modelo do Orb |
 | ⌘Z | Desfazer "Esquecer" da memória (enquanto o aviso está na tela) |
 | ⌘F | Buscar na conversa aberta. Em Skills e Conectores: buscar no catálogo (fora da aba Explorar leva ao catálogo, em Explorar) |

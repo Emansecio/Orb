@@ -61,13 +61,25 @@ enum TurnPreface {
         return String(content[end.upperBound...].drop { $0.isNewline })
     }
 
+    /// What the app adds after the user's words (the lists of files and pictures, the instruction to save a memory).
+    static let additions = ["\n\nAttached files (", "\n\nAttached images (", "\n\nImagens anexadas", MemoryIntent.instructionMarker]
+
+    /// The words of a stored user message with nothing around them: no preface, no list of attachments, no instruction
+    /// to remember. For a message typed as such it is exactly what was typed (or what a skill expanded it to), so two
+    /// messages can be compared by equality, which the preface (it holds the date, the folder and memory notes) rules out
+    /// for a substring search.
+    static func requestWords(_ content: String) -> String {
+        let text = stripped(content)
+        guard let cut = additions.compactMap({ text.range(of: $0) }).min(by: { $0.lowerBound < $1.lowerBound }) else { return text }
+        return String(text[..<cut.lowerBound])
+    }
+
     /// What the user typed in a stored message, for the summaries (`ConversationLedger`, `ToolDigest`): without the
     /// preface and without what the app adds around it. A skill's instructions give way to "/Name request", the file and
     /// picture lists to their names, and the instruction to save a memory goes.
     static func userWords(_ content: String) -> String {
         var text = stripped(content)
         var attached: [String] = []
-        let additions = ["\n\nAttached files (", "\n\nAttached images (", "\n\nImagens anexadas", MemoryIntent.instructionMarker]
         if let cut = additions.compactMap({ text.range(of: $0) }).min(by: { $0.lowerBound < $1.lowerBound }) {
             attached = text[cut.lowerBound...].split(separator: "\n").filter { $0.hasPrefix("- ") }
                 .map { URL(fileURLWithPath: String($0.dropFirst(2))).lastPathComponent }

@@ -32,6 +32,14 @@ struct ComposerDraft: Codable, Equatable, Sendable {
     var pictures: [ImageAttachment] = []
 
     var isEmpty: Bool { files.isEmpty && pictures.isEmpty && text.allSatisfy(\.isWhitespace) }
+
+    /// Takes back text, files and pictures that were refused or never sent: the text goes before what is already
+    /// there, and a file already attached is not added twice.
+    mutating func putBack(text back: String, separator: String, files backFiles: [String] = [], pictures backPictures: [ImageAttachment] = []) {
+        if !back.isEmpty { text = text.isEmpty ? back : back + separator + text }
+        for path in backFiles where !files.contains(path) { files.append(path) }
+        pictures += backPictures
+    }
 }
 
 /// A message of the chat being edited in the composer: what the composer held before (put back when the edit ends, one
@@ -269,7 +277,12 @@ extension AppModel {
             return
         }
         let lane = composerLane(botID)
-        if let draft {
+        // While a message is being edited the field holds the edit, which is not a message to queue: the edit is given up
+        // (the composer gets back what it held; the send below would end it anyway) and only the queue is sent. The key is
+        // disabled then (`ComposerAction.stopAndSendEnabled`); this keeps the menu and the queue bubble's button safe too.
+        let wasEditing = lane.editing != nil
+        cancelEditing(botID)
+        if let draft, !wasEditing {
             let isCommand = lane.files.isEmpty && lane.pictures.isEmpty && CompactionCommand.parse(draft) != nil // stays in the composer
             if !isCommand, !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || lane.hasAttachments { queueMessage(draft, to: botID) }
         }
@@ -286,13 +299,14 @@ extension AppModel {
         startNextQueuedRoutine(for: botID)
     }
 
-    /// A queued message reached the model: the chat shows it as sent, at the point where the model got it.
+    /// A queued message reached the model: the chat shows it as sent, at the point where the model got it. The bubble has
+    /// the id the message had in the queue, which is the link the model's copy of it carries (`ChatMessage.itemID`).
     func deliverSteered(_ id: UUID, to botID: UUID) {
         guard let message = composerLane(botID).delivered(id) else { return }
         countSkillUse(in: message.text)
         closeStreaming(botID)
         // Marked "durante a tarefa": it reached the model in the middle of its work, not as a request of its own.
-        append(.user(text: message.text, attachments: message.attachmentPaths), to: botID, duringTask: true) // follows the end only if the chat was there
+        append(.user(text: message.text, attachments: message.attachmentPaths), to: botID, duringTask: true, id: id) // follows the end only if the chat was there
     }
 
     /// Counts one use of the skill a message starts with (`/slug`), if it does.
@@ -315,10 +329,15 @@ extension AppModel {
         }
     }
 
-    /// Puts messages back in the composer: their texts first, then what is already typed.
+    /// Puts messages back in the composer: their texts first, then what is already typed. While a message is being edited
+    /// they go to what the composer held before the edit, which is what comes back when it ends.
     private func giveBack(_ messages: [SteeredMessage], to botID: UUID) {
         guard let message = SteeredMessage.merged(messages) else { return }
         let lane = composerLane(botID)
+        if lane.editing != nil {
+            lane.editing?.stash.putBack(text: message.text, separator: "\n\n", files: message.files.map(\.path), pictures: message.pictures)
+            return
+        }
         let current = drafts[botID, default: ""]
         setDraft(current.isEmpty ? message.text : message.text + "\n\n" + current, for: botID)
         for url in message.files where !lane.files.contains(where: { $0.url == url }) { lane.files.append(AttachedFile(url: url)) }
