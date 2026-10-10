@@ -15,12 +15,6 @@ struct OrbDraftTool: AgentTool {
             "name": .property("string"),
             "role": .property("string", "One line."),
             "instructions": .property("string", "In the second person, up to 1500 characters."),
-            "look": JSONValue.schema([
-                "color": .property("string"), "eyes": .property("string"), "mouth": .property("string"),
-                "brows": .property("string"), "cheeks": .property("string"), "mustache": .property("string"),
-                "hair": .property("string"), "accessories": .object(["type": .string("array"), "items": .property("string")]),
-                "temperament": .property("string"),
-            ]),
             "capabilities": .object(["type": .string("array"),
                                      "items": .object(["type": .string("string"),
                                                        "enum": .array(["terminal", "browser", "computerUse"].map(JSONValue.string))])]),

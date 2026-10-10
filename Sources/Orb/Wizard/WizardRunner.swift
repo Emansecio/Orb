@@ -49,7 +49,6 @@ final class WizardRunner {
     init(model: AppModel? = nil) {
         self.model = model
         messages = [TranscriptItem(.bot(text: WizardPrompt.firstLine, isStreaming: false))]
-        draft.orb = OrbConfig.random() // the Orb that waits on the stage until the first call fills the draft in
     }
 
     /// A runner in a given state, for the review snapshots: it never calls a model.
@@ -127,11 +126,12 @@ final class WizardRunner {
 
     // MARK: Ending
 
-    /// "Criar": the Orb the draft describes, as the person's own (`createdBy` stays nil). The assistant ends.
+    /// "Criar": the Orb the draft describes, with the look the person chose (`look`: the assistant never designs it), as the
+    /// person's own (`createdBy` stays nil). The assistant ends.
     @discardableResult
-    func create() -> Bot? {
+    func create(look: OrbConfig = OrbConfig()) -> Bot? {
         guard let model, !isFinished, draft.canCreate else { return nil }
-        let bot = model.createBot(name: draft.name, role: draft.role.isEmpty ? "Assistente pessoal" : draft.role, orb: draft.orb,
+        let bot = model.createBot(name: draft.name, role: draft.role.isEmpty ? "Assistente pessoal" : draft.role, orb: look,
                                   model: "", mode: draft.mode, identity: draft.instructions, interview: false, folder: .own,
                                   base: orbsBase)
         let capabilities = draft.capabilities.subtracting([.connectors])

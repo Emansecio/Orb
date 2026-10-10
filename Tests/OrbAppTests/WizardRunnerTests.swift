@@ -263,14 +263,15 @@ private func drafting(_ json: String) -> [LLMEvent] {
         runner.send("oi")
         await settled(runner)
         let botsBefore = model.bots.count
-        let bot = try #require(runner.create())
+        let chosen = OrbConfig(color: "rosa", eyes: "ovais", mouth: "sorriso", hair: "franja")
+        let bot = try #require(runner.create(look: chosen))
         #expect(model.bots.count == botsBefore + 1 && model.bots.last?.id == bot.id)
         let made = try #require(model.bot(bot.id))
         #expect(made.name == "Maia" && made.role == "Cuida da agenda")
         #expect(made.createdBy == nil && made.createdByName == nil, "the person made it")
         #expect(made.permissionMode == .auto && made.model.isEmpty)
         #expect(made.capabilities == [.browser], "never connectors")
-        #expect(made.orb.color == "menta" && made.orb.hair == "franja")
+        #expect(made.orb.color == "rosa" && made.orb.eyes == "ovais" && made.orb.hair == "franja", "the look is the one the person chose, not the model's")
         #expect(model.selection == .bot(bot.id))
         #expect(made.workingURL.path.hasPrefix(root.appending(path: "Orbs").path))
         await waitUntil("the identity in the Orb's memory") { await model.memory.bank(for: bot.id).identity()?.body.contains("Seja breve") == true }

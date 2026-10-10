@@ -36,13 +36,15 @@ struct NewBotSheet: View {
     // MARK: MultiOrb (WP4)
     /// The way the person chose to create the Orb; nil until they choose (see `creation`).
     @State private var userMode: OrbCreationMode?
+    /// "Quem ele é" or "Aparência". The look (`orb`, random when the sheet opens) is the person's in both ways of creating.
+    @State private var tab: NewOrbTab
     /// The sheet was opened to start from a kept memory or an import: those are the form's.
     private let prefersForm: Bool
     /// The parts of the preview washed at the start (review snapshots only).
     private let previewFlashed: Set<DraftField>
     /// The "Criar conversando" assistant. It lives as long as the sheet and writes nothing down until "Criar".
     @State private var wizard: WizardRunner
-    /// What the assistant said the Orb may use, carried over by "Passar para o formulário" (the form has no switches for it).
+    /// What the assistant said the Orb may use, carried over when the person switches to "Formulário" (the form has no switches for it).
     @State private var draftCapabilities: Set<Capability>?
     // MARK: end MultiOrb (WP4)
 
@@ -55,8 +57,10 @@ struct NewBotSheet: View {
     /// the app lets the sheet choose (the assistant when a model is connected) and make its own.
     init(height: CGFloat? = nil, kept: [KeptMemory] = [], chosen: KeptMemory? = nil, startsImporting: Bool = false,
          imported: OrbImport? = nil, draft: OrbImport? = nil, mode: OrbCreationMode? = nil, assistant: WizardRunner? = nil,
-         previewFlashed: Set<DraftField> = []) {
+         previewFlashed: Set<DraftField> = [], tab: NewOrbTab = .who, look: OrbConfig? = nil) {
         self.previewFlashed = previewFlashed
+        _tab = State(initialValue: tab)
+        if let look { _orb = State(initialValue: look) }
         _height = State(initialValue: height ?? NewBotSheetLayout.height())
         _userMode = State(initialValue: mode)
         _wizard = State(initialValue: assistant ?? WizardRunner())
@@ -108,7 +112,10 @@ struct NewBotSheet: View {
 
     /// "Criar conversando | Formulário" at the top of the left column; off, with its reason, while no model is connected.
     private var modePicker: some View {
-        Picker("Como criar o Orb", selection: Binding(get: { creation }, set: { userMode = $0 })) {
+        // Going from the assistant to the form carries the draft over (name, role, instructions, mode, what it may use).
+        Picker("Como criar o Orb", selection: Binding(get: { creation }, set: { new in
+            if new == .form && creation == .assistant { passDraftToForm() } else { userMode = new }
+        })) {
             ForEach(OrbCreationMode.allCases) { Text($0.title).tag($0) }
         }
         .pickerStyle(.segmented)
@@ -124,19 +131,65 @@ struct NewBotSheet: View {
 
     /// "Criar" in the assistant: the Orb the draft describes, and the sheet closes.
     private func createFromAssistant() {
-        guard wizard.create() != nil else { return }
+        guard wizard.create(look: orb) != nil else { return } // the look is the person's (`orb`), never the assistant's
         dismiss()
     }
 
-    /// "Passar para o formulário" (and the final card's "Ajustar"): the draft fills the form's fields and the form is shown.
+    /// "Aleatório": another look, in place (the temperament stays, as in the editor's own dice).
+    private func randomLook() {
+        var next = OrbConfig.random()
+        next.temperament = orb.temperament
+        orb = next
+    }
+
+    /// What the preview shows in the form: the fields as they are now, as a draft.
+    private var formDraft: OrbDraft {
+        var draft = OrbDraft()
+        draft.name = trimmedName
+        draft.role = role.trimmingCharacters(in: .whitespaces)
+        draft.instructions = identity
+        draft.mode = mode
+        if let draftCapabilities { draft.capabilities = draftCapabilities }
+        draft.revision = trimmedName.isEmpty && draft.role.isEmpty ? 0 : 1
+        return draft
+    }
+
+    /// "Quem ele é | Aparência", full width at the top of the sheet.
+    private var tabPicker: some View {
+        Picker("Parte do Orb", selection: Binding(get: { tab }, set: { tab = $0 })) {
+            ForEach(NewOrbTab.allCases) { Text($0.title).tag($0) }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .accessibilityLabel("Parte do Orb")
+        .accessibilityIdentifier("new-orb-tab")
+        .padding(.horizontal, 20)
+        .padding(.top, 14)
+        .padding(.bottom, 12)
+        .background(Palette.chrome)
+        .sheetSection(0)
+    }
+
+    /// The preview of "Quem ele é": the assistant's draft, or the form's fields, always with the person's look.
+    @ViewBuilder private var previewPane: some View {
+        if creation == .assistant {
+            WizardPreviewPane(draft: wizard.draft, look: orb, activity: wizard.activity, flashed: previewFlashed,
+                              onAdjust: passDraftToForm, onBack: wizard.backToChatting,
+                              onDraw: { tab = .look }, onRandom: randomLook)
+        } else {
+            WizardPreviewPane(draft: formDraft, look: orb, emptyText: "Seu Orb aparece aqui conforme você preenche",
+                              onDraw: { tab = .look }, onRandom: randomLook)
+        }
+    }
+
+    /// "Formulário" in the mode picker (and the final card's "Ajustar"): the draft fills the form's fields and the form is shown.
     private func passDraftToForm() {
         let draft = wizard.draft
         wizard.stopTalking()
         if !draft.name.isEmpty { name = draft.name }
         if !draft.role.isEmpty { role = draft.role }
         if !draft.instructions.isEmpty { identity = draft.instructions }
-        orb = draft.orb
-        mode = draft.mode
+        mode = draft.mode // (the look stays the one the person chose)
         draftCapabilities = draft.capabilities
         interview = false // the assistant did the interview
         withAnimation(reduceMotion ? nil : Motion.content) { userMode = .form }
@@ -145,46 +198,21 @@ struct NewBotSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                VStack(spacing: 0) {
-                    if !isImporting { modePicker.transition(.opacity) }
-                    // A ZStack, not a Group: a Group hands its modifiers to each child, so the form and the import panel
-                    // would sit side by side while they swap, and the one coming in would repeat the sheet's entrance.
-                    ZStack {
-                        if isImporting {
-                            ImportPanel(draft: $draft, onBack: { isImporting = false })
-                                .transition(.opacity)
-                        } else if creation == .assistant {
-                            WizardChatView(runner: wizard).transition(.opacity)
-                        } else {
-                            form.transition(.opacity)
-                        }
-                    }
+            if !isImporting { tabPicker }
+            // "Quem ele é" (the assistant or the form, and the preview) or "Aparência" (the editor, the sheet's whole width).
+            ZStack {
+                if tab == .look && !isImporting {
+                    OrbEditor(config: $orb, name: creation == .assistant ? wizard.draft.name : name, randomTitle: "Aleatório")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .transition(.opacity)
+                } else {
+                    whoTab.transition(.opacity)
                 }
-                .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: isImporting)
-                .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: creation)
-                .frame(width: 380)
-                .background(Palette.chrome)
-                // The form comes in with the stage, 0.08 s after the sheet, the options after them and the footer last
-                // (MOVIMENTO.md §2.6). The editor on the right brings its own stage and options in itself.
-                .sheetSection(0)
-                Divider().overlay(Palette.line)
-                ZStack {
-                    if isAssistant {
-                        WizardPreviewPane(runner: wizard, flashed: previewFlashed, onAdjust: passDraftToForm)
-                            .transition(.opacity)
-                    } else {
-                        // Compact: the form beside it already shows the name, and the options need the height.
-                        OrbEditor(config: $orb, name: name, compact: true)
-                            .transition(.opacity)
-                    }
-                }
-                .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: isAssistant)
-                .frame(width: 440)
             }
+            .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: tab)
             Group {
                 if isAssistant {
-                    WizardFooter(canCreate: wizard.draft.canCreate, isReady: wizard.draft.ready, toForm: passDraftToForm, cancel: { dismiss() }, create: createFromAssistant)
+                    WizardFooter(canCreate: wizard.draft.canCreate, isReady: wizard.draft.ready, cancel: { dismiss() }, create: createFromAssistant)
                 } else {
                     SheetFooter(message: isImporting ? ImportText.notCreatedYet : hint, cancel: { dismiss() },
                                 primaryTitle: isImporting ? ImportText.confirm : "Criar Orb",
@@ -196,6 +224,7 @@ struct NewBotSheet: View {
             .sheetSection(2)
         }
         .frame(width: 820, height: height)
+        .background(Palette.chrome) // one ground under both tabs: the hairline between the columns sits on it, not on the window
         .task { wizard.attach(model) } // MultiOrb (WP4)
         .onDisappear { wizard.cancel() } // MultiOrb (WP4): the sheet closed: the assistant's turn stops, nothing is kept
         .task { isNameFocused = creation == .form }
@@ -204,6 +233,40 @@ struct NewBotSheet: View {
             let found = await Task.detached(priority: .userInitiated) { KeptMemories.list(in: memories) }.value
             if !found.isEmpty || kept.isEmpty { kept = found }
         }
+    }
+
+    /// "Quem ele é": the left column (the assistant's chat, the form or the import panel) and the preview.
+    private var whoTab: some View {
+            HStack(spacing: 0) {
+                VStack(spacing: 0) {
+                    if !isImporting { modePicker.transition(.opacity) }
+                    // A ZStack, not a Group: a Group hands its modifiers to each child, so the form and the import panel
+                    // would sit side by side while they swap, and the one coming in would repeat the sheet's entrance.
+                    ZStack {
+                        if isImporting {
+                            ImportPanel(draft: $draft, onBack: { isImporting = false })
+                                .transition(.opacity)
+                        } else if creation == .assistant {
+                            WizardChatView(runner: wizard, look: orb).transition(.opacity)
+                        } else {
+                            form.transition(.opacity)
+                        }
+                    }
+                }
+                .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: isImporting)
+                .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: creation)
+                .frame(width: 380)
+                .background(Palette.chrome)
+                // The left column comes in just after the tabs, the footer last (MOVIMENTO.md §2.6).
+                .sheetSection(1)
+                Rectangle().fill(Palette.line).frame(width: 1)
+                // The preview, in the assistant and in the form: the Orb with the look the person chose.
+                previewPane
+                    .id(creation)
+                    .transition(.opacity)
+                    .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: creation)
+                    .frame(width: 440)
+            }
     }
 
     private var form: some View {

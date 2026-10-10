@@ -8,7 +8,8 @@ import SwiftUI
 /// - `wizard-ready`: the draft complete, the final card at the foot of the preview;
 /// - `wizard-narrow`: the same with a short window (`ORB_SNAPSHOT_HEIGHT=620`);
 /// - `wizard-failed`: a turn that failed, with "Tentar de novo";
-/// - `wizard-form`: the sheet in the form, to see the choice between the two ways.
+/// - `wizard-form`: the sheet in the form, to see the choice between the two ways and the preview beside it;
+/// - `wizard-appearance`: the "Aparência" tab, the editor at the sheet's whole width.
 @MainActor
 enum WizardSnapshots {
     static func view(_ screen: String, model: AppModel) -> AnyView? {
@@ -29,14 +30,16 @@ enum WizardSnapshots {
         case "wizard-failed":
             return sheet(WizardRunner(messages: asking, draft: partialDraft, failure: "O modelo não respondeu."), height: height)
         case "wizard-form":
-            return AnyView(NewBotSheet(height: height, mode: .form))
+            return AnyView(NewBotSheet(height: height, mode: .form, look: look))
+        case "wizard-appearance":
+            return sheet(WizardRunner(messages: asking, draft: partialDraft), height: height, tab: .look)
         default:
             return nil
         }
     }
 
-    private static func sheet(_ runner: WizardRunner, height: CGFloat?, flashed: Set<DraftField> = []) -> AnyView {
-        AnyView(NewBotSheet(height: height, mode: .assistant, assistant: runner, previewFlashed: flashed))
+    private static func sheet(_ runner: WizardRunner, height: CGFloat?, flashed: Set<DraftField> = [], tab: NewOrbTab = .who) -> AnyView {
+        AnyView(NewBotSheet(height: height, mode: .assistant, assistant: runner, previewFlashed: flashed, tab: tab, look: look))
     }
 
     // MARK: Scenes
@@ -73,7 +76,6 @@ enum WizardSnapshots {
         draft.name = "Maia"
         draft.role = "Cuida da agenda e dos e-mails do trabalho"
         draft.instructions = instructions
-        draft.orb = look
         draft.mode = .ask
         draft.revision = 2
         draft.changed = [.role]

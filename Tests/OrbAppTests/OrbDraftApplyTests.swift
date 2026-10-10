@@ -33,31 +33,16 @@ import Testing
         #expect(draft.revision == 2, "each call counts")
     }
 
-    @Test func lookIdsAreCheckedAgainstTheCatalog() {
+    @Test func theLookIsNotTheModelsToChoose() {
         var draft = OrbDraft()
         let before = draft.orb
-        let report = draft.apply(args(#"{"look":{"color":"menta","eyes":"nao-existe","mouth":"sorriso","hair":"franja","accessories":["laco","chapeu-de-mago-falso"],"temperament":"furioso"}}"#))
-        #expect(draft.orb.color == "menta" && draft.orb.mouth == "sorriso" && draft.orb.hair == "franja")
-        #expect(draft.orb.eyes == before.eyes, "an unknown id leaves the field as it was")
-        #expect(draft.orb.accessories == ["laco"])
-        #expect(draft.orb.temperament == before.temperament)
-        #expect(report.changed == [.look])
-        #expect(report.rejected.count == 3)
-        let eyes = report.rejected.first { $0.hasPrefix("eyes 'nao-existe'") }
-        #expect(eyes?.contains("use ") == true && eyes?.contains("pilulas") == true)
-        #expect(report.rejected.contains { $0.hasPrefix("accessories 'chapeu-de-mago-falso'") })
-        #expect(report.rejected.contains { $0.hasPrefix("temperament 'furioso'") })
-    }
-
-    @Test func everyKnownLookIdIsAccepted() {
-        let catalog = OrbCatalog.shared
-        var draft = OrbDraft()
-        let look = OrbConfig.random()
-        let json = "{\"look\":{\"color\":\"\(look.color)\",\"eyes\":\"\(look.eyes)\",\"mouth\":\"\(look.mouth)\",\"brows\":\"\(look.brows)\","
-            + "\"cheeks\":\"\(look.cheeks)\",\"mustache\":\"\(look.mustache)\",\"hair\":\"\(look.hair)\"}}"
-        let report = draft.apply(args(json), catalog: catalog)
-        #expect(report.rejected.isEmpty)
-        #expect(draft.orb.color == look.color && draft.orb.eyes == look.eyes && draft.orb.hair == look.hair)
+        let report = draft.apply(args(#"{"name":"Maia","look":{"color":"menta","eyes":"ovais","hair":"franja","accessories":["laco"]}}"#))
+        #expect(draft.orb == before, "an old model that still sends a look changes nothing")
+        #expect(report.changed == [.name] && report.rejected.isEmpty, "and is not scolded")
+        // Neither the tool nor the prompt offers it (every word is billed in every request).
+        let schema = OrbDraftTool().spec.parameters.jsonString
+        #expect(!schema.contains("\"look\"") && !schema.contains("mustache"))
+        #expect(!WizardPrompt.system().contains("look that") && !WizardPrompt.system().contains(", look,"))
     }
 
     @Test func connectorsAndBypassAreNeverTaken() {
@@ -100,11 +85,12 @@ import Testing
 
     @Test func theModelReadsTheDraftBackOneLinePerField() {
         var draft = OrbDraft()
-        let report = draft.apply(args(#"{"name":"Maia","capabilities":["browser"],"look":{"eyes":"xx"}}"#))
+        let report = draft.apply(args(#"{"name":"Maia","capabilities":["browser","telepatia"]}"#))
         let lines = draft.modelSummary(report).split(separator: "\n").map(String.init)
         #expect(lines.first == "name: Maia")
         #expect(lines.contains("capabilities: browser") && lines.contains("mode: ask") && lines.contains("ready: false"))
-        #expect(lines.contains { $0.hasPrefix("rejected: eyes 'xx'") })
+        #expect(lines.contains { $0.hasPrefix("rejected: capabilities 'telepatia'") })
+        #expect(!lines.contains { $0.hasPrefix("look") }, "the look is not the model's: the draft does not tell it")
     }
 
     @Test func aCallThatIsNotAnObjectChangesNothing() {
@@ -120,13 +106,14 @@ import Testing
         #expect(OrbCreationMode.initial(canConverse: false, prefersForm: false) == .form)
         #expect(OrbCreationMode.initial(canConverse: true, prefersForm: true) == .form, "a kept memory or an import is the form's")
         #expect(OrbCreationMode.allCases.map(\.title) == ["Criar conversando", "Formulário"])
+        #expect(NewOrbTab.allCases.map(\.title) == ["Quem ele é", "Aparência"])
     }
 
     @MainActor @Test func theWizardSnapshotModesAreRegistered() {
         let root = FileManager.default.temporaryDirectory.appending(path: "OrbWizardSnap-\(UUID().uuidString)")
         defer { removeTestFolder(root) }
         let model = AppModel(store: Store(directory: root), runsBackgroundWork: false, secretVault: MemoryVault())
-        for screen in ["wizard", "wizard-asking", "wizard-writing", "wizard-ready", "wizard-narrow", "wizard-failed", "wizard-form"] {
+        for screen in ["wizard", "wizard-asking", "wizard-writing", "wizard-ready", "wizard-narrow", "wizard-failed", "wizard-form", "wizard-appearance"] {
             #expect(MultiOrbSnapshots.view(screen, model: model) != nil, "\(screen)")
         }
         #expect(WizardSnapshots.view("wizard-nao-existe", model: model) == nil)
