@@ -143,9 +143,7 @@ private struct InstalledConnectors: View {
                     }
                 }
             }
-            .padding(24)
-            .frame(maxWidth: 980)
-            .frame(maxWidth: .infinity)
+            .pageColumn()
         }
         .overlay {
             if model.connectors.isEmpty {
@@ -675,9 +673,7 @@ private struct ExploreConnectors: View {
             }
             // The hint, the loading, the error, "no result" and the results swap by fading, bound to the one phase.
             .animateChanges(of: ExplorePhase.of(isSearching: isSearching, isLoading: isLoading, error: error, isEmpty: results.isEmpty))
-            .padding(24)
-            .frame(maxWidth: 980)
-            .frame(maxWidth: .infinity)
+            .pageColumn()
         }
         .task(id: query) {
             try? await Task.sleep(for: .milliseconds(450))

@@ -50,7 +50,7 @@ private struct OrbSheetFrame<Footer: View>: ViewModifier {
     // the footer. The presentation itself is the system's and is left alone.
     func body(content: Content) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .center, spacing: 12) {
+            HStack(alignment: .center, spacing: Spacing.m) {
                 if let icon { ServiceTile(mark: icon) }
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
@@ -65,9 +65,9 @@ private struct OrbSheetFrame<Footer: View>: ViewModifier {
                     }
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 18)
-            .padding(.bottom, 12)
+            .padding(.horizontal, Spacing.sheetEdge)
+            .padding(.top, Spacing.sheetHeaderTop)
+            .padding(.bottom, Spacing.sheetHeaderBottom)
             .sheetSection(0)
             content
                 .orbFormBackground()
@@ -100,6 +100,22 @@ private struct OpenSheetRegistration: ViewModifier {
     }
 }
 
+/// The frame of a sheet's bottom row: the hairline above, the sheet's side padding (the same as the header's and the
+/// body's, so the primary button's right edge is the content's right edge) and one vertical padding, with every
+/// control centered on the same line. `SheetFooter` is the usual content; a sheet with other buttons (a copy, a link)
+/// puts its own in a `SheetFooterBar`, ending with Cancel and the primary action.
+struct SheetFooterBar<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        HStack(alignment: .center, spacing: Spacing.controlGap) { content() }
+            .frame(minHeight: ControlHeight.regular)
+            .padding(.horizontal, Spacing.sheetEdge)
+            .padding(.vertical, Spacing.footerVertical)
+            .overlay(alignment: .top) { Divider().opacity(0.6) }
+    }
+}
+
 /// The bottom row of a sheet: an optional destructive action and a validation message on the left, Cancel and the
 /// primary action on the right (Return and Esc work as usual; a destructive sheet takes Return away from the primary
 /// action with `primaryIsDefault: false`, so a reflex Return does nothing).
@@ -124,11 +140,12 @@ struct SheetFooter: View {
     static func primaryShortcut(isDefault: Bool) -> KeyboardShortcut? { isDefault ? .defaultAction : nil }
 
     var body: some View {
-        HStack(spacing: 8) {
+        SheetFooterBar {
             if let destructiveTitle, let destructive {
                 Button(destructiveTitle, role: .destructive, action: destructive)
                     .buttonStyle(GhostStyle(tint: Palette.danger))
                     .help(destructiveHelp)
+                    .hangsOnLeadingEdge()
             }
             if let message {
                 Text(message)
@@ -138,7 +155,7 @@ struct SheetFooter: View {
                     .contentTransition(.opacity)
                     .transition(.opacity)
             }
-            Spacer(minLength: 12)
+            Spacer(minLength: Spacing.m)
             if showsCancel {
                 Button(cancelTitle, action: cancel)
                     .buttonStyle(GhostStyle())
@@ -158,9 +175,24 @@ struct SheetFooter: View {
         }
         // The validation note comes, goes and changes by fading (§2.13); the buttons are on the other side and stay put.
         .motion(Motion.content, value: message)
-        .padding(.horizontal, 20)
-        .padding(.vertical, 14)
-        .overlay(alignment: .top) { Divider().opacity(0.6) }
+    }
+}
+
+/// The row of buttons at the foot of a card (an approval, a proposal, a pause): the quiet action at the leading edge
+/// (hanging on it, see `hangsOnLeadingEdge`), a hint if any, and the buttons at the trailing edge, the primary
+/// action last. Everything sits on one vertical center, the controls are one height, and the gap between buttons is
+/// `Spacing.controlGap`. A card that stacks its buttons because they do not fit puts them in its own layout.
+struct ActionRow<Leading: View, Trailing: View>: View {
+    @ViewBuilder let leading: () -> Leading
+    @ViewBuilder let trailing: () -> Trailing
+
+    var body: some View {
+        HStack(alignment: .center, spacing: Spacing.controlGap) {
+            leading()
+            Spacer(minLength: Spacing.m)
+            trailing()
+        }
+        .frame(minHeight: ControlHeight.regular)
     }
 }
 
@@ -190,7 +222,7 @@ extension View {
     func chipButton() -> some View {
         // The size is said out loud: inside a grouped Form the buttons keep the form's body font whatever the control size,
         // and would come out larger than the same chips in the panel's header.
-        buttonStyle(.bordered).controlSize(.small).font(.system(size: 12))
+        buttonStyle(.bordered).controlSize(.small).font(.system(size: 12)).labelStyle(FixedIconLabelStyle())
     }
 
     /// The gray line under a switch or a picker in the Orb's panel ("Rodar comandos e ler e escrever arquivos").

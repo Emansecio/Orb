@@ -274,6 +274,7 @@ enum Snapshot {
         let model = AppModel(secretVault: MemoryVault())
         model.showInspector = false // the inspector column does not render offscreen
         if screen.hasSuffix("-profile") { ProfileSnapshots.fill(model) }
+        if screen.hasPrefix("routine") || screen == "inspector-routines" { RoutinesSnapshots.seed(model) }
         model.sendLaunchPrompt()
         let height = ProcessInfo.processInfo.environment["ORB_SNAPSHOT_HEIGHT"].flatMap(Double.init)
         let content: AnyView = switch screen {

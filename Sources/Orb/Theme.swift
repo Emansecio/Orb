@@ -66,6 +66,62 @@ enum Palette {
 }
 
 
+// MARK: Spacing
+
+/// The one spacing scale: sheets, cards, forms and action rows take their paddings and gaps from here, so the same
+/// distance always looks the same and a footer lines up with the body above it.
+enum Spacing {
+    /// 2 / 4 / 8 / 12 / 16 / 20 / 24: the steps between icons and labels, rows, cards and sections.
+    static let hairline: CGFloat = 2
+    static let xs: CGFloat = 4
+    static let s: CGFloat = 8
+    static let m: CGFloat = 12
+    static let l: CGFloat = 16
+    static let xl: CGFloat = 20
+    static let xxl: CGFloat = 24
+
+    /// The sheet's side padding: the body, the header and the footer all use it, so the buttons' right edge is the
+    /// content's right edge.
+    static let sheetEdge: CGFloat = xl
+    static let sheetHeaderTop: CGFloat = 18
+    static let sheetHeaderBottom: CGFloat = m
+    /// Vertical padding of a sheet's footer (above and below the buttons).
+    static let footerVertical: CGFloat = 14
+    /// Between two buttons of one row, and between a hint and the buttons.
+    static let controlGap: CGFloat = s
+    /// Inside a card, and between the parts of a card.
+    static let cardPadding: CGFloat = l
+    static let cardGap: CGFloat = m
+    /// Between cards of a grid or a list.
+    static let cardSpacing: CGFloat = 14
+    /// Between the sections of a page.
+    static let section: CGFloat = xxl
+    /// A page's outer margin.
+    static let page: CGFloat = xxl
+    /// The text-only ghost button's side padding: a ghost button at the start of a row hangs this far outside, so its
+    /// label (not its invisible hover shape) lines up with the content above.
+    static let ghostInset: CGFloat = 12
+    /// The width every row icon takes next to its label (a symbol of any width), so the labels line up.
+    static let iconColumn: CGFloat = 16
+    /// The widest a page's content grows (the lists of skills and connectors, the routines, the gallery).
+    static let pageWidth: CGFloat = 980
+}
+
+extension View {
+    /// A page's content column: centered, no wider than `Spacing.pageWidth`, with the page margin around it, the same
+    /// on every page that scrolls.
+    func pageColumn() -> some View {
+        frame(maxWidth: Spacing.pageWidth).frame(maxWidth: .infinity).padding(Spacing.page)
+    }
+}
+
+/// Heights of the buttons, so a primary, a secondary and a ghost button in one row are the same height.
+enum ControlHeight {
+    static let regular: CGFloat = 30
+    static let compact: CGFloat = 24
+    static let hero: CGFloat = 44
+}
+
 // MARK: Surfaces
 
 struct CardBackground: ViewModifier {
@@ -285,17 +341,35 @@ final class ShimmerBandView: NSView {
 
 // MARK: Buttons
 
-/// White pill — the primary action.
+/// Measures of the pill buttons, which follow the control size: `.small` (the buttons inside cards and rows) is the
+/// compact one.
+struct PillMetrics {
+    let font: Font
+    let horizontal: CGFloat
+    let height: CGFloat
+
+    static func of(_ size: ControlSize) -> PillMetrics {
+        switch size {
+        case .mini, .small: PillMetrics(font: .system(size: 12, weight: .medium), horizontal: 11, height: ControlHeight.compact)
+        default: PillMetrics(font: .system(size: 13, weight: .medium), horizontal: 14, height: ControlHeight.regular)
+        }
+    }
+}
+
+/// White pill: the primary action.
 struct PrimaryPillStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.controlSize) private var controlSize
 
     func makeBody(configuration: Configuration) -> some View {
+        let metrics = PillMetrics.of(controlSize)
         configuration.label
-            .font(.system(size: 13, weight: .medium))
+            .font(metrics.font)
             .foregroundStyle(Palette.onInk)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 7)
+            .padding(.horizontal, metrics.horizontal)
+            .frame(minHeight: metrics.height)
             .background(Palette.ink.opacity(configuration.isPressed ? 0.8 : (isEnabled ? 1 : 0.3)), in: .capsule)
+            .contentShape(.capsule)
     }
 }
 
@@ -311,7 +385,7 @@ struct HeroPillStyle: ButtonStyle {
             .font(.system(size: 15, weight: .semibold))
             .foregroundStyle(Palette.onInk)
             .padding(.horizontal, 22)
-            .padding(.vertical, 11)
+            .frame(minHeight: ControlHeight.hero)
             .background {
                 // The halo is the capsule's own shadow in the stage color; only its opacity changes with the hover.
                 Capsule()
@@ -326,17 +400,20 @@ struct HeroPillStyle: ButtonStyle {
     }
 }
 
-/// Subtle filled pill — secondary action.
+/// Subtle filled pill: secondary action.
 struct SecondaryPillStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.controlSize) private var controlSize
 
     func makeBody(configuration: Configuration) -> some View {
+        let metrics = PillMetrics.of(controlSize)
         configuration.label
-            .font(.system(size: 13, weight: .medium))
+            .font(metrics.font)
             .foregroundStyle(Palette.ink)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 7)
+            .padding(.horizontal, metrics.horizontal)
+            .frame(minHeight: metrics.height)
             .background(Color.white.opacity(configuration.isPressed ? 0.16 : 0.1), in: .capsule)
+            .contentShape(.capsule)
             .opacity(isEnabled ? 1 : 0.4)
     }
 }
@@ -363,15 +440,37 @@ struct GhostStyle: ButtonStyle {
     /// A color for the label instead of the usual gray (red for a destructive action).
     var tint: Color?
     @State private var isHovering = false
+    @Environment(\.controlSize) private var controlSize
 
     func makeBody(configuration: Configuration) -> some View {
+        let metrics = PillMetrics.of(controlSize)
         configuration.label
-            .font(.system(size: 13, weight: .medium))
+            .font(metrics.font)
             .foregroundStyle(tint ?? Palette.secondary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
+            .padding(.horizontal, Spacing.ghostInset)
+            .frame(minHeight: metrics.height)
             .hoverFill(configuration.isPressed || isHovering, pressed: configuration.isPressed, in: .capsule,
                        color: Palette.ghostSelected)
+            .contentShape(.capsule)
             .onHover { isHovering = $0 }
+    }
+}
+
+extension View {
+    /// A ghost button that starts a row (the destructive one of a footer, the "Não permitir" of a card) hangs
+    /// `Spacing.ghostInset` to the left of the row's edge, so its label, not its invisible hover shape, lines up with the
+    /// content above. The mirror of it for one that ends a row is `hangsOnTrailingEdge()`.
+    func hangsOnLeadingEdge() -> some View { padding(.leading, -Spacing.ghostInset) }
+    func hangsOnTrailingEdge() -> some View { padding(.trailing, -Spacing.ghostInset) }
+}
+
+/// A button's icon in a fixed-width column, so a row of buttons whose symbols differ in width (a pencil, a speech
+/// bubble, a play triangle) keeps its labels at the same distance from the edge.
+struct FixedIconLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: Spacing.xs + Spacing.hairline) {
+            configuration.icon.frame(width: Spacing.iconColumn)
+            configuration.title
+        }
     }
 }

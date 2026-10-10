@@ -116,13 +116,12 @@ struct BotInspector: View {
             .sheet(isPresented: $isEditingOrb) {
                 VStack(spacing: 0) {
                     OrbEditor(config: binding(\.orb, of: bot), name: bot.name)
-                    HStack {
+                    SheetFooterBar {
                         Spacer()
                         Button("Pronto") { isEditingOrb = false }
                             .buttonStyle(PrimaryPillStyle())
                             .keyboardShortcut(.defaultAction)
                     }
-                    .padding(14)
                     .background(Palette.chrome)
                     .sheetSection(2)
                 }
@@ -175,7 +174,8 @@ struct BotInspector: View {
                 CreatedByLine(bot: bot) // MultiOrb (WP3)
             }
         }
-        .padding(.horizontal, 16)
+        // The same side padding as the form's cards below, so the header, the buttons, the tabs and the cards share edges.
+        .padding(.horizontal, Spacing.xl)
         .padding(.top, 14)
         .padding(.bottom, 10)
     }
@@ -187,7 +187,7 @@ struct BotInspector: View {
             quickActionRow(bot, showsTitles: true, folderIsMissing: folderIsMissing)
             quickActionRow(bot, showsTitles: false, folderIsMissing: folderIsMissing)
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, Spacing.xl)
         .padding(.bottom, 10)
     }
 
@@ -632,7 +632,7 @@ private struct InspectorTabBar: View {
         // Bound to the selection alone, as in the sidebar: the highlight slides and the lit title changes with it; it
         // jumps under Reduce Motion.
         .animation(Motion.selection(reduceMotion: reduceMotion), value: selection)
-        .padding(.horizontal, 12)
+        .padding(.horizontal, Spacing.xl)
         .padding(.bottom, 4)
         // For VoiceOver and the keyboard this is one group of tabs, which a segmented picker already is.
         .accessibilityRepresentation {

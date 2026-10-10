@@ -956,10 +956,10 @@ struct ApprovalCard: View {
                 .transition(.opacity)
             }
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 6) { denyButton; Spacer(minLength: 8); allowControl }
-                VStack(alignment: .trailing, spacing: 8) {
-                    HStack(spacing: 6) { denyButton; Spacer() }
-                    HStack(spacing: 6) { Spacer(); allowControl }
+                ActionRow { denyButton.hangsOnLeadingEdge() } trailing: { allowControl }
+                VStack(alignment: .trailing, spacing: Spacing.controlGap) {
+                    ActionRow { denyButton.hangsOnLeadingEdge() } trailing: { EmptyView() }
+                    ActionRow { EmptyView() } trailing: { allowControl }
                 }
             }
         }
@@ -1105,7 +1105,7 @@ struct ApprovalCard: View {
                 .foregroundStyle(Palette.onInk)
                 .padding(.leading, 14)
                 .padding(.trailing, hasMoreOptions ? 10 : 14)
-                .padding(.vertical, 7)
+                .frame(minHeight: ControlHeight.regular)
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
@@ -1140,7 +1140,7 @@ struct ApprovalCard: View {
                     Image(systemName: "chevron.down")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(Palette.onInk)
-                        .frame(width: 30, height: 30)
+                        .frame(width: 30, height: ControlHeight.regular)
                         .contentShape(.rect)
                 }
                 .menuStyle(.button)

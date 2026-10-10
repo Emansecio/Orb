@@ -119,6 +119,7 @@ struct ImportPanel: View {
                 Label("Voltar", systemImage: "chevron.left").font(.system(size: 12))
             }
             .buttonStyle(GhostStyle())
+            .hangsOnLeadingEdge()
             .help(Tip.importBack)
             Text(ImportText.title)
                 .font(.system(size: 17, weight: .semibold))
@@ -412,6 +413,7 @@ private struct ImportSkillRow: View {
                 Spacer(minLength: 4)
                 Button(isShowing ? "Ocultar" : "Ver") { isShowing.toggle() }
                     .buttonStyle(GhostStyle())
+                    .hangsOnTrailingEdge()
                     .help(Tip.importToggleSkill(isShowing: isShowing))
             }
             if isShowing {
@@ -452,6 +454,7 @@ struct ImportSummaryRow: View {
                 Button("Remover", action: remove).buttonStyle(GhostStyle())
                     .help(Tip.importRemove)
             }
+            .hangsOnLeadingEdge()
         }
         .accessibilityElement(children: .contain)
     }

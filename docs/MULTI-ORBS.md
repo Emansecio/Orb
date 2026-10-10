@@ -671,7 +671,7 @@ Contador no cabeçalho (turnos e tokens como "42 mil"), com uma barra fina de 2 
 **Consome**: WP0; `OrbEditor`, `OrbFolder`, `AppModel.createBot`. **Fornece**: `OrbProposalCard` (o WP4 reaproveita), `OrbProposal.make`, evento `orbCreated`.
 **Testes**: `OrbProposalTests` (herança da 4.2 linha a linha: capacidades ∩, sem conectores, modo teto, nunca bypass, modelo herdado, look inválido ignorado, sanitização); `OrbProposeFlowTests` (modelo falso chama `orb_propose` → cartão no chat do criador; `.once` cria o Orb com `createdBy`, pasta em diretório temporário, evento; `.deny` não cria e o modelo recebe a recusa; "Editar antes" altera nome/capacidades e o resultado reflete; em **Sem pedir permissão** o cartão **aparece**; em **Só leitura** a ferramenta recusa; Parar cancela o cartão; limite 5/12; não é oferecida em rotina/pedido); `ClaudeCodeProposeTests` com o `claude` falso (o `can_use_tool` de `orb_propose` abre o cartão, o campo `orb_handled` forjado pelo modelo é ignorado); `OrbToolsMCPServerTests` (`--propose`).
 **Modos `--snapshot`**: `orb-proposal` (pendente), `orb-proposal-editing`, `orb-proposal-created`, `orb-proposal-dismissed`, `orb-proposal-narrow` (largura 520), `orb-created-sidebar` (a linha nova na barra lateral).
-**Aceite visual**: o Orb de 72 pt aparece animado (em `--snapshot` estático, parado); chips legíveis; botões na ordem Criar, Editar antes, Não criar; texto exato da 8.4.
+**Aceite visual**: o Orb de 72 pt aparece animado (em `--snapshot` estático, parado); chips legíveis; botões como os de aprovação (`ActionRow`): Não criar à esquerda, Editar antes e Criar à direita, o primário por último; texto exato da 8.4.
 
 ### WP4. Assistente "Criar conversando" (Sonnet)
 
