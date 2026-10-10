@@ -5,6 +5,8 @@ import AppKit
 /// line, a failure with "Tentar de novo", and the message field. Nothing here knows the model: it reads and writes a `WizardRunner`.
 struct WizardChatView: View {
     let runner: WizardRunner
+    /// The look the person chose: the assistant's avatar wears it, so the chat is the Orb being made.
+    let look: OrbConfig
 
     @State private var text = ""
     @FocusState private var isFocused: Bool
@@ -37,7 +39,7 @@ struct WizardChatView: View {
                             .transition(.opacity)
                     }
                     if !runner.liveText.isEmpty {
-                        WizardBotRow(orb: runner.draft.orb) {
+                        WizardBotRow(orb: look) {
                             MarkdownChunk(source: runner.liveText, streaming: true, cached: false)
                         }
                     } else if runner.isThinking {
@@ -79,7 +81,7 @@ struct WizardChatView: View {
         case .user(let text, _):
             WizardUserBubble(text: text)
         case .bot(let text, _):
-            WizardBotRow(orb: runner.draft.orb) { MarkdownChunk(source: text).equatable() }
+            WizardBotRow(orb: look) { MarkdownChunk(source: text).equatable() }
         default:
             EmptyView()
         }
@@ -99,7 +101,7 @@ struct WizardChatView: View {
     /// "escrevendo…" with three dots, while the assistant answers and nothing has streamed yet.
     private var writing: some View {
         HStack(spacing: 8) {
-            BotAvatar(orb: runner.draft.orb, size: 30, animated: false)
+            BotAvatar(orb: look, size: 30, animated: false)
                 .accessibilityHidden(true)
             HStack(spacing: 7) {
                 WizardTypingDots(animated: !reduceMotion)

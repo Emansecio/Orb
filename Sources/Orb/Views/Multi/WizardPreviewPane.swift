@@ -1,18 +1,35 @@
 import SwiftUI
 
-/// The right side of "Criar conversando": the Orb being made, alive on a stage with its glow on the floor, its name and role,
-/// how it works and what it may use. Each `orb_draft` call changes it in front of the person (`OrbDraft.revision`): a new look
-/// cross-fades and the Orb hops, a new name or role changes by fading and is washed for a moment, the instructions unfold,
-/// the chips come in one after another. When the assistant says it is ready the final card enters at the foot.
-/// Under Reduce Motion nothing slides, scales or hops: everything changes by opacity.
+/// The right side of "Quem ele é" (in the assistant and in the form): the Orb being made, alive on a stage with its glow on the
+/// floor, its name and role, how it works and what it may use. The look is always the one the PERSON chose (`look`: the assistant
+/// never designs it), with "Desenhar" and "Aleatório" under the Orb. In the assistant each `orb_draft` call changes the rest in
+/// front of the person (`OrbDraft.revision`): a new name or role changes by fading and is washed for a moment, the instructions
+/// unfold, the chips come in one after another; a new look cross-fades and the Orb hops. When the assistant says it is ready the
+/// final card enters at the foot. Under Reduce Motion nothing slides, scales or hops: everything changes by opacity.
 struct WizardPreviewPane: View {
-    let runner: WizardRunner
+    let draft: OrbDraft
+    let look: OrbConfig
+    var activity: OrbActivity = .idle
+    var emptyText = "Seu Orb aparece aqui conforme vocês conversam"
     let onAdjust: () -> Void
+    let onBack: () -> Void
+    /// "Desenhar": the Aparência tab.
+    let onDraw: () -> Void
+    /// "Aleatório": a new look, in place.
+    let onRandom: () -> Void
 
     /// `flashed`: the parts washed at the start (a review snapshot of the moment a call changed them).
-    init(runner: WizardRunner, flashed: Set<DraftField> = [], onAdjust: @escaping () -> Void) {
-        self.runner = runner
+    init(draft: OrbDraft, look: OrbConfig, activity: OrbActivity = .idle, emptyText: String = "Seu Orb aparece aqui conforme vocês conversam",
+         flashed: Set<DraftField> = [], onAdjust: @escaping () -> Void = {}, onBack: @escaping () -> Void = {},
+         onDraw: @escaping () -> Void, onRandom: @escaping () -> Void) {
+        self.draft = draft
+        self.look = look
+        self.activity = activity
+        self.emptyText = emptyText
         self.onAdjust = onAdjust
+        self.onBack = onBack
+        self.onDraw = onDraw
+        self.onRandom = onRandom
         _flashed = State(initialValue: flashed)
     }
 
@@ -26,7 +43,6 @@ struct WizardPreviewPane: View {
 
     static let orbSize: CGFloat = 168
 
-    private var draft: OrbDraft { runner.draft }
     private var hasDraft: Bool { draft.revision > 0 }
 
     var body: some View {
@@ -34,27 +50,36 @@ struct WizardPreviewPane: View {
             ScrollView {
                 VStack(spacing: 14) {
                     stage
+                    lookActions
                     if hasDraft {
                         identity
+                        // What it will get, from the start (the form's own defaults until the assistant says otherwise).
+                        chips(leading: true)
                         if !draft.instructions.isEmpty { howItWorks.transition(.adapted(.unfold, reduceMotion: reduceMotion)) }
                     } else {
-                        Text("Seu Orb aparece aqui conforme vocês conversam")
+                        Text("\(emptyText)")
                             .font(.system(size: 13))
                             .foregroundStyle(Palette.faint)
                             .multilineTextAlignment(.center)
                             .padding(.top, 6)
                             .transition(.opacity)
+                        chips(leading: false)
                     }
-                    // What it will get, from the start (the form's own defaults until the assistant says otherwise).
-                    chips(leading: hasDraft)
                 }
                 .padding(.horizontal, 28)
                 .padding(.bottom, 20)
                 .frame(maxWidth: .infinity)
             }
             .scrollBounceBehavior(.basedOnSize)
+            // What scrolls under the final card fades out instead of being cut.
+            .mask {
+                VStack(spacing: 0) {
+                    Color.black
+                    LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 16)
+                }
+            }
             if draft.ready {
-                WizardReadyCard(draft: draft, adjust: onAdjust, back: runner.backToChatting)
+                WizardReadyCard(draft: draft, adjust: onAdjust, back: onBack)
                     .padding(.horizontal, 28)
                     .padding(.bottom, 16)
                     .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 14)))
@@ -72,6 +97,8 @@ struct WizardPreviewPane: View {
             poke += 1
         }
         .onChange(of: draft.revision) { revisionChanged() }
+        // A new look, from "Aleatório" here or from the editor: the Orb that is in hops (the crossfade is the stage's).
+        .onChange(of: look) { lookChanged() }
         .onChange(of: draft.ready) { readyChanged() }
         .onDisappear {
             flashTask?.cancel()
@@ -83,13 +110,13 @@ struct WizardPreviewPane: View {
     // MARK: Stage
 
     private var shownActivity: OrbActivity {
-        let live = runner.activity
+        let live = activity
         if live != .idle { return live }
         return isHappy ? .happy : .idle
     }
 
     private var stage: some View {
-        let palette = OrbCatalog.shared.palette(draft.orb.color)
+        let palette = OrbCatalog.shared.palette(look.color)
         let size = Self.orbSize
         let curve = Motion.adapted(Motion.crossFade, reduceMotion: reduceMotion)
         return ZStack {
@@ -106,17 +133,37 @@ struct WizardPreviewPane: View {
                 .frame(width: 340, height: 76)
                 .offset(y: size / 2 + 2)
             ZStack {
-                OrbView(config: draft.orb, activity: shownActivity, size: size, poke: poke, interactive: true,
-                        accessibilityText: "Prévia do Orb: \(draft.orb.summary). \(shownActivity.label).")
-                    .id(draft.orb)
+                OrbView(config: look, activity: shownActivity, size: size, poke: poke, interactive: true,
+                        accessibilityText: "Prévia do Orb: \(look.summary). \(shownActivity.label).")
+                    .id(look)
                     .transition(.opacity)
             }
             .frame(width: size, height: size)
         }
-        .animation(curve, value: draft.orb)
-        .frame(height: size + 76)
-        .padding(.top, 28)
+        .animation(curve, value: look)
+        .frame(height: size + 64)
+        .padding(.top, 14)
         .accessibilityElement(children: .contain)
+    }
+
+    /// "Desenhar" (the Aparência tab) and "Aleatório" (a new look, here): the look is the person's, one click away.
+    private var lookActions: some View {
+        HStack(spacing: 8) {
+            Button(action: onDraw) {
+                Label("Desenhar", systemImage: "paintbrush")
+            }
+            .buttonStyle(SecondaryPillStyle())
+            .help("Abre a aba Aparência, para desenhar o Orb")
+            .accessibilityIdentifier("preview-draw")
+            Button(action: onRandom) {
+                Label("Aleatório", systemImage: "dice")
+            }
+            .buttonStyle(SecondaryPillStyle())
+            .help("Sorteia outra aparência para o Orb")
+            .accessibilityIdentifier("preview-random")
+        }
+        .font(.system(size: 12))
+        .padding(.top, -8)
     }
 
     // MARK: Name, role, instructions, chips
@@ -237,12 +284,14 @@ struct WizardPreviewPane: View {
                 flashed = []
             }
         }
-        // The look cross-fades (the old Orb and the new one are laid over each other); once the new one is in, it hops.
-        if changed.contains(.look), !reduceMotion {
-            Task {
-                try? await Task.sleep(for: .milliseconds(140))
-                poke += 1
-            }
+    }
+
+    /// The look cross-fades (the old Orb and the new one are laid over each other); once the new one is in, it hops.
+    private func lookChanged() {
+        guard !reduceMotion else { return }
+        Task {
+            try? await Task.sleep(for: .milliseconds(140))
+            poke += 1
         }
     }
 
