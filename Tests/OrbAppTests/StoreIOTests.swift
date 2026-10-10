@@ -17,7 +17,7 @@ extension Store {
 
     deinit {
         try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.appending(path: "conversations").path)
-        try? FileManager.default.removeItem(at: root)
+        removeTestFolder(root)
     }
 
     private func conversationURL(_ id: UUID) -> URL { root.appending(path: "conversations/\(id.uuidString).json") }

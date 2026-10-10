@@ -8,7 +8,11 @@ import Testing
 // real Keychain, ChatGPT's session or the `claude` CLI: the sources are fakes.
 
 @MainActor
-struct ConnectionsRefreshTests {
+final class ConnectionsRefreshTests {
+    let root = FileManager.default.temporaryDirectory.appending(path: "OrbConnections-\(UUID().uuidString)")
+
+    deinit { removeTestFolder(root) }
+
     /// Stands in for `claude auth status`: the first `held` calls wait until released, the rest answer at once.
     private final class FakeStatus: Sendable {
         private let state = OSAllocatedUnfairLock(initialState: (calls: 0, waiting: [CheckedContinuation<Void, Never>]()))
@@ -49,7 +53,6 @@ struct ConnectionsRefreshTests {
     }
 
     private func model(keys: FakeKeys, status: FakeStatus) -> AppModel {
-        let root = FileManager.default.temporaryDirectory.appending(path: "OrbConnections-\(UUID().uuidString)")
         let model = AppModel(store: Store(directory: root), runsBackgroundWork: false, devRun: false)
         model.connectionSources = ConnectionSources(keyedProviders: { keys.all }, storeKey: { keys.store($0, $1) },
                                                     hasChatGPTCredential: { false }, signOutOfChatGPT: {},

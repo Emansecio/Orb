@@ -81,11 +81,6 @@ import Testing
         #expect(Motion.adapted(Motion.crossFade, reduceMotion: false) == Motion.crossFade)
     }
 
-    @Test func aSlidingSelectionPaintsItsMotionOnlyWhenMotionIsAllowed() {
-        #expect(Motion.selection(reduceMotion: false) == Motion.content)
-        #expect(Motion.selection(reduceMotion: true) == nil)
-    }
-
     // MARK: Sheets
 
     @Test func theEditorsPartsComeInInTurnStageThenOptionsThenFooter() {
@@ -126,11 +121,6 @@ import Testing
         #expect(idle != RoutineRunState(isRunning: true, isQueued: false))
         #expect(idle != RoutineRunState(isRunning: false, isQueued: true))
         #expect(idle == RoutineRunState(isRunning: false, isQueued: false))
-    }
-
-    @Test func aSelectionThatSlidesDoesNotSlideWhenTheListChangedWithIt() {
-        #expect(Motion.selection(reduceMotion: false, listChanged: true) == nil)
-        #expect(Motion.selection(reduceMotion: false, listChanged: false) == Motion.content)
     }
 
     @Test func theFadeUnderReduceMotionIsTheShortOne() {

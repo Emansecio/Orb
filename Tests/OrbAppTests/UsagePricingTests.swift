@@ -347,7 +347,7 @@ struct UsagePricingTests {
 struct UsagePriceCorrectionTests {
     @Test func correctingAPriceSavesItAndRestoringRemovesIt() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "OrbPriceFix-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let store = Store(directory: root)
         let model = AppModel(store: store, runsBackgroundWork: false)
         model.correctPrice(of: "openai/gpt-5", to: ModelPrice(input: 1, output: 2))

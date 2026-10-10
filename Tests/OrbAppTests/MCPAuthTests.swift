@@ -991,7 +991,7 @@ struct ConnectorLoginModelTests {
         let service = FakeOAuthService()
         let opened = OSAllocatedUnfairLock(initialState: 0)
         let root = folder()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let model = AppModel(store: Store(directory: root), runsBackgroundWork: false, secretVault: MemoryVault(), connectorSession: service.session)
         model.opensLoginPage = { _ in opened.withLock { $0 += 1 } } // the person never comes back from this tab
         // Slack's way: an app registered to the letter, so the redirect is on one fixed port.
@@ -1016,7 +1016,7 @@ struct ConnectorLoginModelTests {
         let browser = FakeOAuthService.Browser()
         let vault = MemoryVault()
         let root = folder()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let model = AppModel(store: Store(directory: root), runsBackgroundWork: false, secretVault: vault, connectorSession: service.session)
         model.opensLoginPage = browser.open
         let config = connector(service)
@@ -1051,7 +1051,7 @@ struct ConnectorLoginModelTests {
         let service = FakeOAuthService()
         let vault = MemoryVault()
         let root = folder()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let model = AppModel(store: Store(directory: root), runsBackgroundWork: false, secretVault: vault, connectorSession: service.session)
         let config = connector(service)
         model.connectors = [config]

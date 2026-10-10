@@ -31,7 +31,7 @@ import Testing
         #expect(!live.hasFailed && live.activity != .error)
         #expect(live.cue == OrbCueSignal(count: 1, kind: .blink))
         #expect(!live.isCelebrating)
-        try? FileManager.default.removeItem(at: root)
+        removeTestFolder(root)
     }
 
     @Test @MainActor func aFailedTurnStillShowsTheError() {
@@ -41,7 +41,7 @@ import Testing
         model.finishTurn(id, turn: turn, succeeded: false)
         #expect(live.hasFailed && live.activity == .error)
         #expect(live.cue.count == 0)
-        try? FileManager.default.removeItem(at: root)
+        removeTestFolder(root)
     }
 
     @Test @MainActor func aTurnThatCouldNotStartShowsTheError() {
@@ -49,7 +49,7 @@ import Testing
         let (id, turn, live) = runningTurn(model)
         model.session(id).failSetup("Sem cliente", turn: turn)
         #expect(live.hasFailed && live.activity == .error)
-        try? FileManager.default.removeItem(at: root)
+        removeTestFolder(root)
     }
 
     @Test @MainActor func sendingClearsTheLastTurnsErrorAndJoy() {
@@ -66,7 +66,7 @@ import Testing
         session.flash(\.hasFailed, seconds: 30)
         _ = session.beginTurn()
         #expect(!live.hasFailed)
-        try? FileManager.default.removeItem(at: root)
+        removeTestFolder(root)
     }
 
     // MARK: Flashes do not erase each other
@@ -76,15 +76,16 @@ import Testing
         let id = model.bots[0].id
         let live = model.live(id)
         let session = model.session(id)
-        session.flash(\.isListening, seconds: 0.15)
-        try? await Task.sleep(for: .milliseconds(80))
-        session.flash(\.isListening, seconds: 0.3)
+        session.flash(\.isListening, seconds: 0.1)
+        try? await Task.sleep(for: .milliseconds(50))
+        // Long enough that a busy main actor cannot let it end on its own before it is checked.
+        session.flash(\.isListening, seconds: 1)
         // The first one's time is over by now; it must not have turned the flag off.
         try? await Task.sleep(for: .milliseconds(120))
         #expect(live.isListening)
         await waitUntil("the second flash ends") { !live.isListening }
         #expect(session.flashes.isEmpty)
-        try? FileManager.default.removeItem(at: root)
+        removeTestFolder(root)
     }
 
     @Test @MainActor func flashesOfDifferentFlagsAreIndependent() async {
@@ -93,12 +94,13 @@ import Testing
         let live = model.live(id)
         let session = model.session(id)
         session.flash(\.isListening, seconds: 0.05)
-        session.flash(\.hasFailed, seconds: 0.3)
+        // Long enough that a busy main actor cannot let it end on its own before it is checked.
+        session.flash(\.hasFailed, seconds: 30)
         await waitUntil("listening ends") { !live.isListening }
         #expect(live.hasFailed)
         session.cancelFlash(\.hasFailed)
         #expect(!live.hasFailed && session.flashes.isEmpty)
-        try? FileManager.default.removeItem(at: root)
+        removeTestFolder(root)
     }
 
     // MARK: Tools in parallel
@@ -118,7 +120,7 @@ import Testing
 
         model.apply(.toolFinished(id: shell.id, state: .done, output: "ok"), to: id)
         #expect(live.runningTool == nil && live.activity == .thinking)
-        try? FileManager.default.removeItem(at: root)
+        removeTestFolder(root)
     }
 
     // MARK: The celebration is as big as the turn
@@ -163,7 +165,7 @@ import Testing
         #expect(end(seconds: 20, actions: 3) == .normal)
         #expect(end(seconds: 90, actions: 3) == .big)
         #expect(live.cue.count == 0)
-        try? FileManager.default.removeItem(at: root)
+        removeTestFolder(root)
     }
 
     @Test @MainActor func aTaskLeftHalfWayOrACutReplySighsInsteadOfCelebrating() {
@@ -189,7 +191,7 @@ import Testing
         // A turn that went well afterwards celebrates again (the "paused" mark went away with the new message).
         end(.status("ok"))
         #expect(live.isCelebrating)
-        try? FileManager.default.removeItem(at: root)
+        removeTestFolder(root)
     }
 
     @Test @MainActor func aRoutineThatFinishesInAnotherOrbCelebratesLightly() {

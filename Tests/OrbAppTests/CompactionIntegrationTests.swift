@@ -284,7 +284,7 @@ struct SessionConnectorTests {
 @Suite final class CompactionAppTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbCompaction-\(UUID().uuidString)")
 
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     /// Items for the messages of `conversation`: what the user said and what the Orb answered.
     private func transcript(for messages: [ChatMessage]) -> [TranscriptItem] {

@@ -180,7 +180,7 @@ struct LocalConnectorInstallTests {
 
     @Test func installingAddsTheConnectorForTheChosenOrbsAndTurnsConnectorsOn() throws {
         let (model, root) = model()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let orb = try #require(model.bots.first)
         model.bots[0].capabilities.remove(.connectors)
         let config = model.installLocalConnector(.agenda, orbIDs: [orb.id])
@@ -197,7 +197,7 @@ struct LocalConnectorInstallTests {
         calendar.calendarList = [CalendarInfo(id: "i", title: "Casa", account: "iCloud", isWritable: true)]
         mail.permission = .notDetermined
         let (model, root) = model(LocalConnectorEnvironment(calendar: calendar, mail: mail))
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         model.installLocalConnector(.agenda, orbIDs: nil)
         model.installLocalConnector(.gmail, orbIDs: nil)
         await model.refreshLocalStates()
@@ -218,7 +218,7 @@ struct LocalConnectorInstallTests {
         let calendar = FakeCalendar()
         calendar.calendarList = [CalendarInfo(id: "w", title: "Trabalho", account: "maria@empresa.com.br", isWritable: true)]
         let (model, root) = model(LocalConnectorEnvironment(calendar: calendar, mail: FakeMail()))
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         model.installLocalConnector(.agenda, orbIDs: nil)
         await model.refreshLocalStates()
         #expect(model.localStates[.agenda] == .noAccount)
@@ -235,7 +235,7 @@ struct LocalConnectorInstallTests {
     @Test func aLocalConnectorStartsThroughTheModelWithTheFakeEnvironment() async throws {
         let calendar = FakeCalendar()
         let (model, root) = model(LocalConnectorEnvironment(calendar: calendar, mail: FakeMail()))
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let config = model.installLocalConnector(.agenda, orbIDs: nil)
         #expect(await model.connectAndWait(config.id) == .ready(toolCount: 6))
         let catalog = try #require(await model.mcp.catalog(config.id))

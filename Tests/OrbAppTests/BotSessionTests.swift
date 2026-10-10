@@ -79,7 +79,7 @@ private struct WritingModel: LLMClient {
 
     deinit {
         QuietNotifications.release()
-        try? FileManager.default.removeItem(at: root)
+        removeTestFolder(root)
     }
 
     private var store: Store { Store(directory: root) }

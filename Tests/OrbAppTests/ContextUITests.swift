@@ -234,7 +234,7 @@ struct ContextModelTests {
 
     @Test func inputCarriesTheChatAndTheStatedWindow() throws {
         let (model, id, root) = makeModel()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         model.seedConversation(conversation(turns: 2), for: id)
         let input = try #require(model.contextInput(for: id))
         #expect(input.windowIsStated)
@@ -245,7 +245,7 @@ struct ContextModelTests {
 
     @Test func noModelMeansNoReading() throws {
         let (model, id, root) = makeModel()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         model.providers = []
         model.seedConversation(conversation(turns: 2), for: id)
         let input = try #require(model.contextInput(for: id))
@@ -254,7 +254,7 @@ struct ContextModelTests {
 
     @Test func claudeCodeOrbsAreMeasuredWithoutABudget() throws {
         let (model, id, root) = makeModel()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         model.providers = [ProviderAccount(kind: .claudeCode)]
         model.defaultModel = "claudeCode/sonnet"
         model.seedConversation(conversation(turns: 2), for: id)
@@ -265,7 +265,7 @@ struct ContextModelTests {
 
     @Test func learnedWindowsAreListedAndForgotten() {
         let (model, id, root) = makeModel()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         _ = id
         #expect(model.learnedWindowRows().isEmpty)
         model.learnContextWindow(8_192, of: "custom/modelo")
@@ -281,7 +281,7 @@ struct ContextModelTests {
 
     @Test func staleLessonsAreNotListed() {
         let (model, _, root) = makeModel()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         model.learnContextWindow(8_192, of: "custom/modelo")
         let future = Date.now.addingTimeInterval(LearnedContext.lifetime + 3_600)
         #expect(model.learnedWindowRows(now: future).isEmpty)
@@ -291,7 +291,7 @@ struct ContextModelTests {
 
     @Test func compactingAShortChatSaysThereIsNothingToDo() {
         let (model, id, root) = makeModel()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         model.seedConversation(conversation(turns: 1, characters: 100), for: id)
         let result = model.compactFromMeter(id, focus: "  ")
         #expect(result.status == .nothingToCompact)
@@ -301,7 +301,7 @@ struct ContextModelTests {
 
     @Test func severalShortRequestsAreNotSaidToBeASingleOne() {
         let (model, id, root) = makeModel()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         model.seedConversation(conversation(turns: 3, characters: 100), for: id)
         let result = model.compactFromMeter(id, focus: nil)
         #expect(result.status == .nothingToCompact)
@@ -313,7 +313,7 @@ struct ContextModelTests {
 
     @Test func compactingALongChatFoldsItAndTellsTheNumbers() throws {
         let (model, id, root) = makeModel()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         model.seedConversation(conversation(turns: 10), for: id)
         let beforeInput = try #require(model.contextInput(for: id))
         let before = try #require(ContextReading.make(beforeInput))
@@ -329,7 +329,7 @@ struct ContextModelTests {
 
     @Test func compactingAClaudeCodeChatRestartsItsSessionAndSaysSoInTheTranscript() throws {
         let (model, id, root) = makeModel()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         model.providers = [ProviderAccount(kind: .claudeCode)]
         model.defaultModel = "claudeCode/sonnet"
         model.seedConversation(conversation(turns: 3), for: id)
@@ -346,7 +346,7 @@ struct ContextModelTests {
 
     @Test func theLatestRequestAndCompactionAreMirroredOnTheOrbsLiveState() {
         let (model, id, root) = makeModel()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         #expect(model.live(id).lastUsage == nil && model.live(id).compactedTo == nil)
         let used = TokenUsage(input: 1_000, output: 10, cacheRead: 3_000, cacheWrite: 0)
         model.apply(.requestUsage(used), to: id)

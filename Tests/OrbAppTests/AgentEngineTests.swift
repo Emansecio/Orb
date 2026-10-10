@@ -1057,7 +1057,7 @@ struct ModelTests {
 
     @Test func storeRoundTrip() throws {
         let directory = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        defer { removeTestFolder(directory) }
         let store = Store(directory: directory)
         var state = AppState.initial
         state.defaultModel = "xai/grok-4"
@@ -1110,7 +1110,7 @@ struct TurnOrchestrationTests {
 
     @Test func aStoppedTurnCannotCloseTheNextOne() throws {
         let (model, bot, root) = modelWithAProvider()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         #expect(model.send("um", to: bot.id))
         let first = try #require(model.turnIDs[bot.id])
         model.stop(bot.id)
@@ -1134,7 +1134,7 @@ struct TurnOrchestrationTests {
 
     @Test func stoppingWhileThePromptIsBeingPreparedReportsNoFailure() async throws {
         let (model, bot, root) = modelWithAProvider()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         // Stop at different moments of the setup (before it starts, while it runs, after it failed on its own).
         for yields in 0..<4 {
             await model.newConversation(bot.id)?.value
@@ -1155,7 +1155,7 @@ struct TurnOrchestrationTests {
 
     @Test func aTurnThatCannotStartFailsOnce() async throws {
         let (model, bot, root) = modelWithAProvider()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         #expect(model.send("oi", to: bot.id))
         let task = try #require(model.turns[bot.id])
         // Setup runs (and fails) in the turn's task; it finishing is the signal that the one notice is there.

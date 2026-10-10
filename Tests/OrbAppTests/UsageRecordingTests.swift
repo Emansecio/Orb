@@ -100,7 +100,7 @@ struct UsageStoreTests {
     private func store() -> Store { Store(directory: root) }
 
     @Test func rowsGoToTheFileOfTheirMonthAndAreAddedInOrder() async throws {
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let store = store()
         let lastOfOctober = UsageKey(hour: utcDate(2026, 10, 31, 23), orb: orb, model: "openai/gpt-5", source: .chat)
         let firstOfNovember = UsageKey(hour: utcDate(2026, 11, 1, 0), orb: orb, model: "openai/gpt-5", source: .chat)
@@ -127,7 +127,7 @@ struct UsageStoreTests {
     }
 
     @Test func aDamagedMonthIsNewsNotAFailedSave() throws {
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         final class Heard: @unchecked Sendable {
             private let lock = NSLock()
             private var items: [String] = []
@@ -150,7 +150,7 @@ struct UsageStoreTests {
     }
 
     @Test func aMonthThatCannotBeReadIsReportedOnceNotAtEveryFlush() throws {
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         final class Heard: @unchecked Sendable {
             private let lock = NSLock()
             private var items: [String] = []
@@ -172,7 +172,7 @@ struct UsageStoreTests {
     }
 
     @Test func aFileThatCannotBeDecodedIsSetAsideAndTheHistoryStartsAgain() async throws {
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let store = store()
         let file = root.appending(path: "uso/2026-10.json")
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -196,7 +196,7 @@ struct UsageRecorderTests {
     private let orb = UUID()
 
     @Test func manyUsesInAnHourAreOneRowWrittenInOneBatch() async throws {
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let store = Store(directory: root)
         var clock = utcDate(2026, 10, 9, 14, 5)
         let recorder = UsageRecorder(store: store, now: { clock }, calendar: utc)
@@ -222,7 +222,7 @@ struct UsageRecorderTests {
     }
 
     @Test func theBatchGoesOutOnItsOwnAfterTheDelay() async throws {
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let store = Store(directory: root)
         let recorder = UsageRecorder(store: store, calendar: utc)
         recorder.record(UsageTotals(requests: 1, input: 4), orb: orb, name: "Atlas", model: "openai/gpt-5", source: .chat)
@@ -235,7 +235,7 @@ struct UsageRecorderTests {
     }
 
     @Test func nothingIsKeptAfterTheHistoryIsClosed() {
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let recorder = UsageRecorder(store: Store(directory: root), calendar: utc)
         recorder.record(UsageTotals(requests: 1, input: 4), orb: orb, name: "Atlas", model: "openai/gpt-5", source: .chat)
         recorder.close()
@@ -269,7 +269,7 @@ struct UsageEventsTests {
 
     @Test func everyModelCallOfAChatTurnIsCountedWithItsOrbAndModel() async {
         let (model, id, root) = makeModel()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         model.apply(.requestUsage(TokenUsage(input: 100, output: 10, cacheRead: 4_000, cacheWrite: 0)), to: id)
         model.apply(.usage(TokenUsage(input: 100, output: 10, cacheRead: 4_000, cacheWrite: 0)), to: id)
         model.apply(.requestUsage(TokenUsage(input: 50, output: 20, cacheRead: 4_100, cacheWrite: 30)), to: id)
@@ -283,7 +283,7 @@ struct UsageEventsTests {
     /// The stopped stream drops what the engine would still say, so the input the provider announced is counted by the reader.
     @Test func aCallStoppedAfterTheProviderReportedItsInputIsStillCounted() async {
         let (model, id, root) = makeModel()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let session = model.session(id)
         let turn = session.beginTurn()
         let (events, feed) = AsyncStream<TurnEvent>.makeStream()
@@ -300,7 +300,7 @@ struct UsageEventsTests {
 
     @Test func aStoppedRoutinesCallKeepsItsSourceEvenWhenTheTurnIsClosedFirst() async {
         let (model, id, root) = makeModel()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let session = model.session(id)
         let turn = session.beginTurn()
         session.routineID = UUID()
@@ -318,7 +318,7 @@ struct UsageEventsTests {
 
     @Test func aCallThatEndedIsNotCountedAgainWhenTheTurnIsStopped() async {
         let (model, id, root) = makeModel()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let session = model.session(id)
         let turn = session.beginTurn()
         let (events, feed) = AsyncStream<TurnEvent>.makeStream()
@@ -336,7 +336,7 @@ struct UsageEventsTests {
 
     @Test func theBatchIsWrittenWhenTheTurnEnds() {
         let (model, id, root) = makeModel()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let turn = model.session(id).beginTurn()
         model.session(id).turnTask = Task {}
         model.apply(.requestUsage(TokenUsage(input: 10, output: 1)), to: id)
@@ -347,7 +347,7 @@ struct UsageEventsTests {
 
     @Test func aRoutinesTurnIsMarkedAsOne() async {
         let (model, id, root) = makeModel()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         model.session(id).routineID = UUID()
         model.apply(.requestUsage(TokenUsage(input: 10, output: 1)), to: id)
         model.session(id).routineID = nil
@@ -359,7 +359,7 @@ struct UsageEventsTests {
 
     @Test func aClaudeCodeTurnIsCountedOnceWithTheCostTheCLIReported() async {
         let (model, id, root) = makeModel()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         model.session(id).isClaudeTurn = true
         model.session(id).turnModel = "claudeCode/sonnet"
         model.apply(.usage(TokenUsage(input: 12, output: 340, cacheRead: 9_000, cacheWrite: 150)), to: id)
@@ -386,7 +386,7 @@ struct UsageEventsTests {
 
     @Test func callsTheAppMakesForItselfAreMarkedAuxiliary() async {
         let (model, id, root) = makeModel()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         model.recordAuxiliaryUsage(TokenUsage(input: 800, output: 200), botID: id, model: "openai/gpt-5")
         let found = await rows(model, root: root)
         #expect(found.count == 1 && found.first?.key.source == .auxiliary && found.first?.totals == UsageTotals(requests: 1, input: 800, output: 200))
@@ -394,7 +394,7 @@ struct UsageEventsTests {
 
     @Test func nothingIsRecordedForAnOrbThatDoesNotExistOrWhileResetting() async {
         let (model, id, root) = makeModel()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         model.recordUsage(UsageTotals(requests: 1, input: 1), botID: UUID(), model: "openai/gpt-5", source: .chat)
         model.isResetting = true
         model.recordUsage(UsageTotals(requests: 1, input: 1), botID: id, model: "openai/gpt-5", source: .chat)
@@ -405,7 +405,7 @@ struct UsageEventsTests {
 
     @Test func theResetRemovesTheHistoryAndKeepsNoPendingRow() async throws {
         let (model, id, root) = makeModel()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         model.apply(.requestUsage(TokenUsage(input: 10, output: 1)), to: id)
         model.usageLog.flush()
         model.store.flush()
@@ -444,7 +444,7 @@ struct AbsurdUsageCountsTests {
 
     @Test func anAbsurdUseGoesThroughTheTotalsAndTheRecorderWithoutTrapping() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "OrbAbsurdUsage-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let used = UsageTotals(TokenUsage(input: Int.max - 1, output: 10, cacheRead: Int.max, cacheWrite: Int.max))
         #expect(!used.isEmpty)
         #expect(used.tokens <= 4 * TokenUsage.maxCount)

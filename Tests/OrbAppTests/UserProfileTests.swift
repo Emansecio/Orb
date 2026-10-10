@@ -13,7 +13,7 @@ private let full = UserProfile(name: "Marina Costa", nickname: "Mari", about: "T
 private final class Folder {
     let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("OrbProfileTests-\(UUID().uuidString)")
     init() { try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true) }
-    deinit { try? FileManager.default.removeItem(at: url) }
+    deinit { removeTestFolder(url) }
 
     func file(_ name: String, _ data: Data) throws -> URL {
         let file = url.appending(path: name)
@@ -141,7 +141,7 @@ struct UserProfileBriefTests {
     }
 
     @Test func theProfileComesFirstInThePinnedPartAndNeverInTheNotes() async {
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let brief = await bank().brief(for: "oi", conversationIsNew: true, profile: full.promptSection)
         let profile = brief.pinned.range(of: "## About the user"), identity = brief.pinned.range(of: "## Your identity")
         #expect(profile != nil && identity != nil && profile!.lowerBound < identity!.lowerBound)
@@ -151,7 +151,7 @@ struct UserProfileBriefTests {
     }
 
     @Test func withoutAProfileTheBriefIsExactlyWhatItWas() async {
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let bank = await bank()
         let before = await bank.brief(for: "oi", conversationIsNew: true)
         let empty = await bank.brief(for: "oi", conversationIsNew: true, profile: UserProfile().promptSection)
@@ -159,7 +159,7 @@ struct UserProfileBriefTests {
     }
 
     @Test func aProfileAtItsLongestFitsTheBudgetWithTheRest() async {
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let long = UserProfile(name: String(repeating: "N", count: 60), nickname: String(repeating: "A", count: 40),
                                about: String(repeating: "palavra ", count: 60))
         let brief = await bank().brief(for: "oi", conversationIsNew: true, profile: long.promptSection)
@@ -168,7 +168,7 @@ struct UserProfileBriefTests {
     }
 
     @Test func theNativePromptKeepsTheSameSystemTurnAfterTurnAndChangesOnceWithTheProfile() async {
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let bank = await bank()
         func system(_ profile: UserProfile, _ message: String, history: [ChatMessage] = []) async -> String {
             let brief = await bank.brief(for: message, conversationIsNew: history.isEmpty, userTurns: 2, profile: profile.promptSection)
@@ -184,7 +184,7 @@ struct UserProfileBriefTests {
     }
 
     @Test func claudeCodeRebuildsTheSessionWhenTheProfileChangesAndSaysSo() async {
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let bank = await bank()
         func built(_ profile: UserProfile, session: TurnPrompt.SessionMarks) async -> TurnPrompt.ClaudeCode {
             let brief = await bank.brief(for: "oi", conversationIsNew: session.isNewSession, profile: profile.promptSection)

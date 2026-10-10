@@ -711,7 +711,8 @@ final class EndlessResponseTests {
     @Test func aStreamThatNeverEndsIsCutAtTheDeadlineWithWhatArrived() async throws {
         let host = "sse.test"
         let session = EndlessStreamProtocol.session(host: host, .init(mime: "text/event-stream", chunk: Data("data: x\n\n".utf8), interval: 0.05))
-        let tool = WebFetchTool(session: session, cache: WebPageCache(), readDeadline: .seconds(2))
+        // A loose deadline: with the whole suite queued at the start of a run, no piece was read within 2 s.
+        let tool = WebFetchTool(session: session, cache: WebPageCache(), readDeadline: .seconds(5))
         let started = ContinuousClock.now
         let output = try await tool.run(arguments(host), context: workspace.context)
         // Far from the 7 days of a plain URLSession, but generous: the whole suite runs on a loaded machine.
@@ -780,11 +781,12 @@ final class EndlessResponseTests {
     @Test func aPageCutByTimeKeepsTheNoteWhenItIsReadInPieces() async throws {
         let host = "slowpage.test"
         let session = EndlessStreamProtocol.session(host: host, .init(mime: "text/html", chunk: Data("<p>palavra palavra</p>".utf8), interval: 0.05))
-        let tool = WebFetchTool(session: session, cache: WebPageCache(), readDeadline: .seconds(1))
+        // A loose deadline: on a busy machine (the whole suite in parallel) no piece may arrive within 1 s.
+        let tool = WebFetchTool(session: session, cache: WebPageCache(), readDeadline: .seconds(3))
         let first = try await tool.run(arguments(host), context: workspace.context)
         #expect(first.contains("não terminou"))
         let again = try await tool.run(.object(["url": .string("https://\(host)/events"), "offset": .number(5)]), context: workspace.context)
-        #expect(again.contains("[... a resposta não terminou em 1 s; o resto não foi lido ...]"), "\(again)")
+        #expect(again.contains("[... a resposta não terminou em 3 s; o resto não foi lido ...]"), "\(again)")
     }
 }
 

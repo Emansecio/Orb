@@ -8,7 +8,7 @@ import Testing
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbKept-\(UUID().uuidString)")
     var memoryRoot: URL { root.appending(path: "memoria") }
 
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root, sealing: root.appending(path: "dados")) }
 
     private func date(_ year: Int, _ month: Int, _ day: Int, _ hour: Int = 12, _ minute: Int = 0) -> Date {
         Calendar.current.date(from: DateComponents(year: year, month: month, day: day, hour: hour, minute: minute))!

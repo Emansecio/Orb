@@ -449,7 +449,7 @@ struct SkillProposalValidationTests {
 
 @Suite final class SkillProposalBankTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbSkills-\(UUID().uuidString)")
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     func bank() -> MemoryBank { MemoryBank(directory: root.appending(path: "orb")) }
 
@@ -549,8 +549,10 @@ struct SkillProposalValidationTests {
     }
 }
 
-struct SkillToolsTests {
+final class SkillToolsTests {
     let directory = FileManager.default.temporaryDirectory.appending(path: "OrbSkillTools-\(UUID().uuidString)")
+
+    deinit { removeTestFolder(directory) }
 
     private func context(skillReview: Bool = false) -> (ToolContext, MemoryBank) {
         let bank = MemoryBank(directory: directory)

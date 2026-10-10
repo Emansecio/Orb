@@ -7,7 +7,7 @@ import Testing
 @Suite(.serialized) final class OrbImportTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbImport-\(UUID().uuidString)")
 
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root, sealing: root.appending(path: "dados")) }
 
     private func write(_ text: String, to relative: String, in base: URL? = nil) throws {
         let url = (base ?? root).appending(path: relative)

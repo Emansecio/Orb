@@ -266,7 +266,7 @@ struct WorkAnnouncerTests {
 /// What the Orb's `BotLive` and session do with the phrases through a turn.
 @Suite final class WorkLineFlowTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbWork-\(UUID().uuidString)")
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     @MainActor private func model() -> AppModel {
         var state = AppState.initial

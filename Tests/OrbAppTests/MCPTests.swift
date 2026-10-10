@@ -59,10 +59,7 @@ while True:
 """#
 
 private func fakeConfig(arguments: [String] = []) throws -> MCPServerConfig {
-    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("mcp-\(UUID().uuidString)")
-    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    let script = directory.appendingPathComponent("server.py")
-    try fakeServer.write(to: script, atomically: true, encoding: .utf8)
+    let script = try testScript(fakeServer)
     return MCPServerConfig(name: "Fake Server", command: "/usr/bin/python3", arguments: [script.path] + arguments,
                            environment: ["ORB_TEST": "ok"])
 }
@@ -136,7 +133,7 @@ struct MCPConnectionTests {
         // `fake-mcp` lives in a folder only the user's `.zshrc` would put on the PATH (nvm, fnm, Volta…).
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("mcp-path-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        defer { removeTestFolder(directory) }
         let command = directory.appendingPathComponent("fake-mcp")
         try ("#!/usr/bin/python3\n" + fakeServer).write(to: command, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: command.path)

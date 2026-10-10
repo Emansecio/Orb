@@ -28,7 +28,7 @@ private struct RecordingModel: LLMClient {
 @Suite final class PrefaceFlowTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbPrefaceFlow-\(UUID().uuidString)")
 
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     @MainActor private func setUp(_ stub: RecordingModel) throws -> (AppModel, Bot, URL) {
         let folder = root.appending(path: "pasta")

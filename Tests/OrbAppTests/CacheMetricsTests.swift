@@ -228,7 +228,7 @@ struct AppModelCacheReportTests {
 
     @Test func theLatestRequestAndTheTurnTotalAreKeptApart() {
         let (model, bot, root) = model()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let request = TokenUsage(input: 100, output: 5, cacheRead: 7_900, cacheWrite: 0)
         let total = TokenUsage(input: 5_100, output: 25, cacheRead: 7_900, cacheWrite: 0)
         model.apply(.requestUsage(request), to: bot.id)
@@ -240,7 +240,7 @@ struct AppModelCacheReportTests {
 
     @Test func theCacheWarningAppearsOncePerConversation() async {
         let (model, bot, root) = model()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         model.apply(.notice(CacheHealth.notice), to: bot.id)
         model.apply(.notice("Outro aviso"), to: bot.id)
         model.apply(.notice(CacheHealth.notice), to: bot.id)

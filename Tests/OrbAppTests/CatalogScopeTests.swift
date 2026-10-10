@@ -17,10 +17,7 @@ private func fakeServer(name: String, count: Int, environment: [String: String] 
         elif id is not None:
             send({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":"nope"}})
     """
-    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("scope-\(UUID().uuidString)")
-    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    let path = directory.appendingPathComponent("server.py")
-    try script.write(to: path, atomically: true, encoding: .utf8)
+    let path = try testScript(script)
     return MCPServerConfig(name: name, command: "/usr/bin/python3", arguments: [path.path], environment: environment)
 }
 
@@ -84,7 +81,7 @@ struct OrbScopeModelTests {
 
 @Suite final class OrbScopeAppTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbScope-\(UUID().uuidString)")
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     @MainActor private func model(vault: any SecretVault = MemoryVault()) -> AppModel {
         var state = AppState.initial
@@ -253,7 +250,7 @@ struct ConnectorToolFilteringTests {
 
     @Test @MainActor func connectAndWaitReportsTheOutcome() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "OrbScope-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)
         let good = try fakeServer(name: "Bom", count: 4)
         let broken = MCPServerConfig(name: "Quebrado", command: "orb-no-such-command-xyz")
@@ -266,7 +263,7 @@ struct ConnectorToolFilteringTests {
     /// known tool, which makes every tool of it ask, rather than as "nothing destructive".
     @Test @MainActor func connectorsWithoutACatalogAreUnverifiedForClaudeCode() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "OrbScope-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)
         let good = try fakeServer(name: "Bom", count: 2)
         let broken = MCPServerConfig(name: "Calendário", command: "orb-no-such-command-xyz")
@@ -286,7 +283,7 @@ struct ConnectorToolFilteringTests {
 
     @Test @MainActor func startingOneConnectorLeavesTheOthersOff() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "OrbScope-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)
         let one = try fakeServer(name: "Um", count: 1), two = try fakeServer(name: "Dois", count: 2)
         model.connectors = [one, two]
@@ -524,7 +521,7 @@ struct ConnectorSecretsTests {
 
 @Suite final class ConnectorSecretsAppTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbSecrets-\(UUID().uuidString)")
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     @Test @MainActor func theDataFileNeverHoldsTheToken() throws {
         let vault = MemoryVault()

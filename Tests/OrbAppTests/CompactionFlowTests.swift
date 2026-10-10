@@ -41,7 +41,7 @@ private struct ScriptedModel: LLMClient {
 final class CompactionFlowTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbCompactionFlow-\(UUID().uuidString)")
 
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     /// An Orb whose model has a 32k window, a folder with a big file, and eight earlier turns with long answers (about
     /// 33,000 characters: under the budget, so sending folds nothing; the file read during the turn does not fit).

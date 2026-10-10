@@ -7,7 +7,7 @@ import Testing
 @Suite final class ConversationHistoryTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbHistory-\(UUID().uuidString)")
 
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     private var store: Store { Store(directory: root) }
 

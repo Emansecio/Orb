@@ -6,7 +6,7 @@ import Testing
 @Suite final class ModelRefreshTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbModelRefresh-\(UUID().uuidString)")
 
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     private actor Asked {
         private(set) var count = 0

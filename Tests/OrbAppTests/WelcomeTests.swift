@@ -7,7 +7,7 @@ import Testing
 @Suite(.serialized) final class WelcomeTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbWelcome-\(UUID().uuidString)")
 
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     /// A model with no Orbs at all (a data folder whose state has an empty list), in memory preferences.
     @MainActor private func emptyModel() throws -> AppModel {

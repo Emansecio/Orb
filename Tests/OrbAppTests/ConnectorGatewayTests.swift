@@ -14,7 +14,7 @@ private struct CatalogFixture {
         manager = MCPManager(store: store)
     }
 
-    func tearDown() { try? FileManager.default.removeItem(at: root) }
+    func tearDown() { removeTestFolder(root) }
 
     static func tool(_ name: String, _ description: String = "", annotations: MCPToolAnnotations = .none,
                      schema: JSONValue = .schema(["id": .property("string")])) -> ConnectorCatalog.Tool {
@@ -314,10 +314,7 @@ for line in sys.stdin:
 """#
 
 private func gatewayConfig(name: String = "GitHub") throws -> MCPServerConfig {
-    let directory = FileManager.default.temporaryDirectory.appending(path: "gateway-server-\(UUID().uuidString)")
-    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    let script = directory.appending(path: "server.py")
-    try gatewayServer.write(to: script, atomically: true, encoding: .utf8)
+    let script = try testScript(gatewayServer)
     return MCPServerConfig(name: name, command: "/usr/bin/python3", arguments: [script.path])
 }
 
@@ -428,7 +425,8 @@ struct ConnectorGatewayEngineTests {
         let manager = MCPManager(), config = try gatewayConfig()
         let (_, script) = await run([[listing(config)], [call("read")], [.text("Ok")]], config: config, manager: manager)
         let lists = await script.toolLists
-        #expect(lists.count == 3 && Set(lists).count == 1)
+        try #require(lists.count == 3)
+        #expect(Set(lists).count == 1)
         #expect(lists[0] == ["connector_tools", "connector_call"])
         await manager.sync([])
     }
@@ -441,7 +439,7 @@ struct ConnectorGatewayEngineTests {
 struct ConnectorTurnTests {
     @Test func aSendOffersOnlyTheTwoFixedToolsAtEveryStep() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "gateway-app-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)
         model.providers = [ProviderAccount(kind: .custom)]
@@ -459,7 +457,8 @@ struct ConnectorTurnTests {
         await waitUntil("the turn to end") { await steps.toolLists.count >= 3 && !model.isWorking(bot.id) }
 
         let lists = await steps.toolLists
-        #expect(lists.count == 3 && Set(lists).count == 1)
+        try #require(lists.count == 3)
+        #expect(Set(lists).count == 1)
         #expect(lists[0].contains("connector_tools") && lists[0].contains("connector_call"))
         #expect(!lists.joined().contains { $0.contains("GitHub__") })
         // The index is in the description of the first one.
@@ -483,7 +482,7 @@ struct ConnectorTurnTests {
 
     @Test func claudeCodeReadsTheCatalogAndStartsNothing() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "gateway-cc-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let store = Store(directory: root)
         let github = MCPServerConfig(name: "GitHub", command: "orb-no-such-command-xyz"), new = MCPServerConfig(name: "Novo", command: "x")
         store.saveConnectorCatalog(CatalogFixture.catalog([
@@ -597,7 +596,7 @@ struct MCPLazyTests {
 
     @Test func theCatalogIsWrittenReadAndForgotten() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "lazy-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let store = Store(directory: root), config = try gatewayConfig()
         let first = manager(store: store)
         await first.sync([config])
@@ -665,7 +664,7 @@ struct MCPLazyTests {
 struct CatalogRenewalTests {
     @Test @MainActor func aStaleCatalogIsListedAgainWithoutHoldingTheTurn() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "renewal-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let store = Store(directory: root), config = try gatewayConfig()
         var old = CatalogFixture.catalog([CatalogFixture.tool("only")])
         old.updatedAt = .now.addingTimeInterval(-3 * 24 * 3600)
@@ -686,7 +685,7 @@ struct CatalogRenewalTests {
 
     @Test @MainActor func aFreshCatalogIsLeftAlone() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "renewal-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let store = Store(directory: root), config = try gatewayConfig()
         store.saveConnectorCatalog(CatalogFixture.catalog([CatalogFixture.tool("only")]), for: config.id)
         store.flush()

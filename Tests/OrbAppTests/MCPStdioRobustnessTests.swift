@@ -49,7 +49,7 @@ while True:
             time.sleep(30)  # alive, and not reading its input
         elif name == "late":
             time.sleep(1); text(id, "late")  # answers, but after the client gave up
-            open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "late.done"), "w").close()
+            open(os.environ["LATE_MARK"], "w").close()
         elif name == "echo":
             text(id, args.get("text", ""))
         elif name == "noisy":
@@ -61,12 +61,11 @@ while True:
         send({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": "nope"}})
 """#
 
+/// The server with `mode`; the mark it leaves after a late reply goes to a path of its own (`LATE_MARK`).
 private func config(_ mode: String = "") throws -> MCPServerConfig {
-    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("mcp-behavior-\(UUID().uuidString)")
-    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    let script = directory.appendingPathComponent("server.py")
-    try behaviorServer.write(to: script, atomically: true, encoding: .utf8)
-    return MCPServerConfig(name: "Comportado", command: "/usr/bin/python3", arguments: [script.path, mode])
+    let mark = FileManager.default.temporaryDirectory.appendingPathComponent("mcp-late-\(UUID().uuidString)")
+    return MCPServerConfig(name: "Comportado", command: "/usr/bin/python3", arguments: [try testScript(behaviorServer).path, mode],
+                           environment: ["LATE_MARK": mark.path])
 }
 
 private func pid(_ text: String) throws -> pid_t { try #require(pid_t(text)) }
@@ -132,7 +131,8 @@ struct MCPStdioRobustnessTests {
         let first = try pid(try await connection.call("pid", arguments: .object([:])))
         await #expect(throws: ToolError.self) { try await connection.call("late", arguments: .object([:]), timeout: .milliseconds(200)) }
         // The reply of the first one arrives, with nobody waiting for it (the server leaves a mark once it has sent it).
-        let mark = URL(fileURLWithPath: server.arguments[0]).deletingLastPathComponent().appendingPathComponent("late.done")
+        let mark = URL(fileURLWithPath: try #require(server.environment["LATE_MARK"]))
+        defer { try? FileManager.default.removeItem(at: mark) }
         await waitUntil("the late reply to be sent") { FileManager.default.fileExists(atPath: mark.path) }
         try await Task.sleep(for: .milliseconds(200))
         await #expect(throws: ToolError.self) { try await connection.call("late", arguments: .object([:]), timeout: .milliseconds(200)) }
@@ -212,6 +212,7 @@ struct MCPStdioRobustnessTests {
             grandchild = (try? String(contentsOf: pidFile, encoding: .utf8)).flatMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
             return grandchild != nil
         }
+        try? FileManager.default.removeItem(at: pidFile)
         return (transport, try #require(grandchild))
     }
 

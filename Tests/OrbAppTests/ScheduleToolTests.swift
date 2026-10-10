@@ -224,7 +224,7 @@ struct SchedulePermissionTests {
 @Suite final class ScheduledTasksTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbSchedule-\(UUID().uuidString)")
 
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     /// A model with two Orbs, Atlas (the one asking) and Lia.
     @MainActor private func setUp() -> (AppModel, Bot, Bot) {
@@ -535,7 +535,7 @@ extension ScheduledTasksTests {
 @Suite final class ScheduleMailboxTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbMailbox-\(UUID().uuidString)")
 
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     @Test @MainActor func aCallFromTheServerIsAnsweredByTheApp() async throws {
         let orb = UUID()

@@ -333,7 +333,7 @@ struct FirstRunStyleTests {
 
     @Test func tryingToSendWithoutAModelNudgesTheCardAndKeepsTheTranscriptClean() throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: "orb-test-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: folder) }
+        defer { removeTestFolder(folder) }
         let model = AppModel(store: Store(directory: folder), runsBackgroundWork: false)
         let id = try #require(model.bots.first?.id)
         model.providers = []
@@ -380,7 +380,7 @@ struct FirstRunModelTests {
 
     @Test func aConnectedModelShowsReadyForAMomentAndThenClears() async {
         let (model, folder) = makeModel()
-        defer { try? FileManager.default.removeItem(at: folder) }
+        defer { removeTestFolder(folder) }
         let steps = steps(for: model)
         let task = steps.connect(.local(.ollama), kind: .ollama, name: "Ollama") { self.addOllama(model, models: 2) }
         #expect(steps.working == .local(.ollama))
@@ -395,7 +395,7 @@ struct FirstRunModelTests {
 
     @Test func aServerWithoutModelsFailsWithAMessageAndStaysRetryable() async {
         let (model, folder) = makeModel()
-        defer { try? FileManager.default.removeItem(at: folder) }
+        defer { removeTestFolder(folder) }
         let steps = steps(for: model)
         let ok = await steps.connect(.local(.ollama), kind: .ollama, name: "Ollama") { self.addOllama(model, models: 0) }.value
         #expect(!ok)
@@ -409,7 +409,7 @@ struct FirstRunModelTests {
 
     @Test func aWorkThatThrowsReportsItsOwnMessage() async {
         let (model, folder) = makeModel()
-        defer { try? FileManager.default.removeItem(at: folder) }
+        defer { removeTestFolder(folder) }
         let steps = steps(for: model)
         _ = await steps.connect(.chatgpt, kind: .chatgpt, name: "ChatGPT") { throw Boom() }.value
         #expect(steps.failure == .init(choice: .chatgpt, message: "chave recusada"))
@@ -418,7 +418,7 @@ struct FirstRunModelTests {
 
     @Test func aStaleDefaultGivesWayToTheProviderJustConnected() async {
         let (model, folder) = makeModel()
-        defer { try? FileManager.default.removeItem(at: folder) }
+        defer { removeTestFolder(folder) }
         // The old default points to a provider that is listed but has no key: not usable, yet not gone either.
         model.addProvider(.xai)
         model.defaultModel = ModelRef(provider: .xai, model: "grok-4").text
@@ -435,7 +435,7 @@ struct FirstRunModelTests {
 
     @Test func adoptingTurnsOnAProviderThatWasSwitchedOffAndKeepsAWorkingDefault() {
         let (model, folder) = makeModel()
-        defer { try? FileManager.default.removeItem(at: folder) }
+        defer { removeTestFolder(folder) }
         addOllama(model, models: 2)
         model.updateProvider(.ollama) { $0.isEnabled = false }
         #expect(!model.isProviderReady)
@@ -450,7 +450,7 @@ struct FirstRunModelTests {
 
     @Test func aKeyThatFailsIsDiscardedWithWhetherTheProviderExistedBefore() async {
         let (model, folder) = makeModel()
-        defer { try? FileManager.default.removeItem(at: folder) }
+        defer { removeTestFolder(folder) }
         let steps = steps(for: model)
         var discarded: [(ProviderKind, Bool)] = []
         let ok = await steps.connectKey("  sk-ruim  ", kind: .openai, model: model,
@@ -471,7 +471,7 @@ struct FirstRunModelTests {
 
     @Test func aBlankKeyDoesNothing() async {
         let (model, folder) = makeModel()
-        defer { try? FileManager.default.removeItem(at: folder) }
+        defer { removeTestFolder(folder) }
         let steps = steps(for: model)
         let ok = await steps.connectKey("   ", kind: .openai, model: model, save: { _, _ in Issue.record("saved a blank key") }).value
         #expect(!ok && steps.working == nil && steps.failure == nil && model.account(.openai) == nil)
@@ -479,7 +479,7 @@ struct FirstRunModelTests {
 
     @Test func startingAnotherPathGivesUpTheOneStillWaiting() async {
         let (model, folder) = makeModel()
-        defer { try? FileManager.default.removeItem(at: folder) }
+        defer { removeTestFolder(folder) }
         let steps = steps(for: model)
         // A login nobody finishes: it waits until it is cancelled.
         let abandoned = steps.connect(.chatgpt, kind: .chatgpt, name: "ChatGPT") { try await Task.sleep(for: .seconds(60)) }
@@ -493,7 +493,7 @@ struct FirstRunModelTests {
 
     @Test func cancelFreesEveryPathAndSaysNothing() async {
         let (model, folder) = makeModel()
-        defer { try? FileManager.default.removeItem(at: folder) }
+        defer { removeTestFolder(folder) }
         let steps = steps(for: model)
         let waiting = steps.connect(.claudeCode, kind: .claudeCode, name: "Claude Code") { try await Task.sleep(for: .seconds(60)) }
         steps.cancel()

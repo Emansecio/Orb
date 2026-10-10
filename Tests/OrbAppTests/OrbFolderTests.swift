@@ -11,7 +11,7 @@ final class OrbFolderSandbox: Sendable {
 
     init() throws { try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true) }
 
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root, sealing: root.appending(path: "data")) }
 
     @discardableResult
     func makeFolder(_ path: String) throws -> URL {

@@ -426,7 +426,7 @@ struct ModelRefreshBackoffTests {
 
     @Test @MainActor func aListThatFailsIsNotAskedForAgainAtTheNextTick() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "OrbModelRefresh-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)
         model.providers = [ProviderAccount(kind: .ollama)]
         let calls = Calls()
@@ -454,7 +454,7 @@ struct ModelRefreshBackoffTests {
 
     @Test @MainActor func aRefusedKeyIsNotAskedForAgainForSixHours() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "OrbModelRefresh-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)
         model.providers = [ProviderAccount(kind: .ollama)]
         let calls = Calls()

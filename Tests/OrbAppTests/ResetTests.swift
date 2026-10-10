@@ -16,7 +16,7 @@ import Testing
 
     deinit {
         defaults.removePersistentDomain(forName: suite)
-        try? FileManager.default.removeItem(at: root)
+        removeTestFolder(root)
     }
 
     private func write(_ text: String, to url: URL) throws {

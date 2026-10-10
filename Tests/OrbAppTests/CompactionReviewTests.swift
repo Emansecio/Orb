@@ -339,7 +339,7 @@ struct CatchUpLatestRequestTests {
 @Suite final class CompactionReviewAppTests {
     private var harnesses: [AppHarness] = []
 
-    deinit { for harness in harnesses { try? FileManager.default.removeItem(at: harness.root) } }
+    deinit { for harness in harnesses { removeTestFolder(harness.root) } }
 
     @MainActor private func harness(_ conversation: Conversation, claudeCode: Bool = false) -> AppHarness {
         let made = AppHarness(conversation, claudeCode: claudeCode)

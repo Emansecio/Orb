@@ -157,7 +157,7 @@ private struct RecordingLLM: LLMClient {
 struct AccessibilityGatingTests {
     private func sendOnce(capabilities: Set<Capability>, trusted: Bool) async throws -> (tools: [String], system: String) {
         let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)
         model.providers = [ProviderAccount(kind: .custom)]
         model.defaultModel = "custom/modelo"

@@ -6,7 +6,7 @@ import Testing
 @Suite(.serialized) final class GreetingTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbGreeting-\(UUID().uuidString)")
 
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     /// A model with a usable provider (no address: a turn fails before any network call) and a new Orb made the way the sheet makes it.
     @MainActor private func model() -> (AppModel, Bot) {

@@ -64,7 +64,7 @@ private struct FakeModel: LLMClient {
 final class StretchNoteFlowTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbStretchNote-\(UUID().uuidString)")
 
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     /// An Orb on a model with a 32k window, with a short conversation. The notes are off until `armed`.
     private func setUp(answer: NoteAnswer = .text("O usuário construiu o Atlas; ficou decidido usar SQLite e a porta 4711."),
@@ -98,15 +98,30 @@ final class StretchNoteFlowTests {
         await waitUntil("the turn to end") { !model.isWorking(botID) }
     }
 
-    /// Adds long turns until the history takes `share` of the budget (the budget as the engine measured it).
+    /// Adds long turns until the history takes `share` of the budget (the budget as the engine measured it): the fewest
+    /// that reach it. Every turn weighs about the same, so all but the last two are added at once from what the first
+    /// one weighed, and only the rest one by one (measuring the whole history after every turn made these tests slow).
     private func grow(to share: Double, _ model: AppModel, _ botID: UUID) throws {
-        while try #require(model.contextFill(for: botID)).budgetFraction < share {
+        func fraction() throws -> Double { try #require(model.contextFill(for: botID)).budgetFraction }
+        func add(_ count: Int) {
             model.editConversation(botID) { chat in
-                let index = chat.messages.count
-                chat.messages += [.user("pedido \(index) " + String(repeating: "a", count: 1_700)),
-                                  ChatMessage(role: .assistant, content: "resposta \(index) " + String(repeating: "b", count: 1_700))]
-                chat.items += [TranscriptItem(.user(text: "pedido \(index)", attachments: [])), TranscriptItem(.bot(text: "resposta \(index)", isStreaming: false))]
+                for _ in 0..<count {
+                    let index = chat.messages.count
+                    chat.messages += [.user("pedido \(index) " + String(repeating: "a", count: 1_700)),
+                                      ChatMessage(role: .assistant, content: "resposta \(index) " + String(repeating: "b", count: 1_700))]
+                    chat.items += [TranscriptItem(.user(text: "pedido \(index)", attachments: [])), TranscriptItem(.bot(text: "resposta \(index)", isStreaming: false))]
+                }
             }
+        }
+        var now = try fraction()
+        guard now < share else { return }
+        add(1)
+        let step = try fraction() - now
+        if step > 0 { add(max(Int((share - now) / step) - 2, 0)) }
+        now = try fraction()
+        while now < share {
+            add(1)
+            now = try fraction()
         }
     }
 

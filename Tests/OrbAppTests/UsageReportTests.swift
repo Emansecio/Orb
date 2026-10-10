@@ -190,7 +190,7 @@ struct UsageReportTests {
 struct UsagePageModelTests {
     @Test func thePageReadsWhatTheTurnsJustUsed() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "OrbUsagePage-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let store = Store(directory: root)
         store.save(AppState.initial)
         store.flush()

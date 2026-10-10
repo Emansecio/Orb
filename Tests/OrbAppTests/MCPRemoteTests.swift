@@ -139,10 +139,7 @@ private struct FakeHTTPServer {
     let port: Int
 
     init(mode: String) throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("mcp-http-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let script = directory.appendingPathComponent("server.py")
-        try fakeHTTPServer.write(to: script, atomically: true, encoding: .utf8)
+        let script = try testScript(fakeHTTPServer)
         let output = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
         process.arguments = [script.path, mode]

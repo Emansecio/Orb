@@ -7,7 +7,7 @@ import Testing
 @Suite final class ConversationLoadingTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbLoading-\(UUID().uuidString)")
 
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     private func conversationURL(_ id: UUID) -> URL { root.appending(path: "conversations/\(id.uuidString).json") }
 

@@ -137,7 +137,7 @@ private struct EchoModel: LLMClient {
     }
 
     @MainActor @Test func retryingTakesTheFailedMessageBackAndSendsItOnce() async {
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let failed = Conversation(items: [user("faça isso"), notice("Não deu certo: Sem conexão com o provedor")],
                                   messages: [.user("faça isso")])
         let (model, id) = model(with: failed)
@@ -157,7 +157,7 @@ private struct EchoModel: LLMClient {
     }
 
     @MainActor @Test func retryingASkillMessageTakesTheExpandedOneBackAndCountsTheUseOnce() async {
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let skill = Skill(slug: "relatorio", name: "Relatório", summary: "", instructions: "Faça o relatório com cuidado.", uses: 1)
         let expanded = SystemPrompt.expandSkill(in: "/relatorio da semana", skills: [skill])!.prompt
         let preface = TurnPreface.make(now: .now, timeZone: "UTC", snapshot: nil, notes: "")
@@ -176,7 +176,7 @@ private struct EchoModel: LLMClient {
     }
 
     @MainActor @Test func retryingASkillMessageWithAPictureSendsThePictureAgainAsAPicture() async {
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let skill = Skill(slug: "relatorio", name: "Relatório", summary: "", instructions: "Faça o relatório com cuidado.", uses: 1)
         let picture = ImageAttachment(path: root.appendingPathComponent("foto.jpg").path, mediaType: "image/jpeg", width: 1, height: 1)
         let expanded = SystemPrompt.expandSkill(in: "/relatorio da semana", skills: [skill])!.prompt
@@ -205,7 +205,7 @@ private struct EchoModel: LLMClient {
     }
 
     @MainActor @Test func retryingWithoutAModelLeavesTheConversationAsItWas() async {
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let failed = Conversation(items: [user("faça isso"), notice("Não deu certo: x")], messages: [.user("faça isso")])
         let (model, id) = model(with: failed, connected: false)
         model.providers = []
@@ -218,7 +218,7 @@ private struct EchoModel: LLMClient {
     }
 
     @MainActor @Test func compactingAndTryingAgainSummarizesTheStartAndResendsTheLastMessage() async {
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         var chat = Conversation()
         for turn in 0..<6 {
             chat.messages += [.user("pedido \(turn) " + String(repeating: "a", count: 3_500)),
@@ -247,7 +247,7 @@ private struct EchoModel: LLMClient {
     }
 
     @MainActor @Test func compactingAndTryingAgainDoesNothingWithASingleRequest() async {
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let failed = Conversation(items: [user("só isto"), notice("Não deu certo: A conversa ficou grande demais para este modelo.")],
                                   messages: [.user("só isto")])
         let (model, id) = model(with: failed)
@@ -259,7 +259,7 @@ private struct EchoModel: LLMClient {
     }
 
     @MainActor @Test func showingTheMemoryOpensThePanelOnItsTab() {
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let (model, id) = model(with: Conversation())
         model.showInspector = false
         model.showMemory(of: id)
@@ -269,7 +269,7 @@ private struct EchoModel: LLMClient {
     }
 
     @MainActor @Test func continuingSaysContinua() async {
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let paused = Conversation(items: [user("a"), TranscriptItem(.bot(text: "parcial", isStreaming: false)),
                                           notice(AgentEngine.pausedNotice(after: 30))],
                                   messages: [.user("a"), ChatMessage(role: .assistant, content: "parcial")])

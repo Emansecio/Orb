@@ -6,7 +6,7 @@ import Testing
 @Suite final class StoreNoticeTextTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbNotices-\(UUID().uuidString)")
 
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     private final class Collected: @unchecked Sendable {
         private let lock = NSLock()

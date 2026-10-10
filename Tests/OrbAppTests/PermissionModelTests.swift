@@ -7,7 +7,7 @@ import Testing
 @Suite final class PermissionModelTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbPermissionModel-\(UUID().uuidString)")
 
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     /// A model with one Orb that is showing an open approval card.
     @MainActor private func modelWithOpenCard(mode: PermissionMode) async throws -> (model: AppModel, botID: UUID, request: ApprovalRequest) {

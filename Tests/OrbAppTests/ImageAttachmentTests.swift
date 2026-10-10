@@ -60,7 +60,7 @@ enum Pictures {
 private final class Folder {
     let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("OrbImageTests-\(UUID().uuidString)")
     init() { try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true) }
-    deinit { try? FileManager.default.removeItem(at: url) }
+    deinit { removeTestFolder(url) }
 
     /// A file of fake picture bytes and the attachment that points at it (the wire never looks inside).
     func attachment(_ name: String = "a.jpg", bytes: String = "bytes", mediaType: String = "image/jpeg") throws -> ImageAttachment {

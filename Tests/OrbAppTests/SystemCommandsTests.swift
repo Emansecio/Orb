@@ -207,7 +207,7 @@ import Testing
 
     @MainActor @Test func hasUsableModelFollowsTheOrbsOwnModelNotTheDefault() {
         let root = FileManager.default.temporaryDirectory.appending(path: "OrbQuickAsk-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)
         model.providers = [ProviderAccount(kind: .ollama)] // local: usable
         model.defaultModel = "ollama/llama"
@@ -274,7 +274,7 @@ import Testing
 
     @Test func keptMemoryFolderIsFoundByName() throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "kept-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         for name in ["Atlas – 2026-10-01 09.00", "Atlas – 2026-10-07 18.30", "Luna – 2026-10-07 18.30"] {
             try FileManager.default.createDirectory(at: root.appending(path: name), withIntermediateDirectories: true)
         }
@@ -287,7 +287,7 @@ import Testing
 @Suite final class ChatRequestTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbRequests-\(UUID().uuidString)")
 
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     @MainActor private func model() -> AppModel {
         var state = AppState.initial

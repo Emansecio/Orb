@@ -371,8 +371,9 @@ final class RunCommandTests {
         let done = capture.finish()
         #expect(done.fileCut && done.bytes == 14_000)
         #expect(try Data(contentsOf: directory.appending(path: "cap.txt")) == stream.prefix(5_000))
-        // The real thing: `yes` writes hundreds of megabytes a second.
-        let output = try await run("yes", ["timeout_seconds": .number(3)])
+        // The real thing: more than the file holds, then a command that does not end. A fixed amount and a looser
+        // timeout instead of `yes` for 3 s: with the whole suite running, fewer than the 50 MB the file holds were read.
+        let output = try await run("yes | head -c 55000000; sleep 60", ["timeout_seconds": .number(6)])
         let note = try #require(output.firstMatch(of: /\[full output saved at ([^;]+?) \((\d+) lines, [^)]*file cut at [^)]*\); read it with read_file/))
         let size = try #require(FileManager.default.attributesOfItem(atPath: String(note.1))[.size] as? Int)
         #expect(size <= StreamCapture.maxSpillBytes && size > 1_000_000, "size \(size)")

@@ -397,7 +397,7 @@ struct EngineStepLimitTests {
 struct EngineSavedOutputsTests {
     @Test func bigOutputsGoToTheFolderTheRequestNames() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: "orb-teste-guardadas-" + UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        defer { removeTestFolder(directory) }
         let recorder = Recorder([[.toolCalls([call("big-1")])], [.text("pronto")]])
         var request = engineRequest(recorder, budget: .fallback, toolSize: 120_000)
         request.outputsDirectory = directory
@@ -439,7 +439,7 @@ struct SavedOutputsCleanupTests {
 
     @Test func oldFilesGoAndRecentOnesStay() throws {
         let directory = try folder()
-        defer { try? FileManager.default.removeItem(at: directory) }
+        defer { removeTestFolder(directory) }
         let now = Date.now
         let old = try write(directory, bot: "A", name: "old.txt", bytes: 10, age: 15 * 24 * 3_600, now: now)
         let recent = try write(directory, bot: "A", name: "recent.txt", bytes: 10, age: 2 * 24 * 3_600, now: now)
@@ -451,7 +451,7 @@ struct SavedOutputsCleanupTests {
 
     @Test func anOrbOverItsShareLosesItsOldestFirstAndOthersAreLeftAlone() throws {
         let directory = try folder()
-        defer { try? FileManager.default.removeItem(at: directory) }
+        defer { removeTestFolder(directory) }
         let now = Date.now
         let oldest = try write(directory, bot: "A", name: "1.txt", bytes: 600, age: 3_000, now: now)
         let middle = try write(directory, bot: "A", name: "2.txt", bytes: 600, age: 2_000, now: now)
@@ -465,7 +465,7 @@ struct SavedOutputsCleanupTests {
 
     @Test func anEmptiedOrbFolderIsRemovedAndAMissingFolderIsFine() throws {
         let directory = try folder()
-        defer { try? FileManager.default.removeItem(at: directory) }
+        defer { removeTestFolder(directory) }
         let now = Date.now
         try write(directory, bot: "A", name: "old.txt", bytes: 10, age: 30 * 24 * 3_600, now: now)
         #expect(ToolOutputCap.cleanUp(directory: directory, now: now) == 1)
@@ -475,7 +475,7 @@ struct SavedOutputsCleanupTests {
 
     @Test func removingAnOrbTakesItsOutputsOnly() throws {
         let directory = try folder()
-        defer { try? FileManager.default.removeItem(at: directory) }
+        defer { removeTestFolder(directory) }
         let mine = UUID(), theirs = UUID()
         let now = Date.now
         try write(directory, bot: mine.uuidString, name: "a.txt", bytes: 10, age: 10, now: now)
@@ -543,7 +543,7 @@ struct ContextSettingsTests {
 
     @Test func theBudgetFollowsTheMemoryLevelAndWhatWasLearned() throws {
         let (model, root) = try model()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let bot = model.bots[0]
         #expect(model.contextMemory == .balanced)
         #expect(model.contextBudget(for: bot)?.tokens == 80_000)
@@ -562,7 +562,7 @@ struct ContextSettingsTests {
 
     @Test func aStaleLessonIsIgnored() throws {
         let (model, root) = try model()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         // (reaches into the same store the app reads at launch)
         var state = AppState.initial
         state.providers = model.providers
@@ -577,7 +577,7 @@ struct ContextSettingsTests {
 
     @Test func claudeCodeManagesItsOwnContext() throws {
         let (model, root) = try model()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         model.providers = [ProviderAccount(kind: .claudeCode)]
         model.defaultModel = "claudeCode/opus"
         #expect(model.contextBudget(for: model.bots[0]) == nil)
@@ -586,7 +586,7 @@ struct ContextSettingsTests {
 
     @Test func theMeterIsReadFromTheOrbsConversation() throws {
         let (model, root) = try model()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let bot = model.bots[0]
         let empty = try #require(model.contextFill(for: bot.id))
         #expect(empty.historyTokens == 0 && empty.windowTokens == 128_000)
@@ -599,7 +599,7 @@ struct ContextSettingsTests {
 
     @Test func theAppRecordsThePauseAndTheNextUserMessageClearsIt() throws {
         let (model, root) = try model()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let id = model.bots[0].id
         model.apply(.message(.user("faça")), to: id)
         model.apply(.message(ChatMessage(role: .assistant, content: "Feito. " + ProgressRecord.marker + "\n- x")), to: id)
@@ -632,7 +632,7 @@ struct ContextSettingsTests {
 
     @Test func theOverheadTheEngineMeasuredPlansTheNextHistory() throws {
         let (model, root) = try model()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let bot = model.bots[0]
         let guessed = try #require(model.contextBudget(for: bot))
         #expect(guessed.overheadTokens == ContextBudget.typicalOverheadTokens)
@@ -662,7 +662,7 @@ struct ContextSettingsTests {
 
     @Test func theChoicesSurviveARestart() throws {
         let (model, root) = try model()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         model.contextMemory = .wide
         model.learnContextWindow(48_000, of: "custom/modelo")
         model.saveNow()
@@ -673,13 +673,13 @@ struct ContextSettingsTests {
 
     @Test func savedOutputsLiveInTheDataFolder() throws {
         let (model, root) = try model()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         #expect(model.outputsDirectory == root.appending(path: "saidas"))
     }
 
     @Test func deletingAnOrbDeletesItsSavedOutputs() async throws {
         let (model, root) = try model()
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         let doomed = model.createBot(name: "Segundo", role: "Teste", orb: OrbConfig(), model: "", mode: .ask, interview: false, folder: .home)
         let folder = model.outputsDirectory.appending(path: doomed.id.uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

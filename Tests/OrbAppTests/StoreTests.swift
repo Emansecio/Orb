@@ -9,7 +9,7 @@ import Testing
 
     deinit {
         try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.path)
-        try? FileManager.default.removeItem(at: root)
+        removeTestFolder(root)
     }
 
     private var stateURL: URL { root.appending(path: "state.json") }

@@ -177,7 +177,7 @@ struct SteeringEngineTests {
     init() { QuietNotifications.hold() }
     deinit {
         QuietNotifications.release()
-        try? FileManager.default.removeItem(at: root)
+        removeTestFolder(root)
     }
 
     @MainActor private func setUp(_ client: HeldModel) -> (AppModel, Bot) {
@@ -745,7 +745,7 @@ struct SteeringModesTests {
 
     @Test func aDraftsFileFromBeforeTheModesStillOpens() throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "OrbDrafts-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeTestFolder(root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let id = UUID()
         let old = #"{"\#(id.uuidString)":{"text":"rascunho","files":["/tmp/a.txt"],"pictures":[]}}"#

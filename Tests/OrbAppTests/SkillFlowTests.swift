@@ -57,7 +57,7 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
 
     deinit {
         QuietNotifications.release()
-        try? FileManager.default.removeItem(at: root)
+        removeTestFolder(root)
     }
 
     @MainActor private func setUp(_ script: Script) -> (AppModel, UUID) {
