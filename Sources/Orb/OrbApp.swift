@@ -341,6 +341,12 @@ enum Snapshot {
 private struct ApprovalCardsSample: View {
     let bot: Bot
 
+    private static func answeredHandoff(botName: String) -> ApprovalRequest {
+        var card = ApprovalRequest.handoff(botName: botName, page: "https://github.com/login — “Sign in to GitHub”")
+        card.decision = .once
+        return card
+    }
+
     var body: some View {
         let items = [ApprovalItem(toolName: "write_file", title: "Gravando arquivo", command: "~/Projetos/app/README.md"),
                      ApprovalItem(toolName: "write_file", title: "Gravando arquivo", command: "~/Projetos/app/notas.txt"),
@@ -353,6 +359,8 @@ private struct ApprovalCardsSample: View {
                                                   suggestions: [.shell("git"), .folder("/Users/x/Projetos/app")], items: items), botID: bot.id)
             ApprovalCard(request: ApprovalRequest(toolName: "run_command", title: "Rodando no Terminal", command: "rm -rf build",
                                                   reason: "", decision: .deny, note: "use a lixeira"), botID: bot.id)
+            ApprovalCard(request: .handoff(botName: bot.name, page: "https://github.com/login — “Sign in to GitHub”"), botID: bot.id)
+            ApprovalCard(request: Self.answeredHandoff(botName: bot.name), botID: bot.id)
         }
         .padding(24)
         .background(Palette.canvas)

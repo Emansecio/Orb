@@ -291,9 +291,9 @@ enum PermissionPolicy {
         segment.words.first == "cd" && segment.words.count <= 2
     }
 
-    /// Claude Code's WebSearch, and the native `web_search`.
+    /// Claude Code's WebSearch, the native `web_search` and the Orb's own, as Claude Code names it.
     static func isSearch(_ call: PermissionCall) -> Bool {
-        call.family == .web && (call.toolName == "WebSearch" || call.toolName == "web_search")
+        call.family == .web && ["WebSearch", "web_search", ClaudeCodeTools.memoryPrefix + "web_search"].contains(call.toolName)
     }
 
     static func hostMatches(_ host: String, _ allowed: String) -> Bool {

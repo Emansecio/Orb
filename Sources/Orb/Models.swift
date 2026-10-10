@@ -404,8 +404,19 @@ struct ApprovalRequest: Identifiable, Codable, Sendable, Equatable {
     var isDangerous = false
     /// What the user told the Orb to do instead when denying.
     var note: String?
+    /// Not a permission: the Orb opened its browser in a window for something only the person can do (`browse_show`) and waits
+    /// for "Pronto" (`.once`) or "Cancelar" (`.deny`). It has no rules to grant, never groups, and a change of permission
+    /// mode does not answer it.
+    var isHandoff = false
 
     var isBatch: Bool { items.count > 1 }
+
+    /// The card `browse_show` opens. `page` is the address (and title) of the page left open in the window.
+    static func handoff(botName: String, page: String) -> ApprovalRequest {
+        ApprovalRequest(toolName: "browse_show", title: "\(botName) abriu o navegador para você", command: page,
+                        reason: "Termine lá o que falta (entrar no site, digitar um código, resolver a verificação) e clique em Pronto.",
+                        isHandoff: true)
+    }
 }
 
 extension ApprovalRequest {
@@ -421,6 +432,7 @@ extension ApprovalRequest {
         items = try c.lossyArray(.items)
         isDangerous = try c.value(.isDangerous, default: false)
         note = try c.decodeIfPresent(String.self, forKey: .note)
+        isHandoff = try c.value(.isHandoff, default: false)
     }
 }
 

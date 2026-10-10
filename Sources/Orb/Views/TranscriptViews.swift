@@ -100,6 +100,7 @@ enum TranscriptSpeech {
     static func notice(_ text: String) -> String { "Aviso: \(text)" }
 
     static func approval(botName: String, title: String) -> String { "\(botName) pede permissão: \(title)" }
+    static func handoff(title: String) -> String { "\(title). Termine no navegador e responda Pronto ou Cancelar" }
 }
 
 // MARK: - Messages
@@ -811,6 +812,12 @@ enum ApprovalSummary {
         decision == .once ? "Permitido" : decision.label
     }
 
+    /// The record of an answered card: a hand-off was finished or cancelled, not allowed or denied.
+    static func label(_ request: ApprovalRequest) -> String {
+        guard request.isHandoff else { return label(request.decision ?? .deny) }
+        return request.decision == .deny || request.decision == nil ? "Cancelado" : "Pronto"
+    }
+
     /// "Rodando no Terminal", or "3 ações" for a card that groups several.
     static func title(_ request: ApprovalRequest) -> String {
         request.isBatch ? "\(request.items.count) ações" : request.title
@@ -870,7 +877,8 @@ struct ApprovalCard: View {
     private var orbName: String { model.live(botID).look.name }
 
     private var isPending: Bool { request.decision == nil }
-    private var allowTitle: String { request.isBatch ? "Permitir as \(request.items.count)" : "Permitir" }
+    private var allowTitle: String { request.isHandoff ? "Pronto" : request.isBatch ? "Permitir as \(request.items.count)" : "Permitir" }
+    private var denyTitle: String { request.isHandoff ? "Cancelar" : "Não permitir" }
     private var hasMoreOptions: Bool { !request.suggestions.isEmpty || request.isBatch }
     private static let visibleItems = 8
 
@@ -906,7 +914,9 @@ struct ApprovalCard: View {
     private var pendingCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             details
-            if showsNote {
+            if request.isHandoff {
+                EmptyView()
+            } else if showsNote {
                 TextField("Diga o que fazer em vez disso…", text: $note)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
@@ -954,7 +964,8 @@ struct ApprovalCard: View {
         }
         .onAppear { if pulsesOnArrival { pulse += 1 } }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(TranscriptSpeech.approval(botName: orbName.isEmpty ? "O Orb" : orbName, title: request.title))
+        .accessibilityLabel(request.isHandoff ? TranscriptSpeech.handoff(title: request.title)
+                            : TranscriptSpeech.approval(botName: orbName.isEmpty ? "O Orb" : orbName, title: request.title))
     }
 
     /// The title, why, the command or the list of actions, and what the user said when denying.
@@ -965,6 +976,11 @@ struct ApprovalCard: View {
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.warn)
                     .accessibilityLabel("Ação arriscada")
+            } else if request.isHandoff {
+                Image(systemName: "macwindow")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.accentText)
+                    .accessibilityHidden(true)
             }
             Text(request.title)
                 .font(.system(size: 14, weight: .semibold))
@@ -981,7 +997,7 @@ struct ApprovalCard: View {
             batchList
         } else if !request.command.isEmpty {
             Text(request.command)
-                .font(.system(size: 12, design: .monospaced))
+                .font(.system(size: 12, design: request.isHandoff ? .default : .monospaced))
                 .foregroundStyle(Palette.secondary)
                 .textSelection(.enabled)
                 .padding(10)
@@ -1044,7 +1060,7 @@ struct ApprovalCard: View {
     private var denyButton: some View {
         Button(action: deny) {
             HStack(spacing: 6) {
-                Text("Não permitir")
+                Text(denyTitle)
                 Text("esc")
                     .font(.system(size: 11))
                     .foregroundStyle(Palette.muted)
@@ -1054,8 +1070,8 @@ struct ApprovalCard: View {
         .background(pressed == .deny ? Palette.ghostSelected : .clear, in: .capsule)
         .scaleEffect(pressed == .deny ? ApprovalShortcut.pressScale : 1)
         .animation(Motion.press, value: pressed)
-        .help("\(Tip.deny) (\(ShortcutCatalog.keys(for: .denyApproval)))")
-        .accessibilityLabel("Não permitir")
+        .help("\(request.isHandoff ? Tip.handoffCancel : Tip.deny) (\(ShortcutCatalog.keys(for: .denyApproval)))")
+        .accessibilityLabel(denyTitle)
         .accessibilityHint("Atalho: Esc")
     }
 
@@ -1080,7 +1096,7 @@ struct ApprovalCard: View {
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .help("\(allowTitle) (\(AppShortcut.commandReturn.label))")
+            .help("\(request.isHandoff ? Tip.handoffDone : allowTitle) (\(AppShortcut.commandReturn.label))")
             .accessibilityLabel(allowTitle)
             .accessibilityHint("Atalho: ⌘↩")
             if hasMoreOptions {
@@ -1140,7 +1156,7 @@ struct ApprovalCard: View {
                         .font(.system(size: 11))
                         .foregroundStyle(request.decision == .deny ? Palette.danger : Palette.faint)
                         .frame(width: 14)
-                    (Text(ApprovalSummary.label(request.decision ?? .deny))
+                    (Text(ApprovalSummary.label(request))
                         .foregroundColor(request.decision == .deny ? Palette.danger : Palette.muted)
                         + Text(" · \(ApprovalSummary.title(request))").foregroundColor(Palette.muted)
                         + Text("  \(ApprovalSummary.detail(request))").foregroundColor(Palette.faint))
@@ -1158,7 +1174,7 @@ struct ApprovalCard: View {
             }
             .buttonStyle(.plain)
             .help(Tip.toggleRequest(isOpen: isOpen))
-            .accessibilityLabel("\(ApprovalSummary.label(request.decision ?? .deny)): \(ApprovalSummary.title(request)). \(ApprovalSummary.detail(request))")
+            .accessibilityLabel("\(ApprovalSummary.label(request)): \(ApprovalSummary.title(request)). \(ApprovalSummary.detail(request))")
             .accessibilityValue(isOpen ? "expandido" : "recolhido")
             .accessibilityHint("Mostra o pedido")
 
