@@ -3,7 +3,7 @@ import Foundation
 /// The built-in tools offered to the model. Each family lists its own tools next to them (`fileTools` in
 /// FileTools.swift, `shellTools` in ShellTool.swift, …), so adding a tool touches only its family's file.
 enum ToolBox {
-    static let all: [any AgentTool] = shellTools + fileTools + webTools + macTools + memoryTools + scheduleTools
+    static let all: [any AgentTool] = shellTools + fileTools + webTools + searchTools + browseTools + macTools + memoryTools + scheduleTools
 
     /// The tools that read or act on another app's interface through Accessibility. Without that permission both
     /// only fail with instructions, so they are not offered (their descriptions are about 950 tokens in every request).
@@ -11,10 +11,13 @@ enum ToolBox {
 
     /// The tools an Orb with these capabilities is offered. `accessibilityGranted` is whether macOS trusts the app
     /// for Accessibility; when it does not, `ui_read` and `ui_act` stay out of the list (it only changes when the
-    /// permission does, which is rare, so the provider's cache of the tool list is not disturbed).
-    static func offered(for capabilities: Set<Capability>, accessibilityGranted: Bool) -> [any AgentTool] {
+    /// permission does, which is rare, so the provider's cache of the tool list is not disturbed). `browser`: the `browse_*`
+    /// tools come only with an installed engine (`.browser`); `web_fetch` and `web_search` come with "Navegar na web" alone.
+    static func offered(for capabilities: Set<Capability>, accessibilityGranted: Bool,
+                        browser: BrowserAvailability = .fetchOnly) -> [any AgentTool] {
         all.filter { tool in
             guard tool.isOffered(for: capabilities) else { return false }
+            if browseToolNames.contains(tool.spec.name), browser != .browser { return false }
             return accessibilityGranted || !accessibilityToolNames.contains(tool.spec.name)
         }
     }

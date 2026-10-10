@@ -159,6 +159,9 @@ final class ToolTests {
         #expect(Set(safe.map(\.spec.name)) == [
             "read_file", "list_directory", "search_files", "grep", "glob", "recall", "job_output", "job_list", "job_stop",
             "shortcuts_list", "clipboard_read", "screenshot", "notify", "apps_list", "processes", "browser_tab", "ui_read",
+            // The Orb's own browser: they look at the page it already has open (which asked first), and "Só leitura" refuses them
+            // all the same (`PermissionCall.readsLivePage`).
+            "browse_snapshot", "browse_read", "browse_screenshot", "browse_scroll", "browse_back", "browse_tabs", "browse_close",
         ])
     }
 

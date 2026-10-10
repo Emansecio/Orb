@@ -168,7 +168,7 @@ struct CapabilityPromptTests {
         let all = PromptParts.nativeToolHints(bot())
         #expect(all.contains("web_fetch") && all.contains("offset or find") && all.contains("no JavaScript"))
         #expect(all.contains("browser_tab with include_text") && all.contains("not to read a page"))
-        #expect(all.contains("no web search tool") && all.contains("Wikipedia's api.php") && all.contains("not a search engine"))
+        #expect(all.contains("web_search to find pages") && all.contains("Wikipedia's api.php") && !all.contains("no web search tool"))
         // Without "Controlar apps do Mac" there is no browser_tab to point to.
         let web = PromptParts.nativeToolHints(bot([.browser]))
         #expect(web.contains("web_fetch") && !web.contains("browser_tab"))

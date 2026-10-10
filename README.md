@@ -150,8 +150,29 @@ No alto do painel: nome e papel (clique para editar; mudar o nome não renomeia 
 pasta", "Terminal" e "Nova conversa". O painel se recolhe sozinho em janelas estreitas (menos de 1180 pt) e volta quando há espaço.
 
 As chaves de "O que pode usar" desligam grupos inteiros de ferramentas para aquele Orb: sem **Terminal e arquivos** ele não roda
-comandos nem lê, escreve, procura ou apaga arquivos (no Claude Code sobra só o `Read`, que abre as imagens que você anexa); sem **Navegar na web** não lê páginas (nem baixa arquivos com `save_to`, que também precisa de **Terminal e arquivos**); sem **Controlar apps do Mac** não usa
+comandos nem lê, escreve, procura ou apaga arquivos (no Claude Code sobra só o `Read`, que abre as imagens que você anexa); sem **Navegar na web** não lê nem pesquisa páginas, não usa o navegador do Orb (nem baixa arquivos com `save_to`, que também precisa de **Terminal e arquivos**); sem **Controlar apps do Mac** não usa
 AppleScript, Atalhos, área de transferência, captura de tela nem controla outros apps; sem **Conectores** não usa os conectores.
+
+### Navegador
+
+**Navegar na web** dá ao Orb três coisas: ler páginas (`web_fetch`), pesquisar (`web_search`) e, com um navegador instalado, **usar um navegador de verdade** em segundo plano (`browse_open`, `browse_snapshot`, `browse_click`, `browse_fill`, `browse_read`, `browse_screenshot`…). Funciona com qualquer modelo. O navegador é do Orb: abre páginas com JavaScript, clica, preenche formulários e **guarda os logins entre uma conversa e outra** (uma pasta de perfil por Orb, em `navegador/` na pasta de dados). Quem dirige é o [agent-browser](https://github.com/vercel-labs/agent-browser); o Orb **nunca instala nada sozinho**.
+
+Cada Orb escolhe o motor (padrão **Chrome**, também nos Orbs que já tinham "Navegar na web"):
+
+| Motor | O que é | Para instalar (no Terminal) |
+|---|---|---|
+| **Simples** | só `web_fetch`: sem JavaScript, sem login | nada |
+| **Chrome** | Chrome for Testing dirigido pelo agent-browser; logins guardados | `brew install agent-browser` e `agent-browser install` (ou `npm i -g agent-browser`) |
+| **Obscura** | [motor leve em Rust](https://github.com/h4ckf0r0day/obscura) com JavaScript; sem perfil guardado e sem janela | `brew install agent-browser` e `brew install obscura` |
+| **CloakBrowser** | [Chromium modificado](https://github.com/CloakHQ/CloakBrowser) para não parecer automação; o Orb o usa pelo agent-browser, com a mesma identidade a cada vez | `brew install agent-browser` e `pip3 install cloakbrowser && python3 -m cloakbrowser install` |
+
+Se o motor escolhido não estiver instalado, o Orb fica só com `web_fetch` e `web_search`, e **avisa uma vez** o comando que falta. As ferramentas do navegador só aparecem quando o motor está pronto.
+
+**Pesquisa.** `web_search` devolve títulos, endereços e trechos. O provedor é uma escolha do Orb: **DuckDuckGo** (padrão, sem conta; pelo navegador do Orb ou, no motor Simples, pela página simples dele), **Google** (sempre pelo navegador do Orb, nunca por API; sem navegador cai no DuckDuckGo e o resultado diz isso) ou **TinyFish** (API com cota gratuita; precisa da sua chave, guardada no Keychain, uma para o app todo). Se o TinyFish recusar a chave, acabar a cota do dia ou limitar o ritmo, a busca vai para o DuckDuckGo e o resultado avisa; nada é cobrado nem tentado de novo em plano pago.
+
+**Quando é com você.** Login, código de verificação (2FA), captcha, aviso de cookies que bloqueia ou qualquer coisa que só uma pessoa faz: o Orb **não tenta resolver nem digita senha ou número de cartão** (campos de senha são recusados). Ele chama `browse_show`, que reabre a mesma sessão numa janela visível; você faz o que falta, diz "pronto" no chat e o Orb continua. O motor Obscura não tem janela: nesse caso o Orb pede para você trocar de motor.
+
+**Permissões.** Abrir uma página e pesquisar perguntam como `web_fetch` (Sempre permitir por site, ou "Pesquisar na web"); clicar, preencher, escolher e apertar teclas perguntam no Perguntar antes e têm a sua própria liberação ("Clicar e preencher páginas no navegador do Orb"); olhar a página que já está aberta não pergunta. No **Só leitura** nada disso roda.
 
 ## Conversar
 
@@ -231,7 +252,7 @@ leitura; e comandos que só olham (`ls`, `git status`, `git log`, `cat`…) não
 |---|---|
 | **Perguntar antes** (padrão) | O que muda algo, roda código, abre algo, acessa a web ou guarda memória **pede a sua aprovação**, a menos que você já tenha liberado aquilo ("Sempre permitir") ou seja escrita na pasta própria do Orb |
 | **Automático** | Faz tudo sozinho, **menos** comandos destrutivos (`rm -rf`, `rm` de arquivo fora da pasta do Orb, `sudo`, `git push --force`, formatar disco…) e mudanças nas instruções dele (identidade e preferências da memória), que ainda perguntam |
-| **Só leitura** | Só lê e pesquisa arquivos e apps do Mac e roda comandos que só olham (`ls`, `git status`, `git log`). Tudo o mais é recusado, **inclusive a web** (`web_fetch`), **mesmo com "Sempre permitir"** |
+| **Só leitura** | Só lê e pesquisa arquivos e apps do Mac e roda comandos que só olham (`ls`, `git status`, `git log`). Tudo o mais é recusado, **inclusive a web** (`web_fetch`, `web_search` e o navegador do Orb), **mesmo com "Sempre permitir"** |
 | **Sem pedir permissão** | Nunca pergunta, nem os comandos destrutivos. Ligar exige uma confirmação ("Rodar sem pedir permissão?"). Use só com Orbs e pastas em que você confia |
 
 ### Cartões de aprovação
@@ -619,13 +640,14 @@ Rodando pelo SwiftPM (sem um `.app`), ele só fecha: abra de novo. Nos modos de 
   `web_fetch` e os conectores, continuam falando com a rede). **Com o Claude Code, o conteúdo vai à Anthropic por ele.**
 - **Outras conexões**: as listas de modelos de cada provedor (e a `models.dev`, para os modelos do OpenCode), o
   [Skills.sh](https://skills.sh) e o GitHub quando você explora ou instala uma skill, o registro do MCP, as páginas que o Orb
-  abrir com `web_fetch`, os serviços dos conectores que você instalar e o login do ChatGPT.
+  abrir com `web_fetch` ou no navegador dele, as pesquisas (o DuckDuckGo ou o Google recebem o que o Orb pesquisa), os serviços dos conectores que você instalar e o login do ChatGPT.
+- **Navegador e pesquisa.** O navegador do Orb guarda cookies e logins numa pasta de perfil por Orb (`navegador/`, na pasta de dados), no seu Mac, e ela some com o Orb. **Com o TinyFish como provedor de pesquisa, o que o Orb pesquisa vai para os servidores do TinyFish** (com a sua chave, guardada no Keychain); com DuckDuckGo ou Google, vai para eles.
 - **Notificações** mostram o começo da resposta do Orb (até 180 caracteres) e o comando de um pedido de permissão; quem vê sua
   tela de bloqueio pode ver isso, conforme as suas configurações de notificação do macOS.
 - **Importar de outro assistente** não faz rede e não lê o seu Mac sem você pedir (colar, escolher ou "Ler"); o que entra
   vira dado na memória do Orb novo, depois da sua prévia.
 - **Segurança das ações**: um texto malicioso numa página ou arquivo não consegue fazer o Orb agir sem você. O que sai do Mac
-  (`web_fetch`, `open`, guardar memória) e o que muda coisas passam pelas permissões; o prompt do Orb trata o que vem de
+  (`web_fetch`, `web_search`, o navegador, `open`, guardar memória) e o que muda coisas passam pelas permissões; o prompt do Orb trata o que vem de
   páginas, arquivos, conectores e memórias como dado, nunca como instrução. Lembre que em "Sem pedir permissão" isso não vale.
 
 ## Problemas comuns

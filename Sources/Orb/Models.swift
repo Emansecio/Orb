@@ -93,6 +93,10 @@ struct Bot: Identifiable, Hashable, Codable, Sendable {
     var model = ""
     var permissionMode = PermissionMode.ask
     var capabilities: Set<Capability> = [.terminal, .browser, .computerUse]
+    /// The browser behind "Navegar na web" (see `BrowserEngineKind`). Orbs saved before the engines existed get the default.
+    var browserEngine = BrowserEngineKind.default
+    /// Where `web_search` goes.
+    var searchProvider = SearchProvider.duckduckgo
     /// What the user chose "Sempre permitir" for, each grant narrowed by a scope (`PermissionRule`). Grants saved
     /// before scopes existed (`allowedTools`, tool names of either engine) are converted when the Orb loads.
     var permissionRules: [PermissionRule] = []
@@ -124,6 +128,8 @@ extension Bot {
         model = try c.value(.model, default: "")
         permissionMode = try c.value(.permissionMode, default: .ask)
         capabilities = Set(try c.lossyArray(.capabilities, default: [.terminal, .browser]))
+        browserEngine = (try? c.decodeIfPresent(BrowserEngineKind.self, forKey: .browserEngine)) ?? .default
+        searchProvider = (try? c.decodeIfPresent(SearchProvider.self, forKey: .searchProvider)) ?? .duckduckgo
         permissionRules = try c.lossyArray(.permissionRules)
         if let old = try? decoder.container(keyedBy: LegacyKeys.self).decodeIfPresent([String].self, forKey: .allowedTools) {
             permissionRules = PermissionPolicy.unique(permissionRules + PermissionPolicy.legacyRules(fromToolNames: old))

@@ -155,6 +155,8 @@ final class AppModel {
     @ObservationIgnored private(set) var learnedContexts: [String: LearnedContext]
     /// Where outputs too big for a conversation are saved for the model to read back (`saidas/<id>/` in the data folder).
     @ObservationIgnored let outputsDirectory: URL
+    /// The Orbs' browsers (`navegador/<id>/` in the data folder holds what each keeps, logins included).
+    @ObservationIgnored var browserHub: BrowserHub
     /// What the models are used for, kept by the hour (`uso/` in the data folder); see `recordUsage`.
     @ObservationIgnored let usageLog: UsageRecorder
     /// Every Orb's own memory bank (`memoria/<id>/` in the data folder).
@@ -320,6 +322,7 @@ final class AppModel {
         learnedContexts = state.learnedContexts
         priceCorrections = state.priceCorrections
         outputsDirectory = ToolOutputCap.directory(inDataFolder: store.directory)
+        browserHub = BrowserHub.live(dataFolder: store.directory)
         // Only the Orb shown first is read at launch, and the window does not wait for it (`beginLoading` below).
         let readsFirstLater = asyncLoading ?? runsBackgroundWork
         for bot in state.bots { session(bot.id).isUnloaded = true }
@@ -1033,6 +1036,8 @@ final class AppModel {
             pictures.deleteAll(for: botID)
             ToolOutputCap.removeAll(for: botID, in: outputs)
         }
+        let browsers = browserHub
+        Task { await browsers.deleteData(botID: botID) }
         session.memoryIdle?.cancel()
         session.memoryIdle = nil
         session.skillReview?.cancel()
@@ -1671,7 +1676,14 @@ final class AppModel {
                 return
             }
             let accessibilityGranted = !bot.capabilities.contains(.computerUse) || accessibilityProbe()
-            var tools = ToolBox.offered(for: bot.capabilities, accessibilityGranted: accessibilityGranted)
+            // The Orb's own browser: its tools come only when the engine it chose is installed.
+            let browserStatus = bot.capabilities.contains(.browser) && bot.browserEngine.drivesABrowser
+                ? await browserHub.status(for: bot.browserEngine) : nil
+            let browserAvailability = BrowserAvailability(capabilities: bot.capabilities, engine: bot.browserEngine, status: browserStatus)
+            var context = context
+            context.browser = BrowserAccess(hub: browserHub, engine: browserAvailability == .browser ? bot.browserEngine : .simple,
+                                            searchProvider: bot.searchProvider, searchKeys: SearchKeys(vault: secretVault))
+            var tools = ToolBox.offered(for: bot.capabilities, accessibilityGranted: accessibilityGranted, browser: browserAvailability)
             // The connectors' own tools do not travel with the request: the model lists and calls them through two fixed ones.
             if bot.capabilities.contains(.connectors), !allowedConnectors.isEmpty {
                 await connectorSync?.value // one added a moment ago is known to `mcp` before the model may name it
@@ -1681,7 +1693,9 @@ final class AppModel {
             // Recorded when the prompt with the snapshot is stored (see `apply`), not before.
             session.pendingMarks = built.marks
             // The system prompt tells the Orb when the interface tools are held back (see `ToolBox.offered`).
-            let system = accessibilityGranted ? built.system : built.system + "\n\n" + ToolBox.accessibilityUnavailableNote
+            var system = accessibilityGranted ? built.system : built.system + "\n\n" + ToolBox.accessibilityUnavailableNote
+            let browserSection = BrowserPrompt.section(bot: bot, availability: browserAvailability, status: browserStatus)
+            if !browserSection.isEmpty { system += "\n\n" + browserSection }
             let request = TurnRequest(bot: bot, model: ref.model, system: system, history: history,
                                       prompt: TurnPreface.prepend(built.preface, to: prompt),
                                       client: client, tools: tools, context: context, budget: budget, ledger: ledger,

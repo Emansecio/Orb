@@ -14,6 +14,9 @@ enum PermissionFamily: String, CaseIterable, Codable, Sendable {
     /// Clicking and typing in other apps' interface (ui_act): its own family, so an earlier grant for Shortcuts or the
     /// clipboard never extends to driving any app.
     case appInterface
+    /// Clicking, typing and pressing keys in the Orb's own browser (`browse_click`, `browse_fill`, `browse_select`, `browse_press`,
+    /// `browse_show`): its own family, so a grant for reading a site never lets the Orb act inside the pages it logged in to.
+    case browserPage
 }
 
 /// A standing "Sempre permitir": a family of tools, narrowed by a scope.
@@ -113,6 +116,7 @@ extension PermissionRule {
             case .appleScript: "Controlar apps com AppleScript"
             case .macApps: "Usar Atalhos, a área de transferência e encerrar apps"
             case .appInterface: "Clicar e preencher campos na interface de outros apps"
+            case .browserPage: "Clicar e preencher páginas no navegador do Orb"
             case .connector: "Usar qualquer ferramenta dos conectores"
             case .memory: "Guardar na memória"
             case .jobs: "Gerenciar processos em segundo plano"
@@ -178,6 +182,9 @@ struct PermissionCall: Sendable, Equatable {
     var savesFile = false
     /// The connector tool, by `PermissionPolicy.connectorKey`.
     var connector: String?
+    /// The call only looks at the page the Orb's browser already has open (a snapshot, the page's text): it asks nothing, but
+    /// "Só leitura" refuses it, as it refuses the web.
+    var readsLivePage = false
 }
 
 enum PermissionVerdict: Equatable, Sendable {
@@ -212,7 +219,7 @@ enum PermissionPolicy {
     ///   rest and "Perguntar antes" runs what a rule or this task's grants cover, or writes inside the Orb's own folder.
     static func evaluate(mode: PermissionMode, call: PermissionCall, rules: [PermissionRule], turnGrants: [PermissionRule] = [],
                          workspace: URL?, home: URL = FileManager.default.homeDirectoryForCurrentUser) -> PermissionVerdict {
-        if call.risk == .safe { return .allow }
+        if call.risk == .safe { return call.readsLivePage && mode == .readOnly ? .deny(readOnlyDenial) : .allow }
         switch mode {
         case .bypass:
             return .allow
@@ -261,7 +268,7 @@ enum PermissionPolicy {
         case .connector:
             guard let key = call.connector else { return false }
             return relevant.contains { if case .connectorTool(let allowed) = $0.scope { allowed == key } else { false } }
-        case .open, .appleScript, .macApps, .appInterface, .memory, .jobs, .schedule:
+        case .open, .appleScript, .macApps, .appInterface, .browserPage, .memory, .jobs, .schedule:
             return false
         }
     }
@@ -284,9 +291,9 @@ enum PermissionPolicy {
         segment.words.first == "cd" && segment.words.count <= 2
     }
 
-    /// Claude Code's WebSearch.
+    /// Claude Code's WebSearch, and the native `web_search`.
     static func isSearch(_ call: PermissionCall) -> Bool {
-        call.family == .web && call.toolName == "WebSearch"
+        call.family == .web && (call.toolName == "WebSearch" || call.toolName == "web_search")
     }
 
     static func hostMatches(_ host: String, _ allowed: String) -> Bool {
@@ -348,6 +355,7 @@ enum PermissionPolicy {
         let name = tool.spec.name
         let family = family(ofTool: name, kind: tool.kind)
         var call = PermissionCall(toolName: name, family: family, risk: tool.risk(arguments))
+        call.readsLivePage = tool.readsLivePage(arguments)
         let directory = arguments.nonEmptyString("cwd").map(context.url(for:)) ?? context.workingDirectory
         let scope = dangerScope(workspace: context.workingDirectory, directory: directory, home: home)
         var danger = tool.danger(arguments, context: context)
@@ -478,6 +486,7 @@ enum PermissionPolicy {
         case "applescript": return .appleScript
         case "shortcuts_run", "clipboard_write", "app_quit": return .macApps
         case "ui_read", "ui_act": return .appInterface
+        case "browse_click", "browse_fill", "browse_select", "browse_press", "browse_show": return .browserPage
         case "remember", "recall": return .memory
         case "job_output", "job_list", "job_stop": return .jobs
         case "schedule": return .schedule
@@ -589,7 +598,7 @@ enum PermissionPolicy {
             if call.savesFile { found = [] }
         case .connector:
             found = call.connector.map { [PermissionRule(family: .connector, scope: .connectorTool($0))] } ?? []
-        case .open, .appleScript, .macApps, .appInterface, .memory, .jobs, .schedule:
+        case .open, .appleScript, .macApps, .appInterface, .browserPage, .memory, .jobs, .schedule:
             found = [PermissionRule(family: family)]
         }
         // Suggestions from Claude Code come after Orb's own, and only where they fit the call's family.

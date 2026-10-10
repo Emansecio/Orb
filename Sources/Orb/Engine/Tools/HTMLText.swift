@@ -630,7 +630,7 @@ enum HTMLText {
         return String(text[range])
     }
 
-    private static func decodeEntities(_ text: String) -> String {
+    static func decodeEntities(_ text: String) -> String {
         guard text.contains("&") else { return text.precomposedStringWithCanonicalMapping }
         let result = NSMutableString(string: text)
         // Back to front so earlier ranges stay valid.

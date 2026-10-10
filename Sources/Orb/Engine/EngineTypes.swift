@@ -584,6 +584,9 @@ struct ToolContext: Sendable {
     var computerUseAllowed = true
     /// The tools run for the background review of the conversation (`SkillReview`): memory takes skill proposals only.
     var skillReview = false
+    /// The Orb's browser (`browse_*`, `web_search`): where it is kept and how the Orb is set up. Without a hub the tools say
+    /// the browser is not there.
+    var browser = BrowserAccess()
 }
 
 protocol AgentTool: Sendable {
@@ -595,6 +598,8 @@ protocol AgentTool: Sendable {
     /// Another capability that also offers the tool (`trash` needs files or apps, whichever the Orb has).
     var alsoWithCapability: Capability? { get }
     func risk(_ arguments: JSONValue) -> ToolRisk
+    /// The call only looks at a page the Orb's browser has open already (`.safe`), but still uses the web: "Só leitura" refuses it.
+    func readsLivePage(_ arguments: JSONValue) -> Bool
     /// Why this particular call is destructive (so "Automático" still asks), or nil. Shell text in `command` or
     /// `script` is checked separately by `DangerousCommand`; this is for tools whose danger is in other arguments.
     func danger(_ arguments: JSONValue) -> String?
@@ -628,6 +633,7 @@ extension AgentTool {
 
     func summary(_ arguments: JSONValue, context: ToolContext) -> (title: String, detail: String) { summary(arguments) }
     func danger(_ arguments: JSONValue) -> String? { nil }
+    func readsLivePage(_ arguments: JSONValue) -> Bool { false }
     func connectingNote(_ arguments: JSONValue) async -> String? { nil }
     func prepare(_ arguments: JSONValue) async throws {}
     var alsoWithCapability: Capability? { nil }

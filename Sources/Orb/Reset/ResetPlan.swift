@@ -61,7 +61,7 @@ struct ResetPlan: Sendable {
     /// The Keychain accounts of the providers: one per provider (`Keychain.get(kind.rawValue)`; ChatGPT's holds the
     /// sign-in). Claude Code has none: its login belongs to its own CLI, which Orb never touches.
     static var providerAccounts: [String] {
-        ProviderKind.allCases.filter { $0 != .claudeCode }.map(\.rawValue)
+        ProviderKind.allCases.filter { $0 != .claudeCode }.map(\.rawValue) + [SearchKeys.tinyFishAccount]
     }
 }
 

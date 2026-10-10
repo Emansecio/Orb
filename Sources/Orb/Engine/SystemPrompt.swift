@@ -158,7 +158,7 @@ enum PromptParts {
         if bot.capabilities.contains(.browser) {
             uses.append("web_fetch for public pages, APIs and PDFs (offset or find for long ones; no JavaScript)"
                 + (bot.capabilities.contains(.computerUse) ? "; browser_tab with include_text for the page the user has open, a logged-in site or a JavaScript one" : ""))
-            uses.append("there is no web search tool: use a site's own search or API (Wikipedia's api.php, api.github.com/search), not a search engine's result page")
+            uses.append("web_search to find pages (a site's own search or API, like Wikipedia's api.php, is better for one site); search again with other words rather than opening many results")
         }
         uses.append("open to open files and links for the user" + (bot.capabilities.contains(.browser) ? ", not to read a page" : ""))
         let background = hasFiles ? " Long commands can run in the background (job_output)." : ""
@@ -203,6 +203,34 @@ enum PromptParts {
         let intro = "Skills (the user invokes them with /name\(engine == .native ? "" : ", the app expands them"); "
             + "when one fits your task, read it first with \(recall) \"/name\")"
         return "## Skills\n\(intro):\n\(list)"
+    }
+}
+
+/// What the Orb is told about its own browser (`browse_*`), after the other sections of the system prompt.
+enum BrowserPrompt {
+    static func section(bot: Bot, availability: BrowserAvailability, status: BrowserEngineStatus?) -> String {
+        switch availability {
+        case .off:
+            return ""
+        case .fetchOnly:
+            return status?.modelNote ?? ""
+        case .browser:
+            let engine = bot.browserEngine
+            var lines = [
+                "## Your browser",
+                "You have your own browser (browse_*): a real \(engine.label) engine that runs JavaScript"
+                    + (engine.keepsProfile ? " and keeps the user's logins between runs" : " (headless, with no saved logins)")
+                    + ". web_search and web_fetch are lighter for public pages; use the browser for JavaScript pages, logins and forms.",
+                "Work in this order: browse_open, browse_snapshot, then browse_click / browse_fill / browse_select with the refs it lists; "
+                    + "snapshot again after the page changes. browse_read gives the text. Close with browse_close when the web work is done.",
+                "A login, a 2FA code, a captcha, a consent wall or anything else only the person can do is theirs: never type a password "
+                    + "or card number, never try to solve a captcha or get around a block.",
+            ]
+            lines.append(engine.canShowWindow
+                ? "Call browse_show, tell the user what to do in the window, and stop until they reply."
+                : "This engine has no window: tell the user to switch the Orb's browser to Chrome or CloakBrowser (Ajustes), and stop.")
+            return lines.joined(separator: "\n")
+        }
     }
 }
 

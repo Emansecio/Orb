@@ -70,7 +70,8 @@ Cada ferramenta declara três coisas (`AgentTool`):
 |---|---|---|
 | `shell` | `run_command` | `Bash` |
 | `writeFiles` | `write_file`, `edit_file`, `trash` | `Write`, `Edit`, `MultiEdit`, `NotebookEdit` |
-| `web` | `web_fetch` | `WebFetch`, `WebSearch` |
+| `web` | `web_fetch`, `web_search`, `browse_open`, `browse_tabs` (nova aba) | `WebFetch`, `WebSearch` |
+| `browserPage` | `browse_click`, `browse_fill`, `browse_select`, `browse_press`, `browse_show` | |
 | `open` | `open` | |
 | `appleScript` | `applescript` | |
 | `macApps` | `shortcuts_run`, `clipboard_write`, `app_quit` | |
@@ -115,6 +116,17 @@ Detalhes que costumam surpreender:
   opção anterior (`sort -T -- -o x`, `grep -e -- -r x .`, `git grep -e -- -iO'cmd'`). O `diff` com um operando que é pasta (ou pode
   ser: `~`, `.`, curinga, `~usuario`) ou com `--from-file` volta ao cartão, porque compara com o arquivo de mesmo nome dentro da
   pasta (`diff .npmrc ~` mostraria `~/.npmrc`). Na dúvida a linha só vai ao cartão.
+- **O navegador do Orb** (`browse_*`, `web_search`; veja o README, "Navegador"). `browse_open`, a aba nova de `browse_tabs` e
+  `web_search` são `.sensitive` na família `web`, como `web_fetch`: cartão no Perguntar antes, "Sempre permitir" por site (a pesquisa
+  tem a regra `search`, "Pesquisar na web", que nunca cobre ler uma página). `browse_click`, `browse_fill`, `browse_select`,
+  `browse_press` e `browse_show` mudam coisas dentro de páginas em que o Orb pode estar logado: são `.sensitive` na família
+  `browserPage` ("Clicar e preencher páginas no navegador do Orb"), que **nenhuma regra de site cobre**, nem o contrário. O cartão
+  diz em quê clica pelo nome que o último `browse_snapshot` deu ao elemento. Olhar a página que já está aberta (`browse_snapshot`,
+  `browse_read`, `browse_screenshot`, `browse_scroll`, `browse_back`, `browse_tabs` sem criar aba) é `.safe`, **mas "Só leitura" recusa**
+  (`PermissionCall.readsLivePage`, `AgentTool.readsLivePage`): é a web. `browse_close` só libera o navegador e roda em todo modo.
+  `browse_fill` **nunca digita em campo de senha ou de cartão**, em modo nenhum (nem em "Sem pedir permissão"): o campo é julgado
+  pelo nome que o snapshot deu a ele (senha, password, contraseña, passwort, cartão, CVV…) e, quando o navegador sabe dizer, pelo
+  `type`/`autocomplete` dele; a ferramenta responde que a pessoa deve digitar e que o Orb chame `browse_show`.
 - `web_fetch`, `open` e `remember` são `.sensitive` de propósito: são o caminho de **saída** de dados (ou o que fica no
   prompt de toda conversa). Um texto malicioso numa página não consegue ler um segredo e mandá-lo sem você aprovar.
 - `remember` com `tipo` `identidade` ou `preferencia` é `.instructs`. Com `fato` ou `procedimento` é `.sensitive`. Com `skill` é

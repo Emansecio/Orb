@@ -86,13 +86,13 @@ Tudo em `Sources/Orb/`.
 
 ### Ferramentas (`Engine/Tools/`)
 
-`ToolBox.all` = `shellTools + fileTools + webTools + macTools + memoryTools + scheduleTools`; cada família lista as suas no próprio arquivo.
-`ToolBox.offered(for:accessibilityGranted:)` filtra por capacidade do Orb e esconde `ui_read`/`ui_act` sem Acessibilidade.
+`ToolBox.all` = `shellTools + fileTools + webTools + searchTools + browseTools + macTools + memoryTools + scheduleTools`; cada família lista as suas no próprio arquivo.
+`ToolBox.offered(for:accessibilityGranted:browser:)` filtra por capacidade do Orb, esconde `ui_read`/`ui_act` sem Acessibilidade e as `browse_*` sem um motor de navegador instalado (`BrowserAvailability.browser`).
 
 | Capacidade | Ferramentas | Arquivos |
 |---|---|---|
 | Terminal e arquivos | `run_command` (`background: true`; saída acima de 20 KB é salva inteira em `saidas/<orb>/comando-….txt`), `job_output`, `job_list`, `job_stop`, `read_file` (texto, PDF, Word/RTF/ODT, Excel .xlsx, PowerPoint .pptx, imagens com OCR), `write_file`, `edit_file`, `list_directory`, `search_files` (Spotlight), `grep` (um arquivo informado em `path` vai até 200 MB, em streaming), `glob` (aceita padrão absoluto), `trash` (também com Controlar apps); o ambiente vem do shell `-lic` da usuária (5 s) e, se ele estoura, o perfil de login responde na hora e a nova tentativa roda em segundo plano (15 s), com espera que dobra de 30 s até 5 min | `ShellTool`, `BackgroundJobs`, `ProcessRunner`, `ShellEnvironment`, `FileTools`, `SearchTools`, `TextFile`, `DocumentReader`, `OfficeReader`, `ReadOnlyCommand` |
-| Navegar na web | `web_fetch` (páginas, PDF, JSON, imagens; `offset`/`find` para páginas longas; `save_to`) | `WebTools`, `HTMLText` |
+| Navegar na web | `web_fetch` (páginas, PDF, JSON, imagens; `offset`/`find` para páginas longas; `save_to`), `web_search` (DuckDuckGo, Google, TinyFish), e com um motor instalado `browse_open/snapshot/read/screenshot/click/fill/select/press/scroll/back/tabs/show/close` | `WebTools`, `HTMLText`, `WebSearchTool`, `BrowseTools`, `Engine/Browser/` |
 | Controlar apps do Mac | `applescript`, `shortcuts_list/run`, `clipboard_read/write`, `screenshot` (com OCR), `apps_list`, `processes`, `app_quit`, `trash`, `browser_tab`, `ui_read`, `ui_act` | `MacTools`, `MacAppTools`, `BrowserTools`, `ScreenshotTool`, `AccessibilityTools`/`Elements`/`Outline`, `AppleScriptSupport` |
 | Sempre | `open`, `notify`, `remember`, `recall`, `schedule` | `MacTools`, `MacAppTools`, `ScheduleTool`, `ScheduleMailbox` |
 | Conectores | `connector_tools`, `connector_call` (fora de `ToolBox.all`, montadas por turno) | `ConnectorGateway`, `MCPTool` |
@@ -124,6 +124,22 @@ Claude Code, o servidor de ferramentas é **outro processo** e não alcança o m
 mesmo código; 20 s de limite; o app começa a ouvir no primeiro turno do Claude Code e limpa a pasta ao começar). O servidor
 recebe a pasta e o Orb por `--schedule-mailbox <pasta> --orb <id>`. Uma execução que passa do próprio intervalo (a cada 15 min,
 levando 20) conta a próxima a partir do fim dela (`finishRoutineRun`), então nada se acumula.
+
+**O navegador do Orb (`Engine/Browser/`).** Um protocolo, `BrowserDriver` (abrir, snapshot com refs, clicar, preencher, ler, captura,
+abas, janela), e um driver real, `AgentBrowserDriver`, que roda a linha de comando do [agent-browser](https://github.com/vercel-labs/agent-browser)
+(`agent-browser --session <s> --json <comando>`) por `ProcessRunner`, com o PATH do shell de login da usuária (`ShellEnvironment`), prazo
+e cancelamento; o processo em segundo plano do próprio agent-browser mantém o navegador aberto entre os comandos. `BrowserEngineKind`
+(`simple`, `chrome`, `obscura`, `cloak`) diz como cada um é lançado (`AgentBrowserConfig.launchArguments`): Chrome com `--profile <pasta do Orb>`;
+Obscura com `--engine obscura --executable-path <obscura>` (sem perfil nem janela); CloakBrowser com `--executable-path <Chromium do Cloak>
+--args --no-sandbox,--fingerprint=<semente>,--fingerprint-platform=macos --profile <pasta>` (a semente fica em `.cloakbrowser-seed` na pasta, como no
+wrapper dele). `BrowserEngineLocator` procura os binários (PATH do shell, depois Homebrew, npm, cargo) e devolve um `BrowserEngineStatus`: pronto, ou o que falta com o comando
+exato (`brew install agent-browser`, `agent-browser install`, `brew install obscura`, `pip3 install cloakbrowser && python3 -m cloakbrowser install`). Nada é instalado pelo app.
+`BrowserHub` guarda um `BrowserSession` por Orb (sessão `orb-<id>-<motor>`, perfil em `navegador/<orb>/<motor>` na pasta de dados, headless), serializa
+os comandos (`AsyncMutex`: ferramentas que só olham rodam juntas no turno) e lembra os refs do último snapshot, para dar nome ao clique no cartão e
+recusar senha. A janela (`browse_show`) fecha a sessão e a reabre no mesmo endereço com `--headed` e o mesmo perfil. A sessão e o `BrowserAccess` do turno
+chegam às ferramentas por `ToolContext.browser`; `AppModel` monta isso a cada turno com o motor do Orb (`Bot.browserEngine`, `Bot.searchProvider`) e acrescenta ao prompt a
+seção `BrowserPrompt` (ou a linha de "falta instalar"). A busca (`web_search`) abre a página de resultados numa aba própria do navegador (e a fecha), lê o resultado por
+script e cai no DuckDuckGo pelo HTTP simples quando o motor é `simple`; o TinyFish é uma API (`SearchKeys` guarda a chave no Keychain) com queda para o DuckDuckGo.
 
 **`web_fetch`.** Lê HTTP(S) com o User-Agent do Safari (gzip/br, `Accept-Language: pt-BR`, 20 s de limite) e decodifica pelo BOM,
 pelo cabeçalho, pelo `<meta charset>` e por UTF-8/Windows-1252. HTML (até 5 MB) vira um Markdown leve (`HTMLText`): só o
