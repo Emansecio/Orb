@@ -686,11 +686,16 @@ final class EndlessStreamProtocol: URLProtocol {
             return
         }
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        // The first piece comes with the headers: on a busy machine the queue below may start only after the reader's
+        // deadline, and a cut with nothing read is a different case from the one these tests are about.
+        client?.urlProtocol(self, didLoad: stream.chunk)
+        Self.streams.withLock { $0[host]?.served += stream.chunk.count }
         DispatchQueue.global().async { [self] in
             while running.withLock({ $0 }) {
+                Thread.sleep(forTimeInterval: stream.interval)
+                guard running.withLock({ $0 }) else { break }
                 client?.urlProtocol(self, didLoad: stream.chunk)
                 Self.streams.withLock { $0[host]?.served += stream.chunk.count }
-                Thread.sleep(forTimeInterval: stream.interval)
             }
         }
     }
