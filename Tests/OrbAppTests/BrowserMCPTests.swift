@@ -218,9 +218,9 @@ struct BrowserMCPPromptTests {
 
     @Test func aMissingEngineIsToldOnceInClaudeCodesWords() {
         var status = BrowserEngineStatus(engine: .chrome)
-        status.missing = [.init(name: "Chrome", command: "agent-browser install")]
+        status.missing = [.init(name: "Chrome")]
         let note = BrowserPrompt.section(bot: bot(.chrome), availability: .fetchOnly, status: status, claudeCode: true)
-        #expect(note.contains("agent-browser install") && note.contains("WebFetch and \(prefix)web_search") && !note.contains("web_fetch"))
+        #expect(note.contains("Ajustes") && note.contains("missing: Chrome") && note.contains("WebFetch and \(prefix)web_search") && !note.contains("web_fetch"))
     }
 
     @Test func theWebToolsOfClaudeCodeStayAvailableWithTheBrowser() {

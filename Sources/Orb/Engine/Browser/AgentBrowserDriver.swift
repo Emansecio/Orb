@@ -15,8 +15,11 @@ struct AgentBrowserConfig: Sendable, Equatable {
     var headed = false
     /// CloakBrowser's fingerprint seed (`--fingerprint=`): the same for the same profile, so a site sees one browser over time.
     var cloakSeed = CloakSeed.range.lowerBound
-    /// Lets pages at `file://` load (tests, local pages); off for the Orb's browsing.
+    /// Lets the scripts of a `file://` page read other local files. Not needed to open one (Chrome opens `file://` pages without it),
+    /// so it is off; Obscura rejects it.
     var allowFileAccess = false
+    /// Lets Obscura reach `localhost` and private addresses (it blocks them by default); for tests of local pages only.
+    var allowPrivateNetwork = false
 
     /// The session of an Orb for an engine. Another engine is another browser, so it gets another session (a running browser
     /// keeps the settings it was launched with).
@@ -27,8 +30,29 @@ struct AgentBrowserConfig: Sendable, Equatable {
     /// Flags every command carries: which browser, and JSON replies.
     var globalArguments: [String] { ["--session", session, "--json"] }
 
-    /// What CloakBrowser's own wrapper passes to its Chromium on macOS (`get_default_stealth_args`).
-    var cloakArguments: [String] { ["--no-sandbox", "--fingerprint=\(cloakSeed)", "--fingerprint-platform=macos"] }
+    /// What CloakBrowser's own wrapper passes to its Chromium on macOS (`get_default_stealth_args`), without its `--no-sandbox`: macOS
+    /// does not need it (checked: the browser starts and browses with the sandbox on), and in a window it shows a warning bar.
+    var cloakArguments: [String] { ["--fingerprint=\(cloakSeed)", "--fingerprint-platform=macos"] }
+
+    /// The user agent of the Chrome for Testing in a `chrome-<version>` folder, as the same Chrome says it with a window.
+    static func chromeUserAgent(executable: String?) -> String? {
+        guard let executable, let range = executable.range(of: #"chrome-(\d+)\."#, options: .regularExpression) else { return nil }
+        let major = executable[range].dropFirst("chrome-".count).prefix { $0.isNumber }
+        return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/\(major).0.0.0 Safari/537.36"
+    }
+
+    /// What the `agent-browser` process (and the background process it starts) runs with besides the user's environment.
+    var extraEnvironment: [String: String] {
+        // A browser nobody has used for half an hour is closed by agent-browser itself (its default is an hour): the safety net
+        // for a browser left behind when the app is killed instead of quit.
+        var environment = ["AGENT_BROWSER_IDLE_TIMEOUT_MS": "1800000"]
+        if engine == .obscura {
+            // The stealth build of Obscura: one consistent fingerprint, and TLS like a real browser's.
+            environment["AGENT_BROWSER_OBSCURA_STEALTH"] = "1"
+            if allowPrivateNetwork { environment["OBSCURA_ALLOW_PRIVATE_NETWORK"] = "1" }
+        }
+        return environment
+    }
 
     /// Flags only the command that launches the browser (`open`) needs; a running browser keeps the ones it started with.
     var launchArguments: [String] {
@@ -37,6 +61,12 @@ struct AgentBrowserConfig: Sendable, Equatable {
         case .simple:
             break
         case .chrome:
+            // The Chrome the app installed is named; without one agent-browser looks for a Chrome by itself.
+            if let browserExecutable { arguments += ["--executable-path", browserExecutable] }
+            // Chrome for Testing in the background says "HeadlessChrome" and `navigator.webdriver = true`, which DuckDuckGo and Google
+            // answer with a captcha (checked); a Chrome's own name and the flag that hides the automation make them answer.
+            if let agent = Self.chromeUserAgent(executable: browserExecutable) { arguments += ["--user-agent", agent] }
+            arguments += ["--args", "--disable-blink-features=AutomationControlled"]
             if let profile { arguments += ["--profile", profile.path] }
             if headed { arguments.append("--headed") }
         case .obscura:
@@ -49,7 +79,7 @@ struct AgentBrowserConfig: Sendable, Equatable {
             if let profile { arguments += ["--profile", profile.path] }
             if headed { arguments.append("--headed") }
         }
-        if allowFileAccess { arguments.append("--allow-file-access") }
+        if allowFileAccess, engine != .obscura { arguments.append("--allow-file-access") }
         return arguments
     }
 }
@@ -88,6 +118,10 @@ struct AgentBrowserReply: Sendable, Equatable {
     static func parse(_ output: String) -> AgentBrowserReply? {
         for line in output.split(whereSeparator: \.isNewline).reversed() {
             let text = line.trimmingCharacters(in: .whitespaces)
+            if text.hasPrefix("["), let json = JSONValue.parse(text), let first = json.array?.first, let success = first["success"]?.bool {
+                // `batch --json` answers with a list, one entry per command (`{command, result, error, success}`).
+                return AgentBrowserReply(success: success, data: first["result"], error: first["error"]?.string)
+            }
             guard text.hasPrefix("{"), let json = JSONValue.parse(text), case .object = json, let success = json["success"]?.bool else { continue }
             return AgentBrowserReply(success: success, data: json["data"], error: json["error"]?.string)
         }
@@ -101,6 +135,12 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
     private let state: OSAllocatedUnfairLock<AgentBrowserConfig>
     private let run: BrowserCommandRunner
     private let environment: @Sendable () async -> [String: String]?
+    /// The elements of the last snapshot, by ref: what Obscura needs to click a link its own click cannot reach.
+    /// `close` was the last thing done: the background process takes a moment to go, and until a page is opened again it does not count.
+    private let closed = OSAllocatedUnfairLock(initialState: false)
+    /// The environment the last command ran with, for the close that cannot wait for a task (`closeSynchronously`).
+    private let lastEnvironment = OSAllocatedUnfairLock<[String: String]?>(initialState: nil)
+    private let knownRefs = OSAllocatedUnfairLock<[String: BrowserRef]>(initialState: [:])
 
     var config: AgentBrowserConfig { state.withLock { $0 } }
 
@@ -124,26 +164,64 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
 
     // MARK: Commands
 
-    /// Runs one command and returns the `data` of the reply, or throws what went wrong.
+    /// Runs one command and returns the `data` of the reply, or throws what went wrong. `text`: the words after the command name
+    /// are text of the page (what to type, a script, an address), never options: the command line takes an argument that is exactly
+    /// one of its options (`--json`, `--headed`) for the option wherever it stands, and `--` does not stop that, so such text goes
+    /// through `batch`, whose own quoting passes it as it is.
     @discardableResult
-    func send(_ command: [String], launching: Bool = false, timeout: Duration = AgentBrowserDriver.commandTimeout) async throws -> JSONValue {
+    func send(_ command: [String], launching: Bool = false, text: Bool = false,
+              timeout: Duration = AgentBrowserDriver.commandTimeout) async throws -> JSONValue {
         let current = config
-        let arguments = current.globalArguments + (launching ? current.launchArguments : []) + command
-        let output: ProcessOutput
-        do {
-            output = try await run(current.executable, arguments, await environment(), timeout)
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch {
-            throw BrowserDriverError.notInstalled("agent-browser could not be started (\(current.executable)): \(error.localizedDescription)")
+        let literal = text && command.dropFirst().contains { $0.hasPrefix("-") }
+        let tail = literal ? ["batch", Self.shellLine(command)] : command
+        let arguments = current.globalArguments + (launching ? current.launchArguments : []) + tail
+        var environment = await environment()
+        if environment != nil || !current.extraEnvironment.isEmpty {
+            environment = (environment ?? ProcessInfo.processInfo.environment).merging(current.extraEnvironment) { _, new in new }
         }
-        if output.timedOut { throw BrowserDriverError.timedOut(command.first ?? "command") }
-        guard let reply = AgentBrowserReply.parse(output.output) else {
-            let text = output.output.trimmingCharacters(in: .whitespacesAndNewlines)
-            throw Self.classify(text.isEmpty ? "agent-browser ended with status \(output.status) and no output." : String(text.prefix(600)))
+        let used = environment
+        lastEnvironment.withLock { $0 = used }
+        var attempt = 0
+        while true {
+            let output: ProcessOutput
+            do {
+                output = try await run(current.executable, arguments, environment, timeout)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                throw BrowserDriverError.notInstalled("agent-browser could not be started (\(current.executable)): \(error.localizedDescription)")
+            }
+            if output.timedOut { throw BrowserDriverError.timedOut(command.first ?? "command") }
+            guard let reply = AgentBrowserReply.parse(output.output) else {
+                let text = output.output.trimmingCharacters(in: .whitespacesAndNewlines)
+                throw Self.classify(text.isEmpty ? "agent-browser ended with status \(output.status) and no output." : String(text.prefix(600)))
+            }
+            guard reply.success else {
+                // The command line asked the background process that has just been closed (`close`, then `open` at once): it
+                // answers on the next try, when it is gone and a new one starts.
+                if attempt < Self.connectRetries, Self.isStaleConnection(reply.error) {
+                    attempt += 1
+                    try await Task.sleep(for: Self.connectRetryDelay)
+                    continue
+                }
+                throw Self.classify(reply.error ?? "agent-browser reported an error.")
+            }
+            return reply.data ?? .null
         }
-        guard reply.success else { throw Self.classify(reply.error ?? "agent-browser reported an error.") }
-        return reply.data ?? .null
+    }
+
+    static let connectRetries = 3
+    static let connectRetryDelay = Duration.milliseconds(500)
+
+    static func isStaleConnection(_ message: String?) -> Bool {
+        guard let message = message?.lowercased() else { return false }
+        return message.contains("failed to connect") && message.contains("no such file or directory")
+    }
+
+    /// The command as the one string `batch` takes: every word in single quotes (an apostrophe as `'\''`), so nothing in it is an
+    /// option, a variable or a space that splits.
+    static func shellLine(_ words: [String]) -> String {
+        words.map { "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'" }.joined(separator: " ")
     }
 
     /// An error message of the command line as the error the tools show.
@@ -154,7 +232,7 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
         }
         if lowered.contains("agent-browser install") || lowered.contains("chrome not found") || lowered.contains("could not find chrome")
             || lowered.contains("no chrome") {
-            return .notInstalled(message + " (the user installs it with `agent-browser install` in the Terminal)")
+            return .notInstalled(message + " (the user installs the browser in Ajustes → Navegador)")
         }
         return .failed(message)
     }
@@ -162,7 +240,8 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
     // MARK: BrowserDriver
 
     func open(_ url: String) async throws -> BrowserPage {
-        let data = try await send(["open", url], launching: true, timeout: Self.openTimeout)
+        let data = try await send(["open", url], launching: true, text: true, timeout: Self.openTimeout)
+        closed.withLock { $0 = false }
         var page = BrowserPage(url: data["url"]?.string ?? url, title: data["title"]?.string ?? "")
         if page.title.isEmpty, let title = try? await send(["get", "title"])["title"]?.string { page.title = title }
         return page
@@ -178,16 +257,59 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
                 refs[id] = BrowserRef(role: entry["role"]?.string ?? "", name: entry["name"]?.string ?? "")
             }
         }
+        let found = refs
+        knownRefs.withLock { $0 = found }
         return BrowserSnapshot(url: data["origin"]?.string ?? "", tree: data["snapshot"]?.string ?? "", refs: refs)
     }
 
-    func click(_ ref: String) async throws { try await send(["click", "@" + ref]) }
+    func click(_ ref: String) async throws {
+        do {
+            try await send(["click", "@" + ref])
+        } catch BrowserDriverError.failed(let message) where config.engine == .obscura && Self.isObscuraBoxModelFailure(message) {
+            // Obscura answers the position of a link with a fractional number its command line cannot read (`DOM.getBoxModel`),
+            // so the click is made in the page, on the element the snapshot called `ref`.
+            try await clickInPage(ref, original: message)
+        }
+    }
 
-    func fill(_ ref: String, text: String) async throws { try await send(["fill", "@" + ref, text]) }
+    /// Obscura's reply to `DOM.getBoxModel` for an element that is not a block, which `agent-browser` fails to read.
+    static func isObscuraBoxModelFailure(_ message: String) -> Bool {
+        message.contains("DOM.getBoxModel") || (message.contains("Failed to deserialize CDP response") && message.contains("floating point"))
+    }
 
-    func select(_ ref: String, value: String) async throws { try await send(["select", "@" + ref, value]) }
+    private func clickInPage(_ ref: String, original: String) async throws {
+        guard let known = knownRefs.withLock({ $0[ref] }) else { throw BrowserDriverError.failed(original) }
+        let script = Self.clickScript(role: known.role, name: known.name)
+        let clicked = try await send(["eval", script], text: true)["result"]
+        guard clicked?.bool == true else { throw BrowserDriverError.failed(original) }
+    }
 
-    func press(_ key: String) async throws { try await send(["press", key]) }
+    /// Clicks the first element of the role whose text, label or title is the name; true when one was clicked.
+    static func clickScript(role: String, name: String) -> String {
+        let selectors: [String: String] = [
+            "link": "a[href], [role=link]", "button": "button, [role=button], input[type=button], input[type=submit], input[type=reset], summary",
+            "checkbox": "input[type=checkbox], [role=checkbox]", "radio": "input[type=radio], [role=radio]", "tab": "[role=tab]",
+            "menuitem": "[role=menuitem]", "option": "option, [role=option]",
+        ]
+        let selector = selectors[role] ?? "a[href], button, [role], input, summary"
+        return """
+        (() => {
+          const wanted = \(JSONValue.string(name).jsonString).replace(/\\s+/g, ' ').trim();
+          const text = el => (el.getAttribute('aria-label') || el.innerText || el.value || el.title || el.alt || '').replace(/\\s+/g, ' ').trim();
+          const all = Array.from(document.querySelectorAll(\(JSONValue.string(selector).jsonString)));
+          const el = all.find(e => text(e) === wanted) || all.find(e => wanted && text(e).includes(wanted));
+          if (!el) return false;
+          el.click();
+          return true;
+        })()
+        """
+    }
+
+    func fill(_ ref: String, text: String) async throws { try await send(["fill", "@" + ref, text], text: true) }
+
+    func select(_ ref: String, value: String) async throws { try await send(["select", "@" + ref, value], text: true) }
+
+    func press(_ key: String) async throws { try await send(["press", key], text: true) }
 
     func scroll(_ direction: BrowserScrollDirection, pixels: Int) async throws {
         try await send(["scroll", direction.rawValue, String(pixels)])
@@ -221,7 +343,7 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
         }
     }
 
-    func newTab(_ url: String?) async throws { try await send(["tab", "new"] + (url.map { [$0] } ?? []), timeout: Self.openTimeout) }
+    func newTab(_ url: String?) async throws { try await send(["tab", "new"] + (url.map { [$0] } ?? []), text: true, timeout: Self.openTimeout) }
 
     func selectTab(_ id: String) async throws { try await send(["tab", id]) }
 
@@ -233,12 +355,17 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
     }
 
     func evaluate(_ script: String) async throws -> String {
-        let data = try await send(["eval", script])
+        let data = try await send(["eval", script], text: true)
         guard let result = data["result"] else { return "" }
         return result.string ?? result.jsonString
     }
 
     func currentURL() async throws -> String? {
+        // `get url` on a session nobody opened would start a browser of its own choosing (the one in Applications, with no
+        // profile): only a session with a background process is asked.
+        if closed.withLock({ $0 }) { return nil }
+        let sessions = try? await send(["session", "list"])["sessions"]?.array?.compactMap(\.string)
+        guard sessions?.contains(config.session) == true else { return nil }
         do {
             let url = try await send(["get", "url"])["url"]?.string
             return url?.isEmpty == true ? nil : url
@@ -249,18 +376,62 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
 
     func setHeaded(_ headed: Bool) async throws -> BrowserPage {
         let address = try await currentURL()
-        // The profile folder can be used by one browser at a time: the one running is closed before the other opens.
+        // The profile folder can be used by one browser at a time: the one running is closed, and gone, before the other opens
+        // (a Chrome started on a profile that is still in use hands over to it and exits, "without writing DevToolsActivePort").
         _ = try? await send(["close"])
+        closed.withLock { $0 = true }
+        await waitUntilGone()
         state.withLock { $0.headed = headed }
-        if let address, address != "about:blank" { return try await open(address) }
-        let data = try await send(["open"], launching: true, timeout: Self.openTimeout)
-        return BrowserPage(url: data["url"]?.string ?? "about:blank", title: "")
+        var attempt = 0
+        while true {
+            do {
+                if let address, address != "about:blank" { return try await open(address) }
+                let data = try await send(["open"], launching: true, timeout: Self.openTimeout)
+                closed.withLock { $0 = false }
+                return BrowserPage(url: data["url"]?.string ?? "about:blank", title: "")
+            } catch BrowserDriverError.failed(let message) where attempt < 2 && message.contains("DevToolsActivePort") {
+                attempt += 1
+                try await Task.sleep(for: .seconds(1.5))
+            }
+        }
+    }
+
+    /// Waits (at most about ten seconds) for the background process of the session to be gone after a `close`.
+    private func waitUntilGone() async {
+        for _ in 0..<50 {
+            let sessions = try? await send(["session", "list"])["sessions"]?.array?.compactMap(\.string)
+            if sessions?.contains(config.session) != true { break }
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+        // The browser itself may outlive the process that closed it by a moment.
+        try? await Task.sleep(for: .milliseconds(300))
+    }
+
+    func closeSynchronously(timeout: TimeInterval) {
+        let current = config
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: current.executable)
+        process.arguments = current.globalArguments + ["close"]
+        process.environment = (lastEnvironment.withLock { $0 } ?? ProcessInfo.processInfo.environment).merging(current.extraEnvironment) { _, new in new }
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        process.standardInput = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return }
+        // Waits for it, but a close that is slow is left to finish on its own: cutting it short would leave the browser behind.
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning, Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
     }
 
     func close() async throws {
         state.withLock { $0.headed = false }
+        closed.withLock { $0 = true }
         do {
-            try await send(["close"])
+            do {
+                try await send(["close"])
+            } catch BrowserDriverError.timedOut {
+                // A machine too busy to answer in time (the command was cut short): once more, or the browser stays behind.
+                try await send(["close"])
+            }
         } catch BrowserDriverError.noPage {
             return
         }

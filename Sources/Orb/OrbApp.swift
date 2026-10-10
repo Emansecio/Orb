@@ -280,6 +280,7 @@ enum Snapshot {
         case "connectors-explore": AnyView(ConnectorsView(tab: .explore))
         case "routines": AnyView(RoutinesView())
         case "models": AnyView(ProviderSettings())
+        case "browser-settings": AnyView(BrowserSettings().frame(width: 640, height: 720))
         case "inspector", "inspector-memory", "inspector-folder", "inspector-routines":
             // The tab after the dash: memory, folder or routines.
             AnyView(model.bots.first.map { bot in

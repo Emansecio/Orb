@@ -8,7 +8,7 @@ import Testing
 struct BrowserPickerCopyTests {
     private func missing(_ engine: BrowserEngineKind, _ names: String...) -> BrowserEngineStatus {
         var status = BrowserEngineStatus(engine: engine, agentBrowser: "/fake/agent-browser")
-        status.missing = names.map { .init(name: $0, command: "instala \($0)") }
+        status.missing = names.map { .init(name: $0) }
         return status
     }
 

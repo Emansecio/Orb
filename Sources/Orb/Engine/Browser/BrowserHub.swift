@@ -130,9 +130,11 @@ final class BrowserSession: @unchecked Sendable {
 }
 
 /// The browsers of the app, one per Orb: finds the engines on the Mac, starts the driver of an Orb's engine on first use and
-/// keeps it, so the tools of the Orb's next turns find the same page open. Never installs anything.
+/// keeps it, so the tools of the Orb's next turns find the same page open. It never installs anything (that is `BrowserInstaller`,
+/// from Ajustes) and closes every browser it started when the app quits.
 final class BrowserHub: Sendable {
-    /// `<data folder>/navegador`: a folder per Orb (and engine) for what the browser keeps, logins included.
+    /// `<data folder>/navegador`: a folder per Orb (and engine) for what the browser keeps, logins included, and `bin`, `chrome`,
+    /// `cloak` for what the installer put there (`BrowserInstallLayout`).
     let profilesDirectory: URL?
     private let locate: @Sendable (BrowserEngineKind) async -> BrowserEngineStatus
     private let makeDriver: @Sendable (AgentBrowserConfig) -> any BrowserDriver
@@ -141,19 +143,22 @@ final class BrowserHub: Sendable {
     private let labels = OSAllocatedUnfairLock<[UUID: [String: String]]>(initialState: [:])
 
     init(profilesDirectory: URL?,
-         locate: @escaping @Sendable (BrowserEngineKind) async -> BrowserEngineStatus = BrowserHub.liveStatus,
+         locate: (@Sendable (BrowserEngineKind) async -> BrowserEngineStatus)? = nil,
          makeDriver: @escaping @Sendable (AgentBrowserConfig) -> any BrowserDriver = { AgentBrowserDriver(config: $0) }) {
         self.profilesDirectory = profilesDirectory
-        self.locate = locate
+        self.locate = locate ?? BrowserHub.liveStatus(root: profilesDirectory)
         self.makeDriver = makeDriver
     }
 
     /// The hub of the app, with its folder in the data folder (`Store.directory`).
     static func live(dataFolder: URL) -> BrowserHub { BrowserHub(profilesDirectory: dataFolder.appending(path: "navegador")) }
 
-    static let liveStatus: @Sendable (BrowserEngineKind) async -> BrowserEngineStatus = { engine in
-        let path = await ShellEnvironment.shared.resolved().environment["PATH"]
-        return BrowserEngineLocator.live(path: path).status(for: engine)
+    /// The engines as they are on this Mac now: what the app installed first, then the user's own PATH.
+    static func liveStatus(root: URL?) -> @Sendable (BrowserEngineKind) async -> BrowserEngineStatus {
+        { engine in
+            let path = await ShellEnvironment.shared.resolved().environment["PATH"]
+            return BrowserEngineLocator.live(path: path, managedRoot: root).status(for: engine)
+        }
     }
 
     func status(for engine: BrowserEngineKind) async -> BrowserEngineStatus { await locate(engine) }
@@ -205,6 +210,30 @@ final class BrowserHub: Sendable {
         clearLabels(botID: botID)
         guard let session = sessions.withLock({ $0.removeValue(forKey: botID) }) else { return }
         try? await session.driver.close()
+    }
+
+    /// Closes the browsers of every Orb that uses `engine` (before its files are removed or replaced).
+    func close(engine: BrowserEngineKind) async {
+        let ids = sessions.withLock { $0.filter { $0.value.engine == engine }.map(\.key) }
+        for id in ids { await close(botID: id) }
+    }
+
+    /// Closes every browser at once, without waiting for a task: for `willTerminate`, which cannot wait for one. A browser left
+    /// behind would keep running (and keep its profile locked) after the app is gone. Gives up after `timeout` seconds.
+    func terminateAllNow(timeout: TimeInterval = 4) {
+        let all = sessions.withLock { sessions -> [BrowserSession] in
+            defer { sessions = [:] }
+            return Array(sessions.values)
+        }
+        let group = DispatchGroup()
+        for session in all {
+            group.enter()
+            DispatchQueue.global().async {
+                session.driver.closeSynchronously(timeout: timeout)
+                group.leave()
+            }
+        }
+        _ = group.wait(timeout: .now() + timeout + 1)
     }
 
     /// The Orb left `engine` for another: closes the browser it had open with it. The session may have been started by another

@@ -59,33 +59,30 @@ enum SearchProvider: String, CaseIterable, Identifiable, Codable, Sendable {
 
 // MARK: - What is installed
 
-/// Whether an engine can run on this Mac, and when it cannot, what is missing and the exact command to fix it. The app never
-/// installs anything itself: it only tells (the settings screen of a later phase offers the commands as buttons).
+/// Whether an engine can run on this Mac, and when it cannot, what is missing. The settings screen installs it (`BrowserInstaller`),
+/// and the Orb's prompt tells the model to ask the person to do it there.
 struct BrowserEngineStatus: Sendable, Equatable {
     var engine: BrowserEngineKind
     /// The `agent-browser` executable, nil when it is not installed.
     var agentBrowser: String?
-    /// What the engine launches, when it is not Chrome: the `obscura` binary or CloakBrowser's Chromium.
+    /// What the engine launches: the `obscura` binary, CloakBrowser's Chromium, or the Chrome for Testing the app installed
+    /// (nil for Chrome when agent-browser is to find one by itself: the one in Applications, say).
     var browserExecutable: String?
-    /// What is missing, each with the command that installs it, in the order to run them.
+    /// What is missing, in the order to install it.
     var missing: [Missing] = []
 
     struct Missing: Sendable, Equatable {
         /// "agent-browser", "Chrome", "Obscura", "CloakBrowser".
         var name: String
-        var command: String
     }
 
     var isReady: Bool { engine == .simple || missing.isEmpty }
 
-    /// The commands to run in the Terminal, in order.
-    var installCommands: [String] { missing.map(\.command) }
-
-    /// For the person: what is missing and how to install it (Portuguese).
+    /// For the person: what is missing and where to install it (Portuguese).
     var userMessage: String? {
         guard !missing.isEmpty else { return nil }
         let names = missing.map(\.name).joined(separator: " e ")
-        return "Falta instalar \(names) para o navegador \(engine.label). No Terminal: " + installCommands.joined(separator: " ; ")
+        return "Falta instalar \(names) para o navegador \(engine.label). Abra Ajustes → Navegador e toque em Instalar."
     }
 
     /// For the model's prompt: one short line (English), so it can tell the user once.
@@ -96,14 +93,15 @@ struct BrowserEngineStatus: Sendable, Equatable {
         guard !missing.isEmpty else { return nil }
         return "The \(engine.label) browser is not installed on this Mac (missing: \(missing.map(\.name).joined(separator: ", "))), so you have "
             + "only \(fetchTools), which run no JavaScript and keep no logins. If the task needs a real browser, tell the user "
-            + "once to run in the Terminal: " + installCommands.joined(separator: " ; ")
+            + "once to open Ajustes → Navegador and install it (one button, nothing else to set up)."
     }
 }
 
 /// Finds `agent-browser` and the engines on this Mac. Everything it reads is injected, so tests need no browser.
 struct BrowserEngineLocator: Sendable {
-    /// Directories searched for commands, in order: the user's own PATH (their login shell's, see `ShellEnvironment`) first,
-    /// then where Homebrew, npm, cargo and pip put things when the PATH does not say.
+    /// Directories searched for commands, in order: the app's own `navegador/bin` (what the app installed), then the user's
+    /// own PATH (their login shell's, see `ShellEnvironment`), then where Homebrew, npm, cargo and pip put things when the
+    /// PATH does not say.
     var searchPath: [String]
     var home: URL
     /// `CLOAKBROWSER_BINARY_PATH` and `CLOAKBROWSER_CACHE_DIR` live here.
@@ -111,11 +109,8 @@ struct BrowserEngineLocator: Sendable {
     var isExecutable: @Sendable (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }
     var directoryContents: @Sendable (String) -> [String] = { (try? FileManager.default.contentsOfDirectory(atPath: $0)) ?? [] }
     var exists: @Sendable (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
-
-    static let installAgentBrowser = "brew install agent-browser"
-    static let installChrome = "agent-browser install"
-    static let installObscura = "brew install obscura"
-    static let installCloak = "pip3 install cloakbrowser && python3 -m cloakbrowser install"
+    /// The folder the app installs into (`BrowserInstallLayout.root`); what is there is preferred to anything else.
+    var managedRoot: URL?
 
     /// The places a command usually is on a Mac, for when the PATH of the app does not include them.
     static func fallbackDirectories(home: URL) -> [String] {
@@ -123,13 +118,15 @@ struct BrowserEngineLocator: Sendable {
          home.appending(path: ".npm-global/bin").path, home.appending(path: ".volta/bin").path, "/usr/bin"]
     }
 
-    /// With the PATH of the user's login shell (`ShellEnvironment`).
+    /// With the PATH of the user's login shell (`ShellEnvironment`). What the app installed (`managedRoot`) is searched first.
     static func live(path: String?, home: URL = FileManager.default.homeDirectoryForCurrentUser,
-                     environment: [String: String] = ProcessInfo.processInfo.environment) -> BrowserEngineLocator {
+                     environment: [String: String] = ProcessInfo.processInfo.environment,
+                     managedRoot: URL? = nil) -> BrowserEngineLocator {
         let given = (path ?? "").split(separator: ":").map(String.init).filter { !$0.isEmpty }
+        let own = managedRoot.map { [BrowserInstallLayout(root: $0).binDirectory.path] } ?? []
         var seen: Set<String> = []
-        let directories = (given + fallbackDirectories(home: home)).filter { seen.insert($0).inserted }
-        return BrowserEngineLocator(searchPath: directories, home: home, environment: environment)
+        let directories = (own + given + fallbackDirectories(home: home)).filter { seen.insert($0).inserted }
+        return BrowserEngineLocator(searchPath: directories, home: home, environment: environment, managedRoot: managedRoot)
     }
 
     func command(_ name: String) -> String? {
@@ -144,40 +141,63 @@ struct BrowserEngineLocator: Sendable {
 
     func obscura() -> String? { command("obscura") }
 
-    /// Whether `agent-browser` will find a Chrome: the one `agent-browser install` downloads (`~/.agent-browser/browsers/chrome-*`),
-    /// or Chrome, Chromium or Brave in Applications (its own search, see `find_chrome` in agent-browser).
-    func chromeAvailable() -> Bool {
-        let cache = home.appending(path: ".agent-browser/browsers").path
-        for entry in directoryContents(cache) where entry.hasPrefix("chrome-") {
+    /// "Google Chrome for Testing" in a `chrome-<version>` folder, where `agent-browser install` puts it (the app is at the top of
+    /// the folder, or in a `chrome-mac-*` folder in it). The newest version wins.
+    func chromeForTesting(in cache: String) -> String? {
+        let app = "Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+        let folders = directoryContents(cache).filter { $0.hasPrefix("chrome-") }.sorted { BrowserVersion.isNewer($0, than: $1) }
+        for entry in folders {
             let folder = (cache as NSString).appendingPathComponent(entry)
-            let app = "Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
-            for relative in [app, "chrome-mac-arm64/" + app, "chrome-mac-x64/" + app]
-            where exists((folder as NSString).appendingPathComponent(relative)) {
-                return true
+            for relative in [app, "chrome-mac-arm64/" + app, "chrome-mac-x64/" + app] {
+                let path = (folder as NSString).appendingPathComponent(relative)
+                if exists(path) { return path }
             }
         }
+        return nil
+    }
+
+    /// The Chrome for Testing in a `chrome-<version>` folder as the installer left it.
+    static func chromeExecutable(inFolder folder: URL) -> URL? {
+        let app = "Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+        for relative in [app, "chrome-mac-arm64/" + app, "chrome-mac-x64/" + app] {
+            let path = folder.appending(path: relative)
+            if FileManager.default.isExecutableFile(atPath: path.path) { return path }
+        }
+        return nil
+    }
+
+    /// The Chrome the app installed itself (`<root>/chrome/chrome-<version>`): what the Chrome engine launches.
+    func installedChrome() -> String? {
+        guard let managedRoot else { return nil }
+        return chromeForTesting(in: BrowserInstallLayout(root: managedRoot).chromeDirectory.path)
+    }
+
+    /// Whether `agent-browser` will find a Chrome: the one the app installed, the one `agent-browser install` downloads
+    /// (`~/.agent-browser/browsers/chrome-*`), or Chrome, Chromium or Brave in Applications (its own search).
+    func chromeAvailable() -> Bool {
+        if installedChrome() != nil { return true }
+        if chromeForTesting(in: home.appending(path: ".agent-browser/browsers").path) != nil { return true }
         return ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
                 "/Applications/Chromium.app/Contents/MacOS/Chromium",
                 "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
                 "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary"].contains { exists($0) }
     }
 
-    /// CloakBrowser's Chromium: `CLOAKBROWSER_BINARY_PATH`, else the newest `chromium-<version>[-pro]` in its cache
-    /// (`CLOAKBROWSER_CACHE_DIR`, default `~/.cloakbrowser`), as its Python wrapper lays it out on macOS.
+    /// CloakBrowser's Chromium: `CLOAKBROWSER_BINARY_PATH`, else the newest `chromium-<version>[-pro]` in the app's own cache, in
+    /// `CLOAKBROWSER_CACHE_DIR`, or in `~/.cloakbrowser`, as its Python wrapper lays it out on macOS.
     func cloakChromium() -> String? {
         if let own = environment["CLOAKBROWSER_BINARY_PATH"], !own.isEmpty { return isExecutable(own) ? own : nil }
-        let cache = environment["CLOAKBROWSER_CACHE_DIR"].flatMap { $0.isEmpty ? nil : $0 } ?? home.appending(path: ".cloakbrowser").path
-        let versions = directoryContents(cache).filter { $0.hasPrefix("chromium-") }.sorted { Self.version($1).lexicographicallyPrecedes(Self.version($0)) }
-        for folder in versions {
-            let path = (cache as NSString).appendingPathComponent(folder + "/Chromium.app/Contents/MacOS/Chromium")
-            if isExecutable(path) { return path }
+        var caches: [String] = []
+        if let managedRoot { caches.append(BrowserInstallLayout(root: managedRoot).cloakCache.path) }
+        caches.append(environment["CLOAKBROWSER_CACHE_DIR"].flatMap { $0.isEmpty ? nil : $0 } ?? home.appending(path: ".cloakbrowser").path)
+        for cache in caches {
+            let versions = directoryContents(cache).filter { $0.hasPrefix("chromium-") }.sorted { BrowserVersion.isNewer($0, than: $1) }
+            for folder in versions {
+                let path = (cache as NSString).appendingPathComponent(folder + "/Chromium.app/Contents/MacOS/Chromium")
+                if isExecutable(path) { return path }
+            }
         }
         return nil
-    }
-
-    /// "chromium-145.0.7632.109.2-pro" -> [145, 0, 7632, 109, 2], to compare versions numerically.
-    private static func version(_ folder: String) -> [Int] {
-        folder.dropFirst("chromium-".count).split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) }
     }
 
     /// What `engine` needs and has. `simple` needs nothing.
@@ -185,23 +205,20 @@ struct BrowserEngineLocator: Sendable {
         var status = BrowserEngineStatus(engine: engine)
         guard engine.drivesABrowser else { return status }
         status.agentBrowser = agentBrowser()
-        if status.agentBrowser == nil {
-            status.missing.append(.init(name: "agent-browser", command: Self.installAgentBrowser))
-        }
+        if status.agentBrowser == nil { status.missing.append(.init(name: BrowserComponent.agentBrowser.name)) }
         switch engine {
         case .simple:
             break
         case .chrome:
-            // Without agent-browser the Chrome is not looked for: installing it is the next command anyway.
-            if status.agentBrowser == nil || !chromeAvailable() {
-                status.missing.append(.init(name: "Chrome", command: Self.installChrome))
-            }
+            // The Chrome the app installed is launched by its path; without one agent-browser looks for Chrome itself.
+            status.browserExecutable = installedChrome()
+            if status.browserExecutable == nil, !chromeAvailable() { status.missing.append(.init(name: BrowserComponent.chrome.name)) }
         case .obscura:
             status.browserExecutable = obscura()
-            if status.browserExecutable == nil { status.missing.append(.init(name: "Obscura", command: Self.installObscura)) }
+            if status.browserExecutable == nil { status.missing.append(.init(name: BrowserComponent.obscura.name)) }
         case .cloak:
             status.browserExecutable = cloakChromium()
-            if status.browserExecutable == nil { status.missing.append(.init(name: "CloakBrowser", command: Self.installCloak)) }
+            if status.browserExecutable == nil { status.missing.append(.init(name: BrowserComponent.cloak.name)) }
         }
         return status
     }
