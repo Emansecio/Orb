@@ -382,6 +382,20 @@ private struct ScriptedLLM: LLMClient {
 // MARK: - Words
 
 struct ProposalSpeechTests {
+    @Test func theExcerptEndsInASingleEllipsisNeverAfterThePeriod() {
+        let text = "Pesquise na web quando eu pedir, compare as fontes e devolva um resumo curto com os links.\nGuarde o que achou em notas na sua pasta.\nSe a pergunta for vaga, pergunte antes."
+        // Cut by lines: the period of the last kept line goes, the ellipsis stays.
+        let byLines = ProposalSpeech.excerpt(text, maxLines: 2, maxCharacters: 500)
+        #expect(byLines.hasSuffix("sua pasta…") && !byLines.contains("...") && !byLines.contains(".…"))
+        // Cut by length: at a word, with punctuation and blanks dropped.
+        let byLength = ProposalSpeech.excerpt("Primeiro passo, depois o segundo; e então o terceiro passo do trabalho todo.", maxLines: 3, maxCharacters: 40)
+        #expect(byLength.hasSuffix("…") && !byLength.hasSuffix(",…") && !byLength.hasSuffix(" …") && byLength.filter { $0 == "…" }.count == 1)
+        // What fits stays whole, period and all.
+        #expect(ProposalSpeech.excerpt("Pesquise e resuma.") == "Pesquise e resuma.")
+        #expect(ProposalSpeech.excerpt("a\nb\nc") == "a\nb\nc")
+        #expect(ProposalSpeech.excerpt("Acabou!!!\nmais\nmais\nmais", maxLines: 1) == "Acabou…")
+    }
+
     @Test func theCardIsReadAsOneSentence() {
         let proposal = OrbProposal(creator: OrbRef(id: UUID(), name: "Atlas"), name: "Pesquisador", role: "Cuida de pesquisas",
                                    capabilities: [.terminal, .browser])

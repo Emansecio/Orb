@@ -32,6 +32,24 @@ enum ProposalSpeech {
         }
     }
 
+    /// The start of the instructions for the card's collapsed view: at most `maxLines` lines and `maxCharacters` characters, cut at a
+    /// word, with the trailing punctuation and blanks dropped and one "…" in their place (never "pasta...."). The whole text when it fits.
+    static func excerpt(_ text: String, maxLines: Int = 3, maxCharacters: Int = 120) -> String {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        var kept = lines.prefix(maxLines).joined(separator: "\n")
+        var cut = lines.count > maxLines
+        if kept.count > maxCharacters {
+            kept = String(kept.prefix(maxCharacters))
+            if let space = kept.lastIndex(where: \.isWhitespace), kept.distance(from: kept.startIndex, to: space) > maxCharacters / 2 {
+                kept = String(kept[..<space])
+            }
+            cut = true
+        }
+        guard cut else { return text }
+        let trimmed = kept.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters).subtracting(CharacterSet(charactersIn: ")]}\"”»")))
+        return trimmed + "…"
+    }
+
     /// "Atlas propõe criar o Orb Pesquisador, Cuida de pesquisas. Pode usar terminal e web. Botões: Criar, Editar antes, Não criar."
     static func card(_ proposal: OrbProposal) -> String {
         var parts = ["\(proposal.creator.name) propõe criar o Orb \(proposal.name)" + (proposal.role.isEmpty ? "" : ", \(proposal.role)") + "."]
@@ -214,9 +232,10 @@ struct OrbProposalCard: View {
 
     /// Three lines of the instructions, and "Ver tudo" when there is more.
     private var instructions: some View {
-        let isLong = shown.instructions.count > 170 || shown.instructions.split(separator: "\n", omittingEmptySubsequences: false).count > 3
+        let excerpt = ProposalSpeech.excerpt(shown.instructions)
+        let isLong = excerpt != shown.instructions
         return VStack(alignment: .leading, spacing: 4) {
-            Text(shown.instructions)
+            Text(showsAll || !isLong ? shown.instructions : excerpt)
                 .font(.system(size: 12))
                 .foregroundStyle(Palette.secondary)
                 .lineLimit(showsAll ? nil : 3)
@@ -274,7 +293,7 @@ struct OrbProposalCard: View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Image(systemName: symbol)
                 .font(.system(size: 10))
-                .frame(width: 12)
+                .frame(width: 16, alignment: .center)
                 .accessibilityHidden(true)
             Text(text)
                 .fixedSize(horizontal: false, vertical: true)
@@ -331,10 +350,16 @@ struct OrbProposalCard: View {
             ForEach(Capability.allCases.filter { $0 != .connectors }) { capability in
                 let has = draft.creatorCapabilities.contains(capability)
                 HStack(spacing: 8) {
-                    Label(capability.label, systemImage: capability.symbol)
-                        .font(.system(size: 12))
-                        .foregroundStyle(has ? Palette.secondary : Palette.faint)
-                        .frame(width: 190, alignment: .leading)
+                    // The icons share one width, so every label starts at the same x (a globe is narrower than a terminal).
+                    HStack(spacing: 6) {
+                        Image(systemName: capability.symbol)
+                            .frame(width: 20, alignment: .center)
+                            .accessibilityHidden(true)
+                        Text(capability.label)
+                    }
+                    .font(.system(size: 12))
+                    .foregroundStyle(has ? Palette.secondary : Palette.faint)
+                    .frame(width: 200, alignment: .leading)
                     Toggle(capability.label, isOn: Binding(get: { draft.capabilities.contains(capability) && has },
                                                           set: { on in
                                                               if on { draft.capabilities.insert(capability) } else { draft.capabilities.remove(capability) }
