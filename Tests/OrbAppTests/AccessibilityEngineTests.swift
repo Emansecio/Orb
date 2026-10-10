@@ -358,11 +358,13 @@ struct AccessibilityRefusalTests {
 
     @Test func aDangerousElementFoundOnlyAtRunTimeIsRefused() async throws {
         let ok = framed(fakeButton("OK"), CGRect(x: 150, y: 150, width: 80, height: 20))
-        let bench = Bench(windows: [framed(fake("AXWindow", title: "A", [ok]), windowFrame)])
+        let window = framed(fake("AXWindow", title: "A", [ok]), windowFrame)
+        let bench = Bench(windows: [window])
         try await bench.read()
         try bench.addShot(marks: [1: "w1.1"], windowFrame: windowFrame)
-        // The reading says "OK" is there; the app's own hit test finds a delete button on top of it.
+        // The reading says "OK" is there; the app's own hit test finds a delete button on top of it, in the same window.
         let delete = fakeButton("Excluir tudo")
+        delete.attrs["AXWindow"] = .element(window)
         bench.system.hitHandler = { _, _ in delete }
         let call: [String: JSONValue] = ["action": .string("click"), "x": .number(180), "y": .number(110)]
         #expect(bench.actor().danger(.object(call)) == nil, "the card judged the reading: a click on OK")
@@ -487,6 +489,268 @@ struct AccessibilityPointingTests {
         _ = try await bench.act(["action": .string("click"), "id": .string("w1.1"), "count": .number(2)])
         #expect(ok.performed.isEmpty)
         #expect(bench.system.syntheticInput.events == [.click(CGPoint(x: 190, y: 160), window: 55, button: .left, count: 2, pid: 100)])
+    }
+}
+
+// MARK: - Found in review (each failed before its fix)
+
+struct AccessibilityReviewTests {
+    private func string(_ text: String) -> JSONValue { .string(text) }
+
+    // A line break is typed as Return (SyntheticEventBuilder): in a chat or mail app that sends.
+    @Test func aLineBreakSendsInAMessagingAppSoItIsDangerousAndRechecked() async throws {
+        let field = fake("AXTextField", title: "Mensagem")
+        field.settable = ["AXFocused"]
+        let bench = Bench(windows: [fake("AXWindow", title: "Conversa", [field])])
+        bench.system.apps[0] = FakeAccessibility.app("Mensagens", "com.apple.MobileSMS", pid: 100)
+        bench.root.attrs["AXFocusedUIElement"] = .element(field)
+        try await bench.read(["app": string("Mensagens")])
+        let call: [String: JSONValue] = ["action": string("type"), "id": string("w1.1"), "value": string("oi\ntudo bem?")]
+        #expect(bench.actor().danger(.object(call))?.contains("Return") == true)
+        #expect(bench.actor().danger(.object(["action": string("type"), "value": string("oi\n")])) != nil, "into the focused field too")
+        #expect(bench.actor().danger(.object(["action": string("set_value"), "id": string("w1.1"), "value": string("a\r\nb")])) != nil)
+        #expect(bench.actor().danger(.object(["action": string("type"), "id": string("w1.1"), "value": string("sem quebra")])) == nil)
+
+        // A card that did not show the danger does not cover the Return found at run time.
+        var unconfirmed = bench.context
+        unconfirmed.judgedDanger = false
+        let message = await bench.failure { try await bench.actor().run(.object(call), context: unconfirmed) }
+        #expect(message.hasPrefix("Não fiz:") && message.contains("quebra de linha"))
+        let blind: [String: JSONValue] = ["action": string("type"), "value": string("oi\n")]
+        #expect(await bench.failure { try await bench.actor().run(.object(blind), context: unconfirmed) }.contains("quebra de linha"))
+        #expect(bench.system.syntheticInput.events.isEmpty)
+        var confirmed = bench.context
+        confirmed.judgedDanger = true
+        _ = try await bench.actor().run(.object(call), context: confirmed)
+        #expect(bench.system.syntheticInput.typed(to: 100) == "oi\ntudo bem?")
+    }
+
+    @Test func aLineBreakOutsideMessagingAppsNeedsNoCard() async throws {
+        let field = fake("AXTextField", title: "Texto")
+        field.settable = ["AXFocused"]
+        let bench = Bench(windows: [fake("AXWindow", title: "Nota", [field])])
+        bench.root.attrs["AXFocusedUIElement"] = .element(field)
+        try await bench.read()
+        let call: [String: JSONValue] = ["action": string("type"), "id": string("w1.1"), "value": string("linha 1\nlinha 2")]
+        #expect(bench.actor().danger(.object(call)) == nil)
+        var context = bench.context
+        context.judgedDanger = false
+        _ = try await bench.actor().run(.object(call), context: context)
+        #expect(bench.system.syntheticInput.typed(to: 100) == "linha 1\nlinha 2")
+    }
+
+    @Test func anAppThatComesForwardWhenFocusedGetsNothingTypedAndIsSentBack() async throws {
+        let field = fake("AXTextField", title: "Nome")
+        field.settable = ["AXFocused"]
+        let bench = Bench(windows: [fake("AXWindow", title: "A", [field])])
+        bench.root.attrs["AXFocusedUIElement"] = .element(field)
+        let system = bench.system
+        let safari = fakeApp(windows: [])
+        safari.settable = ["AXFrontmost"]
+        safari.onSet = { name, _ in if name == "AXFrontmost" { system.frontmost = 200 } }
+        system.roots[200] = safari
+        system.frontmost = 200
+        field.onSet = { name, _ in if name == "AXFocused" { system.frontmost = 100 } }
+        try await bench.read()
+        let message = await bench.failure { try await bench.act(["action": string("type"), "id": string("w1.1"), "value": string("oi")]) }
+        #expect(message.hasPrefix(UIActTool.takeoverMarker) && message.contains("veio para a frente"))
+        #expect(system.syntheticInput.events.isEmpty, "nothing typed into an app the person now has in front")
+        #expect(safari.assignedValue("AXFrontmost")?.bool == true && system.frontmost == 200)
+        // Remembered: focusing it again needs the screen.
+        #expect(await bench.failure { try await bench.act(["action": string("focus"), "id": string("w1.1")]) }.hasPrefix(UIActTool.takeoverMarker))
+    }
+
+    @Test func anErrorAfterActingStillSendsTheAppBack() async throws {
+        let bench = Bench(windows: [fake("AXWindow", title: "A", [fakeButton("OK")])])
+        let system = bench.system
+        let safari = fakeApp(windows: [])
+        safari.settable = ["AXFrontmost"]
+        system.roots[200] = safari
+        system.frontmost = 200
+        // The key event brings the app forward, and then the sending fails.
+        system.syntheticInput.beforeEach = { system.frontmost = 100 }
+        system.syntheticInput.error = ToolError("o app recusou o evento")
+        try await bench.read()
+        let message = await bench.failure { try await bench.act(["action": string("key"), "keys": string("f5")]) }
+        #expect(message.contains("recusou") && message.contains("veio para a frente sozinho"))
+        #expect(safari.assignedValue("AXFrontmost")?.bool == true, "the person's app is given back on the error path too")
+    }
+
+    @Test func aCancelledActionStillSendsTheAppBack() async throws {
+        let field = fake("AXTextField", title: "Nome")
+        field.settable = ["AXFocused"]
+        let bench = Bench(windows: [fake("AXWindow", title: "A", [field])])
+        bench.root.attrs["AXFocusedUIElement"] = .element(field)
+        let system = bench.system
+        let safari = fakeApp(windows: [])
+        safari.settable = ["AXFrontmost"]
+        system.roots[200] = safari
+        system.frontmost = 200
+        try await bench.read()
+        let gate = TakeoverGate()
+        // The app comes forward while the text goes out, and the turn is stopped then.
+        system.syntheticInput.beforeEach = {
+            system.frontmost = 100
+            Task { await gate.release() }
+        }
+        system.syntheticInput.chunkSize = 1
+        let task = Task { try await bench.act(["action": string("type"), "id": string("w1.1"), "value": string(String(repeating: "a", count: 200))]) }
+        await gate.wait()
+        task.cancel()
+        _ = try? await task.value
+        #expect(safari.assignedValue("AXFrontmost")?.bool == true)
+    }
+
+    @Test func aRunHoldsToTheCardsVerdictNotToANewJudgement() async throws {
+        let delete = fakeButton("Excluir")
+        let bench = Bench(windows: [fake("AXWindow", title: "A", [delete])])
+        try await bench.read()
+        let call: [String: JSONValue] = ["action": string("press"), "id": string("w1.1")]
+        #expect(bench.actor().danger(.object(call)) != nil, "judged now, from this store, the call is dangerous")
+        // The card was judged from other readings (another process's, or before this one) and said it was harmless.
+        var context = bench.context
+        context.judgedDanger = false
+        let message = await bench.failure { try await bench.actor().run(.object(call), context: context) }
+        #expect(message.hasPrefix("Não fiz:") && delete.performed.isEmpty)
+        // The same verdict reaching the tools server inside the call.
+        var marked = call
+        marked[UIActTool.cardKey] = string(UIActTool.cardMark(dangerous: false))
+        #expect(await bench.failure { try await bench.act(marked) }.hasPrefix("Não fiz:"))
+        marked[UIActTool.cardKey] = string(UIActTool.cardMark(dangerous: true))
+        _ = try await bench.act(marked)
+        #expect(delete.performed == ["AXPress"])
+    }
+
+    @Test func theToolsServerTakesADangerousVerdictOnlyWithTheAppsToken() {
+        let none = ToolContext(workingDirectory: FileManager.default.temporaryDirectory)
+        func judged(_ mark: String?, _ context: ToolContext = none) -> Bool? {
+            UIActTool.judged(.object(mark.map { [UIActTool.cardKey: .string($0)] } ?? [:]), context: context, token: "tok")
+        }
+        #expect(judged(nil) == nil)
+        #expect(judged("tok:dangerous") == true)
+        #expect(judged("forjado:dangerous") == nil, "a verdict the model wrote itself is not taken")
+        #expect(judged("qualquer:safe") == false, "a harmless verdict only makes the run stricter")
+        var native = none
+        native.judgedDanger = true
+        #expect(judged("x:safe", native) == true, "the native engine's verdict comes first")
+        let folder = FileManager.default.temporaryDirectory
+        #expect(OrbToolsMCPServer.config(directory: folder, mac: true).environment[UIActTool.cardTokenVariable] == UIActTool.cardToken)
+        #expect(OrbToolsMCPServer.config(directory: folder, mac: false).environment[UIActTool.cardTokenVariable] == nil)
+    }
+
+    @Test func aPointIsNeverPressedInAnotherWindowOfTheApp() async throws {
+        let ok = framed(fakeButton("OK"), CGRect(x: 150, y: 150, width: 80, height: 20))
+        let bench = Bench(windows: [framed(fake("AXWindow", title: "A", [ok]), windowFrame)])
+        try await bench.read()
+        try bench.addShot(marks: [:], windowFrame: windowFrame)
+        // Another window of the app lies over the point: the app's hit test finds its button, but the click is about the
+        // screenshot's window.
+        let other = fake("AXWindow", title: "Outra")
+        let foreign = fakeButton("Outro")
+        foreign.attrs["AXWindow"] = .element(other)
+        bench.system.hitHandler = { _, _ in foreign }
+        let text = try await bench.act(["action": string("click"), "x": .number(180), "y": .number(110)])
+        #expect(foreign.performed.isEmpty && ok.performed == ["AXPress"])
+        #expect(text.contains("“OK”"))
+    }
+
+    @Test func aHitInASheetOfTheWindowStillCounts() {
+        let window = fake("AXWindow", title: "A")
+        let sheet = fake("AXSheet")
+        sheet.attrs["AXParent"] = .element(window)
+        let button = fakeButton("Cancelar")
+        button.attrs["AXWindow"] = .element(sheet)
+        #expect(UIActTool.belongs(button, to: window))
+        let loose = fakeButton("Sem janela")
+        loose.attrs["AXParent"] = .element(fake("AXGroup"))
+        #expect(!UIActTool.belongs(loose, to: window))
+        (loose.attrs["AXParent"]?.element as? FakeElement)?.attrs["AXParent"] = .element(window)
+        #expect(UIActTool.belongs(loose, to: window))
+    }
+
+    @Test func takeoverAtAPointChecksTheWindowStillHasTheScreenshotsSize() async throws {
+        let window = framed(fake("AXWindow", title: "A", [framed(fakeButton("OK"), CGRect(x: 150, y: 150, width: 80, height: 20))]), windowFrame)
+        let bench = Bench(windows: [window])
+        try await bench.read()
+        try bench.addShot(marks: [:], windowFrame: windowFrame)
+        window.frame = CGRect(x: 100, y: 100, width: 520, height: 300)
+        let message = await bench.failure {
+            try await bench.act(["action": string("click"), "x": .number(180), "y": .number(110), "takeover": .bool(true)])
+        }
+        #expect(message.contains("mudou de tamanho"))
+        #expect(bench.system.screenOwner.takes == 0, "the screen is not taken to click somewhere else")
+    }
+
+    @Test func aTakeoverThatCouldNotGiveTheAppBackSaysSo() async throws {
+        let button = framed(fakeButton("Desenhar"), CGRect(x: 200, y: 200, width: 100, height: 40))
+        let bench = Bench(windows: [framed(fake("AXWindow", title: "A", [button]), windowFrame)])
+        try await bench.read()
+        bench.system.screenOwner.restoredApp = nil
+        bench.system.screenOwner.restoreFailed = true
+        let text = try await bench.act(["action": string("press"), "id": string("w1.1"), "takeover": .bool(true)])
+        #expect(text.contains("não consegui devolver o app da frente") && text.contains("Avise o usuário"))
+        #expect(!text.contains("nada a devolver"))
+    }
+
+    @Test func anEventFindsItsWindowWithoutScreenRecording() async throws {
+        let logo = framed(fake("AXImage", description: "Logo"), CGRect(x: 120, y: 140, width: 40, height: 20))
+        let bench = Bench(windows: [framed(fake("AXWindow", title: "A", [logo]), windowFrame)])
+        // ScreenCaptureKit refuses (no Screen Recording); the window server lists the window all the same, without its title.
+        bench.system.windowCapturer.error = ToolError("Sem Gravação de Tela")
+        bench.system.listedWindows[100] = [CapturableWindow(windowID: 56, pid: 100, frame: windowFrame, title: "")]
+        try await bench.read()
+        _ = try await bench.act(["action": string("press"), "id": string("w1.1")])
+        #expect(bench.system.syntheticInput.events == [.click(CGPoint(x: 140, y: 150), window: 56, button: .left, count: 1, pid: 100)])
+    }
+
+    @Test func theWindowServerListIsReadForOneProcessAndTheNormalLayer() {
+        let info: [[String: Any]] = [
+            [kCGWindowNumber as String: 7, kCGWindowOwnerPID as String: 100, kCGWindowLayer as String: 0, kCGWindowIsOnscreen as String: true,
+             kCGWindowBounds as String: ["X": 10, "Y": 20, "Width": 300, "Height": 200], kCGWindowName as String: "Doc"],
+            [kCGWindowNumber as String: 8, kCGWindowOwnerPID as String: 100, kCGWindowLayer as String: 25,
+             kCGWindowBounds as String: ["X": 0, "Y": 0, "Width": 30, "Height": 20]],
+            [kCGWindowNumber as String: 9, kCGWindowOwnerPID as String: 200, kCGWindowLayer as String: 0,
+             kCGWindowBounds as String: ["X": 0, "Y": 0, "Width": 30, "Height": 20]],
+            [kCGWindowNumber as String: 10, kCGWindowOwnerPID as String: 100, kCGWindowLayer as String: 0,
+             kCGWindowBounds as String: ["X": 0, "Y": 0, "Width": 50, "Height": 40]],
+        ]
+        let windows = LiveAccessibilitySystem.windows(in: info, pid: 100)
+        #expect(windows == [CapturableWindow(windowID: 7, pid: 100, frame: CGRect(x: 10, y: 20, width: 300, height: 200), title: "Doc"),
+                            CapturableWindow(windowID: 10, pid: 100, frame: CGRect(x: 0, y: 0, width: 50, height: 40), isOnScreen: false)])
+    }
+
+    @Test func theCardHidesWhatIsTypedIntoTheFocusedFieldWhenItMayBeAPassword() async throws {
+        let bench = Bench(windows: [fake("AXWindow", title: "Entrar", [fake("AXTextField", title: "Usuário"),
+                                                                        fake("AXTextField", subrole: "AXSecureTextField")])])
+        try await bench.read()
+        let blind: [String: JSONValue] = ["action": string("type"), "value": string("hunter2")]
+        let detail = bench.actor().summary(.object(blind)).detail
+        #expect(!detail.contains("hunter2") && detail.contains("ocultos"))
+        // Without any reading of the app the card cannot tell either.
+        let unread = Bench(windows: [])
+        #expect(!unread.actor().summary(.object(blind.merging(["app": string("Notas")]) { $1 })).detail.contains("hunter2"))
+        // A window without password fields shows what will be typed.
+        let plain = Bench(windows: [fake("AXWindow", title: "Nota", [fake("AXTextField", title: "Texto")])])
+        try await plain.read()
+        #expect(plain.actor().summary(.object(blind)).detail.contains("hunter2"))
+    }
+
+    @Test func aScreenshotMergedIntoAnOlderReadingMakesItsAppTheLatest() {
+        let store = UISnapshotStore(directory: nil)
+        let bot = UUID()
+        let notes = AccessibilityApp(name: "Notas", bundleID: "com.apple.Notes", pid: 100)
+        let mail = AccessibilityApp(name: "Mail", bundleID: "com.apple.mail", pid: 300)
+        let reading = UISnapshot(app: notes, windowIndex: 1, windowTitle: "A", entries: [:], takenAt: Date.now.addingTimeInterval(-20))
+        store.save(reading, bot: bot)
+        store.save(UISnapshot(app: mail, windowIndex: 1, windowTitle: "Caixa", entries: [:], takenAt: Date.now.addingTimeInterval(-10)), bot: bot)
+        #expect(store.latest(bot: bot)?.app == mail)
+        // A screenshot of Notas now: merged into the Notas reading, it keeps that reading's time…
+        let shot = ScreenshotReading(app: notes, windowIndex: 1, windowTitle: "A", candidates: [], marks: [], shot: nil)
+        let merged = UISnapshot.merging(shot, into: store.snapshot(bot: bot, app: notes))
+        #expect(merged.takenAt == reading.takenAt)
+        store.save(merged, bot: bot)
+        // …and still it is what the Orb looked at last.
+        #expect(store.latest(bot: bot)?.app == notes)
     }
 }
 
@@ -968,16 +1232,28 @@ private final class FakePorts: @unchecked Sendable {
         var registered: Set<AXNotification> = []
         weak var sink: (any AXEventSink)?
         let accepts: Bool
+        /// Like a hung app: every registration and removal goes unanswered (each would cost the whole timeout).
+        var hung = false
+        private var calls = 0
+        /// Registrations and removals asked of the app.
+        var asked: Int { lock.withLock { calls } }
         init(sink: any AXEventSink, accepts: Bool) {
             self.sink = sink
             self.accepts = accepts
         }
-        func add(_ notification: AXNotification) -> Bool {
-            guard accepts else { return false }
+        func add(_ notification: AXNotification) -> AXRegistration {
+            lock.withLock { calls += 1 }
+            if lock.withLock({ hung }) { return .hung }
+            guard accepts else { return .refused }
             lock.withLock { _ = registered.insert(notification) }
+            return .accepted
+        }
+        @discardableResult func remove(_ notification: AXNotification) -> Bool {
+            lock.withLock { calls += 1 }
+            if lock.withLock({ hung }) { return false }
+            lock.withLock { _ = registered.remove(notification) }
             return true
         }
-        func remove(_ notification: AXNotification) { lock.withLock { _ = registered.remove(notification) } }
         var source: CFRunLoopSource? { nil }
         var current: Set<AXNotification> { lock.withLock { registered } }
     }
@@ -985,9 +1261,11 @@ private final class FakePorts: @unchecked Sendable {
     private let lock = NSLock()
     private var made: [Int32: Port] = [:]
     var accepts = true
+    var hung = false
 
     func make(_ pid: Int32, _ sink: any AXEventSink) -> Port {
         let port = Port(sink: sink, accepts: accepts)
+        port.hung = hung
         lock.withLock { made[pid] = port }
         return port
     }
@@ -1045,6 +1323,33 @@ struct AXEventHubTests {
         hub.appQuit(7)
         #expect(await iterator.next() == nil, "an app that quits ends its streams")
         #expect(hub.observedApps == 0)
+    }
+
+    @Test func aHungAppIsAskedOnceNotOncePerNotification() async throws {
+        // Fourteen notifications to a hung app would hold its session for fourteen timeouts: the first unanswered call stops it.
+        let ports = FakePorts()
+        ports.hung = true
+        let hub = hub(ports)
+        var iterator = hub.events(pid: 5, UISettle.notifications).makeAsyncIterator()
+        let port = try #require(ports.port(5))
+        #expect(UISettle.notifications.count == 14)
+        #expect(port.asked == 1)
+        #expect(await iterator.next() == nil, "nothing registered: the caller polls instead")
+
+        // An app that answers again is asked normally; when it hangs during the removals, they stop at the first one too.
+        let live = FakePorts()
+        let hub2 = self.hub(live, idle: .seconds(30))
+        let stream = hub2.events(pid: 6, UISettle.notifications)
+        let answering = try #require(live.port(6))
+        #expect(answering.current == UISettle.notifications)
+        let before = answering.asked
+        answering.hung = true
+        let task = Task { for await _ in stream {} }
+        task.cancel()
+        await task.value
+        try #require(await waitUntil("the removal ran") { answering.asked > before })
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(answering.asked == before + 1)
     }
 
     @Test func anAppThatRefusesNotificationsGivesAStreamThatEndsAtOnce() async {

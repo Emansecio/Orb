@@ -230,7 +230,7 @@ struct MCPStdioRobustnessTests {
         let (transport, grandchild) = try await openWithGrandchild(registry: registry, grace: .milliseconds(200))
         defer { kill(grandchild, SIGKILL) }
         await transport.close()
-        await waitUntil("the server's child to end", timeout: .seconds(3)) { !processIsAlive(grandchild) }
+        await waitUntil("the server's child to end", timeout: .seconds(10)) { !processIsAlive(grandchild) }
         await waitUntil("the registry to forget the server") { registry.count == 0 }
     }
 

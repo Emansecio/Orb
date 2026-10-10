@@ -13,12 +13,20 @@ protocol AXEventSink: AnyObject, Sendable {
     func deliver(_ name: String, element: (any AccessibilityElement)?)
 }
 
+/// What an app said to a notification being registered.
+enum AXRegistration: Sendable, Equatable {
+    case accepted
+    case refused
+    /// The app did not answer (`cannotComplete`): asking it anything more now only waits the timeout again.
+    case hung
+}
+
 /// One app's observer: registers notifications with the app (IPC: call it off the main thread, from the app's queue) and
 /// owns the run loop source the hub schedules.
 protocol AXEventPort: AnyObject, Sendable {
-    /// Whether the app accepted the notification.
-    func add(_ notification: AXNotification) -> Bool
-    func remove(_ notification: AXNotification)
+    func add(_ notification: AXNotification) -> AXRegistration
+    /// False when the app did not answer.
+    @discardableResult func remove(_ notification: AXNotification) -> Bool
     /// Scheduled on the hub's run loop while the app is observed; nil for ports that deliver by other means (tests).
     var source: CFRunLoopSource? { get }
 }
@@ -42,15 +50,18 @@ final class LiveAXEventPort: AXEventPort, @unchecked Sendable {
 
     var source: CFRunLoopSource? { AXObserverGetRunLoopSource(observer) }
 
-    func add(_ notification: AXNotification) -> Bool {
+    func add(_ notification: AXNotification) -> AXRegistration {
         LiveAccessibilityElement.offMain()
-        let status = AXObserverAddNotification(observer, app, notification.rawValue as CFString, refcon)
-        return status == .success || status == .notificationAlreadyRegistered
+        switch AXObserverAddNotification(observer, app, notification.rawValue as CFString, refcon) {
+        case .success, .notificationAlreadyRegistered: return .accepted
+        case .cannotComplete: return .hung
+        default: return .refused
+        }
     }
 
-    func remove(_ notification: AXNotification) {
+    @discardableResult func remove(_ notification: AXNotification) -> Bool {
         LiveAccessibilityElement.offMain()
-        AXObserverRemoveNotification(observer, app, notification.rawValue as CFString)
+        return AXObserverRemoveNotification(observer, app, notification.rawValue as CFString) != .cannotComplete
     }
 
     /// Called once, on the hub's thread, after the source was removed from the run loop.
@@ -194,7 +205,9 @@ final class AXEventHub: AccessibilityEvents, @unchecked Sendable {
         utility.async { [weak self] in self?.sync(entry) }
     }
 
-    /// Makes what the app has registered match what the subscriptions want.
+    /// Makes what the app has registered match what the subscriptions want. A hung app stops it at the first call it does
+    /// not answer: each further call would wait the whole messaging timeout again (14 of them hold the app's session for
+    /// 14 s). What could not be removed is forgotten anyway (an unwanted notification reaches no subscriber).
     private func sync(_ entry: Entry) {
         entry.portLock.withLock {
             let (wanted, port): (Set<AXNotification>, (any AXEventPort)?) = lock.withLock {
@@ -202,11 +215,17 @@ final class AXEventHub: AccessibilityEvents, @unchecked Sendable {
                 return (entry.subscribers.values.reduce(into: Set()) { $0.formUnion($1.notifications) }, entry.port)
             }
             guard let port else { return }
-            for notification in wanted.subtracting(entry.registered) where port.add(notification) {
-                entry.registered.insert(notification)
+            var hung = false
+            for notification in wanted.subtracting(entry.registered).sorted(by: { $0.rawValue < $1.rawValue }) {
+                switch port.add(notification) {
+                case .accepted: entry.registered.insert(notification)
+                case .refused: continue
+                case .hung: hung = true
+                }
+                if hung { break }
             }
             for notification in entry.registered.subtracting(wanted) {
-                port.remove(notification)
+                if !hung, !port.remove(notification) { hung = true }
                 entry.registered.remove(notification)
             }
         }
@@ -272,7 +291,9 @@ final class AXEventHub: AccessibilityEvents, @unchecked Sendable {
         for subscriber in subscribers { subscriber.continuation.finish() }
         entry.portLock.withLock {
             // An app still running is told to stop sending; one that quit has nobody to tell.
-            if !appGone, let port { for notification in entry.registered { port.remove(notification) } }
+            if !appGone, let port {
+                for notification in entry.registered where !port.remove(notification) { break } // a hung app is not waited on again
+            }
             entry.registered.removeAll()
         }
         guard let port else { return }

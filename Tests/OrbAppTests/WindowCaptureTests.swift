@@ -252,7 +252,8 @@ struct ScreenshotToolTests {
 
     /// An "Editor" app (pid 100) with one window "Doc" at (100, 50) of 400×300, a front app that is the Orb (pid 1) and a
     /// capturable window with the same frame.
-    private func rig(trusted: Bool = true, screen: Bool = true, extraLabels: Int = 0, children: [FakeElement]? = nil) -> Rig {
+    private func rig(trusted: Bool = true, screen: Bool = true, extraLabels: Int = 0, children: [FakeElement]? = nil,
+                     sessions: AXSessions = AXSessions(deadlines: .patient)) -> Rig {
         let system = FakeAccessibility()
         system.trusted = trusted
         system.apps = [FakeAccessibility.app("Editor", "com.example.editor", pid: 100), FakeAccessibility.app("Orb", "app.orb", pid: 1, active: true)]
@@ -272,7 +273,7 @@ struct ScreenshotToolTests {
         let folder = FileManager.default.temporaryDirectory.appending(path: "orb-shots-\(UUID().uuidString)")
         let store = UISnapshotStore(directory: nil)
         let tool = ScreenshotTool(system: system, store: store, screenAccess: ScreenCaptureAccess(isGranted: { screen }, request: { requests.bump() }),
-                                  folder: folder, ownPID: 1, frontWindowPID: { _ in 100 })
+                                  folder: folder, ownPID: 1, frontWindowPID: { _ in 100 }, sessions: sessions)
         return Rig(tool: tool, system: system, store: store, requests: requests, folder: folder)
     }
 
@@ -498,6 +499,26 @@ struct ScreenshotToolTests {
         let rig = rig(children: [frame(fakeButton("Salvar"), 120, 70, 80, 24), { let stuck = fakeButton("Preso"); stuck.failures["*"] = .cannotComplete; stuck.frame = CGRect(x: 120, y: 110, width: 80, height: 24); return stuck }()])
         let report = try await run(rig, ["app": .string("Editor"), "ocr": .string("off")])
         #expect(report.contains("não respondeu") && report.contains("incompletas") && report.contains("[1] w1.1 button “Salvar”"))
+        try? FileManager.default.removeItem(at: rig.folder)
+    }
+
+    @Test func aHungAppCostsOnlyTheMarksAndTheNextCallFailsAtOnce() async throws {
+        // The window and the marks are read through the app's session, with its deadline: a hung app does not hold the
+        // screenshot (nor a thread of the cooperative pool) until it answers, and while that call is out the next fails at once.
+        let short = AXDeadlines(read: .milliseconds(150), readWithQuery: .milliseconds(150), action: .milliseconds(150))
+        let rig = rig(sessions: AXSessions(deadlines: short))
+        let root = try #require(rig.system.roots[100])
+        // Long enough that a busy machine running the whole suite still sees the difference (before: ≥ 15 s per call).
+        root.stall = .seconds(15)
+        let clock = ContinuousClock()
+        let begin = clock.now
+        let report = try await run(rig, ["app": .string("Editor")])
+        #expect(begin.duration(to: clock.now) < .seconds(10))
+        #expect(report.contains("Captura salva") && report.contains("Sem marcas") && report.contains("não respondeu"))
+        let again = clock.now
+        let second = try await run(rig, ["app": .string("Editor")])
+        #expect(again.duration(to: clock.now) < .seconds(5))
+        #expect(second.contains("Captura salva") && second.contains("ainda está ocupado"))
         try? FileManager.default.removeItem(at: rig.folder)
     }
 

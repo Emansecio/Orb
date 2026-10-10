@@ -18,6 +18,8 @@ final class FakeTakeoverWorld: TakeoverPlatform, @unchecked Sendable {
     var windows: [Int32: FakeElement] = [:]
     /// An app that never comes forward when told to.
     var ignoresFrontmost: Set<Int32> = []
+    /// An app that does not come forward when activated either (the takeover's second way back).
+    var ignoresActivation: Set<Int32> = []
     let poster = FakeTakeoverPoster()
 
     init(front: TakeoverFront?, cursor: CGPoint) {
@@ -44,10 +46,33 @@ final class FakeTakeoverWorld: TakeoverPlatform, @unchecked Sendable {
 
     func root(of app: AccessibilityApp) -> any AccessibilityElement { FakeApplicationElement(world: self, app: app) }
     func frontmost() -> TakeoverFront? { front }
-    func cursorLocation() -> CGPoint { cursorNow }
+    func cursorLocation() -> CGPoint {
+        lock.withLock {
+            if let (point, left) = pending {
+                if left <= 1 { cursor = point; pending = nil } else { pending = (point, left - 1) }
+            }
+            return cursor
+        }
+    }
+    /// A move that reaches the cursor only after it has been looked at `reads` times.
+    func moveLater(to point: CGPoint, afterReads reads: Int) {
+        lock.withLock {
+            // The same move posted again does not start over.
+            if let current = pending, current.0 == point { return }
+            pending = (point, reads)
+        }
+    }
+    private var pending: (CGPoint, Int)?
     func warpCursor(to point: CGPoint) { lock.withLock { cursor = point; calls.append("warp") } }
     func associateCursor() { lock.withLock { calls.append("associate") } }
     func makePoster() -> any TakeoverEventPoster { poster }
+    func activate(_ pid: Int32) {
+        lock.withLock {
+            calls.append("activate:\(pid)")
+            guard !ignoresActivation.contains(pid) else { return }
+            frontApp = TakeoverFront(pid: pid, name: pid == 10 ? "Safari" : "App \(pid)", bundleID: nil)
+        }
+    }
 }
 
 /// The application element: `AXFrontmost` is writable and brings the app forward.
@@ -91,6 +116,8 @@ final class FakeTakeoverPoster: TakeoverEventPoster, @unchecked Sendable {
     var cursorIgnoresEvents = false
     /// How long each event blocks, like a slow system.
     var delay: Duration = .zero
+    /// A move reaches the cursor only after it has been read this many times, like a window server under load.
+    var cursorArrivesAfterReads = 0
 
     var events: [Event] { lock.withLock { recorded } }
 
@@ -102,7 +129,13 @@ final class FakeTakeoverPoster: TakeoverEventPoster, @unchecked Sendable {
     }
 
     func mouse(_ event: TakeoverMouseEvent, at point: CGPoint, button: MouseButton, clickState: Int) {
-        if (event == .moved || event == .dragged), !cursorIgnoresEvents { world?.cursorNow = point }
+        if (event == .moved || event == .dragged), !cursorIgnoresEvents {
+            if cursorArrivesAfterReads > 0 {
+                world?.moveLater(to: point, afterReads: cursorArrivesAfterReads)
+            } else {
+                world?.cursorNow = point
+            }
+        }
         record(.mouse(event, point, button, clickState: clickState))
     }
     func key(virtualKey: UInt16, down: Bool, modifiers: KeyStroke.Modifiers) { record(.key(virtualKey, down: down, modifiers)) }
@@ -329,9 +362,41 @@ struct ScreenTakeoverTests {
     @Test func anAppThatWillNotComeBackIsNotReportedAsRestored() async throws {
         let rig = TakeoverRig()
         rig.world.ignoresFrontmost = [10]
+        rig.world.ignoresActivation = [10]
         let report = try await rig.takeOver { _ in 1 }
         #expect(report.restoredApp == nil, "it could not be put back, so the report does not say it was")
+        #expect(report.restoreFailed, "and the report says the person's app is not back")
+        #expect(rig.world.log.contains("activate:10"), "the second way was tried")
         #expect(rig.world.front?.pid == 20)
+    }
+
+    @Test func whenAXFrontmostDoesNotBringTheAppBackActivatingItDoes() async throws {
+        let rig = TakeoverRig()
+        rig.world.ignoresFrontmost = [10]
+        let report = try await rig.takeOver { _ in 1 }
+        #expect(report.restoredApp == "Safari" && !report.restoreFailed)
+        #expect(rig.world.front?.pid == 10)
+        #expect(rig.world.log.filter { $0.hasPrefix("activate") } == ["activate:10"])
+    }
+
+    @Test func aFailedRestoreIsToldEvenWhenTheBodyFailed() async throws {
+        struct Boom: LocalizedError { var errorDescription: String? { "Deu errado." } }
+        let rig = TakeoverRig()
+        rig.world.ignoresFrontmost = [10]
+        rig.world.ignoresActivation = [10]
+        do {
+            _ = try await rig.takeOver { _ in throw Boom() }
+            Issue.record("the body's error must come through")
+        } catch {
+            #expect(error.localizedDescription.hasPrefix("Deu errado."))
+            #expect(error.localizedDescription.contains("não consegui devolver Safari"))
+        }
+    }
+
+    @Test func aRestoreThatWorkedTheFirstWayNeverActivates() async throws {
+        let rig = TakeoverRig()
+        let report = try await rig.takeOver { _ in 1 }
+        #expect(!report.restoreFailed && !rig.world.log.contains { $0.hasPrefix("activate") })
     }
 
     // MARK: The system-wide lock
@@ -424,13 +489,31 @@ struct ScreenTakeoverTests {
         #expect(rig.world.front?.pid == 10, "the person's app is put back all the same")
     }
 
-    @Test func aCursorThatNeverArrivesCountsAsTheMouseBeingHeld() async throws {
+    @Test func aCursorThatNeverArrivesStopsTheTakeoverWithoutBlamingThePerson() async throws {
         let rig = TakeoverRig()
         rig.world.poster.cursorIgnoresEvents = true
-        await #expect(throws: TakeoverFailure.userMovedMouse) {
+        // It stayed where the hand left it: a slow system, not the person (who would have put it somewhere else).
+        await #expect(throws: TakeoverFailure.cursorStuck) {
             _ = try await rig.takeOver { hand in try await hand.click(at: CGPoint(x: 100, y: 100), button: .left, count: 1) }
         }
         #expect(rig.world.front?.pid == 10)
+        let moves = rig.world.poster.events.filter { if case .mouse(.moved, _, _, _) = $0 { true } else { false } }
+        #expect(moves.count == 2, "the move is posted once more before giving up")
+        #expect(!rig.world.poster.events.contains { if case .mouse(.down, _, _, _) = $0 { true } else { false } }, "nothing was pressed")
+        #expect(rig.world.log.contains("warp"), "the cursor is put back, since the person did not take it")
+    }
+
+    @Test func aCursorThatArrivesLateUnderLoadIsWaitedFor() async throws {
+        // A window server that applies the move late (a loaded Mac) is not the person moving the mouse: here only after the
+        // cursor was looked at 40 times, more than 60 ms of looking ever gave.
+        let rig = TakeoverRig()
+        rig.world.poster.cursorArrivesAfterReads = 40
+        let report = try await rig.takeOver { hand in
+            try await hand.click(at: CGPoint(x: 100, y: 100), button: .left, count: 1)
+            return "feito"
+        }
+        #expect(report.value == "feito" && report.cursorRestored)
+        #expect(rig.world.poster.events.contains(.mouse(.down, CGPoint(x: 100, y: 100), .left, clickState: 1)))
     }
 
     @Test func aSmallNudgeWithinThreePointsIsTolerated() async throws {

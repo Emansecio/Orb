@@ -489,6 +489,10 @@ final class UISnapshotStore: @unchecked Sendable {
 
     private let lock = NSLock()
     private var snapshots: [Key: UISnapshot] = [:]
+    /// When each snapshot was last saved, as a counter: a screenshot merged into a reading keeps the reading's `takenAt`,
+    /// yet it is the newest thing this Orb looked at, and `latest` must pick it.
+    private var savedOrder: [Key: Int] = [:]
+    private var saves = 0
     private let directory: URL?
     /// A reading older than this is forgotten (and its file deleted): the screen it described is long gone, and the file is
     /// readable by any process of the user.
@@ -517,7 +521,12 @@ final class UISnapshotStore: @unchecked Sendable {
     }
 
     func save(_ snapshot: UISnapshot, bot: UUID?) {
-        lock.withLock { snapshots[Self.key(snapshot.app, bot: bot)] = snapshot }
+        lock.withLock {
+            let key = Self.key(snapshot.app, bot: bot)
+            snapshots[key] = snapshot
+            saves += 1
+            savedOrder[key] = saves
+        }
         guard let directory, let data = try? JSONEncoder().encode(snapshot) else { return }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try? data.write(to: file(for: snapshot.app, in: directory), options: .atomic)
@@ -536,12 +545,12 @@ final class UISnapshotStore: @unchecked Sendable {
         return fresh(at: file(for: app, in: directory))
     }
 
-    /// The newest reading this Orb made in this process, of any app: what `ui_act` acts on when no app is named (never
-    /// the app in front, which is the one the user is using).
+    /// The reading this Orb last saved in this process (a `ui_read`, or a screenshot merged into one), of any app: what
+    /// `ui_act` acts on when no app is named (never the app in front, which is the one the user is using).
     func latest(bot: UUID?) -> UISnapshot? {
         lock.withLock {
             snapshots.filter { $0.key.bot == bot && now().timeIntervalSince($0.value.takenAt) <= maxAge }
-                .map(\.value).max { $0.takenAt < $1.takenAt }
+                .max { (savedOrder[$0.key] ?? 0) < (savedOrder[$1.key] ?? 0) }?.value
         }
     }
 

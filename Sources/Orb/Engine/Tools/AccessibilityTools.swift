@@ -1203,21 +1203,37 @@ struct UIActTool: AgentTool {
             }
             return nil
         case .setValue, .type:
-            return targets(of: step, app: appArgument).contains { $0.entry.secure } ? "preenche um campo de senha" : nil
+            if targets(of: step, app: appArgument).contains(where: { $0.entry.secure }) { return "preenche um campo de senha" }
+            // A line break is typed as Return, which sends in a mail or chat app.
+            guard let value = step.value, Self.hasLineBreak(value) else { return nil }
+            return danger(ofKeys: [Self.returnKey], app: appArgument).map(Self.lineBreakReason)
         case .key:
             if targets(of: step, app: appArgument).contains(where: { $0.entry.secure }) { return "digita num campo de senha" }
-            let readings = store.candidates(matching: appArgument)
-            if readings.isEmpty {
-                return UIDanger.reason(forKeys: step.keys, appName: appArgument, bundleID: appArgument, assumeMessaging: appArgument == nil)
-            }
-            for snapshot in readings {
-                if let reason = UIDanger.reason(forKeys: step.keys, appName: snapshot.app.name, bundleID: snapshot.app.bundleID) { return reason }
-            }
-            return appArgument.flatMap { UIDanger.reason(forKeys: step.keys, appName: $0, bundleID: $0) }
+            return danger(ofKeys: step.keys, app: appArgument)
         default:
             return nil
         }
     }
+
+    /// Keys judged against every reading the call may be about; with none, against the named app (or, unnamed, as if it
+    /// were a messaging app).
+    private func danger(ofKeys keys: [KeyStroke], app appArgument: String?) -> String? {
+        let readings = store.candidates(matching: appArgument)
+        if readings.isEmpty {
+            return UIDanger.reason(forKeys: keys, appName: appArgument, bundleID: appArgument, assumeMessaging: appArgument == nil)
+        }
+        for snapshot in readings {
+            if let reason = UIDanger.reason(forKeys: keys, appName: snapshot.app.name, bundleID: snapshot.app.bundleID) { return reason }
+        }
+        return appArgument.flatMap { UIDanger.reason(forKeys: keys, appName: $0, bundleID: $0) }
+    }
+
+    static let returnKey = KeyStroke(.named(.return))
+
+    /// Text that `type` (and `set_value` when it falls back to typing) sends with Return in it: every line break is one.
+    static func hasLineBreak(_ text: String) -> Bool { text.contains(where: \.isNewline) }
+
+    static func lineBreakReason(_ reason: String) -> String { "o texto tem quebra de linha, que é digitada como Return: \(reason)" }
 
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) {
         let appName = arguments.nonEmptyString("app") ?? "o app da última leitura"
@@ -1245,9 +1261,18 @@ struct UIActTool: AgentTool {
         let label = found.map { $0.entry.label }.flatMap { $0.isEmpty ? nil : UIText.quoted($0) } ?? "o elemento \(reference)"
         let role = found.map { UIRole.short($0.entry.rawRole) + " " } ?? ""
         let place = " · " + (found?.snapshot.app.name ?? appName)
+        // Typing into "the focused field" names no element: the card cannot ask the app (no Accessibility call here), so
+        // the text is hidden whenever the focus may be a password field, by the readings of the app (one has a password
+        // field) or for want of any reading.
+        let blind = step.reference == nil && step.ids.isEmpty && step.point == nil
+        let mayBeSecret = blind && {
+            let readings = store.candidates(matching: app)
+            return readings.isEmpty || readings.contains { $0.entries.values.contains(where: \.secure) }
+        }()
         func text(_ value: String?) -> String {
             guard let value else { return "" }
             if found?.entry.secure == true { return "(campo de senha)" }
+            if mayBeSecret { return "(\(value.count) caractere\(value.count == 1 ? "" : "s"), ocultos: o campo em foco pode ser de senha)" }
             return value.count > 300 ? value.prefix(300) + "…" : value
         }
         switch step.action {
@@ -1272,8 +1297,9 @@ struct UIActTool: AgentTool {
         let steps = try Self.steps(in: arguments)
         let needsName = steps.contains { $0.action == .pickMenu || $0.action == .key }
         let app = try await UIAccess.forAction(arguments["app"]?.string, bot: context.botID, store: store, system: system, needsName: needsName)
-        // What the approval card judged: an action whose live target turns out dangerous runs only if the card said so.
-        let approved = danger(arguments, context: context) != nil
+        // What the approval card judged: an action whose live target turns out dangerous runs only if the card said so. The
+        // engine hands the card's own verdict over (`judged`); only a call no card was computed for judges itself here.
+        let approved = Self.judged(arguments, context: context) ?? (danger(arguments, context: context) != nil)
         if arguments.flag("takeover") { return try await takeOver(steps, app: app, context: context) }
 
         var done: [String] = []
@@ -1300,6 +1326,30 @@ struct UIActTool: AgentTool {
             }
         }
         return text
+    }
+
+    // MARK: The card's verdict
+
+    /// Where the Claude Code engine puts the card's verdict in the call it lets through to the tools server (another
+    /// process, with its own readings): `"<token>:dangerous"` or `"<token>:safe"`.
+    static let cardKey = "orb_card"
+    /// The environment variable that gives the tools server the app's token, so a verdict cannot be made up by the model.
+    static let cardTokenVariable = "ORB_UI_CARD_TOKEN"
+    /// The app makes one per launch; the tools server it starts reads the app's.
+    static let cardToken: String = ProcessInfo.processInfo.environment[cardTokenVariable].flatMap { $0.isEmpty ? nil : $0 } ?? UUID().uuidString
+
+    /// The value of `cardKey` for a call the card judged dangerous or not.
+    static func cardMark(dangerous: Bool, token: String = cardToken) -> String { token + (dangerous ? ":dangerous" : ":safe") }
+
+    /// Whether the card judged the call dangerous, as the engine says: the native engine through the context, the Claude
+    /// Code engine through `cardKey`. A "safe" verdict is taken whoever wrote it (it only makes the run stricter); a
+    /// "dangerous" one only with this process's token. Nil when the engine said nothing.
+    static func judged(_ arguments: JSONValue, context: ToolContext, token: String = cardToken) -> Bool? {
+        if let judged = context.judgedDanger { return judged }
+        guard let mark = arguments[cardKey]?.string else { return nil }
+        if mark == cardMark(dangerous: true, token: token) { return true }
+        if mark.hasSuffix(":safe") { return false }
+        return nil
     }
 
     /// One step done: what to tell the model, and the subscription made before acting (for a `wait` that follows).
@@ -1352,48 +1402,69 @@ struct UIActTool: AgentTool {
                               stealsFocus: session.state.withLock { $0.stealsFocus })
         let frontBefore = await system.frontmostPID()
         let system = system, live = live
-        let (stream, first) = try await UIAccess.mapped(app) {
-            try await sessions.run(app, within: sessions.deadlines.action) {
-                // Subscribed before acting, so the notifications the action causes are not missed.
-                let stream = system.events.events(pid: app.pid, UISettle.notifications, on: nil)
-                return (stream, try Self.act(request, root: system.root(of: app), system: system, live: live, app: app))
-            }
-        }
-        let watcher = AXEventWatcher(stream)
-        var acted = first
-        var method = UIMethod.accessibility
+        var watcher: AXEventWatcher?
         do {
+            let (stream, first) = try await UIAccess.mapped(app) {
+                try await sessions.run(app, within: sessions.deadlines.action) {
+                    // Subscribed before acting, so the notifications the action causes are not missed.
+                    let stream = system.events.events(pid: app.pid, UISettle.notifications, on: nil)
+                    return (stream, try Self.act(request, root: system.root(of: app), system: system, live: live, app: app))
+                }
+            }
+            let events = AXEventWatcher(stream)
+            watcher = events
+            var acted = first
+            var method = UIMethod.accessibility
             if let plan = acted.input {
-                acted.notes += try await send(plan, what: acted.inputWhat, app: app, snapshot: snapshot)
+                acted.notes += try await send(plan, what: acted.inputWhat, app: app, snapshot: snapshot, frontBefore: frontBefore, session: session)
                 method = .event
             }
-            if !waitsAfter { await settle.wait(on: watcher) }
-        } catch {
-            watcher.cancel()
-            throw error
-        }
-        let target = acted.target
-        let after = (try? await sessions.run(app, within: sessions.deadlines.action) { UIState.capture(root: system.root(of: app), target: target) })
-            ?? acted.before
-        acted.notes += await restoreFront(frontBefore, app: app, session: session)
+            if !waitsAfter { await settle.wait(on: events) }
+            let target = acted.target
+            let after = (try? await sessions.run(app, within: sessions.deadlines.action) { UIState.capture(root: system.root(of: app), target: target) })
+                ?? acted.before
+            acted.notes += await restoreFront(frontBefore, app: app, session: session)
 
-        var text = acted.summary + " " + method.tag + " " + UIState.describe(from: acted.before, to: after).clipped(to: 600)
-        if let listing = acted.listing, !listing.isEmpty { text += "\nItens do menu:\n" + listing }
-        if !acted.notes.isEmpty { text += "\n" + acted.notes.joined(separator: "\n") }
-        return Performed(text: text, watcher: watcher, before: acted.before, target: target)
+            var text = acted.summary + " " + method.tag + " " + UIState.describe(from: acted.before, to: after).clipped(to: 600)
+            if let listing = acted.listing, !listing.isEmpty { text += "\nItens do menu:\n" + listing }
+            if !acted.notes.isEmpty { text += "\n" + acted.notes.joined(separator: "\n") }
+            return Performed(text: text, watcher: events, before: acted.before, target: target)
+        } catch {
+            // Failing (or being cancelled) after acting does not leave the person with another app in front.
+            watcher?.cancel()
+            let notes = await restoreFront(frontBefore, app: app, session: session)
+            guard !notes.isEmpty, !(error is CancellationError) else { throw error }
+            throw ToolError(Self.reason(error) + ".\n" + notes.joined(separator: "\n"))
+        }
     }
 
-    /// After every action the app in front must be the one that was: an app that brought itself forward is sent back
-    /// (`AXFrontmost` on the user's app, never `activate`) and remembered as one that steals focus.
+    /// After every action, and after a failed or cancelled one, the app in front must be the one that was: an app that
+    /// brought itself forward is sent back (`AXFrontmost` on the user's app, never `activate`) and remembered as one that
+    /// steals focus. Not cancellable: it runs in its own task, awaited whatever happens to the caller's.
     private func restoreFront(_ before: Int32?, app: AccessibilityApp, session: AXAppSession) async -> [String] {
-        guard let before, before != app.pid, await system.frontmostPID() == app.pid else { return [] }
-        session.state.withLock { $0.stealsFocus = true }
-        let previous = AccessibilityApp(name: "", bundleID: nil, pid: before)
-        let system = system
-        _ = try? await sessions.run(previous, within: sessions.deadlines.action) {
-            try system.root(of: previous).setValue(.bool(true), for: "AXFrontmost")
-        }
-        return ["Aviso: \(app.name) veio para a frente sozinho; devolvi o app que estava na frente. Focar ou digitar nele agora pede takeover."]
+        let system = system, sessions = sessions
+        return await Task.detached(priority: .userInitiated) {
+            guard let before, before != app.pid, await system.frontmostPID() == app.pid else { return [String]() }
+            session.state.withLock { $0.stealsFocus = true }
+            let previous = AccessibilityApp(name: "", bundleID: nil, pid: before)
+            _ = try? await sessions.run(previous, within: sessions.deadlines.action) {
+                try system.root(of: previous).setValue(.bool(true), for: "AXFrontmost")
+            }
+            return ["Aviso: \(app.name) veio para a frente sozinho; devolvi o app que estava na frente. Focar ou digitar nele agora pede takeover."]
+        }.value
+    }
+
+    /// Before keys or text go out: an app that came forward when it got the focus is sent back at once and nothing is sent
+    /// (the person's own typing would now land in it).
+    private func refuseIfBroughtForward(_ before: Int32?, app: AccessibilityApp, session: AXAppSession, what: String,
+                                        front known: Int32?? = .none) async throws {
+        guard let before, before != app.pid else { return }
+        let front: Int32?
+        if case .some(let given) = known { front = given } else { front = await system.frontmostPID() }
+        guard front == app.pid else { return }
+        let notes = await restoreFront(before, app: app, session: session)
+        throw Self.needsScreen(what, because: "\(app.name) veio para a frente ao receber o foco"
+                               + (notes.isEmpty ? "" : " (devolvi o app que estava na frente)"))
     }
 
     /// The error that tells the model only the real mouse and keyboard can do it (with the user's consent).
@@ -1404,7 +1475,8 @@ struct UIActTool: AgentTool {
 
     // MARK: Events to the app (N1)
 
-    private func send(_ plan: InputPlan, what: String, app: AccessibilityApp, snapshot: UISnapshot?) async throws -> [String] {
+    private func send(_ plan: InputPlan, what: String, app: AccessibilityApp, snapshot: UISnapshot?, frontBefore: Int32?,
+                      session: AXAppSession) async throws -> [String] {
         try await refuseIfUserIsActive(app)
         var notes: [String] = []
         switch plan {
@@ -1419,14 +1491,19 @@ struct UIActTool: AgentTool {
                 throw Self.needsScreen(what, because: Self.reason(error))
             }
         case .keys(let strokes, let target):
-            if let target { try await focus(target, app: app) }
+            if let target {
+                try await focus(target, app: app)
+                try await refuseIfBroughtForward(frontBefore, app: app, session: session, what: what)
+            }
             if system.input.secureInputActive { notes.append(Self.secureInputNote) }
             do { try await system.input.keys(strokes, to: app.pid) } catch {
                 throw Self.needsScreen(what, because: Self.reason(error))
             }
         case .text(let text, let target, let replace):
             if system.input.secureInputActive { notes.append(Self.secureInputNote) }
-            notes += try await type(text, into: target, replace: replace, app: app, what: what)
+            notes += try await type(text, into: target, replace: replace, app: app, what: what) { [self] front in
+                try await refuseIfBroughtForward(frontBefore, app: app, session: session, what: what, front: .some(front))
+            }
         }
         return notes
     }
@@ -1440,28 +1517,39 @@ struct UIActTool: AgentTool {
 
     /// Events go to the app's process, not to the keyboard focus; still, a person typing in that very app right now would
     /// be typed over.
-    private func refuseIfUserIsActive(_ app: AccessibilityApp) async throws {
-        guard await system.frontmostPID() == app.pid, system.secondsSinceUserInput() < 3 else { return }
+    /// `front`: the app in front when the caller has just asked (each asking reads the window list and an app).
+    private func refuseIfUserIsActive(_ app: AccessibilityApp, front known: Int32?? = .none) async throws {
+        let front: Int32?
+        if case .some(let given) = known { front = given } else { front = await system.frontmostPID() }
+        guard front == app.pid, system.secondsSinceUserInput() < 3 else { return }
         throw ToolError("O usuário está usando \(app.name) agora (mexeu no teclado ou no mouse há menos de 3 s); não mandei nada para não atrapalhar. "
                         + "Espere um pouco e tente de novo, ou peça a ele.")
     }
 
-    /// The `CGWindowID` of the window: the one the screenshot captured when it is the same window, else the window
-    /// ScreenCaptureKit lists for the app with the same frame (±2 pt) and title.
+    /// The `CGWindowID` of the window: the one the screenshot captured when it is the same window, else the window the
+    /// app has with the same frame (±2 pt) and title. Windows come from the window server's list, which needs no
+    /// permission (the title may be missing without Screen Recording: then the frame decides); ScreenCaptureKit, which
+    /// needs Screen Recording, only when that list has nothing for the app.
     private func windowID(_ window: WindowRef, app: AccessibilityApp, snapshot: UISnapshot?, what: String) async throws -> UInt32 {
         let known = window.windowID ?? snapshot?.shot.flatMap { shot in
             window.frame.map { Self.close(shot.windowFrame, $0) } == true ? shot.windowID : nil
         }
+        let listed = system.windowList(pid: app.pid).sorted { $0.isOnScreen && !$1.isOnScreen }
         if let known {
             // The window of the screenshot must still exist (a new window can reuse the frame, not the number).
-            if let listed = try? await system.capturer.windows(pid: app.pid), !listed.isEmpty, !listed.contains(where: { $0.windowID == known }) {
+            let current = listed.isEmpty ? ((try? await system.capturer.windows(pid: app.pid)) ?? []) : listed
+            if !current.isEmpty, !current.contains(where: { $0.windowID == known }) {
                 throw UIResolver.stale("a janela do screenshot não existe mais; tire outro")
             }
             return known
         }
         let windows: [CapturableWindow]
-        do { windows = try await system.capturer.windows(pid: app.pid) } catch {
-            throw Self.needsScreen(what, because: Self.reason(error))
+        if !listed.isEmpty {
+            windows = listed
+        } else {
+            do { windows = try await system.capturer.windows(pid: app.pid) } catch {
+                throw Self.needsScreen(what, because: Self.reason(error))
+            }
         }
         let match = windows.first { candidate in
             window.frame.map { Self.close(candidate.frame, $0) } ?? true && UIText.fold(candidate.title) == UIText.fold(window.title)
@@ -1498,8 +1586,12 @@ struct UIActTool: AgentTool {
 
     /// Types in chunks of at most 20 UTF-16 units, checking before each one that the focus is still on the field and the
     /// user is not using the app; stops between chunks when the task is cancelled and says how much went in.
-    private func type(_ text: String, into target: any AccessibilityElement, replace: Bool, app: AccessibilityApp, what: String) async throws -> [String] {
+    /// `checkFront` runs right after the focus is given and before every chunk, with the app in front then: it throws when
+    /// the app came forward.
+    private func type(_ text: String, into target: any AccessibilityElement, replace: Bool, app: AccessibilityApp, what: String,
+                      checkFront: @Sendable (Int32?) async throws -> Void) async throws -> [String] {
         try await focus(target, app: app, replace: replace)
+        try await checkFront(await system.frontmostPID())
         let chunks = Self.chunks(text)
         let total = text.count
         var sent = 0
@@ -1507,11 +1599,20 @@ struct UIActTool: AgentTool {
         for (index, chunk) in chunks.enumerated() {
             if Task.isCancelled { return ["Parei a pedido: digitei \(sent) de \(total) caracteres."] }
             if index > 0 {
-                try await refuseIfUserIsActive(app)
-                try await UIAccess.mapped(app) {
-                    try await sessions.run(app, within: sessions.deadlines.action) {
-                        try Self.confirmFocus(on: target, root: system.root(of: app), app: app)
+                do {
+                    // The app in front is asked once per chunk, for both checks.
+                    let front = await system.frontmostPID()
+                    try await checkFront(front)
+                    try await refuseIfUserIsActive(app, front: .some(front))
+                    try await UIAccess.mapped(app) {
+                        try await sessions.run(app, within: sessions.deadlines.action) {
+                            try Self.confirmFocus(on: target, root: system.root(of: app), app: app)
+                        }
                     }
+                } catch is CancellationError {
+                    return ["Parei a pedido: digitei \(sent) de \(total) caracteres."]
+                } catch {
+                    throw ToolError("Digitei \(sent) de \(total) caracteres e parei: \(Self.reason(error)).")
                 }
             }
             do {
@@ -1599,6 +1700,23 @@ struct UIActTool: AgentTool {
             throw ToolError("Não fiz: é um campo de senha, e preencher senha sempre passa pela confirmação do usuário. Repita por id para que ele confirme.")
         }
 
+        /// Whether the focused element is a password field. An app that does not answer is not taken for "no": nothing is
+        /// typed where it cannot be told.
+        func isSecure(_ focused: any AccessibilityElement) throws -> Bool {
+            switch focused.read(UIElementInfo.attributeNames) {
+            case .values(let values): return UIElementInfo(attributes: values).secure
+            case .failed(let failure): throw failure
+            }
+        }
+
+        /// A line break is typed as Return: in a mail or chat app that sends, so it runs only if the card said so.
+        func checkLineBreaks(_ value: String?) throws {
+            guard !request.approved, let value, hasLineBreak(value),
+                  let reason = UIDanger.reason(forKeys: [returnKey], appName: app.name, bundleID: app.bundleID) else { return }
+            throw ToolError("Não fiz: \(lineBreakReason(reason)), e o pedido não passou pela confirmação do usuário. "
+                            + "Repita dizendo o app (argumento app) para que ele confirme, ou mande o texto sem quebra de linha.")
+        }
+
         func windowRef(_ target: UIResolver.Resolved) -> WindowRef {
             let shotID = snapshot?.shot.flatMap { shot in target.windowFrame.map { close(shot.windowFrame, $0) } == true ? shot.windowID : nil }
             return WindowRef(frame: target.windowFrame, title: snapshot?.windowTitle ?? "", windowID: shotID)
@@ -1671,6 +1789,7 @@ struct UIActTool: AgentTool {
         case .setValue:
             let target = try resolve(step.reference ?? "")
             try checkSecure(target)
+            try checkLineBreaks(step.value)
             let value = step.value ?? ""
             let state = before(target)
             let textRoles: Set<String> = ["field", "textarea", "searchfield", "combobox"]
@@ -1704,9 +1823,10 @@ struct UIActTool: AgentTool {
                     throw ToolError("Nenhum campo de \(app.name) tem o foco; diga o id do campo (de ui_read).")
                 }
                 element = focused
-                focusedSecure = UIElementInfo(attributes: focused.attributes(UIElementInfo.attributeNames)).secure
+                focusedSecure = try isSecure(focused)
             }
             try checkSecure(target, focusedSecure: focusedSecure)
+            try checkLineBreaks(step.value)
             let name = target.map { "\($0.name) (\($0.id))" } ?? "o campo em foco"
             return Acted(summary: "Digitei \(step.value?.count ?? 0) caractere\(step.value?.count == 1 ? "" : "s") em \(name).", target: element,
                          before: UIState.capture(root: root, target: element, known: target?.attributes),
@@ -1716,7 +1836,7 @@ struct UIActTool: AgentTool {
             let target: UIResolver.Resolved? = try step.reference.map(resolve)
             var focusedSecure = false
             if target == nil, let focused = root.element("AXFocusedUIElement") {
-                focusedSecure = UIElementInfo(attributes: focused.attributes(UIElementInfo.attributeNames)).secure
+                focusedSecure = try isSecure(focused)
             }
             try checkSecure(target, focusedSecure: focusedSecure)
             if !request.approved, let reason = UIDanger.reason(forKeys: step.keys, appName: app.name, bundleID: app.bundleID) {
@@ -1804,8 +1924,9 @@ struct UIActTool: AgentTool {
         let local = localHit(pixel, in: snapshot)
         let target = try local.map { try resolve($0.id) }
         // The app's hit test sees what is really on top (a popover, a sheet); it is z-ordered, so a covered window answers
-        // nothing and the reading decides.
-        if let hit = system.hitTest(app, at: screen), !(target.map { related(hit, to: $0.element) } ?? false) {
+        // nothing and the reading decides. It sees every window of the app, though: what it finds in another window (one
+        // over the screenshot's) is not what the click is about, and the reading decides then too.
+        if let hit = system.hitTest(app, at: screen), belongs(hit, to: window), !(target.map { related(hit, to: $0.element) } ?? false) {
             var element: any AccessibilityElement = hit
             for _ in 0..<5 where clickable(element) == false {
                 guard let parent = element.element("AXParent") else { break }
@@ -1836,6 +1957,21 @@ struct UIActTool: AgentTool {
         return Acted(summary: "Cliquei em \(description) de \(snapshot.windowTitle.isEmpty ? app.name : UIText.quoted(snapshot.windowTitle)).",
                      target: nil, before: UIState.capture(root: root, target: nil),
                      input: .click(screen, window: windowRef, button: step.button, count: step.count), inputWhat: "clicar em \(description)")
+    }
+
+    /// Whether `element` is in `window`, or in a sheet or drawer of it: its `AXWindow` (or that window's parent) is the
+    /// window, or, for an element that does not say, the window is among its ancestors.
+    static func belongs(_ element: any AccessibilityElement, to window: any AccessibilityElement) -> Bool {
+        if let own = element.element("AXWindow") {
+            return own.isSame(as: window) || own.element("AXParent")?.isSame(as: window) == true
+        }
+        var current = element.element("AXParent")
+        for _ in 0..<16 {
+            guard let node = current else { return false }
+            if node.isSame(as: window) { return true }
+            current = node.element("AXParent")
+        }
+        return false
     }
 
     private static func clickable(_ element: any AccessibilityElement) -> Bool {
@@ -2045,10 +2181,19 @@ struct UIActTool: AgentTool {
                 var window: (any AccessibilityElement)?
                 func center(_ step: Step) throws -> CGPoint {
                     if let pixel = step.point {
-                        guard let snapshot, let shot = snapshot.shot, let windows = root.elements("AXWindows"),
-                              let found = UIWindowChooser.window(of: snapshot, in: windows),
-                              case .point(let origin)? = found.attribute("AXPosition") else {
+                        guard let snapshot, let shot = snapshot.shot else {
                             throw ToolError("x e y são pixels do último screenshot com marcas da janela; tire um screenshot antes.")
+                        }
+                        guard let windows = root.elements("AXWindows"), let found = UIWindowChooser.window(of: snapshot, in: windows) else {
+                            throw UIResolver.stale("a janela \(UIText.quoted(snapshot.windowTitle)) não está mais aberta")
+                        }
+                        let now = found.read(["AXPosition", "AXSize"]).attributes ?? [:]
+                        guard case .point(let origin)? = now["AXPosition"], case .size(let size)? = now["AXSize"] else {
+                            throw UIResolver.stale("não consegui ler onde está a janela")
+                        }
+                        // As in the background: the pixels point elsewhere in a window that changed size since the picture.
+                        guard abs(size.width - shot.windowFrame.width) <= 2, abs(size.height - shot.windowFrame.height) <= 2 else {
+                            throw UIResolver.stale("a janela mudou de tamanho desde o screenshot; tire outro")
                         }
                         window = window ?? found
                         return CGPoint(x: origin.x + pixel.x / shot.scale, y: origin.y + pixel.y / shot.scale)
@@ -2094,9 +2239,14 @@ struct UIActTool: AgentTool {
             }
         }
         let after = (try? await sessions.run(app, within: sessions.deadlines.action) { UIState.capture(root: system.root(of: app), target: nil) }) ?? before
-        let restored = report.restoredApp.map { "devolvi ao \($0)" } ?? "nada a devolver"
+        let restored = report.restoreFailed ? "não consegui devolver o app da frente"
+            : report.restoredApp.map { "devolvi ao \($0)" } ?? "nada a devolver"
         var text = "Fiz \(steps.count == 1 ? "o passo" : "os \(steps.count) passos") com o mouse e o teclado reais em \(app.name). "
             + "[assumi a tela \(UIClock.seconds(report.duration)) · \(restored)] " + UIState.describe(from: before, to: after).clipped(to: 600)
+        if report.restoreFailed {
+            text += "\nAtenção: o app que o usuário usava não voltou para a frente (nem por Acessibilidade nem ativando-o); \(app.name) "
+                + "ficou na frente. Avise o usuário."
+        }
         if !report.cursorRestored { text += "\nAviso: o cursor não voltou exatamente para onde estava." }
         return text
     }

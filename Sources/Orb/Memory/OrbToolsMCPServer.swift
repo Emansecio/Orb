@@ -179,6 +179,8 @@ enum OrbToolsMCPServer {
         server.arguments = [flag, directory.path] + (mac ? [macFlag] : []) + (files ? [filesFlag] : [])
             + (folder.map { [folderFlag, $0.path] } ?? [])
             + (accessibilityGranted.map { [$0 ? accessibilityFlag : noAccessibilityFlag] } ?? [])
+        // The token that lets `ui_act` there trust the card's verdict the app passes along with the call.
+        if mac { server.environment[UIActTool.cardTokenVariable] = UIActTool.cardToken }
         if let scheduleMailbox, let orb { server.arguments += [ScheduleMailbox.flag, scheduleMailbox.path, ScheduleMailbox.orbFlag, orb.uuidString] }
         if browser != .off {
             server.arguments += browser == .browser ? [browserFlag, engine.rawValue] : [webFlag]

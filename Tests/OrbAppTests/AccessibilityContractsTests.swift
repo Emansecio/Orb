@@ -52,7 +52,9 @@ struct KeyStrokeTests {
     @Test func aSingleCharacterIsAKeyAndAnUppercaseLetterImpliesShift() throws {
         #expect(try parse("a") == KeyStroke(.character("a")))
         #expect(try parse("A") == KeyStroke(.character("a"), modifiers: [.shift]))
-        #expect(try parse("cmd+S") == KeyStroke(.character("s"), modifiers: [.command, .shift]))
+        #expect(try parse("cmd+S") == KeyStroke(.character("s"), modifiers: [.command]), "a capital in a shortcut is only how it is written")
+        #expect(try parse("Cmd+Z") == KeyStroke(.character("z"), modifiers: [.command]), "⌘Z is undo, not ⌘⇧Z (redo)")
+        #expect(try parse("cmd+shift+Z") == KeyStroke(.character("z"), modifiers: [.command, .shift]))
         #expect(try parse("ç") == KeyStroke(.character("ç")))
         #expect(try parse(",") == KeyStroke(.character(",")))
         #expect(try parse("cmd+,") == KeyStroke(.character(","), modifiers: [.command]))
@@ -226,10 +228,13 @@ struct AccessibilityContractDefaultsTests {
         await #expect(throws: ToolError.self) { try await system.screen.takeOver(notes, window: nil, limit: .seconds(1)) { _ in 1 } }
     }
 
-    @Test func theDefaultsReachTheLiveSystemToo() {
-        // Nothing real is called: only the stand-ins that the live system has not replaced yet.
+    @Test func theLiveSystemHandsOutTheLiveCollaborators() {
+        // Only the wiring: nothing real is called, and no live state of this Mac (Secure Event Input may be on here) is read.
         let live = LiveAccessibilitySystem()
-        #expect(live.input.secureInputActive == false)
+        #expect(live.input is LiveSyntheticInput)
+        #expect(live.capturer is LiveWindowCapturer)
+        #expect(live.screen is LiveScreenOwner)
+        #expect(live.events is AXEventHub)
     }
 
     @Test func theLiveElementKnowsItsProcessAndComparesHandles() {
@@ -241,6 +246,19 @@ struct AccessibilityContractDefaultsTests {
         #expect(first.isSame(as: second))
         #expect(!first.isSame(as: other))
         #expect(!first.isSame(as: BareElement()))
+    }
+
+    @Test func askingOneByOneStopsAtTheFirstCallAHungAppDoesNotAnswer() {
+        // The fallback for elements without the batch call: five names to a hung app cost one timeout, not five.
+        var asked: [String] = []
+        let found = LiveAccessibilityElement.oneByOne(["AXRole", "AXTitle", "AXValue", "AXSize", "AXPosition"]) { name in
+            asked.append(name)
+            return name == "AXRole" ? (.success, .string("AXButton")) : (.cannotComplete, nil)
+        }
+        #expect(asked == ["AXRole", "AXTitle"])
+        #expect(found.failure == .cannotComplete && found.values["AXRole"]?.string == "AXButton")
+        let missing = LiveAccessibilityElement.oneByOne(["AXRole", "AXTitle"]) { _ in (.attributeUnsupported, nil) }
+        #expect(missing.failure == nil && missing.values.isEmpty, "a missing attribute is not a hung app")
     }
 
     @Test func aRangeIsAValueAndIsReadBack() {
@@ -553,5 +571,63 @@ struct FakeAccessibilitySystemTests {
         var count = 0
         for await _ in stream { count += 1 }
         #expect(count == 1)
+    }
+}
+
+// MARK: - Which apps run, and which is in front
+
+/// Counts what a `LiveDesktop` asked.
+private final class DesktopProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var listings = 0
+    private var asked: [Int32] = []
+    var processLists: Int { lock.withLock { listings } }
+    var frontmostAsked: [Int32] { lock.withLock { asked } }
+    func listed() { lock.withLock { listings += 1 } }
+    func ask(_ pid: Int32) { lock.withLock { asked.append(pid) } }
+}
+
+struct LiveDesktopTests {
+    private func apps(_ pids: [Int32], active: Int32? = nil) -> [RunningAppInfo] {
+        pids.map { RunningAppInfo(name: "App \($0)", bundleID: "app.\($0)", pid: $0, isActive: $0 == active, isHidden: false, isRegular: true) }
+    }
+
+    @Test func theFrontAppIsTheTopWindowsOwnerWhenItSaysSoAndNotWhatTheProcessListClaims() {
+        let probe = DesktopProbe()
+        // The process list says 1 is active (stale, as NSWorkspace's is in the tools server); the window list and the app say 2.
+        let desktop = LiveDesktop(topWindowOwner: { 2 }, isFrontmost: { pid in probe.ask(pid); return pid == 2 },
+                                  processes: { probe.listed(); return self.apps([1, 2, 3], active: 1) })
+        #expect(desktop.frontmost() == 2)
+        let running = desktop.runningApps()
+        #expect(running.filter(\.isActive).map(\.pid) == [2])
+        #expect(probe.frontmostAsked == [2, 2], "the top window's owner answered: nobody else is asked")
+    }
+
+    @Test func whenTheTopWindowIsNotTheFrontAppsTheAppsAreAsked() {
+        // A floating window of another app on top: its owner says it is not in front, and app 3 says it is.
+        let desktop = LiveDesktop(topWindowOwner: { 1 }, isFrontmost: { $0 == 3 }, processes: { self.apps([1, 2, 3]) })
+        #expect(desktop.frontmost() == 3)
+        // Nobody claims it: the top window's owner is the best guess. No window at all and nobody: nil.
+        #expect(LiveDesktop(topWindowOwner: { 1 }, isFrontmost: { _ in false }, processes: { self.apps([1, 2]) }).frontmost() == 1)
+        #expect(LiveDesktop(topWindowOwner: { nil }, isFrontmost: { _ in nil }, processes: { self.apps([1, 2]) }).frontmost() == nil)
+        // An app that does not answer is taken at its window's word.
+        #expect(LiveDesktop(topWindowOwner: { 2 }, isFrontmost: { _ in nil }, processes: { self.apps([1, 2]) }).frontmost() == 2)
+    }
+
+    @Test func theProcessesAreReadAnewOnEveryCall() async {
+        let probe = DesktopProbe()
+        var desktop = LiveDesktop(topWindowOwner: { nil }, isFrontmost: { _ in nil }, processes: { probe.listed(); return [] })
+        desktop.isFrontmost = { _ in nil }
+        let system = LiveAccessibilitySystem(desktop: desktop)
+        _ = await system.runningApps()
+        _ = await system.runningApps()
+        _ = await system.frontmostPID()
+        #expect(probe.processLists == 3, "nothing is cached between calls")
+    }
+
+    @Test func theLiveProcessListFindsThisVeryProcessWithoutTheMainRunLoop() async {
+        // The test runner is not an app Launch Services lists as one; the list must still be made off the main thread.
+        let apps = await LiveDesktop.offPool { LiveDesktop.liveProcesses() }
+        #expect(apps.allSatisfy { $0.pid > 0 && !$0.name.isEmpty && !$0.isActive })
     }
 }

@@ -19,6 +19,8 @@ enum TakeoverFailure: Error, Equatable, LocalizedError {
     case couldNotBringToFront(String)
     /// The real cursor left the place the takeover put it: the person moved the mouse, so it stops.
     case userMovedMouse
+    /// The cursor did not reach the place the takeover sent it to, nor did anybody move it: the system is too slow now.
+    case cursorStuck
     /// Another app took the front while the takeover was using the mouse and keyboard: stopped so nothing lands in it.
     case lostFront(String)
     /// The whole takeover took longer than allowed.
@@ -35,7 +37,9 @@ enum TakeoverFailure: Error, Equatable, LocalizedError {
         case .couldNotBringToFront(let name):
             "Não consegui trazer \(name) para a frente. Nada foi feito; o app que estava na frente continua nele."
         case .userMovedMouse:
-            "Parei de usar a tela porque o mouse se mexeu (a pessoa quis a tela de volta). Devolvi o app da frente e o cursor."
+            "Parei de usar a tela porque o mouse se mexeu (a pessoa quis a tela de volta). Devolvi o app da frente; o cursor ficou onde a pessoa o pôs."
+        case .cursorStuck:
+            "O cursor não chegou aonde eu o mandei (o Mac está lento agora); parei de usar a tela e devolvi o app da frente e o cursor. Tente de novo em instantes."
         case .lostFront(let name):
             "\(name) saiu da frente enquanto eu usava a tela; parei para nada cair em outro app e devolvi a tela."
         case .timeLimit:
@@ -130,6 +134,9 @@ protocol TakeoverPlatform: Sendable {
     /// `CGAssociateMouseAndMouseCursorPosition(1)`: the mouse drives the cursor again.
     func associateCursor()
     func makePoster() -> any TakeoverEventPoster
+    /// The second way to give the person's app back when `AXFrontmost` did not: `NSRunningApplication.activate()` (only
+    /// here, in the takeover, does the Orb activate another app).
+    func activate(_ pid: Int32)
 }
 
 /// Tells the person the Orb has the screen (a panel in the app); see `TakeoverHUD`.
@@ -201,20 +208,45 @@ final class LiveTakeoverHand: TakeoverHand, @unchecked Sendable {
         if pause > .zero { try await Task.sleep(for: pause) }
     }
 
-    /// Posts a move and waits for the cursor to arrive (the window server applies it a moment later), so a cursor that
-    /// stays elsewhere is read as the person holding the mouse.
+    /// How long a move may take to reach the cursor (the window server applies it a moment later, more under load).
+    static let arrival: Duration = .milliseconds(400)
+    /// When a move has not arrived by then, it is posted once more.
+    static let repost: Duration = .milliseconds(120)
+    /// The cursor is looked at at least this many times before a move counts as lost: a process starved by a loaded Mac
+    /// (sleeps that last far longer than asked) must not take its own slowness for a cursor that did not move.
+    static let minimumLooks = 60
+
+    /// Posts a move and waits for the cursor to arrive. The window server moves the cursor in one jump, so while it has
+    /// not arrived it is still where the hand left it: a cursor found anywhere else was moved by the person. One that stays
+    /// put past `arrival` (posted twice) is a slow system, not the person: the takeover stops and the cursor is put back.
     private func place(_ point: CGPoint, _ event: TakeoverMouseEvent, button: MouseButton, deadline: ContinuousClock.Instant) async throws {
-        lock.withLock { expected = point }
+        let previous = lock.withLock { () -> CGPoint in
+            defer { expected = point }
+            return expected
+        }
         poster.mouse(event, at: point, button: button, clickState: 0)
-        let settleBy = min(ContinuousClock.now.advanced(by: .milliseconds(60)), deadline)
+        let started = ContinuousClock.now
+        let settleBy = min(started.advanced(by: Self.arrival), deadline)
+        var posted = 1
+        var looks = 0
+        func near(_ one: CGPoint, _ other: CGPoint) -> Bool { hypot(one.x - other.x, one.y - other.y) <= Self.driftTolerance }
         while true {
             let here = platform.cursorLocation()
-            if hypot(here.x - point.x, here.y - point.y) <= Self.driftTolerance { return }
-            if ContinuousClock.now >= settleBy { break }
-            try await Task.sleep(for: .milliseconds(2))
+            looks += 1
+            if near(here, point) { return }
+            if !near(here, previous) {
+                lock.withLock { drift = true }
+                throw TakeoverFailure.userMovedMouse
+            }
+            let now = ContinuousClock.now
+            if now >= deadline || (now >= settleBy && looks >= Self.minimumLooks) { break }
+            if posted == 1, started.duration(to: .now) >= Self.repost {
+                poster.mouse(event, at: point, button: button, clickState: 0)
+                posted += 1
+            }
+            try await Task.sleep(for: .milliseconds(3))
         }
-        lock.withLock { drift = true }
-        throw TakeoverFailure.userMovedMouse
+        throw TakeoverFailure.cursorStuck
     }
 
     // MARK: TakeoverHand
@@ -349,14 +381,28 @@ struct LiveScreenOwner: ScreenOwner {
         // Whatever happened above (an error, the task cancelled, the time up), the screen goes back, and this part is not
         // cancellable: it runs in its own task that is awaited whatever happens to this one.
         let userTookOver = hand.userMovedMouse
-        let (restoredApp, cursorRestored) = await Task.detached(priority: .userInitiated) { [self] in
+        let restored = await Task.detached(priority: .userInitiated) { [self] in
             let result = await restore(saved, target: app, keepCursor: userTookOver)
             await indicator?.ended()
             lock.release()
             return result
         }.value
-        let value = try outcome.get()
-        return TakeoverReport(value: value, duration: started.duration(to: clock.now), restoredApp: restoredApp, cursorRestored: cursorRestored)
+        let value: Value
+        do {
+            value = try outcome.get()
+        } catch {
+            // The person must hear that their app is not back in front, whatever else went wrong.
+            guard restored.failed, let name = saved.front?.name, !(error is CancellationError) else { throw error }
+            let reason = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            throw ToolError(reason + " " + Self.notRestored(name))
+        }
+        return TakeoverReport(value: value, duration: started.duration(to: clock.now), restoredApp: restored.app,
+                              cursorRestored: restored.cursor, restoreFailed: restored.failed)
+    }
+
+    /// What the model is told (and tells the person) when the app that was in front could not be put back.
+    static func notRestored(_ name: String) -> String {
+        "Atenção: não consegui devolver \(name) para a frente (nem por Acessibilidade nem ativando o app); avise o usuário que ele pode precisar clicar em \(name)."
     }
 
     // MARK: Bringing the app up
@@ -427,9 +473,13 @@ struct LiveScreenOwner: ScreenOwner {
         return root.element("AXFocusedWindow") ?? root.element("AXMainWindow")
     }
 
-    private func restore(_ saved: Saved, target: AccessibilityApp, keepCursor: Bool) async -> (restoredApp: String?, cursorRestored: Bool) {
+    /// Puts the person's app, window and cursor back. `app`: the app put back in front (nil when nothing needed it);
+    /// `failed`: it needed it and neither `AXFrontmost` (twice) nor activating the app brought it back; `cursor`: the
+    /// cursor is where it was (false when the person took the mouse, which is left where they put it).
+    private func restore(_ saved: Saved, target: AccessibilityApp, keepCursor: Bool) async -> (app: String?, failed: Bool, cursor: Bool) {
         let platform = platform
         var restoredApp: String?
+        var failed = false
         if let front = saved.front {
             func putBack() async {
                 await TakeoverQueue.run {
@@ -451,13 +501,21 @@ struct LiveScreenOwner: ScreenOwner {
                 await putBack()
                 back = await isBack()
             }
-            if back, front.pid != target.pid { restoredApp = front.name }
+            if !back, front.pid != target.pid {
+                // The second way: the app asked to activate (cooperative, but it does not depend on the app's AX answer).
+                await TakeoverQueue.run { platform.activate(front.pid) }
+                back = await isBack()
+            }
+            if front.pid != target.pid {
+                if back { restoredApp = front.name } else { failed = true }
+            }
         }
-        // Where the cursor was. When the person grabbed the mouse to stop the takeover, it stays where they put it.
+        // Where the cursor was. When the person grabbed the mouse to stop the takeover, it stays where they put it: then
+        // it is not back, and the report says so.
         let cursor = saved.cursor
         guard !keepCursor else {
             await TakeoverQueue.run { platform.associateCursor() }
-            return (restoredApp, true)
+            return (restoredApp, failed, false)
         }
         let cursorRestored = await TakeoverQueue.run { () -> Bool in
             platform.warpCursor(to: cursor)
@@ -465,7 +523,7 @@ struct LiveScreenOwner: ScreenOwner {
             let here = platform.cursorLocation()
             return hypot(here.x - cursor.x, here.y - cursor.y) <= 2
         }
-        return (restoredApp, cursorRestored)
+        return (restoredApp, failed, cursorRestored)
     }
 }
 
@@ -494,25 +552,10 @@ struct LiveTakeoverPlatform: TakeoverPlatform {
         return LiveAccessibilityElement(ref)
     }
 
-    /// The app in front, from three sources because each fails somewhere: the window list (owner of the top window of the
-    /// normal layer: needs no answer from any app), checked against the app's own `AXFrontmost`; the apps' `AXFrontmost` one by
-    /// one when the top window is not an app's front; and `NSWorkspace` last (it only learns of a change through the main run
-    /// loop, which the Claude Code server does not run, and can be stale). The system-wide `AXFocusedApplication` is not used:
-    /// it fails with "cannot complete" while an Electron app is in front.
+    /// The app in front, read like `ui_act` reads it (`LiveDesktop`: the window list checked against the apps' own
+    /// `AXFrontmost`, never `NSWorkspace`, which the Claude Code server cannot keep up to date).
     func frontmost() -> TakeoverFront? {
-        let candidate = topWindowOwner()
-        if let candidate {
-            switch isFrontmost(candidate) {
-            case true?, nil: return front(candidate)
-            case false?: break
-            }
-        }
-        for app in NSWorkspace.shared.runningApplications where app.activationPolicy == .regular && app.processIdentifier != candidate {
-            if isFrontmost(app.processIdentifier) == true { return front(app.processIdentifier) }
-        }
-        if let candidate { return front(candidate) }
-        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
-        return front(app.processIdentifier)
+        LiveDesktop().frontmost().map(front)
     }
 
     private func front(_ pid: Int32) -> TakeoverFront {
@@ -520,27 +563,8 @@ struct LiveTakeoverPlatform: TakeoverPlatform {
         return TakeoverFront(pid: pid, name: running?.localizedName ?? "o app anterior", bundleID: running?.bundleIdentifier)
     }
 
-    /// The app's own answer to "are you in front"; nil when it does not answer.
-    private func isFrontmost(_ pid: Int32) -> Bool? {
-        let element = AXUIElementCreateApplication(pid)
-        AXUIElementSetMessagingTimeout(element, 0.5)
-        var raw: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, "AXFrontmost" as CFString, &raw) == .success, let raw,
-              CFGetTypeID(raw) == CFBooleanGetTypeID() else { return nil }
-        return CFBooleanGetValue(unsafeDowncast(raw, to: CFBoolean.self))
-    }
-
-    /// The owner of the top-most visible window of the normal layer (the list is ordered front to back).
-    private func topWindowOwner() -> Int32? {
-        let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
-        for window in info {
-            guard (window[kCGWindowLayer as String] as? Int) == 0, (window[kCGWindowAlpha as String] as? Double ?? 1) > 0.01,
-                  let pid = window[kCGWindowOwnerPID as String] as? Int else { continue }
-            let bounds = (window[kCGWindowBounds as String] as? NSDictionary).flatMap { CGRect(dictionaryRepresentation: $0 as CFDictionary) }
-            if let bounds, bounds.width < 40 || bounds.height < 40 { continue }
-            return Int32(pid)
-        }
-        return nil
+    func activate(_ pid: Int32) {
+        _ = NSRunningApplication(processIdentifier: pid)?.activate()
     }
 
     func cursorLocation() -> CGPoint { CGEvent(source: nil)?.location ?? .zero }

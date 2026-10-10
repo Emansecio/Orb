@@ -177,7 +177,7 @@ struct KeyStroke: Sendable, Equatable, CustomStringConvertible {
     /// "cmd+shift+s", "return", "ctrl+option+left", "cmd++" (the plus key). Modifiers: cmd (command), shift, option (alt,
     /// opt), ctrl (control). Keys: return (enter), escape (esc), tab, space, delete (backspace), forwarddelete, up, down,
     /// left, right, home, end, pageup, pagedown, f1…f12, or one character. Case does not matter; an uppercase letter
-    /// alone means shift plus the letter.
+    /// alone ("A", with no modifier) means shift plus the letter, while "Cmd+Z" is ⌘Z (shift only when written).
     static func parse(_ text: String) throws -> KeyStroke {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw ParseError.empty }
@@ -213,7 +213,8 @@ struct KeyStroke: Sendable, Equatable, CustomStringConvertible {
 
         if let named = Named.byName[keyText.lowercased()] { return KeyStroke(.named(named), modifiers: modifiers) }
         guard keyText.count == 1, let character = keyText.first else { throw ParseError.unknownKey(keyText) }
-        if character.isUppercase { modifiers.insert(.shift) }
+        // Only a lone letter carries an implicit shift: in "Cmd+Z" the capital is just how the shortcut is written.
+        if character.isUppercase, modifierTokens.isEmpty { modifiers.insert(.shift) }
         let lower = character.lowercased()
         return KeyStroke(.character(lower.count == 1 ? Character(lower) : character), modifiers: modifiers)
     }
@@ -299,12 +300,15 @@ struct TakeoverReport<Value: Sendable>: Sendable {
     var restoredApp: String?
     /// Whether the pointer is back where it was.
     var cursorRestored: Bool
+    /// The app that was in front could not be put back (neither way worked): the person must be told.
+    var restoreFailed: Bool
 
-    init(value: Value, duration: Duration, restoredApp: String? = nil, cursorRestored: Bool = true) {
+    init(value: Value, duration: Duration, restoredApp: String? = nil, cursorRestored: Bool = true, restoreFailed: Bool = false) {
         self.value = value
         self.duration = duration
         self.restoredApp = restoredApp
         self.cursorRestored = cursorRestored
+        self.restoreFailed = restoreFailed
     }
 }
 

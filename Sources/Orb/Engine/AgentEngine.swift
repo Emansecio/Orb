@@ -719,6 +719,7 @@ actor AgentEngine {
             }
             let target = Self.writeTarget(tool.spec.name, arguments, request.context)
             var context = request.context
+            context.judgedDanger = permission.danger != nil
             context.handoff = { [self] page in
                 await handoff(page: page, resuming: summary.title, request: request, out: out)
             }

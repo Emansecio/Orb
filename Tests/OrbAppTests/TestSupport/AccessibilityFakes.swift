@@ -15,6 +15,8 @@ final class FakeElement: AccessibilityElement, @unchecked Sendable {
     var actions: [String] = []
     var settable: Set<String> = []
     var onPerform: (@Sendable (String) -> Void)?
+    /// Called after an attribute is set (to make the app react, as one that comes forward when a field gets the focus).
+    var onSet: (@Sendable (String, AXAttributeValue) -> Void)?
     /// The owning process reported by `pid`.
     var pid: Int32?
     /// How long every call into this element blocks, like an app that is hung or slow to answer.
@@ -120,6 +122,7 @@ final class FakeElement: AccessibilityElement, @unchecked Sendable {
         guard settable.contains(name) else { throw AXFailure.notSupported }
         lock.withLock { assigned[name] = value }
         attrs[name] = value
+        onSet?(name, value)
     }
 }
 
@@ -176,6 +179,8 @@ final class FakeAccessibility: AccessibilitySystem, @unchecked Sendable {
     var userIdle: TimeInterval = .infinity
     /// Answers `hitTest`; nil result means nothing there.
     var hitHandler: (@Sendable (AccessibilityApp, CGPoint) -> FakeElement?)?
+    /// What the window server lists per process (`windowList`); empty by default, like a list that has nothing for the app.
+    var listedWindows: [Int32: [CapturableWindow]] = [:]
     private var rootRequests = 0
     private var activations: [Int32] = []
     private var hits: [CGPoint] = []
@@ -202,6 +207,7 @@ final class FakeAccessibility: AccessibilitySystem, @unchecked Sendable {
         return hitHandler?(app, point)
     }
     func frontmostPID() async -> Int32? { frontmost }
+    func windowList(pid: Int32) -> [CapturableWindow] { listedWindows[pid] ?? [] }
     func secondsSinceUserInput() -> TimeInterval { userIdle }
 
     var events: any AccessibilityEvents { axEvents }
@@ -295,6 +301,8 @@ final class FakeSyntheticInput: SyntheticInput, @unchecked Sendable {
     private var failure: (any Error)?
     /// Characters per chunk of `text`; the real implementation sends at most 20 UTF-16 units at a time.
     var chunkSize = 20
+    /// Runs before every call is recorded (or fails), like the app reacting to the event as it arrives.
+    var beforeEach: (@Sendable () -> Void)?
 
     var secureInputActive: Bool {
         get { lock.withLock { secure } }
@@ -314,6 +322,7 @@ final class FakeSyntheticInput: SyntheticInput, @unchecked Sendable {
     }
 
     private func record(_ event: Event) throws {
+        beforeEach?()
         try lock.withLock {
             if let failure { throw failure }
             log.append(event)
@@ -323,6 +332,7 @@ final class FakeSyntheticInput: SyntheticInput, @unchecked Sendable {
     func keys(_ strokes: [KeyStroke], to pid: Int32) async throws { try record(.keys(strokes, pid: pid)) }
 
     func text(_ text: String, to pid: Int32) async throws -> Int {
+        beforeEach?()
         if let failure = error { throw failure }
         var sent = 0
         var rest = Substring(text)
@@ -443,6 +453,8 @@ final class FakeScreenOwner: ScreenOwner, @unchecked Sendable {
     /// What the report says was put back in front.
     var restoredApp: String? = "Safari"
     var cursorRestored = true
+    /// The report says the person's app could not be put back in front.
+    var restoreFailed = false
 
     var steps: [Step] { lock.withLock { log } }
     var takes: Int { steps.filter { if case .took = $0 { true } else { false } }.count }
@@ -467,6 +479,7 @@ final class FakeScreenOwner: ScreenOwner, @unchecked Sendable {
         // Restoration cannot be cancelled: it runs in its own task, which is awaited whatever happened to this one.
         await Task.detached { [self] in record(.restored(cancelled: cancelled)) }.value
         let value = try outcome.get()
-        return TakeoverReport(value: value, duration: started.duration(to: clock.now), restoredApp: restoredApp, cursorRestored: cursorRestored)
+        return TakeoverReport(value: value, duration: started.duration(to: clock.now), restoredApp: restoredApp, cursorRestored: cursorRestored,
+                              restoreFailed: restoreFailed)
     }
 }

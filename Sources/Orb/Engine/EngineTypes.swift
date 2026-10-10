@@ -590,6 +590,10 @@ struct ToolContext: Sendable {
     /// Waits for the person to finish what only they can do in the browser window `browse_show` opened. The engine sets it for the
     /// tool call (it opens the card and waits); nil where nobody can answer, and `browse_show` then tells the model to ask and stop.
     var handoff: HandoffHandler?
+    /// Whether the permission check (the approval card, when there was one) judged this very call dangerous: set by the
+    /// engine before the tool runs, so a tool that checks again at run time (`ui_act`) holds to what the card showed
+    /// instead of judging anew from state that may have changed. Nil where no check was made (tests, the tools server).
+    var judgedDanger: Bool?
 }
 
 /// Opens the hand-off card for the page shown (its address and title) and waits: true when the person clicked "Pronto", false

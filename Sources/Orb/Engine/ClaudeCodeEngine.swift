@@ -314,13 +314,22 @@ actor ClaudeCodeEngine {
 
     /// The Orb's `browse_show`, as the CLI names it.
     static let browseShow = ClaudeCodeTools.memoryPrefix + "browse_show"
+    /// The Orb's `ui_act`, as the CLI names it.
+    static let uiAct = ClaudeCodeTools.memoryPrefix + "ui_act"
 
     /// Answers a `can_use_tool` request: by the Orb's mode and rules as they are now, or by asking the user. `browse_show`, once
     /// allowed, also waits for the person to finish in the window (the app opens it, and the card, itself).
     /// `granted` holds the grants of this turn ("Só nesta tarefa").
     private func permission(_ request: ClaudeCodePermissionRequest, turn: ClaudeCodeTurn, hasText: Bool, fromSubagent: Bool,
                             granted: inout [PermissionRule], out: AsyncStream<TurnEvent>.Continuation) async -> ClaudeCodePermissionAnswer {
-        let answer = await authorize(request, turn: turn, hasText: hasText, fromSubagent: fromSubagent, granted: &granted, out: out)
+        var judged: String?
+        let answer = await authorize(request, turn: turn, hasText: hasText, fromSubagent: fromSubagent, granted: &granted, judged: &judged, out: out)
+        // `ui_act` checks its live target again in the tools server, which has readings of its own: it is told what the card
+        // judged (always written here, so a value the model put in the call never stands).
+        if case .allow = answer, request.toolName == Self.uiAct, case .object(var fields) = request.input {
+            fields[UIActTool.cardKey] = .string(UIActTool.cardMark(dangerous: judged != nil))
+            return .allowUpdating(.object(fields))
+        }
         guard case .allow = answer, request.toolName == Self.browseShow, !request.input.flag("hide"), turn.browser.drivesABrowser else {
             return answer
         }
@@ -355,8 +364,10 @@ actor ClaudeCodeEngine {
         return .allowUpdating(.object(fields))
     }
 
+    /// `judged`: the danger the check found in the call (what the card showed), whatever the answer.
     private func authorize(_ request: ClaudeCodePermissionRequest, turn: ClaudeCodeTurn, hasText: Bool, fromSubagent: Bool,
-                           granted: inout [PermissionRule], out: AsyncStream<TurnEvent>.Continuation) async -> ClaudeCodePermissionAnswer {
+                           granted: inout [PermissionRule], judged: inout String?,
+                           out: AsyncStream<TurnEvent>.Continuation) async -> ClaudeCodePermissionAnswer {
         let live = await turn.currentPermissions()
         let workspace = turn.bot.workingURL
         var call = PermissionPolicy.call(claudeCodeTool: request.toolName, input: request.input, workspace: workspace,
@@ -366,6 +377,7 @@ actor ClaudeCodeEngine {
                 ?? (!turn.knownConnectorTools.contains(key) && turn.connectorPrefixes.contains { key.hasPrefix($0) }
                     ? ClaudeCodeTurn.unverifiedReason : nil)
         }
+        judged = call.danger
         let why: PermissionVerdict.AskReason
         switch PermissionPolicy.evaluate(mode: live.mode, call: call, rules: live.rules, turnGrants: granted, workspace: workspace) {
         case .allow: return .allow

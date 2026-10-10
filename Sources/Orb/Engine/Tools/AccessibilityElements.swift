@@ -147,6 +147,9 @@ protocol AccessibilitySystem: Sendable {
     func hitTest(_ app: AccessibilityApp, at point: CGPoint) -> (any AccessibilityElement)?
     /// The process in front, if any.
     func frontmostPID() async -> Int32?
+    /// The windows of a process as the window server lists them (number, owner, frame; the title only with Screen
+    /// Recording), in any Space. Needs no permission: N1 events find their window here.
+    func windowList(pid: Int32) -> [CapturableWindow]
     /// Seconds since the user last pressed a key or a mouse button. Infinite when unknown.
     func secondsSinceUserInput() -> TimeInterval
     /// Notifications from an app (`AXObserver`).
@@ -163,6 +166,7 @@ extension AccessibilitySystem {
     func prepare(_ root: any AccessibilityElement) {}
     func hitTest(_ app: AccessibilityApp, at point: CGPoint) -> (any AccessibilityElement)? { nil }
     func frontmostPID() async -> Int32? { nil }
+    func windowList(pid: Int32) -> [CapturableWindow] { [] }
     func secondsSinceUserInput() -> TimeInterval { .infinity }
     var events: any AccessibilityEvents { UnavailableAccessibilityEvents() }
     var input: any SyntheticInput { UnavailableSyntheticInput() }
@@ -182,10 +186,14 @@ struct LiveAccessibilitySystem: AccessibilitySystem {
         AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), messagingTimeout)
     }()
 
+    /// Which apps run and which is in front, read anew on every call (never NSWorkspace's lists: see `LiveDesktop`).
+    var desktop = LiveDesktop()
+
     func isTrusted() -> Bool { AXIsProcessTrusted() }
 
     func runningApps() async -> [RunningAppInfo] {
-        await MainActor.run { RunningAppInfo.current(includeBackground: true) }
+        let desktop = desktop
+        return await LiveDesktop.offPool { desktop.runningApps() }
     }
 
     func root(of app: AccessibilityApp) -> any AccessibilityElement {
@@ -212,7 +220,26 @@ struct LiveAccessibilitySystem: AccessibilitySystem {
     var events: any AccessibilityEvents { AXEventHub.shared }
 
     func frontmostPID() async -> Int32? {
-        await MainActor.run { NSWorkspace.shared.frontmostApplication?.processIdentifier }
+        let desktop = desktop
+        return await LiveDesktop.offPool { desktop.frontmost() }
+    }
+
+    func windowList(pid: Int32) -> [CapturableWindow] {
+        let info = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        return Self.windows(in: info, pid: pid)
+    }
+
+    /// The normal-layer windows of `pid` in a window-server listing.
+    static func windows(in info: [[String: Any]], pid: Int32) -> [CapturableWindow] {
+        info.compactMap { window in
+            guard (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid,
+                  (window[kCGWindowLayer as String] as? NSNumber)?.intValue ?? 0 == 0,
+                  let number = (window[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
+                  let bounds = (window[kCGWindowBounds as String] as? NSDictionary).flatMap({ CGRect(dictionaryRepresentation: $0 as CFDictionary) })
+            else { return nil }
+            return CapturableWindow(windowID: number, pid: pid, frame: bounds, title: window[kCGWindowName as String] as? String ?? "",
+                                    isOnScreen: (window[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue ?? false)
+        }
     }
 
     var screen: any ScreenOwner { LiveScreenOwner(events: events) }
@@ -264,7 +291,13 @@ struct LiveAccessibilityElement: AccessibilityElement, @unchecked Sendable {
         var raw: CFArray?
         let status = AXUIElementCopyMultipleAttributeValues(ref, names as CFArray, AXCopyMultipleAttributeOptions(rawValue: 0), &raw)
         guard status == .success, let values = raw as? [AnyObject], values.count == names.count else {
-            return Dictionary(uniqueKeysWithValues: names.compactMap { name in attribute(name).map { (name, $0) } })
+            // A hung app is not asked again name by name (each would wait the whole timeout).
+            if Self.fatal(status) != nil { return [:] }
+            return Self.oneByOne(names) { name in
+                var single: CFTypeRef?
+                let error = AXUIElementCopyAttributeValue(ref, name as CFString, &single)
+                return (error, single.map(Self.convert))
+            }.values
         }
         var result: [String: AXAttributeValue] = [:]
         for (name, item) in zip(names, values) {
@@ -282,14 +315,13 @@ struct LiveAccessibilityElement: AccessibilityElement, @unchecked Sendable {
         if let failure = Self.fatal(status) { return .failed(failure) }
         guard status == .success, let items = raw as? [AnyObject], items.count == names.count else {
             // The batch call is not supported by this element: ask one by one, still reporting a dead or hung app.
-            var result: [String: AXAttributeValue] = [:]
-            for name in names {
+            let found = Self.oneByOne(names) { name in
                 var single: CFTypeRef?
                 let error = AXUIElementCopyAttributeValue(ref, name as CFString, &single)
-                if let failure = Self.fatal(error) { return .failed(failure) }
-                if error == .success, let single { result[name] = Self.convert(single) }
+                return (error, single.map(Self.convert))
             }
-            return .values(result)
+            if let failure = found.failure { return .failed(failure) }
+            return .values(found.values)
         }
         var result: [String: AXAttributeValue] = [:]
         for (name, item) in zip(names, items) {
@@ -307,8 +339,20 @@ struct LiveAccessibilityElement: AccessibilityElement, @unchecked Sendable {
         return .values(result)
     }
 
+    /// Asks for each attribute in turn and stops at the first answer that says the app (not the attribute) is the problem:
+    /// a hung app costs one timeout, not one per name.
+    static func oneByOne(_ names: [String], _ ask: (String) -> (AXError, AXAttributeValue?)) -> (values: [String: AXAttributeValue], failure: AXFailure?) {
+        var result: [String: AXAttributeValue] = [:]
+        for name in names {
+            let (error, value) = ask(name)
+            if let failure = fatal(error) { return (result, failure) }
+            if error == .success, let value { result[name] = value }
+        }
+        return (result, nil)
+    }
+
     /// The errors that mean the app, not the attribute, is the problem.
-    private static func fatal(_ error: AXError) -> AXFailure? {
+    static func fatal(_ error: AXError) -> AXFailure? {
         switch error {
         case .apiDisabled: .apiDisabled
         case .cannotComplete: .cannotComplete
@@ -367,7 +411,7 @@ struct LiveAccessibilityElement: AccessibilityElement, @unchecked Sendable {
         }
     }
 
-    private static func convert(_ raw: CFTypeRef) -> AXAttributeValue {
+    static func convert(_ raw: CFTypeRef) -> AXAttributeValue {
         let type = CFGetTypeID(raw)
         if type == CFStringGetTypeID() { return .string(unsafeDowncast(raw, to: CFString.self) as String) }
         if type == CFBooleanGetTypeID() { return .bool(CFBooleanGetValue(unsafeDowncast(raw, to: CFBoolean.self))) }
@@ -396,5 +440,91 @@ struct LiveAccessibilityElement: AccessibilityElement, @unchecked Sendable {
             }
         }
         return .other
+    }
+}
+
+// MARK: - Which apps run, and which is in front
+
+/// The running apps and the app in front, read anew on every call. Never `NSWorkspace`'s `runningApplications` or
+/// `frontmostApplication`: they learn of changes only through the main run loop, which the Claude Code tools server (a
+/// `dispatchMain()` process) does not run, so there they go stale. The app in front comes from the window list (the owner
+/// of the top window of the normal layer: needs no answer from any app), checked against that app's own `AXFrontmost`, and
+/// the other apps' `AXFrontmost` one by one when the top window is not the front app's; the system-wide
+/// `AXFocusedApplication` is not used (it fails with "cannot complete" while an Electron app is in front). The same reading
+/// serves `ui_act` (in both processes) and the takeover (`LiveTakeoverPlatform`).
+struct LiveDesktop: Sendable {
+    /// The owner of the top-most visible window of the normal layer.
+    var topWindowOwner: @Sendable () -> Int32? = LiveDesktop.liveTopWindowOwner
+    /// An app's own answer to "are you in front"; nil when it does not answer.
+    var isFrontmost: @Sendable (Int32) -> Bool? = LiveDesktop.liveIsFrontmost
+    /// The processes that are apps (`isActive` not filled in), enumerated anew.
+    var processes: @Sendable () -> [RunningAppInfo] = LiveDesktop.liveProcesses
+
+    /// The app in front. Blocking (it may ask apps): call it off the main thread and off the cooperative pool.
+    func frontmost() -> Int32? { frontmost(among: nil) }
+
+    /// Every app, with `isActive` set on the one in front.
+    func runningApps() -> [RunningAppInfo] {
+        var apps = processes()
+        let front = frontmost(among: apps)
+        for index in apps.indices { apps[index].isActive = apps[index].pid == front }
+        return apps
+    }
+
+    private func frontmost(among known: [RunningAppInfo]?) -> Int32? {
+        let candidate = topWindowOwner()
+        if let candidate {
+            switch isFrontmost(candidate) {
+            case true?, nil: return candidate
+            case false?: break
+            }
+        }
+        for app in known ?? processes() where app.isRegular && app.pid != candidate {
+            if isFrontmost(app.pid) == true { return app.pid }
+        }
+        return candidate
+    }
+
+    /// Runs blocking work on a GCD thread (never the main thread, never a thread of the cooperative pool).
+    static func offPool<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async { continuation.resume(returning: work()) }
+        }
+    }
+
+    static let liveTopWindowOwner: @Sendable () -> Int32? = {
+        let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        for window in info {
+            guard (window[kCGWindowLayer as String] as? Int) == 0, (window[kCGWindowAlpha as String] as? Double ?? 1) > 0.01,
+                  let pid = window[kCGWindowOwnerPID as String] as? Int else { continue }
+            let bounds = (window[kCGWindowBounds as String] as? NSDictionary).flatMap { CGRect(dictionaryRepresentation: $0 as CFDictionary) }
+            if let bounds, bounds.width < 40 || bounds.height < 40 { continue }
+            return Int32(pid)
+        }
+        return nil
+    }
+
+    static let liveIsFrontmost: @Sendable (Int32) -> Bool? = { pid in
+        let element = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(element, 0.5)
+        var raw: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, "AXFrontmost" as CFString, &raw) == .success, let raw,
+              CFGetTypeID(raw) == CFBooleanGetTypeID() else { return nil }
+        return CFBooleanGetValue(unsafeDowncast(raw, to: CFBoolean.self))
+    }
+
+    /// Every process (`proc_listallpids`) that Launch Services knows as an app, each `NSRunningApplication` made fresh for
+    /// this call (a few milliseconds for the whole Mac).
+    static let liveProcesses: @Sendable () -> [RunningAppInfo] = {
+        let estimate = proc_listallpids(nil, 0)
+        guard estimate > 0 else { return [] }
+        var pids = [pid_t](repeating: 0, count: Int(estimate) + 64)
+        let count = pids.withUnsafeMutableBytes { proc_listallpids($0.baseAddress, Int32($0.count)) }
+        guard count > 0 else { return [] }
+        return pids.prefix(Int(count)).compactMap { pid -> RunningAppInfo? in
+            guard pid > 0, let app = NSRunningApplication(processIdentifier: pid), !app.isTerminated, let name = app.localizedName else { return nil }
+            return RunningAppInfo(name: name, bundleID: app.bundleIdentifier, pid: pid, isActive: false, isHidden: app.isHidden,
+                                  isRegular: app.activationPolicy == .regular, launchDate: app.launchDate)
+        }
     }
 }

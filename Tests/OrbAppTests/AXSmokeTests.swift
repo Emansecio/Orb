@@ -211,7 +211,7 @@ struct AXSmokeTests {
     }
 
     @Test func aStoppedAppDoesNotHangTheReader() async throws {
-        // WP-A: the first failed call ends the reading (cut `.hung`) and the session says it is busy.
+        // WP-A: the first failed call ends the reading (cut `.hung`) within the messaging timeout.
         let fixture = try await FixtureApp.launch()
         defer { fixture.stop() }
         let session = SmokeSession(fixture)
@@ -222,9 +222,31 @@ struct AXSmokeTests {
         let begin = clock.now
         _ = try? await session.read()
         #expect(begin.duration(to: clock.now) <= .milliseconds(1_500), "ui_read returns within 1.5 s of a stopped app")
+    }
+
+    @Test func aCallPastItsDeadlineLeavesTheSessionBusyAndTheNextOneFailsAtOnce() async throws {
+        // WP-A: a deadline shorter than the 1 s messaging timeout, so the call to the stopped app is still out when the next
+        // one comes: that one must fail at once ("ainda está ocupado"), not wait on the app again.
+        let fixture = try await FixtureApp.launch()
+        defer { fixture.stop() }
+        let sessions = AXSessions(deadlines: AXDeadlines(read: .milliseconds(300), readWithQuery: .milliseconds(300), action: .milliseconds(300)))
+        let reader = UIReadTool(system: LiveAccessibilitySystem(), store: UISnapshotStore(directory: nil), sessions: sessions, live: UILiveElements())
+        let context = SmokeSession(fixture).context
+        let arguments = JSONValue.object(["app": .string(AXSmoke.appName)])
+        _ = try await reader.run(arguments, context: context)
+        kill(fixture.pid, SIGSTOP)
+        defer { kill(fixture.pid, SIGCONT) }
+        let clock = ContinuousClock()
+        let begin = clock.now
+        var first = ""
+        do { _ = try await reader.run(arguments, context: context) } catch { first = error.localizedDescription }
+        #expect(first.contains("não respondeu"), "the first call hits its deadline: \(first)")
+        #expect(begin.duration(to: clock.now) <= .milliseconds(800))
         let again = clock.now
-        _ = try? await session.read()
-        #expect(clock.now - again <= .milliseconds(200), "the second call fails at once: the session is busy")
+        var second = ""
+        do { _ = try await reader.run(arguments, context: context) } catch { second = error.localizedDescription }
+        #expect(clock.now - again <= .milliseconds(200), "the second call fails at once")
+        #expect(second.contains("ainda está ocupado"), "because the session is busy: \(second)")
     }
 
     // MARK: Needs WP-A (sessions, events, the ladder)
@@ -243,14 +265,25 @@ struct AXSmokeTests {
         #expect(logged != nil)
     }
 
-    @Test func aPasswordFieldIsTypedIntoButOnlyItsLengthIsEverLogged() async throws {
-        // WP-A: typing in a secure field is allowed (it asks first); nothing reads it back.
+    @Test func aPasswordFieldIsTypedIntoOnlyWhenNamedAndOnlyItsLengthIsEverLogged() async throws {
+        // WP-A: typing "into the focused field" cannot be judged before running; the real NSSecureTextField must be seen as a
+        // password field then and refused (the card did not say so). Named by id, the card asks first, and then it goes.
         let fixture = try await FixtureApp.launch()
         defer { fixture.stop() }
         let session = SmokeSession(fixture)
         let secret = try session.id(of: "field “Senha”", in: try await session.read())
         _ = try await session.act("focus", ["id": .string(secret)])
-        _ = try await session.act("type", ["value": .string("abc123")])
+        let blind: [String: JSONValue] = ["action": .string("type"), "value": .string("abc123"), "app": .string(AXSmoke.appName)]
+        #expect(try session.tool("ui_act").danger(.object(blind)) == nil, "the card cannot tell: it names no field")
+        var refusal = ""
+        do { _ = try await session.act("type", ["value": .string("abc123")]) } catch { refusal = error.localizedDescription }
+        #expect(refusal.contains("campo de senha"), "the focused NSSecureTextField is recognized at run time: \(refusal)")
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(fixture.events("text").allSatisfy { text($0, "field") != "Senha" }, "nothing reached the password field")
+
+        let named: [String: JSONValue] = ["action": .string("type"), "id": .string(secret), "value": .string("abc123"), "app": .string(AXSmoke.appName)]
+        #expect(try session.tool("ui_act").danger(.object(named))?.contains("senha") == true, "named, the card says it is a password field")
+        _ = try await session.act("type", ["id": .string(secret), "value": .string("abc123")])
         let logged = await fixture.waitFor("text") { text($0, "field") == "Senha" && number($0, "length") == 6 }
         #expect(logged != nil)
         #expect(!(try await session.read()).contains("abc123"))

@@ -32,14 +32,19 @@ struct ScreenshotTool: AgentTool {
     /// The app with the front-most ordinary window that is not one of the given processes' (the Orb's own).
     let frontWindowPID: @Sendable (_ excluding: Set<Int32>) -> Int32?
     let ownPID: Int32
+    /// The app's Accessibility calls (its window, the marks) go through its session like ui_read's: one at a time per app,
+    /// with a deadline, and failing at once while a call to a hung app has not come back.
+    let sessions: AXSessions
 
     init(system: any AccessibilitySystem = LiveAccessibilitySystem(), store: UISnapshotStore = .shared,
          screenAccess: ScreenCaptureAccess = .live,
          folder: URL = FileManager.default.temporaryDirectory.appending(path: "OrbScreenshots"),
          ownPID: Int32 = ProcessInfo.processInfo.processIdentifier,
-         frontWindowPID: @escaping @Sendable (_ excluding: Set<Int32>) -> Int32? = ScreenshotTool.liveFrontWindowPID) {
+         frontWindowPID: @escaping @Sendable (_ excluding: Set<Int32>) -> Int32? = ScreenshotTool.liveFrontWindowPID,
+         sessions: AXSessions = .shared) {
         self.system = system
         self.store = store
+        self.sessions = sessions
         self.screenAccess = screenAccess
         self.folder = folder
         self.ownPID = ownPID
@@ -218,12 +223,29 @@ struct ScreenshotTool: AgentTool {
         var ax: AXWindowInfo?
         if trusted {
             let system = system
-            let root = system.root(of: app)
-            ax = try await runDetached {
-                system.prepare(root)
-                return try Self.axWindow(root: root, selector: selector)
+            // A window that does not exist is the model's to fix (thrown); an app that does not answer only costs the marks.
+            var lookup: Result<AXWindowInfo?, ToolError>?
+            do {
+                lookup = try await UIAccess.mapped(app) {
+                    try await sessions.run(app, within: sessions.deadlines.action) { () -> Result<AXWindowInfo?, ToolError> in
+                        let root = system.root(of: app)
+                        system.prepare(root)
+                        do { return .success(try Self.axWindow(root: root, selector: selector)) } catch let error as ToolError {
+                            return .failure(error)
+                        } catch {
+                            return .failure(ToolError(error.localizedDescription))
+                        }
+                    }
+                }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                notes.append("Sem marcas: " + Self.message(error))
             }
-            if ax == nil { notes.append("Sem marcas: \(app.name) não expôs janelas pela Acessibilidade.") }
+            if let lookup {
+                ax = try lookup.get()
+                if ax == nil { notes.append("Sem marcas: \(app.name) não expôs janelas pela Acessibilidade.") }
+            }
         } else {
             notes.append(isOrb ? "Sem marcas: o Orb não lê a própria interface." : "Sem marcas: " + MacPermissionProblem.accessibility.modelMessage)
         }
@@ -267,13 +289,26 @@ struct ScreenshotTool: AgentTool {
             do { return .success(try await capturer.capture(capturing, maxSide: maxSide)) } catch { return .failure(error) }
         }()
         let axWindow = ax
-        async let readMarks: UIMarkReading? = {
+        let sessions = sessions
+        async let readMarks: Result<UIMarkReading, any Error>? = {
             guard wantsMarks, let axWindow, let frame = axWindow.frame else { return nil }
             let element = axWindow.element, prefix = "w\(axWindow.index + 1)"
-            return try? await runDetached { UIMarkCollector.collect(window: element, prefix: prefix, origin: frame.origin, size: frame.size) }
+            do {
+                return .success(try await sessions.run(app, within: sessions.deadlines.read) {
+                    UIMarkCollector.collect(window: element, prefix: prefix, origin: frame.origin, size: frame.size)
+                })
+            } catch {
+                return .failure(error)
+            }
         }()
-        let (pictureResult, reading) = await (pictured, readMarks)
+        let (pictureResult, marksResult) = await (pictured, readMarks)
         try Task.checkCancellation()
+        var reading: UIMarkReading?
+        switch marksResult {
+        case .success(let read)?: reading = read
+        case .failure(let error)?: notes.append("Sem marcas: " + Self.message(error))
+        case nil: break
+        }
 
         var image: CGImage?
         switch pictureResult ?? listingFailure.map({ .failure($0) }) {
@@ -345,6 +380,10 @@ struct ScreenshotTool: AgentTool {
             legend = "Nenhum elemento clicável visível nesta janela."
         }
         return Capture(header: header, ocr: text, file: file, legend: legend, ocrSkipped: !wantsText)
+    }
+
+    private static func message(_ error: any Error) -> String {
+        (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
     }
 
     private struct JPEGPicture: Sendable {
