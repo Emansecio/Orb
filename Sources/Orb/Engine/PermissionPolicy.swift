@@ -17,6 +17,10 @@ enum PermissionFamily: String, CaseIterable, Codable, Sendable {
     /// Clicking, typing and pressing keys in the Orb's own browser (`browse_click`, `browse_fill`, `browse_select`, `browse_press`,
     /// `browse_show`): its own family, so a grant for reading a site never lets the Orb act inside the pages it logged in to.
     case browserPage
+    /// Asking and telling other Orbs (`orbs`). Never granted for good: only the turn's own grant covers it (listing needs no permission).
+    case delegation
+    /// Saving to a group's shared board (`group_remember`); the group's turn grants it, except for preferences.
+    case groupMemory
 }
 
 /// A standing "Sempre permitir": a family of tools, narrowed by a scope.
@@ -121,6 +125,8 @@ extension PermissionRule {
             case .memory: "Guardar na memória"
             case .jobs: "Gerenciar processos em segundo plano"
             case .schedule: "Gerenciar as tarefas agendadas"
+            case .delegation: "Pedir ajuda a outros Orbs"
+            case .groupMemory: "Guardar no quadro do grupo"
             }
         case .commandPrefix(let words): "Rodar comandos \(words.joined(separator: " "))"
         case .folder(let path): "Gravar em \(Self.display(path))"
@@ -268,7 +274,7 @@ enum PermissionPolicy {
         case .connector:
             guard let key = call.connector else { return false }
             return relevant.contains { if case .connectorTool(let allowed) = $0.scope { allowed == key } else { false } }
-        case .open, .appleScript, .macApps, .appInterface, .browserPage, .memory, .jobs, .schedule:
+        case .open, .appleScript, .macApps, .appInterface, .browserPage, .memory, .jobs, .schedule, .delegation, .groupMemory:
             return false
         }
     }
@@ -490,6 +496,8 @@ enum PermissionPolicy {
         case "remember", "recall": return .memory
         case "job_output", "job_list", "job_stop": return .jobs
         case "schedule": return .schedule
+        case "orbs": return .delegation
+        case "group_remember", "group_recall": return .groupMemory
         default: break
         }
         switch kind {
@@ -500,6 +508,7 @@ enum PermissionPolicy {
         case .connector: return .connector
         case .memory: return .memory
         case .schedule: return .schedule
+        case .orbs: return .delegation
         case .search: return nil
         }
     }
@@ -600,6 +609,8 @@ enum PermissionPolicy {
             found = call.connector.map { [PermissionRule(family: .connector, scope: .connectorTool($0))] } ?? []
         case .open, .appleScript, .macApps, .appInterface, .browserPage, .memory, .jobs, .schedule:
             found = [PermissionRule(family: family)]
+        case .delegation, .groupMemory:
+            found = [] // never "Sempre permitir": the turn's own grant covers them
         }
         // Suggestions from Claude Code come after Orb's own, and only where they fit the call's family.
         // A rule for an interpreter (`Bash(python3:*)`) would allow everything, so those are not offered either.

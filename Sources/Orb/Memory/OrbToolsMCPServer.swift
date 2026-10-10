@@ -37,6 +37,7 @@ enum OrbToolsMCPServer {
 
     /// Every tool the server can offer, for naming and summarizing the calls Claude Code reports.
     static let allTools: [any AgentTool] = ToolBox.memoryTools + ToolBox.scheduleTools + ToolBox.macTools + ToolBox.searchTools + ToolBox.browseTools
+        + ToolBox.multiOrbTools + ToolBox.wizardTools
 
     /// What one server process offers, gated like the native tools: memory always, each Mac tool when the Orb has
     /// "Controlar apps do Mac" or the tool needs no capability (`open`, `notify`), `web_search` with "Navegar na web"

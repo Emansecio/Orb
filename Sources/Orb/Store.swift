@@ -22,6 +22,8 @@ struct AppState: Codable, Sendable {
     var profile = UserProfile()
     /// Prices the user corrected on the Uso page, by "provider/model" (US$ per million tokens).
     var priceCorrections: [String: ModelPrice] = [:]
+    /// The groups of Orbs (see `OrbGroup`); their threads are in `conversations/_grupos/`.
+    var groups: [OrbGroup] = []
 
     /// What the app starts with when there is no data yet (a new install, after "Redefinir o Orb"): no Orb, so the
     /// window opens on the welcome, where Atlas is one click away.
@@ -928,6 +930,7 @@ extension AppState {
             init(from decoder: Decoder) throws { value = try? decoder.singleValueContainer().decode(ModelPrice.self) }
         }
         priceCorrections = ((try? c.decodeIfPresent([String: Price].self, forKey: .priceCorrections)) ?? nil)?.compactMapValues(\.value) ?? [:]
+        groups = try c.lossyArray(.groups)
         try migrateSingleProvider(from: decoder)
     }
 

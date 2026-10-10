@@ -134,7 +134,7 @@ enum RetryPlan: Equatable, Sendable {
         let after = items[(lastUser + 1)...]
         for item in after {
             switch item.kind {
-            case .notice, .greeting: continue
+            case .notice, .greeting, .event, .orbMessage, .groupPause: continue
             case .user: return .none
             case .bot, .tool, .approval: return .continueTurn
             }

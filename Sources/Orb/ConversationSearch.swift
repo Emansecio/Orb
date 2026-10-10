@@ -249,6 +249,7 @@ enum ConversationSearch {
         case .notice(let text): return (.notice, text)
         case .tool(let call): return (.tool, call.title + "  " + call.detail.prefix(400))
         case .approval: return nil
+        case .event, .orbMessage, .groupPause: return nil // searched once the exchange lines read as text (MultiOrb)
         }
     }
 

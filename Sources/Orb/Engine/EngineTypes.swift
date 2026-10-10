@@ -594,6 +594,18 @@ struct ToolContext: Sendable {
     /// engine before the tool runs, so a tool that checks again at run time (`ui_act`) holds to what the card showed
     /// instead of judging anew from state that may have changed. Nil where no check was made (tests, the tools server).
     var judgedDanger: Bool?
+    // MARK: MultiOrb (WP0)
+    /// What `orbs` asks of the app on this Orb's behalf; nil where Orbs cannot talk (the tool then says so).
+    var orbs: BridgeHandler?
+    /// Opens the creation card for `orb_propose` and waits for the answer; nil where nobody can answer (a routine, a request, a group turn).
+    var proposeOrb: ProposalHandler?
+    /// What `orb_draft` asks of the creation assistant; nil outside it.
+    var draft: BridgeHandler?
+    /// The group's shared board, in a group's turn.
+    var groupMemory: MemoryBank?
+    /// The turn is a side run (a routine, a request from another Orb, a group's turn) and where it stands in its chain.
+    var sideRun: SideRunInfo?
+    // MARK: end MultiOrb (WP0)
 }
 
 /// Opens the hand-off card for the page shown (its address and title) and waits: true when the person clicked "Pronto", false

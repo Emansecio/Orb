@@ -318,6 +318,7 @@ enum Snapshot {
                 ?? Snapshot.composerScene(screen, model: model)
                 ?? SettingsSnapshots.view(screen, firstBotID: model.bots.first?.id)
                 ?? CatalogSnapshots.view(screen, model: model)
+                ?? MultiOrbSnapshots.view(screen, model: model)
                 ?? AnyView(model.bots.first.map { ChatView(botID: $0.id) })
         }
         let size = NSSize(width: ProcessInfo.processInfo.environment["ORB_SNAPSHOT_WIDTH"].flatMap(Double.init) ?? 1100, height: height ?? 760)

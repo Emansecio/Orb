@@ -13,6 +13,12 @@ enum UsageSource: String, Codable, Sendable, CaseIterable {
     case routine
     /// A call the app makes for itself, outside any turn (see `AppModel.recordAuxiliaryUsage`).
     case auxiliary
+    /// A turn an Orb ran for a request from another Orb.
+    case delegation
+    /// A turn an Orb ran in a group.
+    case group
+    /// The "Criar conversando" assistant.
+    case creation
 
     /// A source from a newer build reads as chat.
     init(from decoder: Decoder) throws { self = try decoder.rawValue(Self.self, fallback: .chat) }

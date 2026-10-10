@@ -81,6 +81,7 @@ enum DetailPage: Hashable {
         case .connectors: .connectors
         case .skills: .skills
         case .bot?: botIDs.isEmpty ? .welcome : .orb
+        case .group?: .orb // MARK: MultiOrb (WP6): a page of its own once the group screens exist
         case nil: botIDs.isEmpty ? .welcome : .orb
         }
     }
@@ -147,6 +148,8 @@ private struct DetailView: View {
             ConnectorsView()
         case .skills:
             SkillsView()
+        case .group:
+            EmptyView() // MARK: MultiOrb (WP6): GroupChatView(groupID:)
         case nil:
             // With Orbs the root view picks the first one at once; with none this is the welcome screen.
             if model.botIDs.isEmpty {
