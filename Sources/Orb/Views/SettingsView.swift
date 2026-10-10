@@ -116,6 +116,18 @@ struct GeneralSettings: View {
     @State private var keptCount = 0
     @State private var hasOrbsFolder = false
     @State private var isShowingReset = false
+    @State private var orbsCanTalk = true
+    @State private var isConfirmingOrbsOff = false
+
+    /// Turning it off while Orbs talk asks first (it stops their conversations); turning it on never does.
+    private func setOrbsCanTalk(_ on: Bool) {
+        if !on, model.delegation.hasActiveChains { isConfirmingOrbsOff = true } else { applyOrbsCanTalk(on) }
+    }
+
+    private func applyOrbsCanTalk(_ on: Bool) {
+        orbsCanTalk = on
+        model.orbsCanTalk = on
+    }
 
     var body: some View {
         Form {
@@ -141,6 +153,24 @@ struct GeneralSettings: View {
                     }
                 }
                 .help(Tip.proposeSkills)
+                // MARK: MultiOrb (WP1)
+                Toggle(isOn: Binding(get: { orbsCanTalk }, set: { setOrbsCanTalk($0) })) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Orbs podem conversar entre si")
+                        Text("Os Orbs veem os colegas e pedem ajuda uns aos outros sozinhos, sem cartão por mensagem. Cada um segue as próprias permissões. Parar (⌘.) interrompe a conversa toda. Não afeta grupos.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .help(Tip.orbsCanTalk)
+                .onAppear { orbsCanTalk = model.orbsCanTalk }
+                .confirmationDialog("Desligar a conversa entre Orbs?", isPresented: $isConfirmingOrbsOff, titleVisibility: .visible) {
+                    Button("Desligar e parar as conversas", role: .destructive) { applyOrbsCanTalk(false) }
+                    Button("Cancelar", role: .cancel) {}
+                } message: {
+                    Text("Há Orbs conversando agora. Desligar interrompe essas conversas.")
+                }
+                // MARK: end MultiOrb (WP1)
             }
             ContextMemorySettings()
             LearnedWindowsSettings(rows: $learnedWindows)

@@ -129,6 +129,15 @@ final class BotSession {
     }
     /// When the running routine's run began.
     @ObservationIgnored var routineStart: Date?
+    // MARK: MultiOrb (WP1)
+    /// What `routineID` stands for while it is set: nil is a routine's run (what it always was), `.delegation` a request from
+    /// another Orb (`routineID` is the request's id) and `.group` a turn in a group (`routineID` is the group's id).
+    @ObservationIgnored var sideKind: SideRunKind?
+    /// Where the running turn stands in its chain of requests between Orbs (nil: a turn of the person's own chat).
+    @ObservationIgnored var chain: ChainContext?
+    /// The request between Orbs the running side run answers (what a request `orbs` makes while it runs is a child of it).
+    @ObservationIgnored var servingRequest: UUID?
+    // MARK: end MultiOrb (WP1)
     /// The snapshot and rules marks of the running turn, recorded on its conversation once the model has been given them.
     @ObservationIgnored var pendingMarks: DeliveryMarks?
     /// The running turn folded older turns into the summary: the conversation is saved to memory when it ends.

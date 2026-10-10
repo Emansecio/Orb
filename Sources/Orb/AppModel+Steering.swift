@@ -296,7 +296,7 @@ extension AppModel {
             return
         }
         giveBack(waiting, to: botID)
-        startNextQueuedRoutine(for: botID)
+        startNextQueuedWork(for: botID)
     }
 
     /// A queued message reached the model: the chat shows it as sent, at the point where the model got it. The bubble has

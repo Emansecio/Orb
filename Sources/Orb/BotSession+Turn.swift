@@ -273,7 +273,14 @@ extension BotSession {
     /// The model and source of the running turn, as the usage history files them.
     private var usageLabel: UsageLabel? {
         guard let model, let name = turnModel ?? model.bot(id).flatMap(model.modelRef(for:))?.text else { return nil }
-        return UsageLabel(model: name, source: routineID == nil ? .chat : .routine)
+        // MARK: MultiOrb (WP1)
+        let source: UsageSource = switch (routineID, sideKind) {
+        case (nil, _): .chat
+        case (_, .delegation): .delegation
+        case (_, .group): .group
+        default: .routine
+        }
+        return UsageLabel(model: name, source: source)
     }
 
     private struct UsageLabel {
@@ -329,8 +336,22 @@ extension BotSession {
         model.setAwaitingApproval(false, of: id)
         let reply = lastReply()
         let routineID = routineID
+        // MARK: MultiOrb (WP1)
+        let kind = sideKind
+        let isOrbRun = kind == .delegation || kind == .group // a request from another Orb or a group turn: nobody to tell
+        sideKind = nil
+        let serving = servingRequest
+        servingRequest = nil
+        chain = nil
         self.routineID = nil
-        if let routineID { model.finishRoutineRun(id, routineID: routineID, succeeded: succeeded, reply: reply) }
+        if let routineID {
+            if isOrbRun {
+                model.delegation.finishSideRun(id, runID: routineID, kind: kind ?? .delegation, serving: serving,
+                                               succeeded: succeeded, userStopped: userStopped, reply: reply)
+            } else {
+                model.finishRoutineRun(id, routineID: routineID, succeeded: succeeded, reply: reply)
+            }
+        }
         if userStopped {
             model.live(id).cued(.blink)
         } else if succeeded {
@@ -340,16 +361,17 @@ extension BotSession {
                 celebrate(OrbCelebration.level(seconds: turnSeconds, actions: turnActions, ranRoutine: ranRoutine,
                                                selected: model.selection == .bot(id)))
             }
-            if let bot = model.bot(id), let reply { model.notify(bot.name, RoutineRun.preview(of: reply)) }
+            if !isOrbRun, let bot = model.bot(id), let reply { model.notify(bot.name, RoutineRun.preview(of: reply)) }
         } else {
             flash(\.hasFailed, seconds: 2.5)
         }
-        if model.selection != .bot(id) || !(NSApp?.isActive ?? false) {
+        // The one who asked is told, not the one who did the work (its unread count goes to the asker when the answer arrives).
+        if !isOrbRun, model.selection != .bot(id) || !(NSApp?.isActive ?? false) {
             model.setUnread(model.live(id).unread + 1, for: id)
         }
         if routineID == nil { scheduleSave(delay: 0) } // a routine's was written by `finishRoutineRun`
         if routineID == nil { model.settleSteering(id, succeeded: succeeded) } // what you said during the turn, if anything
-        if startsQueuedRoutines { model.startNextQueuedRoutine(for: id) }
+        if startsQueuedRoutines { model.startNextQueuedWork(for: id) }
         // Last, so a message or a routine that took the Orb at once is not met by a review. A proposal the turn made
         // (you asked for a skill, or the Orb proposed one) is told now; the review comes in the background.
         if !ranRoutine {

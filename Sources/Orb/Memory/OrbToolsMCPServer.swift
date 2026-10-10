@@ -30,6 +30,60 @@ enum OrbToolsMCPServer {
     /// ask macOS from a child process whose trust is not certain to be attributed to the app.
     static let accessibilityFlag = "--accessibility"
     static let noAccessibilityFlag = "--no-accessibility"
+    // MARK: MultiOrb (WP1)
+    /// Where the tools that reach the app (`orbs`, `orb_draft`) leave their calls: the folder of `OrbBridge` (`--bridge <dir>`, with `--orb <id>`).
+    static let bridgeFlag = OrbBridge.flag
+    /// Serves `orbs`.
+    static let orbsFlag = "--orbs"
+    /// Serves `orb_propose` (the engine opens its card; the tool itself is filled in by the package that owns it).
+    static let proposeFlag = "--propose"
+    /// Serves only `orb_draft`: the creation assistant's server.
+    static let wizardFlag = "--wizard"
+    /// Serves `group_remember` and `group_recall` straight on the group's board (`--group-memory <dir>`; the files are shared, as `remember`'s are).
+    static let groupMemoryFlag = "--group-memory"
+
+    /// Which flags serve which tools: one table, so a package that fills in a tool never touches the server's plumbing.
+    static let flagTools: [(flag: String, tools: [String])] = [
+        (orbsFlag, ["orbs"]),
+        (proposeFlag, ["orb_propose"]),
+        (groupMemoryFlag, ["group_remember", "group_recall"]),
+    ]
+    static let wizardToolNames = ["orb_draft"]
+
+    /// The multi-Orb tools a process serves.
+    struct Extras: Equatable, Sendable {
+        var orbs = false
+        var propose = false
+        var groupMemory = false
+        var wizard = false
+
+        init(orbs: Bool = false, propose: Bool = false, groupMemory: Bool = false, wizard: Bool = false) {
+            self.orbs = orbs
+            self.propose = propose
+            self.groupMemory = groupMemory
+            self.wizard = wizard
+        }
+
+        static let none = Extras()
+
+        func enables(_ flag: String) -> Bool {
+            switch flag {
+            case OrbToolsMCPServer.orbsFlag: orbs
+            case OrbToolsMCPServer.proposeFlag: propose
+            case OrbToolsMCPServer.groupMemoryFlag: groupMemory
+            default: false
+            }
+        }
+    }
+
+    /// The tools the extras add (with `wizard`, the process serves `orb_draft` and nothing else: see `tools`).
+    static func multiTools(_ extras: Extras) -> [any AgentTool] {
+        if extras.wizard { return ToolBox.wizardTools }
+        let names = Set(flagTools.filter { extras.enables($0.flag) }.flatMap(\.tools))
+        return ToolBox.multiOrbTools.filter { names.contains($0.spec.name) }
+    }
+    // MARK: end MultiOrb (WP1)
+
     /// MCP server name in the Claude Code config, so its tools are `mcp__orb_memoria__remember`, `__recall`, `__open`…
     /// The name stays what it was: sessions that are resumed, and the user's "Sempre permitir" choices, refer to the
     /// tools by it. It is also a name unlikely to collide with an MCP server of the user's own.
@@ -42,22 +96,23 @@ enum OrbToolsMCPServer {
     /// What one server process offers, gated like the native tools: memory always, each Mac tool when the Orb has
     /// "Controlar apps do Mac" or the tool needs no capability (`open`, `notify`), `web_search` with "Navegar na web"
     /// (`browser` not `.off`) and the `browse_*` tools once the Orb's engine is installed (`.browser`).
-    static func tools(mac: Bool, files: Bool = false, browser: BrowserAvailability = .off) -> [any AgentTool] {
+    static func tools(mac: Bool, files: Bool = false, browser: BrowserAvailability = .off, extras: Extras = .none) -> [any AgentTool] {
+        if extras.wizard { return multiTools(extras) } // the creation assistant gets its one tool, not the memory or the Mac
         var capabilities: Set<Capability> = []
         if mac { capabilities.insert(.computerUse) }
         if files { capabilities.insert(.terminal) }
         var tools = ToolBox.memoryTools + ToolBox.scheduleTools + ToolBox.macTools.filter { $0.capability == nil || $0.isOffered(for: capabilities) }
         if browser != .off { tools += ToolBox.searchTools }
         if browser == .browser { tools += ToolBox.browseTools }
-        return tools
+        return tools + multiTools(extras)
     }
 
     /// What `tools/list` shows: `tools(mac:)` without `ui_read` and `ui_act` while the app lacks Accessibility (they
     /// would only fail, and every Claude Code request carries their descriptions). Calling one still works.
     /// `accessibilityGranted` nil asks macOS.
     static func listedTools(mac: Bool, files: Bool = false, accessibilityGranted: Bool? = nil,
-                            browser: BrowserAvailability = .off) -> [any AgentTool] {
-        let tools = tools(mac: mac, files: files, browser: browser)
+                            browser: BrowserAvailability = .off, extras: Extras = .none) -> [any AgentTool] {
+        let tools = tools(mac: mac, files: files, browser: browser, extras: extras)
         guard tools.contains(where: { ToolBox.accessibilityToolNames.contains($0.spec.name) }) else { return tools }
         let granted = accessibilityGranted ?? LiveMacPermissionSystem().isAccessibilityTrusted()
         return tools.filter { granted || !ToolBox.accessibilityToolNames.contains($0.spec.name) }
@@ -93,13 +148,30 @@ enum OrbToolsMCPServer {
         var browserProfiles: URL?
         /// The TinyFish key, from the environment of the process. Without it a TinyFish search falls back to DuckDuckGo, and says so.
         var tinyFishKey: String?
+        // MARK: MultiOrb (WP1)
+        /// Where `orbs` and `orb_draft` reach the app (with `orb`); nil: those tools say they are unavailable.
+        var bridge: URL?
+        var orbs = false
+        var propose = false
+        var wizard = false
+        /// The group's board, when the process serves `group_remember` and `group_recall`.
+        var groupMemory: URL?
+        // MARK: end MultiOrb (WP1)
+
+        var extras: Extras { Extras(orbs: orbs, propose: propose, groupMemory: groupMemory != nil, wizard: wizard) }
 
         /// Which web tools this process serves.
         var browser: BrowserAvailability { browserEngine.drivesABrowser ? .browser : web ? .fetchOnly : .off }
 
         init(memoryDirectory: URL, mac: Bool = false, files: Bool = false, folder: URL? = nil, accessibilityGranted: Bool? = nil,
              scheduleMailbox: URL? = nil, orb: UUID? = nil, browser: BrowserAvailability = .off, browserEngine: BrowserEngineKind = .simple,
-             searchProvider: SearchProvider = .duckduckgo, browserProfiles: URL? = nil, tinyFishKey: String? = nil) {
+             searchProvider: SearchProvider = .duckduckgo, browserProfiles: URL? = nil, tinyFishKey: String? = nil,
+             bridge: URL? = nil, orbs: Bool = false, propose: Bool = false, wizard: Bool = false, groupMemory: URL? = nil) {
+            self.bridge = bridge
+            self.orbs = orbs
+            self.propose = propose
+            self.wizard = wizard
+            self.groupMemory = groupMemory
             self.memoryDirectory = memoryDirectory
             self.mac = mac
             self.files = files
@@ -137,6 +209,11 @@ enum OrbToolsMCPServer {
             searchProvider = value(of: OrbToolsMCPServer.searchFlag).flatMap(SearchProvider.init(rawValue:)) ?? .duckduckgo
             browserProfiles = value(of: OrbToolsMCPServer.browserProfilesFlag).map { URL(fileURLWithPath: $0) }
             tinyFishKey = environment[OrbToolsMCPServer.tinyFishKeyVariable].flatMap { $0.isEmpty ? nil : $0 }
+            bridge = value(of: OrbToolsMCPServer.bridgeFlag).map { URL(fileURLWithPath: $0) }
+            orbs = rest.contains(OrbToolsMCPServer.orbsFlag)
+            propose = rest.contains(OrbToolsMCPServer.proposeFlag)
+            wizard = rest.contains(OrbToolsMCPServer.wizardFlag)
+            groupMemory = value(of: OrbToolsMCPServer.groupMemoryFlag).map { URL(fileURLWithPath: $0) }
             // The key is read: it must not stay in the environment of this process, which every program it starts inherits (the
             // `agent-browser` background process, and the browser it keeps, would carry it for as long as they live).
             unsetenv(OrbToolsMCPServer.tinyFishKeyVariable)
@@ -153,6 +230,11 @@ enum OrbToolsMCPServer {
                 context.acceptsImages = true
             }
             if let scheduleMailbox, let orb { context.schedule = ScheduleMailbox.client(directory: scheduleMailbox, orb: orb) }
+            if let bridge, let orb {
+                if orbs { context.orbs = OrbBridge.client(directory: bridge, orb: orb, tool: "orbs") }
+                if wizard { context.draft = OrbBridge.client(directory: bridge, orb: orb, tool: "orb_draft") }
+            }
+            if let groupMemory { context.groupMemory = MemoryBank(directory: groupMemory, createsRoot: false) }
             if web {
                 // The browser of the Orb (its session is named for the Orb, so it is the one the app has) and where its searches go.
                 let vault = MemoryVault()
@@ -178,7 +260,8 @@ enum OrbToolsMCPServer {
                        accessibilityGranted: Bool? = nil, scheduleMailbox: URL? = nil, orb: UUID? = nil,
                        browser: BrowserAvailability = .off, engine: BrowserEngineKind = .simple,
                        searchProvider: SearchProvider = .duckduckgo, browserProfiles: URL? = nil,
-                       tinyFishKey: String? = nil) -> MCPServerConfig {
+                       tinyFishKey: String? = nil, bridge: URL? = nil, orbs: Bool = false, propose: Bool = false,
+                       wizard: Bool = false, groupMemory: URL? = nil) -> MCPServerConfig {
         var server = MCPServerConfig(name: name, command: Bundle.main.executablePath ?? CommandLine.arguments[0])
         server.arguments = [flag, directory.path] + (mac ? [macFlag] : []) + (files ? [filesFlag] : [])
             + (folder.map { [folderFlag, $0.path] } ?? [])
@@ -186,6 +269,15 @@ enum OrbToolsMCPServer {
         // The token that lets `ui_act` there trust the card's verdict the app passes along with the call.
         if mac { server.environment[UIActTool.cardTokenVariable] = UIActTool.cardToken }
         if let scheduleMailbox, let orb { server.arguments += [ScheduleMailbox.flag, scheduleMailbox.path, ScheduleMailbox.orbFlag, orb.uuidString] }
+        if let bridge {
+            server.arguments += [bridgeFlag, bridge.path]
+            // `--orb` is already there when the schedule mailbox is.
+            if scheduleMailbox == nil, let orb { server.arguments += [OrbBridge.orbFlag, orb.uuidString] }
+        }
+        if orbs { server.arguments.append(orbsFlag) }
+        if propose { server.arguments.append(proposeFlag) }
+        if wizard { server.arguments.append(wizardFlag) }
+        if let groupMemory { server.arguments += [groupMemoryFlag, groupMemory.path] }
         if browser != .off {
             server.arguments += browser == .browser ? [browserFlag, engine.rawValue] : [webFlag]
             server.arguments += [searchFlag, searchProvider.rawValue]
@@ -199,22 +291,24 @@ enum OrbToolsMCPServer {
     static func run(_ options: Options) -> Never {
         MCPStdioServer.run {
             Handler(context: options.context, mac: options.mac, files: options.files, accessibilityGranted: options.accessibilityGranted,
-                    browser: options.browser)
+                    browser: options.browser, extras: options.extras)
         }
     }
 
     /// The reply to one line (a parse error gets a JSON-RPC error; notifications get none).
     static func respond(to line: String, context: ToolContext, mac: Bool = false, files: Bool = false,
-                        accessibilityGranted: Bool? = nil, browser: BrowserAvailability = .off) async -> JSONValue? {
+                        accessibilityGranted: Bool? = nil, browser: BrowserAvailability = .off, extras: Extras = .none) async -> JSONValue? {
         await MCPStdioServer.respond(toLine: line, handler: Handler(context: context, mac: mac, files: files,
-                                                                     accessibilityGranted: accessibilityGranted, browser: browser))
+                                                                     accessibilityGranted: accessibilityGranted, browser: browser,
+                                                                     extras: extras))
     }
 
     /// The JSON-RPC response to one message (nil for notifications).
     static func handle(_ request: JSONValue, context: ToolContext, mac: Bool = false, files: Bool = false,
-                       accessibilityGranted: Bool? = nil, browser: BrowserAvailability = .off) async -> JSONValue? {
+                       accessibilityGranted: Bool? = nil, browser: BrowserAvailability = .off, extras: Extras = .none) async -> JSONValue? {
         await MCPStdioServer.respond(to: request, handler: Handler(context: context, mac: mac, files: files,
-                                                                    accessibilityGranted: accessibilityGranted, browser: browser))
+                                                                    accessibilityGranted: accessibilityGranted, browser: browser,
+                                                                    extras: extras))
     }
 
     /// One server process as an MCP server: the tools it offers, and `callResult` for a call.
@@ -224,20 +318,24 @@ enum OrbToolsMCPServer {
         let files: Bool
         let accessibilityGranted: Bool?
         let browser: BrowserAvailability
+        let extras: Extras
         var serverName: String { "orb-memoria" }
 
         func listedTools() -> [JSONValue] {
-            OrbToolsMCPServer.listedTools(mac: mac, files: files, accessibilityGranted: accessibilityGranted, browser: browser).map {
+            OrbToolsMCPServer.listedTools(mac: mac, files: files, accessibilityGranted: accessibilityGranted, browser: browser,
+                                          extras: extras).map {
                 .object(["name": .string($0.spec.name), "description": .string($0.spec.description),
                          "inputSchema": $0.spec.parameters,
                          "annotations": .object(["readOnlyHint": .bool($0.announcedReadOnly)])])
             }
         }
 
-        func offers(_ tool: String) -> Bool { OrbToolsMCPServer.tools(mac: mac, files: files, browser: browser).contains { $0.spec.name == tool } }
+        func offers(_ tool: String) -> Bool {
+            OrbToolsMCPServer.tools(mac: mac, files: files, browser: browser, extras: extras).contains { $0.spec.name == tool }
+        }
 
         func call(_ tool: String, arguments: JSONValue) async -> JSONValue {
-            guard let tool = OrbToolsMCPServer.tools(mac: mac, files: files, browser: browser).first(where: { $0.spec.name == tool }) else {
+            guard let tool = OrbToolsMCPServer.tools(mac: mac, files: files, browser: browser, extras: extras).first(where: { $0.spec.name == tool }) else {
                 return MCPStdioServer.textResult("Ferramenta desconhecida", isError: true)
             }
             return await OrbToolsMCPServer.callResult(of: tool, arguments: arguments, context: context)

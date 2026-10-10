@@ -34,7 +34,7 @@ extension AppModel {
     /// The routine this Orb is running and has stopped on a question: its card is in the routine's conversation, not in
     /// the chat.
     func routineWaitingForYou(_ botID: UUID) -> UUID? {
-        guard live(botID).needsYou else { return nil }
+        guard live(botID).needsYou, sessions[botID]?.sideKind == nil else { return nil } // a request from another Orb is not a routine
         return sessions[botID]?.routineID
     }
 

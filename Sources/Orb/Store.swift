@@ -63,7 +63,9 @@ struct StoreRead<Value: Sendable>: Sendable {
 /// Conversations: an Orb's current one is `conversations/<botID>.json`, with `conversations/<botID>.meta.json` beside
 /// it (see `ConversationMeta`). Its earlier ones are archived in the folder beside it, `conversations/<botID>/`:
 /// `<conversationID>.json` each, `index.json` listing them (a cache that is corrected from the files whenever it
-/// disagrees) and `routine-<routineID>.json` for the conversation of each routine.
+/// disagrees), `routine-<routineID>.json` for the conversation of each routine, `pedido-<requestID>.json` for the one of
+/// each request another Orb made (the last `DelegationLimits.keptPedidos`) and `grupo-<groupID>.json` for the one of the Orb
+/// in each group.
 ///
 /// A file that can't be read is never overwritten: it is set aside as `<name>.corrupt-<yyyyMMdd-HHmmss>` (or,
 /// if that fails, left alone and blocked from writes for the rest of the session).
@@ -110,7 +112,14 @@ struct Store: Sendable {
     /// Whether `file` is where the chat of this Orb is saved, or the conversation of one of its routine runs.
     func isConversationFile(_ file: URL, of botID: UUID) -> Bool {
         file == conversationURL(botID)
-            || (file.deletingLastPathComponent() == archiveFolder(botID) && file.lastPathComponent.hasPrefix("routine-"))
+            || (file.deletingLastPathComponent() == archiveFolder(botID) && Self.isSideConversationName(file.lastPathComponent))
+    }
+
+    static let routinePrefix = "routine", pedidoPrefix = "pedido", grupoPrefix = "grupo"
+
+    /// `routine-…`, `pedido-…` and `grupo-…`: the conversations that are not "earlier conversations" of the Orb.
+    static func isSideConversationName(_ name: String) -> Bool {
+        [routinePrefix, pedidoPrefix, grupoPrefix].contains { name.hasPrefix($0 + "-") }
     }
 
     private func metaURL(_ botID: UUID) -> URL {
@@ -307,6 +316,63 @@ struct Store: Sendable {
     }
 
     private func archiveIndexURL(_ botID: UUID) -> URL { archiveFolder(botID).appendingPathComponent("index.json") }
+
+    // MARK: Side conversations (requests from other Orbs, turns in groups)
+
+    private func sideConversationURL(_ botID: UUID, _ prefix: String, _ id: UUID) -> URL {
+        archiveFolder(botID).appendingPathComponent("\(prefix)-\(id.uuidString).json")
+    }
+
+    /// `then` (on the store's queue) says whether the file is as written.
+    func saveSideConversation(_ conversation: Conversation, prefix: String, id: UUID, for botID: UUID,
+                              then done: (@Sendable (Bool) -> Void)? = nil) {
+        let url = sideConversationURL(botID, prefix, id)
+        enqueue(touching: [url], dropped: { done?(false) }) {
+            let result = writeConversation(conversation, to: url, cached: true)
+            done?(result != .failed)
+        }
+    }
+
+    func readSideConversation(prefix: String, id: UUID, for botID: UUID) -> StoreRead<Conversation> {
+        let url = sideConversationURL(botID, prefix, id)
+        return Self.gate.reading(url) {
+            read(Conversation.self, from: url, ifUnreadable: "a conversa começou vazia")
+        }
+    }
+
+    func readSideConversationAsync(prefix: String, id: UUID, for botID: UUID) async -> StoreRead<Conversation> {
+        await withCheckedContinuation { continuation in
+            Self.readQueue.async { continuation.resume(returning: readSideConversation(prefix: prefix, id: id, for: botID)) }
+        }
+    }
+
+    func deleteSideConversation(prefix: String, id: UUID, for botID: UUID) {
+        let url = sideConversationURL(botID, prefix, id)
+        enqueue(touching: [url]) {
+            Self.gate.waitForReaders(of: url)
+            try? FileManager.default.removeItem(at: url)
+            encoders.remove(url)
+        }
+    }
+
+    /// The Orb keeps the conversations of its last `count` requests from other Orbs; older ones go (by the date they were written).
+    func prunePedidos(for botID: UUID, keeping count: Int) {
+        let folder = archiveFolder(botID)
+        enqueue(touching: []) {
+            let manager = FileManager.default
+            let files = ((try? manager.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [])
+                .filter { $0.lastPathComponent.hasPrefix(Self.pedidoPrefix + "-") && $0.pathExtension == "json" }
+            guard files.count > count else { return }
+            let dated = files.map { url in
+                (url, (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date.distantPast)
+            }
+            for (url, _) in dated.sorted(by: { $0.1 > $1.1 }).dropFirst(count) {
+                Self.gate.waitForReaders(of: url)
+                try? manager.removeItem(at: url)
+                encoders.remove(url)
+            }
+        }
+    }
 
     /// Puts the conversation in the archive and returns its entry at once; the files follow on the store's queue.
     /// The conversation file goes first: a crash before the index is written leaves a file the next listing finds.
