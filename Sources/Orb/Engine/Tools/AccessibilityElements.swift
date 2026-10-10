@@ -142,8 +142,6 @@ protocol AccessibilitySystem: Sendable {
     func root(of app: AccessibilityApp) -> any AccessibilityElement
     /// Asks the app to build its interface tree if it does so only on demand. May wait on the app: call it off the main actor.
     func prepare(_ root: any AccessibilityElement)
-    /// Brings the app to the front (menus of an app in the background can ignore a click).
-    func activate(_ app: AccessibilityApp)
     /// The deepest element of the app at a point in screen coordinates (`AXUIElementCopyElementAtPosition`, z-ordered:
     /// nil for a covered window).
     func hitTest(_ app: AccessibilityApp, at point: CGPoint) -> (any AccessibilityElement)?
@@ -175,8 +173,14 @@ extension AccessibilitySystem {
 // MARK: - The real thing
 
 struct LiveAccessibilitySystem: AccessibilitySystem {
-    /// How long one call may wait for the app before failing instead of hanging the tool.
-    static let messagingTimeout: Float = 2
+    /// How long one call may wait for the app before failing instead of hanging the tool, in seconds.
+    static let messagingTimeout: Float = 1
+
+    /// The timeout set on an element holds only for that element (`AXUIElement.h`); the one set on the system-wide
+    /// element is the default for every other. Set once per process (the app and the tools server Claude Code starts).
+    private static let globalTimeout: Void = {
+        AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), messagingTimeout)
+    }()
 
     func isTrusted() -> Bool { AXIsProcessTrusted() }
 
@@ -185,28 +189,27 @@ struct LiveAccessibilitySystem: AccessibilitySystem {
     }
 
     func root(of app: AccessibilityApp) -> any AccessibilityElement {
+        _ = Self.globalTimeout
         let ref = AXUIElementCreateApplication(app.pid)
-        // The timeout set on the application element holds for the calls on its children too.
         AXUIElementSetMessagingTimeout(ref, Self.messagingTimeout)
         return LiveAccessibilityElement(ref)
     }
 
     func prepare(_ root: any AccessibilityElement) {
         // Electron and Chromium apps build their accessibility tree only for a client that asks (VoiceOver does it
-        // through this attribute); other apps ignore it.
+        // through this attribute); other apps ignore it. Never AXEnhancedUserInterface: it slows the app and animates.
         try? root.setValue(.bool(true), for: "AXManualAccessibility")
     }
 
-    func activate(_ app: AccessibilityApp) {
-        _ = NSRunningApplication(processIdentifier: app.pid)?.activate()
-    }
-
     func hitTest(_ app: AccessibilityApp, at point: CGPoint) -> (any AccessibilityElement)? {
+        LiveAccessibilityElement.offMain()
         guard let root = root(of: app) as? LiveAccessibilityElement else { return nil }
         var hit: AXUIElement?
         guard AXUIElementCopyElementAtPosition(root.ref, Float(point.x), Float(point.y), &hit) == .success, let hit else { return nil }
         return LiveAccessibilityElement(hit)
     }
+
+    var events: any AccessibilityEvents { AXEventHub.shared }
 
     func frontmostPID() async -> Int32? {
         await MainActor.run { NSWorkspace.shared.frontmostApplication?.processIdentifier }
@@ -232,6 +235,13 @@ struct LiveAccessibilityElement: AccessibilityElement, @unchecked Sendable {
         self.ref = ref
     }
 
+    /// Every call below waits on another process: never on the main thread, where a hung app would freeze the Orb.
+    @inline(__always) static func offMain() {
+        #if DEBUG
+        dispatchPrecondition(condition: .notOnQueue(.main))
+        #endif
+    }
+
     var pid: Int32? {
         var pid: pid_t = 0
         return AXUIElementGetPid(ref, &pid) == .success ? pid : nil
@@ -243,12 +253,14 @@ struct LiveAccessibilityElement: AccessibilityElement, @unchecked Sendable {
     }
 
     func attribute(_ name: String) -> AXAttributeValue? {
+        Self.offMain()
         var raw: CFTypeRef?
         guard AXUIElementCopyAttributeValue(ref, name as CFString, &raw) == .success, let raw else { return nil }
         return Self.convert(raw)
     }
 
     func attributes(_ names: [String]) -> [String: AXAttributeValue] {
+        Self.offMain()
         var raw: CFArray?
         let status = AXUIElementCopyMultipleAttributeValues(ref, names as CFArray, AXCopyMultipleAttributeOptions(rawValue: 0), &raw)
         guard status == .success, let values = raw as? [AnyObject], values.count == names.count else {
@@ -264,6 +276,7 @@ struct LiveAccessibilityElement: AccessibilityElement, @unchecked Sendable {
     }
 
     func read(_ names: [String]) -> AXRead {
+        Self.offMain()
         var raw: CFArray?
         let status = AXUIElementCopyMultipleAttributeValues(ref, names as CFArray, AXCopyMultipleAttributeOptions(rawValue: 0), &raw)
         if let failure = Self.fatal(status) { return .failed(failure) }
@@ -305,21 +318,25 @@ struct LiveAccessibilityElement: AccessibilityElement, @unchecked Sendable {
     }
 
     func actionNames() -> [String] {
+        Self.offMain()
         var names: CFArray?
         guard AXUIElementCopyActionNames(ref, &names) == .success else { return [] }
         return names as? [String] ?? []
     }
 
     func isSettable(_ name: String) -> Bool {
+        Self.offMain()
         var settable: DarwinBoolean = false
         return AXUIElementIsAttributeSettable(ref, name as CFString, &settable) == .success && settable.boolValue
     }
 
     func perform(_ action: String) throws {
+        Self.offMain()
         try Self.check(AXUIElementPerformAction(ref, action as CFString))
     }
 
     func setValue(_ value: AXAttributeValue, for name: String) throws {
+        Self.offMain()
         let converted: CFTypeRef
         switch value {
         case .string(let text): converted = text as CFString
@@ -329,6 +346,11 @@ struct LiveAccessibilityElement: AccessibilityElement, @unchecked Sendable {
             var cfRange = CFRange(location: range.location, length: range.length)
             guard let boxed = AXValueCreate(.cfRange, &cfRange) else { throw AXFailure.notSupported }
             converted = boxed
+        case .elements(let list):
+            converted = list.compactMap { ($0 as? LiveAccessibilityElement)?.ref } as CFArray
+        case .element(let element):
+            guard let live = element as? LiveAccessibilityElement else { throw AXFailure.notSupported }
+            converted = live.ref
         default: throw AXFailure.notSupported
         }
         try Self.check(AXUIElementSetAttributeValue(ref, name as CFString, converted))

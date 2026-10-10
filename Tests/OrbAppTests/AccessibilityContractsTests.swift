@@ -274,9 +274,10 @@ struct FakeElementTests {
     @Test func theTreeCounterAddsUpEveryElementBelow() {
         let window = fake("AXWindow", title: "W", [fakeButton("A"), fakeButton("B")])
         _ = UIOutlineBuilder.outline(of: window, prefix: "w1", query: nil, limits: UIOutlineLimits())
-        // One batch of attributes and one AXChildren read per element; buttons carry no AXValue to read.
+        // One batch per element (AXChildren comes in it), plus the actions of each listed element below the window;
+        // buttons carry no AXValue to read.
         #expect(window.subtree.count == 3)
-        #expect(window.treeRoundTrips == 3 * 2)
+        #expect(window.treeRoundTrips == 1 + 2 * 2)
         #expect(window.children.allSatisfy { $0.roundTrips == 2 })
     }
 

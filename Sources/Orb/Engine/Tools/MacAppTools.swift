@@ -263,13 +263,15 @@ struct RunningAppInfo: Sendable, Equatable {
     var isHidden: Bool
     /// Shows in the Dock; background agents and helpers are not.
     var isRegular: Bool
+    /// When the process started: with the pid it tells a running app from a new one that reused the pid.
+    var launchDate: Date? = nil
 
     @MainActor static func current(includeBackground: Bool) -> [RunningAppInfo] {
         NSWorkspace.shared.runningApplications.compactMap { app in
             let regular = app.activationPolicy == .regular
             guard regular || includeBackground, let name = app.localizedName else { return nil }
             return RunningAppInfo(name: name, bundleID: app.bundleIdentifier, pid: app.processIdentifier,
-                                  isActive: app.isActive, isHidden: app.isHidden, isRegular: regular)
+                                  isActive: app.isActive, isHidden: app.isHidden, isRegular: regular, launchDate: app.launchDate)
         }
     }
 }
