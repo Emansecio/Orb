@@ -111,23 +111,36 @@ struct ExchangeStateMark: View {
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(Palette.faint)
             case .lost:
-                Image(systemName: "questionmark.circle")
+                Image(systemName: "clock.badge.questionmark")
                     .font(.system(size: 11))
                     .foregroundStyle(Palette.faint)
             }
         }
-        .accessibilityHidden(true)
+        .accessibilityHidden(true) // the line's value says it (`spoken`)
+        .help(Self.tooltip(state))
     }
 
-    /// What VoiceOver says of the state.
+    /// What the mark says when the pointer rests on it: every state has its words.
+    static func tooltip(_ state: OrbMessageItem.State) -> String {
+        switch state {
+        case .open: "Aguardando"
+        case .replied: "Respondido"
+        case .failed: "Não deu certo"
+        case .refused: "Recusado"
+        case .cancelled: "Cancelado"
+        case .lost: "Sem resposta"
+        }
+    }
+
+    /// What VoiceOver says of the state (the line's value).
     static func spoken(_ state: OrbMessageItem.State) -> String {
         switch state {
-        case .open: "aguardando resposta"
-        case .replied: "respondida"
+        case .open: "aguardando"
+        case .replied: "respondido"
         case .failed: "não deu certo"
-        case .refused: "recusada"
-        case .cancelled: "cancelada"
-        case .lost: "perdida, o app fechou antes da resposta"
+        case .refused: "recusado"
+        case .cancelled: "cancelado"
+        case .lost: "sem resposta, o app fechou antes da resposta"
         }
     }
 }
