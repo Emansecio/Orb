@@ -1,7 +1,7 @@
 # Arquitetura
 
 Para quem vai mexer no código do Orb. App nativo em SwiftUI, Swift 6 (`swift-tools-version: 6.0`, concorrência estrita),
-macOS 14+, um pacote SwiftPM com um alvo executável (`Orb`, `Sources/Orb`) e um alvo de testes (`OrbAppTests`). Não há
+macOS 14+, um pacote SwiftPM com um alvo executável (`Orb`, `Sources/Orb`), um app de fixture só para o smoke de Acessibilidade (`OrbAXFixture`, `Tests/OrbAXFixture`) e um alvo de testes (`OrbAppTests`). Não há
 dependências externas: SQLite, ImageIO, Vision, Network, CryptoKit e o resto vêm do sistema.
 
 Documentos irmãos: [CONTEXTO.md](CONTEXTO.md) (janela, compactação, economia de tokens), [PERMISSOES.md](PERMISSOES.md),
@@ -93,11 +93,31 @@ Tudo em `Sources/Orb/`.
 |---|---|---|
 | Terminal e arquivos | `run_command` (`background: true`; saída acima de 20 KB é salva inteira em `saidas/<orb>/comando-….txt`), `job_output`, `job_list`, `job_stop`, `read_file` (texto, PDF, Word/RTF/ODT, Excel .xlsx, PowerPoint .pptx, imagens com OCR), `write_file`, `edit_file`, `list_directory`, `search_files` (Spotlight), `grep` (um arquivo informado em `path` vai até 200 MB, em streaming), `glob` (aceita padrão absoluto), `trash` (também com Controlar apps); o ambiente vem do shell `-lic` da usuária (5 s) e, se ele estoura, o perfil de login responde na hora e a nova tentativa roda em segundo plano (15 s), com espera que dobra de 30 s até 5 min | `ShellTool`, `BackgroundJobs`, `ProcessRunner`, `ShellEnvironment`, `FileTools`, `SearchTools`, `TextFile`, `DocumentReader`, `OfficeReader`, `ReadOnlyCommand` |
 | Navegar na web | `web_fetch` (páginas, PDF, JSON, imagens; `offset`/`find` para páginas longas; `save_to`), `web_search` (DuckDuckGo, Google, TinyFish), e com um motor instalado `browse_open/snapshot/read/screenshot/click/fill/select/press/scroll/back/tabs/show/close` | `WebTools`, `HTMLText`, `WebSearchTool`, `BrowseTools`, `Engine/Browser/` |
-| Controlar apps do Mac | `applescript`, `shortcuts_list/run`, `clipboard_read/write`, `screenshot` (janela com marcas numeradas e OCR), `apps_list`, `processes`, `app_quit`, `trash`, `browser_tab`, `ui_read`, `ui_act` | `MacTools`, `MacAppTools`, `BrowserTools`, `ScreenshotTool`, `WindowCapture`, `UIMarks`, `SyntheticInput`, `AccessibilityTools`/`Elements`/`Outline`, `AppleScriptSupport` |
+| Controlar apps do Mac | `applescript`, `shortcuts_list/run`, `clipboard_read/write`, `screenshot` (janela com marcas numeradas e OCR), `apps_list`, `processes`, `app_quit`, `trash`, `browser_tab`, `ui_read`, `ui_act` | `MacTools`, `MacAppTools`, `BrowserTools`, `ScreenshotTool`, `WindowCapture`, `UIMarks`, `SyntheticInput`, `AccessibilityTools`/`Elements`/`Outline`/`Contracts`, `ScreenTakeover`, `AppleScriptSupport` |
 | Sempre | `open`, `notify`, `remember`, `recall`, `schedule` | `MacTools`, `MacAppTools`, `ScheduleTool`, `ScheduleMailbox` |
 | Conectores | `connector_tools`, `connector_call` (fora de `ToolBox.all`, montadas por turno) | `ConnectorGateway`, `MCPTool` |
 
 **Visão e entrada sintética** (`docs/USO-DO-COMPUTADOR.md`, pacote WP-B). `WindowCapture.swift`: `LiveWindowCapturer.shared` (o `capturer` de `LiveAccessibilitySystem`) lista e captura janelas por um `CaptureBackend`: ScreenCaptureKit (`SCShareableContent` em cache de 1,5 s, `SCScreenshotManager.captureImage` de uma `desktopIndependentWindow`, `.nominal`, sem sombra, com janelas-filhas, sem cursor, redimensionada a `max_side`) e, quando ele falha por outro motivo que a permissão, `screencapture -o -l <id>`; no máximo 2 capturas ao mesmo tempo (`AsyncGate`) e `CGRequestScreenCaptureAccess` uma vez por processo (`RequestOnce`). `WindowMatcher` casa a janela da árvore AX com a do ScreenCaptureKit por frame (±2 pt) e título. `UIMarks.swift`: `UIMarkCollector` percorre a janela (ids iguais aos do `ui_read`, um controle não é aberto por dentro, o que está fora da janela é pulado, 4 s e 3.000 elementos), `UIMarkSelector` escolhe até 60 marcas (acionáveis, ≥ 6×6 pt dentro da janela, em ordem de leitura), `UIOverlay` desenha contornos e selos numerados com Core Graphics e `ScreenshotJPEG` grava JPEG q0,8 (≤ 450 KB: baixa a qualidade e depois o tamanho), `UIMarkLegend` escreve `[12] w1.3.2 button “Salvar”` (≤ 4.000 caracteres), `ShotGeometry` ganha as conversões pixel ↔ ponto da janela ↔ ponto global (`DisplayLayout` cuida de várias telas, origem negativa e do espelho do AppKit) e `UISnapshot.merging` junta marcas, geometria e frames ao snapshot do `ui_read` da mesma janela (< 60 s). `ScreenshotTool` junta tudo: legenda sem Gravação de Tela, só a imagem sem Acessibilidade, OCR (Vision `.fast`, uma imagem por vez, `(x,y) texto` em pixels da imagem) só com `ocr: on` ou com menos de 8 elementos nomeados. `SyntheticInput.swift`: `LiveSyntheticInput.shared` (o `input`) monta eventos com `SyntheticEventBuilder` (teclado `CGEvent` com `keyboardSetUnicodeString` em pedaços de ≤ 20 unidades UTF-16 sem partir caractere; atalhos com flags explícitas e o código da tecla do layout em uso por `UCKeyTranslate`, `LiveKeyLayout`; mouse com `mouseEventClickState` e a janela nos campos do evento; rolagem em pixels, em passos) e entrega por um `SyntheticEventSink` (`PidEventSink`: `postToPid`, nunca o tap HID, nunca o próprio Orb, nunca a área de transferência); cancelar a tarefa entre os pedaços devolve quantos caracteres saíram.
+
+**Apps em segundo plano: tomada de tela.** O desenho completo está em [USO-DO-COMPUTADOR.md](USO-DO-COMPUTADOR.md). `ScreenTakeover.swift`
+é o único lugar que traz outro app para a frente e usa mouse e teclado de verdade (`.cghidEventTap`). `LiveScreenOwner` (o
+`ScreenOwner` ao vivo, entregue por `LiveAccessibilitySystem.screen`) pega uma trava de sistema com `flock` não bloqueante em
+`~/Library/Caches/<bundle id>/takeover.lock` (o app e o servidor MCP do Claude Code são processos diferentes; a trava some com o
+processo), guarda o app da frente, a janela focada e o cursor, traz o alvo com `AXFrontmost` (espera `AXApplicationActivated` até
+500 ms, com sondagem do app da frente por baixo), roda o corpo com um `LiveTakeoverHand` (`CGEventSource(.privateState)`, arrasto
+em 15 passos, texto em pedaços de 20 unidades UTF-16; aborta se o cursor real se afastar mais de 3 pt do lugar em que foi posto,
+solta o botão se o arrasto para no meio; 10 s no total e 2 s por etapa) e **sempre** devolve, numa `Task.detached` aguardada (a
+restauração não é cancelável): `AXFrontmost` no app anterior, `AXMain` na janela anterior, `CGWarpMouseCursorPosition` +
+`CGAssociateMouseAndMouseCursorPosition(1)` e conferência (se a pessoa pegou o mouse para parar, o cursor fica onde ela o
+pôs). Tudo o que toca o macOS fica atrás de `TakeoverPlatform`/`TakeoverEventPoster` (testes com um mundo falso), e as chamadas
+bloqueantes rodam numa fila própria (`TakeoverQueue`), nunca no pool cooperativo. O aviso "Orb está usando a tela — mexa o mouse
+para parar" é um `NSPanel` não ativante (`TakeoverHUD`) que o app mostra ao receber uma notificação distribuída
+(`TakeoverBroadcast`) de qualquer processo que segure a tomada: funciona igual nos dois motores.
+
+**Servidor MCP: uma tarefa por requisição.** `MCPServerLoop` (em `MCPStdioServer.swift`) atende cada requisição em uma `Task` guardada
+em `[id: Task]`, com a escrita em stdout serializada; `notifications/cancelled` cancela a requisição (que não recebe resposta),
+e o fim de stdin ou `SIGTERM`/`SIGINT` (`DispatchSource.makeSignalSource`) cancelam tudo, esperam até 1,5 s pelas restaurações de
+takeover e saem com `exit(0)`. As respostas continuam byte a byte as de `MCPStdioServer.respond`.
 
 **Codificação dos arquivos de texto.** `TextFile.decode` tenta UTF-8, depois BOM (UTF-16/32), UTF-16 sem marca e por fim Windows-1252
 (Latin-1 se houver byte indefinido). Um arquivo UTF-8 com poucos bytes soltos (um caractere cortado no fim de um log) continua
@@ -138,7 +158,11 @@ wrapper dele). `BrowserEngineLocator` procura os binários (PATH do shell, depoi
 exato (`brew install agent-browser`, `agent-browser install`, `brew install obscura`, `pip3 install cloakbrowser && python3 -m cloakbrowser install`). Nada é instalado pelo app.
 `BrowserHub` guarda um `BrowserSession` por Orb (sessão `orb-<id>-<motor>`, perfil em `navegador/<orb>/<motor>` na pasta de dados, headless), serializa
 os comandos (`AsyncMutex`: ferramentas que só olham rodam juntas no turno) e lembra os refs do último snapshot, para dar nome ao clique no cartão e
-recusar senha. A janela (`browse_show`) fecha a sessão e a reabre no mesmo endereço com `--headed` e o mesmo perfil. A sessão e o `BrowserAccess` do turno
+recusar senha. A janela (`browse_show`) fecha a sessão e a reabre no mesmo endereço com `--headed` e o mesmo perfil, e então **espera a pessoa**:
+`ToolContext.handoff` (que o motor define a cada chamada) abre um cartão de aprovação com `ApprovalRequest.isHandoff` ("Pronto" = `.once`, "Cancelar" = `.deny`)
+pelo mesmo `ApprovalGate` (`ApprovalGate.handoff`), então Parar, o selo "precisa de você", o aviso (categoria `orb.approval.handoff`) e o painel da barra de menus
+valem sem código novo; só `applyModeChange` o ignora (uma troca de modo não responde por ela). Trocar o motor de um Orb (`AppModel.setBrowserEngine`) fecha o
+navegador do motor que ele deixa (`BrowserHub.close(botID:leaving:)`, também quando a sessão foi aberta pelo servidor de ferramentas do Claude Code). A sessão e o `BrowserAccess` do turno
 chegam às ferramentas por `ToolContext.browser`; `AppModel` monta isso a cada turno com o motor do Orb (`Bot.browserEngine`, `Bot.searchProvider`) e acrescenta ao prompt a
 seção `BrowserPrompt` (ou a linha de "falta instalar"). A busca (`web_search`) abre a página de resultados numa aba própria do navegador (e a fecha), lê o resultado por
 script e cai no DuckDuckGo pelo HTTP simples quando o motor é `simple`; o TinyFish é uma API (`SearchKeys` guarda a chave no Keychain) com queda para o DuckDuckGo.
@@ -498,7 +522,13 @@ São mais de 2.000 testes em `Tests/OrbAppTests`, em Swift Testing (`@Test`, `@S
   contexto, `RaisedFlag`, `notifies(reading:whenYouDo:)`, `hasPython`, as visões do `AppModel` que só os testes leem). O Claude Code é testado com um `claude` falso, um script que o
   próprio teste grava (`ORB_CLAUDE_PATH` faz o app usar outro executável).
 - **Fixtures sem binários**: PDFs e PNGs são desenhados na hora (`Fixtures`), e o AX (Acessibilidade) é uma árvore falsa
-  injetável (`AccessibilitySystem`).
+  injetável (`AccessibilitySystem`, com `TestSupport/AccessibilityFakes.swift`; a tomada de tela tem o seu mundo falso em
+  `ScreenTakeoverTests`).
+- **Smoke de Acessibilidade** (`AXSmokeTests`, desligado por padrão): `ORB_AX_SMOKE=1` roda `ui_read`/`ui_act`/`screenshot` contra o app
+  `OrbAXFixture` (AppKit, nunca se ativa, registra em JSON no stdout o que recebeu) e confere que o app da frente e o cursor não
+  mudam; precisa da Acessibilidade para quem roda os testes (o Terminal do Mac, não um terminal sem ela). `ORB_AX_TAKEOVER=1` liga
+  os que assumem a tela de verdade, `ORB_AX_SMOKE_SYSTEM=1` uma leitura do Finder, e a captura exige Gravação de Tela. Não mexa no
+  mouse enquanto rodam. `MCPProcessTests` sobe o próprio binário como `--tools-mcp` e confere EOF, `SIGTERM` e cancelamento.
 - **Contratos de fio**: `ProviderWireGoldenTests` fixa a requisição e os eventos de cada formato.
 
 ### Modelo falso para uso manual
@@ -521,7 +551,7 @@ open -n build/Orb.app --env ORB_DATA_DIR=/tmp/orb-teste --env ORB_SEND="Como est
 
 | Argumento | Efeito |
 |---|---|
-| `--tools-mcp <memória> [--mac] [--files] [--folder <pasta>] [--accessibility\|--no-accessibility] [--schedule-mailbox <pasta> --orb <id>]` | roda só o servidor MCP de ferramentas do Orb para o Claude Code (`--memory-mcp` ainda vale); sem janela |
+| `--tools-mcp <memória> [--mac] [--files] [--folder <pasta>] [--accessibility\|--no-accessibility] [--schedule-mailbox <pasta> --orb <id>] [--web \| --browser <motor>] [--search <provedor>] [--browser-profiles <pasta>]` | roda só o servidor MCP de ferramentas do Orb para o Claude Code (`--memory-mcp` ainda vale); sem janela |
 | `--snapshot <modo> <arquivo.png>` | desenha uma tela fora da vista e sai (abaixo) |
 | `--render-orbs <arquivo.png>` | folha de Orbs × atividades (`docs/orbs-activities.png`) |
 | `--render-icon <arquivo.png> [pixels]` | o ícone do app, desenhado no tamanho pedido (padrão 1024; `scripts/bundle.sh` chama um por tamanho do iconset) |

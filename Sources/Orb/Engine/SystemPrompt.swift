@@ -141,6 +141,11 @@ enum PromptParts {
     build or tests, reread the file), and finish with what changed and what is left.
     """
 
+    /// How to work with other apps without taking over the person's Mac. Only for an Orb that may control apps: in the
+    /// `computerUse` line of `nativeToolHints` (native engine) and in `macApps` (Claude Code, which has no tool hints).
+    static let appControl = "Work with apps in the background: prefer ids and marks to coordinates; [precisa_assumir_tela] means ask the user "
+        + "for a takeover of the screen; web content goes to the browser tools."
+
     /// Only the tools this Orb has: hints for a switched-off capability would send it to tools that are not there. What
     /// each tool does is in its own description; this is only the choice between them. It follows `workHabits`, under the
     /// same heading.
@@ -162,7 +167,8 @@ enum PromptParts {
         }
         uses.append("open to open files and links for the user" + (bot.capabilities.contains(.browser) ? ", not to read a page" : ""))
         let background = hasFiles ? " Long commands can run in the background (job_output)." : ""
-        return uses.joined(separator: "; ") + "." + background
+        let control = bot.capabilities.contains(.computerUse) ? " " + appControl : ""
+        return uses.joined(separator: "; ") + "." + background + control
     }
 
     /// Recipes for the Mac tasks people ask most, and the mistakes models make in them, only for an Orb that may control apps.
@@ -186,7 +192,7 @@ enum PromptParts {
             let tools = ClaudeCodeTools.memoryPrefix
             lines.append("- Prefer \(tools)applescript, \(tools)screenshot and \(tools)browser_tab over osascript, screencapture or "
                          + "scripted Chrome in Bash: they settle the macOS permission first and explain failures. Use "
-                         + "\(tools)ui_read and \(tools)ui_act for apps without AppleScript, when they are offered.")
+                         + "\(tools)ui_read and \(tools)ui_act for apps without AppleScript, when they are offered. " + appControl)
         }
         return lines.joined(separator: "\n")
     }
@@ -206,28 +212,40 @@ enum PromptParts {
     }
 }
 
-/// What the Orb is told about its own browser (`browse_*`), after the other sections of the system prompt.
+/// What the Orb is told about its own browser (`browse_*`), after the other sections of the system prompt. In a Claude Code turn
+/// (`claudeCode`) the tools carry the server's prefix, and the Orb is told to prefer them to Claude Code's own WebFetch and
+/// WebSearch for pages that run JavaScript and for the user's logged-in sessions (those two stay available).
 enum BrowserPrompt {
-    static func section(bot: Bot, availability: BrowserAvailability, status: BrowserEngineStatus?) -> String {
+    static func section(bot: Bot, availability: BrowserAvailability, status: BrowserEngineStatus?, claudeCode: Bool = false) -> String {
+        let prefix = claudeCode ? ClaudeCodeTools.memoryPrefix : ""
+        func tool(_ name: String) -> String { prefix + name }
         switch availability {
         case .off:
             return ""
         case .fetchOnly:
-            return status?.modelNote ?? ""
+            guard let status else { return "" }
+            return status.modelNote(fetchTools: claudeCode ? "WebFetch and \(tool("web_search"))" : "web_fetch and web_search") ?? ""
         case .browser:
             let engine = bot.browserEngine
             var lines = [
                 "## Your browser",
-                "You have your own browser (browse_*): a real \(engine.label) engine that runs JavaScript"
+                "You have your own browser (\(tool("browse_*"))): a real \(engine.label) engine that runs JavaScript"
                     + (engine.keepsProfile ? " and keeps the user's logins between runs" : " (headless, with no saved logins)")
-                    + ". web_search and web_fetch are lighter for public pages; use the browser for JavaScript pages, logins and forms.",
-                "Work in this order: browse_open, browse_snapshot, then browse_click / browse_fill / browse_select with the refs it lists; "
-                    + "snapshot again after the page changes. browse_read gives the text. Close with browse_close when the web work is done.",
+                    + ". \(claudeCode ? "WebFetch and \(tool("web_search")) are" : "web_search and web_fetch are") lighter for public pages; "
+                    + "use the browser for JavaScript pages, logins and forms.",
+                "Work in this order: \(tool("browse_open")), \(tool("browse_snapshot")), then \(tool("browse_click")) / \(tool("browse_fill")) / "
+                    + "\(tool("browse_select")) with the refs it lists; snapshot again after the page changes. \(tool("browse_read")) gives the text. "
+                    + "Close with \(tool("browse_close")) when the web work is done.",
                 "A login, a 2FA code, a captcha, a consent wall or anything else only the person can do is theirs: never type a password "
                     + "or card number, never try to solve a captcha or get around a block.",
             ]
+            if claudeCode {
+                lines.append("Prefer these tools to WebFetch and WebSearch whenever the page needs JavaScript, a click or a form, or the "
+                    + "user's logged-in session: those two see only what a plain download shows.")
+            }
             lines.append(engine.canShowWindow
-                ? "Call browse_show, tell the user what to do in the window, and stop until they reply."
+                ? "Call \(tool("browse_show")) for those: the browser opens in a window, the user does it there and answers on a card "
+                    + "(Pronto or Cancelar), and the call returns when they do. If its result says to ask the user and stop, do that."
                 : "This engine has no window: tell the user to switch the Orb's browser to Chrome or CloakBrowser (Ajustes), and stop.")
             return lines.joined(separator: "\n")
         }

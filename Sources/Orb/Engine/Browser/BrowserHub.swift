@@ -207,6 +207,25 @@ final class BrowserHub: Sendable {
         try? await session.driver.close()
     }
 
+    /// The Orb left `engine` for another: closes the browser it had open with it. The session may have been started by another
+    /// process (the tools server of a Claude Code turn runs its own hub, on the same `agent-browser` session), so when this hub
+    /// holds none the command is sent anyway; it does nothing when no browser is running. The profile stays.
+    func close(botID: UUID, leaving engine: BrowserEngineKind) async {
+        clearLabels(botID: botID)
+        let held = sessions.withLock { sessions -> BrowserSession? in
+            guard sessions[botID]?.engine == engine else { return nil }
+            return sessions.removeValue(forKey: botID)
+        }
+        if let held {
+            try? await held.driver.close()
+            return
+        }
+        guard engine.drivesABrowser else { return }
+        let status = await locate(engine)
+        guard status.agentBrowser != nil else { return }
+        try? await makeDriver(configuration(botID: botID, engine: engine, status: status)).close()
+    }
+
     func closeAll() async {
         let all = sessions.withLock { sessions -> [BrowserSession] in
             defer { sessions = [:] }

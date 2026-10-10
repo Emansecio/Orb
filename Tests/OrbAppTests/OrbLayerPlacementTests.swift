@@ -10,8 +10,11 @@ extension OrbDriverTests {
     private func placementWindow(_ content: NSView) -> NSWindow {
         _ = NSApplication.shared
         OrbView.animateInactive = true
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 300), styleMask: [.borderless], backing: .buffered, defer: false)
         window.contentView = content
+        // On screen for the driver, but never seen: no title bar, fully transparent, and clicks go through.
+        window.alphaValue = 0
+        window.ignoresMouseEvents = true
         window.orderFrontRegardless()
         return window
     }

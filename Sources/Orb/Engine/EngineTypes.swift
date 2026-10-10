@@ -587,7 +587,14 @@ struct ToolContext: Sendable {
     /// The Orb's browser (`browse_*`, `web_search`): where it is kept and how the Orb is set up. Without a hub the tools say
     /// the browser is not there.
     var browser = BrowserAccess()
+    /// Waits for the person to finish what only they can do in the browser window `browse_show` opened. The engine sets it for the
+    /// tool call (it opens the card and waits); nil where nobody can answer, and `browse_show` then tells the model to ask and stop.
+    var handoff: HandoffHandler?
 }
+
+/// Opens the hand-off card for the page shown (its address and title) and waits: true when the person clicked "Pronto", false
+/// when they cancelled (or pressed Parar).
+typealias HandoffHandler = @Sendable (_ page: String) async -> Bool
 
 protocol AgentTool: Sendable {
     var spec: ToolSpec { get }

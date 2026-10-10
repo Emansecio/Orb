@@ -411,7 +411,7 @@ struct BrowsePermissionTests {
         }
         for word in ["login", "2FA", "captcha", "browse_show"] { #expect(try text("browse_open").contains(word), "open: \(word)") }
         for word in ["passwords", "card", "browse_show"] { #expect(try text("browse_fill").contains(word), "fill: \(word)") }
-        for word in ["STOP", "reply", "hide"] { #expect(try text("browse_show").contains(word), "show: \(word)") }
+        for word in ["Pronto", "Cancelar", "stop", "hide"] { #expect(try text("browse_show").contains(word), "show: \(word)") }
         for word in ["offset", "12,000", "24,000", "ref (e12)"] { #expect(try text("browse_snapshot").contains(word), "snapshot: \(word)") }
         for word in ["offset", "12,000", "24,000"] { #expect(try text("browse_read").contains(word), "read: \(word)") }
         for word in ["site", "news", "browse_show", "web_fetch"] { #expect(try text("web_search").contains(word), "search: \(word)") }

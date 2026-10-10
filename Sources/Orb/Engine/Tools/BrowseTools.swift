@@ -502,12 +502,18 @@ struct BrowseTabsTool: BrowseTool {
 }
 
 struct BrowseShowTool: BrowseTool {
+    /// The argument the app itself adds to a Claude Code call once it ran the hand-off (the window and the card) in its own
+    /// process: the server of the Orb's tools then only reports the result. Not part of the schema.
+    static let handledKey = "handoff"
+    static let handledDone = "done"
+
     let spec = ToolSpec(
         name: "browse_show",
         description: """
         Show the browser to the user in a window (same session, logins kept), for what only a person can do: log in, enter a 2FA \
-        code, solve a captcha, approve something. Never try those yourself. After calling it, tell the user what to do and STOP: \
-        no more tool calls until they reply. `hide` sends the browser back to the background.
+        code, solve a captcha, approve something. Never try those yourself. The call waits while the user does it in the window \
+        and returns when they click Pronto on a card in the chat (or Cancelar, which says they declined). Then take a fresh \
+        browse_snapshot. If the result says instead to ask the user and stop, do that. `hide` sends the browser back to the background.
         """,
         parameters: .schema(["hide": .property("boolean")]))
 
@@ -523,18 +529,50 @@ struct BrowseShowTool: BrowseTool {
         guard session.engine.canShowWindow else {
             throw ToolError("This browser (\(session.engine.label)) has no window. Tell the user what needs a person and that they can switch the Orb's browser to Chrome or CloakBrowser in the Orb's settings (Ajustes); then stop.")
         }
+        // Claude Code: the app opened the window and waited for the person already; only the answer is left to give.
+        if !hide, arguments.nonEmptyString(Self.handledKey) == Self.handledDone {
+            session.forgetPage()
+            return Self.finished
+        }
         let page = try await session.exclusive {
             session.forgetPage()
             return try await session.driver.setHeaded(!hide)
         }
         session.setShowingWindow(!hide)
         if let botID = context.botID { context.browser.hub?.clearLabels(botID: botID) }
-        let location = "\(page.url)" + (page.title.isEmpty ? "" : " — “\(page.title)”")
+        let location = Self.location(page)
         if hide { return "The browser is back in the background at \(location). Take a browse_snapshot to continue." }
-        return "The browser is open in a window at \(location) (the page was loaded again). Now tell the user, in one or two sentences, what to do there "
-            + "(log in, enter the code, solve the check) and to reply when they are done. Then STOP: make no more tool calls until they answer. "
-            + "When they do, take a browse_snapshot to see where the page is (browse_show with hide: true sends the browser back to the background)."
+        guard let handoff = context.handoff else {
+            return "The browser is open in a window at \(location) (the page was loaded again). Now tell the user, in one or two sentences, what to do there "
+                + "(log in, enter the code, solve the check) and to reply when they are done. Then STOP: make no more tool calls until they answer. "
+                + "When they do, take a browse_snapshot to see where the page is (browse_show with hide: true sends the browser back to the background)."
+        }
+        guard await handoff(location) else {
+            // Cancelar, or Parar: the window is not wanted any more.
+            if !Task.isCancelled {
+                _ = try? await session.exclusive {
+                    session.forgetPage()
+                    return try await session.driver.setHeaded(false)
+                }
+                session.setShowingWindow(false)
+            }
+            throw ToolError(Self.declined)
+        }
+        session.forgetPage()
+        if let botID = context.botID { context.browser.hub?.clearLabels(botID: botID) }
+        return Self.finished
     }
+
+    /// "https://example.com/login — “Entrar”", the page as the card shows it.
+    static func location(_ page: BrowserPage) -> String {
+        page.url + (page.title.isEmpty ? "" : " — “\(page.title)”")
+    }
+
+    static let finished = "The user says they are done in the browser window (it is still open, on whatever page they left). "
+        + "Take a fresh browse_snapshot to see where the page is now: refs from before are stale. "
+        + "browse_show with hide: true sends the browser back to the background."
+    static let declined = "The user cancelled: they will not do this in the browser. The window was closed. Do not retry or look for a way around "
+        + "it; continue without that step, or ask what they want instead."
 }
 
 struct BrowseCloseTool: BrowseTool {

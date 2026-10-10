@@ -79,31 +79,124 @@ enum MCPStdioServer {
     /// Serves until stdin closes, then exits the process (what Claude Code starts; never opens a window). The messages are read
     /// on a background thread so the main thread stays free for tools that must run on the main actor (clipboard, notifications);
     /// it only services the main queue. Messages are split on "\n" only (JSON text may contain U+2028 and other Unicode line
-    /// separators raw) and handled in turn.
+    /// separators raw). Requests run concurrently, each in its own task (see `MCPServerLoop`): stopping a turn in Claude Code
+    /// cancels the call at once, and stdin closing or SIGTERM cancels everything, lets a screen takeover put the screen back,
+    /// and exits.
     static func run(_ makeHandler: @escaping @Sendable () -> any MCPServerHandler) -> Never {
         Thread.detachNewThread {
-            let handler = makeHandler()
+            let loop = MCPServerLoop(handler: makeHandler()) { line in
+                FileHandle.standardOutput.write(Data((line + "\n").utf8))
+            }
+            // SIGTERM and SIGINT (how a client stops a server) are caught instead of killing the process on the spot.
+            var sources: [DispatchSourceSignal] = []
+            for number in [SIGTERM, SIGINT] {
+                signal(number, SIG_IGN)
+                let source = DispatchSource.makeSignalSource(signal: number, queue: .global())
+                source.setEventHandler {
+                    Task.detached {
+                        await loop.shutdown()
+                        exit(0)
+                    }
+                }
+                source.resume()
+                sources.append(source)
+            }
             while let line = readLine(strippingNewline: true) {
                 guard !line.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
-                if let answer = blocking({ await respond(toLine: line, handler: handler) }) {
-                    FileHandle.standardOutput.write(Data((answer.jsonString + "\n").utf8))
-                }
+                loop.handle(line: line)
             }
-            exit(0)
+            // Stdin closed: cancel what runs, wait for takeovers to give the screen back, and leave.
+            let done = DispatchSemaphore(value: 0)
+            Task.detached {
+                // Requests that are about to finish (a script piped in, then stdin closed) are let finish; the rest is cancelled.
+                await loop.shutdown(patience: .milliseconds(500))
+                done.signal()
+            }
+            done.wait()
+            withExtendedLifetime(sources) { exit(0) }
         }
         dispatchMain()
     }
+}
 
-    /// Waits for async work from a thread that is not part of the concurrency pool.
-    private static func blocking<T: Sendable>(_ work: @escaping @Sendable () async -> T) -> T {
-        let box = OSAllocatedUnfairLock<T?>(initialState: nil)
-        let done = DispatchSemaphore(value: 0)
-        Task.detached {
-            let value = await work()
-            box.withLock { $0 = value }
-            done.signal()
-        }
-        done.wait()
-        return box.withLock { $0 }!
+/// The request loop of a stdio MCP server: one task per request, so a long call does not hold up the next one and can be
+/// cancelled. Replies are written one at a time. A request is cancelled by `notifications/cancelled` (no reply is sent for
+/// it, as the protocol asks), and everything is cancelled by `shutdown()` (stdin closed, SIGTERM).
+final class MCPServerLoop: @unchecked Sendable {
+    private let handler: any MCPServerHandler
+    private let write: @Sendable (String) -> Void
+    private let writeLock = NSLock()
+    private let state = NSLock()
+    private var tasks: [String: Task<Void, Never>] = [:]
+    private var anonymous = 0
+    /// The latest request that is not a tool call.
+    private var lane: Task<Void, Never>?
+    private var stopping = false
+
+    /// `write` receives one JSON line (without the line break) per reply.
+    init(handler: any MCPServerHandler, write: @escaping @Sendable (String) -> Void) {
+        self.handler = handler
+        self.write = write
     }
+
+    /// How many requests are still running.
+    var running: Int { state.withLock { tasks.count } }
+
+    /// Starts handling one line. Returns at once; the reply is written when the request finishes.
+    func handle(line: String) {
+        let parsed = JSONValue.parse(line)
+        if case .object? = parsed, parsed?["method"]?.string == "notifications/cancelled" {
+            if let id = parsed?["params"]?["requestId"], id != .null { cancel(Self.key(for: id)) }
+            return
+        }
+        state.withLock {
+            guard !stopping else { return }
+            // A request is found again by its id; a line without one (a parse error) is only tracked to be waited for.
+            let key: String
+            if let id = parsed?["id"], id != .null { key = Self.key(for: id) } else { anonymous += 1; key = "#\(anonymous)" }
+            let handler = handler
+            // The handshake, `ping`, `tools/list` and errors answer in the order they came; a tool call starts only after those
+            // before it were answered (a script piped in gets its replies in order), and then runs on its own.
+            let isCall = parsed?["method"]?.string == "tools/call"
+            let previous = lane
+            let task = Task.detached { [self] in
+                await previous?.value
+                let answer = await MCPStdioServer.respond(toLine: line, handler: handler)
+                // A cancelled request gets no reply.
+                if let answer, !Task.isCancelled { send(answer.jsonString) }
+                state.withLock { _ = tasks.removeValue(forKey: key) }
+            }
+            tasks[key] = task
+            if !isCall { lane = task }
+        }
+    }
+
+    /// Cancels the request with this key, if it is still running.
+    func cancel(_ key: String) {
+        let task = state.withLock { tasks[key] }
+        task?.cancel()
+    }
+
+    /// Stops taking requests, cancels the running ones (after `patience`) and waits for them to wind down, at most `grace`: a screen takeover
+    /// puts the screen back before its call returns, which is what this waits for.
+    /// `patience` is how long the running requests may first take to finish on their own (stdin closing after a script was
+    /// piped in); a signal gives none.
+    func shutdown(grace: Duration = .milliseconds(1500), patience: Duration = .zero) async {
+        state.withLock { stopping = true }
+        let patient = ContinuousClock.now.advanced(by: patience)
+        while self.running > 0, ContinuousClock.now < patient { try? await Task.sleep(for: .milliseconds(5)) }
+        let running = state.withLock { Array(tasks.values) }
+        for task in running { task.cancel() }
+        let deadline = ContinuousClock.now.advanced(by: grace)
+        while self.running > 0, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    private func send(_ line: String) {
+        writeLock.withLock { write(line) }
+    }
+
+    /// The registry key of a JSON-RPC id: the same number or string always gives the same key.
+    static func key(for id: JSONValue) -> String { id.jsonString }
 }

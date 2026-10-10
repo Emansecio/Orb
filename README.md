@@ -157,22 +157,24 @@ AppleScript, Atalhos, área de transferência, captura de tela nem controla outr
 
 **Navegar na web** dá ao Orb três coisas: ler páginas (`web_fetch`), pesquisar (`web_search`) e, com um navegador instalado, **usar um navegador de verdade** em segundo plano (`browse_open`, `browse_snapshot`, `browse_click`, `browse_fill`, `browse_read`, `browse_screenshot`…). Funciona com qualquer modelo. O navegador é do Orb: abre páginas com JavaScript, clica, preenche formulários e **guarda os logins entre uma conversa e outra** (uma pasta de perfil por Orb, em `navegador/` na pasta de dados). Quem dirige é o [agent-browser](https://github.com/vercel-labs/agent-browser); o Orb **nunca instala nada sozinho**.
 
-Cada Orb escolhe o motor (padrão **Chrome**, também nos Orbs que já tinham "Navegar na web"):
+Cada Orb escolhe o motor (padrão **Chrome**, também nos Orbs que já tinham "Navegar na web"). A escolha fica no painel do Orb, aba **Geral**, logo abaixo da chave **Navegar na web**: dois seletores, **Navegador** (com a descrição de cada motor) e **Pesquisa**, cada um com o estado na hora ("Pronto", ou "Não instalado: falta Chrome" com o botão **Instalar em Ajustes**; TinyFish sem chave diz "Sem chave" e leva a **Adicionar em Ajustes**). Trocar de motor fecha o navegador que o Orb tinha aberto (o perfil e os logins ficam):
 
 | Motor | O que é | Para instalar (no Terminal) |
 |---|---|---|
-| **Simples** | só `web_fetch`: sem JavaScript, sem login | nada |
+| **Leitura simples** | só `web_fetch`: sem JavaScript, sem login | nada |
 | **Chrome** | Chrome for Testing dirigido pelo agent-browser; logins guardados | `brew install agent-browser` e `agent-browser install` (ou `npm i -g agent-browser`) |
 | **Obscura** | [motor leve em Rust](https://github.com/h4ckf0r0day/obscura) com JavaScript; sem perfil guardado e sem janela | `brew install agent-browser` e `brew install obscura` |
 | **CloakBrowser** | [Chromium modificado](https://github.com/CloakHQ/CloakBrowser) para não parecer automação; o Orb o usa pelo agent-browser, com a mesma identidade a cada vez | `brew install agent-browser` e `pip3 install cloakbrowser && python3 -m cloakbrowser install` |
 
 Se o motor escolhido não estiver instalado, o Orb fica só com `web_fetch` e `web_search`, e **avisa uma vez** o comando que falta. As ferramentas do navegador só aparecem quando o motor está pronto.
 
-**Pesquisa.** `web_search` devolve títulos, endereços e trechos. O provedor é uma escolha do Orb: **DuckDuckGo** (padrão, sem conta; pelo navegador do Orb ou, no motor Simples, pela página simples dele), **Google** (sempre pelo navegador do Orb, nunca por API; sem navegador cai no DuckDuckGo e o resultado diz isso) ou **TinyFish** (API com cota gratuita; precisa da sua chave, guardada no Keychain, uma para o app todo). Se o TinyFish recusar a chave, acabar a cota do dia ou limitar o ritmo, a busca vai para o DuckDuckGo e o resultado avisa; nada é cobrado nem tentado de novo em plano pago.
+**Pesquisa.** `web_search` devolve títulos, endereços e trechos. O provedor é uma escolha do Orb: **DuckDuckGo** (padrão, sem conta; pelo navegador do Orb ou, no motor Leitura simples, pela página simples dele), **Google** (sempre pelo navegador do Orb, nunca por API; sem navegador cai no DuckDuckGo e o resultado diz isso) ou **TinyFish** (API com cota gratuita; precisa da sua chave, guardada no Keychain, uma para o app todo). Se o TinyFish recusar a chave, acabar a cota do dia ou limitar o ritmo, a busca vai para o DuckDuckGo e o resultado avisa; nada é cobrado nem tentado de novo em plano pago.
 
-**Quando é com você.** Login, código de verificação (2FA), captcha, aviso de cookies que bloqueia ou qualquer coisa que só uma pessoa faz: o Orb **não tenta resolver nem digita senha ou número de cartão** (campos de senha são recusados). Ele chama `browse_show`, que reabre a mesma sessão numa janela visível; você faz o que falta, diz "pronto" no chat e o Orb continua. O motor Obscura não tem janela: nesse caso o Orb pede para você trocar de motor.
+**Quando é com você.** Login, código de verificação (2FA), captcha, aviso de cookies que bloqueia ou qualquer coisa que só uma pessoa faz: o Orb **não tenta resolver nem digita senha ou número de cartão** (campos de senha são recusados). Ele chama `browse_show`, que reabre a mesma sessão numa janela visível e põe um **cartão no chat**: "Atlas abriu o navegador para você", com **Pronto** (⌘↩) e **Cancelar** (esc). O turno **espera** como espera uma permissão ("Esperando sua resposta"; o Orb fica em "precisa de você" na barra lateral e na barra de menus, e chega o aviso do macOS com os mesmos dois botões). Você faz o que falta na janela e clica em Pronto: a ferramenta devolve sucesso, a janela fica aberta e o Orb continua tirando um `browse_snapshot` novo. Cancelar fecha a janela e diz ao Orb que você recusou (ele não insiste). Parar (⌘.) cancela o cartão como cancela qualquer pedido, e trocar o modo de permissão **não** responde por você. O motor Obscura não tem janela: nesse caso o Orb pede para você trocar de motor.
 
-**Permissões.** Abrir uma página e pesquisar perguntam como `web_fetch` (Sempre permitir por site, ou "Pesquisar na web"); clicar, preencher, escolher e apertar teclas perguntam no Perguntar antes e têm a sua própria liberação ("Clicar e preencher páginas no navegador do Orb"); olhar a página que já está aberta não pergunta. No **Só leitura** nada disso roda.
+**No Claude Code.** O Claude Code recebe as mesmas ferramentas (`mcp__orb_memoria__web_search` com "Navegar na web", e `mcp__orb_memoria__browse_*` quando o motor do Orb está instalado) pelo servidor de ferramentas do próprio Orb, na mesma sessão do agent-browser que o app usa (logins e página aberta valem para os dois motores de conversa). Os `WebFetch` e `WebSearch` do Claude Code continuam disponíveis; o prompt pede que o Orb prefira o navegador dele para páginas com JavaScript e sessões em que você já entrou. A chave do TinyFish vai ao servidor no ambiente do arquivo temporário privado do turno (como os segredos dos conectores), nunca na linha de comando. O cartão Pronto/Cancelar de `browse_show` é do app (o servidor é outro processo): o app abre a janela, espera e só então libera a chamada. No modo **Sem pedir permissão** o Claude Code não consulta o app antes de chamar a ferramenta; `browse_show` então só abre a janela e pede ao Orb que avise e pare.
+
+**Permissões.** Abrir uma página e pesquisar perguntam como `web_fetch` (Sempre permitir por site, ou "Pesquisar na web"); clicar, preencher, escolher e apertar teclas perguntam no Perguntar antes e têm a sua própria liberação ("Clicar e preencher páginas no navegador do Orb"); olhar a página que já está aberta não pergunta. No **Só leitura** nada disso roda. As regras são do Orb: valem igual nos dois motores de conversa, e o cartão de `browse_show` ("Pronto / Cancelar") vem depois do pedido de permissão, quando o modo pergunta.
 
 ## Conversar
 
@@ -313,6 +315,27 @@ atualiza quando você volta ao app e tem **Verificar de novo**. Gravação do Á
 - Quando uma ferramenta falha por falta de permissão, o Orb não tenta de novo: diz o que ligar e onde, e a linha da ferramenta
   ganha o botão **Permitir…** (pede ao macOS ou abre o painel certo).
 - As permissões valem para esta cópia do app; veja [Assinatura estável](#assinatura-estável-recomendado).
+
+### Apps em segundo plano
+
+Com "Controlar apps do Mac" ligado e a Acessibilidade liberada, o Orb opera outros apps **sem tomar a sua tela**: você continua
+usando o Mac e o app da frente, o foco e o cursor ficam onde estavam.
+
+- **O que funciona em segundo plano**: ler a interface do app (mesmo coberto, em outro Espaço ou minimizado), apertar botões,
+  preencher campos, digitar, atalhos de teclado (pelo menu do app), escolher itens de menu, selecionar linhas, rolar e clicar em
+  um ponto da janela quando o app aceita o primeiro clique. A captura de tela vem da própria janela, também quando está coberta.
+- **O cartão "Usar a tela"**: o que só funciona com o mouse e o teclado de verdade (arrastar e soltar, menus de contexto, passar o
+  mouse, apps sem Acessibilidade) o Orb **pede** antes. Você aprova o cartão (ele lista as etapas), o Orb traz o app para a frente
+  por até 10 s, faz o que precisa e **devolve** o app que estava na frente, a janela e o cursor. Um aviso "Orb está usando a tela
+  — mexa o mouse para parar" fica na tela; mexer o mouse interrompe. Só um Orb usa a tela por vez, em todo o Mac. Em "Só leitura"
+  o Orb não assume a tela.
+- **Limites conhecidos**: arrastar e soltar só vale assumindo a tela; apps que desenham tudo num canvas (jogos, alguns editores)
+  não expõem elementos, então o Orb olha a captura e precisa de coordenadas; popups e menus de contexto abertos aparecem à parte
+  e pedem a tela; menus dinâmicos (Recentes, Janela, Serviços) só se preenchem abertos; apps travados respondem "não respondeu"
+  em poucos segundos em vez de segurar o Orb; conteúdo de páginas web vai para o navegador do Orb, não para a leitura de interface.
+- **macOS 15 e Gravação de Tela**: o macOS volta a pedir a confirmação de Gravação da Tela de tempos em tempos. Sem ela o Orb ainda
+  lê a interface e usa a legenda numerada, só não vê a imagem; confirme em Ajustes do Sistema → Privacidade e Segurança →
+  Gravação de Tela e reabra o Orb se a captura voltar a falhar.
 
 ## Memória
 
