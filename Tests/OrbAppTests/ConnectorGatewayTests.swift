@@ -462,7 +462,9 @@ struct ConnectorTurnTests {
         #expect(lists[0].contains("connector_tools") && lists[0].contains("connector_call"))
         #expect(!lists.joined().contains { $0.contains("GitHub__") })
         // The index is in the description of the first one.
-        let withoutConnectors = ToolBox.offered(for: [.connectors], accessibilityGranted: true).map(\.spec.name)
+        // (The Orb's own chat also gets what the multi-Orb features offer it, orb_propose among them.)
+        let withoutConnectors = ToolBox.offered(for: [.connectors], accessibilityGranted: true,
+                                                multi: model.multiOrbOffering(for: bot.id)).map(\.spec.name)
         #expect(Set(lists[0]) == Set(withoutConnectors + ["connector_tools", "connector_call"]))
         await model.mcp.sync([])
     }
