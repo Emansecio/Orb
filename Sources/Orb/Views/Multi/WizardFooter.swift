@@ -1,25 +1,16 @@
 import SwiftUI
 
-/// The foot of the sheet in "Criar conversando": "Passar para o formulário" on the left (the draft goes to the form fields),
-/// Cancelar (discards everything) and Criar Orb (enabled once the draft has a name) on the right.
+/// The foot of the sheet in "Criar conversando": why "Criar Orb" is still off on the left (the mode picker above carries the
+/// draft to the form), Cancelar (discards everything) and Criar Orb (enabled once the draft has a name) on the right.
 struct WizardFooter: View {
     let canCreate: Bool
     /// The assistant said the draft is complete: "Criar Orb" is the next step and shows it (a halo, and ⌘↩ as well as ↩).
     var isReady = false
-    let toForm: () -> Void
     let cancel: () -> Void
     let create: () -> Void
 
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
-            Button(action: toForm) {
-                Text("Passar para o formulário")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Palette.accentText)
-            }
-            .buttonStyle(.plain)
-            .help("Leva o que já foi montado para o formulário, para você preencher o resto à mão")
-            .accessibilityIdentifier("wizard-to-form")
             if !canCreate {
                 Text("O assistente ainda não escolheu um nome.")
                     .font(.system(size: 12))

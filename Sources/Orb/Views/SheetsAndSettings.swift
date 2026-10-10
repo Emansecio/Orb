@@ -44,7 +44,7 @@ struct NewBotSheet: View {
     private let previewFlashed: Set<DraftField>
     /// The "Criar conversando" assistant. It lives as long as the sheet and writes nothing down until "Criar".
     @State private var wizard: WizardRunner
-    /// What the assistant said the Orb may use, carried over by "Passar para o formulário" (the form has no switches for it).
+    /// What the assistant said the Orb may use, carried over when the person switches to "Formulário" (the form has no switches for it).
     @State private var draftCapabilities: Set<Capability>?
     // MARK: end MultiOrb (WP4)
 
@@ -112,7 +112,10 @@ struct NewBotSheet: View {
 
     /// "Criar conversando | Formulário" at the top of the left column; off, with its reason, while no model is connected.
     private var modePicker: some View {
-        Picker("Como criar o Orb", selection: Binding(get: { creation }, set: { userMode = $0 })) {
+        // Going from the assistant to the form carries the draft over (name, role, instructions, mode, what it may use).
+        Picker("Como criar o Orb", selection: Binding(get: { creation }, set: { new in
+            if new == .form && creation == .assistant { passDraftToForm() } else { userMode = new }
+        })) {
             ForEach(OrbCreationMode.allCases) { Text($0.title).tag($0) }
         }
         .pickerStyle(.segmented)
@@ -179,7 +182,7 @@ struct NewBotSheet: View {
         }
     }
 
-    /// "Passar para o formulário" (and the final card's "Ajustar"): the draft fills the form's fields and the form is shown.
+    /// "Formulário" in the mode picker (and the final card's "Ajustar"): the draft fills the form's fields and the form is shown.
     private func passDraftToForm() {
         let draft = wizard.draft
         wizard.stopTalking()
@@ -209,7 +212,7 @@ struct NewBotSheet: View {
             .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: tab)
             Group {
                 if isAssistant {
-                    WizardFooter(canCreate: wizard.draft.canCreate, isReady: wizard.draft.ready, toForm: passDraftToForm, cancel: { dismiss() }, create: createFromAssistant)
+                    WizardFooter(canCreate: wizard.draft.canCreate, isReady: wizard.draft.ready, cancel: { dismiss() }, create: createFromAssistant)
                 } else {
                     SheetFooter(message: isImporting ? ImportText.notCreatedYet : hint, cancel: { dismiss() },
                                 primaryTitle: isImporting ? ImportText.confirm : "Criar Orb",
@@ -221,6 +224,7 @@ struct NewBotSheet: View {
             .sheetSection(2)
         }
         .frame(width: 820, height: height)
+        .background(Palette.chrome) // one ground under both tabs: the hairline between the columns sits on it, not on the window
         .task { wizard.attach(model) } // MultiOrb (WP4)
         .onDisappear { wizard.cancel() } // MultiOrb (WP4): the sheet closed: the assistant's turn stops, nothing is kept
         .task { isNameFocused = creation == .form }
@@ -255,7 +259,7 @@ struct NewBotSheet: View {
                 .background(Palette.chrome)
                 // The left column comes in just after the tabs, the footer last (MOVIMENTO.md §2.6).
                 .sheetSection(1)
-                Divider().overlay(Palette.line)
+                Rectangle().fill(Palette.line).frame(width: 1)
                 // The preview, in the assistant and in the form: the Orb with the look the person chose.
                 previewPane
                     .id(creation)
