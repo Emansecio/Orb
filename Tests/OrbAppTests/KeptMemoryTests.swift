@@ -93,7 +93,7 @@ import Testing
         #expect(list.map(\.pageCount) == [1, 2, 0]) // the archive of compacted sessions is not a memory
         #expect(list.allSatisfy { $0.profile == nil }) // folders from before profiles: the name comes from the folder
         #expect(KeptMemories.count(in: memoryRoot) == 3)
-        #expect(list[1].menuTitle == "Luna · 08/10/2026 · 2 lembranças")
+        #expect(list[1].menuTitle == "Luna · 8 de out. · 2 lembranças")
     }
 
     @Test func noKeptMemoriesIsAnEmptyList() {

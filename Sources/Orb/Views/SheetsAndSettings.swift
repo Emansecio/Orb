@@ -189,7 +189,7 @@ struct NewBotSheet: View {
             }
         } header: {
             Text("Começar de")
-        } footer: {
+        } footer: { FormFootnote {
             // The footer changes with the choice: one text fades into the other, in the same place.
             ZStack(alignment: .leading) {
                 if let chosenMemory {
@@ -201,7 +201,7 @@ struct NewBotSheet: View {
                 }
             }
             .motion(Motion.content, value: footerKey)
-        }
+        } }
     }
 
     /// Which of the "Começar de" footers shows (what its change animates).
@@ -315,9 +315,9 @@ private struct NewBotFolderSection: View {
             }
         } header: {
             Text("Pasta")
-        } footer: {
+        } footer: { FormFootnote {
             Text(footer).textSwap(footer)
-        }
+        } }
         .fileImporter(isPresented: $isPicking, allowedContentTypes: [.folder]) { result in
             if case .success(let url) = result { choice = .existing(url) }
         }

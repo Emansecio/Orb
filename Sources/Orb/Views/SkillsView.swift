@@ -568,17 +568,17 @@ struct SkillEditor: View {
                         }
                 }
                 TextField("O que faz", text: $skill.summary, prompt: Text("ex.: Resume um texto em 5 tópicos"))
-            } footer: {
+            } footer: { FormFootnote {
                 Text(finalSlug.isEmpty ? "O comando é o que você escreve no chat para usar a skill."
                      : "Para usar, escreva /\(finalSlug) no começo da mensagem no chat.")
                     .textSwap(finalSlug.isEmpty)
-            }
+            } }
             Section {
                 PlaceholderTextEditor(placeholder: "Quando eu pedir /\(finalSlug.isEmpty ? "resumir" : finalSlug), leia o texto e responda em 5 tópicos curtos.",
                                       text: $skill.instructions, minHeight: proposal == nil ? 100 : 260)
             } header: {
                 Text("Instruções para o Orb")
-            } footer: {
+            } footer: { FormFootnote {
                 HStack(spacing: 0) {
                     if skill.instructions.count > Self.longInstructions {
                         Text("Instruções longas gastam contexto em toda conversa que usar a skill. ")
@@ -588,7 +588,7 @@ struct SkillEditor: View {
                     Spacer(minLength: 8)
                     Text("\(skill.instructions.count.formatted()) caracteres").monospacedDigit()
                 }
-            }
+            } }
             Section {
                 OrbScopePicker(orbIDs: $skill.orbIDs, noun: "esta skill")
             } header: {

@@ -265,7 +265,7 @@ private struct RoutineCard: View {
                 RunHistory(runs: routine.runs, onOpen: onOpenRun)
             }
             HStack {
-                Button("Editar", action: onEdit)
+                Button("Editar", systemImage: "pencil", action: onEdit)
                     .help(Tip.editRoutine)
                 Button("Ver conversa", systemImage: "text.bubble", action: onOpen)
                     .help(Tip.routineConversation)
@@ -288,7 +288,7 @@ private struct RoutineCard: View {
                 }
                 .animateChanges(of: RoutineRunState(isRunning: isRunning, isQueued: isQueued))
             }
-            .controlSize(.small)
+            .chipButton()
         }
         .padding(16)
         .card(radius: 12)

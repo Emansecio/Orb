@@ -89,6 +89,12 @@ enum TranscriptSample {
             if screen == "transcript-skill-proposal" { _ = await model.memory.bank(for: bot.id).proposeSkill(SkillSnapshots.proposal) }
             try? await Task.sleep(for: .seconds(1))
             model.seedConversation(Conversation(items: items), for: bot.id)
+            // The bar over the top of the conversation (⌘F), and the first message taken back into the field (Editar).
+            if screen == "transcript-find" { try? await Task.sleep(for: .seconds(1)); model.request(.findInConversation, of: bot.id) }
+            if screen == "transcript-edit" {
+                try? await Task.sleep(for: .seconds(1))
+                if let first = items.first { _ = model.beginEditing(itemID: first.id, of: bot.id) }
+            }
         })
     }
 }

@@ -17,24 +17,24 @@ enum WelcomeSnapshots {
         switch screen {
         case "welcome":
             return scene(WelcomeView(forcedStage: .connect, copy: .firstUse, kept: [], detectsProviders: false,
-                                     claude: ClaudeCodeStatus(isInstalled: true)))
+                                     claude: ClaudeCodeStatus(isInstalled: true)), copy: .firstUse)
         case "welcome-checking":
-            return scene(WelcomeView(forcedStage: .checking, copy: .firstUse, kept: [], detectsProviders: false))
+            return scene(WelcomeView(forcedStage: .checking, copy: .firstUse, kept: [], detectsProviders: false), copy: .firstUse)
         case "welcome-ready", "welcome-narrow":
-            return scene(WelcomeView(forcedStage: .create, copy: .firstUse, kept: [], detectsProviders: false))
+            return scene(WelcomeView(forcedStage: .create, copy: .firstUse, kept: [], detectsProviders: false), copy: .firstUse)
         case "welcome-kept":
             let memories = sampleMemories()
-            return scene(WelcomeView(forcedStage: .createWithKept, copy: .firstUse, kept: memories, detectsProviders: false))
+            return scene(WelcomeView(forcedStage: .createWithKept, copy: .firstUse, kept: memories, detectsProviders: false), copy: .firstUse)
         case "welcome-returning":
-            return scene(WelcomeView(forcedStage: .create, copy: .returning, kept: [], detectsProviders: false))
+            return scene(WelcomeView(forcedStage: .create, copy: .returning, kept: [], detectsProviders: false), copy: .returning)
         default:
             return nil
         }
     }
 
-    private static func scene(_ welcome: WelcomeView) -> AnyView {
+    private static func scene(_ welcome: WelcomeView, copy: WelcomeCopy) -> AnyView {
         AnyView(HStack(spacing: 0) {
-            SidebarView().frame(width: 280)
+            SidebarView(invitationCopy: copy).frame(width: 280)
             Divider().overlay(Color.black)
             welcome
         })

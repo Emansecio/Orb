@@ -204,9 +204,9 @@ struct MacPermissionsView: View {
                 NotificationRow(model: model)
             } header: {
                 Text("Essenciais")
-            } footer: {
+            } footer: { FormFootnote {
                 Text("A gravação de tela só vale depois de reabrir o Orb, e o macOS pergunta uma vez só.")
-            }
+            } }
             Section {
                 DisclosureGroup(isExpanded: $showsAutomation) {
                     ForEach(AutomationTarget.known) { target in
@@ -223,9 +223,9 @@ struct MacPermissionsView: View {
                     .contentShape(.rect)
                     .onTapGesture { withAnimation(Motion.adapted(Motion.content, reduceMotion: reduceMotion)) { showsAutomation.toggle() } }
                 }
-            } footer: {
+            } footer: { FormFootnote {
                 Text("Cada app pede a própria permissão, na primeira vez que o Orb o controla.")
-            }
+            } }
             Section {
                 DisclosureGroup("Avançado (desenvolvedores)") {
                     Text("As permissões valem para esta cópia do Orb. Se o app é recompilado com a assinatura temporária, o macOS "

@@ -41,10 +41,10 @@ struct KeptMemory: Identifiable, Equatable, Sendable {
     /// nil for a folder without `perfil.json` (or one that cannot be read).
     var profile: KeptProfile?
 
-    /// "Atlas · 08/10/2026 · 12 lembranças": what the menu shows.
+    /// "Atlas · 8 de out. · 12 lembranças": what the menu shows (the day is written as on the welcome screen).
     var menuTitle: String {
         let count = pageCount == 1 ? "1 lembrança" : "\(pageCount) lembranças"
-        return "\(name) · \(Self.dayFormat.string(from: date)) · \(count)"
+        return "\(name) · \(Self.shortDay.string(from: date)) · \(count)"
     }
 
     /// "12 lembranças" (or "1 lembrança").
@@ -98,8 +98,6 @@ struct KeptMemory: Identifiable, Equatable, Sendable {
 
     private static let shortDay = dayFormatter("d 'de' MMM")
     private static let longDay = dayFormatter("d 'de' MMMM")
-
-    private static let dayFormat = dayFormatter("dd/MM/yyyy")
 }
 
 /// The folder of kept memories and what goes in and out of it. Plain file work with no state, so it can run on any

@@ -49,9 +49,9 @@ struct MemoryTab: View {
             }
         } header: {
             Text("Memória")
-        } footer: {
+        } footer: { FormFootnote {
             if !memory.items.isEmpty { Text(MemoryGroups.summary(memory.items)) }
-        }
+        } }
 
         ForEach(groups) { group in
             let shown = truncates ? Array(group.items.prefix(Self.rowsPerGroup)) : group.items
@@ -75,13 +75,15 @@ struct MemoryTab: View {
 
         Section {
             Button("Ver tudo…", systemImage: "list.bullet.rectangle") { showAll(nil) }
+                .chipButton()
                 .help(Tip.memoryShowAll)
                 .disabled(memory.items.isEmpty)
             Button("Abrir pasta da memória", systemImage: "folder") {
                 NSWorkspace.shared.open(model.memory.directory(for: botID))
             }
+            .chipButton()
             .help(Tip.memoryFolder)
-        } footer: {
+        } footer: { FormFootnote {
             HStack(spacing: 4) {
                 Text("Só \(name) vê isso. São arquivos .md na sua pasta de dados.")
                 Button("Como funciona") { isShowingHelp = true }
@@ -89,7 +91,7 @@ struct MemoryTab: View {
                     .help(Tip.memoryHow)
                     .popover(isPresented: $isShowingHelp, arrowEdge: .top) { MemoryHelp(name: name) }
             }
-        }
+        } }
     }
 }
 
@@ -120,7 +122,8 @@ private struct IdentityBlock: View {
                     .foregroundStyle(.secondary)
             }
             HStack {
-                Button("Editar…", action: edit)
+                Button("Editar…", systemImage: "pencil", action: edit)
+                    .chipButton()
                     .help(Tip.editIdentity)
                 Spacer()
                 if !memory.interviewPending {

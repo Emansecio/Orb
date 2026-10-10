@@ -65,9 +65,9 @@ struct ProfileSettings: View {
             }
         } header: {
             Text("Você")
-        } footer: {
+        } footer: { FormFootnote {
             Text("Todos os Orbs leem o nome, como te chamar e o texto “Sobre você” em cada conversa, e isso vai ao provedor do modelo junto com a mensagem. A foto fica só neste Mac.")
-        }
+        } }
         .fileImporter(isPresented: $isImporting, allowedContentTypes: [.image]) { result in
             if case .success(let url) = result { setPhoto(url) }
         }

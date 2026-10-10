@@ -224,7 +224,8 @@ private struct ConnectorCard: View {
                         .font(.system(size: 14, weight: .semibold))
                         .lineLimit(1)
                     Text(connector.local != nil ? "Neste Mac" : connector.isRemote ? connector.url : ([connector.command] + connector.arguments).joined(separator: " "))
-                        .font(.system(size: 11).monospaced())
+                        // A command or a URL reads in monospace; "Neste Mac" is a plain phrase.
+                        .font(connector.local != nil ? .system(size: 11) : .system(size: 11).monospaced())
                         .foregroundStyle(Palette.faint)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -470,7 +471,7 @@ private struct ConnectorCard: View {
             HStack(spacing: 6) {
                 Button("Tentar de novo", action: runTest).buttonStyle(SecondaryPillStyle())
                     .help("Testa a conexão de novo")
-                Button("Editar…", action: onEdit).buttonStyle(GhostStyle())
+                Button("Editar…", action: onEdit).buttonStyle(SecondaryPillStyle())
                     .help("Abre o editor para corrigir o conector")
             }
             .controlSize(.small)
@@ -571,7 +572,7 @@ struct ConnectorToolsSheet: View {
                 didLoad = true
             }
             .orbSheet("Ferramentas de \(connector.name)", subtitle: subtitle, size: .medium,
-                      icon: ConnectorGallery.service(for: connector)?.mark.ifBranded) {
+                      icon: ConnectorGallery.service(for: connector)?.mark) {
                 SheetFooter(cancel: { dismiss() }, primaryTitle: "Fechar", showsCancel: false, primary: { dismiss() })
             }
     }
@@ -654,6 +655,8 @@ private struct ExploreConnectors: View {
                     } description: {
                         Text("Digite o nome do serviço ou do que ele faz, como “banco de dados” ou “calendário”.")
                     }
+                    // Across the whole width, not the first column of the VStack's alignment (like the Instalados one).
+                    .frame(maxWidth: .infinity)
                     .padding(.top, 30)
                     .transition(.opacity)
                 } else if isLoading || error != nil || results.isEmpty {
@@ -870,7 +873,7 @@ struct ConnectorEditor: View {
         content
             // A guide makes the form longer: the key it leads to should not be hidden under the fold.
             .orbSheet(title, subtitle: subtitle, size: .medium, maxHeight: draft.guide == nil ? SheetSize.maxHeight : 700,
-                      icon: ConnectorGallery.service(for: draft.config)?.mark.ifBranded) { footer }
+                      icon: ConnectorGallery.service(for: draft.config)?.mark) { footer }
             .onAppear(perform: load)
             .onDisappear { signInTask?.cancel() }
             .motion(Motion.content, value: phase)
@@ -980,12 +983,12 @@ struct ConnectorEditor: View {
                             inputFields(secretRows)
                         } header: {
                             Text(secretRows.count == 1 ? "Chave" : "Chaves")
-                        } footer: {
+                        } footer: { FormFootnote {
                             VStack(alignment: .leading, spacing: 6) {
                                 if let note = draft.note { Text(note) }
                                 Text("Chaves ficam no Keychain do Mac, não no arquivo de dados do app.")
                             }
-                        }
+                        } }
                     }
                     if !plainRows.isEmpty {
                         Section {
@@ -1004,7 +1007,7 @@ struct ConnectorEditor: View {
                     OrbScopePicker(orbIDs: $orbIDs, allNote: "Cada Orb precisa estar com “Conectores” ligado no painel dele.")
                 } header: {
                     Text("Usar com")
-                } footer: {
+                } footer: { FormFootnote {
                     VStack(alignment: .leading, spacing: 6) {
                         if let extraAccessNote {
                             Label(extraAccessNote, systemImage: "exclamationmark.triangle")
@@ -1014,7 +1017,7 @@ struct ConnectorEditor: View {
                             Text("“Conectores” é ligado nos Orbs marcados, se ainda não estiver.")
                         }
                     }
-                }
+                } }
                 if isGuided {
                     Section {
                         DisclosureGroup("Avançado", isExpanded: $showsAdvanced) { advancedFields }
@@ -1044,7 +1047,7 @@ struct ConnectorEditor: View {
                 Button("Criar meu app do Slack", systemImage: "arrow.up.right.square") { NSWorkspace.shared.open(SlackApp.creationURL(slackPreset)) }
                     .buttonStyle(SecondaryPillStyle())
                     .help("Abre o Slack no navegador com o app já preenchido")
-                Text("O Slack abre no navegador com tudo preenchido. Escolha o seu workspace e clique em Create. Depois, em Install App, clique em Install to Workspace e em Allow.")
+                Text("O Slack abre no navegador com tudo preenchido. Escolha o seu workspace e clique em **“Create”**. Depois, em **“Install App”**, clique em **“Install to Workspace”** e em **“Allow”**.")
                     .font(.system(size: 11)).foregroundStyle(Palette.faint)
             }
             VStack(alignment: .leading, spacing: 8) {
@@ -1060,7 +1063,7 @@ struct ConnectorEditor: View {
                     Text("Em OAuth & Permissions, copie o User OAuth Token (começa com xoxp-) e cole na chave abaixo.")
                         .font(.system(size: 11)).foregroundStyle(Palette.faint)
                 } else {
-                    TextField("Client ID", text: $clientID, prompt: Text("Em Basic Information → App Credentials"))
+                    TextField("Client ID", text: $clientID, prompt: Text("Em “Basic Information” → “App Credentials”"))
                         .textFieldStyle(.roundedBorder)
                         .help("O Client ID do app do Slack, que o Orb usa para entrar com a sua conta")
                     Text("Copie o Client ID do app e clique em Entrar com Slack: o Slack pede a sua licença no navegador. Não precisa copiar token.")
@@ -1069,9 +1072,9 @@ struct ConnectorEditor: View {
             }
         } header: {
             Text("Passo a passo")
-        } footer: {
+        } footer: { FormFootnote {
             Text("O app é seu, só do seu workspace: o Orb age como você e vê só o que você vê. Se o workspace exige aprovação de apps, peça ao administrador.")
-        }
+        } }
     }
 
     /// A service that enters with the account: what happens, and where the token stays.
@@ -1079,9 +1082,9 @@ struct ConnectorEditor: View {
         Section {
             Label("Ao continuar, o navegador abre para você entrar com a sua conta do \(config.name).", systemImage: "person.crop.circle")
                 .foregroundStyle(Palette.secondary)
-        } footer: {
+        } footer: { FormFootnote {
             Text("O token fica no Keychain do Mac. Você pode sair a qualquer momento.")
-        }
+        } }
     }
 
     /// The app registered with the service, for a login the Orb cannot register itself for (the service asks for one).
@@ -1094,9 +1097,9 @@ struct ConnectorEditor: View {
                 .help("Guardado no Keychain do Mac; em branco, mantém o atual")
         } header: {
             Text("App registrado (login)")
-        } footer: {
+        } footer: { FormFootnote {
             Text("Só para serviços que não deixam o Orb se registrar sozinho. O Client Secret fica no Keychain do Mac; deixe em branco para manter o atual.")
-        }
+        } }
     }
 
     private var inputRows: [KeyValueRow] { values.filter { inputsByName[$0.key] != nil } }
@@ -1125,9 +1128,9 @@ struct ConnectorEditor: View {
             } else {
                 TextField("Comando", text: $config.command, prompt: Text("npx, uvx, docker, /caminho/do/servidor"))
             }
-        } footer: {
+        } footer: { FormFootnote {
             if let source = config.source { Text("Do registro: \(source)") }
-        }
+        } }
         if isRemote && draft.guide != .slack { loginApp }
         if !isRemote {
             Section("Argumentos (um por linha)") {
@@ -1149,11 +1152,11 @@ struct ConnectorEditor: View {
             .help(isRemote ? "Adiciona um cabeçalho HTTP, enviado só para a URL" : "Adiciona uma variável de ambiente para o comando")
         } header: {
             Text(isRemote ? "Cabeçalhos HTTP" : "Variáveis de ambiente")
-        } footer: {
+        } footer: { FormFootnote {
             Text(isRemote
                  ? "Enviados só para a URL acima. Valores que parecem chaves (token, senha…) ficam no Keychain do Mac."
                  : "O comando roda com o PATH do seu shell de login. Valores que parecem chaves (token, senha…) ficam no Keychain do Mac.")
-        }
+        } }
     }
 
     private func isSecret(_ name: String) -> Bool {
@@ -1176,14 +1179,14 @@ struct ConnectorEditor: View {
             }
         } header: {
             Text("Pasta liberada")
-        } footer: {
+        } footer: { FormFootnote {
             if isHome {
                 Label("É a sua pasta pessoal inteira. Prefira escolher só a pasta de que o Orb precisa.", systemImage: "exclamationmark.triangle")
                     .foregroundStyle(Palette.warn)
             } else {
                 Text("Os Orbs com este conector podem ler e gravar arquivos nesta pasta e dentro dela.")
             }
-        }
+        } }
     }
 
     private func chooseFolder(index: Int, current: String) {

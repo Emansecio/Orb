@@ -12,6 +12,8 @@ struct SidebarView: View {
     /// The height of the window's toolbar over the sidebar (its top safe area), applied once by hand: left to the scroll
     /// view, it is applied twice and "Orbs" starts a whole toolbar below the window's buttons.
     @State private var toolbarHeight: CGFloat = 0
+    /// For snapshots: the words of the invitation when the screen beside it forces its own (the app reads them from the model).
+    var invitationCopy: WelcomeCopy?
 
     /// With no Orbs the dashed invitation at the top is the way to make one: no second button for the same thing.
     private var showsNewOrb: Bool { SidebarFooter.showsNewOrb(botCount: model.botIDs.count) }
@@ -31,7 +33,7 @@ struct SidebarView: View {
                             model.selection = nil
                         }
                     } content: { _ in
-                        FirstOrbInvitation(isSelected: model.selection == nil, title: model.welcomeCopy.invitationTitle)
+                        FirstOrbInvitation(isSelected: model.selection == nil, title: (invitationCopy ?? model.welcomeCopy).invitationTitle)
                     }
                     .transition(.opacity)
                 }

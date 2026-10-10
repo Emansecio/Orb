@@ -164,6 +164,41 @@ struct SheetFooter: View {
     }
 }
 
+/// The note under a form section ("Todos os Orbs leem o nome…"): caption size, muted ink, aligned to the leading edge
+/// and across the full width, like the gray lines inside the cards ("Depois de tarefas longas…"). The grouped form
+/// would otherwise draw it body-size, near white and trailing-aligned, bigger than what it explains. A colour set on
+/// the content itself (the warning in orange) wins over the footnote's.
+struct FormFootnote<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        content()
+            .font(.caption)
+            .foregroundStyle(Palette.muted)
+            .multilineTextAlignment(.leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            // The same inset as the section's heading, which the grouped form indents past the card's edge.
+            .padding(.leading, Self.headingInset)
+    }
+
+    static var headingInset: CGFloat { 10 }
+}
+
+extension View {
+    /// The small bordered button the Orb's panel uses everywhere (its quick actions, the folder, the memory, the
+    /// routines): one style and one size, so no row has a taller or plainer button than the next.
+    func chipButton() -> some View {
+        // The size is said out loud: inside a grouped Form the buttons keep the form's body font whatever the control size,
+        // and would come out larger than the same chips in the panel's header.
+        buttonStyle(.bordered).controlSize(.small).font(.system(size: 12))
+    }
+
+    /// The gray line under a switch or a picker in the Orb's panel ("Rodar comandos e ler e escrever arquivos").
+    func capabilityCaption() -> some View {
+        font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+    }
+}
+
 /// A multi-line field with a placeholder, drawn like the app's other inputs (TextEditor has no placeholder and
 /// paints its own background).
 struct PlaceholderTextEditor: View {

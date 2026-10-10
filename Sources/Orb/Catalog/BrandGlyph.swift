@@ -17,27 +17,23 @@ extension BrandMarks {
 }
 
 extension BrandMark {
-    /// How a mark sits on its tile, by what reads on the app's dark surfaces.
+    /// How a mark is drawn. Every service has the same dark tile; only the mark's colour changes, by what reads on it.
     enum Treatment: Equatable, Sendable {
-        /// The brand colour on a dark tile.
+        /// The brand colour on the dark tile.
         case brandOnDark
-        /// White on a dark tile: the brand's colour is (nearly) black, which would vanish.
-        case inkOnDark
-        /// White on a tile of the brand colour: the brand's colour is too dark to be read as a mark on the dark tile.
-        case whiteOnBrand
+        /// White on the dark tile: the brand's colour is too dark to read there (GitHub, Notion, Sentry, Slack, Atlassian).
+        case whiteOnDark
     }
 
     /// The dark tile's colour (`Palette.raised`), what the contrast is judged against.
     static let darkTileHex: UInt32 = 0x222222
     /// Below this contrast against the dark tile (WCAG asks 3:1 for graphics) the colour is not used as the mark's colour.
     static let minimumContrast = 3.0
-    /// Colours this dark are black for this purpose (Notion, GitHub): white ink, not a tile of that colour.
-    static let nearBlackLuminance = 0.02
 
-    var treatment: Treatment {
-        if Self.contrast(hex, Self.darkTileHex) >= Self.minimumContrast { return .brandOnDark }
-        return Self.luminance(hex) < Self.nearBlackLuminance ? .inkOnDark : .whiteOnBrand
-    }
+    var treatment: Treatment { Self.readsOnDarkTile(hex) ? .brandOnDark : .whiteOnDark }
+
+    /// Whether a colour can be the colour of a mark on the dark tile (a brand's, or a generic connector's symbol).
+    static func readsOnDarkTile(_ hex: UInt32) -> Bool { contrast(hex, darkTileHex) >= minimumContrast }
 
     /// WCAG relative luminance of a 0xRRGGBB colour.
     static func luminance(_ hex: UInt32) -> Double {

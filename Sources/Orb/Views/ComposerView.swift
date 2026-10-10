@@ -206,7 +206,8 @@ struct ComposerView: View {
                                          typesInComposer: isFocused && hasText, compact: isCompact)
         }
         if isWorking { return "" }
-        if isEditing { return "↩ envia a edição · esc cancela" }
+        // "Esc cancela" is said once, in the banner above the field, with its button.
+        if isEditing { return "↩ envia a edição" }
         if isFocused, !hasContent, !lane.hasAttachments { return "↩ envia · \(CommandName.newLineKeys) nova linha" }
         return ""
     }

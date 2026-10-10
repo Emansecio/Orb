@@ -99,7 +99,7 @@ struct UsageSettings: View {
                     rowsSection("Por modelo", rows: report.modelRows, report: report, isModel: true)
                     hourSection(report)
                 }
-                Section {} footer: { note }
+                Section {} footer: { FormFootnote { note } }
             }
         }
         .formStyle(.grouped)
@@ -290,11 +290,11 @@ struct UsageSettings: View {
             .accessibilityValue(busiest.map { "Mais uso entre \(UsageFormat.hour($0)) e \(UsageFormat.hour(($0 + 1) % 24))" } ?? "Sem uso")
         } header: {
             Text("Por horário")
-        } footer: {
+        } footer: { FormFootnote {
             if let busiest {
                 Text("Você usa mais entre \(UsageFormat.hour(busiest)) e \(UsageFormat.hour((busiest + 1) % 24)).")
             }
-        }
+        } }
     }
 
     private var note: some View {
