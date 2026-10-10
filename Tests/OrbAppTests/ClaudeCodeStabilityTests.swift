@@ -212,9 +212,12 @@ struct ClaudeCodeMCPStabilityTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let context = OrbToolsMCPServer.Options(memoryDirectory: directory).context
         let request = JSONValue.object(["jsonrpc": .string("2.0"), "id": .number(1), "method": .string("tools/list")])
+        // Accessibility granted, so the list holds every tool whatever this Mac allows the test runner.
         for mac in [true, false] {
-            let first = try #require(await OrbToolsMCPServer.handle(request, context: context, mac: mac)).jsonString
-            for _ in 0..<5 { #expect(try #require(await OrbToolsMCPServer.handle(request, context: context, mac: mac)).jsonString == first) }
+            let first = try #require(await OrbToolsMCPServer.handle(request, context: context, mac: mac, accessibilityGranted: true)).jsonString
+            for _ in 0..<5 {
+                #expect(try #require(await OrbToolsMCPServer.handle(request, context: context, mac: mac, accessibilityGranted: true)).jsonString == first)
+            }
             // In the order the app lists them, memory first.
             let names = try #require(JSONValue.parse(first)?["result"]?["tools"]?.array).compactMap { $0["name"]?.string }
             #expect(names == OrbToolsMCPServer.tools(mac: mac).map(\.spec.name))

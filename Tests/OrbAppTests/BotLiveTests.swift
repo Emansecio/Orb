@@ -8,7 +8,7 @@ import Testing
 @Suite final class BotLiveTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbLive-\(UUID().uuidString)")
 
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     /// Atlas, Luna and Rex, saved in `root`.
     @MainActor private func model() -> AppModel {
@@ -262,14 +262,15 @@ import Testing
         let composerOfA: @MainActor () -> Void = { _ = (other.isWorking, other.permission, other.modelID) }
         let lists: @MainActor () -> Void = { _ = model.botIDs }
 
-        for change: (@MainActor () -> Void) in [
+        let changes: [@MainActor () -> Void] = [
             { model.apply(.status("Pensando"), to: b) },
             { model.apply(.toolStarted(self.call(.file)), to: b) },
             { model.apply(.status("Lendo"), to: b) },
             { model.apply(.approval(self.card()), to: b) },
             { model.update(b) { $0.permissionRules = [.shell("ls")] } },
             { model.update(b) { $0.workingDirectory = "/tmp" } },
-        ] {
+        ]
+        for change in changes {
             expectSilent(reading: sidebarRowOfA, whenYouDo: change)
             expectSilent(reading: composerOfA, whenYouDo: change)
             expectSilent(reading: lists, whenYouDo: change)
