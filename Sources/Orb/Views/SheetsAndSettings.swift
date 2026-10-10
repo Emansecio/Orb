@@ -171,7 +171,7 @@ struct NewBotSheet: View {
                 Divider().overlay(Palette.line)
                 ZStack {
                     if isAssistant {
-                        WizardPreviewPane(runner: wizard, flashed: previewFlashed, onCreate: createFromAssistant, onAdjust: passDraftToForm)
+                        WizardPreviewPane(runner: wizard, flashed: previewFlashed, onAdjust: passDraftToForm)
                             .transition(.opacity)
                     } else {
                         // Compact: the form beside it already shows the name, and the options need the height.
@@ -184,7 +184,7 @@ struct NewBotSheet: View {
             }
             Group {
                 if isAssistant {
-                    WizardFooter(canCreate: wizard.draft.canCreate, toForm: passDraftToForm, cancel: { dismiss() }, create: createFromAssistant)
+                    WizardFooter(canCreate: wizard.draft.canCreate, isReady: wizard.draft.ready, toForm: passDraftToForm, cancel: { dismiss() }, create: createFromAssistant)
                 } else {
                     SheetFooter(message: isImporting ? ImportText.notCreatedYet : hint, cancel: { dismiss() },
                                 primaryTitle: isImporting ? ImportText.confirm : "Criar Orb",

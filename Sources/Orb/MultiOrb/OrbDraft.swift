@@ -18,7 +18,8 @@ struct OrbDraft: Equatable, Sendable {
     var role = ""
     var instructions = ""
     var orb = OrbConfig()
-    var capabilities: Set<Capability> = []
+    /// What the Orb may use: what a new Orb of the form starts with, until the assistant says otherwise (never connectors).
+    var capabilities: Set<Capability> = [.terminal, .browser, .computerUse]
     var mode = PermissionMode.ask
     /// The assistant says it has enough: the final card appears.
     var ready = false

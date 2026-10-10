@@ -356,7 +356,7 @@ struct MultiOrbInvariantTests {
         #expect(!draft.canCreate)
         draft.name = "Lia"
         #expect(draft.canCreate)
-        #expect(draft.mode == .ask && draft.capabilities.isEmpty && draft.revision == 0 && !draft.ready)
+        #expect(draft.mode == .ask && draft.capabilities == [.terminal, .browser, .computerUse] && draft.revision == 0 && !draft.ready)
     }
 }
 

@@ -18,6 +18,13 @@ import Testing
         #expect(second.changed == [.instructions, .mode] && draft.revision == 2)
     }
 
+    @Test func theDraftStartsWithWhatTheFormStartsWith() {
+        var draft = OrbDraft()
+        #expect(draft.capabilities == Bot(name: "x", role: "", orb: OrbConfig()).capabilities, "never a toolless Orb by omission")
+        draft.apply(args(#"{"name":"Maia","mode":"auto"}"#))
+        #expect(draft.capabilities == [.terminal, .browser, .computerUse], "a call that says nothing about it leaves it")
+    }
+
     @Test func aValueEqualToTheCurrentOneIsNotAChange() {
         var draft = OrbDraft()
         draft.apply(args(#"{"name":"Maia"}"#))

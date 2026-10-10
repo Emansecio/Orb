@@ -7,13 +7,11 @@ import SwiftUI
 /// Under Reduce Motion nothing slides, scales or hops: everything changes by opacity.
 struct WizardPreviewPane: View {
     let runner: WizardRunner
-    let onCreate: () -> Void
     let onAdjust: () -> Void
 
     /// `flashed`: the parts washed at the start (a review snapshot of the moment a call changed them).
-    init(runner: WizardRunner, flashed: Set<DraftField> = [], onCreate: @escaping () -> Void, onAdjust: @escaping () -> Void) {
+    init(runner: WizardRunner, flashed: Set<DraftField> = [], onAdjust: @escaping () -> Void) {
         self.runner = runner
-        self.onCreate = onCreate
         self.onAdjust = onAdjust
         _flashed = State(initialValue: flashed)
     }
@@ -39,7 +37,6 @@ struct WizardPreviewPane: View {
                     if hasDraft {
                         identity
                         if !draft.instructions.isEmpty { howItWorks.transition(.adapted(.unfold, reduceMotion: reduceMotion)) }
-                        chips
                     } else {
                         Text("Seu Orb aparece aqui conforme vocês conversam")
                             .font(.system(size: 13))
@@ -48,6 +45,8 @@ struct WizardPreviewPane: View {
                             .padding(.top, 6)
                             .transition(.opacity)
                     }
+                    // What it will get, from the start (the form's own defaults until the assistant says otherwise).
+                    chips(leading: hasDraft)
                 }
                 .padding(.horizontal, 28)
                 .padding(.bottom, 20)
@@ -55,8 +54,8 @@ struct WizardPreviewPane: View {
             }
             .scrollBounceBehavior(.basedOnSize)
             if draft.ready {
-                WizardReadyCard(draft: draft, create: onCreate, adjust: onAdjust, back: runner.backToChatting)
-                    .padding(.horizontal, 20)
+                WizardReadyCard(draft: draft, adjust: onAdjust, back: runner.backToChatting)
+                    .padding(.horizontal, 28)
                     .padding(.bottom, 16)
                     .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 14)))
             }
@@ -101,15 +100,11 @@ struct WizardPreviewPane: View {
                                      center: .center, startRadius: 0, endRadius: 150))
                 .frame(width: 360, height: 300)
                 .offset(y: -6)
-            Ellipse()
-                .fill(RadialGradient(colors: [palette.glow.opacity(0.34), palette.core.opacity(0.1), .clear],
-                                     center: .center, startRadius: 0, endRadius: 130))
-                .frame(width: 300, height: 58)
-                .offset(y: size / 2 + 4)
-            Ellipse()
-                .strokeBorder(palette.core.opacity(0.3), lineWidth: 1)
-                .frame(width: 214, height: 30)
-                .offset(y: size / 2 + 6)
+            Rectangle()
+                .fill(EllipticalGradient(colors: [palette.glow.opacity(0.34), palette.core.opacity(0.1), palette.core.opacity(0)],
+                                         center: .center, startRadiusFraction: 0, endRadiusFraction: 0.5))
+                .frame(width: 340, height: 76)
+                .offset(y: size / 2 + 2)
             ZStack {
                 OrbView(config: draft.orb, activity: shownActivity, size: size, poke: poke, interactive: true,
                         accessibilityText: "Prévia do Orb: \(draft.orb.summary). \(shownActivity.label).")
@@ -119,8 +114,8 @@ struct WizardPreviewPane: View {
             .frame(width: size, height: size)
         }
         .animation(curve, value: draft.orb)
-        .frame(height: size + 88)
-        .padding(.top, 36)
+        .frame(height: size + 76)
+        .padding(.top, 28)
         .accessibilityElement(children: .contain)
     }
 
@@ -204,8 +199,10 @@ struct WizardPreviewPane: View {
         return items
     }
 
-    private var chips: some View {
-        WizardWrap(spacing: 6, alignment: .center) {
+    /// Under the name and role the chips share the left edge of the boxes around them; with nothing drafted yet they sit
+    /// centered under the line of copy.
+    private func chips(leading: Bool) -> some View {
+        WizardWrap(spacing: 6, alignment: leading ? .leading : .center) {
             ForEach(Array(chipItems.enumerated()), id: \.element.id) { index, item in
                 Label(item.title, systemImage: item.symbol)
                     .font(.system(size: 11, weight: .medium))
@@ -219,7 +216,7 @@ struct WizardPreviewPane: View {
         }
         .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: chipItems.map(\.id))
         .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: flashed)
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: leading ? .leading : .center)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Pode usar: " + chipItems.map(\.title).joined(separator: ", "))
     }
@@ -266,50 +263,48 @@ struct WizardPreviewPane: View {
 
 // MARK: - The final card
 
-/// The card that closes the interview: what is about to be created and the three ways out. (The Orb creation card of the
+/// The card that closes the interview: what is about to be created and the two ways out besides the footer's "Criar Orb". (The Orb creation card of the
 /// "Orb cria Orb" feature, `OrbProposalCard`, is built for a proposal that waits in a chat; this one is the assistant's own
 /// and has the same look. TODO: swap for `OrbProposalCard` fed by the draft when that card takes a draft.)
 struct WizardReadyCard: View {
     let draft: OrbDraft
-    let create: () -> Void
     let adjust: () -> Void
     let back: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 16))
-                    .foregroundStyle(Palette.ok)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
+        // One left edge for the title, the line under it and the buttons: the card's inner padding.
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                Label {
                     Text("Tudo pronto: \(draft.name)")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Palette.ink)
                         .lineLimit(1)
-                    Text("Nada foi criado ainda. Crie agora, ajuste no formulário ou volte a conversar.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Palette.muted)
-                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(Palette.ok)
+                        .accessibilityHidden(true)
                 }
+                Text("Revise ao lado e toque em Criar Orb.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            // The two are the same kind of button (the one next step is the footer's "Criar Orb"): one style, one height.
             HStack(spacing: 8) {
-                Button("Criar", action: create)
-                    .buttonStyle(PrimaryPillStyle())
-                    .keyboardShortcut(.return, modifiers: .command)
-                    .help("Cria o Orb (⌘↩)")
-                    .accessibilityIdentifier("wizard-ready-create")
                 Button("Ajustar", action: adjust)
                     .buttonStyle(SecondaryPillStyle())
                     .help("Leva o rascunho para o formulário, para mudar qualquer detalhe")
                 Button("Voltar a conversar", action: back)
-                    .buttonStyle(GhostStyle())
+                    .buttonStyle(SecondaryPillStyle())
                     .help("Continua a conversa com o assistente")
             }
         }
         .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .card(radius: 14)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Tudo pronto para criar \(draft.name). Botões: Criar, Ajustar, Voltar a conversar.")
+        .accessibilityLabel("Tudo pronto para criar \(draft.name). Toque em Criar Orb, ou escolha Ajustar ou Voltar a conversar.")
     }
 }

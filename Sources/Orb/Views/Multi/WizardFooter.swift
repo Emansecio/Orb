@@ -4,12 +4,14 @@ import SwiftUI
 /// Cancelar (discards everything) and Criar Orb (enabled once the draft has a name) on the right.
 struct WizardFooter: View {
     let canCreate: Bool
+    /// The assistant said the draft is complete: "Criar Orb" is the next step and shows it (a halo, and ⌘↩ as well as ↩).
+    var isReady = false
     let toForm: () -> Void
     let cancel: () -> Void
     let create: () -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .center, spacing: 8) {
             Button(action: toForm) {
                 Text("Passar para o formulário")
                     .font(.system(size: 12))
@@ -34,7 +36,13 @@ struct WizardFooter: View {
                 .buttonStyle(PrimaryPillStyle())
                 .keyboardShortcut(.defaultAction)
                 .disabled(!canCreate)
-                .help(canCreate ? "Cria o Orb que você viu" : "Converse até o Orb ter um nome")
+                .shadow(color: Palette.stageGlow.opacity(isReady && canCreate ? 0.4 : 0), radius: 7, y: 1)
+                .animation(Motion.fade, value: isReady)
+                .background {
+                    Button("", action: create).keyboardShortcut(.return, modifiers: .command).opacity(0).accessibilityHidden(true)
+                        .disabled(!canCreate)
+                }
+                .help(canCreate ? "Cria o Orb que você viu (↩ ou ⌘↩)" : "Converse até o Orb ter um nome")
                 .accessibilityIdentifier("wizard-create")
         }
         .motion(Motion.content, value: canCreate)
