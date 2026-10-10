@@ -18,6 +18,8 @@ enum Motion {
     static let emphasis = Animation.spring(response: 0.45, dampingFraction: 0.72)
     /// Something that goes away.
     static let exit = Animation.easeOut(duration: 0.16)
+    /// How long `exit` lasts: what has to wait for something to be gone (rows that fade before they are removed).
+    static let exitDuration = Duration.milliseconds(160)
     /// What replaces every movement under Reduce Motion.
     static let fade = Animation.easeOut(duration: 0.15)
     /// A spinner stays invisible this long: what loads faster than that shows no spinner at all (the chat's, and every

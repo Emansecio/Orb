@@ -73,12 +73,15 @@ private struct TranscriptList: View {
         // The Orb's reply at the end of the chat carries its living avatar; the working line below gives up its own
         // then, so there is one Orb in view at a time. Only the two rows whose answer changed are drawn again.
         let lastReplyID: UUID? = if let last = items.last, last.kind.isReply { last.id } else { nil }
+        // "Refazer" belongs to the last finished reply of an idle chat; rows an edit or a redo is about to cut fade out.
+        let redoID = RewindRows.redoTarget(in: items, isWorking: isWorking)
+        let dropping = live.dropping
 
         // A conversation swapped for another (a new one, one reopened from Conversas) cross-fades; the scroll view is
         // a new one then, as it was when the whole chat was rebuilt.
         ZStack {
             conversation(items: items, isWorking: isWorking, isLoading: isLoading, live: live, transcript: transcript,
-                         lastReplyID: lastReplyID)
+                         lastReplyID: lastReplyID, redoID: redoID, dropping: dropping)
                 .id(generation)
                 .transition(.opacity)
         }
@@ -87,7 +90,7 @@ private struct TranscriptList: View {
     }
 
     private func conversation(items: [TranscriptItem], isWorking: Bool, isLoading: Bool, live: BotLive,
-                              transcript: OrbTranscript, lastReplyID: UUID?) -> some View {
+                              transcript: OrbTranscript, lastReplyID: UUID?, redoID: UUID?, dropping: Set<UUID>) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
@@ -100,7 +103,8 @@ private struct TranscriptList: View {
                     ForEach(items) { item in
                         let isNew = entrances.isNew(item.id)
                         TranscriptRow(item: item, botID: look.id, orb: look.orb, entering: isNew,
-                                      isLastReply: item.id == lastReplyID)
+                                      isLastReply: item.id == lastReplyID, offersRedo: item.id == redoID,
+                                      isDropping: dropping.contains(item.id))
                             .equatable()
                             // The row comes in by itself, not through an animation of the list (which would lay every row
                             // out again); the list's own animation must not add a transition of its own.

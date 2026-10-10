@@ -101,7 +101,7 @@ extension KeyboardShortcut {
 /// A command a key answers to, so the places that show a key (the palette) ask the catalog for it by command.
 enum ShortcutCommand: String, CaseIterable, Sendable {
     case newBot, goTo, toggleInspector, settings
-    case writeMessage, newConversation, conversations, stop, openFolder, send, newLine, queueAfterTask, stopAndSend, chooseModel
+    case writeMessage, newConversation, conversations, stop, openFolder, send, newLine, queueAfterTask, stopAndSend, chooseModel, cancelEdit
     case goToBot, previousBot, nextBot, routines, connectors, skills
     case allowApproval, denyApproval
     case compactOrSave, undoForget, find
@@ -127,8 +127,8 @@ struct ShortcutGroup: Identifiable, Equatable {
 
 /// Every shortcut the app answers, in one place: the "Atalhos do teclado" sheet and Ajustes → Geral draw it, the palette
 /// takes the keys of its actions from it, and the tests check that it lists every key the app declares and that no
-/// two actions of one group share a key. (⌘↩ is the one key several views answer to, each only while it is on screen:
-/// it appears once per place, never twice in one group.)
+/// two actions of one group share a key. (⌘↩ and esc are the keys several views answer to, each only while it is on
+/// screen: they appear once per place, never twice in one group.)
 enum ShortcutCatalog {
     static let groups: [ShortcutGroup] = [
         ShortcutGroup(title: "Geral", items: [
@@ -148,6 +148,7 @@ enum ShortcutCatalog {
             ShortcutItem(command: .newLine, keys: CommandName.newLineKeys, title: "Nova linha na mensagem"),
             ShortcutItem(.stopAndSend, AppShortcut.commandReturn, "Parar e enviar agora (Orb trabalhando e algo escrito; recusa o pedido aberto)"),
             ShortcutItem(.chooseModel, AppShortcut.chooseModel, "Escolher o modelo do Orb"),
+            ShortcutItem(command: .cancelEdit, keys: "esc", title: "Cancelar a edição de uma mensagem (o campo volta como estava)"),
         ]),
         ShortcutGroup(title: "Navegar", items: [
             ShortcutItem(command: .goToBot, keys: "\(AppShortcut.bot(at: 0).label) – \(AppShortcut.bot(at: 8).label)", title: "Ir para o Orb de mesmo número"),

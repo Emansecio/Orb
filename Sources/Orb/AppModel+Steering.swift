@@ -34,6 +34,15 @@ struct ComposerDraft: Codable, Equatable, Sendable {
     var isEmpty: Bool { files.isEmpty && pictures.isEmpty && text.allSatisfy(\.isWhitespace) }
 }
 
+/// A message of the chat being edited in the composer: what the composer held before (put back when the edit ends, one
+/// way or the other) and the pictures the message came with (their files belong to the conversation, so taking one
+/// out of the strip must not delete it).
+struct MessageEdit: Equatable, Sendable {
+    var itemID: UUID
+    var stash: ComposerDraft
+    var originalPictures: Set<String>
+}
+
 /// What one Orb's composer holds that is not text: files and pictures to send, an attachment error, and the
 /// messages queued during a turn. One observable object per Orb (like `BotLive`), so a change in one Orb's composer
 /// re-renders nothing of another.
@@ -46,6 +55,8 @@ final class ComposerLane {
     var error: String?
     /// Pictures pasted or dropped that are still being shrunk and saved off the main thread. Sending waits for 0.
     var pendingPictures = 0
+    /// The message of the chat that the composer is editing, if it is (see `AppModel+Rewind`).
+    var editing: MessageEdit?
     /// Messages sent during a turn that are not in the transcript yet, oldest first. This list is what the chat
     /// shows as "na fila"; `queue` is the copy the engine drains.
     private(set) var queued: [SteeredMessage] = []
@@ -108,6 +119,11 @@ extension AppModel {
         var result: [UUID: ComposerDraft] = [:]
         for bot in bots {
             let lane = sessions[bot.id]?.lane
+            // An edit under way is not a draft: what the composer held before it is what is kept.
+            if let stash = lane?.editing?.stash {
+                if !stash.isEmpty { result[bot.id] = stash }
+                continue
+            }
             let draft = ComposerDraft(text: drafts[bot.id] ?? "", files: lane?.files.map(\.url.path) ?? [], pictures: lane?.pictures ?? [])
             if !draft.isEmpty { result[bot.id] = draft }
         }
@@ -163,6 +179,7 @@ extension AppModel {
     func submit(_ text: String, to botID: UUID, delivery: SteeringDelivery = .steer) -> Bool {
         let lane = composerLane(botID)
         guard lane.pendingPictures == 0 else { return false } // a picture still on its way would miss this message
+        if lane.editing != nil { return submitEdit(text, to: botID) } // the composer holds a message being edited
         if !canSteer(botID) {
             let sent = send(text, attachments: lane.files.map(\.url), images: lane.pictures, to: botID, fromUser: true)
             if sent {

@@ -181,6 +181,17 @@ AppleScript, Atalhos, área de transferência, captura de tela nem controla outr
   resposta a um pedido, o que ia entrar no próximo passo só entra depois dela.
   Dá para tirar uma mensagem da espera ("Editar"). Se o turno falhar ou for parado, o que estava esperando (nos dois modos) volta para o campo. O que está no campo (texto, arquivos e imagens anexados) e o que voltou da fila ficam guardados em `rascunhos.json` ao fechar o app e voltam na próxima abertura (arquivos que sumiram ficam de fora).
 - **Parar.** O botão Parar ou **⌘.**; o Orb avisa "Você interrompeu esta resposta".
+- **Refazer e Editar** (com o Orb parado). Passe o mouse sobre a **última resposta**: ao lado de "Copiar" há o botão
+  **Refazer**, que descarta a resposta e tudo o que o pedido acrescentou (linhas de ferramenta, avisos) e faz o mesmo pedido de novo, como se
+  fosse a primeira vez. Sobre **qualquer mensagem sua** aparece o lápis **Editar**: a mensagem (e os anexos que ainda existem) vai para o
+  campo, sob a faixa "Editando mensagem · Esc cancela", e o que estava no campo espera e volta ao enviar ou cancelar. Ao enviar, a mensagem é
+  trocada e **tudo o que veio depois sai da conversa** (do chat e do histórico do modelo; no Claude Code começa uma sessão nova com o que
+  sobrou); as linhas que saem esmaecem e o Orb responde a partir dali. Se o que sai inclui ações que podem ter mudado algo (arquivo gravado,
+  comando que não é só de olhar), o app confirma antes: "Os passos depois desta mensagem saem da conversa; o que o Orb já fez no Mac não é
+  desfeito." Conversa só de texto não pergunta. Os botões não aparecem com o Orb trabalhando, esperando permissão ou numa rotina; uma
+  mensagem que já virou parte do resumo da conversa (depois de compactar) ou que entrou no meio de uma tarefa fica apagada, com o motivo na
+  dica (para esta, edite o pedido que começou a tarefa; "Refazer" também pede isso se houve mensagens no meio). O uso e o custo já
+  registrados, e o que o Orb guardou na memória, ficam como estão.
 - **O que o Orb está fazendo.** Uma linha no fim da conversa, ao lado dele, diz o verbo e o alvo ("Rodando `swift build`",
   "Lendo README.md", "Procurando “TODO”", "Abrindo github.com") com o tempo do turno e, a partir da segunda ferramenta,
   quantas ações ele já fez ("16 s · 3 ações"). Entre um passo e outro ela diz "Pensando…". Quando espera por você, ela fica

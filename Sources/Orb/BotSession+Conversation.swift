@@ -160,6 +160,7 @@ extension BotSession {
     /// so whatever is queued after it (deleting the archived copy of a reopened conversation) comes after it.
     func installChat(_ chat: Conversation) {
         cancelChunkNote() // so is the note being written about it
+        model?.cancelEditing(id) // a message being edited belonged to the chat that is leaving
         chunkAttempts = [:]
         lastCompaction = nil // a notice of the conversation that was left
         clearRequestUsage() // so is the cache hit of its last request (the meter would show it for this chat)
@@ -184,6 +185,7 @@ extension BotSession {
     /// only the routine's file changes.
     func startRoutineRun(_ routineID: UUID, conversation own: Conversation, at started: Date) {
         cancelChunkNote() // the note being written is about the chat that is parked now
+        model?.cancelEditing(id) // the edit belongs to the chat that is parked now
         let chat = conversation ?? Conversation()
         saveTask?.cancel()
         saveTask = nil

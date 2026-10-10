@@ -15,18 +15,29 @@ struct TranscriptRow: View, Equatable {
     /// This is the Orb's reply at the very end of the chat: its avatar is alive (the one Orb in view), and the
     /// working line below it hides its own. Part of the row's identity, so only the two rows that change re-render.
     var isLastReply = false
+    /// This is the reply "Refazer" belongs to (the last one of an idle chat).
+    var offersRedo = false
+    /// The row is about to leave (an edit or "Refazer" cuts the chat before it): it fades out first.
+    var isDropping = false
 
     nonisolated static func == (lhs: TranscriptRow, rhs: TranscriptRow) -> Bool {
         lhs.item == rhs.item && lhs.botID == rhs.botID && lhs.orb == rhs.orb && lhs.isLastReply == rhs.isLastReply
+            && lhs.offersRedo == rhs.offersRedo && lhs.isDropping == rhs.isDropping
     }
 
     var body: some View {
+        row
+            .opacity(isDropping ? 0 : 1)
+            .animation(Motion.exit, value: isDropping) // opacity only, so it holds under Reduce Motion too
+    }
+
+    @ViewBuilder private var row: some View {
         switch item.kind {
         case .user(let text, let attachments):
-            UserBubble(text: text, attachments: attachments, duringTask: item.duringTask == true)
+            UserBubble(text: text, attachments: attachments, duringTask: item.duringTask == true, botID: botID, itemID: item.id)
         case .bot(let text, let isStreaming):
             BotMessage(orb: orb, botID: botID, text: text, live: isStreaming ? model.liveText(for: item.id, of: botID) : nil,
-                       isLastReply: isLastReply)
+                       isLastReply: isLastReply, offersRedo: offersRedo)
         case .tool(let call):
             ToolCallLine(call: call)
         case .approval(let request):
@@ -76,6 +87,10 @@ private struct UserBubble: View {
     let attachments: [String]
     /// It reached the Orb in the middle of its task (see `TranscriptItem.duringTask`): a small, quiet line says so.
     var duringTask = false
+    let botID: UUID
+    let itemID: UUID
+
+    @State private var hovering = false
 
     var body: some View {
         HStack {
@@ -105,6 +120,38 @@ private struct UserBubble: View {
                         .accessibilityHidden(!text.isEmpty) // the bubble's label already says it
                 }
             }
+            .overlay(alignment: .leading) {
+                // To the left of the bubble, in the space the row leaves; the row's hover keeps it up while the pointer
+                // travels to it. Made only while hovered: whether the message can be edited is looked at then.
+                if hovering {
+                    EditMessageButton(botID: botID, itemID: itemID)
+                        .offset(x: -34)
+                        .transition(.opacity)
+                }
+            }
+        }
+        .contentShape(.rect)
+        .onHover { hovering = $0 }
+        // Responds fast and lets go slowly (§2.7).
+        .animation(Motion.hover(hovering), value: hovering)
+    }
+}
+
+/// "Editar" beside a message of yours: puts it in the composer to be written again (what came after it leaves the
+/// conversation). Not shown while the Orb works, waits for a permission or a routine runs; shown but dimmed, with the
+/// reason as its hover text, for a message that already became part of the summary or that entered in the middle of a
+/// task.
+private struct EditMessageButton: View {
+    @Environment(AppModel.self) private var model
+    let botID: UUID
+    let itemID: UUID
+
+    var body: some View {
+        let refusal = model.editRefusal(itemID: itemID, of: botID)
+        if refusal == nil || refusal?.hidesButton == false {
+            ActionCircleButton(symbol: "pencil", help: refusal?.reason ?? Tip.editMessage, isEnabled: refusal == nil) {
+                model.beginEditing(itemID: itemID, of: botID)
+            }
         }
     }
 }
@@ -121,6 +168,8 @@ private struct BotMessage: View {
     let text: String
     let live: LiveText?
     let isLastReply: Bool
+    /// The last reply of an idle chat: "Refazer" is beside its copy buttons.
+    var offersRedo = false
 
     @State private var hovering = false
 
@@ -150,8 +199,8 @@ private struct BotMessage: View {
                 // Past the text's last line end, in the space the right padding leaves; the row's hover keeps it up
                 // while the pointer travels to it.
                 if live == nil {
-                    MessageActions(text: text)
-                        .offset(x: 62)
+                    MessageActions(text: text, botID: botID, offersRedo: offersRedo)
+                        .offset(x: offersRedo ? 90 : 62)
                         .opacity(hovering ? 1 : 0)
                         .allowsHitTesting(hovering)
                 }
@@ -252,9 +301,12 @@ private struct GreetingReplies: View {
     }
 }
 
-/// The small buttons beside a finished reply: copy it as text, copy it as Markdown.
+/// The small buttons beside a finished reply: copy it as text, copy it as Markdown, and, on the last reply of an idle
+/// chat, ask for it again.
 private struct MessageActions: View {
     let text: String
+    let botID: UUID
+    let offersRedo: Bool
 
     var body: some View {
         HStack(spacing: 4) {
@@ -264,7 +316,55 @@ private struct MessageActions: View {
             CopyButton(symbol: "number", help: Tip.copyMarkdown, copiedHelp: "Markdown copiado") {
                 Clipboard.copy(text)
             }
+            if offersRedo { RedoReplyButton(botID: botID) }
         }
+    }
+}
+
+/// "Refazer": the reply and the steps of its turn leave the conversation and the same request runs again. When those
+/// steps may have changed things on the Mac, it asks first (what the Orb did stays done).
+private struct RedoReplyButton: View {
+    @Environment(AppModel.self) private var model
+    let botID: UUID
+    @State private var isConfirming = false
+
+    var body: some View {
+        let refusal = model.regenerateRefusal(botID)
+        if refusal == nil || refusal?.hidesButton == false {
+            ActionCircleButton(symbol: "arrow.clockwise", help: refusal?.reason ?? Tip.redoReply, isEnabled: refusal == nil) {
+                if model.regenerateDropsChanges(botID) { isConfirming = true } else { model.regenerateLastReply(botID, animated: true) }
+            }
+            .confirmationDialog(RewindWords.redoTitle, isPresented: $isConfirming, titleVisibility: .visible) {
+                Button(RewindWords.redoConfirm, role: .destructive) { model.regenerateLastReply(botID, animated: true) }
+            } message: {
+                Text(RewindWords.redoMessage)
+            }
+        }
+    }
+}
+
+/// A round button of the hover actions of a message (the same look as the copy buttons), dimmed when it cannot be used.
+private struct ActionCircleButton: View {
+    let symbol: String
+    let help: String
+    var isEnabled = true
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Palette.muted)
+                .frame(width: 26, height: 26)
+                .background(Palette.surface, in: .circle)
+                .overlay(Circle().strokeBorder(Palette.line, lineWidth: 1))
+                .contentShape(.circle)
+                .opacity(isEnabled ? 1 : 0.45)
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .help(help)
+        .accessibilityLabel(help)
     }
 }
 

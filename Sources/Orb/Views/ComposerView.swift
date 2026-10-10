@@ -23,6 +23,8 @@ struct ComposerView: View {
     @State private var slashIndex = 0
     /// Esc closed the suggestions; any change to the draft brings them back.
     @State private var isSlashDismissed = false
+    /// The edit being sent would drop actions that changed things on the Mac: waiting for the person to say yes.
+    @State private var isConfirmingEdit = false
 
     /// Card width below which the chips lose their words.
     private nonisolated static let compactBelow: CGFloat = 520
@@ -46,6 +48,7 @@ struct ComposerView: View {
                                pendingPictures: lane.pendingPictures)
     }
     private var isQueueing: Bool { isWorking && model.canSteer(botID) }
+    private var isEditing: Bool { lane.editing != nil }
 
     var body: some View {
         let lane = lane
@@ -76,6 +79,11 @@ struct ComposerView: View {
         .background { shortcuts }
         .background { ApprovalKeyMonitor(handler: handlePasteKey) }
         .background { ContextGaugeDriver(botID: botID, gauge: gauge) }
+        .confirmationDialog(RewindWords.editTitle, isPresented: $isConfirmingEdit, titleVisibility: .visible) {
+            Button(RewindWords.editConfirm, role: .destructive) { submitEdit() }
+        } message: {
+            Text(RewindWords.editMessage)
+        }
         .fileImporter(isPresented: $isImporting, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { attach(urls) }
         }
@@ -85,6 +93,8 @@ struct ComposerView: View {
         }
         // The model list closing (⇧⌘M then ↩, or a click) hands the focus back to the field.
         .onChange(of: isModelOpen) { if !isModelOpen { isFocused = true } }
+        // "Editar" put a message in the field: write on it.
+        .onChange(of: lane.editing?.itemID) { if lane.editing != nil { isFocused = true } }
         // ⌘L, from the sidebar, the panel or another page, with this chat already open.
         .onChange(of: model.pendingChatRequest) {
             if model.takeChatRequest(.focusComposer, of: botID) { isFocused = true }
@@ -96,6 +106,9 @@ struct ComposerView: View {
     private func card(_ lane: ComposerLane) -> some View {
         let matches = slashMatches
         return VStack(alignment: .leading, spacing: 10) {
+            if lane.editing != nil {
+                editingBanner.transition(.adapted(.unfold, reduceMotion: reduceMotion))
+            }
             if lane.hasAttachments || lane.pendingPictures > 0 {
                 attachmentStrip(lane).transition(.adapted(.unfold, reduceMotion: reduceMotion))
             }
@@ -118,7 +131,7 @@ struct ComposerView: View {
                 .onKeyPress(.upArrow) { moveSlash(-1) }
                 .onKeyPress(.downArrow) { moveSlash(1) }
                 .onKeyPress(keys: [.tab]) { handleTab($0) }
-                .onKeyPress(.escape) { dismissSlash() }
+                .onKeyPress(.escape) { handleEscape() }
                 .onChange(of: draft.wrappedValue) {
                     isSlashDismissed = false
                     slashIndex = 0 // a new word means a new list: the highlight starts at its top
@@ -134,7 +147,7 @@ struct ComposerView: View {
         // count or by a key): one discrete value, so the field's own height keeps following the typing (§2.5).
         .animation(reduceMotion ? Motion.fade : Motion.content,
                    value: CardParts(suggestions: !matches.isEmpty, strip: lane.hasAttachments || lane.pendingPictures > 0,
-                                    error: lane.error != nil))
+                                    error: lane.error != nil, banner: lane.editing != nil))
         // The shadow belongs to the background alone: on the whole card every key in the field re-rendered the text,
         // chips and buttons into an offscreen pass to cast it.
         .background { ComposerSurface(isFocused: isFocused, isDropTargeted: isDropTargeted, reduceMotion: reduceMotion) }
@@ -147,6 +160,26 @@ struct ComposerView: View {
             attach(urls)
             return true
         } isTargeted: { isDropTargeted = $0 }
+    }
+
+    /// The line above the field while a message of the chat is being edited: what it is, how to leave, and the button for it.
+    private var editingBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "pencil")
+                .font(.system(size: 11, weight: .medium))
+                .accessibilityHidden(true)
+            Text(RewindWords.banner)
+                .font(.system(size: 12, weight: .medium))
+            Spacer(minLength: 8)
+            Button("Cancelar", systemImage: "xmark") { model.cancelEditing(botID) }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold))
+                .help(Tip.cancelEdit)
+        }
+        .foregroundStyle(Palette.accentText)
+        .padding(.horizontal, 4)
+        .accessibilityElement(children: .contain)
     }
 
     private var dropOverlay: some View {
@@ -173,6 +206,7 @@ struct ComposerView: View {
                                          typesInComposer: isFocused && hasText, compact: isCompact)
         }
         if isWorking { return "" }
+        if isEditing { return "↩ envia a edição · esc cancela" }
         if isFocused, !hasContent, !lane.hasAttachments { return "↩ envia · \(CommandName.newLineKeys) nova linha" }
         return ""
     }
@@ -185,7 +219,8 @@ struct ComposerView: View {
                 ForEach(lane.pictures, id: \.path) { image in
                     PictureChip(image: image) {
                         lane.pictures.removeAll { $0 == image }
-                        model.images.remove(image)
+                        // A picture of the message being edited belongs to the conversation: only the strip lets go of it.
+                        if lane.editing?.originalPictures.contains(image.path) != true { model.images.remove(image) }
                     }
                     .transition(chipTransition)
                 }
@@ -281,6 +316,11 @@ struct ComposerView: View {
                                                              pendingPictures: lane.pendingPictures))
             Button("Escolher modelo") { isModelOpen.toggle() }
                 .keyboardShortcut(AppShortcut.chooseModel)
+            // Esc gives the edit up even when the field has lost the focus.
+            if isEditing {
+                Button("Cancelar a edição") { model.cancelEditing(botID) }
+                    .keyboardShortcut(.cancelAction)
+            }
         }
         .opacity(0)
         .frame(width: 0, height: 0)
@@ -342,6 +382,14 @@ struct ComposerView: View {
     private func dismissSlash() -> KeyPress.Result {
         guard !slashMatches.isEmpty else { return .ignored }
         isSlashDismissed = true // closes the list; what was typed stays
+        return .handled
+    }
+
+    /// Esc closes the skill suggestions first; with none open, it gives up the edit of a message.
+    private func handleEscape() -> KeyPress.Result {
+        if dismissSlash() == .handled { return .handled }
+        guard isEditing else { return .ignored }
+        model.cancelEditing(botID)
         return .handled
     }
 
@@ -425,8 +473,18 @@ struct ComposerView: View {
             }
             return
         }
+        if let edit = lane.editing {
+            // What leaves with the edit may have changed things on the Mac (it stays done): ask first.
+            if model.editDropsChanges(itemID: edit.itemID, of: botID) { isConfirmingEdit = true } else { submitEdit() }
+            return
+        }
         // If the message wasn't sent (no model connected), the attachments stay with the draft.
         model.submit(draft.wrappedValue, to: botID, delivery: delivery)
+    }
+
+    /// Sends the edited message: it takes the place of the original and the rows after it fade out.
+    private func submitEdit() {
+        model.submitEdit(draft.wrappedValue, to: botID, animated: true)
     }
 
     private func insert(_ token: String) {
@@ -441,6 +499,7 @@ private struct CardParts: Equatable {
     var suggestions: Bool
     var strip: Bool
     var error: Bool
+    var banner: Bool
 }
 
 /// A picture waiting to be sent: its thumbnail with a remove button.

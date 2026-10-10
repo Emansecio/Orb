@@ -87,11 +87,12 @@ import Testing
         #expect(Set(ShortcutCatalog.items.map(\.id)).count == ShortcutCatalog.items.count) // one item per command
     }
 
-    /// ⌘↩ is answered by several views, each only while it is on screen; no other key is listed twice.
-    @Test func onlyTheReturnKeyIsSharedBetweenGroups() {
+    /// ⌘↩ and esc are answered by several views, each only while it is on screen (esc: a permission card, the edit of a
+    /// message); no other key is listed twice.
+    @Test func onlyTheReturnAndEscapeKeysAreSharedBetweenGroups() {
         let keys = ShortcutCatalog.items.map(\.keys)
         let repeated = Set(keys.filter { key in keys.filter { $0 == key }.count > 1 })
-        #expect(repeated == [AppShortcut.commandReturn.label])
+        #expect(repeated == [AppShortcut.commandReturn.label, "esc"])
     }
 
     @Test func theKeysTheMenusDeclareAreUniqueAndNotTheSystems() {
