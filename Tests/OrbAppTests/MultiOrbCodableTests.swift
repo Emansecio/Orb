@@ -616,7 +616,8 @@ struct MultiOrbScreenTests {
         let folder = FileManager.default.temporaryDirectory.appending(path: "OrbSnap-\(UUID().uuidString)")
         defer { removeTestFolder(folder) }
         let model = AppModel(store: Store(directory: folder), runsBackgroundWork: false, secretVault: MemoryVault())
-        for screen in ["events", "wizard", "group-chat", "orb-proposal", "settings-general-orbs", "transcript"] {
+        // "events" and the delegation screens belong to WP2 now; the rest still have no package.
+        for screen in ["wizard", "group-chat", "orb-proposal", "settings-general-orbs", "transcript"] {
             #expect(MultiOrbSnapshots.view(screen, model: model) == nil, "\(screen)")
         }
     }

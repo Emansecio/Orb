@@ -149,6 +149,7 @@ private struct FindResultsList: View {
         case .bot, .greeting: botName
         case .notice: "Aviso"
         case .tool: "Ferramenta"
+        case .exchange: "Entre Orbs"
         }
     }
 }

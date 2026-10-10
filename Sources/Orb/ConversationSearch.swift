@@ -196,6 +196,8 @@ enum ConversationSearch {
     /// Where a hit was said, for the label of a result.
     enum Source: Sendable, Equatable {
         case user, bot, greeting, notice, tool
+        /// A line of an exchange between Orbs or of an event (MultiOrb).
+        case exchange
     }
 
     /// A match with a little of what surrounds it, to read in the list of results.
@@ -249,7 +251,12 @@ enum ConversationSearch {
         case .notice(let text): return (.notice, text)
         case .tool(let call): return (.tool, call.title + "  " + call.detail.prefix(400))
         case .approval: return nil
-        case .event, .orbMessage, .groupPause: return nil // searched once the exchange lines read as text (MultiOrb)
+        // MARK: MultiOrb (WP2): the lines between Orbs are searched as the text they read
+        case .event(let event): return (.exchange, event.sentence)
+        case .orbMessage(let message):
+            let line = ExchangeWords.line(for: message)
+            return (.exchange, message.text.isEmpty ? line : line + ": " + message.text)
+        case .groupPause: return nil
         }
     }
 

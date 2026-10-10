@@ -25,16 +25,20 @@ struct WorkLine: Equatable, Sendable {
     var tone = Tone.working
     /// The routine this turn belongs to (its name), when it is a routine's run.
     var routine: String?
+    /// Who the work is for, in front of the phrase ("Pedido de Atlas": "Pedido de Atlas: Lendo README.md"), when the Orb
+    /// works on another Orb's request.
+    var prefix: String?
     /// How many actions (tool calls) the turn has made so far, this phrase's one included.
     var actions = 0
 
     init(verb: String, target: String? = nil, style: Style = .plain, tone: Tone = .working, routine: String? = nil,
-         actions: Int = 0) {
+         prefix: String? = nil, actions: Int = 0) {
         self.verb = verb
         self.target = target?.isEmpty == true ? nil : target
         self.style = style
         self.tone = tone
         self.routine = routine
+        self.prefix = prefix
         self.actions = actions
     }
 
@@ -65,10 +69,11 @@ struct WorkLine: Equatable, Sendable {
         return tone == .working ? "\(verb)…" : verb
     }
 
-    /// `phrase`, with the routine's name in front.
+    /// `phrase`, with the routine's name in front, or the request's ("Pedido de Atlas: Lendo README.md").
     var text: String {
-        guard let routine else { return phrase }
-        return "Rotina “\(routine)”: \(phrase)"
+        if let routine { return "Rotina “\(routine)”: \(phrase)" }
+        if let prefix { return "\(prefix): \(phrase)" }
+        return phrase
     }
 
     /// What identifies the phrase on screen: it changes when the words or the mood change, not when the count of
@@ -79,7 +84,7 @@ struct WorkLine: Equatable, Sendable {
         case .waiting: "a"
         case .retrying: "r"
         }
-        return "\(mood)|\(verb)|\(target ?? "")|\(style)"
+        return "\(mood)|\(prefix ?? "")|\(verb)|\(target ?? "")|\(style)"
     }
 
     /// Whether VoiceOver may be told about the phrase: it names something the Orb is doing.
@@ -127,8 +132,38 @@ enum WorkPhrase {
             // The step under way ("Rodando os testes") says it all.
             return WorkLine(verb: first ?? call.title)
         default:
+            if let name = exchangeTarget(call.title, verb: talkingVerb) { return talking(to: name) }
+            if let name = exchangeTarget(call.title, verb: notifyingVerb) { return WorkLine(verb: notifyingVerb, target: name) }
             return WorkLine(verb: call.title)
         }
+    }
+
+    /// The verbs of a tool call that talks to another Orb: "Falando com Pesquisador" (`orbs` ask, tell).
+    static let talkingVerb = "Falando com", notifyingVerb = "Avisando"
+
+    /// The name in a title that starts with `verb` ("Falando com Pesquisador" → "Pesquisador"); nil for any other title.
+    private static func exchangeTarget(_ title: String, verb: String) -> String? {
+        guard title.hasPrefix(verb + " ") else { return nil }
+        let name = title.dropFirst(verb.count + 1).trimmingCharacters(in: .whitespaces)
+        return name.isEmpty ? nil : name
+    }
+
+    /// The Orb asks another Orb for something ("Falando com Pesquisador"), while its tool call runs.
+    static func talking(to name: String) -> WorkLine {
+        WorkLine(verb: talkingVerb, target: name, style: .plain)
+    }
+
+    /// The Orb waits for the answers it asked for after its turn ended: "Esperando Pesquisador", "Esperando Pesquisador e
+    /// Revisor", "Esperando 3 Orbs". nil when it waits for none. `names` are the distinct Orbs it waits for.
+    static func waiting(for names: [String]) -> WorkLine? {
+        let target: String
+        switch names.count {
+        case 0: return nil
+        case 1: target = names[0]
+        case 2: target = names.joined(separator: " e ")
+        default: target = "\(names.count) Orbs"
+        }
+        return WorkLine(verb: "Esperando", target: target, style: .plain)
     }
 
     /// The phrase for a status line the engines emit between and around tools ("Pensando", "Escrevendo", "Esperando
