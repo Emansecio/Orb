@@ -48,6 +48,12 @@ struct ClaudeCodeTurn: Sendable {
     /// window and the card of `browse_show` (see `ClaudeCodeEngine.handOff`). Without a hub, or with an engine that has no window,
     /// the tool of the Orb's server answers by itself.
     var browser = BrowserAccess()
+    // MARK: MultiOrb (WP4)
+    /// The only tools the turn may call, by the names the CLI gives them (the creation assistant: `orb_draft`). With it the CLI
+    /// starts with no built-in tool at all (`--tools=`, and every one named in `--disallowedTools` as well), and a request for
+    /// any other is refused in `authorize` whatever the Orb's mode says.
+    var onlyTools: Set<String>?
+    // MARK: end MultiOrb (WP4)
     /// How long Claude Code has to answer `initialize` before the turn is given up. Generous: a cold first launch
     /// may be starting the Orb's tools server and the user's connectors (some remote) before it answers.
     var initializeTimeout: TimeInterval = 60
@@ -109,6 +115,10 @@ struct ClaudeCodeTurn: Sendable {
         if !bot.capabilities.contains(.browser) { removed += ClaudeCodeTools.web }
         if bot.permissionMode != .bypass { removed += ClaudeCodeTools.secretReads }
         removed.append(ClaudeCodeTools.askUserQuestion)
+        if onlyTools != nil { // MultiOrb (WP4)
+            removed += ClaudeCodeTools.everyBuiltIn
+            arguments.append("--tools=")
+        }
         if !removed.isEmpty { arguments.append("--disallowedTools=\(removed.joined(separator: ","))") }
         arguments.append("--strict-mcp-config")
         if let mcpConfig { arguments.append("--mcp-config=\(mcpConfig.path)") }
@@ -368,6 +378,9 @@ actor ClaudeCodeEngine {
     private func authorize(_ request: ClaudeCodePermissionRequest, turn: ClaudeCodeTurn, hasText: Bool, fromSubagent: Bool,
                            granted: inout [PermissionRule], judged: inout String?,
                            out: AsyncStream<TurnEvent>.Continuation) async -> ClaudeCodePermissionAnswer {
+        // MARK: MultiOrb (WP4)
+        if let only = turn.onlyTools, !only.contains(request.toolName) { return .deny("Not available in this chat.") }
+        // MARK: end MultiOrb (WP4)
         let live = await turn.currentPermissions()
         let workspace = turn.bot.workingURL
         var call = PermissionPolicy.call(claudeCodeTool: request.toolName, input: request.input, workspace: workspace,

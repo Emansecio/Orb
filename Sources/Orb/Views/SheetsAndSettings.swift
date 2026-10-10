@@ -33,15 +33,34 @@ struct NewBotSheet: View {
     @FocusState private var isNameFocused: Bool
     /// The window's height less a margin when the window is short (the form scrolls then).
     @State private var height: CGFloat
+    // MARK: MultiOrb (WP4)
+    /// The way the person chose to create the Orb; nil until they choose (see `creation`).
+    @State private var userMode: OrbCreationMode?
+    /// The sheet was opened to start from a kept memory or an import: those are the form's.
+    private let prefersForm: Bool
+    /// The parts of the preview washed at the start (review snapshots only).
+    private let previewFlashed: Set<DraftField>
+    /// The "Criar conversando" assistant. It lives as long as the sheet and writes nothing down until "Criar".
+    @State private var wizard: WizardRunner
+    /// What the assistant said the Orb may use, carried over by "Passar para o formulário" (the form has no switches for it).
+    @State private var draftCapabilities: Set<Capability>?
+    // MARK: end MultiOrb (WP4)
 
     /// `height`: a fixed sheet height (review snapshots of a short window); by default it follows the window.
     /// `kept` and `chosen`: what the "Começar de" menu holds and has chosen, for review snapshots; the app reads
     /// them itself, and a chosen memory fills the name, the role and the look as choosing it in the menu does.
     /// `startsImporting`: the sheet opens on the import panel. `imported` and `draft`: an import already confirmed or
     /// being reviewed, for review snapshots.
+    /// `mode` and `assistant` (MultiOrb, WP4): the way the sheet opens and the assistant it holds, for review snapshots and tests;
+    /// the app lets the sheet choose (the assistant when a model is connected) and make its own.
     init(height: CGFloat? = nil, kept: [KeptMemory] = [], chosen: KeptMemory? = nil, startsImporting: Bool = false,
-         imported: OrbImport? = nil, draft: OrbImport? = nil) {
+         imported: OrbImport? = nil, draft: OrbImport? = nil, mode: OrbCreationMode? = nil, assistant: WizardRunner? = nil,
+         previewFlashed: Set<DraftField> = []) {
+        self.previewFlashed = previewFlashed
         _height = State(initialValue: height ?? NewBotSheetLayout.height())
+        _userMode = State(initialValue: mode)
+        _wizard = State(initialValue: assistant ?? WizardRunner())
+        prefersForm = startsImporting || imported != nil || draft != nil || chosen != nil
         _kept = State(initialValue: kept)
         _keptChoice = State(initialValue: chosen?.id ?? "")
         _imported = State(initialValue: imported)
@@ -77,39 +96,109 @@ struct NewBotSheet: View {
         return nil
     }
 
+    // MARK: MultiOrb (WP4)
+    /// The way the sheet creates the Orb now: the person's choice, else the assistant when a model is connected (and the sheet
+    /// was not opened to start from a memory or an import), else the form.
+    private var creation: OrbCreationMode {
+        userMode ?? OrbCreationMode.initial(canConverse: model.canCreateByConversing, prefersForm: prefersForm)
+    }
+
+    /// The assistant is what the sheet shows (the import panel, when open, takes the column instead).
+    private var isAssistant: Bool { creation == .assistant && !isImporting }
+
+    /// "Criar conversando | Formulário" at the top of the left column; off, with its reason, while no model is connected.
+    private var modePicker: some View {
+        Picker("Como criar o Orb", selection: Binding(get: { creation }, set: { userMode = $0 })) {
+            ForEach(OrbCreationMode.allCases) { Text($0.title).tag($0) }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .disabled(!model.canCreateByConversing)
+        .help(model.canCreateByConversing ? "Conversar com o assistente ou preencher o formulário" : OrbCreationMode.needsModel)
+        .accessibilityLabel("Como criar o Orb")
+        .accessibilityIdentifier("new-orb-mode")
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+        .padding(.bottom, 10)
+    }
+
+    /// "Criar" in the assistant: the Orb the draft describes, and the sheet closes.
+    private func createFromAssistant() {
+        guard wizard.create() != nil else { return }
+        dismiss()
+    }
+
+    /// "Passar para o formulário" (and the final card's "Ajustar"): the draft fills the form's fields and the form is shown.
+    private func passDraftToForm() {
+        let draft = wizard.draft
+        wizard.stopTalking()
+        if !draft.name.isEmpty { name = draft.name }
+        if !draft.role.isEmpty { role = draft.role }
+        if !draft.instructions.isEmpty { identity = draft.instructions }
+        orb = draft.orb
+        mode = draft.mode
+        draftCapabilities = draft.capabilities
+        interview = false // the assistant did the interview
+        withAnimation(reduceMotion ? nil : Motion.content) { userMode = .form }
+    }
+    // MARK: end MultiOrb (WP4)
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
-                // A ZStack, not a Group: a Group hands its modifiers to each child, so the form and the import panel
-                // would sit side by side while they swap, and the one coming in would repeat the sheet's entrance.
-                ZStack {
-                    if isImporting {
-                        ImportPanel(draft: $draft, onBack: { isImporting = false })
-                            .transition(.opacity)
-                    } else {
-                        form.transition(.opacity)
+                VStack(spacing: 0) {
+                    if !isImporting { modePicker.transition(.opacity) }
+                    // A ZStack, not a Group: a Group hands its modifiers to each child, so the form and the import panel
+                    // would sit side by side while they swap, and the one coming in would repeat the sheet's entrance.
+                    ZStack {
+                        if isImporting {
+                            ImportPanel(draft: $draft, onBack: { isImporting = false })
+                                .transition(.opacity)
+                        } else if creation == .assistant {
+                            WizardChatView(runner: wizard).transition(.opacity)
+                        } else {
+                            form.transition(.opacity)
+                        }
                     }
                 }
                 .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: isImporting)
+                .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: creation)
                 .frame(width: 380)
                 .background(Palette.chrome)
                 // The form comes in with the stage, 0.08 s after the sheet, the options after them and the footer last
                 // (MOVIMENTO.md §2.6). The editor on the right brings its own stage and options in itself.
                 .sheetSection(0)
                 Divider().overlay(Palette.line)
-                // Compact: the form beside it already shows the name, and the options need the height.
-                OrbEditor(config: $orb, name: name, compact: true)
-                    .frame(width: 440)
+                ZStack {
+                    if isAssistant {
+                        WizardPreviewPane(runner: wizard, flashed: previewFlashed, onCreate: createFromAssistant, onAdjust: passDraftToForm)
+                            .transition(.opacity)
+                    } else {
+                        // Compact: the form beside it already shows the name, and the options need the height.
+                        OrbEditor(config: $orb, name: name, compact: true)
+                            .transition(.opacity)
+                    }
+                }
+                .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: isAssistant)
+                .frame(width: 440)
             }
-            SheetFooter(message: isImporting ? ImportText.notCreatedYet : hint, cancel: { dismiss() },
-                        primaryTitle: isImporting ? ImportText.confirm : "Criar Orb",
-                        isPrimaryDisabled: isImporting ? draft?.plan().isEmpty ?? true : trimmedName.isEmpty,
-                        primary: isImporting ? useImport : create)
-                .background(Palette.chrome)
-                .sheetSection(2)
+            Group {
+                if isAssistant {
+                    WizardFooter(canCreate: wizard.draft.canCreate, toForm: passDraftToForm, cancel: { dismiss() }, create: createFromAssistant)
+                } else {
+                    SheetFooter(message: isImporting ? ImportText.notCreatedYet : hint, cancel: { dismiss() },
+                                primaryTitle: isImporting ? ImportText.confirm : "Criar Orb",
+                                isPrimaryDisabled: isImporting ? draft?.plan().isEmpty ?? true : trimmedName.isEmpty,
+                                primary: isImporting ? useImport : create)
+                }
+            }
+            .background(Palette.chrome)
+            .sheetSection(2)
         }
         .frame(width: 820, height: height)
-        .task { isNameFocused = true }
+        .task { wizard.attach(model) } // MultiOrb (WP4)
+        .onDisappear { wizard.cancel() } // MultiOrb (WP4): the sheet closed: the assistant's turn stops, nothing is kept
+        .task { isNameFocused = creation == .form }
         .task {
             let memories = model.memory.root
             let found = await Task.detached(priority: .userInitiated) { KeptMemories.list(in: memories) }.value
@@ -145,6 +234,12 @@ struct NewBotSheet: View {
                     TextField("Como funciona", text: $identity,
                               prompt: Text("Ex.: Seja direto e me lembre de fazer pausas"), axis: .vertical)
                         .lineLimit(3...6)
+                    if let draftCapabilities { // MultiOrb (WP4)
+                        Text("Do assistente: " + (draftCapabilities.isEmpty ? "sem ferramentas extras"
+                                                  : OrbDraft.offeredCapabilities.filter(draftCapabilities.contains).map(\.label).joined(separator: ", ")))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     Toggle("Na primeira conversa, me fazer perguntas", isOn: $interview)
                     Text("Isso fica na memória do Orb, que começa a crescer na primeira conversa. Dá para editar depois, no painel.")
                         .font(.caption)
@@ -247,10 +342,14 @@ struct NewBotSheet: View {
 
     private func create() {
         guard !trimmedName.isEmpty else { return }
-        model.createBot(name: trimmedName,
-                        role: role.isEmpty ? "Assistente pessoal" : role,
-                        orb: orb, model: modelName, mode: mode, identity: identity, interview: interview,
-                        folder: folder, adopting: chosenMemory, importing: imported)
+        let bot = model.createBot(name: trimmedName,
+                                  role: role.isEmpty ? "Assistente pessoal" : role,
+                                  orb: orb, model: modelName, mode: mode, identity: identity, interview: interview,
+                                  folder: folder, adopting: chosenMemory, importing: imported)
+        // MARK: MultiOrb (WP4)
+        // What the assistant said the Orb may use, if its draft came to the form.
+        if let draftCapabilities { model.update(bot.id) { $0.capabilities = draftCapabilities.subtracting([.connectors]) } }
+        // MARK: end MultiOrb (WP4)
         dismiss()
     }
 }

@@ -616,7 +616,7 @@ struct MultiOrbScreenTests {
         let folder = FileManager.default.temporaryDirectory.appending(path: "OrbSnap-\(UUID().uuidString)")
         defer { removeTestFolder(folder) }
         let model = AppModel(store: Store(directory: folder), runsBackgroundWork: false, secretVault: MemoryVault())
-        for screen in ["events", "wizard", "group-chat", "orb-proposal", "settings-general-orbs", "transcript"] {
+        for screen in ["events", "group-chat", "orb-proposal", "settings-general-orbs", "transcript"] {
             #expect(MultiOrbSnapshots.view(screen, model: model) == nil, "\(screen)")
         }
     }
