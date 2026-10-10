@@ -52,7 +52,7 @@ enum BrowserDriverError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .notInstalled(let message): message
-        case .noPage: "No page is open in the browser: call browse_open with an address first."
+        case .noPage: "No page is open in the browser (it was never opened, or it was closed: after a while unused, say): call browse_open with an address first."
         case .timedOut(let what): "The browser did not answer in time (\(what)). The page may be heavy or stuck; try browse_close and open it again."
         case .failed(let message): message
         case .unsupported(let message): message
@@ -90,8 +90,15 @@ protocol BrowserDriver: Sendable {
     func close() async throws
     /// Closes the browser and waits for it, without a task: for the moment the app quits.
     func closeSynchronously(timeout: TimeInterval)
+    /// The names of the sessions that have a browser running now, whoever started them (the app, or the tools server of a Claude
+    /// Code turn): empty when the command line cannot say.
+    func runningSessions() async -> [String]
+    /// The same without a task, for the moment the app quits.
+    func runningSessionsSynchronously(timeout: TimeInterval) -> [String]
 }
 
 extension BrowserDriver {
     func closeSynchronously(timeout: TimeInterval) {}
+    func runningSessions() async -> [String] { [] }
+    func runningSessionsSynchronously(timeout: TimeInterval) -> [String] { [] }
 }

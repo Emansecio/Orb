@@ -126,10 +126,11 @@ final class BrowserSetup {
     }
 
     /// "agent-browser 0.39.0 · Chrome 155.0.8059.39" from what the installer wrote down.
-    static func versionText(for engine: BrowserEngineKind, records: InstalledRecords, installed: [BrowserComponent: Bool]) -> String? {
+    nonisolated static func versionText(for engine: BrowserEngineKind, records: InstalledRecords, installed: [BrowserComponent: Bool]) -> String? {
         let parts = engine.components.compactMap { component -> String? in
             guard installed[component] == true, let record = records[component.rawValue] else { return nil }
-            return "\(component.name) \(record.version)"
+            // A download the release gave no checksum for is installed, but not as checked: Ajustes says so.
+            return "\(component.name) \(record.version)" + (record.verified == false ? " (sem soma de verificação)" : "")
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }

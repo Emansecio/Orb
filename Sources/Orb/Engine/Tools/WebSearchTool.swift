@@ -102,7 +102,7 @@ enum SearchResultsParser {
         var address = href.trimmingCharacters(in: .whitespacesAndNewlines)
         if address.hasPrefix("//") { address = "https:" + address }
         guard let components = URLComponents(string: address) else { return nil }
-        if components.host?.hasSuffix("duckduckgo.com") == true, components.path == "/l/" || components.path == "/l",
+        if let host = components.host?.lowercased(), host == "duckduckgo.com" || host.hasSuffix(".duckduckgo.com"), components.path == "/l/" || components.path == "/l",
            let target = components.queryItems?.first(where: { $0.name == "uddg" })?.value {
             address = target
         }
@@ -120,8 +120,27 @@ enum SearchResultsParser {
 /// Google's result links go through its own redirect (`/goto?url=<opaque token>`, `/url?q=<address>`): the address of the page is
 /// in the `Location` of the redirect, which asks for no cookie, so it is read without following it.
 enum GoogleRedirects {
+    /// What follows `google.` in the domains Google runs its search on (google.com, google.com.br, google.co.uk, google.de…), from
+    /// Google's own list of its country domains. The host of a result is matched against these exactly: `www.google.evil.test` and
+    /// `google.com.evil.test` are not Google, and the redirect would be asked of whoever owns them.
+    static let googleSuffixes: Set<String> = {
+        let plain = "ac ad ae al am as at az ba be bf bg bi bj bs bt by ca cat cd cf cg ch ci cl cm cn cv cz de dj dk dm dz ee es fi fm fr ga ge gg gl gm gp gr gy hn hr ht hu ie im iq is it je jo kg ki kz la li lk lt lu lv md me mg mk ml mn ms mu mv mw ne nl no nr nu pl pn ps pt ro rs ru rw sc se sh si sk sm sn so sr st td tg tl tm tn to tt vg vu ws"
+        let com = "af ag ai ar au bd bh bn bo br bz co cu cy do ec eg et fj gh gi gt hk jm kh kw lb ly mm mt mx my na ng ni np om pa pe pg ph pk pr py qa sa sb sg sl sv tj tr tw ua uy vc vn"
+        let co = "ao bw ck cr id il in jp ke kr ls ma mz nz th tz ug uk uz ve vi za zm zw"
+        return Set(plain.split(separator: " ").map(String.init) + ["com"] + com.split(separator: " ").map { "com." + $0 }
+                   + co.split(separator: " ").map { "co." + $0 })
+    }()
+
+    /// Whether the host is one of Google's search domains, with or without `www.`.
+    static func isGoogleHost(_ host: String) -> Bool {
+        var name = host.lowercased()
+        if name.hasPrefix("www.") { name.removeFirst(4) }
+        guard name.hasPrefix("google.") else { return false }
+        return googleSuffixes.contains(String(name.dropFirst("google.".count)))
+    }
+
     static func isRedirect(_ address: String) -> Bool {
-        guard let url = URL(string: address), let host = url.host?.lowercased(), host.hasPrefix("www.google.") || host == "google.com" else { return false }
+        guard let url = URL(string: address), let host = url.host, isGoogleHost(host) else { return false }
         return url.path == "/goto" || url.path == "/url"
     }
 
@@ -316,6 +335,15 @@ struct WebSearchTool: AgentTool {
     }
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
+        do {
+            return try await search(arguments, context: context)
+        } catch let error as URLError where error.code == .cancelled {
+            // Stopped (Parar): the request was cut short, which is not a failure of the provider to fall back from.
+            throw CancellationError()
+        }
+    }
+
+    private func search(_ arguments: JSONValue, context: ToolContext) async throws -> String {
         let query = try arguments.requiredString("query").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { throw ToolError("Faltou o argumento \"query\".") }
         let site = arguments.nonEmptyString("site")?.trimmingCharacters(in: .whitespaces)
@@ -328,7 +356,7 @@ struct WebSearchTool: AgentTool {
 
         if provider == .tinyfish {
             let key = await Self.key(context)
-            switch await tinyFish(request, key: key) {
+            switch try await tinyFish(request, key: key) {
             case .success(let hits):
                 return Self.report(query: query, provider: .tinyfish, hits: hits, note: nil)
             case .failure(let failure):
@@ -354,7 +382,8 @@ struct WebSearchTool: AgentTool {
 
     // MARK: TinyFish
 
-    private func tinyFish(_ search: Request, key: String?) async -> Result<[SearchHit], TinyFishSearch.Failure> {
+    /// Throws `CancellationError` when the task is cancelled: that is not a TinyFish failure, and does not go to DuckDuckGo.
+    private func tinyFish(_ search: Request, key: String?) async throws -> Result<[SearchHit], TinyFishSearch.Failure> {
         guard let key else { return .failure(.missingKey) }
         let request = TinyFishSearch.request(key: key, query: search.query, count: search.count, site: search.site, news: search.news)
         for attempt in 0..<2 {
@@ -371,7 +400,9 @@ struct WebSearchTool: AgentTool {
                 }
                 return .success(TinyFishSearch.hits(from: data, limit: search.count))
             } catch is CancellationError {
-                return .failure(.other("cancelled"))
+                throw CancellationError()
+            } catch let error as URLError where error.code == .cancelled {
+                throw CancellationError()
             } catch {
                 return .failure(.other((error as? URLError)?.localizedDescription ?? "network"))
             }
@@ -444,7 +475,14 @@ struct WebSearchTool: AgentTool {
                 report = try await read(provider: provider, search: search, session: session, note: notes(note, search, provider: provider), http: http)
             } catch {
                 // A results page that wants a person stays open: that is the page `browse_show` shows.
-                if usedTab, !(error is SearchBlocked) { try? await session.driver.closeTab(nil) }
+                if usedTab, !(error is SearchBlocked) {
+                    if error is CancellationError {
+                        // Stopped: this task cannot run the command that closes the tab, one of its own does (once the browser is free).
+                        Task.detached { _ = try? await session.exclusive { try await session.driver.closeTab(nil) } }
+                    } else {
+                        try? await session.driver.closeTab(nil)
+                    }
+                }
                 throw error
             }
             if usedTab { try? await session.driver.closeTab(nil) }

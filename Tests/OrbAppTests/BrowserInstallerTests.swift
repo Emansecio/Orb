@@ -7,6 +7,8 @@ import Testing
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbInstaller-\(UUID().uuidString)/navegador")
     var layout: BrowserInstallLayout { BrowserInstallLayout(root: root) }
     let network = FakeInstallNetwork()
+    /// Whether a Chrome of the Mac's own (not the app's) can be found, as far as the installer is concerned.
+    var chromeOnTheMac = false
 
     deinit { removeTestFolder(root.deletingLastPathComponent()) }
 
@@ -59,7 +61,7 @@ import Testing
                 try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
                 return FakeInstallRunner.ok("")
             }
-            if args == ["-m", "pip", "install", "cloakbrowser"] { return FakeInstallRunner.ok("Successfully installed cloakbrowser-0.6.0") }
+            if args == ["-m", "pip", "install", "cloakbrowser==\(BrowserInstaller.cloakPackageVersion)"] { return FakeInstallRunner.ok("Successfully installed cloakbrowser-0.6.0") }
             if args == ["-m", "cloakbrowser", "install"] {
                 for line in ["Download progress: 59% (82/140 MB)\n", "Download complete: 140 MB\n", "SHA256SUMS signature verified: Ed25519 OK\n",
                              "Checksum verified: SHA-256 OK\n", "Extracting to /x\n"] { output(line) }
@@ -80,7 +82,7 @@ import Testing
         let fake = runner ?? workingRunner()
         let space = freeSpace
         return (BrowserInstaller(layout: layout, platform: BrowserPlatform(architecture: arch), network: network, run: fake.runner,
-                                 freeSpace: { _ in space }, findPython: { _ in "/usr/bin/python3" }), fake)
+                                 freeSpace: { _ in space }, findPython: { _ in "/usr/bin/python3" }, chromeAvailable: { [chrome = chromeOnTheMac] _ in chrome }), fake)
     }
 
     // MARK: What is chosen
@@ -129,7 +131,7 @@ import Testing
         #expect(FileManager.default.isExecutableFile(atPath: layout.agentBrowser.path))
         #expect(try Data(contentsOf: layout.agentBrowser) == agentBinary)
         let record = try #require(installer.records()["agentBrowser"])
-        #expect(record.version == "0.39.0" && record.sha256 == FakeInstallNetwork.sha256(agentBinary))
+        #expect(record.version == "0.39.0" && record.sha256 == FakeInstallNetwork.sha256(agentBinary) && record.verified == true)
         #expect(record.source?.hasSuffix("agent-browser-darwin-arm64") == true)
         #expect(steps.value.starts(with: [.preparing, .resolving, .downloading, .verifying, .checking, .installing]), "\(steps.value)")
         #expect(bytes.value == Int64(agentBinary.count))
@@ -167,11 +169,98 @@ import Testing
         #expect(try Data(contentsOf: layout.agentBrowser) == before)
     }
 
+    /// CloakBrowser is a folder swapped into place and tried there: the old install is kept aside until the new one has worked in its
+    /// place and been written down, and comes back if it did not (or if the update was cancelled in between).
+    @Test func aCloakUpdateThatFailsAfterTheSwapPutsTheOldInstallBack() async throws {
+        let (installer, _) = makeInstaller()
+        try await installer.install(.cloak, components: [.cloak])
+        let marker = layout.cloakDirectory.appending(path: "da-instalacao-antiga")
+        try Data("old".utf8).write(to: marker)
+        let before = try #require(installer.records()["cloak"])
+        let oldChromium = layout.cloakCache.appending(path: "chromium-145.0.7632.109.2")
+        #expect(FileManager.default.fileExists(atPath: oldChromium.path))
+
+        // The new install downloads, is moved to its place, and its Python does not start there.
+        let working = workingRunner(cloak: "146.0.1.1")
+        let cloakPython = layout.cloakPython.path
+        let brokenAfterTheMove = FakeInstallRunner { call, output in
+            if call.executable == cloakPython, call.arguments == ["-c", "import cloakbrowser"] {
+                return FakeInstallRunner.failed("ImportError: dlopen failed", status: 1)
+            }
+            return try await working.handler(call, output)
+        }
+        let (failing, _) = makeInstaller(brokenAfterTheMove)
+        do {
+            try await failing.install(.cloak, components: [.cloak])
+            Issue.record("a Python that does not start in its place is a failed update")
+        } catch BrowserInstallError.updateRolledBack(let name, _) {
+            #expect(name == "CloakBrowser")
+        }
+        #expect(FileManager.default.fileExists(atPath: marker.path), "the old install is the one in place")
+        #expect(FileManager.default.fileExists(atPath: oldChromium.path) && !FileManager.default.fileExists(atPath: layout.cloakCache.appending(path: "chromium-146.0.1.1").path))
+        #expect(failing.records()["cloak"] == before, "the record still says what is really there")
+        #expect(failing.isInstalled(.cloak))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: root.path).allSatisfy { !$0.hasPrefix(BrowserInstallLayout.workPrefix) }, "nothing left aside or in the work folders")
+        #expect(BrowserInstallError.updateRolledBack("CloakBrowser", detail: "x").errorDescription?.contains("continua como estava") == true)
+
+        // Cancelled right after the swap: the same.
+        let cancelled = FakeInstallRunner { call, output in
+            if call.executable == cloakPython, call.arguments == ["-c", "import cloakbrowser"] { throw CancellationError() }
+            return try await working.handler(call, output)
+        }
+        let (stopping, _) = makeInstaller(cancelled)
+        await #expect(throws: CancellationError.self) { try await stopping.install(.cloak, components: [.cloak]) }
+        #expect(FileManager.default.fileExists(atPath: marker.path) && stopping.records()["cloak"] == before)
+
+        // An update that works replaces it, and only then is the old one deleted.
+        let (good, _) = makeInstaller(working)
+        try await good.install(.cloak, components: [.cloak])
+        #expect(!FileManager.default.fileExists(atPath: marker.path))
+        #expect(FileManager.default.fileExists(atPath: layout.cloakCache.appending(path: "chromium-146.0.1.1").path))
+        #expect(good.records()["cloak"]?.detail == "Chromium 146.0.1.1")
+        #expect(try FileManager.default.contentsOfDirectory(atPath: root.path).allSatisfy { !$0.hasPrefix(BrowserInstallLayout.workPrefix) })
+    }
+
+    @Test func aFirstCloakInstallThatDoesNotStartInItsPlaceLeavesNothing() async throws {
+        let working = workingRunner()
+        let cloakPython = layout.cloakPython.path
+        let broken = FakeInstallRunner { call, output in
+            call.executable == cloakPython && call.arguments == ["-c", "import cloakbrowser"]
+                ? FakeInstallRunner.failed("ImportError") : try await working.handler(call, output)
+        }
+        let (installer, _) = makeInstaller(broken)
+        await #expect(throws: BrowserInstallError.broken("CloakBrowser", detail: "o Python da instalação não abriu depois de ser movido")) {
+            try await installer.install(.cloak, components: [.cloak])
+        }
+        #expect(!FileManager.default.fileExists(atPath: layout.cloakDirectory.path) && installer.records()["cloak"] == nil)
+    }
+
+    @Test func anInstallKilledBetweenTheSwapAndTheEndGetsItsOldCloakBackAtTheNextInstall() async throws {
+        let (installer, _) = makeInstaller()
+        try await installer.install(.cloak, components: [.cloak])
+        // What a kill after setting the old folder aside and before the new one is in place leaves: the old folder under another name.
+        let aside = root.appending(path: BrowserInstallLayout.workPrefix + BrowserInstaller.asideMarker + UUID().uuidString)
+        try FileManager.default.moveItem(at: layout.cloakDirectory, to: aside)
+        try await installer.install(.chrome, components: [])
+        #expect(installer.isInstalled(.cloak) && !FileManager.default.fileExists(atPath: aside.path))
+        // Leftovers of an install are still thrown away when the real one is there.
+        let work = root.appending(path: BrowserInstallLayout.workPrefix + "lixo")
+        let stale = root.appending(path: BrowserInstallLayout.workPrefix + BrowserInstaller.asideMarker + "velho")
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: stale, withIntermediateDirectories: true)
+        try await installer.install(.chrome, components: [])
+        #expect(!FileManager.default.fileExists(atPath: work.path) && !FileManager.default.fileExists(atPath: stale.path))
+    }
+
     @Test func aReleaseWithoutADigestIsCheckedAgainstItsChecksumsFileOrInstalledUnchecked() async throws {
         try serveReleases(agentDigest: false)
         let (installer, _) = makeInstaller()
         try await installer.install(.chrome, components: [.agentBrowser])
-        #expect(installer.records()["agentBrowser"]?.sha256 == FakeInstallNetwork.sha256(agentBinary), "the hash is the one of the file that was kept")
+        // Neither a digest nor a checksums file: installed, but not written down as checked.
+        let unchecked = try #require(installer.records()["agentBrowser"])
+        #expect(unchecked.sha256 == nil && unchecked.verified == false)
+        #expect(BrowserSetup.versionText(for: .obscura, records: installer.records(), installed: [.agentBrowser: true, .obscura: true])?
+            .contains("agent-browser 0.39.0 (sem soma de verificação)") == true, "Ajustes says so")
 
         // A checksums file next to the asset is used.
         let arm = BrowserPlatform(architecture: .arm64)
@@ -262,7 +351,7 @@ import Testing
         }
         let calls = runner.calls
         #expect(calls.contains { $0.arguments.starts(with: ["-m", "venv"]) && $0.executable == "/usr/bin/python3" })
-        let pip = try #require(calls.first { $0.arguments == ["-m", "pip", "install", "cloakbrowser"] })
+        let pip = try #require(calls.first { $0.arguments == ["-m", "pip", "install", "cloakbrowser==\(BrowserInstaller.cloakPackageVersion)"] })
         #expect(pip.environment["PYTHONNOUSERSITE"] == "1" && pip.environment["PIP_DISABLE_PIP_VERSION_CHECK"] == "1", "nothing of the user's own Python leaks in")
         #expect(pip.arguments.allSatisfy { $0 != "--user" }, "never into the user's Python")
         let download = try #require(calls.first { $0.arguments == ["-m", "cloakbrowser", "install"] })
@@ -409,7 +498,6 @@ import Testing
     @Test func newerReleasesAreLookedForOnceADay() async throws {
         try serveReleases()
         network.serve(document: BrowserInstaller.chromeVersionsURL.absoluteString, #"{"channels":{"Stable":{"version":"156.0.1.1"}}}"#)
-        network.serve(document: BrowserInstaller.cloakPackageURL.absoluteString, #"{"info":{"version":"0.6.0"}}"#)
         let (installer, _) = makeInstaller()
         try await installer.install(.chrome)
         let start = Date(timeIntervalSince1970: 1_800_000_000)
@@ -446,4 +534,196 @@ import Testing
         await #expect(throws: BrowserInstallError.self) { _ = try await installer.checkForUpdates(now: day) }
         #expect(BrowserInstaller.readUpdates(layout.updatesFile) == nil, "a look that reached nothing is not written down, so the next try is soon")
     }
+
+    // MARK: Hardening
+
+    @Test func removingObscuraOrCloakKeepsAgentBrowserWhileAChromeCanBeFound() async throws {
+        try serveReleases()
+        chromeOnTheMac = true // the usual setup: Chrome in Applications, nothing of the app's own but agent-browser
+        let (installer, _) = makeInstaller()
+        try await installer.install(.obscura)
+        try installer.uninstall(.obscura)
+        #expect(!FileManager.default.fileExists(atPath: layout.obscura.path))
+        #expect(FileManager.default.isExecutableFile(atPath: layout.agentBrowser.path) && installer.records()["agentBrowser"] != nil,
+                "the Chrome engine of the Orbs still drives its Chrome through it")
+
+        let (cloaks, _) = makeInstaller()
+        try await cloaks.install(.cloak, components: [.cloak])
+        try cloaks.uninstall(.cloak)
+        #expect(FileManager.default.isExecutableFile(atPath: layout.agentBrowser.path))
+
+        // With no Chrome to be found the last engine takes it away, as before.
+        chromeOnTheMac = false
+        let (bare, _) = makeInstaller()
+        try bare.uninstall(.cloak)
+        #expect(!FileManager.default.fileExists(atPath: layout.agentBrowser.path) && bare.records().isEmpty)
+    }
+
+    @Test func aPackageWithALinkInsteadOfAFileIsNotInstalled() async throws {
+        for kind in ["symbolic", "hard"] {
+            let folder = root.deletingLastPathComponent().appending(path: "pacote-\(kind)")
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try Data("obscura".utf8).write(to: folder.appending(path: "obscura"))
+            if kind == "symbolic" {
+                try FileManager.default.createSymbolicLink(atPath: folder.appending(path: "obscura-worker").path, withDestinationPath: "/etc/hosts")
+            } else {
+                try FileManager.default.linkItem(at: folder.appending(path: "obscura"), to: folder.appending(path: "obscura-worker"))
+            }
+            let archive = root.deletingLastPathComponent().appending(path: "pacote-\(kind).tar.gz")
+            let tar = Process()
+            tar.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
+            tar.arguments = ["-czf", archive.path, "-C", folder.path, "obscura", "obscura-worker"]
+            try tar.run()
+            tar.waitUntilExit()
+            let data = try Data(contentsOf: archive)
+
+            try serveReleases()
+            let arm = BrowserPlatform(architecture: .arm64)
+            network.serve(document: "https://api.github.com/repos/h4ckf0r0day/obscura/releases/latest", FakeInstallNetwork.releaseJSON(
+                tag: obscuraTag, assets: [(arm.obscuraAssets[0], data, true)]))
+            network.serve(file: FakeInstallNetwork.assetURL(tag: obscuraTag, arm.obscuraAssets[0]), data)
+            let (installer, runner) = makeInstaller()
+            do {
+                try await installer.install(.obscura, components: [.obscura])
+                Issue.record("a \(kind) link in the package must stop the install")
+            } catch BrowserInstallError.failed("Obscura", let detail) {
+                #expect(detail.contains("atalho ou link"), "\(kind): \(detail)")
+            }
+            #expect(!FileManager.default.fileExists(atPath: layout.obscura.path) && !FileManager.default.fileExists(atPath: layout.obscuraWorker.path))
+            #expect(!runner.calls.contains { $0.arguments.contains("-xzf") }, "nothing was even extracted")
+        }
+        #expect(BrowserInstaller.unsafeEntry(inVerboseListing: "-rw-r--r--  0 u g 3 Oct 10 05:42 obscura\nlrwxr-xr-x  0 u g 0 Oct 10 05:42 x -> /etc/hosts") != nil)
+        #expect(BrowserInstaller.unsafeEntry(inVerboseListing: "hrw-r--r--  0 u g 0 Oct 10 05:42 x link to obscura") != nil)
+        #expect(BrowserInstaller.unsafeEntry(inVerboseListing: "drwxr-xr-x  0 u g 0 Oct 10 05:42 ./\n-rwxr-xr-x  0 u g 3 Oct 10 05:42 obscura") == nil)
+    }
+
+    @Test func aPlainArchiveStillInstalls() async throws {
+        try serveReleases()
+        let (installer, _) = makeInstaller()
+        try await installer.install(.obscura)
+        #expect(installer.isInstalled(.obscura))
+    }
+
+    @Test func aRateLimitedLookForUpdatesIsNotRepeatedAndAPartialOneIsWrittenDown() async throws {
+        try serveReleases()
+        network.serve(document: BrowserInstaller.chromeVersionsURL.absoluteString, #"{"channels":{"Stable":{"version":"156.0.1.1"}}}"#)
+        let (installer, _) = makeInstaller()
+        try await installer.install(.obscura)
+        let day = Date(timeIntervalSince1970: 1_800_000_000)
+
+        // Obscura's release cannot be read; agent-browser's can: a partial look, written down.
+        network.serve(document: "https://api.github.com/repos/h4ckf0r0day/obscura/releases/latest", "not a release")
+        let partial = try await installer.checkForUpdates(now: day)
+        #expect(partial.latest["agentBrowser"] == "0.39.0" && partial.latest["obscura"] == nil)
+        #expect(BrowserInstaller.readUpdates(layout.updatesFile)?.checkedAt == day)
+
+        // The next day the same part fails again, with nothing new: still a look. Before, the file was left as it was, and every
+        // time Ajustes was opened or an install ended the same calls were made again.
+        let next = day.addingTimeInterval(25 * 3_600)
+        _ = try await installer.checkForUpdates(now: next)
+        #expect(BrowserInstaller.readUpdates(layout.updatesFile)?.checkedAt == next)
+        let asked = network.requests.count
+        _ = try await installer.checkForUpdates(now: next.addingTimeInterval(3_600))
+        _ = try await installer.checkForUpdates(now: next.addingTimeInterval(7_200))
+        #expect(network.requests.count == asked, "at most one round of calls a day")
+
+        // The limit of the host: the look stops at the first refusal (the rest would be refused too) and is not made again today.
+        let later = next.addingTimeInterval(30 * 3_600)
+        network.failure = .rateLimited
+        let before = network.requests.count
+        let limited = try await installer.checkForUpdates(now: later)
+        #expect(limited.latest["agentBrowser"] == "0.39.0", "what was known stays")
+        #expect(network.requests.count - before == 1, "one call, not one per component")
+        _ = try await installer.checkForUpdates(now: later.addingTimeInterval(600))
+        #expect(network.requests.count - before == 1)
+        #expect(BrowserInstaller.readUpdates(layout.updatesFile)?.checkedAt == later)
+        // Not a limit but no network: nothing is written, and the next try is soon.
+        network.failure = nil
+        network.offline = true
+        let offlineDay = later.addingTimeInterval(40 * 3_600)
+        _ = try await installer.checkForUpdates(now: offlineDay)
+        #expect(BrowserInstaller.readUpdates(layout.updatesFile)?.checkedAt == later, "a look that reached nothing is not written down")
+        let askedOffline = network.requests.count
+        _ = try await installer.checkForUpdates(now: offlineDay.addingTimeInterval(60))
+        #expect(network.requests.count > askedOffline, "so the next try is soon")
+    }
+
+    @Test func cloakIsInstalledAtTheVersionTheAppWasTestedWithAndNeverAsksPyPI() async throws {
+        let (installer, runner) = makeInstaller()
+        try await installer.install(.cloak, components: [.cloak])
+        let pip = try #require(runner.calls.first { $0.arguments.starts(with: ["-m", "pip", "install"]) })
+        #expect(pip.arguments.last == "cloakbrowser==\(BrowserInstaller.cloakPackageVersion)", "a pinned version, not whatever is newest")
+        let record = try #require(installer.records()["cloak"])
+        #expect(record.version == BrowserInstaller.cloakPackageVersion && record.source?.hasSuffix("cloakbrowser==\(BrowserInstaller.cloakPackageVersion)") == true)
+        #expect(try await installer.latestVersion(of: .cloak) == BrowserInstaller.cloakPackageVersion)
+        #expect(!network.requests.contains { $0.contains("pypi.org") })
+        // An update is offered when a newer app brings a newer pin, and not otherwise.
+        let check = BrowserUpdateCheck(checkedAt: .now, latest: ["cloak": BrowserInstaller.cloakPackageVersion])
+        #expect(installer.updatable(check).isEmpty)
+        var old = installer.records()
+        old["cloak"]?.version = "0.5.0"
+        #expect(installer.updatable(check, records: old) == [.cloak])
+    }
+
+    @Test func downloadsFollowRedirectsToHTTPSOnly() async throws {
+        #expect(URLSessionInstallNetwork.allowsRedirect(to: URL(string: "https://objects.example.test/x")))
+        #expect(!URLSessionInstallNetwork.allowsRedirect(to: URL(string: "http://objects.example.test/x")))
+        #expect(!URLSessionInstallNetwork.allowsRedirect(to: URL(string: "ftp://x.test/x")) && !URLSessionInstallNetwork.allowsRedirect(to: nil))
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [RedirectingProtocol.self]
+        let network = URLSessionInstallNetwork(session: URLSession(configuration: configuration))
+        // A document that is handed to a plain-HTTP address on the way is refused.
+        do {
+            _ = try await network.data(from: URL(string: "https://example.test/release")!)
+            Issue.record("a redirect to http must be refused")
+        } catch BrowserInstallError.failed(_, let detail) {
+            #expect(detail.contains("sem HTTPS"), "\(detail)")
+        }
+        // One that goes on over https is followed.
+        let data = try await network.data(from: URL(string: "https://example.test/moved")!)
+        #expect(String(decoding: data, as: UTF8.self) == "arrived")
+        // The same for a download: nothing is written.
+        let file = root.deletingLastPathComponent().appending(path: "baixado")
+        do {
+            _ = try await network.download(URL(string: "https://example.test/release")!, to: file) { _, _ in }
+            Issue.record("a download must not follow a redirect to http")
+        } catch BrowserInstallError.failed(_, let detail) {
+            #expect(detail.contains("sem HTTPS"), "\(detail)")
+        }
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+        let kept = file.deletingLastPathComponent().appending(path: "baixado-ok")
+        _ = try await network.download(URL(string: "https://example.test/moved")!, to: kept) { _, _ in }
+        #expect(try String(contentsOf: kept, encoding: .utf8) == "arrived")
+    }
+}
+
+/// Answers `https://example.test/release` with a redirect to a plain-HTTP address, `/moved` with one to another https address, and
+/// that one with a body.
+private final class RedirectingProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let url = request.url else { return }
+        func redirect(to address: String) {
+            let target = URL(string: address)!
+            let response = HTTPURLResponse(url: url, statusCode: 302, httpVersion: "HTTP/1.1", headerFields: ["Location": address])!
+            client?.urlProtocol(self, wasRedirectedTo: URLRequest(url: target), redirectResponse: response)
+            // When the redirect is not followed the page is the redirect itself, as a server's would be.
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocolDidFinishLoading(self)
+        }
+        switch url.path {
+        case "/release": redirect(to: "http://objects.example.test/file")
+        case "/moved": redirect(to: "https://objects.example.test/file")
+        default:
+            let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: Data("arrived".utf8))
+            client?.urlProtocolDidFinishLoading(self)
+        }
+    }
+
+    override func stopLoading() {}
 }

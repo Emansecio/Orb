@@ -246,6 +246,19 @@ struct WebSearchToolTests {
         }
     }
 
+    @Test func aStoppedSearchDoesNotFallBackToDuckDuckGo() async throws {
+        // TinyFish is busy and the retry waits; Parar arrives meanwhile. The search is over: it must not go on to ask DuckDuckGo.
+        let tool = WebSearchTool(session: SearchStubProtocol.session { request in
+            request.url?.host() == "api.search.tinyfish.ai" ? (503, Data()) : (200, Data(duckDuckGoPage.utf8))
+        }, retryDelay: .seconds(30))
+        let task = Task { try await tool.run(.object(["query": .string("x")]), context: context(.tinyfish, keys: keys())) }
+        await waitUntil("TinyFish to be asked") { hosts().contains("api.search.tinyfish.ai") }
+        try await Task.sleep(for: .milliseconds(50))
+        task.cancel()
+        await #expect(throws: CancellationError.self) { _ = try await task.value }
+        #expect(hosts() == ["api.search.tinyfish.ai"], "DuckDuckGo was not asked: \(hosts())")
+    }
+
     @Test func aBusyTinyFishThatRecoversAnswersOnTheRetry() async throws {
         let attempts = Attempts()
         let text = try await search(["query": .string("x")], provider: .tinyfish, keys: keys()) { _ in
@@ -280,6 +293,27 @@ struct WebSearchToolTests {
         let text = try await tool.run(.object(["query": .string("x")]), context: context)
         #expect(text.contains("free allowance") && text.contains("(DuckDuckGo)"))
         #expect(setup.driver.calls.contains { $0.hasPrefix("open https://html.duckduckgo.com/") })
+    }
+
+    @Test func googleRedirectsAreOnlyThoseOfGooglesOwnDomains() async {
+        for host in ["www.google.com", "google.com", "www.google.com.br", "google.co.uk", "www.google.de", "www.google.com.au", "WWW.GOOGLE.FR"] {
+            #expect(GoogleRedirects.isRedirect("https://\(host)/url?q=https://a.test/"), "\(host)")
+        }
+        // Names that only start like Google's, or end in it: their owners would be asked for the redirect.
+        for host in ["www.google.evil.test", "google.com.evil.test", "www.google.com.evil.test", "www.google.evil.com", "www.googlee.com", "evil-google.com",
+                     "www.google.zz", "google.", "www.google.com.br.attacker.io", "notgoogle.com", "google.test"] {
+            #expect(!GoogleRedirects.isRedirect("https://\(host)/url?q=https://a.test/"), "\(host)")
+            #expect(!GoogleRedirects.isRedirect("https://\(host)/goto?url=CAES"), "\(host)")
+        }
+        // And no request goes to them while the results are resolved.
+        let session = SearchStubProtocol.session { _ in (302, Data()) }
+        let fake = SearchHit(title: "x", url: "https://www.google.evil.test/goto?url=CAES", snippet: "")
+        let resolved = await GoogleRedirects.resolve([fake], http: session)
+        #expect(resolved == [fake] && SearchStubProtocol.requests.withLock { $0.isEmpty })
+        // The same for the redirect of DuckDuckGo's own results.
+        #expect(SearchResultsParser.resultAddress("//evilduckduckgo.com/l/?uddg=https%3A%2F%2Fa.test%2F") == "https://evilduckduckgo.com/l/?uddg=https%3A%2F%2Fa.test%2F",
+                "an address of another domain is left as it is, not unwrapped")
+        #expect(SearchResultsParser.resultAddress("//html.duckduckgo.com/l/?uddg=https%3A%2F%2Fa.test%2F") == "https://a.test/")
     }
 
     // MARK: The key

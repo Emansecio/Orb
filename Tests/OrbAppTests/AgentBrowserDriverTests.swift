@@ -12,9 +12,10 @@ private enum FakeAgentBrowser {
     args = sys.argv[1:]
     with open(os.environ["FAKE_AB_LOG"], "a") as log:
         log.write(json.dumps(args) + "\n")
-    VALUE_FLAGS = {"--session", "--profile", "--engine", "--executable-path", "--args"}
-    rest, i = [], 0
+    VALUE_FLAGS = {"--session", "--profile", "--engine", "--executable-path", "--args", "--config"}
+    rest, i, session = [], 0, ""
     while i < len(args):
+        if args[i] == "--session": session = args[i + 1]
         if args[i] in VALUE_FLAGS: i += 2; continue
         if args[i].startswith("--"): i += 1; continue
         rest.append(args[i]); i += 1
@@ -23,6 +24,8 @@ private enum FakeAgentBrowser {
     def fail(message): print(json.dumps({"success": False, "data": None, "error": message}))
     print("Warning: a note on the stream that is not JSON", file=sys.stderr, flush=True)
     mode = os.environ.get("FAKE_AB_MODE", "")
+    # The driver asks which sessions run before any command that is not `open`: this one always has its own.
+    if cmd == "session" and mode not in ("silent",): ok({"sessions": [session]}); sys.exit(0)
     if mode == "silent": sys.exit(3)
     if mode == "hang": import time; time.sleep(30)
     if mode == "unlaunched" and cmd != "open": fail("Browser not launched"); sys.exit(1)
@@ -99,9 +102,13 @@ struct AgentBrowserDriverTests {
         return (run, calls)
     }
 
-    private func make(_ engine: BrowserEngineKind = .chrome, headed: Bool = false, reply: @escaping @Sendable ([String]) -> String)
+    private func make(_ engine: BrowserEngineKind = .chrome, headed: Bool = false, listsSession: Bool = true, reply: @escaping @Sendable ([String]) -> String)
         -> (driver: AgentBrowserDriver, calls: OSAllocatedUnfairLock<[[String]]>) {
-        let (run, calls) = recorder(reply)
+        let name = "orb-test-\(engine.rawValue)"
+        // The session is running, as far as `session list` goes (the driver asks before any command but `open`).
+        let (run, calls) = recorder { arguments in
+            listsSession && arguments.contains("session") && arguments.contains("list") ? abOK("{\"sessions\":[\"\(name)\"]}") : reply(arguments)
+        }
         let config = AgentBrowserConfig(executable: "/x/agent-browser", session: "orb-test-\(engine.rawValue)", engine: engine,
                                         browserExecutable: engine == .chrome ? nil : "/bin/\(engine.rawValue)",
                                         profile: engine.keepsProfile ? URL(fileURLWithPath: "/p") : nil, headed: headed, cloakSeed: 20_000)
@@ -193,7 +200,7 @@ struct AgentBrowserDriverTests {
 
     @Test func aWindowIsAReopenOfTheSamePageWithTheSameProfile() async throws {
         let lists = OSAllocatedUnfairLock(initialState: 0)
-        let (driver, calls) = make { arguments in
+        let (driver, calls) = make(listsSession: false) { arguments in
             // The session is there when asked first, and gone when the driver waits for the close to finish.
             if arguments.contains("session") { return lists.withLock { $0 += 1; return $0 } == 1 ? abOK(#"{"sessions":["orb-test-chrome"]}"#) : abOK(#"{"sessions":[]}"#) }
             return arguments.contains("url") ? abOK(#"{"url":"https://a.test/login"}"#) : abOK(#"{"url":"https://a.test/login","title":"Entrar","closed":true}"#)
@@ -279,7 +286,9 @@ struct AgentBrowserDriverTests {
         defer { try? FileManager.default.removeItem(at: fake.folder) }
         let base = ProcessInfo.processInfo.environment
         let run: BrowserCommandRunner = { executable, arguments, environment, _ in
-            try await ProcessRunner.run(executable, arguments, environment: environment, timeout: .milliseconds(400))
+            // (Only the command that hangs is given the short time: the question whether the session runs is answered at once, but
+            // a machine under load can take longer than that to start a script.)
+            try await ProcessRunner.run(executable, arguments, environment: environment, timeout: arguments.contains("session") && arguments.contains("list") ? .seconds(20) : .milliseconds(400))
         }
         let driver = AgentBrowserDriver(config: AgentBrowserConfig(executable: fake.executable.path, session: "s", engine: .chrome),
                                         environment: { base.merging(["FAKE_AB_LOG": fake.log.path, "FAKE_AB_MODE": "hang"]) { $1 } }, run: run)

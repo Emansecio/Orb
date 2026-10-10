@@ -383,17 +383,63 @@ struct BrowseSelectTool: BrowseTool {
 struct BrowsePressTool: BrowseTool {
     let spec = ToolSpec(
         name: "browse_press",
-        description: "Press a key or combination on the page: Enter, Tab, Escape, ArrowDown, PageDown, Control+a. Enter can submit a form.",
+        description: """
+        Press one named key on the page: Enter, Tab, Shift+Tab, Escape, ArrowUp/Down/Left/Right, PageUp, PageDown, Home, End, \
+        Backspace, Delete or Space. Enter can submit a form. Not for typing text (browse_fill) and refused while a password or \
+        card field has the focus.
+        """,
         parameters: .schema(["key": .property("string")], required: ["key"]))
+
+    /// The keys the tool presses, as the browser names them, by the words a model may use for them. Nothing that types a
+    /// character (`a`, `Control+v`, `Meta+v` pasting what the clipboard holds): a key press must not become a way to type
+    /// into a password field, which `browse_fill` refuses.
+    static let namedKeys: [String: String] = [
+        "enter": "Enter", "return": "Enter", "tab": "Tab", "shift+tab": "Shift+Tab", "escape": "Escape", "esc": "Escape",
+        "arrowup": "ArrowUp", "arrowdown": "ArrowDown", "arrowleft": "ArrowLeft", "arrowright": "ArrowRight",
+        "up": "ArrowUp", "down": "ArrowDown", "left": "ArrowLeft", "right": "ArrowRight",
+        "pageup": "PageUp", "pagedown": "PageDown", "home": "Home", "end": "End",
+        "backspace": "Backspace", "delete": "Delete", "space": "Space",
+    ]
+
+    /// The key as the browser names it, or nil when it is not one the tool presses.
+    static func namedKey(_ text: String) -> String? { namedKeys[text.trimmingCharacters(in: .whitespaces).lowercased()] }
+
+    /// Run in the page before a key: what has the focus, as JSON.
+    static let focusScript = """
+    (() => {
+      const e = document.activeElement;
+      if (!e || !e.getAttribute) return '{}';
+      const attribute = name => (e.getAttribute(name) || '').toLowerCase();
+      return JSON.stringify({type: attribute('type'), autocomplete: attribute('autocomplete'),
+        label: [e.name, e.id, e.getAttribute('aria-label'), e.getAttribute('placeholder')].filter(Boolean).join(' ')});
+    })()
+    """
+
+    /// Why a key is refused for the field that has the focus (`focusScript`'s answer), or nil. The same judgment as `browse_fill`'s:
+    /// by the field's type and autocomplete, and by the name it goes by.
+    static func secretReason(focus: String) -> String? {
+        guard let json = JSONValue.parse(focus) else { return nil }
+        let autocomplete = json["autocomplete"]?.string ?? ""
+        if json["type"]?.string == "password" || autocomplete.contains("password") { return "a password field" }
+        if autocomplete.hasPrefix("cc-") { return "a card field" }
+        return SecretField.reason(role: "", name: json["label"]?.string ?? "")
+    }
 
     func risk(_ arguments: JSONValue) -> ToolRisk { .sensitive }
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) { ("Pressionando uma tecla", arguments["key"]?.string ?? "") }
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
-        let key = try arguments.requiredString("key").trimmingCharacters(in: .whitespaces)
-        guard key.count <= 40, !key.contains(" ") else { throw ToolError("`key` is one key or combination, like Enter or Control+a.") }
+        let given = try arguments.requiredString("key").trimmingCharacters(in: .whitespaces)
+        guard let key = Self.namedKey(given) else {
+            throw ToolError("`key` is one of: Enter, Tab, Shift+Tab, Escape, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, PageUp, PageDown, Home, End, "
+                + "Backspace, Delete, Space. To type text use browse_fill (not for passwords or card numbers: browse_show).")
+        }
         let session = try await BrowseSupport.session(context)
         let url = try await session.exclusive {
+            let focus = try await session.driver.evaluate(Self.focusScript)
+            if let reason = Self.secretReason(focus: focus) {
+                throw ToolError(SecretField.refusal(reason) + " (A key press is refused while it has the focus.)")
+            }
             try await session.driver.press(key)
             return try await session.driver.currentURL()
         }
@@ -464,6 +510,8 @@ struct BrowseTabsTool: BrowseTool {
     /// A new tab goes out to a site; everything else only moves among the pages already open.
     func risk(_ arguments: JSONValue) -> ToolRisk { action(arguments) == "new" ? .sensitive : .safe }
     func readsLivePage(_ arguments: JSONValue) -> Bool { action(arguments) != "new" }
+    /// With no arguments it lists, but `new` with a `url` goes to a site, and `select` and `close` change the browser: not read-only.
+    var announcedReadOnly: Bool { false }
 
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) {
         switch action(arguments) {
@@ -534,9 +582,16 @@ struct BrowseShowTool: BrowseTool {
             session.forgetPage()
             return Self.finished
         }
-        let page = try await session.exclusive {
-            session.forgetPage()
-            return try await session.driver.setHeaded(!hide)
+        let page: BrowserPage
+        do {
+            page = try await session.exclusive {
+                session.forgetPage()
+                return try await session.driver.setHeaded(!hide)
+            }
+        } catch is CancellationError {
+            // Parar in the middle of opening the window: it may be up already, or about to be. Nobody wants it.
+            if !hide { Self.hideWindowInBackground(session) }
+            throw CancellationError()
         }
         session.setShowingWindow(!hide)
         if let botID = context.botID { context.browser.hub?.clearLabels(botID: botID) }
@@ -548,8 +603,11 @@ struct BrowseShowTool: BrowseTool {
                 + "When they do, take a browse_snapshot to see where the page is (browse_show with hide: true sends the browser back to the background)."
         }
         guard await handoff(location) else {
-            // Cancelar, or Parar: the window is not wanted any more.
-            if !Task.isCancelled {
+            // Cancelar, or Parar: the window is not wanted any more. After Parar this task is cancelled, and a cancelled task cannot
+            // run the commands that close the window (they would stop at once): a task of its own does, and nothing waits for it.
+            if Task.isCancelled {
+                Self.hideWindowInBackground(session)
+            } else {
                 _ = try? await session.exclusive {
                     session.forgetPage()
                     return try await session.driver.setHeaded(false)
@@ -561,6 +619,17 @@ struct BrowseShowTool: BrowseTool {
         session.forgetPage()
         if let botID = context.botID { context.browser.hub?.clearLabels(botID: botID) }
         return Self.finished
+    }
+
+    /// Sends the browser back to the background from a task that is not the (cancelled) one of the call.
+    static func hideWindowInBackground(_ session: BrowserSession) {
+        Task.detached {
+            _ = try? await session.exclusive {
+                session.forgetPage()
+                return try await session.driver.setHeaded(false)
+            }
+            session.setShowingWindow(false)
+        }
     }
 
     /// "https://example.com/login — “Entrar”", the page as the card shows it.
@@ -586,8 +655,9 @@ struct BrowseCloseTool: BrowseTool {
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
         guard let botID = context.botID, let hub = context.browser.hub else { throw ToolError("The Orb's browser is not available here.") }
-        guard hub.existingSession(botID: botID) != nil else { return "The browser was not open." }
-        await hub.close(botID: botID)
+        // Always asks to close, by the Orb's session name: with the Claude Code engine each turn's tools server has a hub of its own,
+        // new and empty, while the browser the earlier turns opened is still running under that name.
+        guard await hub.close(botID: botID) else { return "The browser was not open." }
         return "Browser closed."
     }
 }

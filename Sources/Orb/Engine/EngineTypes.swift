@@ -611,6 +611,11 @@ protocol AgentTool: Sendable {
     func risk(_ arguments: JSONValue) -> ToolRisk
     /// The call only looks at a page the Orb's browser has open already (`.safe`), but still uses the web: "Só leitura" refuses it.
     func readsLivePage(_ arguments: JSONValue) -> Bool
+    /// Whether a client that only sees the tool's name and schema (Claude Code, through MCP's `readOnlyHint`) may take every call
+    /// of it as harmless. Judged without arguments, so `risk` alone is not enough: a tool that looks at the page with no arguments
+    /// and changes it with others (`browse_tabs`) says no here, and so does one that reads a live page (that is the web, which
+    /// "Só leitura" refuses).
+    var announcedReadOnly: Bool { get }
     /// Why this particular call is destructive (so "Automático" still asks), or nil. Shell text in `command` or
     /// `script` is checked separately by `DangerousCommand`; this is for tools whose danger is in other arguments.
     func danger(_ arguments: JSONValue) -> String?
@@ -645,6 +650,7 @@ extension AgentTool {
     func summary(_ arguments: JSONValue, context: ToolContext) -> (title: String, detail: String) { summary(arguments) }
     func danger(_ arguments: JSONValue) -> String? { nil }
     func readsLivePage(_ arguments: JSONValue) -> Bool { false }
+    var announcedReadOnly: Bool { risk(.object([:])) == .safe && !readsLivePage(.object([:])) }
     func connectingNote(_ arguments: JSONValue) async -> String? { nil }
     func prepare(_ arguments: JSONValue) async throws {}
     var alsoWithCapability: Capability? { nil }

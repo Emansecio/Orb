@@ -124,12 +124,12 @@ Detalhes que costumam surpreender:
   diz em quê clica pelo nome que o último `browse_snapshot` deu ao elemento. Olhar a página que já está aberta (`browse_snapshot`,
   `browse_read`, `browse_screenshot`, `browse_scroll`, `browse_back`, `browse_tabs` sem criar aba) é `.safe`, **mas "Só leitura" recusa**
   (`PermissionCall.readsLivePage`, `AgentTool.readsLivePage`): é a web. `browse_close` só libera o navegador e roda em todo modo.
-  `browse_fill` **nunca digita em campo de senha ou de cartão**, em modo nenhum (nem em "Sem pedir permissão"): o campo é julgado
+  `browse_press` aperta só teclas **com nome** (Enter, Tab, Shift+Tab, Escape, setas, PageUp/PageDown, Home, End, Backspace, Delete, Space): nada que digite um caractere, nem Control/Meta+V, que colaria o que está na área de transferência num campo de senha; e recusa qualquer tecla enquanto `document.activeElement` é um campo de senha ou de cartão (tipo, `autocomplete` ou nome). `browse_fill` **nunca digita em campo de senha ou de cartão**, em modo nenhum (nem em "Sem pedir permissão"): o campo é julgado
   pelo nome que o snapshot deu a ele (senha, password, contraseña, passwort, cartão, CVV…) e, quando o navegador sabe dizer, pelo
   `type`/`autocomplete` dele; a ferramenta responde que a pessoa deve digitar e que o Orb chame `browse_show`.
   Depois de permitido, `browse_show` abre a janela e põe um segundo cartão, **Pronto / Cancelar** (`ApprovalRequest.isHandoff`): não é permissão, é a vez
   da pessoa. Ele espera como qualquer cartão (Parar o cancela), **nenhuma troca de modo o responde** (nem "Sem pedir permissão") e não oferece "Sempre permitir".
-  No Claude Code as mesmas ferramentas são `mcp__orb_memoria__browse_*` e `mcp__orb_memoria__web_search`, julgadas pelas mesmas regras (a regra "Pesquisar na web"
+  A dica `readOnlyHint` que o servidor MCP anuncia (`AgentTool.announcedReadOnly`) é a mesma lição do `schedule`: `risk` sem argumentos não basta. Ferramenta que olha uma página viva (`readsLivePage`: `browse_snapshot`, `browse_read`, `browse_screenshot`, `browse_scroll`, `browse_back`) **não** é anunciada como somente leitura, porque "Só leitura" a recusa, e `browse_tabs` também não (sem argumentos lista, mas `new` com `url` navega e `select`/`close` mexem no navegador); só `browse_close` é anunciada como segura. No Claude Code as mesmas ferramentas são `mcp__orb_memoria__browse_*` e `mcp__orb_memoria__web_search`, julgadas pelas mesmas regras (a regra "Pesquisar na web"
   cobre as duas pesquisas); o cartão de `browse_show` é aberto pelo app antes de liberar a chamada.
 - `web_fetch`, `open` e `remember` são `.sensitive` de propósito: são o caminho de **saída** de dados (ou o que fica no
   prompt de toda conversa). Um texto malicioso numa página não consegue ler um segredo e mandá-lo sem você aprovar.

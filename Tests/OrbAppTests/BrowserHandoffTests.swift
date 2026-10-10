@@ -115,11 +115,35 @@ struct BrowserHandoffEngineTests {
         #expect(setup.hub.existingSession(botID: setup.botID)?.isShowingWindow == false)
     }
 
-    @Test func stoppingTheOrbAnswersTheOpenCardWithACancel() async {
+    /// Parar for real: `AppModel.stop` cancels the task that is running the turn first and answers the open cards after, so the tool
+    /// finds its own task cancelled when the card gives up. A cancelled task cannot run the command that closes the window, so the
+    /// tool hides it from a task of its own.
+    @Test func stoppingTheOrbAnswersTheOpenCardWithACancelAndHidesTheWindow() async throws {
+        let engine = AgentEngine()
+        let turn = request()
+        let consumer = Task { () -> Int in
+            var count = 0
+            for await _ in engine.run(turn) { count += 1 }
+            return count
+        }
+        await waitUntil("the card to open") { await engine.gate.openIDs(for: turn.bot.id).count == 1 }
+        #expect(setup.driver.calls == ["setHeaded true"])
+        consumer.cancel() // the task of the turn, not only its cards
+        await waitUntil("the window to be hidden") { setup.driver.calls.contains("setHeaded false") }
+        #expect(setup.driver.calls == ["setHeaded true", "setHeaded false"])
+        let session = try #require(setup.hub.existingSession(botID: setup.botID))
+        await waitUntil("the Orb to know it is hidden") { !session.isShowingWindow }
+        await engine.gate.cancelApprovals(for: turn.bot.id) // and then the cards, as `stop` does
+        _ = await consumer.value
+        #expect(await engine.gate.openIDs(for: turn.bot.id).isEmpty)
+    }
+
+    /// The other way to end the card: the cards are answered without the task being cancelled (a mode change never does it, but
+    /// the gate can).
+    @Test func aCardAnsweredWithACancelGivesTheModelTheDecline() async {
         let engine = AgentEngine()
         let turn = request()
         let events = await drive(engine, turn) { _ in
-            // What `stop` does for the Orb: its open cards are denied.
             await engine.gate.cancelApprovals(for: turn.bot.id)
         }
         #expect((toolResult(events) ?? "").contains("cancelled"))

@@ -161,15 +161,28 @@ final class BrowserHub: Sendable {
         }
     }
 
-    func status(for engine: BrowserEngineKind) async -> BrowserEngineStatus { await locate(engine) }
+    func status(for engine: BrowserEngineKind) async -> BrowserEngineStatus {
+        let status = await locate(engine)
+        remember(status)
+        return status
+    }
+
+    /// The `agent-browser` last seen, for closing browsers at quit, which cannot ask where it is.
+    private let knownAgentBrowser = OSAllocatedUnfairLock<String?>(initialState: nil)
+
+    private func remember(_ status: BrowserEngineStatus) {
+        if let path = status.agentBrowser, path.hasPrefix("/") { knownAgentBrowser.withLock { $0 = path } }
+    }
 
     /// How the Orb's browser is launched for this engine and status.
     func configuration(botID: UUID, engine: BrowserEngineKind, status: BrowserEngineStatus) -> AgentBrowserConfig {
+        remember(status)
         let profile = engine.keepsProfile
             ? profilesDirectory?.appending(path: botID.uuidString).appending(path: engine.rawValue) : nil
         var config = AgentBrowserConfig(executable: status.agentBrowser ?? "agent-browser",
                                         session: AgentBrowserConfig.sessionName(botID: botID, engine: engine), engine: engine,
-                                        browserExecutable: status.browserExecutable, profile: profile)
+                                        browserExecutable: status.browserExecutable, profile: profile, stateDirectory: profilesDirectory)
+        // Written once (atomically, see `CloakSeed`): two callers at the same time get the same seed.
         if engine == .cloak, let profile { config.cloakSeed = CloakSeed.seed(inProfile: profile) }
         return config
     }
@@ -177,12 +190,17 @@ final class BrowserHub: Sendable {
     /// The Orb's browser, started on first use. Throws what is missing when the engine is not installed.
     func session(botID: UUID, engine: BrowserEngineKind) async throws -> BrowserSession {
         if let existing = sessions.withLock({ $0[botID] }), existing.engine == engine { return existing }
-        let status = await locate(engine)
+        let status = await status(for: engine)
         guard status.isReady else { throw BrowserDriverError.notInstalled(status.modelNote ?? "The browser is not installed.") }
-        // Another engine is another browser: the old one is closed (best effort) before the new one takes its place.
-        if let old = sessions.withLock({ $0.removeValue(forKey: botID) }) { try? await old.driver.close() }
-        let session = BrowserSession(botID: botID, engine: engine, driver: makeDriver(configuration(botID: botID, engine: engine, status: status)))
-        sessions.withLock { $0[botID] = session }
+        // Two calls for the same Orb can both get here (the tools of one turn run at the same time, and the lookup above waited):
+        // the check and the installing of the session are one step, so the second finds the first one's and uses it.
+        let (session, replaced) = sessions.withLock { sessions -> (BrowserSession, BrowserSession?) in
+            if let existing = sessions[botID], existing.engine == engine { return (existing, nil) }
+            let session = BrowserSession(botID: botID, engine: engine, driver: makeDriver(configuration(botID: botID, engine: engine, status: status)))
+            return (session, sessions.updateValue(session, forKey: botID))
+        }
+        // Another engine is another browser: the old one is closed (best effort).
+        if let replaced, replaced !== session { try? await replaced.driver.close() }
         return session
     }
 
@@ -205,22 +223,91 @@ final class BrowserHub: Sendable {
 
     // MARK: Closing
 
-    /// Closes the Orb's browser (and forgets it). The profile stays: logins survive.
-    func close(botID: UUID) async {
-        clearLabels(botID: botID)
-        guard let session = sessions.withLock({ $0.removeValue(forKey: botID) }) else { return }
-        try? await session.driver.close()
+    // A browser outlives the process that started it: its background process (`agent-browser`) keeps it. The Claude Code engine's
+    // tools server is another process with a hub of its own, new at every turn, so the sessions of its turns are not held here.
+    // They are named after the Orb and the engine (`AgentBrowserConfig.sessionName`), so everything below that closes a browser
+    // closes it by name too: the sessions `agent-browser` reports running that are the Orb's, whoever started them.
+
+    private static let driven: [BrowserEngineKind] = [.chrome, .obscura, .cloak]
+
+    /// The `agent-browser` to ask which sessions run: the one the engines resolve to now.
+    private func agentBrowserPath() async -> String? {
+        for engine in Self.driven {
+            if let path = await status(for: engine).agentBrowser { return path }
+        }
+        return nil
     }
 
-    /// Closes the browsers of every Orb that uses `engine` (before its files are removed or replaced).
+    /// The same when nothing can be awaited (the app is quitting): the last one seen, or the one the app installed, or one in the
+    /// usual places of a Mac (the login shell's PATH cannot be asked now).
+    private func agentBrowserPathNow() -> String? {
+        if let known = knownAgentBrowser.withLock({ $0 }) { return known }
+        return BrowserEngineLocator.live(path: nil, managedRoot: profilesDirectory).agentBrowser()
+    }
+
+    /// A driver for a session by name, to ask or close it.
+    private func driver(forSession name: String, executable: String) -> any BrowserDriver {
+        makeDriver(AgentBrowserConfig(executable: executable, session: name, engine: AgentBrowserConfig.engine(ofSession: name) ?? .chrome,
+                                      stateDirectory: profilesDirectory))
+    }
+
+    /// The Orb's sessions running now (`orb-<id>-<engine>`) that `matches`, whoever started them.
+    private func runningSessions(executable: String, where matches: (String) -> Bool) async -> [String] {
+        await driver(forSession: "orb-sessions", executable: executable).runningSessions()
+            .filter { $0.hasPrefix(AgentBrowserConfig.sessionPrefix) && matches($0) }
+    }
+
+    /// Closes by name the sessions running now that `matches`, except `skipping` (the ones just closed). True when there was one.
+    @discardableResult
+    private func closeRunning(where matches: (String) -> Bool, skipping: Set<String> = []) async -> Bool {
+        guard let executable = await agentBrowserPath() else { return false }
+        let names = await runningSessions(executable: executable, where: matches).filter { !skipping.contains($0) }
+        for name in names { try? await driver(forSession: name, executable: executable).close() }
+        return !names.isEmpty
+    }
+
+    /// Closes the browser this hub holds for the Orb (and forgets it); true when there was one.
+    private func closeHeld(botID: UUID, engine: BrowserEngineKind? = nil) async -> BrowserSession? {
+        let held = sessions.withLock { sessions -> BrowserSession? in
+            guard let session = sessions[botID], engine == nil || session.engine == engine else { return nil }
+            return sessions.removeValue(forKey: botID)
+        }
+        if let held { try? await held.driver.close() }
+        return held
+    }
+
+    private static func name(of session: BrowserSession) -> String { AgentBrowserConfig.sessionName(botID: session.botID, engine: session.engine) }
+
+    /// Closes the Orb's browsers, whichever engine and whoever started them (and forgets them). The profile stays: logins survive.
+    /// True when one was open.
+    @discardableResult
+    func close(botID: UUID) async -> Bool {
+        clearLabels(botID: botID)
+        let held = await closeHeld(botID: botID)
+        let prefix = AgentBrowserConfig.botPrefix(botID)
+        let others = await closeRunning(where: { $0.hasPrefix(prefix) }, skipping: held.map { [Self.name(of: $0)] } ?? [])
+        return held != nil || others
+    }
+
+    /// Closes the browsers of every Orb that uses `engine` (before its files are removed or replaced), the ones other processes
+    /// started included.
     func close(engine: BrowserEngineKind) async {
         let ids = sessions.withLock { $0.filter { $0.value.engine == engine }.map(\.key) }
-        for id in ids { await close(botID: id) }
+        var held: Set<String> = []
+        for id in ids {
+            clearLabels(botID: id)
+            if let session = await closeHeld(botID: id, engine: engine) { held.insert(Self.name(of: session)) }
+        }
+        let suffix = "-" + engine.rawValue
+        await closeRunning(where: { $0.hasSuffix(suffix) }, skipping: held)
     }
 
     /// Closes every browser at once, without waiting for a task: for `willTerminate`, which cannot wait for one. A browser left
-    /// behind would keep running (and keep its profile locked) after the app is gone. Gives up after `timeout` seconds.
-    func terminateAllNow(timeout: TimeInterval = 4) {
+    /// behind would keep running (and keep its profile locked) after the app is gone. That includes the ones the tools server of a
+    /// Claude Code turn started (another process, with its own hub): every running session named for an Orb is closed. `orbs`: the
+    /// Orbs of this app, when the caller knows them; only their sessions are closed then (another build of the app on the same Mac
+    /// has Orbs of its own, and its browsers are not ours to close). Gives up after `timeout` seconds.
+    func terminateAllNow(timeout: TimeInterval = 4, orbs: Set<UUID>? = nil) {
         let all = sessions.withLock { sessions -> [BrowserSession] in
             defer { sessions = [:] }
             return Array(sessions.values)
@@ -234,25 +321,32 @@ final class BrowserHub: Sendable {
             }
         }
         _ = group.wait(timeout: .now() + timeout + 1)
+        guard let executable = agentBrowserPathNow() else { return }
+        let held = Set(all.map(Self.name(of:)))
+        let lister = driver(forSession: "orb-sessions", executable: executable)
+        let prefixes = orbs.map { $0.map(AgentBrowserConfig.botPrefix) }
+        let others = lister.runningSessionsSynchronously(timeout: timeout).filter { name in
+            name.hasPrefix(AgentBrowserConfig.sessionPrefix) && !held.contains(name) && (prefixes?.contains { name.hasPrefix($0) } ?? true)
+        }
+        for name in others {
+            group.enter()
+            DispatchQueue.global().async { [self] in
+                driver(forSession: name, executable: executable).closeSynchronously(timeout: timeout)
+                group.leave()
+            }
+        }
+        _ = group.wait(timeout: .now() + timeout + 1)
     }
 
     /// The Orb left `engine` for another: closes the browser it had open with it. The session may have been started by another
     /// process (the tools server of a Claude Code turn runs its own hub, on the same `agent-browser` session), so when this hub
-    /// holds none the command is sent anyway; it does nothing when no browser is running. The profile stays.
+    /// holds none the session is closed by name; it does nothing when no browser is running. The profile stays.
     func close(botID: UUID, leaving engine: BrowserEngineKind) async {
         clearLabels(botID: botID)
-        let held = sessions.withLock { sessions -> BrowserSession? in
-            guard sessions[botID]?.engine == engine else { return nil }
-            return sessions.removeValue(forKey: botID)
-        }
-        if let held {
-            try? await held.driver.close()
-            return
-        }
+        if await closeHeld(botID: botID, engine: engine) != nil { return }
         guard engine.drivesABrowser else { return }
-        let status = await locate(engine)
-        guard status.agentBrowser != nil else { return }
-        try? await makeDriver(configuration(botID: botID, engine: engine, status: status)).close()
+        let name = AgentBrowserConfig.sessionName(botID: botID, engine: engine)
+        await closeRunning(where: { $0 == name })
     }
 
     func closeAll() async {
@@ -262,11 +356,21 @@ final class BrowserHub: Sendable {
         }
         labels.withLock { $0 = [:] }
         for session in all { try? await session.driver.close() }
+        await closeRunning(where: { _ in true }, skipping: Set(all.map(Self.name(of:))))
     }
 
-    /// Deletes what the Orb's browser kept (profile folders), when the Orb is deleted.
+    /// Deletes what the Orb's browser kept (profile folders), when the Orb is deleted. Its browsers are closed first, and waited
+    /// for: a Chrome still running would write into a folder that is gone.
     func deleteData(botID: UUID) async {
         await close(botID: botID)
+        if let executable = await agentBrowserPath() {
+            let prefix = AgentBrowserConfig.botPrefix(botID)
+            for _ in 0..<50 where !(await runningSessions(executable: executable, where: { $0.hasPrefix(prefix) })).isEmpty {
+                try? await Task.sleep(for: .milliseconds(200))
+            }
+            // The browser itself may outlive its background process by a moment.
+            try? await Task.sleep(for: .milliseconds(300))
+        }
         if let folder = profilesDirectory?.appending(path: botID.uuidString) { try? FileManager.default.removeItem(at: folder) }
     }
 }
