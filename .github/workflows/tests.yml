@@ -1,0 +1,51 @@
+name: Testes
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Uma execução nova na mesma ref cancela a anterior que ficou para trás.
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  swift:
+    name: swift build + swift test
+    runs-on: macos-26
+    timeout-minutes: 45
+
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@v4
+
+      # O pacote exige Swift 6 (swift-tools-version 6.0). Em vez de fixar uma versão, escolhe o Xcode estável mais novo
+      # instalado na imagem: /Applications/Xcode_<versão>.app, sem beta nem release candidate.
+      - name: Selecionar o Xcode mais novo
+        run: |
+          set -euo pipefail
+          latest="$(ls -d /Applications/Xcode_*.app | grep -E '/Xcode_[0-9]+(\.[0-9]+)*\.app$' | sort -V | tail -n 1)"
+          if [ -z "$latest" ]; then
+            echo "Nenhum Xcode estável encontrado em /Applications" >&2
+            ls -d /Applications/Xcode* >&2 || true
+            exit 1
+          fi
+          echo "Usando $latest"
+          sudo xcode-select -s "$latest/Contents/Developer"
+          xcodebuild -version
+          swift --version
+
+      # Sem cache de .build de propósito: o SwiftPM decide o que recompilar pela data dos arquivos, e num checkout novo
+      # todos os fontes são mais recentes que o cache, então ele recompilaria tudo igual. Não há dependências externas
+      # (nem Package.resolved) para baixar. Se o tempo de build incomodar, reavaliar.
+
+      - name: Compilar
+        run: swift build
+
+      - name: Rodar os testes
+        run: swift test

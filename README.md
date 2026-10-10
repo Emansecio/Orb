@@ -1,5 +1,7 @@
 # Orb para macOS
 
+[![Testes](https://github.com/Emansecio/Orb/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/Emansecio/Orb/actions/workflows/tests.yml)
+
 O Orb é um app nativo (SwiftUI, macOS 14 ou mais novo) para conversar com **Orbs**: assistentes animados que agem no seu
 Mac. Cada Orb tem o seu modelo, a sua pasta, a sua memória, as suas permissões e as suas rotinas. Eles leem e escrevem
 arquivos, rodam comandos, abrem apps, leem páginas da web e usam conectores, sempre dentro das permissões que você der.
