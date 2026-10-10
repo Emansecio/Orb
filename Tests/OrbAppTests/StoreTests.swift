@@ -375,7 +375,8 @@ import Testing
 
         model.runRoutine(routine.id)
         await model.routineStarted()
-        #expect(model.isWorking(bot.id))
+        // It ran. (Not `isWorking`: with no address the turn fails at once, and on a slow machine it is already over here.)
+        #expect(model.routines.first?.lastRun != nil)
         #expect(model.drafts[bot.id] == "rascunho em andamento")
         model.stop(bot.id)
     }
