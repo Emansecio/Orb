@@ -9,6 +9,9 @@ struct SidebarView: View {
     /// The Orbs the rows were last laid out for (nil until the first appearance): an update that changes this list
     /// together with the selection is a row coming or going, and its layout must not animate.
     @State private var settledBotIDs: [UUID]?
+    /// The height of the window's toolbar over the sidebar (its top safe area), applied once by hand: left to the scroll
+    /// view, it is applied twice and "Orbs" starts a whole toolbar below the window's buttons.
+    @State private var toolbarHeight: CGFloat = 0
 
     var body: some View {
         ScrollView {
@@ -54,6 +57,7 @@ struct SidebarView: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
+            .padding(.top, toolbarHeight)
             // A new or a deleted Orb: the row comes (rises 6 pt) or goes (fades) and the others slide, bound to the ids, so a
             // status or an unread count moves nothing. Written before the selection's modifier below, which is the outer
             // one: the animation of the list wins when both change in one update, and the highlight (which would slide
@@ -69,6 +73,8 @@ struct SidebarView: View {
             .onChange(of: model.botIDs, initial: true) { settledBotIDs = model.botIDs }
         }
         .scrollIndicators(.never)
+        .ignoresSafeArea(.container, edges: .top)
+        .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { toolbarHeight = $0 }
         .background(Palette.chrome)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(alignment: .leading, spacing: 8) {

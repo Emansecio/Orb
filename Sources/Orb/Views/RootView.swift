@@ -22,6 +22,9 @@ struct RootView: View {
         } detail: {
             DetailView(welcomeLedger: welcomeLedger)
         }
+        // The bar is the sidebar's own color, not the system's grey: the top of the window and the sidebar are one surface.
+        .toolbarBackground(Palette.chrome, for: .windowToolbar)
+        .toolbarBackground(.visible, for: .windowToolbar)
         // With Orbs there is always one chosen ("Escolha um Orb" is gone); with none, the welcome screen shows.
         .onChange(of: model.botIDs, initial: true) { _, ids in
             if !ids.isEmpty { welcomeLedger.reset() }
