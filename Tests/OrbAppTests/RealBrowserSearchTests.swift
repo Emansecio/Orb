@@ -10,24 +10,34 @@ struct RealBrowserSearchTests {
         await RealBrowsers.gate.lock()
         let profiles = FileManager.default.temporaryDirectory.appending(path: "OrbRealSearch-\(UUID().uuidString)")
         let hub = BrowserHub(profilesDirectory: profiles, locate: { RealBrowsers.status($0) })
-        let botID = UUID()
-        defer { try? FileManager.default.removeItem(at: profiles) }
-        defer { Task { await RealBrowsers.gate.unlock() } }
-        var context = ToolContext(workingDirectory: FileManager.default.temporaryDirectory, botID: botID)
-        context.browser = BrowserAccess(hub: hub, engine: engine, searchProvider: provider)
         var report: String?
+        var failure: Error?
+        do {
+            report = try await run(engine, provider, query: query, hub: hub)
+        } catch {
+            failure = error
+        }
+        // The turn goes to the next test only when the browser is gone (it takes a second or two to leave).
+        await hub.closeAll()
+        for _ in 0..<150 where !RealBrowserScenario.processes(under: RealBrowsers.root.path).isEmpty { try? await Task.sleep(for: .milliseconds(100)) }
+        try? FileManager.default.removeItem(at: profiles)
+        await RealBrowsers.gate.unlock()
+        if let failure { throw failure }
+        return report
+    }
+
+    private static func run(_ engine: BrowserEngineKind, _ provider: SearchProvider, query: String, hub: BrowserHub) async throws -> String? {
+        var context = ToolContext(workingDirectory: FileManager.default.temporaryDirectory, botID: UUID())
+        context.browser = BrowserAccess(hub: hub, engine: engine, searchProvider: provider)
         do {
             let start = ContinuousClock.now
-            report = try await WebSearchTool().run(.object(["query": .string(query), "count": .number(5)]), context: context)
-            print("[\(engine.rawValue)/\(provider.rawValue)] web_search in \(start.duration(to: .now)):\n\(report ?? "")")
+            let report = try await WebSearchTool().run(.object(["query": .string(query), "count": .number(5)]), context: context)
+            print("[\(engine.rawValue)/\(provider.rawValue)] web_search in \(start.duration(to: .now)):\n\(report)")
+            return report
         } catch let blocked as SearchBlocked {
             print("[\(engine.rawValue)/\(provider.rawValue)] blocked, as it should say: \(blocked.message)")
-        } catch {
-            await hub.closeAll()
-            throw error
+            return nil
         }
-        await hub.closeAll()
-        return report
     }
 
     /// The report has real results: a numbered list with addresses.

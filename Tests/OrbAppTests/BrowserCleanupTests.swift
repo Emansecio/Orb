@@ -89,7 +89,14 @@ import Testing
         let running = RealBrowserScenario.processes(under: RealBrowsers.root.path)
         #expect(!running.isEmpty, "the browser is running before the quit")
         let started = ContinuousClock.now
-        scenario.hub.terminateAllNow()
+        // As `willTerminate` does it, but off the cooperative pool: it blocks until the browsers are closed.
+        let hub = scenario.hub
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global().async {
+                hub.terminateAllNow()
+                continuation.resume()
+            }
+        }
         print("[\(engine.rawValue)] quit: \(started.duration(to: .now))")
         // `finish` waits for the processes to go, as the app's quit does not: what is left then is the answer.
         let left = await scenario.finish()

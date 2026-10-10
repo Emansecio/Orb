@@ -82,12 +82,27 @@ struct RealBrowserInstallTests {
 actor RealBrowserGate {
     private var heldSince: Date?
 
+    /// The real browsers start only when the rest of the suite has had its twenty seconds: Chrome windows and processes starting
+    /// beside three thousand tests make the ones that wait on a clock (a process that must end in 3 s) fail now and then.
+    static let quietAfter: TimeInterval = 30
+
     func lock() async {
+        while let age = Self.processAge(), age < Self.quietAfter { try? await Task.sleep(for: .milliseconds(500)) }
         while let since = heldSince, Date().timeIntervalSince(since) < 240 { try? await Task.sleep(for: .milliseconds(100)) }
         heldSince = Date()
     }
 
     func unlock() { heldSince = nil }
+
+    /// Seconds since this process started (nil when the system will not say).
+    static func processAge() -> TimeInterval? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+        guard sysctl(&mib, UInt32(mib.count), &info, &size, nil, 0) == 0 else { return nil }
+        let start = info.kp_proc.p_un.__p_starttime
+        return Date().timeIntervalSince1970 - (TimeInterval(start.tv_sec) + TimeInterval(start.tv_usec) / 1e6)
+    }
 }
 
 final class LockedBox<Value: Sendable>: @unchecked Sendable {

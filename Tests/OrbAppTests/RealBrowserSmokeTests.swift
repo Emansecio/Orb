@@ -43,7 +43,7 @@ struct RealBrowserScenario {
         server.stop()
         try? FileManager.default.removeItem(at: profiles)
         var left = Self.processes(under: RealBrowsers.root.path)
-        for _ in 0..<50 where !left.isEmpty {
+        for _ in 0..<150 where !left.isEmpty {
             try? await Task.sleep(for: .milliseconds(100))
             left = Self.processes(under: RealBrowsers.root.path)
         }
@@ -82,14 +82,14 @@ struct RealBrowserScenario {
     static func processes(under folder: String) -> [String] {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
-        process.arguments = ["-f", folder]
+        process.arguments = ["-fl", folder]
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
         guard (try? process.run()) != nil else { return [] }
         process.waitUntilExit()
         return String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            .split(whereSeparator: \.isNewline).map(String.init)
+            .split(whereSeparator: \.isNewline).map { String($0.prefix(200)) }
     }
 }
 
