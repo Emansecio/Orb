@@ -14,8 +14,21 @@ enum AXAttributeValue: Sendable {
     case elements([any AccessibilityElement])
     case point(CGPoint)
     case size(CGSize)
-    /// A kind of value this tool does not use (dates, URLs, ranges…).
+    /// A text range (`AXSelectedTextRange`, `AXVisibleCharacterRange`).
+    case range(AXTextRange)
+    /// A kind of value this tool does not use (dates, URLs…).
     case other
+}
+
+/// A span of characters in a text element: `location` is the offset of the first one (negative when the API says "none").
+struct AXTextRange: Sendable, Equatable {
+    var location: Int
+    var length: Int
+
+    init(location: Int, length: Int) {
+        self.location = location
+        self.length = length
+    }
 }
 
 /// Why an Accessibility call failed, reduced to what the tools tell the model.
@@ -33,6 +46,8 @@ enum AXFailure: Error, Equatable, Sendable {
 
 /// One node of an app's interface. Reads never throw: an attribute the element lacks is nil.
 protocol AccessibilityElement: Sendable {
+    /// The process that owns the element (`AXUIElementGetPid`); nil when it cannot be told.
+    var pid: Int32? { get }
     func attribute(_ name: String) -> AXAttributeValue?
     /// Several attributes at once (one round trip to the app in the real implementation).
     func attributes(_ names: [String]) -> [String: AXAttributeValue]
@@ -40,9 +55,24 @@ protocol AccessibilityElement: Sendable {
     func isSettable(_ name: String) -> Bool
     func perform(_ action: String) throws
     func setValue(_ value: AXAttributeValue, for name: String) throws
+    /// Whether both handles are the same element (`CFEqual`), which the tools use to confirm an element is still the one
+    /// a snapshot named.
+    func isSame(as other: any AccessibilityElement) -> Bool
+    /// Like `attributes(_:)`, but a call the app fails to answer is reported instead of looking like "no attributes".
+    func read(_ names: [String]) -> AXRead
 }
 
 extension AccessibilityElement {
+    var pid: Int32? { nil }
+
+    /// Identity for class-based elements; value types cannot be told apart without help.
+    func isSame(as other: any AccessibilityElement) -> Bool {
+        guard type(of: self) is AnyClass, type(of: other) is AnyClass else { return false }
+        return (self as AnyObject) === (other as AnyObject)
+    }
+
+    func read(_ names: [String]) -> AXRead { .values(attributes(names)) }
+
     func attributes(_ names: [String]) -> [String: AXAttributeValue] {
         var result: [String: AXAttributeValue] = [:]
         for name in names { if let value = attribute(name) { result[name] = value } }
@@ -68,6 +98,7 @@ extension AXAttributeValue {
         }
     }
     var element: (any AccessibilityElement)? { if case .element(let element) = self { element } else { nil } }
+    var range: AXTextRange? { if case .range(let range) = self { range } else { nil } }
     var elements: [any AccessibilityElement]? {
         switch self {
         case .elements(let list): list
@@ -82,6 +113,24 @@ struct AccessibilityApp: Sendable, Equatable, Codable {
     var name: String
     var bundleID: String?
     var pid: Int32
+    /// When the process started: with the pid and bundle identifier it tells a running app from a new one that reused
+    /// the pid. Nil when unknown (old snapshots).
+    var launchDate: Date?
+
+    init(name: String, bundleID: String?, pid: Int32, launchDate: Date? = nil) {
+        self.name = name
+        self.bundleID = bundleID
+        self.pid = pid
+        self.launchDate = launchDate
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.value(.name, default: "")
+        bundleID = try? c.decodeIfPresent(String.self, forKey: .bundleID)
+        pid = try c.decode(Int32.self, forKey: .pid)
+        launchDate = try? c.decodeIfPresent(Date.self, forKey: .launchDate)
+    }
 }
 
 /// The calls into macOS, injectable so the tools are tested without touching the real Accessibility API.
@@ -95,10 +144,32 @@ protocol AccessibilitySystem: Sendable {
     func prepare(_ root: any AccessibilityElement)
     /// Brings the app to the front (menus of an app in the background can ignore a click).
     func activate(_ app: AccessibilityApp)
+    /// The deepest element of the app at a point in screen coordinates (`AXUIElementCopyElementAtPosition`, z-ordered:
+    /// nil for a covered window).
+    func hitTest(_ app: AccessibilityApp, at point: CGPoint) -> (any AccessibilityElement)?
+    /// The process in front, if any.
+    func frontmostPID() async -> Int32?
+    /// Seconds since the user last pressed a key or a mouse button. Infinite when unknown.
+    func secondsSinceUserInput() -> TimeInterval
+    /// Notifications from an app (`AXObserver`).
+    var events: any AccessibilityEvents { get }
+    /// Keyboard, mouse and scroll events sent to one process.
+    var input: any SyntheticInput { get }
+    /// Window images.
+    var capturer: any WindowCapturer { get }
+    /// Taking the screen over for what only real input can do.
+    var screen: any ScreenOwner { get }
 }
 
 extension AccessibilitySystem {
     func prepare(_ root: any AccessibilityElement) {}
+    func hitTest(_ app: AccessibilityApp, at point: CGPoint) -> (any AccessibilityElement)? { nil }
+    func frontmostPID() async -> Int32? { nil }
+    func secondsSinceUserInput() -> TimeInterval { .infinity }
+    var events: any AccessibilityEvents { UnavailableAccessibilityEvents() }
+    var input: any SyntheticInput { UnavailableSyntheticInput() }
+    var capturer: any WindowCapturer { UnavailableWindowCapturer() }
+    var screen: any ScreenOwner { UnavailableScreenOwner() }
 }
 
 // MARK: - The real thing
@@ -129,6 +200,22 @@ struct LiveAccessibilitySystem: AccessibilitySystem {
     func activate(_ app: AccessibilityApp) {
         _ = NSRunningApplication(processIdentifier: app.pid)?.activate()
     }
+
+    func hitTest(_ app: AccessibilityApp, at point: CGPoint) -> (any AccessibilityElement)? {
+        guard let root = root(of: app) as? LiveAccessibilityElement else { return nil }
+        var hit: AXUIElement?
+        guard AXUIElementCopyElementAtPosition(root.ref, Float(point.x), Float(point.y), &hit) == .success, let hit else { return nil }
+        return LiveAccessibilityElement(hit)
+    }
+
+    func frontmostPID() async -> Int32? {
+        await MainActor.run { NSWorkspace.shared.frontmostApplication?.processIdentifier }
+    }
+
+    func secondsSinceUserInput() -> TimeInterval {
+        let kinds: [CGEventType] = [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]
+        return kinds.map { CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: $0) }.min() ?? .infinity
+    }
 }
 
 /// An `AXUIElement`. The reference is only a handle, and the API may be called from any thread (one call sequence at a
@@ -138,6 +225,16 @@ struct LiveAccessibilityElement: AccessibilityElement, @unchecked Sendable {
 
     init(_ ref: AXUIElement) {
         self.ref = ref
+    }
+
+    var pid: Int32? {
+        var pid: pid_t = 0
+        return AXUIElementGetPid(ref, &pid) == .success ? pid : nil
+    }
+
+    func isSame(as other: any AccessibilityElement) -> Bool {
+        guard let other = other as? LiveAccessibilityElement else { return false }
+        return CFEqual(ref, other.ref)
     }
 
     func attribute(_ name: String) -> AXAttributeValue? {
@@ -161,6 +258,47 @@ struct LiveAccessibilityElement: AccessibilityElement, @unchecked Sendable {
         return result
     }
 
+    func read(_ names: [String]) -> AXRead {
+        var raw: CFArray?
+        let status = AXUIElementCopyMultipleAttributeValues(ref, names as CFArray, AXCopyMultipleAttributeOptions(rawValue: 0), &raw)
+        if let failure = Self.fatal(status) { return .failed(failure) }
+        guard status == .success, let items = raw as? [AnyObject], items.count == names.count else {
+            // The batch call is not supported by this element: ask one by one, still reporting a dead or hung app.
+            var result: [String: AXAttributeValue] = [:]
+            for name in names {
+                var single: CFTypeRef?
+                let error = AXUIElementCopyAttributeValue(ref, name as CFString, &single)
+                if let failure = Self.fatal(error) { return .failed(failure) }
+                if error == .success, let single { result[name] = Self.convert(single) }
+            }
+            return .values(result)
+        }
+        var result: [String: AXAttributeValue] = [:]
+        for (name, item) in zip(names, items) {
+            if CFGetTypeID(item) == AXValueGetTypeID() {
+                let value = unsafeDowncast(item, to: AXValue.self)
+                if AXValueGetType(value) == .axError {
+                    // A missing attribute is an error value in its slot; a hung or dead app is not "missing".
+                    var error = AXError.success
+                    if AXValueGetValue(value, .axError, &error), let failure = Self.fatal(error) { return .failed(failure) }
+                    continue
+                }
+            }
+            result[name] = Self.convert(item)
+        }
+        return .values(result)
+    }
+
+    /// The errors that mean the app, not the attribute, is the problem.
+    private static func fatal(_ error: AXError) -> AXFailure? {
+        switch error {
+        case .apiDisabled: .apiDisabled
+        case .cannotComplete: .cannotComplete
+        case .invalidUIElement: .invalidElement
+        default: nil
+        }
+    }
+
     func actionNames() -> [String] {
         var names: CFArray?
         guard AXUIElementCopyActionNames(ref, &names) == .success else { return [] }
@@ -182,6 +320,10 @@ struct LiveAccessibilityElement: AccessibilityElement, @unchecked Sendable {
         case .string(let text): converted = text as CFString
         case .number(let number): converted = NSNumber(value: number)
         case .bool(let flag): converted = NSNumber(value: flag)
+        case .range(let range):
+            var cfRange = CFRange(location: range.location, length: range.length)
+            guard let boxed = AXValueCreate(.cfRange, &cfRange) else { throw AXFailure.notSupported }
+            converted = boxed
         default: throw AXFailure.notSupported
         }
         try Self.check(AXUIElementSetAttributeValue(ref, name as CFString, converted))
@@ -219,6 +361,9 @@ struct LiveAccessibilityElement: AccessibilityElement, @unchecked Sendable {
             case .cgSize:
                 var size = CGSize.zero
                 if AXValueGetValue(value, .cgSize, &size) { return .size(size) }
+            case .cfRange:
+                var range = CFRange()
+                if AXValueGetValue(value, .cfRange, &range) { return .range(AXTextRange(location: range.location, length: range.length)) }
             default:
                 break
             }
