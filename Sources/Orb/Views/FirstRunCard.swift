@@ -356,6 +356,7 @@ struct FirstRunCard: View {
                         .help(Tip.modelSettings)
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.accentText)
+                        .frame(maxWidth: .infinity)
                 }
             }
         }

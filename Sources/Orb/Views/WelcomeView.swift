@@ -430,8 +430,9 @@ private struct WelcomePointView: View {
             if isRow {
                 HStack(alignment: .top, spacing: 12) { icon; words }
             } else {
-                VStack(alignment: .leading, spacing: 6) { icon; words }
-                    .frame(width: 168, alignment: .leading)
+                // Centered in its column, like the Orbs, the title and the card above and below it.
+                VStack(alignment: .center, spacing: 6) { icon; words }
+                    .frame(width: 168)
             }
         }
         .accessibilityElement(children: .ignore)
@@ -448,7 +449,7 @@ private struct WelcomePointView: View {
     }
 
     private var words: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: isRow ? .leading : .center, spacing: 2) {
             Text(point.title)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Palette.ink)
@@ -457,6 +458,7 @@ private struct WelcomePointView: View {
                 .foregroundStyle(Palette.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
+        .multilineTextAlignment(isRow ? .leading : .center)
     }
 }
 
