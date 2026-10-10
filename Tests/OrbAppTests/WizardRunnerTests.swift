@@ -153,7 +153,8 @@ private func drafting(_ json: String) -> [LLMEvent] {
         #expect(runner.messages.count == 3)
 
         #expect(runner.send("Curtas e diretas."))
-        await settled(runner)
+        // The second answer, not just a quiet moment between the tool call and the text (a loaded machine can show one).
+        await waitUntil("the second answer") { runner.messages.count == 5 && !runner.isThinking && runner.liveText.isEmpty }
         #expect(runner.draft.instructions == "Você é a Maia." && runner.draft.capabilities == [.browser] && runner.draft.ready)
         #expect(runner.draft.revision == 2)
         #expect(botTexts(runner).last == "Tudo certo, é só criar.")
