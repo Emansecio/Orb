@@ -222,12 +222,12 @@ struct ScreenshotTool: AgentTool {
 
         var ax: AXWindowInfo?
         if trusted {
-            let system = system
+            let system = system, appSessions = self.sessions
             // A window that does not exist is the model's to fix (thrown); an app that does not answer only costs the marks.
             var lookup: Result<AXWindowInfo?, ToolError>?
             do {
                 lookup = try await UIAccess.mapped(app) {
-                    try await sessions.run(app, within: sessions.deadlines.action) { () -> Result<AXWindowInfo?, ToolError> in
+                    try await appSessions.run(app, within: appSessions.deadlines.action) { () -> Result<AXWindowInfo?, ToolError> in
                         let root = system.root(of: app)
                         system.prepare(root)
                         do { return .success(try Self.axWindow(root: root, selector: selector)) } catch let error as ToolError {
