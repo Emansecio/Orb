@@ -8,6 +8,9 @@ import Testing
 
 private let notes = AccessibilityApp(name: "Notas", bundleID: "com.apple.Notes", pid: 100)
 
+/// Sessions whose deadlines a loaded machine cannot reach: these tests are about what the tools say, not about time.
+private let patientSessions = AXSessions(deadlines: .patient)
+
 // MARK: - Outline
 
 struct UIOutlineTests {
@@ -160,7 +163,7 @@ struct UIReadToolTests {
                        FakeAccessibility.app("Safari", "com.apple.Safari", pid: 200)]
         system.roots[100] = fakeApp(windows: windows, menus: menus)
         let store = UISnapshotStore(directory: nil)
-        return (UIReadTool(system: system, store: store), system, store)
+        return (UIReadTool(system: system, store: store, sessions: patientSessions), system, store)
     }
 
     private func read(_ tool: UIReadTool, _ arguments: [String: JSONValue] = [:]) async throws -> String {
@@ -268,7 +271,7 @@ struct UIReadToolTests {
         let (_, system, store) = setup(windows: [fake("AXWindow", title: "Grande", (1...30).map { fakeButton("Botão \($0)") })])
         var limits = UIOutlineLimits()
         limits.maxLines = 5
-        let tool = UIReadTool(system: system, store: store, limits: limits)
+        let tool = UIReadTool(system: system, store: store, limits: limits, sessions: patientSessions)
         let text = try await read(tool)
         #expect(text.contains("[Saída cortada: mostrei 5 de 31 elementos"))
         #expect(text.contains("query"))
@@ -308,8 +311,8 @@ struct UIActToolTests {
         let root = fakeApp(windows: windows, menus: menus)
         system.roots[100] = root
         let store = UISnapshotStore(directory: directory)
-        return Rig(read: UIReadTool(system: system, store: store),
-                   act: UIActTool(system: system, store: store, settle: .zero, activation: .zero), system: system, store: store, root: root)
+        return Rig(read: UIReadTool(system: system, store: store, sessions: patientSessions),
+                   act: UIActTool(system: system, store: store, settle: .none, sessions: patientSessions), system: system, store: store, root: root)
     }
 
     private func act(_ rig: Rig, _ arguments: [String: JSONValue]) async throws -> String {
@@ -381,13 +384,21 @@ struct UIActToolTests {
         var message = await failure { try await act(r, ["action": .string("press"), "id": .string("w1.2")]) }
         #expect(message.contains(stale) && target.performed.isEmpty)
 
-        // Something before it disappeared, so the path now leads to another element.
+        // Something before it disappeared, so the path now leads to another element. Without the live reference kept from
+        // the reading (another process's reading, or one gone stale) the walk by path refuses…
         var window: FakeElement
         (r, window, target) = build()
         try await readFirst(r)
         window.children.removeFirst()
+        UILiveElements.shared.forget(bot: context.botID, pid: 100)
         message = await failure { try await act(r, ["action": .string("press"), "id": .string("w1.2")]) }
         #expect(message.contains(stale) && target.performed.isEmpty)
+        // …while the live reference still reaches the very element the reading named, which is pressed (design §3).
+        (r, window, target) = build()
+        try await readFirst(r)
+        window.children.removeFirst()
+        _ = try await act(r, ["action": .string("press"), "id": .string("w1.2")])
+        #expect(target.performed == ["AXPress"])
 
         // The element changed role.
         (r, _, target) = build()
@@ -474,11 +485,13 @@ struct UIActToolTests {
     }
 
     @Test func focusFallsBackToRaiseForAWindowThatCannotTakeFocus() async throws {
+        // Raising a window takes the screen from the user: focus never falls back to AXRaise, it says what is possible.
         let inner = fake("AXWindow", title: "Dentro", actions: ["AXRaise"])
         let rig = rig(windows: [fake("AXWindow", title: "A", [inner])])
         try await readFirst(rig)
-        _ = try await act(rig, ["action": .string("focus"), "id": .string("w1.1")])
-        #expect(inner.performed == ["AXRaise"])
+        let refused = await failure { try await act(rig, ["action": .string("focus"), "id": .string("w1.1")]) }
+        #expect(refused.contains("não aceita foco"))
+        #expect(inner.performed.isEmpty)
     }
 
     @Test func unknownActionsAndFailuresFromTheAPIAreExplained() async throws {
@@ -508,17 +521,18 @@ struct UIActToolTests {
 
     @Test func pickMenuWalksThePathAndPressesTheLastItem() async throws {
         let (rig, pdf, _) = menuRig()
-        let text = try await act(rig, ["action": .string("pick_menu"), "menu_path": .array(["Arquivo", "Exportar…", "PDF…"].map(JSONValue.string))])
+        let text = try await act(rig, ["action": .string("pick_menu"), "app": .string("Notas"),
+                                       "menu_path": .array(["Arquivo", "Exportar…", "PDF…"].map(JSONValue.string))])
         #expect(text.hasPrefix("Escolhi Arquivo → Exportar… → PDF… em Notas."))
         #expect(pdf.performed == ["AXPress"])
-        #expect(rig.system.activated == [100], "the app is brought forward first")
+        #expect(rig.system.activated == [], "menus are pressed in the background, the app is never brought forward")
     }
 
     @Test func menuTitlesMatchIgnoringAccentsCaseAndEllipsisStyle() async throws {
         let (rig, pdf, _) = menuRig()
         for path in [["arquivo", "EXPORTAR...", "pdf..."], ["Arquivo", "Exportar", "PDF"], ["ARQUIVO", "exportar…", "Pdf…"]] {
             pdf.onPerform = nil
-            _ = try await act(rig, ["action": .string("pick_menu"), "menu_path": .array(path.map(JSONValue.string))])
+            _ = try await act(rig, ["action": .string("pick_menu"), "app": .string("Notas"), "menu_path": .array(path.map(JSONValue.string))])
         }
         #expect(pdf.performed.count == 3)
 
@@ -538,7 +552,7 @@ struct UIActToolTests {
     @Test func pickMenuExplainsWhatWentWrong() async throws {
         let (rig, _, _) = menuRig()
         func attempt(_ path: [String]) async -> String {
-            await failure { try await act(rig, ["action": .string("pick_menu"), "menu_path": .array(path.map(JSONValue.string))]) }
+            await failure { try await act(rig, ["action": .string("pick_menu"), "app": .string("Notas"), "menu_path": .array(path.map(JSONValue.string))]) }
         }
         let unknownTop = await attempt(["Arquivos", "Novo"])
         #expect(unknownTop.contains("Não achei “Arquivos” na barra de menus") && unknownTop.contains("Opções: Arquivo, Editar"))
@@ -548,7 +562,7 @@ struct UIActToolTests {
         #expect(disabled.contains("desativado"))
         let noSubmenu = await attempt(["Arquivo", "Novo", "Algo"])
         #expect(noSubmenu.contains("não abre um submenu"))
-        let none = await failure { try await act(rig, ["action": .string("pick_menu")]) }
+        let none = await failure { try await act(rig, ["action": .string("pick_menu"), "app": .string("Notas")]) }
         #expect(none.contains("menu_path"))
     }
 
@@ -564,7 +578,7 @@ struct UIActToolTests {
         let text = try await act(rig, ["action": .string("show_menu"), "id": .string("m1")])
         #expect(text.contains("Abri o menu"))
         #expect(text.contains("Itens do menu:\n- Novo\n- Exportar… ▸\n- Imprimir… (desativado)"))
-        #expect(rig.system.activated == [100])
+        #expect(rig.system.activated == [])
     }
 
     // MARK: Danger
@@ -610,7 +624,7 @@ struct UIActToolTests {
         let outlook = AccessibilityApp(name: "Microsoft Outlook", bundleID: "com.microsoft.Outlook", pid: 7)
         let store = UISnapshotStore(directory: nil)
         store.save(UISnapshot(app: outlook, windowIndex: 1, windowTitle: "Caixa", entries: ["w1.5": .init(rawRole: "AXButton", label: "Excluir", secure: false)]), bot: nil)
-        let tool = UIActTool(system: FakeAccessibility(), store: store, settle: .zero, activation: .zero)
+        let tool = UIActTool(system: FakeAccessibility(), store: store, settle: .none, sessions: patientSessions)
         let call: JSONValue = .object(["action": .string("press"), "id": .string("w1.5"), "app": .string("Outlook")])
         #expect(tool.danger(call) != nil)
         #expect(tool.summary(call).title == "Clicando em “Excluir”")
@@ -628,7 +642,7 @@ struct UIActToolTests {
         store.save(reading(notes, "Excluir", at: 10), bot: UUID())
         store.save(reading(notes, "Salvar", at: 20), bot: UUID())
         store.save(reading(safari, "Salvar", at: 30), bot: UUID())
-        let tool = UIActTool(system: FakeAccessibility(), store: store, settle: .zero, activation: .zero)
+        let tool = UIActTool(system: FakeAccessibility(), store: store, settle: .none, sessions: patientSessions)
         #expect(tool.danger(.object(["action": .string("press"), "id": .string("w1.1"), "app": .string("Notas")])) != nil)
         #expect(tool.danger(.object(["action": .string("press"), "id": .string("w1.1")])) != nil, "no app named: every reading counts")
         #expect(tool.danger(.object(["action": .string("press"), "id": .string("w1.1"), "app": .string("Safari")])) == nil)
@@ -836,7 +850,8 @@ struct UIToolWiringTests {
         }
         let act = try #require(ToolBox.macTools.first { $0.spec.name == "ui_act" })
         let actions = act.spec.parameters["properties"]?["action"]?["enum"]?.array?.compactMap(\.string)
-        #expect(actions == ["press", "focus", "set_value", "increment", "decrement", "show_menu", "pick_menu"])
+        #expect(actions == ["press", "focus", "set_value", "type", "key", "select", "scroll", "click", "increment", "decrement",
+                            "show_menu", "pick_menu"])
         #expect(act.spec.parameters["required"]?.array?.compactMap(\.string) == ["action"])
     }
 

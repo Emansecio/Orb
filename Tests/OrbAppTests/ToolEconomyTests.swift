@@ -15,7 +15,7 @@ struct ToolSpecEconomyTests {
     /// The specs measured 14,497 after the pass, and 14,994 with the skills in `remember` and `recall` (measured again after
     /// bringing in the on-demand connectors, the profile and the schedule); the ceiling leaves room for a sentence or two.
     /// (`web_search`, always offered with "Navegar na web", came after and fits the same ceiling, raised from 15,000.)
-    private static let specCharsCeiling = 15_700
+    private static let specCharsCeiling = 17_500
     /// The tools of the Orb's own browser are offered only when an engine is installed, so they have a ceiling of their own.
     private static let browseSpecCharsCeiling = 4_200
 

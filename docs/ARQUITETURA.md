@@ -93,9 +93,30 @@ Tudo em `Sources/Orb/`.
 |---|---|---|
 | Terminal e arquivos | `run_command` (`background: true`; saída acima de 20 KB é salva inteira em `saidas/<orb>/comando-….txt`), `job_output`, `job_list`, `job_stop`, `read_file` (texto, PDF, Word/RTF/ODT, Excel .xlsx, PowerPoint .pptx, imagens com OCR), `write_file`, `edit_file`, `list_directory`, `search_files` (Spotlight), `grep` (um arquivo informado em `path` vai até 200 MB, em streaming), `glob` (aceita padrão absoluto), `trash` (também com Controlar apps); o ambiente vem do shell `-lic` da usuária (5 s) e, se ele estoura, o perfil de login responde na hora e a nova tentativa roda em segundo plano (15 s), com espera que dobra de 30 s até 5 min | `ShellTool`, `BackgroundJobs`, `ProcessRunner`, `ShellEnvironment`, `FileTools`, `SearchTools`, `TextFile`, `DocumentReader`, `OfficeReader`, `ReadOnlyCommand` |
 | Navegar na web | `web_fetch` (páginas, PDF, JSON, imagens; `offset`/`find` para páginas longas; `save_to`), `web_search` (DuckDuckGo, Google, TinyFish), e com um motor instalado `browse_open/snapshot/read/screenshot/click/fill/select/press/scroll/back/tabs/show/close` | `WebTools`, `HTMLText`, `WebSearchTool`, `BrowseTools`, `Engine/Browser/` |
-| Controlar apps do Mac | `applescript`, `shortcuts_list/run`, `clipboard_read/write`, `screenshot` (com OCR), `apps_list`, `processes`, `app_quit`, `trash`, `browser_tab`, `ui_read`, `ui_act` | `MacTools`, `MacAppTools`, `BrowserTools`, `ScreenshotTool`, `AccessibilityTools`/`Elements`/`Outline`, `AppleScriptSupport` |
+| Controlar apps do Mac | `applescript`, `shortcuts_list/run`, `clipboard_read/write`, `screenshot` (com OCR), `apps_list`, `processes`, `app_quit`, `trash`, `browser_tab`, `ui_read`, `ui_act` | `MacTools`, `MacAppTools`, `BrowserTools`, `ScreenshotTool`, `AccessibilityTools`/`Elements`/`Outline`/`Session`/`Events`/`Contracts`, `AppleScriptSupport` |
 | Sempre | `open`, `notify`, `remember`, `recall`, `schedule` | `MacTools`, `MacAppTools`, `ScheduleTool`, `ScheduleMailbox` |
 | Conectores | `connector_tools`, `connector_call` (fora de `ToolBox.all`, montadas por turno) | `ConnectorGateway`, `MCPTool` |
+
+**Apps em segundo plano (`ui_read`/`ui_act`, desenho em `docs/USO-DO-COMPUTADOR.md`).** Nada rouba o foco, move o cursor ou
+digita onde a usuária digita. Toda chamada ao AX é IPC que bloqueia: roda na fila serial do app (`actor AXAppSession`, com
+`unownedExecutor` numa `DispatchSerialQueue`, em `AXSessions.shared`, `AccessibilitySession.swift`), no máximo 4 apps ao mesmo
+tempo, com prazo (leitura 4 s, 8 s com `query`; ação 2 s; `wait` = timeout + 0,5 s). Estourado o prazo, a ferramenta responde
+"não respondeu" e o app fica ocupado até a chamada presa voltar (novas falham na hora). O timeout de mensagem do AX é 1 s,
+posto uma vez por processo no elemento system-wide (o do app vale só para ele) e na raiz; o primeiro `.cannotComplete` encerra a
+leitura (`read(_:) -> AXRead`, corte `.hung`). Em debug, o elemento vivo para com `dispatchPrecondition` se chamado na main.
+A leitura pede num lote só papel, título, filhos, posição e tamanho (≤ 2 IPC por elemento, +1 para valor), corta em 400 linhas
+ou 14.000 caracteres e lê só 3 níveis dentro de `AXWebArea` sem `query`; o `UISnapshot` ganha `generation`, frames relativos à
+janela e `actionable`, e herda marcas e geometria do screenshot da mesma janela (< 60 s). `UILiveElements` guarda as
+referências AX vivas de cada leitura (por Orb e app, 6 leituras, 4.000 referências, 10 min): a ação confere o elemento num lote
+(papel, nome, processo, janela) em vez de refazer o caminho. `ui_act` sobe uma escada: AX (N0), evento ao processo do app
+(N1, `system.input`), e a tela real só com `takeover` e confirmação (N2, `system.screen`); sem N1 o erro leva o marcador
+`[precisa_assumir_tela]`. Sem `app`, age no app da leitura mais nova do Orb, nunca no da frente; recusa digitar com o app em
+uso pela pessoa (tecla ou clique há < 3 s) ou com o foco do app fora do campo, refaz o juízo de perigo com o rótulo vivo, e
+devolve com `AXFrontmost` o app da frente se o alvo se ativar sozinho. As notificações vêm do `AXEventHub`
+(`AccessibilityEvents.swift`): uma thread "Orb.AXEvents" com run loop próprio, um `AXObserver` por app com contagem de
+assinaturas, desmontagem pela thread do hub (`CFRunLoopPerformBlock`), fim do processo por `DispatchSource`, app ocioso sai em
+30 s, até 16 apps. Depois de agir, `UISettle` espera a primeira notificação (≤ 400 ms) e 60 ms de silêncio (150 ms sem
+notificações); `wait` relê a cada notificação ou a cada 250 ms.
 
 **Codificação dos arquivos de texto.** `TextFile.decode` tenta UTF-8, depois BOM (UTF-16/32), UTF-16 sem marca e por fim Windows-1252
 (Latin-1 se houver byte indefinido). Um arquivo UTF-8 com poucos bytes soltos (um caractere cortado no fim de um log) continua

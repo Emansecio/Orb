@@ -164,6 +164,12 @@ struct UIElementInfo: Equatable {
 
 enum UIOutlineCut: String, Hashable, Sendable {
     case lines, depth, visited, time
+    /// The app stopped answering in the middle: the walk ended at the first call it failed.
+    case hung
+    /// A web page was read only near its top (the browser tools read pages better).
+    case web
+    /// The text reached its character cap.
+    case characters
 }
 
 struct UIOutlineLimits: Sendable {
@@ -171,32 +177,46 @@ struct UIOutlineLimits: Sendable {
     var maxDepth = 12
     /// Elements examined at most; every one costs a round trip to the app.
     var maxVisited = 3000
-    /// Seconds the walk may take before it stops and says so.
-    var seconds: Double = 20
+    /// Seconds the walk may take before it stops and says so; nil leaves it to the caller's deadline (4 s here).
+    var seconds: Double?
+    /// Characters of outline at most (`ToolOutputBudget.fit`).
+    var maxCharacters = 14_000
+    /// Levels read under a web area when there is no query: a page has thousands of elements.
+    var webDepth = 3
 }
 
 struct UIOutline {
     var lines: [String] = []
     var entries: [String: UISnapshot.Entry] = [:]
+    /// The live element behind each listed id.
+    var elements: [String: any AccessibilityElement] = [:]
     /// Elements that would have been listed without the line cap.
     var total = 0
     var matched = 0
     var cuts: Set<UIOutlineCut> = []
     var cancelled = false
+    /// Why the walk stopped early because of the app (hung, gone, permission off); nil when it did not.
+    var failure: AXFailure?
+    /// The window's frame on screen, when it said.
+    var windowFrame: CGRect?
 }
 
 enum UIOutlineBuilder {
     private final class Node {
         let id: String
         let info: UIElementInfo
+        let element: any AccessibilityElement
+        var frame: CGRect?
+        var actionable = false
         var children: [Node] = []
         let matches: Bool
         /// It matches the query, or something under it does.
         var keep: Bool
 
-        init(id: String, info: UIElementInfo, matches: Bool) {
+        init(id: String, info: UIElementInfo, element: any AccessibilityElement, matches: Bool) {
             self.id = id
             self.info = info
+            self.element = element
             self.matches = matches
             keep = matches
         }
@@ -207,50 +227,103 @@ enum UIOutlineBuilder {
         var cuts: Set<UIOutlineCut> = []
         let started = Date()
         var cancelled = false
+        var failure: AXFailure?
+        /// The window's top-left corner, which entry frames are relative to.
+        var origin: CGPoint?
+        var windowFrame: CGRect?
     }
+
+    /// Read in one round trip per element: what the line shows, the children and the frame. AXValue is not among them
+    /// (a password field's value must never be requested).
+    static let readNames = UIElementInfo.attributeNames + ["AXChildren", "AXPosition"]
+
+    /// Actions a click can trigger.
+    static let clickActions: Set<String> = ["AXPress", "AXConfirm", "AXPick", "AXOpen"]
 
     /// The outline of one window. Elements get ids `<prefix>.<position among its parent's children>`, counting every
     /// child (also the ones left out), so an id does not move when something beside it appears or disappears.
     static func outline(of window: any AccessibilityElement, prefix: String, query: String?, limits: UIOutlineLimits) -> UIOutline {
         let wanted = query.map(UIText.fold).flatMap { $0.isEmpty ? nil : $0 }
         var walk = Walk()
-        let roots = visit(window, id: prefix, depth: 0, wanted: wanted, limits: limits, walk: &walk)
-        var outline = UIOutline(cuts: walk.cuts, cancelled: walk.cancelled)
+        let roots = visit(window, id: prefix, depth: 0, webDepth: nil, wanted: wanted, limits: limits, walk: &walk)
+        var outline = UIOutline(cuts: walk.cuts, cancelled: walk.cancelled, failure: walk.failure, windowFrame: walk.windowFrame)
         let listed = roots.filter(\.keep)
         outline.total = listed.reduce(0) { $0 + count($1) }
         outline.matched = wanted == nil ? 0 : listed.reduce(0) { $0 + countMatches($1) }
-        for node in listed { emit(node, depth: 0, limits: limits, into: &outline) }
-        if outline.total > outline.lines.count { outline.cuts.insert(.lines) }
+        var ordered: [(node: Node, depth: Int)] = []
+        for node in listed { collect(node, depth: 0, limits: limits, into: &ordered) }
+        if outline.total > ordered.count { outline.cuts.insert(.lines) }
+        let lines = ordered.map { String(repeating: "  ", count: $0.depth) + $0.node.id + " " + $0.node.info.line }
+        let fitted = ToolOutputBudget.fit(lines, budget: limits.maxCharacters)
+        if fitted.omitted > 0 { outline.cuts.insert(.characters) }
+        outline.lines = fitted.kept
+        for (node, _) in ordered.prefix(fitted.kept.count) {
+            outline.entries[node.id] = UISnapshot.Entry(rawRole: node.info.rawRole, label: node.info.identity, secure: node.info.secure,
+                                                        frame: node.frame, actionable: node.actionable)
+            outline.elements[node.id] = node.element
+        }
         return outline
     }
 
-    private static func visit(_ element: any AccessibilityElement, id: String, depth: Int, wanted: String?,
+    private static func visit(_ element: any AccessibilityElement, id: String, depth: Int, webDepth: Int?, wanted: String?,
                               limits: UIOutlineLimits, walk: inout Walk) -> [Node] {
-        if Task.isCancelled { walk.cancelled = true; return [] }
+        if walk.failure != nil { return [] }
+        if AXWork.isCancelled { walk.cancelled = true; return [] }
         if walk.visited >= limits.maxVisited { walk.cuts.insert(.visited); return [] }
-        if Date().timeIntervalSince(walk.started) >= limits.seconds { walk.cuts.insert(.time); return [] }
+        if Date().timeIntervalSince(walk.started) >= limits.seconds ?? 4 { walk.cuts.insert(.time); return [] }
         walk.visited += 1
 
-        var info = UIElementInfo(attributes: element.attributes(UIElementInfo.attributeNames))
+        let attributes: [String: AXAttributeValue]
+        switch element.read(readNames) {
+        case .values(let values):
+            attributes = values
+        case .failed(.invalidElement) where depth > 0:
+            return [] // gone while the walk went by
+        case .failed(let failure):
+            // The first call the app fails ends the walk: a hung app would fail every other one too, a second at a time.
+            walk.failure = failure
+            if failure == .cannotComplete { walk.cuts.insert(.hung) }
+            return []
+        }
+        var info = UIElementInfo(attributes: attributes)
+        var frame: CGRect?
+        if case .point(let origin)? = attributes["AXPosition"], let size = info.size {
+            if depth == 0 {
+                walk.origin = origin
+                walk.windowFrame = CGRect(origin: origin, size: size)
+            }
+            if let windowOrigin = walk.origin {
+                frame = CGRect(x: origin.x - windowOrigin.x, y: origin.y - windowOrigin.y, width: size.width, height: size.height)
+            }
+        }
         if info.isInvisible { return [] }
         info.value = UIElementInfo.readValue(of: element, info: info)
 
         var children: [Node] = []
-        let list = element.elements("AXChildren") ?? []
-        if depth < limits.maxDepth {
+        let list = attributes["AXChildren"]?.elements ?? []
+        // Under a web area without a query only the first levels are read; the browser tools are for pages.
+        let childWebDepth = webDepth.map { $0 + 1 } ?? (info.rawRole == "AXWebArea" && wanted == nil ? 1 : nil)
+        if depth >= limits.maxDepth {
+            if !list.isEmpty { walk.cuts.insert(.depth) }
+        } else if let childWebDepth, childWebDepth > limits.webDepth {
+            if !list.isEmpty { walk.cuts.insert(.web) }
+        } else {
             for (index, child) in list.enumerated() {
-                children += visit(child, id: "\(id).\(index + 1)", depth: depth + 1, wanted: wanted, limits: limits, walk: &walk)
+                children += visit(child, id: "\(id).\(index + 1)", depth: depth + 1, webDepth: childWebDepth, wanted: wanted,
+                                  limits: limits, walk: &walk)
             }
-        } else if !list.isEmpty {
-            walk.cuts.insert(.depth)
         }
 
         if depth > 0, !info.hasText, UIRole.layoutOnly.contains(info.role) || UIRole.emptyIsNoise.contains(info.role) {
             return children
         }
-        let node = Node(id: id, info: info, matches: wanted.map { info.searchText.contains($0) } ?? true)
+        let node = Node(id: id, info: info, element: element, matches: wanted.map { info.searchText.contains($0) } ?? true)
+        node.frame = frame
         node.children = children
         node.keep = node.matches || children.contains(where: \.keep)
+        if node.keep, depth > 0, walk.failure == nil {
+            node.actionable = !clickActions.isDisjoint(with: element.actionNames())
+        }
         return [node]
     }
 
@@ -259,26 +332,29 @@ enum UIOutlineBuilder {
         (node.matches ? 1 : 0) + node.children.filter(\.keep).reduce(0) { $0 + countMatches($1) }
     }
 
-    private static func emit(_ node: Node, depth: Int, limits: UIOutlineLimits, into outline: inout UIOutline) {
-        guard outline.lines.count < limits.maxLines else { return }
-        outline.lines.append(String(repeating: "  ", count: depth) + node.id + " " + node.info.line)
-        outline.entries[node.id] = UISnapshot.Entry(rawRole: node.info.rawRole, label: node.info.identity, secure: node.info.secure)
-        for child in node.children where child.keep { emit(child, depth: depth + 1, limits: limits, into: &outline) }
+    private static func collect(_ node: Node, depth: Int, limits: UIOutlineLimits, into ordered: inout [(node: Node, depth: Int)]) {
+        guard ordered.count < limits.maxLines else { return }
+        ordered.append((node, depth))
+        for child in node.children where child.keep { collect(child, depth: depth + 1, limits: limits, into: &ordered) }
     }
 
     /// The menu bar's top-level menus, ids `m1`, `m2`…
-    static func menuBar(of root: any AccessibilityElement) -> (lines: [String], entries: [String: UISnapshot.Entry])? {
+    static func menuBar(of root: any AccessibilityElement)
+        -> (lines: [String], entries: [String: UISnapshot.Entry], elements: [String: any AccessibilityElement])? {
         guard let bar = root.element("AXMenuBar"), let items = bar.elements("AXChildren"), !items.isEmpty else { return nil }
         var lines: [String] = []
         var entries: [String: UISnapshot.Entry] = [:]
+        var elements: [String: any AccessibilityElement] = [:]
         for (index, item) in items.enumerated() {
-            let info = UIElementInfo(attributes: item.attributes(UIElementInfo.attributeNames))
+            guard let attributes = item.read(UIElementInfo.attributeNames).attributes else { continue }
+            let info = UIElementInfo(attributes: attributes)
             guard !info.isInvisible else { continue }
             let id = "m\(index + 1)"
             lines.append(id + " " + info.line)
-            entries[id] = UISnapshot.Entry(rawRole: info.rawRole, label: info.identity, secure: false)
+            entries[id] = UISnapshot.Entry(rawRole: info.rawRole, label: info.identity, secure: false, actionable: true)
+            elements[id] = item
         }
-        return lines.isEmpty ? nil : (lines, entries)
+        return lines.isEmpty ? nil : (lines, entries, elements)
     }
 }
 
@@ -460,6 +536,15 @@ final class UISnapshotStore: @unchecked Sendable {
         return fresh(at: file(for: app, in: directory))
     }
 
+    /// The newest reading this Orb made in this process, of any app: what `ui_act` acts on when no app is named (never
+    /// the app in front, which is the one the user is using).
+    func latest(bot: UUID?) -> UISnapshot? {
+        lock.withLock {
+            snapshots.filter { $0.key.bot == bot && now().timeIntervalSince($0.value.takenAt) <= maxAge }
+                .map(\.value).max { $0.takenAt < $1.takenAt }
+        }
+    }
+
     /// Every snapshot that may be what a call is about, for judging a call before it runs: those of the named app (a
     /// name or bundle identifier), or all of them when no app is named, newest first.
     func candidates(matching app: String?) -> [UISnapshot] {
@@ -479,5 +564,33 @@ final class UISnapshotStore: @unchecked Sendable {
     private func file(for app: AccessibilityApp, in directory: URL) -> URL {
         let safe = UIText.fold(app.bundleID ?? app.name).map { $0.isLetter || $0.isNumber || $0 == "." ? String($0) : "_" }.joined()
         return directory.appending(path: "ax-\(safe).json")
+    }
+}
+
+// MARK: - Merging readings
+
+extension UISnapshot {
+    /// Whether both readings are of the same window of the same running app.
+    func isSameWindow(as other: UISnapshot) -> Bool {
+        app.pid == other.app.pid && windowIndex != nil && windowIndex == other.windowIndex && windowTitle == other.windowTitle
+    }
+
+    /// This reading with what `previous` knew about the same window, when it is less than `within` seconds older: the
+    /// marks and geometry of the screenshot taken of it and, when this reading is `partial` (a query lists only part of
+    /// the window), the ids it listed and this one did not. A mark is dropped when its id now names something else. Ids
+    /// name positions, and every action checks the live element against its entry before touching it.
+    func carryingOver(from previous: UISnapshot?, partial: Bool, within: TimeInterval = 60) -> UISnapshot {
+        guard let previous, isSameWindow(as: previous), takenAt.timeIntervalSince(previous.takenAt) < within else { return self }
+        var merged = self
+        if partial { merged.entries = previous.entries.merging(entries) { _, new in new } }
+        if marks.isEmpty, shot == nil {
+            let known = merged.entries
+            merged.marks = previous.marks.filter { _, id in
+                guard let old = previous.entries[id], let now = known[id] else { return false }
+                return now.rawRole == old.rawRole && now.label == old.label
+            }
+            merged.shot = previous.shot
+        }
+        return merged
     }
 }
