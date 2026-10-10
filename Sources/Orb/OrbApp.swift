@@ -173,9 +173,13 @@ struct AppCommands: Commands {
             Button(CommandName.conversations) { showMain(); model.showConversations() }
                 .keyboardShortcut(AppShortcut.conversations)
                 .disabled(model.commandBotID == nil || sheetOpen)
-            Button(CommandName.stop) { model.stopCurrent() }
+            // MARK: MultiOrb (WP6): with a group on show, ⌘. stops the group's request.
+            Button(CommandName.stop) { model.stopSelection() }
                 .keyboardShortcut(AppShortcut.stop)
-                .disabled(!model.canStopCurrent)
+                .disabled(!model.canStopSelection)
+            Button(CommandName.newGroup) { showMain(); model.showNewGroup = true }
+                .keyboardShortcut(AppShortcut.newGroup)
+                .disabled(sheetOpen || model.botIDs.count < 2)
             Button(CommandName.openFolder) {
                 if let id = model.commandBotID { model.openFolder(of: id) }
             }

@@ -9,6 +9,8 @@ struct PaletteEntry: Identifiable, Equatable {
         case page(SidebarItem)
         case reopen(conversation: UUID, bot: UUID)
         case newBot, importOrb, newConversation, focusComposer, findInConversation, showConversations, openFolder, toggleInspector, shortcuts
+        /// A group's chat (its id), and "Novo grupo…".
+        case group(UUID), newGroup
     }
 
     /// The order of the groups when nothing was typed.
@@ -80,7 +82,7 @@ enum PaletteSearch {
 enum PaletteBuilder {
     /// Everything the palette can go to. `current` is the open Orb: the actions and the earlier conversations are its.
     static func entries(orbs: [BotLook], current: UUID?, routines: [Routine], skills: [Skill],
-                        archive: [ConversationSummary], now: Date = .now) -> [PaletteEntry] {
+                        archive: [ConversationSummary], groups: [OrbGroup] = [], now: Date = .now) -> [PaletteEntry] {
         var list: [PaletteEntry] = []
         for (index, look) in orbs.enumerated() {
             list.append(PaletteEntry(id: "bot-\(look.id)", title: look.name, subtitle: look.role.isEmpty ? nil : look.role,
@@ -106,6 +108,10 @@ enum PaletteBuilder {
         }
         list.append(PaletteEntry(id: "new-bot", title: CommandName.newBot, subtitle: nil, symbol: "plus", section: .actions,
                                  shortcut: ShortcutCatalog.keys(for: .newBot), action: .newBot, keywords: "criar adicionar"))
+        // MARK: MultiOrb (WP6)
+        list.append(PaletteEntry(id: "new-group", title: CommandName.newGroup, subtitle: "Orbs que trabalham juntos", symbol: "person.3",
+                                 section: .actions, shortcut: ShortcutCatalog.keys(for: .newGroup), action: .newGroup,
+                                 keywords: "grupo equipe orquestrador juntos"))
         list.append(PaletteEntry(id: "import-orb", title: CommandName.importOrb, subtitle: "Trazer o que outro assistente sabe", symbol: "square.and.arrow.down",
                                  section: .actions, shortcut: nil, action: .importOrb, keywords: "chatgpt gemini hermes openclaw memória migrar"))
         list.append(PaletteEntry(id: "shortcuts", title: CommandName.shortcuts, subtitle: nil, symbol: "keyboard", section: .actions,
@@ -120,6 +126,12 @@ enum PaletteBuilder {
             let owner = orbs.first { $0.id == routine.botID }?.name
             list.append(PaletteEntry(id: "routine-\(routine.id)", title: "Rotina: \(routine.name)", subtitle: owner, symbol: "clock",
                                      section: .workspace, action: .page(.routines)))
+        }
+        for group in groups {
+            list.append(PaletteEntry(id: "group-\(group.id)", title: "Grupo: \(group.name)",
+                                     subtitle: group.memberIDs.count == 1 ? "1 Orb" : "\(group.memberIDs.count) Orbs",
+                                     symbol: "person.3.fill", section: .workspace, action: .group(group.id),
+                                     keywords: "grupo equipe orquestrador"))
         }
         for skill in skills where skill.isEnabled {
             list.append(PaletteEntry(id: "skill-\(skill.id)", title: "Skill: \(skill.name)", subtitle: skill.summary.isEmpty ? "/\(skill.slug)" : skill.summary,
@@ -252,7 +264,7 @@ struct CommandPalette: View {
     /// Built once when it opens (and again when the earlier conversations arrive), not on each keystroke.
     private func build(archive: [ConversationSummary]) {
         entries = PaletteBuilder.entries(orbs: model.botIDs.map { model.live($0).look }, current: model.commandBotID,
-                                         routines: model.routines, skills: model.skills, archive: archive)
+                                         routines: model.routines, skills: model.skills, archive: archive, groups: model.groups)
     }
 
     private func load() async {
@@ -281,6 +293,8 @@ struct CommandPalette: View {
             model.selection = .bot(bot)
             Task { await model.reopenConversation(conversation, of: bot) }
         case .newBot: model.showNewBot = true
+        case .group(let id): model.selection = .group(id)
+        case .newGroup: model.showNewGroup = true
         case .importOrb: model.startNewOrbImporting()
         case .newConversation: if let id = model.commandBotID { model.selection = .bot(id); model.newConversation(id) }
         case .focusComposer: model.focusComposer()

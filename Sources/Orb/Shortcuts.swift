@@ -11,6 +11,7 @@ import SwiftUI
 /// What each command is called wherever it appears.
 enum CommandName {
     static let newBot = "Novo Orb…"
+    static let newGroup = "Novo grupo…"
     static let importOrb = "Importar de outro assistente…"
     static let goTo = "Ir para…"
     static let newConversation = "Nova conversa"
@@ -35,6 +36,8 @@ enum CommandName {
 enum AppShortcut {
     static let newBot = KeyboardShortcut("n")
     static let newConversation = KeyboardShortcut("n", modifiers: [.command, .shift])
+    /// ⌥⌘G: a new group of Orbs (sheet "Novo grupo").
+    static let newGroup = KeyboardShortcut("g", modifiers: [.command, .option])
     static let toggleInspector = KeyboardShortcut("b", modifiers: [.command, .option])
     static let goTo = KeyboardShortcut("k")
     static let writeMessage = KeyboardShortcut("l")
@@ -73,7 +76,7 @@ enum AppShortcut {
     static let contextual: [KeyboardShortcut] = [commandReturn, chooseModel, undoForget, find, findNext, findPrevious, settings]
 
     /// Every key above, for the tests that check that none is used twice.
-    static let all: [KeyboardShortcut] = [newBot, newConversation, toggleInspector, goTo, writeMessage, conversations, stop,
+    static let all: [KeyboardShortcut] = [newBot, newConversation, newGroup, toggleInspector, goTo, writeMessage, conversations, stop,
                                           openFolder, previousBot, nextBot, routines, connectors, skills]
         + (0..<9).map(bot(at:))
 }
@@ -104,7 +107,7 @@ extension KeyboardShortcut {
 
 /// A command a key answers to, so the places that show a key (the palette) ask the catalog for it by command.
 enum ShortcutCommand: String, CaseIterable, Sendable {
-    case newBot, goTo, toggleInspector, settings
+    case newBot, newGroup, goTo, toggleInspector, settings
     case writeMessage, newConversation, conversations, stop, openFolder, send, newLine, queueAfterTask, stopAndSend, chooseModel, cancelEdit
     case goToBot, previousBot, nextBot, routines, connectors, skills
     case allowApproval, denyApproval
@@ -137,6 +140,7 @@ enum ShortcutCatalog {
     static let groups: [ShortcutGroup] = [
         ShortcutGroup(title: "Geral", items: [
             ShortcutItem(.newBot, AppShortcut.newBot, CommandName.newBot),
+            ShortcutItem(.newGroup, AppShortcut.newGroup, CommandName.newGroup),
             ShortcutItem(.goTo, AppShortcut.goTo, "Ir para… (Orbs, conversas e ações)"),
             ShortcutItem(.toggleInspector, AppShortcut.toggleInspector, CommandName.toggleInspector),
             ShortcutItem(.settings, AppShortcut.settings, "Ajustes"),

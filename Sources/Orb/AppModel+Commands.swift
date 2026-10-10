@@ -75,7 +75,7 @@ extension AppModel {
     /// A sheet of the app is open: the commands that would open another one, or swap the screen behind it (and take
     /// the sheet's draft along), wait.
     var hasOpenSheet: Bool {
-        showNewBot || showCommandPalette || showShortcuts || deletingBotID != nil || openSheets > 0
+        showNewBot || showNewGroup || showCommandPalette || showShortcuts || deletingBotID != nil || openSheets > 0
     }
 
     /// Opens the Orb's chat (a command on the routines page, or on another Orb, still has to land somewhere) and
