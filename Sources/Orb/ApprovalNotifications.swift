@@ -10,6 +10,9 @@ enum ApprovalNotifications {
     static let category = "orb.approval"
     /// The same actions, but "Permitir" asks for the Mac to be unlocked: for destructive requests.
     static let dangerousCategory = "orb.approval.dangerous"
+    /// The Orb opened its browser for the person to finish something (`browse_show`): the same two actions, as "Pronto"
+    /// and "Cancelar".
+    static let handoffCategory = "orb.approval.handoff"
     static let allowAction = "orb.approval.allow"
     static let denyAction = "orb.approval.deny"
     static let botKey = "botID"
@@ -35,9 +38,13 @@ enum ApprovalNotifications {
         var userInfo: [String: String]
     }
 
+    /// The buttons of a hand-off banner.
+    static let handoffDoneTitle = "Pronto"
+    static let handoffCancelTitle = "Cancelar"
+
     static func payload(botName: String, botID: UUID, request: ApprovalRequest) -> Payload {
         Payload(identifier: request.id.uuidString, title: botName, body: body(for: request), threadID: botID.uuidString,
-                category: request.isDangerous ? dangerousCategory : category,
+                category: request.isHandoff ? handoffCategory : request.isDangerous ? dangerousCategory : category,
                 userInfo: [botKey: botID.uuidString, approvalKey: request.id.uuidString])
     }
 
@@ -86,13 +93,14 @@ enum ApprovalNotifications {
     // MARK: Notification center
 
     static func categories() -> Set<UNNotificationCategory> {
-        func make(_ identifier: String, requiresUnlock: Bool) -> UNNotificationCategory {
-            let allow = UNNotificationAction(identifier: allowAction, title: "Permitir",
+        func make(_ identifier: String, requiresUnlock: Bool, allowTitle: String = "Permitir", denyTitle: String = "Não permitir") -> UNNotificationCategory {
+            let allow = UNNotificationAction(identifier: allowAction, title: allowTitle,
                                              options: requiresUnlock ? [.authenticationRequired] : [])
-            let deny = UNNotificationAction(identifier: denyAction, title: "Não permitir", options: [])
+            let deny = UNNotificationAction(identifier: denyAction, title: denyTitle, options: [])
             return UNNotificationCategory(identifier: identifier, actions: [allow, deny], intentIdentifiers: [], options: [])
         }
-        return [make(category, requiresUnlock: false), make(dangerousCategory, requiresUnlock: true)]
+        return [make(category, requiresUnlock: false), make(dangerousCategory, requiresUnlock: true),
+                make(handoffCategory, requiresUnlock: false, allowTitle: handoffDoneTitle, denyTitle: handoffCancelTitle)]
     }
 
     static func content(for payload: Payload) -> UNMutableNotificationContent {
@@ -155,7 +163,7 @@ enum ApprovalNotifications {
     static func clearStale() {
         guard isAvailable else { return }
         UNUserNotificationCenter.current().getDeliveredNotifications { delivered in
-            let stale = delivered.filter { [category, dangerousCategory].contains($0.request.content.categoryIdentifier) }
+            let stale = delivered.filter { [category, dangerousCategory, handoffCategory].contains($0.request.content.categoryIdentifier) }
                 .map(\.request.identifier)
             if !stale.isEmpty { UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: stale) }
         }

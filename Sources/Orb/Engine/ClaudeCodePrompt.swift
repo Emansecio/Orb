@@ -180,6 +180,13 @@ enum ClaudeCodePrompt {
         accessibilityGranted == false ? system + "\n\n" + ToolBox.accessibilityUnavailableNote : system
     }
 
+    /// The system prompt, plus what the Orb is told about its own browser (the tools are the tools server's, so they carry its
+    /// prefix) and that they are to be preferred to Claude Code's WebFetch and WebSearch for pages with JavaScript and logins.
+    static func withBrowserNote(_ system: String, bot: Bot, availability: BrowserAvailability, status: BrowserEngineStatus?) -> String {
+        let section = BrowserPrompt.section(bot: bot, availability: availability, status: status, claudeCode: true)
+        return section.isEmpty ? system : system + "\n\n" + section
+    }
+
     /// The permissions section as the system prompt has it.
     static func standingPermissions(_ bot: Bot) -> String { PromptParts.permissions(bot, engine: .claudeCode) }
 }

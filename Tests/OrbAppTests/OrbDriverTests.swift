@@ -90,8 +90,11 @@ struct OrbDriverTests {
         _ = NSApplication.shared
         // No window is visible to a test run (no one looks at the screen): frames run regardless.
         OrbView.animateInactive = true
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: size, height: size), styleMask: [.titled], backing: .buffered, defer: false)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: size, height: size), styleMask: [.borderless], backing: .buffered, defer: false)
         window.contentView = content
+        // On screen for the driver, but never seen: no title bar, fully transparent, and clicks go through.
+        window.alphaValue = 0
+        window.ignoresMouseEvents = true
         window.orderFrontRegardless()
         return window
     }

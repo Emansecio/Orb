@@ -229,7 +229,9 @@ app: `Orb --tools-mcp <pasta da memória> [--mac] [--files] [--folder <pasta do 
 (`--memory-mcp` ainda é aceito; `--files` liga `trash`, a ferramenta de arquivos que não pede permissão do Mac). Ele oferece `remember` e `recall` sobre os mesmos arquivos (o SQLite em modo WAL deixa o
 app e o servidor usarem o índice juntos) e, com "Controlar apps do Mac", também as ferramentas do Mac (`open`,
 `applescript`, `shortcuts_*`, `clipboard_*`, `screenshot`, `notify`, `apps_list`, `processes`, `app_quit`, `trash`,
-`browser_tab`, e `ui_read`/`ui_act` se o app tem Acessibilidade). Para o Claude Code os nomes são
+`browser_tab`, e `ui_read`/`ui_act` se o app tem Acessibilidade) e, com "Navegar na web", `web_search` e, com o motor do Orb instalado, as `browse_*`
+(`--web` ou `--browser <motor>`, `--search <provedor>`, `--browser-profiles <pasta>`; a chave do TinyFish vai na variável `ORB_TINYFISH_KEY` do arquivo
+temporário 0600 do turno, e sem ela a busca cai no DuckDuckGo). Para o Claude Code os nomes são
 `mcp__orb_memoria__remember`, `mcp__orb_memoria__recall` e assim por diante. O processo não abre janela nem inicia o app.
 
 `recall` é liberada sem pedir; `remember` segue as permissões do Orb (identidade e preferências sempre perguntam). Com

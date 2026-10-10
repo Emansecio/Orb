@@ -718,7 +718,11 @@ actor AgentEngine {
                 out.yield(.status(summary.title))
             }
             let target = Self.writeTarget(tool.spec.name, arguments, request.context)
-            let result = try await tool.runWithImages(arguments, context: request.context)
+            var context = request.context
+            context.handoff = { [self] page in
+                await handoff(page: page, resuming: summary.title, request: request, out: out)
+            }
+            let result = try await tool.runWithImages(arguments, context: context)
             let files = (target.map { [ProducedFile(path: $0.url.path, created: !$0.existed)] } ?? [])
                 + result.images.map { ProducedFile(path: $0.path, created: true) }
             out.yield(.toolFinished(id: started.id, state: .done, output: Self.preview(result.text), files: files))
@@ -728,6 +732,17 @@ actor AgentEngine {
             out.yield(.toolFinished(id: started.id, state: .failed, output: message))
             return ToolOutcome("Error: \(message)", isError: true)
         }
+    }
+
+    /// The card of a tool that hands the browser to the person: it waits, like an approval, for "Pronto" or "Cancelar". True on
+    /// "Pronto". Parar answers it with a refusal (the turn is cancelled anyway).
+    private func handoff(page: String, resuming title: String, request: TurnRequest, out: AsyncStream<TurnEvent>.Continuation) async -> Bool {
+        let done = await gate.handoff(page: page, botName: request.bot.name, botID: request.bot.id) { card in
+            out.yield(.approval(card))
+            out.yield(.status("Esperando sua resposta"))
+        }
+        out.yield(.status(title))
+        return done
     }
 
     /// Where `write_file` or `edit_file` is about to write and whether a file was there already, to tell "novo" from "alterado".

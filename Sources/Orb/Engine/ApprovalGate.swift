@@ -48,6 +48,17 @@ extension ClaudeCodePolicy {
     static func userDenial(note: String?) -> String { ApprovalNote.append(note, to: userDenial) }
 }
 
+extension ApprovalGate {
+    /// The card `browse_show` opens once the window is up: `show` puts it in the conversation (and says the Orb is waiting),
+    /// and this waits for "Pronto" (true) or "Cancelar" and Parar (false). A change of permission mode never answers it.
+    func handoff(page: String, botName: String, botID: UUID, show: (ApprovalRequest) -> Void) async -> Bool {
+        let card = ApprovalRequest.handoff(botName: botName, page: page)
+        open(card.id, botID: botID, alwaysAsks: true, isHandoff: true)
+        show(card)
+        return await wait(for: card.id).decision != .deny
+    }
+}
+
 /// The open approval cards of every Orb, shared by both engines: a turn opens one, shows it and waits; the UI
 /// (or a change of permission mode) answers it. Waiting is safe against cancellation, and an answer that
 /// arrives before the engine starts waiting is kept.
@@ -56,6 +67,8 @@ actor ApprovalGate {
         var botID: UUID
         /// Still needs the user's eyes whatever the mode (destructive, or changes the Orb's instructions).
         var alwaysAsks: Bool
+        /// The Orb waits for the person to finish something in the browser (not a permission): no mode answers it.
+        var isHandoff = false
         var answer: ApprovalAnswer?
         var continuation: CheckedContinuation<ApprovalAnswer, Never>?
     }
@@ -63,8 +76,8 @@ actor ApprovalGate {
     private var entries: [UUID: Entry] = [:]
 
     /// Registers a card before it is shown, so an answer can never get ahead of the wait.
-    func open(_ approvalID: UUID, botID: UUID, alwaysAsks: Bool = false) {
-        entries[approvalID] = Entry(botID: botID, alwaysAsks: alwaysAsks)
+    func open(_ approvalID: UUID, botID: UUID, alwaysAsks: Bool = false, isHandoff: Bool = false) {
+        entries[approvalID] = Entry(botID: botID, alwaysAsks: alwaysAsks, isHandoff: isHandoff)
     }
 
     /// Suspends until the card is answered. A cancelled task (the user pressed Parar) leaves as a denial.
@@ -104,7 +117,7 @@ actor ApprovalGate {
         resolve(approvalID: approvalID, answer: ApprovalAnswer(decision: decision))
     }
 
-    /// Denies the Orb's open cards (the user stopped its turn).
+    /// Denies the Orb's open cards (the user stopped its turn), hand-offs included.
     func cancelApprovals(for botID: UUID) {
         for id in openIDs(for: botID) { resolve(approvalID: id, answer: .deny) }
     }
@@ -116,7 +129,8 @@ actor ApprovalGate {
     func applyModeChange(to mode: PermissionMode, for botID: UUID) -> [(approvalID: UUID, decision: ApprovalDecision)] {
         var answered: [(UUID, ApprovalDecision)] = []
         for id in openIDs(for: botID) {
-            guard let entry = entries[id] else { continue }
+            // A hand-off is not a permission: only the person answers it (or Parar, which cancels it).
+            guard let entry = entries[id], !entry.isHandoff else { continue }
             switch mode {
             case .bypass: answered.append((id, .once))
             case .auto where !entry.alwaysAsks: answered.append((id, .once))

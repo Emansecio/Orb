@@ -127,6 +127,10 @@ Detalhes que costumam surpreender:
   `browse_fill` **nunca digita em campo de senha ou de cartão**, em modo nenhum (nem em "Sem pedir permissão"): o campo é julgado
   pelo nome que o snapshot deu a ele (senha, password, contraseña, passwort, cartão, CVV…) e, quando o navegador sabe dizer, pelo
   `type`/`autocomplete` dele; a ferramenta responde que a pessoa deve digitar e que o Orb chame `browse_show`.
+  Depois de permitido, `browse_show` abre a janela e põe um segundo cartão, **Pronto / Cancelar** (`ApprovalRequest.isHandoff`): não é permissão, é a vez
+  da pessoa. Ele espera como qualquer cartão (Parar o cancela), **nenhuma troca de modo o responde** (nem "Sem pedir permissão") e não oferece "Sempre permitir".
+  No Claude Code as mesmas ferramentas são `mcp__orb_memoria__browse_*` e `mcp__orb_memoria__web_search`, julgadas pelas mesmas regras (a regra "Pesquisar na web"
+  cobre as duas pesquisas); o cartão de `browse_show` é aberto pelo app antes de liberar a chamada.
 - `web_fetch`, `open` e `remember` são `.sensitive` de propósito: são o caminho de **saída** de dados (ou o que fica no
   prompt de toda conversa). Um texto malicioso numa página não consegue ler um segredo e mandá-lo sem você aprovar.
 - `remember` com `tipo` `identidade` ou `preferencia` é `.instructs`. Com `fato` ou `procedimento` é `.sensitive`. Com `skill` é
@@ -183,6 +187,15 @@ Detalhes que costumam surpreender:
   que está ausente ou tem mais de 24 h.
 - `ui_act` tem perigo quando o rótulo do elemento (ou o item de menu) fala em excluir, enviar, comprar ou descartar, ou
   quando preenche um campo de senha. `app_quit` com `force` tem perigo ("encerra o app à força").
+- **Perigos novos do `ui_act` em segundo plano** (desenho em [USO-DO-COMPUTADOR.md](USO-DO-COMPUTADOR.md)): o perigo é recalculado na
+  execução, depois de resolver o elemento real, com o rótulo vivo (o que o cartão mostrou pode estar defasado): se agora é
+  perigoso e o cartão não avisou, a ação é recusada e o modelo é orientado a repetir por `id` ou `pick_menu`. Vale também para
+  Return/Enter em app de mensagem (envia), `cmd+delete` no Finder (apaga), `click` por coordenada, `key` e a primeira etapa
+  perigosa de `steps`. `type`, `key` e `set_value` em campo de senha têm perigo (o valor nunca é lido de volta). **Assumir a
+  tela** (`takeover`) tem perigo sempre: pergunta em "Perguntar antes" e "Automático" (o cartão lista as etapas), é recusado em "Só
+  leitura" e roda em "Sem pedir permissão" com o aviso na tela. Um takeover é global ao Mac (uma trava de arquivo em
+  `~/Library/Caches/<bundle id>/takeover.lock`: o app e o servidor do Claude Code são processos diferentes), dura no máximo 10 s,
+  se interrompe se o mouse real se mexer e sempre devolve o app da frente, a janela e o cursor.
 - A família `appInterface` (`ui_read`, `ui_act`) só pergunta pelo `ui_act`: uma liberação antiga de Atalhos ou da área de transferência (`macApps`) não passa a
   cobrir "clicar e preencher campos em qualquer app".
 
@@ -424,7 +437,7 @@ lista de `--help` mostra `manual`, que o próprio CLI converte em `default`).
 - O motivo que o CLI manda junto do pedido (`decision_reason`) vem em inglês e não aparece no cartão: vale o motivo do próprio
   Orb ou, sem ele, a frase "<Orb> precisa da sua permissão para continuar." quando o modelo ainda não escreveu nada. Os nomes
   das ferramentas próprias do CLI (`TodoWrite`, `Task`, `ExitPlanMode`, `Skill`…) também aparecem em português (`ClaudeCodeTools.summary`).
-- As ferramentas do próprio Orb (memória, agendamento e Mac), que o Claude Code vê como `mcp__orb_memoria__…`, passam pela mesma política
+- As ferramentas do próprio Orb (memória, agendamento, Mac e web), que o Claude Code vê como `mcp__orb_memoria__…`, passam pela mesma política
   que as gêmeas nativas: risco, perigo (`app_quit` forçado, `do shell script`) e família. As seguras rodam em todos os modos.
 - Uma negação aparece na linha da ferramenta em português ("Você negou esta ação." / "Bloqueado: o Orb está em modo Só
   leitura.").

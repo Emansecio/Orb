@@ -1833,8 +1833,22 @@ final class AppModel {
                 return
             }
             let environment = await ClaudeCode.shared.environment(for: installation)
+            // The Orb's web tools in the tools server: web_search with "Navegar na web", and the browse_* tools once the engine it
+            // chose is installed (as in the native engine). The app asks what is installed and reads the TinyFish key here: the
+            // server is another process and gets them in its flags and its (private, temporary) config.
+            let browserStatus = bot.capabilities.contains(.browser) && bot.browserEngine.drivesABrowser
+                ? await browserHub.status(for: bot.browserEngine) : nil
+            let browserAvailability = BrowserAvailability(capabilities: bot.capabilities, engine: bot.browserEngine, status: browserStatus)
+            let search = SearchKeys(vault: secretVault)
+            let tinyFishKey = browserAvailability != .off && bot.searchProvider == .tinyfish ? (try? await runDetached { search.tinyFish }) ?? nil : nil
+            var toolServers = servers
+            toolServers[0] = OrbToolsMCPServer.config(directory: bank.directory, mac: usesMac, files: bot.capabilities.contains(.terminal),
+                                                      folder: bot.workingURL, accessibilityGranted: accessibility,
+                                                      scheduleMailbox: scheduleMailbox.directory, orb: botID, browser: browserAvailability,
+                                                      engine: bot.browserEngine, searchProvider: bot.searchProvider,
+                                                      browserProfiles: browserHub.profilesDirectory, tinyFishKey: tinyFishKey)
             // The CLI cannot renew a login in the middle of a turn: it gets a token with time left.
-            let (servers, ended) = await connectorAuth.bearers(for: servers)
+            let (servers, ended) = await connectorAuth.bearers(for: toolServers)
             // A login that could not be renewed is told to the cards now, not only when an Orb with the native engine meets it.
             for (id, reason) in ended { await mcp.loginEnded(id, reason: reason) }
             // What the connectors mark destructive, from their catalogs: the CLI's own connections never reach the Orb. A
@@ -1842,13 +1856,17 @@ final class AppModel {
             let annotations = await connectorAnnotations(for: connectorIDs, cliNames: cliNames)
             renewOldCatalogs(of: connectorIDs)
             guard session.isCurrent(turn) else { return }
-            let claudeTurn = ClaudeCodeTurn(bot: bot, executable: installation.executable, model: model,
-                                            system: ClaudeCodePrompt.withAccessibilityNote(built.system, accessibilityGranted: accessibility),
+            let system = ClaudeCodePrompt.withBrowserNote(ClaudeCodePrompt.withAccessibilityNote(built.system, accessibilityGranted: accessibility),
+                                                          bot: bot, availability: browserAvailability, status: browserStatus)
+            var claudeTurn = ClaudeCodeTurn(bot: bot, executable: installation.executable, model: model,
+                                            system: system,
                                             prompt: prompt, images: pictures, requestItem: bubble, context: context, sessionID: sessionID, connectors: servers,
                                             environment: environment, destructiveConnectors: annotations.destructive,
                                             knownConnectorTools: annotations.known, connectorPrefixes: annotations.prefixes,
                                             turnGrants: turnGrants,
                                             permissions: permissionSource(for: bot))
+            claudeTurn.browser = BrowserAccess(hub: browserHub, engine: browserAvailability == .browser ? bot.browserEngine : .simple,
+                                               searchProvider: bot.searchProvider)
             // Recorded when the session answers (see `apply`): a turn that fails before that sent nothing.
             session.pendingMarks = built.marks
             await session.play(claudeEngine.run(claudeTurn), turn: turn)

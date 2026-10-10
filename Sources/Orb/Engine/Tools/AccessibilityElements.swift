@@ -215,6 +215,8 @@ struct LiveAccessibilitySystem: AccessibilitySystem {
         await MainActor.run { NSWorkspace.shared.frontmostApplication?.processIdentifier }
     }
 
+    var screen: any ScreenOwner { LiveScreenOwner(events: events) }
+
     func secondsSinceUserInput() -> TimeInterval {
         let kinds: [CGEventType] = [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]
         return kinds.map { CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: $0) }.min() ?? .infinity

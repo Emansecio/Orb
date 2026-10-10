@@ -292,6 +292,10 @@ struct BotInspector: View {
                     .textSwap(connectorsLine)
             }
         }
+        if capability == .browser && BrowserPickerCopy.showsPickers(bot.capabilities) {
+            BrowserPickerRows(botID: bot.id)
+                .transition(.quiet)
+        }
         if capability == .connectors && isOn {
             Button("Gerenciar conectores", systemImage: "arrow.up.right") { model.selection = .connectors }
                 .buttonStyle(.link)
