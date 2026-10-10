@@ -120,10 +120,14 @@ extension AppModel {
 
     /// ⌘.: stops the open Orb's answer.
     func stopCurrent() {
+        if case .group(let id) = selection, isGroupWorking(id) { stopGroup(id); return } // MultiOrb (WP5): the open group
         if let id = selectedBotID, isWorking(id) { stop(id) }
     }
 
-    var canStopCurrent: Bool { selectedBotID.map { isWorking($0) } ?? false }
+    var canStopCurrent: Bool {
+        if case .group(let id) = selection { return isGroupWorking(id) }
+        return selectedBotID.map { isWorking($0) } ?? false
+    }
 
     /// ⇧⌘O: the Orb's folder in the Finder.
     func openFolder(of botID: UUID) {

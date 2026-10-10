@@ -777,7 +777,7 @@ actor MemoryBank {
 /// Every Orb's memory bank, one folder per Orb under `memoria/` in the data folder.
 final class MemoryLibrary: Sendable {
     let root: URL
-    private let state = OSAllocatedUnfairLock(initialState: (banks: [UUID: MemoryBank](), closed: Set<UUID>(), isSealed: false))
+    let state = OSAllocatedUnfairLock(initialState: (banks: [UUID: MemoryBank](), closed: Set<UUID>(), isSealed: false))
 
     init(root: URL) { self.root = root }
 
@@ -807,7 +807,7 @@ final class MemoryLibrary: Sendable {
         }
     }
 
-    private func closeBank(_ orbID: UUID) {
+    func closeBank(_ orbID: UUID) {
         state.withLock { state in
             state.banks.removeValue(forKey: orbID)?.close()
             state.closed.insert(orbID)

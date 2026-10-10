@@ -273,7 +273,9 @@ extension BotSession {
     /// The model and source of the running turn, as the usage history files them.
     private var usageLabel: UsageLabel? {
         guard let model, let name = turnModel ?? model.bot(id).flatMap(model.modelRef(for:))?.text else { return nil }
-        return UsageLabel(model: name, source: routineID == nil ? .chat : .routine)
+        // MultiOrb (WP5): a turn of a member in a group is filed as the group's (the delegation runtime files its own by `sideKind`).
+        let source: UsageSource = model.groupHub.activeGroup(of: id) != nil ? .group : routineID == nil ? .chat : .routine
+        return UsageLabel(model: name, source: source)
     }
 
     private struct UsageLabel {

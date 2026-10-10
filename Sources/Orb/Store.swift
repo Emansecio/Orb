@@ -107,10 +107,16 @@ struct Store: Sendable {
         directory.appendingPathComponent("conversations/\(botID.uuidString).json")
     }
 
-    /// Whether `file` is where the chat of this Orb is saved, or the conversation of one of its routine runs.
+    /// The prefixes of the conversations an Orb keeps in its archive folder besides the earlier chats (a routine's run, a
+    /// request from another Orb, a turn in a group): not earlier conversations of the Orb, so no index lists them.
+    static let sideConversationPrefixes = ["routine-", "pedido-", GroupFiles.sidePrefix]
+
+    /// Whether `file` is where the chat of this Orb is saved, or the conversation of one of its side runs (a routine's, a
+    /// request's, a group's).
     func isConversationFile(_ file: URL, of botID: UUID) -> Bool {
         file == conversationURL(botID)
-            || (file.deletingLastPathComponent() == archiveFolder(botID) && file.lastPathComponent.hasPrefix("routine-"))
+            || (file.deletingLastPathComponent() == archiveFolder(botID)
+                && Self.sideConversationPrefixes.contains { file.lastPathComponent.hasPrefix($0) })
     }
 
     private func metaURL(_ botID: UUID) -> URL {
@@ -459,6 +465,81 @@ struct Store: Sendable {
     func readRoutineConversationAsync(routine routineID: UUID, for botID: UUID) async -> StoreRead<Conversation> {
         await withCheckedContinuation { continuation in
             Self.readQueue.async { continuation.resume(returning: readRoutineConversation(routine: routineID, for: botID)) }
+        }
+    }
+
+    // MARK: Groups
+
+    /// A group's thread: `conversations/_grupos/<groupID>.json` (only its items are used).
+    private func groupConversationURL(_ groupID: UUID) -> URL {
+        directory.appendingPathComponent("conversations/\(GroupFiles.threadFolder)/\(groupID.uuidString).json")
+    }
+
+    /// A member's conversation in a group: `conversations/<botID>/grupo-<groupID>.json`, kept until the group is deleted.
+    private func groupSideConversationURL(_ botID: UUID, _ groupID: UUID) -> URL {
+        archiveFolder(botID).appendingPathComponent("\(GroupFiles.sidePrefix)\(groupID.uuidString).json")
+    }
+
+    /// `then` (on the store's queue) says whether the file is as written: false when the write failed or was dropped.
+    func saveGroupConversation(_ conversation: Conversation, group groupID: UUID, then done: (@Sendable (Bool) -> Void)? = nil) {
+        let url = groupConversationURL(groupID)
+        enqueue(touching: [url], dropped: { done?(false) }) {
+            let result = writeConversation(conversation, to: url, cached: true)
+            done?(result != .failed)
+        }
+    }
+
+    /// A file that cannot be read is set aside and never written over (see `read`).
+    func readGroupConversation(group groupID: UUID) -> StoreRead<Conversation> {
+        let url = groupConversationURL(groupID)
+        return Self.gate.reading(url) {
+            read(Conversation.self, from: url, ifUnreadable: "a conversa do grupo começou vazia")
+        }
+    }
+
+    func readGroupConversationAsync(group groupID: UUID) async -> StoreRead<Conversation> {
+        await withCheckedContinuation { continuation in
+            Self.readQueue.async { continuation.resume(returning: readGroupConversation(group: groupID)) }
+        }
+    }
+
+    func deleteGroupConversation(group groupID: UUID) {
+        let url = groupConversationURL(groupID)
+        enqueue(touching: [url]) {
+            Self.gate.waitForReaders(of: url)
+            try? FileManager.default.removeItem(at: url)
+            encoders.remove(url)
+        }
+    }
+
+    func saveGroupSideConversation(_ conversation: Conversation, group groupID: UUID, for botID: UUID,
+                                   then done: (@Sendable (Bool) -> Void)? = nil) {
+        let url = groupSideConversationURL(botID, groupID)
+        enqueue(touching: [url], dropped: { done?(false) }) {
+            let result = writeConversation(conversation, to: url, cached: true)
+            done?(result != .failed)
+        }
+    }
+
+    func readGroupSideConversation(group groupID: UUID, for botID: UUID) -> StoreRead<Conversation> {
+        let url = groupSideConversationURL(botID, groupID)
+        return Self.gate.reading(url) {
+            read(Conversation.self, from: url, ifUnreadable: "a conversa do Orb no grupo começou vazia")
+        }
+    }
+
+    func readGroupSideConversationAsync(group groupID: UUID, for botID: UUID) async -> StoreRead<Conversation> {
+        await withCheckedContinuation { continuation in
+            Self.readQueue.async { continuation.resume(returning: readGroupSideConversation(group: groupID, for: botID)) }
+        }
+    }
+
+    func deleteGroupSideConversation(group groupID: UUID, for botID: UUID) {
+        let url = groupSideConversationURL(botID, groupID)
+        enqueue(touching: [url]) {
+            Self.gate.waitForReaders(of: url)
+            try? FileManager.default.removeItem(at: url)
+            encoders.remove(url)
         }
     }
 

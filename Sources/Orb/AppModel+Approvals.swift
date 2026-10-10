@@ -41,6 +41,7 @@ extension AppModel {
     /// What a tap on a banner opens: the Orb's chat, or, for a routine waiting for an answer, its conversation.
     func showApprovalOwner(_ botID: UUID) {
         guard bot(botID) != nil else { return }
+        if showGroupOfMember(botID) { return } // MultiOrb (WP5): a member waiting in a group's turn is answered in the group
         if routineWaitingForYou(botID) != nil { showRoutineRequest(of: botID) } else { selection = .bot(botID) }
     }
 
@@ -76,6 +77,9 @@ extension AppModel {
             decide(decision, approvalID: approvalID, botID: botID)
         case .open(let botID):
             if let botID { showApprovalOwner(botID) }
+            ApprovalNotifications.bringAppToFront()
+        case .openGroup(let groupID):
+            if group(groupID) != nil { selection = .group(groupID) }
             ApprovalNotifications.bringAppToFront()
         case .ignore:
             break

@@ -7,7 +7,7 @@ import os
 final class AppModel {
     // MARK: Persisted state
 
-    var bots: [Bot] { didSet { scheduleStateSave(); syncLives() } }
+    var bots: [Bot] { didSet { scheduleStateSave(); syncLives(); normalizeGroups() } }
     var routines: [Routine] { didSet { scheduleStateSave(); queueFollowsEdits(from: oldValue); syncActivities() } }
     var skills: [Skill] { didSet { scheduleStateSave() } }
     var connectors: [MCPServerConfig] { didSet { scheduleStateSave(); syncConnectors() } }
@@ -29,6 +29,10 @@ final class AppModel {
     @ObservationIgnored var groupSessions: [UUID: GroupSession] = [:]
     @ObservationIgnored var groupLives: [UUID: GroupLive] = [:]
     // MARK: end MultiOrb (WP0)
+    // MARK: MultiOrb (WP5)
+    /// The loop of the groups (`GroupHub`), over `delegation`; a test puts one over a fake delegation service here.
+    @ObservationIgnored lazy var groupHub: GroupHub = makeGroupHub()
+    // MARK: end MultiOrb (WP5)
     /// Each Orb's running machinery (see `BotSession`): its conversation in memory, its turn, its streamed reply.
     /// Conversations: at launch only the selected Orb's is read (off the main thread, `beginLoading`); the others are
     /// read when they are needed (`BotSession.isUnloaded`): when you switch to the Orb, or something has to change
@@ -150,6 +154,7 @@ final class AppModel {
                 setUnread(0, for: id)
                 if selection != oldValue { liveBot(id)?.glanced() } // its sidebar Orb glances toward the chat
             }
+            if case .group(let id) = selection { groupHub.markRead(id) } // MultiOrb (WP5): looking at the group reads it
         }
     }
 
@@ -373,6 +378,7 @@ final class AppModel {
         usageLog.adoptCallbacks(of: self.store) // it holds its own copy of the store, made before these were set
 
         syncLives()
+        normalizeGroups() // groups of Orbs that no longer exist (the state was edited, or an older build lost an Orb)
         for (id, count) in state.unread {
             if let id = UUID(uuidString: id) { live(id).setUnread(count) }
         }
@@ -407,6 +413,7 @@ final class AppModel {
                     self?.saveDraftsIfChanged()
                     self?.startModelRefresh() // apart: a provider that does not answer must not hold up the routines
                     await self?.unloadIdleConversations()
+                    self?.unloadIdleGroupSessions()
                     try? await Task.sleep(for: .seconds(30))
                 }
             }
@@ -458,7 +465,7 @@ final class AppModel {
         // The write already cleared the session's "unsaved" mark; memory holds the only copy, so quitting writes it again.
         // A run's conversation already finished is not the session's (the chat is back): `unsavedRoutineConversations` has it.
         if let file = notice.file, let session = sessions.values.first(where: { store.isConversationFile(file, of: $0.id) }),
-           session.conversation != nil, session.routineID != nil || !file.lastPathComponent.hasPrefix("routine-") {
+           session.conversation != nil, session.routineID != nil || !Store.sideConversationPrefixes.contains(where: { file.lastPathComponent.hasPrefix($0) }) {
             session.isDirty = true
         }
         guard !didReportSaveFailure else { return } // once: a full disk would otherwise repeat on every save
@@ -484,6 +491,8 @@ final class AppModel {
         if folder == "conversations", let id = UUID(uuidString: stem) {
             return bots.first { $0.id == id }.map { "a conversa de \($0.name)" }
         }
+        if folder == GroupFiles.threadFolder { return "a conversa de um grupo" }
+        if stem.hasPrefix(GroupFiles.sidePrefix) { return "a conversa de um Orb num grupo" }
         // Inside an Orb's folder of earlier conversations: `<conversationID>`, `routine-<routineID>` or `index`.
         guard let owner = UUID(uuidString: folder).flatMap({ id in bots.first { $0.id == id } }) else { return nil }
         if stem == "index" { return "a lista de conversas antigas de \(owner.name)" }
@@ -665,6 +674,7 @@ final class AppModel {
         if live.needsYou != was {
             refreshPresence()
             syncActivities()
+            groupHub.memberWaitChanged(botID) // MultiOrb (WP5): "Precisa de você" in the group's header
         }
     }
 
@@ -1085,6 +1095,7 @@ final class AppModel {
         } else {
             library.delete(botID)
         }
+        leaveGroups(botID, name: name) // MultiOrb (WP5): before the Orb is gone, so the groups can say who left
         bots.removeAll { $0.id == botID }
         session.close()
         writeIfChanged(nil, at: botID, in: \.archives)
@@ -1119,6 +1130,7 @@ final class AppModel {
         modelRefresh = nil
         queuedRoutines = []
         routines = [] // the end of a running routine finds nothing to record
+        for group in groups { groupHub.forget(group.id, writesEvent: false) } // a group's request goes with the rest
         var ending: [Task<Void, Never>] = loop.map { [$0] } ?? []
         if let reads = keyReads?.task { ending.append(Task { _ = await reads.value }) }
         ending += sessions.values.compactMap(\.turnTask)
@@ -1634,7 +1646,9 @@ final class AppModel {
         session.memoryRequest = intent.map { ($0, max(0, (session.conversation?.items.count ?? 1) - 1)) }
         // Your request is the approval: this turn saves to memory without asking (the Orb's saved settings don't change).
         let rememberTool = ref.provider == .claudeCode ? ClaudeCodeTools.memoryPrefix + "remember" : "remember"
-        let turnGrants = intent == nil ? [] : [PermissionRule(family: .memory)]
+        // MultiOrb (WP5): a member's turn in a group adds its section, the board's tools and their grants.
+        let groupTurn = groupTurnExtras(for: botID)
+        let turnGrants = (intent == nil ? [] : [PermissionRule(family: .memory)]) + (groupTurn?.grants ?? [])
 
         var prompt = typed.isEmpty && pictures.isEmpty ? Self.attachmentsOnlyPrompt : typed
         if let expansion = SystemPrompt.expandSkill(in: typed, skills: skills(for: botID)) {
@@ -1652,7 +1666,8 @@ final class AppModel {
             prompt += MemoryIntent.instruction(tool: rememberTool)
         }
         if ref.provider == .claudeCode {
-            runClaudeCode(bot, model: ref.model, prompt: prompt, images: pictures, message: typed, bubble: bubble, turnGrants: turnGrants)
+            runClaudeCode(bot, model: ref.model, prompt: prompt, images: pictures, message: typed, bubble: bubble, turnGrants: turnGrants,
+                          group: groupTurn)
             return true
         }
         let skills = self.skills(for: botID)
@@ -1709,7 +1724,9 @@ final class AppModel {
             var context = context
             context.browser = BrowserAccess(hub: browserHub, engine: browserAvailability == .browser ? bot.browserEngine : .simple,
                                             searchProvider: bot.searchProvider, searchKeys: SearchKeys(vault: secretVault))
-            var tools = ToolBox.offered(for: bot.capabilities, accessibilityGranted: accessibilityGranted, browser: browserAvailability)
+            context.groupMemory = groupTurn?.bank // MultiOrb (WP5)
+            var tools = ToolBox.offered(for: bot.capabilities, accessibilityGranted: accessibilityGranted, browser: browserAvailability,
+                                        multi: groupTurn?.offering ?? MultiOrbOffering())
             // The connectors' own tools do not travel with the request: the model lists and calls them through two fixed ones.
             if bot.capabilities.contains(.connectors), !allowedConnectors.isEmpty {
                 await connectorSync?.value // one added a moment ago is known to `mcp` before the model may name it
@@ -1722,6 +1739,7 @@ final class AppModel {
             var system = accessibilityGranted ? built.system : built.system + "\n\n" + ToolBox.accessibilityUnavailableNote
             let browserSection = BrowserPrompt.section(bot: bot, availability: browserAvailability, status: browserStatus)
             if !browserSection.isEmpty { system += "\n\n" + browserSection }
+            if let groupTurn { system += "\n\n" + groupTurn.system(claudeCode: false) } // MultiOrb (WP5)
             let request = TurnRequest(bot: bot, model: ref.model, system: system, history: history,
                                       prompt: TurnPreface.prepend(built.preface, to: prompt),
                                       client: client, tools: tools, context: context, budget: budget, ledger: ledger,
@@ -1804,7 +1822,8 @@ final class AppModel {
     }
 
     /// A turn run by the user's Claude Code, continuing the conversation's Claude Code session.
-    private func runClaudeCode(_ bot: Bot, model: String, prompt: String, images pictures: [ImageAttachment], message: String, bubble: UUID, turnGrants: [PermissionRule]) {
+    private func runClaudeCode(_ bot: Bot, model: String, prompt: String, images pictures: [ImageAttachment], message: String, bubble: UUID, turnGrants: [PermissionRule],
+                               group groupTurn: GroupTurnExtras? = nil) {
         let botID = bot.id
         let session = session(botID)
         let conversation = session.conversation ?? Conversation()
@@ -1825,7 +1844,7 @@ final class AppModel {
         scheduleMailbox.start()
         let servers = [OrbToolsMCPServer.config(directory: bank.directory, mac: usesMac, files: bot.capabilities.contains(.terminal),
                                                 folder: bot.workingURL, accessibilityGranted: accessibility,
-                                                scheduleMailbox: scheduleMailbox.directory, orb: botID)]
+                                                scheduleMailbox: scheduleMailbox.directory, orb: botID, groupMemory: groupTurn?.bankDirectory)]
             + connectors
         let connectorIDs = Set(connectors.map(\.id))
         let cliNames = ClaudeCodeTurn.mcpNames(servers) // what the CLI will call each server
@@ -1872,7 +1891,8 @@ final class AppModel {
                                                       folder: bot.workingURL, accessibilityGranted: accessibility,
                                                       scheduleMailbox: scheduleMailbox.directory, orb: botID, browser: browserAvailability,
                                                       engine: bot.browserEngine, searchProvider: bot.searchProvider,
-                                                      browserProfiles: browserHub.profilesDirectory, tinyFishKey: tinyFishKey)
+                                                      browserProfiles: browserHub.profilesDirectory, tinyFishKey: tinyFishKey,
+                                                      groupMemory: groupTurn?.bankDirectory)
             // The CLI cannot renew a login in the middle of a turn: it gets a token with time left.
             let (servers, ended) = await connectorAuth.bearers(for: toolServers)
             // A login that could not be renewed is told to the cards now, not only when an Orb with the native engine meets it.
@@ -1882,8 +1902,9 @@ final class AppModel {
             let annotations = await connectorAnnotations(for: connectorIDs, cliNames: cliNames)
             renewOldCatalogs(of: connectorIDs)
             guard session.isCurrent(turn) else { return }
-            let system = ClaudeCodePrompt.withBrowserNote(ClaudeCodePrompt.withAccessibilityNote(built.system, accessibilityGranted: accessibility),
+            var system = ClaudeCodePrompt.withBrowserNote(ClaudeCodePrompt.withAccessibilityNote(built.system, accessibilityGranted: accessibility),
                                                           bot: bot, availability: browserAvailability, status: browserStatus)
+            if let groupTurn { system += "\n\n" + groupTurn.system(claudeCode: true) } // MultiOrb (WP5)
             var claudeTurn = ClaudeCodeTurn(bot: bot, executable: installation.executable, model: model,
                                             system: system,
                                             prompt: prompt, images: pictures, requestItem: bubble, context: context, sessionID: sessionID, connectors: servers,
@@ -2345,6 +2366,7 @@ final class AppModel {
         store.save(state)
         saveDraftsIfChanged() // after the turns stopped for quitting gave their queued messages back
         for session in sessions.values { session.saveNow() }
+        saveGroupSessionsNow()
         for (routineID, unsaved) in unsavedRoutineConversations {
             unsavedRoutineConversations[routineID] = nil
             saveRoutineConversation(unsaved.conversation, routine: routineID, for: unsaved.botID)
