@@ -267,7 +267,7 @@ struct BrowseToolTests {
     @Test func aMissingInstallIsToldInsteadOfStartingAnything() async {
         let missing = FakeBrowserSetup(ready: false)
         let text = await message(BrowseOpenTool(), ["url": .string("https://a.test/")], context: missing.context())
-        #expect(text.contains("agent-browser install"))
+        #expect(text.contains("Ajustes") && text.contains("Chrome"))
         #expect(missing.driver.calls.isEmpty && missing.configs.withLock { $0.isEmpty })
     }
 

@@ -31,8 +31,10 @@ struct ProcessOutput: Sendable {
 enum ProcessRunner {
     /// `environment` replaces the inherited one when given. `spillTo`: a file to write the whole stream to when it is
     /// longer than `outputLimit` (the result keeps only the start and end); never created for shorter output.
+    /// `onOutput`: called with each piece of output as it arrives (from a background queue), for progress lines.
     static func run(_ executable: String, _ arguments: [String], directory: URL? = nil, environment: [String: String]? = nil,
-                    timeout: Duration, outputLimit: Int = 20_000, spillTo: URL? = nil) async throws -> ProcessOutput {
+                    timeout: Duration, outputLimit: Int = 20_000, spillTo: URL? = nil,
+                    onOutput: (@Sendable (Data) -> Void)? = nil) async throws -> ProcessOutput {
         try Task.checkCancellation()
         let pipe = Pipe()
         let (exited, exitedContinuation) = AsyncStream<ChildExit>.makeStream()
@@ -65,6 +67,7 @@ enum ProcessRunner {
                 drainedContinuation.finish()
             } else {
                 buffer.withLock { $0.append(data) }
+                onOutput?(data)
             }
         }
 

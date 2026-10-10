@@ -109,7 +109,7 @@ struct FakeBrowserSetup {
             locate: { engine in
                 var status = BrowserEngineStatus(engine: engine, agentBrowser: "/fake/agent-browser",
                                                  browserExecutable: engine == .chrome ? nil : "/fake/\(engine.rawValue)")
-                if !ready { status.missing = [.init(name: "Chrome", command: BrowserEngineLocator.installChrome)] }
+                if !ready { status.missing = [.init(name: "Chrome")] }
                 return status
             },
             makeDriver: { config in

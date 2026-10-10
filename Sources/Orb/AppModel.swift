@@ -157,6 +157,14 @@ final class AppModel {
     @ObservationIgnored let outputsDirectory: URL
     /// The Orbs' browsers (`navegador/<id>/` in the data folder holds what each keeps, logins included).
     @ObservationIgnored var browserHub: BrowserHub
+    /// Ajustes → Navegador: installs, updates and removes the browsers the Orbs drive (`navegador/bin`, `chrome`, `cloak`).
+    @ObservationIgnored lazy var browserSetup: BrowserSetup = {
+        let root = browserHub.profilesDirectory ?? store.directory.appending(path: "navegador")
+        let installer = BrowserInstaller(layout: BrowserInstallLayout(root: root))
+        return BrowserSetup(installer: installer, status: { [weak self] engine in
+            await self?.browserHub.status(for: engine) ?? BrowserEngineStatus(engine: engine)
+        }, closeBrowsers: { [weak self] engine in await self?.browserHub.close(engine: engine) })
+    }()
     /// What the models are used for, kept by the hour (`uso/` in the data folder); see `recordUsage`.
     @ObservationIgnored let usageLog: UsageRecorder
     /// Every Orb's own memory bank (`memoria/<id>/` in the data folder).
@@ -410,6 +418,7 @@ final class AppModel {
                 // Commands and CLIs in the middle of a turn lead process groups of their own and would outlive the app.
                 ChildProcessGroups.killAllNow(including: self?.jobs.runningGroups ?? [])
                 self?.jobs.killAllNow()
+                self?.browserHub.terminateAllNow() // each Orb's browser lives in a background process of its own that would outlive the app
                 StdioServerRegistry.shared.killAllNow() // a connector's server that stays open past EOF would outlive the app
             }
         }
@@ -971,9 +980,16 @@ final class AppModel {
         guard let index = bots.firstIndex(where: { $0.id == botID }) else { return }
         var bot = bots[index]
         let mode = bot.permissionMode
+        let engine = bot.browserEngine, hadBrowser = bot.capabilities.contains(.browser)
         change(&bot)
         if bot != bots[index] { bots[index] = bot }
         if bot.permissionMode != mode { permissionModeChanged(botID, to: bot.permissionMode) }
+        // Another engine is another browser, and without "Navegar na web" there is none: the one that was open is closed now,
+        // not when the Orb next needs a browser.
+        if bot.browserEngine != engine || (hadBrowser && !bot.capabilities.contains(.browser)) {
+            let hub = browserHub
+            Task { await hub.close(botID: botID) }
+        }
     }
 
     /// The mode and "Sempre permitir" rules of an Orb as they are now; the engines read this at every tool call,

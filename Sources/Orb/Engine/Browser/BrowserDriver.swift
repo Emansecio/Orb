@@ -88,4 +88,10 @@ protocol BrowserDriver: Sendable {
     /// profile (logins). The page is loaded again; what was typed and not sent is lost.
     func setHeaded(_ headed: Bool) async throws -> BrowserPage
     func close() async throws
+    /// Closes the browser and waits for it, without a task: for the moment the app quits.
+    func closeSynchronously(timeout: TimeInterval)
+}
+
+extension BrowserDriver {
+    func closeSynchronously(timeout: TimeInterval) {}
 }

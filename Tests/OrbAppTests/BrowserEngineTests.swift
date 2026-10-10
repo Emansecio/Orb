@@ -21,24 +21,25 @@ struct BrowserEngineTests {
         #expect(status.isReady && status.missing.isEmpty && status.modelNote == nil && status.userMessage == nil)
     }
 
-    @Test func withoutAgentBrowserEveryEngineSaysHowToInstallIt() {
+    @Test func withoutAgentBrowserEveryEngineSaysItIsMissingAndWhereToInstallIt() {
         for engine in [BrowserEngineKind.chrome, .obscura, .cloak] {
             let status = locator().status(for: engine)
             #expect(!status.isReady, "\(engine)")
-            #expect(status.installCommands.first == "brew install agent-browser", "\(engine)")
-            #expect(status.modelNote?.contains("brew install agent-browser") == true)
-            #expect(status.userMessage?.contains("agent-browser") == true)
+            #expect(status.missing.first?.name == "agent-browser", "\(engine)")
+            #expect(status.modelNote?.contains("agent-browser") == true && status.modelNote?.contains("Ajustes") == true)
+            #expect(status.userMessage?.contains("agent-browser") == true && status.userMessage?.contains("Ajustes") == true)
+            #expect(status.modelNote?.contains("brew") == false && status.userMessage?.contains("brew") == false, "no Homebrew needed")
         }
     }
 
     @Test func chromeNeedsAgentBrowserAndAChromeToo() {
         let nothing = locator().status(for: .chrome)
-        #expect(nothing.installCommands == ["brew install agent-browser", "agent-browser install"])
+        #expect(nothing.missing.map(\.name) == ["agent-browser", "Chrome"])
 
         let onlyTheCommand = locator(files: ["/opt/homebrew/bin/agent-browser"]).status(for: .chrome)
         #expect(onlyTheCommand.agentBrowser == "/opt/homebrew/bin/agent-browser")
-        #expect(onlyTheCommand.installCommands == ["agent-browser install"])
-        #expect(onlyTheCommand.modelNote?.contains("agent-browser install") == true)
+        #expect(onlyTheCommand.missing.map(\.name) == ["Chrome"])
+        #expect(onlyTheCommand.modelNote?.contains("missing: Chrome") == true)
     }
 
     @Test func chromeIsFoundWhereAgentBrowserInstallsItOrInApplications() {
@@ -69,7 +70,7 @@ struct BrowserEngineTests {
 
     @Test func obscuraIsItsBinaryOnThePath() {
         let missing = locator(files: ["/opt/homebrew/bin/agent-browser"]).status(for: .obscura)
-        #expect(missing.installCommands == ["brew install obscura"])
+        #expect(missing.missing.map(\.name) == ["Obscura"])
         let there = locator(files: ["/opt/homebrew/bin/agent-browser", "/opt/homebrew/bin/obscura"]).status(for: .obscura)
         #expect(there.isReady && there.browserExecutable == "/opt/homebrew/bin/obscura")
     }
@@ -83,7 +84,7 @@ struct BrowserEngineTests {
         #expect(found.status(for: .cloak).browserExecutable == chromium("145.0.7632.109.10"))
 
         let missing = locator(files: ["/opt/homebrew/bin/agent-browser"]).status(for: .cloak)
-        #expect(missing.installCommands == ["pip3 install cloakbrowser && python3 -m cloakbrowser install"])
+        #expect(missing.missing.map(\.name) == ["CloakBrowser"])
     }
 
     @Test func cloakHonoursItsOwnVariables() {
@@ -104,7 +105,7 @@ struct BrowserEngineTests {
     @Test func theBrowserToolsComeOnlyWithAnInstalledEngine() {
         let ready = BrowserEngineStatus(engine: .chrome, agentBrowser: "/x/agent-browser")
         var missing = ready
-        missing.missing = [.init(name: "Chrome", command: "agent-browser install")]
+        missing.missing = [.init(name: "Chrome")]
         let on: Set<Capability> = [.browser]
         #expect(BrowserAvailability(capabilities: on, engine: .chrome, status: ready) == .browser)
         #expect(BrowserAvailability(capabilities: on, engine: .chrome, status: missing) == .fetchOnly)
@@ -138,9 +139,9 @@ struct BrowserEngineTests {
         var bot = Bot(name: "Atlas", role: "", orb: OrbConfig())
         bot.browserEngine = .chrome
         var missing = BrowserEngineStatus(engine: .chrome)
-        missing.missing = [.init(name: "agent-browser", command: "brew install agent-browser"), .init(name: "Chrome", command: "agent-browser install")]
+        missing.missing = [.init(name: "agent-browser"), .init(name: "Chrome")]
         let note = BrowserPrompt.section(bot: bot, availability: .fetchOnly, status: missing)
-        #expect(note.contains("brew install agent-browser ; agent-browser install") && note.contains("only web_fetch and web_search"))
+        #expect(note.contains("missing: agent-browser, Chrome") && note.contains("Ajustes") && note.contains("only web_fetch and web_search"))
         #expect(!note.contains("\n"), "one short line")
 
         #expect(BrowserPrompt.section(bot: bot, availability: .off, status: nil).isEmpty)
@@ -169,8 +170,17 @@ struct BrowserEngineTests {
     }
 
     @Test func chromeLaunchesWithTheOrbsProfileAndNoWindow() {
-        #expect(config(.chrome).launchArguments == ["--profile", "/data/navegador/orb/chrome"])
-        #expect(config(.chrome, headed: true).launchArguments == ["--profile", "/data/navegador/orb/chrome", "--headed"])
+        let hidden = ["--args", "--disable-blink-features=AutomationControlled"]
+        #expect(config(.chrome).launchArguments == hidden + ["--profile", "/data/navegador/orb/chrome"])
+        #expect(config(.chrome, headed: true).launchArguments == hidden + ["--profile", "/data/navegador/orb/chrome", "--headed"])
+        // The Chrome the app installed is named, so a Chrome elsewhere (or Brave) is never picked by accident.
+        var installed = config(.chrome)
+        installed.browserExecutable = "/data/navegador/chrome/chrome-155.0.8059.39/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+        #expect(installed.launchArguments == [
+            "--executable-path", installed.browserExecutable!,
+            "--user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+            "--args", "--disable-blink-features=AutomationControlled", "--profile", "/data/navegador/orb/chrome"])
+        #expect(AgentBrowserConfig.chromeUserAgent(executable: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome") == nil)
     }
 
     @Test func obscuraIsChosenByEngineAndHasNeitherProfileNorWindow() {
@@ -184,17 +194,32 @@ struct BrowserEngineTests {
     @Test func cloakLaunchesItsChromiumWithTheFingerprintFlagsOfItsOwnWrapper() {
         #expect(config(.cloak).launchArguments == [
             "--executable-path", "/bin/cloak",
-            "--args", "--no-sandbox,--fingerprint=31337,--fingerprint-platform=macos",
+            "--args", "--fingerprint=31337,--fingerprint-platform=macos",
             "--profile", "/data/navegador/orb/cloak",
         ])
         #expect(config(.cloak, headed: true).launchArguments.last == "--headed")
     }
 
-    @Test func fileAccessIsOffUnlessAskedFor() {
+    @Test func fileAccessIsOffUnlessAskedForAndObscuraNeverGetsIt() {
         #expect(!config(.chrome).launchArguments.contains("--allow-file-access"))
         var allowed = config(.chrome)
         allowed.allowFileAccess = true
         #expect(allowed.launchArguments.last == "--allow-file-access")
+        var obscura = config(.obscura)
+        obscura.allowFileAccess = true
+        #expect(!obscura.launchArguments.contains("--allow-file-access"), "agent-browser rejects it with Obscura")
+    }
+
+    @Test func obscuraRunsInItsStealthModeAndEveryBrowserClosesItselfWhenForgotten() {
+        let obscura = config(.obscura).extraEnvironment
+        #expect(obscura["AGENT_BROWSER_OBSCURA_STEALTH"] == "1" && obscura["OBSCURA_ALLOW_PRIVATE_NETWORK"] == nil)
+        var local = config(.obscura)
+        local.allowPrivateNetwork = true
+        #expect(local.extraEnvironment["OBSCURA_ALLOW_PRIVATE_NETWORK"] == "1")
+        for engine in [BrowserEngineKind.chrome, .obscura, .cloak] {
+            #expect(config(engine).extraEnvironment["AGENT_BROWSER_IDLE_TIMEOUT_MS"] == "1800000", "\(engine)")
+        }
+        #expect(config(.chrome).extraEnvironment["AGENT_BROWSER_OBSCURA_STEALTH"] == nil)
     }
 
     @Test func eachOrbAndEngineHasItsOwnSession() {

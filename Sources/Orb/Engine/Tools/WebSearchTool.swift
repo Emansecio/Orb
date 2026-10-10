@@ -53,11 +53,16 @@ enum SearchResultsParser {
         const a = h.closest('a');
         if (!a || !a.href || !a.href.startsWith('http') || a.href.includes('google.com/search') || seen.has(a.href)) return;
         seen.add(a.href);
-        let box = a.parentElement;
-        for (let i = 0; i < 4 && box && box.parentElement && box.innerText.length < 80; i++) box = box.parentElement;
         const title = h.innerText.trim();
-        const lines = (box ? box.innerText : '').split('\\n').map(s => s.trim())
-          .filter(s => s.length > 40 && s !== title && !s.startsWith('http'));
+        // The result's box: up from the link until it holds the snippet, and before it would hold another result.
+        let box = a;
+        for (let i = 0; i < 8 && box.parentElement; i++) {
+          if (box.parentElement.querySelectorAll('h3').length > 1) break;
+          box = box.parentElement;
+          if (box.innerText.length > title.length + 120) break;
+        }
+        const lines = box.innerText.split('\\n').map(s => s.trim())
+          .filter(s => s.length > 40 && s !== title && !s.startsWith('http') && !s.includes(' \\u203a '));
         results.push({title, url: a.href, snippet: lines[0] || ''});
       });
       return JSON.stringify({results: results.slice(0, 15), url: location.href, title: document.title});
@@ -111,6 +116,59 @@ enum SearchResultsParser {
     }
 }
 
+
+/// Google's result links go through its own redirect (`/goto?url=<opaque token>`, `/url?q=<address>`): the address of the page is
+/// in the `Location` of the redirect, which asks for no cookie, so it is read without following it.
+enum GoogleRedirects {
+    static func isRedirect(_ address: String) -> Bool {
+        guard let url = URL(string: address), let host = url.host?.lowercased(), host.hasPrefix("www.google.") || host == "google.com" else { return false }
+        return url.path == "/goto" || url.path == "/url"
+    }
+
+    /// The target written in the link itself (`/url?q=https://…`), when there is one.
+    static func embeddedTarget(_ address: String) -> String? {
+        guard let components = URLComponents(string: address), components.path == "/url" else { return nil }
+        for name in ["q", "url"] {
+            if let value = components.queryItems?.first(where: { $0.name == name })?.value, SearchResultsParser.resultAddress(value) != nil { return value }
+        }
+        return nil
+    }
+
+    static func resolve(_ hits: [SearchHit], http: URLSession) async -> [SearchHit] {
+        await withTaskGroup(of: (Int, String?).self) { group in
+            for (index, hit) in hits.enumerated() where isRedirect(hit.url) {
+                group.addTask {
+                    if let direct = embeddedTarget(hit.url) { return (index, direct) }
+                    return (index, await location(of: hit.url, http: http))
+                }
+            }
+            var result = hits
+            for await (index, target) in group {
+                if let target { result[index].url = target }
+            }
+            return result
+        }
+    }
+
+    /// Where the redirect points: asked once, not followed.
+    static func location(of address: String, http: URLSession) async -> String? {
+        guard let url = URL(string: address) else { return nil }
+        var request = URLRequest(url: url, timeoutInterval: 8)
+        request.setValue(WebFetchTool.userAgent, forHTTPHeaderField: "User-Agent")
+        guard let (_, response) = try? await http.data(for: request, delegate: NoRedirect()),
+              let http = response as? HTTPURLResponse, (300..<400).contains(http.statusCode),
+              let location = http.value(forHTTPHeaderField: "Location"),
+              let target = URL(string: location, relativeTo: url)?.absoluteURL, ["http", "https"].contains(target.scheme?.lowercased()) else { return nil }
+        return target.absoluteString
+    }
+
+    private final class NoRedirect: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+        func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                        newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+            completionHandler(nil)
+        }
+    }
+}
 
 /// The search page asked for a person; the message says what the model does about it.
 struct SearchBlocked: LocalizedError {
@@ -284,7 +342,7 @@ struct WebSearchTool: AgentTool {
         }
         if context.browser.drivesABrowser, let hub = context.browser.hub, let botID = context.botID {
             let browser = try await hub.session(botID: botID, engine: context.browser.engine)
-            return try await Self.searchInBrowser(request, provider: provider, session: browser, note: note)
+            return try await Self.searchInBrowser(request, provider: provider, session: browser, note: note, http: session)
         }
         return try await searchByFetch(request, note: note)
     }
@@ -372,17 +430,18 @@ struct WebSearchTool: AgentTool {
 
     // MARK: In the Orb's browser
 
-    private static func searchInBrowser(_ search: Request, provider: SearchProvider, session: BrowserSession, note: String?) async throws -> String {
+    private static func searchInBrowser(_ search: Request, provider: SearchProvider, session: BrowserSession, note: String?,
+                                        http: URLSession) async throws -> String {
         let address = address(for: search, provider: provider).absoluteString
         return try await session.exclusive {
             // A new tab, so the page the Orb is working on stays where it was.
-            let hadPage = (try? await session.driver.currentURL()) != nil
+            let hadPage = ((try? await session.driver.currentURL()) ?? "about:blank") != "about:blank"
             var usedTab = false
             if hadPage, (try? await session.driver.newTab(address)) != nil { usedTab = true } else { _ = try await session.driver.open(address) }
             if !usedTab { session.forgetPage() }
             let report: String
             do {
-                report = try await read(provider: provider, search: search, session: session, note: notes(note, search, provider: provider))
+                report = try await read(provider: provider, search: search, session: session, note: notes(note, search, provider: provider), http: http)
             } catch {
                 // A results page that wants a person stays open: that is the page `browse_show` shows.
                 if usedTab, !(error is SearchBlocked) { try? await session.driver.closeTab(nil) }
@@ -394,13 +453,14 @@ struct WebSearchTool: AgentTool {
     }
 
     /// Reads the results page that is open.
-    private static func read(provider: SearchProvider, search: Request, session: BrowserSession, note: String?) async throws -> String {
+    private static func read(provider: SearchProvider, search: Request, session: BrowserSession, note: String?, http: URLSession) async throws -> String {
         switch provider {
         case .google:
             let json = try await session.driver.evaluate(SearchResultsParser.googleScript)
             let location = JSONValue.parse(json)?["url"]?.string ?? ""
             if SearchResultsParser.isGoogleBlock(url: location) { throw blocked(.google, window: session.engine.canShowWindow) }
-            return report(query: search.query, provider: .google, hits: SearchResultsParser.google(json: json, limit: search.count), note: note)
+            let hits = await GoogleRedirects.resolve(SearchResultsParser.google(json: json, limit: search.count), http: http)
+            return report(query: search.query, provider: .google, hits: hits, note: note)
         case .duckduckgo, .tinyfish:
             let html = try await session.driver.evaluate("document.documentElement.outerHTML")
             if SearchResultsParser.isDuckDuckGoBlock(html: html) { throw blocked(.duckduckgo, window: session.engine.canShowWindow) }

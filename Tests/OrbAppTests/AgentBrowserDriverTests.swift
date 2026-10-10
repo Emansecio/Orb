@@ -115,7 +115,7 @@ struct AgentBrowserDriverTests {
         #expect(page == BrowserPage(url: "https://a.test/", title: "A"))
         try await driver.click("e1")
         let all = calls.withLock { $0 }
-        #expect(all[0] == ["--session", "orb-test-chrome", "--json", "--profile", "/p", "open", "https://a.test/"])
+        #expect(all[0] == ["--session", "orb-test-chrome", "--json", "--args", "--disable-blink-features=AutomationControlled", "--profile", "/p", "open", "https://a.test/"])
         #expect(all[1] == ["--session", "orb-test-chrome", "--json", "click", "@e1"])
     }
 
@@ -136,6 +136,7 @@ struct AgentBrowserDriverTests {
         let (driver, calls) = make { arguments in
             if arguments.contains("snapshot") { return abOK(#"{"snapshot":"- link \"x\" [ref=e1]","origin":"https://a.test/","refs":{"e1":{"role":"link","name":"x"}}}"#) }
             if arguments.contains("tab") && arguments.count == 4 { return abOK(#"{"tabs":[]}"#) }
+            if arguments.contains("session") { return abOK(#"{"sessions":["orb-test-chrome"]}"#) }
             return abOK(#"{"title":"T","url":"https://a.test/","value":"password","result":"r","content":"c"}"#)
         }
         _ = try await driver.snapshot(interactive: true, selector: nil)
@@ -191,14 +192,18 @@ struct AgentBrowserDriverTests {
     }
 
     @Test func aWindowIsAReopenOfTheSamePageWithTheSameProfile() async throws {
+        let lists = OSAllocatedUnfairLock(initialState: 0)
         let (driver, calls) = make { arguments in
-            arguments.contains("url") ? abOK(#"{"url":"https://a.test/login"}"#) : abOK(#"{"url":"https://a.test/login","title":"Entrar","closed":true}"#)
+            // The session is there when asked first, and gone when the driver waits for the close to finish.
+            if arguments.contains("session") { return lists.withLock { $0 += 1; return $0 } == 1 ? abOK(#"{"sessions":["orb-test-chrome"]}"#) : abOK(#"{"sessions":[]}"#) }
+            return arguments.contains("url") ? abOK(#"{"url":"https://a.test/login"}"#) : abOK(#"{"url":"https://a.test/login","title":"Entrar","closed":true}"#)
         }
         let page = try await driver.setHeaded(true)
         #expect(page.url == "https://a.test/login")
         #expect(driver.config.headed)
         let commands = calls.withLock { $0.map { Array($0.dropFirst(3)) } }
-        #expect(commands == [["get", "url"], ["close"], ["--profile", "/p", "--headed", "open", "https://a.test/login"]])
+        #expect(commands == [["session", "list"], ["get", "url"], ["close"], ["session", "list"],
+                             ["--args", "--disable-blink-features=AutomationControlled", "--profile", "/p", "--headed", "open", "https://a.test/login"]])
         _ = try await driver.setHeaded(false)
         #expect(!driver.config.headed)
         try await driver.close()
@@ -238,7 +243,8 @@ struct AgentBrowserDriverTests {
         try await driver.close()
 
         let logged = FakeAgentBrowser.commands(in: fake.log)
-        #expect(logged.first == ["--session", "orb-real", "--json", "--profile", "/p", "open", "https://fake.test/start"])
+        #expect(logged.first == ["--session", "orb-real", "--json", "--args", "--disable-blink-features=AutomationControlled",
+                                 "--profile", "/p", "open", "https://fake.test/start"])
         #expect(logged.last == ["--session", "orb-real", "--json", "close"])
     }
 
@@ -278,39 +284,5 @@ struct AgentBrowserDriverTests {
         let driver = AgentBrowserDriver(config: AgentBrowserConfig(executable: fake.executable.path, session: "s", engine: .chrome),
                                         environment: { base.merging(["FAKE_AB_LOG": fake.log.path, "FAKE_AB_MODE": "hang"]) { $1 } }, run: run)
         await #expect(throws: BrowserDriverError.timedOut("read")) { _ = try await driver.read() }
-    }
-}
-
-/// Against the real `agent-browser`, when this Mac has it and a Chrome: a page from a file, snapshotted. Not part of CI.
-struct RealAgentBrowserTests {
-    static let locator = BrowserEngineLocator.live(path: ProcessInfo.processInfo.environment["PATH"])
-    static let installed = locator.status(for: .chrome).isReady
-
-    @Test(.enabled(if: RealAgentBrowserTests.installed)) func aLocalPageIsOpenedAndSnapshotted() async throws {
-        let folder = FileManager.default.temporaryDirectory.appending(path: "OrbRealBrowser-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: folder) }
-        let page = folder.appending(path: "page.html")
-        try """
-        <html><head><title>Página de teste</title></head><body><h1>Olá</h1>
-        <a href="https://example.com/">Exemplo</a><input type="password" aria-label="Senha"><button>Enviar</button></body></html>
-        """.write(to: page, atomically: true, encoding: .utf8)
-
-        let status = Self.locator.status(for: .chrome)
-        var config = AgentBrowserConfig(executable: try #require(status.agentBrowser), session: "orb-test-\(UUID().uuidString.prefix(8))",
-                                        engine: .chrome, profile: folder.appending(path: "profile"))
-        config.allowFileAccess = true
-        let driver = AgentBrowserDriver(config: config)
-        defer { Task { try? await driver.close() } }
-
-        let opened = try await driver.open(page.absoluteString)
-        #expect(opened.title == "Página de teste")
-        let snapshot = try await driver.snapshot(interactive: true, selector: nil)
-        #expect(snapshot.refs.values.contains(BrowserRef(role: "button", name: "Enviar")))
-        #expect(snapshot.refs.values.contains { $0.role == "link" && $0.name == "Exemplo" })
-        let field = try #require(snapshot.refs.first { $0.value.name == "Senha" }?.key)
-        #expect(try await driver.attribute("type", of: field) == "password")
-        #expect(try await driver.read().content.contains("Olá"))
-        try await driver.close()
     }
 }

@@ -2,10 +2,10 @@ import SwiftUI
 import AppKit
 import ServiceManagement
 
-// Ajustes: four tabs (Geral, Modelos, Uso, Permissões) that anything in the app can open directly.
+// Ajustes: five tabs (Geral, Modelos, Navegador, Uso, Permissões) that anything in the app can open directly.
 
 enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
-    case general, models, usage, permissions
+    case general, models, browser, usage, permissions
 
     var id: String { rawValue }
 
@@ -13,6 +13,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .general: "Geral"
         case .models: "Modelos"
+        case .browser: "Navegador"
         case .usage: "Uso"
         case .permissions: "Permissões"
         }
@@ -22,6 +23,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .general: "gearshape"
         case .models: "cpu"
+        case .browser: "globe"
         case .usage: "chart.bar"
         case .permissions: "lock.shield"
         }
@@ -32,6 +34,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .general: 760
         case .models, .permissions: 640
+        case .browser: 720
         case .usage: 700
         }
     }
@@ -75,6 +78,9 @@ struct SettingsView: View {
             ProviderSettings()
                 .tabItem { Label(SettingsTab.models.title, systemImage: SettingsTab.models.symbol) }
                 .tag(SettingsTab.models)
+            BrowserSettings()
+                .tabItem { Label(SettingsTab.browser.title, systemImage: SettingsTab.browser.symbol) }
+                .tag(SettingsTab.browser)
             UsageSettings()
                 .tabItem { Label(SettingsTab.usage.title, systemImage: SettingsTab.usage.symbol) }
                 .tag(SettingsTab.usage)
