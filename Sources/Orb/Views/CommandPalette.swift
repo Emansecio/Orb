@@ -8,7 +8,7 @@ struct PaletteEntry: Identifiable, Equatable {
         case bot(UUID)
         case page(SidebarItem)
         case reopen(conversation: UUID, bot: UUID)
-        case newBot, importOrb, newConversation, focusComposer, showConversations, openFolder, toggleInspector, shortcuts
+        case newBot, importOrb, newConversation, focusComposer, findInConversation, showConversations, openFolder, toggleInspector, shortcuts
     }
 
     /// The order of the groups when nothing was typed.
@@ -94,6 +94,8 @@ enum PaletteBuilder {
                                      section: .actions, shortcut: ShortcutCatalog.keys(for: .newConversation), action: .newConversation, keywords: "limpar começar"))
             list.append(PaletteEntry(id: "focus", title: CommandName.writeMessage, subtitle: name, symbol: "text.cursor",
                                      section: .actions, shortcut: ShortcutCatalog.keys(for: .writeMessage), action: .focusComposer, keywords: "compositor campo focar digitar"))
+            list.append(PaletteEntry(id: "find", title: CommandName.findInConversation, subtitle: name, symbol: "magnifyingglass",
+                                     section: .actions, shortcut: ShortcutCatalog.keys(for: .find), action: .findInConversation, keywords: "procurar pesquisar texto mensagem"))
             list.append(PaletteEntry(id: "history", title: CommandName.conversations, subtitle: name, symbol: "clock.arrow.circlepath",
                                      section: .actions, shortcut: ShortcutCatalog.keys(for: .conversations), action: .showConversations, keywords: "histórico reabrir arquivo"))
             list.append(PaletteEntry(id: "folder", title: CommandName.openFolder, subtitle: "Pasta de trabalho\(suffix)", symbol: "folder",
@@ -282,6 +284,7 @@ struct CommandPalette: View {
         case .importOrb: model.startNewOrbImporting()
         case .newConversation: if let id = model.commandBotID { model.selection = .bot(id); model.newConversation(id) }
         case .focusComposer: model.focusComposer()
+        case .findInConversation: model.findInConversation()
         case .showConversations: model.showConversations()
         case .openFolder: if let id = model.commandBotID { model.openFolder(of: id) }
         case .toggleInspector: model.toggleInspector()

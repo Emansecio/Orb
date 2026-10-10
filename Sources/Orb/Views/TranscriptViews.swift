@@ -19,25 +19,30 @@ struct TranscriptRow: View, Equatable {
     var offersRedo = false
     /// The row is about to leave (an edit or "Refazer" cuts the chat before it): it fades out first.
     var isDropping = false
+    /// This is the result a search in the conversation has chosen: its text is marked and a wash fades behind it. Only the
+    /// row of that result is given one, so choosing another result redraws two rows.
+    var find: FindFocus?
 
     nonisolated static func == (lhs: TranscriptRow, rhs: TranscriptRow) -> Bool {
         lhs.item == rhs.item && lhs.botID == rhs.botID && lhs.orb == rhs.orb && lhs.isLastReply == rhs.isLastReply
-            && lhs.offersRedo == rhs.offersRedo && lhs.isDropping == rhs.isDropping
+            && lhs.offersRedo == rhs.offersRedo && lhs.isDropping == rhs.isDropping && lhs.find == rhs.find
     }
 
     var body: some View {
-        row
+        content
+            .background { if let find { FindWash(isOn: find.isFlashing) } }
             .opacity(isDropping ? 0 : 1)
             .animation(Motion.exit, value: isDropping) // opacity only, so it holds under Reduce Motion too
     }
 
-    @ViewBuilder private var row: some View {
+    @ViewBuilder private var content: some View {
         switch item.kind {
         case .user(let text, let attachments):
-            UserBubble(text: text, attachments: attachments, duringTask: item.duringTask == true, botID: botID, itemID: item.id)
+            UserBubble(text: text, attachments: attachments, duringTask: item.duringTask == true, botID: botID, itemID: item.id,
+                       highlight: find?.query)
         case .bot(let text, let isStreaming):
             BotMessage(orb: orb, botID: botID, text: text, live: isStreaming ? model.liveText(for: item.id, of: botID) : nil,
-                       isLastReply: isLastReply, offersRedo: offersRedo)
+                       isLastReply: isLastReply, offersRedo: offersRedo, highlight: find?.query)
         case .tool(let call):
             ToolCallLine(call: call)
         case .approval(let request):
@@ -45,8 +50,25 @@ struct TranscriptRow: View, Equatable {
         case .notice(let text):
             NoticeLine(id: item.id, text: text, botID: botID)
         case .greeting(let text):
-            GreetingMessage(orb: orb, botID: botID, text: text, isLast: isLastReply)
+            GreetingMessage(orb: orb, botID: botID, text: text, isLast: isLastReply, highlight: find?.query)
         }
+    }
+}
+
+/// The wash behind the message a search just brought into view: it comes at once and fades in `Motion.content` (a plain
+/// fade of the same length under Reduce Motion: it is opacity, not movement).
+private struct FindWash: View {
+    let isOn: Bool
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 12)
+            .fill(Palette.findWash)
+            .padding(.horizontal, -10)
+            .padding(.vertical, -4)
+            .opacity(isOn ? 1 : 0)
+            .motion(Motion.content, value: isOn)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 
@@ -90,6 +112,8 @@ private struct UserBubble: View {
     let botID: UUID
     let itemID: UUID
 
+    var highlight: String?
+
     @State private var hovering = false
 
     var body: some View {
@@ -103,7 +127,7 @@ private struct UserBubble: View {
                     .accessibilityHidden(true) // the message's own label starts with "Você"
                 if !attachments.isEmpty { AttachmentStack(paths: attachments) }
                 if !text.isEmpty {
-                    Text(text)
+                    userText
                         .font(Palette.conversationFont)
                         .foregroundStyle(Palette.ink)
                         .textSelection(.enabled)
@@ -134,6 +158,10 @@ private struct UserBubble: View {
         .onHover { hovering = $0 }
         // Responds fast and lets go slowly (§2.7).
         .animation(Motion.hover(hovering), value: hovering)
+    }
+
+    @ViewBuilder private var userText: some View {
+        if highlight != nil { Text(FindMarking.marked(text, query: highlight)) } else { Text(text) }
     }
 }
 
@@ -170,6 +198,7 @@ private struct BotMessage: View {
     let isLastReply: Bool
     /// The last reply of an idle chat: "Refazer" is beside its copy buttons.
     var offersRedo = false
+    var highlight: String?
 
     @State private var hovering = false
 
@@ -245,7 +274,7 @@ private struct BotMessage: View {
         if let live {
             ParagraphStack(live: live)
         } else {
-            MarkdownChunk(source: text).equatable()
+            MarkdownChunk(source: text, highlight: highlight).equatable()
         }
     }
 }
@@ -258,11 +287,12 @@ private struct GreetingMessage: View {
     let botID: UUID
     let text: String
     let isLast: Bool
+    var highlight: String?
 
     var body: some View {
         let enters = isLast && EmptyChatEntrance.plays(for: botID, in: presented)
         VStack(alignment: .leading, spacing: 10) {
-            BotMessage(orb: orb, botID: botID, text: text, live: nil, isLastReply: isLast)
+            BotMessage(orb: orb, botID: botID, text: text, live: nil, isLastReply: isLast, highlight: highlight)
                 .entrance(.rise, enters: enters)
             if isLast {
                 GreetingReplies(botID: botID)
@@ -1149,7 +1179,8 @@ struct ApprovalCard: View {
 
     /// ⌘↩ and Esc answer this card when it is the newest open one of the Orb being shown.
     private func handleKey(_ event: NSEvent, in window: NSWindow) -> Bool {
-        guard model.selectedBot?.id == botID, model.newestPendingApprovalID(of: botID) == request.id else { return false }
+        guard model.selectedBot?.id == botID, model.newestPendingApprovalID(of: botID) == request.id,
+              !model.findFieldHasFocus else { return false } // Esc in the find field closes the find bar
         let field = window.firstResponder as? NSTextView
         let editing = ApprovalShortcut.isEditing(responderIsText: field != nil, hasText: field.map { !$0.string.isEmpty } ?? false,
                                                  hasMarkedText: field?.hasMarkedText() ?? false, noteFocused: isEditingNote)

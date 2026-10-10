@@ -247,6 +247,8 @@ enum Tip {
     static let autoColor = "Usa uma cor que combina com a do corpo do Orb"
     static let routineTemplate = "Abre o editor de rotina já preenchido com este modelo"
     static let openRunReport = "Abre o relatório desta execução"
+    static let findResults = "Mostra a lista dos resultados, com um trecho de cada"
+    static let findClose = "Fecha a busca"
     static let exploreSkills = "Abre a busca no catálogo aberto de skills"
     static let showProviderDetails = "Mostra a chave, o endereço e os modelos deste provedor"
     static let hideProviderDetails = "Esconde os detalhes deste provedor"
@@ -258,6 +260,9 @@ enum Tip {
     static func settings() -> String { "Abre os Ajustes (\(AppShortcut.settings.label))" }
     static func conversations() -> String { "Mostra as conversas anteriores deste Orb (\(AppShortcut.conversations.label))" }
     static func newConversation() -> String { "Começa uma conversa nova; a atual fica em conversas anteriores (\(AppShortcut.newConversation.label))" }
+    static func findInConversation() -> String { "Busca nesta conversa (\(AppShortcut.find.label))" }
+    static func findNext() -> String { "Vai para o próximo resultado (\(AppShortcut.findNext.label))" }
+    static func findPrevious() -> String { "Vai para o resultado anterior (\(AppShortcut.findPrevious.label))" }
     static func inspector(isShowing: Bool) -> String { "\(isShowing ? "Oculta" : "Mostra") o painel do Orb (\(AppShortcut.toggleInspector.label))" }
 
     /// A sentence of the app's own prose, as the tail of a tip: no full stop at the end.
@@ -297,6 +302,7 @@ enum Tip {
          recheckPermissions, resetConfirm,
          autoColor, routineTemplate, openRunReport, exploreSkills, showProviderDetails, hideProviderDetails,
          previewActivity("pensando"),
+         findResults, findClose, findInConversation(), findNext(), findPrevious(),
          newBot(), settings(), conversations(), newConversation(), inspector(isShowing: true), inspector(isShowing: false)]
     }
 }

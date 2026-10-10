@@ -15,6 +15,7 @@ enum CommandName {
     static let goTo = "Ir para…"
     static let newConversation = "Nova conversa"
     static let writeMessage = "Escrever uma mensagem"
+    static let findInConversation = "Buscar na conversa"
     static let conversations = "Conversas anteriores"
     static let stop = "Parar a resposta"
     static let openFolder = "Abrir pasta do Orb no Finder"
@@ -59,14 +60,17 @@ enum AppShortcut {
     static let chooseModel = KeyboardShortcut("m", modifiers: [.command, .shift])
     /// ⌘Z while the "esqueceu isso" toast is up (a field with something to undo keeps its own).
     static let undoForget = KeyboardShortcut("z", modifiers: .command)
-    /// ⌘F in Skills and Conectores.
+    /// ⌘F in a chat (the find bar) and in Skills and Conectores (the catalog's search).
     static let find = KeyboardShortcut("f", modifiers: .command)
+    /// ⌘G and ⇧⌘G while the find bar of a chat is open: the next and the previous result.
+    static let findNext = KeyboardShortcut("g", modifiers: .command)
+    static let findPrevious = KeyboardShortcut("g", modifiers: [.command, .shift])
     /// ⌘, is the system's own Ajustes item; listed here so it is written like the others.
     static let settings = KeyboardShortcut(",")
 
     /// The keys of views and of the system's Ajustes item, which `all` (the menus' keys) leaves out because they may
     /// share a key with a command of another view or with the system.
-    static let contextual: [KeyboardShortcut] = [commandReturn, chooseModel, undoForget, find, settings]
+    static let contextual: [KeyboardShortcut] = [commandReturn, chooseModel, undoForget, find, findNext, findPrevious, settings]
 
     /// Every key above, for the tests that check that none is used twice.
     static let all: [KeyboardShortcut] = [newBot, newConversation, toggleInspector, goTo, writeMessage, conversations, stop,
@@ -104,7 +108,7 @@ enum ShortcutCommand: String, CaseIterable, Sendable {
     case writeMessage, newConversation, conversations, stop, openFolder, send, newLine, queueAfterTask, stopAndSend, chooseModel, cancelEdit
     case goToBot, previousBot, nextBot, routines, connectors, skills
     case allowApproval, denyApproval
-    case compactOrSave, undoForget, find
+    case compactOrSave, undoForget, find, findNext, findPrevious
     case menuBarPanel
 }
 
@@ -149,6 +153,9 @@ enum ShortcutCatalog {
             ShortcutItem(.stopAndSend, AppShortcut.commandReturn, "Parar e enviar agora (Orb trabalhando e algo escrito; recusa o pedido aberto)"),
             ShortcutItem(.chooseModel, AppShortcut.chooseModel, "Escolher o modelo do Orb"),
             ShortcutItem(command: .cancelEdit, keys: "esc", title: "Cancelar a edição de uma mensagem (o campo volta como estava)"),
+            ShortcutItem(.find, AppShortcut.find, CommandName.findInConversation + " (em Skills e Conectores, busca no catálogo)"),
+            ShortcutItem(.findNext, AppShortcut.findNext, "Próximo resultado da busca na conversa (também ↩ e ↓ no campo de busca; esc fecha)"),
+            ShortcutItem(.findPrevious, AppShortcut.findPrevious, "Resultado anterior da busca na conversa (também ⇧↩ e ↑ no campo de busca)"),
         ]),
         ShortcutGroup(title: "Navegar", items: [
             ShortcutItem(command: .goToBot, keys: "\(AppShortcut.bot(at: 0).label) – \(AppShortcut.bot(at: 8).label)", title: "Ir para o Orb de mesmo número"),
@@ -165,7 +172,6 @@ enum ShortcutCatalog {
         ShortcutGroup(title: "Em painéis e avisos", items: [
             ShortcutItem(command: .compactOrSave, keys: AppShortcut.commandReturn.label, title: "Compactar agora (painel de contexto) ou salvar (editor “Como o Orb funciona”)"),
             ShortcutItem(.undoForget, AppShortcut.undoForget, "Desfazer “Esquecer” da memória (enquanto o aviso está na tela)"),
-            ShortcutItem(.find, AppShortcut.find, "Buscar (em Skills e Conectores)"),
         ]),
         ShortcutGroup(title: "De qualquer lugar do Mac", items: [
             ShortcutItem(command: .menuBarPanel, keys: "⌃⌥Espaço", title: "Abrir o painel da barra de menus do Orb (opcional, no menu Orbs ou em Ajustes → Geral)"),

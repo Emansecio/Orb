@@ -11,7 +11,7 @@ import AppKit
 /// when the command runs, so a notification would be sent before anyone listens. The chat takes it in `onAppear` (it
 /// has just been created) and in `onChange` (it was already open).
 struct PendingChatRequest: Equatable {
-    enum Kind: Equatable { case focusComposer, showConversations, editLook, showTab(InspectorTab) }
+    enum Kind: Equatable { case focusComposer, showConversations, editLook, findInConversation, showTab(InspectorTab) }
     let kind: Kind
     let botID: UUID
 }
@@ -106,6 +106,11 @@ extension AppModel {
     /// ⌘L: the cursor goes to the composer, from the sidebar, the panel or another page.
     func focusComposer() {
         if let id = commandBotID { request(.focusComposer, of: id) }
+    }
+
+    /// ⌘F from the palette: the find bar of the open Orb's chat.
+    func findInConversation() {
+        if let id = commandBotID { request(.findInConversation, of: id) }
     }
 
     /// ⌘Y: the list of earlier conversations of the open Orb (or of the given one, from the sidebar's menu).

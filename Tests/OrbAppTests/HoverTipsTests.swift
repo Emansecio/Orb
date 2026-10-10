@@ -31,7 +31,7 @@ struct HoverTipsTests {
         let keyGlyphs = CharacterSet(charactersIn: "⌘⌥⇧⌃↩")
         let fixed = Tip.all.filter { $0.rangeOfCharacter(from: keyGlyphs) != nil }
         let withKeys: [String] = [Tip.newBot(), Tip.settings(), Tip.conversations(), Tip.newConversation(), Tip.inspector(isShowing: true), Tip.inspector(isShowing: false),
-                                  Tip.createOrbSheet()]
+                                  Tip.createOrbSheet(), Tip.findInConversation(), Tip.findNext(), Tip.findPrevious()]
         #expect(Set(fixed) == Set(withKeys))
         #expect(Tip.newBot().contains(AppShortcut.newBot.label))
         #expect(Tip.settings().contains(AppShortcut.settings.label))
@@ -39,6 +39,9 @@ struct HoverTipsTests {
         #expect(Tip.newConversation().contains(AppShortcut.newConversation.label))
         #expect(Tip.inspector(isShowing: true).contains(AppShortcut.toggleInspector.label))
         #expect(Tip.createOrbSheet().contains(AppShortcut.newBot.label))
+        #expect(Tip.findInConversation().contains(AppShortcut.find.label))
+        #expect(Tip.findNext().contains(AppShortcut.findNext.label))
+        #expect(Tip.findPrevious().contains(AppShortcut.findPrevious.label))
     }
 
     @Test func theTipsThatFollowAStateFollowIt() {

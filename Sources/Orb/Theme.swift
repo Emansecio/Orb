@@ -52,6 +52,9 @@ enum Palette {
     static let ok = Color(hex: 0x00C972)
     static let danger = Color(hex: 0xFF263C)
     static let warn = Color(hex: 0xFF9800)
+    // What a search in the conversation marks: the text it found, and the wash that fades behind the message it brought into view.
+    static let findMatch = Color(hex: 0xFF9800, opacity: 0.4)
+    static let findWash = Color(hex: 0x1084FE, opacity: 0.16)
 
     // The welcome screen's stage light (the indigo palette's glow, and a cool floor under the Orbs).
     static let stageGlow = Color(hex: 0x6E5CFF)

@@ -5,6 +5,9 @@ import SwiftUI
 struct ChatView: View {
     @Environment(AppModel.self) private var model
     let botID: UUID
+    /// The find bar (⌘F) of this chat. One for the view, which stays across Orbs: it is closed when the Orb changes.
+    @State private var find = ConversationFind()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let live = model.live(botID)
@@ -13,11 +16,27 @@ struct ChatView: View {
         // toolbar and the panel, outside this container, change at once and never flash: the transcript is a view of
         // its own per Orb (`.id`), so SwiftUI fades the old one out and the new one in.
         ZStack {
-            TranscriptList(look: look)
+            TranscriptList(look: look, find: find)
                 .id(botID)
                 .transition(.opacity)
         }
         .motion(Motion.crossFade, value: botID)
+        .overlay(alignment: .top) {
+            // Over the chat, not above it: opening the bar lays nothing out again (the list keeps its place).
+            if find.isOpen {
+                FindBar(find: find, botID: botID)
+                    .padding(.top, 10)
+                    .padding(.horizontal, 16)
+                    .transition(.adapted(.rise, reduceMotion: reduceMotion))
+            }
+        }
+        .motion(Motion.content, value: find.isOpen)
+        .onAppear { bindFind(); takeFindRequest() }
+        .onChange(of: botID) {
+            find.close()
+            bindFind()
+        }
+        .onChange(of: model.pendingChatRequest) { takeFindRequest() }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
                 FirstRunBanner(botID: botID)
@@ -31,6 +50,9 @@ struct ChatView: View {
         .navigationSubtitle(model.modelName(forModel: live.modelID))
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
+                Button("Buscar na conversa", systemImage: "magnifyingglass") { find.open() }
+                    .keyboardShortcut(AppShortcut.find)
+                    .help(Tip.findInConversation())
                 ConversationsMenuButton(botID: botID)
                     .id(botID)
                 Button("Nova conversa", systemImage: "square.and.pencil") {
@@ -46,6 +68,22 @@ struct ChatView: View {
     }
 }
 
+extension ChatView {
+    /// What the find bar searches (the stored items of this Orb's chat, never its rows) and how it speaks to VoiceOver.
+    private func bindFind() {
+        let model = model, botID = botID
+        find.source = { model.orbTranscript(botID).items }
+        find.announce = { text in
+            if NSWorkspace.shared.isVoiceOverEnabled { model.announceForAccessibility(text, priority: .low) }
+        }
+    }
+
+    /// ⌘F from the command palette or a menu: the bar opens (the chat may have just been created for it).
+    private func takeFindRequest() {
+        if model.takeChatRequest(.findInConversation, of: botID) { find.open() }
+    }
+}
+
 /// The conversation. Its own view so streaming re-renders only this list, not the toolbar, composer or
 /// inspector. It reads the Orb's `OrbTranscript` and nothing of the streamed text (that is a `LiveText` the reply's
 /// own views read), so it is redrawn when an item is added or changes, not on every flush, and not at all for
@@ -55,6 +93,8 @@ private struct TranscriptList: View {
     @Environment(\.presentedEmptyChats) private var presentedEmptyChats
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let look: BotLook
+    /// The find bar's state: the list scrolls to the result it chooses and gives its row the marks.
+    let find: ConversationFind
     /// Off while the user has scrolled up to read, so new content doesn't pull the view down.
     @State private var followsBottom = true
     /// Scrolls for the lists that cannot keep the bottom in view themselves (macOS 14).
@@ -76,12 +116,13 @@ private struct TranscriptList: View {
         // "Refazer" belongs to the last finished reply of an idle chat; rows an edit or a redo is about to cut fade out.
         let redoID = RewindRows.redoTarget(in: items, isWorking: isWorking)
         let dropping = live.dropping
+        let found = find.focus
 
         // A conversation swapped for another (a new one, one reopened from Conversas) cross-fades; the scroll view is
         // a new one then, as it was when the whole chat was rebuilt.
         ZStack {
             conversation(items: items, isWorking: isWorking, isLoading: isLoading, live: live, transcript: transcript,
-                         lastReplyID: lastReplyID, redoID: redoID, dropping: dropping)
+                         lastReplyID: lastReplyID, redoID: redoID, dropping: dropping, found: found)
                 .id(generation)
                 .transition(.opacity)
         }
@@ -90,8 +131,11 @@ private struct TranscriptList: View {
     }
 
     private func conversation(items: [TranscriptItem], isWorking: Bool, isLoading: Bool, live: BotLive,
-                              transcript: OrbTranscript, lastReplyID: UUID?, redoID: UUID?, dropping: Set<UUID>) -> some View {
-        ScrollViewReader { proxy in
+                              transcript: OrbTranscript, lastReplyID: UUID?, redoID: UUID?, dropping: Set<UUID>,
+                              found: FindFocus?) -> some View {
+        // A result on show holds the chat where it is: a reply that grows meanwhile does not take the view to the end.
+        let follows = followsBottom && !find.pausesFollowing
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     if isLoading {
@@ -104,7 +148,7 @@ private struct TranscriptList: View {
                         let isNew = entrances.isNew(item.id)
                         TranscriptRow(item: item, botID: look.id, orb: look.orb, entering: isNew,
                                       isLastReply: item.id == lastReplyID, offersRedo: item.id == redoID,
-                                      isDropping: dropping.contains(item.id))
+                                      isDropping: dropping.contains(item.id), find: item.id == found?.itemID ? found : nil)
                             .equatable()
                             // The row comes in by itself, not through an animation of the list (which would lay every row
                             // out again); the list's own animation must not add a transition of its own.
@@ -136,10 +180,12 @@ private struct TranscriptList: View {
                 // The list grew while a finger rested on it: glide to the end again.
                 withAnimation(ScrollMotion.animation(reduceMotion: reduceMotion)) { scrollToBottom(proxy) }
             }))
-            .modifier(KeepsBottom(follows: followsBottom))
+            .modifier(KeepsBottom(follows: follows))
             .environment(\.replyGrew, replyGrew(proxy))
-            .onChange(of: followsBottom) { follower.follows = followsBottom }
+            .onChange(of: follows) { follower.follows = follows }
+            .onChange(of: find.jump) { if let jump = find.jump { scrollToFound(jump, proxy) } }
             .onChange(of: transcript.revision) {
+                find.itemsChanged()
                 if !BottomFollower.anchorsItself { follower.follow { scrollToBottom(proxy) } }
             }
             .onChange(of: live.scrollNudge) { showSentMessage(proxy) }
@@ -153,6 +199,7 @@ private struct TranscriptList: View {
                 }
             }
             .onChange(of: isLoading) {
+                find.itemsChanged() // a search typed while the conversation was being read
                 // The conversation just arrived from disk: start at its end, as when it was there from the first frame.
                 guard !isLoading else { return }
                 proxy.scrollTo(BottomAnchor.id, anchor: .bottom)
@@ -180,9 +227,26 @@ private struct TranscriptList: View {
     /// the end already; from higher up it goes there at once.
     private func showSentMessage(_ proxy: ScrollViewProxy) {
         let wasAtBottom = followsBottom
+        find.resumeFollowing()
         followsBottom = true
         withAnimation(wasAtBottom ? ScrollMotion.animation(reduceMotion: reduceMotion) : nil) {
             scrollToBottom(proxy)
+        }
+    }
+
+    /// Brings the message of the chosen result into view, with the match where `FindScroll` puts it. Scrolling to an id is
+    /// all it takes: the list makes the rows around it as it arrives and none of the rest. Rows far from the last one shown
+    /// are measured only by estimate until they exist, so the same scroll is made once more when they do.
+    private func scrollToFound(_ jump: FindJump, _ proxy: ScrollViewProxy) {
+        let anchor = UnitPoint(x: 0.5, y: jump.anchorY)
+        // Under Reduce Motion nothing moves in a glide: the list is simply there.
+        withAnimation(jump.glides ? ScrollMotion.animation(reduceMotion: reduceMotion) : nil) {
+            proxy.scrollTo(jump.itemID, anchor: anchor)
+        }
+        Task {
+            try? await Task.sleep(for: .milliseconds(150))
+            guard find.jump?.token == jump.token else { return }
+            proxy.scrollTo(jump.itemID, anchor: anchor)
         }
     }
 

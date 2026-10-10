@@ -68,6 +68,8 @@ final class AppModel {
     // Commands and shortcuts (see AppModel+Commands.swift).
     var showCommandPalette = false
     var showShortcuts = false
+    /// The cursor is in the find field of a chat: Esc and ⌘↩ are the field's, not an approval card's.
+    @ObservationIgnored var findFieldHasFocus = false
     /// The Orb whose "Apagar…" sheet is open (one dialog for the sidebar and the inspector).
     var deletingBotID: UUID?
     /// The edit sheets that are on screen right now (each registers itself, see `registersOpenSheet`). Tokens rather

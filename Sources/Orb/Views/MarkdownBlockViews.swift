@@ -12,6 +12,8 @@ struct MarkdownChunk: View, Equatable {
     let source: String
     var streaming = false
     var cached = true
+    /// What a search in the conversation found in this reply: marked wherever it appears (nil: nothing).
+    var highlight: String?
 
     var body: some View {
         let blocks = MarkdownCache.blocks(source, cached: cached)
@@ -20,7 +22,7 @@ struct MarkdownChunk: View, Equatable {
         } else {
             VStack(alignment: .leading, spacing: markdownBlockSpacing) {
                 ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
-                    MarkdownBlockView(block: block, cursor: streaming && index == blocks.count - 1).equatable()
+                    MarkdownBlockView(block: block, cursor: streaming && index == blocks.count - 1, highlight: highlight).equatable()
                 }
             }
         }
@@ -31,6 +33,7 @@ struct MarkdownBlockView: View, Equatable {
     let block: MarkdownBlock
     /// The reply is still being written and this is its last block.
     var cursor = false
+    var highlight: String?
 
     var body: some View {
         switch block {
@@ -46,7 +49,7 @@ struct MarkdownBlockView: View, Equatable {
         case .list(let items):
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(Array(items.enumerated()), id: \.offset) { index, item in
-                    ListItemRow(item: item, cursor: cursor && index == items.count - 1).equatable()
+                    ListItemRow(item: item, cursor: cursor && index == items.count - 1, highlight: highlight).equatable()
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -59,9 +62,9 @@ struct MarkdownBlockView: View, Equatable {
                     RoundedRectangle(cornerRadius: 1).fill(Palette.lineStrong).frame(width: 2)
                 }
         case .code(let language, let code, _):
-            CodeBlockView(language: language, code: code, streaming: cursor)
+            CodeBlockView(language: language, code: code, streaming: cursor, highlight: highlight)
         case .table(let table):
-            TableBlockView(table: table, streaming: cursor)
+            TableBlockView(table: table, streaming: cursor, highlight: highlight)
         case .rule:
             Rectangle().fill(Palette.line).frame(height: 1).padding(.vertical, 4)
         }
@@ -77,8 +80,31 @@ struct MarkdownBlockView: View, Equatable {
 
     /// Text with the Markdown of its inline syntax applied (and the cursor after it while the reply is written).
     private func inline(_ source: String) -> some View {
-        let text = Text(MarkdownCache.attributed(source, cached: !cursor))
+        let text = Text(markdownText(source, cached: !cursor, highlight: highlight))
         return cursor ? text + Text(" ●").foregroundColor(Palette.muted) : text
+    }
+}
+
+/// The inline Markdown of `source` as the text a row draws, with what a search found marked.
+@MainActor func markdownText(_ source: String, cached: Bool, highlight: String?) -> AttributedString {
+    FindMarking.marked(MarkdownCache.attributed(source, cached: cached), query: highlight)
+}
+
+/// Marks the matches of a search in the text a row draws. Only the row of the chosen result is ever marked, so the cost is
+/// one search in one message.
+enum FindMarking {
+    static func marked(_ text: AttributedString, query: String?) -> AttributedString {
+        guard let query, let pattern = SearchPattern(query) else { return text }
+        var searcher = TextSearcher(pattern)
+        let ranges = searcher.matches(in: text.unicodeScalars)
+        guard !ranges.isEmpty else { return text }
+        var marked = text
+        for range in ranges { marked[range].backgroundColor = Palette.findMatch }
+        return marked
+    }
+
+    static func marked(_ text: String, query: String?) -> AttributedString {
+        marked(AttributedString(text), query: query)
     }
 }
 
@@ -86,13 +112,14 @@ struct MarkdownBlockView: View, Equatable {
 private struct ListItemRow: View, Equatable {
     let item: MarkdownListItem
     let cursor: Bool
+    var highlight: String?
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             marker
                 .frame(width: 18, alignment: .trailing)
                 .accessibilityHidden(true)
-            let text = Text(MarkdownCache.attributed(item.text, cached: !cursor))
+            let text = Text(markdownText(item.text, cached: !cursor, highlight: highlight))
             (cursor ? text + Text(" ●").foregroundColor(Palette.muted) : text)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -120,11 +147,12 @@ struct CodeBlockView: View, Equatable {
     let code: String
     /// The code is still being written (this is the last block of a reply that streams).
     var streaming = false
+    var highlight: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var flash = CopiedFlash()
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.language == rhs.language && lhs.code == rhs.code && lhs.streaming == rhs.streaming
+        lhs.language == rhs.language && lhs.code == rhs.code && lhs.streaming == rhs.streaming && lhs.highlight == rhs.highlight
     }
 
     /// Lines per piece of a long code block while it streams.
@@ -185,7 +213,7 @@ struct CodeBlockView: View, Equatable {
                 CodeLines(text: pieces.tail)
             }
         } else {
-            CodeLines(text: code)
+            CodeLines(text: code, highlight: highlight)
         }
     }
 
@@ -209,13 +237,22 @@ struct CodeBlockView: View, Equatable {
 /// Lines of code in the block's style. Equatable, so a piece that did not change is not laid out again.
 private struct CodeLines: View, Equatable {
     let text: String
+    var highlight: String?
 
     var body: some View {
-        Text(text.isEmpty ? " " : text)
+        line
             .font(.system(size: 12, design: .monospaced))
             .foregroundStyle(Palette.ink.opacity(0.9))
             .lineSpacing(2)
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder private var line: some View {
+        if highlight != nil {
+            Text(FindMarking.marked(text, query: highlight))
+        } else {
+            Text(text.isEmpty ? " " : text)
+        }
     }
 }
 
@@ -224,6 +261,7 @@ struct TableBlockView: View, Equatable {
     let table: MarkdownTable
     /// The table is still being written (it is the last block of a reply that streams).
     var streaming = false
+    var highlight: String?
 
     /// Rows per piece of a long table while it streams.
     nonisolated static let pieceRows = 20
@@ -232,7 +270,7 @@ struct TableBlockView: View, Equatable {
         Grid(alignment: .topLeading, horizontalSpacing: 18, verticalSpacing: 6) {
             GridRow {
                 ForEach(Array(table.header.enumerated()), id: \.offset) { column, cell in
-                    TableCell(source: cell, alignment: table.alignments.alignment(at: column), cached: true).fontWeight(.semibold)
+                    TableCell(source: cell, alignment: table.alignments.alignment(at: column), cached: true, highlight: highlight).fontWeight(.semibold)
                 }
             }
             Divider().gridCellUnsizedAxes(.horizontal).overlay(Palette.line)
@@ -256,7 +294,7 @@ struct TableBlockView: View, Equatable {
             }
             TableRows(rows: pieces.tail, alignments: table.alignments, writing: true)
         } else {
-            TableRows(rows: table.rows, alignments: table.alignments, writing: streaming)
+            TableRows(rows: table.rows, alignments: table.alignments, writing: streaming, highlight: highlight)
         }
     }
 
@@ -274,12 +312,13 @@ private struct TableRows: View, Equatable {
     let rows: [[String]]
     let alignments: [MarkdownTable.Alignment]
     let writing: Bool
+    var highlight: String?
 
     var body: some View {
         ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
             GridRow {
                 ForEach(Array(row.enumerated()), id: \.offset) { column, cell in
-                    TableCell(source: cell, alignment: alignments.alignment(at: column), cached: !(writing && index == rows.count - 1))
+                    TableCell(source: cell, alignment: alignments.alignment(at: column), cached: !(writing && index == rows.count - 1), highlight: highlight)
                 }
             }
         }
@@ -290,9 +329,10 @@ private struct TableCell: View {
     let source: String
     let alignment: Alignment
     let cached: Bool
+    var highlight: String?
 
     var body: some View {
-        Text(MarkdownCache.attributed(source, cached: cached))
+        Text(markdownText(source, cached: cached, highlight: highlight))
             .frame(maxWidth: .infinity, alignment: alignment)
     }
 }

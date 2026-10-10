@@ -180,6 +180,14 @@ AppleScript, Atalhos, área de transferência, captura de tela nem controla outr
   "↩ fila · ⌘↩ para e envia" e o balão diz "Depois da resposta (o Claude Code não recebe no meio)". Se o Orb espera sua
   resposta a um pedido, o que ia entrar no próximo passo só entra depois dela.
   Dá para tirar uma mensagem da espera ("Editar"). Se o turno falhar ou for parado, o que estava esperando (nos dois modos) volta para o campo. O que está no campo (texto, arquivos e imagens anexados) e o que voltou da fila ficam guardados em `rascunhos.json` ao fechar o app e voltam na próxima abertura (arquivos que sumiram ficam de fora).
+- **Buscar na conversa.** **⌘F** (ou a lupa da barra do chat, ou "Buscar na conversa" em ⌘K) abre uma barra no alto do chat:
+  digite e ela mostra "3 de 12", leva você à mensagem e marca o trecho. **↩** / **↓** / **⌘G** vão para o próximo resultado,
+  **⇧↩** / **↑** / **⇧⌘G** para o anterior (dá a volta), o botão de lista mostra um trecho de cada resultado para escolher, e **Esc** fecha.
+  Não importa maiúscula nem acento ("acao" acha "Ação"). A busca lê o texto guardado das mensagens (as suas, as do Orb, os avisos e a
+  linha de cada ferramenta, não a saída delas), fora da thread principal e só depois de uma pausa na digitação; nenhuma mensagem é
+  desenhada por causa dela, só a que você escolhe aparece (a lista de mensagens já desenha só as que estão à vista). Enquanto você
+  olha um resultado, o chat não vai sozinho para o fim com a resposta que chega; enviar uma mensagem volta a seguir. Até 1000
+  resultados aparecem ("3 de 1000+"). A resposta que ainda está sendo escrita fica de fora até terminar. VoiceOver lê "3 de 12 resultados".
 - **Parar.** O botão Parar ou **⌘.**; o Orb avisa "Você interrompeu esta resposta".
 - **Refazer e Editar** (com o Orb parado). Passe o mouse sobre a **última resposta**: ao lado de "Copiar" há o botão
   **Refazer**, que descarta a resposta e tudo o que o pedido acrescentou (linhas de ferramenta, avisos) e faz o mesmo pedido de novo, como se
@@ -540,7 +548,8 @@ tem a **Galeria**, os **Instalados** e **Explorar**.
 | Esc | Num cartão de aprovação: não permitir (não vale enquanto você digita). Também fecha a paleta e a lista de skills |
 | ⇧⌘M | Escolher o modelo do Orb |
 | ⌘Z | Desfazer "Esquecer" da memória (enquanto o aviso está na tela) |
-| ⌘F | Buscar, em Skills e Conectores (fora da aba Explorar leva ao catálogo, em Explorar) |
+| ⌘F | Buscar na conversa aberta. Em Skills e Conectores: buscar no catálogo (fora da aba Explorar leva ao catálogo, em Explorar) |
+| ⌘G / ⇧⌘G | Com a busca da conversa aberta: próximo resultado / anterior (também ↩ ou ↓ e ⇧↩ ou ↑ no campo; Esc fecha) |
 | ⌃⌥Espaço | De **qualquer app**: abre o painel da barra de menus. Opcional, desligado por padrão |
 
 A mesma lista, completa, está em **Ajuda → Atalhos do teclado** e em Ajustes → Geral (as duas leem o mesmo catálogo, `Shortcuts.swift`).
