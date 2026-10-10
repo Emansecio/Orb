@@ -135,7 +135,7 @@ struct BrandMarksTests {
             }
         }
         #expect(Set(ConnectorGallery.services.filter { $0.mark.brand != nil }.map(\.id)) == Set(branded))
-        #expect(BrandMarks.withoutLogo == ["slack"])
+        #expect(BrandMarks.withoutLogo.isEmpty)
         #expect(Set(BrandMarks.all.keys).isDisjoint(with: BrandMarks.withoutLogo))
     }
 

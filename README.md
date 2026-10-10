@@ -444,7 +444,7 @@ tem a **Galeria**, os **Instalados** e **Explorar**.
 
 - **Conectores** dão ferramentas novas aos Orbs (ler o Gmail, a Agenda, o Slack, o GitHub, uma pasta…). A **Galeria** é uma grade
   de serviços: cada cartão diz o que o serviço faz e como conecta, e o botão diz onde ele está (**Conectar**, **Conectado**,
-  **Resolver** quando falta algo, **Desligado**, **Em breve**). O ícone é o logotipo da marca (Gmail, Google Agenda, Notion, GitHub, Supabase, Linear, Atlassian e Sentry; vêm embutidos no app, nada é baixado) ou, onde não há (Slack) e nos conectores genéricos e da Apple, um símbolo ou uma letra na cor da marca. Os instalados e as folhas de conexão usam o mesmo ícone.
+  **Resolver** quando falta algo, **Desligado**, **Em breve**). O ícone é o logotipo da marca (Gmail, Google Agenda, Slack, Notion, GitHub, Supabase, Linear, Atlassian e Sentry; vêm embutidos no app, nada é baixado) ou, nos conectores genéricos e da Apple, um símbolo na cor da marca. Os instalados e as folhas de conexão usam o mesmo ícone.
   *Explorar* busca no [registro oficial do MCP](https://registry.modelcontextprotocol.io) os demais servidores, com aviso de que os
   não marcados "Oficial" são código de terceiros. Em "Adicionar manualmente" dá para informar o comando ou a URL.
   - **Google pelo Mac** (Gmail, Google Agenda, Lembretes): conectores **locais**, sem servidor e sem projeto no Google. A conta
@@ -572,7 +572,7 @@ Rodando pelo SwiftPM (sem um `.app`), ele só fecha: abra de novo. Nos modos de 
 - **Local.** Conversas, memórias, ajustes, anexos, saídas de ferramentas e o histórico de uso (só números, por hora) são arquivos comuns, sem criptografia própria, em
   `~/Library/Application Support/Orb` (Ajustes → Geral → Pasta de dados → Mostrar no Finder). O Orb não envia estatísticas de
   uso nem relatórios de erro.
-- **Logotipos.** Os logotipos dos serviços (galeria de conectores) vêm do [Simple Icons](https://simpleicons.org) 16.34.0 (CC0, domínio público), embutidos no código: o app não baixa imagem nenhuma para isso. As marcas pertencem aos seus donos e aparecem só para dizer a que serviço o conector se liga; o Orb não tem vínculo nem aprovação deles.
+- **Logotipos.** Os logotipos dos serviços (galeria de conectores) vêm do [Simple Icons](https://simpleicons.org) 16.34.0 (o do Slack, da 13.21.0, a última que o tinha; CC0, domínio público), embutidos no código: o app não baixa imagem nenhuma para isso. As marcas pertencem aos seus donos e aparecem só para dizer a que serviço o conector se liga; o Orb não tem vínculo nem aprovação deles.
 - **Chaves.** As chaves de API, o login do ChatGPT e os segredos dos conectores ficam no **Keychain** do macOS (no arquivo de dados
   fica só um marcador). O login do Claude Code é do próprio Claude Code: o Orb nunca o lê.
 - **O que vai para o provedor que você escolheu**, a cada mensagem: o que você escreveu, os anexos (imagens reduzidas; arquivos
