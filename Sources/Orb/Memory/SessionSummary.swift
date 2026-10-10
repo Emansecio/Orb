@@ -77,7 +77,7 @@ enum SessionSummary {
                     let detail = isConnectorCard(request) ? "" : " " + request.command
                     open.append("Você negou: " + line(request.title + detail, 140))
                 }
-            case .notice, .greeting:
+            case .notice, .greeting, .event, .orbMessage, .groupPause:
                 break
             }
         }

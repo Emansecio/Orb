@@ -14,11 +14,19 @@ enum ToolBox {
     /// permission does, which is rare, so the provider's cache of the tool list is not disturbed). `browser`: the `browse_*`
     /// tools come only with an installed engine (`.browser`); `web_fetch` and `web_search` come with "Navegar na web" alone.
     static func offered(for capabilities: Set<Capability>, accessibilityGranted: Bool,
-                        browser: BrowserAvailability = .fetchOnly) -> [any AgentTool] {
-        all.filter { tool in
+                        browser: BrowserAvailability = .fetchOnly, multi: MultiOrbOffering = MultiOrbOffering()) -> [any AgentTool] {
+        let base = all.filter { tool in
             guard tool.isOffered(for: capabilities) else { return false }
             if browseToolNames.contains(tool.spec.name), browser != .browser { return false }
             return accessibilityGranted || !accessibilityToolNames.contains(tool.spec.name)
+        }
+        return base + multiOrbTools.filter { tool in
+            switch tool.spec.name {
+            case "orbs": multi.orbs
+            case OrbProposeTool.name: multi.propose
+            case "group_remember", "group_recall": multi.groupMemory
+            default: false
+            }
         }
     }
 

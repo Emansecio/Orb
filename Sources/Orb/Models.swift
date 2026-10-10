@@ -108,6 +108,10 @@ struct Bot: Identifiable, Hashable, Codable, Sendable {
     var trustedInstructionsHash: String?
     /// Memory list of versions before each Orb had its own memory bank; moved into the bank at launch.
     var memory: [MemoryFact] = []
+    /// The Orb that created this one (`orb_propose`), and the name it had then; nil for an Orb the person made.
+    var createdBy: UUID?
+    var createdByName: String?
+    var createdAt: Date?
 
     var workingURL: URL {
         workingDirectory.isEmpty ? FileManager.default.homeDirectoryForCurrentUser
@@ -137,6 +141,10 @@ extension Bot {
         workingDirectory = try c.value(.workingDirectory, default: "")
         trustedInstructionsHash = try c.decodeIfPresent(String.self, forKey: .trustedInstructionsHash)
         memory = try c.value(.memory, default: [])
+        // Where the Orb came from is only a note: whatever cannot be read leaves the Orb as the person's own.
+        createdBy = (try? c.decodeIfPresent(UUID.self, forKey: .createdBy)) ?? nil
+        createdByName = (try? c.decodeIfPresent(String.self, forKey: .createdByName)) ?? nil
+        createdAt = (try? c.decodeIfPresent(Date.self, forKey: .createdAt)) ?? nil
     }
 }
 
@@ -155,6 +163,12 @@ struct TranscriptItem: Identifiable, Codable, Sendable, Equatable {
         /// What a new Orb says first, written by the app (`OrbGreeting`). Like a notice it is only for the screen: it is
         /// never one of the conversation's `messages`, so the model does not see it and nothing counts it.
         case greeting(String)
+        /// Something that happened between Orbs or to them (an Orb created, a group joined…), written by the app.
+        case event(OrbEvent)
+        /// A message between Orbs: a request sent or received, a reply, a post in a group's thread.
+        case orbMessage(OrbMessageItem)
+        /// A group reached its budget and waits for the person to continue or end the request.
+        case groupPause(GroupPauseItem)
     }
 
     var id = UUID()
@@ -249,6 +263,13 @@ struct Conversation: Codable, Sendable {
             case .approval(var request) where request.decision == nil:
                 request.decision = .deny
                 copy.items[index].kind = .approval(request)
+            case .orbMessage(var message) where message.direction == .sent && message.state == .open:
+                // Requests in flight do not survive the app closing (nobody is working on them anymore).
+                message.state = .lost
+                copy.items[index].kind = .orbMessage(message)
+            case .groupPause(var pause) where pause.state == .open:
+                pause.state = .ended
+                copy.items[index].kind = .groupPause(pause)
             default:
                 break
             }
@@ -295,6 +316,8 @@ extension Conversation {
 struct ToolCall: Identifiable, Codable, Sendable, Equatable {
     enum Kind: String, Codable, Sendable {
         case shell, browser, file, search, computer, connector, memory, schedule
+        /// The tools that reach other Orbs (`orbs`, `orb_propose`, `orb_draft`).
+        case orbs
 
         init(from decoder: Decoder) throws { self = try decoder.rawValue(Self.self, fallback: .connector) }
 
@@ -308,6 +331,7 @@ struct ToolCall: Identifiable, Codable, Sendable, Equatable {
             case .connector: "puzzlepiece.extension"
             case .memory: "brain"
             case .schedule: "clock.arrow.circlepath"
+            case .orbs: "bubble.left.and.bubble.right"
             }
         }
     }
@@ -408,8 +432,12 @@ struct ApprovalRequest: Identifiable, Codable, Sendable, Equatable {
     /// for "Pronto" (`.once`) or "Cancelar" (`.deny`). It has no rules to grant, never groups, and a change of permission
     /// mode does not answer it.
     var isHandoff = false
+    /// An Orb proposes a new Orb (`orb_propose`): the card shows it and asks Criar / Editar antes / Não criar. Like a hand-off
+    /// it is not a permission: it has no rules to grant, never groups, and a change of permission mode does not answer it.
+    var proposal: OrbProposal?
 
     var isBatch: Bool { items.count > 1 }
+    var isProposal: Bool { proposal != nil }
 
     /// The card `browse_show` opens. `page` is the address (and title) of the page left open in the window.
     static func handoff(botName: String, page: String) -> ApprovalRequest {
@@ -433,6 +461,8 @@ extension ApprovalRequest {
         isDangerous = try c.value(.isDangerous, default: false)
         note = try c.decodeIfPresent(String.self, forKey: .note)
         isHandoff = try c.value(.isHandoff, default: false)
+        // Only the card's contents: a proposal this version cannot read leaves a plain card the person can still answer.
+        proposal = (try? c.decodeIfPresent(OrbProposal.self, forKey: .proposal)) ?? nil
     }
 }
 
@@ -626,6 +656,7 @@ extension Skill {
 
 enum SidebarItem: Hashable {
     case bot(UUID)
+    case group(UUID)
     case routines
     case connectors
     case skills

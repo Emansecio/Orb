@@ -51,6 +51,13 @@ struct TranscriptRow: View, Equatable {
             NoticeLine(id: item.id, text: text, botID: botID)
         case .greeting(let text):
             GreetingMessage(orb: orb, botID: botID, text: text, isLast: isLastReply, highlight: find?.query)
+        // MARK: MultiOrb (WP0)
+        case .event(let event):
+            EventLineView(event: event)
+        case .orbMessage(let message):
+            OrbMessageRow(message: message, botID: botID)
+        case .groupPause(let pause):
+            GroupPauseCard(pause: pause)
         }
     }
 }

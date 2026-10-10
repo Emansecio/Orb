@@ -20,6 +20,15 @@ final class AppModel {
     var profile: UserProfile { didSet { scheduleStateSave() } }
     /// Prices the user corrected on the Uso page, by "provider/model".
     var priceCorrections: [String: ModelPrice] { didSet { scheduleStateSave() } }
+    // MARK: MultiOrb (WP0)
+    /// The groups of Orbs (`normalizeGroups` keeps them true to `bots`).
+    var groups: [OrbGroup] { didSet { scheduleStateSave() } }
+    /// Orbs asking each other for work (a shell that refuses everything until the runtime lands).
+    @ObservationIgnored var delegation: DelegationHub = DelegationHub()
+    /// A group's thread and its live state, made when the group is first opened.
+    @ObservationIgnored var groupSessions: [UUID: GroupSession] = [:]
+    @ObservationIgnored var groupLives: [UUID: GroupLive] = [:]
+    // MARK: end MultiOrb (WP0)
     /// Each Orb's running machinery (see `BotSession`): its conversation in memory, its turn, its streamed reply.
     /// Conversations: at launch only the selected Orb's is read (off the main thread, `beginLoading`); the others are
     /// read when they are needed (`BotSession.isUnloaded`): when you switch to the Orb, or something has to change
@@ -329,6 +338,7 @@ final class AppModel {
         profile = state.profile
         learnedContexts = state.learnedContexts
         priceCorrections = state.priceCorrections
+        groups = state.groups
         outputsDirectory = ToolOutputCap.directory(inDataFolder: store.directory)
         browserHub = BrowserHub.live(dataFolder: store.directory)
         // Only the Orb shown first is read at launch, and the window does not wait for it (`beginLoading` below).
@@ -2313,7 +2323,7 @@ final class AppModel {
         for (id, live) in lives where live.unread > 0 { unread[id.uuidString] = live.unread }
         return AppState(bots: bots, routines: routines, skills: skills, connectors: connectorSecrets.redact(connectors),
                         providers: providers, defaultModel: defaultModel, unread: unread, contextMemory: contextMemory,
-                        learnedContexts: learnedContexts, profile: profile, priceCorrections: priceCorrections)
+                        learnedContexts: learnedContexts, profile: profile, priceCorrections: priceCorrections, groups: groups)
     }
 
     private func scheduleStateSave() {

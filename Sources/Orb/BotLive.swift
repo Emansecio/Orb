@@ -17,6 +17,14 @@ struct BotLook: Equatable, Sendable {
     }
 }
 
+/// The other Orb in an exchange that is going on: the sidebar draws a ring around the avatar in its color. Small and
+/// `Equatable`, written only when it changes.
+struct PartnerTint: Equatable, Sendable {
+    var botID: UUID
+    /// The partner's `OrbConfig.color` (an id of `OrbCatalog`).
+    var color: String
+}
+
 /// One Orb as the views see it: its settings and everything that changes while the app runs (what it is doing,
 /// whether it waits for you, how many messages you have not read, its memory).
 ///
@@ -49,6 +57,13 @@ final class BotLive {
     /// follows `status` step by step (never per token), each phrase staying at least `workDwell` so none flickers;
     /// nil exactly when `status` is.
     private(set) var work: WorkLine?
+    // MARK: MultiOrb (WP0)
+    /// What the Orb says while it waits for other Orbs' answers after its own turn ended ("Esperando Pesquisador"); nil when
+    /// it waits for none. Written by the delegation runtime.
+    private(set) var chainWork: WorkLine?
+    /// The Orb it is exchanging messages with now (the sidebar's ring).
+    private(set) var partner: PartnerTint?
+    // MARK: end MultiOrb (WP0)
     /// `status != nil`, kept apart so the composer does not re-render with every new status line.
     private(set) var isWorking = false
     /// When the running turn began (nil exactly when none runs); the working line counts from it.
@@ -97,6 +112,8 @@ final class BotLive {
     @ObservationIgnored var isCelebrating = false { didSet { refresh() } }
     /// The last turn was interrupted or failed (a brief "error" expression).
     @ObservationIgnored var hasFailed = false { didSet { refresh() } }
+    /// The Orb waits for the answer of another Orb it asked (`OrbActivity.conversing`).
+    @ObservationIgnored var isConversing = false { didSet { refresh() } }
     @ObservationIgnored private(set) var isAwaitingApproval = false
     /// You are typing to the Orb: from the first keystroke until `composingQuiet` after the last (see `noteComposing`).
     @ObservationIgnored private(set) var isComposing = false
@@ -161,7 +178,7 @@ final class BotLive {
 
     /// What views say the Orb is doing: its phrase, or (for a status no step gave a phrase to) the plain status. nil when
     /// no turn runs.
-    var shownWork: WorkLine? { work ?? status.map { WorkPhrase.line(status: $0) } }
+    var shownWork: WorkLine? { work ?? status.map { WorkPhrase.line(status: $0) } ?? chainWork }
 
     /// Tests shorten the time a phrase stays.
     func setWorkDwell(_ duration: Duration) { dwell.minDwell = duration }
@@ -194,6 +211,10 @@ final class BotLive {
     func cued(_ kind: OrbCue) { cue = OrbCueSignal(count: cue.count + 1, kind: kind) }
 
     func setCelebration(_ level: OrbCelebration) { assign(\.celebration, to: level) }
+
+    func setChainWork(_ line: WorkLine?) { assign(\.chainWork, to: line) }
+
+    func setPartner(_ tint: PartnerTint?) { assign(\.partner, to: tint) }
 
     func glanced() { glance += 1 }
 
@@ -231,7 +252,7 @@ final class BotLive {
         assign(\.isWorking, to: status != nil)
         assign(\.activity, to: Self.activity(awaitingApproval: isAwaitingApproval, failed: hasFailed, celebrating: isCelebrating,
                                               isWorking: status != nil, tool: runningTool, speaking: isSpeaking,
-                                              listening: isListening, composing: isComposing))
+                                              listening: isListening, composing: isComposing, conversing: isConversing))
     }
 
     /// What the Orb does, most urgent first: waiting for you, the error and happy beats, then (while a turn
@@ -239,11 +260,11 @@ final class BotLive {
     /// (`attentive`) or is idle: a working Orb keeps working while you write to it.
     nonisolated static func activity(awaitingApproval: Bool, failed: Bool, celebrating: Bool, isWorking: Bool,
                                      tool: ToolCall.Kind?, speaking: Bool, listening: Bool,
-                                     composing: Bool = false) -> OrbActivity {
+                                     composing: Bool = false, conversing: Bool = false) -> OrbActivity {
         if awaitingApproval { return .waiting }
         if failed { return .error }
         if celebrating { return .happy }
-        guard isWorking else { return composing ? .attentive : .idle }
+        guard isWorking else { return conversing ? .conversing : composing ? .attentive : .idle }
         if let tool {
             switch tool {
             case .shell: return .typing
@@ -251,6 +272,7 @@ final class BotLive {
             case .file: return .reading
             case .search: return .searching
             case .connector, .memory, .schedule: return .thinking
+            case .orbs: return .conversing
             }
         }
         if speaking { return .speaking }

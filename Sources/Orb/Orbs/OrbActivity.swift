@@ -4,6 +4,8 @@ import SwiftUI
 /// gaze pattern, body motion and the little status bubble.
 enum OrbActivity: String, CaseIterable, Identifiable, Sendable {
     case idle, attentive, listening, speaking, thinking, typing, browsing, reading, searching, waiting, happy, error, sleepy
+    /// Waiting for another Orb's answer after asking it (`orbs`): the face of `attentive`, with its own gaze and sway.
+    case conversing
 
     var id: String { rawValue }
 
@@ -11,6 +13,7 @@ enum OrbActivity: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .idle: "Parado"
         case .attentive: "Atento"
+        case .conversing: "Conversando"
         case .listening: "Ouvindo"
         case .speaking: "Falando"
         case .thinking: "Pensando"
@@ -29,6 +32,7 @@ enum OrbActivity: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .idle: "circle"
         case .attentive: "keyboard"
+        case .conversing: "bubble.left.and.bubble.right"
         case .listening: "ear"
         case .speaking: "waveform"
         case .thinking: "ellipsis"
@@ -97,7 +101,7 @@ enum OrbActivity: String, CaseIterable, Identifiable, Sendable {
         case .typing, .error, .waiting, .happy: 30
         case .speaking: 20
         case .thinking, .browsing, .reading, .searching: 15
-        case .idle, .attentive, .listening, .sleepy: 10
+        case .idle, .attentive, .listening, .sleepy, .conversing: 10
         }
     }
 
@@ -113,7 +117,7 @@ enum OrbActivity: String, CaseIterable, Identifiable, Sendable {
     /// little jelly wobble; to a calmer one it just settles.
     var energy: Int {
         switch self {
-        case .idle, .attentive, .listening, .speaking, .sleepy: 0
+        case .idle, .attentive, .listening, .speaking, .sleepy, .conversing: 0
         case .thinking, .typing, .browsing, .reading, .searching: 1
         case .waiting, .happy, .error: 2
         }
@@ -124,7 +128,7 @@ enum OrbActivity: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .idle: 1
         case .listening, .waiting, .happy: 0.3
-        case .attentive: 0.2
+        case .attentive, .conversing: 0.2
         case .speaking: 0.35
         default: 0
         }
@@ -153,6 +157,10 @@ enum OrbActivity: String, CaseIterable, Identifiable, Sendable {
         case .attentive:
             // Watching the user type: eyes down toward the message field, a lazy drift along the line.
             return (CGPoint(x: 0.08 * sin(t * 0.9), y: -0.45), 0.3)
+        case .conversing:
+            // Waiting for a teammate's answer: the eyes go back and forth between the chat (to the right) and the middle, every ~1.8 s.
+            let toChat = Int((t / 1.8).rounded(.down)) % 2 == 0
+            return (toChat ? CGPoint(x: 0.7, y: 0.05) : .zero, 0.25)
         case .speaking:
             return (CGPoint(x: 0.06 * sin(t * 0.7), y: -0.05), 0.7)
         case .thinking:
@@ -188,6 +196,9 @@ enum OrbActivity: String, CaseIterable, Identifiable, Sendable {
         case .idle, .attentive, .listening:
             // Breathing, a slow float and a barely-there sway, out of step so it never looks like a loop.
             return OrbBodyMotion(lift: Self.float(t, bob: bob), squash: Self.breath(t, bob: bob), tilt: 1.1 * bob * sin(t * 0.55 + 0.8))
+        case .conversing:
+            // Breathing with a slight lean that comes and goes: it is waiting, not working.
+            return OrbBodyMotion(lift: Self.float(t, bob: bob), squash: Self.breath(t, bob: bob), tilt: 2 * sin(t * 0.9))
         case .speaking:
             // A gentle nod in the rhythm of speech.
             return OrbBodyMotion(lift: 0.014 * bob * sin(t * 4.4), squash: 0.01 * bob * sin(t * 2.2 + 1), tilt: 2 * sin(t * 1.3))
