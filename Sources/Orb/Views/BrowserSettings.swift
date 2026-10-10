@@ -84,6 +84,8 @@ private struct BrowserEngineRowView: View {
 
     @ViewBuilder private var actions: some View {
         switch row.phase {
+        case .checking:
+            EmptyView()
         case .notInstalled, .failed:
             Button(isFailed ? "Tentar de novo" : "Instalar") { setup.install(row.engine) }
                 .disabled(!row.canInstall)
@@ -125,6 +127,11 @@ private struct BrowserEngineRowView: View {
                 if let progress = installingProgress, progress.componentFraction != nil {
                     Text("\(Int(((progress.fraction ?? 0) * 100).rounded()))%").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }
+            }
+        case .checking:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.mini)
+                Text(row.statusText).font(.caption).foregroundStyle(.secondary)
             }
         case .notInstalled:
             Label(row.statusText, systemImage: "circle.dashed")

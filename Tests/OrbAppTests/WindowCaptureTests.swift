@@ -1,6 +1,7 @@
 import AppKit
 import CoreGraphics
 import Foundation
+import os
 import Testing
 @testable import Orb
 
@@ -94,19 +95,20 @@ struct WindowCaptureTests {
         let cached = make(.seconds(60))
         #expect(try await cached.windows(pid: 100).map(\.windowID) == [1, 3])
         #expect(try await cached.windows(pid: 200).map(\.windowID) == [2])
-        #expect(try await cached.windows(pid: 300).isEmpty)
         #expect(listings.count == 1, "1.5 s of cache is the design; here a long lifetime proves the cache is used")
+        #expect(try await cached.windows(pid: 300).isEmpty)
+        #expect(listings.count == 2, "an app the cached listing does not have is listed again, once")
 
         let expired = make(.zero)
         _ = try await expired.windows(pid: 100)
         _ = try await expired.windows(pid: 100)
-        #expect(listings.count == 3)
+        #expect(listings.count == 4)
         #expect(LiveWindowCapturer.cacheLifetime == .milliseconds(1_500) && LiveWindowCapturer.maxConcurrentCaptures == 2)
     }
 
     @Test func theCacheExpiresAfterItsLifetime() async throws {
         let listings = Counter()
-        let capturer = LiveWindowCapturer(backend: backend(windows: { listings.bump(); return [] }, primary: { _, _ in try self.image() },
+        let capturer = LiveWindowCapturer(backend: backend(windows: { listings.bump(); return [self.window(1, pid: 1)] }, primary: { _, _ in try self.image() },
                                                            fallback: { _, _ in try self.image() }), lifetime: .milliseconds(80))
         _ = try await capturer.windows(pid: 1)
         _ = try await capturer.windows(pid: 1)
@@ -114,6 +116,35 @@ struct WindowCaptureTests {
         try await Task.sleep(for: .milliseconds(150))
         _ = try await capturer.windows(pid: 1)
         #expect(listings.count == 2)
+    }
+
+    @Test func aWindowThatOpenedAfterTheCachedListingIsFoundByListingAgain() async throws {
+        // The smoke's fixture: its window appeared a moment after another capture filled the 1.5 s cache.
+        let listings = Counter()
+        let appeared = OSAllocatedUnfairLock(initialState: false)
+        let capturer = LiveWindowCapturer(backend: backend(windows: {
+            listings.bump()
+            return [self.window(1, pid: 200)] + (appeared.withLock { $0 } ? [self.window(2, pid: 100, title: "Fixture")] : [])
+        }, primary: { _, _ in try self.image() }, fallback: { _, _ in try self.image() }), lifetime: .seconds(60))
+        #expect(try await capturer.windows(pid: 200).map(\.windowID) == [1])
+        appeared.withLock { $0 = true }
+        #expect(try await capturer.windows(pid: 100).map(\.windowID) == [2], "not \"no window that can be captured\"")
+        #expect(listings.count == 2)
+        #expect(try await capturer.refreshedWindows(pid: 200).map(\.windowID) == [1] && listings.count == 3, "a fresh listing on demand")
+    }
+
+    @Test func theWindowServerListKeepsTheNormalLayerWithNumbersFramesAndTitles() {
+        let info: [[String: Any]] = [
+            [kCGWindowNumber as String: 8333, kCGWindowOwnerPID as String: 400, kCGWindowLayer as String: 0, kCGWindowName as String: "Downloads",
+             kCGWindowIsOnscreen as String: true, kCGWindowBounds as String: ["X": 315, "Y": 248, "Width": 920, "Height": 436]],
+            [kCGWindowNumber as String: 2940, kCGWindowOwnerPID as String: 400, kCGWindowLayer as String: 103,
+             kCGWindowBounds as String: ["X": 838, "Y": 427, "Width": 262, "Height": 35]],
+            [kCGWindowNumber as String: 90, kCGWindowOwnerPID as String: 500, kCGWindowLayer as String: 0,
+             kCGWindowBounds as String: ["X": -1440, "Y": -200, "Width": 800, "Height": 600]],
+        ]
+        let listed = WindowServerList.parse(info)
+        #expect(listed == [CapturableWindow(windowID: 8333, pid: 400, frame: CGRect(x: 315, y: 248, width: 920, height: 436), title: "Downloads", isOnScreen: true),
+                           CapturableWindow(windowID: 90, pid: 500, frame: CGRect(x: -1440, y: -200, width: 800, height: 600), title: "", isOnScreen: false)])
     }
 
     @Test func screenCaptureKitIsTriedFirstAndScreencaptureNotAtAllWhenItWorks() async throws {
@@ -218,6 +249,39 @@ struct WindowCaptureTests {
         // The Accessibility frame is stale (the window moved): same size and title still finds it.
         #expect(WindowMatcher.match(frame: CGRect(x: 0, y: 0, width: 500, height: 200), title: "B", among: [a, b])?.windowID == 2)
         #expect(WindowMatcher.match(frame: CGRect(x: 0, y: 0, width: 9, height: 9), title: "?", among: [a])?.windowID == 1, "the app's only window")
+    }
+
+    /// What Finder listed in the smoke: one real window and four untitled 33-point strips (one per display and Space),
+    /// plus here a tab behind it on the same spot.
+    private var finderWindows: [CapturableWindow] {
+        let strip = CGRect(x: 0, y: 0, width: 1512, height: 33)
+        return [window(161, frame: strip, title: ""), window(8333, frame: CGRect(x: 315, y: 248, width: 920, height: 436), title: "Downloads"),
+                window(160, frame: strip, title: "", onScreen: false), window(159, frame: strip, title: "", onScreen: false),
+                window(162, frame: strip, title: "", onScreen: false),
+                window(8340, frame: CGRect(x: 315, y: 248, width: 920, height: 436), title: "Documentos", onScreen: false)]
+    }
+
+    @Test func finderIsMatchedAmongItsStripsAndTabs() {
+        let downloads = CGRect(x: 315, y: 248, width: 920, height: 436)
+        #expect(WindowMatcher.match(frame: downloads, title: "Downloads", among: finderWindows)?.windowID == 8333)
+        #expect(WindowMatcher.match(frame: downloads, title: "Documentos", among: finderWindows)?.windowID == 8340, "the tab by its title")
+        #expect(WindowMatcher.match(frame: downloads, title: "", among: finderWindows)?.windowID == 8333, "untitled: the tab on screen")
+        #expect(WindowMatcher.match(windowID: 8340, frame: CGRect(x: 0, y: 0, width: 1, height: 1), title: "x", among: finderWindows)?.windowID == 8340,
+                "the number Accessibility gives settles it, whatever the frame says")
+        // Finder's desktop (an "AXWindows" entry the size of the display) is none of them; strips do not count as "the only window".
+        #expect(WindowMatcher.match(frame: CGRect(x: 0, y: 0, width: 1512, height: 982), title: "", among: finderWindows) == nil)
+        #expect(WindowMatcher.match(frame: CGRect(x: 0, y: 0, width: 1512, height: 982), title: "", among: Array(finderWindows.prefix(5)))?.windowID == 8333,
+                "one plausible window among strips is the app's only window")
+        #expect(WindowMatcher.choose(from: finderWindows, selector: nil)?.windowID == 8333, "not a strip")
+    }
+
+    @Test func aWindowOnASecondDisplayLeftOfAndAboveTheMainOneIsMatched() {
+        // Accessibility and the window server both use global points from the top left of the main display: a display on
+        // the left and higher gives negative coordinates on both sides, and a Retina scale changes neither.
+        let left = window(31, frame: CGRect(x: -1440, y: -200, width: 800, height: 600), title: "")
+        let main = window(32, frame: CGRect(x: 100, y: 50, width: 800, height: 600), title: "")
+        #expect(WindowMatcher.match(frame: CGRect(x: -1441.5, y: -199, width: 800, height: 601), title: "", among: [left, main])?.windowID == 31)
+        #expect(WindowMatcher.match(frame: CGRect(x: 100, y: 50, width: 800, height: 600), title: "", among: [left, main])?.windowID == 32)
     }
 
     @Test func withoutAccessibilityAWindowIsChosenByPositionTitleOrWhatIsOnScreen() {
@@ -549,6 +613,59 @@ extension ScreenshotToolTests {
         let report = try await run(rig, ["app": .string("Orb"), "ocr": .string("off")])
         #expect(report.contains("Captura salva") && report.contains("não lê a própria interface") && !report.contains("[1]"))
         #expect(rig.system.rootCalls == 0)
+        try? FileManager.default.removeItem(at: rig.folder)
+    }
+
+    @Test func finderSDesktopEntryGivesWayToItsRealWindow() async throws {
+        // Finder lists its desktop among "AXWindows" (first, the size of the display, untitled), and with Finder in the
+        // background no window says it is focused: the picture and the marks are the "Downloads" window's.
+        let rig = rig()
+        let desktop = fake("AXScrollArea", size: nil)
+        desktop.frame = CGRect(x: 0, y: 0, width: 1512, height: 982)
+        let save = frame(fakeButton("Compartilhar"), 400, 270, 80, 24)
+        let downloads = fake("AXWindow", title: "Downloads", [save])
+        downloads.frame = CGRect(x: 315, y: 248, width: 920, height: 436)
+        let root = fakeApp(windows: [desktop, downloads])
+        root.attrs["AXFocusedWindow"] = nil
+        rig.system.roots[100] = root
+        let strip = CGRect(x: 0, y: 0, width: 1512, height: 33)
+        rig.system.windowCapturer.setWindows([
+            CapturableWindow(windowID: 161, pid: 100, frame: strip), CapturableWindow(windowID: 160, pid: 100, frame: strip, isOnScreen: false),
+            CapturableWindow(windowID: 8333, pid: 100, frame: downloads.frame!, title: "Downloads"),
+            CapturableWindow(windowID: 159, pid: 100, frame: strip, isOnScreen: false), CapturableWindow(windowID: 162, pid: 100, frame: strip, isOnScreen: false),
+        ], pid: 100)
+        let report = try await run(rig, ["app": .string("Editor")])
+        #expect(report.contains("janela “Downloads” de Editor"), Comment(rawValue: report))
+        #expect(report.contains("w2.1 button “Compartilhar”"))
+        #expect(rig.system.windowCapturer.captures.map(\.windowID) == [8333])
+        try? FileManager.default.removeItem(at: rig.folder)
+    }
+
+    @Test func theWindowNumberAccessibilityGivesBeatsAFrameThatDoesNotMatch() async throws {
+        let rig = rig()
+        let window = try #require(rig.system.roots[100]?.attrs["AXWindows"]?.elements?.first as? FakeElement)
+        window.windowNumber = 91
+        rig.system.windowCapturer.setWindows([CapturableWindow(windowID: 77, pid: 100, frame: CGRect(x: 600, y: 50, width: 400, height: 300), title: "Outra"),
+                                              CapturableWindow(windowID: 91, pid: 100, frame: CGRect(x: 103, y: 47, width: 404, height: 296), title: "")], pid: 100)
+        _ = try await run(rig, ["app": .string("Editor"), "marks": .bool(false)])
+        #expect(rig.system.windowCapturer.captures.map(\.windowID) == [91])
+        try? FileManager.default.removeItem(at: rig.folder)
+    }
+
+    @Test func aWindowMissingFromAnOldListingIsLookedForInAFreshOne() async throws {
+        // What failed in the smoke: the fixture's window had opened after the listing the capturer kept.
+        let rig = rig()
+        rig.system.windowCapturer.setStale([], pid: 100)
+        let report = try await run(rig, ["app": .string("Editor"), "marks": .bool(false)])
+        #expect(report.contains("Captura salva"), Comment(rawValue: report))
+        #expect(rig.system.windowCapturer.refreshCount == 1 && rig.system.windowCapturer.captures.map(\.windowID) == [77])
+        try? FileManager.default.removeItem(at: rig.folder)
+    }
+
+    @Test func theAppIsFoundWithoutAskingWhichOneIsInFront() async throws {
+        let rig = rig()
+        _ = try await run(rig, ["app": .string("Editor"), "marks": .bool(false)])
+        #expect(rig.system.listings == [false], "a hung app on top would make that question wait")
         try? FileManager.default.removeItem(at: rig.folder)
     }
 

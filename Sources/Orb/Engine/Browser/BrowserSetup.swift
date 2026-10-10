@@ -4,6 +4,8 @@ import Observation
 /// One line of Ajustes → Navegador: an engine, and what can be done with it now.
 struct BrowserEngineRow: Equatable, Identifiable, Sendable {
     enum Phase: Equatable, Sendable {
+        /// The Mac has not been looked at yet: nothing is said and nothing can be done until it has.
+        case checking
         case notInstalled
         /// Ready to use. `managed`: the app installed it (it can remove and update it); otherwise it was found on the Mac.
         case installed(managed: Bool)
@@ -26,7 +28,7 @@ struct BrowserEngineRow: Equatable, Identifiable, Sendable {
         guard !isBlocked else { return false }
         switch phase {
         case .notInstalled, .failed: return true
-        case .installed, .installing: return false
+        case .checking, .installed, .installing: return false
         }
     }
 
@@ -47,6 +49,7 @@ struct BrowserEngineRow: Equatable, Identifiable, Sendable {
     /// The line under the name: what it is doing or has.
     var statusText: String {
         switch phase {
+        case .checking: "Conferindo…"
         case .notInstalled: "Não instalado"
         case .installed(let managed):
             managed ? "Instalado" + (versionText.map { " · \($0)" } ?? "") : "Instalado fora do Orb" + (versionText.map { " · \($0)" } ?? "")
@@ -81,7 +84,8 @@ final class BrowserSetup {
         self.installer = installer
         self.status = status
         self.closeBrowsers = closeBrowsers
-        rows = Self.engines.map { BrowserEngineRow(engine: $0, phase: .notInstalled) }
+        // Until the first look, every engine is "checking", never "not installed" with an Install button that would be wrong.
+        rows = Self.engines.map { BrowserEngineRow(engine: $0, phase: .checking) }
     }
 
     var isBusy: Bool { working != nil }

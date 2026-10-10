@@ -277,9 +277,16 @@ struct CapturableWindow: Sendable, Equatable {
 
 /// Images of single windows, also when covered or on another Space.
 protocol WindowCapturer: Sendable {
+    /// The app's windows; may come from a listing made a moment ago.
     func windows(pid: Int32) async throws -> [CapturableWindow]
+    /// The app's windows listed now (for a window the last listing may not have had).
+    func refreshedWindows(pid: Int32) async throws -> [CapturableWindow]
     /// The window's own pixels, nominal resolution, scaled down so the longer side is at most `maxSide`.
     func capture(_ window: CapturableWindow, maxSide: Int) async throws -> CGImage
+}
+
+extension WindowCapturer {
+    func refreshedWindows(pid: Int32) async throws -> [CapturableWindow] { try await windows(pid: pid) }
 }
 
 // MARK: - Taking the screen over

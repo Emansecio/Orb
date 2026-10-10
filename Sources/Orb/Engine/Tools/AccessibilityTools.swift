@@ -64,7 +64,10 @@ enum UIAccess {
     static func open(_ query: String?, system: any AccessibilitySystem, ownPID: Int32 = ProcessInfo.processInfo.processIdentifier,
                      ownBundleID: String? = Bundle.main.bundleIdentifier) async throws -> AccessibilityApp {
         guard system.isTrusted() else { throw ToolError(MacPermissionProblem.accessibility.modelMessage) }
-        let apps = await system.runningApps()
+        // Which app is in front matters only when none is named; finding that out asks apps, and a hung one on top makes
+        // it wait (a call to it must fail at once, not after that wait).
+        let named = !(query?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        let apps = await system.runningApps(withFrontmost: !named)
         switch UIAppResolver.resolve(query, in: apps, ownPID: ownPID, ownBundleID: ownBundleID) {
         case .success(let app): return app
         case .failure(let failure): throw ToolError(failure.message)
@@ -93,7 +96,7 @@ enum UIAccess {
 
     /// The app is still the one that was read: the same process (pid, bundle identifier and launch date).
     static func verify(_ app: AccessibilityApp, system: any AccessibilitySystem) async throws -> AccessibilityApp {
-        let running = await system.runningApps()
+        let running = await system.runningApps(withFrontmost: false)
         guard let match = running.first(where: { $0.pid == app.pid }), match.bundleID == app.bundleID,
               sameLaunch(app.launchDate, match.launchDate) else {
             throw ToolError("\(app.name) fechou ou foi reaberto desde a última leitura; chame ui_read de novo.")
@@ -412,15 +415,27 @@ enum UIWaitCondition: Sendable, Equatable {
     }
 }
 
-/// Waits for something to show in an app: re-checks when a notification comes (60 ms after the last of a burst), and
-/// every 250 ms when the app sends none.
+/// Waits for something to show in an app: re-checks as soon as a notification comes (also one that came while it was
+/// looking), and every 250 ms when none does: an app may change what it shows without saying so (and not every element
+/// says it changed), so the notifications only make the waiting shorter.
 struct UIWaiter: Sendable {
     let system: any AccessibilitySystem
     let sessions: AXSessions
     let store: UISnapshotStore
     let live: UILiveElements
+    /// The longest pause between two looks when no notification comes.
     var poll: Duration = .milliseconds(250)
-    var quiet: Duration = .milliseconds(60)
+    /// The pauses before that: short at first, when what was waited for most likely happens (a label that changes right
+    /// after a press), then longer.
+    static let ticks: [Duration] = [.milliseconds(50), .milliseconds(50), .milliseconds(75), .milliseconds(100), .milliseconds(150)]
+
+    /// Told every pause before it is taken (tests).
+    var onPause: (@Sendable (Duration) -> Void)?
+
+    /// The pause after the `look`-th look (from 0).
+    func tick(after look: Int) -> Duration {
+        look < Self.ticks.count ? min(Self.ticks[look], poll) : poll
+    }
 
     /// Notifications that say the window changed (focus and layout alone do not).
     static let changeNotifications: Set<AXNotification> = [
@@ -463,8 +478,11 @@ struct UIWaiter: Sendable {
         }
         var baseline: Probe?
         var eventsAtBaseline = 0
+        var looks = 0
         while true {
             try Task.checkCancellation()
+            // Counted before looking: a notification that comes while the look runs makes the next look start at once.
+            let seen = watcher.count
             let left = max(clock.now.duration(to: end + sessions.deadlines.waitGrace), .milliseconds(100))
             let probe = try await UIAccess.mapped(app) {
                 try await sessions.run(app, within: min(sessions.deadlines.action, left)) {
@@ -488,10 +506,13 @@ struct UIWaiter: Sendable {
             }
             let remaining = clock.now.duration(to: end)
             guard remaining > .zero else { return "(não aconteceu em \(UIClock.seconds(timeout)))" }
+            let pause = min(tick(after: looks), remaining)
+            looks += 1
+            onPause?(pause)
             if watcher.isFinished {
-                try await Task.sleep(for: min(poll, remaining))
-            } else if await watcher.waitForMore(than: watcher.count, timeout: min(.seconds(1), remaining)) {
-                try await Task.sleep(for: min(quiet, max(clock.now.duration(to: end), .zero)))
+                try await Task.sleep(for: pause)
+            } else {
+                await watcher.waitForMore(than: seen, timeout: pause)
             }
         }
     }
@@ -516,6 +537,8 @@ struct UIWaiter: Sendable {
             var limits = UIOutlineLimits()
             limits.maxLines = 40
             limits.seconds = 1.5
+            // Whether it is there, not how many times: the walk ends at the first element that has the text.
+            limits.stopAtFirstMatch = true
             let outline = UIOutlineBuilder.outline(of: window, prefix: "w\(index + 1)", query: text, limits: limits)
             if let failure = outline.failure, failure != .invalidElement { throw failure }
             return Probe(matched: outline.matched > 0)
@@ -555,6 +578,65 @@ struct UIWaiter: Sendable {
             let index = try UIWindowChooser.choose(from: windows, selector: selector, focused: values["AXFocusedWindow"]?.element)
             return (windows[index], index)
         }
+    }
+}
+
+// MARK: - Selecting rows
+
+/// Selecting rows of a table, outline or list without a click, and reading back that it took.
+enum UIRowSelection {
+    static let containerRoles: Set<String> = ["AXTable", "AXOutline", "AXList", "AXBrowser", "AXGrid"]
+    static let rowRoles: Set<String> = ["AXRow"]
+
+    /// The row `element` is (or is in, up to six levels up: a cell's text, the cell) and the container that holds it.
+    static func context(of element: any AccessibilityElement, role: String) -> (row: any AccessibilityElement, container: (any AccessibilityElement)?)? {
+        var current = element
+        var currentRole = role
+        for _ in 0...6 {
+            if rowRoles.contains(currentRole) {
+                var parent = current.element("AXParent")
+                for _ in 0..<3 {
+                    guard let above = parent else { break }
+                    if containerRoles.contains(above.string("AXRole") ?? "") { return (current, above) }
+                    parent = above.element("AXParent")
+                }
+                return (current, nil)
+            }
+            if containerRoles.contains(currentRole) { return nil }
+            guard let parent = current.element("AXParent") else { return nil }
+            current = parent
+            currentRole = parent.string("AXRole") ?? ""
+        }
+        return nil
+    }
+
+    /// Tries, reading back after each: the container's `AXSelectedRows` (an NSTableView selects as a click would and
+    /// tells its delegate), each row's `AXSelected`, the container's `AXSelectedChildren`, and for one row its `AXPress`
+    /// (web and Electron lists). False when none of them was confirmed. Blocking: run it on the app's queue.
+    static func select(_ rows: [any AccessibilityElement], in container: (any AccessibilityElement)?,
+                       pause: TimeInterval = 0.05) -> Bool {
+        guard !rows.isEmpty else { return false }
+        func isSelected(_ row: any AccessibilityElement) -> Bool {
+            if row.bool("AXSelected") == true { return true }
+            guard let container else { return false }
+            let listed = container.elements("AXSelectedRows") ?? container.elements("AXSelectedChildren") ?? []
+            return listed.contains { $0.isSame(as: row) }
+        }
+        func confirmed() -> Bool {
+            for attempt in 0..<3 {
+                if attempt > 0 { Thread.sleep(forTimeInterval: pause) }
+                if rows.allSatisfy(isSelected) { return true }
+            }
+            return false
+        }
+        if let container, container.isSettable("AXSelectedRows"), (try? container.setValue(.elements(rows), for: "AXSelectedRows")) != nil,
+           confirmed() { return true }
+        if rows.allSatisfy({ $0.isSettable("AXSelected") }),
+           (try? rows.forEach { try $0.setValue(.bool(true), for: "AXSelected") }) != nil, confirmed() { return true }
+        if let container, container.isSettable("AXSelectedChildren"),
+           (try? container.setValue(.elements(rows), for: "AXSelectedChildren")) != nil, confirmed() { return true }
+        if rows.count == 1, rows[0].actionNames().contains("AXPress"), (try? rows[0].perform("AXPress")) != nil, confirmed() { return true }
+        return false
     }
 }
 
@@ -1537,7 +1619,7 @@ struct UIActTool: AgentTool {
         let listed = system.windowList(pid: app.pid).sorted { $0.isOnScreen && !$1.isOnScreen }
         if let known {
             // The window of the screenshot must still exist (a new window can reuse the frame, not the number).
-            let current = listed.isEmpty ? ((try? await system.capturer.windows(pid: app.pid)) ?? []) : listed
+            let current = listed.isEmpty ? ((try? await system.capturer.refreshedWindows(pid: app.pid)) ?? []) : listed
             if !current.isEmpty, !current.contains(where: { $0.windowID == known }) {
                 throw UIResolver.stale("a janela do screenshot não existe mais; tire outro")
             }
@@ -1547,7 +1629,7 @@ struct UIActTool: AgentTool {
         if !listed.isEmpty {
             windows = listed
         } else {
-            do { windows = try await system.capturer.windows(pid: app.pid) } catch {
+            do { windows = try await system.capturer.refreshedWindows(pid: app.pid) } catch {
                 throw Self.needsScreen(what, because: Self.reason(error))
             }
         }
@@ -1579,9 +1661,18 @@ struct UIActTool: AgentTool {
     }
 
     static func confirmFocus(on target: any AccessibilityElement, root: any AccessibilityElement, app: AccessibilityApp) throws {
-        guard let focused = root.element("AXFocusedUIElement"), focused.isSame(as: target) else {
-            throw ToolError("O foco de \(app.name) não está no campo pedido; não mandei nada. Leia de novo com ui_read e diga o id do campo.")
-        }
+        guard let focused = root.element("AXFocusedUIElement"), focused.isSame(as: target) else { throw focusLost(app) }
+    }
+
+    static func focusLost(_ app: AccessibilityApp) -> ToolError {
+        ToolError("O foco de \(app.name) não está no campo pedido; não mandei nada. Leia de novo com ui_read e diga o id do campo.")
+    }
+
+    /// In one round trip: whether the app's focus is still on `target`, and whether the app says it is in front (nil
+    /// when it does not say).
+    static func focusAndFront(of target: any AccessibilityElement, root: any AccessibilityElement) -> (focusHeld: Bool, inFront: Bool?) {
+        let values = root.attributes(["AXFocusedUIElement", "AXFrontmost"])
+        return (values["AXFocusedUIElement"]?.element.map { $0.isSame(as: target) } ?? false, values["AXFrontmost"]?.bool)
     }
 
     /// Types in chunks of at most 20 UTF-16 units, checking before each one that the focus is still on the field and the
@@ -1600,15 +1691,19 @@ struct UIActTool: AgentTool {
             if Task.isCancelled { return ["Parei a pedido: digitei \(sent) de \(total) caracteres."] }
             if index > 0 {
                 do {
-                    // The app in front is asked once per chunk, for both checks.
-                    let front = await system.frontmostPID()
-                    try await checkFront(front)
-                    try await refuseIfUserIsActive(app, front: .some(front))
-                    try await UIAccess.mapped(app) {
+                    // One question to the app per chunk: where its focus is and whether it is in front (only the app's own
+                    // answer matters here: is it this app). Asking the whole desktop which app is in front, a hundred
+                    // times for 2,000 characters, cost more than the typing.
+                    let (focusHeld, inFront) = try await UIAccess.mapped(app) {
                         try await sessions.run(app, within: sessions.deadlines.action) {
-                            try Self.confirmFocus(on: target, root: system.root(of: app), app: app)
+                            Self.focusAndFront(of: target, root: system.root(of: app))
                         }
                     }
+                    var front: Int32?
+                    if let inFront { front = inFront ? app.pid : nil } else { front = await system.frontmostPID() }
+                    try await checkFront(front)
+                    try await refuseIfUserIsActive(app, front: .some(front))
+                    if !focusHeld { throw Self.focusLost(app) }
                 } catch is CancellationError {
                     return ["Parei a pedido: digitei \(sent) de \(total) caracteres."]
                 } catch {
@@ -1652,7 +1747,10 @@ struct UIActTool: AgentTool {
             let started = clock.now
             let system = system
             let target = last.target
+            let ticks = UIWaiter(system: system, sessions: sessions, store: store, live: live)
+            var looks = 0
             while started.duration(to: clock.now) < timeout {
+                let seen = last.watcher.count
                 if last.watcher.events.contains(where: { UIWaiter.changeNotifications.contains($0.notification) }) {
                     return "(esperei \(UIClock.seconds(started.duration(to: clock.now))): mudou)"
                 }
@@ -1660,10 +1758,12 @@ struct UIActTool: AgentTool {
                 if now != last.before { return "(esperei \(UIClock.seconds(started.duration(to: clock.now))): mudou)" }
                 let left = timeout - started.duration(to: clock.now)
                 guard left > .zero else { break }
+                let pause = min(ticks.tick(after: looks), left)
+                looks += 1
                 if last.watcher.isFinished {
-                    try await Task.sleep(for: min(.milliseconds(250), left))
+                    try await Task.sleep(for: pause)
                 } else {
-                    await last.watcher.waitForMore(than: last.watcher.count, timeout: min(.seconds(1), left))
+                    await last.watcher.waitForMore(than: seen, timeout: pause)
                 }
             }
             return "(não aconteceu em \(UIClock.seconds(timeout)))"
@@ -1742,8 +1842,10 @@ struct UIActTool: AgentTool {
                 return Acted(summary: "\(verb) \(target.name) (\(target.id)).", target: target.element, before: state)
             }
             if target.element.isSettable("AXSelected") {
-                try target.element.setValue(.bool(true), for: "AXSelected")
-                return Acted(summary: "Selecionei \(target.name) (\(target.id)).", target: target.element, before: state)
+                let context = UIRowSelection.context(of: target.element, role: target.live.rawRole)
+                if UIRowSelection.select([target.element], in: context?.container) {
+                    return Acted(summary: "Selecionei \(target.name) (\(target.id)).", target: target.element, before: state)
+                }
             }
             guard let frame = target.frame, target.window != nil else { throw missing(target, "clique", actions) }
             return Acted(summary: "\(verb) \(target.name) (\(target.id)).", target: target.element, before: state,
@@ -2018,23 +2120,37 @@ struct UIActTool: AgentTool {
             let rows = try ([step.reference].compactMap { $0 } + step.ids).map(resolve)
             for row in rows { try checkDanger(row.live.identity, row.name) }
             let state = before(rows.first)
-            // A table or outline selects several rows at once through its AXSelectedRows.
-            if let parent = rows[0].element.element("AXParent"), parent.isSettable("AXSelectedRows") {
-                try parent.setValue(.elements(rows.map(\.element)), for: "AXSelectedRows")
-            } else {
-                for row in rows {
-                    guard row.element.isSettable("AXSelected") else { throw ToolError("\(row.name) (\(row.id)) não pode ser selecionado.") }
-                    try row.element.setValue(.bool(true), for: "AXSelected")
-                }
+            // Each id stands for its row (a cell's text names the row it is in); a table selects them together.
+            let contexts = rows.map { UIRowSelection.context(of: $0.element, role: $0.live.rawRole) }
+            let container = contexts.lazy.compactMap { $0?.container }.first
+            let elements = zip(rows, contexts).map { row, context in context?.row ?? row.element }
+            guard UIRowSelection.select(elements, in: container) else {
+                throw ToolError("Não consegui selecionar \(rows.map(\.id).joined(separator: ", ")): \(app.name) não confirmou a seleção por Acessibilidade.")
             }
-            return Acted(summary: "Selecionei \(rows.count) itens: \(rows.map(\.id).joined(separator: ", ")).", target: rows.first?.element, before: state)
+            return Acted(summary: "Selecionei \(rows.count) itens: \(rows.map(\.id).joined(separator: ", ")).", target: elements.first, before: state)
         }
         let target = try resolve(step.reference ?? "")
         guard let value = step.value else {
+            // The row the element is (or is in), selected the way its table takes it and read back.
+            if let context = UIRowSelection.context(of: target.element, role: target.live.rawRole) {
+                try checkDanger(target.live.identity, target.name)
+                let state = before(target)
+                if UIRowSelection.select([context.row], in: context.container) {
+                    return Acted(summary: "Selecionei a linha de \(target.name) (\(target.id)).", target: context.row, before: state)
+                }
+                var acted: Acted
+                do { acted = try press(target, "Cliquei em") } catch {
+                    throw ToolError("\(app.name) não confirmou a seleção de \(target.name) (\(target.id)), e não há outro jeito de selecioná-la em segundo plano.")
+                }
+                acted.notes.append("Não confirmei a seleção: \(app.name) não a mostrou pela Acessibilidade. Leia de novo para conferir.")
+                return acted
+            }
             if target.element.isSettable("AXSelected") {
                 try checkDanger(target.live.identity, target.name)
                 let state = before(target)
-                try target.element.setValue(.bool(true), for: "AXSelected")
+                guard UIRowSelection.select([target.element], in: nil) else {
+                    throw ToolError("\(app.name) não confirmou a seleção de \(target.name) (\(target.id)).")
+                }
                 return Acted(summary: "Selecionei \(target.name) (\(target.id)).", target: target.element, before: state)
             }
             return try press(target, "Selecionei")
@@ -2064,12 +2180,8 @@ struct UIActTool: AgentTool {
                 throw ToolError("Nenhuma linha de \(target.name) tem \(UIText.quoted(value)).")
             }
             try checkDanger(rowText(row), "a linha \(UIText.quoted(value))")
-            if row.isSettable("AXSelected") {
-                try row.setValue(.bool(true), for: "AXSelected")
-            } else if target.element.isSettable("AXSelectedRows") {
-                try target.element.setValue(.elements([row]), for: "AXSelectedRows")
-            } else {
-                throw ToolError("As linhas de \(target.name) não podem ser selecionadas por Acessibilidade.")
+            guard UIRowSelection.select([row], in: target.element) else {
+                throw ToolError("As linhas de \(target.name) não puderam ser selecionadas por Acessibilidade (\(app.name) não confirmou a seleção).")
             }
             return Acted(summary: "Selecionei a linha \(UIText.quoted(value)) em \(target.name) (\(target.id)).", target: row, before: state)
         case "tabs", "radiogroup":

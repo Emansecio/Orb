@@ -13,7 +13,11 @@ import Testing
 //   ORB_AX_SMOKE_SYSTEM=1          also a read-only look at Finder
 //   (Screen Recording, for the capture ones, is checked with CGPreflightScreenCaptureAccess)
 //
-// Do not touch the mouse or keyboard while they run: "nothing changed on the person's desk" is what most of them check.
+// Do not touch the mouse or keyboard while they run: "nothing changed on the person's desk" is what most of them check
+// (a check during which the person did move the mouse, click or type is reported as a known issue, not as a failure).
+//
+// Time budgets are the design's for a release build (`swift test -c release -Xswiftc -enable-testing`, which `@testable`
+// needs); a debug build gets them × `AXSmoke.budgetFactor`.
 // Tests marked `WP-A` or `WP-B` below were written against docs/USO-DO-COMPUTADOR.md before those packages landed and pass
 // only with them; the rest run on what exists.
 
@@ -23,6 +27,23 @@ enum AXSmoke {
     static var system: Bool { ProcessInfo.processInfo.environment["ORB_AX_SMOKE_SYSTEM"] == "1" }
     static var capture: Bool { CGPreflightScreenCaptureAccess() }
     static let appName = "OrbAXFixture"
+
+    /// How much slower a debug build may be. The design's budgets are for the release build the app ships as. In a debug
+    /// build the Orb's own work runs unoptimized: measured on this Mac, an outline of 1,200 elements takes 22 ms against
+    /// 11 ms, drawing and encoding a 1520×1336 JPEG 6 ms against 5 ms, and the async plumbing around each call is slower
+    /// too. Most of every budget is the other side (the app answering Accessibility, ScreenCaptureKit, the window server),
+    /// which is the same in both builds, so the whole call is far less than 2× slower: 1.6 covers it with room to spare.
+    static let budgetFactor: Double = {
+        #if DEBUG
+        1.6
+        #else
+        1
+        #endif
+    }()
+
+    /// A budget in milliseconds for this build.
+    static func budget(_ releaseMilliseconds: Double) -> Double { releaseMilliseconds * budgetFactor }
+    static func budget(_ release: Duration) -> Duration { release * budgetFactor }
 }
 
 // MARK: - The fixture
@@ -95,6 +116,19 @@ struct Desk {
     }
 
     func distance(to other: Desk) -> CGFloat { hypot(cursor.x - other.cursor.x, cursor.y - other.cursor.y) }
+
+    /// Seconds since the person last moved the mouse, clicked or typed, from the hardware's own events (`hidSystemState`:
+    /// the events the tools send to a process are not among them).
+    static func secondsSincePersonActed() -> TimeInterval {
+        let kinds: [CGEventType] = [.mouseMoved, .leftMouseDown, .rightMouseDown, .otherMouseDown, .leftMouseDragged, .scrollWheel, .keyDown]
+        return kinds.map { CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: $0) }.min() ?? .infinity
+    }
+}
+
+/// Whether the person used the mouse or keyboard during the `seconds` that just passed: then a moved cursor or another
+/// app in front may be theirs, and the check says nothing about the tools.
+func personActed(within seconds: TimeInterval, idle: TimeInterval = Desk.secondsSincePersonActed()) -> Bool {
+    idle < seconds
 }
 
 private func percentile(_ values: [Double], _ fraction: Double) -> Double {
@@ -150,12 +184,24 @@ struct SmokeSession {
 }
 
 /// Runs `body` and checks the person's desk is as it was: same app in front, cursor within 2 points, and the fixture never
-/// became the active app.
+/// became the active app. Strict while the person keeps still; when they moved the mouse, clicked or typed meanwhile, a
+/// difference may be theirs, and it is recorded as a known issue (inconclusive) instead of a failure.
 private func expectUndisturbed(_ fixture: FixtureApp, _ comment: Comment, _ body: () async throws -> Void) async throws {
     let before = Desk.now()
+    let started = ContinuousClock.now
     try await body()
     try await Task.sleep(for: .milliseconds(150))
     let after = Desk.now()
+    let spent = started.duration(to: .now)
+    let seconds = Double(spent.components.seconds) + Double(spent.components.attoseconds) / 1e18 + 0.05
+    let disturbed = after.frontPID != before.frontPID || after.distance(to: before) > 2 || !fixture.events("activated").isEmpty
+    if disturbed, personActed(within: seconds) {
+        withKnownIssue("Inconclusivo: a pessoa mexeu no mouse ou no teclado durante \(comment); o cursor andou \(Int(after.distance(to: before))) pt.",
+                       isIntermittent: true) {
+            Issue.record("desk changed while the person was using it: \(comment)")
+        }
+        return
+    }
     #expect(after.frontPID == before.frontPID, comment)
     #expect(after.distance(to: before) <= 2, comment)
     #expect(fixture.events("activated").isEmpty, "the fixture must not have become the active app: \(comment)")
@@ -241,7 +287,7 @@ struct AXSmokeTests {
         var first = ""
         do { _ = try await reader.run(arguments, context: context) } catch { first = error.localizedDescription }
         #expect(first.contains("não respondeu"), "the first call hits its deadline: \(first)")
-        #expect(begin.duration(to: clock.now) <= .milliseconds(800))
+        #expect(begin.duration(to: clock.now) <= .milliseconds(800), "the 300 ms deadline, plus finding the app by name")
         let again = clock.now
         var second = ""
         do { _ = try await reader.run(arguments, context: context) } catch { second = error.localizedDescription }
@@ -290,7 +336,8 @@ struct AXSmokeTests {
     }
 
     @Test func selectingARowDoesNotDisturbTheDesk() async throws {
-        // WP-A: `select` is `AXSelected` on the row.
+        // WP-A: `select` on the row (the reading's line is its cell's text): the table's `AXSelectedRows`, else the row's
+        // `AXSelected`, read back before saying it is done.
         let fixture = try await FixtureApp.launch()
         defer { fixture.stop() }
         let session = SmokeSession(fixture)
@@ -348,7 +395,9 @@ struct AXSmokeTests {
         _ = try await session.act("press", ["id": .string(button)])
         let reading = try await session.read(["wait": .string("appears"), "query": .string("Pronto"), "timeout": .number(5)])
         #expect(reading.contains("Pronto"))
-        #expect(begin.duration(to: clock.now) <= .milliseconds(700), "press → label changed (500 ms) → read, all within 700 ms")
+        // The label changes 500 ms after the press: that part is the fixture's, the rest is a budget.
+        #expect(begin.duration(to: clock.now) <= .milliseconds(500) + AXSmoke.budget(.milliseconds(200)),
+                "press → label changed (500 ms) → read, all within 700 ms (release)")
     }
 
     @Test func aThousandSubscriptionsLeaveNothingBehind() async throws {
@@ -389,7 +438,7 @@ struct AXSmokeTests {
         let clock = ContinuousClock()
         let begin = clock.now
         _ = try await session.act("type", ["value": .string(String(repeating: "abcdefghij", count: 200))])
-        #expect(begin.duration(to: clock.now) <= .milliseconds(400))
+        #expect(begin.duration(to: clock.now) <= AXSmoke.budget(.milliseconds(400)))
         let logged = await fixture.waitFor("text") { text($0, "field") == "Notas" && (text($0, "value")?.count ?? 0) >= 2_000 }
         #expect(logged != nil)
     }
@@ -409,7 +458,7 @@ struct AXSmokeTests {
             let spent = begin.duration(to: clock.now)
             times.append(Double(spent.components.seconds) * 1_000 + Double(spent.components.attoseconds) / 1e15)
         }
-        #expect(percentile(times, 0.95) <= 800, "p95 \(percentile(times, 0.95)) ms")
+        #expect(percentile(times, 0.95) <= AXSmoke.budget(800), "p95 \(percentile(times, 0.95)) ms (budget \(AXSmoke.budget(800)) ms)")
     }
 
     @Test func pressingMeetsItsBudget() async throws {
@@ -425,7 +474,7 @@ struct AXSmokeTests {
             let spent = begin.duration(to: clock.now)
             times.append(Double(spent.components.seconds) * 1_000 + Double(spent.components.attoseconds) / 1e15)
         }
-        #expect(percentile(times, 0.95) <= 250, "p95 \(percentile(times, 0.95)) ms")
+        #expect(percentile(times, 0.95) <= AXSmoke.budget(250), "p95 \(percentile(times, 0.95)) ms (budget \(AXSmoke.budget(250)) ms)")
         #expect(fixture.events("button").count == 20)
     }
 
@@ -477,14 +526,14 @@ struct AXSmokeTests {
         func milliseconds(_ spent: Duration) -> Double { Double(spent.components.seconds) * 1_000 + Double(spent.components.attoseconds) / 1e15 }
         let cold = clock.now
         _ = try await session.capture(["marks": .bool(false), "ocr": .string("off")])
-        #expect(milliseconds(cold.duration(to: clock.now)) <= 500)
+        #expect(milliseconds(cold.duration(to: clock.now)) <= AXSmoke.budget(500))
         var times: [Double] = []
         for _ in 0..<20 {
             let begin = clock.now
             _ = try await session.capture(["marks": .bool(false), "ocr": .string("off")])
             times.append(milliseconds(begin.duration(to: clock.now)))
         }
-        #expect(percentile(times, 0.95) <= 120, "p95 \(percentile(times, 0.95)) ms")
+        #expect(percentile(times, 0.95) <= AXSmoke.budget(120), "p95 \(percentile(times, 0.95)) ms (budget \(AXSmoke.budget(120)) ms)")
     }
 
     private static func colors(inImageAt url: URL) throws -> (magentaShare: Double, distinct: Int) {

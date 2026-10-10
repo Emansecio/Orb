@@ -102,8 +102,10 @@ enum ImageScaling {
 
 // MARK: - Which window is which
 
-/// Finds the capturable window that is a given window of the Accessibility tree: the two APIs share no identifier, so
-/// they are matched by frame (within a couple of points) and title.
+/// Finds the capturable window that is a given window of the Accessibility tree. Its `CGWindowID`, when Accessibility
+/// gives it (`AccessibilityElement.windowID`), settles it; otherwise they are matched by frame (within a couple of points:
+/// both are in global points, origin at the top left of the main display, also on a second display at negative
+/// coordinates) and title.
 enum WindowMatcher {
     static let tolerance: CGFloat = 2
 
@@ -112,11 +114,15 @@ enum WindowMatcher {
             && abs(a.width - b.width) <= tolerance && abs(a.height - b.height) <= tolerance
     }
 
-    /// The window of `windows` (all of one app) that has this frame and title; nil when none can be told. Several windows
-    /// on the same spot (tabbed windows) are told apart by title, then by being on screen. With no frame match, a title
-    /// match of about the same size is used, and the only window of the app is taken as it is.
-    static func match(frame: CGRect?, title: String, among windows: [CapturableWindow]) -> CapturableWindow? {
+    /// A window a person could mean: not a strip such as the 33-point bars Finder keeps at the top of every display.
+    static func isPlausible(_ window: CapturableWindow) -> Bool { window.frame.width >= 80 && window.frame.height >= 60 }
+
+    /// The window of `windows` (all of one app) with this number, else with this frame and title; nil when none can be
+    /// told. Several windows on the same spot (tabbed windows) are told apart by title, then by being on screen. With no
+    /// frame match, a title match of about the same size is used, and the only plausible window of the app is taken as it is.
+    static func match(windowID: UInt32? = nil, frame: CGRect?, title: String, among windows: [CapturableWindow]) -> CapturableWindow? {
         guard !windows.isEmpty else { return nil }
+        if let windowID, let found = windows.first(where: { $0.windowID == windowID }) { return found }
         let wanted = UIText.fold(title)
         func titled(_ list: [CapturableWindow]) -> [CapturableWindow] {
             wanted.isEmpty ? [] : list.filter { UIText.fold($0.title) == wanted }
@@ -132,14 +138,15 @@ enum WindowMatcher {
         } else if let found = titled(windows).first {
             return found
         }
-        return windows.count == 1 ? windows[0] : nil
+        let plausible = windows.filter(isPlausible)
+        return plausible.count == 1 ? plausible[0] : nil
     }
 
     /// A window picked without the Accessibility tree: `selector` is a position from 1 (front to back, as listed) or part
-    /// of a title; without one, the first window on screen.
+    /// of a title; without one, the first window on screen that is not a strip.
     static func choose(from windows: [CapturableWindow], selector: String?) -> CapturableWindow? {
         let wanted = selector?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if wanted.isEmpty { return windows.first { $0.isOnScreen } ?? windows.first }
+        if wanted.isEmpty { return windows.first { $0.isOnScreen && isPlausible($0) } ?? windows.first { $0.isOnScreen } ?? windows.first }
         if let position = Int(wanted) { return windows.indices.contains(position - 1) ? windows[position - 1] : nil }
         let folded = UIText.fold(wanted)
         return windows.first { UIText.fold($0.title).contains(folded) }
@@ -199,17 +206,27 @@ final class LiveWindowCapturer: WindowCapturer, @unchecked Sendable {
         gate = AsyncGate(limit: maxConcurrent)
     }
 
+    /// The app's windows, from the cache when it is fresh; a cached listing with none of the app's windows (an app that
+    /// opened its first window a moment ago) is listed again once before saying so.
     func windows(pid: Int32) async throws -> [CapturableWindow] {
-        try await allWindows().filter { $0.pid == pid }
+        let (listed, cached) = try await allWindows()
+        let mine = listed.filter { $0.pid == pid }
+        guard mine.isEmpty, cached else { return mine }
+        return try await allWindows(refresh: true).windows.filter { $0.pid == pid }
     }
 
-    private func allWindows(refresh: Bool = false) async throws -> [CapturableWindow] {
+    /// Listed now, whatever the cache holds: for a window the cached listing did not have.
+    func refreshedWindows(pid: Int32) async throws -> [CapturableWindow] {
+        try await allWindows(refresh: true).windows.filter { $0.pid == pid }
+    }
+
+    private func allWindows(refresh: Bool = false) async throws -> (windows: [CapturableWindow], cached: Bool) {
         let now = ContinuousClock.now
-        if !refresh, let hit = lock.withLock({ cache.flatMap { now - $0.at < lifetime ? $0.windows : nil } }) { return hit }
+        if !refresh, let hit = lock.withLock({ cache.flatMap { now - $0.at < lifetime ? $0.windows : nil } }) { return (hit, true) }
         do {
             let listed = try await backend.windows()
             lock.withLock { cache = (listed, ContinuousClock.now) }
-            return listed
+            return (listed, false)
         } catch {
             throw Self.explain(error)
         }
@@ -245,16 +262,40 @@ final class LiveWindowCapturer: WindowCapturer, @unchecked Sendable {
 }
 
 extension CaptureBackend {
-    /// ScreenCaptureKit for listing and capturing, `screencapture -o -l` when that fails.
+    /// The window server's list for listing (a millisecond, no permission needed, the same windows and numbers as
+    /// ScreenCaptureKit's, which takes tens of milliseconds), ScreenCaptureKit for capturing, `screencapture -o -l` when
+    /// that fails.
     static let screenCaptureKit = CaptureBackend(
-        windows: { try await SCKSession.shared.windows() },
+        windows: { WindowServerList.capturable() },
         primary: { window, maxSide in try await SCKSession.shared.capture(window, maxSide: maxSide) },
         fallback: { window, maxSide in try await ScreencaptureCommand.capture(window, maxSide: maxSide) })
 }
 
 // MARK: - ScreenCaptureKit
 
-/// Holds the `SCWindow`s of the last listing (a capture needs the object, not just its number).
+/// The normal-layer windows of every app, as the window server lists them: number, owner, frame in global points
+/// (origin at the top left of the main display), title (only with Screen Recording) and whether it is on screen.
+enum WindowServerList {
+    static func capturable() -> [CapturableWindow] {
+        let info = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        return parse(info)
+    }
+
+    static func parse(_ info: [[String: Any]]) -> [CapturableWindow] {
+        info.compactMap { window in
+            guard let pid = (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
+                  (window[kCGWindowLayer as String] as? NSNumber)?.intValue ?? 0 == 0,
+                  let number = (window[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
+                  let bounds = (window[kCGWindowBounds as String] as? NSDictionary).flatMap({ CGRect(dictionaryRepresentation: $0 as CFDictionary) })
+            else { return nil }
+            return CapturableWindow(windowID: number, pid: pid, frame: bounds, title: window[kCGWindowName as String] as? String ?? "",
+                                    isOnScreen: (window[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue ?? false)
+        }
+    }
+}
+
+/// Holds the `SCWindow`s of the last ScreenCaptureKit listing (a capture needs the object, not just its number); listed
+/// again only for a window it does not know or whose size changed.
 actor SCKSession {
     static let shared = SCKSession()
 
@@ -276,7 +317,9 @@ actor SCKSession {
     }
 
     func capture(_ window: CapturableWindow, maxSide: Int) async throws -> CGImage {
-        if objects[window.windowID] == nil { _ = try await windows() }
+        if objects[window.windowID].map({ !WindowMatcher.close(CGRect(origin: .zero, size: $0.frame.size), CGRect(origin: .zero, size: window.frame.size), tolerance: 1) }) ?? true {
+            _ = try await windows()
+        }
         guard let object = objects[window.windowID] else { throw WindowCaptureError.windowGone(window.windowID) }
         let filter = SCContentFilter(desktopIndependentWindow: object)
         let scale = max(1, CGFloat(SCShareableContent.info(for: filter).pointPixelScale))

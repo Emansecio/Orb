@@ -201,6 +201,15 @@ struct ClaudeCodePolicyTests {
         #expect(mcp.detail == #"get_issue {"id":3}"#)
     }
 
+    @Test func toolSearchSaysWhichToolsItLoadsInPlainWordsNotItsJSON() {
+        let one = ClaudeCodeTools.summary("ToolSearch", .object(["query": .string("select:mcp__orb_memoria__web_search"), "max_results": .number(1)]))
+        #expect(one == ("Carregando ferramentas", "web search"))
+        let several = ClaudeCodeTools.summary("ToolSearch", .object(["query": .string("select:mcp__orb_memoria__ui_read, Read,mcp__slack__send_message")]))
+        #expect(several.detail == "ui read, Read, send message (slack)")
+        #expect(ClaudeCodeTools.summary("ToolSearch", .object(["query": .string("notebook jupyter")])).detail == "busca: notebook jupyter")
+        #expect(!ClaudeCodeTools.summary("ToolSearch", .object(["query": .string("select:x")])).detail.contains("{"))
+    }
+
     @Test func claudeCodesOwnToolsGetPortugueseTitles() {
         let todos = JSONValue.object(["todos": .array([
             .object(["content": .string("Escrever testes"), "status": .string("completed"), "activeForm": .string("Escrevendo testes")]),

@@ -353,6 +353,7 @@ enum ClaudeCodeTools {
         case "Task", "Agent": return ("Delegando a um subagente", input["description"]?.string ?? "")
         case "ExitPlanMode": return ("Apresentando o plano", String((input["plan"]?.string ?? "").prefix(300)))
         case "Skill": return ("Usando uma habilidade", input["skill"]?.string ?? input["command"]?.string ?? "")
+        case "ToolSearch": return ("Carregando ferramentas", toolSearchDetail(input["query"]?.string ?? ""))
         default:
             let arguments = input == .object([:]) ? "" : " " + input.jsonString
             if name.hasPrefix("mcp__") {
@@ -363,6 +364,29 @@ enum ClaudeCodeTools {
             }
             return ("Usando \(name)", String(arguments.dropFirst().prefix(300)))
         }
+    }
+}
+
+extension ClaudeCodeTools {
+    /// What Claude Code's `ToolSearch` (it loads the definitions of tools it holds back) is after, in plain words:
+    /// "select:mcp__orb_memoria__web_search,Read" → "web search, Read"; a tool of another server says which
+    /// ("send message (slack)"); a keyword search is shown as typed.
+    static func toolSearchDetail(_ query: String) -> String {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.lowercased().hasPrefix("select:") else { return trimmed.isEmpty ? "" : "busca: \(trimmed)" }
+        let names = trimmed.dropFirst("select:".count).split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        return names.map(plainToolName).joined(separator: ", ")
+    }
+
+    /// `mcp__orb_memoria__web_search` → "web search"; `mcp__slack__send_message` → "send message (slack)"; a built-in
+    /// tool keeps its name.
+    static func plainToolName(_ name: String) -> String {
+        func words(_ text: String) -> String { text.replacingOccurrences(of: "_", with: " ") }
+        if name.hasPrefix(memoryPrefix) { return words(String(name.dropFirst(memoryPrefix.count))) }
+        guard name.hasPrefix("mcp__") else { return name }
+        let parts = name.dropFirst(5).components(separatedBy: "__")
+        guard parts.count > 1 else { return words(parts[0]) }
+        return "\(words(parts.dropFirst().joined(separator: " "))) (\(words(parts[0])))"
     }
 }
 

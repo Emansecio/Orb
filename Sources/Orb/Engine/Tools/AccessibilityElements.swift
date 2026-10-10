@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import os
 
 // The Accessibility API behind a small protocol, so `ui_read` and `ui_act` run against a fake tree in tests and the
 // real calls live in one place. Attribute and action names are the API's own strings ("AXRole", "AXPress"): the
@@ -60,10 +61,14 @@ protocol AccessibilityElement: Sendable {
     func isSame(as other: any AccessibilityElement) -> Bool
     /// Like `attributes(_:)`, but a call the app fails to answer is reported instead of looking like "no attributes".
     func read(_ names: [String]) -> AXRead
+    /// For a window, its `CGWindowID` as the window server knows it (what ScreenCaptureKit and the window list use); nil
+    /// for other elements, or when it cannot be told. Asks the Accessibility server only, not the app.
+    var windowID: UInt32? { get }
 }
 
 extension AccessibilityElement {
     var pid: Int32? { nil }
+    var windowID: UInt32? { nil }
 
     /// Identity for class-based elements; value types cannot be told apart without help.
     func isSame(as other: any AccessibilityElement) -> Bool {
@@ -138,6 +143,9 @@ protocol AccessibilitySystem: Sendable {
     /// Whether this process may use the Accessibility API. Never shows the system prompt.
     func isTrusted() -> Bool
     func runningApps() async -> [RunningAppInfo]
+    /// The same list; with `withFrontmost` false, `isActive` is not filled in, which spares asking apps which one is in
+    /// front (a hung app on top makes that wait). For finding an app by name.
+    func runningApps(withFrontmost: Bool) async -> [RunningAppInfo]
     /// The top of an app's interface (`AXUIElementCreateApplication`).
     func root(of app: AccessibilityApp) -> any AccessibilityElement
     /// Asks the app to build its interface tree if it does so only on demand. May wait on the app: call it off the main actor.
@@ -163,6 +171,7 @@ protocol AccessibilitySystem: Sendable {
 }
 
 extension AccessibilitySystem {
+    func runningApps(withFrontmost: Bool) async -> [RunningAppInfo] { await runningApps() }
     func prepare(_ root: any AccessibilityElement) {}
     func hitTest(_ app: AccessibilityApp, at point: CGPoint) -> (any AccessibilityElement)? { nil }
     func frontmostPID() async -> Int32? { nil }
@@ -194,6 +203,12 @@ struct LiveAccessibilitySystem: AccessibilitySystem {
     func runningApps() async -> [RunningAppInfo] {
         let desktop = desktop
         return await LiveDesktop.offPool { desktop.runningApps() }
+    }
+
+    func runningApps(withFrontmost: Bool) async -> [RunningAppInfo] {
+        guard !withFrontmost else { return await runningApps() }
+        let desktop = desktop
+        return await LiveDesktop.offPool { desktop.processes() }
     }
 
     func root(of app: AccessibilityApp) -> any AccessibilityElement {
@@ -231,15 +246,7 @@ struct LiveAccessibilitySystem: AccessibilitySystem {
 
     /// The normal-layer windows of `pid` in a window-server listing.
     static func windows(in info: [[String: Any]], pid: Int32) -> [CapturableWindow] {
-        info.compactMap { window in
-            guard (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid,
-                  (window[kCGWindowLayer as String] as? NSNumber)?.intValue ?? 0 == 0,
-                  let number = (window[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
-                  let bounds = (window[kCGWindowBounds as String] as? NSDictionary).flatMap({ CGRect(dictionaryRepresentation: $0 as CFDictionary) })
-            else { return nil }
-            return CapturableWindow(windowID: number, pid: pid, frame: bounds, title: window[kCGWindowName as String] as? String ?? "",
-                                    isOnScreen: (window[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue ?? false)
-        }
+        WindowServerList.parse(info).filter { $0.pid == pid }
     }
 
     var screen: any ScreenOwner { LiveScreenOwner(events: events) }
@@ -272,6 +279,21 @@ struct LiveAccessibilityElement: AccessibilityElement, @unchecked Sendable {
     var pid: Int32? {
         var pid: pid_t = 0
         return AXUIElementGetPid(ref, &pid) == .success ? pid : nil
+    }
+
+    /// `_AXUIElementGetWindow`: not in the public headers, but what every window manager uses to tie an Accessibility
+    /// window to its `CGWindowID`. Looked up at run time, so a macOS without it only loses the shortcut (windows are then
+    /// matched by frame and title).
+    private typealias GetWindowFunction = @convention(c) (AXUIElement, UnsafeMutablePointer<CGWindowID>) -> AXError
+    private static let getWindow: GetWindowFunction? = {
+        guard let symbol = dlsym(dlopen(nil, RTLD_LAZY), "_AXUIElementGetWindow") else { return nil }
+        return unsafeBitCast(symbol, to: GetWindowFunction.self)
+    }()
+
+    var windowID: UInt32? {
+        guard let getWindow = Self.getWindow else { return nil }
+        var id: CGWindowID = 0
+        return getWindow(ref, &id) == .success && id != 0 ? id : nil
     }
 
     func isSame(as other: any AccessibilityElement) -> Bool {
@@ -504,12 +526,20 @@ struct LiveDesktop: Sendable {
         return nil
     }
 
+    /// Apps that let the question time out, and when: they are not asked again for `unresponsiveFor` (each asking would
+    /// wait the half second again, on every action, while a hung app keeps its window on top).
+    private static let unresponsive = OSAllocatedUnfairLock(initialState: [Int32: ContinuousClock.Instant]())
+    static let unresponsiveFor: Duration = .seconds(5)
+
     static let liveIsFrontmost: @Sendable (Int32) -> Bool? = { pid in
+        let now = ContinuousClock.now
+        if unresponsive.withLock({ $0[pid].map { now - $0 < unresponsiveFor } ?? false }) { return nil }
         let element = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(element, 0.5)
         var raw: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, "AXFrontmost" as CFString, &raw) == .success, let raw,
-              CFGetTypeID(raw) == CFBooleanGetTypeID() else { return nil }
+        let status = AXUIElementCopyAttributeValue(element, "AXFrontmost" as CFString, &raw)
+        unresponsive.withLock { $0[pid] = status == .cannotComplete ? ContinuousClock.now : nil }
+        guard status == .success, let raw, CFGetTypeID(raw) == CFBooleanGetTypeID() else { return nil }
         return CFBooleanGetValue(unsafeDowncast(raw, to: CFBoolean.self))
     }
 

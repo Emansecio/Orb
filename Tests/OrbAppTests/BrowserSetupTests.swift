@@ -250,6 +250,16 @@ struct BrowserDriverRealityTests {
         #expect(setup.row(.cloak)?.statusText == "Não instalado")
     }
 
+    @MainActor @Test func beforeTheFirstLookEveryEngineIsCheckingWithNothingToInstallOrRemove() async {
+        let setup = BrowserSetup(installer: installer(), status: status(ready: [.obscura]))
+        for row in setup.rows {
+            #expect(row.phase == .checking && row.statusText == "Conferindo…", "not \"Não instalado\" before anything was looked at")
+            #expect(!row.canInstall && !row.canRemove && !row.canUpdate)
+        }
+        await setup.refresh()
+        #expect(setup.rows.allSatisfy { $0.phase != .checking }, "the first look replaces it")
+    }
+
     @MainActor @Test func anEngineTheAppInstalledShowsItsVersionsAndCanBeRemovedAndUpdated() async throws {
         let layout = BrowserInstallLayout(root: root)
         try FileManager.default.createDirectory(at: layout.binDirectory, withIntermediateDirectories: true)

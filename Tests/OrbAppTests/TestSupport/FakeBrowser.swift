@@ -145,6 +145,7 @@ final class SearchStubProtocol: URLProtocol, @unchecked Sendable {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
+        let request = request
         Self.requests.withLock { $0.append(request) }
         let answer = Self.handler.withLock { $0 }(request)
         // Status 0 stands for a network that fails.

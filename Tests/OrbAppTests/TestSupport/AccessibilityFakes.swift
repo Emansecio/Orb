@@ -19,6 +19,9 @@ final class FakeElement: AccessibilityElement, @unchecked Sendable {
     var onSet: (@Sendable (String, AXAttributeValue) -> Void)?
     /// The owning process reported by `pid`.
     var pid: Int32?
+    /// For a window: the `CGWindowID` reported by `windowID` (nil, like a system without that call, by default).
+    var windowNumber: UInt32?
+    var windowID: UInt32? { windowNumber }
     /// How long every call into this element blocks, like an app that is hung or slow to answer.
     var stall: Duration = .zero
     /// Scripted failures, kept until removed. Keys: an attribute name (its reads fail), `"perform:AXPress"`,
@@ -182,6 +185,8 @@ final class FakeAccessibility: AccessibilitySystem, @unchecked Sendable {
     /// What the window server lists per process (`windowList`); empty by default, like a list that has nothing for the app.
     var listedWindows: [Int32: [CapturableWindow]] = [:]
     private var rootRequests = 0
+    private var frontmostRequests = 0
+    private var appListings: [Bool] = []
     private var activations: [Int32] = []
     private var hits: [CGPoint] = []
 
@@ -191,12 +196,20 @@ final class FakeAccessibility: AccessibilitySystem, @unchecked Sendable {
     let screenOwner = FakeScreenOwner()
 
     var rootCalls: Int { lock.withLock { rootRequests } }
+    /// How often `frontmostPID()` was asked.
+    var frontmostCalls: Int { lock.withLock { frontmostRequests } }
+    /// For each listing of the running apps, whether it had to say which one is in front.
+    var listings: [Bool] { lock.withLock { appListings } }
     var activated: [Int32] { lock.withLock { activations } }
     /// The points `hitTest` was asked about.
     var hitTests: [CGPoint] { lock.withLock { hits } }
 
     func isTrusted() -> Bool { trusted }
-    func runningApps() async -> [RunningAppInfo] { apps }
+    func runningApps() async -> [RunningAppInfo] { await runningApps(withFrontmost: true) }
+    func runningApps(withFrontmost: Bool) async -> [RunningAppInfo] {
+        lock.withLock { appListings.append(withFrontmost) }
+        return withFrontmost ? apps : apps.map { var app = $0; app.isActive = false; return app }
+    }
     func root(of app: AccessibilityApp) -> any AccessibilityElement {
         lock.withLock { rootRequests += 1 }
         return roots[app.pid] ?? fake("AXApplication", size: nil)
@@ -206,7 +219,10 @@ final class FakeAccessibility: AccessibilitySystem, @unchecked Sendable {
         lock.withLock { hits.append(point) }
         return hitHandler?(app, point)
     }
-    func frontmostPID() async -> Int32? { frontmost }
+    func frontmostPID() async -> Int32? {
+        lock.withLock { frontmostRequests += 1 }
+        return frontmost
+    }
     func windowList(pid: Int32) -> [CapturableWindow] { listedWindows[pid] ?? [] }
     func secondsSinceUserInput() -> TimeInterval { userIdle }
 
@@ -368,12 +384,18 @@ final class FakeWindowCapturer: WindowCapturer, @unchecked Sendable {
 
     private let lock = NSLock()
     private var byPID: [Int32: [CapturableWindow]] = [:]
+    /// What `windows(pid:)` answers until the next `refreshedWindows(pid:)`: a listing from before a window appeared.
+    private var stale: [Int32: [CapturableWindow]] = [:]
+    private var refreshes = 0
     private var failure: (any Error)?
     private var taken: [Capture] = []
     /// Pixels per point of the images made.
     var scale: CGFloat = 2
 
     func setWindows(_ windows: [CapturableWindow], pid: Int32) { lock.withLock { byPID[pid] = windows } }
+    /// Makes `windows(pid:)` answer `windows` (an old listing) until the app's windows are listed afresh.
+    func setStale(_ windows: [CapturableWindow], pid: Int32) { lock.withLock { stale[pid] = windows } }
+    var refreshCount: Int { lock.withLock { refreshes } }
     var error: (any Error)? {
         get { lock.withLock { failure } }
         set { lock.withLock { failure = newValue } }
@@ -383,6 +405,15 @@ final class FakeWindowCapturer: WindowCapturer, @unchecked Sendable {
     func windows(pid: Int32) async throws -> [CapturableWindow] {
         try lock.withLock {
             if let failure { throw failure }
+            return stale[pid] ?? byPID[pid] ?? []
+        }
+    }
+
+    func refreshedWindows(pid: Int32) async throws -> [CapturableWindow] {
+        try lock.withLock {
+            if let failure { throw failure }
+            refreshes += 1
+            stale[pid] = nil
             return byPID[pid] ?? []
         }
     }

@@ -1,5 +1,6 @@
 import AppKit
 import ImageIO
+import os
 import Vision
 
 struct ScreenshotTool: AgentTool {
@@ -169,10 +170,21 @@ struct ScreenshotTool: AgentTool {
         var title: String
         var frame: CGRect?
         var minimized: Bool
+        var role: String
+        /// Its `CGWindowID`, when Accessibility tells it.
+        var windowID: UInt32?
     }
 
+    /// The app's windows as Accessibility lists them (at most `maxAXWindows`), and which of them was asked for (or is focused).
+    private struct AXWindowList: Sendable {
+        var all: [AXWindowInfo]
+        var chosen: Int
+    }
+
+    static let maxAXWindows = 24
+
     private func resolveApp(_ query: String?) async throws -> AccessibilityApp {
-        let apps = await system.runningApps()
+        let apps = await system.runningApps(withFrontmost: false)
         let found: RunningAppInfo?
         if let query {
             switch RunningAppMatcher.match(query, in: apps) {
@@ -193,15 +205,45 @@ struct ScreenshotTool: AgentTool {
                                 launchDate: NSRunningApplication(processIdentifier: found.pid)?.launchDate)
     }
 
-    private static func axWindow(root: any AccessibilityElement, selector: String?) throws -> AXWindowInfo? {
-        guard let windows = root.elements("AXWindows"), !windows.isEmpty else { return nil }
-        let index = try UIWindowChooser.choose(from: windows, selector: selector)
-        let window = windows[index]
-        let attributes = window.attributes(["AXTitle", "AXPosition", "AXSize", "AXMinimized"])
-        var frame: CGRect?
-        if case .point(let origin)? = attributes["AXPosition"], case .size(let size)? = attributes["AXSize"] { frame = CGRect(origin: origin, size: size) }
-        return AXWindowInfo(element: window, index: index, title: attributes["AXTitle"]?.string ?? "", frame: frame,
-                            minimized: attributes["AXMinimized"]?.bool ?? false)
+    private static func axWindows(root: any AccessibilityElement, selector: String?) throws -> AXWindowList? {
+        let top = root.attributes(["AXWindows", "AXFocusedWindow"])
+        guard let windows = top["AXWindows"]?.elements, !windows.isEmpty else { return nil }
+        let chosen = try UIWindowChooser.choose(from: windows, selector: selector, focused: top["AXFocusedWindow"]?.element)
+        let indices = [chosen] + windows.indices.filter { $0 != chosen }.prefix(maxAXWindows - 1)
+        let all = indices.map { index in
+            let window = windows[index]
+            let attributes = window.attributes(["AXRole", "AXTitle", "AXPosition", "AXSize", "AXMinimized"])
+            var frame: CGRect?
+            if case .point(let origin)? = attributes["AXPosition"], case .size(let size)? = attributes["AXSize"] { frame = CGRect(origin: origin, size: size) }
+            return AXWindowInfo(element: window, index: index, title: attributes["AXTitle"]?.string ?? "", frame: frame,
+                                minimized: attributes["AXMinimized"]?.bool ?? false, role: attributes["AXRole"]?.string ?? "",
+                                windowID: window.windowID)
+        }
+        return AXWindowList(all: all, chosen: chosen)
+    }
+
+    /// The window to photograph, and the Accessibility window that goes with it. The window read is the one asked for, else
+    /// the focused one; when no window was named and that one has no picture (Finder's desktop is an "AXWindows" entry
+    /// with no window behind it), the next Accessibility window that does is taken. A last resort, for the window read
+    /// only, is the app's single plausible window.
+    private static func pair(_ axList: AXWindowList?, selector: String?, among list: [CapturableWindow]) -> (ax: AXWindowInfo?, target: CapturableWindow?) {
+        guard let axList, let chosen = axList.all.first else { return (nil, WindowMatcher.choose(from: list, selector: selector)) }
+        func strict(_ info: AXWindowInfo) -> CapturableWindow? {
+            guard let found = WindowMatcher.match(windowID: info.windowID, frame: info.frame, title: info.title, among: list) else { return nil }
+            // The lone-window fallback is not a match.
+            let byNumber = info.windowID == found.windowID
+            let byFrame = info.frame.map { WindowMatcher.close($0, found.frame) } ?? false
+            let byTitle = !info.title.isEmpty && UIText.fold(info.title) == UIText.fold(found.title)
+            return byNumber || byFrame || byTitle ? found : nil
+        }
+        if chosen.minimized { return (chosen, nil) }
+        if let found = strict(chosen) { return (chosen, found) }
+        if selector == nil {
+            for info in axList.all.dropFirst() where info.role == "AXWindow" && !info.minimized {
+                if let found = strict(info) { return (info, found) }
+            }
+        }
+        return (chosen, WindowMatcher.match(windowID: chosen.windowID, frame: chosen.frame, title: chosen.title, among: list))
     }
 
     private func captureWindow(_ arguments: JSONValue, context: ToolContext, ocrMode: String?) async throws -> Capture {
@@ -220,17 +262,23 @@ struct ScreenshotTool: AgentTool {
         let trusted = accessibilityGranted && !isOrb
         var notes: [String] = []
 
-        var ax: AXWindowInfo?
+        var axList: AXWindowList?
         if trusted {
             let system = system, appSessions = self.sessions
+            let session = appSessions.session(for: app.pid)
             // A window that does not exist is the model's to fix (thrown); an app that does not answer only costs the marks.
-            var lookup: Result<AXWindowInfo?, ToolError>?
+            var lookup: Result<AXWindowList?, ToolError>?
             do {
                 lookup = try await UIAccess.mapped(app) {
-                    try await appSessions.run(app, within: appSessions.deadlines.action) { () -> Result<AXWindowInfo?, ToolError> in
+                    try await appSessions.run(app, within: appSessions.deadlines.action) { () -> Result<AXWindowList?, ToolError> in
                         let root = system.root(of: app)
-                        system.prepare(root)
-                        do { return .success(try Self.axWindow(root: root, selector: selector)) } catch let error as ToolError {
+                        // Asked once per app, as ui_read does (Electron and Chromium build their tree on demand).
+                        if session.state.withLock({ $0.manualAccessibility == nil }) {
+                            system.prepare(root)
+                            let accepted = root.attribute("AXManualAccessibility")?.bool == true
+                            session.state.withLock { $0.manualAccessibility = accepted }
+                        }
+                        do { return .success(try Self.axWindows(root: root, selector: selector)) } catch let error as ToolError {
                             return .failure(error)
                         } catch {
                             return .failure(ToolError(error.localizedDescription))
@@ -243,31 +291,33 @@ struct ScreenshotTool: AgentTool {
                 notes.append("Sem marcas: " + Self.message(error))
             }
             if let lookup {
-                ax = try lookup.get()
-                if ax == nil { notes.append("Sem marcas: \(app.name) não expôs janelas pela Acessibilidade.") }
+                axList = try lookup.get()
+                if axList == nil { notes.append("Sem marcas: \(app.name) não expôs janelas pela Acessibilidade.") }
             }
         } else {
             notes.append(isOrb ? "Sem marcas: o Orb não lê a própria interface." : "Sem marcas: " + MacPermissionProblem.accessibility.modelMessage)
         }
 
         // The window to photograph. A listing that fails is a failed capture: the marks can still be given.
+        var ax = axList?.all.first
         var target: CapturableWindow?
         var listingFailure: (any Error)?
         if hasScreen {
             var list: [CapturableWindow] = []
             do {
                 list = try await system.capturer.windows(pid: app.pid)
+                (ax, target) = Self.pair(axList, selector: selector, among: list)
+                if target == nil, ax?.minimized != true {
+                    // The listing may be from a moment before the window appeared (it is kept 1.5 s): once more, fresh.
+                    list = try await system.capturer.refreshedWindows(pid: app.pid)
+                    (ax, target) = Self.pair(axList, selector: selector, among: list)
+                }
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
                 listingFailure = error
             }
             if listingFailure == nil {
-                if let ax {
-                    target = WindowMatcher.match(frame: ax.frame, title: ax.title, among: list)
-                } else {
-                    target = WindowMatcher.choose(from: list, selector: selector)
-                }
                 if ax?.minimized == true {
                     notes.append("A janela está minimizada: não há imagem dela (o macOS não captura janela minimizada).")
                     target = nil
@@ -409,13 +459,25 @@ struct ScreenshotTool: AgentTool {
         return WindowCandidate.front(in: WindowCandidate.parse(info), excludingPIDs: excluding)?.pid
     }
 
-    /// A fresh path in a temp folder, clearing captures older than a day so they don't pile up.
-    private static func newFile(in folder: URL, extension ext: String) throws -> URL {
+    /// When each folder was last cleared: listing a day of captures on every capture costs more than the capture's own
+    /// bookkeeping, so it happens at most every `cleanupInterval`.
+    private static let lastCleanup = OSAllocatedUnfairLock(initialState: [String: ContinuousClock.Instant]())
+    static let cleanupInterval: Duration = .seconds(600)
+
+    /// A fresh path in a temp folder, clearing captures older than a day (now and then) so they don't pile up.
+    static func newFile(in folder: URL, extension ext: String, now: ContinuousClock.Instant = .now) throws -> URL {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let cutoff = Date.now.addingTimeInterval(-86_400)
-        let old = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
-        for url in old where ((try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .now) < cutoff {
-            try? FileManager.default.removeItem(at: url)
+        let due = lastCleanup.withLock { cleared in
+            guard cleared[folder.path].map({ now - $0 >= cleanupInterval }) ?? true else { return false }
+            cleared[folder.path] = now
+            return true
+        }
+        if due {
+            let cutoff = Date.now.addingTimeInterval(-86_400)
+            let old = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+            for url in old where ((try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .now) < cutoff {
+                try? FileManager.default.removeItem(at: url)
+            }
         }
         return folder.appending(path: "screenshot-\(UUID().uuidString.prefix(8)).\(ext)")
     }

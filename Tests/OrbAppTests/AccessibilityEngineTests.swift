@@ -167,6 +167,40 @@ struct AccessibilityLadderTests {
         #expect(UIActTool.chunks(text).allSatisfy { $0.utf16.count <= 20 } && UIActTool.chunks(text).joined() == text)
     }
 
+    @Test func typingAsksTheAppOncePerChunkAndNotTheWholeDesktop() async throws {
+        let field = fake("AXTextField", title: "Notas")
+        field.settable = ["AXFocused"]
+        let bench = Bench(windows: [fake("AXWindow", title: "A", [field])])
+        bench.root.attrs["AXFocusedUIElement"] = .element(field)
+        bench.root.attrs["AXFrontmost"] = .bool(false)
+        try await bench.read()
+        let before = bench.system.frontmostCalls
+        bench.root.resetRoundTrips()
+        let text = String(repeating: "abcdefghij", count: 200)
+        _ = try await bench.act(["action": .string("type"), "id": .string("w1.1"), "value": .string(text)])
+        #expect(bench.system.syntheticInput.typed(to: 100) == text)
+        // Before: the desktop was asked which app is in front before every one of the 100 chunks.
+        #expect(bench.system.frontmostCalls - before <= 3, "\(bench.system.frontmostCalls - before) asks of the whole desktop")
+        #expect(bench.root.roundTrips <= 100 + 10, "one round trip to the app per chunk: \(bench.root.roundTrips)")
+    }
+
+    @Test func anAppThatCameForwardWhileTypingStopsTheTyping() async throws {
+        let field = fake("AXTextField", title: "Notas")
+        field.settable = ["AXFocused"]
+        let bench = Bench(windows: [fake("AXWindow", title: "A", [field])])
+        bench.system.frontmost = 200
+        bench.root.attrs["AXFocusedUIElement"] = .element(field)
+        bench.root.attrs["AXFrontmost"] = .bool(false)
+        try await bench.read()
+        let root = bench.root
+        bench.system.syntheticInput.beforeEach = { root.attrs["AXFrontmost"] = .bool(true) }
+        let message = await bench.failure {
+            try await bench.act(["action": .string("type"), "id": .string("w1.1"), "value": .string(String(repeating: "x", count: 60))])
+        }
+        #expect(message.contains("veio para a frente"), Comment(rawValue: message))
+        #expect(bench.system.syntheticInput.typed(to: 100).count == 20, "only the first chunk went out")
+    }
+
     @Test func typingWithoutEventsStopsWithTheMarker() async throws {
         let field = fake("AXTextField", title: "Nome")
         let bench = Bench(windows: [fake("AXWindow", title: "A", [field])])
@@ -282,6 +316,39 @@ struct AccessibilityLadderTests {
         let mixed: JSONValue = .array([.object(["action": .string("press"), "id": .string("w1.1")]),
                                        .object(["action": .string("pick_menu"), "menu_path": .array([.string("Arquivo"), .string("Excluir")])])])
         #expect(bench.actor().danger(.object(["action": .string("press"), "steps": mixed])) != nil)
+    }
+
+    @Test func selectingTheTextOfARowSelectsTheRowThroughItsTableAndReadsItBack() async throws {
+        // The smoke's NSTableView: the reading's line for "Linha 5" is the cell's text, which takes no AXSelected; the
+        // table takes AXSelectedRows (and tells its delegate), the row's own AXSelected is the second try.
+        let table = fake("AXTable", title: "Tabela")
+        table.settable = ["AXSelectedRows"]
+        let rows = (1...6).map { index -> FakeElement in
+            let label = fake("AXStaticText", value: .string("Linha \(index)"))
+            let row = fake("AXRow", [label])
+            label.attrs["AXParent"] = .element(row)
+            row.attrs["AXParent"] = .element(table)
+            return row
+        }
+        table.children = rows
+        let bench = Bench(windows: [fake("AXWindow", title: "A", [table])])
+        try await bench.read()
+        let text = try await bench.act(["action": .string("select"), "id": .string("w1.1.5.1")])
+        #expect(text.hasPrefix("Selecionei a linha"), Comment(rawValue: text))
+        let selected = try #require(table.assignedValue("AXSelectedRows")?.elements)
+        #expect(selected.count == 1 && selected[0].isSame(as: rows[4]))
+        #expect(bench.system.syntheticInput.events.isEmpty, "no click")
+    }
+
+    @Test func aSelectionTheAppDoesNotShowIsNotReportedAsDone() async throws {
+        let row = fake("AXRow", title: "Linha 1")
+        row.settable = ["AXSelected"]
+        // An app that takes the value and keeps showing the row unselected.
+        row.onSet = { name, _ in if name == "AXSelected" { row.attrs["AXSelected"] = .bool(false) } }
+        let bench = Bench(windows: [fake("AXWindow", title: "A", [fake("AXTable", title: "T", [row])])])
+        try await bench.read()
+        let message = await bench.failure { try await bench.act(["action": .string("select"), "id": .string("w1.1.1")]) }
+        #expect(message.contains("não confirmou"), Comment(rawValue: message))
     }
 
     @Test func idsRepeatTheActionAndSelectSeveralRowsAtOnce() async throws {
@@ -820,6 +887,14 @@ struct AccessibilityWaitTests {
         }
     }
 
+    @Test func aReadOfANamedAppDoesNotAskWhichAppIsInFront() async throws {
+        let bench = Bench(windows: [fake("AXWindow", title: "A", [fakeButton("OK")])])
+        try await bench.read()
+        #expect(bench.system.listings == [false])
+        try await bench.read([:])
+        #expect(bench.system.listings == [false, true], "only the app in front, when none is named")
+    }
+
     @Test func readWaitsForATextToAppearOnANotification() async throws {
         let window = fake("AXWindow", title: "A", [fakeButton("Salvar")])
         let bench = Bench(windows: [window])
@@ -889,6 +964,29 @@ struct AccessibilityWaitTests {
         #expect(text.contains("apareceu “Exportado”"))
     }
 
+    @Test func aSilentAppIsLookedAtAgainWithinAQuarterSecondNotAfterOne() async throws {
+        // The app is subscribed (the stream is alive) but says nothing, as when a label changes without a notification
+        // reaching the app's observer: the wait must not sleep a whole second between looks (it did: 1 s whenever the
+        // stream was alive, 250 ms only when it had ended). The pauses are checked, not the clock, which a loaded machine
+        // stretches.
+        let window = fake("AXWindow", title: "A", [fakeButton("Salvar")])
+        let bench = Bench(windows: [window])
+        let pauses = OSAllocatedUnfairLock(initialState: [Duration]())
+        var waiter = UIWaiter(system: bench.system, sessions: bench.sessions, store: bench.store, live: bench.live)
+        // After the fourth pause the text shows up (still without a notification), which ends the wait.
+        waiter.onPause = { pause in
+            let count = pauses.withLock { $0.append(pause); return $0.count }
+            if count == 4 { window.children.append(fake("AXStaticText", value: .string("Agora"))) }
+        }
+        let app = AccessibilityApp(name: "Notas", bundleID: "com.apple.Notes", pid: 100)
+        let note = try await waiter.wait(.appears("Agora"), app: app, window: nil, bot: bench.context.botID, timeout: .seconds(120))
+        #expect(note.contains("apareceu “Agora”"))
+        let taken = pauses.withLock { $0 }
+        #expect(taken.count >= 4 && taken.allSatisfy { $0 <= .milliseconds(250) }, "\(taken)")
+        #expect(taken.first == .milliseconds(50), "the first look again comes soon: \(taken)")
+        #expect(waiter.tick(after: 0) == .milliseconds(50) && waiter.tick(after: 4) == .milliseconds(150) && waiter.tick(after: 9) == .milliseconds(250))
+    }
+
     @Test func settleWaitsForTheFirstNotificationThenForQuiet() async {
         let events = FakeAccessibilityEvents()
         let watcher = AXEventWatcher(events.events(pid: 1, UISettle.notifications))
@@ -925,6 +1023,31 @@ struct AccessibilityBudgetTests {
             let carriesValue = ["AXTextField", "AXStaticText"].contains(role)
             #expect(element.roundTrips <= 2 + (carriesValue ? 1 : 0), "\(role): \(element.roundTrips)")
         }
+    }
+
+    @Test func aTablesColumnsAreNotWalkedAgainForTheCellsItsRowsHave() {
+        let cells = (1...50).map { fake("AXStaticText", value: .string("Linha \($0)")) }
+        let rows = cells.map { fake("AXRow", [$0]) }
+        let column = fake("AXColumn", title: "Item")
+        column.children = cells // the same cells, as AppKit lists them under the column too
+        let window = fake("AXWindow", title: "A", [fake("AXTable", title: "Tabela", rows + [column])])
+        let outline = UIOutlineBuilder.outline(of: window, prefix: "w1", query: "Linha 7", limits: UIOutlineLimits())
+        #expect(outline.matched == 1, "once, not once per row and once per column")
+        let unlisted = cells.enumerated().filter { $0.offset != 6 }.map(\.element)
+        #expect(unlisted.allSatisfy { $0.roundTrips <= 2 }, "\(unlisted.map(\.roundTrips).max() ?? 0) round trips for one cell")
+    }
+
+    @Test func aWaitLooksOnlyUntilTheTextIsThere() {
+        let early = fake("AXStaticText", value: .string("Pronto"))
+        let rest = (1...300).map { fake("AXStaticText", value: .string("Trecho \($0)")) }
+        let window = fake("AXWindow", title: "A", [early] + rest)
+        var limits = UIOutlineLimits()
+        limits.stopAtFirstMatch = true
+        let outline = UIOutlineBuilder.outline(of: window, prefix: "w1", query: "Pronto", limits: limits)
+        #expect(outline.matched == 1)
+        #expect(rest.allSatisfy { $0.roundTrips == 0 }, "nothing after the element that has it is read")
+        let full = UIOutlineBuilder.outline(of: window, prefix: "w1", query: "Trecho", limits: UIOutlineLimits())
+        #expect(full.matched == 300, "a reading still lists every match")
     }
 
     @Test func pressingWithTheLiveReferenceStaysWithinSixCalls() async throws {

@@ -625,6 +625,19 @@ struct LiveDesktopTests {
         #expect(probe.processLists == 3, "nothing is cached between calls")
     }
 
+    @Test func findingAnAppByNameAsksNoAppWhetherItIsInFront() async {
+        // A stopped app whose window is on top made every call wait half a second on this question, and the call that must
+        // fail at once ("ainda está ocupado") took 0.5 s.
+        let probe = DesktopProbe()
+        let desktop = LiveDesktop(topWindowOwner: { 7 }, isFrontmost: { pid in probe.ask(pid); return nil },
+                                  processes: { probe.listed(); return self.apps([7, 8]) })
+        let system = LiveAccessibilitySystem(desktop: desktop)
+        let listed = await system.runningApps(withFrontmost: false)
+        #expect(listed.map(\.pid) == [7, 8] && probe.frontmostAsked.isEmpty)
+        _ = await system.runningApps(withFrontmost: true)
+        #expect(probe.frontmostAsked == [7])
+    }
+
     @Test func theLiveProcessListFindsThisVeryProcessWithoutTheMainRunLoop() async {
         // The test runner is not an app Launch Services lists as one; the list must still be made off the main thread.
         let apps = await LiveDesktop.offPool { LiveDesktop.liveProcesses() }

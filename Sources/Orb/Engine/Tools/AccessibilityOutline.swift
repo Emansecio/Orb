@@ -183,6 +183,8 @@ struct UIOutlineLimits: Sendable {
     var maxCharacters = 14_000
     /// Levels read under a web area when there is no query: a page has thousands of elements.
     var webDepth = 3
+    /// With a query, end the walk at the first element listed for it (a wait asks only whether the text is there).
+    var stopAtFirstMatch = false
 }
 
 struct UIOutline {
@@ -228,6 +230,8 @@ enum UIOutlineBuilder {
         let started = Date()
         var cancelled = false
         var failure: AXFailure?
+        /// `stopAtFirstMatch` found its element: nothing more is visited.
+        var stopped = false
         /// The window's top-left corner, which entry frames are relative to.
         var origin: CGPoint?
         var windowFrame: CGRect?
@@ -266,8 +270,8 @@ enum UIOutlineBuilder {
     }
 
     private static func visit(_ element: any AccessibilityElement, id: String, depth: Int, webDepth: Int?, wanted: String?,
-                              limits: UIOutlineLimits, walk: inout Walk) -> [Node] {
-        if walk.failure != nil { return [] }
+                              limits: UIOutlineLimits, walk: inout Walk, parentRole: String = "") -> [Node] {
+        if walk.failure != nil || walk.stopped { return [] }
         if AXWork.isCancelled { walk.cancelled = true; return [] }
         if walk.visited >= limits.maxVisited { walk.cuts.insert(.visited); return [] }
         if Date().timeIntervalSince(walk.started) >= limits.seconds ?? 4 { walk.cuts.insert(.time); return [] }
@@ -298,26 +302,29 @@ enum UIOutlineBuilder {
         }
         if info.isInvisible { return [] }
         info.value = UIElementInfo.readValue(of: element, info: info)
+        let dropped = depth > 0 && !info.hasText && (UIRole.layoutOnly.contains(info.role) || UIRole.emptyIsNoise.contains(info.role))
+        let matches = wanted.map { info.searchText.contains($0) } ?? true
+        if limits.stopAtFirstMatch, wanted != nil, matches, !dropped { walk.stopped = true }
 
         var children: [Node] = []
         let list = attributes["AXChildren"]?.elements ?? []
         // Under a web area without a query only the first levels are read; the browser tools are for pages.
         let childWebDepth = webDepth.map { $0 + 1 } ?? (info.rawRole == "AXWebArea" && wanted == nil ? 1 : nil)
-        if depth >= limits.maxDepth {
+        if info.rawRole == "AXColumn", ["AXTable", "AXOutline"].contains(parentRole) {
+            // A table's column lists the same cells as its rows: walking both would read every cell twice.
+        } else if depth >= limits.maxDepth {
             if !list.isEmpty { walk.cuts.insert(.depth) }
         } else if let childWebDepth, childWebDepth > limits.webDepth {
             if !list.isEmpty { walk.cuts.insert(.web) }
         } else {
             for (index, child) in list.enumerated() {
                 children += visit(child, id: "\(id).\(index + 1)", depth: depth + 1, webDepth: childWebDepth, wanted: wanted,
-                                  limits: limits, walk: &walk)
+                                  limits: limits, walk: &walk, parentRole: info.rawRole)
             }
         }
 
-        if depth > 0, !info.hasText, UIRole.layoutOnly.contains(info.role) || UIRole.emptyIsNoise.contains(info.role) {
-            return children
-        }
-        let node = Node(id: id, info: info, element: element, matches: wanted.map { info.searchText.contains($0) } ?? true)
+        if dropped { return children }
+        let node = Node(id: id, info: info, element: element, matches: matches)
         node.frame = frame
         node.children = children
         node.keep = node.matches || children.contains(where: \.keep)
