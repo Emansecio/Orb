@@ -21,22 +21,25 @@ final class BrowserInstaller: Sendable {
     private let run: InstallCommandRunner
     private let freeSpace: @Sendable (URL) -> Int64?
     private let findPython: @Sendable (InstallCommandRunner) async throws -> String
+    /// Whether `agent-browser` would find a Chrome for the Chrome engine (the one the app installed, or one on the Mac).
+    private let chromeAvailable: @Sendable (BrowserInstallLayout) -> Bool
 
     static let agentBrowserRepository = "vercel-labs/agent-browser"
     static let obscuraRepository = "h4ckf0r0day/obscura"
     static let chromeVersionsURL = URL(string: "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions.json")!
-    static let cloakPackageURL = URL(string: "https://pypi.org/pypi/cloakbrowser/json")!
 
     init(layout: BrowserInstallLayout, platform: BrowserPlatform = .current, network: any InstallNetwork = URLSessionInstallNetwork(),
          run: @escaping InstallCommandRunner = BrowserInstaller.processRunner,
          freeSpace: @escaping @Sendable (URL) -> Int64? = BrowserInstaller.availableSpace,
-         findPython: @escaping @Sendable (InstallCommandRunner) async throws -> String = BrowserInstaller.locatePython) {
+         findPython: @escaping @Sendable (InstallCommandRunner) async throws -> String = BrowserInstaller.locatePython,
+         chromeAvailable: @escaping @Sendable (BrowserInstallLayout) -> Bool = { BrowserEngineLocator.live(path: nil, managedRoot: $0.root).chromeAvailable() }) {
         self.layout = layout
         self.platform = platform
         self.network = network
         self.run = run
         self.freeSpace = freeSpace
         self.findPython = findPython
+        self.chromeAvailable = chromeAvailable
     }
 
     static let processRunner: InstallCommandRunner = { executable, arguments, environment, timeout, onOutput in
@@ -131,14 +134,15 @@ final class BrowserInstaller: Sendable {
         defer { try? FileManager.default.removeItem(at: work) }
         let file = work.appending(path: "agent-browser")
         let hash = try await download(asset, to: file, component: component, version: release.version, report: report)
-        try await verify(hash, of: asset, in: release, component: component, report: report)
+        let verified = try await verify(hash, of: asset, in: release, component: component, report: report)
         try Self.makeExecutable(file)
         Quarantine.clear(file)
         report(.init(component: component, phase: .checking, version: release.version))
         try await requireWorking(file.path, ["--version"], name: component.name, expecting: release.version)
         report(.init(component: component, phase: .installing, version: release.version))
         try replaceItem(at: layout.agentBrowser, with: file)
-        return InstalledComponent(version: release.version, installedAt: .now, source: asset.url.absoluteString, sha256: hash)
+        return InstalledComponent(version: release.version, installedAt: .now, source: asset.url.absoluteString,
+                                  sha256: verified ? hash : nil, verified: verified)
     }
 
     // MARK: Obscura
@@ -155,7 +159,7 @@ final class BrowserInstaller: Sendable {
         defer { try? FileManager.default.removeItem(at: work) }
         let archive = work.appending(path: "obscura.tar.gz")
         let hash = try await download(asset, to: archive, component: component, version: release.version, report: report)
-        try await verify(hash, of: asset, in: release, component: component, report: report)
+        let verified = try await verify(hash, of: asset, in: release, component: component, report: report)
 
         report(.init(component: component, phase: .extracting, version: release.version))
         let unpacked = work.appending(path: "conteudo", directoryHint: .isDirectory)
@@ -178,11 +182,13 @@ final class BrowserInstaller: Sendable {
             try replaceItem(at: layout.obscuraWorker, with: unpacked.appending(path: "obscura-worker"))
         }
         try replaceItem(at: layout.obscura, with: unpacked.appending(path: "obscura"))
-        return InstalledComponent(version: release.version, installedAt: .now, source: asset.url.absoluteString, sha256: hash,
-                                  detail: asset.name.contains("stealth") ? "stealth" : nil)
+        return InstalledComponent(version: release.version, installedAt: .now, source: asset.url.absoluteString,
+                                  sha256: verified ? hash : nil, detail: asset.name.contains("stealth") ? "stealth" : nil, verified: verified)
     }
 
-    /// Unpacks a `.tar.gz` after reading its list: only the files named in `expecting`, none with a path that leaves the folder.
+    /// Unpacks a `.tar.gz` after reading its list: only the files named in `expecting`, only regular files (a link in the package
+    /// could point anywhere on the Mac, and the files are made executable and moved into the app's folder), none with a path that
+    /// leaves the folder.
     private func extract(_ archive: URL, into folder: URL, expecting: Set<String>) async throws {
         let listing = try await run("/usr/bin/tar", ["-tzf", archive.path], environment(), .seconds(120), { _ in })
         guard listing.status == 0 else { throw Self.commandFailure("Obscura", listing) }
@@ -193,8 +199,32 @@ final class BrowserInstaller: Sendable {
                 throw BrowserInstallError.failed("Obscura", detail: "o pacote traz um arquivo inesperado (\(name.clipped(to: 60))), por segurança nada foi instalado.")
             }
         }
+        // The same list with the kind of each entry (`-` file, `d` folder, `l` symbolic link, `h` hard link).
+        let detailed = try await run("/usr/bin/tar", ["-tvzf", archive.path], environment(), .seconds(120), { _ in })
+        guard detailed.status == 0 else { throw Self.commandFailure("Obscura", detailed) }
+        if let entry = Self.unsafeEntry(inVerboseListing: detailed.output) {
+            throw BrowserInstallError.failed("Obscura", detail: "o pacote traz um atalho ou link (\(entry.clipped(to: 60))), por segurança nada foi instalado.")
+        }
         let result = try await run("/usr/bin/tar", ["-xzf", archive.path, "-C", folder.path], environment(), .seconds(300), { _ in })
         guard result.status == 0 else { throw Self.commandFailure("Obscura", result) }
+        // What came out is what was listed: regular files, not links.
+        for name in expecting {
+            guard let type = try? FileManager.default.attributesOfItem(atPath: folder.appending(path: name).path)[.type] as? FileAttributeType else { continue }
+            guard type == .typeRegular else {
+                throw BrowserInstallError.failed("Obscura", detail: "\(name) do pacote não é um arquivo comum, por segurança nada foi instalado.")
+            }
+        }
+    }
+
+    /// The first entry of a `tar -tv` listing that is not a regular file or a folder (a symbolic or hard link, a device…), nil when
+    /// all are.
+    static func unsafeEntry(inVerboseListing text: String) -> String? {
+        for line in text.split(whereSeparator: \.isNewline) {
+            guard let kind = line.first else { continue }
+            if kind != "-" && kind != "d" { return String(line) }
+            if line.contains(" link to ") { return String(line) }
+        }
+        return nil
     }
 
     // MARK: Chrome
@@ -258,7 +288,8 @@ final class BrowserInstaller: Sendable {
 
         // The package and what it lists (its automation library comes along: the package cannot even start without it, about 130 MB).
         report(.init(component: component, phase: .installing))
-        let pip = try await run(venvPython, ["-m", "pip", "install", "cloakbrowser"], env, .seconds(900), { _ in })
+        // The version this app was tested with, not whatever is newest: the app drives the package's Chromium by its own flags.
+        let pip = try await run(venvPython, ["-m", "pip", "install", "cloakbrowser==\(Self.cloakPackageVersion)"], env, .seconds(900), { _ in })
         guard pip.status == 0 else { throw Self.commandFailure(component.name, pip) }
 
         report(.init(component: component, phase: .downloading))
@@ -283,15 +314,33 @@ final class BrowserInstaller: Sendable {
             .deletingLastPathComponent().lastPathComponent.replacingOccurrences(of: "chromium-", with: "")
 
         report(.init(component: component, phase: .installing, version: version))
-        try swapDirectory(layout.cloakDirectory, with: cloak)
-        // The folder moved with its virtual environment inside: it must still start.
-        let moved = try? await run(layout.cloakPython.path, ["-c", "import cloakbrowser"], env, .seconds(60), { _ in })
-        guard moved?.status == 0 else {
+        let aside = try swapDirectory(layout.cloakDirectory, with: cloak)
+        let installed = InstalledComponent(version: version, installedAt: .now, source: "pypi.org/project/cloakbrowser==\(Self.cloakPackageVersion)",
+                                           detail: "Chromium \(chromiumVersion)")
+        // The old install stays where it was put aside until the new one is checked in its place and written down: if either
+        // fails (or the task is cancelled), the old one comes back, and the record still says what is really there.
+        do {
+            // The folder moved with its virtual environment inside: it must still start.
+            let moved = try await run(layout.cloakPython.path, ["-c", "import cloakbrowser"], env, .seconds(60), { _ in })
+            guard moved.status == 0 else {
+                throw BrowserInstallError.broken(component.name, detail: "o Python da instalação não abriu depois de ser movido")
+            }
+            try Task.checkCancellation()
+            try record(component, installed)
+        } catch {
             try? FileManager.default.removeItem(at: layout.cloakDirectory)
-            throw BrowserInstallError.broken(component.name, detail: "o Python da instalação não abriu depois de ser movido")
+            if let aside { try? FileManager.default.moveItem(at: aside, to: layout.cloakDirectory) }
+            if aside != nil, let broken = error as? BrowserInstallError, case .broken(_, let detail) = broken {
+                throw BrowserInstallError.updateRolledBack(component.name, detail: detail)
+            }
+            throw error
         }
-        return InstalledComponent(version: version, installedAt: .now, source: "pypi.org/project/cloakbrowser", detail: "Chromium \(chromiumVersion)")
+        if let aside { try? FileManager.default.removeItem(at: aside) }
+        return installed
     }
+
+    /// The `cloakbrowser` package version the app installs (the one its CloakBrowser support was tested with).
+    static let cloakPackageVersion = "0.6.0"
 
     /// `<cache>/chromium-<version>/Chromium.app/Contents/MacOS/Chromium`, the newest.
     static func cloakChromium(in cache: URL) -> URL? {
@@ -333,19 +382,32 @@ final class BrowserInstaller: Sendable {
         if !force, let cached, !cached.isDue(now: now) { return cached }
         var latest: [String: String] = cached?.latest ?? [:]
         var failure: Error?
+        var reached = false
         for component in BrowserComponent.allCases where isInstalled(component) {
             do {
                 latest[component.rawValue] = try await latestVersion(of: component)
+                reached = true
             } catch is CancellationError {
                 throw CancellationError()
+            } catch BrowserInstallError.rateLimited {
+                // The limit counts calls: stop asking for the rest, and do not ask again before tomorrow.
+                failure = BrowserInstallError.rateLimited
+                break
             } catch {
                 failure = error
             }
         }
-        if latest.isEmpty, let failure { throw failure }
+        // A look that reached something counts as a look, even when part of it failed (what is known stays, and the next look is
+        // tomorrow's: GitHub allows few calls an hour to a Mac without a login), and so does being told to wait. Only a look that
+        // reached nothing (no network) is not written down: the next try is soon.
+        let wasLimited = (failure as? BrowserInstallError) == .rateLimited
+        if !reached, let failure {
+            if wasLimited { Self.writeUpdates(BrowserUpdateCheck(checkedAt: now, latest: latest), to: layout.updatesFile) }
+            if latest.isEmpty { throw failure }
+            return BrowserUpdateCheck(checkedAt: wasLimited ? now : (cached?.checkedAt ?? now), latest: latest)
+        }
         let result = BrowserUpdateCheck(checkedAt: now, latest: latest)
-        // Only a look that reached something counts as a look: with no network the next try is soon, not tomorrow.
-        if failure == nil || latest != (cached?.latest ?? [:]) { Self.writeUpdates(result, to: layout.updatesFile) }
+        Self.writeUpdates(result, to: layout.updatesFile)
         return result
     }
 
@@ -372,9 +434,9 @@ final class BrowserInstaller: Sendable {
             guard let version = json?["channels"]?["Stable"]?["version"]?.string else { throw BrowserInstallError.failed("Chrome", detail: "a lista de versões veio sem a estável.") }
             return version
         case .cloak:
-            let json = JSONValue.parse(String(decoding: try await network.data(from: Self.cloakPackageURL), as: UTF8.self))
-            guard let version = json?["info"]?["version"]?.string else { throw BrowserInstallError.failed("CloakBrowser", detail: "o índice de pacotes veio sem versão.") }
-            return version
+            // The package is installed at the version the app was tested with (`cloakPackageVersion`), so the newest one an
+            // install can bring is that: an update shows when a newer app brings a newer pin, not when the index has a new release.
+            return Self.cloakPackageVersion
         }
     }
 
@@ -407,8 +469,13 @@ final class BrowserInstaller: Sendable {
             try record(component, nil)
         }
         if removeProfiles { removeProfileFolders(of: engine) }
+        // Another engine still needs `agent-browser` when it can run: Obscura and CloakBrowser when their files are here, and Chrome
+        // whenever a Chrome can be found (the one the app installed, or one on the Mac that `agent-browser` finds by itself, which
+        // is the common setup: Chrome there, nothing of the app's own but `agent-browser`).
         let stillUsed = BrowserEngineKind.allCases.contains { other in
-            other != engine && other.browserComponent.map(isInstalled) == true
+            guard other != engine, other.drivesABrowser else { return false }
+            if other == .chrome { return chromeAvailable(layout) }
+            return other.browserComponent.map(isInstalled) == true
         }
         if !stillUsed {
             try? fileManager.removeItem(at: layout.agentBrowser)
@@ -473,9 +540,11 @@ final class BrowserInstaller: Sendable {
     }
 
     /// Compares the hash of the download with the one the release publishes: GitHub's own `digest` of the asset, else a checksums
-    /// file next to it. A release that publishes neither is installed without the check.
+    /// file next to it. A release that publishes neither is installed without the check, and the record says so (false): it is
+    /// not written down as verified.
+    @discardableResult
     private func verify(_ hash: String, of asset: Asset, in release: Release, component: BrowserComponent,
-                        report: @escaping @Sendable (BrowserInstallProgress) -> Void) async throws {
+                        report: @escaping @Sendable (BrowserInstallProgress) -> Void) async throws -> Bool {
         report(.init(component: component, phase: .verifying, version: release.version))
         var expected = asset.sha256
         if expected == nil {
@@ -484,7 +553,9 @@ final class BrowserInstaller: Sendable {
                 if let found = Self.checksum(of: asset.name, inListing: String(decoding: data, as: UTF8.self)) { expected = found; break }
             }
         }
-        if let expected, expected.lowercased() != hash.lowercased() { throw BrowserInstallError.checksumMismatch(component.name) }
+        guard let expected else { return false }
+        if expected.lowercased() != hash.lowercased() { throw BrowserInstallError.checksumMismatch(component.name) }
+        return true
     }
 
     static func isChecksumFile(_ name: String, for asset: String) -> Bool {
@@ -539,6 +610,13 @@ final class BrowserInstaller: Sendable {
         let fileManager = FileManager.default
         for entry in (try? fileManager.contentsOfDirectory(at: layout.root, includingPropertiesForKeys: nil)) ?? []
         where entry.lastPathComponent.hasPrefix(BrowserInstallLayout.workPrefix) {
+            // An install killed between setting the old CloakBrowser aside and putting the new one in place left the old one
+            // here and nothing in its place: it is the installed one, not leftovers.
+            if entry.lastPathComponent.hasPrefix(BrowserInstallLayout.workPrefix + Self.asideMarker),
+               !fileManager.fileExists(atPath: layout.cloakDirectory.path),
+               (try? fileManager.moveItem(at: entry, to: layout.cloakDirectory)) != nil {
+                continue
+            }
             try? fileManager.removeItem(at: entry)
         }
     }
@@ -564,10 +642,11 @@ final class BrowserInstaller: Sendable {
         }
     }
 
-    /// Replaces a folder by another: the old one is set aside first and comes back if the move fails.
-    private func swapDirectory(_ destination: URL, with new: URL) throws {
+    /// Replaces a folder by another: the old one is set aside first and comes back if the move fails. Returns where the old one
+    /// is (nil when there was none); the caller deletes it once the new one is known to work, or moves it back if it is not.
+    private func swapDirectory(_ destination: URL, with new: URL) throws -> URL? {
         let fileManager = FileManager.default
-        let aside = destination.deletingLastPathComponent().appending(path: BrowserInstallLayout.workPrefix + "antigo-" + UUID().uuidString)
+        let aside = destination.deletingLastPathComponent().appending(path: BrowserInstallLayout.workPrefix + Self.asideMarker + UUID().uuidString)
         let hadOld = fileManager.fileExists(atPath: destination.path)
         try fileManager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
         if hadOld { try fileManager.moveItem(at: destination, to: aside) }
@@ -577,8 +656,11 @@ final class BrowserInstaller: Sendable {
             if hadOld { try? fileManager.moveItem(at: aside, to: destination) }
             throw error
         }
-        if hadOld { try? fileManager.removeItem(at: aside) }
+        return hadOld ? aside : nil
     }
+
+    /// What the name of a folder set aside by `swapDirectory` has after the work prefix.
+    static let asideMarker = "antigo-"
 
     static func makeExecutable(_ file: URL) throws {
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)

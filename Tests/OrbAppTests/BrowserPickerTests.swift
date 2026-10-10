@@ -113,15 +113,22 @@ struct BrowserPickerCopyTests {
     /// The browser may have been started by another process (the tools server of a Claude Code turn): the app holds no session
     /// for it, but the engine it leaves is closed all the same, through the session name the two share.
     @Test func leavingAnEngineClosesTheBrowserAnotherProcessStarted() async {
-        let setup = FakeBrowserSetup(engine: .chrome)
-        let botID = UUID()
-        await setup.hub.close(botID: botID, leaving: .chrome)
-        #expect(setup.driver.calls == ["close"])
-        #expect(setup.configs.withLock { $0.map(\.session) } == [AgentBrowserConfig.sessionName(botID: botID, engine: .chrome)])
+        let world = FakeBrowserWorld()
+        let hub = world.hub()
+        let botID = UUID(), otherOrb = UUID()
+        let chrome = AgentBrowserConfig.sessionName(botID: botID, engine: .chrome)
+        let cloak = AgentBrowserConfig.sessionName(botID: botID, engine: .cloak)
+        let others = AgentBrowserConfig.sessionName(botID: otherOrb, engine: .chrome)
+        for name in [chrome, cloak, others, "default"] { world.start(name) }
+        await hub.close(botID: botID, leaving: .chrome)
+        #expect(world.closed == [chrome], "only the Orb's session of the engine it left")
+        #expect(world.running == [cloak, others, "default"])
+        // Nothing running by that name: nothing is closed (no command is sent for a browser that is not there).
+        await hub.close(botID: botID, leaving: .chrome)
+        #expect(world.closed == [chrome])
         // The simple engine has no browser to close.
-        let none = FakeBrowserSetup(engine: .chrome)
-        await none.hub.close(botID: botID, leaving: .simple)
-        #expect(none.driver.calls.isEmpty)
+        await hub.close(botID: botID, leaving: .simple)
+        #expect(world.closed == [chrome])
     }
 
     @Test func theSessionOfAnotherEngineIsNotClosedByMistake() async throws {

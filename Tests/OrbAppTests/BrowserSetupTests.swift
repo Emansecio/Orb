@@ -5,14 +5,18 @@ import Testing
 
 /// What the driver learned from running against the real browsers, and the settings model of Ajustes → Navegador.
 struct BrowserDriverRealityTests {
-    private func make(_ engine: BrowserEngineKind = .chrome, reply: @escaping @Sendable ([String]) -> String)
+    private func make(_ engine: BrowserEngineKind = .chrome, listsSession: Bool = true, reply: @escaping @Sendable ([String]) -> String)
         -> (driver: AgentBrowserDriver, calls: OSAllocatedUnfairLock<[[String]]>) {
         let calls = OSAllocatedUnfairLock<[[String]]>(initialState: [])
+        let name = "orb-test-\(engine.rawValue)"
         let run: BrowserCommandRunner = { _, arguments, _, _ in
             calls.withLock { $0.append(arguments) }
-            return ProcessOutput(status: 0, signal: nil, output: reply(arguments), timedOut: false)
+            // The session is running, as far as `session list` goes (the driver asks before any command but `open`).
+            let answer = listsSession && arguments.contains("session") && arguments.contains("list")
+                ? "{\"success\":true,\"data\":{\"sessions\":[\"\(name)\"]},\"error\":null}" : reply(arguments)
+            return ProcessOutput(status: 0, signal: nil, output: answer, timedOut: false)
         }
-        let config = AgentBrowserConfig(executable: "/x/agent-browser", session: "orb-test-\(engine.rawValue)", engine: engine,
+        let config = AgentBrowserConfig(executable: "/x/agent-browser", session: name, engine: engine,
                                         browserExecutable: nil, profile: nil)
         return (AgentBrowserDriver(config: config, environment: { nil }, run: run), calls)
     }
@@ -26,11 +30,38 @@ struct BrowserDriverRealityTests {
         try await driver.fill("e1", text: "--json")
         try await driver.fill("e1", text: "-it's x")
         try await driver.fill("e1", text: "olá")
-        let commands = calls.withLock { $0.map { Array($0.dropFirst(3)) } }
+        // (Without the `session list` the driver asks first.)
+        let commands = calls.withLock { $0.map { Array($0.dropFirst(3)) }.filter { $0.first != "session" } }
         #expect(commands[0] == ["batch", "'fill' '@e1' '--json'"])
         #expect(commands[1] == ["batch", "'fill' '@e1' '-it'\\''s x'"], "an apostrophe is closed, escaped and opened again")
         #expect(commands[2] == ["fill", "@e1", "olá"], "ordinary text does not need it")
         #expect(AgentBrowserDriver.shellLine(["a b", "$HOME", "`x`"]) == "'a b' '$HOME' '`x`'")
+    }
+
+    /// The quoting above only matters if the real `batch` reads it back as the words that were meant. Asks the real command line
+    /// (no browser starts: the `fill` fails on an element that is not there, and its reply still says how the command was read).
+    @Test(.enabled(if: !RealBrowsers.skipped && RealBrowsers.status(.chrome).agentBrowser != nil))
+    func theRealBatchReadsTheQuotedWordsBackAsTheyWere() async throws {
+        let executable = try #require(RealBrowsers.status(.chrome).agentBrowser)
+        let sockets = "/tmp/orbab-\(UUID().uuidString.prefix(8))"
+        let session = "orb-test-batch-\(UUID().uuidString.prefix(8).lowercased())"
+        let environment = ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory(), "AGENT_BROWSER_SOCKET_DIR": sockets]
+        defer { try? FileManager.default.removeItem(atPath: sockets) }
+        let texts = ["--json", "-it's x", "$HOME `x` \"q\"", "a b", "--", "-", "'", "''", "\\", "\\'", "ação ✓ 日本", "#c ; ls", "*", "~", "{a}", "&& rm -rf x",
+                     "--headed", "--session", "-p", "x\ty", "[\"fill\"]", "@e2"]
+        for text in texts {
+            let line = AgentBrowserDriver.shellLine(["fill", "@e1", text])
+            let output = try await ProcessRunner.run(executable, ["--session", session, "--json", "batch", line], environment: environment, timeout: .seconds(30))
+            let reply = try #require(JSONValue.parse(output.output.split(whereSeparator: \.isNewline).last.map(String.init) ?? ""), "\(output.output)")
+            let read = reply.array?.first?["command"]?.array?.compactMap(\.string)
+            #expect(read == ["fill", "@e1", text], "\(text.debugDescription) was read as \(String(describing: read))")
+        }
+        // A line break is a word like any other; a command with many words keeps each one.
+        let many = AgentBrowserDriver.shellLine(["fill", "@e1", "first line\nsecond line"])
+        let output = try await ProcessRunner.run(executable, ["--session", session, "--json", "batch", many], environment: environment, timeout: .seconds(30))
+        #expect(JSONValue.parse(output.output.split(whereSeparator: \.isNewline).last.map(String.init) ?? "")?.array?.first?["command"]?.array?.compactMap(\.string)
+                == ["fill", "@e1", "first line\nsecond line"])
+        _ = try? await ProcessRunner.run(executable, ["--session", session, "--json", "close"], environment: environment, timeout: .seconds(30))
     }
 
     @Test func aBatchAnswerIsAListWithTheResultOfTheCommand() throws {
@@ -58,13 +89,13 @@ struct BrowserDriverRealityTests {
         let (driver, calls) = make(.obscura) { arguments in
             if arguments.contains("snapshot") { return ok(#"{"snapshot":"- link \"Ir\" [ref=e2]","origin":"http://a.test/","refs":{"e2":{"role":"link","name":"Ir"}}}"#) }
             if arguments.contains("click") { return "{\"success\":false,\"data\":null,\"error\":\"\(failure)\"}" }
-            return ok(#"{"result":true}"#)
+            return ok(#"{"result":"clicked"}"#)
         }
         _ = try await driver.snapshot(interactive: true, selector: nil)
         try await driver.click("e2")
         let eval = try #require(calls.withLock { $0.last })
         #expect(eval.contains("eval") && eval.last?.contains("a[href]") == true && eval.last?.contains("\"Ir\"") == true)
-        #expect(eval.last?.contains("el.click()") == true)
+        #expect(eval.last?.contains(".click()") == true)
 
         // Another failure is still a failure, and so is a link that is not on the page.
         let (other, _) = make(.obscura) { _ in "{\"success\":false,\"data\":null,\"error\":\"Unknown ref: e5\"}" }
@@ -78,8 +109,78 @@ struct BrowserDriverRealityTests {
         await #expect(throws: BrowserDriverError.failed(failure)) { try await chrome.click("e2") }
     }
 
+    // MARK: Obscura's click in the page never guesses (finding 5)
+
+    private static let boxModelFailure = "{\"success\":false,\"data\":null,\"error\":\"Failed to deserialize CDP response for DOM.getBoxModel: invalid type: floating point `1.5`, expected i64\"}"
+
+    @Test func obscuraDoesNotClickWhenTheSnapshotHadTwoElementsAlike() async throws {
+        let (driver, calls) = make(.obscura) { arguments in
+            if arguments.contains("snapshot") {
+                return ok(#"{"snapshot":"x","origin":"http://a.test/","refs":{"e1":{"role":"button","name":"Comprar"},"e2":{"role":"button","name":"Comprar"},"e3":{"role":"link","name":"Ajuda"}}}"#)
+            }
+            if arguments.contains("click") { return Self.boxModelFailure }
+            return ok(#"{"result":"clicked"}"#)
+        }
+        _ = try await driver.snapshot(interactive: true, selector: nil)
+        do {
+            try await driver.click("e1")
+            Issue.record("two buttons called Comprar: a click on the first one that matches could buy the wrong thing")
+        } catch BrowserDriverError.failed(let message) {
+            #expect(message.contains("more than one element is called “Comprar”"))
+        }
+        #expect(!calls.withLock { $0.contains { $0.contains("eval") } }, "the page was not even asked to click")
+        // A name that is alone is clicked.
+        try await driver.click("e3")
+        #expect(calls.withLock { $0.contains { $0.contains("eval") } })
+    }
+
+    @Test func obscuraDoesNotClickWhenThePageHasTwoElementsAlikeEvenIfTheSnapshotHadOne() async throws {
+        let (driver, _) = make(.obscura) { arguments in
+            if arguments.contains("snapshot") { return ok(#"{"snapshot":"x","origin":"http://a.test/","refs":{"e1":{"role":"link","name":"Ver"}}}"#) }
+            if arguments.contains("click") { return Self.boxModelFailure }
+            return ok(#"{"result":"ambiguous"}"#)
+        }
+        _ = try await driver.snapshot(interactive: true, selector: nil)
+        await #expect(throws: BrowserDriverError.failed(AgentBrowserDriver.ambiguousClick("Ver"))) { try await driver.click("e1") }
+        // The script itself: it counts the elements and clicks only a single one.
+        let script = AgentBrowserDriver.clickScript(role: "link", name: "Ver")
+        #expect(script.contains("found.length > 1) return 'ambiguous'") && script.contains("if (!wanted) return 'none'"))
+    }
+
+    @Test func theClickScriptRunsInANodeLikeEngineAndKeepsToItsRules() throws {
+        // Runs the script against a tiny stand-in document, if `node` is on the Mac: two equal links are ambiguous, one is clicked.
+        let node = ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"].first { FileManager.default.isExecutableFile(atPath: $0) }
+        guard let node else { return }
+        func run(links: [String], name: String) throws -> String {
+            let script = AgentBrowserDriver.clickScript(role: "link", name: name)
+            let harness = """
+            const clicked = [];
+            const make = text => ({innerText: text, getAttribute: () => null, click() { clicked.push(text); }});
+            const items = \(JSONValue.array(links.map { .string($0) }).jsonString).map(make);
+            const document = {querySelectorAll: () => items};
+            const result = \(script);
+            console.log(result + ':' + clicked.length);
+            """
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: node)
+            process.arguments = ["-e", harness]
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            try process.run()
+            process.waitUntilExit()
+            return String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        #expect(try run(links: ["Ver", "Ver", "Outro"], name: "Ver") == "ambiguous:0")
+        #expect(try run(links: ["Ver", "Outro"], name: "Ver") == "clicked:1")
+        #expect(try run(links: ["Ver tudo", "Outro"], name: "Ver") == "clicked:1", "one partial match is the one")
+        #expect(try run(links: ["Ver tudo", "Ver mais"], name: "Ver") == "ambiguous:0")
+        #expect(try run(links: ["Outro"], name: "Ver") == "none:0")
+        #expect(try run(links: ["", "Outro"], name: "") == "none:0", "an empty name matches nothing")
+    }
+
     @Test func aSessionNobodyOpenedIsNotStartedToAskItsAddress() async throws {
-        let (driver, calls) = make { arguments in
+        // (The driver answers `noPage` from its own `session list`, never sending the command that would start a browser.)
+        let (driver, calls) = make(listsSession: false) { arguments in
             arguments.contains("session") ? ok(#"{"sessions":["another"]}"#) : ok(#"{"url":"https://a.test/"}"#)
         }
         #expect(try await driver.currentURL() == nil)
@@ -87,7 +188,7 @@ struct BrowserDriverRealityTests {
     }
 
     @Test func afterCloseNoPageCountsEvenWhileTheBackgroundProcessIsLeaving() async throws {
-        let (driver, calls) = make { arguments in
+        let (driver, calls) = make(listsSession: false) { arguments in
             arguments.contains("session") ? ok(#"{"sessions":["orb-test-chrome"]}"#) : ok(#"{"url":"https://a.test/","title":"A","closed":true}"#)
         }
         _ = try await driver.open("https://a.test/")

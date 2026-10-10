@@ -29,8 +29,8 @@ struct RealBrowserScenario {
         let hub = BrowserHub(profilesDirectory: profiles, locate: { RealBrowsers.status($0) }, makeDriver: { config in
             var config = config
             config.allowPrivateNetwork = true // Obscura blocks 127.0.0.1 unless told
-            let environment = ProcessInfo.processInfo.environment.merging(["AGENT_BROWSER_SOCKET_DIR": sockets]) { $1 }
-            return AgentBrowserDriver(config: config, environment: { environment })
+            config.socketDirectory = URL(fileURLWithPath: sockets)
+            return AgentBrowserDriver(config: config, environment: { ProcessInfo.processInfo.environment })
         })
         return RealBrowserScenario(engine: engine, hub: hub, profiles: profiles, server: try await LocalPageServer(pages: LocalPageServer.testSite))
     }

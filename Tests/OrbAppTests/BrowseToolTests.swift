@@ -138,11 +138,11 @@ struct BrowseToolTests {
         let submitted = try await run(BrowseFillTool(), ["ref": .string("e1"), "text": .string("busca"), "submit": .bool(true)])
         #expect(submitted.contains("pressed Enter"))
         #expect(try await run(BrowseSelectTool(), ["ref": .string("e1"), "value": .string("BR")]).contains("BR"))
-        #expect(try await run(BrowsePressTool(), ["key": .string("Control+a")]).contains("Pressed Control+a"))
+        #expect(try await run(BrowsePressTool(), ["key": .string("ArrowDown")]).contains("Pressed ArrowDown"))
         let calls = setup.driver.calls
         #expect(calls.contains("click e1") && calls.contains("fill e1 olá") && calls.contains("fill e1 busca") && calls.contains("press Enter"))
-        #expect(calls.contains("select e1 BR") && calls.contains("press Control+a"))
-        #expect(await message(BrowsePressTool(), ["key": .string("two words")]).contains("one key"))
+        #expect(calls.contains("select e1 BR") && calls.contains("press ArrowDown"))
+        #expect(await message(BrowsePressTool(), ["key": .string("two words")]).contains("`key` is one of"))
     }
 
     @Test func aStaleRefGetsTheAdviceToSnapshotAgain() async {
@@ -239,6 +239,88 @@ struct BrowseToolTests {
 
         let hidden = try await run(BrowseShowTool(), ["hide": .bool(true)])
         #expect(setup.driver.calls.contains("setHeaded false") && hidden.contains("background") && !session.isShowingWindow)
+    }
+
+    @Test func stoppingWhileTheWindowIsOpenHidesItFromATaskOfItsOwn() async throws {
+        let fake = FakeBrowserSetup()
+        var context = fake.context()
+        // The card waits like an approval does: until the person answers, or the task is cancelled (Parar).
+        context.handoff = { _ in
+            while !Task.isCancelled { try? await Task.sleep(for: .milliseconds(5)) }
+            return false
+        }
+        let task = Task { try await BrowseShowTool().run(.object([:]), context: context) }
+        await waitUntil("the window to open") { fake.driver.calls.contains("setHeaded true") }
+        try await Task.sleep(for: .milliseconds(30)) // the call is waiting on the card now
+        task.cancel()
+        await #expect(throws: ToolError.self) { _ = try await task.value }
+        // The cancelled task cannot run the commands that close the window: a task of the tool's own does.
+        await waitUntil("the window to be hidden") { fake.driver.calls.contains("setHeaded false") }
+        let session = try await fake.hub.session(botID: fake.botID, engine: .chrome)
+        await waitUntil("the Orb to know it is hidden") { !session.isShowingWindow }
+    }
+
+    @Test func cancelarHidesTheWindowInTheCallItself() async throws {
+        let fake = FakeBrowserSetup()
+        var context = fake.context()
+        context.handoff = { _ in false } // Cancelar: not a stopped task
+        _ = await message(BrowseShowTool(), context: context)
+        #expect(fake.driver.calls == ["setHeaded true", "setHeaded false"])
+    }
+
+    // MARK: Keys
+
+    @Test func browsePressTakesNamedKeysAndNothingThatTypes() async throws {
+        let named = [("Enter", "Enter"), ("return", "Enter"), ("tab", "Tab"), ("Shift+Tab", "Shift+Tab"), ("ArrowDown", "ArrowDown"), ("up", "ArrowUp"),
+                     ("esc", "Escape"), ("Escape", "Escape"), ("PageUp", "PageUp"), ("pagedown", "PageDown"), ("Home", "Home"), ("End", "End"),
+                     ("Backspace", "Backspace"), ("delete", "Delete"), ("Space", "Space")]
+        for (given, sent) in named {
+            let fake = FakeBrowserSetup()
+            let text = try await run(BrowsePressTool(), ["key": .string(given)], context: fake.context())
+            #expect(fake.driver.calls.contains("press \(sent)") && text.contains("Pressed \(sent)"), "\(given)")
+        }
+        // A key that types a character, or pastes what the clipboard holds, is a way around the rule that passwords are the person's.
+        for refused in ["a", "S", "1", "-", "Control+v", "Meta+v", "Control+Shift+v", "Shift+Insert", "Control+a", "Alt+x", "Control+Alt+Delete", "F5", "", "Enter Enter"] {
+            let fake = FakeBrowserSetup()
+            let text = await message(BrowsePressTool(), ["key": .string(refused)], context: fake.context())
+            #expect(text.contains("`key` is one of") || text.contains("key"), "\(refused)")
+            #expect(!fake.driver.calls.contains { $0.hasPrefix("press") }, "\(refused) must not reach the browser: \(fake.driver.calls)")
+        }
+    }
+
+    @Test func browsePressIsRefusedWhileAPasswordOrCardFieldHasTheFocus() async throws {
+        func focus(_ type: String, _ autocomplete: String = "", _ label: String = "x") -> String {
+            "{\"type\":\"\(type)\",\"autocomplete\":\"\(autocomplete)\",\"label\":\"\(label)\"}"
+        }
+        let secret = [focus("password"), focus("text", "current-password"), focus("text", "new-password"), focus("text", "cc-number"),
+                      focus("text", "cc-csc"), focus("text", "", "Senha"), focus("text", "", "Número do cartão"), focus("text", "", "CVV")]
+        for focused in secret {
+            let fake = FakeBrowserSetup()
+            fake.driver.state.withLock { $0.evaluation = focused }
+            for key in ["Space", "Backspace", "Enter"] {
+                let text = await message(BrowsePressTool(), ["key": .string(key)], context: fake.context())
+                #expect(text.contains("Refused") && text.contains("browse_show"), "\(focused) \(key): \(text)")
+            }
+            #expect(!fake.driver.calls.contains { $0.hasPrefix("press") }, "\(focused)")
+        }
+        // An ordinary field, or nothing focused, is fine.
+        for focused in [focus("text", "email", "Email"), focus("search"), "{}", ""] {
+            let fake = FakeBrowserSetup()
+            fake.driver.state.withLock { $0.evaluation = focused }
+            _ = try await run(BrowsePressTool(), ["key": .string("Space")], context: fake.context())
+            #expect(fake.driver.calls.contains("press Space"), "\(focused)")
+        }
+        // The script that asks the page is the one the tool runs, and it reads the focused element.
+        #expect(BrowsePressTool.focusScript.contains("document.activeElement"))
+    }
+
+    @Test func browseTabsCountsAsNotReadOnlyForAClientThatOnlySeesTheNameAndSchema() {
+        // With no arguments it lists, and `new` with a `url` goes to a site.
+        #expect(BrowseTabsTool().risk(.object([:])) == .safe)
+        #expect(BrowseTabsTool().announcedReadOnly == false)
+        #expect(BrowseSnapshotTool().announcedReadOnly == false && BrowseReadTool().announcedReadOnly == false, "they read a live page")
+        #expect(BrowseCloseTool().announcedReadOnly == true)
+        #expect(WebSearchTool().announcedReadOnly == false && BrowseClickTool().announcedReadOnly == false)
     }
 
     @Test func obscuraHasNoWindowToShow() async {

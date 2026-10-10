@@ -418,7 +418,7 @@ final class AppModel {
                 // Commands and CLIs in the middle of a turn lead process groups of their own and would outlive the app.
                 ChildProcessGroups.killAllNow(including: self?.jobs.runningGroups ?? [])
                 self?.jobs.killAllNow()
-                self?.browserHub.terminateAllNow() // each Orb's browser lives in a background process of its own that would outlive the app
+                self?.browserHub.terminateAllNow(orbs: Set(self?.bots.map(\.id) ?? [])) // each Orb's browser lives in a background process of its own that would outlive the app
                 StdioServerRegistry.shared.killAllNow() // a connector's server that stays open past EOF would outlive the app
             }
         }

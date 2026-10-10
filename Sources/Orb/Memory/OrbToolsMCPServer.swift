@@ -136,6 +136,9 @@ enum OrbToolsMCPServer {
             searchProvider = value(of: OrbToolsMCPServer.searchFlag).flatMap(SearchProvider.init(rawValue:)) ?? .duckduckgo
             browserProfiles = value(of: OrbToolsMCPServer.browserProfilesFlag).map { URL(fileURLWithPath: $0) }
             tinyFishKey = environment[OrbToolsMCPServer.tinyFishKeyVariable].flatMap { $0.isEmpty ? nil : $0 }
+            // The key is read: it must not stay in the environment of this process, which every program it starts inherits (the
+            // `agent-browser` background process, and the browser it keeps, would carry it for as long as they live).
+            unsetenv(OrbToolsMCPServer.tinyFishKeyVariable)
         }
 
         var context: ToolContext {
@@ -224,7 +227,7 @@ enum OrbToolsMCPServer {
             OrbToolsMCPServer.listedTools(mac: mac, files: files, accessibilityGranted: accessibilityGranted, browser: browser).map {
                 .object(["name": .string($0.spec.name), "description": .string($0.spec.description),
                          "inputSchema": $0.spec.parameters,
-                         "annotations": .object(["readOnlyHint": .bool($0.risk(.object([:])) == .safe)])])
+                         "annotations": .object(["readOnlyHint": .bool($0.announcedReadOnly)])])
             }
         }
 

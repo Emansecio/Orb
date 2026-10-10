@@ -11,6 +11,8 @@ final class FakeInstallNetwork: InstallNetwork, @unchecked Sendable {
     /// Runs before a download answers (to wait for a cancellation, or to fail).
     var beforeDownload: (@Sendable (URL) async throws -> Void)?
     var offline = false
+    /// Answers every request for a document with this error (the GitHub limit, say).
+    var failure: BrowserInstallError?
 
     var requests: [String] { lock.withLock { asked } }
 
@@ -20,6 +22,7 @@ final class FakeInstallNetwork: InstallNetwork, @unchecked Sendable {
     func data(from url: URL) async throws -> Data {
         lock.withLock { asked.append(url.absoluteString) }
         if offline { throw BrowserInstallError.noNetwork }
+        if let failure { throw failure }
         guard let data = lock.withLock({ documents[url.absoluteString] }) else { throw BrowserInstallError.failed("arquivo", detail: "HTTP 404") }
         return data
     }

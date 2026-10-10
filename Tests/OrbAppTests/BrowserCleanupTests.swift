@@ -56,6 +56,152 @@ import Testing
         #expect(hub.existingSession(botID: setup.botID) == nil)
     }
 
+    // MARK: Browsers another process started (the tools server of a Claude Code turn)
+
+    // Each turn of the Claude Code engine starts a tools server with a hub of its own, new and empty; the browser it opens is a
+    // background process of `agent-browser` that outlives it, under the session name of the Orb. The app's hub holds none of
+    // those, so everything that closes browsers has to close by name.
+
+    private func sessions(_ world: FakeBrowserWorld, orb: UUID, other: UUID) -> (chrome: String, cloak: String, otherChrome: String, personal: String) {
+        let names = (AgentBrowserConfig.sessionName(botID: orb, engine: .chrome), AgentBrowserConfig.sessionName(botID: orb, engine: .cloak),
+                     AgentBrowserConfig.sessionName(botID: other, engine: .chrome), "default")
+        for name in [names.0, names.1, names.2, names.3] { world.start(name) }
+        return names
+    }
+
+    @Test func quittingAlsoClosesTheBrowsersOfClaudeCodeTurnsAndOnlyTheOrbsOnes() async throws {
+        let world = FakeBrowserWorld()
+        let hub = world.hub()
+        let held = UUID(), mcpOrb = UUID(), mcpOther = UUID()
+        _ = try await hub.session(botID: held, engine: .chrome)
+        world.start(AgentBrowserConfig.sessionName(botID: held, engine: .chrome))
+        let started = sessions(world, orb: mcpOrb, other: mcpOther)
+        hub.terminateAllNow(timeout: 2)
+        let heldName = AgentBrowserConfig.sessionName(botID: held, engine: .chrome)
+        #expect(Set(world.closedSynchronously) == [heldName, started.chrome, started.cloak, started.otherChrome],
+                "the held one and every one the tools servers started: \(world.closedSynchronously)")
+        #expect(world.running == [started.personal], "the person's own agent-browser session is not ours to close")
+        #expect(hub.existingSession(botID: held) == nil)
+    }
+
+    @Test func quittingClosesOnlyTheSessionsOfTheOrbsThisAppHasWhenItKnowsThem() async {
+        // Another build of the app on the same Mac (a dev build, say) has Orbs of its own, and browsers that are theirs.
+        let world = FakeBrowserWorld()
+        let hub = world.hub()
+        let mine = UUID(), theirs = UUID()
+        let myChrome = AgentBrowserConfig.sessionName(botID: mine, engine: .chrome)
+        let myObscura = AgentBrowserConfig.sessionName(botID: mine, engine: .obscura)
+        let theirChrome = AgentBrowserConfig.sessionName(botID: theirs, engine: .chrome)
+        for name in [myChrome, myObscura, theirChrome] { world.start(name) }
+        _ = await hub.status(for: .chrome) // (the app asks long before it quits)
+        hub.terminateAllNow(timeout: 2, orbs: [mine])
+        #expect(Set(world.closedSynchronously) == [myChrome, myObscura])
+        #expect(world.running == [theirChrome])
+    }
+
+    @Test func quittingFindsAgentBrowserEvenIfThisHubNeverAskedWhereItIs() {
+        // The app quit before any tool asked for a browser: the hub never resolved `agent-browser`. It is in the app's own folder.
+        let root = FileManager.default.temporaryDirectory.appending(path: "OrbQuit-\(UUID().uuidString)")
+        defer { removeTestFolder(root) }
+        let layout = BrowserInstallLayout(root: root)
+        try? FileManager.default.createDirectory(at: layout.binDirectory, withIntermediateDirectories: true)
+        try? Data("#!/bin/sh\n".utf8).write(to: layout.agentBrowser)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: layout.agentBrowser.path)
+        let world = FakeBrowserWorld()
+        let hub = BrowserHub(profilesDirectory: root, locate: { BrowserEngineStatus(engine: $0) }, makeDriver: world.makeDriver)
+        let name = AgentBrowserConfig.sessionName(botID: UUID(), engine: .obscura)
+        world.start(name)
+        hub.terminateAllNow(timeout: 2)
+        #expect(world.closedSynchronously == [name])
+        #expect(world.configs.allSatisfy { $0.executable == layout.agentBrowser.path })
+    }
+
+    @Test func closingAnOrbsBrowserClosesWhatAnotherProcessStartedForItInEveryEngine() async {
+        let world = FakeBrowserWorld()
+        let hub = world.hub()
+        let orb = UUID(), other = UUID()
+        let started = sessions(world, orb: orb, other: other)
+        #expect(await hub.close(botID: orb))
+        #expect(Set(world.closed) == [started.chrome, started.cloak])
+        #expect(world.running == [started.otherChrome, started.personal])
+        // Nothing of the Orb is running any more: the tool can tell it was not open.
+        #expect(await hub.close(botID: orb) == false)
+    }
+
+    @Test func closingAnEnginesBrowsersReachesEveryOrbsSessionOfIt() async throws {
+        let world = FakeBrowserWorld()
+        let hub = world.hub()
+        let orb = UUID(), other = UUID()
+        let started = sessions(world, orb: orb, other: other)
+        _ = try await hub.session(botID: orb, engine: .chrome) // held by this hub, too
+        await hub.close(engine: .chrome)
+        #expect(Set(world.closed) == [started.chrome, started.otherChrome], "\(world.closed)")
+        #expect(world.running == [started.cloak, started.personal], "the other engine and the person's session stay")
+        #expect(hub.existingSession(botID: orb) == nil)
+    }
+
+    @Test func deletingTheOrbWaitsForItsBrowsersBeforeTheProfileGoes() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "OrbDelete-\(UUID().uuidString)")
+        defer { removeTestFolder(root) }
+        let world = FakeBrowserWorld()
+        world.lingers = 3 // the background process takes a few listings to go
+        let hub = world.hub(profiles: root)
+        let orb = UUID()
+        let profile = root.appending(path: "\(orb.uuidString)/chrome")
+        try FileManager.default.createDirectory(at: profile, withIntermediateDirectories: true)
+        world.start(AgentBrowserConfig.sessionName(botID: orb, engine: .chrome)) // started by a Claude Code turn
+        await hub.deleteData(botID: orb)
+        #expect(world.closed == [AgentBrowserConfig.sessionName(botID: orb, engine: .chrome)])
+        #expect(world.listings >= 4, "it kept asking until the browser was gone (\(world.listings) listings)")
+        #expect(!FileManager.default.fileExists(atPath: root.appending(path: orb.uuidString).path))
+    }
+
+    @Test func browseCloseClosesTheBrowserEvenWhenThisHubNeverOpenedIt() async throws {
+        let world = FakeBrowserWorld()
+        let hub = world.hub()
+        let orb = UUID()
+        var context = ToolContext(workingDirectory: FileManager.default.temporaryDirectory, botID: orb)
+        context.browser = BrowserAccess(hub: hub, engine: .chrome)
+        // An earlier turn opened it, from a tools server that is gone now.
+        world.start(AgentBrowserConfig.sessionName(botID: orb, engine: .chrome))
+        #expect(try await BrowseCloseTool().run(.object([:]), context: context) == "Browser closed.")
+        #expect(world.running.isEmpty)
+        #expect(try await BrowseCloseTool().run(.object([:]), context: context) == "The browser was not open.")
+    }
+
+    @MainActor @Test func turningOffNavegarNaWebClosesTheBrowserATurnOfClaudeCodeStarted() async throws {
+        defer { removeTestFolder(root) }
+        var state = AppState.initial
+        let botID = state.bots[0].id
+        state.bots[0].browserEngine = .chrome
+        Store(directory: root).save(state)
+        let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)
+        let world = FakeBrowserWorld()
+        model.browserHub = world.hub()
+        let name = AgentBrowserConfig.sessionName(botID: botID, engine: .chrome)
+        world.start(name) // the hub of the app holds nothing
+        model.update(botID) { $0.capabilities.remove(.browser) }
+        for _ in 0..<100 where !world.running.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(world.closed == [name])
+    }
+
+    @MainActor @Test func removingOrUpdatingAnEngineFromAjustesClosesTheBrowsersAClaudeCodeTurnStarted() async throws {
+        defer { removeTestFolder(root) }
+        Store(directory: root).save(AppState.initial)
+        let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)
+        let world = FakeBrowserWorld()
+        model.browserHub = world.hub()
+        let orb = UUID()
+        let chrome = AgentBrowserConfig.sessionName(botID: orb, engine: .chrome)
+        let obscura = AgentBrowserConfig.sessionName(botID: orb, engine: .obscura)
+        world.start(chrome)
+        world.start(obscura)
+        model.browserSetup.remove(.chrome)
+        for _ in 0..<100 where world.running.contains(chrome) { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(world.closed == [chrome], "the binaries are not replaced or deleted under a running Chrome; Obscura is left alone")
+        #expect(world.running.contains(obscura))
+    }
+
     @Test func theCommandThatClosesAnAgentBrowserSessionIsRunAndWaitedFor() throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: "OrbCloseNow-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

@@ -51,7 +51,8 @@ extension BrowserEngineKind {
 ///     bin/agent-browser, bin/obscura, bin/obscura-worker
 ///     chrome/chrome-<version>/Google Chrome for Testing.app
 ///     cloak/venv (Python), cloak/cache/chromium-<version>/Chromium.app
-///     instalados.json (what is installed, and which version), atualizacoes.json (the last look for newer releases)
+///     instalados.json (what is installed, and which version), atualizacoes.json (the last look for newer releases),
+///     agent-browser.json (the empty config every command is told to read), sessoes/<session>.launch (how each browser was launched)
 struct BrowserInstallLayout: Sendable, Equatable {
     var root: URL
 
@@ -79,10 +80,14 @@ struct InstalledComponent: Codable, Equatable, Sendable {
     var installedAt: Date
     /// Where it was downloaded from (a release asset, a package index), when it was.
     var source: String?
-    /// The SHA-256 the download was checked against; nil when the release publishes none.
+    /// The SHA-256 the download was checked against; nil when the release publishes none (and nothing was checked).
     var sha256: String?
     /// Something worth showing next to the version: CloakBrowser's Chromium, say.
     var detail: String?
+    /// Whether the download matched a checksum the release publishes (true), or the release published none and the file is
+    /// whatever the server sent (false, shown in Ajustes). Nil for what has no such download (Chrome and CloakBrowser verify their
+    /// own packages) and for records written before this was told.
+    var verified: Bool?
 }
 
 typealias InstalledRecords = [String: InstalledComponent]
@@ -170,6 +175,8 @@ enum BrowserInstallError: LocalizedError, Equatable, Sendable {
     case needsAgentBrowser
     case broken(String, detail: String)
     case cloakNeedsKey
+    /// The new version did not work in its place, and the one that was installed came back.
+    case updateRolledBack(String, detail: String)
     case failed(String, detail: String)
 
     var errorDescription: String? {
@@ -200,6 +207,8 @@ enum BrowserInstallError: LocalizedError, Equatable, Sendable {
             "O \(name) foi instalado mas não abriu (\(detail)). Foi removido; tente instalar de novo."
         case .cloakNeedsKey:
             "O CloakBrowser pediu uma chave de licença para baixar o navegador. Crie uma chave grátis em cloakbrowser.dev/free, rode no Terminal cloakbrowser login e tente de novo."
+        case .updateRolledBack(let name, let detail):
+            "A versão nova do \(name) não abriu (\(detail)). A que estava instalada voltou e continua como estava."
         case .failed(let name, let detail):
             "Não foi possível instalar o \(name): \(detail)"
         }

@@ -39,7 +39,12 @@ struct BrowserMCPToolListTests {
         let reply = try #require(await OrbToolsMCPServer.handle(request, context: setup.context(), browser: .browser))
         let tools = try #require(reply["result"]?["tools"]?.array)
         func hint(_ name: String) -> Bool? { tools.first { $0["name"]?.string == name }?["annotations"]?["readOnlyHint"]?.bool }
-        #expect(hint("browse_snapshot") == true && hint("browse_read") == true && hint("browse_close") == true)
+        // Looking at a live page is safe for the Orb but it is the web, which "Só leitura" refuses: not read-only for a client that only
+        // sees the hint. `browse_tabs` lists with no arguments and navigates with `new` and a `url`.
+        for name in ["browse_snapshot", "browse_read", "browse_screenshot", "browse_scroll", "browse_back", "browse_tabs"] {
+            #expect(hint(name) == false, "\(name) reads or moves a live page")
+        }
+        #expect(hint("browse_close") == true, "it only frees the browser")
         #expect(hint("browse_click") == false && hint("browse_fill") == false && hint("browse_show") == false)
         #expect(hint("web_search") == false, "the query leaves the Mac")
         // Without the engine none of the browse_* tools is there.
@@ -114,6 +119,17 @@ struct BrowserMCPConfigTests {
         // Without it a TinyFish search falls back to DuckDuckGo (the tool says so), as in the app.
         let missing = try #require(OrbToolsMCPServer.Options(arguments: config.arguments, environment: [:]))
         #expect(missing.tinyFishKey == nil && missing.context.browser.searchKeys?.tinyFish == nil)
+    }
+
+    @Test func theServerDropsTheTinyFishKeyFromItsEnvironmentOnceItReadIt() throws {
+        // Every program the server starts inherits its environment: the `agent-browser` background process, and the browser it keeps
+        // for as long as it lives, would carry the key.
+        setenv(OrbToolsMCPServer.tinyFishKeyVariable, "tf-secret", 1)
+        defer { unsetenv(OrbToolsMCPServer.tinyFishKeyVariable) }
+        let options = try #require(OrbToolsMCPServer.Options(arguments: ["Orb", "--tools-mcp", "/tmp/m", "--browser", "chrome", "--search", "tinyfish"]))
+        #expect(options.tinyFishKey == "tf-secret", "read from the real environment of the process")
+        #expect(getenv(OrbToolsMCPServer.tinyFishKeyVariable) == nil)
+        #expect(options.context.browser.searchKeys?.tinyFish == "tf-secret", "and still there for the searches")
     }
 
     @Test func theServersContextReachesTheOrbsBrowser() throws {
