@@ -12,8 +12,12 @@ enum SwitchBench {
         try? await Task.sleep(for: .seconds(4)) // the window settles, the first chat loads
         var times: [Double] = []
         var unfocused = 0
+        // `ORB_BENCH_COLD=1`: every other conversation is let go before each change, as after five idle minutes.
+        let cold = environment["ORB_BENCH_COLD"] == "1"
+        if cold { model.conversationKeepAlive = .zero }
         for round in 1...rounds {
             for bot in model.bots {
+                if cold { await model.unloadIdleConversations() }
                 let start = ContinuousClock.now
                 model.selection = .bot(bot.id)
                 await afterNextFrame()
