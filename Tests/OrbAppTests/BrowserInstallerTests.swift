@@ -180,19 +180,20 @@ import Testing
         let oldChromium = layout.cloakCache.appending(path: "chromium-145.0.7632.109.2")
         #expect(FileManager.default.fileExists(atPath: oldChromium.path))
 
-        // The new install downloads, is moved to its place, and its Python does not start there.
+        // The new install downloads, is moved to its place, and its Chromium does not start there (the first run, in the work
+        // folder, is fine).
         let working = workingRunner(cloak: "146.0.1.1")
-        let cloakPython = layout.cloakPython.path
+        let cacheInPlace = layout.cloakCache.path
         let brokenAfterTheMove = FakeInstallRunner { call, output in
-            if call.executable == cloakPython, call.arguments == ["-c", "import cloakbrowser"] {
-                return FakeInstallRunner.failed("ImportError: dlopen failed", status: 1)
+            if call.executable.hasPrefix(cacheInPlace), call.arguments == ["--version"] {
+                return FakeInstallRunner.failed("dyld: Library not loaded", status: 1)
             }
             return try await working.handler(call, output)
         }
         let (failing, _) = makeInstaller(brokenAfterTheMove)
         do {
             try await failing.install(.cloak, components: [.cloak])
-            Issue.record("a Python that does not start in its place is a failed update")
+            Issue.record("a Chromium that does not start in its place is a failed update")
         } catch BrowserInstallError.updateRolledBack(let name, _) {
             #expect(name == "CloakBrowser")
         }
@@ -205,7 +206,7 @@ import Testing
 
         // Cancelled right after the swap: the same.
         let cancelled = FakeInstallRunner { call, output in
-            if call.executable == cloakPython, call.arguments == ["-c", "import cloakbrowser"] { throw CancellationError() }
+            if call.executable.hasPrefix(cacheInPlace), call.arguments == ["--version"] { throw CancellationError() }
             return try await working.handler(call, output)
         }
         let (stopping, _) = makeInstaller(cancelled)
@@ -223,13 +224,13 @@ import Testing
 
     @Test func aFirstCloakInstallThatDoesNotStartInItsPlaceLeavesNothing() async throws {
         let working = workingRunner()
-        let cloakPython = layout.cloakPython.path
+        let cacheInPlace = layout.cloakCache.path
         let broken = FakeInstallRunner { call, output in
-            call.executable == cloakPython && call.arguments == ["-c", "import cloakbrowser"]
-                ? FakeInstallRunner.failed("ImportError") : try await working.handler(call, output)
+            call.executable.hasPrefix(cacheInPlace) && call.arguments == ["--version"]
+                ? FakeInstallRunner.failed("dyld: Library not loaded") : try await working.handler(call, output)
         }
         let (installer, _) = makeInstaller(broken)
-        await #expect(throws: BrowserInstallError.broken("CloakBrowser", detail: "o Python da instalação não abriu depois de ser movido")) {
+        await #expect(throws: BrowserInstallError.broken("CloakBrowser", detail: "o Chromium da instalação não abriu depois de ser movido")) {
             try await installer.install(.cloak, components: [.cloak])
         }
         #expect(!FileManager.default.fileExists(atPath: layout.cloakDirectory.path) && installer.records()["cloak"] == nil)
@@ -357,11 +358,42 @@ import Testing
         let download = try #require(calls.first { $0.arguments == ["-m", "cloakbrowser", "install"] })
         #expect(download.environment["CLOAKBROWSER_CACHE_DIR"]?.contains(BrowserInstallLayout.workPrefix) == true, "downloaded into the work folder")
         #expect(!calls.contains { $0.executable == "sudo" || $0.arguments.contains("sudo") })
-        #expect(FileManager.default.isExecutableFile(atPath: layout.cloakPython.path))
+        #expect(!FileManager.default.fileExists(atPath: layout.cloakDirectory.appending(path: "venv").path), "the virtual environment is only for installing")
+        #expect(try FileManager.default.contentsOfDirectory(atPath: layout.cloakDirectory.path) == ["cache"])
         #expect(installer.records()["cloak"]?.version == "0.6.0" && installer.records()["cloak"]?.detail == "Chromium 145.0.7632.109.2")
         let status = BrowserEngineLocator.live(path: "/usr/bin", home: root, managedRoot: root).status(for: .cloak)
         #expect(status.browserExecutable == layout.cloakCache.appending(path: "chromium-145.0.7632.109.2/Chromium.app/Contents/MacOS/Chromium").path)
         #expect(phases.value.contains(.downloading) && phases.value.contains(.verifying) && phases.value.contains(.extracting), "\(phases.value)")
+    }
+
+    @Test func cloakCountsAsInstalledWithOnlyItsChromium() throws {
+        let (installer, _) = makeInstaller()
+        #expect(!installer.isInstalled(.cloak))
+        let binary = layout.cloakCache.appending(path: "chromium-145.0.1.1/Chromium.app/Contents/MacOS")
+        try FileManager.default.createDirectory(at: binary, withIntermediateDirectories: true)
+        let file = binary.appending(path: "Chromium")
+        try Data("chromium".utf8).write(to: file)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
+        #expect(installer.isInstalled(.cloak), "no Python needed")
+    }
+
+    @Test func theVirtualEnvironmentOfAnOlderCloakInstallIsRemovedOnlyWhenTheChromiumIsThere() throws {
+        let (installer, _) = makeInstaller()
+        let venv = layout.cloakDirectory.appending(path: "venv/bin", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: venv, withIntermediateDirectories: true)
+        try Data("python".utf8).write(to: venv.appending(path: "python"))
+        // Without the Chromium nothing is touched: it is not an install the cleanup understands.
+        installer.removeLegacyCloakEnvironment()
+        #expect(FileManager.default.fileExists(atPath: venv.path))
+
+        let binary = layout.cloakCache.appending(path: "chromium-145.0.1.1/Chromium.app/Contents/MacOS")
+        try FileManager.default.createDirectory(at: binary, withIntermediateDirectories: true)
+        let file = binary.appending(path: "Chromium")
+        try Data("chromium".utf8).write(to: file)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
+        installer.removeLegacyCloakEnvironment()
+        #expect(!FileManager.default.fileExists(atPath: layout.cloakDirectory.appending(path: "venv").path))
+        #expect(installer.isInstalled(.cloak), "the Chromium stays")
     }
 
     @Test func withoutAWorkingPythonTheMessageSaysWhatToDo() async throws {

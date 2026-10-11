@@ -12,8 +12,9 @@ typealias InstallCommandRunner = @Sendable (_ executable: String, _ arguments: [
 ///   SHA-256 GitHub publishes for the asset.
 /// - Chrome: `agent-browser install` (Chrome for Testing), run with a `HOME` of its own so it lands in the app's folder.
 /// - Obscura: the macOS `stealth` build of github.com/h4ckf0r0day/obscura, checked the same way.
-/// - CloakBrowser: its Python package in a private virtual environment; the package downloads its own Chromium and checks the
-///   signature of it (it needs no account for the free build).
+/// - CloakBrowser: its Python package in a private virtual environment, only while installing; the package downloads its own
+///   Chromium and checks the signature of it (it needs no account for the free build). The environment (about 157 MB) is deleted
+///   before the move: the app launches the Chromium itself and never runs that Python again.
 final class BrowserInstaller: Sendable {
     let layout: BrowserInstallLayout
     let platform: BrowserPlatform
@@ -77,7 +78,7 @@ final class BrowserInstaller: Sendable {
         case .agentBrowser: return fileManager.isExecutableFile(atPath: layout.agentBrowser.path)
         case .obscura: return fileManager.isExecutableFile(atPath: layout.obscura.path)
         case .chrome: return !Self.folders(in: layout.chromeDirectory, prefix: "chrome-").isEmpty
-        case .cloak: return fileManager.isExecutableFile(atPath: layout.cloakPython.path) && Self.cloakChromium(in: layout.cloakCache) != nil
+        case .cloak: return Self.cloakChromium(in: layout.cloakCache) != nil
         }
     }
 
@@ -92,6 +93,7 @@ final class BrowserInstaller: Sendable {
                  progress: @escaping @Sendable (BrowserInstallProgress) -> Void = { _ in }) async throws {
         let wanted = components ?? engine.components.filter { !isInstalled($0) }
         removeStaleWorkFolders()
+        removeLegacyCloakEnvironment()
         for (index, component) in wanted.enumerated() {
             try Task.checkCancellation()
             let report: @Sendable (BrowserInstallProgress) -> Void = { update in
@@ -310,6 +312,8 @@ final class BrowserInstaller: Sendable {
         try await requireWorking(chromium.path, ["--version"], name: component.name, expecting: nil, timeout: .seconds(60))
         let package = try? await run(venvPython, ["-c", "import cloakbrowser; print(cloakbrowser.__version__)"], env, .seconds(60), { _ in })
         let version = package.flatMap { BrowserVersion.find(in: $0.output) } ?? "desconhecida"
+        // Nothing needs the package any more (the app starts the Chromium itself): only the cache moves into place.
+        try? FileManager.default.removeItem(at: venv)
         let chromiumVersion = chromium.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().lastPathComponent.replacingOccurrences(of: "chromium-", with: "")
 
@@ -320,10 +324,10 @@ final class BrowserInstaller: Sendable {
         // The old install stays where it was put aside until the new one is checked in its place and written down: if either
         // fails (or the task is cancelled), the old one comes back, and the record still says what is really there.
         do {
-            // The folder moved with its virtual environment inside: it must still start.
-            let moved = try await run(layout.cloakPython.path, ["-c", "import cloakbrowser"], env, .seconds(60), { _ in })
-            guard moved.status == 0 else {
-                throw BrowserInstallError.broken(component.name, detail: "o Python da instalação não abriu depois de ser movido")
+            // The Chromium moved with the folder: it must still start in its place.
+            guard let moved = Self.cloakChromium(in: layout.cloakCache),
+                  try await run(moved.path, ["--version"], env, .seconds(60), { _ in }).status == 0 else {
+                throw BrowserInstallError.broken(component.name, detail: "o Chromium da instalação não abriu depois de ser movido")
             }
             try Task.checkCancellation()
             try record(component, installed)
@@ -620,6 +624,14 @@ final class BrowserInstaller: Sendable {
             }
             try? fileManager.removeItem(at: entry)
         }
+    }
+
+    /// Installs made before the virtual environment was dropped still have `cloak/venv` (about 157 MB the app never runs). It goes
+    /// only when the Chromium is there to be used; an install works in a work folder, so this never touches one in progress.
+    func removeLegacyCloakEnvironment() {
+        let venv = layout.cloakDirectory.appending(path: "venv", directoryHint: .isDirectory)
+        guard FileManager.default.fileExists(atPath: venv.path), Self.cloakChromium(in: layout.cloakCache) != nil else { return }
+        try? FileManager.default.removeItem(at: venv)
     }
 
     private func requireSpace(_ needed: Int64, at folder: URL) throws {

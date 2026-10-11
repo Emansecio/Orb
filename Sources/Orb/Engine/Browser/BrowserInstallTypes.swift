@@ -50,7 +50,7 @@ extension BrowserEngineKind {
 ///
 ///     bin/agent-browser, bin/obscura, bin/obscura-worker
 ///     chrome/chrome-<version>/Google Chrome for Testing.app
-///     cloak/venv (Python), cloak/cache/chromium-<version>/Chromium.app
+///     cloak/cache/chromium-<version>/Chromium.app (the Python environment that downloads it lives only in the work folder)
 ///     instalados.json (what is installed, and which version), atualizacoes.json (the last look for newer releases),
 ///     agent-browser.json (the empty config every command is told to read), sessoes/<session>.launch (how each browser was launched)
 struct BrowserInstallLayout: Sendable, Equatable {
@@ -63,7 +63,6 @@ struct BrowserInstallLayout: Sendable, Equatable {
     /// Holds `chrome-<version>` folders, as `agent-browser install` names them.
     var chromeDirectory: URL { root.appending(path: "chrome", directoryHint: .isDirectory) }
     var cloakDirectory: URL { root.appending(path: "cloak", directoryHint: .isDirectory) }
-    var cloakPython: URL { cloakDirectory.appending(path: "venv/bin/python") }
     var cloakCache: URL { cloakDirectory.appending(path: "cache", directoryHint: .isDirectory) }
     var recordsFile: URL { root.appending(path: "instalados.json") }
     var updatesFile: URL { root.appending(path: "atualizacoes.json") }

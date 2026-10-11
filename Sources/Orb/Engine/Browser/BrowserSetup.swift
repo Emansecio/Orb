@@ -101,6 +101,7 @@ final class BrowserSetup {
         for engine in engines { found[engine] = await status(engine) }
         let installer = installer
         let (records, installed) = await Task.detached { () -> (InstalledRecords, [BrowserComponent: Bool]) in
+            installer.removeLegacyCloakEnvironment()
             var installed: [BrowserComponent: Bool] = [:]
             for component in BrowserComponent.allCases { installed[component] = installer.isInstalled(component) }
             return (installer.records(), installed)
