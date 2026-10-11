@@ -196,7 +196,13 @@ private struct TranscriptList: View {
             .onChange(of: find.jump) { if let jump = find.jump { scrollToFound(jump, proxy) } }
             .onChange(of: transcript.revision) {
                 find.itemsChanged()
-                if !BottomFollower.anchorsItself { follower.follow { scrollToBottom(proxy) } }
+                if BottomFollower.anchorsItself {
+                    // The scroll view keeps the end as rows grow, but not always when a whole row arrives at once (a card that
+                    // needs you, a long answer relayed from another Orb): it is laid out by estimate first. Settle on it.
+                    followResumedTurn(proxy)
+                } else {
+                    follower.follow { scrollToBottom(proxy) }
+                }
             }
             .onChange(of: live.scrollNudge) { showSentMessage(proxy) }
             .onChange(of: live.followNudge) { followResumedTurn(proxy) }
@@ -286,8 +292,8 @@ private struct TranscriptList: View {
         }
     }
 
-    /// A turn the Orb started by itself (the answer of another Orb woke it): the list scrolls to the end the way it does for
-    /// a message of yours, so the rows that come with it are laid out near the end and the scroll view keeps it from there.
+    /// A turn the Orb started by itself (the answer of another Orb woke it), or a new row in the chat: the list scrolls to the
+    /// end the way it does for a message of yours, so the rows that come with it are laid out near the end and the scroll view keeps it from there.
     /// Unlike `showSentMessage` it never takes a list the user scrolled up (or a result of the find bar) to the end.
     private func followResumedTurn(_ proxy: ScrollViewProxy) {
         guard followsBottom, !find.pausesFollowing else { return }
