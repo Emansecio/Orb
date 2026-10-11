@@ -42,11 +42,20 @@ struct SidebarView: View {
                         .transition(.adapted(.arrive, reduceMotion: reduceMotion))
                 }
 
-                // MARK: MultiOrb (WP6): the groups, between the Orbs and the workspace; hidden while there is none.
-                if !model.groups.isEmpty {
-                    SidebarGroupsSection(selectionSpace: selectionSpace)
-                        .padding(.top, 16)
-                        .transition(.adapted(.arrive, reduceMotion: reduceMotion))
+                // MARK: MultiOrb (WP6): the groups, between the Orbs and the workspace, with "Novo grupo" under them; the section
+                // shows once there are two Orbs to put together (or a group already).
+                if !model.groups.isEmpty || model.botIDs.count >= 2 {
+                    VStack(alignment: .leading, spacing: 1) {
+                        SidebarGroupsSection(selectionSpace: selectionSpace)
+                        SidebarRow(isSelected: false, selectionSpace: selectionSpace, help: "Junta Orbs para trabalharem juntos num pedido") {
+                            model.showNewGroup = true
+                        } content: { hovering in
+                            NavLabel(title: "Novo grupo", isSelected: false, symbol: "plus", hint: hovering ? AppShortcut.newGroup.label : nil)
+                        }
+                        .accessibilityIdentifier("sidebar-new-group")
+                    }
+                    .padding(.top, 16)
+                    .transition(.adapted(.arrive, reduceMotion: reduceMotion))
                 }
                 // MARK: end MultiOrb (WP6)
 

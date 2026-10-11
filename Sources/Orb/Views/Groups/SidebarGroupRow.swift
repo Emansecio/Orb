@@ -19,8 +19,8 @@ enum GroupRowText {
     }
 }
 
-/// The groups of the sidebar, between the Orbs and the workspace. Hidden while there is no group: a group is made from the
-/// palette, ⌥⌘G, the Orbs menu or an Orb's "Criar grupo com…".
+/// The groups of the sidebar, between the Orbs and the workspace (the sidebar puts "Novo grupo" under them). A group is also
+/// made from the palette, ⌥⌘G, the Orbs menu or an Orb's "Criar grupo com…".
 struct SidebarGroupsSection: View {
     @Environment(AppModel.self) private var model
     let selectionSpace: Namespace.ID
