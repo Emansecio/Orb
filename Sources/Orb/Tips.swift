@@ -138,6 +138,8 @@ enum Tip {
     static let importChooseFile = "Escolhe o arquivo ou a pasta que o outro assistente exportou"
     static let importSource = "Escolhe entre outro assistente e um bot do marketplace do Grok Bot"
     static let importOpenMarketplace = "Abre o marketplace do Grok Bot no navegador"
+    static let importPickBot = "Lê este bot e mostra o que vem dele na prévia"
+    static let importMarketplaceCategory = "Mostra só os bots desta categoria do marketplace"
     static let importReadLocal = "Lê as configurações deste assistente que estão neste Mac"
     static let importKind = "Diz se o texto são instruções do assistente ou lembranças sobre você"
     static let importItem = "Marcado, este item vai para o novo Orb"
@@ -292,7 +294,7 @@ enum Tip {
          handoffDone, handoffCancel, browserEngine, searchProvider, installBrowserEngine, addSearchKey,
          menuBarItem, connectModel, openMainWindow, closeReply, openChatInApp, reviewRiskyInApp, allowOnce, allowBatchOnce,
          routineRequest, chooseOrb(named: "Orb"),
-         importFromAssistant, startFromKeptMemory, importBack, importCopyPrompt, importChooseFile, importReadLocal, importKind, importItem, importReview, importRemove,
+         importFromAssistant, importPickBot, importMarketplaceCategory, startFromKeptMemory, importBack, importCopyPrompt, importChooseFile, importReadLocal, importKind, importItem, importReview, importRemove,
          importToggleSkill(isShowing: true), importToggleSkill(isShowing: false),
          newSkill, noOrbForSkill, installed, openSkillDetails, discardProposal, keepProposal, saveProposal, clearSearch,
          showInstalled, showCatalog, showGallery, useSkill(orb: "Orb", slug: "resumir"), chooseOrbForSkill(slug: "resumir"),

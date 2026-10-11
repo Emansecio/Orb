@@ -162,6 +162,51 @@ struct GrokMarketplaceTests {
         #expect(ImportSource.marketplace.made(imported) && !ImportSource.assistant.made(imported))
     }
 
+    @Test func theGalleryFiltersAndGroupsTheList() {
+        let bots = [
+            MarketplaceBot(id: "a", name: "Researchy", creatorName: "Farzad", summary: "A research desk.", categories: ["Engineering"]),
+            MarketplaceBot(id: "b", name: "SEO Desk", creatorName: "Mia", summary: "Pesquisa de palavras e páginas.", categories: ["Marketing", "From Grok Bot Team"]),
+            MarketplaceBot(id: "c", name: "Outbound", creatorName: "Leo", summary: "Writes the first research-backed message.", categories: ["Marketing"]),
+        ]
+        #expect(GrokMarketplace.filter(bots, query: "", category: nil).map(\.id) == ["a", "b", "c"])
+        #expect(GrokMarketplace.filter(bots, query: "", category: "Marketing").map(\.id) == ["b", "c"])
+        // Every word, accents and case aside; a name that starts with the word first.
+        #expect(GrokMarketplace.filter(bots, query: "RESEARCH", category: nil).map(\.id) == ["a", "c"])
+        #expect(GrokMarketplace.filter(bots, query: "pesquisa paginas", category: nil).map(\.id) == ["b"])
+        #expect(GrokMarketplace.filter(bots, query: "mia", category: "Marketing").map(\.id) == ["b"])
+        #expect(GrokMarketplace.filter(bots, query: "research", category: "Marketing").map(\.id) == ["c"])
+        #expect(GrokMarketplace.filter(bots, query: "nada disso", category: nil).isEmpty)
+        // The fullest category first, ties alphabetical; the app's words for the ones it knows.
+        #expect(GrokMarketplace.categories(in: bots) == ["Marketing", "Engineering", "From Grok Bot Team"])
+        #expect(GrokMarketplace.categoryLabel("From Grok Bot Team") == "Do time do Grok Bot")
+        #expect(GrokMarketplace.categoryLabel("Sales") == "Vendas")
+        #expect(GrokMarketplace.categoryLabel("Astrology") == "Astrology")
+    }
+
+    @Test func theListIsReadOnceForAWhile() async throws {
+        let html = try page([researchy, listed.merging(["id": "other", "name": "Other", "categories": ["Sales"], "color": "violet"]) { $1 }])
+        let fetches = Fetches()
+        let fetch: GrokMarketplace.Fetch = { url in
+            await fetches.add(url)
+            return html
+        }
+        // Far from now, so no other reading of the list shares this one.
+        let start = Date(timeIntervalSince1970: 4_000_000_000)
+        await GrokMarketplace.CatalogCache.shared.clear()
+        let first = try await GrokMarketplace.catalog(fetch: fetch, now: start)
+        #expect(first.map(\.id) == ["researchy", "other"])
+        #expect(first[1].categories == ["Sales"] && first[1].color == "violet")
+        _ = try await GrokMarketplace.catalog(fetch: fetch, now: start.addingTimeInterval(60))
+        #expect(await fetches.urls == [GrokMarketplace.home])
+        _ = try await GrokMarketplace.catalog(fetch: fetch, now: start.addingTimeInterval(GrokMarketplace.CatalogCache.lifetime + 1))
+        #expect(await fetches.urls.count == 2)
+        await GrokMarketplace.CatalogCache.shared.clear()
+        // A page without bots says so instead of showing an empty gallery.
+        await #expect(throws: MarketplaceFailure.unreadable) {
+            _ = try await GrokMarketplace.catalog(fetch: { _ in "<html>changed</html>" }, now: start)
+        }
+    }
+
     /// The real marketplace (network): `ORB_LIVE_MARKETPLACE=1 swift test --filter GrokMarketplaceTests`.
     @Test(.enabled(if: ProcessInfo.processInfo.environment["ORB_LIVE_MARKETPLACE"] != nil))
     func theRealMarketplaceReads() async throws {
@@ -173,5 +218,9 @@ struct GrokMarketplaceTests {
         let share = try #require(list.first { $0.addHref.hasPrefix("/bot/") })
         let viaAdd = try await GrokMarketplace.read(try #require(GrokMarketplace.link(in: "https://x.ai" + share.addHref)))
         #expect(viaAdd.name == ImportSanitizer.line(share.name, limit: 40))
+        let catalog = try await GrokMarketplace.catalog(fetch: GrokMarketplace.fetchPage, now: Date(timeIntervalSince1970: 4_100_000_000))
+        #expect(catalog.count > 20)
+        #expect(!GrokMarketplace.categories(in: catalog).isEmpty)
+        await GrokMarketplace.CatalogCache.shared.clear()
     }
 }

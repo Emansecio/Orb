@@ -3,7 +3,8 @@ import Foundation
 // "Importar de outro assistente → Link do marketplace": a bot of the Grok Bot marketplace (x.ai/bot/marketplace), read
 // from its public page and turned into an `OrbImport`, so it goes through the same preview and checkboxes as any import.
 // The page is a Next.js page: the bot comes as JSON inside the page's `self.__next_f.push([1,"…"])` scripts. The
-// marketplace's list holds every bot's card but not its contents; a bot's own page holds the contents.
+// marketplace's list holds every bot's card but not its contents (the panel's gallery is made of those cards); a bot's own
+// page holds the contents.
 
 /// One bot as the marketplace page describes it. Every field is optional: what is missing is left out.
 struct MarketplaceBot: Decodable, Equatable, Sendable {
@@ -34,6 +35,10 @@ struct MarketplaceBot: Decodable, Equatable, Sendable {
     var description = ""
     var summary = ""
     var addHref = ""
+    /// The marketplace's own categories, in English ("Marketing", "From Grok Bot Team"): see `GrokMarketplace.categoryLabel`.
+    var categories: [String] = []
+    /// The color of its card ("green", "violet"…).
+    var color = ""
     var instructions = ""
     var memories: [Entry] = []
     var skills: [Entry] = []
@@ -41,18 +46,20 @@ struct MarketplaceBot: Decodable, Equatable, Sendable {
     var integrations: [Entry] = []
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, creatorName, description, summary, addHref, instructions, memories, skills, routines, integrations
+        case id, name, creatorName, description, summary, addHref, categories, color, instructions, memories, skills, routines, integrations
     }
 
     init(id: String = "", name: String = "", creatorName: String = "", description: String = "", summary: String = "",
-         addHref: String = "", instructions: String = "", memories: [Entry] = [], skills: [Entry] = [],
-         routines: [Entry] = [], integrations: [Entry] = []) {
+         addHref: String = "", categories: [String] = [], color: String = "", instructions: String = "", memories: [Entry] = [],
+         skills: [Entry] = [], routines: [Entry] = [], integrations: [Entry] = []) {
         self.id = id
         self.name = name
         self.creatorName = creatorName
         self.description = description
         self.summary = summary
         self.addHref = addHref
+        self.categories = categories
+        self.color = color
         self.instructions = instructions
         self.memories = memories
         self.skills = skills
@@ -70,6 +77,8 @@ struct MarketplaceBot: Decodable, Equatable, Sendable {
         description = text(.description)
         summary = text(.summary)
         addHref = text(.addHref)
+        categories = ((try? values.decode([String?].self, forKey: .categories)) ?? []).compactMap { $0 }.filter { !$0.isEmpty }
+        color = text(.color)
         instructions = text(.instructions)
         memories = list(.memories)
         skills = list(.skills)
@@ -235,6 +244,72 @@ enum GrokMarketplace {
             }
         }
         return nil
+    }
+
+    // MARK: The gallery
+
+    /// Every bot of the marketplace's list, as its cards describe them (no contents: those come from the bot's page).
+    /// Kept for a while, so going back and forth between the tabs does not fetch the list again.
+    static func catalog(fetch: Fetch = fetchPage, now: Date = .now) async throws -> [MarketplaceBot] {
+        if let kept = await CatalogCache.shared.bots(at: now) { return kept }
+        let bots = Self.bots(inPage: try await fetch(home)).filter { !$0.id.isEmpty && isToken($0.id) && !$0.name.isEmpty }
+        guard !bots.isEmpty else { throw MarketplaceFailure.unreadable }
+        await CatalogCache.shared.keep(bots, at: now)
+        return bots
+    }
+
+    /// The list a few minutes old at most.
+    actor CatalogCache {
+        static let shared = CatalogCache()
+        static let lifetime: TimeInterval = 15 * 60
+        private var kept: (bots: [MarketplaceBot], at: Date)?
+
+        func bots(at now: Date) -> [MarketplaceBot]? {
+            guard let kept, now >= kept.at, now.timeIntervalSince(kept.at) < Self.lifetime else { return nil }
+            return kept.bots
+        }
+
+        func keep(_ bots: [MarketplaceBot], at now: Date) { kept = (bots, now) }
+        func clear() { kept = nil }
+    }
+
+    /// The categories the bots are in, the fullest first (ties in alphabetical order).
+    static func categories(in bots: [MarketplaceBot]) -> [String] {
+        var counts: [String: Int] = [:]
+        for bot in bots { for category in Set(bot.categories) { counts[category, default: 0] += 1 } }
+        return counts.sorted { ($1.value, $0.key) < ($0.value, $1.key) }.map(\.key)
+    }
+
+    /// A category in the app's words; one it does not know keeps the marketplace's.
+    static func categoryLabel(_ category: String) -> String {
+        switch category {
+        case "From Grok Bot Team": "Do time do Grok Bot"
+        case "Sales": "Vendas"
+        case "Personal": "Pessoal"
+        case "Engineering": "Engenharia"
+        case "Product": "Produto"
+        case "Operations": "Operações"
+        case "Recruiting & People": "Recrutamento e pessoas"
+        case "Support", "Customer Support": "Atendimento"
+        case "Finance": "Finanças"
+        case "Research": "Pesquisa"
+        case "Education": "Educação"
+        default: category
+        }
+    }
+
+    /// The bots in `category` (nil: all) whose name, summary, description or creator has every word typed (accents and
+    /// case aside), in the list's order; a name that starts with the first word comes first.
+    static func filter(_ bots: [MarketplaceBot], query: String, category: String?) -> [MarketplaceBot] {
+        let words = MemoryText.fold(query).split(whereSeparator: \.isWhitespace).map(String.init)
+        let inCategory = category.map { wanted in bots.filter { $0.categories.contains(wanted) } } ?? bots
+        guard !words.isEmpty else { return inCategory }
+        let matching = inCategory.filter { bot in
+            let text = MemoryText.fold([bot.name, bot.summary, bot.description, bot.creatorName].joined(separator: " "))
+            return words.allSatisfy { text.contains($0) }
+        }
+        let first = words[0]
+        return matching.filter { MemoryText.fold($0.name).hasPrefix(first) } + matching.filter { !MemoryText.fold($0.name).hasPrefix(first) }
     }
 
     // MARK: Into the import

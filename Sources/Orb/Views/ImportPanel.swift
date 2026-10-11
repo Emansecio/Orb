@@ -64,6 +64,8 @@ struct ImportPanel: View {
     @State private var link = ""
     @State private var error: String?
     @State private var isReading = false
+    /// The marketplace page being read (from the gallery or the link field), for the spinner on its row.
+    @State private var readingLink: String?
     @State private var reading: Task<Void, Never>?
     @State private var copied = CopiedFlash()
     @State private var isPicking = false
@@ -85,7 +87,7 @@ struct ImportPanel: View {
                         promptStep
                         answerStep
                     case .marketplace:
-                        linkStep
+                        marketplaceStep
                     }
                     if let draft, source.made(draft) {
                         ImportPreview(imported: Binding(get: { draft }, set: { self.draft = $0 }), step: source == .assistant ? 3 : 2,
@@ -106,10 +108,7 @@ struct ImportPanel: View {
             }
             .task { // "Revisar" comes back to a preview that already exists
                 guard let draft else { return }
-                if !draft.link.isEmpty {
-                    source = .marketplace
-                    link = draft.link
-                }
+                if !draft.link.isEmpty { source = .marketplace } // its row in the gallery shows it chosen
                 await Task.yield()
                 proxy.scrollTo(Self.previewID, anchor: .top)
             }
@@ -148,6 +147,7 @@ struct ImportPanel: View {
             // Each source keeps its own reading: what the other one was doing stops, and its preview is not this one's.
             reading?.cancel()
             isReading = false
+            readingLink = nil
             error = nil
             if let draft, !source.made(draft) { self.draft = nil }
         }
@@ -179,27 +179,27 @@ struct ImportPanel: View {
         .help(Tip.importSource)
     }
 
-    private var linkStep: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            StepLabel("1. Cole o link de um bot")
-            Text("Abra um bot no marketplace do Grok Bot, copie o endereço da página (ou o link do botão Add) e cole aqui. O Orb lê as instruções, as memórias e as skills dele.")
+    private var marketplaceStep: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            StepLabel("1. Escolha um bot")
+            Text("O Orb lê as instruções, as memórias e as skills do bot que você escolher.")
                 .font(.system(size: 12))
                 .foregroundStyle(Palette.muted)
                 .fixedSize(horizontal: false, vertical: true)
-            TextField("Link do bot", text: $link, prompt: Text("https://x.ai/bot/marketplace/bots/…"))
+            MarketplaceGallery(chosen: draft?.link, reading: readingLink) { bot in read(link: .page(bot.id)) }
+            TextField("Link do bot", text: $link, prompt: Text("Ou cole o link de um bot: https://x.ai/bot/…"))
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 12))
                 .onSubmit { readLinkSoon(delay: .zero) }
-            HStack(spacing: 8) {
-                Button("Abrir o marketplace") { NSWorkspace.shared.open(GrokMarketplace.home) }
-                    .buttonStyle(SecondaryPillStyle())
-                    .help(Tip.importOpenMarketplace)
-                Spacer(minLength: 0)
-                ZStack {
-                    if isReading { DelayedSpinner().transition(.opacity) }
+                .overlay(alignment: .trailing) {
+                    ZStack {
+                        if isReading, let readingLink, GrokMarketplace.link(in: link)?.url.absoluteString == readingLink {
+                            DelayedSpinner().transition(.opacity)
+                        }
+                    }
+                    .padding(.trailing, 6)
+                    .motion(Motion.content, value: isReading)
                 }
-                .motion(Motion.content, value: isReading)
-            }
             if let error {
                 Text(error)
                     .font(.system(size: 12))
@@ -317,10 +317,10 @@ struct ImportPanel: View {
     private func readLinkSoon(delay: Duration = .milliseconds(400)) {
         reading?.cancel()
         let text = link.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else {
+        guard !text.isEmpty else { // the preview stays: it may be a bot picked in the gallery
             isReading = false
+            readingLink = nil
             error = nil
-            if let draft, !draft.link.isEmpty { self.draft = nil }
             return
         }
         reading = Task {
@@ -331,23 +331,44 @@ struct ImportPanel: View {
                 error = MarketplaceFailure.notALink.errorDescription
                 return
             }
-            // The same bot already in the preview ("Revisar", or Return on the same link) is not read again.
-            if let draft, draft.link == found.url.absoluteString { return }
-            isReading = true
-            let outcome = await Task.detached(priority: .userInitiated) { () -> Result<OrbImport, any Error> in
-                do { return .success(try await GrokMarketplace.read(found)) } catch { return .failure(error) }
-            }.value
-            guard !Task.isCancelled else { return }
+            await readBot(found)
+        }
+    }
+
+    /// A bot picked in the gallery: read at once.
+    private func read(link found: GrokMarketplace.Link) {
+        reading?.cancel()
+        reading = Task { await readBot(found) }
+    }
+
+    /// The bot's page, off the main thread, into the preview.
+    private func readBot(_ found: GrokMarketplace.Link) async {
+        let page = found.url.absoluteString
+        // The same bot already in the preview ("Revisar", or Return on the same link) is not read again.
+        if let draft, draft.link == page {
             isReading = false
-            switch outcome {
-            case .success(let imported):
-                error = nil
-                draft = imported
-                AccessibilityNotification.Announcement(ImportText.announcement(imported)).post()
-            case .failure(let failure):
-                if let draft, !draft.link.isEmpty { self.draft = nil }
-                error = (failure as? MarketplaceFailure ?? .unreadable).errorDescription
-            }
+            readingLink = nil
+            return
+        }
+        isReading = true
+        readingLink = page
+        let outcome = await Task.detached(priority: .userInitiated) { () -> Result<OrbImport, any Error> in
+            do { return .success(try await GrokMarketplace.read(found)) } catch { return .failure(error) }
+        }.value
+        guard !Task.isCancelled else {
+            if readingLink == page { readingLink = nil }
+            return
+        }
+        isReading = false
+        readingLink = nil
+        switch outcome {
+        case .success(let imported):
+            error = nil
+            draft = imported
+            AccessibilityNotification.Announcement(ImportText.announcement(imported)).post()
+        case .failure(let failure):
+            if let draft, !draft.link.isEmpty { self.draft = nil }
+            error = (failure as? MarketplaceFailure ?? .unreadable).errorDescription
         }
     }
 

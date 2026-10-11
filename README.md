@@ -406,6 +406,11 @@ Cada Orb tem a **sua** memória, que nasce com ele e cresce a cada conversa: nad
     de ChatGPT: 1 instrução, 9 lembranças e 2 skills. Veja na aba Memória." O que a importação traz de "Sobre você" fica na
     memória do Orb novo (o perfil de Ajustes → Você é seu e não é tocado).
   - *Nada sai do Mac.* Importar não faz rede: lê o que você colou ou escolheu, e o resultado vai para a memória local.
+  Na aba **Marketplace do Grok Bot**, em vez do prompt, uma galeria com os bots do marketplace do Grok Bot
+  (x.ai/bot/marketplace): busca por nome, assunto ou autor, as categorias do marketplace ("Do time do Grok Bot", "Marketing",
+  "Vendas"…) e um clique no bot lê a página dele para a mesma prévia (instruções, memórias, skills; as rotinas viram
+  procedimentos para ler e as integrações um lembrete). Também dá para colar o link de um bot ou do botão Add. A lista é lida
+  uma vez e guardada por 15 minutos.
 - No **Claude Code** a memória é a mesma: `remember` e `recall` rodam no Orb, e o `claude` não guarda histórico (a conversa vai
   num arquivo temporário que é apagado ao fim do turno), então "Esquecer" no Orb não deixa cópia nele.
 
@@ -659,8 +664,9 @@ Rodando pelo SwiftPM (sem um `.app`), ele só fecha: abra de novo. Nos modos de 
 - **Navegador e pesquisa.** O navegador do Orb guarda cookies e logins numa pasta de perfil por Orb (`navegador/`, na pasta de dados), no seu Mac, e ela some com o Orb. **Com o TinyFish como provedor de pesquisa, o que o Orb pesquisa vai para os servidores do TinyFish** (com a sua chave, guardada no Keychain); com DuckDuckGo ou Google, vai para eles.
 - **Notificações** mostram o começo da resposta do Orb (até 180 caracteres) e o comando de um pedido de permissão; quem vê sua
   tela de bloqueio pode ver isso, conforme as suas configurações de notificação do macOS.
-- **Importar de outro assistente** não faz rede e não lê o seu Mac sem você pedir (colar, escolher ou "Ler"); o que entra
-  vira dado na memória do Orb novo, depois da sua prévia.
+- **Importar de outro assistente** não lê o seu Mac sem você pedir (colar, escolher ou "Ler") e só usa a rede na aba do
+  marketplace do Grok Bot (as páginas públicas de x.ai, sem login); o que entra vira dado na memória do Orb novo, depois da
+  sua prévia.
 - **Segurança das ações**: um texto malicioso numa página ou arquivo não consegue fazer o Orb agir sem você. O que sai do Mac
   (`web_fetch`, `web_search`, o navegador, `open`, guardar memória) e o que muda coisas passam pelas permissões; o prompt do Orb trata o que vem de
   páginas, arquivos, conectores e memórias como dado, nunca como instrução. Lembre que em "Sem pedir permissão" isso não vale.

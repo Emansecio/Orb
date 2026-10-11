@@ -581,6 +581,21 @@ enum NewBotSnapshots {
             skills: [.init(name: "Research pass", description: "Use when running a live research or fact-check.",
                            content: "Launch the research, wait until it exits, then deliver sourced dated claims.")],
             integrations: [.init(name: "Notion", description: "Notion MCP server.")])
+        let card = { (id: String, name: String, by: String, color: String, categories: [String], summary: String) in
+            MarketplaceBot(id: id, name: name, creatorName: by, summary: summary, categories: categories, color: color)
+        }
+        MarketplaceGallery.preloaded = [
+            card("dr-eggbot-v2", "dr eggbot", "Lauren Tan", "red", ["From Grok Bot Team"],
+                 "Designs high-quality Grok Bots. Asks a few preference questions, then creates them."),
+            card("overheard", "Overheard", "Grok Bot Team", "violet", ["From Grok Bot Team", "Personal"],
+                 "Turns what you hear in meetings into notes and follow-ups."),
+            card("researchy", "Researchy", "Farzad", "green", ["Engineering"], bot.summary),
+            card("seo-aeo-desk", "SEO & AEO Desk", "Mia", "orange", ["Marketing"],
+                 "Audits pages for search and answer engines and drafts the fixes."),
+            card("outbound", "Outbound Prospecting", "Leo", "cyan", ["Sales"],
+                 "Finds leads, writes the first message and keeps the follow-up going."),
+            card("haggle-bot", "Haggle Bot", "Ana", "magenta", ["Personal"], "Negotiates prices and bills for you, politely and persistently."),
+        ]
         guard let found = try? GrokMarketplace.orbImport(bot, link: .page(bot.id)) else { return AnyView(NewBotSheet(height: height)) }
         return AnyView(NewBotSheet(height: height, draft: found))
     }
