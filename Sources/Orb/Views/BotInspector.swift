@@ -488,36 +488,52 @@ struct BotInspector: View {
     @ViewBuilder
     private func routinesTab(_ bot: Bot) -> some View {
         let routines = model.routines(for: bot.id)
-        Section {
-            if routines.isEmpty {
-                Text("Nenhuma rotina ainda. Peça a \(bot.name) no chat, como “verifique meus e-mails a cada 30 minutos”, ou crie uma aqui.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            ForEach(routines) { routine in
-                RoutineRow(routine: routine) {
-                    editingRoutine = routine
+        // Each routine is a card of its own; the first one carries the tab's title.
+        if routines.isEmpty {
+            Section {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Nenhuma rotina ainda", systemImage: "clock.badge")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Palette.ink)
+                    Text("Peça a \(bot.name) no chat, como “verifique meus e-mails a cada 30 minutos”, ou crie uma aqui.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.muted)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                .padding(.vertical, 4)
+            } header: {
+                Text("Rotinas")
             }
-            Button("Nova rotina…", systemImage: "plus") {
-                editingRoutine = Routine(name: "", botID: bot.id, prompt: "", schedule: .daily(hour: 9, minute: 0))
+        }
+        ForEach(Array(routines.enumerated()), id: \.element.id) { index, routine in
+            Section {
+                RoutineRow(routine: routine) { editingRoutine = routine }
+            } header: {
+                if index == 0 { Text("Rotinas") }
             }
-            .chipButton()
-            .help(Tip.newRoutine)
-        } header: {
-            Text("Rotinas")
+        }
+        Section {
+            HStack(spacing: 8) {
+                Button("Nova rotina…", systemImage: "plus") {
+                    editingRoutine = Routine(name: "", botID: bot.id, prompt: "", schedule: .daily(hour: 9, minute: 0))
+                }
+                .buttonStyle(SecondaryPillStyle())
+                .controlSize(.small)
+                .help(Tip.newRoutine)
+                Spacer(minLength: 4)
+                Button("Ver todas", systemImage: "arrow.up.right") { model.selection = .routines }
+                    .buttonStyle(GhostStyle(tint: Palette.accentText))
+                    .controlSize(.small)
+                    .hangsOnTrailingEdge()
+                    .help(Tip.allRoutines)
+            }
         } footer: { FormFootnote {
             if !routines.isEmpty {
                 Text("\(bot.name) faz isso sozinho, no horário, enquanto o app está aberto.")
             }
         } }
-        // Rows come and go in place (also the ones the Orb schedules or deletes from the chat). Only this tab watches.
+        // Cards come and go in place (also the ones the Orb schedules or deletes from the chat). Only this tab watches.
         .animateChanges(of: routines.map(\.id))
-        Section {
-            Button("Ver todas as rotinas", systemImage: "arrow.up.right") { model.selection = .routines }
-                .buttonStyle(.link)
-                .help(Tip.allRoutines)
-        }
     }
 
     // MARK: Memória
@@ -736,7 +752,8 @@ private struct WorkspaceFileRow: View {
     }
 }
 
-/// One of the Orb's routines in its panel: on/off, when it runs next, how the last run went, and a way to delete it.
+/// One of the Orb's routines in its panel, as a card of its own: what it is and when (with its switch), when it runs
+/// next, how the last run went, and its actions (run now, edit, delete).
 private struct RoutineRow: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -747,36 +764,38 @@ private struct RoutineRow: View {
     var body: some View {
         // The routine as it is now (the toggle and the runs change it in the model, not in this copy).
         let current = model.routines.first { $0.id == routine.id } ?? routine
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                VStack(alignment: .leading, spacing: 1) {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                RoutineGlyph(schedule: current.schedule, isOn: current.isEnabled)
+                VStack(alignment: .leading, spacing: 2) {
                     Text(current.name)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Palette.ink)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                     Text(current.schedule.label)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.muted)
                 }
-                Spacer()
+                Spacer(minLength: 6)
                 Toggle("Ativa", isOn: Binding(get: { current.isEnabled }, set: { model.setRoutineEnabled(routine.id, $0) }))
                     .toggleStyle(.switch)
                     .labelsHidden()
-                    .controlSize(.small)
+                    .controlSize(.mini)
                     .help(Tip.routineToggle(isOn: current.isEnabled))
             }
-            // The same words as the Rotinas page ("Próxima: em 3 h · hoje às 09:00", "Pausada").
-            NextRunLine(routine: current)
-            Text(current.lastResult ?? "Ainda não rodou.")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-                .lineLimit(2)
+            VStack(alignment: .leading, spacing: 6) {
+                RoutineNextLine(routine: current)
+                RoutineLastLine(routine: current)
+            }
             footer(current)
-                .chipButton()
         }
-        .opacity(current.isEnabled ? 1 : 0.6)
+        .padding(.vertical, 4)
         // The task the Orb just scheduled is marked for a moment (`AppModel.freshRoutine`).
         .background {
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: 10)
                 .fill(Palette.accent.opacity(model.freshRoutine == routine.id ? 0.12 : 0))
-                .padding(.horizontal, -8).padding(.vertical, -5)
+                .padding(.horizontal, -8).padding(.vertical, -4)
         }
         .animateChanges(of: current.isEnabled)
         .animateChanges(of: model.freshRoutine)
@@ -787,34 +806,134 @@ private struct RoutineRow: View {
 
     @ViewBuilder
     private func footer(_ current: Routine) -> some View {
-        HStack {
+        HStack(spacing: 4) {
             if isConfirmingDelete {
                 Text("Apagar esta rotina?")
+                    .font(.system(size: 12))
                     .lineLimit(1)
-                    .foregroundStyle(.secondary)
-                Spacer()
+                    .foregroundStyle(Palette.secondary)
+                Spacer(minLength: 4)
                 Button("Cancelar") { isConfirmingDelete = false }
+                    .buttonStyle(GhostStyle())
                 Button("Apagar", role: .destructive) { model.deleteRoutine(routine.id) }
-                    .foregroundStyle(.red)
+                    .buttonStyle(GhostStyle(tint: Palette.danger))
+                    .hangsOnTrailingEdge()
             } else {
-                Button("Editar", systemImage: "pencil", action: edit)
-                    .help(Tip.editRoutine)
-                Button(role: .destructive) { isConfirmingDelete = true } label: { Image(systemName: "trash") }
-                    .iconTip(Tip.deleteRoutine, label: "Apagar “\(current.name)”")
-                Spacer()
-                // Like the Rotinas page: with the Orb busy the run waits for it (`runRoutine` queues it).
-                if model.isRoutineRunning(routine.id) {
-                    Label("Rodando…", systemImage: "hourglass").foregroundStyle(.secondary)
-                } else if model.isRoutineQueued(routine.id) {
-                    Label("Na fila", systemImage: "clock").foregroundStyle(.secondary)
-                        .help(Tip.queuedRoutine)
-                } else {
-                    Button("Rodar agora", systemImage: "play.fill") { model.runRoutine(routine.id) }
-                        .help(Tip.runRoutineNow)
+                // Like the Rotinas page: with the Orb busy the run waits for it (`runRoutine` queues it). The three swap
+                // in place, cross-fading, so the row does not shift.
+                ZStack(alignment: .leading) {
+                    if model.isRoutineRunning(routine.id) {
+                        Label("Rodando…", systemImage: "hourglass")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Palette.muted)
+                            .transition(.opacity)
+                    } else if model.isRoutineQueued(routine.id) {
+                        Label("Na fila", systemImage: "clock")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Palette.muted)
+                            .help(Tip.queuedRoutine)
+                            .transition(.opacity)
+                    } else {
+                        Button("Rodar agora", systemImage: "play.fill") { model.runRoutine(routine.id) }
+                            .buttonStyle(SecondaryPillStyle())
+                            .help(Tip.runRoutineNow)
+                            .transition(.opacity)
+                    }
                 }
+                .controlSize(.small)
+                .animateChanges(of: RoutineRunState(isRunning: model.isRoutineRunning(routine.id), isQueued: model.isRoutineQueued(routine.id)))
+                Spacer(minLength: 4)
+                Button("Editar", systemImage: "pencil", action: edit)
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(CircleGhostStyle(side: 26, fontSize: 12))
+                    .foregroundStyle(Palette.secondary)
+                    .help(Tip.editRoutine)
+                Button("Apagar “\(current.name)”", systemImage: "trash") { isConfirmingDelete = true }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(CircleGhostStyle(side: 26, fontSize: 12))
+                    .foregroundStyle(Palette.secondary)
+                    .help(Tip.deleteRoutine)
+                    .padding(.trailing, -4)
             }
         }
+        .frame(minHeight: 26)
         .transition(.opacity)
+    }
+}
+
+/// The routine's kind at a glance: a clock that turns for an interval, a calendar for a weekday, a clock for a time of
+/// day; tinted while it is on, gray while it is paused.
+private struct RoutineGlyph: View {
+    static let side: CGFloat = 30
+    let schedule: Schedule
+    let isOn: Bool
+
+    private var symbol: String {
+        switch schedule {
+        case .everyHours, .everyMinutes: "arrow.triangle.2.circlepath"
+        case .weekly: "calendar"
+        case .daily: "clock"
+        }
+    }
+
+    var body: some View {
+        Image(systemName: isOn ? symbol : "pause.fill")
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(isOn ? Palette.accentText : Palette.muted)
+            .frame(width: Self.side, height: Self.side)
+            .background((isOn ? Palette.accent.opacity(0.16) : Palette.raised), in: .rect(cornerRadius: 8))
+            .contentTransition(.symbolEffect(.replace))
+            .accessibilityHidden(true)
+    }
+}
+
+/// "Próxima: amanhã às 01:03 · em 5 h 59 min", kept right as the minutes pass; "Pausada" while it is off.
+private struct RoutineNextLine: View {
+    let routine: Routine
+
+    var body: some View {
+        if routine.isEnabled {
+            TimelineView(.periodic(from: .now, by: 60)) { context in
+                Label {
+                    Text("Próxima: \(RoutineText.dayAndTime(routine.nextRun, now: context.date)) · \(RoutineText.relative(until: routine.nextRun, now: context.date))")
+                } icon: {
+                    Image(systemName: "arrow.forward.circle")
+                }
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.secondary)
+            }
+        } else {
+            Label("Pausada: não roda até você ligar de novo", systemImage: "pause.circle")
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.muted)
+        }
+    }
+}
+
+/// How the last run went: its mark, when, and the first line of its report; "Ainda não rodou" before the first.
+private struct RoutineLastLine: View {
+    let routine: Routine
+
+    var body: some View {
+        if let run = routine.runs.first {
+            Label {
+                Text("\(RoutineText.stamp(run.date)) · \(run.summary)")
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: run.succeeded ? "checkmark.circle.fill" : "xmark.circle.fill")
+                    .foregroundStyle(run.succeeded ? Palette.ok : Palette.danger)
+            }
+            .font(.system(size: 12))
+            .foregroundStyle(Palette.muted)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Última execução \(run.succeeded ? "deu certo" : "não deu certo"), \(RoutineText.stamp(run.date)). \(run.summary)")
+        } else {
+            Label(routine.lastResult ?? "Ainda não rodou", systemImage: "circle.dashed")
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.faint)
+                .lineLimit(2)
+        }
     }
 }
 
