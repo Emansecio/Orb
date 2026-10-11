@@ -109,13 +109,17 @@ final class WizardRunner {
         start(prompt: prompt)
     }
 
-    /// The person left the conversation for the form: the answer being written stops, and the draft stays as it is.
+    static let interrupted = "A resposta parou quando você foi para o formulário."
+
+    /// The person left the conversation for the form: the answer being written stops, and the draft stays as it is. The message
+    /// left without an answer, so coming back offers "Tentar de novo" (it sends the same message; what had streamed is dropped).
     func stopTalking() {
         guard isThinking else { return }
         turn?.cancel()
         turn = nil
-        flushLiveText()
+        liveText = ""
         isThinking = false
+        failure = Self.interrupted
         if history.count > historyMark { history.removeSubrange(historyMark...) }
     }
 

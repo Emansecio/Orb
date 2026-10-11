@@ -230,6 +230,22 @@ private func drafting(_ json: String) -> [LLMEvent] {
         #expect(calls.count == 2 && calls[1].messages.filter { $0.role == .user }.count == 1)
     }
 
+    @MainActor @Test func leavingForTheFormMidAnswerOffersTryAgainForTheUnansweredMessage() async {
+        let script = Script([said("Voltei.")], holdsCall: 1)
+        let (_, runner) = setUp(script)
+        runner.send("quero um Orb")
+        await waitUntil("the model to be asked") { await script.calls.count == 1 }
+        runner.stopTalking()
+        #expect(!runner.isThinking && runner.failure == WizardRunner.interrupted && !runner.canSend)
+        #expect(runner.history.isEmpty && runner.userMessageCount == 1)
+        await script.release()
+        runner.retry()
+        #expect(runner.failure == nil)
+        await settled(runner)
+        #expect(botTexts(runner).last == "Voltei.")
+        #expect(runner.userMessageCount == 1, "the message is not sent twice to the chat")
+    }
+
     @MainActor @Test func withoutAUsableModelItSaysSo() {
         let (model, runner) = setUp(Script([said("oi")]))
         model.providers = []
