@@ -298,12 +298,12 @@ import Testing
 
     @Test func thePaletteOffersTheSearchWithTheCatalogKey() throws {
         let atlas = BotLook(Bot(id: UUID(), name: "Atlas", role: "", orb: OrbConfig()))
-        let entries = PaletteBuilder.entries(orbs: [atlas], current: atlas.id, routines: [], skills: [], archive: [])
+        let entries = PaletteBuilder.entries(orbs: [atlas], current: atlas.id, routines: [], skills: [])
         let entry = try #require(entries.first { $0.id == "find" })
         #expect(entry.action == .findInConversation)
         #expect(entry.shortcut == ShortcutCatalog.keys(for: .find))
         #expect(PaletteSearch.rank(entries, query: "buscar").first?.id == "find")
-        #expect(!PaletteBuilder.entries(orbs: [], current: nil, routines: [], skills: [], archive: []).contains { $0.id == "find" })
+        #expect(!PaletteBuilder.entries(orbs: [], current: nil, routines: [], skills: []).contains { $0.id == "find" })
     }
 }
 

@@ -1147,7 +1147,7 @@ struct TurnOrchestrationTests {
         defer { removeTestFolder(root) }
         // Stop at different moments of the setup (before it starts, while it runs, after it failed on its own).
         for yields in 0..<4 {
-            await model.newConversation(bot.id)?.value
+            model.session(bot.id).conversation = Conversation() // a clean chat for each moment
             #expect(model.send("oi", to: bot.id))
             for _ in 0..<yields { await Task.yield() }
             let task = model.turns[bot.id] // nil when the setup already failed on its own

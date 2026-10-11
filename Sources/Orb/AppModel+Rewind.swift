@@ -18,12 +18,12 @@ extension AppModel {
     // MARK: Whether
 
     /// Why nothing can be rewound in this Orb's chat right now, or nil. Not while it works, waits for a permission,
-    /// loads, changes chat, or a routine holds it.
+    /// loads, or a routine holds it.
     func rewindRefusal(_ botID: UUID, ignoringFade: Bool = false) -> RewindRefusal? {
         guard let session = sessions[botID], bot(botID) != nil else { return .missing }
         if session.routineID != nil || session.parkedChat != nil { return .routine }
         if session.turnTask != nil || live(botID).isWorking || session.isLoading || session.isUnloaded
-            || changingChat.contains(botID) || isResetting || (!ignoringFade && !live(botID).dropping.isEmpty) { return .busy }
+            || isResetting || (!ignoringFade && !live(botID).dropping.isEmpty) { return .busy }
         if !pendingApprovals(of: botID).isEmpty { return .approvalPending }
         return nil
     }

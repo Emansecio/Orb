@@ -30,13 +30,11 @@ struct HoverTipsTests {
         // A fixed text never carries a key by hand: only the functions below do, reading it from AppShortcut.
         let keyGlyphs = CharacterSet(charactersIn: "⌘⌥⇧⌃↩")
         let fixed = Tip.all.filter { $0.rangeOfCharacter(from: keyGlyphs) != nil }
-        let withKeys: [String] = [Tip.newBot(), Tip.settings(), Tip.conversations(), Tip.newConversation(), Tip.inspector(isShowing: true), Tip.inspector(isShowing: false),
+        let withKeys: [String] = [Tip.newBot(), Tip.settings(), Tip.inspector(isShowing: true), Tip.inspector(isShowing: false),
                                   Tip.createOrbSheet(), Tip.findInConversation(), Tip.findNext(), Tip.findPrevious()]
         #expect(Set(fixed) == Set(withKeys))
         #expect(Tip.newBot().contains(AppShortcut.newBot.label))
         #expect(Tip.settings().contains(AppShortcut.settings.label))
-        #expect(Tip.conversations().contains(AppShortcut.conversations.label))
-        #expect(Tip.newConversation().contains(AppShortcut.newConversation.label))
         #expect(Tip.inspector(isShowing: true).contains(AppShortcut.toggleInspector.label))
         #expect(Tip.createOrbSheet().contains(AppShortcut.newBot.label))
         #expect(Tip.findInConversation().contains(AppShortcut.find.label))
@@ -60,14 +58,14 @@ struct HoverTipsTests {
     }
 
     @Test func everyNoticeButtonAndPermissionRowActionHasATip() {
-        let notices: [NoticeAction] = [.retry, .continueTurn, .openSettings, .newConversation, .compact, .openMemory, .reviewSkill]
+        let notices: [NoticeAction] = [.retry, .continueTurn, .openSettings, .compact, .openMemory, .reviewSkill]
         for action in notices {
             #expect(!action.help.isEmpty && action.help.count <= 90 && !action.help.hasSuffix("."), "\(action.help)")
         }
         // A new case has to be added here, or this fails to compile its exhaustive switch.
         for action in notices {
             switch action {
-            case .retry, .continueTurn, .openSettings, .newConversation, .compact, .openMemory, .reviewSkill: break
+            case .retry, .continueTurn, .openSettings, .compact, .openMemory, .reviewSkill: break
             }
         }
         for action in [PermissionRowAction.ask, .openAppAndAsk(appName: "Notas"), .openSystemSettings] {

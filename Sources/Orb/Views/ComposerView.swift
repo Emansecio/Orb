@@ -44,7 +44,7 @@ struct ComposerView: View {
     /// A message can be sent: any time the Orb is free, and while it works on your chat (it is queued). Not while a
     /// picture is still being prepared: it would miss this message and ride along with the next one.
     private var canSend: Bool {
-        !model.changingChat.contains(botID) && ComposerAction.canSend(hasContent: hasContent, isWorking: isWorking, canSteer: model.canSteer(botID),
+        ComposerAction.canSend(hasContent: hasContent, isWorking: isWorking, canSteer: model.canSteer(botID),
                                pendingPictures: lane.pendingPictures)
     }
     private var isQueueing: Bool { isWorking && model.canSteer(botID) }
@@ -193,7 +193,6 @@ struct ComposerView: View {
     }
 
     private var placeholder: LocalizedStringKey {
-        if model.changingChat.contains(botID) { return "Guardando a conversa…" }
         if isQueueing { return "Escreva para orientar o Orb enquanto ele trabalha" }
         if isWorking { return LocalizedStringKey(ComposerAction.routinePlaceholder(routineName: model.runningRoutineName(botID))) }
         return "Pergunte qualquer coisa ou solte um arquivo"

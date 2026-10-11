@@ -163,28 +163,6 @@ extension BotSession {
         if let chat = parkedChat, !chat.items.isEmpty { model?.store.save(chat, for: id) }
     }
 
-    /// Replaces the chat (which a running routine may have parked) and writes it at once, on the store's queue,
-    /// so whatever is queued after it (deleting the archived copy of a reopened conversation) comes after it.
-    func installChat(_ chat: Conversation) {
-        cancelChunkNote() // so is the note being written about it
-        model?.cancelEditing(id) // a message being edited belonged to the chat that is leaving
-        chunkAttempts = [:]
-        lastCompaction = nil // a notice of the conversation that was left
-        clearRequestUsage() // so is the cache hit of its last request (the meter would show it for this chat)
-        model?.live(id).setLastUsage(nil)
-        model?.live(id).setCompactedTo(nil)
-        transcript?.swapped() // before the items change: the chat sees another conversation, not new messages
-        if parkedChat != nil {
-            parkedChat = chat
-        } else {
-            conversation = chat
-            saveTask?.cancel()
-            saveTask = nil
-            isDirty = false
-        }
-        model?.store.save(chat, for: id)
-    }
-
     // MARK: A routine's run
 
     /// The turn machinery works on `conversation`: the routine's own goes there, the chat waits. The chat is written

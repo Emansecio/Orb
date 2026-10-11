@@ -347,9 +347,8 @@ O que usa cada padrão:
 - **Banner "Conecte um modelo".** Sobe e some com o compositor acompanhando, preso a `shows`; as frases e os botões trocam no lugar (C). Na troca de Orb ele
   é uma vista nova e aparece na hora. Se travar com uma conversa muito longa, ficar só com o fade (`.quiet`).
 - **Cartão de aprovação.** O campo de "Dizer o que fazer em vez disso" desce 4 pt (`unfold`) e o link some em fade; o cartão cresce em `Motion.content`.
-- **Barra de menus (QuickAsk) e popover "Conversas anteriores".** Nota, "Conecte um modelo", resposta, aprovações e linhas de "outros trabalhando" em `.quiet` (H);
-  o anel do Orb escolhido usa `Motion.press`. Nas conversas: carregando vira lista em `.quiet`, a lixeira vira "Apagar de vez?" por opacidade (a linha toma
-  a altura de uma vez), uma conversa apagada some em `Motion.exit` e as outras fecham o vão.
+- **Barra de menus (QuickAsk).** Nota, "Conecte um modelo", resposta, aprovações e linhas de "outros trabalhando" em `.quiet` (H);
+  o anel do Orb escolhido usa `Motion.press`.
 - **Carregando, depois pronto nas folhas.** Ferramentas do conector, prévia de skill ("Instalar skill" vira "Instalada"), conversa e relatório da rotina,
   importar e a contagem do "Some:" do Apagar Orb (D). A folha de Rotina que fecha e reabre ao virar conversa (ids diferentes) segue do sistema.
 - **Seções dentro de `Form`.** Dia, passos e relógio da folha de Rotina, "Gerenciar conectores" e "Permissões do macOS" do painel, "Usar com", o rodapé

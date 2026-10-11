@@ -247,9 +247,5 @@ struct AppModelCacheReportTests {
         model.apply(.notice("Outro aviso"), to: bot.id)
         // Other notices are not collapsed; the cache one is.
         #expect(notices(model, bot) == [CacheHealth.notice, "Outro aviso", "Outro aviso"])
-        // A new conversation can say it again.
-        await model.newConversation(bot.id)?.value
-        model.apply(.notice(CacheHealth.notice), to: bot.id)
-        #expect(notices(model, bot) == [CacheHealth.notice])
     }
 }

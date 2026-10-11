@@ -109,7 +109,7 @@ clique nela traz a tela de volta (e "Novo Orb" no pé da barra lateral só apare
 
 A **barra lateral** tem os seus Orbs, o **Espaço de trabalho** (Rotinas, Conectores, Skills), **Novo Orb** (só com Orbs na lista) e **Ajustes**. Uma
 linha mostra o que o Orb está fazendo ("Pensando…"), "Precisa de você" quando ele espera uma permissão e um ponto quando há
-mensagens não lidas; o botão direito abre o menu do Orb (nova conversa, conversas anteriores, abrir pasta, personalizar, ver
+mensagens não lidas; o botão direito abre o menu do Orb (abrir pasta, personalizar, ver
 rotinas, apagar). No meio fica o chat; à direita, o painel do Orb.
 
 No canto inferior esquerdo da barra lateral fica a **sua foto** (um círculo; sem foto, a inicial do seu nome ou uma silhueta):
@@ -146,8 +146,8 @@ O **painel do Orb** (⌥⌘B mostra ou esconde) tem quatro abas:
 | Pasta e acessos | a pasta (abrir no Finder ou no Terminal, mudar, recriar se sumiu), "Confiar nas instruções desta pasta", as **Liberações** e os arquivos alterados e recentes |
 | Rotinas | as rotinas deste Orb: ativar e pausar, editar, apagar, rodar agora (veja [Rotinas](#rotinas)) |
 
-No alto do painel: nome e papel (clique para editar; mudar o nome não renomeia a pasta), "Personalizar…" (aparência), "Abrir
-pasta", "Terminal" e "Nova conversa". O painel se recolhe sozinho em janelas estreitas (menos de 1180 pt) e volta quando há espaço.
+No alto do painel: nome e papel (clique para editar; mudar o nome não renomeia a pasta), "Personalizar…" (aparência), "Pasta"
+e "Terminal". O painel se recolhe sozinho em janelas estreitas (menos de 1180 pt) e volta quando há espaço.
 
 As chaves de "O que pode usar" desligam grupos inteiros de ferramentas para aquele Orb: sem **Terminal e arquivos** ele não roda
 comandos nem lê, escreve, procura ou apaga arquivos; sem **Navegar na web** não lê nem pesquisa páginas, não usa o navegador do Orb (nem baixa arquivos com `save_to`, que também precisa de **Terminal e arquivos**); sem **Controlar apps do Mac** não usa
@@ -239,7 +239,7 @@ Se o motor escolhido não estiver instalado, o Orb fica só com `web_fetch` e `w
   com educação (no máximo uma vez a cada 8 s). Com "Reduzir movimento" as frases só trocam de opacidade.
 - **Quando algo dá errado**, a mensagem vem com a ação: "Tentar de novo" (reenvia, se nada tinha sido feito; se já tinha
   respondido, pede para continuar), "Continuar", "Abrir Ajustes" (chave inválida, sem modelo) ou, numa conversa grande demais, "Compactar
-  e tentar de novo" (resume o começo e reenvia; só aparece quando há o que resumir) e "Nova conversa". Limite de uso (429) e instabilidade do provedor são tentados de novo sozinhos algumas vezes, com a espera à vista.
+  e tentar de novo" (resume o começo e reenvia; só aparece quando há o que resumir). Limite de uso (429) e instabilidade do provedor são tentados de novo sozinhos algumas vezes, com a espera à vista.
 - **Tarefas longas.** Um turno tem até 30 passos (60 numa rotina). Ao chegar lá o Orb deixa um registro do que fez e avisa
   "Pausei depois de 30 passos…": diga **"continua"**.
 - **Skills.** `/resumir`, `/organizar` e `/revisar` vêm prontas; veja [Conectores e skills](#conectores-e-skills).
@@ -365,7 +365,7 @@ Cada Orb tem a **sua** memória, que nasce com ele e cresce a cada conversa: nad
 - **Segredos não entram.** Chaves de API, tokens, senhas em URLs e variáveis do tipo `SENHA=…` são removidos antes de qualquer
   coisa ser gravada.
 - **O tempo.** Conversas antigas (mais de 30 dias e pouco usadas) são compactadas, nunca apagadas sozinhas. Só você apaga.
-- **Ao apagar um Orb**, o diálogo mostra o que some (a conversa atual, as arquivadas, as rotinas) e o que fica (a pasta), e
+- **Ao apagar um Orb**, o diálogo mostra o que some (a conversa, as rotinas) e o que fica (a pasta), e
   oferece **Apagar e guardar a memória** (o botão principal: a memória vai para `memoria/_guardadas/<nome> – <data>`, com
   "Mostrar no Finder") ou **Apagar com a memória**. Ajustes → Geral → "Memórias guardadas" diz quantas há e abre essa pasta.
   Junto da memória fica um pequeno `perfil.json` com o nome, o papel e a aparência do Orb (nunca permissões, modo ou segredos).
@@ -415,11 +415,10 @@ Detalhes: [docs/MEMORIA.md](docs/MEMORIA.md).
 
 ### Conversas
 
-**Nova conversa** (⇧⌘N) guarda a atual e começa outra, sem perder nada (uma conversa em que você não disse nada não é guardada; se o disco não aceitar a gravação, por exemplo por falta de espaço, a conversa continua aberta e o app avisa, em vez de apagá-la). O que está escrito no campo (e as mensagens que estavam na fila) segue para a conversa nova. Enquanto a conversa é guardada (o campo mostra "Guardando a conversa…"), o envio fica parado e o rascunho não se perde (uma rotina que começa nesse intervalo roda normalmente, na conversa própria dela).
-**Conversas** (botão da barra do chat, **⌘Y**) lista as anteriores deste Orb, agrupadas em Hoje, Ontem, Esta semana e Mais
-antigas, com busca a partir de 5. ↩ reabre (a atual é arquivada antes); Delete pede para apagar ("Apagar de vez? Não dá para
-desfazer."; ↩ confirma, Esc cancela). Apagar uma conversa apaga também as imagens que só ela usava; uma imagem que outra conversa
-do mesmo Orb (a atual, outra arquivada ou de uma rotina) ainda usa fica.
+Cada Orb tem **uma conversa só**, que nunca some: tudo o que vocês disseram, as anotações e os avisos ficam nela, em ordem.
+Quando ela cresce, o começo vira um resumo para o modelo (veja [Contexto da conversa](#contexto-da-conversa)), mas as mensagens continuam
+no chat para você ler e buscar (⌘F). Conversas guardadas por versões antigas do Orb (o antigo "Nova conversa") voltam para
+dentro dela na primeira abertura, na ordem em que aconteceram.
 
 ### Rotinas
 
@@ -577,10 +576,8 @@ tem a **Galeria**, os **Instalados** e **Explorar**.
 | Tecla | Faz |
 |---|---|
 | ⌘N | Novo Orb |
-| ⇧⌘N | Nova conversa |
-| ⌘K | **Ir para…**: paleta para chegar a um Orb, uma conversa anterior, uma página ou uma ação (↑↓ escolhem, ↩ abre, Esc fecha) |
+| ⌘K | **Ir para…**: paleta para chegar a um Orb, uma página ou uma ação (↑↓ escolhem, ↩ abre, Esc fecha) |
 | ⌘L | Escrever uma mensagem (foca o compositor) |
-| ⌘Y | Conversas anteriores do Orb aberto |
 | ⌘. | Parar a resposta |
 | ⇧⌘O | Abrir a pasta do Orb no Finder |
 | ⌥⌘B | Mostrar ou ocultar o painel do Orb |
@@ -677,7 +674,7 @@ Rodando pelo SwiftPM (sem um `.app`), ele só fecha: abra de novo. Nos modos de 
 | "Você atingiu o limite de uso do provedor (429)" | Espere um pouco ou confira o plano. O Orb tenta de novo sozinho em falhas passageiras |
 | Claude Code "não encontrado neste Mac" | Instale o `claude` ([guia](https://code.claude.com/docs/en/setup)) e use "Verificar de novo" em Ajustes → Modelos |
 | Ollama ou LM Studio "Servidor não encontrado" | Abra o app e ligue o servidor local (LM Studio: o servidor precisa estar ligado e com um modelo carregado); baixe pelo menos um modelo |
-| "A conversa ficou grande demais para este modelo" | Compactar agora, Nova conversa, ou escolha o Contexto das conversas "Econômico" |
+| "A conversa ficou grande demais para este modelo" | Compactar agora, ou escolha o Contexto das conversas "Econômico" |
 | O Orb diz que falta uma permissão do macOS | Ajustes → Permissões (ou o botão "Permitir…" na linha da ferramenta). Reabra o app depois de Gravação do Áudio do Sistema e da Tela e Acesso Total ao Disco |
 | As permissões do macOS somem a cada compilação | [Assinatura estável](#assinatura-estável-recomendado) |
 | O Orb parou numa pergunta | Veja o cartão na conversa, o ponto na barra de menus ou a notificação |

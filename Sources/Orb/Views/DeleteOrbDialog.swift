@@ -3,38 +3,29 @@ import SwiftUI
 /// What deleting an Orb takes with it and what stays, in words. Pure, so the copy is tested.
 struct DeleteOrbSummary: Equatable {
     var name: String
-    /// Earlier conversations of the Orb; nil until the list has been read.
-    var archivedCount: Int?
     var routineCount: Int
     /// The Orb's own working folder as shown to the user ("~/Orbs/Atlas"); nil when it works in the home folder.
     var folder: String?
     /// The groups it belongs to: it leaves them (MultiOrb).
     var groupCount: Int
 
-    init(name: String, archivedCount: Int?, routineCount: Int, folder: String?, groupCount: Int = 0) {
+    init(name: String, routineCount: Int, folder: String?, groupCount: Int = 0) {
         self.name = name
-        self.archivedCount = archivedCount
         self.routineCount = routineCount
         self.folder = folder
         self.groupCount = groupCount
     }
 
     @MainActor
-    init(bot: Bot, archivedCount: Int?, routineCount: Int, groupCount: Int = 0, home: String = NSHomeDirectory()) {
+    init(bot: Bot, routineCount: Int, groupCount: Int = 0, home: String = NSHomeDirectory()) {
         let shown = bot.workingDirectory.isEmpty ? nil : OrbFolder.display(bot.workingURL, home: home)
-        self.init(name: bot.name, archivedCount: archivedCount, routineCount: routineCount, folder: shown == "~" ? nil : shown,
+        self.init(name: bot.name, routineCount: routineCount, folder: shown == "~" ? nil : shown,
                   groupCount: groupCount)
     }
 
-    /// "Some: a conversa, as 12 conversas anteriores, as 2 rotinas e sai de 2 grupos."
+    /// "Some: a conversa, 2 rotinas e sai de 2 grupos."
     var goes: String {
-        var parts = ["a conversa atual"]
-        switch archivedCount {
-        case nil: parts.append("as conversas anteriores")
-        case 0?: break
-        case 1?: parts.append("1 conversa anterior")
-        case let count?: parts.append("\(count) conversas anteriores")
-        }
+        var parts = ["a conversa"]
         if routineCount == 1 { parts.append("1 rotina") } else if routineCount > 1 { parts.append("\(routineCount) rotinas") }
         // MARK: MultiOrb (WP6): it also leaves the groups it is in ("também sai de N grupos").
         if groupCount == 1 { parts.append("sai de 1 grupo") } else if groupCount > 1 { parts.append("sai de \(groupCount) grupos") }
@@ -97,7 +88,7 @@ struct SummaryLine: View {
                 .font(.system(size: 13))
                 .foregroundStyle(Palette.ink)
                 .fixedSize(horizontal: false, vertical: true)
-                // The count that arrives once the archive is read ("as conversas anteriores" → "12 conversas anteriores").
+                // A count that arrives later, an option that changes the sentence.
                 .contentTransition(.opacity)
         }
         .motion(Motion.content, value: text)
@@ -109,11 +100,10 @@ struct SummaryLine: View {
 struct DeleteOrbSheet: View {
     @Environment(AppModel.self) private var model
     let botID: UUID
-    @State private var archivedCount: Int?
 
     var body: some View {
         if let bot = model.bot(botID) {
-            let summary = DeleteOrbSummary(bot: bot, archivedCount: archivedCount, routineCount: model.routines(for: botID).count,
+            let summary = DeleteOrbSummary(bot: bot, routineCount: model.routines(for: botID).count,
                                            groupCount: model.groups.filter { $0.memberIDs.contains(botID) }.count)
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 12) {
@@ -135,10 +125,6 @@ struct DeleteOrbSheet: View {
                             primaryIsDefault: false, // deleting is never what a reflex Return does; Esc still cancels
                             destructiveHelp: Tip.deleteWithMemory, primaryHelp: Tip.deleteKeepingMemory,
                             primary: { model.confirmDelete(botID, keepMemory: true) })
-            }
-            .task {
-                await model.loadArchive(botID)
-                archivedCount = model.archives[botID]?.count ?? 0
             }
         }
     }

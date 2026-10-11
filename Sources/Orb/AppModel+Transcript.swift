@@ -12,8 +12,6 @@ enum NoticeAction: Equatable, Sendable {
     case continueTurn
     /// The problem is the model, its key or its login: open Ajustes.
     case openSettings
-    /// The conversation is too long for the model.
-    case newConversation
     /// The conversation is too long for the model: summarize its start and send the last message again.
     case compact
     /// The app kept something in memory by itself: look at it in the Memória tab.
@@ -26,7 +24,6 @@ enum NoticeAction: Equatable, Sendable {
         case .retry: "Tentar de novo"
         case .continueTurn: "Continuar"
         case .openSettings: "Abrir Ajustes"
-        case .newConversation: "Nova conversa"
         case .compact: "Compactar e tentar de novo"
         case .openMemory: "Ver na memória"
         case .reviewSkill: "Revisar"
@@ -39,7 +36,6 @@ enum NoticeAction: Equatable, Sendable {
         case .retry: "Refaz o pedido que não deu certo"
         case .continueTurn: "Envia “\(Self.continueMessage)” para o Orb seguir de onde parou"
         case .openSettings: "Abre os Ajustes para ver o modelo, a chave ou o login"
-        case .newConversation: "Começa uma conversa nova; a atual fica em conversas anteriores"
         case .compact: "Resume o começo da conversa e envia a última mensagem de novo"
         case .openMemory: "Abre a aba Memória, no painel do Orb"
         case .reviewSkill: "Abre a skill proposta para você ler e decidir"
@@ -51,7 +47,6 @@ enum NoticeAction: Equatable, Sendable {
         case .retry: "arrow.clockwise"
         case .continueTurn: "play.fill"
         case .openSettings: "gearshape"
-        case .newConversation: "square.and.pencil"
         case .compact: "arrow.triangle.merge"
         case .openMemory: "brain"
         case .reviewSkill: "wand.and.stars"
@@ -87,7 +82,7 @@ enum NoticeAction: Equatable, Sendable {
         guard notice.hasPrefix(failurePrefix) else { return [] }
         // Only the app's own sentence decides: what follows "Detalhe do provedor:" (or "Detalhe do Claude Code:") is free text.
         let reason = ourSentence(of: notice.dropFirst(failurePrefix.count).lowercased())
-        if reason.contains("grande demais") { return [.compact, .newConversation] }
+        if reason.contains("grande demais") { return [.compact] }
         // Out of balance: trying again is right once the balance is topped up; Ajustes only if another model is wanted.
         if reason.contains("sem saldo") || reason.contains("pede pagamento") { return [.retry, .openSettings] }
         return isSettingsProblem(reason) ? [.openSettings, .retry] : [.retry]

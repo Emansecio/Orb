@@ -272,7 +272,7 @@ O avatar e seu sistema de animação: `OrbModel` (config, catálogo, imagens), `
 | Compositor | `ComposerView`, `ComposerChips` (permissões, skills, modelo), `ComposerSupport`, `ModelPopover`, `ModelPicker`, `ContextMeterViews` |
 | Painel do Orb | `BotInspector` (abas Geral, Memória, Pasta e acessos, Rotinas), `InspectorSupport`, `MemoryViews`, `DeleteOrbDialog`, `PermissionConfirmation` |
 | Ajustes | `SettingsView` (Geral, Modelos, Uso, Permissões), `ProfileSettings` (a seção "Você" e `ProfileAvatar`, que a barra lateral também usa), `ResetOrbSheet` ("Redefinir o Orb?" e o alerta), `ProviderSettings`, `ProviderPresentation`, `CustomProviderFields`, `ClaudeCodeSettings`, `MacPermissionsView`, `ContextSettings` |
-| Páginas | `RoutinesView`, `ConversationsMenu`, `SkillsView`, `ConnectorsView`, `CatalogParts` |
+| Páginas | `RoutinesView`, `SkillsView`, `ConnectorsView`, `CatalogParts` |
 | Sistema | `CommandPalette` (⌘K e a folha de atalhos; as teclas vêm de `ShortcutCatalog`, em `Shortcuts.swift`, a mesma lista que Ajustes → Geral mostra), `QuickAskView` (painel da barra de menus), `SheetKit` (folhas: `orbSheet`, `SheetFooter`/`SheetFooterBar`, `ActionRow` das linhas de botões dos cartões), `ImportPanel` (a importação de outro assistente, dentro da folha Novo Orb) |
 | Para revisão (só `--snapshot`) | `WelcomeSnapshots`, `CatalogSnapshots` (com as cenas `skill-proposal`, `skill-proposal-update`), `ContextSnapshots`, `SystemSnapshots`, `TranscriptSamples` (`transcript-skill-proposal`), `AttachmentSnapshots`, e `SnapshotComposerScenes.swift` (na raiz de `Sources/Orb/`) |
 
@@ -332,9 +332,9 @@ Pasta de dados: `~/Library/Application Support/Orb/` (a variável `ORB_DATA_DIR`
 ```
 state.json                       AppState: Orbs, rotinas, skills, conectores (segredos viram "@keychain"), provedores,
                                  modelo padrão, não lidas, nível de contexto das conversas, janelas aprendidas, correções de preço
-conversations/<Orb>.json         conversa atual: itens da tela + mensagens do modelo + resumo/ledger + marcas
+conversations/<Orb>.json         a conversa do Orb (uma só, nunca some): itens da tela + mensagens do modelo + resumo/ledger + marcas
 conversations/<Orb>.meta.json    nota ao lado: quantos itens, quantos já foram para a memória, impressão digital do arquivo
-conversations/<Orb>/<id>.json    conversas anteriores ("Nova conversa"), com index.json (cache corrigido pelos arquivos)
+conversations/<Orb>/<id>.json    só de versões antigas ("Nova conversa"): `Store.mergeArchive` as junta à conversa na abertura, em ordem, e apaga
 conversations/<Orb>/routine-<rotina>.json   a conversa de cada rotina
 rascunhos.json                   o que cada compositor guarda sem enviar (`ComposerDraft`: texto e caminhos de arquivos e imagens); gravado ao sair, depois que o turno interrompido devolveu a fila, e a cada rodada do agendador; lido na abertura
 conectores/<id>.json             catálogo do conector (`ConnectorCatalog`): o que o servidor ofereceu da última vez, sem segredos
@@ -452,9 +452,7 @@ modelo de provedor com formato desconhecido sai da lista. A gravação increment
   pouco mais em conversas longas) e na hora ao fim do turno; ao sair, só o que mudou (`saveNow`). Uma gravação que falha marca a
   conversa como não salva de novo (`reportSaveFailure`), para o `saveNow` ao sair tentar outra vez. A conversa de uma execução de
   rotina que já terminou (o chat voltou) fica em `unsavedRoutineConversations` se a gravação falha, e é gravada de novo ao sair; a próxima execução da rotina parte dela, não do arquivo mais antigo.
-- Ao sair (`willTerminate`): `stopTurnsForQuit` interrompe os turnos (os cartões fecham e a conversa diz "Você interrompeu"), `undoChatChangesForQuit` desfaz uma "Nova conversa" ou
-  reabertura cujo arquivamento ainda está na fila (a conversa aberta volta ao disco e a cópia recém-arquivada some, para ela não
-  aparecer duas vezes), o estado e os rascunhos são salvos, e `ChildProcessGroups.killAllNow` e `BackgroundJobs.killAllNow()` encerram os grupos de processos que o app iniciou: os comandos em
+- Ao sair (`willTerminate`): `stopTurnsForQuit` interrompe os turnos (os cartões fecham e a conversa diz "Você interrompeu"), o estado e os rascunhos são salvos, e `ChildProcessGroups.killAllNow` e `BackgroundJobs.killAllNow()` encerram os grupos de processos que o app iniciou: os comandos em
   segundo plano, o `claude` do Claude Code e o `run_command` em primeiro plano (cada um lidera um grupo próprio, que a morte do app não alcança).
 - Leituras: fila concorrente própria, coordenada por arquivo (`FileGate`): uma leitura espera as gravações *daquele* arquivo
   (nunca vê um arquivo pela metade nem uma versão velha) e não espera as dos outros. O nome de um arquivo para o `FileGate`,
@@ -466,8 +464,8 @@ modelo de provedor com formato desconhecido sai da lista. A gravação increment
   arquivo (cache por arquivo, no máximo 4 arquivos e 48 MB) e não grava quando nada mudou. Ao gravar, saídas antigas de
   ferramentas (anteriores à penúltima mensagem do usuário) ficam com começo e fim (~4 000 caracteres).
 - Só a conversa do Orb aberto é lida na abertura (`beginLoading`, com marcador de carregamento); as outras, ao trocar de Orb ou
-  quando algo precisa delas (`ensureLoaded`, na thread principal, só quando não dá para esperar). Reabrir uma conversa
-  arquivada (`reopenConversation`) e começar uma rotina (a leitura da conversa dela, `startRoutine`) também leem fora da thread
+  quando algo precisa delas (`ensureLoaded`, na thread principal, só quando não dá para esperar). Começar uma rotina (a leitura
+  da conversa dela, `startRoutine`) também lê fora da thread
   principal e conferem depois que o Orb, a rotina e a conversa ainda existem e que nenhum turno começou. Uma conversa parada há mais
   de 5 min, sem nada para gravar, volta ao disco (`unloadIdleConversations`, a cada 30 s), o que a nota `.meta.json` ao lado
   permite verificar sem reler.
@@ -598,8 +596,7 @@ Renderiza a tela com dados de exemplo numa janela fora da tela, sem tirar o foco
 (`NSApp.setActivationPolicy(.accessory)`), e grava o PNG. Os Orbs saem estáticos (o Core Animation não é capturado). Os dados
 vêm de uma pasta temporária nova (os Orbs iniciais) ou, se você definir `ORB_DATA_DIR`, dessa pasta. O Keychain não é tocado.
 
-> O modo `conversations` grava seis conversas de exemplo (`RoutinesSnapshots.seedArchive` usa `Store.standard`): por isso o
-> `--snapshot` nunca usa a sua pasta real. Só escreve em `ORB_DATA_DIR` se você o definir (aponte para uma pasta de teste).
+> O `--snapshot` nunca usa a sua pasta real: só escreve em `ORB_DATA_DIR` se você o definir (aponte para uma pasta de teste).
 
 Modos (qualquer outro nome mostra o chat do primeiro Orb):
 
@@ -610,7 +607,7 @@ Modos (qualquer outro nome mostra o chat do primeiro Orb):
 | Contexto | `context-meter`, `context-nudge`, `context-popover`, `context-popover-result`, `context-popover-short`, `settings-context` |
 | Ajustes | `settings-general`, `settings-profile` (Geral com um perfil de exemplo e foto desenhada na hora), `settings-reset` (a folha "Redefinir o Orb?"), `settings-models`, `settings-usage` (um mês de uso de exemplo escrito na pasta de dados; `-usagePeriod today\|week\|month30\|thisMonth` e `-usageChartBy model`, antes de `--snapshot`, escolhem outra vista sem salvar nada), `settings-usage-empty` (sem exemplo: mostra o que a pasta tiver), `settings-perms`, `first-run-banner`, `models` |
 | Barra de menus | `quickask`, `quickask-approvals`, `quickask-reply` |
-| Rotinas e conversas | `routines`, `routine-editor`, `routine-editor-new`, `routine-run`, `routine-run-failed`, `routine-conversation`, `conversations` |
+| Rotinas e conversas | `routines`, `routine-editor`, `routine-editor-new`, `routine-run`, `routine-run-failed`, `routine-conversation` |
 | Skills e conectores | `skills`, `skills-explore`, `skill-editor`, `skill-editor-new`, `skill-preview`, `skill-preview-installed`, `connectors` (instalados), `connectors-gallery`, `connectors-explore`, `connectors-lazy`, `conn-tools`, `conn-signin`, `conn-needs-signin`, `conn-editor-notion`, `conn-google-intro`, `conn-google-account`, `conn-google-account-agenda`, `conn-google-denied`, `conn-google-working`, `conn-google-done`, `conn-editor-supabase`, `conn-editor-github`, `conn-editor-files`, `conn-editor-slack`, `conn-editor-manual`, `conn-editor-edit`, `conn-editor-edit-registry`, `conn-editor-connecting`, `conn-editor-connected`, `conn-editor-failed`, `conn-editor-retired-slack` |
 
 Com `ORB_SEND`, o snapshot envia o prompt e espera `ORB_SNAPSHOT_WAIT` segundos antes de fotografar. Para medir o streaming sem

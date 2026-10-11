@@ -1,21 +1,20 @@
 import SwiftUI
 
-// "Ir para…" (⌘K): one field to reach an Orb, a page, an earlier conversation or an action without the mouse.
+// "Ir para…" (⌘K): one field to reach an Orb, a page or an action without the mouse.
 // The list is built and ranked by plain values (`PaletteBuilder`, `PaletteSearch`), so it is tested without a window.
 
 struct PaletteEntry: Identifiable, Equatable {
     enum Action: Equatable {
         case bot(UUID)
         case page(SidebarItem)
-        case reopen(conversation: UUID, bot: UUID)
-        case newBot, importOrb, newConversation, focusComposer, findInConversation, showConversations, openFolder, toggleInspector, shortcuts
+        case newBot, importOrb, focusComposer, findInConversation, openFolder, toggleInspector, shortcuts
         /// A group's chat (its id), and "Novo grupo…".
         case group(UUID), newGroup
     }
 
     /// The order of the groups when nothing was typed.
     enum Section: Int, Comparable {
-        case orbs, actions, workspace, conversations
+        case orbs, actions, workspace
 
         static func < (a: Section, b: Section) -> Bool { a.rawValue < b.rawValue }
 
@@ -24,7 +23,6 @@ struct PaletteEntry: Identifiable, Equatable {
             case .orbs: "Orbs"
             case .actions: "Ações"
             case .workspace: "Espaço de trabalho"
-            case .conversations: "Conversas anteriores"
             }
         }
     }
@@ -80,9 +78,9 @@ enum PaletteSearch {
 }
 
 enum PaletteBuilder {
-    /// Everything the palette can go to. `current` is the open Orb: the actions and the earlier conversations are its.
+    /// Everything the palette can go to. `current` is the open Orb: the actions are its.
     static func entries(orbs: [BotLook], current: UUID?, routines: [Routine], skills: [Skill],
-                        archive: [ConversationSummary], groups: [OrbGroup] = [], now: Date = .now) -> [PaletteEntry] {
+                        groups: [OrbGroup] = []) -> [PaletteEntry] {
         var list: [PaletteEntry] = []
         for (index, look) in orbs.enumerated() {
             list.append(PaletteEntry(id: "bot-\(look.id)", title: look.name, subtitle: look.role.isEmpty ? nil : look.role,
@@ -92,14 +90,10 @@ enum PaletteBuilder {
         let name = orbs.first { $0.id == current }?.name
         if current != nil {
             let suffix = name.map { " de \($0)" } ?? ""
-            list.append(PaletteEntry(id: "new-conversation", title: CommandName.newConversation, subtitle: name, symbol: "square.and.pencil",
-                                     section: .actions, shortcut: ShortcutCatalog.keys(for: .newConversation), action: .newConversation, keywords: "limpar começar"))
             list.append(PaletteEntry(id: "focus", title: CommandName.writeMessage, subtitle: name, symbol: "text.cursor",
                                      section: .actions, shortcut: ShortcutCatalog.keys(for: .writeMessage), action: .focusComposer, keywords: "compositor campo focar digitar"))
             list.append(PaletteEntry(id: "find", title: CommandName.findInConversation, subtitle: name, symbol: "magnifyingglass",
                                      section: .actions, shortcut: ShortcutCatalog.keys(for: .find), action: .findInConversation, keywords: "procurar pesquisar texto mensagem"))
-            list.append(PaletteEntry(id: "history", title: CommandName.conversations, subtitle: name, symbol: "clock.arrow.circlepath",
-                                     section: .actions, shortcut: ShortcutCatalog.keys(for: .conversations), action: .showConversations, keywords: "histórico reabrir arquivo"))
             list.append(PaletteEntry(id: "folder", title: CommandName.openFolder, subtitle: "Pasta de trabalho\(suffix)", symbol: "folder",
                                      section: .actions, shortcut: ShortcutCatalog.keys(for: .openFolder), action: .openFolder, keywords: "finder arquivos"))
             list.append(PaletteEntry(id: "inspector", title: CommandName.toggleInspector, subtitle: nil, symbol: "sidebar.right",
@@ -137,25 +131,7 @@ enum PaletteBuilder {
             list.append(PaletteEntry(id: "skill-\(skill.id)", title: "Skill: \(skill.name)", subtitle: skill.summary.isEmpty ? "/\(skill.slug)" : skill.summary,
                                      symbol: "wand.and.stars", section: .workspace, action: .page(.skills), keywords: skill.slug))
         }
-        if let current {
-            for entry in archive.prefix(40) {
-                list.append(PaletteEntry(id: "conversation-\(entry.id)", title: entry.title.isEmpty ? "Conversa sem título" : entry.title,
-                                         subtitle: [name, dayLabel(entry.updatedAt, now: now)].compactMap { $0 }.joined(separator: " · "),
-                                         symbol: "bubble.left",
-                                         section: .conversations, action: .reopen(conversation: entry.id, bot: current)))
-            }
-        }
         return list
-    }
-
-    /// "hoje", "ontem" or the date.
-    static func dayLabel(_ date: Date, now: Date, calendar: Calendar = .current) -> String {
-        if calendar.isDate(date, inSameDayAs: now) { return "Hoje" }
-        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now), calendar.isDate(date, inSameDayAs: yesterday) { return "Ontem" }
-        let format = DateFormatter()
-        format.locale = Locale(identifier: "pt_BR")
-        format.dateFormat = "d 'de' MMM"
-        return format.string(from: date)
     }
 }
 
@@ -241,7 +217,7 @@ struct CommandPalette: View {
         .background(Palette.chrome)
         .onChange(of: query) { selected = 0 }
         .onAppear { isFocused = true }
-        .task { await load() }
+        .onAppear { build() }
     }
 
     private func hint(_ keys: String, _ text: String) -> some View {
@@ -261,17 +237,10 @@ struct CommandPalette: View {
         selected = (selected + step + count) % count
     }
 
-    /// Built once when it opens (and again when the earlier conversations arrive), not on each keystroke.
-    private func build(archive: [ConversationSummary]) {
+    /// Built once when it opens, not on each keystroke.
+    private func build() {
         entries = PaletteBuilder.entries(orbs: model.botIDs.map { model.live($0).look }, current: model.commandBotID,
-                                         routines: model.routines, skills: model.skills, archive: archive, groups: model.groups)
-    }
-
-    private func load() async {
-        build(archive: model.commandBotID.flatMap { model.archives[$0] } ?? [])
-        guard let id = model.commandBotID else { return }
-        await model.loadArchive(id)
-        build(archive: model.archives[id] ?? [])
+                                         routines: model.routines, skills: model.skills, groups: model.groups)
     }
 
     private func run(_ results: [PaletteEntry]) {
@@ -289,17 +258,12 @@ struct CommandPalette: View {
         switch action {
         case .bot(let id): model.selection = .bot(id)
         case .page(let page): model.selection = page
-        case .reopen(let conversation, let bot):
-            model.selection = .bot(bot)
-            Task { await model.reopenConversation(conversation, of: bot) }
         case .newBot: model.showNewBot = true
         case .group(let id): model.selection = .group(id)
         case .newGroup: model.showNewGroup = true
         case .importOrb: model.startNewOrbImporting()
-        case .newConversation: if let id = model.commandBotID { model.selection = .bot(id); model.newConversation(id) }
         case .focusComposer: model.focusComposer()
         case .findInConversation: model.findInConversation()
-        case .showConversations: model.showConversations()
         case .openFolder: if let id = model.commandBotID { model.openFolder(of: id) }
         case .toggleInspector: model.toggleInspector()
         case .shortcuts: model.showShortcuts = true

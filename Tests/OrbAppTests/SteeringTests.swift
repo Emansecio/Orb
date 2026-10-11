@@ -340,7 +340,7 @@ struct SteeringEngineTests {
         await gate.open()
     }
 
-    @Test @MainActor func aNewConversationKeepsWhatWasQueuedAndItsAttachmentsInTheComposer() async throws {
+    @Test @MainActor func stoppingKeepsWhatWasQueuedAndItsAttachmentsInTheComposer() async throws {
         let gate = Latch()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
@@ -353,19 +353,12 @@ struct SteeringEngineTests {
         model.submit("analise isso também", to: bot.id)
         #expect(lane.queued.count == 1 && lane.files.isEmpty)
 
-        await model.newConversation(bot.id)?.value // stops the turn: the queued message goes back to the composer
+        model.stop(bot.id) // the queued message goes back to the composer
         #expect(!model.isWorking(bot.id))
         #expect(model.drafts[bot.id] == "analise isso também") // the text is not lost with its attachment
         #expect(lane.files.map(\.url) == [file])
-        #expect(lane.queued.isEmpty && model.transcript(bot.id).isEmpty)
+        #expect(lane.queued.isEmpty)
         await gate.open()
-    }
-
-    @Test @MainActor func aNewConversationKeepsTheDraftOfTheOrb() async throws {
-        let (model, bot) = setUp(HeldModel())
-        model.setDraft("ainda escrevendo", for: bot.id)
-        await model.newConversation(bot.id)?.value
-        #expect(model.drafts[bot.id] == "ainda escrevendo")
     }
 
     @Test @MainActor func theCompactCommandTypedDuringATurnIsNotQueuedForTheModel() async throws {

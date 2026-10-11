@@ -75,12 +75,12 @@ private struct EchoModel: LLMClient {
         #expect(NoticeAction.actions(for: "A resposta passou do limite do modelo e foi cortada. Diga “continua” para seguir.") == [.continueTurn])
     }
 
-    @Test func aConversationThatIsTooLongOffersToCompactAndANewOne() {
+    @Test func aConversationThatIsTooLongOffersToCompact() {
         let tooLong = "Não deu certo: A conversa ficou grande demais para este modelo. Comece uma conversa nova ou apague o que não precisa."
-        #expect(NoticeAction.actions(for: tooLong) == [.compact, .newConversation])
-        #expect(NoticeAction.actions(for: tooLong, canCompact: true) == [.compact, .newConversation])
-        // A single request has nothing older to summarize: only the new conversation is offered.
-        #expect(NoticeAction.actions(for: tooLong, canCompact: false) == [.newConversation])
+        #expect(NoticeAction.actions(for: tooLong) == [.compact])
+        #expect(NoticeAction.actions(for: tooLong, canCompact: true) == [.compact])
+        // A single request has nothing older to summarize: nothing is offered.
+        #expect(NoticeAction.actions(for: tooLong, canCompact: false).isEmpty)
         #expect(NoticeAction.actions(for: "Não deu certo: O modelo não respondeu.", canCompact: false) == [.retry])
     }
 

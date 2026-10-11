@@ -656,27 +656,6 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(activity.began.count == activity.ended)
     }
 
-    @Test @MainActor func newConversationDuringARoutineArchivesTheChatAndLetsTheRoutineFinish() async throws {
-        let gate = Gate()
-        let stub = StubModel(gate: gate)
-        let (model, bot, routine) = setUp(stub)
-        model.runRoutine(routine.id)
-        await model.routineStarted()
-        await waitForModelCalls(stub)
-
-        await model.newConversation(bot.id)?.value
-        #expect(model.isRoutineRunning(routine.id)) // not stopped
-        #expect(model.transcript(bot.id).isEmpty)
-        #expect(store.readArchive(bot.id).map(\.title) == ["oi"])
-
-        await gate.open()
-        await waitUntilIdle(model, bot.id)
-        #expect(model.routines[0].runs.first?.succeeded == true)
-        #expect(notices(model.transcript(bot.id)).count == 1) // the new chat has the line, not the old one
-        model.saveNow()
-        #expect(store.loadConversation(bot.id)?.archiveTitle == "Conversa sem título") // the file holds the new chat
-    }
-
     @Test @MainActor func whileARoutineRunsTheChatOnDiskIsNotTouched() async throws {
         let gate = Gate()
         let stub = StubModel(gate: gate)
@@ -713,34 +692,6 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(!chatFile.items.contains { if case .user(let t, _) = $0.kind { t == "resuma os arquivos novos" } else { false } })
         await later.open()
         await waitUntilIdle(model, bot.id)
-    }
-
-    @Test @MainActor func aQueuedRoutineStartsWhileTheChatIsBeingArchivedAndRunsAllTheSame() async throws {
-        let gate = Gate()
-        let (model, bot, routine) = setUp(StubModel(gate: gate))
-        #expect(model.send("pergunta", to: bot.id))
-        model.runRoutine(routine.id)
-        await model.routineStarted()
-        #expect(model.queuedRoutines == [routine.id])
-
-        // "Nova conversa" with the writer busy: the turn stops, and the routine waits for the chat to be archived.
-        let release = DispatchSemaphore(value: 0)
-        model.store.stallWriter(until: release)
-        let change = model.newConversation(bot.id)
-        #expect(model.changingChat.contains(bot.id))
-        await gate.open()
-        await waitUntil("the stopped turn to end") { model.session(bot.id).turnTask == nil }
-        #expect(model.queuedRoutines == [routine.id] && !model.isRoutineRunning(routine.id))
-
-        release.signal()
-        await change?.value
-        await waitUntil("the routine to run") { !model.routines[0].runs.isEmpty }
-        await waitUntilIdle(model, bot.id)
-
-        // The new conversation opened (the routine's notice did not read as a change), and the run happened after it.
-        #expect(model.routines[0].runs.count == 1 && model.routines[0].runs[0].succeeded)
-        #expect(model.dataNotices.isEmpty)
-        #expect(!model.transcript(bot.id).contains { if case .user(let t, _) = $0.kind { t == "pergunta" } else { false } })
     }
 
     @Test @MainActor func aRunStartsFromTheConversationThatCouldNotBeWrittenNotFromTheOlderFile() async throws {

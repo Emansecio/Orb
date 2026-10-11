@@ -1,77 +1,12 @@
 import Foundation
 
-// Archived conversations and routine runs: the value types and the text around them. Where they are kept is
-// `Store` (conversation archive); how the app uses them is `AppModel`.
-
-/// One line of the list of an Orb's earlier conversations (also what `index.json` of the archive holds).
-struct ConversationSummary: Identifiable, Codable, Sendable, Equatable {
-    var id: UUID
-    /// The first thing the user said, flattened and shortened.
-    var title: String
-    var createdAt: Date
-    var updatedAt: Date
-    /// What the user and the Orb said (tool rows and notices do not count).
-    var messageCount: Int
-
-    static let titleLimit = 60
-
-    init(id: UUID = UUID(), title: String, createdAt: Date, updatedAt: Date, messageCount: Int) {
-        self.id = id
-        self.title = title
-        self.createdAt = createdAt
-        self.updatedAt = updatedAt
-        self.messageCount = messageCount
-    }
-
-    init(of conversation: Conversation, id: UUID = UUID()) {
-        self.id = id
-        title = conversation.archiveTitle
-        createdAt = conversation.items.first?.date ?? .now
-        updatedAt = conversation.items.last?.date ?? createdAt
-        messageCount = conversation.items.reduce(0) { count, item in
-            switch item.kind {
-            case .user, .bot: count + 1
-            default: count
-            }
-        }
-    }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        id = try c.decode(UUID.self, forKey: .id)
-        title = try c.value(.title, default: "Conversa")
-        createdAt = try c.value(.createdAt, default: Date.now)
-        updatedAt = try c.value(.updatedAt, default: createdAt)
-        messageCount = try c.value(.messageCount, default: 0)
-    }
-}
-
-/// The archive's `index.json`. It is a cache of the folder: whatever it gets wrong is corrected from the files.
-struct ConversationIndex: Codable, Sendable {
-    var entries: [ConversationSummary] = []
-
-    init(entries: [ConversationSummary] = []) { self.entries = entries }
-
-    init(from decoder: Decoder) throws {
-        entries = try decoder.container(keyedBy: CodingKeys.self).lossyArray(.entries)
-    }
-}
+// Routine runs and the conversations an older version set aside: the value types and the text around them. Where they
+// are kept is `Store`; how the app uses them is `AppModel`.
 
 extension Conversation {
     /// Whether the user ever said something here (a conversation of notices alone is not worth keeping).
     var hasUserMessages: Bool {
         items.contains { if case .user = $0.kind { true } else { false } }
-    }
-
-    /// The first user message on one line, shortened to `ConversationSummary.titleLimit`.
-    var archiveTitle: String {
-        for item in items {
-            guard case .user(let text, let attachments) = item.kind else { continue }
-            let line = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-            if !line.isEmpty { return Self.clipped(line, to: ConversationSummary.titleLimit) }
-            if let first = attachments.first { return Self.clipped(first, to: ConversationSummary.titleLimit) }
-        }
-        return "Conversa sem título"
     }
 
     static func clipped(_ text: String, to limit: Int) -> String {
@@ -202,5 +137,45 @@ enum RoutineReport {
         let cleaned = String(name.map { "/\\:\u{0}".contains($0) || $0.isNewline ? "-" : $0 })
             .trimmingCharacters(in: CharacterSet(charactersIn: ". ").union(.whitespacesAndNewlines))
         return cleaned.isEmpty ? "Rotina" : String(cleaned.prefix(60)).trimmingCharacters(in: .whitespaces)
+    }
+}
+
+// MARK: - One conversation per Orb
+
+extension Conversation {
+    /// The Orb's one conversation with the ones the old "Nova conversa" set aside put back before it, oldest first (an
+    /// Orb has a single conversation now). With no user message in `current` (only the greeting it got after the last
+    /// set-aside, or nothing) the newest set-aside one carries on instead. One already in it (an item of it is there:
+    /// the merge ran before and its files were not yet gone) is not added twice.
+    static func merging(_ archived: [Conversation], into current: Conversation?) -> Conversation {
+        var older = archived.filter { !$0.items.isEmpty }
+            .sorted { ($0.items.first?.date ?? .distantPast) < ($1.items.first?.date ?? .distantPast) }
+        var base: Conversation
+        if let current, current.hasUserMessages || older.isEmpty {
+            base = current
+        } else if let newest = older.popLast() {
+            base = newest.closingInterruptedTurn()
+        } else {
+            return Conversation()
+        }
+        let present = Set(base.items.map(\.id))
+        older.removeAll { $0.items.contains { present.contains($0.id) } }
+        guard !older.isEmpty else { return base }
+
+        var items: [TranscriptItem] = [], messages: [ChatMessage] = []
+        for conversation in older {
+            items += conversation.closingInterruptedTurn().items
+            messages += conversation.messages.answeringDanglingToolCalls()
+        }
+        let shift = messages.count
+        var merged = base
+        merged.items = items + base.items
+        merged.messages = messages + base.messages
+        // What was set aside had been saved to memory when it was.
+        merged.memorySavedCount = items.count + (base.memorySavedCount ?? 0)
+        merged.summaryCoveredCount = base.summaryCoveredCount.map { $0 + shift }
+        merged.condensedCount = base.condensedCount.map { $0 + shift }
+        merged.chunkSummaries = base.chunkSummaries?.map { ChunkSummary(start: $0.start + shift, end: $0.end + shift, text: $0.text) }
+        return merged
     }
 }

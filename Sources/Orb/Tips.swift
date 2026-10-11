@@ -5,7 +5,7 @@ import SwiftUI
 // key is read from `ShortcutCatalog`/`AppShortcut`, never typed by hand, so a key that changes changes its tip.
 // A text only one control shows stays beside that control. The style, which the tests check on `Tip.all`:
 // Brazilian Portuguese, one short sentence (about 80 characters at most), a present-tense verb or the effect, no full
-// stop, the app's own words (Orb, conversas anteriores, contexto das conversas, comando de skill).
+// stop, the app's own words (Orb, contexto das conversas, comando de skill).
 
 enum Tip {
     // MARK: Attachments
@@ -23,7 +23,6 @@ enum Tip {
     static let manageGrants = "Abre as liberações permanentes deste Orb no painel"
     static let adjustContext = "Abre Ajustes para escolher quanto das conversas o Orb guarda"
     static let chooseModel = "Escolhe o modelo da lista"
-    static let reopenConversation = "Reabre esta conversa"
     static let forgetWindow = "Esquece o tamanho de janela aprendido para este modelo"
     static let suggestion = "Envia esta sugestão ao Orb"
     static let queueAfterTask = "Deixa esta mensagem para depois da tarefa, em vez de entrar no próximo passo"
@@ -269,8 +268,6 @@ enum Tip {
 
     static func newBot() -> String { "Cria um novo Orb (\(AppShortcut.newBot.label))" }
     static func settings() -> String { "Abre os Ajustes (\(AppShortcut.settings.label))" }
-    static func conversations() -> String { "Mostra as conversas anteriores deste Orb (\(AppShortcut.conversations.label))" }
-    static func newConversation() -> String { "Começa uma conversa nova; a atual fica em conversas anteriores (\(AppShortcut.newConversation.label))" }
     static func findInConversation() -> String { "Busca nesta conversa (\(AppShortcut.find.label))" }
     static func findNext() -> String { "Vai para o próximo resultado (\(AppShortcut.findNext.label))" }
     static func findPrevious() -> String { "Vai para o resultado anterior (\(AppShortcut.findPrevious.label))" }
@@ -282,7 +279,7 @@ enum Tip {
     /// Every fixed text above, for the test that holds them to the style.
     static var all: [String] {
         [attach, removeAttachment, previewAttachment, previewImage, missingAttachment, moreAttachments,
-         skills, manageGrants, adjustContext, chooseModel, reopenConversation, forgetWindow, suggestion, queueAfterTask, steerNow,
+         skills, manageGrants, adjustContext, chooseModel, forgetWindow, suggestion, queueAfterTask, steerNow,
          newRoutine, editRoutine, deleteRoutine, runRoutineNow, runRoutineAgain, queuedRoutine, routineConversation,
          copyReport, openReportFile, runOnceNow, routinePermissions, allRoutines,
          routineToggle(isOn: true), routineToggle(isOn: false),
@@ -315,7 +312,7 @@ enum Tip {
          autoColor, routineTemplate, openRunReport, exploreSkills, showProviderDetails, hideProviderDetails,
          previewActivity("pensando"),
          findResults, findClose, findInConversation(), findNext(), findPrevious(),
-         newBot(), settings(), conversations(), newConversation(), inspector(isShowing: true), inspector(isShowing: false)]
+         newBot(), settings(), inspector(isShowing: true), inspector(isShowing: false)]
     }
 }
 

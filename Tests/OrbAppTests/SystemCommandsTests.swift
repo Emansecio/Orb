@@ -133,7 +133,7 @@ import Testing
     /// The palette does not write keys of its own: each action shows the catalog's key for its command.
     @Test func theKeysInThePaletteAreTheCatalogsKeys() {
         let expected: [String: ShortcutCommand] = [
-            "new-conversation": .newConversation, "focus": .writeMessage, "history": .conversations, "folder": .openFolder,
+            "focus": .writeMessage, "folder": .openFolder,
             "inspector": .toggleInspector, "new-bot": .newBot, "page-routines": .routines, "page-connectors": .connectors,
             "page-skills": .skills,
         ]
@@ -148,7 +148,6 @@ import Testing
 
     @Test func shortcutsAreWrittenLikeTheMenusDo() {
         #expect(AppShortcut.toggleInspector.label == "⌥⌘B")
-        #expect(AppShortcut.newConversation.label == "⇧⌘N")
         #expect(AppShortcut.previousBot.label == "⌥↑")
         #expect(AppShortcut.bot(at: 2).label == "⌘3")
         #expect(AppShortcut.stop.label == "⌘.")
@@ -164,7 +163,7 @@ import Testing
 
     @Test func catalogListsTheCommandsOfTheMenus() {
         let keys = Set(ShortcutCatalog.groups.flatMap(\.items).map(\.keys))
-        for key in ["⌘N", "⇧⌘N", "⌘K", "⌘L", "⌘Y", "⇧⌘O", "⌘.", "⌥⌘B", "⌥⌘R", "⌥⌘C", "⌥⌘K", "⌥↑", "⌥↓"] {
+        for key in ["⌘N", "⌘K", "⌘L", "⇧⌘O", "⌘.", "⌥⌘B", "⌥⌘R", "⌥⌘C", "⌥⌘K", "⌥↑", "⌥↓"] {
             #expect(keys.contains(key), "\(key) falta no catálogo")
         }
     }
@@ -174,8 +173,7 @@ import Testing
     private func sample() -> [PaletteEntry] {
         let atlas = BotLook(Bot(id: UUID(), name: "Atlas", role: "Assistente do seu Mac", orb: OrbConfig()))
         let luna = BotLook(Bot(id: UUID(), name: "Luna", role: "Agenda", orb: OrbConfig()))
-        let archive = [ConversationSummary(title: "Organizar a pasta Downloads", createdAt: .now, updatedAt: .now, messageCount: 4)]
-        return PaletteBuilder.entries(orbs: [atlas, luna], current: atlas.id, routines: [], skills: [], archive: archive)
+        return PaletteBuilder.entries(orbs: [atlas, luna], current: atlas.id, routines: [], skills: [])
     }
 
     @Test func emptyQueryKeepsTheGroupsInOrder() {
@@ -186,16 +184,15 @@ import Testing
 
     @Test func searchIgnoresCaseAndAccents() {
         #expect(PaletteSearch.rank(sample(), query: "INTEGRACOES").map(\.id) == ["page-connectors"]) // keyword "integrações"
-        #expect(PaletteSearch.rank(sample(), query: "historico").contains { $0.id == "history" }) // keyword "histórico"
         #expect(PaletteSearch.rank(sample(), query: "luna").first?.title == "Luna")
     }
 
     @Test func titlePrefixBeatsContains() {
-        let ranked = PaletteSearch.rank(sample(), query: "conversa")
-        // "Conversas anteriores" (starts with it) comes before "Nova conversa" (a later word) and the archived one.
-        let titles = ranked.map(\.title)
-        #expect(titles.first == "Conversas anteriores")
-        #expect(titles.contains("Nova conversa"))
+        let titles = PaletteSearch.rank(sample(), query: "rotinas").map(\.title)
+        // "Rotinas" (starts with it) comes before anything that only mentions it in a subtitle or keyword.
+        #expect(titles.first == "Rotinas")
+        // A later word of the title still matches.
+        #expect(PaletteSearch.rank(sample(), query: "conversa").map(\.title).contains("Buscar na conversa"))
     }
 
     @Test func everyWordMustMatch() {
@@ -209,8 +206,8 @@ import Testing
     }
 
     @Test func noOrbOpenMeansNoOrbActions() {
-        let entries = PaletteBuilder.entries(orbs: [], current: nil, routines: [], skills: [], archive: [])
-        #expect(!entries.contains { $0.id == "new-conversation" })
+        let entries = PaletteBuilder.entries(orbs: [], current: nil, routines: [], skills: [])
+        #expect(!entries.contains { $0.id == "focus" })
         #expect(entries.contains { $0.id == "new-bot" })
     }
 
@@ -314,18 +311,15 @@ import Testing
     // MARK: Delete dialog
 
     @Test func deleteSummaryNamesWhatGoesAndWhatStays() {
-        let summary = DeleteOrbSummary(name: "Atlas", archivedCount: 12, routineCount: 2, folder: "~/Orbs/Atlas")
-        #expect(summary.goes == "Some: a conversa atual, 12 conversas anteriores e 2 rotinas.")
+        let summary = DeleteOrbSummary(name: "Atlas", routineCount: 2, folder: "~/Orbs/Atlas")
+        #expect(summary.goes == "Some: a conversa e 2 rotinas.")
         #expect(summary.stays == "Fica: a pasta ~/Orbs/Atlas e, se você quiser, a memória.")
     }
 
     @Test func deleteSummaryHandlesSingularsAndNothingElse() {
-        #expect(DeleteOrbSummary(name: "A", archivedCount: 1, routineCount: 1, folder: nil).goes
-                == "Some: a conversa atual, 1 conversa anterior e 1 rotina.")
-        #expect(DeleteOrbSummary(name: "A", archivedCount: 0, routineCount: 0, folder: nil).goes == "Some: a conversa atual.")
-        #expect(DeleteOrbSummary(name: "A", archivedCount: nil, routineCount: 0, folder: nil).goes
-                == "Some: a conversa atual e as conversas anteriores.")
-        #expect(DeleteOrbSummary(name: "A", archivedCount: 0, routineCount: 0, folder: nil).stays.hasPrefix("Fica: tudo o que está no seu Mac"))
+        #expect(DeleteOrbSummary(name: "A", routineCount: 1, folder: nil).goes == "Some: a conversa e 1 rotina.")
+        #expect(DeleteOrbSummary(name: "A", routineCount: 0, folder: nil).goes == "Some: a conversa.")
+        #expect(DeleteOrbSummary(name: "A", routineCount: 0, folder: nil).stays.hasPrefix("Fica: tudo o que está no seu Mac"))
     }
 
     @Test func keptMemoryFolderIsFoundByName() throws {
@@ -356,12 +350,12 @@ import Testing
         let model = model()
         let (first, second) = (model.botIDs[0], model.botIDs[1])
         model.selection = .bot(first)
-        model.showConversations(of: second)
+        model.request(.findInConversation, of: second)
         #expect(model.selection == .bot(second))
-        #expect(!model.takeChatRequest(.showConversations, of: first))
+        #expect(!model.takeChatRequest(.findInConversation, of: first))
         #expect(!model.takeChatRequest(.focusComposer, of: second))
-        #expect(model.takeChatRequest(.showConversations, of: second))
-        #expect(!model.takeChatRequest(.showConversations, of: second)) // taken once
+        #expect(model.takeChatRequest(.findInConversation, of: second))
+        #expect(!model.takeChatRequest(.findInConversation, of: second)) // taken once
     }
 
     @Test @MainActor func commandsFromAWorkspacePageLandOnTheFirstOrb() {

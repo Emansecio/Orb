@@ -877,37 +877,8 @@ enum RoutinesSnapshots {
         case "routine-conversation":
             guard let routine = model.routines.first else { return nil }
             return AnyView(RoutineConversationSheet(routineID: routine.id))
-        case "conversations":
-            guard let bot = model.bots.first else { return nil }
-            Self.seedArchive(for: bot.id)
-            return AnyView(ConversationsMenu(botID: bot.id, onClose: {}).background(Palette.chrome).frame(width: 380, height: 520, alignment: .top))
         default:
             return nil
         }
-    }
-
-    /// A few earlier conversations at different days, so the grouped list has something to show.
-    private static func seedArchive(for botID: UUID) {
-        let store = Store.standard
-        guard store.readArchive(botID).isEmpty else { return }
-        let titles: [(String, Double, Int)] = [
-            ("Qual é a melhor forma de organizar meus PDFs de contratos por cliente e ano?", 0.2, 12),
-            ("Resuma o artigo que salvei ontem", 1.1, 4),
-            ("Me ajuda a planejar a viagem de dezembro", 2.4, 18),
-            ("Revisar o texto da apresentação", 3.5, 6),
-            ("Como configuro o backup automático?", 9, 2),
-            ("Ideias de nome para o projeto", 40, 1),
-        ]
-        for (title, daysAgo, count) in titles {
-            let when = Date.now.addingTimeInterval(-daysAgo * 86_400)
-            var conversation = Conversation()
-            for index in 0..<max(2, count) {
-                var item = TranscriptItem(index % 2 == 0 ? .user(text: index == 0 ? title : "Mais uma coisa", attachments: []) : .bot(text: "Claro.", isStreaming: false))
-                item.date = when.addingTimeInterval(Double(index) * 60)
-                conversation.items.append(item)
-            }
-            store.archive(conversation, for: botID)
-        }
-        store.flush()
     }
 }

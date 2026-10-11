@@ -174,8 +174,8 @@ struct BotInspector: View {
         .padding(.bottom, 14)
     }
 
-    /// The three things people do most with an Orb, one click each from any tab: three equal tiles, each with its
-    /// name under the icon (an icon alone did not say that the third one puts the conversation away).
+    /// What people do most with an Orb's folder, one click each from any tab: equal tiles, each with its name under
+    /// the icon.
     private func quickActions(_ bot: Bot) -> some View {
         let folderIsMissing = listing?.folder == .missing
         return HStack(spacing: 8) {
@@ -187,9 +187,6 @@ struct BotInspector: View {
                 OrbFolder.openInTerminal(bot.workingURL)
             }
             .disabled(folderIsMissing)
-            quickAction("Nova conversa", "square.and.pencil", help: Tip.newConversation()) {
-                model.newConversation(bot.id)
-            }
         }
         .padding(.horizontal, Spacing.xl)
         .padding(.bottom, 14)

@@ -17,7 +17,7 @@ struct ContextMemorySettings: View {
         } header: {
             Text("Contexto das conversas")
         } footer: { FormFootnote {
-            Text("Vale para todos os Orbs. Quando passa do limite, o começo da conversa vira um resumo; as mensagens continuam salvas em Conversas anteriores.")
+            Text("Vale para todos os Orbs. Quando passa do limite, o começo da conversa vira um resumo; as mensagens continuam salvas na conversa.")
         } }
     }
 }

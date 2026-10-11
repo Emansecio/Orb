@@ -226,21 +226,7 @@ final class StretchNoteFlowTests {
         #expect(!(model.conversations[botID]?.messages.isEmpty ?? true))
     }
 
-    @Test func theNoteIsDroppedWhenTheConversationChangesOrTheOrbGoes() async throws {
-        // A new conversation.
-        let (model, botID, asked) = try setUp(answer: .hangs)
-        await warmUp(model, botID)
-        try grow(to: 0.75, model, botID)
-        model.writesStretchNotes = true
-        model.writeStretchNote(of: botID)
-        await waitUntil("the request") { await asked.notes.count == 1 }
-        let task = try #require(model.session(botID).chunkTask)
-        await model.newConversation(botID)?.value
-        #expect(model.session(botID).chunkTask == nil)
-        await task.value // it ends: cancelled, nothing kept
-        #expect(model.conversations[botID]?.chunkSummaries == nil)
-
-        // The Orb deleted.
+    @Test func theNoteIsDroppedWhenTheOrbGoes() async throws {
         let (other, otherBot, otherAsked) = try setUp(answer: .hangs)
         await warmUp(other, otherBot)
         try grow(to: 0.75, other, otherBot)

@@ -713,16 +713,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
         #expect(model.drafts[id] == "meu rascunho")
     }
 
-    @MainActor @Test func openingAnotherChatGivesTheEditUp() async throws {
-        defer { removeTestFolder(root) }
-        let (model, id) = model(with: conversation(["a", "b"]))
-        await model.loadedConversation(id)
-        model.setDraft("rascunho", for: id)
-        #expect(model.beginEditing(itemID: try #require(row("b", in: model, id)).id, of: id))
-        model.session(id).installChat(Conversation())
-        #expect(!model.isEditing(id) && model.drafts[id] == "rascunho")
-    }
-
     @MainActor @Test func theEditedPicturesStayOnDiskWhenTheyLeaveTheStrip() async throws {
         defer { removeTestFolder(root) }
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -876,7 +866,7 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
         try "x".write(to: report, atomically: true, encoding: .utf8)
         var chat = Conversation()
         chat.items = [user("veja", [photo.path, report.path]), notice("Não deu certo: sem rede")] // no message: it never got there
-        model.session(id).installChat(chat)
+        model.session(id).conversation = chat
 
         #expect(model.editRefusal(itemID: chat.items[0].id, of: id) == nil)
         #expect(model.beginEditing(itemID: chat.items[0].id, of: id))

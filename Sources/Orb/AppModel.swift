@@ -54,13 +54,10 @@ final class AppModel {
     /// back to disk (`unloadIdleConversations`). Not observed itself: a session is made with its Orb (`syncLives`)
     /// and views read the session's own observed properties.
     @ObservationIgnored private(set) var sessions: [UUID: BotSession] = [:]
-    /// Earlier conversations of each Orb as last listed (see `loadArchive`).
-    private(set) var archives: [UUID: [ConversationSummary]] = [:]
     /// Routines that came due while their Orb was busy; each runs when the Orb is free. One entry per routine.
     private(set) var queuedRoutines: [UUID] = []
-    /// Archived conversations being read to be reopened, and the routine each Orb is reading its conversation for
-    /// before starting it (at most one per Orb): a second request for either waits for that one.
-    @ObservationIgnored private var reopening: Set<UUID> = []
+    /// The routine each Orb is reading its conversation for before starting it (at most one per Orb): a second
+    /// request waits for that one.
     @ObservationIgnored private var startingRoutines: [UUID: UUID] = [:]
     var isStartingRoutine: Bool { !startingRoutines.isEmpty } // internal for tests (`startingRoutines` is private to this file)
     /// Things the user should hear about the data files (an unreadable file and where its copy is, a failed save).
@@ -241,20 +238,8 @@ final class AppModel {
     nonisolated static let sleepGap: TimeInterval = 90
     /// How long "going to sleep" holds the routines back without a wake.
     nonisolated static let sleepHold: TimeInterval = 120
-    /// Orbs whose chat is being replaced (a new or a reopened conversation): the archive is written first, and a second
-    /// request meanwhile would archive the same chat twice. Observed: the composer holds sending until it is over, or a
-    /// message would land in the chat that is about to be replaced.
-    private(set) var changingChat: Set<UUID> = []
     /// Conversations of finished routine runs whose file could not be written, by routine.
     @ObservationIgnored var unsavedRoutineConversations: [UUID: (botID: UUID, conversation: Conversation)] = [:]
-    /// A change of the open chat ("Nova conversa", a reopened one) whose archive write is on the store's queue, by Orb:
-    /// the step that installs the other chat comes later, and quitting in between must not leave both (`undoChatChangesForQuit`).
-    @ObservationIgnored private var pendingChatChanges: [UUID: PendingChatChange] = [:]
-    private struct PendingChatChange {
-        var token = UUID()
-        /// The archive entry of the chat that is leaving, once its write is queued.
-        var summaryID: UUID?
-    }
     /// The Keychain reads of a `refreshConnections` under way, and which state of the Keychain they started from
     /// (`keychainGeneration` changes when the app itself changes a key).
     @ObservationIgnored private var keyReads: (generation: Int, task: Task<Set<ProviderKind>, Never>)?
@@ -333,6 +318,9 @@ final class AppModel {
         let stateRead = store.readState()
         notices += stateRead.notice.map { [Self.described($0, bots: [], routines: [])] } ?? []
         let state = stateRead.value ?? firstUse
+        // An Orb has one conversation: the ones an older version set aside come back into it, once. Reads of the
+        // conversation wait for this.
+        for bot in state.bots { store.mergeArchive(of: bot.id) }
         bots = state.bots
         routines = state.routines
         skills = state.skills
@@ -430,7 +418,6 @@ final class AppModel {
             MainActor.assumeIsolated {
                 ApprovalNotifications.clear(self?.pendingApprovals.map(\.id) ?? [])
                 self?.stopTurnsForQuit() // before the save: the cards close and "Você interrompeu" is written
-                self?.undoChatChangesForQuit()
                 self?.saveNow()
                 // Commands and CLIs in the middle of a turn lead process groups of their own and would outlive the app.
                 ChildProcessGroups.killAllNow(including: self?.jobs.runningGroups ?? [])
@@ -527,12 +514,12 @@ final class AppModel {
     func unloadIdleConversations(now: ContinuousClock.Instant = .now, only: UUID? = nil) async {
         guard !didReportSaveFailure else { return }
         let keepAlive = conversationKeepAlive
-        let candidates = sessions.values.filter { (only == nil || $0.id == only) && !changingChat.contains($0.id) && $0.isIdle(now: now, keepAlive: keepAlive) }
+        let candidates = sessions.values.filter { (only == nil || $0.id == only) && $0.isIdle(now: now, keepAlive: keepAlive) }
         for session in candidates {
             let botID = session.id
             guard let meta = await store.readMetaAsync(botID) else { continue }
             // Looked at again after waiting: it may have been used, changed or started a turn meanwhile.
-            guard sessions[botID] === session, !changingChat.contains(botID), session.isIdle(now: now, keepAlive: keepAlive),
+            guard sessions[botID] === session, session.isIdle(now: now, keepAlive: keepAlive),
                   let conversation = session.conversation, meta.matches(conversation) else { continue }
             session.unload()
             store.releaseCache(for: botID)
@@ -1099,10 +1086,9 @@ final class AppModel {
         leaveGroups(botID, name: name) // MultiOrb (WP5): before the Orb is gone, so the groups can say who left
         bots.removeAll { $0.id == botID }
         session.close()
-        writeIfChanged(nil, at: botID, in: \.archives)
         sessions[botID] = nil // with its transcript: whatever still holds the session writes to nothing anyone shows
         store.deleteConversation(botID)
-        store.deleteArchive(botID) // the earlier conversations and the routines' ones
+        store.deleteArchive(botID) // the routines' conversations and the requests' ones
         if selection == .bot(botID) { selection = bots.first.map { .bot($0.id) } }
         if lastSelectedBotID == botID { lastSelectedBotID = nil } // a catalog sheet must not default to an Orb that is gone
         return keeping
@@ -1161,234 +1147,6 @@ final class AppModel {
         let deadline = ContinuousClock.now + wait
         while !finished.withLock({ $0 }), ContinuousClock.now < deadline { try? await Task.sleep(for: .milliseconds(25)) }
     }
-
-    // MARK: Conversation history
-
-    /// Starts a new conversation. The current one is archived (when you said anything in it), not thrown away: it is
-    /// replaced only once its archive file is on disk, so a full disk leaves it open instead of losing it. The draft
-    /// belongs to the Orb, not to the conversation: it stays in the composer, with what was queued during a stopped
-    /// turn (which `leaveChat` gave back to it, attachments and all). Returns the task that finishes the change
-    /// (nil when there is nothing to wait for or one is already under way).
-    @discardableResult
-    func newConversation(_ botID: UUID) -> Task<Void, Never>? {
-        guard bot(botID) != nil, !changingChat.contains(botID) else { return nil }
-        // Before the turn stops: a routine waiting for this Orb would take it in between, over the chat being archived.
-        changingChat.insert(botID)
-        leaveChat(botID)
-        guard let leaving = chatToArchive(botID) else {
-            session(botID).installChat(Conversation())
-            endChatChange(botID)
-            return nil
-        }
-        guard leaving.chat.hasUserMessages else {
-            leaving.keepStretch(in: session(botID))
-            session(botID).installChat(Conversation())
-            endChatChange(botID)
-            return nil
-        }
-        let change = PendingChatChange()
-        pendingChatChanges[botID] = change
-        return Task { [weak self] in
-            guard let self else { return }
-            defer {
-                if pendingChatChanges[botID]?.token == change.token { pendingChatChanges[botID] = nil }
-                endChatChange(botID)
-            }
-            guard pendingChatChanges[botID]?.token == change.token else { return } // undone before it began
-            guard let summary = await archiveForChange(leaving.chat, of: botID) else {
-                addNotice(Self.couldNotArchive)
-                return
-            }
-            guard pendingChatChanges[botID]?.token == change.token else { return } // the app was quitting: undone
-            // Said something meanwhile: the new conversation would throw that away. The chat stays open, and the
-            // copy just archived goes, or the next attempt would list the same conversation twice.
-            guard bot(botID) != nil, isUnchanged(botID, since: leaving) else {
-                store.deleteArchived(summary.id, for: botID)
-                if bot(botID) != nil { addNotice(Self.changedMeanwhile) }
-                return
-            }
-            noteArchived(summary, leaving, of: botID)
-            session(botID).installChat(Conversation())
-        }
-    }
-
-    /// Makes an archived conversation the current one. The current one is archived first (if you said anything in
-    /// it), so nothing is lost either way. The conversation keeps its memory bookkeeping
-    /// (how much of it is already saved as memory), so reopening it saves nothing twice. The file is read
-    /// off the main thread; what changed meanwhile is looked at again before the chat is replaced. The archived copy
-    /// goes only after both the current chat's archive and the reopened one are written: with a full disk the change
-    /// is given up and nothing is lost.
-    @discardableResult
-    func reopenConversation(_ id: UUID, of botID: UUID) async -> Bool {
-        guard bot(botID) != nil, !reopening.contains(id), !changingChat.contains(botID) else { return false }
-        reopening.insert(id)
-        changingChat.insert(botID)
-        defer {
-            reopening.remove(id)
-            endChatChange(botID)
-        }
-        let read = await store.readArchivedAsync(id, for: botID)
-        // The Orb was deleted, or the conversation was deleted from the list, while it was being read.
-        guard let owner = bot(botID), archives[botID]?.contains(where: { $0.id == id }) ?? true else { return false }
-        addNotice(Self.labeled(read.notice, for: owner))
-        guard let chosen = read.value else {
-            archives[botID]?.removeAll { $0.id == id }
-            return false
-        }
-        leaveChat(botID)
-        let leaving = chatToArchive(botID)
-        let change = PendingChatChange()
-        pendingChatChanges[botID] = change
-        defer { if pendingChatChanges[botID]?.token == change.token { pendingChatChanges[botID] = nil } }
-        var summary: ConversationSummary?
-        if let leaving, leaving.chat.hasUserMessages {
-            summary = await archiveForChange(leaving.chat, of: botID)
-            guard summary != nil else {
-                addNotice(Self.couldNotArchive)
-                return false
-            }
-        }
-        guard pendingChatChanges[botID]?.token == change.token else { return false } // the app was quitting: undone
-        let reopened = chosen.closingInterruptedTurn()
-        // Given up after the current chat was archived: that copy goes, the chat is still open and would be archived again.
-        func giveUp() -> Bool {
-            if let summary { store.deleteArchived(summary.id, for: botID) }
-            return false
-        }
-        guard bot(botID) != nil, isUnchanged(botID, since: leaving) else {
-            if bot(botID) != nil { addNotice(Self.changedMeanwhile) }
-            return giveUp()
-        }
-        guard await store.saveAndWait(reopened, for: botID) else {
-            addNotice(Self.couldNotReopen)
-            return giveUp()
-        }
-        guard pendingChatChanges[botID]?.token == change.token else { return false } // the app was quitting: undone
-        guard bot(botID) != nil, isUnchanged(botID, since: leaving) else {
-            if bot(botID) != nil { addNotice(Self.changedMeanwhile) }
-            // The file holds the reopened chat by now: the one still open goes back on disk before its archived copy goes.
-            if let session = sessions[botID] {
-                session.isDirty = true
-                session.saveNow()
-            }
-            return giveUp()
-        }
-        if let leaving {
-            if let summary { noteArchived(summary, leaving, of: botID) } else { leaving.keepStretch(in: session(botID)) }
-        }
-        session(botID).installChat(reopened)
-        store.deleteArchived(id, for: botID) // the reopened chat is on disk by now: only then does its archived copy go
-        archives[botID]?.removeAll { $0.id == id }
-        return true
-    }
-
-    /// `archiveAndWait` for a change of the open chat: the entry is noted as soon as its write is queued, so that
-    /// quitting before the change is finished can take it back.
-    private func archiveForChange(_ chat: Conversation, of botID: UUID) async -> ConversationSummary? {
-        let summary = ConversationSummary(of: chat)
-        pendingChatChanges[botID]?.summaryID = summary.id
-        let store = store
-        let archived = await withCheckedContinuation { continuation in
-            store.archive(chat, as: summary, for: botID) { continuation.resume(returning: $0) }
-        }
-        return archived ? summary : nil
-    }
-
-    /// Quitting while a new or reopened conversation waits for its archive write: the step that would finish the
-    /// change (opening the other chat) will not run, and the file would still hold the old chat beside its archived
-    /// copy. The change is given up instead: the open chat goes back on disk (the file may already hold the reopened
-    /// one) and the entry just archived goes. Nothing is lost, nothing is listed twice.
-    var hasQueuedChatArchive: Bool { pendingChatChanges.values.contains { $0.summaryID != nil } } // internal for tests
-
-    func undoChatChangesForQuit() {
-        guard !isResetting else { return }
-        for (botID, change) in pendingChatChanges {
-            if let session = sessions[botID] {
-                session.isDirty = true
-                session.saveNow()
-            }
-            if let id = change.summaryID { store.deleteArchived(id, for: botID) }
-        }
-        pendingChatChanges = [:]
-    }
-
-    /// Permanently deletes an archived conversation, and the pictures (`anexos/`) only it pointed to.
-    func deleteArchivedConversation(_ id: UUID, of botID: UUID) {
-        store.deleteArchived(id, for: botID, removingPicturesUnlessUsedBy: pictureNamesInUse(by: botID))
-        archives[botID]?.removeAll { $0.id == id }
-    }
-
-    /// The file names of the pictures this Orb's live state points to: the open conversation (the store reads the saved
-    /// one too), the pictures attached to the message box and the ones in queued messages.
-    func pictureNamesInUse(by botID: UUID) -> Set<String> {
-        guard let session = sessions[botID] else { return [] }
-        var pictures = (session.conversation?.messages ?? []).flatMap(\.images)
-        if let lane = session.lane {
-            pictures += lane.pictures + lane.queued.flatMap(\.pictures)
-        }
-        return Set(pictures.map { URL(fileURLWithPath: $0.path).lastPathComponent })
-    }
-
-    /// Reads the Orb's archive (the conversations menu does this when it opens).
-    func loadArchive(_ botID: UUID) async {
-        let list = await store.readArchiveAsync(botID)
-        guard bot(botID) != nil else { return }
-        writeIfChanged(list, at: botID, in: \.archives)
-    }
-
-    /// Before the chat is replaced: a turn of the chat stops (a running routine does not: it has its own
-    /// conversation), the pending memory save is dropped (archiving saves it) and the conversation is read if it
-    /// was not yet.
-    private func leaveChat(_ botID: UUID) {
-        if sessions[botID]?.routineID == nil { stop(botID) }
-        sessions[botID]?.memoryIdle?.cancel()
-        sessions[botID]?.memoryIdle = nil
-        ensureLoaded(botID)
-    }
-
-    /// The chat that is about to leave, and what of it is not yet in memory (saved once, when it has left).
-    private struct LeavingChat {
-        var chat: Conversation
-        var stretch: [TranscriptItem]
-        var itemCount: Int
-
-        @MainActor func keepStretch(in session: BotSession) {
-            if !stretch.isEmpty { session.persistStretch(stretch) }
-        }
-    }
-
-    private func chatToArchive(_ botID: UUID) -> LeavingChat? {
-        guard let session = sessions[botID], var chat = session.parkedChat ?? session.conversation else { return nil }
-        let count = chat.items.count
-        let start = min(chat.memorySavedCount ?? 0, count)
-        let stretch = Array(chat.items[start...])
-        // The mark of how much is saved goes into the archive with the conversation.
-        if !stretch.isEmpty { chat.memorySavedCount = count }
-        return LeavingChat(chat: chat, stretch: stretch, itemCount: count)
-    }
-
-    /// Whether nothing was said in the chat since it was looked at (the awaits in between let the user go on typing).
-    private func isUnchanged(_ botID: UUID, since leaving: LeavingChat?) -> Bool {
-        guard let leaving else { return true }
-        let session = sessions[botID]
-        return (session?.parkedChat ?? session?.conversation)?.items.count == leaving.itemCount
-    }
-
-    /// The chat is in the archive: its menu entry, and the memory page of what was not yet kept.
-    private func noteArchived(_ summary: ConversationSummary, _ leaving: LeavingChat, of botID: UUID) {
-        leaving.keepStretch(in: session(botID))
-        if archives[botID] != nil {
-            archives[botID]?.append(summary)
-            archives[botID]?.sort { $0.updatedAt > $1.updatedAt }
-        }
-    }
-
-    private static let couldNotArchive = StoreNotice(
-        message: "Não foi possível guardar esta conversa em conversas anteriores (talvez falte espaço no disco). Ela continua aberta.")
-    private static let changedMeanwhile = StoreNotice(
-        message: "A conversa mudou enquanto era guardada, então a nova conversa não foi aberta. Ela continua aberta.")
-    private static let couldNotReopen = StoreNotice(
-        message: "Não foi possível reabrir a conversa: o disco não aceitou a gravação (talvez falte espaço). A conversa atual continua aberta e a outra segue em conversas anteriores.")
 
     // MARK: Memory
 
@@ -1581,9 +1339,7 @@ final class AppModel {
               fromUser: Bool = false, bubble: UUID = UUID(), endsEdit: Bool = true, origin: SendOrigin = .user) -> Bool {
         let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let session = session(botID)
-        // A routine's prompt goes to its own conversation (the chat is parked), so a chat being swapped is no obstacle to it.
         guard !isResetting, !typed.isEmpty || !pictures.isEmpty || !attachments.isEmpty, session.turnTask == nil,
-              session.routineID != nil || !changingChat.contains(botID),
               let bot = effectiveBot(botID) else { return false }
         ensureLoaded(botID)
         // "/compactar [foco]" is a command of the composer, not a message for the model.
@@ -1897,17 +1653,11 @@ final class AppModel {
             startIdleQueuedRoutines() // waiting, but its Orb may be free by now (the routine was moved to another Orb)
             return
         }
-        guard !isWorking(routine.botID), startingRoutines[routine.botID] == nil, !changingChat.contains(routine.botID) else {
+        guard !isWorking(routine.botID), startingRoutines[routine.botID] == nil else {
             queuedRoutines.append(routineID)
             return
         }
         startRoutine(routine)
-    }
-
-    /// The chat change is over: a routine that came due meanwhile runs now, over the chat that stayed (see `beginRoutine`).
-    private func endChatChange(_ botID: UUID) {
-        changingChat.remove(botID)
-        startNextQueuedWork(for: botID)
     }
 
     /// Reads the list of Orbs, then each one's session: a view that asks is told when any Orb starts or ends a run,
@@ -1966,9 +1716,7 @@ final class AppModel {
         }
         let session = session(botID)
         // A message (or a routine of its own) took the Orb meanwhile: this one waits for the turn to end, as any other.
-        // So it does while the chat is being archived or reopened: its notice at the end would read as the chat having
-        // changed, and the change would be given up.
-        guard session.turnTask == nil, !changingChat.contains(botID) else {
+        guard session.turnTask == nil else {
             if !queuedRoutines.contains(routineID) { queuedRoutines.append(routineID) }
             return
         }
@@ -1999,10 +1747,10 @@ final class AppModel {
 
     // MARK: MultiOrb (WP1)
 
-    /// Whether nothing holds the Orb: no turn, no routine or request being started, no chat being swapped.
+    /// Whether nothing holds the Orb: no turn, no routine or request being started.
     func canTakeSideWork(_ botID: UUID) -> Bool {
         !isResetting && bot(botID) != nil && sessions[botID]?.turnTask == nil && startingRoutines[botID] == nil
-            && !changingChat.contains(botID) && !delegation.isStarting(botID)
+            && !delegation.isStarting(botID)
     }
 
     /// The Orb became free: what waits for it runs now, in this order: the answers to what it asked (they wake it), a request from
@@ -2017,7 +1765,7 @@ final class AppModel {
 
     /// Runs the routines that were waiting for this Orb, one at a time, as it becomes free.
     func startNextQueuedRoutine(for botID: UUID) {
-        while sessions[botID]?.turnTask == nil, startingRoutines[botID] == nil, !changingChat.contains(botID),
+        while sessions[botID]?.turnTask == nil, startingRoutines[botID] == nil,
               let next = queuedRoutines.first(where: { id in routines.first { $0.id == id }?.botID == botID }) {
             queuedRoutines.removeAll { $0 == next }
             if let routine = routines.first(where: { $0.id == next }) { startRoutine(routine) }

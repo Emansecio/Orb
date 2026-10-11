@@ -48,12 +48,6 @@ import Testing
         #expect(SessionSummary.page(from: conversation?.items ?? []) == nil) // nor does it become a memory page
     }
 
-    @Test @MainActor func aNewConversationDoesNotGreetAgain() async {
-        let (model, bot) = model()
-        await model.newConversation(bot.id)?.value
-        #expect(items(model, bot).isEmpty)
-    }
-
     @Test @MainActor func theGreetingIsSavedWithTheConversation() throws {
         let (model, bot) = model()
         let saved = try JSONDecoder().decode(Conversation.self, from: JSONEncoder().encode(try #require(model.loadedConversation(bot.id))))

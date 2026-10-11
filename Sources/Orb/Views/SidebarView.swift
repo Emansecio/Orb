@@ -260,13 +260,6 @@ private struct SidebarBotRow: View {
                 .equatable()
         }
         .contextMenu {
-            Button(CommandName.newConversation, systemImage: "square.and.pencil") {
-                model.selection = .bot(botID)
-                model.newConversation(botID)
-            }
-            Button(CommandName.conversations, systemImage: "clock.arrow.circlepath") {
-                model.showConversations(of: botID)
-            }
             Button(CommandName.openFolder, systemImage: "folder") { model.openFolder(of: botID) }
             Button("Personalizar…", systemImage: "paintpalette") { model.showLookEditor(of: botID) }
             // MARK: MultiOrb (WP6)

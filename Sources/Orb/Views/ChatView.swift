@@ -57,12 +57,6 @@ struct ChatView: View {
                 Button("Buscar na conversa", systemImage: "magnifyingglass") { find.open() }
                     .keyboardShortcut(AppShortcut.find)
                     .help(Tip.findInConversation())
-                ConversationsMenuButton(botID: botID)
-                    .id(botID)
-                Button("Nova conversa", systemImage: "square.and.pencil") {
-                    model.newConversation(botID)
-                }
-                .help(Tip.newConversation())
                 Button("Painel do Orb", systemImage: "sidebar.right") {
                     model.toggleInspector()
                 }

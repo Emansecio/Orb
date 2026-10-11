@@ -15,10 +15,8 @@ enum CommandName {
     static let newGroup = "Novo grupo…"
     static let importOrb = "Importar de outro assistente…"
     static let goTo = "Ir para…"
-    static let newConversation = "Nova conversa"
     static let writeMessage = "Escrever uma mensagem"
     static let findInConversation = "Buscar na conversa"
-    static let conversations = "Conversas anteriores"
     static let stop = "Parar a resposta"
     static let openFolder = "Abrir pasta do Orb no Finder"
     static let toggleInspector = "Mostrar ou ocultar o painel do Orb"
@@ -36,13 +34,11 @@ enum CommandName {
 /// The keys the menus declare.
 enum AppShortcut {
     static let newBot = KeyboardShortcut("n")
-    static let newConversation = KeyboardShortcut("n", modifiers: [.command, .shift])
     /// ⌥⌘G: a new group of Orbs (sheet "Novo grupo").
     static let newGroup = KeyboardShortcut("g", modifiers: [.command, .option])
     static let toggleInspector = KeyboardShortcut("b", modifiers: [.command, .option])
     static let goTo = KeyboardShortcut("k")
     static let writeMessage = KeyboardShortcut("l")
-    static let conversations = KeyboardShortcut("y")
     static let stop = KeyboardShortcut(".")
     static let openFolder = KeyboardShortcut("o", modifiers: [.command, .shift])
     static let previousBot = KeyboardShortcut(.upArrow, modifiers: .option)
@@ -77,7 +73,7 @@ enum AppShortcut {
     static let contextual: [KeyboardShortcut] = [commandReturn, chooseModel, undoForget, find, findNext, findPrevious, settings]
 
     /// Every key above, for the tests that check that none is used twice.
-    static let all: [KeyboardShortcut] = [newBot, newConversation, newGroup, toggleInspector, goTo, writeMessage, conversations, stop,
+    static let all: [KeyboardShortcut] = [newBot, newGroup, toggleInspector, goTo, writeMessage, stop,
                                           openFolder, previousBot, nextBot, routines, connectors, skills]
         + (0..<9).map(bot(at:))
 }
@@ -109,7 +105,7 @@ extension KeyboardShortcut {
 /// A command a key answers to, so the places that show a key (the palette) ask the catalog for it by command.
 enum ShortcutCommand: String, CaseIterable, Sendable {
     case newBot, newGroup, goTo, toggleInspector, settings
-    case writeMessage, newConversation, conversations, stop, openFolder, send, newLine, queueAfterTask, stopAndSend, chooseModel, cancelEdit
+    case writeMessage, stop, openFolder, send, newLine, queueAfterTask, stopAndSend, chooseModel, cancelEdit
     case goToBot, previousBot, nextBot, routines, connectors, skills
     case allowApproval, denyApproval
     case compactOrSave, undoForget, find, findNext, findPrevious
@@ -142,14 +138,12 @@ enum ShortcutCatalog {
         ShortcutGroup(title: "Geral", items: [
             ShortcutItem(.newBot, AppShortcut.newBot, CommandName.newBot),
             ShortcutItem(.newGroup, AppShortcut.newGroup, CommandName.newGroup),
-            ShortcutItem(.goTo, AppShortcut.goTo, "Ir para… (Orbs, conversas e ações)"),
+            ShortcutItem(.goTo, AppShortcut.goTo, "Ir para… (Orbs, páginas e ações)"),
             ShortcutItem(.toggleInspector, AppShortcut.toggleInspector, CommandName.toggleInspector),
             ShortcutItem(.settings, AppShortcut.settings, "Ajustes"),
         ]),
         ShortcutGroup(title: "Conversa", items: [
             ShortcutItem(.writeMessage, AppShortcut.writeMessage, CommandName.writeMessage),
-            ShortcutItem(.newConversation, AppShortcut.newConversation, CommandName.newConversation),
-            ShortcutItem(.conversations, AppShortcut.conversations, CommandName.conversations),
             ShortcutItem(.stop, AppShortcut.stop, CommandName.stop),
             ShortcutItem(.openFolder, AppShortcut.openFolder, CommandName.openFolder),
             ShortcutItem(command: .send, keys: "↩", title: "Enviar a mensagem (com o Orb trabalhando, direciona a tarefa)"),

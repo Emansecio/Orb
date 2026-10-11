@@ -207,9 +207,9 @@ struct GroupTextsTests {
     }
 
     @Test func deletingAnOrbSaysItLeavesTheGroups() {
-        let summary = DeleteOrbSummary(name: "Lia", archivedCount: 0, routineCount: 0, folder: nil, groupCount: 2)
+        let summary = DeleteOrbSummary(name: "Lia", routineCount: 0, folder: nil, groupCount: 2)
         #expect(summary.goes.contains("sai de 2 grupos"))
-        let none = DeleteOrbSummary(name: "Lia", archivedCount: 0, routineCount: 0, folder: nil)
+        let none = DeleteOrbSummary(name: "Lia", routineCount: 0, folder: nil)
         #expect(!none.goes.contains("grupo"))
     }
 }

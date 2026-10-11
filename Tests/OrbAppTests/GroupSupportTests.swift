@@ -351,7 +351,10 @@ struct GroupStoreTests {
         let file = root.appending(path: "conversations/\(orb.uuidString)/grupo-\(group.uuidString).json")
         #expect(FileManager.default.fileExists(atPath: file.path))
         #expect(store.isConversationFile(file, of: orb))
-        #expect(store.readArchive(orb).isEmpty) // no list of earlier conversations shows it
+        // It is not a set-aside conversation of the Orb (those were `<uuid>.json`): nothing would merge it into the chat.
+        let folder = root.appending(path: "conversations/\(orb.uuidString)")
+        let plain = (try? FileManager.default.contentsOfDirectory(atPath: folder.path))?.filter { UUID(uuidString: ($0 as NSString).deletingPathExtension) != nil }
+        #expect(plain?.isEmpty == true)
         // Deleting the Orb's archive takes it along.
         store.deleteArchive(orb)
         store.flush()

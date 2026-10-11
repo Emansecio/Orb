@@ -253,7 +253,9 @@ struct DelegationPersistenceTests {
         #expect(store.readSideConversation(prefix: Store.pedidoPrefix, id: ids[4], for: bot).value != nil)
         #expect(store.readSideConversation(prefix: Store.pedidoPrefix, id: ids[3], for: bot).value != nil)
         #expect(store.readSideConversation(prefix: Store.pedidoPrefix, id: ids[0], for: bot).value == nil)
-        // They are not in the Orb's list of earlier conversations.
-        #expect(store.readArchive(bot).isEmpty)
+        // They are not set-aside conversations of the Orb (`<uuid>.json`): nothing would merge them into the chat.
+        let folder = root.appending(path: "conversations/\(bot.uuidString)")
+        let plain = (try? FileManager.default.contentsOfDirectory(atPath: folder.path))?.filter { UUID(uuidString: ($0 as NSString).deletingPathExtension) != nil }
+        #expect(plain?.isEmpty == true)
     }
 }

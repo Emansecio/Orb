@@ -117,18 +117,6 @@ import Testing
         #expect(model.takeTabRequest(of: luna) == nil) // taken once
     }
 
-    // MARK: Palette
-
-    @Test func earlierConversationsSayWhoseTheyAre() {
-        let atlas = BotLook(Bot(id: UUID(), name: "Atlas", role: "", orb: OrbConfig()))
-        let luna = BotLook(Bot(id: UUID(), name: "Luna", role: "", orb: OrbConfig()))
-        let archive = [ConversationSummary(title: "Organizar Downloads", createdAt: .now, updatedAt: .now, messageCount: 4)]
-        let entries = PaletteBuilder.entries(orbs: [atlas, luna], current: luna.id, routines: [], skills: [], archive: archive)
-        let conversation = entries.first { $0.section == .conversations }
-        #expect(conversation?.subtitle == "Luna · Hoje")
-        #expect(PaletteSearch.rank(entries, query: "luna organizar").contains { $0.section == .conversations })
-    }
-
     // MARK: Words
 
     @Test func theFirstRunCardUsesNoArticleBeforeTheName() {

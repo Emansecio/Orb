@@ -143,8 +143,7 @@ enum ImageProcessing {
 // MARK: - Store
 
 /// The pictures kept for the Orbs: `<data folder>/anexos/<orb id>/<uuid>.jpg|png`. They stay as long as a conversation
-/// of the Orb points at them: they go when the Orb is deleted, or with an archived conversation that is deleted
-/// (unless another conversation of the Orb still uses them: `Store.deleteArchived`).
+/// of the Orb points at them: they go when the Orb is deleted.
 struct ImageStore: Sendable {
     let directory: URL
 

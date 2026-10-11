@@ -143,11 +143,6 @@ struct AppCommands: Commands {
             Button(CommandName.newBot) { showMain(); model.showNewBot = true }
                 .keyboardShortcut(AppShortcut.newBot)
                 .disabled(sheetOpen)
-            Button(CommandName.newConversation) {
-                if let id = model.selectedBotID { model.newConversation(id) }
-            }
-            .keyboardShortcut(AppShortcut.newConversation)
-            .disabled(model.selectedBotID == nil)
         }
         CommandGroup(after: .sidebar) {
             Button(CommandName.toggleInspector) { model.toggleInspector() }
@@ -170,9 +165,6 @@ struct AppCommands: Commands {
             Divider()
             Button(CommandName.writeMessage) { showMain(); model.focusComposer() }
                 .keyboardShortcut(AppShortcut.writeMessage)
-                .disabled(model.commandBotID == nil || sheetOpen)
-            Button(CommandName.conversations) { showMain(); model.showConversations() }
-                .keyboardShortcut(AppShortcut.conversations)
                 .disabled(model.commandBotID == nil || sheetOpen)
             // MARK: MultiOrb (WP6): with a group on show, ⌘. stops the group's request.
             Button(CommandName.stop) { model.stopSelection() }

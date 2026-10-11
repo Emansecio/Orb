@@ -379,126 +379,49 @@ struct Store: Sendable {
         }
     }
 
-    /// Puts the conversation in the archive and returns its entry at once; the files follow on the store's queue.
-    /// The conversation file goes first: a crash before the index is written leaves a file the next listing finds.
-    /// When that file can't be written the index is left alone, and `done` (on the queue) says so: the conversation
-    /// is then in no archive, so whoever is about to let go of it must not. The same when the folder is sealed.
-    @discardableResult
-    func archive(_ conversation: Conversation, for botID: UUID, then done: (@Sendable (Bool) -> Void)? = nil) -> ConversationSummary {
-        let summary = ConversationSummary(of: conversation)
-        archive(conversation, as: summary, for: botID, then: done)
-        return summary
-    }
-
-    /// Like `archive`, once the conversation is in the archive; nil when it could not be written.
-    func archiveAndWait(_ conversation: Conversation, for botID: UUID) async -> ConversationSummary? {
-        let summary = ConversationSummary(of: conversation)
-        let archived = await withCheckedContinuation { continuation in
-            archive(conversation, as: summary, for: botID) { continuation.resume(returning: $0) }
-        }
-        return archived ? summary : nil
-    }
-
-    func archive(_ conversation: Conversation, as summary: ConversationSummary, for botID: UUID, then done: (@Sendable (Bool) -> Void)?) {
-        let file = archivedURL(botID, summary.id)
-        enqueue(touching: [file, archiveIndexURL(botID)], dropped: { done?(false) }) {
-            var entries = reconciledArchive(botID).entries
-            let archived = writeConversation(conversation, to: file, cached: false) == .wrote
-            if archived {
-                entries.append(summary)
-                write(ConversationIndex(entries: entries), to: archiveIndexURL(botID))
+    /// Puts the conversations the old "Nova conversa" set aside (`<uuid>.json` in the Orb's folder of conversations)
+    /// back into its one conversation (see `Conversation.merging`), once: their files go after the merged conversation
+    /// is written. Reads of the conversation wait for it. A conversation file that can't be read is left alone, and so
+    /// is a set-aside one that can't; the routines' and requests' files in the same folder are never touched.
+    func mergeArchive(of botID: UUID) {
+        let url = conversationURL(botID), note = metaURL(botID), index = archiveIndexURL(botID)
+        enqueue(touching: [url, note, index]) {
+            let manager = FileManager.default
+            func setAside() -> [URL] {
+                ((try? manager.contentsOfDirectory(atPath: archiveFolder(botID).path)) ?? []).compactMap { name in
+                    guard name.hasSuffix(".json"), let id = UUID(uuidString: String(name.dropLast(".json".count))) else { return nil }
+                    return archivedURL(botID, id)
+                }
             }
-            done?(archived)
-        }
-    }
-
-    /// The archived conversations of an Orb, newest first. A file that can't be read is left out of the list.
-    func readArchive(_ botID: UUID) -> [ConversationSummary] {
-        queue.sync { listArchive(botID) }
-    }
-
-    func readArchiveAsync(_ botID: UUID) async -> [ConversationSummary] {
-        await withCheckedContinuation { continuation in
-            queue.async { continuation.resume(returning: listArchive(botID)) }
-        }
-    }
-
-    func readArchived(_ id: UUID, for botID: UUID) -> StoreRead<Conversation> {
-        let url = archivedURL(botID, id)
-        return Self.gate.reading(url) {
-            read(Conversation.self, from: url, ifUnreadable: "ela saiu da lista de conversas")
-        }
-    }
-
-    /// Like `readArchived`, on a thread of the store's own: reopening a long conversation does not freeze the window.
-    func readArchivedAsync(_ id: UUID, for botID: UUID) async -> StoreRead<Conversation> {
-        await withCheckedContinuation { continuation in
-            Self.readQueue.async { continuation.resume(returning: readArchived(id, for: botID)) }
-        }
-    }
-
-    /// Deletes an archived conversation. With `unlessUsedBy` (the file names of the pictures the app holds in memory
-    /// for this Orb: its open conversation, unsent attachments, queued messages) the pictures only this conversation
-    /// pointed to go with it; one that another conversation of the same Orb (the current one, another archived one,
-    /// a routine's) or `unlessUsedBy` still refers to stays. nil leaves the pictures alone (reopening a conversation
-    /// moves it, it is not deleted).
-    func deleteArchived(_ id: UUID, for botID: UUID, removingPicturesUnlessUsedBy inUse: Set<String>? = nil) {
-        let file = archivedURL(botID, id)
-        enqueue(touching: [file, archiveIndexURL(botID)]) {
-            Self.gate.waitForReaders(of: file)
-            let pictures = inUse == nil ? [] : Self.pictureNames(inFileAt: file)
-            try? FileManager.default.removeItem(at: file)
-            let (entries, changed) = reconciledArchive(botID)
-            if changed { write(ConversationIndex(entries: entries), to: archiveIndexURL(botID)) }
-            if let inUse { removePictures(pictures, of: botID, unlessUsedBy: inUse) }
-        }
-    }
-
-    /// The names (`<uuid>.jpg|png`, see `ImageStore`) of the pictures a conversation file points to. It reads the
-    /// file's text, not the conversation: it works on a file that no longer decodes, and any mention counts.
-    static func pictureNames(inFileAt url: URL) -> Set<String> {
-        guard let data = try? Data(contentsOf: url), !data.isEmpty else { return [] }
-        let text = String(decoding: data, as: UTF8.self)
-        let matches = pictureNamePattern.matches(in: text, range: NSRange(text.startIndex..., in: text))
-        return Set(matches.compactMap { Range($0.range, in: text).map { String(text[$0]) } })
-    }
-
-    private static let pictureNamePattern = try! NSRegularExpression(
-        pattern: #"[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}\.(?:jpg|png)"#)
-
-    private static func jsonFiles(in folder: URL) -> [URL] {
-        ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? [])
-            .filter { $0.pathExtension == "json" && $0.lastPathComponent != "index.json" }
-    }
-
-    /// The `<name>.json.corrupt-<date>` copies of files that stopped decoding: they are kept for the user to recover
-    /// and may still name a picture, so a picture they name is not deleted. In the Orb's own `conversations/` folder
-    /// (`botID` given) only the copies of this Orb's files count.
-    private static func setAsideCopies(in folder: URL, of botID: UUID? = nil) -> [URL] {
-        ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? [])
-            .filter { url in
-                let name = url.lastPathComponent
-                guard name.contains(".json.corrupt-") else { return false }
-                return botID.map { name.hasPrefix($0.uuidString) } ?? true
+            let files = setAside()
+            guard !files.isEmpty else {
+                try? manager.removeItem(at: index) // the list of the set-aside ones, which is no longer read
+                return
             }
-    }
-
-    /// Deletes the Orb's pictures named in `names`, except those the Orb's current conversation, the rest of its archive
-    /// (routines' conversations included) or `inUse` still point to. Runs on the store's queue.
-    private func removePictures(_ names: Set<String>, of botID: UUID, unlessUsedBy inUse: Set<String>) {
-        var doomed = names.subtracting(inUse)
-        guard !doomed.isEmpty else { return }
-        let others = ([conversationURL(botID)] + Self.jsonFiles(in: archiveFolder(botID)))
-            + Self.setAsideCopies(in: archiveFolder(botID)) + Self.setAsideCopies(in: conversationURL(botID).deletingLastPathComponent(), of: botID)
-        for other in others where !doomed.isEmpty {
-            Self.gate.waitForReaders(of: other)
-            doomed.subtract(Self.pictureNames(inFileAt: other))
+            var current: Conversation?
+            if manager.fileExists(atPath: url.path) {
+                guard let data = try? Data(contentsOf: url),
+                      let read = try? JSONDecoder().decode(Conversation.self, from: data) else { return }
+                current = read
+            }
+            let archived = files.compactMap { file -> (URL, Conversation)? in
+                guard let data = try? Data(contentsOf: file),
+                      let conversation = try? JSONDecoder().decode(Conversation.self, from: data) else { return nil }
+                return (file, conversation)
+            }
+            guard !archived.isEmpty else { return }
+            let merged = Conversation.merging(archived.map(\.1), into: current)
+            guard writeConversation(merged, to: url, cached: true) != .failed else { return }
+            write(ConversationMeta(of: merged, file: FileFingerprint(of: url)), to: note)
+            for (file, _) in archived {
+                Self.gate.waitForReaders(of: file)
+                try? manager.removeItem(at: file)
+            }
+            if setAside().isEmpty { try? manager.removeItem(at: index) }
         }
-        let folder = ImageStore(dataFolder: directory).folder(for: botID)
-        for name in doomed { try? FileManager.default.removeItem(at: folder.appending(path: name)) }
     }
 
-    /// Everything archived for the Orb, its routines' conversations included (the Orb is being deleted).
+    /// The Orb's folder of conversations: its routines' and its requests' (the Orb is being deleted).
     func deleteArchive(_ botID: UUID) {
         let folder = archiveFolder(botID)
         enqueue(touching: []) {
@@ -588,36 +511,6 @@ struct Store: Sendable {
             try? FileManager.default.removeItem(at: url)
             encoders.remove(url)
         }
-    }
-
-    private func listArchive(_ botID: UUID) -> [ConversationSummary] {
-        let (entries, changed) = reconciledArchive(botID)
-        if changed { write(ConversationIndex(entries: entries), to: archiveIndexURL(botID)) }
-        return entries.sorted { ($0.updatedAt, $0.id.uuidString) > ($1.updatedAt, $1.id.uuidString) }
-    }
-
-    /// The index corrected by the folder: entries whose file is gone are dropped, and files the index does not know
-    /// (it was lost, or the app quit before writing it) are added. A file that can't be decoded is skipped and left
-    /// where it is. `changed` says the index file needs rewriting. Runs on `queue`.
-    private func reconciledArchive(_ botID: UUID) -> (entries: [ConversationSummary], changed: Bool) {
-        let folder = archiveFolder(botID)
-        guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else { return ([], false) }
-        let files = Set(names.compactMap { name -> UUID? in
-            name.hasSuffix(".json") ? UUID(uuidString: String(name.dropLast(".json".count))) : nil
-        })
-        let indexed = (try? Data(contentsOf: archiveIndexURL(botID)))
-            .flatMap { try? JSONDecoder().decode(ConversationIndex.self, from: $0) }?.entries
-        var entries: [ConversationSummary] = []
-        var seen: Set<UUID> = []
-        for entry in indexed ?? [] where files.contains(entry.id) && seen.insert(entry.id).inserted { entries.append(entry) }
-        var changed = indexed == nil ? !files.isEmpty : entries.count != indexed?.count
-        for id in files.subtracting(seen).sorted(by: { $0.uuidString < $1.uuidString }) {
-            guard let data = try? Data(contentsOf: archivedURL(botID, id)),
-                  let conversation = try? JSONDecoder().decode(Conversation.self, from: data) else { continue }
-            entries.append(ConversationSummary(of: conversation, id: id))
-            changed = true
-        }
-        return (entries, changed)
     }
 
     /// Waits for pending writes.

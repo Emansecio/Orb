@@ -141,60 +141,6 @@ struct RoutinesUITests {
         #expect(RoutineText.reportBlocks("").isEmpty)
         #expect(RoutineText.reportBlocks("   \n\n").isEmpty)
     }
-
-    // MARK: Earlier conversations
-
-    private func summary(_ title: String, _ updated: Date, messages: Int = 2) -> ConversationSummary {
-        ConversationSummary(title: title, createdAt: updated, updatedAt: updated, messageCount: messages)
-    }
-
-    @Test func conversationsAreGroupedByDayNewestFirst() {
-        let entries = [
-            summary("antiga", date(2026, 8, 1, 10, 0)),
-            summary("ontem", date(2026, 10, 7, 22, 0)),
-            summary("hoje cedo", date(2026, 10, 8, 1, 0)),
-            summary("hoje tarde", date(2026, 10, 8, 11, 0)),
-            summary("semana", date(2026, 10, 3, 9, 0)),
-        ]
-        let groups = ConversationListing.groups(entries, now: now, calendar: calendar)
-        #expect(groups.map(\.title) == ["Hoje", "Ontem", "Esta semana", "Mais antigas"])
-        #expect(groups[0].entries.map(\.title) == ["hoje tarde", "hoje cedo"])
-        #expect(groups[1].entries.map(\.title) == ["ontem"])
-        #expect(groups[3].entries.map(\.title) == ["antiga"])
-        #expect(ConversationListing.groups([], now: now, calendar: calendar).isEmpty)
-        // Empty groups are left out.
-        #expect(ConversationListing.groups([entries[0]], now: now, calendar: calendar).map(\.title) == ["Mais antigas"])
-    }
-
-    @Test func searchIgnoresCaseAndAccents() {
-        let entries = [summary("Planejar a viagem de dezembro", now), summary("Revisar o texto", now)]
-        #expect(ConversationListing.filter(entries, query: "  ").count == 2)
-        #expect(ConversationListing.filter(entries, query: "VIAGEM").map(\.title) == ["Planejar a viagem de dezembro"])
-        #expect(ConversationListing.filter(entries, query: "revisão").isEmpty)
-        #expect(ConversationListing.filter(entries, query: "planejár").count == 1)
-    }
-
-    @Test func aConversationRowSaysHowManyMessagesAndWhen() {
-        #expect(ConversationListing.subtitle(summary("a", date(2026, 10, 7, 14, 32), messages: 4), now: now, calendar: calendar)
-                == "4 mensagens · ontem 14:32")
-        #expect(ConversationListing.subtitle(summary("a", date(2026, 10, 8, 9, 0), messages: 1), now: now, calendar: calendar)
-                == "1 mensagem · hoje 09:00")
-    }
-
-    @Test func arrowKeysMoveTheSelectionAndStopAtTheEnds() {
-        let ids = (0..<3).map { _ in UUID() }
-        #expect(ConversationListing.moved(nil, by: 1, in: ids) == ids[0])
-        #expect(ConversationListing.moved(nil, by: -1, in: ids) == ids[2])
-        #expect(ConversationListing.moved(ids[0], by: 1, in: ids) == ids[1])
-        #expect(ConversationListing.moved(ids[2], by: 1, in: ids) == ids[2])
-        #expect(ConversationListing.moved(ids[0], by: -1, in: ids) == ids[0])
-        #expect(ConversationListing.moved(UUID(), by: 1, in: ids) == ids[0])
-        #expect(ConversationListing.moved(nil, by: 1, in: []) == nil)
-    }
-
-    @Test func theSearchFieldAppearsFromFiveConversations() {
-        #expect(ConversationListing.searchFrom == 5)
-    }
 }
 
 /// "Nova rotina" with no Orb is not a dead end: what each start says (the paths that make the Atlas are in WelcomeTests).

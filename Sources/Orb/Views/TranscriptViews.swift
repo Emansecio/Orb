@@ -790,7 +790,6 @@ private struct NoticeLine: View {
         case .retry: model.retryLastTurn(botID)
         case .continueTurn: model.continueTurn(botID)
         case .openSettings: SettingsRouter.open(.models, using: openSettings)
-        case .newConversation: model.newConversation(botID)
         case .compact: model.compactAndRetry(botID)
         case .openMemory: model.showMemory(of: botID)
         case .reviewSkill:
