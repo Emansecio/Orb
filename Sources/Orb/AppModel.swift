@@ -59,6 +59,8 @@ final class AppModel {
     /// The routine each Orb is reading its conversation for before starting it (at most one per Orb): a second
     /// request waits for that one.
     @ObservationIgnored private var startingRoutines: [UUID: UUID] = [:]
+    /// Gives freed memory back once the app has been in the background a while (see `MemoryRelief`).
+    @ObservationIgnored private var backgroundRelief: Task<Void, Never>?
     var isStartingRoutine: Bool { !startingRoutines.isEmpty } // internal for tests (`startingRoutines` is private to this file)
     /// Things the user should hear about the data files (an unreadable file and where its copy is, a failed save).
     /// The first one is shown as an alert; `dismissDataNotice` moves on to the next.
@@ -434,9 +436,20 @@ final class AppModel {
         }
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
+                self?.backgroundRelief?.cancel()
                 if let self, case .bot(let id) = self.selection {
                     self.setUnread(0, for: id)
                     Task { await self.refreshMemory(id) } // picks up pages edited by hand meanwhile
+                }
+            }
+        }
+        // A while in the background, the memory freed while you used the app goes back to the system.
+        NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.backgroundRelief?.cancel()
+                self?.backgroundRelief = Task {
+                    try? await Task.sleep(for: .seconds(30))
+                    if !Task.isCancelled { MemoryRelief.soon() }
                 }
             }
         }
@@ -515,6 +528,7 @@ final class AppModel {
         guard !didReportSaveFailure else { return }
         let keepAlive = conversationKeepAlive
         let candidates = sessions.values.filter { (only == nil || $0.id == only) && $0.isIdle(now: now, keepAlive: keepAlive) }
+        var unloadedAny = false
         for session in candidates {
             let botID = session.id
             guard let meta = await store.readMetaAsync(botID) else { continue }
@@ -523,7 +537,9 @@ final class AppModel {
                   let conversation = session.conversation, meta.matches(conversation) else { continue }
             session.unload()
             store.releaseCache(for: botID)
+            unloadedAny = true
         }
+        if unloadedAny { MemoryRelief.soon() }
     }
 
     /// The same message is never queued twice (a file read from two places at once reports the same thing).

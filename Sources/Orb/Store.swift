@@ -1,6 +1,5 @@
 import Foundation
 import Security
-import Darwin.malloc
 
 /// Everything the app keeps between launches, except conversations (see `Store`) and API keys (Keychain).
 struct AppState: Codable, Sendable {
@@ -157,7 +156,7 @@ struct Store: Sendable {
             read(Conversation.self, from: url, ifUnreadable: "a conversa começou vazia")
         }
         // The decode of a long conversation leaves megabytes of freed memory the process would keep: give it back.
-        if let size = result.fingerprint?.size, size > 1 << 20 { malloc_zone_pressure_relief(nil, 0) }
+        if let size = result.fingerprint?.size, size > 1 << 20 { MemoryRelief.now() }
         // A conversation read without a valid note about it gets one, so the next launch can tell what is unsaved
         // in it without reading it again.
         if let conversation = result.value, let fingerprint = result.fingerprint, result.notice == nil,

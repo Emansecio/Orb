@@ -437,6 +437,14 @@ enum OrbImages {
         return images
     }
 
+    /// Lets go of every decoded bitmap. The editor fills the caches with variants (each tint, each option at stage size)
+    /// that nothing shows once it closes; the Orbs on screen keep their own bitmaps, and a size they ask for again is
+    /// decoded in the background as usual.
+    static func trim() {
+        cache.removeAllObjects()
+        untinted.removeAllObjects()
+    }
+
     /// For tests: drops these bitmaps from the shared cache, as its byte limit or memory pressure would.
     static func evictForTesting(_ layers: [OrbLayer], pixels: CGFloat) {
         for layer in layers { cache.removeObject(forKey: key(layer.path, side: bitmapSide(for: pixels), tint: layer.tint)) }

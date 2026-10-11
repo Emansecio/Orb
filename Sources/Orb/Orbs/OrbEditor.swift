@@ -70,7 +70,10 @@ struct OrbEditor: View {
         }
         .background(Palette.canvas)
         .onGeometryChange(for: Bool.self) { $0.size.height < Self.compactBelow } action: { isShort = $0 }
-        .onDisappear { undoManager?.removeAllActions(withTarget: undoTarget) }
+        .onDisappear {
+            undoManager?.removeAllActions(withTarget: undoTarget)
+            MemoryRelief.orbsClosed() // the variants it decoded: some 50 MB after a tour of the categories
+        }
     }
 
     /// What the chosen category offers. Another category cross-fades with the one before (§2.6): the two are laid over

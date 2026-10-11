@@ -41,12 +41,12 @@ struct RootView: View {
         }
         .environment(\.presentedEmptyChats, presentedEmptyChats)
         .environment(\.presentedQueued, presentedQueued)
-        .sheet(isPresented: $model.showNewBot, onDismiss: { model.newBotStart = nil; model.newBotImporting = false }) {
+        .sheet(isPresented: $model.showNewBot, onDismiss: { model.newBotStart = nil; model.newBotImporting = false; MemoryRelief.orbsClosed() }) {
             // Opened from a kept memory on the welcome screen: the sheet starts from it. Opened to import: on that panel.
             NewBotSheet(kept: model.newBotStart.map { [$0] } ?? [], chosen: model.newBotStart, startsImporting: model.newBotImporting)
         }
         // MARK: MultiOrb (WP6)
-        .sheet(isPresented: $model.showNewGroup, onDismiss: { model.newGroupStart = nil }) {
+        .sheet(isPresented: $model.showNewGroup, onDismiss: { model.newGroupStart = nil; MemoryRelief.orbsClosed() }) {
             NewGroupSheet(startingWith: model.newGroupStart)
         }
         // MARK: end MultiOrb (WP6)
