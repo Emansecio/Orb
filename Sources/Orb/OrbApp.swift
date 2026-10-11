@@ -154,6 +154,11 @@ struct AppCommands: Commands {
                 .keyboardShortcut(AppShortcut.toggleInspector)
                 .disabled(sheetOpen)
         }
+        // The system's Quit is ignored while a sheet is open (see `AppTermination`).
+        CommandGroup(replacing: .appTermination) {
+            Button(CommandName.quit) { AppTermination.quit() }
+                .keyboardShortcut("q")
+        }
         CommandGroup(replacing: .help) {
             Button(CommandName.shortcuts) { showMain(); model.showShortcuts = true }
                 .disabled(sheetOpen)

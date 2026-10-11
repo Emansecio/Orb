@@ -37,6 +37,34 @@ enum AppRelaunch {
             helper.standardError = FileHandle.nullDevice
             try? helper.run()
         }
+        AppTermination.quit()
+    }
+}
+
+/// Quitting the app. AppKit ignores `terminate` while any window has a sheet attached (it does not even ask the
+/// delegate), so a quit with the "Redefinindo…" or "Novo Orb" sheet open did nothing: the sheets close first.
+enum AppTermination {
+    @MainActor
+    static func quit() {
+        closeSheets()
         NSApp.terminate(nil)
+    }
+
+    /// Ends every sheet, innermost first (a sheet can carry a sheet of its own).
+    @MainActor
+    static func closeSheets(in windows: [NSWindow] = NSApp.windows) {
+        for window in windows {
+            while let sheet = innermostSheet(of: window) {
+                (sheet.sheetParent ?? window).endSheet(sheet)
+                sheet.orderOut(nil)
+            }
+        }
+    }
+
+    @MainActor
+    private static func innermostSheet(of window: NSWindow) -> NSWindow? {
+        var sheet = window.attachedSheet
+        while let inner = sheet?.attachedSheet { sheet = inner }
+        return sheet
     }
 }
