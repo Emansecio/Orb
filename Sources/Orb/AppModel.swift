@@ -1676,6 +1676,9 @@ final class AppModel {
         session.showWork(WorkPhrase.line(status: "Pensando"))
         session.clearBeats() // the last turn's joy or error does not hide this one
         live(botID).poked()
+        // The answers of the Orbs it asked wake the Orb by themselves: no message of yours scrolled the chat, so it is asked to
+        // follow the answer from the start, as it does yours (but only if it was at the end).
+        if case .orbReply = origin { live(botID).followed() }
         if fromUser { live(botID).scrolled() } // a routine or a quick ask must not drag a chat you are reading to its end
         if origin.isUser { session.flash(\.isListening, seconds: 1.4) }
 

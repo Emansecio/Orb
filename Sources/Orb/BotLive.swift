@@ -78,6 +78,10 @@ final class BotLive {
     /// while the Orb works (its bubble changes no transcript revision). Not for a routine's prompt or a queued message
     /// delivered to the model, which must not pull a chat you are reading. The Orb does not jump for it.
     private(set) var scrollNudge = 0
+    /// Incremented when a turn starts by itself in this chat (the answers to the Orb's requests to other Orbs wake it): the
+    /// chat follows the new rows only if it was following the end, and stays where it is when you scrolled up to read.
+    /// `scrollNudge` is for what you sent and always takes the chat to the end.
+    private(set) var followNudge = 0
     /// The rows of the chat that are about to leave because you edited a message or asked for a reply again: they fade
     /// out (`Motion.exit`) before the conversation is cut. Empty the rest of the time.
     private(set) var dropping: Set<UUID> = []
@@ -205,6 +209,8 @@ final class BotLive {
     func poked() { poke += 1 }
 
     func scrolled() { scrollNudge += 1 }
+
+    func followed() { followNudge += 1 }
 
     func setDropping(_ ids: Set<UUID>) { assign(\.dropping, to: ids) }
 

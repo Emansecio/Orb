@@ -199,6 +199,7 @@ private struct TranscriptList: View {
                 if !BottomFollower.anchorsItself { follower.follow { scrollToBottom(proxy) } }
             }
             .onChange(of: live.scrollNudge) { showSentMessage(proxy) }
+            .onChange(of: live.followNudge) { followResumedTurn(proxy) }
             .onAppear {
                 guard !BottomFollower.anchorsItself else { return }
                 scrollToBottom(proxy)
@@ -282,6 +283,19 @@ private struct TranscriptList: View {
         followsBottom = true
         withAnimation(wasAtBottom ? ScrollMotion.animation(reduceMotion: reduceMotion) : nil) {
             scrollToBottom(proxy)
+        }
+    }
+
+    /// A turn the Orb started by itself (the answer of another Orb woke it): the list scrolls to the end the way it does for
+    /// a message of yours, so the rows that come with it are laid out near the end and the scroll view keeps it from there.
+    /// Unlike `showSentMessage` it never takes a list the user scrolled up (or a result of the find bar) to the end.
+    private func followResumedTurn(_ proxy: ScrollViewProxy) {
+        guard followsBottom, !find.pausesFollowing else { return }
+        withAnimation(ScrollMotion.animation(reduceMotion: reduceMotion)) { scrollToBottom(proxy) }
+        // Again once the rows of the event and the working line have been laid out: the first scroll goes by estimates.
+        Task {
+            try? await Task.sleep(for: .milliseconds(150))
+            if followsBottom, !find.pausesFollowing { scrollToBottom(proxy) }
         }
     }
 

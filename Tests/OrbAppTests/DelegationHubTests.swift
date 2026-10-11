@@ -207,6 +207,9 @@ private final class Hooks: GroupTurnHooks {
         // The target is back in its chat; nobody is left waiting, and the asker's wait line is gone.
         #expect(model.sessions[team.pesquisador.id]?.routineID == nil && model.sessions[team.pesquisador.id]?.parkedChat == nil)
         #expect(model.live(team.atlas.id).chainWork == nil && model.live(team.atlas.id).partner == nil && !model.live(team.atlas.id).isConversing)
+        // The chat is asked to follow the turn the answer woke (once), and the one send of the person is the only scroll to the end.
+        #expect(model.live(team.atlas.id).followNudge == 1 && model.live(team.atlas.id).scrollNudge == 1)
+        #expect(model.live(team.pesquisador.id).followNudge == 0 && model.live(team.pesquisador.id).scrollNudge == 0)
     }
 
     @Test func theAskerWaitsOnScreenWhileTheTargetWorks() async throws {
