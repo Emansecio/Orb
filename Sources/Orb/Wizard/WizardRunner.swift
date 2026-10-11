@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 /// The "Criar conversando" assistant: a conversation that exists only while the sheet is open and writes nothing down. It
-/// runs like `reviewSkillsIfDue` does: a `TurnRequest` (or a `ClaudeCodeTurn`) put together by hand for a stand-in Orb that is not
+/// runs like `reviewSkillsIfDue` does: a `TurnRequest` put together by hand for a stand-in Orb that is not
 /// in `bots`, with `orb_draft` as its only tool. What it learns goes into `draft`, which the preview shows live; nothing
 /// exists until `create()`, and `cancel()` throws it all away.
 @MainActor @Observable
@@ -24,7 +24,7 @@ final class WizardRunner {
     /// The assistant's words as they stream, until a tool call or the end of the answer makes them a message.
     private(set) var liveText = ""
     private(set) var failure: String?
-    /// What the model has been told, for the native engine (Claude Code keeps its own session).
+    /// What the model has been told.
     private(set) var history: [ChatMessage] = []
     /// The sheet closed (cancelled, or the Orb was made): nothing more happens.
     private(set) var isFinished = false
@@ -34,17 +34,10 @@ final class WizardRunner {
     @ObservationIgnored private(set) weak var model: AppModel?
     @ObservationIgnored private var turn: Task<Void, Never>?
     @ObservationIgnored private var folder: URL?
-    @ObservationIgnored private var claudeSession: String?
-    @ObservationIgnored private var claude: ClaudeCodeEngine?
     @ObservationIgnored private var lastPrompt: String?
     /// Where the new Orb's own folder is made (`~/Orbs`; a test puts a temporary one).
     @ObservationIgnored var orbsBase = OrbFolder.defaultBase
     @ObservationIgnored private var historyMark = 0
-    /// Finds Claude Code (a test puts a stand-in).
-    @ObservationIgnored var claudeLauncher: @Sendable () async -> (executable: URL, environment: [String: String])? = {
-        guard let found = await ClaudeCode.shared.installation() else { return nil }
-        return (found.executable, await ClaudeCode.shared.environment(for: found))
-    }
 
     init(model: AppModel? = nil) {
         self.model = model
@@ -167,8 +160,8 @@ final class WizardRunner {
 
     // MARK: The tool
 
-    /// One `orb_draft` call: the draft takes it, and the model reads the draft back. Called from the native engine's tool and,
-    /// for Claude Code, from the bridge's mailbox (`AppModel.wizardDraft`).
+    /// One `orb_draft` call: the draft takes it, and the model reads the draft back. Called from the native engine's tool and
+    /// from the bridge's mailbox (`AppModel.wizardDraft`).
     func applyDraft(_ arguments: JSONValue) -> String {
         guard !isFinished else { return "The assistant is closed." }
         let report = draft.apply(arguments)
@@ -209,11 +202,8 @@ final class WizardRunner {
         historyMark = history.count
         WizardRegistry.add(self)
         let usedModel = ref.text
-        if ref.provider == .claudeCode {
-            turn = Task { [weak self] in await self?.runClaudeCode(prompt: prompt, model: ref.model, usedModel: usedModel) }
-        } else {
-            turn = Task { [weak self] in await self?.runNative(prompt: prompt, ref: ref, account: account, usedModel: usedModel) }
-        }
+        // Every provider, Claude Code's included, goes through the native engine (`account.client` picks the transport).
+        turn = Task { [weak self] in await self?.runNative(prompt: prompt, ref: ref, account: account, usedModel: usedModel) }
     }
 
     private func runNative(prompt: String, ref: ModelRef, account: ProviderAccount, usedModel: String) async {
@@ -236,29 +226,6 @@ final class WizardRunner {
         await consume(model.engine.run(request), usedModel: usedModel, tracksHistory: true)
     }
 
-    private func runClaudeCode(prompt: String, model claudeModel: String, usedModel: String) async {
-        guard let model else { return }
-        guard let launch = await claudeLauncher() else {
-            fail("O Claude Code não foi encontrado neste Mac. Veja Ajustes → Modelos.")
-            return
-        }
-        guard !Task.isCancelled else { return }
-        let folder = ensureFolder()
-        // One bridge for the whole app: the call arrives in the app's own mailbox and `AppModel.bridgeCall` hands `orb_draft` to the
-        // assistant `id` (`wizardDraft`). Nothing per sheet but the tools server's empty memory folder.
-        model.orbBridge.start()
-        let tools = OrbToolsMCPServer.config(directory: folder.appending(path: "memoria", directoryHint: .isDirectory),
-                                             orb: id, bridge: model.orbBridge.directory, wizard: true)
-        var claudeTurn = ClaudeCodeTurn(bot: syntheticBot, executable: launch.executable, model: claudeModel,
-                                        system: WizardPrompt.system(profile: model.profile.promptSection), prompt: prompt,
-                                        sessionID: claudeSession, connectors: [tools], environment: launch.environment,
-                                        permissions: { PermissionState(mode: .readOnly, rules: []) })
-        claudeTurn.onlyTools = [ClaudeCodeTools.memoryPrefix + OrbDraftTool.name]
-        let engine = claude ?? ClaudeCodeEngine(gate: model.gate)
-        claude = engine
-        await consume(engine.run(claudeTurn), usedModel: usedModel, tracksHistory: false)
-    }
-
     /// Reads a turn's events into the chat.
     private func consume(_ events: AsyncStream<TurnEvent>, usedModel: String, tracksHistory: Bool) async {
         var failed = false
@@ -272,8 +239,6 @@ final class WizardRunner {
                 flushLiveText()
             case .message(let message):
                 if tracksHistory { history.append(message) }
-            case .session(let session):
-                if !session.isEmpty { claudeSession = session }
             case .requestUsage(let used):
                 record(UsageTotals(used), model: usedModel)
             case .usage(let total):
@@ -285,7 +250,7 @@ final class WizardRunner {
                 failure = message
             case .notice(let text):
                 if text == AgentEngine.pausedNotice(after: Self.maxSteps) { reachedStepLimit = true }
-            case .status, .approval, .toolFinished, .pendingUsage, .taskPaused, .steered, .compacted:
+            case .session, .status, .approval, .toolFinished, .pendingUsage, .taskPaused, .steered, .compacted:
                 break
             }
         }

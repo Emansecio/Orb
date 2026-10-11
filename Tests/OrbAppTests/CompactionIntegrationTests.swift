@@ -389,28 +389,15 @@ struct SessionConnectorTests {
         #expect((model.conversations[botID]?.summaryCoveredCount ?? .max) < (model.conversations[botID]?.messages.count ?? 0))
     }
 
-    @Test @MainActor func forClaudeCodeTheSessionIsDroppedAndTheNextOneStartsFromTheSummary() throws {
-        var seeded = conversation(turns: 6)
-        seeded.claudeSessionID = "sessao-abc"
-        seeded.claudeSessionFolder = "/tmp/pasta"
-        seeded.claudeSeenCount = seeded.messages.count
-        seeded.claudeMemoryPinned = "identidade"
-        seeded.claudeWorkspaceHash = "w"
-        seeded.claudeStandingHash = "s"
-        let (model, botID) = model(seeded, claudeCode: true)
+    @Test @MainActor func aClaudeCodeChatFoldsLikeAnyOtherAndHasNoSessionToRestart() async throws {
+        let (model, botID) = model(conversation(turns: 24, output: 20_000), claudeCode: true)
         let result = model.compactNow(botID: botID, focus: "o login")
 
-        #expect(result.status == .claudeSessionRestarted && result.didCompact)
-        #expect(result.message.contains("A próxima mensagem começa uma sessão nova do Claude Code, com esse resumo."))
+        #expect(result.status == .compacted && result.didCompact)
+        #expect(!result.message.contains(AppModel.claudeRestartNote))
         let conversation = try #require(model.conversations[botID])
-        #expect(conversation.claudeSessionID == nil && conversation.claudeSeenCount == nil)
-        #expect(conversation.claudeMemoryPinned == nil && conversation.claudeWorkspaceHash == nil && conversation.claudeStandingHash == nil)
-        // Everything but the latest turn is in the summary; the new session's catch-up is that summary and that turn.
-        #expect(conversation.messages.count - conversation.coveredMessageCount == 4)
-        let catchUp = ClaudeCodePrompt.catchUp(conversation, seen: 0)
-        #expect(catchUp.contains("Pedido original: " + firstRequest) && catchUp.contains("Dar atenção a: o login"))
-        #expect(catchUp.contains("User: pedido número 5 do projeto"))
-        #expect(!catchUp.contains("User: pedido número 4 do projeto"))
+        #expect(conversation.summary?.contains("Dar atenção a: o login") == true)
+        #expect(conversation.summaryCoveredCount == result.foldedMessages)
     }
 
     // MARK: Notices from the engine

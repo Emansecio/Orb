@@ -405,14 +405,12 @@ struct CatchUpLatestRequestTests {
         #expect(app.model.transcript(app.botID).contains { if case .user(let text, _) = $0.kind { text == "/compactar" } else { false } })
     }
 
-    @Test @MainActor func claudeCodesManualCompactionReportsEstimatedNumbers() throws {
+    @Test @MainActor func claudeCodesManualCompactionReportsEstimatedNumbersLikeAnyOther() throws {
         var seeded = Conversation()
-        seeded.messages = (0..<8).flatMap { work($0 == 0 ? firstRequest : "pedido número \($0) do projeto", steps: 1, output: 4_000, reply: "resposta \($0)", tag: "g\($0)") }
-        seeded.claudeSessionID = "sessao-abc"
-        seeded.claudeSessionFolder = "/tmp/pasta"
+        seeded.messages = (0..<24).flatMap { work($0 == 0 ? firstRequest : "pedido número \($0) do projeto", steps: 1, output: 20_000, reply: "resposta \($0)", tag: "g\($0)") }
         let app = harness(seeded, claudeCode: true)
         let result = app.model.compactNow(botID: app.botID)
-        #expect(result.status == .claudeSessionRestarted)
+        #expect(result.status == .compacted)
         #expect(result.tokensBefore > result.tokensAfter && result.tokensAfter > 0)
         #expect(app.notices(startingWith: "Compactei a conversa:").first?.contains("tokens)") == true)
     }

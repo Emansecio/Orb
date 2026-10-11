@@ -179,10 +179,15 @@ struct ProviderClientTests {
         #expect(try await client.credentials(false) == "second")
     }
 
-    @Test func claudeCodeModelsHaveNoHTTPClient() {
-        var account = ProviderAccount(kind: .claudeCode)
-        account.baseURL = "http://127.0.0.1:1/v1"
-        #expect(account.client(for: ProviderModel(id: "opus", name: "Opus", format: .claudeCode), credentials: { _ in nil }, conversationID: "c") == nil)
+    @Test func claudeCodeModelsGoThroughTheCLIPipeWhateverTheAddress() {
+        // No address, no key: the CLI is only the transport.
+        let account = ProviderAccount(kind: .claudeCode)
+        let model = ProviderModel(id: "opus", name: "Opus", format: .claudeCode)
+        #expect(account.client(for: model, credentials: { _ in nil }, conversationID: "c") is ClaudeCodeClient)
+        #expect(account.client(for: nil, credentials: { _ in nil }, conversationID: "c") is ClaudeCodeClient)
+        var withAddress = account
+        withAddress.baseURL = "http://127.0.0.1:1/v1"
+        #expect(withAddress.client(for: model, credentials: { _ in nil }, conversationID: "c") is ClaudeCodeClient)
     }
 }
 

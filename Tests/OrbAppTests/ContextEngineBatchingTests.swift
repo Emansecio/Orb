@@ -575,13 +575,13 @@ struct ContextSettingsTests {
         #expect(again.contextBudget(for: again.bots[0])?.window == 128_000)
     }
 
-    @Test func claudeCodeManagesItsOwnContext() throws {
+    @Test func claudeCodeIsBudgetedByTheOrbLikeAnyModel() throws {
         let (model, root) = try model()
         defer { removeTestFolder(root) }
         model.providers = [ProviderAccount(kind: .claudeCode)]
         model.defaultModel = "claudeCode/opus"
-        #expect(model.contextBudget(for: model.bots[0]) == nil)
-        #expect(model.contextFill(for: model.bots[0].id) == nil)
+        #expect(model.contextBudget(for: model.bots[0])?.window == 200_000)
+        #expect(model.contextFill(for: model.bots[0].id) != nil)
     }
 
     @Test func theMeterIsReadFromTheOrbsConversation() throws {

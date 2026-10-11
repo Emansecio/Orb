@@ -47,47 +47,6 @@ private struct ScriptedModel: LLMClient {
 }
 
 
-/// A stand-in `claude` that plays the tools server's part: it reads the tools server's arguments from `--mcp-config`, and makes
-/// the `orb_draft` call the way the server does (a file in the app's mailbox, the answer in a `.reply` beside it). It logs the answer.
-private let bridgeCallingClaude = #"""
-#!/usr/bin/python3
-import json, os, sys, time, uuid
-
-log = open(os.environ["FAKE_CLAUDE_LOG"], "a")
-def note(text):
-    log.write(text.rstrip("\n") + "\n"); log.flush()
-def emit(obj):
-    sys.stdout.write(json.dumps(obj) + "\n"); sys.stdout.flush()
-
-config_path = next(a.split("=", 1)[1] for a in sys.argv if a.startswith("--mcp-config="))
-server = json.load(open(config_path))["mcpServers"]["orb_memoria"]
-args = server["args"]
-bridge = args[args.index("--bridge") + 1]
-orb = args[args.index("--orb") + 1]
-note("wizard:" + str("--wizard" in args))
-session = next((a.split("=", 1)[1] for a in sys.argv if a.startswith(("--session-id=", "--resume="))), "none")
-for raw in sys.stdin:
-    msg = json.loads(raw)
-    kind = msg.get("type")
-    if kind == "control_request" and msg["request"]["subtype"] == "initialize":
-        emit({"type": "control_response", "response": {"subtype": "success", "request_id": msg["request_id"], "response": {"models": []}}})
-    elif kind == "user":
-        emit({"type": "system", "subtype": "init", "session_id": session, "model": "claude-test"})
-        call_id = str(uuid.uuid4()).upper()
-        call = {"v": 1, "id": call_id, "tool": "orb_draft", "orb": orb, "arguments": {"name": "Maia", "role": "Cuida da agenda"}}
-        tmp = os.path.join(bridge, call_id + ".tmp")
-        open(tmp, "w").write(json.dumps(call))
-        os.rename(tmp, os.path.join(bridge, call_id + ".json"))
-        reply = os.path.join(bridge, call_id + ".reply")
-        for _ in range(200):
-            if os.path.exists(reply): break
-            time.sleep(0.05)
-        note("reply:" + (open(reply).read() if os.path.exists(reply) else "none"))
-        emit({"type": "result", "subtype": "success", "is_error": False, "num_turns": 1, "session_id": session, "result": "ok"})
-        break
-note("eof")
-"""#
-
 private func said(_ text: String) -> [LLMEvent] { [.text(text), .finished(.done, nil)] }
 
 private func drafting(_ json: String) -> [LLMEvent] {
@@ -317,29 +276,22 @@ private func drafting(_ json: String) -> [LLMEvent] {
     }
 
 
-    /// The Claude Code path end to end: the assistant's tools server is configured for the app's own mailbox, a call that arrives
-    /// there reaches the open assistant through `AppModel.bridgeCall`, and the draft shows it.
-    @MainActor @Test func anOrbDraftCallThroughTheBridgeUpdatesTheDraftOfTheClaudeCodeAssistant() async throws {
-        let (model, runner) = setUp(Script([said("oi")]))
+    /// A Claude Code model runs the assistant on the native engine like any provider: the client is the one the app hands out
+    /// (`clientOverride` here), the Orb's own tool is the only one offered, and the draft is filled by the engine's tool call.
+    @MainActor @Test func theAssistantRunsOnAClaudeCodeModelThroughTheNativeEngine() async throws {
+        let script = Script([drafting(#"{"name":"Maia","role":"Cuida da agenda"}"#), said("Como ela deve trabalhar?")])
+        let (model, runner) = setUp(script)
         model.providers = [ProviderAccount(kind: .claudeCode)]
         model.publishConnections([.claudeCode])
         model.defaultModel = "claudeCode/sonnet"
-        let fakeFolder = root.appending(path: "fake-claude", directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(at: fakeFolder, withIntermediateDirectories: true)
-        let executable = fakeFolder.appending(path: "claude")
-        FileManager.default.createFile(atPath: executable.path, contents: Data(bridgeCallingClaude.utf8), attributes: [.posixPermissions: 0o755])
-        let log = fakeFolder.appending(path: "log.txt")
-        runner.claudeLauncher = { (executable, ["PATH": "/usr/bin:/bin", "FAKE_CLAUDE_LOG": log.path]) }
         #expect(runner.send("quero uma Maia"))
-        await waitUntil("the call to reach the draft") { runner.draft.name == "Maia" }
-        #expect(runner.draft.role == "Cuida da agenda")
         await settled(runner)
-        let text = (try? String(contentsOf: log, encoding: .utf8)) ?? ""
-        #expect(text.contains("wizard:True"))
-        #expect(text.contains("reply:{\"text\":\"name: Maia"), "the server gets the draft read back: \(text)")
-        #expect(model.orbBridge.isListening)
+        #expect(runner.draft.name == "Maia" && runner.draft.role == "Cuida da agenda")
+        #expect(botTexts(runner).last == "Como ela deve trabalhar?")
+        let calls = await script.calls
+        #expect(calls.count == 2 && calls.allSatisfy { $0.tools == ["orb_draft"] })
+        #expect(runner.failure == nil)
         runner.cancel()
-        #expect(throws: (any Error).self) { try model.wizardDraft(runner.id, .object(["name": .string("Outro")])) }
     }
 
     @MainActor @Test func theAssistantsCallsAreFiledUnderCriacaoDeOrb() async throws {

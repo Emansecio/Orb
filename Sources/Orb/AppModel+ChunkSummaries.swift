@@ -6,7 +6,7 @@ import Foundation
 
 extension AppModel {
     /// After a turn of the native engine ends: starts the note, when one is due. A routine's run, a developer mode and
-    /// Claude Code (whose CLI compacts its own session) never get one.
+    /// Claude Code (its side requests would each start a CLI process) never get one.
     func writeStretchNote(of botID: UUID) {
         let session = session(botID)
         guard writesStretchNotes, !isDevRun, !isResetting, session.routineID == nil, session.chunkTask == nil,

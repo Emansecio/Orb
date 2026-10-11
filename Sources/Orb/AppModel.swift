@@ -211,7 +211,6 @@ final class AppModel {
     /// The approval cards open in any turn, whichever engine runs it (internal so tests can open cards).
     @ObservationIgnored let gate: ApprovalGate
     @ObservationIgnored let engine: AgentEngine
-    @ObservationIgnored private let claudeEngine: ClaudeCodeEngine
     @ObservationIgnored let mcp: MCPManager
     /// The logins of the remote connectors (tokens in the vault, account `mcp.<id>.oauth`).
     @ObservationIgnored let connectorAuth: MCPAuth
@@ -349,7 +348,6 @@ final class AppModel {
         let gate = ApprovalGate()
         self.gate = gate
         engine = AgentEngine(gate: gate)
-        claudeEngine = ClaudeCodeEngine(gate: gate)
         memory = MemoryLibrary.at(store.directory.appending(path: "memoria"))
         usageLog = UsageRecorder(store: store)
         var notices: [StoreNotice] = []
@@ -1061,13 +1059,11 @@ final class AppModel {
     }
 
     /// Changing the mode while the Orb waits for an answer answers the open cards: "Sem pedir permissão" allows
-    /// them, "Automático" the ones it would not have asked about, "Só leitura" denies them. Claude Code is told too.
+    /// them, "Automático" the ones it would not have asked about, "Só leitura" denies them.
     private func permissionModeChanged(_ botID: UUID, to mode: PermissionMode) {
         guard let session = sessions[botID], session.turnTask != nil, routineModeOverride(botID) == nil else { return } // the routine's own mode stands
-        let isClaudeCode = session.isClaudeTurn
         Task {
             let answered = await gate.applyModeChange(to: mode, for: botID)
-            if isClaudeCode { await claudeEngine.modeChanged(for: botID, to: mode) }
             self.sessions[botID]?.markDecided(answered)
         }
     }
@@ -1521,26 +1517,15 @@ final class AppModel {
                                                    alreadySummarized: conversation.summary != nil))
         guard conversation.messages.count > 1 else { return tooShort }
 
-        let claudeCode = modelRef(for: bot)?.provider == .claudeCode
+        // Claude Code's models are driven by the native engine too (its CLI is only the transport), so they fold like any other.
         let budget = contextBudget(for: bot) ?? .fallback
-        // Claude Code's session holds what Orb's messages do not show, so its conversation is folded down to the latest
-        // turn: the new session starts from the summary and that turn.
-        let attempt = claudeCode ? conversation.compactAllButLatestTurn(focus: focus)
-            : conversation.compact(budget: budget, focus: focus)
-        guard let report = attempt else { return tooShort }
-        if claudeCode {
-            conversation.claudeSessionReported("", folder: nil)
-            conversation.claudeMemoryPinned = nil
-            conversation.claudeWorkspaceHash = nil
-            conversation.claudeStandingHash = nil
-        }
+        guard let report = conversation.compact(budget: budget, focus: focus) else { return tooShort }
         session.conversation = conversation
         let saved = session.announce(report)
         var message = report.notice
-        if claudeCode { message += " " + Self.claudeRestartNote }
         if saved { message += " Guardei o essencial na memória do Orb." }
         scheduleConversationSave(botID, delay: 0)
-        return CompactionResult(status: claudeCode ? .claudeSessionRestarted : .compacted, foldedMessages: report.foldedMessages,
+        return CompactionResult(status: .compacted, foldedMessages: report.foldedMessages,
                                 tokensBefore: report.tokensBefore ?? 0, tokensAfter: report.tokensAfter ?? 0,
                                 savedToMemory: saved, message: message)
     }
@@ -1686,7 +1671,7 @@ final class AppModel {
         let intent = session.routineID == nil && origin.isUser ? MemoryIntent.detect(typed) : nil
         session.memoryRequest = intent.map { ($0, max(0, (session.conversation?.items.count ?? 1) - 1)) }
         // Your request is the approval: this turn saves to memory without asking (the Orb's saved settings don't change).
-        let rememberTool = ref.provider == .claudeCode ? ClaudeCodeTools.memoryPrefix + "remember" : "remember"
+        let rememberTool = "remember"
         // MultiOrb (WP5): a member's turn in a group adds its section, the board's tools and their grants.
         let groupTurn = groupTurnExtras(for: botID)
         var turnGrants = intent == nil ? [] : [PermissionRule(family: .memory)]
@@ -1706,16 +1691,11 @@ final class AppModel {
             prompt += "\n\nAttached files (read them with your tools):\n" + attachments.map { "- \($0.path)" }.joined(separator: "\n")
         }
         if !pictures.isEmpty {
-            prompt += Self.pictureNote(pictures, forClaudeCode: ref.provider == .claudeCode, modelSees: sees)
+            prompt += Self.pictureNote(pictures, forClaudeCode: false, modelSees: sees)
         }
         prompt = unattendedPrompt(prompt, for: botID)
         if intent != nil {
             prompt += MemoryIntent.instruction(tool: rememberTool)
-        }
-        if ref.provider == .claudeCode {
-            runClaudeCode(bot, model: ref.model, prompt: prompt, images: pictures, message: typed, bubble: bubble, turnGrants: turnGrants,
-                          multi: multi, group: groupTurn)
-            return true
         }
         let skills = self.skills(for: botID)
         let allowedConnectors = connectors(for: botID)
@@ -1827,9 +1807,9 @@ final class AppModel {
     nonisolated static let prefaceAllowance = 4_000
 
     /// The history budget of the model `bot` uses, the memory level and what a refusal once taught about the model's
-    /// window included. nil for Claude Code, which manages its own context.
+    /// window included. nil while the Orb has no usable model.
     func contextBudget(for bot: Bot) -> ContextBudget? {
-        guard let ref = modelRef(for: bot), ref.provider != .claudeCode, let account = account(ref.provider) else { return nil }
+        guard let ref = modelRef(for: bot), let account = account(ref.provider) else { return nil }
         return contextBudget(ref: ref, account: account, botID: bot.id)
     }
 
@@ -1842,8 +1822,7 @@ final class AppModel {
         return sessions[botID]?.measuredOverhead.map { budget.refined(overheadTokens: $0) } ?? budget
     }
 
-    /// How full the context of the Orb's conversation is, for the meter. nil for Claude Code or while the Orb has no
-    /// usable model.
+    /// How full the context of the Orb's conversation is, for the meter. nil while the Orb has no usable model.
     func contextFill(for botID: UUID) -> ContextFill? {
         guard let bot = bot(botID), let budget = contextBudget(for: bot) else { return nil }
         return (sessions[botID]?.conversation ?? Conversation()).contextFill(budget: budget)
@@ -1877,113 +1856,6 @@ final class AppModel {
         guard modelSees != false else { return "" }
         return (modelSees == true ? "\n\nAttached images (resized copies, shown to you with this message):\n"
                 : "\n\nAttached images (resized copies):\n") + list
-    }
-
-    /// A turn run by the user's Claude Code, continuing the conversation's Claude Code session.
-    private func runClaudeCode(_ bot: Bot, model: String, prompt: String, images pictures: [ImageAttachment], message: String, bubble: UUID, turnGrants: [PermissionRule],
-                               multi: MultiOrbOffering, group groupTurn: GroupTurnExtras? = nil) {
-        let botID = bot.id
-        let session = session(botID)
-        let conversation = session.conversation ?? Conversation()
-        let folder = bot.workingURL.standardizedFileURL.path
-        // Claude Code keeps sessions per folder: once the Orb's folder changed, the old one can't be resumed, so a
-        // new session starts and gets the conversation so far as catch-up.
-        let sessionID = conversation.claudeSession(forFolder: folder)
-        // New session: hand it the whole conversation so far. Resumed: only what other models did since.
-        // (Sessions from before this was tracked count as up to date.)
-        let seen = sessionID == nil ? 0 : min(conversation.claudeSeenCount ?? conversation.messages.count, conversation.messages.count)
-        let catchUp = ClaudeCodePrompt.catchUp(conversation, seen: seen)
-        let skills = self.skills(for: botID)
-        let bank = memory.bank(for: botID)
-        // The app knows whether it has Accessibility; the server (a child process) is told rather than left to ask.
-        let usesMac = bot.capabilities.contains(.computerUse)
-        let accessibility = usesMac ? accessibilityProbe() : nil
-        let connectors = connectorServers(for: bot)
-        scheduleMailbox.start()
-        // MARK: MultiOrb (WP1)
-        if multi.orbs { orbBridge.start() }
-        let bridge = multi.orbs ? orbBridge.directory : nil
-        let teammates = multi.orbs ? orbsSection(for: bot, claudeCode: true) : ""
-        // MARK: end MultiOrb (WP1)
-        let servers = [OrbToolsMCPServer.config(directory: bank.directory, mac: usesMac, files: bot.capabilities.contains(.terminal),
-                                                folder: bot.workingURL, accessibilityGranted: accessibility,
-                                                scheduleMailbox: scheduleMailbox.directory, orb: botID,
-                                                bridge: bridge, orbs: multi.orbs, propose: multi.propose, groupMemory: groupTurn?.bankDirectory)]
-            + connectors
-        let connectorIDs = Set(connectors.map(\.id))
-        let cliNames = ClaudeCodeTurn.mcpNames(servers) // what the CLI will call each server
-        let isNew = conversation.messages.isEmpty
-        let userTurns = session.userTurnCount()
-        session.isClaudeTurn = true
-        session.claudeTurnDelivered = false
-        session.claudeTurnFolder = folder
-        session.turnModel = ModelRef(provider: .claudeCode, model: model).text
-        let turn = session.beginTurn()
-        session.turnTask = Task {
-            guard !Task.isCancelled else { return } // stopped before it began
-            let brief = await bank.brief(for: message, conversationIsNew: isNew, userTurns: userTurns,
-                                         tools: ClaudeCodePrompt.memoryTools, canSave: bot.permissionMode != .readOnly,
-                                         alreadySent: sessionID == nil ? [] : (conversation.claudeRelatedSent ?? []).flatMap { $0 },
-                                         profile: profile.promptSection)
-            // A resumed session sends the same system prompt again (rebuilt only when its identity, preferences or rules change); the rest rides with the message.
-            let inputs = await TurnPromptInputs.gather(bot: bot, skills: skills, brief: brief)
-            guard session.isCurrent(turn) else { return } // stopped while preparing
-            let built = TurnPrompt.claudeCode(inputs, session: .init(isNewSession: sessionID == nil,
-                                                                     workspaceHash: conversation.claudeWorkspaceHash,
-                                                                     pinned: conversation.claudeMemoryPinned,
-                                                                     standingHash: conversation.claudeStandingHash,
-                                                                     workspace: conversation.claudeWorkspaceSeen,
-                                                                     system: conversation.claudeSystem))
-            let context = [built.context, catchUp].filter { !$0.isEmpty }.joined(separator: "\n\n")
-            let found = await ClaudeCode.shared.installation()
-            guard session.isCurrent(turn) else { return }
-            guard let installation = found else {
-                session.failSetup("O Claude Code não foi encontrado neste Mac. Veja Ajustes → Modelos.", turn: turn)
-                return
-            }
-            let environment = await ClaudeCode.shared.environment(for: installation)
-            // The Orb's web tools in the tools server: web_search with "Navegar na web", and the browse_* tools once the engine it
-            // chose is installed (as in the native engine). The app asks what is installed and reads the TinyFish key here: the
-            // server is another process and gets them in its flags and its (private, temporary) config.
-            let browserStatus = bot.capabilities.contains(.browser) && bot.browserEngine.drivesABrowser
-                ? await browserHub.status(for: bot.browserEngine) : nil
-            let browserAvailability = BrowserAvailability(capabilities: bot.capabilities, engine: bot.browserEngine, status: browserStatus)
-            let search = SearchKeys(vault: secretVault)
-            let tinyFishKey = browserAvailability != .off && bot.searchProvider == .tinyfish ? (try? await runDetached { search.tinyFish }) ?? nil : nil
-            var toolServers = servers
-            toolServers[0] = OrbToolsMCPServer.config(directory: bank.directory, mac: usesMac, files: bot.capabilities.contains(.terminal),
-                                                      folder: bot.workingURL, accessibilityGranted: accessibility,
-                                                      scheduleMailbox: scheduleMailbox.directory, orb: botID, browser: browserAvailability,
-                                                      engine: bot.browserEngine, searchProvider: bot.searchProvider,
-                                                      browserProfiles: browserHub.profilesDirectory, tinyFishKey: tinyFishKey,
-                                                      bridge: bridge, orbs: multi.orbs, propose: multi.propose, groupMemory: groupTurn?.bankDirectory)
-            // The CLI cannot renew a login in the middle of a turn: it gets a token with time left.
-            let (servers, ended) = await connectorAuth.bearers(for: toolServers)
-            // A login that could not be renewed is told to the cards now, not only when an Orb with the native engine meets it.
-            for (id, reason) in ended { await mcp.loginEnded(id, reason: reason) }
-            // What the connectors mark destructive, from their catalogs: the CLI's own connections never reach the Orb. A
-            // connector with no catalog yet is asked about tool by tool.
-            let annotations = await connectorAnnotations(for: connectorIDs, cliNames: cliNames)
-            renewOldCatalogs(of: connectorIDs)
-            guard session.isCurrent(turn) else { return }
-            var system = ClaudeCodePrompt.withBrowserNote(ClaudeCodePrompt.withAccessibilityNote(built.system, accessibilityGranted: accessibility),
-                                                          bot: bot, availability: browserAvailability, status: browserStatus)
-            if !teammates.isEmpty { system += "\n\n" + teammates }
-            if let groupTurn { system += "\n\n" + groupTurn.system(claudeCode: true) } // MultiOrb (WP5)
-            var claudeTurn = ClaudeCodeTurn(bot: bot, executable: installation.executable, model: model,
-                                            system: system,
-                                            prompt: prompt, images: pictures, requestItem: bubble, context: context, sessionID: sessionID, connectors: servers,
-                                            environment: environment, destructiveConnectors: annotations.destructive,
-                                            knownConnectorTools: annotations.known, connectorPrefixes: annotations.prefixes,
-                                            turnGrants: turnGrants,
-                                            permissions: permissionSource(for: bot))
-            claudeTurn.browser = BrowserAccess(hub: browserHub, engine: browserAvailability == .browser ? bot.browserEngine : .simple,
-                                               searchProvider: bot.searchProvider)
-            if multi.propose { claudeTurn.orbCreation = orbCreationSupport(for: bot) } // MultiOrb (WP3)
-            // Recorded when the session answers (see `apply`): a turn that fails before that sent nothing.
-            session.pendingMarks = built.marks
-            await session.play(claudeEngine.run(claudeTurn), turn: turn)
-        }
     }
 
     /// For a Claude Code turn: the tools of `ids` that the connectors mark destructive, the tools the catalogs know at all

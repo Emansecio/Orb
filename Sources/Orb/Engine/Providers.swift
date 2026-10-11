@@ -74,7 +74,7 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
     var summary: String {
         switch self {
         case .chatgpt: "Entre com sua conta ChatGPT Plus ou Pro e use o limite do seu plano."
-        case .claudeCode: "Usa o Claude Code instalado no seu Mac, com o login da própria Anthropic (Pro ou Max). O app só abre o Claude Code; nunca vê nem guarda a sua sessão."
+        case .claudeCode: "Usa o login do Claude Code instalado no seu Mac (Pro ou Max) só para chegar ao modelo. O prompt, as ferramentas e a memória são do Orb, e o app nunca vê nem guarda a sua sessão."
         case .openai: "Modelos GPT pela API da OpenAI, cobrados por uso."
         case .anthropic: "Modelos Claude pela API da Anthropic, cobrados por uso."
         case .opencodeZen: "Gateway da OpenCode com modelos testados em agentes (Claude, GPT, Grok e abertos; os modelos Gemini, que usam outro formato, ainda não aparecem). Pré-pago: cobra do seu saldo pelo uso, sem margem sobre o preço do modelo. Os modelos gratuitos, que podem usar seus dados, ficam fora da lista."
@@ -449,6 +449,9 @@ extension ProviderAccount {
     /// The client for one model: the format decides the wire protocol; OpenCode also wants a stable session id,
     /// and the OpenAI-style formats key their prompt cache to the conversation.
     func client(for model: ProviderModel?, credentials: @escaping CredentialsProvider, conversationID: String) -> (any LLMClient)? {
+        // Claude Code has no address and no key: the installed CLI is only the transport to the model, through the user's login
+        // (so `credentials` goes unused). Everything else about the turn (prompt, tools, memory) is the Orb's own.
+        if kind == .claudeCode { return ClaudeCodeClient() }
         guard let base = URL(string: baseURL), base.host != nil else { return nil }
         var headers = kind == .custom ? self.headers : [:]
         if kind == .opencodeZen || kind == .opencodeGo { headers["x-opencode-session"] = conversationID }
@@ -465,7 +468,7 @@ extension ProviderAccount {
             return ResponsesClient(baseURL: base, credentials: credentials, extraHeaders: headers,
                                    toolsAsInputItem: kind == .chatgpt, conversationID: conversationID)
         case .claudeCode:
-            return nil
+            return ClaudeCodeClient()
         }
     }
 }

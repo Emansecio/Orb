@@ -260,7 +260,7 @@ enum ClaudeCodeWire {
         return (json["response"]?["response"]?["models"]?.array ?? []).compactMap { entry in
             guard let value = entry["value"]?.string, !value.isEmpty else { return nil }
             let name = value == ClaudeCodeModels.defaultID ? "Padrão do Claude Code" : entry["displayName"]?.string ?? value
-            return ProviderModel(id: value, name: name, format: .claudeCode)
+            return ProviderModel(id: value, name: name, format: .claudeCode, contextLength: ClaudeCodeModels.window(of: value), supportsImages: true)
         }
     }
 }
@@ -278,13 +278,19 @@ enum ClaudeCodeModels {
     /// Not passed to `--model`, so the user's own Claude Code setting (or their plan's default) applies.
     static let defaultID = "default"
 
+    /// The window the Orb plans a Claude Code model's history by (the CLI does not say; Claude models take 200K tokens).
+    static let windowTokens = 200_000
+
+    /// An id ending in `[1m]` is the million-token variant.
+    static func window(of id: String) -> Int { id.hasSuffix("[1m]") ? 1_000_000 : windowTokens }
+
     /// Documented aliases (https://code.claude.com/docs/en/model-config#model-aliases), used when the CLI
     /// cannot be asked for its list.
     static let fallback: [ProviderModel] = [
-        ProviderModel(id: defaultID, name: "Padrão do Claude Code", format: .claudeCode),
-        ProviderModel(id: "opus", name: "Opus", format: .claudeCode),
-        ProviderModel(id: "sonnet", name: "Sonnet", format: .claudeCode),
-        ProviderModel(id: "haiku", name: "Haiku", format: .claudeCode),
+        ProviderModel(id: defaultID, name: "Padrão do Claude Code", format: .claudeCode, contextLength: windowTokens, supportsImages: true),
+        ProviderModel(id: "opus", name: "Opus", format: .claudeCode, contextLength: windowTokens, supportsImages: true),
+        ProviderModel(id: "sonnet", name: "Sonnet", format: .claudeCode, contextLength: windowTokens, supportsImages: true),
+        ProviderModel(id: "haiku", name: "Haiku", format: .claudeCode, contextLength: windowTokens, supportsImages: true),
     ]
 }
 

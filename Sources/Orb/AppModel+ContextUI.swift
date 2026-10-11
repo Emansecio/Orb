@@ -11,14 +11,13 @@ extension AppModel {
     func contextInput(for botID: UUID) -> ContextInput? {
         guard let bot = bot(botID), let session = sessions[botID], let conversation = session.parkedChat ?? session.conversation else { return nil }
         let ref = modelRef(for: bot)
-        let isClaudeCode = ref?.provider == .claudeCode
         var stated = false
-        if let ref, !isClaudeCode {
+        if let ref {
             let catalog = account(ref.provider)?.models.first { $0.id == ref.model }?.contextLength ?? 0
             stated = catalog > 0 || (learnedContexts[ref.text]?.isFresh() ?? false)
         }
-        return ContextInput(botID: botID, conversation: conversation, budget: isClaudeCode ? nil : contextBudget(for: bot),
-                            isClaudeCode: isClaudeCode, windowIsStated: stated, usage: session.routineID == nil ? live(botID).lastUsage : nil, memory: contextMemory)
+        return ContextInput(botID: botID, conversation: conversation, budget: contextBudget(for: bot),
+                            isClaudeCode: false, windowIsStated: stated, usage: session.routineID == nil ? live(botID).lastUsage : nil, memory: contextMemory)
     }
 
     /// "Compactar agora" from the meter or the card: compacts, says what happened to VoiceOver, and, for Claude Code,

@@ -252,15 +252,15 @@ struct ContextModelTests {
         #expect(ContextReading.make(input) == nil)
     }
 
-    @Test func claudeCodeOrbsAreMeasuredWithoutABudget() throws {
+    @Test func claudeCodeOrbsAreMeasuredLikeAnyOtherWithTheirOwnWindow() throws {
         let (model, id, root) = makeModel()
         defer { removeTestFolder(root) }
         model.providers = [ProviderAccount(kind: .claudeCode)]
         model.defaultModel = "claudeCode/sonnet"
         model.seedConversation(conversation(turns: 2), for: id)
         let input = try #require(model.contextInput(for: id))
-        #expect(input.isClaudeCode)
-        #expect(input.budget == nil)
+        #expect(!input.isClaudeCode)
+        #expect(input.budget?.window == 200_000)
     }
 
     @Test func learnedWindowsAreListedAndForgotten() {
@@ -327,21 +327,21 @@ struct ContextModelTests {
         #expect(after.fill?.usedTokens ?? .max < before.fill?.usedTokens ?? 0)
     }
 
-    @Test func compactingAClaudeCodeChatRestartsItsSessionAndSaysSoInTheTranscript() throws {
+    @Test func compactingAClaudeCodeChatFoldsItLikeAnyOther() throws {
         let (model, id, root) = makeModel()
         defer { removeTestFolder(root) }
         model.providers = [ProviderAccount(kind: .claudeCode)]
         model.defaultModel = "claudeCode/sonnet"
         model.seedConversation(conversation(turns: 3), for: id)
         let result = model.compactFromMeter(id, focus: "  decisões  ")
-        #expect(result.status == .claudeSessionRestarted)
+        #expect(result.status == .compacted)
         #expect(result.didCompact)
-        #expect(result.message.contains(AppModel.claudeRestartNote))
+        #expect(!result.message.contains(AppModel.claudeRestartNote), "no session of the CLI to restart: every turn is rebuilt from the Orb's messages")
         let notices = model.conversations[id]?.items.compactMap { item -> String? in
             if case .notice(let text) = item.kind { text } else { nil }
         } ?? []
-        #expect(notices.contains(AppModel.claudeRestartNote))
-        #expect(notices.count == 2) // the compaction's own notice and the new-session one
+        #expect(!notices.contains(AppModel.claudeRestartNote))
+        #expect(notices.count == 1) // the compaction's own notice
     }
 
     @Test func theLatestRequestAndCompactionAreMirroredOnTheOrbsLiveState() {

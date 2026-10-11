@@ -342,8 +342,8 @@ struct BotInspector: View {
 
         if let file = instructionFile {
             Section {
-                // Claude Code loads CLAUDE.md by itself as the project's instructions: trusting it here would change nothing.
-                if !InstructionsText.claudeCodeReadsItself(file, usesClaudeCode: usesClaudeCode(bot)) {
+                // Claude Code's models run on the Orb's own engine too (the CLI loads no project files), so trust always matters.
+                if !InstructionsText.claudeCodeReadsItself(file, usesClaudeCode: false) {
                     Toggle(isOn: instructionsTrustBinding(file, of: bot)) {
                         VStack(alignment: .leading, spacing: 1) {
                             Label("Confiar nas instruções desta pasta", systemImage: "checkmark.shield")
@@ -362,7 +362,7 @@ struct BotInspector: View {
                 Text("Instruções da pasta")
             } footer: { FormFootnote {
                 Text(InstructionsText.footer(for: file, name: bot.name, trustedHash: bot.trustedInstructionsHash,
-                                             usesClaudeCode: usesClaudeCode(bot)))
+                                             usesClaudeCode: false))
             } }
             // What is read from the folder arrives by fading (`.quiet`), never by animating the height of a list that may
             // be long (§2.13).
@@ -558,8 +558,6 @@ struct BotInspector: View {
             set: { value in model.update(botID) { $0[keyPath: keyPath] = value } }
         )
     }
-
-    private func usesClaudeCode(_ bot: Bot) -> Bool { model.modelRef(for: bot)?.provider == .claudeCode }
 
     /// On remembers the hash of the file as it is on disk right now, not as the panel last showed it: what the user
     /// trusts is what the next turn will read. If the file changed, the toggle shows off again.

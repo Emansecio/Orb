@@ -10,6 +10,9 @@ enum Launcher {
         if let options = OrbToolsMCPServer.Options(arguments: CommandLine.arguments) {
             OrbToolsMCPServer.run(options)
         }
+        if let options = ClaudePipeServer.Options(arguments: CommandLine.arguments) {
+            ClaudePipeServer.run(options)
+        }
         if let kind = LocalConnectorServer.kind(arguments: CommandLine.arguments) {
             LocalConnectorServer.run(kind)
         }
