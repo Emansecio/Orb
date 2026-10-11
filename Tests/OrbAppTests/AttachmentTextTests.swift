@@ -62,6 +62,13 @@ final class AttachmentTextTests {
         #expect(read.contains("--- Página 2 ---"))
     }
 
+    @Test func anOldExcelFileSavedAsAWebPageIsReadAsATable() throws {
+        let page = "<html><body><table><tr><td>Nome</td><td>Matrícula</td></tr><tr><td>Ana</td><td>1128938200</td></tr></table></body></html>"
+        let url = try write("lista.xls", page.data(using: .isoLatin1)!)
+        let read = try #require(text(AttachmentText.extract(url)))
+        #expect(read.contains("Ana\t1128938200"))
+    }
+
     @Test func binariesAndPicturesAreLeftToTheTools() throws {
         let zip = try write("fotos.zip", Data([0x50, 0x4B, 0x03, 0x04, 0, 0, 0xFF, 0x00, 0x01]))
         #expect(AttachmentText.extract(zip) == .unread)

@@ -29,6 +29,7 @@ enum AttachmentText {
     static func extract(_ url: URL) -> Extracted {
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         let isDocument = DocumentReader.isPDF(url) || DocumentReader.isDocument(url) || OfficeReader.isOffice(url)
+            || LegacyExcelReader.isLegacyExcel(url)
         guard size <= (isDocument ? maxDocumentBytes : maxTextBytes) else { return .unread }
         do {
             if DocumentReader.isPDF(url) {
@@ -37,6 +38,9 @@ enum AttachmentText {
             }
             if DocumentReader.isDocument(url) {
                 return .text(try DocumentReader.documentText(at: url), kind: "documento .\(url.pathExtension.lowercased()) convertido em texto")
+            }
+            if LegacyExcelReader.isLegacyExcel(url) {
+                return .text(try LegacyExcelReader.text(at: url), kind: "planilha .xls convertida em texto")
             }
             if OfficeReader.isOffice(url) {
                 return .text(try OfficeReader.text(at: url), kind: "documento .\(url.pathExtension.lowercased()) convertido em texto")
