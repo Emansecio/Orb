@@ -1380,8 +1380,8 @@ struct UIActTool: AgentTool {
         let needsName = steps.contains { $0.action == .pickMenu || $0.action == .key }
         let app = try await UIAccess.forAction(arguments["app"]?.string, bot: context.botID, store: store, system: system, needsName: needsName)
         // What the approval card judged: an action whose live target turns out dangerous runs only if the card said so. The
-        // engine hands the card's own verdict over (`judged`); only a call no card was computed for judges itself here.
-        let approved = Self.judged(arguments, context: context) ?? (danger(arguments, context: context) != nil)
+        // engine hands the card's own verdict over (`judgedDanger`); only a call no card was computed for judges itself here.
+        let approved = context.judgedDanger ?? (danger(arguments, context: context) != nil)
         if arguments.flag("takeover") { return try await takeOver(steps, app: app, context: context) }
 
         var done: [String] = []
@@ -1408,30 +1408,6 @@ struct UIActTool: AgentTool {
             }
         }
         return text
-    }
-
-    // MARK: The card's verdict
-
-    /// Where the Claude Code engine puts the card's verdict in the call it lets through to the tools server (another
-    /// process, with its own readings): `"<token>:dangerous"` or `"<token>:safe"`.
-    static let cardKey = "orb_card"
-    /// The environment variable that gives the tools server the app's token, so a verdict cannot be made up by the model.
-    static let cardTokenVariable = "ORB_UI_CARD_TOKEN"
-    /// The app makes one per launch; the tools server it starts reads the app's.
-    static let cardToken: String = ProcessInfo.processInfo.environment[cardTokenVariable].flatMap { $0.isEmpty ? nil : $0 } ?? UUID().uuidString
-
-    /// The value of `cardKey` for a call the card judged dangerous or not.
-    static func cardMark(dangerous: Bool, token: String = cardToken) -> String { token + (dangerous ? ":dangerous" : ":safe") }
-
-    /// Whether the card judged the call dangerous, as the engine says: the native engine through the context, the Claude
-    /// Code engine through `cardKey`. A "safe" verdict is taken whoever wrote it (it only makes the run stricter); a
-    /// "dangerous" one only with this process's token. Nil when the engine said nothing.
-    static func judged(_ arguments: JSONValue, context: ToolContext, token: String = cardToken) -> Bool? {
-        if let judged = context.judgedDanger { return judged }
-        guard let mark = arguments[cardKey]?.string else { return nil }
-        if mark == cardMark(dangerous: true, token: token) { return true }
-        if mark.hasSuffix(":safe") { return false }
-        return nil
     }
 
     /// One step done: what to tell the model, and the subscription made before acting (for a `wait` that follows).

@@ -3,8 +3,7 @@ import Observation
 
 // Talking to an Orb while it works: what you send during a turn waits, shown in the chat with where it is going.
 // Two modes (`SteeringDelivery`): ↩ steers (Orb's own engine hands it to the model at the next step boundary) and ⇥ queues
-// it for after the task (it goes as the next request when the turn ends well). Claude Code takes one prompt per process,
-// so there everything waits for the end of the answer. Also the composer state that must outlive the composer view (attachments),
+// it for after the task (it goes as the next request when the turn ends well). Also the composer state that must outlive the composer view (attachments),
 // which is rebuilt every time you switch Orb.
 
 /// A file waiting to be sent with the next message. The size is read when it is attached, not when it is drawn.
@@ -174,12 +173,8 @@ extension AppModel {
         sessions[botID]?.routineID.flatMap { id in routines.first { $0.id == id }?.name }
     }
 
-    /// Whether a queued message reaches the model before the turn ends (Orb's own engine) and not only after it
-    /// (Claude Code takes one prompt per process).
-    func steersMidTurn(_ botID: UUID) -> Bool { canSteer(botID) && sessions[botID]?.isClaudeTurn != true }
-
-    /// Whether the running turn is Claude Code's (which takes nothing in the middle of it).
-    func isClaudeCodeTurn(_ botID: UUID) -> Bool { sessions[botID]?.isClaudeTurn == true }
+    /// Whether a queued message can reach the model before the turn ends (at its next step), and not only after it.
+    func steersMidTurn(_ botID: UUID) -> Bool { canSteer(botID) }
 
     /// The composer's send: starts a turn when the Orb is free, queues the message when it is working. Returns false
     /// when nothing was sent, so the composer keeps what you wrote.
@@ -241,20 +236,18 @@ extension AppModel {
         if !files.isEmpty {
             prompt += "\n\nAttached files (read them with your tools):\n" + files.map { "- \($0.path)" }.joined(separator: "\n")
         }
-        if !pictures.isEmpty { prompt += Self.pictureNote(pictures, forClaudeCode: false, modelSees: nil) }
+        if !pictures.isEmpty { prompt += Self.pictureNote(pictures, modelSees: nil) }
         // Asking to remember something mid-turn: the model is told to save it (the turn's grants were fixed when it
         // began, so saving may still ask for approval). Sent after the turn, `send` handles it as a message of its own.
         if steersMidTurn(botID), MemoryIntent.detect(typed) != nil {
             prompt += MemoryIntent.instruction(tool: "remember")
         }
-        // Claude Code has no middle of the turn to steer: everything there waits for the end, and says so.
         lane.enqueue(SteeredMessage(text: typed, files: files, pictures: pictures, prompt: prompt,
                                     delivery: steersMidTurn(botID) ? delivery : .afterTask))
         live(botID).scrolled() // scrolls the chat down to the "na fila" bubble, which changes no transcript revision
     }
 
-    /// Moves a waiting message between "into the task" and "after the task". Does nothing when it was delivered meanwhile,
-    /// or when the engine cannot steer (Claude Code).
+    /// Moves a waiting message between "into the task" and "after the task". Does nothing when it was delivered meanwhile.
     func switchDelivery(_ id: UUID, botID: UUID) {
         let lane = composerLane(botID)
         guard steersMidTurn(botID), let current = lane.queued.first(where: { $0.id == id })?.delivery else { return }

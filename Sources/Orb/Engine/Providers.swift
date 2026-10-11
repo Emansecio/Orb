@@ -5,7 +5,7 @@ import Foundation
 
 enum APIFormat: String, Codable, Sendable {
     case chat, responses, messages
-    /// Not an HTTP API: the turn runs through the local Claude Code CLI (`ClaudeCodeEngine`).
+    /// Not an HTTP API: the model is reached through the local Claude Code CLI, which is only a pipe to it (`ClaudeCodeClient`).
     case claudeCode
 
     /// A format from a newer build reads as chat completions (and the file is kept, see `DecodeLoss`).

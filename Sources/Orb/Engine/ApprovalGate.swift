@@ -44,10 +44,6 @@ extension PermissionPolicy {
     static func userDenial(note: String?) -> String { ApprovalNote.append(note, to: userDenial) }
 }
 
-extension ClaudeCodePolicy {
-    static func userDenial(note: String?) -> String { ApprovalNote.append(note, to: userDenial) }
-}
-
 extension ApprovalGate {
     /// The card `browse_show` opens once the window is up: `show` puts it in the conversation (and says the Orb is waiting),
     /// and this waits for "Pronto" (true) or "Cancelar" and Parar (false). A change of permission mode never answers it.

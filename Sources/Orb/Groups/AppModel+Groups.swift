@@ -280,7 +280,7 @@ extension AppModel {
             groupID: group.id, runID: run.id, requestID: turn.requestID,
             groupName: group.name, role: role, turnBudget: run.turnLimit,
             offering: offering, grants: [PermissionRule(family: .delegation), PermissionRule(family: .groupMemory)],
-            bank: memory.groupBank(for: group.id), bankDirectory: memory.groupDirectory(for: group.id),
+            bank: memory.groupBank(for: group.id),
             sideRun: SideRunInfo(kind: .group, id: turn.requestID,
                                  chain: ChainContext(chainID: run.id, hop: 1, path: [], groupID: group.id, serving: turn.requestID)))
     }
@@ -294,8 +294,7 @@ extension AppModel {
 }
 
 /// What the engines add to a member's turn in a group (see `AppModel.groupTurnExtras`): the section of the system prompt, which
-/// of the multi-Orb tools are offered, the grants that let those tools run without a card per call, and the board's bank (and
-/// folder, for Claude Code's tools server).
+/// of the multi-Orb tools are offered, the grants that let those tools run without a card per call, and the board's bank.
 struct GroupTurnExtras {
     var groupID: UUID
     var runID: UUID
@@ -306,12 +305,10 @@ struct GroupTurnExtras {
     var offering: MultiOrbOffering
     var grants: [PermissionRule]
     var bank: MemoryBank
-    var bankDirectory: URL
     var sideRun: SideRunInfo
 
-    /// The group section of the system prompt; in a Claude Code turn the tools carry the tools server's prefix.
-    func system(claudeCode: Bool) -> String {
-        GroupPrompt.section(groupName: groupName, role: role, turnBudget: turnBudget,
-                            toolPrefix: claudeCode ? ClaudeCodeTools.memoryPrefix : "")
+    /// The group section of the system prompt.
+    var system: String {
+        GroupPrompt.section(groupName: groupName, role: role, turnBudget: turnBudget)
     }
 }

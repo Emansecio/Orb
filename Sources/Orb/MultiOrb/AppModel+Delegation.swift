@@ -1,9 +1,8 @@
 import Foundation
 
-// The app's side of Orbs asking each other for work: what a turn is handed (the tool, the teammates' section, the grant), how
-// Claude Code's tools server reaches the hub, and what the views and the other packages ask of the runtime. The hub itself is
-// `DelegationHub`; `canTakeSideWork` and `startNextQueuedWork` (who runs next on a free Orb) are in `AppModel.swift`, beside the
-// routines' queue they extend.
+// The app's side of Orbs asking each other for work: what a turn is handed (the tool, the teammates' section, the grant),
+// and what the views and the other packages ask of the runtime. The hub itself is `DelegationHub`; `canTakeSideWork` and
+// `startNextQueuedWork` (who runs next on a free Orb) are in `AppModel.swift`, beside the routines' queue they extend.
 
 extension AppModel {
     /// What `orbs` asks of the app for `botID`, for a native turn (`ToolContext.orbs`).
@@ -35,28 +34,10 @@ extension AppModel {
     }
 
     /// The system prompt's section about the teammates (empty when there are none).
-    func orbsSection(for bot: Bot, claudeCode: Bool) -> String {
+    func orbsSection(for bot: Bot) -> String {
         let group = turnGroup(of: bot.id)
         let team = delegation.roster(for: bot.id, groupID: group).compactMap { self.bot($0.id) }
-        return OrbsPrompt.section(for: bot, roster: team, isGroup: group != nil, claudeCode: claudeCode)
-    }
-
-    /// One call that arrived through the mailbox of Claude Code's tools server.
-    func bridgeCall(tool: String, orb: UUID, arguments: JSONValue, callID: UUID) async throws -> String {
-        switch tool {
-        case "orbs":
-            return try await delegation.handleTool(arguments, orb: orb, messageID: callID)
-        case OrbProposeTool.name:
-            // One path only: in a Claude Code turn the app runs the proposal when the CLI asks permission for the call
-            // (`ClaudeCodeEngine.proposeOrb`, marked with `ORB_PROPOSE_TOKEN`) and the server just reports it. The server never
-            // asks the mailbox for this tool, so a call that arrives here would be a second handling of the same card.
-            throw ToolError("Essa ferramenta não está disponível agora.")
-        case OrbDraftTool.name:
-            // The creation assistant's tool (WP4): `orb` is the stand-in Orb of the sheet that is open.
-            return try wizardDraft(orb, arguments)
-        default:
-            throw ToolError("Essa ferramenta não está disponível agora.")
-        }
+        return OrbsPrompt.section(for: bot, roster: team, isGroup: group != nil)
     }
 
     /// Who asked the request the Orb is working on, for the working line ("Pedido de Atlas"); nil outside a request.

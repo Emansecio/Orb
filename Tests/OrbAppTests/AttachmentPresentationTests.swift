@@ -231,24 +231,6 @@ final class AttachmentPresentationTests {
         return files
     }
 
-    @Test func claudeCodeReportsTheFilesItWritesAndEdits() throws {
-        let existing = try file("velho.swift", bytes: 4)
-        let fresh = root.appending(path: "novo.swift").path
-        var transcript = ClaudeCodeTranscript(isResuming: false)
-        var events: [TurnEvent] = []
-        for message: ClaudeCodeMessage in [
-            .toolUse(id: "w", name: "Write", input: .object(["file_path": .string(fresh)])),
-            .toolResult(id: "w", output: "ok", isError: false),
-            .toolUse(id: "e", name: "Edit", input: .object(["file_path": .string(existing)])),
-            .toolResult(id: "e", output: "ok", isError: false),
-            .toolUse(id: "f", name: "Write", input: .object(["file_path": .string(root.appending(path: "falhou.txt").path)])),
-            .toolResult(id: "f", output: "erro", isError: true),
-            .toolUse(id: "b", name: "Bash", input: .object(["command": .string("ls")])),
-            .toolResult(id: "b", output: "a", isError: false),
-        ] { events += transcript.apply(message) }
-        let finished = events.compactMap { if case .toolFinished(_, _, _, let files) = $0 { files } else { nil } }
-        #expect(finished == [[ProducedFile(path: fresh, created: true)], [ProducedFile(path: existing, created: false)], [], []])
-    }
 }
 
 /// A model that asks for one tool call and then answers.

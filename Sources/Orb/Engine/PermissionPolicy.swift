@@ -1,12 +1,12 @@
 import Foundation
 
-// One place that decides whether a tool call runs, asks or is refused. Both engines (the native tool loop and
-// Claude Code) turn a call into a `PermissionCall` and ask `PermissionPolicy.evaluate`, so they cannot drift.
+// One place that decides whether a tool call runs, asks or is refused: the engine turns a call into a `PermissionCall` and asks
+// `PermissionPolicy.evaluate`. (The tools of a Claude Code model run through the same engine, so they are judged the same.)
 
 // MARK: - Rules
 
-/// What kind of thing a tool call does, the same for both engines (`run_command` and Claude Code's `Bash` are
-/// both `shell`), so a grant keeps working after the Orb switches model.
+/// What kind of thing a tool call does (`run_command`, and the old Claude Code `Bash`, are both `shell`), so a grant
+/// keeps working after the Orb switches model.
 enum PermissionFamily: String, CaseIterable, Codable, Sendable {
     case shell, writeFiles, web, open, appleScript, macApps, connector, memory, jobs
     /// Creating, pausing, resuming and deleting the Orb's scheduled tasks (`schedule`); listing them needs no permission.
@@ -34,7 +34,7 @@ struct PermissionRule: Codable, Hashable, Sendable {
         case folder(String)
         /// This site and its subdomains.
         case host(String)
-        /// Searching the web (Claude Code's WebSearch), which has no site to name; never covers reading a page.
+        /// Searching the web (`web_search`), which has no site to name; never covers reading a page.
         case search
         /// One connector tool, by `PermissionPolicy.connectorKey`.
         case connectorTool(String)
@@ -297,9 +297,9 @@ enum PermissionPolicy {
         segment.words.first == "cd" && segment.words.count <= 2
     }
 
-    /// Claude Code's WebSearch, the native `web_search` and the Orb's own, as Claude Code names it.
+    /// The native `web_search` (as opposed to fetching a page).
     static func isSearch(_ call: PermissionCall) -> Bool {
-        call.family == .web && ["WebSearch", "web_search", ClaudeCodeTools.memoryPrefix + "web_search"].contains(call.toolName)
+        call.family == .web && call.toolName == "web_search"
     }
 
     static func hostMatches(_ host: String, _ allowed: String) -> Bool {
@@ -410,76 +410,9 @@ enum PermissionPolicy {
     /// Why this read of a file is a secret being read: `read_file` and `grep` of a private key, saved password or token.
     /// (A folder search withholds such files by itself, see `GrepTool`.)
     static func secretBeingRead(toolName: String, path: URL?, home: URL) -> String? {
-        guard let path, ["read_file", "grep", "Read", "Grep", "NotebookRead"].contains(toolName) else { return nil }
+        guard let path, ["read_file", "grep"].contains(toolName) else { return nil }
         let sensitive = DangerousCommand.SensitiveFiles(home: home)
         return sensitive.reason(for: path.standardizedFileURL.path) ?? sensitive.reason(for: resolved(path).path)
-    }
-
-    /// A tool call from Claude Code (`Bash`, `Write`, `mcp__server__tool`…). The Bash of the main session returns to the
-    /// Orb's folder after each call (`CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR`), but a subagent's keeps the folder a
-    /// `cd` left it in, so with `fromSubagent` a command is not judged as if it ran in the Orb's folder: relative paths
-    /// are unknown (`rm x.txt` asks) and nothing is taken as read-only from them.
-    static func call(claudeCodeTool name: String, input: JSONValue, workspace: URL?, fromSubagent: Bool = false,
-                     home: URL = FileManager.default.homeDirectoryForCurrentUser) -> PermissionCall {
-        // The Orb's own tools (memory, Mac) are judged exactly like their native twins: risk, `danger` (a forced
-        // quit, AppleScript's `do shell script`, standing instructions) and families.
-        if let tool = OrbToolsMCPServer.tool(claudeCodeName: name) {
-            var call = call(for: tool, arguments: input, context: ToolContext(workingDirectory: workspace ?? home), home: home)
-            call.toolName = name
-            return call
-        }
-        let base = workspace ?? home
-        func path(_ key: String) -> URL? {
-            guard let text = input[key]?.string, !text.isEmpty else { return nil }
-            let expanded = (text as NSString).expandingTildeInPath
-            return expanded.hasPrefix("/") ? URL(fileURLWithPath: expanded) : base.appending(path: expanded)
-        }
-        func risk(_ name: String) -> ToolRisk {
-            switch name {
-            // Like the native `job_output` / `job_stop`: they only reach background shells this Orb's own turn started
-            // (TaskStop and TaskOutput are what the newer CLI calls KillShell/KillBash and BashOutput).
-            case "Read", "LS", "Glob", "Grep", "NotebookRead", "BashOutput", "TaskOutput", "KillShell", "KillBash", "TaskStop":
-                .safe
-            default:
-                .sensitive
-            }
-        }
-        var call = PermissionCall(toolName: name, family: nil, risk: risk(name))
-        let scope = fromSubagent ? nil : dangerScope(workspace: workspace, directory: workspace, home: home)
-        switch name {
-        case "Bash":
-            call.family = .shell
-            if let text = input["command"]?.string {
-                call.command = ShellCommandLine.parse(text)
-                call.danger = DangerousCommand.reason(for: text, in: scope, home: home)
-                if call.danger == nil, !fromSubagent, !input.flag("run_in_background"), let line = call.command,
-                   ReadOnlyCommand.isReadOnly(line, directory: base, home: home) {
-                    call.risk = .safe
-                }
-            }
-        case "BashOutput", "TaskOutput", "KillShell", "KillBash", "TaskStop":
-            call.family = .jobs
-        case "Write", "Edit", "MultiEdit", "NotebookEdit":
-            call.family = .writeFiles
-            call.paths = [path("file_path") ?? path("notebook_path")].compactMap { $0 }.map(resolved)
-            call.danger = call.paths.lazy.compactMap { DangerousCommand.reason(forWritingTo: $0, home: home) }.first
-        case "Read", "Grep", "NotebookRead":
-            if let reason = secretBeingRead(toolName: name, path: path("file_path") ?? path("notebook_path") ?? path("path"), home: home) {
-                call.risk = .sensitive
-                call.danger = reason
-            }
-        case "WebFetch":
-            call.family = .web
-            call.host = input["url"]?.string.flatMap(Self.host(of:))
-        case "WebSearch":
-            call.family = .web
-        case let name where name.hasPrefix("mcp__"):
-            call.family = .connector
-            call.connector = connectorKey(name)
-        default:
-            break
-        }
-        return call
     }
 
     /// The family of a native tool: by name, and by kind for tools this list does not know (connectors, new tools).
@@ -562,8 +495,8 @@ enum PermissionPolicy {
         return spaced.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
     }
 
-    /// A connector tool's identity, the same whichever engine names it: `GitHub__create_issue` (native) and
-    /// `mcp__github__create_issue` (Claude Code) both become `github__create_issue`.
+    /// A connector tool's identity: `GitHub__create_issue` and the old Claude Code name
+    /// `mcp__github__create_issue` both become `github__create_issue`.
     static func connectorKey(_ name: String) -> String {
         var text = name.lowercased()
         if text.hasPrefix("mcp__") { text.removeFirst(5) }
@@ -592,7 +525,7 @@ enum PermissionPolicy {
     /// Up to three standing rules that would cover this call, narrowest sensible first. Empty for calls that must
     /// always ask (destructive ones, changes to the Orb's instructions) and for anything that already runs.
     static func suggestions(for call: PermissionCall, existing: [PermissionRule] = [], workspace: URL? = nil,
-                            home: URL = FileManager.default.homeDirectoryForCurrentUser, extra: [PermissionRule] = []) -> [PermissionRule] {
+                            home: URL = FileManager.default.homeDirectoryForCurrentUser) -> [PermissionRule] {
         guard call.risk == .sensitive, call.danger == nil, let family = call.family else { return [] }
         var found: [PermissionRule] = []
         switch family {
@@ -611,17 +544,6 @@ enum PermissionPolicy {
             found = [PermissionRule(family: family)]
         case .delegation, .groupMemory:
             found = [] // never "Sempre permitir": the turn's own grant covers them
-        }
-        // Suggestions from Claude Code come after Orb's own, and only where they fit the call's family.
-        // A rule for an interpreter (`Bash(python3:*)`) would allow everything, so those are not offered either.
-        found += extra.filter { rule in
-            guard rule.family == family, rule.isValid else { return false }
-            if case .commandPrefix(let words) = rule.scope {
-                guard let program = words.first else { return false }
-                return !interpreters.contains(program)
-                    && program.range(of: #"^[A-Za-z0-9][A-Za-z0-9._+-]*$"#, options: .regularExpression) != nil
-            }
-            return true
         }
         return Array(unique(found).filter { !existing.contains($0) }.prefix(3))
     }
@@ -686,11 +608,15 @@ enum PermissionPolicy {
 
     // MARK: Old grants
 
+    /// What the tools of the Orb's own MCP server were called by the Claude Code CLI before it became only a pipe to the model:
+    /// "Sempre permitir" choices saved then carry these names.
+    static let legacyOrbToolPrefix = "mcp__orb_memoria__"
+
     /// The family a tool name from before scoped grants belonged to, in either engine's naming, or nil for names
     /// that no longer mean anything.
     static func legacyRule(forToolName name: String) -> PermissionRule? {
-        // The Orb's own tools as Claude Code names them (`mcp__orb_memoria__applescript`) are their native twins.
-        if name.hasPrefix(ClaudeCodeTools.memoryPrefix) { return legacyRule(forToolName: String(name.dropFirst(ClaudeCodeTools.memoryPrefix.count))) }
+        // The Orb's own tools as the old Claude Code integration named them (`mcp__orb_memoria__applescript`) are their native twins.
+        if name.hasPrefix(Self.legacyOrbToolPrefix) { return legacyRule(forToolName: String(name.dropFirst(Self.legacyOrbToolPrefix.count))) }
         switch name {
         case "run_command", "Bash": return PermissionRule(family: .shell)
         case "write_file", "edit_file", "trash", "Write", "Edit", "MultiEdit", "NotebookEdit": return PermissionRule(family: .writeFiles)

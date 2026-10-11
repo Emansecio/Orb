@@ -2,7 +2,7 @@ import Foundation
 
 /// What a connector's server offered the last time it ran, kept on disk (`conectores/<id>.json`, never a secret) so the
 /// Orb can list, resolve and judge the connector's tools without starting it: the index the model reads, the card's
-/// "12 ferramentas", "Ver ferramentas" and the annotations of a Claude Code turn all come from here.
+/// "12 ferramentas", "Ver ferramentas" and the annotations the permission check reads all come from here.
 struct ConnectorCatalog: Codable, Sendable, Equatable {
     struct Tool: Codable, Sendable, Equatable {
         var name: String
@@ -32,10 +32,5 @@ struct ConnectorCatalog: Codable, Sendable, Equatable {
         tools = specs.map { Tool(name: $0.name, description: $0.description, inputSchema: $0.parameters,
                                  annotations: annotations[$0.name] ?? .none) }
         self.updatedAt = updatedAt
-    }
-
-    /// The tools as the engine knows them (`<Server>__<tool>`), for `serverName` and the manager that runs them.
-    func mcpTools(serverName: String, serverID: UUID, manager: MCPManager) -> [MCPTool] {
-        tools.map { MCPTool(serverName: serverName, remote: $0.spec, serverID: serverID, manager: manager, annotations: $0.annotations) }
     }
 }

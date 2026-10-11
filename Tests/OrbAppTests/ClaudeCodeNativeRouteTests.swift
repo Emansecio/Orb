@@ -57,8 +57,6 @@ private struct RecordingModel: LLMClient {
         let asked = Asked()
         let (model, botID) = setUp(asked)
         #expect(model.send("oi, tudo bem?", to: botID, fromUser: true))
-        // Not the old Claude Code turn: nothing marks it as one.
-        #expect(model.session(botID).isClaudeTurn == false && !model.isClaudeCodeTurn(botID))
         await waitUntil("the turn to end") { !model.isWorking(botID) && model.session(botID).turnTask == nil }
 
         let calls = await asked.calls
@@ -71,7 +69,6 @@ private struct RecordingModel: LLMClient {
             if case .bot(let text, _) = item.kind { text } else { nil }
         }
         #expect(texts.last == "feito")
-        #expect(model.session(botID).conversation?.claudeSessionID == nil, "no CLI session to resume")
     }
 
     @Test @MainActor func aClaudeCodeTurnSteersInTheMiddleAndIsRecordedUnderThePlan() async throws {

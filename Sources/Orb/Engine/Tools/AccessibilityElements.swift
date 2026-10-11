@@ -190,7 +190,7 @@ struct LiveAccessibilitySystem: AccessibilitySystem {
     static let messagingTimeout: Float = 1
 
     /// The timeout set on an element holds only for that element (`AXUIElement.h`); the one set on the system-wide
-    /// element is the default for every other. Set once per process (the app and the tools server Claude Code starts).
+    /// element is the default for every other. Set once per process.
     private static let globalTimeout: Void = {
         AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), messagingTimeout)
     }()
@@ -468,12 +468,12 @@ struct LiveAccessibilityElement: AccessibilityElement, @unchecked Sendable {
 // MARK: - Which apps run, and which is in front
 
 /// The running apps and the app in front, read anew on every call. Never `NSWorkspace`'s `runningApplications` or
-/// `frontmostApplication`: they learn of changes only through the main run loop, which the Claude Code tools server (a
-/// `dispatchMain()` process) does not run, so there they go stale. The app in front comes from the window list (the owner
+/// `frontmostApplication`: they learn of changes only through the main run loop, which a process without one (a command line
+/// tool, a test) does not run, so there they go stale. The app in front comes from the window list (the owner
 /// of the top window of the normal layer: needs no answer from any app), checked against that app's own `AXFrontmost`, and
 /// the other apps' `AXFrontmost` one by one when the top window is not the front app's; the system-wide
 /// `AXFocusedApplication` is not used (it fails with "cannot complete" while an Electron app is in front). The same reading
-/// serves `ui_act` (in both processes) and the takeover (`LiveTakeoverPlatform`).
+/// serves `ui_act` and the takeover (`LiveTakeoverPlatform`).
 struct LiveDesktop: Sendable {
     /// The owner of the top-most visible window of the normal layer.
     var topWindowOwner: @Sendable () -> Int32? = LiveDesktop.liveTopWindowOwner

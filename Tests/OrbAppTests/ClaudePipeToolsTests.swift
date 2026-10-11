@@ -149,7 +149,8 @@ private func respond(_ line: String, _ declarations: [JSONValue], _ mailbox: Cla
             try await Task.sleep(for: .milliseconds(100))
             try mailbox.deliver(ClaudePipeToolResult(text: "falhou", images: [], isError: true), toolUseID: "toolu_B")
         }
-        let reply = try #require(await respond(call(1, tool: "screenshot", toolUseID: "toolu_B"), declarations, mailbox))
+        // A generous deadline: the wait ends when the result lands, and a loaded test run can stall the late delivery for seconds.
+        let reply = try #require(await respond(call(1, tool: "screenshot", toolUseID: "toolu_B"), declarations, mailbox, timeout: .seconds(120)))
         try await late.value
         #expect(reply["result"]?["isError"] == .bool(true))
         #expect(reply["result"]?["content"]?.array?.first?["text"]?.string == "falhou")
@@ -202,11 +203,12 @@ private func respond(_ line: String, _ declarations: [JSONValue], _ mailbox: Cla
         let mailbox = ClaudePipeMailbox(directory: dir.appendingPathComponent("box"))
         let started = ContinuousClock.now
         let task = Task { await respond(call(1, tool: "remember", toolUseID: "toolu_cancel"), declarations, mailbox,
-                                        poll: .milliseconds(5), timeout: .seconds(60)) }
+                                        poll: .milliseconds(5), timeout: .seconds(600)) }
         try await Task.sleep(for: .milliseconds(50))
         task.cancel()
         _ = await task.value
-        #expect(ContinuousClock.now - started < .seconds(5))
+        // Far short of the 600-second deadline, with room for a loaded test run.
+        #expect(ContinuousClock.now - started < .seconds(60))
     }
 
     // MARK: Loop

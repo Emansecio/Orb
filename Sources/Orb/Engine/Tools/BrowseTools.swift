@@ -510,8 +510,6 @@ struct BrowseTabsTool: BrowseTool {
     /// A new tab goes out to a site; everything else only moves among the pages already open.
     func risk(_ arguments: JSONValue) -> ToolRisk { action(arguments) == "new" ? .sensitive : .safe }
     func readsLivePage(_ arguments: JSONValue) -> Bool { action(arguments) != "new" }
-    /// With no arguments it lists, but `new` with a `url` goes to a site, and `select` and `close` change the browser: not read-only.
-    var announcedReadOnly: Bool { false }
 
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) {
         switch action(arguments) {
@@ -550,11 +548,6 @@ struct BrowseTabsTool: BrowseTool {
 }
 
 struct BrowseShowTool: BrowseTool {
-    /// The argument the app itself adds to a Claude Code call once it ran the hand-off (the window and the card) in its own
-    /// process: the server of the Orb's tools then only reports the result. Not part of the schema.
-    static let handledKey = "handoff"
-    static let handledDone = "done"
-
     let spec = ToolSpec(
         name: "browse_show",
         description: """
@@ -576,11 +569,6 @@ struct BrowseShowTool: BrowseTool {
         let hide = arguments.flag("hide")
         guard session.engine.canShowWindow else {
             throw ToolError("This browser (\(session.engine.label)) has no window. Tell the user what needs a person and that they can switch the Orb's browser to Chrome or CloakBrowser in the Orb's settings (Ajustes); then stop.")
-        }
-        // Claude Code: the app opened the window and waited for the person already; only the answer is left to give.
-        if !hide, arguments.nonEmptyString(Self.handledKey) == Self.handledDone {
-            session.forgetPage()
-            return Self.finished
         }
         let page: BrowserPage
         do {
@@ -655,8 +643,7 @@ struct BrowseCloseTool: BrowseTool {
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
         guard let botID = context.botID, let hub = context.browser.hub else { throw ToolError("The Orb's browser is not available here.") }
-        // Always asks to close, by the Orb's session name: with the Claude Code engine each turn's tools server has a hub of its own,
-        // new and empty, while the browser the earlier turns opened is still running under that name.
+        // Always asks to close, by the Orb's session name: the browser an earlier run of the app opened may still be running under it.
         guard await hub.close(botID: botID) else { return "The browser was not open." }
         return "Browser closed."
     }

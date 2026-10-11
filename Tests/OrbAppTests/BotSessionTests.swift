@@ -357,55 +357,6 @@ private struct WritingModel: LLMClient {
         #expect(model.selection == .bot(a))
     }
 
-    // MARK: Claude Code catch-up
-
-    /// A resumed Claude Code session (folder /x) that had seen 2 messages, then two more from another model.
-    @MainActor private func resumedClaudeChat(_ model: AppModel, _ botID: UUID) -> BotSession {
-        model.editConversation(botID) {
-            $0.messages = [.user("um"), ChatMessage(role: .assistant, content: "dois"), .user("três"), ChatMessage(role: .assistant, content: "quatro")]
-            $0.claudeSessionReported("s", folder: "/x")
-            $0.claudeSeenCount = 2
-        }
-        let session = model.session(botID)
-        session.isClaudeTurn = true
-        session.claudeTurnFolder = "/x"
-        _ = session.beginTurn()
-        session.turnTask = Task {}
-        return session
-    }
-
-    @Test @MainActor func aClaudeCodeTurnThatNeverReachedTheCLIKeepsTheCatchUpPending() async throws {
-        let model = AppModel(store: Store(directory: root.appending(path: "claude")), runsBackgroundWork: false)
-        let botID = model.bots[0].id
-        let session = resumedClaudeChat(model, botID)
-        let turn = try #require(session.turnID)
-
-        model.apply(.message(.user("e agora?")), to: botID)
-        model.apply(.failed("O Claude Code não respondeu em 60 segundos."), to: botID)
-        model.finishTurn(botID, turn: turn, succeeded: false) // no .session came: the CLI got nothing
-
-        let conversation = try #require(session.conversation)
-        #expect(conversation.claudeSeenCount == 2)
-        let catchUp = ClaudeCodePrompt.catchUp(conversation, seen: 2)
-        #expect(catchUp.contains("três") && catchUp.contains("quatro"))
-        #expect(!session.isClaudeTurn && !session.claudeTurnDelivered)
-    }
-
-    @Test @MainActor func aClaudeCodeTurnThatReachedTheCLICountsEverythingAsSeen() async throws {
-        let model = AppModel(store: Store(directory: root.appending(path: "claude-ok")), runsBackgroundWork: false)
-        let botID = model.bots[0].id
-        let session = resumedClaudeChat(model, botID)
-        let turn = try #require(session.turnID)
-
-        model.apply(.message(.user("e agora?")), to: botID)
-        model.apply(.session("s"), to: botID) // the CLI answered: it has the catch-up and the message
-        model.apply(.message(ChatMessage(role: .assistant, content: "feito")), to: botID)
-        model.finishTurn(botID, turn: turn)
-
-        #expect(session.conversation?.claudeSeenCount == 6)
-        #expect(!session.claudeTurnDelivered)
-    }
-
     // MARK: Reading and writing the conversation
 
     @Test @MainActor func anOrbsConversationIsReadWhenFirstNeededAndWrittenBack() async throws {

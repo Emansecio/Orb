@@ -212,27 +212,6 @@ struct LocalConnectorServerTests {
         #expect(ping["result"] == .object([:]))
     }
 
-    @Test func theCommandLineNamesTheConnector() {
-        #expect(LocalConnectorServer.kind(arguments: ["Orb", "--local-connector", "gmail"]) == .gmail)
-        #expect(LocalConnectorServer.kind(arguments: ["Orb", "--local-connector", "outro"]) == nil)
-        #expect(LocalConnectorServer.kind(arguments: ["Orb", "--local-connector"]) == nil)
-        #expect(LocalConnectorServer.kind(arguments: ["Orb"]) == nil)
-    }
-
-    @Test func claudeCodeStartsTheAppsOwnBinaryForALocalConnector() throws {
-        let agenda = LocalConnectorKind.agenda.config
-        let github = MCPServerConfig(name: "GitHub", url: "https://api.githubcopilot.com/mcp/")
-        #expect(ClaudeCodeTurn.mcpNames([agenda, github]) == [agenda.id: "google-agenda", github.id: "github"])
-        let config = try #require(ClaudeCodeTurn.mcpConfig([agenda, github]))
-        let entry = try #require(config["mcpServers"]?["google-agenda"])
-        #expect(entry["type"]?.string == "stdio" && entry["args"]?.array?.compactMap(\.string) == ["--local-connector", "agenda"])
-        #expect(entry["command"]?.string?.isEmpty == false)
-        // A disabled one is left out, like any connector.
-        var off = LocalConnectorKind.gmail.config
-        off.isEnabled = false
-        #expect(ClaudeCodeTurn.mcpNames([off]).isEmpty)
-    }
-
     @Test func aLocalConnectorSurvivesTheDataFileAndOldFilesLackTheField() throws {
         let config = LocalConnectorKind.gmail.config
         let data = try JSONEncoder().encode(config)
@@ -289,7 +268,8 @@ struct LocalConnectorManagerTests {
         for config in [agenda, gmail, lembretes] { try await manager.ensureStarted(config.id) }
         func verdict(_ config: MCPServerConfig, _ tool: String, mode: PermissionMode = .auto) async throws -> PermissionVerdict {
             let catalog = try #require(await manager.catalog(config.id))
-            let mcp = try #require(catalog.mcpTools(serverName: config.name, serverID: config.id, manager: manager).first { $0.toolName == tool })
+            let found = try #require(catalog.tools.first { $0.spec.name == tool })
+            let mcp = MCPTool(serverName: config.name, remote: found.spec, serverID: config.id, manager: manager, annotations: found.annotations)
             let call = PermissionPolicy.call(for: mcp, arguments: .object([:]), context: ToolContext(workingDirectory: FileManager.default.temporaryDirectory))
             return PermissionPolicy.evaluate(mode: mode, call: call, rules: [], workspace: nil)
         }

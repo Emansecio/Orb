@@ -914,33 +914,6 @@ extension SteeringModelTests {
         #expect(items(model, bot.id).allSatisfy { !$0.duringTask })
     }
 
-    @Test @MainActor func inClaudeCodeBothModesAreTheQueueAndTheBubbleSaysSo() async throws {
-        let gate = Latch()
-        let client = HeldModel(gate: gate)
-        let (model, bot) = setUp(client)
-        model.submit("primeiro", to: bot.id)
-        await waitUntil("the model call") { await client.seen.count >= 1 }
-        model.session(bot.id).isClaudeTurn = true // the turn is Claude Code's: it takes nothing in the middle
-        #expect(model.isClaudeCodeTurn(bot.id) && !model.steersMidTurn(bot.id))
-
-        #expect(model.submit("direcionar", to: bot.id, delivery: .steer))
-        #expect(model.submit("fila", to: bot.id, delivery: .afterTask))
-        let lane = model.composerLane(bot.id)
-        #expect(lane.queued.map(\.delivery) == [.afterTask, .afterTask]) // the first one asked to steer: there is nothing to steer
-        #expect(!lane.queue.hasSteering)
-        for message in lane.queued {
-            #expect(QueuedMessages.whenText(needsYou: false, isClaudeCode: model.isClaudeCodeTurn(bot.id), delivery: message.delivery)
-                    == "Depois da resposta (o Claude Code não recebe no meio)")
-        }
-        model.switchDelivery(lane.queued[0].id, botID: bot.id) // the bubble has no button for it; the call changes nothing
-        #expect(lane.queued.map(\.delivery) == [.afterTask, .afterTask])
-        await gate.open()
-        await waitUntilIdle(model, bot.id)
-        // After the answer both go together, in the order of sending, as a request of their own.
-        #expect(items(model, bot.id).map(\.text) == ["primeiro", "direcionar\n\nfila"])
-        #expect(items(model, bot.id).allSatisfy { !$0.duringTask })
-    }
-
     @Test @MainActor func aFailedOrStoppedTaskGivesBackBothModesToTheField() async throws {
         let client = HeldModel()
         let (model, bot) = setUp(client)

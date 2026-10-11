@@ -42,11 +42,6 @@ struct PrefacedHistoryTests {
         #expect(!summary.contains(TurnPreface.openTag))
     }
 
-    @Test func theClaudeCodeCatchUpDropsThePrefaceToo() {
-        let catchUp = ClaudeCodePrompt.catchUp([prefaced("o que mudou?"), ChatMessage(role: .assistant, content: "nada")])
-        #expect(catchUp.contains("User: o que mudou?"))
-        #expect(!catchUp.contains(TurnPreface.openTag) && !catchUp.contains("Package.swift"))
-    }
 }
 
 // MARK: - Fences
@@ -106,49 +101,30 @@ struct InstructionTrustTests {
         #expect(file.isTrusted(by: file.hash))
     }
 
-    @Test func claudeCodeReadsItsOwnClaudeMd() {
-        let claudeMd = FolderInstructions(fileName: "CLAUDE.md", content: "x", wasCut: false, hash: "h")
-        let agents = FolderInstructions(fileName: "AGENTS.md", content: "x", wasCut: false, hash: "h")
-        #expect(InstructionsText.claudeCodeReadsItself(claudeMd, usesClaudeCode: true))
-        #expect(!InstructionsText.claudeCodeReadsItself(claudeMd, usesClaudeCode: false))
-        #expect(!InstructionsText.claudeCodeReadsItself(agents, usesClaudeCode: true))
-        #expect(InstructionsText.footer(for: claudeMd, name: "Atlas", trustedHash: nil, usesClaudeCode: true).contains("próprio Claude Code"))
-        #expect(InstructionsText.footer(for: claudeMd, name: "Atlas", trustedHash: nil).contains("material de referência"))
-    }
 }
 
 // MARK: - Prompt follows the switches
 
 struct CapabilityPromptTests {
     @Test func withoutComputerUseThePromptDoesNotSendTheOrbToAppleScript() {
-        for engine in [PromptEngine.native, .claudeCode] {
-            let text = PromptParts.permissions(bot([.terminal, .browser]), engine: engine)
-            #expect(!text.contains("administrator privileges") && !text.contains("Finder via osascript"))
-            #expect(!text.contains("Gravação de Tela"))
-            #expect(text.contains("sudo") && text.contains("Controlar apps do Mac"))
-        }
-        let on = PromptParts.permissions(bot(), engine: .native)
+        let text = PromptParts.permissions(bot([.terminal, .browser]))
+        #expect(!text.contains("administrator privileges") && !text.contains("Finder via osascript"))
+        #expect(!text.contains("Gravação de Tela"))
+        #expect(text.contains("sudo") && text.contains("Controlar apps do Mac"))
+        let on = PromptParts.permissions(bot())
         #expect(on.contains("administrator privileges") && on.contains("trash tool") && on.contains("Gravação de Tela"))
     }
 
     @Test func theTrashToolIsNamedWheneverTheOrbHasIt() {
-        // It needs "Terminal e arquivos" or "Controlar apps do Mac", whichever is on, in both engines.
-        let native = PromptParts.permissions(bot([.terminal]), engine: .native)
-        #expect(native.contains("prefer the trash tool over rm"))
-        let claudeCode = PromptParts.permissions(bot([.terminal]), engine: .claudeCode)
-        #expect(claudeCode.contains("prefer the mcp__orb_memoria__trash tool over rm"))
-        #expect(!claudeCode.contains("Finder"))
-        #expect(PromptParts.permissions(bot([.computerUse]), engine: .claudeCode).contains("mcp__orb_memoria__trash"))
+        // It needs "Terminal e arquivos" or "Controlar apps do Mac", whichever is on.
+        #expect(PromptParts.permissions(bot([.terminal])).contains("prefer the trash tool over rm"))
+        #expect(PromptParts.permissions(bot([.computerUse])).contains("trash tool"))
         // With neither switch there is no trash tool and nothing to delete with.
-        for engine in [PromptEngine.native, .claudeCode] {
-            #expect(!PromptParts.permissions(bot([.browser]), engine: engine).contains("trash tool"))
-        }
+        #expect(!PromptParts.permissions(bot([.browser])).contains("trash tool"))
     }
 
-    @Test func claudeCodeIsToldWhatItKeepsWhenTheTerminalSwitchIsOff() {
-        let claudeCode = PromptParts.permissions(bot([.browser]), engine: .claudeCode)
-        #expect(claudeCode.contains("Read only for files the user attached"))
-        let native = PromptParts.permissions(bot([.browser]), engine: .native)
+    @Test func theOrbIsToldWhatItKeepsWhenTheTerminalSwitchIsOff() {
+        let native = PromptParts.permissions(bot([.browser]))
         #expect(native.contains("no tools to read, write or search files"))
     }
 
@@ -178,7 +154,7 @@ struct CapabilityPromptTests {
     }
 
     @Test func askModeAdmitsTheActionsTheUserAlwaysAllows() {
-        #expect(PromptParts.permissions(bot(mode: .ask), engine: .native).contains("always allow"))
+        #expect(PromptParts.permissions(bot(mode: .ask)).contains("always allow"))
     }
 }
 
@@ -202,27 +178,13 @@ struct CapabilityPromptTests {
 
     @Test @MainActor func aNativeTurnRecordsTheSnapshotOnlyWhenItsMessageIsStored() {
         let (model, bot) = model()
-        model.session(bot.id).pendingMarks = .native(workspaceHash: "w1")
+        model.session(bot.id).pendingMarks = DeliveryMarks(workspaceHash: "w1", workspace: nil)
         model.apply(.message(ChatMessage(role: .assistant, content: "oi")), to: bot.id)
         #expect(model.conversations[bot.id]?.workspaceHash == nil)
 
         model.apply(.message(.user("pedido")), to: bot.id)
         #expect(model.conversations[bot.id]?.workspaceHash == "w1")
         #expect(model.pendingMarks[bot.id] == nil)
-    }
-
-    @Test @MainActor func aClaudeCodeTurnRecordsItsMarksWhenTheSessionAnswers() {
-        let (model, bot) = model()
-        model.session(bot.id).pendingMarks = .claudeCode(workspaceHash: "w2", pinned: "identidade", standingHash: "s2")
-        model.apply(.message(.user("pedido")), to: bot.id) // Orb's own copy of the prompt: nothing was delivered yet
-        model.apply(.session(""), to: bot.id)
-        #expect(model.conversations[bot.id]?.claudeWorkspaceHash == nil)
-
-        model.apply(.session("abc"), to: bot.id)
-        let conversation = model.conversations[bot.id]
-        #expect(conversation?.claudeWorkspaceHash == "w2" && conversation?.claudeStandingHash == "s2")
-        #expect(conversation?.claudeMemoryPinned == "identidade" && conversation?.claudeSessionID == "abc")
-        #expect(conversation?.workspaceHash == nil)
     }
 
     @Test @MainActor func aTurnThatFailsBeforeDeliveryLeavesTheMarksAlone() async {

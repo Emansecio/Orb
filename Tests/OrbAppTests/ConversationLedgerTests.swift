@@ -688,22 +688,6 @@ struct ManualCompactionTests {
         #expect(history.last?.content == "resposta 23")
     }
 
-    @Test func claudeCodeStyleFoldsEverythingButTheLatestTurn() throws {
-        var conversation = conversation(turns: 6, output: 100)
-        let attempt = conversation.compactAllButLatestTurn(focus: "o login")
-        let report = try #require(attempt)
-        #expect(report.foldedMessages == 5 * 4)
-        #expect(conversation.messages.count - (conversation.summaryCoveredCount ?? 0) == 4)
-        #expect(conversation.summary?.contains("Pedido original: " + longRequest) == true)
-        #expect(conversation.summary?.contains("Dar atenção a: o login") == true)
-        #expect(conversation.compactions == 1)
-        // Again right away: nothing more before the latest turn.
-        #expect(conversation.compactAllButLatestTurn() == nil)
-        // One turn only: nothing to fold.
-        var single = Conversation()
-        single.messages = step(longRequest)
-        #expect(single.compactAllButLatestTurn() == nil)
-    }
 }
 
 // MARK: - Reports and notices
@@ -741,17 +725,6 @@ struct CompactionReportTests {
         #expect(report.notice == "Neste pedido, resumi os 18 primeiros passos para caber no modelo (≈ 60 mil → 40 mil tokens).")
         #expect(CompactionReport(kind: .steps, foldedMessages: 1, tokensBefore: nil, tokensAfter: nil).notice
             == "Neste pedido, resumi o primeiro passo para caber no modelo.")
-    }
-
-    @Test func claudeCodesOwnCompactionIsDescribedWithWhatItReported() {
-        #expect(CompactionReport(kind: .claudeCode, foldedMessages: 0, tokensBefore: 168_000, tokensAfter: 21_000, trigger: "auto").notice
-            == "O Claude Code compactou a sessão sozinho (de 168 mil para 21 mil tokens).")
-        #expect(CompactionReport(kind: .claudeCode, foldedMessages: 0, tokensBefore: 168_000, tokensAfter: 21_000, trigger: "manual").notice
-            == "O Claude Code compactou a sessão (de 168 mil para 21 mil tokens).")
-        #expect(CompactionReport(kind: .claudeCode, foldedMessages: 0, tokensBefore: 168_000, tokensAfter: nil, trigger: "auto").notice
-            == "O Claude Code compactou a sessão sozinho (tinha 168 mil tokens).")
-        #expect(CompactionReport(kind: .claudeCode, foldedMessages: 0, tokensBefore: nil, tokensAfter: nil).notice
-            == "O Claude Code compactou a sessão sozinho.")
     }
 
     @Test func theSlashCommandIsParsedWithItsFocus() {

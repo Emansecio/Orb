@@ -32,15 +32,6 @@ final class AppModel {
     var showNewGroup = false
     var newGroupStart: UUID?
     // MARK: end MultiOrb (WP0)
-    // MARK: MultiOrb (WP1)
-    /// Where Claude Code's tools server asks for `orbs` (and the creation assistant's `orb_draft`): see `OrbBridge`. It starts
-    /// listening with the first Claude Code turn.
-    @ObservationIgnored private(set) lazy var orbBridge = OrbBridge.Server(directory: store.directory.appending(path: "ponte")) {
-        [weak self] orb, tool, arguments, callID in
-        guard let self else { throw ToolError("O app está fechando.") }
-        return try await self.bridgeCall(tool: tool, orb: orb, arguments: arguments, callID: callID)
-    }
-    // MARK: end MultiOrb (WP1)
     // MARK: MultiOrb (WP3)
     /// Where the Orbs an Orb proposes get their own folder (`~/Orbs`; tests point it at a temporary folder).
     @ObservationIgnored var proposedOrbFolderBase = OrbFolder.defaultBase
@@ -122,13 +113,6 @@ final class AppModel {
     var freshRoutine: UUID?
     /// How long that highlight lasts.
     @ObservationIgnored var freshDuration = Duration.seconds(2.5)
-    /// Where Claude Code's tools server asks for the same (see `ScheduleMailbox`); it starts listening with the first
-    /// Claude Code turn.
-    @ObservationIgnored private(set) lazy var scheduleMailbox = ScheduleMailbox.Server(
-        directory: store.directory.appending(path: "agendamentos")) { [weak self] orb, arguments in
-            guard let self else { throw ToolError("O app está fechando.") }
-            return try self.schedule(arguments, orb: orb)
-        }
     /// The "Esqueceu isso. Desfazer" of the memory screens: here so it outlives the panel being rebuilt (switching Orbs).
     @ObservationIgnored let memoryUndo = MemoryUndo()
     /// Which phrases of the working line VoiceOver is told (not more often than every 8 s).
@@ -220,10 +204,6 @@ final class AppModel {
     @ObservationIgnored let connectorSecrets: ConnectorSecrets
     /// The registrations of connectors, one after another: waiting for the last one means `mcp` knows every connector.
     @ObservationIgnored private var connectorSync: Task<Void, Never>?
-    /// Whether a Claude Code turn may renew an old connector catalog in the background (only the running app does), and
-    /// when each connector was last tried, so one that fails is not started again at every message.
-    @ObservationIgnored var renewsCatalogs: Bool // internal so tests can switch it on
-    @ObservationIgnored private var catalogRenewals: [UUID: Date] = [:]
     /// The connectors being logged in through the browser now (their cards show it, whichever screen started it).
     var signingIn: Set<UUID> = []
     @ObservationIgnored var loginAttempts: [UUID: Task<String?, Never>] = [:]
@@ -336,7 +316,6 @@ final class AppModel {
         self.store = store
         isDevRun = devRun
         if devRun { connectionSources.claudeCodeStatus = nil } // a developer run never runs the real `claude`
-        renewsCatalogs = runsBackgroundWork && !devRun
         writesStretchNotes = runsBackgroundWork && !devRun
         let vault = secretVault ?? (runsBackgroundWork && !devRun ? KeychainVault() : MemoryVault())
         self.secretVault = vault
@@ -417,7 +396,7 @@ final class AppModel {
         let cleansTemporaryFiles = !DevRun.isActive
         Task.detached(priority: .utility) {
             ToolOutputCap.cleanUp(directory: outputs)
-            if cleansTemporaryFiles { ClaudeCodeEngine.removeStaleMCPConfigs() }
+            if cleansTemporaryFiles { LegacyTemporaryFiles.removeStaleMCPConfigs() }
         }
         ApprovalNotifications.clearStale()
         ApprovalNotifications.install { [weak self] route in self?.handle(route) }
@@ -1139,7 +1118,7 @@ final class AppModel {
     // MARK: Reset
 
     /// The first thing "Redefinir o Orb" does: stops everything the app is doing, so nothing writes while the data is
-    /// removed and nothing starts again after: the scheduler, every Orb's turn (Claude Code's process included), the
+    /// removed and nothing starts again after: the scheduler, every Orb's turn (a Claude Code process included), the
     /// routines and their queue, the approval cards and banners, the connectors. Returns when the turns have ended, or
     /// after `wait` (a command that does not stop does not hold the reset). Writing is sealed before this is called.
     func stopForReset(wait: Duration = .seconds(3)) async {
@@ -1234,8 +1213,8 @@ final class AppModel {
     }
 
     /// Makes an archived conversation the current one. The current one is archived first (if you said anything in
-    /// it), so nothing is lost either way. The conversation keeps its Claude Code session and its memory
-    /// bookkeeping (how much of it is already saved as memory), so reopening it saves nothing twice. The file is read
+    /// it), so nothing is lost either way. The conversation keeps its memory bookkeeping
+    /// (how much of it is already saved as memory), so reopening it saves nothing twice. The file is read
     /// off the main thread; what changed meanwhile is looked at again before the chat is replaced. The archived copy
     /// goes only after both the current chat's archive and the reopened one are written: with a full disk the change
     /// is given up and nothing is lost.
@@ -1494,10 +1473,7 @@ final class AppModel {
     /// machinery as an automatic compaction but down to `ContextMeter.compactingShare` of the budget, after saving to the
     /// Orb's memory what it held. `focus` is something the summary should pay attention to. The result carries the
     /// numbers (estimated tokens of the history before and after) and a sentence for the screen; when something was
-    /// compacted the same sentence is added to the transcript. Not while a message is being answered. For Claude
-    /// Code, whose context is its own session, the session is dropped and the next message starts a new one from the
-    /// summary (Orb cannot ask the CLI to compact; it compacts itself, see `ClaudeCodeMessage.compacted`): the numbers
-    /// are then estimates from Orb's copy of the conversation.
+    /// compacted the same sentence is added to the transcript. Not while a message is being answered.
     @discardableResult
     func compactNow(botID: UUID, focus: String? = nil) -> CompactionResult {
         guard let bot = bot(botID) else {
@@ -1517,7 +1493,6 @@ final class AppModel {
                                                    alreadySummarized: conversation.summary != nil))
         guard conversation.messages.count > 1 else { return tooShort }
 
-        // Claude Code's models are driven by the native engine too (its CLI is only the transport), so they fold like any other.
         let budget = contextBudget(for: bot) ?? .fallback
         guard let report = conversation.compact(budget: budget, focus: focus) else { return tooShort }
         session.conversation = conversation
@@ -1530,15 +1505,12 @@ final class AppModel {
                                 savedToMemory: saved, message: message)
     }
 
-    nonisolated static let claudeRestartNote = "A próxima mensagem começa uma sessão nova do Claude Code, com esse resumo. Os números são estimativas."
-
     /// "/compactar [foco]" typed in the composer: compacts and tells what happened in the transcript (when something
-    /// was compacted the notice is already there; otherwise, or when the Claude Code session starts over, a line says so).
+    /// was compacted the notice is already there; otherwise a line says why not).
     private func runCompactionCommand(focus: String?, for botID: UUID) {
         let result = compactNow(botID: botID, focus: focus)
         switch result.status {
         case .compacted: break
-        case .claudeSessionRestarted: append(.notice(Self.claudeRestartNote), to: botID)
         case .nothingToCompact, .busy, .unavailable: append(.notice(result.message), to: botID)
         }
     }
@@ -1691,7 +1663,7 @@ final class AppModel {
             prompt += "\n\nAttached files (read them with your tools):\n" + attachments.map { "- \($0.path)" }.joined(separator: "\n")
         }
         if !pictures.isEmpty {
-            prompt += Self.pictureNote(pictures, forClaudeCode: false, modelSees: sees)
+            prompt += Self.pictureNote(pictures, modelSees: sees)
         }
         prompt = unattendedPrompt(prompt, for: botID)
         if intent != nil {
@@ -1720,7 +1692,7 @@ final class AppModel {
         // MARK: MultiOrb (WP1)
         if multi.orbs { context.orbs = delegationHandler(for: botID) }
         context.sideRun = session.routineID.flatMap { id in session.sideKind.map { SideRunInfo(kind: $0, id: id, chain: session.chain) } }
-        let teammates = multi.orbs ? orbsSection(for: bot, claudeCode: false) : ""
+        let teammates = multi.orbs ? orbsSection(for: bot) : ""
         let maxSteps = session.sideKind == .delegation || session.sideKind == .group ? DelegationLimits.sideRunMaxSteps
             : session.routineID != nil ? AgentEngine.routineMaxSteps : AgentEngine.defaultMaxSteps
         let baseContext = context
@@ -1777,7 +1749,7 @@ final class AppModel {
             let browserSection = BrowserPrompt.section(bot: bot, availability: browserAvailability, status: browserStatus)
             if !browserSection.isEmpty { system += "\n\n" + browserSection }
             if !teammates.isEmpty { system += "\n\n" + teammates }
-            if let groupTurn { system += "\n\n" + groupTurn.system(claudeCode: false) } // MultiOrb (WP5)
+            if let groupTurn { system += "\n\n" + groupTurn.system } // MultiOrb (WP5)
             let request = TurnRequest(bot: bot, model: ref.model, system: system, history: history,
                                       prompt: TurnPreface.prepend(built.preface, to: prompt),
                                       client: client, tools: tools, context: context, budget: budget, ledger: ledger,
@@ -1846,48 +1818,15 @@ final class AppModel {
         scheduleStateSave()
     }
 
-    /// What the prompt says about the pictures of a message. Claude Code cannot be handed pictures, but its Read tool
-    /// opens image files; Orb's own engine sends them with the message (the paths are for tools that need a file).
-    nonisolated static func pictureNote(_ pictures: [ImageAttachment], forClaudeCode: Bool, modelSees: Bool?) -> String {
+    /// What the prompt says about the pictures of a message: the engine sends them with the message (the paths are for tools
+    /// that need a file).
+    nonisolated static func pictureNote(_ pictures: [ImageAttachment], modelSees: Bool?) -> String {
         let list = pictures.map { "- \($0.path)" }.joined(separator: "\n")
-        if forClaudeCode { return "\n\nImagens anexadas — use a ferramenta Read para vê-las:\n" + list }
         // A model that cannot see them gets the paths from the engine; one that can gets them for tools. When it is
         // not known whether it sees (`modelSees` nil), the engine decides and adds its own line if it sent paths only.
         guard modelSees != false else { return "" }
         return (modelSees == true ? "\n\nAttached images (resized copies, shown to you with this message):\n"
                 : "\n\nAttached images (resized copies):\n") + list
-    }
-
-    /// For a Claude Code turn: the tools of `ids` that the connectors mark destructive, the tools the catalogs know at all
-    /// (any other tool of these connectors is asked about: it appeared after the catalog was made) and the prefix of each
-    /// connector's tools. Read from the catalogs, so nothing is started.
-    func connectorAnnotations(for ids: Set<UUID>, cliNames: [UUID: String]) async
-        -> (destructive: [String: String], known: Set<String>, prefixes: Set<String>) {
-        guard !ids.isEmpty else { return ([:], [], []) }
-        var tools: [any AgentTool] = []
-        for connector in connectors where ids.contains(connector.id) {
-            if let catalog = await mcp.catalog(connector.id) {
-                tools += catalog.mcpTools(serverName: connector.name, serverID: connector.id, manager: mcp)
-            }
-        }
-        return (ClaudeCodeTurn.destructiveConnectors(tools, cliNames: cliNames),
-                ClaudeCodeTurn.knownConnectorTools(tools, cliNames: cliNames),
-                ClaudeCodeTurn.connectorPrefixes(ids, cliNames: cliNames))
-    }
-
-    /// Lists again, in the background, the connectors of a Claude Code turn whose catalog is missing or older than
-    /// `maxAge`, so what the turn is told about their tools does not stay frozen (the CLI runs its own servers, which
-    /// only this catalog describes). Never holds the turn; each connector is tried at most once an hour.
-    func renewOldCatalogs(of ids: Set<UUID>, maxAge: TimeInterval = 24 * 3600) {
-        guard renewsCatalogs else { return }
-        let enabled = connectors.filter { ids.contains($0.id) && $0.isEnabled }
-        Task {
-            for connector in enabled where Date.now.timeIntervalSince(catalogRenewals[connector.id] ?? .distantPast) > 3600 {
-                if let catalog = await mcp.catalog(connector.id), Date.now.timeIntervalSince(catalog.updatedAt) < maxAge { continue }
-                catalogRenewals[connector.id] = .now
-                _ = await testConnector(connector.id)
-            }
-        }
     }
 
     /// Quitting: stops every running turn, so nothing is left running unwatched (the app no longer answers permission

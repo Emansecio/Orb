@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// `Orb --snapshot context-meter | context-nudge | context-popover | context-popover-result | context-popover-claude |
+/// `Orb --snapshot context-meter | context-nudge | context-popover | context-popover-result |
 /// context-popover-short | settings-context out.png`: the context meter in the composer, the card for a long
 /// conversation (at the default window height too: the card must not push the composer out), its popover (a popover
 /// window does not render offscreen, so it is drawn on its own) and the memory settings with learned windows.
@@ -25,11 +25,6 @@ enum ContextSnapshots {
         case "context-popover-short":
             seed(model, bot: bot, turns: 1, charactersPerMessage: 400)
             return popover(model, bot: bot)
-        case "context-popover-claude":
-            seed(model, bot: bot, turns: 6, charactersPerMessage: 2_000, claudeCode: true)
-            return popover(model, bot: bot, result: CompactionResult(
-                status: .claudeSessionRestarted, foldedMessages: 10, tokensBefore: 22_000, tokensAfter: 4_000,
-                message: "Compactei a conversa. " + AppModel.claudeRestartNote))
         case "settings-context":
             model.learnContextWindow(8_192, of: "ollama/gpt-5")
             model.learnContextWindow(32_000, of: "ollama/qwen3", stated: false)
@@ -44,12 +39,12 @@ enum ContextSnapshots {
 
     private static let usage = TokenUsage(input: 7_000, output: 300, cacheRead: 35_000, cacheWrite: 0)
 
-    /// A model with a 128k window (or Claude Code).
-    private static func seedModel(_ model: AppModel, claudeCode: Bool) {
-        var account = ProviderAccount(kind: claudeCode ? .claudeCode : .ollama)
+    /// A model with a 128k window.
+    private static func seedModel(_ model: AppModel) {
+        var account = ProviderAccount(kind: .ollama)
         account.models = [ProviderModel(id: "gpt-5", name: "GPT-5", format: .chat, contextLength: 128_000)]
         model.providers = [account]
-        model.defaultModel = claudeCode ? "claudeCode/sonnet" : "ollama/gpt-5"
+        model.defaultModel = "ollama/gpt-5"
     }
 
     /// `turns` exchanges of `charactersPerMessage` characters each.
@@ -66,8 +61,8 @@ enum ContextSnapshots {
     }
 
     /// For the popover scenes, which need no chat: the conversation is there at once.
-    private static func seed(_ model: AppModel, bot: Bot, turns: Int, charactersPerMessage: Int, claudeCode: Bool = false) {
-        seedModel(model, claudeCode: claudeCode)
+    private static func seed(_ model: AppModel, bot: Bot, turns: Int, charactersPerMessage: Int) {
+        seedModel(model)
         model.seedConversation(conversation(turns: turns, charactersPerMessage: charactersPerMessage), for: bot.id)
         model.apply(.requestUsage(usage), to: bot.id)
     }
@@ -75,7 +70,7 @@ enum ContextSnapshots {
     /// The chat, with the conversation put in memory after the Orb's own one has been read from disk (which would replace it).
     private static func chat(_ model: AppModel, bot: Bot, charactersPerMessage: Int) -> AnyView {
         let conversation = conversation(turns: 12, charactersPerMessage: charactersPerMessage)
-        seedModel(model, claudeCode: false)
+        seedModel(model)
         return AnyView(ChatView(botID: bot.id).task {
             try? await Task.sleep(for: .seconds(1))
             model.seedConversation(conversation, for: bot.id)

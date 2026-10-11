@@ -119,37 +119,16 @@ enum TurnPreface {
     }
 }
 
-/// What a turn records on its conversation once the model has actually been given the snapshot and the updates (see
-/// `AppModel`): a turn that is stopped or fails before that leaves the marks as they were, so the next turn sends again.
-enum DeliveryMarks: Sendable, Equatable {
-    /// `workspace`: the snapshot as the model now has it (`WorkspaceSnapshot.forComparison`), to tell what changed next time.
-    case native(workspaceHash: String, workspace: WorkspaceSnapshot? = nil)
-    /// `system`: the system prompt the session started with (what every later turn of it sends again, byte for byte).
-    /// `related`: the related-memory lines this turn carried; `startsSession`: this turn began a new Claude Code session,
-    /// which has seen nothing the earlier ones were sent, so their lines are forgotten.
-    case claudeCode(workspaceHash: String, workspace: WorkspaceSnapshot? = nil, pinned: String, standingHash: String,
-                    system: String? = nil, related: [String] = [], startsSession: Bool = false)
-
-    var isNative: Bool {
-        if case .native = self { return true }
-        return false
-    }
+/// What a turn records on its conversation once the model has actually been given the snapshot (see `AppModel`): a turn that
+/// is stopped or fails before that leaves the marks as they were, so the next turn sends again.
+struct DeliveryMarks: Sendable, Equatable {
+    var workspaceHash: String
+    /// The snapshot as the model now has it (`WorkspaceSnapshot.forComparison`), to tell what changed next time.
+    var workspace: WorkspaceSnapshot?
 
     func record(in conversation: inout Conversation) {
-        switch self {
-        case .native(let workspaceHash, let workspace):
-            conversation.workspaceHash = workspaceHash
-            conversation.workspaceSeen = workspace
-        case .claudeCode(let workspaceHash, let workspace, let pinned, let standingHash, let system, let related, let startsSession):
-            conversation.claudeWorkspaceHash = workspaceHash
-            conversation.claudeWorkspaceSeen = workspace
-            conversation.claudeMemoryPinned = pinned
-            conversation.claudeStandingHash = standingHash
-            if let system { conversation.claudeSystem = system }
-            var recent = startsSession ? [] : conversation.claudeRelatedSent ?? []
-            recent.append(related)
-            conversation.claudeRelatedSent = Array(recent.suffix(TurnPreface.relatedWindow))
-        }
+        conversation.workspaceHash = workspaceHash
+        conversation.workspaceSeen = workspace
     }
 }
 
@@ -175,7 +154,7 @@ struct TurnPromptInputs: Sendable {
     fileprivate var folderSection: String { instructions?.prompt(trustedHash: bot.trustedInstructionsHash) ?? "" }
 }
 
-/// The system prompt plus the per-message context of a turn, for Orb's own engine and for Claude Code.
+/// The system prompt plus the per-message context of a turn.
 enum TurnPrompt {
     struct Native: Equatable, Sendable {
         var system: String
@@ -186,11 +165,11 @@ enum TurnPrompt {
         /// What `Conversation.workspaceSeen` becomes.
         var workspace: WorkspaceSnapshot
 
-        var marks: DeliveryMarks { .native(workspaceHash: workspaceHash, workspace: workspace) }
+        var marks: DeliveryMarks { DeliveryMarks(workspaceHash: workspaceHash, workspace: workspace) }
     }
 
     /// `lastWorkspaceHash` and `lastWorkspace`: the snapshot the conversation last sent. The model gets the whole snapshot
-    /// when `history` holds none (a new conversation, a compacted start, turns answered by Claude Code) or nothing is
+    /// when `history` holds none (a new conversation, a compacted start) or nothing is
     /// recorded of the last one; only what changed when the folder changed; and nothing about the folder otherwise.
     static func native(_ inputs: TurnPromptInputs, history: [ChatMessage], lastWorkspaceHash: String?,
                        lastWorkspace: WorkspaceSnapshot? = nil) -> Native {
@@ -203,70 +182,5 @@ enum TurnPrompt {
                       preface: TurnPreface.make(now: inputs.now, timeZone: inputs.environment.timeZone, report: report,
                                                 snapshot: inputs.snapshot, notes: notes),
                       workspaceHash: inputs.snapshot.hash, workspace: inputs.snapshot.forComparison)
-    }
-
-    struct ClaudeCode: Equatable, Sendable {
-        /// Appended to Claude Code's system prompt. Turns of a session send the same text, byte for byte, so Claude Code's
-        /// prompt cache holds; it is rebuilt (one cache miss) only when the identity, the preferences or the standing
-        /// rules changed, which is rare and started by the user.
-        var system: String
-        /// Sent before the message (the caller adds the catch-up on other models' turns after it).
-        var context: String
-        var workspaceHash: String
-        var workspace: WorkspaceSnapshot
-        var standingHash: String
-        /// Identity and preferences as this turn's session has them.
-        var pinned: String
-        /// The related-memory lines `context` carries.
-        var related: [String]
-        /// Whether this turn starts a new session.
-        var startsSession: Bool
-
-        var marks: DeliveryMarks {
-            .claudeCode(workspaceHash: workspaceHash, workspace: workspace, pinned: pinned, standingHash: standingHash,
-                        system: system, related: related, startsSession: startsSession)
-        }
-    }
-
-    /// What the Claude Code session already has: `isNewSession` when there is none to resume, otherwise the marks
-    /// the conversation kept from the turns it ran.
-    struct SessionMarks: Sendable {
-        var isNewSession: Bool
-        var workspaceHash: String?
-        var pinned: String?
-        var standingHash: String?
-        /// The snapshot the session was last given, as `Conversation.claudeWorkspaceSeen` kept it.
-        var workspace: WorkspaceSnapshot?
-        /// The system prompt the session started with (nil: not recorded, as in sessions from before this was kept).
-        var system: String?
-    }
-
-    static func claudeCode(_ inputs: TurnPromptInputs, session: SessionMarks) -> ClaudeCode {
-        // Claude Code reads CLAUDE.md on its own.
-        let folder = inputs.instructions?.fileName == "CLAUDE.md" ? "" : inputs.folderSection
-        let standing = ClaudeCodePrompt.standing(bot: inputs.bot, skills: inputs.skills, folder: folder)
-        let standingHash = ShortHash.of(standing.joined(separator: "\n"))
-        let current = ClaudeCodePrompt.make(bot: inputs.bot, skills: inputs.skills, memory: inputs.brief.stable,
-                                            environment: inputs.environment, folder: folder)
-        // The session sends its first system prompt again, byte for byte, until its identity, preferences or standing rules
-        // change: then the system prompt is rebuilt, so it never contradicts the current rules for the rest of the session
-        // (and a compaction by Claude Code can't leave only an old version). The update also rides with the message
-        // (below), in case Claude Code applies the system prompt only when a session starts.
-        let standingChanged = session.standingHash.map { $0 != standingHash } ?? false
-        let pinnedChanged = session.pinned.map { $0 != inputs.brief.pinned } ?? false
-        let system = session.isNewSession || standingChanged || pinnedChanged ? current : (session.system ?? current)
-
-        let report = inputs.snapshot.report(lastHash: session.workspaceHash, seen: session.workspace,
-                                            modelHasSnapshot: !session.isNewSession)
-        var parts = [TurnPreface.make(now: inputs.now, timeZone: inputs.environment.timeZone, report: report,
-                                      snapshot: inputs.snapshot, notes: session.isNewSession ? inputs.brief.notes : "")]
-        if !session.isNewSession {
-            parts.append(ClaudeCodePrompt.memoryUpdate(inputs.brief, pinnedChanged: inputs.brief.pinned != session.pinned))
-            if standingHash != session.standingHash { parts.append(ClaudeCodePrompt.standingUpdate(standing)) }
-        }
-        return ClaudeCode(system: system, context: parts.filter { !$0.isEmpty }.joined(separator: "\n\n"),
-                          workspaceHash: inputs.snapshot.hash, workspace: inputs.snapshot.forComparison,
-                          standingHash: standingHash, pinned: inputs.brief.pinned,
-                          related: inputs.brief.relatedHeaders, startsSession: session.isNewSession)
     }
 }

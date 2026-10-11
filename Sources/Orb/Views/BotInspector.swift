@@ -342,15 +342,12 @@ struct BotInspector: View {
 
         if let file = instructionFile {
             Section {
-                // Claude Code's models run on the Orb's own engine too (the CLI loads no project files), so trust always matters.
-                if !InstructionsText.claudeCodeReadsItself(file, usesClaudeCode: false) {
-                    Toggle(isOn: instructionsTrustBinding(file, of: bot)) {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Label("Confiar nas instruções desta pasta", systemImage: "checkmark.shield")
-                            Text("Se ligado, \(bot.name) segue o que está em \(file.fileName) como ordens. Ligue só para pastas suas.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+                Toggle(isOn: instructionsTrustBinding(file, of: bot)) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Label("Confiar nas instruções desta pasta", systemImage: "checkmark.shield")
+                        Text("Se ligado, \(bot.name) segue o que está em \(file.fileName) como ordens. Ligue só para pastas suas.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 Button("Ver \(file.fileName) no Finder", systemImage: "doc.text.magnifyingglass") {
@@ -361,8 +358,7 @@ struct BotInspector: View {
             } header: {
                 Text("Instruções da pasta")
             } footer: { FormFootnote {
-                Text(InstructionsText.footer(for: file, name: bot.name, trustedHash: bot.trustedInstructionsHash,
-                                             usesClaudeCode: false))
+                Text(InstructionsText.footer(for: file, name: bot.name, trustedHash: bot.trustedInstructionsHash))
             } }
             // What is read from the folder arrives by fading (`.quiet`), never by animating the height of a list that may
             // be long (§2.13).
@@ -849,15 +845,7 @@ enum RelativeTime {
 }
 
 enum InstructionsText {
-    /// CLAUDE.md in the folder of an Orb that runs on Claude Code: Claude Code reads it as instructions on its own.
-    static func claudeCodeReadsItself(_ file: FolderInstructions, usesClaudeCode: Bool) -> Bool {
-        usesClaudeCode && file.fileName == "CLAUDE.md"
-    }
-
-    static func footer(for file: FolderInstructions, name: String, trustedHash: String?, usesClaudeCode: Bool = false) -> String {
-        if claudeCodeReadsItself(file, usesClaudeCode: usesClaudeCode) {
-            return "\(file.fileName) é lido pelo próprio Claude Code como instruções do projeto."
-        }
+    static func footer(for file: FolderInstructions, name: String, trustedHash: String?) -> String {
         if file.isTrusted(by: trustedHash) { return "\(file.fileName) vale como instruções de \(name) nesta pasta." }
         if trustedHash != nil {
             return "\(file.fileName) mudou desde que você confiou nele: \(name) o lê só como referência, até você confiar de novo."

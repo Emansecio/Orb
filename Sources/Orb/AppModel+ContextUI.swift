@@ -17,16 +17,14 @@ extension AppModel {
             stated = catalog > 0 || (learnedContexts[ref.text]?.isFresh() ?? false)
         }
         return ContextInput(botID: botID, conversation: conversation, budget: contextBudget(for: bot),
-                            isClaudeCode: false, windowIsStated: stated, usage: session.routineID == nil ? live(botID).lastUsage : nil, memory: contextMemory)
+                            windowIsStated: stated, usage: session.routineID == nil ? live(botID).lastUsage : nil, memory: contextMemory)
     }
 
-    /// "Compactar agora" from the meter or the card: compacts, says what happened to VoiceOver, and, for Claude Code,
-    /// tells the transcript that the next message starts a new session (the same as "/compactar").
+    /// "Compactar agora" from the meter or the card: compacts and says what happened to VoiceOver.
     @discardableResult
     func compactFromMeter(_ botID: UUID, focus: String?) -> CompactionResult {
         let trimmed = focus?.trimmingCharacters(in: .whitespacesAndNewlines)
         let result = compactNow(botID: botID, focus: trimmed?.isEmpty == false ? trimmed : nil)
-        if result.status == .claudeSessionRestarted { append(.notice(Self.claudeRestartNote), to: botID) }
         announceForAccessibility(result.message)
         return result
     }

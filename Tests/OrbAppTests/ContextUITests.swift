@@ -16,10 +16,9 @@ private func conversation(turns: Int, characters: Int = 3_500) -> Conversation {
     return conversation
 }
 
-private func input(_ conversation: Conversation, window: Int = 128_000, claudeCode: Bool = false,
-                   usage: TokenUsage? = nil) -> ContextInput {
-    ContextInput(botID: UUID(), conversation: conversation, budget: claudeCode ? nil : ContextBudget(modelWindow: window),
-                 isClaudeCode: claudeCode, windowIsStated: true, usage: usage, memory: .balanced)
+private func input(_ conversation: Conversation, window: Int = 128_000, usage: TokenUsage? = nil) -> ContextInput {
+    ContextInput(botID: UUID(), conversation: conversation, budget: ContextBudget(modelWindow: window),
+                 windowIsStated: true, usage: usage, memory: .balanced)
 }
 
 struct ContextWordsTests {
@@ -104,13 +103,13 @@ struct ContextReadingTests {
         #expect(reading.percent >= 1 && reading.percent < 20)
         #expect(reading.tone == .calm)
         #expect(!reading.canCompact)
-        #expect(reading.usageWords?.hasPrefix("cerca de") == true)
+        #expect(reading.usageWords.hasPrefix("cerca de"))
     }
 
     @Test func aLongConversationOffersToCompact() throws {
         // A small window: the history budget is what fills first.
         let reading = try #require(ContextReading.make(input(conversation(turns: 8), window: 16_000)))
-        #expect(reading.fill?.budgetFraction ?? 0 >= 0.85)
+        #expect(reading.fill.budgetFraction >= 0.85)
         #expect(reading.tone == ContextTone(share: reading.fraction))
         #expect(reading.canCompact)
     }
@@ -119,10 +118,10 @@ struct ContextReadingTests {
         // 24 messages of about 1,000 tokens in a 1M window: 2% of the window, but 30% of the 80k budget.
         let reading = try #require(ContextReading.make(input(conversation(turns: 12), window: 1_000_000)))
         #expect(reading.percent <= 5)
-        #expect(try #require(reading.fill).budgetFraction > reading.fraction)
+        #expect(reading.fill.budgetFraction > reading.fraction)
         // Close to the budget: the next compaction is near, whatever the window.
         let heavy = try #require(ContextReading.make(input(conversation(turns: 12, characters: 10_000), window: 1_000_000)))
-        #expect(try #require(heavy.fill).budgetFraction >= 0.85)
+        #expect(heavy.fill.budgetFraction >= 0.85)
         // The ring says the window's share and is coloured by it: calm at a few percent.
         #expect(heavy.percent < 85)
         #expect(heavy.tone == .calm)
@@ -134,20 +133,6 @@ struct ContextReadingTests {
         #expect(ContextTone(share: 0.84) == .warming)
         #expect(ContextTone(share: 0.85) == .full)
         #expect(ContextTone(share: 2) == .full)
-    }
-
-    @Test func claudeCodeHasNoNumbersButCanStartOver() throws {
-        let reading = try #require(ContextReading.make(input(conversation(turns: 2), claudeCode: true,
-                                                              usage: TokenUsage(input: 1, cacheRead: 9))))
-        #expect(reading.fill == nil)
-        #expect(reading.isClaudeCode)
-        #expect(reading.canCompact)
-        #expect(reading.cacheHit == nil)
-        #expect(reading.spokenState.contains("Claude Code"))
-        var single = Conversation()
-        single.messages = [.user("oi")]
-        let one = try #require(ContextReading.make(input(single, claudeCode: true)))
-        #expect(one.canCompact == false)
     }
 
     @Test func cacheHitComesFromTheLastRequest() throws {
@@ -182,7 +167,7 @@ struct ContextReadingTests {
         let chat = conversation(turns: 1, characters: 12_000)
         let reading = try #require(ContextReading.make(input(chat, window: 16_000)))
         #expect(!reading.canCompact)
-        #expect(reading.fill?.compaction == nil)
+        #expect(reading.fill.compaction == nil)
     }
 
     /// The offer promises what the compaction really leaves, measured as the app measures it afterwards.
@@ -238,7 +223,6 @@ struct ContextModelTests {
         model.seedConversation(conversation(turns: 2), for: id)
         let input = try #require(model.contextInput(for: id))
         #expect(input.windowIsStated)
-        #expect(!input.isClaudeCode)
         #expect(input.budget?.window == 32_000)
         #expect(ContextReading.make(input)?.messageCount == 4)
     }
@@ -259,7 +243,6 @@ struct ContextModelTests {
         model.defaultModel = "claudeCode/sonnet"
         model.seedConversation(conversation(turns: 2), for: id)
         let input = try #require(model.contextInput(for: id))
-        #expect(!input.isClaudeCode)
         #expect(input.budget?.window == 200_000)
     }
 
@@ -324,24 +307,7 @@ struct ContextModelTests {
         let afterInput = try #require(model.contextInput(for: id))
         let after = try #require(ContextReading.make(afterInput))
         #expect(after.foldedMessages > 0)
-        #expect(after.fill?.usedTokens ?? .max < before.fill?.usedTokens ?? 0)
-    }
-
-    @Test func compactingAClaudeCodeChatFoldsItLikeAnyOther() throws {
-        let (model, id, root) = makeModel()
-        defer { removeTestFolder(root) }
-        model.providers = [ProviderAccount(kind: .claudeCode)]
-        model.defaultModel = "claudeCode/sonnet"
-        model.seedConversation(conversation(turns: 3), for: id)
-        let result = model.compactFromMeter(id, focus: "  decisões  ")
-        #expect(result.status == .compacted)
-        #expect(result.didCompact)
-        #expect(!result.message.contains(AppModel.claudeRestartNote), "no session of the CLI to restart: every turn is rebuilt from the Orb's messages")
-        let notices = model.conversations[id]?.items.compactMap { item -> String? in
-            if case .notice(let text) = item.kind { text } else { nil }
-        } ?? []
-        #expect(!notices.contains(AppModel.claudeRestartNote))
-        #expect(notices.count == 1) // the compaction's own notice
+        #expect(after.fill.usedTokens < before.fill.usedTokens)
     }
 
     @Test func theLatestRequestAndCompactionAreMirroredOnTheOrbsLiveState() {
@@ -351,7 +317,7 @@ struct ContextModelTests {
         let used = TokenUsage(input: 1_000, output: 10, cacheRead: 3_000, cacheWrite: 0)
         model.apply(.requestUsage(used), to: id)
         #expect(model.live(id).lastUsage == used)
-        model.apply(.compacted(CompactionReport(kind: .claudeCode, foldedMessages: 0, tokensBefore: 9_000, tokensAfter: 2_000, trigger: "auto")), to: id)
+        model.apply(.compacted(CompactionReport(kind: .manual, foldedMessages: 0, tokensBefore: 9_000, tokensAfter: 2_000)), to: id)
         #expect(model.live(id).compactedTo == 2_000)
         #expect(model.contextInput(for: id)?.usage == used)
     }

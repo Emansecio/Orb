@@ -375,14 +375,13 @@ struct DangerousCommandTests {
             #expect(DangerousCommand.reason(forAppleScript: script, language: .applescript, home: home) != nil, Comment(rawValue: script))
             #expect(DangerousCommand.reason(forAppleScript: script, home: home) != nil, Comment(rawValue: script))
         }
-        // The same through the tool (native and Claude Code twin) and through Bash.
+        // The same through the tool and through the shell.
         let context = ToolContext(workingDirectory: FileManager.default.temporaryDirectory)
         let call = PermissionPolicy.call(for: AppleScriptTool(), arguments: .object(["script": .string(mail)]), context: context)
         #expect(PermissionPolicy.evaluate(mode: .auto, call: call, rules: [], workspace: nil, home: home) == .ask(.dangerous(call.danger ?? "")))
-        let twin = ClaudeCodeTools.memoryPrefix + "applescript"
-        #expect(ClaudeCodePolicy.answer(mode: .auto, toolName: twin, input: .object(["script": .string(mail)])) == nil)
         let escaped = mail.replacingOccurrences(of: "'", with: "'\\''")
-        #expect(ClaudeCodePolicy.answer(mode: .auto, toolName: "Bash", input: .object(["command": .string("osascript -e '\(escaped)'")])) == nil)
+        let viaShell = PermissionPolicy.call(for: RunCommandTool(), arguments: .object(["command": .string("osascript -e '\(escaped)'")]), context: context)
+        #expect(viaShell.danger != nil)
         // Comments and strings still do not count as code.
         #expect(DangerousCommand.reason(forAppleScript: "-- restart later, empty trash\n(* shut down *)\ndisplay dialog \"restart\"", language: .applescript, home: home) == nil)
         #expect(DangerousCommand.reason(forAppleScript: "tell application \"Notes\" to get name of note 1's folder -- don't restart", language: .applescript, home: home) == nil)
@@ -418,7 +417,7 @@ struct DangerousCommandTests {
         #expect(DangerousCommand.reason(forAppleScript: #"do shell script "echo " & quoted form of "x""#, home: home) == nil)
     }
 
-    @Test func sendingMailThroughAnyEngineAsksInAutoMode() {
+    @Test func sendingMailAsksInAutoMode() {
         let script = #"tell application "Mail" to send theMessage"#
         let context = ToolContext(workingDirectory: FileManager.default.temporaryDirectory)
         let call = PermissionPolicy.call(for: AppleScriptTool(), arguments: .object(["script": .string(script)]), context: context)
@@ -426,11 +425,8 @@ struct DangerousCommandTests {
         #expect(PermissionPolicy.evaluate(mode: .auto, call: call, rules: [], workspace: nil, home: home) == .ask(.dangerous(call.danger ?? "")))
         let shell = PermissionPolicy.call(for: RunCommandTool(), arguments: .object(["command": .string("osascript -e '\(script)'")]), context: context)
         #expect(shell.danger != nil)
-        // Claude Code: its twin tool and the Bash osascript are judged the same way.
-        let twin = ClaudeCodeTools.memoryPrefix + "applescript"
-        #expect(ClaudeCodePolicy.answer(mode: .auto, toolName: twin, input: .object(["script": .string(script)])) == nil)
-        #expect(ClaudeCodePolicy.answer(mode: .auto, toolName: twin, input: .object(["script": .string(#"tell application "Music" to play"#)])) != nil)
-        #expect(ClaudeCodePolicy.answer(mode: .auto, toolName: "Bash", input: .object(["command": .string("osascript -e '\(script)'")])) == nil)
+        let music = PermissionPolicy.call(for: AppleScriptTool(), arguments: .object(["script": .string(#"tell application "Music" to play"#)]), context: context)
+        #expect(music.danger == nil)
     }
 
     @Test func theAppleScriptToolChecksItsScript() {

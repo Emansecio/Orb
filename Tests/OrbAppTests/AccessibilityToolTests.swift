@@ -840,7 +840,7 @@ struct UIToolWiringTests {
         #expect(PermissionPolicy.family(ofTool: "ui_read", kind: .computer) == .appInterface)
         #expect(PermissionPolicy.family(ofTool: "ui_act", kind: .computer) == .appInterface)
         #expect(PermissionPolicy.legacyRule(forToolName: "ui_act") == PermissionRule(family: .appInterface))
-        #expect(PermissionPolicy.legacyRule(forToolName: ClaudeCodeTools.memoryPrefix + "ui_act") == PermissionRule(family: .appInterface))
+        #expect(PermissionPolicy.legacyRule(forToolName: PermissionPolicy.legacyOrbToolPrefix + "ui_act") == PermissionRule(family: .appInterface))
     }
 
     @Test func theSchemasNameTheirArguments() throws {
@@ -853,24 +853,6 @@ struct UIToolWiringTests {
         #expect(actions == ["press", "focus", "set_value", "type", "key", "select", "scroll", "click", "increment", "decrement",
                             "show_menu", "pick_menu"])
         #expect(act.spec.parameters["required"]?.array?.compactMap(\.string) == ["action"])
-    }
-
-    @Test func claudeCodeGetsBothToolsThroughTheToolsServerOnlyWithMacAccess() async throws {
-        func listed(mac: Bool) async throws -> [String] {
-            let request = JSONValue.object(["jsonrpc": .string("2.0"), "id": .number(1), "method": .string("tools/list")])
-            let reply = try #require(await OrbToolsMCPServer.handle(request, context: ToolContext(workingDirectory: FileManager.default.temporaryDirectory), mac: mac,
-                                                                          accessibilityGranted: true))
-            return reply["result"]?["tools"]?.array?.compactMap { $0["name"]?.string } ?? []
-        }
-        let withMac = try await listed(mac: true)
-        #expect(withMac.contains("ui_read") && withMac.contains("ui_act"))
-        let without = try await listed(mac: false)
-        #expect(!without.contains("ui_read") && !without.contains("ui_act"))
-
-        let tool = try #require(OrbToolsMCPServer.tool(claudeCodeName: ClaudeCodeTools.memoryPrefix + "ui_act"))
-        #expect(tool.spec.name == "ui_act")
-        let call = PermissionPolicy.call(claudeCodeTool: ClaudeCodeTools.memoryPrefix + "ui_read", input: .object([:]), workspace: nil)
-        #expect(call.family == .appInterface && call.risk == .safe)
     }
 
     @Test func thePromptPointsToAppleScriptFirstAndToReadingBeforeActing() {

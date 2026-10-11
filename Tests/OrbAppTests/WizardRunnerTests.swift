@@ -232,7 +232,7 @@ private func drafting(_ json: String) -> [LLMEvent] {
         #expect(model.bots.map(\.id) == botsBefore, "nothing was created")
         #expect(!FileManager.default.fileExists(atPath: folder.path))
         #expect(!FileManager.default.fileExists(atPath: root.appending(path: "Orbs").path))
-        #expect(throws: (any Error).self) { try model.wizardDraft(runner.id, .object(["name": .string("Outro")])) }
+        #expect(runner.applyDraft(.object(["name": .string("Outro")])) == "The assistant is closed.")
         #expect(runner.draft.name == "Maia")
     }
 
@@ -262,17 +262,6 @@ private func drafting(_ json: String) -> [LLMEvent] {
         let (model, runner) = setUp(Script([said("oi")]))
         let before = model.bots.count
         #expect(runner.create() == nil && model.bots.count == before)
-    }
-
-    @MainActor @Test func theCallsOfClaudeCodesToolsServerReachTheOpenAssistantOnly() throws {
-        let (model, runner) = setUp(Script([said("oi")]))
-        WizardRegistry.add(runner)
-        let answer = try model.wizardDraft(runner.id, .object(["name": .string("Maia")]))
-        #expect(answer.hasPrefix("name: Maia") && runner.draft.name == "Maia")
-        #expect(throws: (any Error).self) { try WizardRegistry.draft(orb: runner.id, tool: "run_command", arguments: .object([:])) }
-        #expect(throws: (any Error).self) { try model.wizardDraft(UUID(), .object([:])) }
-        runner.cancel()
-        #expect(throws: (any Error).self) { try model.wizardDraft(runner.id, .object([:])) }
     }
 
 

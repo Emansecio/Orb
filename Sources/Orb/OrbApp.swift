@@ -1,20 +1,13 @@
 import SwiftUI
 import AppKit
 
-/// `Orb --tools-mcp <folder>` runs only the Orb's tools for Claude Code, and `Orb --local-connector <agenda|lembretes|gmail>`
-/// one of the app's own connectors (no window, and none of the app's AppKit/SwiftUI setup: `OrbApp.main()` is never reached);
-/// anything else is the app.
+/// `Orb --pipe-tools` declares the Orb's tools to the Claude Code CLI (which is only a pipe to the model): no window, and none of
+/// the app's AppKit/SwiftUI setup, so `OrbApp.main()` is never reached; anything else is the app.
 @main
 enum Launcher {
     static func main() {
-        if let options = OrbToolsMCPServer.Options(arguments: CommandLine.arguments) {
-            OrbToolsMCPServer.run(options)
-        }
         if let options = ClaudePipeServer.Options(arguments: CommandLine.arguments) {
             ClaudePipeServer.run(options)
-        }
-        if let kind = LocalConnectorServer.kind(arguments: CommandLine.arguments) {
-            LocalConnectorServer.run(kind)
         }
         OrbApp.main()
     }

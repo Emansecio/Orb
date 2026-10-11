@@ -3,7 +3,7 @@ import Foundation
 // Connectors that run inside the app, without a server to launch: Google Agenda and Lembretes (EventKit) and Gmail (Mail.app).
 // They sit behind the same door as every other connector (`connector_tools` / `connector_call`), so they get the catalog, the
 // approval cards and the "Sempre permitir" rules for free. To the rest of the app a local connector is an MCP server that
-// answers in-process (`LocalTransport`); for Claude Code the same answers come from `Orb --local-connector <id>` over stdio.
+// answers in-process (`LocalTransport`).
 
 /// One tool of a local connector: the same four things an MCP server says about a tool.
 struct LocalTool: Sendable {
@@ -94,24 +94,8 @@ struct LocalConnectorEnvironment: Sendable {
 
 // MARK: - Speaking MCP
 
-/// The JSON-RPC side of a local connector: what `MCPStdioServer` needs to serve one, the same for the in-process transport and
-/// for the stdio server Claude Code starts.
+/// The JSON-RPC side of a local connector: what `MCPStdioServer` needs to serve one, for the in-process transport.
 enum LocalConnectorServer {
-    /// The command line flag of the stdio server: `Orb --local-connector <agenda|lembretes|gmail>`.
-    static let flag = "--local-connector"
-
-    static func kind(arguments: [String]) -> LocalConnectorKind? {
-        arguments.firstIndex(of: flag).flatMap { arguments.indices.contains($0 + 1) ? LocalConnectorKind(rawValue: arguments[$0 + 1]) : nil }
-    }
-
-    /// The stdio entry of a local connector for `--mcp-config`.
-    static func config(for server: MCPServerConfig, kind: LocalConnectorKind) -> MCPServerConfig {
-        var copy = server
-        copy.command = Bundle.main.executablePath ?? CommandLine.arguments[0]
-        copy.arguments = [flag, kind.rawValue]
-        return copy
-    }
-
     /// The response to one message; nil for notifications.
     static func respond(to request: JSONValue, connector: any LocalConnector) async -> JSONValue? {
         await MCPStdioServer.respond(to: request, handler: Handler(connector: connector))
@@ -120,11 +104,6 @@ enum LocalConnectorServer {
     /// The response to one stdin line; nil for a line that is not a JSON object (the connector never answers parse errors) and for notifications.
     static func respond(toLine line: String, connector: any LocalConnector) async -> JSONValue? {
         await MCPStdioServer.respond(toLine: line, handler: Handler(connector: connector))
-    }
-
-    /// Serves `kind` over stdin/stdout until stdin closes, then exits (what Claude Code starts). Never opens a window.
-    static func run(_ kind: LocalConnectorKind) -> Never {
-        MCPStdioServer.run { Handler(connector: LocalConnectorEnvironment.live.connector(kind)) }
     }
 
     /// A local connector as an MCP server: its tools, listed with their annotations, and its calls.

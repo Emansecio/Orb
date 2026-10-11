@@ -3,7 +3,7 @@ import Foundation
 // What the app keeps of the use of models: one small row per hour × Orb × model × source, with the tokens the providers
 // reported. Nothing about the conversations. The rows of a month live in `uso/yyyy-MM.json` (see `UsageStore.swift`);
 // the cost is not stored, it is worked out when the page is opened (`ModelPricing.swift`), so a corrected price also
-// fixes the past. The one exception is the cost the Claude Code CLI itself reports.
+// fixes the past. The one exception is a cost a tool itself reported (rows saved while the Claude Code CLI reported its own).
 
 /// Where a use of a model came from.
 enum UsageSource: String, Codable, Sendable, CaseIterable {
@@ -36,7 +36,7 @@ struct UsageKey: Hashable, Codable, Sendable {
 
 /// What was used in it.
 struct UsageTotals: Codable, Equatable, Sendable {
-    /// Calls to the model (one per turn for Claude Code, whose CLI reports the turn as a whole).
+    /// Calls to the model.
     var requests = 0
     /// A count is kept within 0...TokenUsage.maxCount: one absurd number (a damaged file, a broken server) never overflows a sum.
     private static func capped(_ count: Int) -> Int { min(max(0, count), TokenUsage.maxCount) }
@@ -48,12 +48,12 @@ struct UsageTotals: Codable, Equatable, Sendable {
     /// Of `cacheWrite`, the tokens written for an hour (Anthropic charges twice the input for them, 1.25 for five minutes).
     var cacheWrite1h = 0
     var output = 0
-    /// The cost the provider's own tool reported, in dollars (Claude Code's `total_cost_usd`); nil when none did.
+    /// The cost the provider's own tool reported, in dollars (only old rows have one: Claude Code's `total_cost_usd`); nil when none did.
     var reportedCost: Double?
 
     var tokens: Int { input + cacheRead + cacheWrite + output }
     /// What a budget between Orbs counts: the tokens charged in full or written to the cache. Reading the cache is left out:
-    /// with Claude Code each turn rereads tens of thousands of cached tokens, and a group would spend its budget in two turns.
+    /// each turn rereads tens of thousands of cached tokens, and a group would spend its budget in two turns.
     var budgetTokens: Int { input + cacheWrite + output }
     var isEmpty: Bool { requests == 0 && tokens == 0 && reportedCost == nil }
 

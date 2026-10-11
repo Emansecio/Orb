@@ -90,8 +90,8 @@ protocol BrowserDriver: Sendable {
     func close() async throws
     /// Closes the browser and waits for it, without a task: for the moment the app quits.
     func closeSynchronously(timeout: TimeInterval)
-    /// The names of the sessions that have a browser running now, whoever started them (the app, or the tools server of a Claude
-    /// Code turn): empty when the command line cannot say.
+    /// The names of the sessions that have a browser running now, whoever started them (this run of the app, or an earlier one):
+    /// empty when the command line cannot say.
     func runningSessions() async -> [String]
     /// The same without a task, for the moment the app quits.
     func runningSessionsSynchronously(timeout: TimeInterval) -> [String]

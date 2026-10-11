@@ -222,7 +222,7 @@ private extension ApprovalRequest {
         #expect(ApprovalNote.clean(String(repeating: "x", count: 900))?.count == ApprovalNote.maxLength)
         #expect(ApprovalAnswer(decision: .deny, note: "  ").note == nil)
         #expect(PermissionPolicy.userDenial(note: "faça X") == PermissionPolicy.userDenial + " The user said: faça X")
-        #expect(ClaudeCodePolicy.userDenial(note: nil) == ClaudeCodePolicy.userDenial)
+        #expect(PermissionPolicy.userDenial(note: nil) == PermissionPolicy.userDenial)
     }
 
     @Test @MainActor func openCardsOfEveryOrbAreListedAndFlagTheirOrb() async {

@@ -276,31 +276,6 @@ struct StepsNoteTests {
     }
 }
 
-// MARK: - Claude Code catch-up
-
-struct CatchUpLatestRequestTests {
-    @Test func theLatestRequestAndAnswerAreNotCutAtTheUsualLimit() {
-        var conversation = Conversation()
-        let spec = String(repeating: "especificação ", count: 350)   // about 4,900 characters
-        let answer = String(repeating: "detalhe ", count: 300)       // 2,400 characters
-        conversation.messages = work("pedido antigo " + spec, steps: 0, reply: "resposta antiga " + answer, tag: "x")
-            + work("pedido novo " + spec, steps: 0, reply: "resposta nova " + answer, tag: "y")
-        let text = ClaudeCodePrompt.catchUp(conversation, seen: 0)
-        #expect(text.contains("User: pedido novo " + spec))
-        #expect(text.contains("Assistant: resposta nova " + answer))
-        // Earlier ones are still cut.
-        #expect(!text.contains("User: pedido antigo " + spec) && text.contains("User: pedido antigo "))
-        #expect(!text.contains("Assistant: resposta antiga " + answer))
-    }
-
-    @Test func aHugePastedRequestStillHasACeiling() {
-        var conversation = Conversation()
-        conversation.messages = work("log " + String(repeating: "L", count: 50_000), steps: 0, tag: "z")
-        let text = ClaudeCodePrompt.catchUp(conversation, seen: 0)
-        #expect(text.count < 9_500 && text.contains("User: log LLLL"))
-    }
-}
-
 // MARK: - The app
 
 @MainActor private struct AppHarness {

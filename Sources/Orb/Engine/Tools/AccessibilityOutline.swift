@@ -484,8 +484,8 @@ struct UISnapshot: Codable, Sendable, Equatable {
     }
 }
 
-/// The last snapshot per Orb and app. Kept in memory, and mirrored to a small file per app so the approval check (which
-/// runs in the Orb app) can see a snapshot taken by the tools server that Claude Code started (another process).
+/// The last snapshot per Orb and app. Kept in memory, and mirrored to a small file per app so the approval check can see a
+/// snapshot taken by another process of the app.
 final class UISnapshotStore: @unchecked Sendable {
     static let shared = UISnapshotStore()
 

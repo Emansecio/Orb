@@ -183,30 +183,6 @@ struct UserProfileBriefTests {
         #expect(changed != first && changed.contains("Call them: Marina."))
     }
 
-    @Test func claudeCodeRebuildsTheSessionWhenTheProfileChangesAndSaysSo() async {
-        defer { removeTestFolder(root) }
-        let bank = await bank()
-        func built(_ profile: UserProfile, session: TurnPrompt.SessionMarks) async -> TurnPrompt.ClaudeCode {
-            let brief = await bank.brief(for: "oi", conversationIsNew: session.isNewSession, profile: profile.promptSection)
-            return TurnPrompt.claudeCode(inputs(brief), session: session)
-        }
-        let first = await built(full, session: .init(isNewSession: true, workspaceHash: nil, pinned: nil, standingHash: nil))
-        var conversation = Conversation()
-        conversation.record(first.marks)
-        func marks() -> TurnPrompt.SessionMarks {
-            .init(isNewSession: false, workspaceHash: conversation.claudeWorkspaceHash, pinned: conversation.claudeMemoryPinned,
-                  standingHash: conversation.claudeStandingHash, workspace: conversation.claudeWorkspaceSeen, system: conversation.claudeSystem)
-        }
-        // Same profile: the same system prompt, and nothing about the profile rides with the message.
-        let same = await built(full, session: marks())
-        #expect(same.system == first.system && !same.context.contains("profile changed"))
-        // Another nickname: the system prompt is rebuilt, and the new block goes with the message.
-        var renamed = full
-        renamed.nickname = "Marina"
-        let changed = await built(renamed, session: marks())
-        #expect(changed.system != first.system && changed.system.contains("Call them: Marina."))
-        #expect(changed.context.contains("the user's profile and preferences changed") && changed.context.contains("Call them: Marina."))
-    }
 }
 
 // MARK: - The photo

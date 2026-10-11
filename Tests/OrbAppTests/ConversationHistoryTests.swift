@@ -365,11 +365,8 @@ import Testing
         #expect(model.transcript(botID).count == 2)
     }
 
-    @Test @MainActor func reopeningKeepsTheClaudeCodeSessionAndTheMemoryBookkeeping() async throws {
+    @Test @MainActor func reopeningKeepsTheMemoryBookkeeping() async throws {
         var original = conversation("um", "dois")
-        original.claudeSessionID = "sessao-abc"
-        original.claudeSessionFolder = "/tmp/pasta"
-        original.claudeSeenCount = 4
         original.memorySavedCount = 4
         original.summary = "resumo"
         let (model, botID) = model(current: original)
@@ -378,8 +375,7 @@ import Testing
 
         #expect(await model.reopenConversation(entry.id, of: botID))
         let reopened = try #require(model.conversations[botID])
-        #expect(reopened.claudeSessionID == "sessao-abc" && reopened.claudeSessionFolder == "/tmp/pasta")
-        #expect(reopened.claudeSeenCount == 4 && reopened.summary == "resumo")
+        #expect(reopened.summary == "resumo")
         #expect(reopened.memorySavedCount == 4) // all of it was saved already: leaving again saves nothing new
 
         await model.newConversation(botID)?.value

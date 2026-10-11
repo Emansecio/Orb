@@ -57,11 +57,8 @@ extension Store {
     }
 
     private func same(_ a: Conversation, _ b: Conversation) -> Bool {
-        a.items == b.items && a.messages == b.messages && a.claudeSessionID == b.claudeSessionID
-            && a.claudeSeenCount == b.claudeSeenCount && a.memorySavedCount == b.memorySavedCount
+        a.items == b.items && a.messages == b.messages && a.memorySavedCount == b.memorySavedCount
             && a.summary == b.summary && a.summaryCoveredCount == b.summaryCoveredCount && a.workspaceHash == b.workspaceHash
-            && a.claudeWorkspaceHash == b.claudeWorkspaceHash && a.claudeStandingHash == b.claudeStandingHash
-            && a.claudeMemoryPinned == b.claudeMemoryPinned && a.claudeSessionFolder == b.claudeSessionFolder
     }
 
     // MARK: The incremental encoder writes the same document
@@ -91,7 +88,6 @@ extension Store {
             case 4:
                 live.memorySavedCount = random.next(live.items.count + 1)
             case 5:
-                live.claudeSessionID = random.next(2) == 0 ? nil : "sessao-\(step)"
                 live.summary = random.next(2) == 0 ? nil : "resumo \"com aspas\" e \\ barras"
             case 6: // an old item disappears (never done by the app, but the cache must not care)
                 if live.items.count > 4 { live.items.remove(at: random.next(live.items.count)) }

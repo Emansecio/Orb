@@ -254,7 +254,7 @@ final class ConversationEncoder: @unchecked Sendable {
         var tail: Data
     }
 
-    /// `{"claudeSessionID":…,"items":[],"memorySavedCount":…,"messages":[],…}` (keys sorted) cut around the two
+    /// `{"compactions":…,"items":[],"memorySavedCount":…,"messages":[],…}` (keys sorted) cut around the two
     /// empty lists. Needs each to appear once, items first; anything else (a field added with such a name in a
     /// string value cannot match: quotes inside strings are escaped) means the shortcut is not safe.
     private static func split(_ shell: Data) -> Split? {

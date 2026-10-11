@@ -1,8 +1,7 @@
 import Foundation
 
-// The Orb's skills inside its memory folder, which every process that has the memory can reach: the app and the
-// Claude Code tools server. `_skills.json` is a copy of the skills the Orb may use, written by the app, so `recall`
-// can load one on demand from any process; `_propostas/<comando>.md` holds what the Orb proposed until you decide.
+// The Orb's skills inside its memory folder. `_skills.json` is a copy of the skills the Orb may use, written by the app,
+// so `recall` can load one on demand; `_propostas/<comando>.md` holds what the Orb proposed until you decide.
 // Neither folder is a memory page: they are not searched, listed in the panel or forgotten with "Esquecer".
 
 extension MemoryBank {

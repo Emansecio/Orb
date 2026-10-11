@@ -223,10 +223,10 @@ final class BrowserHub: Sendable {
 
     // MARK: Closing
 
-    // A browser outlives the process that started it: its background process (`agent-browser`) keeps it. The Claude Code engine's
-    // tools server is another process with a hub of its own, new at every turn, so the sessions of its turns are not held here.
-    // They are named after the Orb and the engine (`AgentBrowserConfig.sessionName`), so everything below that closes a browser
-    // closes it by name too: the sessions `agent-browser` reports running that are the Orb's, whoever started them.
+    // A browser outlives the process that started it: its background process (`agent-browser`) keeps it, and one left by an earlier
+    // run of the app is not held here. Sessions are named after the Orb and the engine (`AgentBrowserConfig.sessionName`), so
+    // everything below that closes a browser closes it by name too: the sessions `agent-browser` reports running that are the Orb's,
+    // whoever started them.
 
     private static let driven: [BrowserEngineKind] = [.chrome, .obscura, .cloak]
 
@@ -303,8 +303,8 @@ final class BrowserHub: Sendable {
     }
 
     /// Closes every browser at once, without waiting for a task: for `willTerminate`, which cannot wait for one. A browser left
-    /// behind would keep running (and keep its profile locked) after the app is gone. That includes the ones the tools server of a
-    /// Claude Code turn started (another process, with its own hub): every running session named for an Orb is closed. `orbs`: the
+    /// behind would keep running (and keep its profile locked) after the app is gone. That includes the ones an earlier run of
+    /// the app left: every running session named for an Orb is closed. `orbs`: the
     /// Orbs of this app, when the caller knows them; only their sessions are closed then (another build of the app on the same Mac
     /// has Orbs of its own, and its browsers are not ours to close). Gives up after `timeout` seconds.
     func terminateAllNow(timeout: TimeInterval = 4, orbs: Set<UUID>? = nil) {
@@ -339,7 +339,7 @@ final class BrowserHub: Sendable {
     }
 
     /// The Orb left `engine` for another: closes the browser it had open with it. The session may have been started by another
-    /// process (the tools server of a Claude Code turn runs its own hub, on the same `agent-browser` session), so when this hub
+    /// process (an earlier run of the app), so when this hub
     /// holds none the session is closed by name; it does nothing when no browser is running. The profile stays.
     func close(botID: UUID, leaving engine: BrowserEngineKind) async {
         clearLabels(botID: botID)

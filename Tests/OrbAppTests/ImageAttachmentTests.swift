@@ -738,28 +738,16 @@ struct VisionCatalogTests {
 // MARK: - App
 
 struct ImageAppTests {
-    @Test func claudeCodeIsToldWhereThePicturesAreAndToUseRead() {
-        let note = AppModel.pictureNote([ImageAttachment(path: "/d/anexos/x/1.jpg", mediaType: "image/jpeg", width: 1, height: 1)],
-                                        forClaudeCode: true, modelSees: true)
-        #expect(note.contains("Imagens anexadas") && note.contains("Read") && note.contains("/d/anexos/x/1.jpg"))
-    }
-
-    @Test func theNativeEngineMentionsPathsOnlyForModelsThatSee() {
+    @Test func picturePathsAreMentionedOnlyForModelsThatSee() {
         let images = [ImageAttachment(path: "/d/1.jpg", mediaType: "image/jpeg", width: 1, height: 1)]
-        #expect(AppModel.pictureNote(images, forClaudeCode: false, modelSees: true).contains("/d/1.jpg"))
-        #expect(AppModel.pictureNote(images, forClaudeCode: false, modelSees: false).isEmpty)
+        #expect(AppModel.pictureNote(images, modelSees: true).contains("/d/1.jpg"))
+        #expect(AppModel.pictureNote(images, modelSees: false).isEmpty)
     }
 
     @Test func whenItIsNotKnownIfTheModelSeesTheNoteDoesNotPromiseIt() {
         let images = [ImageAttachment(path: "/d/1.jpg", mediaType: "image/jpeg", width: 1, height: 1)]
-        let note = AppModel.pictureNote(images, forClaudeCode: false, modelSees: nil)
+        let note = AppModel.pictureNote(images, modelSees: nil)
         #expect(note.contains("/d/1.jpg") && !note.contains("shown to you"))
-    }
-
-    @Test func theClaudeCodeCatchUpListsPicturesOtherModelsWereShown() {
-        let image = ImageAttachment(path: "/d/anexos/x/1.jpg", mediaType: "image/jpeg", width: 1, height: 1)
-        let text = ClaudeCodePrompt.catchUp([.user("veja", images: [image]), ChatMessage(role: .assistant, content: "vi")])
-        #expect(text.contains("/d/anexos/x/1.jpg"))
     }
 
     @Test @MainActor func aSentMessageStoresFullPathsAndAPictureAloneIsEnough() throws {

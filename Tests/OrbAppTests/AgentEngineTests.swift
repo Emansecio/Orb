@@ -964,11 +964,6 @@ struct ApprovalGateTests {
         #expect(await gate.applyModeChange(to: .readOnly, for: bot).map(\.decision) == [.deny])
     }
 
-    @Test func oneGateServesBothEngines() async {
-        let gate = ApprovalGate()
-        #expect(await AgentEngine(gate: gate).gate === gate)
-        #expect(await ClaudeCodeEngine(gate: gate).gate === gate)
-    }
 }
 
 struct ModelTests {
@@ -1021,17 +1016,6 @@ struct ModelTests {
                         "chmod +x run.sh", "grep -rn TODO ."] {
             #expect(DangerousCommand.reason(for: command) == nil, "\(command)")
         }
-    }
-
-    @Test func claudeCodeModesFollowTheBotMode() {
-        let rm = JSONValue.object(["command": .string("rm -rf ~/x")])
-        let ls = JSONValue.object(["command": .string("ls")])
-        #expect(ClaudeCodePolicy.cliMode(.bypass) == "bypassPermissions")
-        #expect(ClaudeCodePolicy.answer(mode: .bypass, toolName: "Bash", input: rm) == .allow)
-        #expect(ClaudeCodePolicy.answer(mode: .auto, toolName: "Bash", input: ls) == .allow)
-        #expect(ClaudeCodePolicy.answer(mode: .auto, toolName: "Bash", input: rm) == nil)
-        #expect(ClaudeCodePolicy.answer(mode: .ask, toolName: "Bash", input: rm, rules: PermissionPolicy.legacyRules(fromToolNames: ["Bash"])) == nil)
-        #expect(ClaudeCodePolicy.answer(mode: .ask, toolName: "Bash", input: ls, rules: PermissionPolicy.legacyRules(fromToolNames: ["Bash"])) == .allow)
     }
 
     @Test func skillExpansion() throws {

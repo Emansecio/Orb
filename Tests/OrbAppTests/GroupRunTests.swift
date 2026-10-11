@@ -222,13 +222,12 @@ struct GroupPolicyAndExtrasTests {
         let extras = try #require(world.model.groupTurnExtras(for: world.atlas.id))
         #expect(extras.groupID == world.groupID && extras.offering == MultiOrbOffering(orbs: true, propose: false, groupMemory: true))
         #expect(extras.grants == [PermissionRule(family: .delegation), PermissionRule(family: .groupMemory)])
-        #expect(extras.bankDirectory == world.model.memory.groupDirectory(for: world.groupID))
         #expect(extras.sideRun.kind == .group && extras.sideRun.chain?.groupID == world.groupID)
         let names = ToolBox.offered(for: [], accessibilityGranted: true, multi: extras.offering).map(\.spec.name)
         #expect(names.contains("orbs") && names.contains("group_remember") && names.contains("group_recall") && !names.contains("orb_propose"))
-        let native = extras.system(claudeCode: false), claude = extras.system(claudeCode: true)
-        #expect(native.hasPrefix("## Group \"Lançamento\""))
-        #expect(native.contains("use orbs ask") && claude.contains("use \(ClaudeCodeTools.memoryPrefix)orbs ask"))
+        let system = extras.system
+        #expect(system.hasPrefix("## Group \"Lançamento\""))
+        #expect(system.contains("use orbs ask"))
         #expect(world.model.groupTurnExtras(for: world.revisor.id) == nil) // not in a turn
         world.fake.finish(first, reply: "ok")
         #expect(world.model.groupTurnExtras(for: world.atlas.id) == nil)

@@ -223,15 +223,13 @@ struct CommandPrefixTests {
 
     /// A rule for a program that only wraps another would cover whatever it wraps.
     @Test func wrappersNeverGetARule() {
-        func suggestions(_ command: String, extra: [PermissionRule] = []) -> [PermissionRule] {
-            PermissionPolicy.suggestions(for: shell(command, context: folders.context, home: folders.home), home: folders.home, extra: extra)
+        func suggestions(_ command: String) -> [PermissionRule] {
+            PermissionPolicy.suggestions(for: shell(command, context: folders.context, home: folders.home), home: folders.home)
         }
         for command in ["caffeinate -i swift build", "nice -n 5 make", "xcrun simctl list", "arch -arm64 brew install x", "timeout 5 make",
                         "gtimeout 5 make", "stdbuf -o L make", "ionice -c 3 make", "builtin cd x", "noglob ls", "watch -n 5 ls"] {
             let program = command.split(separator: " ")[0]
             #expect(!suggestions(command).contains(.shell(String(program))), Comment(rawValue: command))
-            // Nor when the CLI offers it.
-            #expect(!suggestions(command, extra: [.shell(String(program))]).contains(.shell(String(program))), Comment(rawValue: command))
         }
         #expect(suggestions("git push origin main") == [.shell("git", "push"), .shell("git")])
     }
@@ -439,8 +437,8 @@ struct HostAndConnectorScopeTests {
     }
 
     @Test func searchingTheWebHasItsOwnRuleThatNeverCoversReadingPages() throws {
-        let search = PermissionPolicy.call(claudeCodeTool: "WebSearch", input: .object(["query": .string("swift")]), workspace: folders.orb, home: folders.home)
-        let page = PermissionPolicy.call(claudeCodeTool: "WebFetch", input: .object(["url": .string("https://github.com/x")]), workspace: folders.orb, home: folders.home)
+        let search = PermissionPolicy.call(for: WebSearchTool(), arguments: .object(["query": .string("swift")]), context: folders.context, home: folders.home)
+        let page = fetch("https://github.com/x")
         let searchRule = PermissionRule(family: .web, scope: .search)
         // The card offers "Pesquisar na web", not "any site" (which would also allow every WebFetch).
         #expect(PermissionPolicy.suggestions(for: search, home: folders.home) == [searchRule])
@@ -457,11 +455,13 @@ struct HostAndConnectorScopeTests {
         #expect(!PermissionRule(family: .shell, scope: .search).isValid)
     }
 
-    @Test func connectorGrantsFollowTheToolAcrossEngines() {
+    @Test func connectorGrantsFollowTheTool() {
         let native = PermissionRule.connector("GitHub__create_issue")
         #expect(native.scope == .connectorTool("github__create_issue"))
-        #expect(PermissionRule.connector("mcp__github__create_issue") == native)
-        let call = PermissionPolicy.call(claudeCodeTool: "mcp__github__create_issue", input: .object([:]), workspace: nil, home: folders.home)
+        #expect(PermissionRule.connector("mcp__github__create_issue") == native, "a grant saved under the CLI's name is the same")
+        let tool = MCPTool(serverName: "GitHub", remote: ToolSpec(name: "create_issue", description: "", parameters: .schema([:])),
+                           serverID: UUID(), manager: MCPManager())
+        let call = PermissionPolicy.call(for: tool, arguments: .object([:]), context: folders.context, home: folders.home)
         #expect(PermissionPolicy.isCovered(call, by: [native]))
         #expect(!PermissionPolicy.isCovered(call, by: [.connector("github__delete_repo")]))
         #expect(PermissionPolicy.isCovered(call, by: [PermissionRule(family: .connector)]))
@@ -505,7 +505,7 @@ struct PermissionRulePersistenceTests {
 
     @Test func oldAllowedToolsBecomeRulesForBothEnginesNames() throws {
         let names = ["run_command", "Bash", "write_file", "edit_file", "Write", "Edit", "web_fetch", "WebFetch", "WebSearch", "open",
-                     "applescript", "app_quit", "shortcuts_run", "remember", ClaudeCodeTools.memoryPrefix + "remember",
+                     "applescript", "app_quit", "shortcuts_run", "remember", PermissionPolicy.legacyOrbToolPrefix + "remember",
                      "GitHub__create_issue", "mcp__github__create_issue", "touch", "job_output", "Read"]
         let json = #"{"id":"\#(UUID().uuidString)","name":"Velho","allowedTools":\#(JSONValue.array(names.map(JSONValue.string)).jsonString)}"#
         let bot = try decode(json)
@@ -555,166 +555,6 @@ struct PermissionRulePersistenceTests {
         #expect(again.suggestions == [.shell("git")])
         #expect(try JSONDecoder().decode(ApprovalDecision.self, from: Data(#""task""#.utf8)) == .task)
         #expect(try JSONDecoder().decode(ApprovalDecision.self, from: Data(#""futuro""#.utf8)) == .deny)
-    }
-}
-
-// MARK: - Claude Code
-
-struct ClaudeCodePermissionBridgeTests {
-    private let folders: Folders
-
-    init() throws { folders = try Folders() }
-
-    private func call(_ tool: String, _ input: [String: JSONValue]) -> PermissionCall {
-        PermissionPolicy.call(claudeCodeTool: tool, input: .object(input), workspace: folders.orb, home: folders.home)
-    }
-
-    /// The Bash of a subagent keeps the folder a `cd` left it in, so its commands are not judged in the Orb's folder.
-    @Test func aSubagentsRelativeCommandsAreNotJudgedInTheOrbsFolder() {
-        func call(_ command: String, fromSubagent: Bool) -> PermissionCall {
-            PermissionPolicy.call(claudeCodeTool: "Bash", input: .object(["command": .string(command)]), workspace: folders.orb,
-                                  fromSubagent: fromSubagent, home: folders.home)
-        }
-        // In the main session `rm x.txt` is in the Orb's own folder; in a subagent nobody knows where it is.
-        #expect(call("rm x.txt", fromSubagent: false).danger == nil)
-        #expect(call("rm x.txt", fromSubagent: true).danger != nil)
-        // A listing is read-only only where the folder is known.
-        #expect(call("ls", fromSubagent: false).risk == .safe)
-        #expect(call("ls", fromSubagent: true).risk == .sensitive)
-        // Absolute paths are judged the same.
-        #expect(call("rm -rf ~", fromSubagent: true).danger != nil)
-    }
-
-    @Test func toolsMapToTheSameFamiliesAsTheNativeOnes() {
-        #expect(call("Bash", ["command": .string("git status")]).family == .shell)
-        #expect(call("Write", ["file_path": .string("a.txt")]).family == .writeFiles)
-        #expect(call("Edit", ["file_path": .string("a.txt")]).family == .writeFiles)
-        #expect(call("NotebookEdit", ["notebook_path": .string("a.ipynb")]).family == .writeFiles)
-        #expect(call("WebFetch", ["url": .string("https://github.com/x")]).host == "github.com")
-        #expect(call("WebSearch", ["query": .string("x")]).family == .web)
-        #expect(call("mcp__github__create_issue", [:]).family == .connector)
-        #expect(call(ClaudeCodeTools.memoryPrefix + "remember", ["fact": .string("x")]).family == .memory)
-        #expect(call("Read", ["file_path": .string("a")]).risk == .safe)
-        #expect(call("Grep", [:]).risk == .safe)
-        #expect(call("Mistério", [:]).risk == .sensitive)
-    }
-
-    @Test func aGrantFromOneEngineWorksInTheOther() {
-        let rules = [PermissionRule.shell("git"), PermissionRule(family: .writeFiles), PermissionRule.host("github.com")]
-        let ask: (String, [String: JSONValue]) -> ClaudeCodePermissionAnswer? = {
-            ClaudeCodePolicy.answer(mode: .ask, toolName: $0, input: .object($1), rules: rules)
-        }
-        #expect(ask("Bash", ["command": .string("git status")]) == .allow)
-        #expect(ask("Bash", ["command": .string("npm test")]) == nil)
-        #expect(ask("Write", ["file_path": .string("/tmp/a.txt")]) == .allow)
-        #expect(ask("WebFetch", ["url": .string("https://github.com/x")]) == .allow)
-        #expect(ask("WebFetch", ["url": .string("https://evil.dev")]) == nil)
-    }
-
-    @Test func writesInsideTheOrbsFolderRunWithoutACard() {
-        let write = { (path: String) in
-            ClaudeCodePolicy.answer(mode: .ask, toolName: "Write", input: .object(["file_path": .string(path)]), workspace: folders.orb)
-        }
-        #expect(write(folders.orb.appending(path: "a.txt").path) == .allow)
-        #expect(write("rel/a.txt") == .allow)
-        #expect(write(folders.elsewhere.appending(path: "a.txt").path) == nil)
-        #expect(write("../x.txt") == nil)
-    }
-
-    @Test func toolsTheSessionDoesNotKnowAskButCannotBeRemembered() {
-        let c = call("Mistério", [:])
-        #expect(c.family == nil)
-        #expect(PermissionPolicy.suggestions(for: c, home: folders.home).isEmpty)
-        #expect(ClaudeCodePolicy.answer(mode: .ask, toolName: "Mistério") == nil)
-        #expect(ClaudeCodePolicy.answer(mode: .auto, toolName: "Mistério") == .allow)
-    }
-
-    @Test func permissionSuggestionsFromTheCLIAreParsed() throws {
-        let line = """
-        {"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"git status"},
-         "permission_suggestions":[
-           {"type":"addRules","behavior":"allow","destination":"localSettings","rules":[{"toolName":"Bash","ruleContent":"git status:*"}]},
-           {"type":"addRules","behavior":"allow","destination":"localSettings","rules":[{"toolName":"Bash","ruleContent":"npm run *"},{"toolName":"Bash","ruleContent":"ls -la"}]},
-           {"type":"addRules","behavior":"allow","destination":"session","rules":[{"toolName":"WebFetch","ruleContent":"domain:github.com"}]},
-           {"type":"addRules","behavior":"deny","destination":"session","rules":[{"toolName":"Bash","ruleContent":"rm:*"}]},
-           {"type":"addDirectories","destination":"session","directories":["/Users/x/site","relativo","/"]},
-           {"type":"setMode","mode":"acceptEdits","destination":"session"},
-           {"type":"addRules","behavior":"allow","destination":"session","rules":[{"toolName":"mcp__github__create_issue"}]},
-           {"type":"outraCoisa"}]}}
-        """
-        var parser = ClaudeCodeParser()
-        guard case .permission(let request)? = parser.parse(line.replacingOccurrences(of: "\n", with: "")).first else {
-            Issue.record("expected a permission request"); return
-        }
-        #expect(request.suggestions == [.shell("git", "status"), .shell("npm", "run"), .host("github.com"), .folder("/Users/x/site"),
-                                        .connector("mcp__github__create_issue")])
-        // A null or missing field is no suggestions.
-        let plain = #"{"type":"control_request","request_id":"r2","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{},"permission_suggestions":null}}"#
-        guard case .permission(let bare)? = parser.parse(plain).first else { Issue.record("expected a permission request"); return }
-        #expect(bare.suggestions.isEmpty)
-    }
-
-    @Test func theCLIsSuggestionsJoinOursWhereTheyFit() {
-        let c = call("Bash", ["command": .string("tar x")])
-        let extra: [PermissionRule] = [.shell("tar"), .host("github.com"), .shell("tar", "-xf")]
-        let merged = PermissionPolicy.suggestions(for: c, home: folders.home, extra: extra)
-        #expect(merged == [.shell("tar"), .shell("tar", "-xf")])
-        let dangerous = call("Bash", ["command": .string("rm -rf ~/x")])
-        #expect(PermissionPolicy.suggestions(for: dangerous, home: folders.home, extra: extra).isEmpty)
-    }
-
-    @Test func theCLIsSuggestionsForInterpretersAreNotOffered() {
-        let c = call("Bash", ["command": .string("python3 scripts/build.py")])
-        let extra: [PermissionRule] = [.shell("python3"), .shell("bash"), .shell("sh", "-c"), .shell("node"), .shell("../x")]
-        let merged = PermissionPolicy.suggestions(for: c, home: folders.home, extra: extra)
-        #expect(merged.isEmpty)
-        let git = call("Bash", ["command": .string("git push origin main")])
-        #expect(PermissionPolicy.suggestions(for: git, home: folders.home, extra: [.shell("env"), .shell("git", "push")])
-            == [.shell("git", "push"), .shell("git")])
-    }
-
-    @Test func subcommandSuggestionsComeBeforeTheWholeProgram() {
-        let git = call("Bash", ["command": .string("git push origin main")])
-        #expect(PermissionPolicy.suggestions(for: git, home: folders.home) == [.shell("git", "push"), .shell("git")])
-    }
-
-    @Test func claudeCodeToolsThatRunThingsAreNotReadOnly() {
-        for name in ["Task", "Agent", "Skill", "TodoWrite", "ToolSearch"] {
-            let c = call(name, [:])
-            #expect(PermissionPolicy.evaluate(mode: .readOnly, call: c, rules: [], workspace: nil) != .allow, "\(name)")
-            if case .ask = PermissionPolicy.evaluate(mode: .ask, call: c, rules: [], workspace: nil) {} else { Issue.record("\(name) should ask") }
-        }
-        for name in ["Read", "Grep", "Glob", "LS", "BashOutput", "TaskOutput"] {
-            let c = call(name, [:])
-            #expect(PermissionPolicy.evaluate(mode: .readOnly, call: c, rules: [], workspace: nil) == .allow, "\(name)")
-        }
-    }
-
-    /// `job_stop` and Claude Code's KillShell/KillBash (TaskStop in newer CLIs) only stop processes the Orb itself
-    /// started: same family, same risk, so the same answer in every mode.
-    @Test func stoppingAJobIsTheSameInBothEngines() {
-        let native = PermissionPolicy.call(for: JobStopTool(), arguments: .object(["id": .string("1")]),
-                                           context: ToolContext(workingDirectory: folders.home), home: folders.home)
-        #expect(native.risk == .safe && native.family == .jobs)
-        for name in ["KillShell", "KillBash", "TaskStop"] {
-            let c = call(name, [:])
-            #expect(c.risk == native.risk && c.family == native.family, "\(name)")
-            for mode in PermissionMode.allCases {
-                #expect(PermissionPolicy.evaluate(mode: mode, call: c, rules: [], workspace: nil)
-                        == PermissionPolicy.evaluate(mode: mode, call: native, rules: [], workspace: nil), "\(name) \(mode)")
-            }
-        }
-        // Reading a job's output is safe in both (TaskOutput is what newer CLIs call BashOutput).
-        for name in ["BashOutput", "TaskOutput"] {
-            #expect(call(name, [:]).risk == .safe && call(name, [:]).family == .jobs, "\(name)")
-        }
-    }
-
-    @Test func theModeSwitchRequestMatchesTheSDK() throws {
-        let line = ClaudeCodeWire.setPermissionMode(id: "req_1_ab", mode: ClaudeCodePolicy.cliMode(.readOnly))
-        let json = try #require(JSONValue.parse(line))
-        #expect(json["type"] == .string("control_request") && json["request_id"] == .string("req_1_ab"))
-        #expect(json["request"] == .object(["subtype": .string("set_permission_mode"), "mode": .string("plan")]))
     }
 }
 
@@ -824,7 +664,7 @@ struct MCPAnnotationTests {
             Issue.record("expected a dangerous ask"); return
         }
         #expect(PermissionPolicy.evaluate(mode: .ask, call: call, rules: [PermissionRule(family: .connector)], workspace: nil) != .allow)
-        #expect(PermissionPolicy.suggestions(for: call, existing: [], workspace: nil, extra: []).isEmpty)
+        #expect(PermissionPolicy.suggestions(for: call, existing: [], workspace: nil).isEmpty)
         // "Sem pedir permissão" is the user's own choice and still runs it.
         #expect(PermissionPolicy.evaluate(mode: .bypass, call: call, rules: [], workspace: nil) == .allow)
     }
@@ -857,7 +697,9 @@ struct MCPAnnotationTests {
         let config = MCPServerConfig(name: "Fake", command: "/usr/bin/python3", arguments: [script.path])
         await manager.sync([config])
         try await manager.ensureStarted(config.id)
-        let tools: [any AgentTool] = try #require(await manager.catalog(config.id)).mcpTools(serverName: "Fake", serverID: config.id, manager: manager)
+        let tools: [any AgentTool] = try #require(await manager.catalog(config.id)).tools.map {
+            MCPTool(serverName: "Fake", remote: $0.spec, serverID: config.id, manager: manager, annotations: $0.annotations)
+        }
         func risk(_ name: String) throws -> ToolRisk {
             try #require(tools.first { $0.spec.name == "Fake__\(name)" }).risk(.object([:]))
         }

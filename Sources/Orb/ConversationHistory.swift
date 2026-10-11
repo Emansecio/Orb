@@ -83,7 +83,7 @@ extension Conversation {
 
     /// The routine's conversation as a new run finds it. The transcript keeps the last runs (older ones are cut at a
     /// run boundary), but the model starts from nothing: every run is a fresh task, and its context must not grow
-    /// with each hourly run. Claude Code starts a new session for the same reason.
+    /// with each hourly run.
     func startingRoutineRun(at date: Date, keepingRuns: Int = Routine.keptRuns - 1) -> Conversation {
         var copy = self
         copy.messages = []
@@ -93,18 +93,9 @@ extension Conversation {
         copy.compactions = nil
         copy.condensedCount = nil
         copy.taskPaused = nil
-        copy.claudeSessionID = nil
-        copy.claudeSessionFolder = nil
-        copy.claudeSeenCount = nil
-        copy.claudeMemoryPinned = nil
         copy.workspaceHash = nil
-        copy.claudeWorkspaceHash = nil
-        copy.claudeStandingHash = nil
         copy.gatewaySessionID = nil
         copy.workspaceSeen = nil
-        copy.claudeWorkspaceSeen = nil
-        copy.claudeSystem = nil
-        copy.claudeRelatedSent = nil
         copy.memorySavedCount = nil
 
         let starts = copy.items.indices.filter { index in

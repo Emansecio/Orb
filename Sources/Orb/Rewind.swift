@@ -287,22 +287,6 @@ extension Conversation {
         // The snapshot of the folder may have been in a message that left: it is sent again with the next one.
         workspaceHash = nil
         workspaceSeen = nil
-        if claudeSessionID != nil {
-            resetClaudeSession()
-        } else {
-            claudeSeenCount = claudeSeenCount.map { min($0, messages.count) }
-        }
-    }
-
-    /// Claude Code keeps its own copy of the conversation, which has the discarded turns: the next message starts a new
-    /// session, told what is left of the conversation (as after "Compactar agora").
-    mutating func resetClaudeSession() {
-        claudeSessionReported("", folder: nil)
-        claudeMemoryPinned = nil
-        claudeWorkspaceHash = nil
-        claudeStandingHash = nil
-        claudeWorkspaceSeen = nil
-        claudeSystem = nil
     }
 }
 

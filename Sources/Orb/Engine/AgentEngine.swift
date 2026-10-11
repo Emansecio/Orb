@@ -13,8 +13,6 @@ enum TurnEvent: Sendable {
     case failed(String)
     /// Something the user should know, shown in the transcript (not sent to the model).
     case notice(String)
-    /// The Claude Code session this conversation continues in ("" = forget it and start a new one next time).
-    case session(String)
     /// Tokens the turn has used so far, summed over its model calls (the last one is the turn's total).
     case usage(TokenUsage)
     /// Tokens of the model call that just ended, alone (`.usage` follows with the new total): the size of the prompt
@@ -23,15 +21,12 @@ enum TurnEvent: Sendable {
     /// The provider has begun to bill a model call (its input tokens are known before the answer ends). `.requestUsage` follows
     /// with the final numbers; only a call that never ends (the user stopped it) is counted from this one.
     case pendingUsage(TokenUsage)
-    /// What the provider's own tool says the turn cost, in dollars (Claude Code's `total_cost_usd`; on a plan, what it would
-    /// cost at API prices). Follows the turn's `.usage`.
-    case reportedCost(Double)
     /// The task stopped at the step limit and left a progress record: the next message picks it up.
     case taskPaused
     /// A message the user sent during the turn (see `SteeringQueue`) was just handed to the model: the transcript
     /// shows it now, in its place among the steps, instead of as queued.
     case steered(UUID)
-    /// Part of the history was folded into a summary during the turn (or Claude Code compacted its own session). The
+    /// Part of the history was folded into a summary during the turn. The
     /// app tells the user once, with numbers, and keeps the summary when the fold is of older turns (`report.fold`).
     case compacted(CompactionReport)
 }

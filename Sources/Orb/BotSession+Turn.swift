@@ -142,10 +142,9 @@ extension BotSession {
         finishTurn(turn, succeeded: false, userStopped: true, startsQueuedRoutines: startsQueuedRoutines)
     }
 
-    /// Records the marks of the turn's prompt when it has been delivered: for Orb's own engine, when the user message (with
-    /// the snapshot) is stored; for Claude Code, when its session answers.
-    func recordMarks(native: Bool) {
-        guard let marks = pendingMarks, marks.isNative == native else { return }
+    /// Records the marks of the turn's prompt when it has been delivered: when the user message (with the snapshot) is stored.
+    func recordMarks() {
+        guard let marks = pendingMarks else { return }
         pendingMarks = nil
         conversation?.record(marks)
     }
@@ -209,7 +208,7 @@ extension BotSession {
             if message.role == .assistant, !message.toolCalls.isEmpty, reviewBase != nil, routineID == nil { stepsSinceSkill += 1 }
             if message.role == .user {
                 conversation?.taskPaused = false
-                recordMarks(native: true)
+                recordMarks()
             }
             scheduleSave(delay: Self.streamingSaveInterval)
         case .failed(let message):
@@ -223,16 +222,13 @@ extension BotSession {
             append(.notice(text))
         case .usage(let total):
             setUsage(total)
-            // Claude Code reports the turn as a whole, once; the native engine's calls are counted one by one below.
-            if isClaudeTurn { recordUsage(UsageTotals(total)) }
+            // The model calls are counted one by one, as `.requestUsage` arrives.
         case .requestUsage(let used):
             setRequestUsage(used)
             model.live(id).setLastUsage(used)
             recordUsage(UsageTotals(used))
         case .pendingUsage:
             break // `play` keeps it for a call that is stopped
-        case .reportedCost(let cost):
-            recordUsage(UsageTotals(reportedCost: cost))
         case .compacted(var report):
             closeStreaming()
             // A fold of older turns is kept (the next turn starts from it), counted in the conversation's own messages.
@@ -241,8 +237,6 @@ extension BotSession {
                 report.foldedRequests = conversation.map { $0.requestCount(in: 0..<$0.coveredMessageCount) }
                 if report.foldedMessages > 0 { foldedNotes += report.digests }
             }
-            // Claude Code compacting its own session forgets details too: the memory is brought up to date after the turn.
-            if report.kind == .claudeCode { compactedInTurn = true }
             guard report.fold == nil || report.foldedMessages > 0 else { break }
             append(.notice(report.notice))
             lastCompaction = report
@@ -253,15 +247,6 @@ extension BotSession {
             scheduleSave(delay: Self.streamingSaveInterval)
         case .steered(let messageID):
             model.deliverSteered(messageID, to: id)
-        case .session(let sessionID):
-            ensureLoaded()
-            let folder = claudeTurnFolder
-            changeConversation { $0.claudeSessionReported(sessionID, folder: folder) }
-            if !sessionID.isEmpty {
-                claudeTurnDelivered = true
-                recordMarks(native: false)
-            }
-            scheduleSave(delay: Self.streamingSaveInterval)
         }
     }
 
@@ -311,13 +296,6 @@ extension BotSession {
         compactedInTurn = false
         let notes = foldedNotes
         foldedNotes = []
-        let turnFolder = claudeTurnFolder
-        claudeTurnFolder = nil
-        if isClaudeTurn {
-            isClaudeTurn = false
-            if claudeTurnDelivered { conversation?.claudeTurnFinished(folder: turnFolder) }
-            claudeTurnDelivered = false
-        }
         stopSpeaking()
         closeStreaming()
         model.setStatus(nil, of: id)

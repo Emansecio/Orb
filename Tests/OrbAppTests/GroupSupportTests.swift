@@ -127,9 +127,9 @@ struct GroupPromptTests {
         #expect(orchestrator.hasPrefix("## Group \"Lançamento\"\nYou are in a group with the user and these Orbs."))
         #expect(orchestrator.contains("You receive each user message first") && orchestrator.contains("use orbs ask to assign"))
         #expect(orchestrator.hasSuffix("Be economical: the user set a budget of 12 turns."))
-        let member = GroupPrompt.section(groupName: "Lançamento", role: .member, turnBudget: 8, toolPrefix: "mcp__orb_memoria__")
+        let member = GroupPrompt.section(groupName: "Lançamento", role: .member, turnBudget: 8)
         #expect(member.contains("Do what you are asked or @mentioned for"))
-        #expect(member.contains("ask them directly with mcp__orb_memoria__orbs") && member.contains("with mcp__orb_memoria__group_remember."))
+        #expect(member.contains("ask them directly with orbs") && member.contains("with group_remember."))
         #expect(!member.contains("You receive each user message first"))
     }
 
@@ -257,38 +257,6 @@ struct GroupMemoryTests {
         #expect(brief.contains("Other notes (group_recall has the details): Reunião"))
         #expect(brief.count <= GroupBoard.briefLimit)
         #expect(await GroupBoard.brief(bank: library().groupBank(for: UUID()), message: "oi") == "")
-    }
-
-    @Test func theChildProcessServesTheBoardOnlyWithItsFlag() async throws {
-        let library = library(), id = UUID()
-        let board = library.groupBank(for: id)
-        await board.remember("Ponto de partida", kind: .fato) // makes the folder, as the app does before the child starts
-        let folder = library.groupDirectory(for: id)
-        let config = OrbToolsMCPServer.config(directory: root.appending(path: "orb"), groupMemory: folder)
-        #expect(config.arguments.suffix(2) == ["--group-memory", folder.path])
-        let options = try #require(OrbToolsMCPServer.Options(arguments: config.arguments, environment: [:]))
-        #expect(options.groupMemory?.path == folder.path && options.context.groupMemory != nil)
-        #expect(OrbToolsMCPServer.config(directory: root).arguments == ["--tools-mcp", root.path])
-        #expect(OrbToolsMCPServer.Options(memoryDirectory: root).context.groupMemory == nil)
-
-        let names = { (with: Bool) in OrbToolsMCPServer.tools(mac: false, extras: .init(groupMemory: with)).map(\.spec.name) }
-        #expect(names(true).contains("group_remember") && names(true).contains("group_recall"))
-        #expect(!names(false).contains("group_remember") && !names(false).contains("group_recall"))
-        #expect(OrbToolsMCPServer.listedTools(mac: false, extras: .init(groupMemory: true)).map(\.spec.name).contains("group_recall"))
-
-        func call(_ name: String, _ arguments: JSONValue, group: Bool = true) async -> JSONValue? {
-            await OrbToolsMCPServer.handle(.object(["jsonrpc": .string("2.0"), "id": .number(1), "method": .string("tools/call"),
-                                                    "params": .object(["name": .string(name), "arguments": arguments])]),
-                                           context: options.context, extras: .init(groupMemory: group))
-        }
-        let saved = await call("group_remember", args("Decisão: usar a API v3"))
-        #expect(saved?["result"]?["isError"] == .bool(false))
-        // The app's bank (another actor over the same files) sees what the child wrote.
-        await waitUntil("the child's note on the board") { await board.snapshot().items(.fato).contains { $0.body.contains("API v3") } }
-        let refused = await call("group_remember", args("x"), group: false)
-        #expect(refused?["error"] != nil || refused?["result"]?["isError"] == .bool(true))
-        // The Claude Code names of the tools resolve to the same tools (permission, summary).
-        #expect(OrbToolsMCPServer.tool(claudeCodeName: ClaudeCodeTools.memoryPrefix + "group_remember")?.spec.name == "group_remember")
     }
 
     @Test func theSessionPageSaysWhatWasAskedAndWhatCameOutWithoutSecrets() {

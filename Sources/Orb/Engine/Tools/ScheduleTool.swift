@@ -1,8 +1,7 @@
 import Foundation
 
 /// Carries out a call of the `schedule` tool for the Orb that made it. The routines belong to the app, so the app does
-/// the work (`AppModel.schedule`): the native engine calls it directly, Claude Code's tools server (another process)
-/// through `ScheduleMailbox`.
+/// the work (`AppModel.schedule`): the engine calls it directly.
 typealias ScheduleHandler = @Sendable (JSONValue) async throws -> String
 
 /// One call of `schedule`, checked: what was asked and, for a new task, when it runs.
@@ -97,7 +96,7 @@ struct ScheduleTool: AgentTool {
 
     /// Listing only reads; creating, pausing, resuming and deleting change what the Orb does on its own later. A call
     /// that names an action but does not parse changes nothing and goes straight to its error, with no card to approve
-    /// first. Without an action it is the tool as a whole being asked about (Claude Code's `readOnlyHint`): sensitive.
+    /// first. Without an action it is the tool as a whole being asked about: sensitive.
     func risk(_ arguments: JSONValue) -> ToolRisk {
         guard arguments["action"] != nil else { return .sensitive }
         switch try? ScheduleCommand(arguments) {

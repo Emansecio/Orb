@@ -1,9 +1,10 @@
 import Foundation
 
-// "Claude Code (sua assinatura)": Orb runs the user's own, unmodified `claude` CLI headless, and the user
-// signs in through Claude Code's own flow (`claude auth login`). Per Anthropic's policy
-// (https://code.claude.com/docs/en/legal-and-compliance, "Authentication and credential use"), Orb never
-// reads, copies or stores Claude Code's credentials and never calls Anthropic with them: it only launches the CLI.
+// "Claude Code (sua assinatura)": the user's own, unmodified `claude` CLI is only the pipe to the model (see `ClaudeCodeClient`;
+// the prompt, the tools, the memory and the context are the Orb's), and the user signs in through Claude Code's own flow
+// (`claude auth login`). Per Anthropic's policy (https://code.claude.com/docs/en/legal-and-compliance, "Authentication and
+// credential use"), Orb never reads, copies or stores Claude Code's credentials and never calls Anthropic with them: it only
+// launches the CLI. This file finds the CLI, runs its account commands and asks it for the models of the plan.
 
 struct ClaudeCodeStatus: Equatable, Sendable {
     var isInstalled = false
@@ -38,33 +39,6 @@ struct ClaudeCodeStatus: Equatable, Sendable {
         }
         let parts = [email, method].compactMap { $0 }.filter { !$0.isEmpty }
         return parts.isEmpty ? "Conectado" : parts.joined(separator: " · ")
-    }
-}
-
-extension Conversation {
-    /// The Claude Code session a turn in `folder` can resume: nil when there is none, or when it was started in
-    /// another folder (Claude Code stores sessions per folder, so resuming it there would fail). A session saved
-    /// before its folder was tracked counts as being in `folder`.
-    func claudeSession(forFolder folder: String) -> String? {
-        guard let id = claudeSessionID else { return nil }
-        return claudeSessionFolder.map { $0 == folder } ?? true ? id : nil
-    }
-
-    /// The CLI reported its session id for a turn run in `folder`; an empty id means the session is gone.
-    mutating func claudeSessionReported(_ id: String, folder: String?) {
-        claudeSessionID = id.isEmpty ? nil : id
-        claudeSessionFolder = id.isEmpty ? nil : folder
-        if id.isEmpty {
-            claudeSeenCount = nil
-            claudeRelatedSent = nil // the next session has seen none of it
-        }
-    }
-
-    /// A Claude Code turn in `folder` ended. Everything so far went through (or was handed to) its session, unless
-    /// the session left over is another folder's (this turn's new one never started), which has seen nothing of it.
-    mutating func claudeTurnFinished(folder: String?) {
-        guard claudeSessionID != nil, claudeSessionFolder.map({ $0 == folder }) ?? true else { return }
-        claudeSeenCount = messages.count
     }
 }
 

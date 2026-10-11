@@ -116,13 +116,6 @@ final class BotSession {
     /// The running turn's id. A turn that was stopped can still be finishing its setup or draining events while the
     /// next one runs; only the current id may change the Orb's state.
     @ObservationIgnored var turnID: UUID?
-    /// The running turn belongs to Claude Code (stop and approvals go there).
-    @ObservationIgnored var isClaudeTurn = false
-    /// The folder the running Claude Code turn started in; its session belongs to that folder.
-    @ObservationIgnored var claudeTurnFolder: String?
-    /// The running Claude Code turn reached the CLI (its session answered). One that failed before that, or was stopped
-    /// while preparing, handed the session nothing: what other models said stays to be caught up on.
-    @ObservationIgnored var claudeTurnDelivered = false
     /// The routine whose run is the running turn.
     var routineID: UUID? {
         didSet { if (oldValue == nil) != (routineID == nil) { model?.syncActivities() } }
@@ -165,7 +158,6 @@ final class BotSession {
     @ObservationIgnored var stepsSinceSkill = 0
     /// The request of the latest turn of Orb's own engine, with the history it sent but not its message: what a review
     /// asks the model with, so the system prompt, the tools and the history are the ones the provider has in its cache.
-    /// Nil for a turn of Claude Code.
     @ObservationIgnored var reviewBase: TurnRequest?
     /// Where in the conversation's messages the turn began: what the turn added is what follows `reviewBase.history`.
     @ObservationIgnored var reviewFrom = 0
@@ -195,7 +187,7 @@ final class BotSession {
     /// Tokens of the latest model call alone: `promptTokens` is how full the context is now and `cacheHitRatio` how
     /// much of it the provider's cache served (native engine only; for the context meter).
     private(set) var requestUsage: TokenUsage?
-    /// What the latest compaction did (on its own, on request, or Claude Code's own), for the context meter.
+    /// What the latest compaction did (on its own or on request), for the context meter.
     var lastCompaction: CompactionReport?
 
     func setUsage(_ total: TokenUsage) { assign(\.usage, to: total) }

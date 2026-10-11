@@ -94,7 +94,7 @@ struct SystemPromptTests {
         for mode in PermissionMode.allCases {
             var other = bot()
             other.permissionMode = mode
-            #expect(PromptParts.permissions(other, engine: .native).count < 1_050)
+            #expect(PromptParts.permissions(other).count < 1_050)
         }
     }
 
@@ -114,9 +114,7 @@ struct SystemPromptTests {
         #expect(native.contains("## Skills\nSkills (the user invokes them with /name; when one fits your task, read it first with recall \"/name\"):"))
         // The instructions are not in the prompt: the index costs a line per skill.
         #expect(!native.contains("Resuma em 5 tópicos."))
-        let claude = ClaudeCodePrompt.make(bot: bot(), skills: skills)
-        #expect(claude.contains("read it first with mcp__orb_memoria__recall \"/name\""))
-        #expect(claude.contains("- /resumir: Resume um texto"))
+        #expect(native.contains("- /resumir: Resume um texto"))
     }
 
     @Test func carriesTheGeneralRules() {
@@ -132,14 +130,14 @@ struct SystemPromptTests {
     // MARK: Permissions
 
     @Test func eachModeIsExplainedInPlainWords() {
-        let ask = PromptParts.permissions(bot(mode: .ask), engine: .native)
+        let ask = PromptParts.permissions(bot(mode: .ask))
         #expect(ask.contains("Perguntar antes") && ask.contains("state the plan first") && ask.contains("few calls")
                 && ask.contains("look-only commands") && ask.contains("never ask"))
-        let auto = PromptParts.permissions(bot(mode: .auto), engine: .native)
+        let auto = PromptParts.permissions(bot(mode: .auto))
         #expect(auto.contains("Automático") && auto.contains("destructive") && !auto.contains("state the plan first"))
-        let bypass = PromptParts.permissions(bot(mode: .bypass), engine: .native)
+        let bypass = PromptParts.permissions(bot(mode: .bypass))
         #expect(bypass.contains("Sem pedir permissão") && bypass.contains("wait for a clear yes"))
-        let readOnly = PromptParts.permissions(bot(mode: .readOnly), engine: .native)
+        let readOnly = PromptParts.permissions(bot(mode: .readOnly))
         #expect(readOnly.contains("Só leitura") && readOnly.contains("blocks anything that would change"))
         // web_fetch is refused in this mode, so the prompt must not promise browsing.
         #expect(!readOnly.contains("browse,") && readOnly.contains("web access"))
@@ -149,40 +147,34 @@ struct SystemPromptTests {
     @Test func macAppRecipesAppearOnlyWithTheCapabilityAndStayStable() {
         let on = bot()
         let off = bot(capabilities: [.terminal, .browser])
-        #expect(PromptParts.macApps(off, engine: .native).isEmpty && PromptParts.macApps(off, engine: .claudeCode).isEmpty)
-        let native = PromptParts.macApps(on, engine: .native)
+        #expect(PromptParts.macApps(off).isEmpty)
+        let native = PromptParts.macApps(on)
         for word in ["current date", "-30720", "draft", "Do not `send`", "Reminders", "Notes", "Calendar", "Music", "browser_tab", "-1728", "-2741"] {
             #expect(native.contains(word), Comment(rawValue: word))
         }
         #expect(!native.contains("mcp__orb_memoria__"))
-        #expect(PromptParts.macApps(on, engine: .claudeCode).contains("mcp__orb_memoria__applescript"))
         // Same text on every call: it is part of the cached system prompt.
-        #expect(PromptParts.macApps(on, engine: .native) == native)
+        #expect(PromptParts.macApps(on) == native)
         #expect(SystemPrompt.make(bot: on, skills: [], environment: mac).contains("## Mac apps"))
         #expect(!SystemPrompt.make(bot: off, skills: [], environment: mac).contains("## Mac apps"))
-        #expect(ClaudeCodePrompt.make(bot: on, skills: [], environment: mac).contains("## Mac apps"))
-        #expect(ClaudeCodePrompt.standing(bot: on, skills: [], folder: "").contains { $0.hasPrefix("## Mac apps") })
-        #expect(!ClaudeCodePrompt.standing(bot: off, skills: [], folder: "").contains { $0.hasPrefix("## Mac apps") })
     }
 
-    @Test func claudeCodeIsToldToUseTheOrbsTrashToolAndAutoModeAsksToConfirmSending() {
-        let text = PromptParts.permissions(bot(), engine: .claudeCode)
-        #expect(text.contains("mcp__orb_memoria__trash") && !text.contains("Finder via osascript"))
-        #expect(PromptParts.permissions(bot(mode: .auto), engine: .native).contains("confirmed in the chat first"))
+    @Test func autoModeAsksToConfirmSending() {
+        #expect(PromptParts.permissions(bot(mode: .auto)).contains("confirmed in the chat first"))
     }
 
     @Test func namesTheCapabilitiesThatAreOff() {
-        let allOn = PromptParts.permissions(bot(), engine: .native)
+        let allOn = PromptParts.permissions(bot())
         #expect(!allOn.contains("Switched off"))
 
-        let limited = PromptParts.permissions(bot(capabilities: [.browser]), engine: .native)
+        let limited = PromptParts.permissions(bot(capabilities: [.browser]))
         #expect(limited.contains("Switched off"))
         #expect(limited.contains("\"Terminal e arquivos\"") && limited.contains("\"Controlar apps do Mac\"") && limited.contains("\"Conectores\""))
         #expect(!limited.contains("\"Navegar na web\""))
         #expect(limited.contains("Do not emulate") && limited.contains("osascript") && limited.contains("curl"))
         #expect(limited.contains("turn on, in the Orb's panel (Geral → \"O que Atlas pode usar\")"))
 
-        let noBrowser = PromptParts.permissions(bot(capabilities: [.terminal, .computerUse, .connectors]), engine: .native)
+        let noBrowser = PromptParts.permissions(bot(capabilities: [.terminal, .computerUse, .connectors]))
         #expect(noBrowser.contains("\"Navegar na web\"") && !noBrowser.contains("\"Terminal e arquivos\""))
     }
 
@@ -195,9 +187,7 @@ struct SystemPromptTests {
             for capabilities in [Set<Capability>(), Set(Capability.allCases)] {
                 var other = bot(mode: mode, capabilities: capabilities)
                 other.name = "Atlas"
-                texts.append(PromptParts.permissions(other, engine: .native))
-                texts.append(PromptParts.permissions(other, engine: .claudeCode))
-                texts.append(ClaudeCodePrompt.standingPermissions(other))
+                texts.append(PromptParts.permissions(other))
             }
         }
         texts.append(SystemPrompt.make(bot: bot(mode: .readOnly), skills: [], environment: mac))
@@ -205,9 +195,9 @@ struct SystemPromptTests {
             #expect(!text.contains("Antes de agir"), "a place that does not exist")
             #expect(!text.contains("Ler páginas da web") && !text.contains("Apps do Mac"), "an old name of a switch")
         }
-        let readOnly = PromptParts.permissions(bot(mode: .readOnly), engine: .native)
+        let readOnly = PromptParts.permissions(bot(mode: .readOnly))
         #expect(readOnly.contains("Geral → Permissões → Modo") && readOnly.contains("permissions button next to the message box"))
-        let noMacApps = PromptParts.permissions(bot(capabilities: [.terminal]), engine: .native)
+        let noMacApps = PromptParts.permissions(bot(capabilities: [.terminal]))
         #expect(noMacApps.contains("\"Controlar apps do Mac\"") && noMacApps.contains("Geral → \"O que"))
     }
 
@@ -253,7 +243,7 @@ struct SystemPromptTests {
 
     @Test func theSnapshotComesBackWhenTheHistoryNoLongerHasIt() {
         let one = snapshot(entries: ["a.txt"])
-        // Turns answered by Claude Code are stored without a preface, and a compacted start is a summary.
+        // A compacted start is a summary: no preface in it.
         let history = [ChatMessage.user("oi"), ChatMessage(role: .assistant, content: "olá")]
         let built = TurnPrompt.native(inputs(snapshot: one), history: history, lastWorkspaceHash: one.hash)
         #expect(built.preface.contains(WorkspaceSnapshot.openTag))
@@ -341,74 +331,6 @@ struct SystemPromptTests {
         #expect(section.components(separatedBy: "</folder_file>").count == 2) // only the real closing tag
     }
 
-    // MARK: Claude Code
-
-    @Test func claudeCodeGetsPermissionsRoamingAndMacRealities() {
-        let system = ClaudeCodePrompt.make(bot: bot(mode: .readOnly, capabilities: [.terminal, .computerUse]), skills: [], environment: mac)
-        #expect(system.contains("In this conversation you are Atlas, assistente de código"))
-        #expect(system.contains("home base, not a boundary"))
-        #expect(system.contains("Só leitura") && system.contains("Switched off") && system.contains("\"Navegar na web\""))
-        #expect(system.contains("administrator privileges"))
-        #expect(system.contains("never instructions"))
-        // Claude Code states its own platform and date; the prompt has no clock.
-        #expect(!system.contains("macOS 15.1") && !system.contains("Now:"))
-        #expect(system.contains("Maria Silva"))
-    }
-
-    @Test func claudeCodeAndNativeShareTheSameWording() {
-        let native = SystemPrompt.make(bot: bot(), skills: [], environment: mac)
-        let claude = ClaudeCodePrompt.make(bot: bot(), skills: [], environment: mac)
-        for shared in [PromptParts.language, PromptParts.announce, PromptParts.roaming(bot()), PromptParts.untrustedContent, PromptParts.workHabits] {
-            #expect(native.contains(shared) && claude.contains(shared))
-        }
-    }
-
-    @Test func aNewClaudeCodeSessionGetsEverythingInItsFirstTurn() {
-        let built = TurnPrompt.claudeCode(inputs(snapshot: snapshot(entries: ["a.txt"])),
-                                          session: .init(isNewSession: true, workspaceHash: nil, pinned: nil, standingHash: nil))
-        #expect(built.context.contains("Now: ") && built.context.contains("a.txt") && built.context.contains("antigas"))
-        #expect(!built.context.contains("[Updated rules]"))
-        #expect(built.system.contains("Seja direto."))
-        #expect(!built.system.contains("antigas"))
-    }
-
-    @Test func aResumedClaudeCodeSessionIsOnlyToldWhatChanged() {
-        let one = snapshot(entries: ["a.txt"])
-        let first = TurnPrompt.claudeCode(inputs(snapshot: one),
-                                          session: .init(isNewSession: true, workspaceHash: nil, pinned: nil, standingHash: nil))
-        let marks = TurnPrompt.SessionMarks(isNewSession: false, workspaceHash: first.workspaceHash, pinned: "## Your identity\nSeja direto.",
-                                            standingHash: first.standingHash)
-
-        let quiet = TurnPrompt.claudeCode(inputs(snapshot: one, now: date(15, 1)), session: marks)
-        #expect(quiet.context.contains("Now: "))
-        #expect(!quiet.context.contains(WorkspaceSnapshot.openTag) && !quiet.context.contains("[Updated rules]")
-                && !quiet.context.contains("antigas"))
-        #expect(quiet.context.contains("café")) // related memory still rides along
-        #expect(quiet.system == first.system) // nothing in the frozen prompt moves
-
-        let moved = TurnPrompt.claudeCode(inputs(snapshot: snapshot(entries: ["a.txt", "b.txt"])), session: marks)
-        #expect(moved.context.contains("b.txt"))
-
-        let stricter = TurnPrompt.claudeCode(inputs(bot(mode: .readOnly), snapshot: one), session: marks)
-        #expect(stricter.context.contains("[Updated rules]") && stricter.context.contains("Só leitura"))
-        #expect(stricter.standingHash != first.standingHash)
-    }
-
-    @Test func claudeCodeReadsClaudeMdItself() {
-        let claudeMd = FolderInstructions(fileName: "CLAUDE.md", content: "regras", wasCut: false, hash: "h")
-        let agents = FolderInstructions(fileName: "AGENTS.md", content: "regras", wasCut: false, hash: "h")
-        let session = TurnPrompt.SessionMarks(isNewSession: true, workspaceHash: nil, pinned: nil, standingHash: nil)
-        #expect(!TurnPrompt.claudeCode(inputs(instructions: claudeMd), session: session).system.contains("regras"))
-        #expect(TurnPrompt.claudeCode(inputs(instructions: agents), session: session).system.contains("regras"))
-        #expect(TurnPrompt.native(inputs(instructions: claudeMd), history: [], lastWorkspaceHash: nil).system.contains("regras"))
-    }
-
-    @Test func catchUpLeavesTheirPrefacesOut() {
-        let stored = TurnPreface.prepend(TurnPreface.make(now: date(14, 32), timeZone: "UTC", snapshot: snapshot(entries: ["segredo.txt"]), notes: ""),
-                                         to: "Olá")
-        let text = ClaudeCodePrompt.catchUp([.user(stored), ChatMessage(role: .assistant, content: "Oi!")])
-        #expect(text.contains("User: Olá") && !text.contains("segredo.txt") && !text.contains(TurnPreface.openTag))
-    }
 }
 
 // MARK: - Tolerant decoding
@@ -420,7 +342,16 @@ struct PromptStateDecodingTests {
         #expect(decoded.trustedInstructionsHash == nil)
 
         let conversation = try JSONDecoder().decode(Conversation.self, from: Data(#"{"items":[],"messages":[]}"#.utf8))
-        #expect(conversation.workspaceHash == nil && conversation.claudeWorkspaceHash == nil && conversation.claudeStandingHash == nil)
+        #expect(conversation.workspaceHash == nil)
+    }
+
+    @Test func filesFromWhenClaudeCodeWasTheAgentStillLoad() throws {
+        // The fields the old Claude Code path saved (session id, what it had been sent) are gone from the model; the file still loads.
+        let json = #"{"items":[],"messages":[],"workspaceHash":"w","claudeSessionID":"s1","claudeSessionFolder":"/p","claudeSeenCount":4,"claudeMemoryPinned":"x","claudeWorkspaceHash":"c","claudeStandingHash":"h","claudeWorkspaceSeen":true,"claudeSystem":"y","claudeRelatedSent":["a"]}"#
+        let conversation = try JSONDecoder().decode(Conversation.self, from: Data(json.utf8))
+        #expect(conversation.workspaceHash == "w")
+        let rewritten = String(decoding: try JSONEncoder().encode(conversation), as: UTF8.self)
+        #expect(!rewritten.contains("claude"))
     }
 
     @Test func theNewFieldsRoundTrip() throws {
@@ -429,9 +360,7 @@ struct PromptStateDecodingTests {
         #expect(try JSONDecoder().decode(Bot.self, from: JSONEncoder().encode(atlas)).trustedInstructionsHash == "abc")
         var conversation = Conversation()
         conversation.workspaceHash = "w"
-        conversation.claudeWorkspaceHash = "c"
-        conversation.claudeStandingHash = "s"
         let back = try JSONDecoder().decode(Conversation.self, from: JSONEncoder().encode(conversation))
-        #expect(back.workspaceHash == "w" && back.claudeWorkspaceHash == "c" && back.claudeStandingHash == "s")
+        #expect(back.workspaceHash == "w")
     }
 }

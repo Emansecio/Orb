@@ -10,7 +10,7 @@ extension Snapshot {
     static func composerScene(_ screen: String, model: AppModel) -> AnyView? {
         guard let bot = model.bots.first else { return nil }
         switch screen {
-        case "chat-working", "chat-working-claude", "chat-working-wait", "chat-working-retry", "chat-attachments-queued":
+        case "chat-working", "chat-working-wait", "chat-working-retry", "chat-attachments-queued":
             return workingTurn(screen, model: model, bot: bot)
         case "chat-typed":
             seedConversation(model, bot: bot)
@@ -89,7 +89,7 @@ extension Snapshot {
 
     /// Mid-turn, 16 s in, after two steps that are done: `chat-working` runs `swift build --jobs 6` (the phrase with its
     /// target, "3 ações"; one message that reached the Orb mid-task, marked, and two that wait: one steers, one for
-    /// after the task; `chat-working-claude` is the same turn in Claude Code, where both wait for the end of the answer), `chat-working-wait` waits for your answer to a card (the phrase
+    /// after the task), `chat-working-wait` waits for your answer to a card (the phrase
     /// stands still in the warning color) and `chat-working-retry` waits to try again (the countdown takes the
     /// clock's place). The phrases come in at once (no minimum time), as in a turn that has been going on a while.
     @MainActor
@@ -133,10 +133,9 @@ extension Snapshot {
         model.session(id).turnTask = Task { try? await Task.sleep(for: .seconds(3600)) }
         live.backdateWork(to: .now.addingTimeInterval(-16))
         if screen == "chat-attachments-queued" { AttachmentSnapshots.queue(model.composerLane(id)) }
-        if screen == "chat-working" || screen == "chat-working-claude" {
-            if screen == "chat-working-claude" { model.session(id).isClaudeTurn = true }
+        if screen == "chat-working" {
             let lane = model.composerLane(id)
-            lane.enqueue(SteeredMessage(text: "Na verdade, ignore a pasta node_modules.", prompt: "", delivery: screen == "chat-working-claude" ? .afterTask : .steer))
+            lane.enqueue(SteeredMessage(text: "Na verdade, ignore a pasta node_modules.", prompt: "", delivery: .steer))
             lane.enqueue(SteeredMessage(text: "E me mande um resumo no fim.", files: [URL(fileURLWithPath: "/Users/x/Documentos/relatório.pdf")], prompt: "",
                                         delivery: .afterTask))
             model.setDraft("Depois disso, rode os testes", for: id)

@@ -27,7 +27,7 @@ enum MCPProtocol {
     static let preferred = "2025-06-18"
 }
 
-/// The MCP server side the app speaks over stdio, shared by `Orb --tools-mcp` and `Orb --local-connector`: the handshake, `ping`,
+/// The MCP server side the app speaks over stdio, shared by `Orb --pipe-tools` and the in-process local connectors: the handshake, `ping`,
 /// `tools/list`, `tools/call`, the JSON-RPC envelope and errors, and the loop that reads stdin.
 enum MCPStdioServer {
     /// The response to one message; nil for notifications.
@@ -76,10 +76,10 @@ enum MCPStdioServer {
         .object(["jsonrpc": .string("2.0"), "id": id, "error": .object(["code": .number(code), "message": .string(message)])])
     }
 
-    /// Serves until stdin closes, then exits the process (what Claude Code starts; never opens a window). The messages are read
+    /// Serves until stdin closes, then exits the process (what the Claude Code CLI starts; never opens a window). The messages are read
     /// on a background thread so the main thread stays free for tools that must run on the main actor (clipboard, notifications);
     /// it only services the main queue. Messages are split on "\n" only (JSON text may contain U+2028 and other Unicode line
-    /// separators raw). Requests run concurrently, each in its own task (see `MCPServerLoop`): stopping a turn in Claude Code
+    /// separators raw). Requests run concurrently, each in its own task (see `MCPServerLoop`): stopping a turn
     /// cancels the call at once, and stdin closing or SIGTERM cancels everything, lets a screen takeover put the screen back,
     /// and exits.
     static func run(_ makeHandler: @escaping @Sendable () -> any MCPServerHandler) -> Never {

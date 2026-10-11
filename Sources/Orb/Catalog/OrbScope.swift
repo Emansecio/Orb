@@ -59,11 +59,6 @@ extension AppModel {
         connectors.filter { $0.isEnabled && $0.isAvailable(to: botID) }
     }
 
-    /// The connectors a Claude Code turn of this Orb is given: none while its "Conectores" switch is off.
-    func connectorServers(for bot: Bot) -> [MCPServerConfig] {
-        bot.capabilities.contains(.connectors) ? connectors(for: bot.id) : []
-    }
-
     /// What the Orb panel shows under "Conectores": the names of the connectors this Orb actually gets (empty while its
     /// switch is off).
     func connectorNames(for botID: UUID) -> [String] {

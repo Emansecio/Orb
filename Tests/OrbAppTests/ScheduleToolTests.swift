@@ -169,12 +169,10 @@ struct ScheduleToolSpecTests {
         #expect(detail.hasSuffix("…") && detail.count < 450)
     }
 
-    @Test func theToolIsOfferedToBothEnginesUnderOneNameAndKindAndNeedsNoCapability() {
+    @Test func theToolIsOfferedUnderOneNameAndKindAndNeedsNoCapability() {
         #expect(ToolBox.all.contains { $0.spec.name == "schedule" })
-        #expect(OrbToolsMCPServer.tool(claudeCodeName: "mcp__orb_memoria__schedule")?.spec.name == "schedule")
         #expect(tool.kind == .schedule && tool.capability == nil)
-        #expect(ClaudeCodeTools.kind("mcp__orb_memoria__schedule") == .schedule)
-        #expect(ClaudeCodeTools.summary("mcp__orb_memoria__schedule", call("delete", name: "A")).title == "Apagando tarefa agendada")
+        #expect(tool.summary(call("delete", name: "A")).title == "Apagando tarefa agendada")
     }
 
     @Test func withoutTheAppBehindItTheToolSaysSo() async {
@@ -188,25 +186,21 @@ struct SchedulePermissionTests {
     private let tool = ScheduleTool()
     private let home = URL(fileURLWithPath: "/Users/teste")
 
-    private func verdict(_ mode: PermissionMode, _ action: String, rules: [PermissionRule] = [], claudeCode: Bool = false) -> PermissionVerdict {
+    private func verdict(_ mode: PermissionMode, _ action: String, rules: [PermissionRule] = []) -> PermissionVerdict {
         let arguments = call(action, name: "A", prompt: "x", when: daily9)
-        let permission = claudeCode
-            ? PermissionPolicy.call(claudeCodeTool: "mcp__orb_memoria__schedule", input: arguments, workspace: nil, home: home)
-            : PermissionPolicy.call(for: tool, arguments: arguments, context: ToolContext(workingDirectory: home), home: home)
+        let permission = PermissionPolicy.call(for: tool, arguments: arguments, context: ToolContext(workingDirectory: home), home: home)
         return PermissionPolicy.evaluate(mode: mode, call: permission, rules: rules, workspace: nil, home: home)
     }
 
     @Test func eachModeDecidesLikeItDoesForAnyChangeThatStays() {
-        for claudeCode in [false, true] {
-            for action in ["create", "pause", "resume", "delete"] {
-                #expect(verdict(.ask, action, claudeCode: claudeCode) == .ask(.needsPermission), "\(action)")
-                #expect(verdict(.auto, action, claudeCode: claudeCode) == .allow, "\(action)")
-                #expect(verdict(.bypass, action, claudeCode: claudeCode) == .allow, "\(action)")
-                #expect(verdict(.readOnly, action, claudeCode: claudeCode) == .deny(PermissionPolicy.readOnlyDenial), "\(action)")
-            }
-            // Looking is not changing: it runs even in read-only.
-            for mode in PermissionMode.allCases { #expect(verdict(mode, "list", claudeCode: claudeCode) == .allow, "\(mode)") }
+        for action in ["create", "pause", "resume", "delete"] {
+            #expect(verdict(.ask, action) == .ask(.needsPermission), "\(action)")
+            #expect(verdict(.auto, action) == .allow, "\(action)")
+            #expect(verdict(.bypass, action) == .allow, "\(action)")
+            #expect(verdict(.readOnly, action) == .deny(PermissionPolicy.readOnlyDenial), "\(action)")
         }
+        // Looking is not changing: it runs even in read-only.
+        for mode in PermissionMode.allCases { #expect(verdict(mode, "list") == .allow, "\(mode)") }
     }
 
     @Test func aStandingGrantOfTheirOwnCoversThemAndNothingElseDoes() {
@@ -530,84 +524,3 @@ extension ScheduledTasksTests {
     }
 }
 
-// MARK: - Claude Code's end
-
-@Suite final class ScheduleMailboxTests {
-    let root = FileManager.default.temporaryDirectory.appending(path: "OrbMailbox-\(UUID().uuidString)")
-
-    deinit { removeTestFolder(root) }
-
-    @Test @MainActor func aCallFromTheServerIsAnsweredByTheApp() async throws {
-        let orb = UUID()
-        var seen: [(UUID, JSONValue)] = []
-        let server = ScheduleMailbox.Server(directory: root.appending(path: "caixa")) { id, arguments in
-            seen.append((id, arguments))
-            if arguments["action"]?.string == "delete" { throw ToolError("Não achei a tarefa.") }
-            return "Agendei."
-        }
-        server.start()
-        defer { server.stop() }
-        let handler = ScheduleMailbox.client(directory: server.directory, orb: orb)
-
-        #expect(try await handler(call("create", prompt: "x", when: daily9)) == "Agendei.")
-        #expect(seen.count == 1 && seen[0].0 == orb && seen[0].1["action"]?.string == "create")
-        do {
-            _ = try await handler(call("delete", name: "A"))
-            Issue.record("an error went through as an answer")
-        } catch {
-            #expect(error.localizedDescription == "Não achei a tarefa.")
-        }
-        // Nothing is left behind once the calls are over.
-        #expect(try FileManager.default.contentsOfDirectory(atPath: server.directory.path).isEmpty)
-    }
-
-    @Test @MainActor func requestsLeftByAnEarlierRunAreSweptWhenTheAppStartsListening() throws {
-        let directory = root.appending(path: "caixa")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try Data("{}".utf8).write(to: directory.appending(path: "velho.json"))
-        let server = ScheduleMailbox.Server(directory: directory) { _, _ in "" }
-        server.start()
-        defer { server.stop() }
-        #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
-    }
-
-    @Test @MainActor func aMailboxThatIsGoneIsReportedNotThrownAsAFileError() async {
-        let handler = ScheduleMailbox.client(directory: root.appending(path: "nao-existe"), orb: UUID())
-        do {
-            _ = try await handler(call("list"))
-            Issue.record("answered from nowhere")
-        } catch {
-            #expect(error.localizedDescription.hasPrefix("Não consegui falar com o app"))
-        }
-    }
-
-    @Test @MainActor func theServerGivesUpWhenNobodyAnswers() async throws {
-        let directory = root.appending(path: "vazia")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let handler = ScheduleMailbox.client(directory: directory, orb: UUID(), timeout: .milliseconds(200))
-        await #expect(throws: ToolError.self) { try await handler(call("list")) }
-        #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).count == 1) // the unanswered request; the app sweeps it
-    }
-
-    @Test func theServerProcessIsToldWhereTheMailboxIsAndForWhichOrb() throws {
-        let orb = UUID()
-        let config = OrbToolsMCPServer.config(directory: root, scheduleMailbox: root.appending(path: "caixa"), orb: orb)
-        let options = try #require(OrbToolsMCPServer.Options(arguments: config.arguments))
-        #expect(options.scheduleMailbox == root.appending(path: "caixa") && options.orb == orb)
-        #expect(options.context.schedule != nil)
-        // Without them the tool is there but says it is unavailable.
-        let plain = try #require(OrbToolsMCPServer.Options(arguments: OrbToolsMCPServer.config(directory: root).arguments))
-        #expect(plain.scheduleMailbox == nil && plain.orb == nil && plain.context.schedule == nil)
-    }
-
-    @Test func theToolIsCalledThroughTheMcpServerLikeTheOthers() async throws {
-        var context = ToolContext(workingDirectory: root)
-        context.schedule = { arguments in "ok: \(arguments["action"]?.string ?? "")" }
-        let reply = try #require(await OrbToolsMCPServer.handle(.object([
-            "jsonrpc": .string("2.0"), "id": .number(1), "method": .string("tools/call"),
-            "params": .object(["name": .string("schedule"), "arguments": call("list")]),
-        ]), context: context))
-        #expect(reply["result"]?["content"]?.array?.first?["text"]?.string == "ok: list")
-        #expect(reply["result"]?["isError"] == .bool(false))
-    }
-}

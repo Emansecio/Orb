@@ -97,9 +97,8 @@ enum ContextTone: Equatable, Sendable {
 struct ContextInput: Sendable {
     var botID: UUID
     var conversation: Conversation
-    /// nil for Claude Code, which manages its own context.
+    /// nil while no model is connected to measure the conversation against.
     var budget: ContextBudget?
-    var isClaudeCode: Bool
     /// The window comes from the provider's catalog or from a refusal (else Orb assumes one for the model's kind).
     var windowIsStated: Bool
     /// The Orb's latest model call.
@@ -115,9 +114,7 @@ struct ContextReading: Equatable, Sendable {
     static let fullAt = 0.85
 
     var botID: UUID
-    var isClaudeCode: Bool
-    /// nil for Claude Code.
-    var fill: ContextFill?
+    var fill: ContextFill
     var windowIsStated: Bool
     var messageCount: Int
     /// Your requests in the conversation, and the ones the summary stands for.
@@ -132,25 +129,21 @@ struct ContextReading: Equatable, Sendable {
     static func make(_ input: ContextInput) -> ContextReading? {
         let conversation = input.conversation
         guard !conversation.messages.isEmpty, !Task.isCancelled else { return nil }
-        var fill: ContextFill?
-        if !input.isClaudeCode {
-            guard let budget = input.budget else { return nil }
-            guard let measured = ContextMeter.fill(of: conversation, budget: budget, isCancelled: { Task.isCancelled }) else { return nil }
-            fill = measured
-        }
-        return ContextReading(botID: input.botID, isClaudeCode: input.isClaudeCode,
+        guard let budget = input.budget,
+              let fill = ContextMeter.fill(of: conversation, budget: budget, isCancelled: { Task.isCancelled }) else { return nil }
+        return ContextReading(botID: input.botID,
                               fill: fill, windowIsStated: input.windowIsStated, messageCount: conversation.messages.count,
                               requestCount: conversation.requestCount(in: 0..<conversation.messages.count),
                               foldedRequests: conversation.requestCount(in: 0..<conversation.coveredMessageCount),
-                              memory: input.memory, cacheHit: input.isClaudeCode ? nil : input.usage?.cacheHitRatio)
+                              memory: input.memory, cacheHit: input.usage?.cacheHitRatio)
     }
 
     /// Share of the model's window the next request would take, 0 to 1.
-    var fraction: Double { min(max(fill?.fraction ?? 0, 0), 1) }
+    var fraction: Double { min(max(fill.fraction, 0), 1) }
 
     /// The percentage on the meter, 1 to 100 (0 only for an empty request).
     var percent: Int {
-        let share = (fill?.fraction ?? 0) * 100
+        let share = fill.fraction * 100
         guard share > 0 else { return 0 }
         return min(max(Int(share.rounded()), 1), 100)
     }
@@ -158,20 +151,18 @@ struct ContextReading: Equatable, Sendable {
     var tone: ContextTone { ContextTone(share: fraction) }
 
     /// Messages the summary has swallowed so far.
-    var foldedMessages: Int { fill?.foldedMessages ?? 0 }
+    var foldedMessages: Int { fill.foldedMessages }
 
-    /// Whether "Compactar agora" has anything to do. For Claude Code any conversation with more than one message can
-    /// start a new session from a summary.
-    var canCompact: Bool { isClaudeCode ? messageCount > 1 : fill?.compaction != nil }
+    /// Whether "Compactar agora" has anything to do.
+    var canCompact: Bool { fill.compaction != nil }
 
-    /// "cerca de 42 mil de 128 mil tokens"; nil for Claude Code.
-    var usageWords: String? {
-        fill.map { ContextWords.usage(used: $0.usedTokens, window: $0.windowTokens, windowIsStated: windowIsStated) }
+    /// "cerca de 42 mil de 128 mil tokens".
+    var usageWords: String {
+        ContextWords.usage(used: fill.usedTokens, window: fill.windowTokens, windowIsStated: windowIsStated)
     }
 
     /// The spoken state of the meter, for VoiceOver and the tooltip.
     var spokenState: String {
-        guard fill != nil, let usageWords else { return "O Claude Code cuida do próprio contexto" }
         return "\(percent)% usado, \(usageWords)"
     }
 }

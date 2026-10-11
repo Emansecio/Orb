@@ -65,8 +65,8 @@ struct AgentBrowserConfig: Sendable, Equatable {
 
     /// What the browser of this session is launched with, as one text: the engine, the flags of the launch and the environment
     /// that changes the browser. A running browser started with another one is not reused (see `AgentBrowserDriver.open`). Whether
-    /// the window is shown is not part of it: the app and the tools server of a Claude Code turn take turns showing and hiding it,
-    /// and an `open` must not close the window the person is using.
+    /// the window is shown is not part of it: showing and hiding it is the person's, and an `open` must not close the window
+    /// the person is using.
     var launchFingerprint: String {
         ([engine.rawValue] + launchArguments.filter { $0 != "--headed" } + extraEnvironment.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" })
             .joined(separator: "\u{1F}")
@@ -86,11 +86,14 @@ struct AgentBrowserConfig: Sendable, Equatable {
         if let file = launchRecordFile { try? FileManager.default.removeItem(at: file) }
     }
 
+    /// The variable a TinyFish key travelled in when the Orb's tools ran in another process; still never passed on to the browser.
+    static let tinyFishKeyVariable = "ORB_TINYFISH_KEY"
+
     /// The environment of the user's login shell without what would reconfigure the browser behind the app's back: every
     /// `AGENT_BROWSER_*` setting (the app sets its own) and the key of the search provider. Proxies (`HTTP_PROXY`, `HTTPS_PROXY`,
     /// `ALL_PROXY`, `NO_PROXY`) stay as the shell has them, so a Mac that needs a proxy to reach the web keeps working.
     static func sanitized(_ environment: [String: String]) -> [String: String] {
-        environment.filter { !$0.key.uppercased().hasPrefix("AGENT_BROWSER_") && $0.key != OrbToolsMCPServer.tinyFishKeyVariable }
+        environment.filter { !$0.key.uppercased().hasPrefix("AGENT_BROWSER_") && $0.key != tinyFishKeyVariable }
     }
 
     /// The environment a command runs with: the login shell's (or the app's), cleaned, plus what this session sets.
@@ -166,7 +169,7 @@ enum CloakSeed {
     }
 
     /// The seed of the profile, made once: the file is written whole in a file of its own and put in place with `link`, which
-    /// fails when the name is taken, so two callers (two tasks, the app and the tools server of a Claude Code turn) that both
+    /// fails when the name is taken, so two callers (two tasks, or two runs of the app) that both
     /// find no seed end up with the same one: the first to link wins and the other reads it.
     static func seed(inProfile profile: URL) -> Int {
         let file = profile.appending(path: fileName)

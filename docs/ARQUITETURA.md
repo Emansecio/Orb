@@ -18,8 +18,8 @@ AppModel (@MainActor @Observable)  ── BotSession por Orb ── TurnRequest 
    │   lista de Orbs, rotinas, provedores,    (turno, conversa,   TurnEvent ◄──  │  clientes (OpenAI · Responses · Anthropic)
    │   catálogos, ajustes, arquivos de dados   texto em stream)                  │  ferramentas (Engine/Tools) · MCP
    │                                                                             │  PermissionPolicy · ApprovalGate
-   ├─ BotLive por Orb (estado que as telas leem)                                 └─ ClaudeCodeEngine (processo `claude -p`)
-   ├─ Store (JSON em disco, filas próprias) · Keychain                              + OrbToolsMCPServer (o app como servidor MCP)
+   ├─ BotLive por Orb (estado que as telas leem)                                 └─ ClaudeCodeClient (o CLI `claude -p` só como cano até o modelo)
+   ├─ Store (JSON em disco, filas próprias) · Keychain                              + `--pipe-tools` (o app declara as ferramentas ao CLI)
    └─ Orbs/ (avatar: Core Animation, OrbDriver)
 ```
 
@@ -28,8 +28,10 @@ Três ideias organizam o resto:
 1. **Cada Orb é independente.** O que um Orb faz (turno, texto em stream, aprovações, fila de mensagens, memória, uso de
    tokens) vive em um `BotSession`; o que as telas mostram dele vive em um `BotLive`. Dois Orbs trabalham ao mesmo tempo sem
    se tocar, e uma mudança num não redesenha a tela do outro.
-2. **Dois motores, um contrato.** O motor nativo (`AgentEngine`) e o do Claude Code (`ClaudeCodeEngine`) recebem uma
-   requisição de turno e devolvem um `AsyncStream<TurnEvent>`. Permissões, aprovações, memória e prompt passam pelas mesmas peças.
+2. **Um motor só.** Todo Orb, seja qual for o modelo, roda no `AgentEngine`: recebe uma requisição de turno e devolve um
+   `AsyncStream<TurnEvent>`. Prompt, ferramentas, permissões, aprovações, memória e contexto são do Orb. Para os modelos do Claude
+   Code o que muda é só o cliente de modelo (`ClaudeCodeClient`, em `Engine/ClaudePipe/`): o CLI `claude` entra apenas como cano até o
+   modelo, usando o login que a pessoa já fez nele.
 3. **O disco é a fonte da verdade e nada o bloqueia.** Estado, conversas e memória são arquivos legíveis; leitura e
    escrita ficam fora da thread principal; arquivos ilegíveis nunca são sobrescritos.
 
@@ -41,7 +43,7 @@ Tudo em `Sources/Orb/`.
 
 | Arquivo | Papel |
 |---|---|
-| `OrbApp.swift` | `Launcher` (`@main`: com `--tools-mcp` roda só o servidor MCP, sem janela), `OrbApp` (janela, Ajustes, barra de menus), `AppDelegate`, `AppCommands` (menu "Orbs"), `OrbSheet` (`--render-orbs`), `Snapshot` (`--snapshot`) |
+| `OrbApp.swift` | `Launcher` (`@main`: com `--pipe-tools` roda só o servidor que declara as ferramentas ao CLI, sem janela), `OrbApp` (janela, Ajustes, barra de menus), `AppDelegate`, `AppCommands` (menu "Orbs"), `OrbSheet` (`--render-orbs`), `Snapshot` (`--snapshot`) |
 | `AppIcon.swift` | o ícone do app (`--render-icon`): CoreGraphics puro, desenhado direto em cada tamanho na grade do macOS (ladrilho de 824 em 1024, sombra padrão; desde o macOS 26 o sistema põe qualquer outro formato num quadrado cinza), vidro perolado claro e o Orb índigo da marca o maior possível (690), com o `GelShader` (port de `art/orbgen/Body.swift`, por pixel na CPU), rosto sem óculos e uma variante simples até 64 px |
 | `AppModel.swift` | `@MainActor @Observable`: Orbs, rotinas, skills, conectores, provedores, modelo padrão, nível de contexto das conversas; criar/apagar Orb, `send`, `runClaudeCode`, `compactNow`, rotinas e fila, conexão de provedores, salvar |
 | `AppModel+Approvals / +Commands / +ContextUI / +MemoryUI / +RoutinesUI / +Schedule / +Steering / +Transcript` | o que cada área pede ao modelo: `decide` e banners; comandos, paleta e barra de menus; dados do medidor; esquecer/desfazer; modelos de rotina e listas; a ferramenta `schedule` (o Orb cria, lista, pausa e apaga as próprias rotinas); fila "enquanto trabalha"; "Tentar de novo"/"Continuar" |
@@ -79,9 +81,9 @@ Tudo em `Sources/Orb/`.
 | `TurnPrompt.swift`, `SystemPrompt.swift`, `WorkspaceSnapshot.swift`, `WorkspaceChanges.swift`, `FolderInstructions.swift` | o prompt: sistema estável + prefácio por mensagem (`<orb_context>`: hora, pasta, memória); instruções da pasta (`ORB.md`/`AGENTS.md`/`CLAUDE.md`) |
 | `PermissionPolicy.swift`, `ApprovalGate.swift`, `ApprovalBatch.swift`, `DangerousCommand.swift`, `ShellCommandLine.swift` | permissões: veja [PERMISSOES.md](PERMISSOES.md) |
 | `Steering.swift` | a fila de mensagens enviadas durante um turno (`SteeringQueue`) e o modo de cada uma (`SteeringDelivery`: `.steer`, entregue no próximo passo, ou `.afterTask`, que espera o fim; `drainSteering` só leva as `.steer`, sob o mesmo lock) |
-| `ClaudeCode.swift`, `ClaudeCodeEngine.swift`, `ClaudeCodePrompt.swift`, `ClaudeCodeProtocol.swift` | provedor Claude Code: achar o `claude`, login/status, um processo `claude -p` por turno, protocolo `stream-json` e `can_use_tool`, prompt anexado e catch-up |
+| `ClaudeCode.swift`, `ClaudeCodeProtocol.swift`, `ClaudePipe/` | provedor Claude Code: achar o `claude`, login/status e ambiente do CLI (`ClaudeCode.swift`); as linhas `stream-json` que o app escreve, o texto de erro de um `result` e os modelos do plano (`ClaudeCodeProtocol.swift`); `ClaudeCodeClient` (o CLI como cano até o modelo, sem ferramentas próprias) e `ClaudePipe*` (o servidor `--pipe-tools` que só declara as ferramentas do Orb, e a caixa de correio com os resultados que o motor do Orb deixa para ele) |
 | `MCPConnection.swift`, `MCPTransport.swift`, `MCPTool.swift` | conectores MCP: stdio (com o ambiente do Terminal da usuária, de `ShellEnvironment`, para achar `npx`/`uvx` do `.zshrc`) e HTTP (Streamable HTTP com recuo para SSE). `MCPManager` só registra os conectores; o servidor sobe na primeira chamada (`ensureStarted`, uma subida compartilhada) e um ceifador (acorda a cada 60 s) desliga o que ficou 10 min sem uso e sem chamada pendente. Duas chamadas seguidas sem nenhuma resposta (`MCPConnection.stuckAfter`; qualquer mensagem do servidor, até a resposta tardia de uma chamada que já estourou, zera a conta, e chamadas paralelas que estouram juntas contam como uma), ou um `tools/list` que estoura o prazo, fecham a conexão (o servidor está vivo mas travado; as outras chamadas pendentes ouvem que o conector foi reiniciado, não o timeout delas) e a próxima sobe um processo novo; o timeout manda `notifications/cancelled`. O prazo de uma chamada é 60 s, ou o `LocalConnector.callTimeout` quando o conector é local (Gmail: 200 s, mais que os dois scripts de 90 s). Um 404 de sessão HTTP (`MCPSessionExpired`) repete uma vez numa sessão nova só a chamada que recebeu o 404 (ou que chegou depois, sem ter sido enviada); as demais já em andamento no servidor falham com "pode ter sido executada" e não são repetidas, para não duplicar efeitos. `StdioTransport` escreve no stdin fora do actor (um servidor que não lê não impede o `close`), acha o fim da linha só nos bytes novos, lê uma resposta que veio depois de lixo sem quebra de linha e fecha a conexão se passar de 32 MB sem `\n` (`HTTPTransport` tem o mesmo teto por resposta e por evento SSE, com o erro "resposta grande demais"); `StdioServerRegistry` guarda os servidores, cada um líder de um grupo de processos próprio (`SpawnedProcess`), e os sinais vão ao grupo, para que o que fica no grupo (o node que o `npx`/`uvx` abriu e os filhos dele) não sobreviva; quem cria sessão própria (o Chromium do Playwright, por exemplo) sai do grupo e depende de o servidor fechá-lo ao receber o SIGTERM: `close` manda SIGTERM e, 3 s depois, SIGKILL, e `killAllNow` (no `willTerminate`) encerra todos ao fechar o app. O pedido de "Permitir mais" fica na entrada do conector (`asksMoreScope`) até `scopeGranted`, em vez de se perder quando o servidor reinicia. `MCPTool` (`Servidor__ferramenta`) guarda o id do conector e chama o gerente |
-| `LocalConnector.swift`, `Tools/CalendarConnector.swift`, `Tools/MailConnector.swift` | conectores que rodam dentro do app (Google Agenda e Lembretes por EventKit, Gmail pelo Mail.app com AppleScript), atrás do mesmo porteiro. `MCPServerConfig.local` os marca; `LocalTransport` responde o JSON-RPC em processo (`LocalConnectorServer.respond`), então catálogo, cartão, ceifador e permissões funcionam como em qualquer conector. Para o Claude Code o mesmo servidor sai de `Orb --local-connector <agenda\|lembretes\|gmail>` por stdio (`mcpConfig` troca o conector local por essa entrada). `LocalConnectorEnvironment` agrupa o que eles tocam (`CalendarBackend`, `MailBackend`): testes e capturas põem fakes e nenhuma permissão do macOS é pedida |
+| `LocalConnector.swift`, `Tools/CalendarConnector.swift`, `Tools/MailConnector.swift` | conectores que rodam dentro do app (Google Agenda e Lembretes por EventKit, Gmail pelo Mail.app com AppleScript), atrás do mesmo porteiro. `MCPServerConfig.local` os marca; `LocalTransport` responde o JSON-RPC em processo (`LocalConnectorServer.respond`), então catálogo, cartão, ceifador e permissões funcionam como em qualquer conector. `LocalConnectorEnvironment` agrupa o que eles tocam (`CalendarBackend`, `MailBackend`): testes e capturas põem fakes e nenhuma permissão do macOS é pedida |
 | `ConnectorGateway.swift` | o porteiro dos conectores: `connector_tools` (índice dos conectores do Orb na descrição, lista as ferramentas e os argumentos) e `connector_call` (roda uma). Ficam fora de `ToolBox.all`; `AgentEngine.resolved` troca cada `connector_call` pela chamada do `MCPTool` de verdade antes da política de permissão |
 
 ### Ferramentas (`Engine/Tools/`)
@@ -94,7 +96,7 @@ Tudo em `Sources/Orb/`.
 | Terminal e arquivos | `run_command` (`background: true`; saída acima de 20 KB é salva inteira em `saidas/<orb>/comando-….txt`), `job_output`, `job_list`, `job_stop`, `read_file` (texto, PDF, Word/RTF/ODT, Excel .xlsx, PowerPoint .pptx, imagens com OCR), `write_file`, `edit_file`, `list_directory`, `search_files` (Spotlight), `grep` (um arquivo informado em `path` vai até 200 MB, em streaming), `glob` (aceita padrão absoluto), `trash` (também com Controlar apps); o ambiente vem do shell `-lic` da usuária (5 s) e, se ele estoura, o perfil de login responde na hora e a nova tentativa roda em segundo plano (15 s), com espera que dobra de 30 s até 5 min | `ShellTool`, `BackgroundJobs`, `ProcessRunner`, `ShellEnvironment`, `FileTools`, `SearchTools`, `TextFile`, `DocumentReader`, `OfficeReader`, `ReadOnlyCommand` |
 | Navegar na web | `web_fetch` (páginas, PDF, JSON, imagens; `offset`/`find` para páginas longas; `save_to`), `web_search` (DuckDuckGo, Google, TinyFish), e com um motor instalado `browse_open/snapshot/read/screenshot/click/fill/select/press/scroll/back/tabs/show/close` | `WebTools`, `HTMLText`, `WebSearchTool`, `BrowseTools`, `Engine/Browser/` |
 | Controlar apps do Mac | `applescript`, `shortcuts_list/run`, `clipboard_read/write`, `screenshot` (janela com marcas numeradas e OCR), `apps_list`, `processes`, `app_quit`, `trash`, `browser_tab`, `ui_read`, `ui_act` | `MacTools`, `MacAppTools`, `BrowserTools`, `ScreenshotTool`, `WindowCapture`, `UIMarks`, `SyntheticInput`, `AccessibilityTools`/`Elements`/`Outline`/`Session`/`Events`/`Contracts`, `ScreenTakeover`, `AppleScriptSupport` |
-| Sempre | `open`, `notify`, `remember`, `recall`, `schedule` | `MacTools`, `MacAppTools`, `ScheduleTool`, `ScheduleMailbox` |
+| Sempre | `open`, `notify`, `remember`, `recall`, `schedule` | `MacTools`, `MacAppTools`, `ScheduleTool` |
 | Conectores | `connector_tools`, `connector_call` (fora de `ToolBox.all`, montadas por turno) | `ConnectorGateway`, `MCPTool` |
 
 **Apps em segundo plano (`ui_read`/`ui_act`, desenho em `docs/USO-DO-COMPUTADOR.md`).** Nada rouba o foco, move o cursor ou
@@ -161,11 +163,7 @@ relatório; logo depois de o Mac acordar, `runDueRoutines` espera 45 s pela rede
 chamada (`daily`, `weekly`, `every_minutes` de 15 a 720, `every_hours` de 1 a 24; nome, prompt de até 4.000 caracteres); quem
 executa é `AppModel.schedule(_:orb:)`, que só vê as rotinas do Orb que chamou, recusa o 21º, o nome repetido e a criação vinda
 de dentro de uma rotina, e responde em português ("Agendei “X”: a cada 30 minutos. Próxima execução: …"), que é também o que o
-chat mostra como resultado da ferramenta. No motor nativo a chamada chega por `ToolContext.schedule` (um fecho preso ao Orb); no
-Claude Code, o servidor de ferramentas é **outro processo** e não alcança o modelo, então ele deixa `<id>.json` na pasta
-`agendamentos/` do app e espera o `<id>.reply` (`ScheduleMailbox`: o app acorda com a pasta mudando, sem sondar, e responde com o
-mesmo código; 20 s de limite; o app começa a ouvir no primeiro turno do Claude Code e limpa a pasta ao começar). O servidor
-recebe a pasta e o Orb por `--schedule-mailbox <pasta> --orb <id>`. Uma execução que passa do próprio intervalo (a cada 15 min,
+chat mostra como resultado da ferramenta. A chamada chega por `ToolContext.schedule` (um fecho preso ao Orb), com qualquer modelo. Uma execução que passa do próprio intervalo (a cada 15 min,
 levando 20) conta a próxima a partir do fim dela (`finishRoutineRun`), então nada se acumula.
 
 **O navegador do Orb (`Engine/Browser/`).** Um protocolo, `BrowserDriver` (abrir, snapshot com refs, clicar, preencher, ler, captura,
@@ -179,14 +177,14 @@ wrapper dele; sem `--no-sandbox`, que o macOS não precisa). O Chrome leva `--ex
 
 **Instalação (`BrowserInstaller`).** Instala dentro de `navegador/` na pasta de dados (`BrowserInstallLayout`): `bin/agent-browser` e `bin/obscura` (+ `obscura-worker`), `chrome/chrome-<versão>/`, `cloak/{venv,cache}` e `instalados.json`. O agent-browser e o Obscura (build `stealth` do macOS) vêm da API de releases do GitHub (a versão "latest" resolvida na hora e gravada), com o SHA-256 do `digest` do arquivo conferido (ou o de um arquivo de somas ao lado); o `.tar.gz` do Obscura só pode conter `obscura` e `obscura-worker`. O Chrome é o `agent-browser install` rodado com um `HOME` da pasta de trabalho (ele não tem variável para a pasta de destino), e a pasta `chrome-<versão>` é movida para `navegador/chrome`. O CloakBrowser é um venv (`python3 -m venv`) com `pip install cloakbrowser==<versão testada>` (`BrowserInstaller.cloakPackageVersion`) e `python -m cloakbrowser install` (baixa o Chromium e confere a assinatura Ed25519 e o SHA-256 por conta própria; sem chave); o `python3` do sistema só é chamado se `xcode-select -p` disser que as ferramentas existem, porque sem elas ele abre um diálogo. Tudo roda fora da main, por `ProcessRunner` (que ganhou `onOutput` para ler "42/184 MB" como progresso) e por `URLSession` (download com progresso); nada com `sudo`. Cada peça é baixada e testada (`--version`) numa pasta `.instalando-<id>` e só então trocada pela antiga (`replaceItemAt` / troca de pasta: a pasta antiga do CloakBrowser fica de lado até o `import cloakbrowser` funcionar no lugar novo e `instalados.json` ser gravado, e volta se qualquer um dos dois falhar), então cancelar (`Task.cancel`, que mata o processo e a transferência) ou falhar não estraga o que havia. `uninstall` remove os arquivos do motor (e o agent-browser com o último); os perfis só saem com `removeProfiles`. `checkForUpdates` consulta o GitHub, o índice de versões do Chrome for Testing e o PyPI no máximo uma vez por dia (`atualizacoes.json`). `BrowserSetup` é o modelo de Ajustes → Navegador (`BrowserEngineRow`: estado, versões, o que cada botão pode); uma instalação por vez, porque todas dividem o agent-browser.
 
-Limpeza: ao sair (`willTerminate`) `BrowserHub.terminateAllNow` roda `agent-browser close` de cada sessão que o hub guarda e, depois, de **cada sessão `orb-*` que `session list` mostra** (as que o servidor de ferramentas de um turno do Claude Code abriu: cada turno tem um `BrowserHub` novo e vazio, e o processo em segundo plano sobrevive a ele), e espera (até 4 s); `close(botID:)`, `close(engine:)` (atualizar ou remover um motor em Ajustes) e `deleteData` também fecham por nome (`deleteData` espera o navegador sumir antes de apagar o perfil), e `browse_close` sempre manda fechar a sessão do Orb; `AppModel.update` fecha o navegador do Orb quando o motor muda ou "Navegar na web" é desligado; o agent-browser fecha sozinho um navegador parado há 30 minutos (`AGENT_BROWSER_IDLE_TIMEOUT_MS`).
+Limpeza: ao sair (`willTerminate`) `BrowserHub.terminateAllNow` roda `agent-browser close` de cada sessão que o hub guarda e, depois, de **cada sessão `orb-*` que `session list` mostra** (as que uma execução anterior do app deixou: o processo em segundo plano do navegador sobrevive ao app), e espera (até 4 s); `close(botID:)`, `close(engine:)` (atualizar ou remover um motor em Ajustes) e `deleteData` também fecham por nome (`deleteData` espera o navegador sumir antes de apagar o perfil), e `browse_close` sempre manda fechar a sessão do Orb; `AppModel.update` fecha o navegador do Orb quando o motor muda ou "Navegar na web" é desligado; o agent-browser fecha sozinho um navegador parado há 30 minutos (`AGENT_BROWSER_IDLE_TIMEOUT_MS`).
 `BrowserHub` guarda um `BrowserSession` por Orb (sessão `orb-<id>-<motor>`, perfil em `navegador/<orb>/<motor>` na pasta de dados, headless), serializa
 os comandos (`AsyncMutex`: ferramentas que só olham rodam juntas no turno) e lembra os refs do último snapshot, para dar nome ao clique no cartão e
 recusar senha. A janela (`browse_show`) fecha a sessão e a reabre no mesmo endereço com `--headed` e o mesmo perfil, e então **espera a pessoa**:
 `ToolContext.handoff` (que o motor define a cada chamada) abre um cartão de aprovação com `ApprovalRequest.isHandoff` ("Pronto" = `.once`, "Cancelar" = `.deny`)
 pelo mesmo `ApprovalGate` (`ApprovalGate.handoff`), então Parar, o selo "precisa de você", o aviso (categoria `orb.approval.handoff`) e o painel da barra de menus
 valem sem código novo; só `applyModeChange` o ignora (uma troca de modo não responde por ela). Trocar o motor de um Orb (`AppModel.setBrowserEngine`) fecha o
-navegador do motor que ele deixa (`BrowserHub.close(botID:leaving:)`, também quando a sessão foi aberta pelo servidor de ferramentas do Claude Code). A sessão e o `BrowserAccess` do turno
+navegador do motor que ele deixa (`BrowserHub.close(botID:leaving:)`, também quando a sessão foi aberta por uma execução anterior do app). A sessão e o `BrowserAccess` do turno
 chegam às ferramentas por `ToolContext.browser`; `AppModel` monta isso a cada turno com o motor do Orb (`Bot.browserEngine`, `Bot.searchProvider`) e acrescenta ao prompt a
 seção `BrowserPrompt` (ou a linha de "falta instalar"). A busca (`web_search`) abre a página de resultados numa aba própria do navegador (e a fecha), lê o resultado por
 script e cai no DuckDuckGo pelo HTTP simples quando o motor é `simple`; o TinyFish é uma API (`SearchKeys` guarda a chave no Keychain) com queda para o DuckDuckGo.
@@ -236,7 +234,7 @@ linha, cartões) é em português (`AgentTool.summary`).
 ### Memória (`Memory/`)
 
 `MemoryBank` (um actor por Orb) + `MemoryIndex` (SQLite/FTS5) + `MemoryPage`/`MemoryText`/`MemorySanitizer` +
-`SessionSummary` + `MemoryIntent` + `KeptMemories` (memórias guardadas e o perfil de cada uma) + `OrbToolsMCPServer`.
+`SessionSummary` + `MemoryIntent` + `KeptMemories` (memórias guardadas e o perfil de cada uma).
 Detalhes em [MEMORIA.md](MEMORIA.md). As skills que o Orb propõe vivem aí também (`SkillProposal`, `MemoryBank+Skills`,
 `_propostas/`, `_skills.json`); a revisão que as propõe é `Engine/SkillReview.swift` + `AppModel+SkillReview.swift`, e o contador
 (`stepsSinceSkill`, de passos do modelo), o pedido guardado (`reviewBase`, com `reviewFrom`) e a tarefa (`skillReview`) ficam no `BotSession`.
@@ -283,8 +281,8 @@ O avatar e seu sistema de animação: `OrbModel` (config, catálogo, imagens), `
 ## O caminho de um turno
 
 ```
-ComposerView ── AppModel.submit ─┬─ Orb livre ─► AppModel.send ─┬─ Claude Code ─► runClaudeCode ──► ClaudeCodeEngine.run
-                                 └─ Orb trabalhando ─► fila     └─ nativo ───────► AgentEngine.run
+ComposerView ── AppModel.submit ─┬─ Orb livre ─► AppModel.send ───► AgentEngine.run
+                                 └─ Orb trabalhando ─► fila              (qualquer modelo; o cliente varia)
                                     (ComposerLane / SteeringQueue)                          │
                                                                        AsyncStream<TurnEvent>│
                                                                                              ▼
@@ -357,11 +355,7 @@ uso/aaaa-mm.json                 histórico de uso: uma linha por hora × Orb ×
 Fora dela: o **Keychain** (serviço `app.orb.mac`; uma conta por provedor com chave, `chatgpt` com o JSON do login e
 `mcp.<id do conector>.<NOME>` para segredos de conectores e `mcp.<id>.oauth` para o login de um conector), as **preferências** (`UserDefaults`: `notifyWhenDone`,
 `quickAskGlobalShortcut`, `keychainAccountsFromOpenBot`, aba de Ajustes e do painel de cada Orb, modelos recentes…) e a **pasta de cada Orb**
-(`~/Orbs/<Nome>/`, com `Rotinas/<nome>/…md`), que o app não apaga ao apagar o Orb. Há ainda um arquivo temporário por turno do
-Claude Code, `$TMPDIR/orb-mcp-p<pid>-<uuid>.json` (0600), com a configuração dos conectores já com os segredos: o fim do turno o apaga, e
-na abertura o app apaga os que sobraram de uma saída no meio do turno (`ClaudeCodeEngine.removeStaleMCPConfigs`): os que levam o
-`pid` de um processo que não existe mais, e os de versões antigas (sem `pid`) parados há mais de 2 minutos. O `$TMPDIR` é o mesmo
-do app real, então os modos de desenvolvedor (`--snapshot`…) não fazem essa limpeza.
+(`~/Orbs/<Nome>/`, com `Rotinas/<nome>/…md`), que o app não apaga ao apagar o Orb.
 
 ### Redefinir o Orb
 
@@ -485,7 +479,7 @@ modelo de provedor com formato desconhecido sai da lista. A gravação increment
 | O que | Onde roda |
 |---|---|
 | `AppModel`, `BotSession`, `BotLive`, `LiveText`, `OrbTranscript`, `ComposerLane`, `ConnectorSecrets`, as telas | `@MainActor` |
-| `AgentEngine`, `ClaudeCodeEngine`, `ApprovalGate`, `MCPManager`/`MCPConnection`/transportes, `ChatGPTAuth`, `MCPAuth`, `ClaudeCode`, `WorkspaceSnapshots`, `BackgroundJobs`, `ShellEnvironment`, `SkillCatalog` | `actor` |
+| `AgentEngine`, `ApprovalGate`, `MCPManager`/`MCPConnection`/transportes, `ChatGPTAuth`, `MCPAuth`, `ClaudeCode`, `WorkspaceSnapshots`, `BackgroundJobs`, `ShellEnvironment`, `SkillCatalog` | `actor` |
 | `MemoryBank` | um `actor` por Orb: todas as escritas daquele Orb em fila; `MemoryLibrary` (sem estado mutável fora do lock) guarda os bancos |
 | Disco, Keychain, SQLite, decodificação de imagens, leitura de pasta e git | fila do `Store`, tarefas desprendidas (`Task.detached`), `DispatchQueue` próprias, `runDetached` (cancelável) para `grep`/`glob`/documentos, `Blocking.run` para chamadas bloqueantes do TCC |
 
@@ -552,7 +546,7 @@ São mais de 2.000 testes em `Tests/OrbAppTests`, em Swift Testing (`@Test`, `@S
   `OrbAXFixture` (AppKit, nunca se ativa, registra em JSON no stdout o que recebeu) e confere que o app da frente e o cursor não
   mudam; precisa da Acessibilidade para quem roda os testes (o Terminal do Mac, não um terminal sem ela). `ORB_AX_TAKEOVER=1` liga
   os que assumem a tela de verdade, `ORB_AX_SMOKE_SYSTEM=1` uma leitura do Finder, e a captura exige Gravação de Tela. Não mexa no
-  mouse enquanto rodam. `MCPProcessTests` sobe o próprio binário como `--tools-mcp` e confere EOF, `SIGTERM` e cancelamento.
+  mouse enquanto rodam.
 - **Contratos de fio**: `ProviderWireGoldenTests` fixa a requisição e os eventos de cada formato.
 
 ### Modelo falso para uso manual
@@ -575,7 +569,7 @@ open -n build/Orb.app --env ORB_DATA_DIR=/tmp/orb-teste --env ORB_SEND="Como est
 
 | Argumento | Efeito |
 |---|---|
-| `--tools-mcp <memória> [--mac] [--files] [--folder <pasta>] [--accessibility\|--no-accessibility] [--schedule-mailbox <pasta> --orb <id>] [--web \| --browser <motor>] [--search <provedor>] [--browser-profiles <pasta>]` | roda só o servidor MCP de ferramentas do Orb para o Claude Code (`--memory-mcp` ainda vale); sem janela |
+| `--pipe-tools <declarações.json> --pipe-mailbox <pasta>` (montado pelo `ClaudeCodeClient`) | roda só o servidor MCP que declara as ferramentas do Orb ao CLI do Claude Code (que é apenas o cano até o modelo); os resultados vêm da caixa de correio que o motor do Orb preenche; sem janela |
 | `--snapshot <modo> <arquivo.png>` | desenha uma tela fora da vista e sai (abaixo) |
 | `--render-orbs <arquivo.png>` | folha de Orbs × atividades (`docs/orbs-activities.png`) |
 | `--render-icon <arquivo.png> [pixels]` | o ícone do app, desenhado no tamanho pedido (padrão 1024; `scripts/bundle.sh` chama um por tamanho do iconset) |
@@ -615,8 +609,8 @@ Modos (qualquer outro nome mostra o chat do primeiro Orb):
 | Área | Modos |
 |---|---|
 | Janela e painéis | `app`, `sidebar`, `sidebar-profile` (com o perfil de exemplo), `inspector` (aba Geral), `inspector-memory`, `inspector-folder`, `inspector-routines`, `memory-sheet`, `new-orb`, `new-orb-kept` (com memórias guardadas, uma escolhida), `new-orb-import` (o painel de importação vazio), `new-orb-import-preview` (a prévia de um exemplo, com um item suspeito desmarcado; use `ORB_SNAPSHOT_HEIGHT=1300` para vê-la inteira), `new-orb-imported` (de volta ao formulário, com a importação confirmada), `welcome` (sem modelo), `welcome-checking` (conexões ainda não verificadas), `welcome-ready`, `welcome-kept` (com duas memórias guardadas), `welcome-returning` (lista esvaziada), `welcome-narrow` (a pronta; use `ORB_SNAPSHOT_WIDTH=1000 ORB_SNAPSHOT_HEIGHT=620`) — todas com `ORB_DATA_DIR` numa pasta com `{"bots":[]}`, senão o modo de desenvolvedor cria o Atlas —, `editor`, `editor-<categoria>` (o editor numa categoria, com um visual que tem cabelo e chapéu), `delete-orb`, `palette`, `shortcuts`, `menubar-icons` |
-| Conversa | `chat-greeting`, `chat-greeting-returning`, `chat-greeting-typed`, `chat-working` (uma mensagem direcionada, uma para depois da tarefa e uma entregue no meio, com a marca), `chat-working-claude` (o mesmo no Claude Code), `chat-working-wait`, `chat-working-retry`, `chat-typed`, `chat-attachments`, `chat-attachments-queued`, `chat-slash`, `popover-permissions`, `popover-model`, `popover-skills`, `approvals`, `transcript`, `transcript-approvals`, `transcript-notices`, `transcript-failed`, `transcript-retry`, `transcript-find` (a barra ⌘F aberta sobre o começo da conversa), `transcript-edit` (a primeira mensagem de volta no campo, em edição), `transcript-attachments` (uma, duas, cinco e doze imagens, arquivos longos, ausente e antigo), `transcript-outputs` (arquivo novo, alterado e captura sob a linha da ferramenta) |
-| Contexto | `context-meter`, `context-nudge`, `context-popover`, `context-popover-result`, `context-popover-short`, `context-popover-claude`, `settings-context` |
+| Conversa | `chat-greeting`, `chat-greeting-returning`, `chat-greeting-typed`, `chat-working` (uma mensagem direcionada, uma para depois da tarefa e uma entregue no meio, com a marca), `chat-working-wait`, `chat-working-retry`, `chat-typed`, `chat-attachments`, `chat-attachments-queued`, `chat-slash`, `popover-permissions`, `popover-model`, `popover-skills`, `approvals`, `transcript`, `transcript-approvals`, `transcript-notices`, `transcript-failed`, `transcript-retry`, `transcript-find` (a barra ⌘F aberta sobre o começo da conversa), `transcript-edit` (a primeira mensagem de volta no campo, em edição), `transcript-attachments` (uma, duas, cinco e doze imagens, arquivos longos, ausente e antigo), `transcript-outputs` (arquivo novo, alterado e captura sob a linha da ferramenta) |
+| Contexto | `context-meter`, `context-nudge`, `context-popover`, `context-popover-result`, `context-popover-short`, `settings-context` |
 | Ajustes | `settings-general`, `settings-profile` (Geral com um perfil de exemplo e foto desenhada na hora), `settings-reset` (a folha "Redefinir o Orb?"), `settings-models`, `settings-usage` (um mês de uso de exemplo escrito na pasta de dados; `-usagePeriod today\|week\|month30\|thisMonth` e `-usageChartBy model`, antes de `--snapshot`, escolhem outra vista sem salvar nada), `settings-usage-empty` (sem exemplo: mostra o que a pasta tiver), `settings-perms`, `first-run-banner`, `models` |
 | Barra de menus | `quickask`, `quickask-approvals`, `quickask-reply` |
 | Rotinas e conversas | `routines`, `routine-editor`, `routine-editor-new`, `routine-run`, `routine-run-failed`, `routine-conversation`, `conversations` |
@@ -641,19 +635,17 @@ A arte (camadas dos Orbs) tem o seu próprio gerador, descrito em [art/README.md
 Duplicações conhecidas que ficaram para depois:
 
 - **Fluxo de aprovação.** O trecho que abre o `ApprovalGate`, emite `.approval` e `.status`, espera e resolve a resposta
-  (`.deny`/`.review`/`.task`/`.always`/`.once`) existe três vezes (`AgentEngine`, duas delas, e `ClaudeCodeEngine`), e a frase
+  (`.deny`/`.review`/`.task`/`.always`/`.once`) existe duas vezes (`AgentEngine`), e a frase
   "Esperando sua resposta" é repetida em vários arquivos, com `WorkLine` comparando o texto. A ideia é uma função só em
   `ApprovalGate` e uma constante para a frase. Não foi feito ainda.
-- **Servidor MCP stdio.** `LocalConnectorServer` e `OrbToolsMCPServer` repetem à mão as versões de protocolo, as respostas de
-  `initialize`/`ping`/`tools/list`, os erros `-32601`/`-32602`, o envelope JSON-RPC e o laço de stdin (e `MCPConnection` repete a
-  versão preferida). A ideia é um `MCPStdioServer` comum. Não foi feito ainda.
 
 ## Como estender
 
 - **Nova ferramenta.** Um `struct` que implementa `AgentTool` (`spec`, `kind`, `capability`, `risk`, `summary`, `run`; `danger`
   se alguma chamada é destrutiva), na lista da família em `ToolBox` (`fileTools`, `shellTools`…). Decida a **família de
-  permissão** em `PermissionPolicy.family(ofTool:kind:)` (sem isso ela cai pelo `kind`) e o `legacyRule` se precisar. Se o
-  Claude Code deve ter a ferramenta, ela entra em `ToolBox.macTools`, `memoryTools` ou `scheduleTools` (o que `OrbToolsMCPServer` serve); uma que muda o estado do app precisa de um jeito de chegar até ele (veja `schedule`). Texto
+  permissão** em `PermissionPolicy.family(ofTool:kind:)` (sem isso ela cai pelo `kind`) e o `legacyRule` se precisar. Uma
+  que muda o estado do app precisa de um jeito de chegar até ele (veja `schedule`: um fecho em `ToolContext`). Com os modelos do Claude Code a ferramenta chega ao CLI
+  pelo `--pipe-tools` sem trabalho extra: ele declara tudo o que o motor oferece naquele turno. Texto
   da ferramenta para o modelo em inglês, curto (cada palavra é cobrada em toda requisição); título e detalhe para o usuário em português.
 - **Novo provedor.** Um `case` em `ProviderKind` com `label`, `summary`, `defaultBaseURL`, `keyPage`, `shortName`, `tagline` e
   `group`; a lista de modelos em `ModelCatalog.fetch`; o formato de cada modelo decide o cliente (`ProviderAccount.client`).

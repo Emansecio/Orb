@@ -668,41 +668,17 @@ struct AccessibilityReviewTests {
         #expect(safari.assignedValue("AXFrontmost")?.bool == true)
     }
 
-    @Test func aRunHoldsToTheCardsVerdictNotToANewJudgement() async throws {
+    @Test func aRunHoldsToTheApprovalsVerdictNotToANewJudgement() async throws {
         let delete = fakeButton("Excluir")
         let bench = Bench(windows: [fake("AXWindow", title: "A", [delete])])
         try await bench.read()
         let call: [String: JSONValue] = ["action": string("press"), "id": string("w1.1")]
         #expect(bench.actor().danger(.object(call)) != nil, "judged now, from this store, the call is dangerous")
-        // The card was judged from other readings (another process's, or before this one) and said it was harmless.
+        // The card was judged from other readings (before this one) and said it was harmless.
         var context = bench.context
         context.judgedDanger = false
         let message = await bench.failure { try await bench.actor().run(.object(call), context: context) }
         #expect(message.hasPrefix("Não fiz:") && delete.performed.isEmpty)
-        // The same verdict reaching the tools server inside the call.
-        var marked = call
-        marked[UIActTool.cardKey] = string(UIActTool.cardMark(dangerous: false))
-        #expect(await bench.failure { try await bench.act(marked) }.hasPrefix("Não fiz:"))
-        marked[UIActTool.cardKey] = string(UIActTool.cardMark(dangerous: true))
-        _ = try await bench.act(marked)
-        #expect(delete.performed == ["AXPress"])
-    }
-
-    @Test func theToolsServerTakesADangerousVerdictOnlyWithTheAppsToken() {
-        let none = ToolContext(workingDirectory: FileManager.default.temporaryDirectory)
-        func judged(_ mark: String?, _ context: ToolContext = none) -> Bool? {
-            UIActTool.judged(.object(mark.map { [UIActTool.cardKey: .string($0)] } ?? [:]), context: context, token: "tok")
-        }
-        #expect(judged(nil) == nil)
-        #expect(judged("tok:dangerous") == true)
-        #expect(judged("forjado:dangerous") == nil, "a verdict the model wrote itself is not taken")
-        #expect(judged("qualquer:safe") == false, "a harmless verdict only makes the run stricter")
-        var native = none
-        native.judgedDanger = true
-        #expect(judged("x:safe", native) == true, "the native engine's verdict comes first")
-        let folder = FileManager.default.temporaryDirectory
-        #expect(OrbToolsMCPServer.config(directory: folder, mac: true).environment[UIActTool.cardTokenVariable] == UIActTool.cardToken)
-        #expect(OrbToolsMCPServer.config(directory: folder, mac: false).environment[UIActTool.cardTokenVariable] == nil)
     }
 
     @Test func aPointIsNeverPressedInAnotherWindowOfTheApp() async throws {

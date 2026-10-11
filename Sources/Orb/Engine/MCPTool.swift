@@ -412,16 +412,6 @@ actor MCPManager {
         publish()
     }
 
-    /// The login of a connector ended where the manager did not see it (a Claude Code turn renewing the token): the card says so.
-    func loginEnded(_ id: UUID, reason: MCPAuthRequired.Reason) async {
-        guard let entry = entries[id], entry.config.isEnabled else { return }
-        let required = MCPAuthRequired(reason: reason, challenge: MCPChallenge())
-        let status = status(for: required, of: id, previously: entry.status)
-        guard status != entry.status else { return }
-        await stopServer(id, becoming: status)
-        publish()
-    }
-
     /// The person signed out: the server stops and the card asks for a login again.
     func signedOut(_ id: UUID) async {
         guard entries[id] != nil else { return }

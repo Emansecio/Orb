@@ -147,25 +147,6 @@ struct OrbScopeModelTests {
         #expect(model.connectors[0].orbIDs == [model.bots[0].id])
     }
 
-    @Test @MainActor func claudeCodeGetsOnlyTheOrbsConnectors() {
-        let model = model()
-        let (atlas, lia) = (model.bots[0], model.bots[1])
-        model.connectors = [MCPServerConfig(name: "Para todos", command: "x"),
-                            MCPServerConfig(name: "Só Atlas", command: "x", orbIDs: [atlas.id]),
-                            MCPServerConfig(name: "Desligado", command: "x", isEnabled: false)]
-        model.bots[0].capabilities.insert(.connectors)
-        model.bots[1].capabilities.insert(.connectors)
-        #expect(model.connectorServers(for: model.bots[0]).map(\.name) == ["Para todos", "Só Atlas"])
-        #expect(model.connectorServers(for: model.bots[1]).map(\.name) == ["Para todos"])
-        // What `--mcp-config` carries for Lia has no trace of Atlas's connector.
-        let json = ClaudeCodeTurn.mcpConfig(model.connectorServers(for: model.bots[1]))?.jsonString ?? ""
-        #expect(json.contains("para-todos") && !json.contains("so-atlas") && !json.contains("desligado"))
-        // With the Orb's switch off it gets none.
-        model.bots[1].capabilities.remove(.connectors)
-        #expect(model.connectorServers(for: model.bots[1]).isEmpty)
-        #expect(lia.id == model.bots[1].id && atlas.id == model.bots[0].id)
-    }
-
     @Test @MainActor func aNewConnectorNeverDefaultsToADeletedOrb() {
         let model = model()
         let (atlas, lia) = (model.bots[0].id, model.bots[1].id)
@@ -257,28 +238,6 @@ struct ConnectorToolFilteringTests {
         model.connectors = [good, broken]
         #expect(await model.connectAndWait(good.id) == .ready(toolCount: 4))
         guard case .failed? = await model.connectAndWait(broken.id) else { Issue.record("expected failure"); return }
-    }
-
-    /// The CLI starts its own connections, so a connector with no catalog (it never ran, or failed) must come out with no
-    /// known tool, which makes every tool of it ask, rather than as "nothing destructive".
-    @Test @MainActor func connectorsWithoutACatalogAreUnverifiedForClaudeCode() async throws {
-        let root = FileManager.default.temporaryDirectory.appending(path: "OrbScope-\(UUID().uuidString)")
-        defer { removeTestFolder(root) }
-        let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)
-        let good = try fakeServer(name: "Bom", count: 2)
-        let broken = MCPServerConfig(name: "Calendário", command: "orb-no-such-command-xyz")
-        let never = try fakeServer(name: "Lento", count: 1)
-        model.connectors = [good, broken, never]
-        let names = ClaudeCodeTurn.mcpNames([good, broken, never])
-        #expect(await model.connectAndWait(good.id) == .ready(toolCount: 2))
-        guard case .failed? = await model.connectAndWait(broken.id) else { Issue.record("expected failure"); return }
-        let found = await model.connectorAnnotations(for: [good.id, broken.id, never.id], cliNames: names)
-        #expect(found.prefixes == ["bom__", "calend_rio__", "lento__"])
-        #expect(found.known == ["bom__t0", "bom__t1"])
-        #expect(found.destructive.isEmpty)
-        #expect(await model.connectorAnnotations(for: [], cliNames: names).prefixes.isEmpty)
-        // Reading the catalogs started nothing.
-        #expect(await model.mcp.isRunning(never.id) == false)
     }
 
     @Test @MainActor func startingOneConnectorLeavesTheOthersOff() async throws {

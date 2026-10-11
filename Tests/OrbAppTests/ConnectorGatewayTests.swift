@@ -482,27 +482,6 @@ struct ConnectorTurnTests {
         #expect(await fixture.manager.status() == [github.id: .idle(toolCount: 2)])
     }
 
-    @Test func claudeCodeReadsTheCatalogAndStartsNothing() async throws {
-        let root = FileManager.default.temporaryDirectory.appending(path: "gateway-cc-\(UUID().uuidString)")
-        defer { removeTestFolder(root) }
-        let store = Store(directory: root)
-        let github = MCPServerConfig(name: "GitHub", command: "orb-no-such-command-xyz"), new = MCPServerConfig(name: "Novo", command: "x")
-        store.saveConnectorCatalog(CatalogFixture.catalog([
-            CatalogFixture.tool("wipe", annotations: MCPToolAnnotations(destructive: true)),
-            CatalogFixture.tool("read", annotations: MCPToolAnnotations(readOnly: true)),
-        ]), for: github.id)
-        store.flush()
-        let model = AppModel(store: store, runsBackgroundWork: false)
-        model.connectors = [github, new]
-        await waitUntil("the connectors to be registered") { await model.mcp.status().count == 2 }
-        let names = ClaudeCodeTurn.mcpNames([github, new])
-        let found = await model.connectorAnnotations(for: [github.id, new.id], cliNames: names)
-        #expect(found.destructive == ["github__wipe": "o conector marcou esta ferramenta como destrutiva"])
-        // A connector that never ran has no known tool, so every tool of it asks, as before.
-        #expect(found.prefixes == ["github__", "novo__"])
-        #expect(found.known == ["github__wipe", "github__read"])
-        #expect(await model.mcp.status() == [github.id: .idle(toolCount: 2), new.id: .idle(toolCount: nil)])
-    }
 }
 
 // MARK: - Servers that start when used and stop when idle
@@ -657,47 +636,5 @@ struct MCPLazyTests {
         #expect(await manager.catalog(config.id) == nil)
         #expect(await manager.status() == [config.id: .idle(toolCount: nil)])
         await manager.sync([])
-    }
-}
-
-// MARK: - Old catalogs are renewed in the background
-
-@Suite(.enabled(if: hasPython))
-struct CatalogRenewalTests {
-    @Test @MainActor func aStaleCatalogIsListedAgainWithoutHoldingTheTurn() async throws {
-        let root = FileManager.default.temporaryDirectory.appending(path: "renewal-\(UUID().uuidString)")
-        defer { removeTestFolder(root) }
-        let store = Store(directory: root), config = try gatewayConfig()
-        var old = CatalogFixture.catalog([CatalogFixture.tool("only")])
-        old.updatedAt = .now.addingTimeInterval(-3 * 24 * 3600)
-        store.saveConnectorCatalog(old, for: config.id)
-        store.flush()
-        let model = AppModel(store: store, runsBackgroundWork: false)
-        model.connectors = [config]
-        await waitUntil("the connector to be registered") { await model.mcp.status().count == 1 }
-        // Off in tests unless asked for.
-        model.renewOldCatalogs(of: [config.id])
-        try await Task.sleep(for: .milliseconds(200))
-        #expect(await model.mcp.catalog(config.id)?.tools.count == 1)
-        model.renewsCatalogs = true
-        model.renewOldCatalogs(of: [config.id])
-        await waitUntil("the catalog to be renewed") { await model.mcp.catalog(config.id)?.tools.count == 6 }
-        await model.mcp.sync([])
-    }
-
-    @Test @MainActor func aFreshCatalogIsLeftAlone() async throws {
-        let root = FileManager.default.temporaryDirectory.appending(path: "renewal-\(UUID().uuidString)")
-        defer { removeTestFolder(root) }
-        let store = Store(directory: root), config = try gatewayConfig()
-        store.saveConnectorCatalog(CatalogFixture.catalog([CatalogFixture.tool("only")]), for: config.id)
-        store.flush()
-        let model = AppModel(store: store, runsBackgroundWork: false)
-        model.renewsCatalogs = true
-        model.connectors = [config]
-        await waitUntil("the connector to be registered") { await model.mcp.status().count == 1 }
-        model.renewOldCatalogs(of: [config.id])
-        try await Task.sleep(for: .milliseconds(300))
-        #expect(await model.mcp.catalog(config.id)?.tools.count == 1)
-        #expect(await !model.mcp.isRunning(config.id))
     }
 }

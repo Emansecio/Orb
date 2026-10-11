@@ -674,7 +674,7 @@ final class LiveTakeoverPoster: TakeoverEventPoster, @unchecked Sendable {
 // MARK: - The panel that tells the person
 
 /// The Orb tells the app it has the screen by a distributed notification, so the panel appears in the app whichever
-/// process runs the takeover (the app itself for the native engine, the Claude Code tools server otherwise).
+/// process runs the takeover.
 struct TakeoverBroadcast: TakeoverIndicator {
     static var beganName: Notification.Name { Notification.Name("\(Bundle.main.bundleIdentifier ?? "Orb").takeover.began") }
     static var endedName: Notification.Name { Notification.Name("\(Bundle.main.bundleIdentifier ?? "Orb").takeover.ended") }

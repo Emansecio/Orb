@@ -112,18 +112,14 @@ struct ComposerSupportTests {
     }
 
     @Test func theQueueSaysItWaitsForYourAnswerWhenARequestIsOpen() {
-        #expect(QueuedMessages.whenText(needsYou: true, isClaudeCode: false, delivery: .steer) == "Entra depois que você responder ao pedido")
-        #expect(QueuedMessages.whenText(needsYou: true, isClaudeCode: true, delivery: .afterTask).contains("responder ao pedido"))
+        #expect(QueuedMessages.whenText(needsYou: true, delivery: .steer) == "Entra depois que você responder ao pedido")
+        #expect(QueuedMessages.whenText(needsYou: true, delivery: .afterTask) == "Depois da tarefa")
     }
 
     @Test func eachWaitingMessageSaysWhereItIsGoingWithoutSayingQueuedWhenItEntersTheTask() {
-        #expect(QueuedMessages.whenText(needsYou: false, isClaudeCode: false, delivery: .steer) == "Entra no próximo passo")
-        #expect(QueuedMessages.whenText(needsYou: false, isClaudeCode: false, delivery: .afterTask) == "Depois da tarefa")
-        // Claude Code: both modes are the queue, and the line is honest about it.
-        for delivery in [SteeringDelivery.steer, .afterTask] {
-            #expect(QueuedMessages.whenText(needsYou: false, isClaudeCode: true, delivery: delivery) == "Depois da resposta (o Claude Code não recebe no meio)")
-        }
-        #expect(!QueuedMessages.whenText(needsYou: false, isClaudeCode: false, delivery: .steer).contains("fila"))
+        #expect(QueuedMessages.whenText(needsYou: false, delivery: .steer) == "Entra no próximo passo")
+        #expect(QueuedMessages.whenText(needsYou: false, delivery: .afterTask) == "Depois da tarefa")
+        #expect(!QueuedMessages.whenText(needsYou: false, delivery: .steer).contains("fila"))
         #expect(QueuedMessages.switchTitle(from: .steer) == "Pôr na fila" && QueuedMessages.switchTitle(from: .afterTask) == "Direcionar")
         #expect(QueuedMessages.switchHelp(from: .steer) == Tip.queueAfterTask && QueuedMessages.switchHelp(from: .afterTask) == Tip.steerNow)
     }

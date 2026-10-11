@@ -15,7 +15,7 @@ final class WizardRunner {
     static let usageName = "Criação de Orb"
     static let unavailable = "Conecte um modelo em Ajustes → Modelos para conversar."
 
-    /// The stand-in Orb's id: the bridge's `orb:` and the registry's key.
+    /// The stand-in Orb's id: its usage and its temporary folder are named for it.
     let id = UUID()
     /// What the chat shows: only the person's messages and the assistant's words (`.user` / `.bot`).
     private(set) var messages: [TranscriptItem]
@@ -146,12 +146,11 @@ final class WizardRunner {
         isThinking = false
         turn?.cancel()
         turn = nil
-        WizardRegistry.remove(id)
         removeFolder()
     }
 
     private nonisolated func removeFolder() {
-        // The stand-in's working folder: one temporary folder with the tools server's empty memory.
+        // The stand-in's working folder: one temporary folder.
         let url = FileManager.default.temporaryDirectory.appending(path: Self.folderName(for: id), directoryHint: .isDirectory)
         try? FileManager.default.removeItem(at: url)
     }
@@ -160,8 +159,7 @@ final class WizardRunner {
 
     // MARK: The tool
 
-    /// One `orb_draft` call: the draft takes it, and the model reads the draft back. Called from the native engine's tool and
-    /// from the bridge's mailbox (`AppModel.wizardDraft`).
+    /// One `orb_draft` call: the draft takes it, and the model reads the draft back. Called from the engine's tool.
     func applyDraft(_ arguments: JSONValue) -> String {
         guard !isFinished else { return "The assistant is closed." }
         let report = draft.apply(arguments)
@@ -200,7 +198,6 @@ final class WizardRunner {
         isThinking = true
         liveText = ""
         historyMark = history.count
-        WizardRegistry.add(self)
         let usedModel = ref.text
         // Every provider, Claude Code's included, goes through the native engine (`account.client` picks the transport).
         turn = Task { [weak self] in await self?.runNative(prompt: prompt, ref: ref, account: account, usedModel: usedModel) }
@@ -243,14 +240,12 @@ final class WizardRunner {
                 record(UsageTotals(used), model: usedModel)
             case .usage(let total):
                 if !tracksHistory { record(UsageTotals(total), model: usedModel) }
-            case .reportedCost(let cost):
-                record(UsageTotals(reportedCost: cost), model: usedModel)
             case .failed(let message):
                 failed = true
                 failure = message
             case .notice(let text):
                 if text == AgentEngine.pausedNotice(after: Self.maxSteps) { reachedStepLimit = true }
-            case .session, .status, .approval, .toolFinished, .pendingUsage, .taskPaused, .steered, .compacted:
+            case .status, .approval, .toolFinished, .pendingUsage, .taskPaused, .steered, .compacted:
                 break
             }
         }
@@ -290,27 +285,5 @@ final class WizardRunner {
     private func record(_ totals: UsageTotals, model usedModel: String) {
         guard let model, !model.isResetting, !totals.isEmpty else { return }
         model.usageLog.record(totals, orb: Self.usageOrbID, name: Self.usageName, model: usedModel, source: .creation)
-    }
-}
-
-/// The assistants that are open, by their stand-in Orb's id: how a call that arrives through Claude Code's mailbox finds its draft.
-@MainActor
-enum WizardRegistry {
-    private final class Box {
-        weak var runner: WizardRunner?
-        init(_ runner: WizardRunner) { self.runner = runner }
-    }
-    private static var boxes: [UUID: Box] = [:]
-
-    static func add(_ runner: WizardRunner) { boxes[runner.id] = Box(runner) }
-    static func remove(_ id: UUID) { boxes[id] = nil }
-    static func runner(_ id: UUID) -> WizardRunner? { boxes[id]?.runner }
-
-    /// A call of the tools server for the assistant `orb`: only `orb_draft`, and only while the assistant is open.
-    static func draft(orb: UUID, tool: String, arguments: JSONValue) throws -> String {
-        guard tool == OrbDraftTool.name, let runner = runner(orb), !runner.isFinished else {
-            throw ToolError("O assistente de criação não está disponível agora.")
-        }
-        return runner.applyDraft(arguments)
     }
 }

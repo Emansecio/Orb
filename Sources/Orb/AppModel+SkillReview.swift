@@ -18,7 +18,7 @@ struct SkillDraft: Identifiable {
 extension AppModel {
     // MARK: What the Orb's tools can load
 
-    /// Gives the Orb's tools (`recall "/name"`), in this process or in Claude Code's, the skills this Orb may use.
+    /// Gives the Orb's tools (`recall "/name"`) the skills this Orb may use.
     func publishSkills(for botID: UUID) {
         let digests = skills(for: botID).map(SkillDigest.init)
         let bank = memory.bank(for: botID)
@@ -33,7 +33,7 @@ extension AppModel {
     /// Starts the review of the conversation when the turn that just ended took enough steps with tools: in the
     /// background, without a word in the chat, with the system prompt, tools and history of the turn (so the provider's
     /// cache is still warm).
-    /// Not in an Orb that only reads, not after Claude Code's turns (it keeps its own session) and not while anything else
+    /// Not in an Orb that only reads and not while anything else
     /// has the Orb; a message from the user stops it (`send`).
     func reviewSkillsIfDue(_ session: BotSession) {
         guard proposesSkills, session.stepsSinceSkill >= SkillReview.threshold, session.skillReview == nil,
@@ -66,7 +66,6 @@ extension AppModel {
                 guard let usedModel else { continue }
                 switch event {
                 case .requestUsage(let used): recordUsage(UsageTotals(used), botID: botID, model: usedModel, source: .auxiliary)
-                case .reportedCost(let cost): recordUsage(UsageTotals(reportedCost: cost), botID: botID, model: usedModel, source: .auxiliary)
                 default: break
                 }
             }

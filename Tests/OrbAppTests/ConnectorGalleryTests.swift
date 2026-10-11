@@ -240,11 +240,5 @@ struct LocalConnectorInstallTests {
         #expect(await model.connectAndWait(config.id) == .ready(toolCount: 6))
         let catalog = try #require(await model.mcp.catalog(config.id))
         #expect(catalog.tools.contains { $0.name == "delete_event" && $0.annotations.destructive == true })
-        // The catalog is what the Claude Code turn judges by, with no server started for it.
-        let names = ClaudeCodeTurn.mcpNames([config])
-        let found = await model.connectorAnnotations(for: [config.id], cliNames: names)
-        #expect(found.destructive.keys.contains("google_agenda__delete_event") || found.destructive.keys.contains("google-agenda__delete_event")
-                || found.destructive.keys.contains { $0.hasSuffix("__delete_event") })
-        #expect(found.known.contains { $0.hasSuffix("__search_events") })
     }
 }

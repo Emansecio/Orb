@@ -314,13 +314,9 @@ struct BrowseToolTests {
         #expect(BrowsePressTool.focusScript.contains("document.activeElement"))
     }
 
-    @Test func browseTabsCountsAsNotReadOnlyForAClientThatOnlySeesTheNameAndSchema() {
+    @Test func browseTabsWithNoArgumentsOnlyLists() {
         // With no arguments it lists, and `new` with a `url` goes to a site.
         #expect(BrowseTabsTool().risk(.object([:])) == .safe)
-        #expect(BrowseTabsTool().announcedReadOnly == false)
-        #expect(BrowseSnapshotTool().announcedReadOnly == false && BrowseReadTool().announcedReadOnly == false, "they read a live page")
-        #expect(BrowseCloseTool().announcedReadOnly == true)
-        #expect(WebSearchTool().announcedReadOnly == false && BrowseClickTool().announcedReadOnly == false)
     }
 
     @Test func obscuraHasNoWindowToShow() async {

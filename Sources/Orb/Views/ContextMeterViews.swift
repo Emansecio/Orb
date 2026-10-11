@@ -117,19 +117,14 @@ struct ContextMeterChip: View {
     private func chip(_ reading: ContextReading) -> some View {
         Button { isOpen.toggle() } label: {
             HStack(spacing: 5) {
-                if reading.fill != nil {
-                    ContextRing(fraction: reading.fraction, tone: reading.tone)
-                    if !compact {
-                        Text("\(reading.percent)%")
-                            .monospacedDigit()
-                            .foregroundStyle(reading.tone == .calm ? Palette.muted : reading.tone.color)
-                            // The number rolls to the next one once per turn (never per token); it fades under Reduce Motion.
-                            .contentTransition(reduceMotion ? .identity : .numericText())
-                            .animation(Motion.content, value: reading.percent)
-                    }
-                } else {
-                    Image(systemName: "gauge.with.needle")
-                        .foregroundStyle(Palette.muted)
+                ContextRing(fraction: reading.fraction, tone: reading.tone)
+                if !compact {
+                    Text("\(reading.percent)%")
+                        .monospacedDigit()
+                        .foregroundStyle(reading.tone == .calm ? Palette.muted : reading.tone.color)
+                        // The number rolls to the next one once per turn (never per token); it fades under Reduce Motion.
+                        .contentTransition(reduceMotion ? .identity : .numericText())
+                        .animation(Motion.content, value: reading.percent)
                 }
             }
         }
@@ -190,7 +185,7 @@ struct ContextPopover: View {
                 .padding(.horizontal, 14)
                 .padding(.top, 14)
                 .padding(.bottom, 10)
-            if reading.fill != nil { gauge }
+            gauge
             kept
             Divider().padding(.top, 12)
             compactSection
@@ -208,7 +203,7 @@ struct ContextPopover: View {
                     .font(.system(size: 22, weight: .semibold))
                     .monospacedDigit()
                     .foregroundStyle(reading.tone == .calm ? Palette.ink : reading.tone.color)
-                Text(reading.usageWords.map { $0.prefix(1).uppercased() + $0.dropFirst() } ?? "")
+                Text(reading.usageWords.prefix(1).uppercased() + reading.usageWords.dropFirst())
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -236,23 +231,17 @@ struct ContextPopover: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Palette.muted)
                 .accessibilityAddTraits(.isHeader)
-            if reading.isClaudeCode {
-                row("sparkles", "O Claude Code cuida do próprio contexto: ele resume a sessão sozinho quando ela enche.")
-            } else {
-                row("text.quote", ContextWords.kept(totalRequests: reading.requestCount, foldedRequests: reading.foldedRequests))
-                if let fill = reading.fill, fill.budgetFraction > fill.fraction, fill.budgetFraction >= ContextReading.warmsAt {
-                    row("arrow.triangle.merge", "Contexto \(reading.memory.label.lowercased()): perto de ~\(ContextWords.approx(fill.budgetTokens)) tokens de conversa, o começo vira resumo sozinho.")
-                }
-                if let hit = reading.cacheHit {
-                    row("bolt", ContextWords.cache(hit), detail: "na última chamada ao modelo")
-                }
+            row("text.quote", ContextWords.kept(totalRequests: reading.requestCount, foldedRequests: reading.foldedRequests))
+            if reading.fill.budgetFraction > reading.fill.fraction, reading.fill.budgetFraction >= ContextReading.warmsAt {
+                row("arrow.triangle.merge", "Contexto \(reading.memory.label.lowercased()): perto de ~\(ContextWords.approx(reading.fill.budgetTokens)) tokens de conversa, o começo vira resumo sozinho.")
             }
-            if !reading.isClaudeCode {
-                Button("Ajustar o contexto das conversas…", action: adjustMemory)
-                    .buttonStyle(.link)
-                    .help(Tip.adjustContext)
-                    .font(.system(size: 11))
+            if let hit = reading.cacheHit {
+                row("bolt", ContextWords.cache(hit), detail: "na última chamada ao modelo")
             }
+            Button("Ajustar o contexto das conversas…", action: adjustMemory)
+                .buttonStyle(.link)
+                .help(Tip.adjustContext)
+                .font(.system(size: 11))
         }
         .padding(.horizontal, 14)
     }
@@ -313,10 +302,7 @@ struct ContextPopover: View {
     }
 
     private var compactingExplanation: String {
-        if reading.isClaudeCode {
-            return "Compactar agora faz um resumo desta conversa e encerra a sessão atual do Claude Code: a próxima mensagem começa uma sessão nova, a partir desse resumo."
-        }
-        if let compaction = reading.fill?.compaction {
+        if let compaction = reading.fill.compaction {
             return ContextWords.wouldFree(requests: compaction.turns, alreadySummarized: reading.foldedRequests > 0,
                                           tokens: compaction.tokensFreed)
         }
@@ -341,10 +327,6 @@ struct ContextPopover: View {
                         .foregroundStyle(Palette.ink)
                     if result.savedToMemory {
                         Text("O essencial ficou guardado na memória do Orb.")
-                            .font(.system(size: 11)).foregroundStyle(Palette.muted)
-                    }
-                    if result.status == .claudeSessionRestarted {
-                        Text(AppModel.claudeRestartNote)
                             .font(.system(size: 11)).foregroundStyle(Palette.muted)
                     }
                 } else {

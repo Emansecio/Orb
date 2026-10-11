@@ -37,26 +37,7 @@ struct OrbProposeTool: AgentTool {
         ("Propondo um Orb", arguments["name"]?.string ?? "")
     }
 
-    /// The token the app writes next to `orb_handled` for a Claude Code call, and the server holds in its environment: the model never
-    /// sees it, so a result it wrote into the call itself is never taken for the app's (the same scheme as `UIActTool.cardKey`).
-    static let handledKey = "orb_handled"
-    static let handledTokenVariable = "ORB_PROPOSE_TOKEN"
-    static let handledToken: String = ProcessInfo.processInfo.environment[handledTokenVariable].flatMap { $0.isEmpty ? nil : $0 } ?? UUID().uuidString
-
-    /// What the app writes into a Claude Code call after it ran the proposal itself: the token, a colon, the text for the model.
-    static func handledMark(_ result: String, token: String = handledToken) -> String { token + ":" + result }
-
-    /// The result the app handed over, or nil when the field is absent or was not written with `token` (the server's own).
-    static func handledResult(in arguments: JSONValue, token: String?) -> String? {
-        guard let token, !token.isEmpty, let mark = arguments[handledKey]?.string, mark.hasPrefix(token + ":") else { return nil }
-        return String(mark.dropFirst(token.count + 1))
-    }
-
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
-        // Claude Code: the app opened the card and created the Orb in its own process; the server only reports what happened.
-        if let handled = Self.handledResult(in: arguments, token: ProcessInfo.processInfo.environment[Self.handledTokenVariable]) {
-            return handled
-        }
         guard let support = context.orbCreation, let propose = context.proposeOrb else {
             throw ToolError("You cannot propose an Orb here: only in your own chat with the user, not in a routine, a request from another Orb or a group.")
         }

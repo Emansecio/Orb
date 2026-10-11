@@ -221,11 +221,10 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
         chat.chunkSummaries = [ChunkSummary(start: 0, end: 2, text: "nota do começo"), ChunkSummary(start: 2, end: 5, text: "nota que cruza o corte")]
         chat.workspaceHash = "w"
         chat.workspaceSeen = WorkspaceSnapshot(path: "/tmp/pasta")
-        chat.claudeSeenCount = 6
         let cut = chat.rewindCut(atItem: 3, skills: [])!
         chat.rewind(to: cut)
         #expect(chat.taskPaused == nil) // read again from the history that is left
-        #expect(chat.memorySavedCount == 3 && chat.condensedCount == 2 && chat.claudeSeenCount == 2)
+        #expect(chat.memorySavedCount == 3 && chat.condensedCount == 2)
         #expect(chat.chunkSummaries?.map(\.text) == ["nota do começo"])
         #expect(chat.workspaceHash == nil && chat.workspaceSeen == nil)
     }
@@ -250,27 +249,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
         #expect(chat.isSummarized(chat.rewindCut(atItem: 1, skills: [])!))
         #expect(chat.isSummarized(chat.rewindCut(atItem: 3, skills: [])!))
         #expect(!chat.isSummarized(chat.rewindCut(atItem: 5, skills: [])!)) // the first one after it
-    }
-
-    @Test func cuttingAClaudeCodeConversationDropsItsSession() {
-        var chat = conversation(["a", "b"])
-        chat.claudeSessionID = "sessao-abc"
-        chat.claudeSessionFolder = "/tmp/pasta"
-        chat.claudeSeenCount = 4
-        chat.claudeMemoryPinned = "identidade"
-        chat.claudeWorkspaceHash = "w"
-        chat.claudeStandingHash = "s"
-        chat.claudeSystem = "sistema"
-        chat.claudeRelatedSent = [["x"]]
-        chat.claudeWorkspaceSeen = WorkspaceSnapshot(path: "/tmp/pasta")
-        chat.rewind(to: chat.rewindCut(atItem: 3, skills: [])!)
-        #expect(chat.claudeSession(forFolder: "/tmp/pasta") == nil) // nothing to resume: a new session starts
-        #expect(chat.claudeSessionID == nil && chat.claudeSessionFolder == nil && chat.claudeSeenCount == nil)
-        #expect(chat.claudeMemoryPinned == nil && chat.claudeWorkspaceHash == nil && chat.claudeStandingHash == nil)
-        #expect(chat.claudeSystem == nil && chat.claudeRelatedSent == nil && chat.claudeWorkspaceSeen == nil)
-        // The new session is told what is left of the conversation, and nothing of the turn that went.
-        let catchUp = ClaudeCodePrompt.catchUp(chat, seen: 0)
-        #expect(catchUp.contains("User: a") && !catchUp.contains("User: b") && !catchUp.contains("resposta a b"))
     }
 
     // MARK: The last turn

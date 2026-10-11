@@ -429,13 +429,6 @@ struct MultiOrbToolOfferTests {
         #expect(ToolBox.wizardTools.map(\.spec.name) == ["orb_draft"])
     }
 
-    @Test func theToolsAreNamedForClaudeCodeToo() throws {
-        for name in ["orbs", "orb_propose", "orb_draft", "group_remember", "group_recall"] {
-            let tool = try #require(OrbToolsMCPServer.tool(claudeCodeName: ClaudeCodeTools.memoryPrefix + name), "\(name)")
-            #expect(tool.spec.name == name)
-        }
-    }
-
     @Test func everySpecIsShortAndWellFormed() {
         for tool in ToolBox.multiOrbTools + ToolBox.wizardTools {
             #expect(!tool.spec.description.isEmpty, "\(tool.spec.name)")
@@ -539,12 +532,6 @@ struct MultiOrbPermissionTests {
         #expect(verdict(.ask, preference, grants: grants) == .ask(.instructs))
     }
 
-    @Test func claudeCodeJudgesTheOrbsToolLikeTheNativeOne() {
-        let input: JSONValue = .object(["action": .string("ask"), "to": .string("Revisor"), "message": .string("oi")])
-        let call = PermissionPolicy.call(claudeCodeTool: ClaudeCodeTools.memoryPrefix + "orbs", input: input, workspace: nil, home: home)
-        #expect(call.family == .delegation && call.risk == .sensitive)
-        #expect(PermissionPolicy.evaluate(mode: .ask, call: call, rules: [], turnGrants: grant, workspace: nil, home: home) == .allow)
-    }
 }
 
 // MARK: - The Orb's face

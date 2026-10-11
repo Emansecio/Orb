@@ -196,18 +196,8 @@ struct TranscriptItem: Identifiable, Codable, Sendable, Equatable {
 struct Conversation: Codable, Sendable {
     var items: [TranscriptItem] = []
     var messages: [ChatMessage] = []
-    /// Claude Code keeps its own history; turns run through it resume this session.
-    var claudeSessionID: String?
-    /// The folder that session runs in. Claude Code stores sessions per folder, so after the Orb's folder
-    /// changes the session can't be resumed and a new one starts (nil = recorded before this was tracked).
-    var claudeSessionFolder: String?
-    /// How many of `messages` that Claude Code session has seen; later ones (other models' turns) are
-    /// handed to it as context on its next turn.
-    var claudeSeenCount: Int?
     /// How many of `items` are already saved in the Orb's memory as session pages.
     var memorySavedCount: Int?
-    /// Identity and preferences as the current Claude Code session's system prompt has them.
-    var claudeMemoryPinned: String?
     /// Summary standing in for the first `summaryCoveredCount` of `messages`, which no longer fit the model's
     /// window (see `ContextWindow`). The messages themselves stay.
     var summary: String?
@@ -229,25 +219,12 @@ struct Conversation: Codable, Sendable {
     var lastModelCall: Date?
     /// Hash of the workspace snapshot the model last got in this conversation (it is sent again only when it changes).
     var workspaceHash: String?
-    /// The same for the current Claude Code session, which never sees the snapshots other models were given.
-    var claudeWorkspaceHash: String?
-    /// Hash of the permissions and folder instructions in the current Claude Code session's system prompt.
-    var claudeStandingHash: String?
     /// Id this conversation sends gateways that key routing and prompt caching to a session (OpenCode's
     /// `x-opencode-session`). Born with the conversation, so a cleared chat or a routine run gets a new one.
     var gatewaySessionID: String?
     /// The snapshot behind `workspaceHash` (without its recent files), so a later message can say only what changed in the
     /// folder instead of sending the whole snapshot again. Nil in conversations from before it was kept.
     var workspaceSeen: WorkspaceSnapshot?
-    /// The same for the current Claude Code session (`claudeWorkspaceHash`).
-    var claudeWorkspaceSeen: WorkspaceSnapshot?
-    /// The system prompt the current Claude Code session started with. Every resume sends this same text, byte for byte,
-    /// so Claude Code's own prompt cache is not started over by a change in the Orb's memory, skills or settings (those
-    /// reach the session with the message instead).
-    var claudeSystem: String?
-    /// The related-memory lines the current Claude Code session's latest turns carried (one list per turn), so a resumed
-    /// session is not sent the same memories again.
-    var claudeRelatedSent: [[String]]?
 
     /// After a quit or crash mid-turn: nothing is streaming, running or waiting anymore.
     func closingInterruptedTurn() -> Conversation {
@@ -287,11 +264,7 @@ extension Conversation {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         items = try c.lossyArray(.items)
         messages = try c.lossyArray(.messages)
-        claudeSessionID = try c.decodeIfPresent(String.self, forKey: .claudeSessionID)
-        claudeSessionFolder = try c.decodeIfPresent(String.self, forKey: .claudeSessionFolder)
-        claudeSeenCount = try c.decodeIfPresent(Int.self, forKey: .claudeSeenCount)
         memorySavedCount = try c.decodeIfPresent(Int.self, forKey: .memorySavedCount)
-        claudeMemoryPinned = try c.decodeIfPresent(String.self, forKey: .claudeMemoryPinned)
         summary = try c.decodeIfPresent(String.self, forKey: .summary)
         summaryCoveredCount = try c.decodeIfPresent(Int.self, forKey: .summaryCoveredCount)
         // A ledger this version cannot read is dropped (the summary text still stands) instead of losing the conversation.
@@ -302,14 +275,9 @@ extension Conversation {
         taskPaused = try c.decodeIfPresent(Bool.self, forKey: .taskPaused)
         lastModelCall = (try? c.decodeIfPresent(Date.self, forKey: .lastModelCall)) ?? nil
         workspaceHash = try c.decodeIfPresent(String.self, forKey: .workspaceHash)
-        claudeWorkspaceHash = try c.decodeIfPresent(String.self, forKey: .claudeWorkspaceHash)
-        claudeStandingHash = try c.decodeIfPresent(String.self, forKey: .claudeStandingHash)
         gatewaySessionID = try c.decodeIfPresent(String.self, forKey: .gatewaySessionID)
         // Only helps to save tokens: whatever cannot be read here is sent whole next time instead of failing the conversation.
         workspaceSeen = (try? c.decodeIfPresent(WorkspaceSnapshot.self, forKey: .workspaceSeen)) ?? nil
-        claudeWorkspaceSeen = (try? c.decodeIfPresent(WorkspaceSnapshot.self, forKey: .claudeWorkspaceSeen)) ?? nil
-        claudeSystem = try? c.decodeIfPresent(String.self, forKey: .claudeSystem)
-        claudeRelatedSent = (try? c.decodeIfPresent([[String]].self, forKey: .claudeRelatedSent)) ?? nil
     }
 }
 

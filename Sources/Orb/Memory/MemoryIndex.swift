@@ -3,8 +3,7 @@ import SQLite3
 
 /// The derived search index of one Orb's memory (`index.sqlite` next to the pages). Everything in it can be
 /// rebuilt from the markdown files, except the access counters that make used memories age slower.
-/// Not thread-safe: owned by one `MemoryBank` actor (the Claude Code helper process opens its own, and WAL
-/// mode lets both read and write the same file).
+/// Not thread-safe: owned by one `MemoryBank` actor (WAL mode lets another process read and write the same file).
 final class MemoryIndex {
     enum Value {
         case text(String), real(Double), int(Int), null
@@ -48,7 +47,7 @@ final class MemoryIndex {
         guard code == SQLITE_OK else { throw Self.failure(code) } // `deinit` closes the handle
         sqlite3_busy_timeout(db, busyTimeout)
         // Opening an index that is already right writes nothing: a write here would wait for whoever holds the index
-        // (the app rebuilding it, the Claude Code helper) and fail with it busy.
+        // (another process rebuilding it) and fail with it busy.
         let version = rows("PRAGMA user_version").first?.int(0) ?? 0
         if version != 0, version != Self.schemaVersion {
             sqlite3_exec(db, "DROP TABLE IF EXISTS pages_fts; DROP TABLE IF EXISTS pages; DROP TABLE IF EXISTS meta;", nil, nil, nil)

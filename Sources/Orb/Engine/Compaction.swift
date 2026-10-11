@@ -15,8 +15,6 @@ struct CompactionReport: Sendable, Equatable {
         case steps
         /// The user asked for it ("Compactar agora").
         case manual
-        /// Claude Code compacted its own session.
-        case claudeCode
     }
 
     /// What a fold in the middle of a turn leaves for the app to keep (the next turn starts from it).
@@ -39,20 +37,17 @@ struct CompactionReport: Sendable, Equatable {
     /// Estimated tokens the history would take without the compaction and with it; nil when not known.
     var tokensBefore: Int?
     var tokensAfter: Int?
-    /// Claude Code: "auto" or "manual".
-    var trigger: String?
     var fold: Fold?
     /// The model's notes on the stretches this fold took (see `ChunkSummary`): they go to the memory with them.
     var digests: [String] = []
 
-    init(kind: Kind, foldedMessages: Int, tokensBefore: Int?, tokensAfter: Int?, trigger: String? = nil, fold: Fold? = nil,
+    init(kind: Kind, foldedMessages: Int, tokensBefore: Int?, tokensAfter: Int?, fold: Fold? = nil,
          digests: [String] = []) {
         self.kind = kind
         self.digests = digests
         self.foldedMessages = foldedMessages
         self.tokensBefore = tokensBefore
         self.tokensAfter = tokensAfter
-        self.trigger = trigger
         self.fold = fold
     }
 
@@ -70,13 +65,6 @@ struct CompactionReport: Sendable, Equatable {
         case .steps:
             let what = foldedMessages == 1 ? "o primeiro passo" : "os \(foldedMessages) primeiros passos"
             return "Neste pedido, resumi \(what) para caber no modelo\(range)."
-        case .claudeCode:
-            let how = trigger == "manual" ? "" : " sozinho"
-            if let before = tokensBefore, let after = tokensAfter {
-                return "O Claude Code compactou a sessão\(how) (de \(Self.tokenText(before)) para \(Self.tokenText(after)) tokens)."
-            }
-            if let before = tokensBefore { return "O Claude Code compactou a sessão\(how) (tinha \(Self.tokenText(before)) tokens)." }
-            return "O Claude Code compactou a sessão\(how)."
         }
     }
 
@@ -115,29 +103,6 @@ extension Conversation {
         report.tokensAfter = contextFill(budget: budget).historyTokens
         return report
     }
-
-    /// For a Claude Code conversation, whose context is the CLI's own session: folds everything before the latest turn
-    /// into the summary, so a new session can start from it and that turn. nil when there is no earlier turn. The
-    /// numbers are estimates from Orb's own copy of the conversation (Claude Code's session is not visible to Orb).
-    mutating func compactAllButLatestTurn(focus: String? = nil) -> CompactionReport? {
-        let covered = coveredMessageCount
-        guard let latest = messages.lastIndex(where: { $0.role == .user && !$0.content.hasPrefix(ContextSummary.marker) }),
-              latest > covered else { return nil }
-        var base = currentLedger ?? ConversationLedger()
-        if let focus = Self.cleanFocus(focus) { base.focus = focus }
-        // What a new session would have to be told, estimated: the summary and every message not yet in it, against
-        // the summary as it becomes and the latest turn.
-        let before = (summary?.count ?? 0) + messages[covered...].contextCharacters
-        base.absorb(Array(messages[covered..<latest]))
-        let text = base.render()
-        summary = text
-        ledger = base
-        summaryCoveredCount = latest
-        compactions = (compactions ?? 0) + 1
-        return CompactionReport(kind: .manual, foldedMessages: latest - covered,
-                                tokensBefore: ContextBudget.tokens(forCharacters: before),
-                                tokensAfter: ContextBudget.tokens(forCharacters: text.count + messages[latest...].contextCharacters))
-    }
 }
 
 // MARK: - Result for the UI
@@ -147,8 +112,6 @@ struct CompactionResult: Sendable, Equatable {
     enum Status: Sendable, Equatable {
         /// Older messages became a summary.
         case compacted
-        /// Claude Code: the session was dropped and the next message starts a new one from the summary.
-        case claudeSessionRestarted
         /// Too little history to be worth it.
         case nothingToCompact
         /// A message is being answered; compaction waits.
@@ -166,7 +129,7 @@ struct CompactionResult: Sendable, Equatable {
     /// The line shown to the user (also the transcript notice when something happened).
     var message: String
 
-    var didCompact: Bool { status == .compacted || status == .claudeSessionRestarted }
+    var didCompact: Bool { status == .compacted }
 }
 
 /// The text "/compactar [foco]" in the composer.

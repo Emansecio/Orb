@@ -357,33 +357,6 @@ struct UsageEventsTests {
         #expect(found.first { $0.key.source == .routine }?.totals.input == 10)
     }
 
-    @Test func aClaudeCodeTurnIsCountedOnceWithTheCostTheCLIReported() async {
-        let (model, id, root) = makeModel()
-        defer { removeTestFolder(root) }
-        model.session(id).isClaudeTurn = true
-        model.session(id).turnModel = "claudeCode/sonnet"
-        model.apply(.usage(TokenUsage(input: 12, output: 340, cacheRead: 9_000, cacheWrite: 150)), to: id)
-        model.apply(.reportedCost(0.0421), to: id)
-        let found = await rows(model, root: root)
-        #expect(found.count == 1 && found.first?.key.model == "claudeCode/sonnet")
-        #expect(found.first?.totals == UsageTotals(requests: 1, input: 12, cacheRead: 9_000, cacheWrite: 150, output: 340, reportedCost: 0.0421))
-    }
-
-    @Test func theCLIsCostFollowsItsUsageInTheTurnsEvents() {
-        var transcript = ClaudeCodeTranscript(isResuming: false)
-        _ = transcript.apply(.started(sessionID: "s"))
-        let events = transcript.apply(.result(ClaudeCodeResult(isError: false, message: "Oi", sessionID: "s",
-                                                               usage: TokenUsage(input: 1, output: 2), costUSD: 0.5)))
-        let kinds = events.prefix(2).map { event -> String in
-            switch event {
-            case .usage: "usage"
-            case .reportedCost(let cost): "cost \(cost)"
-            default: "other"
-            }
-        }
-        #expect(kinds == ["usage", "cost 0.5"])
-    }
-
     @Test func callsTheAppMakesForItselfAreMarkedAuxiliary() async {
         let (model, id, root) = makeModel()
         defer { removeTestFolder(root) }

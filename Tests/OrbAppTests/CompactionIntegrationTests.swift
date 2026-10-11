@@ -29,166 +29,6 @@ private func conversation(turns: Int, output: Int = 100, start: Int = 0, longRep
     return conversation
 }
 
-// MARK: - Catch-up for a Claude Code session
-
-struct CatchUpTests {
-    @Test func nothingHappenedSinceTheSessionLastSawTheConversation() {
-        let conversation = conversation(turns: 3)
-        #expect(ClaudeCodePrompt.catchUp(conversation, seen: conversation.messages.count).isEmpty)
-        #expect(ClaudeCodePrompt.catchUp(Conversation(), seen: 0).isEmpty)
-        #expect(ClaudeCodePrompt.catchUp(conversation, seen: 999).isEmpty)
-    }
-
-    @Test func aShortConversationIsListedWholeWithNoSummary() {
-        let text = ClaudeCodePrompt.catchUp(conversation(turns: 3), seen: 0)
-        #expect(text.hasPrefix("Earlier in this Orb conversation (answered by another model, so you have not seen it):"))
-        #expect(text.hasSuffix("The user's new message:"))
-        #expect(text.contains("User: " + firstRequest) && text.contains("Assistant: resposta 2"))
-        #expect(!text.contains("Summary of the older part") && !text.contains("summary above"))
-    }
-
-    @Test func aResumedSessionGetsOnlyWhatItMissed() {
-        let text = ClaudeCodePrompt.catchUp(conversation(turns: 4), seen: 8)
-        #expect(!text.contains("pedido número 1 do projeto"))
-        #expect(text.contains("User: pedido número 2 do projeto") && text.contains("User: pedido número 3 do projeto"))
-        #expect(!text.contains("Summary of the older part"))
-    }
-
-    @Test func aNewSessionStartsFromTheConversationsSummaryAndTheMessagesAfterIt() throws {
-        var conversation = conversation(turns: 12, output: 25_000, longReplies: true)
-        _ = conversation.prepareHistory(budget: ContextBudget(tokens: 10_000))
-        let covered = conversation.coveredMessageCount
-        #expect(covered > 0)
-        let text = ClaudeCodePrompt.catchUp(conversation, seen: 0)
-        #expect(text.contains("Summary of the older part (written by Orb):\nPedido original: " + firstRequest))
-        // Only the messages after the summary are listed.
-        let firstListed = try #require(conversation.messages[covered...].first { $0.role == .user })
-        #expect(text.contains("User: " + firstListed.content))
-        #expect(!text.contains("User: pedido número 1 do projeto"))
-        #expect(text.contains("Assistant: resposta 11"))
-    }
-
-    @Test func aSessionThatMissedPartOfWhatTheSummaryCoversGetsTheSummaryToo() {
-        var conversation = conversation(turns: 12, output: 25_000, longReplies: true)
-        _ = conversation.prepareHistory(budget: ContextBudget(tokens: 10_000))
-        let covered = conversation.coveredMessageCount
-        #expect(ClaudeCodePrompt.catchUp(conversation, seen: covered - 4).contains("Summary of the older part"))
-        // One that saw everything the summary covers does not need it.
-        #expect(!ClaudeCodePrompt.catchUp(conversation, seen: covered).contains("Summary of the older part"))
-    }
-
-    @Test func theFirstRequestAndTheDecisionsSurviveALongConversationWithoutASummary() {
-        var conversation = Conversation()
-        for index in 0..<120 {
-            let request = index == 0 ? firstRequest : index == 3 ? "Decisão: a porta será 4711, não mude." : "pedido número \(index) do projeto"
-            conversation.messages += turn(request, output: String(repeating: "s", count: 9_000), reply: String(repeating: "r", count: 1_200), id: "i\(index)")
-        }
-        let text = ClaudeCodePrompt.catchUp(conversation, seen: 0)
-        #expect(text.count <= 16_000)
-        #expect(text.contains("Pedido original: " + firstRequest))
-        #expect(text.contains("decisão: a porta será 4711, não mude."))
-        #expect(text.contains("User: pedido número 119 do projeto"))
-        #expect(text.contains("earlier messages are in the summary above"))
-    }
-
-    @Test func messagesAreListedWholeNeverCutInTheMiddle() {
-        var conversation = Conversation()
-        for index in 0..<120 {
-            conversation.messages += turn("pedido \(index) " + String(repeating: "u", count: 300), output: String(repeating: "s", count: 9_000),
-                                          reply: "resposta \(index) " + String(repeating: "r", count: 800), id: "j\(index)")
-        }
-        let text = ClaudeCodePrompt.catchUp(conversation, seen: 0, limit: 6_000)
-        #expect(text.count <= 6_000)
-        for line in text.components(separatedBy: "\n") {
-            if line.hasPrefix("User: ") { #expect(line.hasSuffix(String(repeating: "u", count: 300))) }
-            if line.hasPrefix("Assistant: resposta") { #expect(line.hasSuffix(String(repeating: "r", count: 800))) }
-        }
-        // The body starts at a message, right after the marker line.
-        let marker = text.range(of: "earlier messages are in the summary above …]\n\n")
-        #expect(marker != nil)
-        #expect(marker.map { text[$0.upperBound...].hasPrefix("User: ") || text[$0.upperBound...].hasPrefix("Assistant: ") || text[$0.upperBound...].hasPrefix("Tool result: ") } == true)
-    }
-
-    @Test func requestsAndAnswersAreKeptBeforeToolLinesWhenSpaceIsShort() {
-        var conversation = Conversation()
-        for index in 0..<30 {
-            conversation.messages += turn("pedido \(index) " + String(repeating: "u", count: 100), output: String(repeating: "s", count: 200),
-                                          reply: "resposta \(index)", id: "k\(index)")
-        }
-        let roomy = ClaudeCodePrompt.catchUp(conversation, seen: 0, limit: 16_000)
-        #expect(roomy.contains("Tool result:") && roomy.contains("[called: read_file"))
-        // With room for about half of it, the oldest listed turns lose their tool lines while the answers stay.
-        let tight = ClaudeCodePrompt.catchUp(conversation, seen: 0, limit: 5_000)
-        #expect(tight.contains("User: pedido 29 ") && tight.contains("Assistant: resposta 29"))
-        let listedUsers = tight.components(separatedBy: "\n").filter { $0.hasPrefix("User: ") }.count
-        let listedTools = tight.components(separatedBy: "\n").filter { $0.hasPrefix("Tool result:") }.count
-        #expect(listedUsers > 8)
-        #expect(listedTools <= listedUsers)
-    }
-
-    @Test func aToolResultWithoutItsCallDoesNotStartTheList() {
-        var conversation = conversation(turns: 2)
-        conversation.messages.insert(.tool("orphan", "sobra"), at: 0)
-        let text = ClaudeCodePrompt.catchUp(conversation, seen: 0)
-        #expect(!text.contains("sobra"))
-        #expect(text.contains("User: " + firstRequest))
-    }
-
-    @Test func picturesAreListedByPath() {
-        let image = ImageAttachment(path: "/d/a.jpg", mediaType: "image/jpeg", width: 1, height: 1)
-        var conversation = Conversation()
-        conversation.messages = [.user("veja isto", images: [image]), ChatMessage(role: .assistant, content: "vi")]
-        #expect(ClaudeCodePrompt.catchUp(conversation, seen: 0).contains("[images: /d/a.jpg]"))
-    }
-
-    @Test func aSummaryPairInTheMessagesIsNotListedAsARequest() {
-        var conversation = Conversation()
-        conversation.messages = ContextSummary.pair("Pedido original: algo") + turn("novo pedido do projeto")
-        let text = ClaudeCodePrompt.catchUp(conversation, seen: 0)
-        #expect(!text.contains("User: " + ContextSummary.marker))
-        #expect(text.contains("User: novo pedido do projeto"))
-    }
-}
-
-// MARK: - Claude Code's own compaction
-
-struct ClaudeCodeCompactionTests {
-    private func parse(_ line: String) -> [ClaudeCodeMessage] {
-        var parser = ClaudeCodeParser()
-        return parser.parse(line)
-    }
-
-    @Test func aCompactBoundaryReportsTheTriggerAndTheTokens() {
-        let line = #"{"type":"system","subtype":"compact_boundary","session_id":"s1","uuid":"u1","compact_metadata":{"trigger":"auto","pre_tokens":168000,"post_tokens":21000}}"#
-        #expect(parse(line) == [.compacted(trigger: "auto", preTokens: 168_000, postTokens: 21_000)])
-        let manual = #"{"type":"system","subtype":"compact_boundary","compact_metadata":{"trigger":"manual","pre_tokens":90000}}"#
-        #expect(parse(manual) == [.compacted(trigger: "manual", preTokens: 90_000, postTokens: nil)])
-    }
-
-    @Test func aCompactBoundaryWithoutDetailsIsStillReported() {
-        #expect(parse(#"{"type":"system","subtype":"compact_boundary"}"#) == [.compacted(trigger: "auto", preTokens: nil, postTokens: nil)])
-        #expect(parse(#"{"type":"system","subtype":"compact_boundary","compact_metadata":{"trigger":7,"pre_tokens":"x"}}"#)
-            == [.compacted(trigger: "auto", preTokens: nil, postTokens: nil)])
-    }
-
-    @Test func otherSystemMessagesAndSubagentTrafficAreIgnored() {
-        #expect(parse(#"{"type":"system","subtype":"compact_progress","phase":"start"}"#).isEmpty)
-        #expect(parse(#"{"type":"system","subtype":"status","status":"compacting"}"#).isEmpty)
-        #expect(parse(#"{"type":"system","subtype":"compact_boundary","parent_tool_use_id":"toolu_1","compact_metadata":{"trigger":"auto","pre_tokens":1}}"#).isEmpty)
-        // init still works.
-        #expect(parse(#"{"type":"system","subtype":"init","session_id":"s9"}"#) == [.started(sessionID: "s9")])
-    }
-
-    @Test func theTranscriptTurnsItIntoAReportWithoutEndingTheTurn() {
-        var transcript = ClaudeCodeTranscript(isResuming: true)
-        let events = transcript.apply(.compacted(trigger: "auto", preTokens: 168_000, postTokens: 21_000))
-        guard case .compacted(let report) = events.first, events.count == 1 else { Issue.record("expected one report"); return }
-        #expect(report.kind == .claudeCode && report.trigger == "auto" && report.fold == nil)
-        #expect(report.notice == "O Claude Code compactou a sessão sozinho (de 168 mil para 21 mil tokens).")
-        #expect(!transcript.isFinished)
-    }
-}
-
 // MARK: - Decisions in memory pages
 
 struct SessionDecisionsTests {
@@ -389,12 +229,11 @@ struct SessionConnectorTests {
         #expect((model.conversations[botID]?.summaryCoveredCount ?? .max) < (model.conversations[botID]?.messages.count ?? 0))
     }
 
-    @Test @MainActor func aClaudeCodeChatFoldsLikeAnyOtherAndHasNoSessionToRestart() async throws {
+    @Test @MainActor func aClaudeCodeChatFoldsLikeAnyOther() async throws {
         let (model, botID) = model(conversation(turns: 24, output: 20_000), claudeCode: true)
         let result = model.compactNow(botID: botID, focus: "o login")
 
         #expect(result.status == .compacted && result.didCompact)
-        #expect(!result.message.contains(AppModel.claudeRestartNote))
         let conversation = try #require(model.conversations[botID])
         #expect(conversation.summary?.contains("Dar atenção a: o login") == true)
         #expect(conversation.summaryCoveredCount == result.foldedMessages)
@@ -465,15 +304,6 @@ struct SessionConnectorTests {
         model.apply(.compacted(CompactionReport(kind: .steps, foldedMessages: 18, tokensBefore: 60_000, tokensAfter: 40_000)), to: botID)
         #expect(lastNotice(model, botID)?.hasPrefix("Neste pedido, resumi os 18 primeiros passos") == true)
         #expect(model.conversations[botID]?.summary == nil && model.conversations[botID]?.compactions == nil)
-    }
-
-    @Test @MainActor func claudeCodesOwnCompactionIsAnnouncedWithItsNumbers() throws {
-        let (model, botID) = model(conversation(turns: 2), claudeCode: true)
-        _ = model.contextSummary(for: botID)
-        model.apply(.compacted(CompactionReport(kind: .claudeCode, foldedMessages: 0, tokensBefore: 168_000, tokensAfter: 21_000, trigger: "auto")), to: botID)
-        #expect(lastNotice(model, botID) == "O Claude Code compactou a sessão sozinho (de 168 mil para 21 mil tokens).")
-        #expect(model.conversations[botID]?.summary == nil)
-        #expect(model.lastCompaction[botID]?.kind == .claudeCode)
     }
 
     // MARK: Sending

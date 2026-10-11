@@ -255,7 +255,6 @@ struct WorkspaceTurnTests {
         conversation.record(first.marks)
         #expect(conversation.workspaceHash == first.workspaceHash)
         #expect(conversation.workspaceSeen?.git?.changes == [" M a.swift"] && conversation.workspaceSeen?.recentFiles.count == 1)
-        #expect(conversation.claudeWorkspaceSeen == nil)
     }
 }
 
@@ -266,39 +265,31 @@ struct WorkspaceMarksStorageTests {
         var conversation = Conversation()
         conversation.workspaceHash = "h"
         conversation.workspaceSeen = snap(git: repo(changes: [" M a.swift"]))
-        conversation.claudeWorkspaceSeen = snap(["x"])
-        conversation.claudeSystem = "frozen prompt"
-        conversation.claudeRelatedSent = [["- [Fato, 07/10/2026 14:32] A"], []]
         let loaded = try JSONDecoder().decode(Conversation.self, from: JSONEncoder().encode(conversation))
-        #expect(loaded.workspaceSeen == conversation.workspaceSeen && loaded.claudeWorkspaceSeen == conversation.claudeWorkspaceSeen)
-        #expect(loaded.claudeSystem == "frozen prompt" && loaded.claudeRelatedSent == conversation.claudeRelatedSent)
+        #expect(loaded.workspaceSeen == conversation.workspaceSeen)
     }
 
     @Test func conversationsSavedBeforeLoadWithoutThem() throws {
         let old = #"{"items": [], "messages": [], "workspaceHash": "abc", "claudeWorkspaceHash": "def"}"#
         let loaded = try JSONDecoder().decode(Conversation.self, from: Data(old.utf8))
-        #expect(loaded.workspaceHash == "abc" && loaded.workspaceSeen == nil && loaded.claudeSystem == nil && loaded.claudeRelatedSent == nil)
+        #expect(loaded.workspaceHash == "abc" && loaded.workspaceSeen == nil)
     }
 
     @Test func aComparisonSnapshotThatCannotBeReadDoesNotSpoilTheConversation() throws {
         let json = #"""
         {"items": [], "messages": [{"role": "user", "content": "oi"}], "workspaceHash": "abc",
-         "workspaceSeen": {"path": 7, "state": "novo-estado"}, "claudeWorkspaceSeen": "texto", "claudeSystem": 3,
-         "claudeRelatedSent": {"a": 1}}
+         "workspaceSeen": {"path": 7, "state": "novo-estado"}, "claudeWorkspaceSeen": "texto", "claudeSystem": 3}
         """#
         let loaded = try JSONDecoder().decode(Conversation.self, from: Data(json.utf8))
         #expect(loaded.messages.count == 1 && loaded.workspaceHash == "abc")
-        #expect(loaded.workspaceSeen == nil && loaded.claudeWorkspaceSeen == nil && loaded.claudeSystem == nil && loaded.claudeRelatedSent == nil)
+        #expect(loaded.workspaceSeen == nil)
     }
 
     @Test func aRoutineRunStartsWithoutThem() {
         var conversation = Conversation()
         conversation.workspaceSeen = snap()
-        conversation.claudeWorkspaceSeen = snap()
-        conversation.claudeSystem = "x"
-        conversation.claudeRelatedSent = [["a"]]
         let fresh = conversation.startingRoutineRun(at: .now)
-        #expect(fresh.workspaceSeen == nil && fresh.claudeWorkspaceSeen == nil && fresh.claudeSystem == nil && fresh.claudeRelatedSent == nil)
+        #expect(fresh.workspaceSeen == nil)
     }
 }
 

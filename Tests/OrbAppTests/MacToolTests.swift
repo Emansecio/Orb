@@ -256,12 +256,6 @@ struct MacToolTests {
         #expect(OpenTool.runsShortcut(" Shortcuts://run-shortcut?name=x "))
     }
 
-    @Test func theMCPServerContextCarriesTheMacSwitch() {
-        let directory = URL(fileURLWithPath: "/tmp/m")
-        #expect(OrbToolsMCPServer.Options(memoryDirectory: directory, mac: true).context.computerUseAllowed)
-        #expect(!OrbToolsMCPServer.Options(memoryDirectory: directory).context.computerUseAllowed)
-    }
-
     @Test func findsApplicationsThroughLaunchServices() async throws {
         let finder = await OpenTool.application(named: "com.apple.finder")
         #expect(finder?.lastPathComponent == "Finder.app")

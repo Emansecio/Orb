@@ -717,8 +717,7 @@ enum ComposerAction: Equatable {
 
 /// The line under the composer while a message can be sent to a working Orb. Pure, so the tests can read it.
 enum ComposerHint {
-    /// Orb's own engine: ↩ steers the task, ⇥ waits for its end, ⌘↩ stops and sends. Claude Code takes nothing in the middle
-    /// of a turn, so ↩ is the queue there (⇥ does the same and is not advertised). With a permission request open, ⌘↩ typed
+    /// ↩ steers the task, ⇥ waits for its end, ⌘↩ stops and sends. With a permission request open, ⌘↩ typed
     /// in the composer stops the turn (which refuses the request) and sends; from anywhere else it still allows the
     /// request (see `ApprovalShortcut`), and the line says so.
     static func queueing(steersMidTurn: Bool, needsYou: Bool, typesInComposer: Bool, compact: Bool = false) -> String {

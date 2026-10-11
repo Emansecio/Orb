@@ -618,13 +618,6 @@ final class SkillToolsTests {
         #expect(RecallTool().summary(.object(["query": .string("/resumir")])) == ("Lendo a skill", "/resumir"))
     }
 
-    @Test func claudeCodeProposesThroughTheSameTools() {
-        let remember = ClaudeCodeTools.memoryPrefix + "remember"
-        for mode in [PermissionMode.ask, .auto, .readOnly] {
-            #expect(ClaudeCodePolicy.answer(mode: mode, toolName: remember, input: skill("x")) == .allow, "\(mode)")
-        }
-    }
-
     @Test func skillsDecodeWithoutTheOrbThatLearnedThem() throws {
         let old = #"{"id":"6F1B6E5E-7C65-4B6C-A8E1-0B2B3C4D5E6F","slug":"resumir","name":"Resumir","summary":"s","instructions":"i"}"#
         let decoded = try JSONDecoder().decode(Skill.self, from: Data(old.utf8))

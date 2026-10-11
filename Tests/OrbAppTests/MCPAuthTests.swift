@@ -433,7 +433,6 @@ struct MCPSignInTests {
         #expect(service.requests.isEmpty)
         try seed(vault, plain.id, service)
         #expect(auth.tokenProvider(for: plain) == nil)
-        #expect(await auth.withBearer([plain])[0].headers["Authorization"] == nil)
         // A server being developed on this Mac may use plain HTTP.
         var local = plain
         local.url = "http://localhost:8080/mcp"
@@ -596,38 +595,6 @@ struct MCPRenewalTests {
         #expect(kept.clientID == nil && kept.registrationPort == nil && kept.accessToken.isEmpty)
     }
 
-    @Test func claudeCodeKeepsATokenThatStillWorksWhenThereIsNothingToRenewItWith() async throws {
-        let service = FakeOAuthService()
-        let vault = MemoryVault()
-        let auth = MCPAuth(vault: vault, session: service.session)
-        var config = connector(service)
-        config.id = UUID()
-        try seed(vault, config.id, service, expiresIn: 20 * 60, refreshToken: nil) // 20 min left, no refresh token
-        let servers = await auth.withBearer([config])
-        #expect(servers[0].headers["Authorization"] == "Bearer at-0") // sent as is
-        #expect(service.requests.isEmpty)
-        #expect(try stored(vault, config.id).accessToken == "at-0") // and still there afterwards
-        #expect(await auth.isSignedIn(config.id))
-        // Only once it has really ended is the login over.
-        try seed(vault, config.id, service, expiresIn: -5, refreshToken: nil)
-        let other = MCPAuth(vault: vault, session: service.session)
-        #expect(await other.withBearer([config])[0].headers["Authorization"] == nil)
-        #expect(try stored(vault, config.id).accessToken.isEmpty)
-    }
-
-    @Test func claudeCodeGetsTheCurrentBearerWhenTheRenewalFailsForAPassingReason() async throws {
-        let service = FakeOAuthService { $0.onToken = { _ in .json(#"{"error":"temporarily_unavailable"}"#, status: 503) } }
-        let vault = MemoryVault()
-        let auth = MCPAuth(vault: vault, session: service.session)
-        var config = connector(service)
-        config.id = UUID()
-        try seed(vault, config.id, service, expiresIn: 20 * 60)
-        let servers = await auth.withBearer([config])
-        #expect(servers[0].headers["Authorization"] == "Bearer at-0")
-        #expect(service.requests.filter { $0.label == "auth POST /token" }.count == 1) // it tried
-        #expect(try stored(vault, config.id).refreshToken == "rt-0") // and kept the login for next time
-    }
-
     @Test func aConnectorWithoutALoginAsksTheVaultOnlyOnce() async throws {
         final class Counting: SecretVault, @unchecked Sendable {
             let inner = MemoryVault()
@@ -680,29 +647,6 @@ struct MCPRenewalTests {
         #expect(vault.accounts.isEmpty)
     }
 
-    @Test func claudeCodeGetsABearerWithTimeLeft() async throws {
-        let service = FakeOAuthService()
-        let vault = MemoryVault()
-        let auth = MCPAuth(vault: vault, session: service.session)
-        var signedIn = connector(service)
-        signedIn.id = UUID()
-        var keyed = MCPServerConfig(name: "GitHub", url: "https://api.example.com/mcp", headers: ["Authorization": "Bearer ghp_fixed"])
-        keyed.id = UUID()
-        let local = MCPServerConfig(name: "Local", command: "npx")
-        // 20 minutes left is less than the 30 a whole turn may need: renewed before the turn.
-        try seed(vault, signedIn.id, service, expiresIn: 20 * 60)
-        let servers = await auth.withBearer([signedIn, keyed, local])
-        #expect(servers[0].headers["Authorization"] == "Bearer at-2")
-        #expect(servers[1].headers["Authorization"] == "Bearer ghp_fixed" && servers[2].headers.isEmpty)
-        let config = try #require(ClaudeCodeTurn.mcpConfig(servers))
-        #expect(config.jsonString.contains("Bearer at-2") && config.jsonString.contains("Bearer ghp_fixed"))
-        // Plenty left: used as is.
-        try seed(vault, signedIn.id, service, expiresIn: 3 * 3600)
-        let again = FakeOAuthService()
-        let other = MCPAuth(vault: vault, session: again.session)
-        #expect(await other.withBearer([signedIn])[0].headers["Authorization"] == "Bearer at-0")
-        #expect(again.requests.isEmpty)
-    }
 }
 
 // MARK: - The transport
@@ -940,28 +884,6 @@ struct MCPLoginStatusTests {
         #expect(await manager.status()[config.id] == .idle(toolCount: 1))
         _ = try await manager.test(config.id)
         #expect(await manager.status()[config.id] == .ready(toolCount: 1))
-    }
-
-    @Test func aLoginThatEndedWhileClaudeCodeRenewedItReachesTheCard() async throws {
-        let service = FakeOAuthService { $0.onToken = { _ in .json(#"{"error":"invalid_grant"}"#, status: 400) } }
-        let vault = MemoryVault()
-        let auth = MCPAuth(vault: vault, session: service.session)
-        let manager = manager(service, auth: auth)
-        let config = connector(service)
-        try seed(vault, config.id, service, expiresIn: 10)
-        await manager.sync([config])
-        #expect(await manager.status()[config.id] == .idle(toolCount: nil)) // nothing has asked for the login yet
-
-        let (servers, ended) = await auth.bearers(for: [config])
-        #expect(servers[0].headers["Authorization"] == nil) // the CLI gets the server without a token…
-        #expect(ended == [config.id: .expired]) // …and the app now knows why
-        for (id, reason) in ended { await manager.loginEnded(id, reason: reason) }
-        #expect(await manager.status()[config.id] == .needsSignIn("A sessão do Notion expirou. Entre de novo."))
-
-        // The next turn finds no token at all: that is not news, and the card keeps its words.
-        let again = await auth.bearers(for: [config])
-        #expect(again.ended.isEmpty)
-        #expect(await manager.status()[config.id] == .needsSignIn("A sessão do Notion expirou. Entre de novo."))
     }
 
     @Test func signingOutStopsTheConnectorAndAsksForALoginAgain() async throws {

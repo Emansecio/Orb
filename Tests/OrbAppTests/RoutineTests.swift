@@ -875,14 +875,13 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         old.messages = [.user("antiga")]
         old.summary = "resumo"
         old.summaryCoveredCount = 1
-        old.claudeSessionID = "abc"
         old.workspaceHash = "h"
         old.memorySavedCount = 3
         old.items = [TranscriptItem(.notice(Conversation.routineRunMarker + "ontem")), TranscriptItem(.user(text: "p", attachments: []))]
 
         let next = old.startingRoutineRun(at: .now)
         #expect(next.messages.isEmpty && next.summary == nil && next.summaryCoveredCount == nil)
-        #expect(next.claudeSessionID == nil && next.workspaceHash == nil && next.memorySavedCount == nil)
+        #expect(next.workspaceHash == nil && next.memorySavedCount == nil)
         #expect(next.items.count == 3) // what was there, and the marker of this run
     }
 
