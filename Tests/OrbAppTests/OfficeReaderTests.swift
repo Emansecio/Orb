@@ -135,8 +135,7 @@ final class OfficeReaderTests {
     }
 
     @Test func otherBinaryFormatsGetSpecificAdvice() async throws {
-        for (name, needle) in [("a.pages", "iWork"), ("b.numbers", "iWork"), ("c.key", "iWork"), ("d.xls", "formato antigo"), ("e.ppt", "formato antigo"),
-                               ("f.zip", "compactado")] {
+        for (name, needle) in [("a.pages", "iWork"), ("b.numbers", "iWork"), ("c.key", "iWork"), ("e.ppt", "formato antigo"), ("f.zip", "compactado")] {
             try workspace.write(name, Data([0x50, 0x4B, 0x03, 0x04, 0x00, 0x01, 0x02]))
             do {
                 _ = try await workspace.run(ReadFileTool(), ["path": .string(name)])

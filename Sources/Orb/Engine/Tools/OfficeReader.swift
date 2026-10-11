@@ -29,13 +29,19 @@ enum OfficeReader {
         for (index, sheet) in sheets.enumerated() {
             guard let data = part(url, sheet.path) else { continue }
             let rows = SheetParser.parse(data, strings: strings, maxRows: maxRows + 1)
-            var lines = rows.rows.prefix(maxRows).map { row in "\(row.number): " + row.cells.joined(separator: "\t") }
-            if rows.rows.count > maxRows { lines.append("[... a aba tem mais linhas; leia o resto com run_command ...]") }
-            if rows.cutColumns { lines.append("[... colunas além da \(SheetParser.maxColumns)ª foram omitidas; leia o resto com run_command ...]") }
-            blocks.append("## Aba \(index + 1): \(sheet.name) (\(rows.rows.count > maxRows ? "mais de \(maxRows)" : String(rows.rows.count)) linhas com dados)\n"
-                          + (lines.isEmpty ? "(vazia)" : lines.joined(separator: "\n")))
+            blocks.append(sheetBlock(number: index + 1, name: sheet.name, rows: rows.rows, cutColumns: rows.cutColumns))
         }
         return blocks.isEmpty ? "(planilha vazia)" : blocks.joined(separator: "\n\n")
+    }
+
+    /// One sheet as text. `rows` holds at most `maxRows + 1` rows (the extra one only tells there are more); the
+    /// legacy `.xls` reader prints its sheets through here too, so both formats read the same.
+    static func sheetBlock(number: Int, name: String, rows: [SheetParser.Row], cutColumns: Bool) -> String {
+        var lines = rows.prefix(maxRows).map { row in "\(row.number): " + row.cells.joined(separator: "\t") }
+        if rows.count > maxRows { lines.append("[... a aba tem mais linhas; leia o resto com run_command ...]") }
+        if cutColumns { lines.append("[... colunas além da \(SheetParser.maxColumns)ª foram omitidas; leia o resto com run_command ...]") }
+        return "## Aba \(number): \(name) (\(rows.count > maxRows ? "mais de \(maxRows)" : String(rows.count)) linhas com dados)\n"
+            + (lines.isEmpty ? "(vazia)" : lines.joined(separator: "\n"))
     }
 
     /// The sheets in workbook order with the file each one lives in.

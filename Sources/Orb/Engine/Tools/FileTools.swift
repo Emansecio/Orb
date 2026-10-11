@@ -14,7 +14,7 @@ struct ReadFileTool: AgentTool {
         description: """
         Read a file as numbered lines (`<number><tab><text>`); the number prefix is not file content, never \
         include it in edits. One call returns up to ~24,000 characters or `limit` lines; a note at the end gives \
-        the `offset` to continue. Also reads PDFs (`pages`), Word/RTF/ODT, Excel (.xlsx) and PowerPoint (.pptx) as \
+        the `offset` to continue. Also reads PDFs (`pages`), Word/RTF/ODT, Excel (.xlsx, .xls) and PowerPoint (.pptx) as \
         text, and images (size plus OCR text). Files over 20 MB are refused: use grep \
         (one file up to 200 MB) or head/tail/sed.
         """,
@@ -42,7 +42,8 @@ struct ReadFileTool: AgentTool {
         try url.requireRegularFile()
         let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
 
-        if DocumentReader.isPDF(url) || DocumentReader.isImage(url) || DocumentReader.isDocument(url) || OfficeReader.isOffice(url) {
+        if DocumentReader.isPDF(url) || DocumentReader.isImage(url) || DocumentReader.isDocument(url) || OfficeReader.isOffice(url)
+            || LegacyExcelReader.isLegacyExcel(url) {
             guard size <= maxDocumentBytes else {
                 throw ToolError("\(url.path) é grande demais (\(size) bytes); use run_command para extrair só o que precisa.")
             }
@@ -55,10 +56,14 @@ struct ReadFileTool: AgentTool {
                 return try await Task.detached(priority: .userInitiated) { try DocumentReader.describeImage(at: url, size: size) }.value
             }
             let office = OfficeReader.isOffice(url)
+            let legacyExcel = LegacyExcelReader.isLegacyExcel(url)
             let key = DocumentTextCache.Key(url, size: size)
             let text = try await runDetached {
                 try FileAccess.translating(url, writing: false) {
-                    try DocumentTextCache.shared.text(for: key) { try office ? OfficeReader.text(at: url) : DocumentReader.documentText(at: url) }
+                    try DocumentTextCache.shared.text(for: key) {
+                        if office { return try OfficeReader.text(at: url) }
+                        return try legacyExcel ? LegacyExcelReader.text(at: url) : DocumentReader.documentText(at: url)
+                    }
                 }
             }
             return Self.numbered(TextFile.lines(of: text), arguments: arguments, note: "documento .\(url.pathExtension.lowercased()) convertido em texto")
@@ -110,8 +115,8 @@ struct ReadFileTool: AgentTool {
         switch url.pathExtension.lowercased() {
         case "pages", "numbers", "key":
             "É um pacote do iWork: peça para exportar para PDF, Word ou Excel (Arquivo → Exportar para), ou olhe a prévia embutida com run_command (unzip -l)."
-        case "xls", "ppt":
-            "É um formato antigo do Office, sem leitor aqui: converta para .xlsx ou .pptx (ou PDF) antes, por exemplo abrindo e exportando no Excel ou PowerPoint."
+        case "ppt":
+            "É um formato antigo do PowerPoint, sem leitor aqui: converta para .pptx (ou PDF) antes, por exemplo abrindo e exportando no PowerPoint."
         case "zip", "gz", "tgz", "7z", "rar", "tar":
             "É um arquivo compactado: liste com run_command (unzip -l, tar -tf) e extraia só o que precisa."
         default:
