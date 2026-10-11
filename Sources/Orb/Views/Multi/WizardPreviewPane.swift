@@ -127,11 +127,13 @@ struct WizardPreviewPane: View {
                                      center: .center, startRadius: 0, endRadius: 150))
                 .frame(width: 360, height: 300)
                 .offset(y: -6)
+                .allowsHitTesting(false) // light only: it spills past the stage onto Desenhar/Aleatório
             Rectangle()
                 .fill(EllipticalGradient(colors: [palette.glow.opacity(0.34), palette.core.opacity(0.1), palette.core.opacity(0)],
                                          center: .center, startRadiusFraction: 0, endRadiusFraction: 0.5))
                 .frame(width: 340, height: 76)
                 .offset(y: size / 2 + 2)
+                .allowsHitTesting(false)
             ZStack {
                 OrbView(config: look, activity: shownActivity, size: size, poke: poke, interactive: true,
                         accessibilityText: "Prévia do Orb: \(look.summary). \(shownActivity.label).")
