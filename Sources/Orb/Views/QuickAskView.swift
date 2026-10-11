@@ -182,6 +182,12 @@ struct QuickAskView: View {
                 .lineLimit(1...4)
                 .focused($isFocused)
                 .onSubmit(send)
+                // ⇧↩ breaks the line, as in the chat's field.
+                .background {
+                    ApprovalKeyMonitor { event, window in
+                        isFocused && window.attachedSheet == nil && NewLineKey.isShiftReturn(event) && NewLineKey.insert(in: window)
+                    }
+                }
                 .padding(10)
                 .card(radius: 10)
                 .accessibilityLabel("Mensagem para \(selected?.name ?? "um Orb")")

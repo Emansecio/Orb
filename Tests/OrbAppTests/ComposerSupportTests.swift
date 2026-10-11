@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import Orb
@@ -359,5 +360,35 @@ struct ComposerSupportTests {
         var close = InspectorAutoClose()
         #expect(close.windowResized(to: 1000, isOpen: true) == false)
         #expect(close.windowResized(to: 1500, isOpen: false) == true)
+    }
+}
+
+/// ⇧↩ breaks the line where the cursor is instead of sending.
+@MainActor struct NewLineKeyTests {
+    private func key(_ code: UInt16, _ flags: NSEvent.ModifierFlags) -> NSEvent {
+        NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil,
+                         characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: code)!
+    }
+
+    @Test func onlyShiftReturnIsTheNewLine() {
+        #expect(NewLineKey.isShiftReturn(key(36, .shift)))
+        #expect(NewLineKey.isShiftReturn(key(76, .shift))) // Enter on the keypad
+        #expect(!NewLineKey.isShiftReturn(key(36, [])))
+        #expect(!NewLineKey.isShiftReturn(key(36, [.shift, .command])))
+        #expect(!NewLineKey.isShiftReturn(key(48, .shift))) // ⇧⇥
+    }
+
+    @Test func theLineBreakGoesWhereTheCursorIs() {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [], backing: .buffered, defer: true)
+        let editor = NSTextView(frame: NSRect(x: 0, y: 0, width: 200, height: 100))
+        window.contentView?.addSubview(editor)
+        editor.string = "primeirasegunda"
+        #expect(window.makeFirstResponder(editor))
+        editor.setSelectedRange(NSRange(location: 8, length: 0))
+        #expect(NewLineKey.insert(in: window))
+        #expect(editor.string == "primeira\nsegunda")
+        // No text field with the keys: nothing taken.
+        #expect(window.makeFirstResponder(nil))
+        #expect(!NewLineKey.insert(in: window))
     }
 }

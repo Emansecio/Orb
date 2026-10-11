@@ -78,7 +78,7 @@ struct ComposerView: View {
             LinearGradient(colors: [Palette.canvas.opacity(0), Palette.canvas], startPoint: .top, endPoint: .init(x: 0.5, y: 0.35))
         }
         .background { shortcuts }
-        .background { ApprovalKeyMonitor(handler: handlePasteKey) }
+        .background { ApprovalKeyMonitor(handler: handleKey) }
         .background { ContextGaugeDriver(botID: botID, gauge: gauge) }
         .confirmationDialog(RewindWords.editTitle, isPresented: $isConfirmingEdit, titleVisibility: .visible) {
             Button(RewindWords.editConfirm, role: .destructive) { submitEdit() }
@@ -395,11 +395,13 @@ struct ComposerView: View {
     /// Finder attaches them; anything with text on the clipboard pastes as text, as before. The text field cannot
     /// take a picture, so the key is looked at before it gets there. Only the composer's own window counts: the menu
     /// bar panel, Settings and the sheets over the chat keep their ⌘V.
-    private func handlePasteKey(_ event: NSEvent, in window: NSWindow) -> Bool {
-        guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
-              event.charactersIgnoringModifiers == "v",
-              PasteGate.takes(eventIsInComposerWindow: event.window === window, isKey: window.isKeyWindow,
+    /// ⇧↩ breaks the line too (the field itself only knows ⌥↩), at the cursor, instead of sending.
+    private func handleKey(_ event: NSEvent, in window: NSWindow) -> Bool {
+        guard PasteGate.takes(eventIsInComposerWindow: event.window === window, isKey: window.isKeyWindow,
                               hasSheet: window.attachedSheet != nil, isFocused: isFocused) else { return false }
+        if NewLineKey.isShiftReturn(event) { return NewLineKey.insert(in: window) }
+        guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+              event.charactersIgnoringModifiers == "v" else { return false }
         return pasteImages()
     }
 
@@ -696,6 +698,22 @@ enum ComposerHint {
 
 /// Whether the composer's ⌘V monitor takes a key press. The monitor sees every key of the app, so it must be sure the
 /// press is for the composer's window (not the menu bar panel, Settings or a sheet over the chat) and its field.
+/// ⇧↩ in a message field: a new line where the cursor is, as ⌥↩ makes, never a send.
+enum NewLineKey {
+    static func isShiftReturn(_ event: NSEvent) -> Bool {
+        [36, 76].contains(event.keyCode) // Return, and Enter on the numeric keypad
+            && event.modifierFlags.intersection([.shift, .command, .option, .control]) == .shift
+    }
+
+    /// The field being typed in takes the line break (with its undo); false when no text field has the keys.
+    @MainActor
+    static func insert(in window: NSWindow) -> Bool {
+        guard let editor = window.firstResponder as? NSTextView else { return false }
+        editor.insertNewlineIgnoringFieldEditor(nil)
+        return true
+    }
+}
+
 enum PasteGate {
     static func takes(eventIsInComposerWindow: Bool, isKey: Bool, hasSheet: Bool, isFocused: Bool) -> Bool {
         eventIsInComposerWindow && isKey && !hasSheet && isFocused

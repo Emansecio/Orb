@@ -28,7 +28,7 @@ enum CommandName {
     static let skills = "Skills"
     static let globalShortcut = "Abrir o painel da barra de menus com ⌃⌥Espaço"
     /// Shift-Return sends in a multi-line field on macOS; Option-Return is what breaks the line.
-    static let newLineKeys = "⌥↩"
+    static let newLineKeys = "⇧↩"
 }
 
 /// The keys the menus declare.

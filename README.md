@@ -180,7 +180,7 @@ Se o motor escolhido não estiver instalado, o Orb fica só com `web_fetch` e `w
 
 ## Conversar
 
-- **Escrever.** ↩ envia, ⌥↩ pula de linha. Digite `/` para ver as skills (↑↓ escolhem, ↩ ou ⇥ completam, Esc fecha).
+- **Escrever.** ↩ envia, ⇧↩ (ou ⌥↩) pula de linha. Digite `/` para ver as skills (↑↓ escolhem, ↩ ou ⇥ completam, Esc fecha).
 - **Respostas** vêm em Markdown de verdade: títulos, listas (inclusive de tarefas), tabelas, citações e blocos de código com
   botão "Copiar". Passe o mouse sobre uma resposta para "Copiar" ou "Copiar como Markdown".
 - **Anexos.** O botão `+`, ⌘V ou soltar em qualquer ponto do chat (a conversa toda vira o alvo, sem abrir nada; vale também imagem arrastada direto do navegador) anexa. Imagens (PNG, JPEG, HEIC, GIF, WebP, TIFF; até 20 MB cada)
@@ -590,7 +590,7 @@ tem a **Galeria**, os **Instalados** e **Explorar**.
 | ⌘1 … ⌘9 | Ir para o Orb de mesmo número na barra lateral |
 | ⌥⌘R / ⌥⌘C / ⌥⌘K | Rotinas / Conectores / Skills |
 | ⌘, | Ajustes |
-| ↩ / ⌥↩ | Enviar (com o Orb trabalhando, direciona a tarefa) / nova linha |
+| ↩ / ⇧↩ | Enviar (com o Orb trabalhando, direciona a tarefa) / nova linha |
 | ⇥ | Com o Orb trabalhando e algo escrito: pôr na fila para depois da tarefa. Com a lista de skills aberta: completar a skill |
 | ⌘↩ | Com o Orb trabalhando e algo escrito: parar e enviar agora (recusa o pedido aberto, se houver; desligado durante a edição de uma mensagem). Num cartão de aprovação, com o campo de mensagem vazio: permitir. No painel de contexto: compactar |
 | Esc | Num cartão de aprovação: não permitir (não vale enquanto você digita). Também fecha a paleta e a lista de skills; com o cursor no campo, desiste da edição de uma mensagem (depois de fechar a lista de skills, se estiver aberta) |
@@ -607,7 +607,7 @@ já usa essas teclas, o Orb avisa e deixa desligado.
 ## Barra de menus e pergunta rápida
 
 O ícone do Orb na barra de menus muda quando algum Orb trabalha (cheio) e ganha um ponto quando algum espera por você. O
-painel dele deixa **perguntar a um Orb sem abrir o app** (escolha o Orb, escreva, ↩ envia, ⌥↩ pula de linha), ler o fim da
+painel dele deixa **perguntar a um Orb sem abrir o app** (escolha o Orb, escreva, ↩ envia, ⇧↩ pula de linha), ler o fim da
 resposta e **responder pedidos de permissão** de todos os Orbs. Se o Orb escolhido já está trabalhando, a mensagem entra na fila,
 como no chat (numa rotina, o painel avisa que ela precisa terminar). "Ver conversa" continua no app. A conversa é a mesma do chat.
 

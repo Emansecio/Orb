@@ -116,7 +116,7 @@ import Testing
     @Test func theKeysOfTheViewsAreInTheCatalogToo() {
         let keys = ShortcutCatalog.items.map(\.keys)
         for shortcut in AppShortcut.contextual { #expect(keys.contains(shortcut.label), "\(shortcut.label) falta no catálogo") }
-        for key in ["⇧⌘M", "⌘↩", "⌘Z", "⌘,", "esc", "↩", "⌥↩", "⌃⌥Espaço"] { #expect(keys.contains(key), "\(key) falta no catálogo") }
+        for key in ["⇧⌘M", "⌘↩", "⌘Z", "⌘,", "esc", "↩", "⇧↩", "⌃⌥Espaço"] { #expect(keys.contains(key), "\(key) falta no catálogo") }
         // Every command has a key, and each is listed once.
         for command in ShortcutCommand.allCases {
             #expect(ShortcutCatalog.items.filter { $0.command == command }.count == 1, "\(command)")
@@ -153,12 +153,12 @@ import Testing
         #expect(AppShortcut.stop.label == "⌘.")
     }
 
-    /// In a multi-line field of macOS, Shift-Return sends; the line break is Option-Return. The hints say so.
-    @Test func newLineHintIsOptionReturn() {
-        #expect(CommandName.newLineKeys == "⌥↩")
+    /// The message fields break the line with Shift-Return (`NewLineKey`; Option-Return still works), and the hints say so.
+    @Test func newLineHintIsShiftReturn() {
+        #expect(CommandName.newLineKeys == "⇧↩")
         let items = ShortcutCatalog.groups.flatMap(\.items)
-        #expect(items.contains { $0.keys == "⌥↩" && $0.title == "Nova linha na mensagem" })
-        #expect(!items.contains { $0.keys.contains("⇧↩") })
+        #expect(items.contains { $0.keys == "⇧↩" && $0.title == "Nova linha na mensagem" })
+        #expect(items.filter { $0.keys.contains("⇧↩") }.count == 1)
     }
 
     @Test func catalogListsTheCommandsOfTheMenus() {

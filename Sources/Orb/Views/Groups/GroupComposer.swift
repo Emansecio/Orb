@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The field under a group's thread. ↩ sends, ⌥↩ breaks the line, "@" opens the members (and "todos") with ↑↓ and ↩. No
+/// The field under a group's thread. ↩ sends, ⇧↩ or ⌥↩ breaks the line, "@" opens the members (and "todos") with ↑↓ and ↩. No
 /// attachments in a group (v1).
 struct GroupComposer: View {
     /// The names of the members: what a mention can call.
@@ -30,8 +30,11 @@ struct GroupComposer: View {
                     .lineLimit(1...8)
                     .focused($isFocused)
                     .onKeyPress(.return, phases: .down) { press in
-                        // ⌥↩ is the line break: the field takes it as it is.
+                        // ⌥↩ is the line break: the field takes it as it is. ⇧↩ makes the same one.
                         if press.modifiers.contains(.option) { return .ignored }
+                        if press.modifiers.contains(.shift), let window = NSApp.keyWindow {
+                            return NewLineKey.insert(in: window) ? .handled : .ignored
+                        }
                         if isPicking {
                             choose(options[min(selected, options.count - 1)])
                         } else {
