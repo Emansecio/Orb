@@ -562,6 +562,59 @@ private final class Hooks: GroupTurnHooks {
         #expect(model.delegation.inbox.isEmpty && model.delegation.queues.values.allSatisfy(\.isEmpty))
     }
 
+    /// Atlas asks Pesquisador, who asks Revisor and waits (Revisor is held on a valve): Pesquisador's side conversation is kept in memory.
+    private func waitingMiddleTeam(_ valve: Valve) -> Team {
+        Team { seen in
+            switch seen.who {
+            case "Atlas":
+                if seen.toolResult != nil { return say("Pedi.") }
+                return orbsCall("ask", to: "Pesquisador", "Pesquise.")
+            case "Pesquisador":
+                if seen.toolResult != nil { return say("Aguardo.") }
+                return orbsCall("ask", to: "Revisor", "Revise.")
+            default:
+                await valve.wait()
+                return say("Tarde.")
+            }
+        }
+    }
+
+    private func openLines(of team: Team, request: DelegationRequest) throws -> [OrbMessageItem] {
+        let side = try #require(team.model.store.readSideConversation(prefix: Store.pedidoPrefix, id: request.id, for: team.pesquisador.id).value)
+        return side.items.compactMap { if case .orbMessage(let message) = $0.kind, message.state == .open { message } else { nil } }
+    }
+
+    @Test func stoppingTheChainClosesTheLinesOfARequestThatWaitedForItsChildren() async throws {
+        let valve = Valve()
+        let team = waitingMiddleTeam(valve)
+        defer { team.cleanUp() }
+        let model = team.model
+        model.send("peça", to: team.atlas.id, fromUser: true)
+        await waitUntil("the middle one to wait") { team.request(from: team.atlas, to: team.pesquisador)?.state == .awaitingChildren }
+        await waitUntil("the asker turn to end") { team.botTexts(team.atlas) == ["Pedi."] }
+        let middle = try #require(team.request(from: team.atlas, to: team.pesquisador))
+        #expect(try !openLines(of: team, request: middle).isEmpty) // "Aguardando resposta" is on disk while it waits
+        model.stop(team.atlas.id)
+        #expect(try openLines(of: team, request: middle).isEmpty)
+        await valve.open()
+        await team.settle()
+    }
+
+    @Test func aTimedOutRequestThatWaitedForItsChildrenClosesItsLines() async throws {
+        let valve = Valve()
+        let team = waitingMiddleTeam(valve)
+        defer { team.cleanUp() }
+        let model = team.model
+        model.send("peça", to: team.atlas.id, fromUser: true)
+        await waitUntil("the middle one to wait") { team.request(from: team.atlas, to: team.pesquisador)?.state == .awaitingChildren }
+        let middle = try #require(team.request(from: team.atlas, to: team.pesquisador))
+        model.delegation.sweep(now: .now.addingTimeInterval(DelegationLimits.requestTimeout + 60))
+        #expect(model.delegation.requests[middle.id]?.state == .failed)
+        #expect(try openLines(of: team, request: middle).isEmpty)
+        await valve.open()
+        await team.settle()
+    }
+
     @Test func anOrbDeletedMidChainAnswersFailedToWhoWaited() async throws {
         let valve = Valve()
         let team = Team { seen in
@@ -844,5 +897,50 @@ private actor Names {
         #expect(items.contains { if case .event(let event) = $0.kind { event.kind == .groupStopped } else { false } })
         #expect(!items.contains { if case .orbMessage(let message) = $0.kind { message.text.contains("não") && message.direction == .post && message.kind == .reply } else { false } })
         #expect(team.botTexts(team.atlas).isEmpty)
+        // The stop is told in the group's thread; the orchestrator's private chat gets no "conversa entre Orbs" line.
+        #expect(!team.events(team.atlas).contains { $0.kind == .chainStopped })
+    }
+
+    @Test func endingFromThePauseDoesNotWriteInTheOrchestratorsPrivateChat() async throws {
+        let team = Team { seen in
+            switch seen.who {
+            case "Atlas":
+                if seen.user.contains("<orb_reply") { return say("Isto não devia aparecer.") }
+                if seen.toolResult != nil { return say("Pedi ao Pesquisador.") }
+                return orbsCall("ask", to: "Pesquisador", "Pesquise.")
+            default: return say("Achei 42.")
+            }
+        }
+        defer { team.cleanUp() }
+        let group = group(team, budget: GroupBudget(maxTurns: 2, maxTokens: 1_000_000))
+        team.model.postUserMessage("Descubra o número", to: group.id)
+        await waitUntil("the group to pause") { team.model.groupLive(group.id).runState == .paused(.turns) }
+        team.model.endRun(group.id)
+        await team.settle()
+        #expect(team.model.groupLive(group.id).runState == .idle)
+        #expect(!team.events(team.atlas).contains { $0.kind == .chainStopped })
+        #expect(team.model.groupSession(group.id)?.items.contains { if case .event(let event) = $0.kind { event.kind == .groupStopped } else { false } } == true)
+    }
+
+    @Test func aPausedGroupDoesNotTimeOutAndContinuarStillDeliversTheHeldAnswer() async throws {
+        let team = Team { seen in
+            switch seen.who {
+            case "Atlas":
+                if seen.user.contains("<orb_reply") { return say("Fechado com o que o Pesquisador achou.") }
+                if seen.toolResult != nil { return say("Pedi ao Pesquisador.") }
+                return orbsCall("ask", to: "Pesquisador", "Pesquise.")
+            default: return say("Achei 42.")
+            }
+        }
+        defer { team.cleanUp() }
+        let group = group(team, budget: GroupBudget(maxTurns: 2, maxTokens: 1_000_000))
+        team.model.postUserMessage("Descubra o número", to: group.id)
+        await waitUntil("the group to pause") { team.model.groupLive(group.id).runState == .paused(.turns) }
+        // Half an hour and more pass while the group waits for the person.
+        team.model.delegation.sweep(now: .now.addingTimeInterval(DelegationLimits.requestTimeout + 60))
+        #expect(team.model.delegation.requests.values.allSatisfy { $0.state != .failed })
+        team.model.continueRun(group.id)
+        await waitUntil("the held answer to wake the orchestrator") { self.finalPosts(team, group, "Fechado com o que o Pesquisador achou.") == 1 }
+        await team.settle()
     }
 }

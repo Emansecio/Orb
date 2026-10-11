@@ -36,7 +36,7 @@ struct GroupPauseCard: View {
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.muted)
                 ActionRow {
-                    Button("Encerrar") { model.stopGroup(pause.groupID) }
+                    Button("Encerrar") { model.endRun(pause.groupID) }
                         .buttonStyle(GhostStyle())
                         .hangsOnLeadingEdge()
                 } trailing: {

@@ -416,6 +416,11 @@ final class DelegationHub: DelegationService {
         let ready = held.filter { requests[$0]?.envelope.chainID == chain }
         held.removeAll { id in ready.contains(id) || requests[id]?.state != .queued }
         var targets: [UUID] = []
+        // The wait restarts: the time the group spent paused does not count against the requests it held.
+        for id in requests.keys where requests[id]?.envelope.chainID == chain {
+            if requests[id]?.state == .queued { requests[id]?.envelope.sentAt = .now }
+            if requests[id]?.state == .awaitingChildren { waitingSince[id] = .now }
+        }
         for id in ready {
             guard let request = requests[id], request.state == .queued else { continue }
             queues[request.envelope.to.id, default: []].insert(id, at: 0)
@@ -445,7 +450,7 @@ final class DelegationHub: DelegationService {
             requests[envelope.id]?.state = .cancelled
             requests[envelope.id]?.finishedAt = .now
             queues[envelope.to.id]?.removeAll { $0 == envelope.id }
-            suspended[envelope.id] = nil
+            closeSuspended(request, as: .cancelled)
             waitingSince[envelope.id] = nil
             touched.formUnion([envelope.from.id, envelope.to.id])
             if envelope.kind == .ask { markSent(envelope.id, asker: envelope.from.id, as: .cancelled) }
@@ -464,7 +469,8 @@ final class DelegationHub: DelegationService {
         // Their requests are marked first, so the end of each turn finds nothing to answer.
         for botID in running { model.session(botID).stop(startsQueuedRoutines: false) }
         refresh(Array(touched))
-        if reason == .user, !isShuttingDown, !alreadyCancelled, !open.isEmpty || hadInbox, model.bot(chain.originBot) != nil {
+        // A group's chain says it stopped in the group's own thread (`groupStopped`), never in its orchestrator's private chat.
+        if reason == .user, chain.groupID == nil, !isShuttingDown, !alreadyCancelled, !open.isEmpty || hadInbox, model.bot(chain.originBot) != nil {
             appendToChat(of: chain.originBot, .event(OrbEvent(kind: .chainStopped, actor: model.bot(chain.originBot).map(OrbRef.init),
                                                               chainID: id)))
         }
@@ -517,6 +523,17 @@ final class DelegationHub: DelegationService {
         refresh(Array(Set(affected.flatMap { [$0.envelope.from.id, $0.envelope.to.id] })))
     }
 
+    /// The request waited for its children and will not resume: the conversation kept in memory for it is closed on disk, its
+    /// open lines (the request itself and what it asked) now read `state`, so "Ver o trabalho" does not wait for an answer forever.
+    private func closeSuspended(_ request: DelegationRequest, as state: OrbMessageItem.State) {
+        let id = request.id
+        guard var conversation = suspended.removeValue(forKey: id) else { return }
+        for child in request.openChildren { conversation.items.settingSent(child, to: state) }
+        conversation.items.settingReceived(id, to: state)
+        let envelope = request.envelope
+        write(conversation, kind: envelope.groupID != nil ? .group : .delegation, runID: envelope.groupID ?? id, for: envelope.to.id)
+    }
+
     /// A request that cannot go on (the target cannot start, time ran out): it ends `failed` and its asker is told.
     private func fail(_ request: DelegationRequest, _ reason: String) {
         var failed = request
@@ -524,7 +541,7 @@ final class DelegationHub: DelegationService {
         failed.finishedAt = .now
         requests[request.id] = failed
         queues[request.envelope.to.id]?.removeAll { $0 == request.id }
-        suspended[request.id] = nil
+        closeSuspended(request, as: .failed)
         waitingSince[request.id] = nil
         answer(failed, status: .failed, text: reason)
         if request.envelope.groupID != nil { groupHooks?.turnFinished(failed, reply: nil, outcome: .failed) }
@@ -542,12 +559,16 @@ final class DelegationHub: DelegationService {
 
     /// Run by the scheduler every 30 seconds: a request that waited too long ends `failed`, and what is old and idle is forgotten.
     func sweep(now: Date = .now) {
-        for request in requests.values where request.state == .queued
+        // A group's pause is not a timeout: what the group holds back (queued turns, answers in the inbox) waits for "Continuar".
+        for request in requests.values where request.state == .queued && !held.contains(request.id)
             && now.timeIntervalSince(request.envelope.sentAt) > DelegationLimits.requestTimeout {
             fail(request, "Tempo esgotado")
         }
+        let answered = Set(inbox.values.flatMap { $0.compactMap(\.servingRequest) })
         for (id, since) in waitingSince where now.timeIntervalSince(since) > DelegationLimits.requestTimeout {
-            if let request = requests[id], request.state == .awaitingChildren { fail(request, "Tempo esgotado") }
+            guard let request = requests[id], request.state == .awaitingChildren else { continue }
+            if answered.contains(id) || !request.openChildren.isDisjoint(with: held) { continue }
+            fail(request, "Tempo esgotado")
         }
         let busy = Set(requests.values.filter { Self.isOpen($0.state) }.map(\.envelope.chainID))
             .union(inbox.values.flatMap { $0.map(\.chainID) })
