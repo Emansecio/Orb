@@ -92,6 +92,7 @@ struct ComposerView: View {
             isFocused = true
             _ = model.takeChatRequest(.focusComposer, of: botID) // ⌘L that opened this chat: it already has the focus
         }
+        .onChange(of: botID) { orbChanged() }
         // The model list closing (⇧⌘M then ↩, or a click) hands the focus back to the field.
         .onChange(of: isModelOpen) { if !isModelOpen { isFocused = true } }
         // "Editar" put a message in the field: write on it.
@@ -100,6 +101,21 @@ struct ComposerView: View {
         .onChange(of: model.pendingChatRequest) {
             if model.takeChatRequest(.focusComposer, of: botID) { isFocused = true }
         }
+    }
+
+    /// The composer stays when another Orb is chosen (ChatView): what was open for the last one closes, and the new
+    /// Orb's field takes the keys as a newly opened chat's does.
+    private func orbChanged() {
+        isImporting = false
+        isModelOpen = false
+        isConfirmingEdit = false
+        slashIndex = 0
+        isSlashDismissed = false
+        isFocused = true
+        _ = model.takeChatRequest(.focusComposer, of: botID)
+        // The field is the same one, with the other Orb's draft: what ⌘Z would undo was typed for the last Orb (in this
+        // field or in its panel's), so it goes. The main window's undo is only its text fields'.
+        NSApp.mainWindow?.undoManager?.removeAllActions()
     }
 
     // MARK: Card

@@ -58,8 +58,9 @@ struct ChatView: View {
             VStack(spacing: 0) {
                 FirstRunBanner(botID: botID)
                     .id(botID)
+                // One composer for every Orb (its draft and attachments live in the Orb's lane): changing Orbs does not
+                // build it again, and it clears what belongs to one Orb itself (`ComposerView.orbChanged`).
                 ComposerView(botID: botID, isDropTargeted: isDropTargeted)
-                    .id(botID)
             }
         }
         .onDrop(of: AppModel.droppableTypes, isTargeted: $isDropTargeted) { model.attachDropped($0, to: botID) }

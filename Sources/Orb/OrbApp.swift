@@ -29,6 +29,7 @@ struct OrbApp: App {
                     OrbImages.prewarmResting(model.bots.map(\.orb), selected: model.selectedBot?.orb,
                                              scale: NSScreen.main?.backingScaleFactor ?? 2)
                 }
+                .task { await SwitchBench.runIfAsked(model) }
                 .task {
                     // Snapshots send their own launch prompt; the regular window must not send it again.
                     if !CommandLine.arguments.contains("--snapshot") { model.sendLaunchPrompt() }

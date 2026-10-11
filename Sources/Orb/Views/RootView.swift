@@ -127,8 +127,9 @@ private struct DetailView: View {
         )) {
             ZStack {
                 if let id = selectedBotID {
+                    // One panel for every Orb: changing Orbs gives it the other's data instead of building it again (its
+                    // form, pickers and switches took about a third of a change). It clears what belongs to one Orb itself.
                     BotInspector(botID: id)
-                        .id(id)
                         .transition(.opacity)
                 } else if let id = selectedGroupID {
                     // MARK: MultiOrb (WP6): a group's panel in the same column

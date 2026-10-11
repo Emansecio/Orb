@@ -66,7 +66,7 @@ struct BotInspector: View {
             }
             .overlay(alignment: .bottom) { MemoryUndoToast(undo: model.memoryUndo).padding(.bottom, 14) }
             .onChange(of: tab) { _, new in InspectorTabMemory.remember(new, for: botID) }
-            .onChange(of: botID) { _, new in tab = InspectorTabMemory.tab(for: new) }
+            .onChange(of: botID) { _, new in orbChanged(to: new) }
             .task(id: bot.workingDirectory) {
                 instructionFile = await FolderInstructions.loadInBackground(from: bot.workingURL)
             }
@@ -130,6 +130,25 @@ struct BotInspector: View {
             }
             .background(Palette.chrome)
         }
+    }
+
+    /// The panel stays when another Orb is chosen (RootView): what belonged to the last one goes, and this one's tab and
+    /// requests come in.
+    private func orbChanged(to new: UUID) {
+        tab = InspectorTabMemory.tab(for: new)
+        isEditingOrb = false
+        isPickingFolder = false
+        isConfirmingBypass = false
+        isEditingIdentity = false
+        isShowingMemory = false
+        memorySheetKind = nil
+        identityDraft = ""
+        isSavingIdentity = false
+        identitySaveFailed = false
+        listing = nil // read again for this Orb's folder (`FilesKey`)
+        folderProblem = nil
+        editingRoutine = nil
+        takeRequests()
     }
 
     /// What a command asked of this panel: the appearance editor ("Personalizar…"), or a tab ("Gerenciar" in the
@@ -550,6 +569,7 @@ struct BotInspector: View {
             memorySheetKind = kind
             isShowingMemory = true
         })
+        .id(bot.id) // its search belongs to one Orb's memory (the panel itself stays across Orbs)
     }
 
     /// Falls back to the last rendered value, so a sheet closing after deletion never reads a missing bot.
