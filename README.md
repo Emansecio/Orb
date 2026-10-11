@@ -183,7 +183,7 @@ Se o motor escolhido não estiver instalado, o Orb fica só com `web_fetch` e `w
 - **Escrever.** ↩ envia, ⌥↩ pula de linha. Digite `/` para ver as skills (↑↓ escolhem, ↩ ou ⇥ completam, Esc fecha).
 - **Respostas** vêm em Markdown de verdade: títulos, listas (inclusive de tarefas), tabelas, citações e blocos de código com
   botão "Copiar". Passe o mouse sobre uma resposta para "Copiar" ou "Copiar como Markdown".
-- **Anexos.** O botão `+` (ou arrastar para a janela, ou ⌘V) anexa. Imagens (PNG, JPEG, HEIC, GIF, WebP, TIFF; até 20 MB cada)
+- **Anexos.** O botão `+`, ⌘V ou soltar em qualquer ponto do chat (a conversa toda vira o alvo, sem abrir nada; vale também imagem arrastada direto do navegador) anexa. Imagens (PNG, JPEG, HEIC, GIF, WebP, TIFF; até 20 MB cada)
   são reduzidas (um chip "Preparando imagem…" aparece e o envio espera) e enviadas ao modelo se ele enxerga; se ele não enxerga, só o caminho vai e o app avisa. Outros arquivos
   vão como caminho: o Orb os lê com as ferramentas (precisa de "Terminal e arquivos"); um arquivo sozinho, sem texto, já pode ser enviado (o Orb recebe "Veja o(s) arquivo(s) anexado(s).") ou colocado na fila. A captura de tela que o Orb tira
   também chega a ele como imagem, quando o modelo enxerga.

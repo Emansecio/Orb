@@ -10,10 +10,11 @@ struct ComposerView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let botID: UUID
+    /// Something is being dragged over the chat (`ChatView` takes the drop): the card lights up where it will land.
+    var isDropTargeted = false
 
     @FocusState private var isFocused: Bool
     @State private var isImporting = false
-    @State private var isDropTargeted = false
     @State private var isModelOpen = false
     /// What the context meter and the "conversa longa" card show (measured by `ContextGaugeDriver`).
     @State private var gauge = ContextGauge()
@@ -151,15 +152,7 @@ struct ComposerView: View {
         // The shadow belongs to the background alone: on the whole card every key in the field re-rendered the text,
         // chips and buttons into an offscreen pass to cast it.
         .background { ComposerSurface(isFocused: isFocused, isDropTargeted: isDropTargeted, reduceMotion: reduceMotion) }
-        .overlay {
-            ZStack { if isDropTargeted { dropOverlay } }
-                .animation(reduceMotion ? nil : Motion.hover(isDropTargeted), value: isDropTargeted)
-        }
         .onGeometryChange(for: Bool.self) { $0.size.width < Self.compactBelow } action: { isCompact = $0 }
-        .dropDestination(for: URL.self) { urls, _ in
-            attach(urls)
-            return true
-        } isTargeted: { isDropTargeted = $0 }
     }
 
     /// The line above the field while a message of the chat is being edited: what it is, how to leave, and the button for it.
@@ -180,16 +173,6 @@ struct ComposerView: View {
         .foregroundStyle(Palette.accentText)
         .padding(.horizontal, 4)
         .accessibilityElement(children: .contain)
-    }
-
-    private var dropOverlay: some View {
-        Label("Solte para anexar", systemImage: "arrow.down.doc")
-            .font(.system(size: 14, weight: .medium))
-            .foregroundStyle(Palette.ink)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Palette.surface.opacity(0.92), in: .rect(cornerRadius: 20))
-            .allowsHitTesting(false)
-            .transition(.opacity)
     }
 
     private var placeholder: LocalizedStringKey {
@@ -402,29 +385,10 @@ struct ComposerView: View {
 
     // MARK: Actions
 
-    /// Pictures become image attachments (shrunk and saved in the background); other files keep being listed by path.
+    /// The file picker or ⌘V: typing can go on right away.
     private func attach(_ urls: [URL]) {
-        let lane = lane
-        for url in urls where url.isFileURL {
-            if ImageProcessing.isImageFile(url) {
-                attachPicture { try await $0.attach(fileAt: url, botID: $1) }
-            } else if !lane.files.contains(where: { $0.url == url }) {
-                lane.files.append(AttachedFile(url: url))
-            }
-        }
-        isFocused = true // the file picker, a drop or ⌘V: typing can go on right away
-    }
-
-    private func attachPicture(_ load: @escaping @Sendable (ImageStore, UUID) async throws -> ImageAttachment) {
-        let lane = lane
-        lane.error = nil
-        let store = model.images, botID = botID
-        lane.pendingPictures += 1 // sending waits until the picture is in (see `canSend`)
-        Task {
-            defer { lane.pendingPictures -= 1 }
-            do { lane.pictures.append(try await load(store, botID)) }
-            catch { lane.error = error.localizedDescription }
-        }
+        model.attach(urls, to: botID)
+        isFocused = true
     }
 
     /// ⌘V with a picture on the clipboard (a screenshot, an image copied from Preview) or with picture files copied in
@@ -449,7 +413,8 @@ struct ComposerView: View {
         }
         let hasText = board.types?.contains { [.string, .rtf].contains($0) } ?? false
         guard files.isEmpty, !hasText, let data = board.data(forType: .png) ?? board.data(forType: .tiff) else { return false }
-        attachPicture { try await $0.attach(data, name: "imagem colada", botID: $1) }
+        model.attachPicture(to: botID) { try await $0.attach(data, name: "imagem colada", botID: $1) }
+        isFocused = true
         return true
     }
 

@@ -7,7 +7,15 @@ struct ChatView: View {
     let botID: UUID
     /// The find bar (⌘F) of this chat. One for the view, which stays across Orbs: it is closed when the Orb changes.
     @State private var find = ConversationFind()
+    /// Files or a picture are being dragged over the chat: anywhere on it, they join the next message.
+    @State private var isDropTargeted: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// `showsDrop`: drawn as while files are dragged over it (a `--snapshot` of it).
+    init(botID: UUID, showsDrop: Bool = false) {
+        self.botID = botID
+        _isDropTargeted = State(initialValue: showsDrop)
+    }
 
     var body: some View {
         let live = model.live(botID)
@@ -31,6 +39,11 @@ struct ChatView: View {
             }
         }
         .motion(Motion.content, value: find.isOpen)
+        // Over the conversation, above the composer (whose card lights up too): the whole chat takes the drop.
+        .overlay {
+            ZStack { if isDropTargeted { ChatDropOverlay() } }
+                .animation(reduceMotion ? nil : Motion.hover(isDropTargeted), value: isDropTargeted)
+        }
         .onAppear { bindFind(); takeFindRequest() }
         .onChange(of: botID) {
             find.close()
@@ -45,10 +58,11 @@ struct ChatView: View {
             VStack(spacing: 0) {
                 FirstRunBanner(botID: botID)
                     .id(botID)
-                ComposerView(botID: botID)
+                ComposerView(botID: botID, isDropTargeted: isDropTargeted)
                     .id(botID)
             }
         }
+        .onDrop(of: AppModel.droppableTypes, isTargeted: $isDropTargeted) { model.attachDropped($0, to: botID) }
         .background(Palette.canvas)
         .navigationTitle(look.name)
         .navigationSubtitle(model.modelName(forModel: live.modelID))
@@ -79,6 +93,33 @@ extension ChatView {
     /// ⌘F from the command palette or a menu: the bar opens (the chat may have just been created for it).
     private func takeFindRequest() {
         if model.takeChatRequest(.findInConversation, of: botID) { find.open() }
+    }
+}
+
+/// What the chat shows while files are dragged over it: where they go, before they are let go.
+private struct ChatDropOverlay: View {
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "arrow.down.doc")
+                .font(.system(size: 28, weight: .regular))
+                .foregroundStyle(Palette.accentText)
+            Text("Solte para anexar")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Palette.ink)
+            Text("Arquivos e imagens vão com a sua próxima mensagem")
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.muted)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Palette.canvas.opacity(0.88), in: .rect(cornerRadius: 18))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18)
+                .strokeBorder(Palette.accentText.opacity(0.7), style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
+        }
+        .padding(12)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .transition(.opacity)
     }
 }
 

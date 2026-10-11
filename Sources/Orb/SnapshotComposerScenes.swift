@@ -29,6 +29,10 @@ extension Snapshot {
             lane.error = "Não foi possível ler uma das imagens."
             model.setDraft("O que há nestas imagens?", for: bot.id)
             return AnyView(ChatView(botID: bot.id))
+        case "chat-drop":
+            // Files dragged over the chat, before they are let go: anywhere on it takes them.
+            seedConversation(model, bot: bot)
+            return AnyView(ChatView(botID: bot.id, showsDrop: true))
         case "chat-slash":
             model.skills = [Skill(slug: "resumir", name: "Resumir", summary: "Resume um texto ou arquivo em poucos tópicos.", instructions: "x"),
                             Skill(slug: "revisar", name: "Revisar código", summary: "Revisa mudanças e aponta riscos.", instructions: "x"),
