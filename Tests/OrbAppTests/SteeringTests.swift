@@ -255,6 +255,25 @@ struct SteeringEngineTests {
         #expect(attached == [[file.path]])
     }
 
+    @Test @MainActor func theTextOfAnAttachedFileGoesWithTheMessage() async throws {
+        let client = HeldModel()
+        let (model, bot) = setUp(client)
+        let table = root.appending(path: "matriculas.csv")
+        try Data("nome;matricula\nAna;1128938200\n- não é um arquivo\n".utf8).write(to: table)
+        let archive = root.appending(path: "fotos.zip")
+        try Data([0x50, 0x4B, 0x03, 0x04, 0, 0, 0xFF, 0x00]).write(to: archive)
+        model.attach([table, archive], to: bot.id) // read in the background as they are attached
+        #expect(model.send("confira", attachments: [table, archive], to: bot.id, fromUser: true))
+        await waitUntilIdle(model, bot.id)
+        let seen = try #require(await client.seen.calls.first?.last)
+        #expect(seen.content.contains("Ana;1128938200"))
+        #expect(seen.content.contains("<attached_file path=\"\(archive.path)\">\n(not read here: read it with your tools)"))
+        // What the summaries take as the user's words: the request and the two names, not the lines of the table.
+        #expect(TurnPreface.userWords(seen.content).hasPrefix("confira"))
+        #expect(!TurnPreface.userWords(seen.content).contains("não é um arquivo"))
+        #expect(TurnPreface.requestWords(seen.content) == "confira")
+    }
+
     @Test @MainActor func aFileAloneIsQueuedWhileTheOrbWorks() async throws {
         let gate = Latch()
         let client = HeldModel(gate: gate)

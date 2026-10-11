@@ -169,6 +169,8 @@ final class AppModel {
     @ObservationIgnored private(set) var store: Store
     /// Pictures attached to messages and returned by tools (`anexos/<id>/` in the data folder).
     @ObservationIgnored let images: ImageStore
+    /// The text of the files attached in the composers, read as they are attached (see `AttachmentText`).
+    @ObservationIgnored let attachmentTexts = AttachmentTextCache()
     /// Models ("provider/model") that answered that they cannot read pictures, so later turns do not try again.
     @ObservationIgnored private var visionRejected: Set<String> = []
     /// Context windows learned from refusals ("provider/model"); they shrink the history budget of that model.
@@ -1431,9 +1433,7 @@ final class AppModel {
             prompt = expansion.prompt
             if let index = skills.firstIndex(where: { $0.id == expansion.skill.id }) { skills[index].uses += 1 }
         }
-        if !attachments.isEmpty {
-            prompt += "\n\nAttached files (read them with your tools):\n" + attachments.map { "- \($0.path)" }.joined(separator: "\n")
-        }
+        // The files and their text go at the end of the message, once read (`AttachmentText`).
         if !pictures.isEmpty {
             prompt += Self.pictureNote(pictures, modelSees: sees)
         }
@@ -1447,7 +1447,10 @@ final class AppModel {
         // Read before this turn's own messages are recorded: it is whether the last task is waiting for "continua".
         let paused = session.conversation?.isTaskPaused ?? false
         // The message and what goes before it (workspace snapshot, memory notes) take room too.
+        let attachmentRoom = AttachmentText.room(historyCharacters: budget.characters)
         let reserve = prompt.count + Self.prefaceAllowance
+            + AttachmentText.estimate(for: attachments, texts: attachmentTexts.cached(attachments), room: attachmentRoom)
+        let attachmentTexts = attachmentTexts
         yieldStretchNote(to: botID, provider: ref.provider)
         let prepared = session.changeConversation { $0.prepareHistory(budget: budget, reserving: reserve, now: .now) }
         let history = prepared.history
@@ -1483,6 +1486,8 @@ final class AppModel {
                                          canSave: bot.permissionMode != .readOnly, alreadySent: sentMemories,
                                          profile: profile.promptSection)
             let inputs = await TurnPromptInputs.gather(bot: bot, skills: skills, brief: brief)
+            let files = await attachmentTexts.texts(attachments)
+            let message = prompt + AttachmentText.block(for: attachments, texts: files, room: attachmentRoom)
             guard session.isCurrent(turn) else { return } // stopped while preparing
             let built = TurnPrompt.native(inputs, history: history, lastWorkspaceHash: lastWorkspaceHash, lastWorkspace: lastWorkspace)
             let client: any LLMClient
@@ -1523,7 +1528,7 @@ final class AppModel {
             if !teammates.isEmpty { system += "\n\n" + teammates }
             if let groupTurn { system += "\n\n" + groupTurn.system } // MultiOrb (WP5)
             let request = TurnRequest(bot: bot, model: ref.model, system: system, history: history,
-                                      prompt: TurnPreface.prepend(built.preface, to: prompt),
+                                      prompt: TurnPreface.prepend(built.preface, to: message),
                                       client: client, tools: tools, context: context, budget: budget, ledger: ledger,
                                       chunks: chunks, maxSteps: maxSteps,
                                       turnGrants: turnGrants, permissions: permissionSource(for: bot),

@@ -230,15 +230,15 @@ extension AppModel {
         // now: a queued message may be delivered by either path and must count once.
         var prompt = SystemPrompt.expandSkill(in: typed, skills: skills(for: botID))?.prompt
             ?? (typed.isEmpty && pictures.isEmpty ? Self.attachmentsOnlyPrompt : typed)
-        if !files.isEmpty {
-            prompt += "\n\nAttached files (read them with your tools):\n" + files.map { "- \($0.path)" }.joined(separator: "\n")
-        }
         if !pictures.isEmpty { prompt += Self.pictureNote(pictures, modelSees: nil) }
         // Asking to remember something mid-turn: the model is told to save it (the turn's grants were fixed when it
         // began, so saving may still ask for approval). Sent after the turn, `send` handles it as a message of its own.
         if MemoryIntent.detect(typed) != nil {
             prompt += MemoryIntent.instruction(tool: "remember")
         }
+        // The files' text as far as it is read already (it is, unless they were attached a moment ago): the rest is left to the tools.
+        let room = AttachmentText.room(historyCharacters: bot(botID).flatMap(contextBudget(for:))?.characters ?? ContextBudget.fallback.characters)
+        prompt += AttachmentText.block(for: files, texts: attachmentTexts.cached(files), room: room)
         lane.enqueue(SteeredMessage(text: typed, files: files, pictures: pictures, prompt: prompt, delivery: delivery))
         live(botID).scrolled() // scrolls the chat down to the "na fila" bubble, which changes no transcript revision
     }

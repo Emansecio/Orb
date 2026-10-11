@@ -13,6 +13,7 @@ extension AppModel {
                 attachPicture(to: botID) { try await $0.attach(fileAt: url, botID: $1) }
             } else if !lane.files.contains(where: { $0.url == url }) {
                 lane.files.append(AttachedFile(url: url))
+                attachmentTexts.prepare(url) // read now, so the message that takes it goes at once
             }
         }
     }

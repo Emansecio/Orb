@@ -79,6 +79,8 @@ enum TurnPreface {
     /// picture lists to their names, and the instruction to save a memory goes.
     static func userWords(_ content: String) -> String {
         var text = stripped(content)
+        // The files' own text (`AttachmentText`) is not the user's, and its lines are not the list of files.
+        if let contents = text.range(of: AttachmentText.contentsMarker) { text = String(text[..<contents.lowerBound]) }
         var attached: [String] = []
         if let cut = additions.compactMap({ text.range(of: $0) }).min(by: { $0.lowerBound < $1.lowerBound }) {
             attached = text[cut.lowerBound...].split(separator: "\n").filter { $0.hasPrefix("- ") }
