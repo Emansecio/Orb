@@ -16,11 +16,13 @@ struct LiveBotAvatar: View {
     /// Lives only while it has something to do: working, celebrating, watching you type. Once the Orb is idle it
     /// settles into the resting pose and stops, so a reply that stays on screen costs nothing.
     var restsWhenIdle = false
+    /// Off for the Orb on a stage with room around it (the empty chat): a big hair or hat keeps its full size there.
+    var fits = true
 
     var body: some View {
         let live = model.live(botID)
         BotAvatar(orb: orb, size: size, activity: live.activity, celebration: live.celebration,
                   paused: paused || (restsWhenIdle && live.activity == .idle), ack: live.poke, landing: landing,
-                  cue: live.cue, interactive: interactive)
+                  cue: live.cue, interactive: interactive, fits: fits)
     }
 }

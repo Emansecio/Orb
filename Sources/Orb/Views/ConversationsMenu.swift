@@ -43,6 +43,10 @@ struct ConversationsMenu: View {
     @State private var selection: UUID?
     /// The list as shown, grouped by day: rebuilt when the archive or the search changes, not on every draw.
     @State private var groups: [ConversationGroup] = []
+    /// The list's own height: a scroll view in a popover has no height of its own and would shrink to nothing,
+    /// hiding the conversations, so it is given this (up to `maxListHeight`, then it scrolls).
+    @State private var listHeight: CGFloat = 0
+    private static let maxListHeight: CGFloat = 340
     @FocusState private var isSearchFocused: Bool
     @FocusState private var isListFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -98,8 +102,9 @@ struct ConversationsMenu: View {
                                 }
                             }
                         }
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { listHeight = $0 }
                     }
-                    .frame(maxHeight: 340)
+                    .frame(height: min(max(listHeight, 44), Self.maxListHeight))
                     .onChange(of: selection) { _, id in
                         if let id { proxy.scrollTo(id) }
                     }

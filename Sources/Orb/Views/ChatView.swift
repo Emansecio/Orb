@@ -536,7 +536,7 @@ private struct EmptyChatView: View {
         let showsFirstRun = SetupPrompt.shows(connectionsChecked: model.hasCheckedConnections, orbHasModel: model.hasModelSetup(for: look.id),
                                               connectedName: firstRun.connectedName, hasItems: true)
         VStack(spacing: 16) {
-            LiveBotAvatar(botID: look.id, orb: look.orb, size: 96, interactive: true, landing: landed)
+            LiveBotAvatar(botID: look.id, orb: look.orb, size: 96, interactive: true, landing: landed, fits: false)
                 .padding(.top, 72)
                 .entrance(.drop, enters: enters) {
                     // Touches the floor: the Orb's own landing. The Orb stays still under Reduce Motion.

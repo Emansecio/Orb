@@ -147,75 +147,67 @@ struct BotInspector: View {
 
     // MARK: Top of the panel
 
-    /// Who the Orb is, always visible: avatar, name and role (editable), its look in one line.
+    /// Who the Orb is, always visible: avatar, name and role (editable), and the way to change its look (the look
+    /// itself is said in the link's tip, so the header keeps to three short lines).
     private func header(_ bot: Bot) -> some View {
         let summary = AppearanceSummary.text(for: bot.orb)
-        return HStack(spacing: 12) {
+        return HStack(alignment: .center, spacing: 14) {
             LiveBotAvatar(botID: bot.id, orb: bot.orb, size: 60, interactive: true) // the only part that follows the activity
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 4) {
                 InspectorHeader(bot: bot)
                     .id(bot.id)
-                HStack(spacing: 6) {
-                    Text(summary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-                    Button("Personalizar…") {
-                        editorHeight = NewBotSheetLayout.height(preferred: 720)
-                        isEditingOrb = true
-                    }
-                    .buttonStyle(.link)
-                    .font(.caption)
-                    .fixedSize()
-                    .help(Tip.customizeOrb)
+                Button("Personalizar…") {
+                    editorHeight = NewBotSheetLayout.height(preferred: 720)
+                    isEditingOrb = true
                 }
-                .help(summary)
+                .buttonStyle(.link)
+                .font(.caption)
+                .fixedSize()
+                .help("\(Tip.customizeOrb) (\(summary))")
                 CreatedByLine(bot: bot) // MultiOrb (WP3)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         // The same side padding as the form's cards below, so the header, the buttons, the tabs and the cards share edges.
         .padding(.horizontal, Spacing.xl)
-        .padding(.top, 14)
-        .padding(.bottom, 10)
+        .padding(.top, 16)
+        .padding(.bottom, 14)
     }
 
-    /// The three things people do most with an Orb, one click each from any tab. Icons alone when the panel is narrow.
+    /// The three things people do most with an Orb, one click each from any tab: three equal tiles, each with its
+    /// name under the icon (an icon alone did not say that the third one puts the conversation away).
     private func quickActions(_ bot: Bot) -> some View {
         let folderIsMissing = listing?.folder == .missing
-        return ViewThatFits(in: .horizontal) {
-            quickActionRow(bot, showsTitles: true, folderIsMissing: folderIsMissing)
-            quickActionRow(bot, showsTitles: false, folderIsMissing: folderIsMissing)
-        }
-        .padding(.horizontal, Spacing.xl)
-        .padding(.bottom, 10)
-    }
-
-    private func quickActionRow(_ bot: Bot, showsTitles: Bool, folderIsMissing: Bool) -> some View {
-        HStack(spacing: 6) {
-            quickAction("Abrir pasta", "folder", showsTitle: showsTitles, help: Tip.openFolderInFinder(bot.name)) {
+        return HStack(spacing: 8) {
+            quickAction("Pasta", "folder", help: Tip.openFolderInFinder(bot.name)) {
                 OrbFolder.showInFinder(bot.workingURL)
             }
             .disabled(folderIsMissing)
-            quickAction("Terminal", "terminal", showsTitle: showsTitles, help: Tip.openFolderInTerminal(bot.name)) {
+            quickAction("Terminal", "terminal", help: Tip.openFolderInTerminal(bot.name)) {
                 OrbFolder.openInTerminal(bot.workingURL)
             }
             .disabled(folderIsMissing)
-            quickAction("Nova conversa", "square.and.pencil", showsTitle: showsTitles, help: Tip.newConversation()) {
+            quickAction("Nova conversa", "square.and.pencil", help: Tip.newConversation()) {
                 model.newConversation(bot.id)
             }
-            if !showsTitles { Spacer(minLength: 0) }
         }
-        .chipButton()
-        .fixedSize(horizontal: showsTitles, vertical: false)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, Spacing.xl)
+        .padding(.bottom, 14)
     }
 
-    private func quickAction(_ title: String, _ symbol: String, showsTitle: Bool, help: String,
-                             action: @escaping () -> Void) -> some View {
+    private func quickAction(_ title: String, _ symbol: String, help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            if showsTitle { Label(title, systemImage: symbol) } else { Image(systemName: symbol) }
+            VStack(spacing: 4) {
+                Image(systemName: symbol)
+                    .font(.system(size: 14))
+                    .frame(height: 18)
+                Text(title)
+                    .font(.system(size: 11))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
         }
+        .buttonStyle(QuickActionTileStyle())
         .help(help)
         .accessibilityLabel(title)
     }
@@ -891,5 +883,22 @@ private struct IdentityEditor: View {
                     .opacity(0)
                     .accessibilityHidden(true)
             }
+    }
+}
+
+/// One of the panel's quick actions: an equal-width tile with a soft fill, lighter on hover, dimmed when disabled.
+private struct QuickActionTileStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var isHovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(isEnabled ? Palette.ink : Palette.faint)
+            .padding(.horizontal, 6)
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .hoverFill(isEnabled && (configuration.isPressed || isHovering), pressed: configuration.isPressed,
+                       in: .rect(cornerRadius: 8), color: Palette.ghostSelected, resting: Palette.raised)
+            .contentShape(.rect(cornerRadius: 8))
+            .onHover { isHovering = $0 }
     }
 }

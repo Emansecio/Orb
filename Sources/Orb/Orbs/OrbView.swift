@@ -33,6 +33,9 @@ struct OrbView: View {
     /// How big its joy is while `activity` is `happy`.
     var celebration = OrbCelebration.big
     var interactive = false
+    /// Shrinks a look that reaches past the box (an afro, a top hat) until all of it fits (`OrbFootprint`): for
+    /// avatars set among other things. The Orb on a stage with room around it leaves it off.
+    var fits = false
     /// What VoiceOver says (default: "Orb" and what it is doing).
     var accessibilityText: String?
 
@@ -40,16 +43,20 @@ struct OrbView: View {
     @Environment(\.appearsActive) private var appearsActive
 
     var body: some View {
+        let fit = fits ? OrbFootprint.fit(config) : (scale: 1, offset: .zero)
+        let orb = (size * fit.scale).rounded()
         Group {
             if animated && !reduceMotion && !OrbView.forceStatic {
-                AnimatedOrb(config: config, activity: activity, size: size, followsPointer: followsPointer,
+                AnimatedOrb(config: config, activity: activity, size: orb, followsPointer: followsPointer,
                             poke: poke, ack: ack, landing: landing, glance: glance, cue: cue, celebration: celebration,
                             interactive: interactive,
                             live: !paused && (appearsActive || OrbView.animateInactive))
             } else {
-                OrbFrame(config: config, activity: activity, size: size, pose: .rest)
+                OrbFrame(config: config, activity: activity, size: orb, pose: .rest)
             }
         }
+        .frame(width: orb, height: orb)
+        .offset(x: (fit.offset.width * size).rounded(), y: (fit.offset.height * size).rounded())
         .frame(width: size, height: size)
         .accessibilityElement()
         .accessibilityLabel(accessibilityText ?? "Orb, \(activity.label)")
@@ -268,10 +275,12 @@ struct BotAvatar: View {
     var glance = 0
     var cue = OrbCueSignal()
     var interactive = false
+    /// On by default: an avatar sits among other things, so a big hair or hat shrinks to fit (`OrbView.fits`).
+    var fits = true
 
     var body: some View {
         OrbView(config: orb, activity: activity, size: size, animated: animated, paused: paused, poke: poke, ack: ack,
-                landing: landing, glance: glance, cue: cue, celebration: celebration, interactive: interactive)
+                landing: landing, glance: glance, cue: cue, celebration: celebration, interactive: interactive, fits: fits)
     }
 }
 
