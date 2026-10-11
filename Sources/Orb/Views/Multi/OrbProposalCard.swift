@@ -101,8 +101,8 @@ struct OrbProposalCard: View {
     }
 
     private var isPending: Bool { request.decision == nil }
-    /// What the card shows: the edit in progress while editing, the proposal otherwise.
-    private var shown: OrbProposal { isEditing ? draft : proposal }
+    /// What the card shows: while pending, what "Criar" will create (the draft, even with the editor closed); the proposal once answered.
+    private var shown: OrbProposal { isPending ? draft : proposal }
     private var creator: String { proposal.creator.name }
     private var wasCreated: Bool { request.decision != nil && request.decision != .deny }
 
@@ -277,7 +277,7 @@ struct OrbProposalCard: View {
     /// The model, the folder and the connectors: read only, even when editing.
     private var facts: some View {
         let folder = OrbFolder.display(OrbFolder.availableURL(for: shown.name, in: model.proposedOrbFolderBase))
-        let taken = isEditing ? model.isOrbNameTaken(draft.name) : proposal.nameTaken
+        let taken = isPending ? model.isOrbNameTaken(draft.name) : proposal.nameTaken
         return VStack(alignment: .leading, spacing: 3) {
             fact("Mesmo modelo que \(creator)", symbol: "cpu")
             fact("Pasta \(folder)", symbol: "folder")
