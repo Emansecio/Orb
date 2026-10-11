@@ -1908,7 +1908,7 @@ final class AppModel {
         let servers = [OrbToolsMCPServer.config(directory: bank.directory, mac: usesMac, files: bot.capabilities.contains(.terminal),
                                                 folder: bot.workingURL, accessibilityGranted: accessibility,
                                                 scheduleMailbox: scheduleMailbox.directory, orb: botID,
-                                                bridge: bridge, orbs: multi.orbs, groupMemory: groupTurn?.bankDirectory)]
+                                                bridge: bridge, orbs: multi.orbs, propose: multi.propose, groupMemory: groupTurn?.bankDirectory)]
             + connectors
         let connectorIDs = Set(connectors.map(\.id))
         let cliNames = ClaudeCodeTurn.mcpNames(servers) // what the CLI will call each server
@@ -1956,7 +1956,7 @@ final class AppModel {
                                                       scheduleMailbox: scheduleMailbox.directory, orb: botID, browser: browserAvailability,
                                                       engine: bot.browserEngine, searchProvider: bot.searchProvider,
                                                       browserProfiles: browserHub.profilesDirectory, tinyFishKey: tinyFishKey,
-                                                      bridge: bridge, orbs: multi.orbs, groupMemory: groupTurn?.bankDirectory)
+                                                      bridge: bridge, orbs: multi.orbs, propose: multi.propose, groupMemory: groupTurn?.bankDirectory)
             // The CLI cannot renew a login in the middle of a turn: it gets a token with time left.
             let (servers, ended) = await connectorAuth.bearers(for: toolServers)
             // A login that could not be renewed is told to the cards now, not only when an Orb with the native engine meets it.
