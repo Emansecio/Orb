@@ -244,6 +244,10 @@ struct GroupPolicyAndExtrasTests {
         #expect(world.hub.run(world.groupID)?.tokensUsed == 1_000) // a chat turn is not the group's
         world.hub.tokensUsed(10, chain: world.hub.run(world.groupID)!.id)
         #expect(world.hub.run(world.groupID)?.tokensUsed == 1_010)
+        // Rereading the cache is not spending: Claude Code rereads tens of thousands of tokens every turn.
+        world.model.recordUsage(UsageTotals(requests: 1, input: 5, cacheRead: 70_000, cacheWrite: 200, output: 95), botID: world.atlas.id,
+                                model: "custom/modelo", source: .group)
+        #expect(world.hub.run(world.groupID)?.tokensUsed == 1_310)
     }
 }
 

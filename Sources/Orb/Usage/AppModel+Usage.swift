@@ -10,8 +10,8 @@ extension AppModel {
         guard !isResetting, let name = bot(botID)?.name else { return }
         usageLog.record(totals, orb: botID, name: name, model: model, source: source)
         // What a turn of a chain between Orbs costs counts against the chain's budget (what the provider charges in full or writes to its cache).
-        if let chain = sessions[botID]?.chain?.chainID { delegation.tokensUsed(totals.input + totals.cacheWrite + totals.output, chain: chain) }
-        if source == .group { groupHub.noteTokens(totals.tokens, botID: botID) } // MultiOrb (WP5): counts against the request's budget
+        if let chain = sessions[botID]?.chain?.chainID { delegation.tokensUsed(totals.budgetTokens, chain: chain) }
+        if source == .group { groupHub.noteTokens(totals.budgetTokens, botID: botID) } // MultiOrb (WP5): counts against the request's budget
     }
 
     /// For a call the app makes for itself whose reply is a single `TokenUsage` (the note on a stretch the next fold will

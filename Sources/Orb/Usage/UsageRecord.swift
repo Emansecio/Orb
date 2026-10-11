@@ -52,6 +52,9 @@ struct UsageTotals: Codable, Equatable, Sendable {
     var reportedCost: Double?
 
     var tokens: Int { input + cacheRead + cacheWrite + output }
+    /// What a budget between Orbs counts: the tokens charged in full or written to the cache. Reading the cache is left out:
+    /// with Claude Code each turn rereads tens of thousands of cached tokens, and a group would spend its budget in two turns.
+    var budgetTokens: Int { input + cacheWrite + output }
     var isEmpty: Bool { requests == 0 && tokens == 0 && reportedCost == nil }
 
     init(requests: Int = 0, input: Int = 0, cacheRead: Int = 0, cacheWrite: Int = 0, cacheWrite1h: Int = 0, output: Int = 0,
