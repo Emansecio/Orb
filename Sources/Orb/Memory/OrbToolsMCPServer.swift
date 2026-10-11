@@ -190,7 +190,10 @@ enum OrbToolsMCPServer {
         /// `--accessibility` / `--no-accessibility`, `--schedule-mailbox <dir> --orb <id>` and the web flags (`--web`,
         /// `--browser <engine>`, `--search <provider>`, `--browser-profiles <dir>`; the TinyFish key comes from `environment`);
         /// nil when the arguments do not ask for the server.
-        init?(arguments: [String], environment: [String: String] = ProcessInfo.processInfo.environment) {
+        /// `dropFromEnvironment` takes a variable out of this process's environment (tests pass their own: the real environment is
+        /// shared by every test running at the same time).
+        init?(arguments: [String], environment: [String: String] = ProcessInfo.processInfo.environment,
+              dropFromEnvironment: (String) -> Void = { unsetenv($0) }) {
             guard let start = arguments.firstIndex(where: { $0 == OrbToolsMCPServer.flag || $0 == OrbToolsMCPServer.legacyFlag }),
                   arguments.indices.contains(start + 1) else { return nil }
             self.init(memoryDirectory: URL(fileURLWithPath: arguments[start + 1]))
@@ -216,7 +219,7 @@ enum OrbToolsMCPServer {
             groupMemory = value(of: OrbToolsMCPServer.groupMemoryFlag).map { URL(fileURLWithPath: $0) }
             // The key is read: it must not stay in the environment of this process, which every program it starts inherits (the
             // `agent-browser` background process, and the browser it keeps, would carry it for as long as they live).
-            unsetenv(OrbToolsMCPServer.tinyFishKeyVariable)
+            if environment[OrbToolsMCPServer.tinyFishKeyVariable] != nil { dropFromEnvironment(OrbToolsMCPServer.tinyFishKeyVariable) }
         }
 
         var context: ToolContext {

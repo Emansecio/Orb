@@ -139,10 +139,12 @@ private func drafting(_ json: String) -> [LLMEvent] {
         #expect(WizardPrompt.suggestions.count == 3)
     }
 
-    @MainActor @Test func twoTurnsFillTheDraftAndGrowTheChat() async {
+    @MainActor @Test func twoTurnsFillTheDraftAndGrowTheChat() async throws {
         let script = Script([drafting(#"{"name":"Maia","role":"Cuida da agenda"}"#), said("Como você prefere que ele trabalhe?"),
                              drafting(#"{"instructions":"Você é a Maia.","capabilities":["browser"],"ready":true}"#), said("Tudo certo, é só criar.")])
-        let (_, runner) = setUp(script)
+        // The runner holds the app weakly (the sheet keeps it in the app): the test keeps it alive across both turns.
+        let (model, runner) = setUp(script)
+        defer { withExtendedLifetime(model) {} }
 
         #expect(runner.send(WizardPrompt.suggestions[0]))
         #expect(runner.isThinking && !runner.offersSuggestions)
@@ -163,7 +165,8 @@ private func drafting(_ json: String) -> [LLMEvent] {
 
         // The model saw only `orb_draft`, the interview prompt and (second turn) the whole exchange.
         let calls = await script.calls
-        #expect(calls.count == 4 && calls.allSatisfy { $0.tools == ["orb_draft"] })
+        try #require(calls.count == 4) // (a failure here must not crash the run reading calls[2])
+        #expect(calls.allSatisfy { $0.tools == ["orb_draft"] })
         #expect(calls[0].system.contains("Interview them in Brazilian Portuguese"))
         #expect(calls[0].system.contains(WizardPrompt.firstLine))
         #expect(calls[2].messages.contains { $0.role == .user && $0.content == "Curtas e diretas." })

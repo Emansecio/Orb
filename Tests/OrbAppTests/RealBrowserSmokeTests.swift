@@ -87,8 +87,11 @@ struct RealBrowserScenario {
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
         guard (try? process.run()) != nil else { return [] }
+        // Read first: the end of the output is pgrep exiting. Waiting first could spin in `waitUntilExit` (it once held a full
+        // run of the suite for a quarter of an hour).
+        let output = pipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
-        return String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        return String(decoding: output, as: UTF8.self)
             .split(whereSeparator: \.isNewline).map { String($0.prefix(200)) }
     }
 }

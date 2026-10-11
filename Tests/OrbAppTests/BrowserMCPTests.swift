@@ -124,11 +124,13 @@ struct BrowserMCPConfigTests {
     @Test func theServerDropsTheTinyFishKeyFromItsEnvironmentOnceItReadIt() throws {
         // Every program the server starts inherits its environment: the `agent-browser` background process, and the browser it keeps
         // for as long as it lives, would carry the key.
-        setenv(OrbToolsMCPServer.tinyFishKeyVariable, "tf-secret", 1)
-        defer { unsetenv(OrbToolsMCPServer.tinyFishKeyVariable) }
-        let options = try #require(OrbToolsMCPServer.Options(arguments: ["Orb", "--tools-mcp", "/tmp/m", "--browser", "chrome", "--search", "tinyfish"]))
-        #expect(options.tinyFishKey == "tf-secret", "read from the real environment of the process")
-        #expect(getenv(OrbToolsMCPServer.tinyFishKeyVariable) == nil)
+        // (Not the real environment: it is shared by every test running at the same time.)
+        var dropped: [String] = []
+        let options = try #require(OrbToolsMCPServer.Options(arguments: ["Orb", "--tools-mcp", "/tmp/m", "--browser", "chrome", "--search", "tinyfish"],
+                                                             environment: [OrbToolsMCPServer.tinyFishKeyVariable: "tf-secret"],
+                                                             dropFromEnvironment: { dropped.append($0) }))
+        #expect(options.tinyFishKey == "tf-secret", "read from the environment of the process")
+        #expect(dropped == [OrbToolsMCPServer.tinyFishKeyVariable])
         #expect(options.context.browser.searchKeys?.tinyFish == "tf-secret", "and still there for the searches")
     }
 
