@@ -534,7 +534,7 @@ enum ContextSummary {
 
 extension Conversation {
     /// The history for the next turn. When turns had to be folded away, remembers the summary and how many
-    /// messages it covers (the messages themselves stay, for the transcript and for Claude Code). Compaction is
+    /// messages it covers (the messages themselves stay, for the transcript). Compaction is
     /// permanent by design: it uses the budget of the model active at that moment, and a later switch to a model
     /// with a larger window keeps working from the summary.
     ///

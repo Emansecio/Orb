@@ -99,7 +99,7 @@ struct ContextBudget: Sendable, Equatable {
 
     var characters: Int { Int(min(Double(tokens) * Self.charactersPerToken, Double(Int.max / 4))) }
 
-    /// Used when nothing is known about the model (and by callers that don't care, like the Claude Code catch-up).
+    /// Used when nothing is known about the model.
     static let fallback = ContextBudget(modelWindow: 128_000)
 
     /// A budget of exactly `tokens` of history (tests, and callers that know better).

@@ -5,7 +5,7 @@ import Foundation
 // steps, and when it fails the summary is simply the rules' alone.
 
 extension AppModel {
-    /// After a turn of the native engine ends: starts the note, when one is due. A routine's run, a developer mode and
+    /// After a turn ends: starts the note, when one is due. A routine's run, a developer mode and
     /// Claude Code (its side requests would each start a CLI process) never get one.
     func writeStretchNote(of botID: UUID) {
         let session = session(botID)

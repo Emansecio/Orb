@@ -217,7 +217,6 @@ struct SteeringEngineTests {
         #expect(lane.queued.map(\.text) == ["corrija isso"])
         #expect(model.drafts[bot.id] == "") // the composer is free for the next thought
         #expect(userTexts(model, bot.id) == ["primeiro"]) // not in the transcript yet
-        #expect(model.steersMidTurn(bot.id))
         await gate.open()
         await waitUntilIdle(model, bot.id)
     }

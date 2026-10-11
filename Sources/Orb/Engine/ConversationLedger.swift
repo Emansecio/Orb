@@ -293,7 +293,7 @@ struct ConversationLedger: Codable, Sendable, Equatable {
         for call in message.toolCalls { calls[call.id] = ToolReference(call) }
         var text = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
         let interrupted = text.hasSuffix(AgentEngine.interruptedMarker.trimmingCharacters(in: .whitespacesAndNewlines))
-        // Claude Code's turns carry a note of what it did; it is not part of what was said.
+        // Turns saved while Claude Code was the agent end with a note of what it did; it is not part of what was said.
         if let note = text.range(of: "(Actions taken in this turn:", options: .backwards) { text = String(text[..<note.lowerBound]) }
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }

@@ -321,8 +321,6 @@ final class WizardTypingDotsView: NSView {
     private var dots: [CALayer] = []
     private static let key = "typing"
     var animated: Bool { didSet { if animated != oldValue { updateAnimation() } } }
-    /// For tests: whether the dots are moving.
-    var isAnimating: Bool { dots.first?.animation(forKey: Self.key) != nil }
 
     init(animated: Bool) {
         self.animated = animated

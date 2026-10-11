@@ -335,7 +335,7 @@ struct ScreenshotToolTests {
         system.windowCapturer.setWindows([CapturableWindow(windowID: 77, pid: 100, frame: windowFrame, title: "Doc")], pid: 100)
         let requests = WindowCaptureTests.Counter()
         let folder = FileManager.default.temporaryDirectory.appending(path: "orb-shots-\(UUID().uuidString)")
-        let store = UISnapshotStore(directory: nil)
+        let store = UISnapshotStore()
         let tool = ScreenshotTool(system: system, store: store, screenAccess: ScreenCaptureAccess(isGranted: { screen }, request: { requests.bump() }),
                                   folder: folder, ownPID: 1, frontWindowPID: { _ in 100 }, sessions: sessions)
         return Rig(tool: tool, system: system, store: store, requests: requests, folder: folder)
@@ -762,7 +762,7 @@ struct WindowCaptureSmokeTests {
     /// them. Needs Accessibility too; `ORB_SMOKE_SAVE` names a file for the picture.
     @Test(.enabled(if: WindowCaptureSmokeTests.enabled && AXIsProcessTrusted()), .timeLimit(.minutes(1)))
     func theToolMarksARealFinderWindow() async throws {
-        let store = UISnapshotStore(directory: nil)
+        let store = UISnapshotStore()
         let folder = FileManager.default.temporaryDirectory.appending(path: "orb-smoke-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: folder) }
         let tool = ScreenshotTool(system: LiveAccessibilitySystem(), store: store, folder: folder)

@@ -276,7 +276,7 @@ struct AXSmokeTests {
         let fixture = try await FixtureApp.launch()
         defer { fixture.stop() }
         let sessions = AXSessions(deadlines: AXDeadlines(read: .milliseconds(300), readWithQuery: .milliseconds(300), action: .milliseconds(300)))
-        let reader = UIReadTool(system: LiveAccessibilitySystem(), store: UISnapshotStore(directory: nil), sessions: sessions, live: UILiveElements())
+        let reader = UIReadTool(system: LiveAccessibilitySystem(), store: UISnapshotStore(), sessions: sessions, live: UILiveElements())
         let context = SmokeSession(fixture).context
         let arguments = JSONValue.object(["app": .string(AXSmoke.appName)])
         _ = try await reader.run(arguments, context: context)

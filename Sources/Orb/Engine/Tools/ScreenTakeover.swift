@@ -4,6 +4,7 @@ import Carbon.HIToolbox
 import CoreGraphics
 import Darwin
 import Foundation
+import os
 
 // Taking the screen over (docs/USO-DO-COMPUTADOR.md, "N2"): the only place that brings another app to the front, uses the
 // real mouse and keyboard (`.cghidEventTap`) and gives everything back. Everything the system is asked for sits behind
@@ -13,7 +14,7 @@ import Foundation
 
 /// Why a takeover did not happen or stopped. Always shown to the model, so the text says what to do.
 enum TakeoverFailure: Error, Equatable, LocalizedError {
-    /// Another takeover holds the system-wide lock (another Orb, or the app and the Claude Code server at once).
+    /// Another takeover holds the lock (another Orb).
     case busy
     /// The app did not come to the front within the wait.
     case couldNotBringToFront(String)
@@ -52,49 +53,25 @@ enum TakeoverFailure: Error, Equatable, LocalizedError {
     }
 }
 
-// MARK: - The system-wide lock
+// MARK: - The lock
 
-/// One takeover on the whole Mac: the app and the Claude Code server are different processes, so the lock is a file
-/// (`flock`, which the system drops when the process dies).
-final class TakeoverLock: @unchecked Sendable {
-    private let lock = NSLock()
-    private var descriptor: Int32
+/// One takeover at a time: two Orbs asking for the screen together share the one mouse and keyboard, so the second is
+/// refused instead of waiting.
+final class TakeoverLock: Sendable {
+    static let shared = TakeoverLock()
 
-    private init(descriptor: Int32) {
-        self.descriptor = descriptor
-    }
-
-    deinit { release() }
-
-    /// `~/Library/Caches/<bundle id>/takeover.lock`.
-    static func defaultURL(bundleID: String? = Bundle.main.bundleIdentifier) -> URL {
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
-            ?? FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/Caches")
-        return caches.appending(path: bundleID ?? "Orb").appending(path: "takeover.lock")
-    }
+    private let held = OSAllocatedUnfairLock(initialState: false)
 
     /// Takes the lock without waiting; `TakeoverFailure.busy` when somebody holds it.
-    static func acquire(at url: URL) throws -> TakeoverLock {
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let descriptor = open(url.path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
-        guard descriptor >= 0 else { throw ToolError("Não consegui criar a trava de uso da tela em \(url.path).") }
-        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
-            let reason = errno
-            close(descriptor)
-            if reason == EWOULDBLOCK { throw TakeoverFailure.busy }
-            throw ToolError("Não consegui travar o uso da tela (erro \(reason)).")
+    func acquire() throws {
+        let wasHeld = held.withLock { state -> Bool in
+            defer { state = true }
+            return state
         }
-        return TakeoverLock(descriptor: descriptor)
+        if wasHeld { throw TakeoverFailure.busy }
     }
 
-    func release() {
-        lock.withLock {
-            guard descriptor >= 0 else { return }
-            flock(descriptor, LOCK_UN)
-            close(descriptor)
-            descriptor = -1
-        }
-    }
+    func release() { held.withLock { $0 = false } }
 }
 
 // MARK: - Seams
@@ -329,7 +306,7 @@ struct LiveScreenOwner: ScreenOwner {
     var platform: any TakeoverPlatform
     var events: any AccessibilityEvents
     var indicator: (any TakeoverIndicator)?
-    var lockURL: URL
+    var lock: TakeoverLock
     /// How long the app has to become the active one (`AXApplicationActivated`).
     var activationTimeout: Duration = .milliseconds(500)
     var stepLimit: Duration = .seconds(2)
@@ -338,11 +315,11 @@ struct LiveScreenOwner: ScreenOwner {
     var restoreTimeout: Duration = .milliseconds(500)
 
     init(platform: any TakeoverPlatform = LiveTakeoverPlatform(), events: any AccessibilityEvents = UnavailableAccessibilityEvents(),
-         indicator: (any TakeoverIndicator)? = TakeoverBroadcast(), lockURL: URL = TakeoverLock.defaultURL()) {
+         indicator: (any TakeoverIndicator)? = TakeoverBroadcast(), lock: TakeoverLock = .shared) {
         self.platform = platform
         self.events = events
         self.indicator = indicator
-        self.lockURL = lockURL
+        self.lock = lock
     }
 
     /// What was in front before.
@@ -355,7 +332,7 @@ struct LiveScreenOwner: ScreenOwner {
     func takeOver<Value: Sendable>(_ app: AccessibilityApp, window: (any AccessibilityElement)?, limit: Duration,
                                    _ body: @escaping @Sendable (any TakeoverHand) async throws -> Value) async throws -> TakeoverReport<Value> {
         try Task.checkCancellation()
-        let lock = try TakeoverLock.acquire(at: lockURL)
+        try lock.acquire()
         let clock = ContinuousClock()
         let started = clock.now
         let platform = platform
@@ -553,7 +530,7 @@ struct LiveTakeoverPlatform: TakeoverPlatform {
     }
 
     /// The app in front, read like `ui_act` reads it (`LiveDesktop`: the window list checked against the apps' own
-    /// `AXFrontmost`, never `NSWorkspace`, which the Claude Code server cannot keep up to date).
+    /// `AXFrontmost`, never `NSWorkspace`).
     func frontmost() -> TakeoverFront? {
         LiveDesktop().frontmost().map(front)
     }

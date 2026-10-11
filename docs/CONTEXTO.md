@@ -19,12 +19,11 @@ Três ideias dirigem tudo:
 
 | Momento | Quem | O que faz |
 |---|---|---|
-| Ao enviar (motor nativo) | `Conversation.prepareHistory` (chamado por `AppModel.send`) | Decide o corte e a condensação do histórico que o turno vai usar (cedo, se o cache esfriou); grava resumo, `ledger`, `summaryCoveredCount`, `condensedCount` na conversa; leva ao resumo as notas do modelo dos trechos que dobrou |
-| Ao fim de um turno do chat (motor nativo) | `AppModel.writeStretchNote` | Com o histórico acima de 60% do orçamento (medido como a dobra fria; em Ollama e LM Studio só depois de 5 min sem mensagem), pede em segundo plano a nota do modelo sobre o trecho que uma dobra feita agora tiraria |
+| Ao enviar | `Conversation.prepareHistory` (chamado por `AppModel.send`) | Decide o corte e a condensação do histórico que o turno vai usar (cedo, se o cache esfriou); grava resumo, `ledger`, `summaryCoveredCount`, `condensedCount` na conversa; leva ao resumo as notas do modelo dos trechos que dobrou |
+| Ao fim de um turno do chat | `AppModel.writeStretchNote` | Com o histórico acima de 60% do orçamento (medido como a dobra fria; em Ollama e LM Studio só depois de 5 min sem mensagem), pede em segundo plano a nota do modelo sobre o trecho que uma dobra feita agora tiraria |
 | A cada chamada ao modelo | `AgentEngine.fitted` → `ContextWindow.fit` | Reajusta a janela com o `ContextCut` do turno (que leva as notas ainda não dobradas, `TurnRequest.chunks`); só mexe no começo quando enche de novo |
 | Dentro de uma tarefa longa | `TurnEvent.compacted` (com `CompactionReport.Fold`) | O app guarda a dobra em turnos inteiros (`BotSession.keepFold`) para o próximo turno partir do mesmo resumo; as notas que a dobra levou (`report.digests`) vão à memória no fim do turno |
 | Sob pedido | `AppModel.compactNow` / `/compactar [foco]` | Mesma máquina, até 30% do orçamento |
-| Claude Code | `ClaudeCodeEngine` + `ClaudeCodePrompt.catchUp` | O contexto é do próprio CLI; o Orb só recomeça sessões (veja abaixo) |
 
 ## Orçamento (`ContextBudget`)
 
@@ -42,8 +41,8 @@ histórico (tokens) = máx( 2 000,  mín( 90% da janela − sobrecarga − reser
 | Teto do nível | "Contexto das conversas" em Ajustes → Geral: **Econômico** 40 000 · **Equilibrado** 80 000 (padrão) · **Amplo** 60% da janela, nunca menos que o Equilibrado (em janelas abaixo de ~133 mil, 60% seria menos que 80 000). `ContextMemoryLevel`, salvo em `AppState.contextMemory` |
 | Folga para o pedido | `leavingRoom`: tira do orçamento a mensagem nova e o prefácio (até 4 000 caracteres de reserva, `AppModel.prefaceAllowance`), nunca mais que a metade |
 
-Um modelo fora do catálogo usa o formato do provedor (ou o `format` da conta, no gateway próprio). Claude Code não tem
-orçamento do Orb (`contextBudget(for:)` devolve `nil`).
+Um modelo fora do catálogo usa o formato do provedor (ou o `format` da conta, no gateway próprio). O Claude Code tem orçamento como
+qualquer outro provedor (`ContextBudget.init(model:provider:…)` o trata como o formato `claudeCode`).
 
 ### Janela aprendida
 
@@ -103,7 +102,7 @@ O esqueleto do resumo é por regras e continua exato: pedido original fixo, deci
 sobra do começo de uma conversa longa era raso. Por isso, em segundo plano e antes da dobra, o modelo escreve uma nota curta
 sobre o trecho que a dobra vai levar:
 
-1. **Quando.** No fim de um turno bem-sucedido do chat com o motor nativo (nunca rotina, nunca Claude Code, nunca em modo de
+1. **Quando.** No fim de um turno bem-sucedido do chat (nunca rotina, nunca Claude Code, nunca em modo de
    desenvolvedor, `AppModel.writeStretchNote`), se o histórico passa de 60% do orçamento (`ChunkSummarizer.startsAt`,
    que é `coldFoldShare`: a partir daí uma conversa com o cache frio já é dobrada, então a nota precisa existir antes) e há
    um trecho sem nota que valha a chamada. A conta é a da dobra fria: contra o orçamento que sobra depois do prompt e do
@@ -170,9 +169,8 @@ sobre o trecho que a dobra vai levar:
    cancelada não conta e a nota volta a ser pedida no fim de um turno seguinte. Nos demais provedores corre em
    paralelo a um turno novo sem tocar nele. Não aparece na conversa nem conta passos; com `ORB_DEBUG_USAGE=1` escreve uma
    linha `stretch note: …` no stderr. Em testes (`runsBackgroundWork: false`) fica desligado (`writesStretchNotes`).
-10. **Claude Code.** Fora: o CLI compacta a própria sessão. O catch-up de uma sessão nova (`ClaudeCodePrompt.catchUp`) usa só
-    o esqueleto do resumo (`digestRoom: 0`): o orçamento dele é de 16 000 caracteres, e as notas, escritas para a janela do
-    motor nativo, ficariam disputando esse espaço com as mensagens recentes. Elas continuam na conversa e na memória.
+10. **Claude Code.** Fora (`writeStretchNote` não roda com ele): cada pedido à parte começaria um processo do CLI. A dobra de uma
+    conversa dele é a de sempre, só por regras.
 
 ## Uma tarefa maior que a janela
 
@@ -230,7 +228,6 @@ Quando uma compactação tira mensagens da janela, o que elas continham vai para
 - no envio: `BotSession.announce(report, memoryUpTo:)` grava as páginas de sessão até a mensagem que está sendo enviada, com
   a nota do modelo dos trechos que a dobra levou (seção `## Resumo`);
 - dentro do turno: o fim do turno grava (`compactedInTurn`), também com as notas que as dobras do turno levaram;
-- o Claude Code compactando a própria sessão também marca `compactedInTurn`.
 
 Execuções de rotina não viram sessões. Veja [MEMORIA.md](MEMORIA.md) para o formato da página.
 
@@ -267,23 +264,21 @@ processo em segundo plano): um comando que não para de imprimir (`yes`) não en
   diz o que é verdade: "Só há um pedido nesta conversa: não há mensagens antigas para resumir", "A conversa ainda é curta: não há
   o que compactar" (vários pedidos curtos) ou "O começo já está resumido; não há mais o que compactar agora". O resultado (`CompactionResult`) traz os números antes/depois, os mesmos do medidor,
   e vira também um aviso na conversa: "Compactei a conversa: os 5 primeiros pedidos viraram um resumo (≈ 58 mil → 19 mil tokens)."
-- **Claude Code**: não há medida do Orb. "Compactar agora" dobra tudo menos o último turno no resumo
-  (`compactAllButLatestTurn`), zera a sessão (`claudeSessionReported("")`) e a **próxima mensagem começa uma sessão nova** a
-  partir do resumo. Os números são estimativas da cópia do Orb.
 
 ## Claude Code
 
-O CLI mantém a própria sessão, então o Orb não corta histórico para ele. O que o Orb faz:
+Um Orb no Claude Code usa o mesmo caminho dos outros provedores: orçamento, janela aprendida, medidor, condensação, dobras, resumo e
+"Compactar agora" são os do Orb. O CLI é só o cano até o modelo e não guarda conversa nem compacta nada (`DISABLE_AUTO_COMPACT=1` no
+ambiente dele). O que muda é como o histórico chega a ele (`ClaudePipeSession.split`):
 
-- **Catch-up** (`ClaudeCodePrompt.catchUp`, até 16 000 caracteres): numa sessão nova recebe a conversa até ali; numa retomada,
-  só o que *outros modelos* responderam desde a última vez (`Conversation.claudeSeenCount`). O resumo ocupa o lugar do que
-  cobre; as mensagens entram inteiras ou não entram, das mais novas para as mais velhas (pedido e resposta cortados em
-  1 200 caracteres, menos o último pedido e a última resposta: 8 000 e 4 000); o que não cabe é absorvido num ledger, não
-  cortado no meio.
-- **Aviso do próprio CLI**: o evento `compact_boundary` vira "O Claude Code compactou a sessão (de X para Y tokens)."
-- **Prompt estável**: a sessão retomada reenvia byte a byte o prompt anexado com que começou; identidade, modo, skills e
-  instruções da pasta que mudaram vão junto da mensagem ("[Updated rules]"), e o prompt só é reconstruído (um único corte de
-  cache) quando identidade, preferências ou regras permanentes mudam.
+- o prompt do sistema vai em `--system-prompt-file`; a última mensagem do usuário vai pela entrada (`stream-json`);
+- o que veio antes vira um arquivo de sessão temporário na pasta de projetos do CLI (`~/.claude/projects/…`), retomado com `--resume`
+  e apagado quando o processo termina. O arquivo só pode acabar numa resposta do assistente com texto e sem chamada de ferramenta; o
+  que sobra no fim do histórico entra em texto antes ou depois da mensagem (`[Histórico anterior, em texto]`,
+  `[Continuação deste pedido, em texto]`), então nada se perde;
+- um processo atende todos os passos de um turno: ele para nas chamadas de ferramenta do modelo (parked), o motor as executa e o
+  resultado volta ao mesmo processo. Qualquer outra chamada (um turno novo, uma nova tentativa, um corte do histórico) começa um
+  processo novo com a conversa reconstruída, e o cache do prompt é o do provedor (`arrangesPromptCache`).
 
 ## Economia de tokens
 
@@ -292,10 +287,10 @@ Medidas que não são "compactar" mas decidem quanto cada mensagem custa:
 | Medida | Onde | Efeito |
 |---|---|---|
 | Corpo da requisição **determinístico** | `WireEncoder` (chaves ordenadas; `messages` e `tool_choice` por último) nos 3 clientes | O prefixo é idêntico byte a byte entre chamadas, então o cache do provedor acerta |
-| Marcadores de cache | Anthropic: `cache_control` na última ferramenta, no sistema e no fim da última mensagem (as duas primeiras com TTL de 1 h só em `api.anthropic.com`; o fim, 5 min). `prompt_cache_key` por conversa: chat só em `api.openai.com`; Responses em `api.openai.com` e `chatgpt.com`. O OpenCode recebe `x-opencode-session` por conversa | Chamadas seguidas leem o prefixo do cache |
+| Marcadores de cache | Anthropic: `cache_control` na última ferramenta, no sistema e no fim da última mensagem (as duas primeiras com TTL de 1 h só em `api.anthropic.com`; o fim, 5 min). `prompt_cache_key` por conversa: chat só em `api.openai.com`; Responses em `api.openai.com` e `chatgpt.com`. O OpenCode recebe `x-opencode-session` por conversa. No Claude Code o próprio CLI marca o prompt | Chamadas seguidas leem o prefixo do cache |
 | **Cache medido** | `TokenUsage.promptTokens` / `cacheHitRatio`, `TurnEvent.requestUsage` | O medidor mostra o acerto do último pedido; `ORB_DEBUG_USAGE=1` imprime uma linha por passo no stderr |
 | **Uso registrado e custo** | `AppModel.recordUsage`, `uso/`, `PriceBook` | Os mesmos números de cada pedido (entrada, cache lido e gravado, saída) são somados por hora, Orb e modelo, e Ajustes → Uso diz o que custaram: o cache lido custa o preço do cache. Veja [ARQUITETURA.md](ARQUITETURA.md#uso-e-custos) |
-| Aviso de cache que não pega | `CacheHealth.isFailing`: pelo menos 3 chamadas, prompt médio ≥ 4 096 tokens e menos de 20% lido do cache | Um aviso por conversa, e só para clientes que de fato armam o cache (`arrangesPromptCache`: OpenAI, Responses em hosts com chave, Anthropic; chat em OpenRouter ou servidor local não é culpado) |
+| Aviso de cache que não pega | `CacheHealth.isFailing`: pelo menos 3 chamadas, prompt médio ≥ 4 096 tokens e menos de 20% lido do cache | Um aviso por conversa, e só para clientes que de fato armam o cache (`arrangesPromptCache`: OpenAI, Responses em hosts com chave, Anthropic, Claude Code; chat em OpenRouter ou servidor local não é culpado) |
 | Prompt do sistema **estável** | `SystemPrompt`, `PromptParts` | Sem data nem hora: o texto é igual de um dia para o outro. O que muda a cada mensagem vai no prefácio |
 | **Prefácio por diferença** | `TurnPreface`, `WorkspaceSnapshot.report`, `WorkspaceChanges` | A pasta vai inteira uma vez; depois só `<workspace_changes>` (entradas, branch, mudanças e commits novos), ou nada. O hash exclui "arquivos recentes" (mudavam a cada escrita do próprio Orb). O snapshot completo volta quando o histórico não o tem mais |
 | **Memória relacionada sem repetição** | `MemoryBank.related`, `TurnPreface.relatedLines` | No máximo 3 itens de 220 caracteres, só para mensagens com assunto (nada para "obrigado"), com 2 palavras em comum quando a mensagem tem 3 ou mais; um item (id `#a1b2`) que as últimas 3 mensagens já levaram só volta se a página mudou |
@@ -334,7 +329,7 @@ par, `prepareHistory`, saídas grandes), `Engine/ContextCondensing.swift`, `Engi
 cancelamento, servidores locais), `Engine/ToolDigest.swift` (linhas por passo e registro de progresso), `Engine/Compaction.swift` (relatório, `compact`,
 `/compactar`), `Engine/ContextMeter.swift`, `Engine/ToolOutputSpill.swift`, `AppModel+ContextUI.swift`, `ContextGauge.swift`,
 `Views/ContextMeterViews.swift`, `Views/ContextSettings.swift`, `Engine/TurnPrompt.swift`, `Engine/WorkspaceChanges.swift`,
-`Engine/ConnectorGateway.swift`; o registro e o
+`Engine/ConnectorGateway.swift`, `Engine/ClaudePipe/ClaudePipeSession.swift` (o histórico do Orb → arquivo de sessão do CLI); o registro e o
 custo dos tokens, em `Usage/` (`UsageRecord`, `UsageStore`, `ModelPricing`, `UsageReport`).
 Testes: `ContextWindowTests`, `ContextBatchingTests`, `ContextEngineBatchingTests`, `ConversationLedgerTests`,
 `CompactionFlowTests`, `CompactionIntegrationTests`, `CompactionReviewTests`, `ColdFoldTests`, `ChunkSummaryTests`, `ChunkFoldTests`,

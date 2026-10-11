@@ -63,7 +63,7 @@ com os caminhos mais curtos (se você escrever antes, o texto fica no campo e o 
 
 | Grupo | Provedor | Como conectar | Observações |
 |---|---|---|---|
-| Assinatura (sem chave) | **Claude Code (sua assinatura)** | "Entrar" abre o navegador (roda `claude auth login --claudeai`) | Precisa do `claude` instalado ([como instalar](https://code.claude.com/docs/en/setup)). O login é o do próprio Claude Code: o Orb nunca lê, copia nem guarda os tokens. "Sair" desconecta o Claude Code no Mac inteiro, inclusive no Terminal. Os modelos são os que a sua conta oferece |
+| Assinatura (sem chave) | **Claude Code (sua assinatura)** | "Entrar" abre o navegador (roda `claude auth login --claudeai`) | Precisa do `claude` instalado ([como instalar](https://code.claude.com/docs/en/setup)). O login é o do próprio Claude Code: o Orb nunca lê, copia nem guarda os tokens. O `claude` é só o cano até o modelo (sem ferramentas, memória nem configurações dele): o prompt, as ferramentas, as permissões, a memória e o contexto são os do Orb, iguais aos de qualquer outro provedor, e o uso sai do limite do seu plano. "Sair" desconecta o Claude Code no Mac inteiro, inclusive no Terminal. Os modelos são os que a sua conta oferece |
 | | **ChatGPT (sua assinatura)** | "Entrar com ChatGPT" (login oficial para apps locais) | Precisa do ChatGPT Plus ou Pro; usa o limite do seu plano |
 | Chave de API | **OpenAI**, **Claude** (API da Anthropic), **xAI (Grok)**, **OpenRouter** | colar a chave | Cobrança por uso, direto no provedor |
 | | **OpenCode Zen** | colar a chave de [opencode.ai/auth](https://opencode.ai/auth) | Gateway pré-pago: cobra do seu saldo pelo uso, sem margem sobre o preço do modelo. Modelos gratuitos (que podem usar seus dados) e os Gemini ficam fora da lista |
@@ -150,7 +150,7 @@ No alto do painel: nome e papel (clique para editar; mudar o nome não renomeia 
 pasta", "Terminal" e "Nova conversa". O painel se recolhe sozinho em janelas estreitas (menos de 1180 pt) e volta quando há espaço.
 
 As chaves de "O que pode usar" desligam grupos inteiros de ferramentas para aquele Orb: sem **Terminal e arquivos** ele não roda
-comandos nem lê, escreve, procura ou apaga arquivos (no Claude Code sobra só o `Read`, que abre as imagens que você anexa); sem **Navegar na web** não lê nem pesquisa páginas, não usa o navegador do Orb (nem baixa arquivos com `save_to`, que também precisa de **Terminal e arquivos**); sem **Controlar apps do Mac** não usa
+comandos nem lê, escreve, procura ou apaga arquivos; sem **Navegar na web** não lê nem pesquisa páginas, não usa o navegador do Orb (nem baixa arquivos com `save_to`, que também precisa de **Terminal e arquivos**); sem **Controlar apps do Mac** não usa
 AppleScript, Atalhos, área de transferência, captura de tela nem controla outros apps; sem **Conectores** não usa os conectores.
 
 ### Navegador
@@ -170,15 +170,13 @@ Cada Orb escolhe o motor (padrão **Chrome**, também nos Orbs que já tinham "N
 
 O CloakBrowser precisa de Python 3.9 ou mais novo: o do macOS (`/usr/bin/python3`) só funciona depois de instalar as Ferramentas de Linha de Comando do Xcode (`xcode-select --install`, no Terminal, uma vez); o app avisa se faltar. O binário grátis dele (Chromium 145) não pede conta nem chave; uma chave grátis em cloakbrowser.dev/free dá o Chromium mais novo, e é opcional.
 
-Se o motor escolhido não estiver instalado, o Orb fica só com `web_fetch` e `web_search`, e **avisa uma vez** para instalar em Ajustes → Navegador. As ferramentas do navegador só aparecem quando o motor está pronto. Ao sair do app, ao trocar o motor de um Orb, ao desligar "Navegar na web", ao apagar o Orb e ao atualizar ou remover um motor em Ajustes, os navegadores abertos são fechados (nenhum Chrome fica para trás), **inclusive os que o Claude Code abriu** (cada turno dele tem um servidor de ferramentas novo, que não guarda a sessão: o app e `browse_close` fecham pelo nome da sessão do Orb, `orb-<id>-<motor>`); um navegador esquecido por 30 minutos se fecha sozinho. Um comando que não é `browse_open` **nunca inicia um navegador**: se o processo em segundo plano do Orb morreu (30 minutos parado, `browse_close` em outro turno, troca de motor no meio de um turno), `browse_snapshot`, `browse_read` e os outros respondem que não há página e pedem `browse_open` (que lança o navegador com o perfil e as opções do Orb); e uma sessão que ficou rodando com outras opções (uma versão antiga do app, outro perfil) é fechada antes de a página abrir. O agent-browser roda com um arquivo de configuração vazio do app e dentro de `navegador/` (nada de `~/.agent-browser/config.json` nem de `./agent-browser.json` da pasta pessoal) e sem as variáveis `AGENT_BROWSER_*` do seu shell; os proxies do shell de login (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`) continuam valendo, para quem precisa deles.
+Se o motor escolhido não estiver instalado, o Orb fica só com `web_fetch` e `web_search`, e **avisa uma vez** para instalar em Ajustes → Navegador. As ferramentas do navegador só aparecem quando o motor está pronto. Ao sair do app, ao trocar o motor de um Orb, ao desligar "Navegar na web", ao apagar o Orb e ao atualizar ou remover um motor em Ajustes, os navegadores abertos são fechados (nenhum Chrome fica para trás), **inclusive os que uma execução anterior do app deixou** (fecham pelo nome da sessão do Orb, `orb-<id>-<motor>`); um navegador esquecido por 30 minutos se fecha sozinho. Um comando que não é `browse_open` **nunca inicia um navegador**: se o processo em segundo plano do Orb morreu (30 minutos parado, `browse_close` em outro turno, troca de motor no meio de um turno), `browse_snapshot`, `browse_read` e os outros respondem que não há página e pedem `browse_open` (que lança o navegador com o perfil e as opções do Orb); e uma sessão que ficou rodando com outras opções (uma versão antiga do app, outro perfil) é fechada antes de a página abrir. O agent-browser roda com um arquivo de configuração vazio do app e dentro de `navegador/` (nada de `~/.agent-browser/config.json` nem de `./agent-browser.json` da pasta pessoal) e sem as variáveis `AGENT_BROWSER_*` do seu shell; os proxies do shell de login (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`) continuam valendo, para quem precisa deles.
 
 **Pesquisa.** A chave do TinyFish (grátis, sem cartão: agent.tinyfish.ai/api-keys) também se guarda em Ajustes → Navegador. `web_search` devolve títulos, endereços e trechos. O provedor é uma escolha do Orb: **DuckDuckGo** (padrão, sem conta; pelo navegador do Orb ou, no motor Leitura simples, pela página simples dele), **Google** (sempre pelo navegador do Orb, nunca por API; sem navegador cai no DuckDuckGo e o resultado diz isso) ou **TinyFish** (API com cota gratuita; precisa da sua chave, guardada no Keychain, uma para o app todo). Se o TinyFish recusar a chave, acabar a cota do dia ou limitar o ritmo, a busca vai para o DuckDuckGo e o resultado avisa; nada é cobrado nem tentado de novo em plano pago.
 
 **Quando é com você.** Login, código de verificação (2FA), captcha, aviso de cookies que bloqueia ou qualquer coisa que só uma pessoa faz: o Orb **não tenta resolver nem digita senha ou número de cartão** (campos de senha são recusados). Ele chama `browse_show`, que reabre a mesma sessão numa janela visível e põe um **cartão no chat**: "Atlas abriu o navegador para você", com **Pronto** (⌘↩) e **Cancelar** (esc). O turno **espera** como espera uma permissão ("Esperando sua resposta"; o Orb fica em "precisa de você" na barra lateral e na barra de menus, e chega o aviso do macOS com os mesmos dois botões). Você faz o que falta na janela e clica em Pronto: a ferramenta devolve sucesso, a janela fica aberta e o Orb continua tirando um `browse_snapshot` novo. Cancelar fecha a janela e diz ao Orb que você recusou (ele não insiste). Parar (⌘.) cancela o cartão como cancela qualquer pedido, e trocar o modo de permissão **não** responde por você. O motor Obscura não tem janela: nesse caso o Orb pede para você trocar de motor.
 
-**No Claude Code.** O Claude Code recebe as mesmas ferramentas (`mcp__orb_memoria__web_search` com "Navegar na web", e `mcp__orb_memoria__browse_*` quando o motor do Orb está instalado) pelo servidor de ferramentas do próprio Orb, na mesma sessão do agent-browser que o app usa (logins e página aberta valem para os dois motores de conversa). Os `WebFetch` e `WebSearch` do Claude Code continuam disponíveis; o prompt pede que o Orb prefira o navegador dele para páginas com JavaScript e sessões em que você já entrou. A chave do TinyFish vai ao servidor no ambiente do arquivo temporário privado do turno (como os segredos dos conectores), nunca na linha de comando. O cartão Pronto/Cancelar de `browse_show` é do app (o servidor é outro processo): o app abre a janela, espera e só então libera a chamada. No modo **Sem pedir permissão** o Claude Code não consulta o app antes de chamar a ferramenta; `browse_show` então só abre a janela e pede ao Orb que avise e pare.
-
-**Permissões.** Abrir uma página e pesquisar perguntam como `web_fetch` (Sempre permitir por site, ou "Pesquisar na web"); clicar, preencher, escolher e apertar teclas perguntam no Perguntar antes (`browse_press` aperta só teclas com nome: Enter, Tab, Shift+Tab, Escape, setas, PageUp/PageDown, Home, End, Backspace, Delete e Space, nunca um caractere nem Control/Meta+V, e recusa qualquer tecla enquanto um campo de senha ou de cartão está em foco) e têm a sua própria liberação ("Clicar e preencher páginas no navegador do Orb"); olhar a página que já está aberta não pergunta. No **Só leitura** nada disso roda. As regras são do Orb: valem igual nos dois motores de conversa, e o cartão de `browse_show` ("Pronto / Cancelar") vem depois do pedido de permissão, quando o modo pergunta.
+**Permissões.** Abrir uma página e pesquisar perguntam como `web_fetch` (Sempre permitir por site, ou "Pesquisar na web"); clicar, preencher, escolher e apertar teclas perguntam no Perguntar antes (`browse_press` aperta só teclas com nome: Enter, Tab, Shift+Tab, Escape, setas, PageUp/PageDown, Home, End, Backspace, Delete e Space, nunca um caractere nem Control/Meta+V, e recusa qualquer tecla enquanto um campo de senha ou de cartão está em foco) e têm a sua própria liberação ("Clicar e preencher páginas no navegador do Orb"); olhar a página que já está aberta não pergunta. No **Só leitura** nada disso roda. As regras são do Orb, com qualquer modelo, e o cartão de `browse_show` ("Pronto / Cancelar") vem depois do pedido de permissão, quando o modo pergunta.
 
 ## Conversar
 
@@ -203,8 +201,7 @@ Se o motor escolhido não estiver instalado, o Orb fica só com `web_fetch` e `w
   trabalhando e algo no campo; com as sugestões de skill abertas ele completa a skill, como antes. Cada mensagem pendente
   diz para onde vai ("Entra no próximo passo", "Depois da tarefa"), e um botão no balão troca o modo depois de enviada
   ("Pôr na fila" / "Direcionar"). Uma mensagem que entrou no meio da tarefa aparece no chat onde o Orb a recebeu, com a
-  marca "Durante a tarefa" (guardada na conversa). No Claude Code não há meio de turno: tudo é fila, a dica mostra só
-  "↩ fila · ⌘↩ para e envia" e o balão diz "Depois da resposta (o Claude Code não recebe no meio)". Se o Orb espera sua
+  marca "Durante a tarefa" (guardada na conversa). Se o Orb espera sua
   resposta a um pedido, o que ia entrar no próximo passo só entra depois dela.
   Dá para tirar uma mensagem da espera ("Editar"). Se o turno falhar ou for parado, o que estava esperando (nos dois modos) volta para o campo. O que está no campo (texto, arquivos e imagens anexados) e o que voltou da fila ficam guardados em `rascunhos.json` ao fechar o app e voltam na próxima abertura (arquivos que sumiram ficam de fora).
 - **Buscar na conversa.** **⌘F** (ou a lupa da barra do chat, ou "Buscar na conversa" em ⌘K) abre uma barra no alto do chat:
@@ -223,8 +220,7 @@ Se o motor escolhido não estiver instalado, o Orb fica só com `web_fetch` e `w
   primeiro; o botão "Cancelar" da faixa também desiste), e o que estava no campo espera e volta ao enviar ou cancelar. Qualquer outro envio
   que comece com a edição aberta (um "Continuar" de aviso, uma resposta da saudação, o painel da barra de menus) desiste da edição e
   devolve o que estava no campo; ⌘↩ "parar e enviar" fica desligado durante a edição. Ao enviar, a mensagem é
-  trocada e **tudo o que veio depois sai da conversa** (do chat e do histórico do modelo; no Claude Code começa uma sessão nova com o que
-  sobrou); as linhas que saem esmaecem e o Orb responde a partir dali. Se o que sai inclui ações que podem ter mudado algo (arquivo gravado,
+  trocada e **tudo o que veio depois sai da conversa** (do chat e do histórico do modelo); as linhas que saem esmaecem e o Orb responde a partir dali. Se o que sai inclui ações que podem ter mudado algo (arquivo gravado,
   comando que não é só de olhar), o app confirma antes: "Os passos depois desta mensagem saem da conversa; o que o Orb já fez no Mac não é
   desfeito." Conversa só de texto não pergunta. Os botões não aparecem com o Orb trabalhando, esperando permissão ou numa rotina; uma
   mensagem que já virou parte do resumo da conversa (depois de compactar) ou que entrou no meio de uma tarefa fica apagada, com o motivo na
@@ -276,8 +272,6 @@ Quando o Orb precisa de você, aparece um cartão na conversa e o Orb espera ("E
 - **Comandos perigosos** (apagar em massa, `sudo`, forçar push, baixar e executar script, desligar o Mac, mexer em `~/.ssh` ou
   nos arquivos de inicialização do shell…) mostram um aviso de "Comando arriscado" e **sempre perguntam**, no Perguntar antes
   e no Automático, e nenhum "Sempre permitir" os cobre. (No "Só leitura" são recusados e no "Sem pedir permissão" não há pergunta.)
-- No **Claude Code**, o "Automático" também passa pela política do Orb (o CLI roda em modo `default` e cada pedido chega ao
-  Orb): uma edição em `~/.zshrc` ou `~/.ssh` pergunta, como no motor nativo.
 - Trocar o modo com cartões abertos responde a eles: "Sem pedir permissão" permite, "Só leitura" nega, "Automático" permite
   os que não são perigosos.
 - **Pela notificação.** Se o app está em segundo plano, ou outro Orb está aberto, o pedido chega como banner com **Permitir** e
@@ -314,7 +308,7 @@ atualiza quando você volta ao app e tem **Verificar de novo**. Gravação do Á
 - No **Automático**, enviar e-mail ou mensagem por AppleScript (ou apertar Return no WhatsApp/Telegram…), apagar vários itens de
   uma vez e abrir scripts, instaladores ou links que rodam Atalhos perguntam antes, como os outros comandos perigosos.
 - O Orb recebe receitas curtas para as tarefas comuns do Mac (datas sem depender do idioma, rascunho no Mail, Lembretes, Notas,
-  Calendário, Música) e conselhos para os erros típicos do AppleScript. No Claude Code, a captura de tela chega como imagem.
+  Calendário, Música) e conselhos para os erros típicos do AppleScript.
 - No painel do Orb, a chave "Controlar apps do Mac" ligada traz o atalho **Permissões**.
 - Quando uma ferramenta falha por falta de permissão, o Orb não tenta de novo: diz o que ligar e onde, e a linha da ferramenta
   ganha o botão **Permitir…** (pede ao macOS ou abre o painel certo).
@@ -412,8 +406,8 @@ Cada Orb tem a **sua** memória, que nasce com ele e cresce a cada conversa: nad
     de ChatGPT: 1 instrução, 9 lembranças e 2 skills. Veja na aba Memória." O que a importação traz de "Sobre você" fica na
     memória do Orb novo (o perfil de Ajustes → Você é seu e não é tocado).
   - *Nada sai do Mac.* Importar não faz rede: lê o que você colou ou escolheu, e o resultado vai para a memória local.
-- No **Claude Code**, a memória chega por um servidor de ferramentas que o próprio app oferece; o histórico do Claude Code
-  (`~/.claude/projects/`) é dele, e "Esquecer" no Orb não o apaga.
+- No **Claude Code** a memória é a mesma: `remember` e `recall` rodam no Orb, e o `claude` não guarda histórico (a conversa vai
+  num arquivo temporário que é apagado ao fim do turno), então "Esquecer" no Orb não deixa cópia nele.
 
 Detalhes: [docs/MEMORIA.md](docs/MEMORIA.md).
 
@@ -441,7 +435,7 @@ aviso dizendo por quê.
   janela fechada); durante uma execução, o Mac também não entra em repouso sozinho. Enquanto a execução espera uma
   aprovação sua, o Mac volta a poder dormir. Terminada a execução, ou sem rotinas ligadas, o app não pede nada.
 - **Peça no chat.** "Verifique meus e-mails a cada 30 minutos" ou "todo dia às 9h me mande um resumo das notícias": o Orb cria a
-  rotina sozinho (ferramenta `schedule`, nos dois motores) e também lista, pausa, retoma e apaga as dele quando você pede. Nada
+  rotina sozinho (ferramenta `schedule`) e também lista, pausa, retoma e apaga as dele quando você pede. Nada
   disso passa em branco: em "Perguntar antes" o cartão mostra o nome, quando roda e o que será pedido; em "Só leitura" só dá
   para listar. A rotina roda no modo do próprio Orb (nunca num mais permissivo), cada Orb tem no máximo 20 e só mexe nas suas, e
   uma rotina em execução não cria outras. A nova aparece na aba Rotinas do painel (que abre sozinha se estiver à vista), com um
@@ -479,8 +473,6 @@ janela vai antes para a memória do Orb. As mensagens continuam salvas na conver
   mensagem), *Equilibrado* (80 mil, o padrão) ou *Amplo* (até 60% da janela, nunca menos que o Equilibrado; custa mais por mensagem). Vale para todos os Orbs.
 - Se um provedor recusa uma conversa por tamanho, o Orb aprende a janela real daquele modelo (**Janelas aprendidas**, com
   "Esquecer", útil depois de aumentar o limite do servidor).
-- No **Claude Code** o contexto é do próprio Claude Code, que se resume sozinho; "Compactar agora" faz um resumo e **a próxima
-  mensagem começa uma sessão nova** a partir dele.
 
 Detalhes técnicos: [docs/CONTEXTO.md](docs/CONTEXTO.md).
 
@@ -502,7 +494,7 @@ Como o custo é dito:
 | Modelo | Aparece como |
 |---|---|
 | Chave de API (OpenAI, Claude, xAI, OpenRouter, OpenCode Zen, Command Code, gateway) | o valor em dólares, pelos tokens de cada pedido: o cache lido custa o preço do cache, não o da entrada |
-| Assinatura (login do ChatGPT, Claude Code, OpenCode Go) | **Incluído no plano**, com os tokens. O "≈ US$ x pela API" é o que o Claude Code informa de cada turno, ou o que a tabela de preços daria. Não entra no total |
+| Assinatura (login do ChatGPT, Claude Code, OpenCode Go) | **Incluído no plano**, com os tokens. O "≈ US$ x pela API" é o que a tabela de preços daria para esses tokens. Não entra no total |
 | Ollama, LM Studio, gateway em `localhost` | **Grátis** |
 | Modelo que ninguém conhece o preço | os tokens e **Sem preço** (e o aviso no alto) |
 
@@ -550,23 +542,22 @@ tem a **Galeria**, os **Instalados** e **Explorar**.
     serviço sem PKCE é recusado). O token fica no Keychain, nunca no arquivo de dados, e **Sair da conta** (no menu do cartão)
     o apaga (e pede ao serviço que o revogue, quando o servidor de login anuncia o endereço da revogação; o `auth.revoke` do Slack ainda não é chamado, então o token dele só deixa de valer ao expirar ou ao desinstalar o app). O cartão mostra **Entrar**, **Sessão expirou** (a renovação foi recusada) ou **Precisa de mais permissão** (o
     servidor pediu um escopo a mais: **Permitir mais** abre o login de novo, uma vez por clique, e o botão fica até a permissão ser liberada). Um login que ficou esperando o navegador é do app, não do cartão: sair da tela não o prende, e um novo clique em *Entrar* substitui o anterior. Em **Avançado** dá para dar o
-    Client ID e o Client Secret de um app seu, para serviços que não deixam o Orb se registrar. Com o Claude Code, o token vai
-    renovado (com pelo menos 30 minutos de vida, quando o serviço dá refresh token) para cada turno; se o serviço recusar a renovação, o cartão passa a dizer **Sessão expirou** na hora. Só entra em conectores HTTPS.
+    Client ID e o Client Secret de um app seu, para serviços que não deixam o Orb se registrar. Só entra em conectores HTTPS.
   - **GitHub** e **Supabase** (`mcp.supabase.com/mcp`, token de acesso pessoal; começa com `read_only=true`) pedem uma chave.
 - **Carregam sob demanda.** Um conector não liga com o app nem manda as suas ferramentas a cada mensagem: o Orb recebe só duas
   ferramentas fixas, uma para ver o que cada conector oferece e outra para usá-lo. O servidor sobe na primeira vez que um Orb
   precisa dele (a conversa mostra "Conectando a GitHub…") e desliga sozinho depois de 10 minutos sem uso (um servidor local que fica sem responder, duas chamadas seguidas, é desligado e sobe de novo na próxima; ao fechar o app, os servidores locais são encerrados). O cartão em
   *Instalados* mostra **Pronto** (desligado, liga quando precisar), **Em uso**, **Conectando…**, **Erro** ou **Desligado**, e o
   menu tem **Testar conexão** ("Conectou: 12 ferramentas em 0,8 s"; se falhar, o motivo aparece no cartão), **Ver ferramentas…** (com "Só leitura" e "Destrutiva"),
-  **Editar…** e **Apagar…**. Uma falha traz "Tentar de novo". Com o Claude Code os conectores vão como sempre, e ele mesmo
-  adia as ferramentas.
+  **Editar…** e **Apagar…**. Uma falha traz "Tentar de novo".
 - **Quem usa.** Cada conector e cada skill tem **"Usar com"**: todos os Orbs (padrão) ou só os que você marcar. O Orb também
   precisa estar com a chave **Conectores** ligada (marcar o Orb em "Usar com" liga sozinho). Uma ferramenta de conector pede
   aprovação como as demais, a menos que o servidor a anuncie como somente leitura. Uma que **envia, publica ou apaga** (pelo
   nome: send, post, reply, forward, share, publish, delete, remove, trash, archive, schedule, invite, transfer) pergunta até no
   Automático, a não ser que o servidor a declare só de leitura. O que vem de um conector não vira memória de longo prazo: a
-  página de sessão guarda só que o conector foi usado. O Claude Code roda sempre com `--strict-mcp-config`: os conectores do
-  claude.ai e os servidores do `~/.claude.json` não entram, só os conectores do Orb.
+  página de sessão guarda só que o conector foi usado. O Claude Code não vê os conectores: o `claude` roda só com o servidor mínimo do cano
+  (`--strict-mcp-config`), então os conectores do claude.ai e os servidores do `~/.claude.json` não entram, e os do Orb passam pela política do Orb como
+  com qualquer modelo.
 - **Chaves e tokens** dos conectores (inclusive o login, conta `mcp.<id>.oauth`) ficam no **Keychain**, não no arquivo de dados;
   apagar o conector ou redefinir o Orb apaga também o login.
 - **Skills** são instruções reutilizáveis no formato aberto `SKILL.md`. *Explorar* busca no catálogo [Skills.sh](https://skills.sh)
@@ -707,7 +698,7 @@ swift test           # mais de 2.000 testes (motor, provedores, Claude Code, fer
 |---|---|
 | [docs/ARQUITETURA.md](docs/ARQUITETURA.md) | mapa dos módulos, caminho de um turno, persistência, concorrência, desempenho, testes e ferramentas de desenvolvimento |
 | [docs/CONTEXTO.md](docs/CONTEXTO.md) | orçamento, compactação, resumo estruturado, medidor, economia de tokens e o registro de uso |
-| [docs/PERMISSOES.md](docs/PERMISSOES.md) | modos, liberações com escopo, comandos perigosos, aprovações, ponte com o Claude Code e permissões do macOS |
+| [docs/PERMISSOES.md](docs/PERMISSOES.md) | modos, liberações com escopo, comandos perigosos, aprovações, o Claude Code como cano e permissões do macOS |
 | [docs/MEMORIA.md](docs/MEMORIA.md) | a memória por Orb |
 | [docs/ORBS.md](docs/ORBS.md) | o avatar: atividades, jeito, animação e desempenho |
 | [docs/MOVIMENTO.md](docs/MOVIMENTO.md) | especificação do movimento da interface |

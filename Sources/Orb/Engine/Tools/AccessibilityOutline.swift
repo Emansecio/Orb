@@ -368,7 +368,7 @@ enum UIOutlineBuilder {
 // MARK: - Snapshot
 
 /// Where a screenshot sits, to turn its pixels back into points on screen.
-struct ShotGeometry: Codable, Sendable, Equatable {
+struct ShotGeometry: Sendable, Equatable {
     var pixelWidth: Int
     var pixelHeight: Int
     /// Pixels per point.
@@ -389,8 +389,8 @@ struct ShotGeometry: Codable, Sendable, Equatable {
 
 /// What one `ui_read` showed: for each id its role and name, and which window it came from. `ui_act` finds the element
 /// again from the id and refuses to act when the live element no longer looks like this.
-struct UISnapshot: Codable, Sendable, Equatable {
-    struct Entry: Codable, Sendable, Equatable {
+struct UISnapshot: Sendable, Equatable {
+    struct Entry: Sendable, Equatable {
         /// The AX role ("AXButton").
         var rawRole: String
         /// Title, else description, as shown in the outline.
@@ -407,15 +407,6 @@ struct UISnapshot: Codable, Sendable, Equatable {
             self.secure = secure
             self.frame = frame
             self.actionable = actionable
-        }
-
-        init(from decoder: Decoder) throws {
-            let c = try decoder.container(keyedBy: CodingKeys.self)
-            rawRole = try c.value(.rawRole, default: "")
-            label = try c.value(.label, default: "")
-            secure = try c.value(.secure, default: false)
-            frame = try? c.decodeIfPresent(CGRect.self, forKey: .frame)
-            actionable = (try? c.decodeIfPresent(Bool.self, forKey: .actionable)) ?? false
         }
     }
 
@@ -444,37 +435,6 @@ struct UISnapshot: Codable, Sendable, Equatable {
         self.shot = shot
     }
 
-    private enum CodingKeys: String, CodingKey {
-        case app, windowIndex, windowTitle, entries, takenAt, generation, marks, shot
-    }
-
-    // Fields added later fall back to defaults, so a snapshot stored by an older version still decodes.
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        app = try c.decode(AccessibilityApp.self, forKey: .app)
-        windowIndex = try c.decodeIfPresent(Int.self, forKey: .windowIndex)
-        windowTitle = try c.value(.windowTitle, default: "")
-        entries = (try? c.decodeIfPresent([String: Entry].self, forKey: .entries)) ?? [:]
-        takenAt = try c.value(.takenAt, default: .distantPast)
-        generation = (try? c.decodeIfPresent(Int.self, forKey: .generation)) ?? 0
-        let stored = (try? c.decodeIfPresent([String: String].self, forKey: .marks)) ?? [:]
-        marks = Dictionary(stored.compactMap { key, id in Int(key).map { ($0, id) } }, uniquingKeysWith: { first, _ in first })
-        shot = try? c.decodeIfPresent(ShotGeometry.self, forKey: .shot)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var c = encoder.container(keyedBy: CodingKeys.self)
-        try c.encode(app, forKey: .app)
-        try c.encodeIfPresent(windowIndex, forKey: .windowIndex)
-        try c.encode(windowTitle, forKey: .windowTitle)
-        try c.encode(entries, forKey: .entries)
-        try c.encode(takenAt, forKey: .takenAt)
-        try c.encode(generation, forKey: .generation)
-        // JSON keys are strings: an Int-keyed dictionary would be written as a flat array.
-        try c.encode(Dictionary(uniqueKeysWithValues: marks.map { (String($0.key), $0.value) }), forKey: .marks)
-        try c.encodeIfPresent(shot, forKey: .shot)
-    }
-
     /// Whether a call naming `name` may be about this app: the same test that finds the app (`RunningAppMatcher`),
     /// an exact name or bundle identifier, or a name that contains the text.
     func isFor(_ name: String) -> Bool {
@@ -484,8 +444,7 @@ struct UISnapshot: Codable, Sendable, Equatable {
     }
 }
 
-/// The last snapshot per Orb and app. Kept in memory, and mirrored to a small file per app so the approval check can see a
-/// snapshot taken by another process of the app.
+/// The last snapshot per Orb and app, kept in memory.
 final class UISnapshotStore: @unchecked Sendable {
     static let shared = UISnapshotStore()
 
@@ -500,27 +459,13 @@ final class UISnapshotStore: @unchecked Sendable {
     /// yet it is the newest thing this Orb looked at, and `latest` must pick it.
     private var savedOrder: [Key: Int] = [:]
     private var saves = 0
-    private let directory: URL?
-    /// A reading older than this is forgotten (and its file deleted): the screen it described is long gone, and the file is
-    /// readable by any process of the user.
+    /// A reading older than this is forgotten: the screen it described is long gone.
     private let maxAge: TimeInterval
     private let now: @Sendable () -> Date
 
-    init(directory: URL? = FileManager.default.temporaryDirectory.appending(path: "OrbAccessibility"),
-         maxAge: TimeInterval = 3_600, now: @escaping @Sendable () -> Date = { .now }) {
-        self.directory = directory
+    init(maxAge: TimeInterval = 3_600, now: @escaping @Sendable () -> Date = { .now }) {
         self.maxAge = maxAge
         self.now = now
-    }
-
-    /// The snapshot in `url`, or nil when it cannot be read or is older than `maxAge` (then the file is deleted).
-    private func fresh(at url: URL) -> UISnapshot? {
-        guard let data = try? Data(contentsOf: url), let snapshot = try? JSONDecoder().decode(UISnapshot.self, from: data) else { return nil }
-        guard now().timeIntervalSince(snapshot.takenAt) <= maxAge else {
-            try? FileManager.default.removeItem(at: url)
-            return nil
-        }
-        return snapshot
     }
 
     private static func key(_ app: AccessibilityApp, bot: UUID?) -> Key {
@@ -534,25 +479,19 @@ final class UISnapshotStore: @unchecked Sendable {
             saves += 1
             savedOrder[key] = saves
         }
-        guard let directory, let data = try? JSONEncoder().encode(snapshot) else { return }
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try? data.write(to: file(for: snapshot.app, in: directory), options: .atomic)
     }
 
-    /// The Orb's own last reading of the app, else the last one anybody made (another process's, from the file).
+    /// The Orb's own last reading of the app.
     func snapshot(bot: UUID?, app: AccessibilityApp) -> UISnapshot? {
         let key = Self.key(app, bot: bot)
-        let own: UISnapshot? = lock.withLock {
+        return lock.withLock {
             guard let snapshot = snapshots[key] else { return nil }
             guard now().timeIntervalSince(snapshot.takenAt) <= maxAge else { snapshots[key] = nil; return nil }
             return snapshot
         }
-        if let own { return own }
-        guard let directory else { return nil }
-        return fresh(at: file(for: app, in: directory))
     }
 
-    /// The reading this Orb last saved in this process (a `ui_read`, or a screenshot merged into one), of any app: what
+    /// The reading this Orb last saved (a `ui_read`, or a screenshot merged into one), of any app: what
     /// `ui_act` acts on when no app is named (never the app in front, which is the one the user is using).
     func latest(bot: UUID?) -> UISnapshot? {
         lock.withLock {
@@ -568,18 +507,8 @@ final class UISnapshotStore: @unchecked Sendable {
             snapshots = snapshots.filter { now().timeIntervalSince($0.value.takenAt) <= maxAge }
             return Array(snapshots.values)
         }
-        if let directory, let names = try? FileManager.default.contentsOfDirectory(atPath: directory.path) {
-            for name in names where name.hasPrefix("ax-") && name.hasSuffix(".json") {
-                if let snapshot = fresh(at: directory.appending(path: name)) { found.append(snapshot) }
-            }
-        }
         if let app = app?.trimmingCharacters(in: .whitespacesAndNewlines), !app.isEmpty { found = found.filter { $0.isFor(app) } }
         return found.sorted { $0.takenAt > $1.takenAt }
-    }
-
-    private func file(for app: AccessibilityApp, in directory: URL) -> URL {
-        let safe = UIText.fold(app.bundleID ?? app.name).map { $0.isLetter || $0.isNumber || $0 == "." ? String($0) : "_" }.joined()
-        return directory.appending(path: "ax-\(safe).json")
     }
 }
 

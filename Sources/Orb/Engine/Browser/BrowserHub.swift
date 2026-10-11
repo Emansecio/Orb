@@ -2,7 +2,7 @@ import Foundation
 import os
 
 /// What a tool of an Orb needs to reach its browser: the hub that keeps the browsers, and the Orb's settings. Part of the
-/// `ToolContext`; without a hub (tests, the Claude Code engine for now) the `browse_*` tools say the browser is not there.
+/// `ToolContext`; without a hub (tests) the `browse_*` tools say the browser is not there.
 struct BrowserAccess: Sendable {
     var hub: BrowserHub?
     var engine: BrowserEngineKind = .simple
@@ -289,8 +289,8 @@ final class BrowserHub: Sendable {
         return held != nil || others
     }
 
-    /// Closes the browsers of every Orb that uses `engine` (before its files are removed or replaced), the ones other processes
-    /// started included.
+    /// Closes the browsers of every Orb that uses `engine` (before its files are removed or replaced), the ones an earlier run of the
+    /// app started included.
     func close(engine: BrowserEngineKind) async {
         let ids = sessions.withLock { $0.filter { $0.value.engine == engine }.map(\.key) }
         var held: Set<String> = []

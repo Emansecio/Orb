@@ -114,12 +114,12 @@ extension AXAttributeValue {
 }
 
 /// A running app whose interface can be read.
-struct AccessibilityApp: Sendable, Equatable, Codable {
+struct AccessibilityApp: Sendable, Equatable {
     var name: String
     var bundleID: String?
     var pid: Int32
     /// When the process started: with the pid and bundle identifier it tells a running app from a new one that reused
-    /// the pid. Nil when unknown (old snapshots).
+    /// the pid. Nil when unknown.
     var launchDate: Date?
 
     init(name: String, bundleID: String?, pid: Int32, launchDate: Date? = nil) {
@@ -127,14 +127,6 @@ struct AccessibilityApp: Sendable, Equatable, Codable {
         self.bundleID = bundleID
         self.pid = pid
         self.launchDate = launchDate
-    }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        name = try c.value(.name, default: "")
-        bundleID = try? c.decodeIfPresent(String.self, forKey: .bundleID)
-        pid = try c.decode(Int32.self, forKey: .pid)
-        launchDate = try? c.decodeIfPresent(Date.self, forKey: .launchDate)
     }
 }
 

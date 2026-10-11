@@ -1,16 +1,16 @@
 # Permissões
 
-Como o Orb decide se uma ação roda, pergunta ou é recusada. Vale para os dois motores (o nativo, `AgentEngine`, e o do
-Claude Code, `ClaudeCodeEngine`): os dois transformam a chamada numa `PermissionCall` e perguntam a mesma função,
-`PermissionPolicy.evaluate`. Assim as regras não se afastam uma da outra.
+Como o Orb decide se uma ação roda, pergunta ou é recusada. Vale para todo Orb, seja qual for o modelo, o do Claude Code
+incluído (o `claude` é só o cano até o modelo, veja "Claude Code"): o motor (`AgentEngine`) transforma a chamada numa
+`PermissionCall` e pergunta a `PermissionPolicy.evaluate` antes de rodar qualquer ferramenta.
 
 Para o ponto de vista de quem usa o app, veja a seção "Permissões" do [README](../README.md).
 
 ## Visão geral
 
 ```
-chamada de ferramenta (nativa, de conector ou do Claude Code)
-        │  PermissionPolicy.call(for:…) / call(claudeCodeTool:…)
+chamada de ferramenta (própria do Orb ou de conector)
+        │  PermissionPolicy.call(for:…)
         ▼
 PermissionCall   família · risco · perigo · comando · pastas · site · conector
         │  PermissionPolicy.evaluate(modo, chamada, liberações, concessões da tarefa, pasta)
@@ -20,7 +20,7 @@ PermissionCall   família · risco · perigo · comando · pastas · site · con
 .deny(mensagem)   volta para o modelo como erro ("Not run: …")
 ```
 
-O modo e as liberações são lidos **a cada chamada** (`PermissionSource`, que o `AppModel` entrega às duas engines), nunca
+O modo e as liberações são lidos **a cada chamada** (`PermissionSource`, que o `AppModel` entrega ao motor), nunca
 copiados no começo do turno. Trocar o modo ou remover uma liberação no meio de uma tarefa vale já para a próxima ação.
 
 ## Modos
@@ -62,42 +62,40 @@ Cada ferramenta declara três coisas (`AgentTool`):
 
 - **Risco** (`ToolRisk`): `.safe` (lê ou consulta), `.sensitive` (muda algo, roda código ou pode mandar dados para fora) e
   `.instructs` (muda as instruções permanentes do Orb).
-- **Família** (`PermissionFamily`): o tipo de coisa que a chamada faz, igual nos dois motores (`run_command` e o `Bash`
-  do Claude Code são `shell`), para que uma liberação continue valendo se o Orb trocar de modelo.
+- **Família** (`PermissionFamily`): o tipo de coisa que a chamada faz, para que uma liberação continue valendo se o Orb
+  trocar de modelo. Liberações salvas no tempo em que o Claude Code usava as ferramentas dele (`Bash`, `Write`, `mcp__orb_memoria__…`,
+  `mcp__servidor__ferramenta`) ainda são entendidas e viram a família certa (`legacyRule`).
 - **Perigo** (`danger`): por que *esta* chamada é destrutiva, ou `nil`.
 
-| Família | Ferramentas nativas | Claude Code |
-|---|---|---|
-| `shell` | `run_command` | `Bash` |
-| `writeFiles` | `write_file`, `edit_file`, `trash` | `Write`, `Edit`, `MultiEdit`, `NotebookEdit` |
-| `web` | `web_fetch`, `web_search`, `browse_open`, `browse_tabs` (nova aba) | `WebFetch`, `WebSearch` |
-| `browserPage` | `browse_click`, `browse_fill`, `browse_select`, `browse_press`, `browse_show` | |
-| `open` | `open` | |
-| `appleScript` | `applescript` | |
-| `macApps` | `shortcuts_run`, `clipboard_write`, `app_quit` | |
-| `appInterface` | `ui_read`, `ui_act` | |
-| `connector` | ferramentas de conectores (`Servidor__ferramenta`) | `mcp__servidor__ferramenta` |
-| `memory` | `remember`, `recall` | `mcp__orb_memoria__remember`, `mcp__orb_memoria__recall` |
-| `schedule` | `schedule` (criar, pausar, retomar, apagar) | `mcp__orb_memoria__schedule` |
-| `jobs` | `job_output`, `job_list`, `job_stop` | `BashOutput`, `KillShell`, `KillBash` (`TaskOutput` e `TaskStop` nos CLIs novos) |
+| Família | Ferramentas |
+|---|---|
+| `shell` | `run_command` |
+| `writeFiles` | `write_file`, `edit_file`, `trash` |
+| `web` | `web_fetch`, `web_search`, `browse_open`, `browse_tabs` (nova aba) |
+| `browserPage` | `browse_click`, `browse_fill`, `browse_select`, `browse_press`, `browse_show` |
+| `open` | `open` |
+| `appleScript` | `applescript` |
+| `macApps` | `shortcuts_run`, `clipboard_write`, `app_quit` |
+| `appInterface` | `ui_read`, `ui_act` |
+| `connector` | ferramentas de conectores (`Servidor__ferramenta`) |
+| `memory` | `remember`, `recall` |
+| `schedule` | `schedule` (criar, pausar, retomar, apagar) |
+| `jobs` | `job_output`, `job_list`, `job_stop` |
 
 Detalhes que costumam surpreender:
 
 - **O que é `.safe`** (roda sem perguntar, até em "Só leitura"): `read_file`, `list_directory`, `search_files`, `grep`,
   `glob`, `recall`, `job_output`, `job_list`, `job_stop`, `shortcuts_list`, `clipboard_read`, `screenshot`, `apps_list`,
-  `processes`, `browser_tab`, `notify`, `ui_read`. No Claude Code: `Read`, `LS`, `Glob`, `Grep`, `NotebookRead`,
-  `BashOutput`, `TaskOutput`, `KillShell`, `KillBash` e `TaskStop`; qualquer outra ferramenta dele é `.sensitive`. Parar um processo é
-  seguro nos dois motores pelo mesmo motivo: só alcança processos em segundo plano que o próprio Orb iniciou (e que já
-  passaram pela aprovação do comando que os começou). `TaskStop` e `TaskOutput` são os nomes novos de `KillShell`/`KillBash` e `BashOutput` no CLI.
-- **Dois casos em que o `.safe` da ferramenta não vale.** (1) **Segredos**: `read_file` e `grep` (e `Read`/`Grep`/`NotebookRead` do
-  Claude Code) de uma chave ou credencial (`~/.ssh` menos `.pub`/`known_hosts`/`config`, `~/.aws` menos `config`, `~/.gnupg`,
+  `processes`, `browser_tab`, `notify`, `ui_read`. Parar um processo é seguro pelo mesmo motivo de ler a saída dele: só alcança
+  processos em segundo plano que o próprio Orb iniciou (e que já passaram pela aprovação do comando que os começou).
+- **Dois casos em que o `.safe` da ferramenta não vale.** (1) **Segredos**: `read_file` e `grep` de uma chave ou credencial (`~/.ssh` menos `.pub`/`known_hosts`/`config`, `~/.aws` menos `config`, `~/.gnupg`,
   `~/.kube`, `~/.config/gcloud`, `~/Library/Keychains`, `~/.netrc`, `~/.npmrc`, `~/.config/gh/hosts.yml`,
   `~/.docker/config.json`, `.env` e `.env.*` menos `.example`/`.sample`, `*.pem`, `*.p12`, `*.key`, `id_rsa`…; ver
   `DangerousCommand.SensitiveFiles`) viram `.sensitive` com perigo: **perguntam** em "Perguntar antes" e "Automático", são
   **negadas** em "Só leitura" e rodam em "Sem pedir permissão". Uma busca em pasta (`grep` sem apontar o arquivo) não lê esses
   arquivos de passagem: deixa-os de fora e diz quantos. Comandos de shell também perguntam no "Automático" quando uma palavra
   deles aponta para um segredo em `~` (`cat ~/.ssh/id_rsa`, `tar … ~/.aws`), com exceção dos que só mostram nomes e tamanhos
-  (`ls`, `stat`, `file`, `du`, `wc`, `find`). (2) **Comandos que só olham**: uma linha de `run_command` (ou `Bash`) feita só de
+  (`ls`, `stat`, `file`, `du`, `wc`, `find`). (2) **Comandos que só olham**: uma linha de `run_command` feita só de
   `ls`, `cat`/`head`/`tail`, `grep` (sem `-r`), `wc`, `file`, `stat`, `du`, `df`, `which`, `echo`, `printf` (sem `-v`), `pwd`,
   `command -v`/`type`, `diff`/`cmp`/`shasum`/`md5` (sem `-r`, `-l`, `-c`), `find` (sem
   `-exec`/`-delete`/`-fprint`), `sort`/`uniq` (sem arquivo de saída) e `git status`/`log`/`diff`/`show`/`blame`/`branch`
@@ -129,8 +127,7 @@ Detalhes que costumam surpreender:
   `type`/`autocomplete` dele; a ferramenta responde que a pessoa deve digitar e que o Orb chame `browse_show`.
   Depois de permitido, `browse_show` abre a janela e põe um segundo cartão, **Pronto / Cancelar** (`ApprovalRequest.isHandoff`): não é permissão, é a vez
   da pessoa. Ele espera como qualquer cartão (Parar o cancela), **nenhuma troca de modo o responde** (nem "Sem pedir permissão") e não oferece "Sempre permitir".
-  A dica `readOnlyHint` que o servidor MCP anuncia (`AgentTool.announcedReadOnly`) é a mesma lição do `schedule`: `risk` sem argumentos não basta. Ferramenta que olha uma página viva (`readsLivePage`: `browse_snapshot`, `browse_read`, `browse_screenshot`, `browse_scroll`, `browse_back`) **não** é anunciada como somente leitura, porque "Só leitura" a recusa, e `browse_tabs` também não (sem argumentos lista, mas `new` com `url` navega e `select`/`close` mexem no navegador); só `browse_close` é anunciada como segura. No Claude Code as mesmas ferramentas são `mcp__orb_memoria__browse_*` e `mcp__orb_memoria__web_search`, julgadas pelas mesmas regras (a regra "Pesquisar na web"
-  cobre as duas pesquisas); o cartão de `browse_show` é aberto pelo app antes de liberar a chamada.
+  A dica `readOnlyHint` que o servidor MCP anuncia (`AgentTool.announcedReadOnly`) é a mesma lição do `schedule`: `risk` sem argumentos não basta. Ferramenta que olha uma página viva (`readsLivePage`: `browse_snapshot`, `browse_read`, `browse_screenshot`, `browse_scroll`, `browse_back`) **não** é anunciada como somente leitura, porque "Só leitura" a recusa, e `browse_tabs` também não (sem argumentos lista, mas `new` com `url` navega e `select`/`close` mexem no navegador); só `browse_close` é anunciada como segura.
 - `web_fetch`, `open` e `remember` são `.sensitive` de propósito: são o caminho de **saída** de dados (ou o que fica no
   prompt de toda conversa). Um texto malicioso numa página não consegue ler um segredo e mandá-lo sem você aprovar.
 - `remember` com `tipo` `identidade` ou `preferencia` é `.instructs`. Com `fato` ou `procedimento` é `.sensitive`. Com `skill` é
@@ -143,15 +140,13 @@ Detalhes que costumam surpreender:
   retomar e apagar são `.sensitive` (cartão em "Perguntar antes", `Sempre permitir` oferece "Gerenciar as tarefas agendadas";
   roda em "Automático" e "Sem pedir permissão"; **negado em "Só leitura"**). `list` é `.safe` e roda em todos os modos, e uma
   chamada que nomeia a ação mas não passa na conferência (intervalo de 5 minutos, `when` faltando) também é `.safe`: não muda nada,
-  então vai direto ao erro, sem cartão para aprovar só para ouvir um não (sem `action` nenhuma, que é o que o Claude Code pergunta
-  ao anunciar a ferramenta, vale `.sensitive`, para o `readOnlyHint` sair falso). O cartão mostra o nome, quando roda e o que será pedido, numa linha. A tarefa criada **nunca** é mais permissiva que o Orb: nasce com
+  então vai direto ao erro, sem cartão para aprovar só para ouvir um não (sem `action` nenhuma, que é a ferramenta como um todo,
+  vale `.sensitive`, para o `readOnlyHint` anunciado ao servidor MCP sair falso). O cartão mostra o nome, quando roda e o que será pedido, numa linha. A tarefa criada **nunca** é mais permissiva que o Orb: nasce com
   `permissionMode` nil (usa o modo do Orb na hora de rodar, como uma rotina feita à mão sem "Avançado"). Um Orb só enxerga e
   muda as rotinas dele, tem no máximo 20 (`AppModel.scheduledTaskLimit`) e uma execução de rotina não cria outras (um e-mail ou
   uma página lidos numa rotina não conseguem plantar tarefas que sobrevivem a ela; pausar, retomar e apagar continuam valendo).
-  **Limite conhecido (Claude Code):** a caixa de correio `agendamentos/` não autentica o `orb` do pedido, que vem no próprio
-  arquivo. Quem escreve nessa pasta já é um processo da sua conta, e um Orb com shell liberado (Automático) já faz tudo o que
-  uma rotina faria; um token por turno não o impediria de lê-lo no `ps` ou no arquivo de configuração do turno. Por isso não há
-  token: o "só as dele" e o "rotina não cria tarefas" valem para as chamadas da ferramenta, não contra um shell liberado.
+  O "só as dele" e o "rotina não cria tarefas" valem para as chamadas da ferramenta, não contra um shell liberado (um Orb com
+  shell liberado, no Automático, já faz tudo o que uma rotina faria).
 - O Orb não vê as ferramentas dos conectores: usa `connector_tools` e `connector_call` (`.safe`, só leem o catálogo e
   passam o pedido). O motor troca cada `connector_call` pelo `MCPTool` de verdade (`GitHub__create_issue`) **antes** da
   política: o cartão ("Usando GitHub"), as anotações, o perigo e as regras "Sempre permitir" (`connectorKey`
@@ -164,27 +159,17 @@ Detalhes que costumam surpreender:
   chamada em laço, e é a pessoa quem concede a permissão a mais (cada clique abre o login uma vez, com os escopos já dados mais os pedidos).
   O navegador abre sempre por clique dela. O app recusa um servidor de login sem PKCE `S256` ou sem HTTPS, e um conector remoto sem HTTPS (fora do loopback) não faz login nem recebe o token, e uma resposta do login
   com `iss` ou `state` errados não chega a trocar o código. O token fica só no Keychain (conta `mcp.<id>.oauth`), vai em
-  `Authorization` (nunca na URL, no `state.json` nem em mensagens de erro) e, no Claude Code, no arquivo temporário 0600 do turno. Apagar o conector ou "Sair da conta" apaga o login do Keychain e o revoga no serviço (melhor esforço, se o servidor anuncia `revocation_endpoint`); um login que ainda estava no navegador nessa hora é cancelado e não grava nada.
+  `Authorization` (nunca na URL, no `state.json` nem em mensagens de erro). Apagar o conector ou "Sair da conta" apaga o login do Keychain e o revoga no serviço (melhor esforço, se o servidor anuncia `revocation_endpoint`); um login que ainda estava no navegador nessa hora é cancelado e não grava nada.
 - Ferramentas de conectores (`MCPTool`) são `.sensitive`, **exceto** quando o servidor as anuncia como somente leitura
   (`readOnlyHint`), de mundo fechado (`openWorldHint` não verdadeiro) e não destrutivas. Uma ferramenta anunciada como
   destrutiva (`destructiveHint`) tem perigo: pergunta até no "Automático". O mesmo vale para a ferramenta que **envia, publica ou
-  apaga** pelo nome, mesmo sem `destructiveHint` (`PermissionPolicy.connectorDanger`, a mesma função nos dois motores): uma das
+  apaga** pelo nome, mesmo sem `destructiveHint` (`PermissionPolicy.connectorDanger`): uma das
   palavras `send`, `post`, `reply`, `forward`, `share`, `publish`, `comment`, `push`, `merge`, `submit`, `upload`, `notify`, `delete`,
   `remove`, `trash`, `archive`, `schedule`, `invite`, `transfer` (também `destroy`, `purge`, e `create` junto de `pull`:
   `create_pull_request`) no nome, separado por `_`, `-`, `.` ou maiúsculas (`slack_send_message`, `deleteEvent`);
   palavras parecidas (`sent`, `replies`, `schedules`) não contam. `readOnlyHint` verdadeiro vence o nome; `destructiveHint`
-  verdadeiro vence tudo. Perigo nunca é coberto por "Sempre permitir". No Claude Code o mapa dessas ferramentas vem do
-  catálogo em disco de cada conector (`ClaudeCodeTurn.destructiveConnectors`, montado ao preparar o turno, sem subir servidor),
-  porque as anotações que o CLI recebe dos seus próprios servidores não chegam ao Orb; assim as duas engines perguntam igual. A chave é a que o CLI usa de
-  verdade (`mcp__<nome na configuração>__<ferramenta>` por `connectorKey`), e o nome na configuração (`ClaudeCodeTurn.mcpNames`)
-  é só ASCII, com `-2`, `-3` para nomes repetidos: "Calendário" vira `calend-rio`. O catálogo pode estar defasado (o CLI usa
-  só ele, e ele só se renova quando o motor nativo usa o conector, quando o servidor avisa que as ferramentas mudaram ou com
-  "Testar conexão"), então a checagem é por ferramenta: o turno leva o prefixo de cada conector (`connectorPrefixes`) e as
-  ferramentas que o catálogo conhece (`knownConnectorTools`); uma ferramenta de um conector do Orb que o catálogo não lista
-  (conector sem catálogo, ou ferramenta que surgiu depois dele) não tem anotações conhecidas e pergunta, até no "Automático",
-  com o motivo "não deu para conferir se o conector marca esta ferramenta como destrutiva". Para o catálogo não ficar
-  parado, um turno do Claude Code renova em segundo plano (sem segurar o turno, no máximo uma vez por hora por conector) o
-  que está ausente ou tem mais de 24 h.
+  verdadeiro vence tudo. Perigo nunca é coberto por "Sempre permitir". As anotações vêm do servidor, guardadas no catálogo do conector
+  (`ConnectorCatalog`), que é o que o motor lê ao trocar o `connector_call` pela ferramenta de verdade.
 - `ui_act` tem perigo quando o rótulo do elemento (ou o item de menu) fala em excluir, enviar, comprar ou descartar, ou
   quando preenche um campo de senha. `app_quit` com `force` tem perigo ("encerra o app à força").
 - **Perigos novos do `ui_act` em segundo plano** (desenho em [USO-DO-COMPUTADOR.md](USO-DO-COMPUTADOR.md)): o perigo é recalculado na
@@ -193,8 +178,7 @@ Detalhes que costumam surpreender:
   Return/Enter em app de mensagem (envia), `cmd+delete` no Finder (apaga), `click` por coordenada, `key` e a primeira etapa
   perigosa de `steps`. `type`, `key` e `set_value` em campo de senha têm perigo (o valor nunca é lido de volta). **Assumir a
   tela** (`takeover`) tem perigo sempre: pergunta em "Perguntar antes" e "Automático" (o cartão lista as etapas), é recusado em "Só
-  leitura" e roda em "Sem pedir permissão" com o aviso na tela. Um takeover é global ao Mac (uma trava de arquivo em
-  `~/Library/Caches/<bundle id>/takeover.lock`: o app e o servidor do Claude Code são processos diferentes), dura no máximo 10 s,
+  leitura" e roda em "Sem pedir permissão" com o aviso na tela. Um takeover é um por vez (`TakeoverLock.shared`: o segundo Orb a pedir recebe "ocupado" em vez de esperar), dura no máximo 10 s,
   se interrompe se o mouse real se mexer e sempre devolve o app da frente, a janela e o cursor.
 - A família `appInterface` (`ui_read`, `ui_act`) só pergunta pelo `ui_act`: uma liberação antiga de Atalhos ou da área de transferência (`macApps`) não passa a
   cobrir "clicar e preencher campos em qualquer app".
@@ -209,7 +193,7 @@ Uma liberação é uma `PermissionRule`: uma família com um **escopo** (`Bot.pe
 | `commandPrefix(palavras)` | comandos que começam com essas palavras | "Rodar comandos git", "Rodar comandos npm run" |
 | `folder(caminho)` | gravar em arquivos **dentro** da pasta (absoluta, nunca `/`) | "Gravar em ~/Projetos/app" |
 | `host(site)` | o site e seus subdomínios | "Acessar exemplo.com" |
-| `search` | pesquisar na web (o `WebSearch` do Claude Code, que não tem site); nunca cobre ler uma página | "Pesquisar na web" |
+| `search` | pesquisar na web (`web_search`, que não tem site); nunca cobre ler uma página | "Pesquisar na web" |
 | `connectorTool(chave)` | uma ferramenta de conector | "Usar create_issue (github)" |
 
 Regras de validade (`PermissionRule.isValid`): o escopo só faz sentido para a sua família. Ao ler o arquivo, uma regra de
@@ -238,10 +222,10 @@ por `PermissionPolicy`); por isso a prévia desmarca o que parece dar ordens, e 
   estar cobertas: uma regra do site (ou "qualquer site") e uma regra de pasta (ou a pasta própria do Orb). Só "Acessar
   qualquer site" nunca libera gravar em qualquer lugar. O destino é julgado como em `write_file`
   (`DangerousCommand.reason(forWritingTo:)`): `~/Library/LaunchAgents`, `.zshrc`, `.ssh`… perguntam até no "Automático". O
-  `WebSearch` do Claude Code não tem site: o cartão oferece "Pesquisar na web" (escopo `search`), não "qualquer site", que
-  liberaria todo `WebFetch`. Sem "Terminal e arquivos" o `web_fetch` recusa `save_to` (`ToolContext.canSaveFiles`).
-- `connector`: a chave da ferramenta (`PermissionPolicy.connectorKey`, igual para `GitHub__create_issue` e
-  `mcp__github__create_issue`).
+  `web_search` não tem site: o cartão oferece "Pesquisar na web" (escopo `search`), não "qualquer site", que
+  liberaria todo `web_fetch`. Sem "Terminal e arquivos" o `web_fetch` recusa `save_to` (`ToolContext.canSaveFiles`).
+- `connector`: a chave da ferramenta (`PermissionPolicy.connectorKey`, `GitHub__create_issue` vira
+  `github__create_issue`; o formato antigo `mcp__github__create_issue` das liberações salvas pelo Claude Code vira o mesmo).
 - `open`, `appleScript`, `macApps`, `appInterface`, `memory`, `jobs`, `schedule`: só o escopo `any`.
 
 **Sugestões do cartão.** `PermissionPolicy.suggestions` oferece até 3 regras, da mais estreita para a mais larga:
@@ -249,10 +233,9 @@ por `PermissionPolicy`); por isso a prévia desmarca o que parece dar ordens, e 
 regra para interpretadores e embrulhos (`sh`, `bash`, `python3`, `node`, `xargs`, `sudo`, `find`, `awk`, `sed`, `ssh`, `open` e os
 mesmos embrulhos que o detector de perigo atravessa: `env`, `nice`, `caffeinate`, `arch`, `xcrun`, `timeout`…; a lista é
 `DangerousCommand.wrappers`), porque liberaria qualquer coisa. Uma regra de uma palavra só para um embrulho, já salva por uma versão
-antiga, deixa de valer: o cartão volta a aparecer. Chamadas perigosas e as que mudam instruções não têm sugestões. No Claude Code, as
-sugestões que o próprio CLI manda (`permission_suggestions`) entram depois, filtradas pelas mesmas regras.
+antiga, deixa de valer: o cartão volta a aparecer. Chamadas perigosas e as que mudam instruções não têm sugestões.
 
-**Migração.** Orbs antigos tinham `allowedTools` (nomes de ferramenta dos dois motores). `Bot.init(from:)` converte cada
+**Migração.** Orbs antigos tinham `allowedTools` (nomes de ferramenta, do motor próprio e do Claude Code de então). `Bot.init(from:)` converte cada
 nome em regra de escopo `any` da família certa (`legacyRules`).
 
 ## Escrita na pasta própria
@@ -325,7 +308,7 @@ message`) não é perigoso.
 vale), um arquivo executável sem extensão (abre no Terminal e roda) ou um link `shortcuts://run-shortcut…` é perigoso. Com
 "Controlar apps do Mac" desligado, `open` recusa o link que roda um Atalho.
 
-**Escritas**: `write_file`/`edit_file`/`trash` (e `Write`/`Edit`/`MultiEdit`/`NotebookEdit` do Claude Code, também no
+**Escritas**: `write_file`/`edit_file`/`trash` (também no
 "Automático") em arquivos de inicialização do shell
 (`.zshrc`, `.zprofile`, `.bashrc`…), em `~/.ssh`, em `~/Library/LaunchAgents`, em `/Library/LaunchAgents`,
 `/Library/LaunchDaemons` e `/etc` (que o sistema resolve para `/private/etc`) são perigosas. A comparação ignora maiúsculas e minúsculas, como o sistema de arquivos do Mac:
@@ -339,7 +322,7 @@ normal do modo.
 ### O cartão
 
 Quando `evaluate` devolve `.ask`, o motor monta um `ApprovalRequest`, abre uma entrada no `ApprovalGate` (um actor
-compartilhado pelas duas engines, seguro contra cancelamento), emite `TurnEvent.approval` e espera. O cartão aparece na
+compartilhado, seguro contra cancelamento), emite `TurnEvent.approval` e espera. O cartão aparece na
 conversa e o Orb passa a `waiting` ("Esperando sua resposta").
 
 | Controle | Efeito (`ApprovalDecision`) |
@@ -384,66 +367,30 @@ sem foco, ⌘↩ permite.
 
 `ApprovalGate.applyModeChange`: "Sem pedir permissão" permite todos os cartões abertos; "Automático" permite os que não
 são `alwaysAsks` (perigo ou mudança de instruções continuam esperando); "Só leitura" nega todos. A conversa marca o que foi
-respondido sozinho. No Claude Code, o novo modo também vai ao processo (`set_permission_mode`).
+respondido sozinho.
 
-## Ponte com o Claude Code
+## Claude Code
 
-O `ClaudeCodeEngine` roda um `claude -p` por turno, em `stream-json`, com `--permission-prompt-tool stdio`: cada ferramenta
-que o CLI não aprova sozinho chega como um pedido `can_use_tool`. O engine converte o pedido com
-`PermissionPolicy.call(claudeCodeTool:input:workspace:)` e usa o mesmo `evaluate`, o mesmo `ApprovalGate` e o mesmo cartão.
+Um Orb no Claude Code passa pela mesma `PermissionPolicy.evaluate` e pelo mesmo `ApprovalGate` que os outros: o motor julga a chamada,
+abre o cartão se for o caso e só depois roda a ferramenta; o resultado volta ao CLI. O `claude` (`ClaudeCodeClient`) é só o cano até o
+modelo e não decide nada por conta própria:
 
-| Modo do Orb | `--permission-mode` |
-|---|---|
-| Perguntar antes | `default` |
-| Automático | `default` |
-| Só leitura | `plan` |
-| Sem pedir permissão | `bypassPermissions` |
-
-"Perguntar antes" e "Automático" rodam o CLI do mesmo jeito (`default`): o CLI não aprova sozinho nada que considere
-arriscado, e tudo isso chega ao Orb como `can_use_tool`. Quem decide é `PermissionPolicy.evaluate`, igual ao motor nativo:
-no "Automático" permite, a não ser que seja perigoso (`~/.zshrc`, `~/.ssh`, LaunchAgents, `rm -rf`…) ou mude as instruções do
-Orb. O modo `acceptEdits` não é usado de propósito: com ele o CLI aprovaria edições de arquivo sozinho e a checagem de
-perigo do Orb (`DangerousCommand.reason(forWritingTo:)`) nunca as veria. `default` é aceito pelo CLI instalado (2.1.x; a
-lista de `--help` mostra `manual`, que o próprio CLI converte em `default`).
-- Capacidades desligadas viram `--disallowedTools` (sem "Terminal e arquivos": `Bash`, `Edit`, `Write`, `MultiEdit`,
-  `NotebookEdit`, `Glob`, `Grep`, `LS`, `NotebookRead` e os controles de shell `BashOutput`, `TaskOutput`, `KillShell`,
-  `KillBash`, `TaskStop`, como no motor nativo; só o `Read` fica, porque o CLI abre por ele as imagens anexadas; sem "Navegar na
-  web": `WebFetch`, `WebSearch`) e, **sempre**, `--strict-mcp-config`: só carregam os servidores que o Orb põe no `--mcp-config` (o
-  das ferramentas do Orb e os conectores do Orb, com a política dele). Os conectores do claude.ai (Gmail, Agenda, Drive…) e os servidores do
-  `~/.claude.json` da pessoa nunca entram: rodariam fora das permissões do Orb, sem cartão e sem anotações; um servidor desconhecido
-  não roda. Fora do "Sem pedir permissão", entram também
-  `Read(~/.ssh/**)`, `Read(~/.aws/**)` e as outras leituras de segredo (`ClaudeCodeTools.secretReads`): o CLI confia na pasta pessoal
-  inteira (`--add-dir`) e nunca perguntaria ao Orb, então a leitura é recusada de vez (o motor nativo pergunta). Isso vale para
-  a ferramenta `Read`; um `cat ~/.ssh/id_rsa` pelo `Bash` do CLI passa pela ponte do Orb, a não ser que o próprio CLI o aprove antes
-  (ele aprova sozinho alguns comandos de leitura dentro das pastas de `--add-dir`): não foi possível conferir isso sem abrir uma
-  sessão real, então é um limite conhecido.
-- `AskUserQuestion` (a pergunta de múltipla escolha do CLI) vai sempre em `--disallowedTools`, até no "Sem pedir permissão": o Orb não
-  tem cartão para respondê-la (o SDK devolve `answers` em `updatedInput`), e aprová-la deixaria o modelo seguir como se a pessoa
-  tivesse respondido. Se uma chamada chegar mesmo assim (um CLI que não conheça o nome), o Orb a nega sem cartão e diz ao modelo
-  para perguntar em texto e encerrar o turno (`ClaudeCodePolicy.questionDenial`). Não foi conferido com um CLI real se, em `-p`,
-  ele chegaria a oferecer a ferramenta; a remoção é inofensiva de qualquer jeito.
-- O CLI roda com o mesmo ambiente do `run_command` (`ShellEnvironment`: shell de login interativo, com o PATH do `.zshrc`,
-  `JAVA_HOME` etc.) e com a pasta do `claude` na frente do PATH, menos as variáveis do provedor (`ANTHROPIC_*`, como
-  `ANTHROPIC_API_KEY`), que trocariam em silêncio o login do claude.ai por cobrança da API; o Bash dele e os conectores MCP que ele inicia herdam isso.
-  Sai também `ENABLE_TOOL_SEARCH=false` (e `0`, `off`): o CLI adia sozinho as ferramentas dos conectores (busca de ferramentas),
-  e desligar isso mandaria todas elas a cada mensagem. Por isso o Claude Code não usa o porteiro (`connector_tools`).
-  Os argumentos (persona e memória em português) chegam byte a byte (`LineProcess` usa `posix_spawn`).
-- O Bash do CLI mantém o `cd` entre uma chamada e outra, mas a política julga cada comando na pasta do Orb. Por isso o
-  processo sobe com `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1` (`ClaudeCodeTurn.processEnvironment`), que faz cada chamada do Bash
-  **da sessão principal** voltar à pasta do projeto (https://code.claude.com/docs/en/env-vars). O Bash de um subagente (`Task`/`Agent`)
-  continua guardando o `cd`. O Orb reconhece esses pedidos (o `tool_use_id` não apareceu nas mensagens da sessão principal) e
-  não presume pasta: um `rm x.txt` relativo pergunta e um comando só é "somente leitura" sem depender da pasta
-  (`PermissionPolicy.call(claudeCodeTool:…fromSubagent:)`).
-- O motivo que o CLI manda junto do pedido (`decision_reason`) vem em inglês e não aparece no cartão: vale o motivo do próprio
-  Orb ou, sem ele, a frase "<Orb> precisa da sua permissão para continuar." quando o modelo ainda não escreveu nada. Os nomes
-  das ferramentas próprias do CLI (`TodoWrite`, `Task`, `ExitPlanMode`, `Skill`…) também aparecem em português (`ClaudeCodeTools.summary`).
-- As ferramentas do próprio Orb (memória, agendamento, Mac e web), que o Claude Code vê como `mcp__orb_memoria__…`, passam pela mesma política
-  que as gêmeas nativas: risco, perigo (`app_quit` forçado, `do shell script`) e família. As seguras rodam em todos os modos.
-- Uma negação aparece na linha da ferramenta em português ("Você negou esta ação." / "Bloqueado: o Orb está em modo Só
-  leitura.").
-- Limite: o que o **próprio CLI** aprova sozinho (`bypassPermissions`, ferramentas de leitura, e o que as regras de
-  `permissions.allow` do Claude Code já liberam) não chega ao Orb (veja "Limites conhecidos").
-  `ClaudeCodeEngine.modeChanged` avisa o CLI quando o modo muda.
+- Roda com `--tools ""` (nenhuma ferramenta dele: sem Bash, Read, Write, WebFetch, Task…), `--setting-sources ""` (não lê o
+  `~/.claude/settings.json` nem o `.claude/settings.json` da pasta, então as regras `permissions.allow` dele não existem aqui),
+  `--disable-slash-commands` e `--strict-mcp-config` com um servidor só, o `orb` (o binário do Orb em `--pipe-tools`), que apenas
+  declara as ferramentas do turno. Os conectores do claude.ai e os servidores do `~/.claude.json` da pessoa nunca entram, e os
+  conectores do Orb não vão ao CLI: o Orb os usa pelo `connector_call`, como em qualquer provedor. A pasta de trabalho do CLI é uma
+  pasta vazia do app (`claude-pipe/cwd`).
+- `--permission-mode default --permission-prompt-tool stdio`: o CLI pede `can_use_tool` antes de chamar uma ferramenta MCP.
+  `ClaudePipeRun` só responde "permitir" depois que o motor já avaliou, perguntou (se precisava) e rodou a chamada e entregou o
+  resultado na caixa de correio; qualquer outro pedido é negado na hora ("Ferramenta indisponível."). O modo do Orb não vai ao
+  CLI: trocá-lo age no motor e no `ApprovalGate`, não no processo.
+- O CLI roda com o mesmo ambiente do `run_command` (`ShellEnvironment`: shell de login interativo, com o PATH do `.zshrc`) e a
+  pasta do `claude` na frente do PATH, menos as variáveis do provedor (`ANTHROPIC_*`, como `ANTHROPIC_API_KEY`), que trocariam em
+  silêncio o login do claude.ai por cobrança da API (`ClaudeCode.isProviderVariable`).
+- Não há o que o CLI aprove "por fora": sem ferramentas e sem configurações dele, tudo o que o modelo consegue fazer é chamar uma
+  ferramenta do Orb, e essa passa pela política. Por isso valem para ele os mesmos modos, famílias, liberações e a mesma checagem
+  de perigo e de segredos.
 
 ## Permissões do macOS (TCC)
 
@@ -466,8 +413,7 @@ Separadas das anteriores: dizem o que o **macOS** deixa o app fazer. Ficam em Aj
   pedido, porque o macOS encerraria o processo: o sheet manda empacotar com `scripts/bundle.sh`. Dentro dos conectores, ler não
   pergunta; criar evento, lembrete e rascunho seguem o modo do Orb; **alterar evento, apagar evento e enviar e-mail perguntam sempre**
   (`update_event` é marcado destrutivo porque o Google avisa os convidados da mudança; o evento mostra quantos convidados tem).
-  Um período dado só por datas inclui o dia final inteiro (`to`/`until` "2026-10-10" vai até o fim do dia 10). Um evento repetido não é alterado nem apagado. O servidor para o Claude Code
-  (`Orb --local-connector`) roda no processo filho com a identidade do app e não pergunta nada ao macOS por conta própria.
+  Um período dado só por datas inclui o dia final inteiro (`to`/`until` "2026-10-10" vai até o fim do dia 10). Um evento repetido não é alterado nem apagado. Os conectores rodam dentro do app (`LocalTransport`), com a identidade dele, e não perguntam nada ao macOS por conta própria.
 - A aba nunca pede nada sozinha; cada linha tem um botão: "Pedir agora" mostra o aviso do macOS onde ele existe, "Abrir <app> e
   pedir" cobre a Automação de um app fechado e "Abrir Ajustes do Sistema" leva ao painel certo. Atualiza ao voltar ao app. Gravação do Áudio do Sistema e da Tela e Acesso Total só valem depois de reabrir o Orb.
 - **Pré-voo de Automação.** Antes de rodar AppleScript/JXA, `AutomationPreflight` lê os apps que o script endereça
@@ -485,9 +431,7 @@ Separadas das anteriores: dizem o que o **macOS** deixa o app fazer. Ficam em Aj
   O nome do app recusado é lido também do texto em português do sistema ("eventos Apple para Mail") e, se nada o nomeia e o
   script fala com um só app, esse é o app. No painel do Orb (Geral → "O que o Orb pode usar"), a chave "Controlar apps do Mac"
   ligada mostra o atalho **Permissões**.
-- `ui_read` e `ui_act` só são oferecidos ao modelo com a Acessibilidade concedida (o prompt avisa quando ficam de fora). O
-  servidor de ferramentas do Claude Code recebe a resposta do app (`--accessibility` / `--no-accessibility`) em vez de
-  perguntar ao macOS de dentro de um processo filho.
+- `ui_read` e `ui_act` só são oferecidos ao modelo com a Acessibilidade concedida (o prompt avisa quando ficam de fora).
 - As permissões valem para a identidade de assinatura do app. Com assinatura ad-hoc (o padrão de `scripts/bundle.sh`), cada
   compilação é "outro app" para o macOS; `scripts/make-signing-identity.sh` cria o certificado local "Orb Local" que mantém
   a identidade (veja o README).
@@ -507,18 +451,12 @@ O que o modelo de permissões **não** faz, para ninguém contar com isso:
   um sandbox, que o app não tem.
 - **O detector olha o texto do comando.** Um script gravado em arquivo e executado (`bash script.sh`, `python3 x.py`) não é
   lido; só `sh -c '…'`, `eval`, `$( )`, crases e `osascript -e` são abertos (até 4 níveis).
-- **Claude Code.** No "Automático" o CLI roda em `default`, então todo pedido de ferramenta que ele não considera de
-  leitura passa pelo Orb, inclusive edições de arquivo. Ainda não passa pelo Orb: o que o CLI aprova pelo `bypassPermissions`
-  (só no "Sem pedir permissão"), as ferramentas de leitura dele e o que as regras `permissions.allow` das configurações do
-  próprio Claude Code (`~/.claude/settings.json`, `.claude/settings.json` da pasta) já liberam. A checagem de perigo do Orb
-  só vê o que chega como `can_use_tool`.
 
 ## Instruções da pasta
 
 `ORB.md`, senão `AGENTS.md`, senão `CLAUDE.md` na pasta do Orb é **material de referência**, não ordem: qualquer pasta
 baixada pode trazer um. "Confiar nas instruções desta pasta" (painel, aba "Pasta e acessos") guarda o SHA-256 completo do
-arquivo em `Bot.trustedInstructionsHash`; se o arquivo mudar, volta a ser referência até confiar de novo. Para um Orb no
-Claude Code o `CLAUDE.md` é lido pelo próprio CLI e o interruptor não aparece. O texto da pasta e da memória não consegue
+arquivo em `Bot.trustedInstructionsHash`; se o arquivo mudar, volta a ser referência até confiar de novo. O texto da pasta e da memória não consegue
 fechar as tags `<orb_context>`/`<workspace_snapshot>` (`Fence.neutralize`).
 
 ## Onde está no código
@@ -530,11 +468,11 @@ fechar as tags `<orb_context>`/`<workspace_snapshot>` (`Fence.neutralize`).
 | `Engine/DangerousCommand.swift`, `Engine/ShellCommandLine.swift` | perigo em shell, AppleScript e escritas; segredos que não se leem sem perguntar (`SensitiveFiles`); análise da linha de comando |
 | `Engine/ReadOnlyCommand.swift` | quais linhas de shell só olham (sem cartão no "Perguntar antes", rodam no "Só leitura") |
 | `Engine/ApprovalGate.swift`, `Engine/ApprovalBatch.swift` | cartões abertos, resposta, grupos, troca de modo |
-| `Engine/AgentEngine.swift` | `execute` / `confirmBatch`: onde o motor nativo pergunta |
-| `Engine/ClaudeCodeEngine.swift`, `Engine/ClaudeCodeProtocol.swift` | `can_use_tool`, `ClaudeCodePolicy`, modos do CLI |
+| `Engine/AgentEngine.swift` | `execute` / `confirmBatch`: onde o motor pergunta |
+| `Engine/ClaudePipe/ClaudeCodeClient.swift`, `Engine/ClaudeCodeProtocol.swift` | `can_use_tool` (`ClaudePipeRun.answer`), as linhas de controle do CLI |
 | `AppModel.swift`, `AppModel+Approvals.swift` | `permissionState`, `decide`, `permissionModeChanged`, banners |
 | `ApprovalNotifications.swift`, `Views/ApprovalKeyboard.swift` | notificações com ações, ⌘↩ / Esc |
 | `Views/TranscriptViews.swift` (`ApprovalCard`), `Views/QuickAskView.swift` | os cartões |
 | `Views/ComposerChips.swift`, `Views/BotInspector.swift`, `Views/PermissionConfirmation.swift` | seletor de modo, "Liberações", confirmação do bypass |
 | `MacPermissions.swift`, `Views/MacPermissionsView.swift` | TCC, pré-voo, tradução de erros |
-| Testes | `PermissionPolicyTests`, `ReadOnlyCommandTests`, `PermissionModelTests`, `DangerousCommandTests`, `ApprovalNotificationTests`, `MacPermissionsTests`, `AgentEngineTests`, `ClaudeCodeEngineTests` |
+| Testes | `PermissionPolicyTests`, `ReadOnlyCommandTests`, `PermissionModelTests`, `DangerousCommandTests`, `ApprovalNotificationTests`, `MacPermissionsTests`, `AgentEngineTests`, `ClaudeCodeClientTests` |

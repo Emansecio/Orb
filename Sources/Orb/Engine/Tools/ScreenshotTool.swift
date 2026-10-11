@@ -194,7 +194,7 @@ struct ScreenshotTool: AgentTool {
             case .found(let matches): found = matches[0]
             }
         } else {
-            // Not the Orb's own windows (nor those of another process of the same app).
+            // Not the Orb's own windows (nor those of another instance of the same app).
             var own: Set<Int32> = [ownPID]
             if let bundle = Bundle.main.bundleIdentifier { own.formUnion(apps.filter { $0.bundleID == bundle }.map(\.pid)) }
             guard let pid = frontWindowPID(own) else { throw ToolError("Não achei nenhuma janela visível de outro app.") }

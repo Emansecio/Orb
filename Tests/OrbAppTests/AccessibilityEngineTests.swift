@@ -12,7 +12,7 @@ import Testing
 /// A bench with its own sessions and live references, so a hung app in one test never slows another.
 private struct Bench {
     let system: FakeAccessibility
-    let store = UISnapshotStore(directory: nil)
+    let store = UISnapshotStore()
     let sessions: AXSessions
     let live = UILiveElements()
     let root: FakeElement
@@ -449,7 +449,7 @@ struct AccessibilityRefusalTests {
         #expect(UIDanger.reason(forKeys: [KeyStroke(.named(.delete), modifiers: .command)], appName: "Finder", bundleID: "com.apple.finder") != nil)
         #expect(UIDanger.reason(forKeys: [KeyStroke(.named(.delete))], appName: "Finder", bundleID: "com.apple.finder") == nil)
 
-        let store = UISnapshotStore(directory: nil)
+        let store = UISnapshotStore()
         store.save(UISnapshot(app: AccessibilityApp(name: "Mail", bundleID: "com.apple.mail", pid: 7), windowIndex: 1, windowTitle: "Nova", entries: [:]), bot: nil)
         let tool = UIActTool(system: FakeAccessibility(), store: store, settle: .none)
         #expect(tool.danger(.object(["action": .string("key"), "app": .string("Mail"), "keys": .string("return")])) != nil)
@@ -779,7 +779,7 @@ struct AccessibilityReviewTests {
     }
 
     @Test func aScreenshotMergedIntoAnOlderReadingMakesItsAppTheLatest() {
-        let store = UISnapshotStore(directory: nil)
+        let store = UISnapshotStore()
         let bot = UUID()
         let notes = AccessibilityApp(name: "Notas", bundleID: "com.apple.Notes", pid: 100)
         let mail = AccessibilityApp(name: "Mail", bundleID: "com.apple.mail", pid: 300)
@@ -830,24 +830,6 @@ struct AccessibilityStaleIdTests {
         bench.system.apps[0].launchDate = launched.addingTimeInterval(60) // the same pid, another process
         let message = await bench.failure { try await bench.act(["action": .string("press"), "id": .string("w1.1")]) }
         #expect(message.contains("fechou ou foi reaberto"))
-    }
-
-    @Test func anOldSnapshotFileStillDrivesAnAction() async throws {
-        let folder = FileManager.default.temporaryDirectory.appending(path: "OrbAXEngine-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: folder) }
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        // Written by a version without generation, frames, marks or launch dates.
-        let json = #"{"app":{"name":"Notas","bundleID":"com.apple.Notes","pid":100},"windowIndex":1,"windowTitle":"Doc","#
-            + #""entries":{"w1.1":{"rawRole":"AXButton","label":"OK","secure":false}},"takenAt":\#(Date.now.timeIntervalSinceReferenceDate)}"#
-        try Data(json.utf8).write(to: folder.appending(path: "ax-com.apple.notes.json"))
-        let target = fakeButton("OK")
-        let system = FakeAccessibility()
-        system.apps = [FakeAccessibility.app("Notas", "com.apple.Notes", pid: 100)]
-        system.roots[100] = fakeApp(windows: [fake("AXWindow", title: "Doc", [target])])
-        let tool = UIActTool(system: system, store: UISnapshotStore(directory: folder), settle: .none, sessions: AXSessions(), live: UILiveElements())
-        let context = ToolContext(workingDirectory: folder, botID: UUID())
-        _ = try await tool.run(.object(["action": .string("press"), "app": .string("Notas"), "id": .string("w1.1")]), context: context)
-        #expect(target.performed == ["AXPress"])
     }
 }
 
@@ -1185,7 +1167,7 @@ struct AccessibilityHangTests {
         system.apps = [FakeAccessibility.app("Notas", "com.apple.Notes", pid: 100)]
         root.attrs["AXWindows"] = .elements([window])
         system.roots[100] = root
-        let store = UISnapshotStore(directory: nil)
+        let store = UISnapshotStore()
         let sessions = AXSessions()
         let context = ToolContext(workingDirectory: FileManager.default.temporaryDirectory, botID: UUID())
         let read = UIReadTool(system: system, store: store, sessions: sessions, live: UILiveElements())

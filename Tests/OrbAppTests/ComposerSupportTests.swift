@@ -16,14 +16,13 @@ struct ComposerSupportTests {
 
     @Test func theQueueHintHasAShortFormForANarrowComposer() {
         let key = AppShortcut.commandReturn.label
-        #expect(ComposerHint.queueing(steersMidTurn: true, needsYou: false, typesInComposer: true, compact: true) == "↩ direciona · ⇥ fila")
-        #expect(ComposerHint.queueing(steersMidTurn: false, needsYou: false, typesInComposer: true, compact: true) == "↩ fila")
-        #expect(ComposerHint.queueing(steersMidTurn: true, needsYou: true, typesInComposer: true, compact: true) == "↩ direciona · ⇥ fila · \(key) recusa e envia")
-        #expect(ComposerHint.queueing(steersMidTurn: true, needsYou: true, typesInComposer: false, compact: true) == "\(key) permite o pedido")
+        #expect(ComposerHint.queueing(needsYou: false, typesInComposer: true, compact: true) == "↩ direciona · ⇥ fila")
+        #expect(ComposerHint.queueing(needsYou: true, typesInComposer: true, compact: true) == "↩ direciona · ⇥ fila · \(key) recusa e envia")
+        #expect(ComposerHint.queueing(needsYou: true, typesInComposer: false, compact: true) == "\(key) permite o pedido")
         // Every short form is shorter than its long one, and the long ones are unchanged without `compact`.
-        for (steers, needs, types) in [(true, false, true), (false, false, true), (true, true, true), (true, true, false)] {
-            let long = ComposerHint.queueing(steersMidTurn: steers, needsYou: needs, typesInComposer: types)
-            #expect(ComposerHint.queueing(steersMidTurn: steers, needsYou: needs, typesInComposer: types, compact: true).count < long.count)
+        for (needs, types) in [(false, true), (true, true), (true, false)] {
+            let long = ComposerHint.queueing(needsYou: needs, typesInComposer: types)
+            #expect(ComposerHint.queueing(needsYou: needs, typesInComposer: types, compact: true).count < long.count)
         }
     }
 
@@ -48,14 +47,12 @@ struct ComposerSupportTests {
     @Test func theHintNeverPromisesStopAndSendWhereCommandReturnAllows() {
         let key = AppShortcut.commandReturn.label
         // No request open: the line is the usual one.
-        #expect(ComposerHint.queueing(steersMidTurn: true, needsYou: false, typesInComposer: true) == "↩ direciona · ⇥ fila · \(key) para e envia")
-        // Claude Code takes nothing in the middle of a turn: everything there is the queue, and the line shows no steering.
-        #expect(ComposerHint.queueing(steersMidTurn: false, needsYou: false, typesInComposer: true) == "↩ fila · \(key) para e envia")
+        #expect(ComposerHint.queueing(needsYou: false, typesInComposer: true) == "↩ direciona · ⇥ fila · \(key) para e envia")
         // A request open and text in the focused composer: ⌘↩ stops (refusing the request) and sends.
-        let typing = ComposerHint.queueing(steersMidTurn: true, needsYou: true, typesInComposer: true)
+        let typing = ComposerHint.queueing(needsYou: true, typesInComposer: true)
         #expect(typing.contains("\(key) recusa o pedido e envia agora") && typing.hasPrefix("↩ direciona"))
         // Elsewhere ⌘↩ still allows the request, and the line says that instead.
-        let elsewhere = ComposerHint.queueing(steersMidTurn: true, needsYou: true, typesInComposer: false)
+        let elsewhere = ComposerHint.queueing(needsYou: true, typesInComposer: false)
         #expect(elsewhere.contains("\(key) permite o pedido") && !elsewhere.contains("para e envia"))
     }
 
@@ -141,10 +138,9 @@ struct ComposerSupportTests {
     }
 
     @Test func theRoundButtonSaysDirecionarWhereTheOrbTakesMessagesMidTask() {
-        #expect(ComposerAction.queue.title(isRoutine: false, steers: true) == "Direcionar")
-        #expect(ComposerAction.queue.help(isRoutine: false, steers: true).hasPrefix("Direcionar"))
-        #expect(ComposerAction.queue.title(isRoutine: false, steers: false) == "Colocar na fila") // Claude Code
-        #expect(ComposerAction.stop.title(isRoutine: false, steers: true) == "Parar")
+        #expect(ComposerAction.queue.title(isRoutine: false) == "Direcionar")
+        #expect(ComposerAction.queue.help(isRoutine: false).hasPrefix("Direcionar"))
+        #expect(ComposerAction.stop.title(isRoutine: false) == "Parar")
     }
 
     @Test func pasteIsTakenOnlyInTheComposersOwnKeyWindowWithoutASheet() {

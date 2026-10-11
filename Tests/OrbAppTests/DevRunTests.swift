@@ -14,7 +14,6 @@ import Testing
     @Test func aNormalLaunchUsesTheUsersFolder() {
         #expect(folder([]) == .standard(support.appending(path: "Orb")))
         #expect(folder([]).allowsLegacyMigration)
-        #expect(folder(["--tools-mcp", "/m"]).allowsLegacyMigration)
     }
 
     @Test func everyDeveloperModeGetsAFreshTemporaryFolder() {

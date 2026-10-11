@@ -86,14 +86,11 @@ struct AgentBrowserConfig: Sendable, Equatable {
         if let file = launchRecordFile { try? FileManager.default.removeItem(at: file) }
     }
 
-    /// The variable a TinyFish key travelled in when the Orb's tools ran in another process; still never passed on to the browser.
-    static let tinyFishKeyVariable = "ORB_TINYFISH_KEY"
-
     /// The environment of the user's login shell without what would reconfigure the browser behind the app's back: every
-    /// `AGENT_BROWSER_*` setting (the app sets its own) and the key of the search provider. Proxies (`HTTP_PROXY`, `HTTPS_PROXY`,
+    /// `AGENT_BROWSER_*` setting (the app sets its own). Proxies (`HTTP_PROXY`, `HTTPS_PROXY`,
     /// `ALL_PROXY`, `NO_PROXY`) stay as the shell has them, so a Mac that needs a proxy to reach the web keeps working.
     static func sanitized(_ environment: [String: String]) -> [String: String] {
-        environment.filter { !$0.key.uppercased().hasPrefix("AGENT_BROWSER_") && $0.key != tinyFishKeyVariable }
+        environment.filter { !$0.key.uppercased().hasPrefix("AGENT_BROWSER_") }
     }
 
     /// The environment a command runs with: the login shell's (or the app's), cleaned, plus what this session sets.

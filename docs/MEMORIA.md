@@ -30,7 +30,7 @@ documento descreve o que existe no código. Como a memória se combina com a com
 Os arquivos `.md` são a fonte da verdade: dá para abrir no Obsidian, editar à mão ou apagar. A cada ~20 s de uso (e quando
 o app volta para a frente) o índice confere as datas dos arquivos e se atualiza (`MemoryBank.reconcile`); se o `index.sqlite`
 sumir ou corromper, ele é refeito a partir das páginas (só se perde a contagem de uso). Só a corrupção apaga o arquivo: um
-índice que outro processo está usando (o app reconstruindo, o servidor de ferramentas do Claude Code) ou uma pasta que não
+índice que outro processo está usando (por exemplo, o app reconstruindo) ou uma pasta que não
 abre não são apagados, e abrir um índice já certo não escreve nada, então não espera a trava. Se não abriu, o banco tenta de
 novo a cada 30 s (`indexRetryInterval`) em vez de ficar sem busca a sessão inteira.
 
@@ -130,12 +130,12 @@ Detalhes que importam:
 
 - **Perfil da usuária** (Ajustes → Geral → Você; `UserProfile.promptSection`, passado em `brief(profile:)`): nome, como te
   chamar e "Sobre você", em até ~750 caracteres e **zero quando vazio**. Entra no começo do `pinned`, não em `SystemPrompt`
-  (a base está no teto do `SystemPromptTests`), e vale para todos os Orbs e para os dois motores. Não é uma memória: não é
+  (a base está no teto do `SystemPromptTests`), e vale para todos os Orbs. Não é uma memória: não é
   indexado, o `recall` não o acha e não vai para `_guardadas`. A divisão é: **perfil = quem você é** (global, você edita num
   formulário); **identidade e preferências = como este Orb trabalha com você** (por Orb, o Orb escreve com `remember`). O bloco
   diz ao modelo que, no jeito de trabalhar, identidade e preferências vencem, e para não perguntar o que o perfil já diz.
   Passa por `MemoryText.flatten` e `MemorySanitizer.scrub` (colar uma chave não a envia). Editar o perfil custa uma falha de
-  cache (como editar uma preferência); no Claude Code a sessão é reconstruída e `memoryUpdate` leva o bloco novo.
+  cache (como editar uma preferência).
 
 - **Relacionadas** (`MemoryBank.related`): a busca roda em toda mensagem, então é seletiva. Agradecimentos e saudações não
   buscam nada; verbos e palavras de pergunta ("você lembra…", "quantos…") não contam como assunto; `nome` e `anos` só valem
@@ -222,26 +222,14 @@ reindexa. O VoiceOver é avisado nos dois casos.
   `usuário:senha@` em URLs, `curl -u`, variáveis como `DB_PASSWORD=…`/`MY_TOKEN: …`, JSON `"password": "…"` e chaves
   privadas são removidos antes de qualquer coisa ser gravada.
 
-## Modo Claude Code
+## Claude Code
 
-O Claude Code só recebe ferramentas por MCP. Cada turno passa um servidor chamado `orb_memoria` que é o próprio binário do
-app: `Orb --tools-mcp <pasta da memória> [--mac] [--files] [--folder <pasta do Orb>] [--accessibility | --no-accessibility]`
-(`--memory-mcp` ainda é aceito; `--files` liga `trash`, a ferramenta de arquivos que não pede permissão do Mac). Ele oferece `remember` e `recall` sobre os mesmos arquivos (o SQLite em modo WAL deixa o
-app e o servidor usarem o índice juntos) e, com "Controlar apps do Mac", também as ferramentas do Mac (`open`,
-`applescript`, `shortcuts_*`, `clipboard_*`, `screenshot`, `notify`, `apps_list`, `processes`, `app_quit`, `trash`,
-`browser_tab`, e `ui_read`/`ui_act` se o app tem Acessibilidade) e, com "Navegar na web", `web_search` e, com o motor do Orb instalado, as `browse_*`
-(`--web` ou `--browser <motor>`, `--search <provedor>`, `--browser-profiles <pasta>`; a chave do TinyFish vai na variável `ORB_TINYFISH_KEY` do arquivo
-temporário 0600 do turno, e sem ela a busca cai no DuckDuckGo). Para o Claude Code os nomes são
-`mcp__orb_memoria__remember`, `mcp__orb_memoria__recall` e assim por diante. O processo não abre janela nem inicia o app.
-
-`recall` é liberada sem pedir; `remember` segue as permissões do Orb (identidade e preferências sempre perguntam). Com
-"Conectores" desligado, `--strict-mcp-config` (que vai em todo turno) deixa só esse servidor.
-
-O Claude Code grava o prompt de sistema na primeira mensagem de cada sessão e o reaproveita ao retomar. Por isso, nas
-mensagens seguintes, a memória que muda vai junto com a mensagem (bloco `[Memory]`): as lembranças ligadas a ela e, se
-mudaram, a identidade e as preferências. O prompt de sistema só é reconstruído quando identidade, preferências, modo, nome,
-skills ou instruções da pasta mudam. O histórico do próprio Claude Code (`~/.claude/projects/`) guarda o que já foi dito;
-"Esquecer" no Orb não apaga esse histórico.
+Um Orb no Claude Code tem a mesma memória dos outros: o resumo de cada mensagem (`brief`), `remember` e `recall` são do motor do Orb, e o
+`claude` não grava nada nem vê a pasta da memória. As ferramentas chegam ao modelo pelo servidor MCP mínimo do cano (`mcp__orb__remember`,
+`mcp__orb__recall`; o cliente tira o prefixo antes de o motor ver a chamada), que só as declara: quem as roda é o motor, com as permissões
+de sempre (`recall` liberada sem pedir; `remember` segue as permissões do Orb, e identidade e preferências sempre perguntam). O CLI também
+não guarda histórico: a conversa vai num arquivo de sessão temporário que é apagado quando o processo termina (e o `--no-session-persistence`
+impede o resto), então "Esquecer" no Orb não deixa cópia no `~/.claude/projects/`.
 
 ## Skills aprendidas
 
@@ -275,11 +263,10 @@ skill vai dentro de `remember` e `recall`.
   primeiras palavras, como `npm publish`, aparecem numa skill existente; comandos de todo dia como `git status` não contam; **um só** comando em comum já basta se o corpo tiver similaridade de 0,25 ou mais). A
   recusa manda melhorar a existente com o mesmo nome (`Improve it… name: <existente>`).
 - **Carregar.** O app grava `_skills.json` (slug, nome, resumo, instruções, se pode ser melhorada) a cada mensagem, só quando muda,
-  pelo actor da memória. `recall "/nome"` devolve as instruções dessa skill, nos dois motores (o servidor MCP do Claude Code lê o
-  mesmo arquivo). A seção "Skills" do prompt continua com uma linha por skill e diz para ler a que serve com `recall "/nome"`
+  pelo actor da memória. `recall "/nome"` devolve as instruções dessa skill. A seção "Skills" do prompt continua com uma linha por skill e diz para ler a que serve com `recall "/nome"`
   antes de começar; sem skills o prompt não muda.
-- **Revisão em segundo plano** (`SkillReview`, `AppModel+SkillReview`). Cada **passo** do modelo que pede ferramentas no motor
-  nativo, em conversa (não em rotina), sobe `BotSession.stepsSinceSkill` (como o `_iters_since_skill` do Hermes: dez leituras
+- **Revisão em segundo plano** (`SkillReview`, `AppModel+SkillReview`). Cada **passo** do modelo que pede ferramentas,
+  em conversa (não em rotina), sobe `BotSession.stepsSinceSkill` (como o `_iters_since_skill` do Hermes: dez leituras
   paralelas numa resposta são um passo); uma proposta zera. Quando um turno bem-sucedido termina com 10 ou mais, e não parou no
   limite de passos, o app pergunta ao Orb, em segundo plano, se o trabalho ensinou algo que valha uma skill. É a mesma requisição
   do turno (mesmo system, mesmas ferramentas, o histórico que o turno mandou, já resumido ou condensado, mais o que o turno
@@ -289,8 +276,7 @@ skill vai dentro de `remember` e `recall`.
   recusado na hora com "This review only proposes skills"; `ToolContext.skillReview` repete a recusa dentro da ferramenta). Até 6
   chamadas ao modelo. Nada aparece no chat nem no histórico, mas o que ela gasta é registrado na página Uso com a origem `auxiliary` (cada
   `requestUsage`, no modelo do turno). É cancelada quando você escreve (ou uma rotina começa) ou quando o Orb
-  é redefinido, nunca roda junto com um turno, nem num Orb "Só leitura", nem depois de turnos do Claude Code (que mantém a sua
-  sessão). O aviso de proposta não cai na conversa de uma rotina: espera o fim do próximo turno. O prompt pede skill no nível da classe de tarefa, "lições, não
+  é redefinido, nunca roda junto com um turno, nem num Orb "Só leitura". O aviso de proposta não cai na conversa de uma rotina: espera o fim do próximo turno. O prompt pede skill no nível da classe de tarefa, "lições, não
   registros", melhorar antes de criar, incorporar o procedimento da memória sobre o mesmo assunto e responder "Nothing to save."
   quando não há técnica não trivial, correção sua ou skill errada. Em Ajustes → Geral dá para desligar.
 - **Aprovar.** Depois do turno ou da revisão, o chat ganha **um** aviso por proposta nova ("Skill proposta: /x — Nome" ou "Melhoria
@@ -326,7 +312,6 @@ trecho de conversa (página de sessão), na varredura diária e na conferência 
 | `Memory/MemoryIntent.swift` | reconhece "memorize…" e o que guardar |
 | `Memory/SkillProposal.swift`, `Memory/MemoryBank+Skills.swift` | a proposta de skill e a validação; `_propostas/`, `_skills.json`, `skillText` |
 | `Engine/SkillReview.swift`, `AppModel+SkillReview.swift` | o prompt e o gatilho da revisão, avisos, editor |
-| `Memory/OrbToolsMCPServer.swift` | servidor MCP stdio (`--tools-mcp`) para o Claude Code |
 | `Engine/Tools/MacTools.swift` | ferramentas `remember` e `recall` |
 | `BotSession+Conversation.swift` | `pendingStretch`, `saveMemory` (com as notas da dobra), `keepRequestedMemory`, `scheduleMemorySave`, `announce` |
 | `AppModel.swift` (MARK: Memory) | criar, migrar (`prepareMemory`), esquecer, identidade, entrevista |

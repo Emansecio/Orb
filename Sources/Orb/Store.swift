@@ -557,12 +557,6 @@ struct Store: Sendable {
         }
     }
 
-    func readGroupConversationAsync(group groupID: UUID) async -> StoreRead<Conversation> {
-        await withCheckedContinuation { continuation in
-            Self.readQueue.async { continuation.resume(returning: readGroupConversation(group: groupID)) }
-        }
-    }
-
     func deleteGroupConversation(group groupID: UUID) {
         let url = groupConversationURL(groupID)
         enqueue(touching: [url]) {
@@ -581,10 +575,6 @@ struct Store: Sendable {
 
     func readGroupSideConversation(group groupID: UUID, for botID: UUID) -> StoreRead<Conversation> {
         readSideConversation(prefix: Self.grupoPrefix, id: groupID, for: botID)
-    }
-
-    func readGroupSideConversationAsync(group groupID: UUID, for botID: UUID) async -> StoreRead<Conversation> {
-        await readSideConversationAsync(prefix: Self.grupoPrefix, id: groupID, for: botID)
     }
 
     func deleteGroupSideConversation(group groupID: UUID, for botID: UUID) {

@@ -86,13 +86,10 @@ struct BrowserEngineStatus: Sendable, Equatable {
     }
 
     /// For the model's prompt: one short line (English), so it can tell the user once.
-    var modelNote: String? { modelNote(fetchTools: "web_fetch and web_search") }
-
-    /// `fetchTools`: what the engine calls the tools that remain (Claude Code's are WebFetch and the Orb's web_search).
-    func modelNote(fetchTools: String) -> String? {
+    var modelNote: String? {
         guard !missing.isEmpty else { return nil }
         return "The \(engine.label) browser is not installed on this Mac (missing: \(missing.map(\.name).joined(separator: ", "))), so you have "
-            + "only \(fetchTools), which run no JavaScript and keep no logins. If the task needs a real browser, tell the user "
+            + "only web_fetch and web_search, which run no JavaScript and keep no logins. If the task needs a real browser, tell the user "
             + "once to open Ajustes → Navegador and install it (one button, nothing else to set up)."
     }
 }

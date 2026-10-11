@@ -110,36 +110,12 @@ actor MemoryBank {
     /// what it learns, so saving them must not cut the end (the brief already trims long ones by itself).
     static let identityMaximumLength = 12_000
 
-    /// The folder was there when this bank opened and the bank does not make it again (`createsRoot: false`): once it
-    /// is gone the Orb was deleted or reset, and the bank closes instead of bringing it back with a late write.
-    private let watchesRoot: Bool
-
-    /// `createsRoot: false` for a bank another process holds, which the app cannot close.
-    init(directory: URL, createsRoot: Bool = true) {
+    init(directory: URL) {
         self.directory = directory
-        watchesRoot = !createsRoot && FileManager.default.fileExists(atPath: directory.path)
-    }
-
-    /// Makes `folder` (inside the bank). A bank that does not create its root builds only the levels below it, one by
-    /// one, so a root that disappeared meanwhile is not brought back by a write that was already under way.
-    private func makeDirectory(_ folder: URL) {
-        let files = FileManager.default
-        guard watchesRoot else {
-            try? files.createDirectory(at: folder, withIntermediateDirectories: true)
-            return
-        }
-        let rootParts = directory.standardizedFileURL.pathComponents
-        var current = directory
-        for part in folder.standardizedFileURL.pathComponents.dropFirst(rootParts.count) {
-            current.append(path: part)
-            try? files.createDirectory(at: current, withIntermediateDirectories: false)
-        }
     }
 
     nonisolated func close() { closedState.withLock { $0 = true } }
-    var isClosed: Bool {
-        closedState.withLock { $0 } || (watchesRoot && !FileManager.default.fileExists(atPath: directory.path))
-    }
+    var isClosed: Bool { closedState.withLock { $0 } }
 
     // MARK: Identity
 
@@ -546,7 +522,7 @@ actor MemoryBank {
     /// can't be opened) is never deleted: nil, and `prepare` tries again later.
     private func openIndex(busyTimeout: Int32 = 3000) -> MemoryIndex? {
         guard !isClosed else { return nil }
-        makeDirectory(directory)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appending(path: "index.sqlite")
         var rebuilt = false
         for attempt in 0..<3 {
@@ -612,7 +588,7 @@ actor MemoryBank {
     private func write(_ page: MemoryPage) -> Bool {
         guard !isClosed else { return false }
         let url = directory.appending(path: page.path)
-        makeDirectory(url.deletingLastPathComponent())
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         guard (try? Data(page.markdown().utf8).write(to: url, options: .atomic)) != nil else { return false }
         upsert(page, mtime: Self.modificationDate(url).timeIntervalSince1970)
         return true
@@ -635,7 +611,7 @@ actor MemoryBank {
         let archive = directory.appending(path: "_arquivo/" + path)
         // An archive already there holds the full text from before; never overwrite it with a shorter version.
         if !FileManager.default.fileExists(atPath: archive.path) {
-            makeDirectory(archive.deletingLastPathComponent())
+            try? FileManager.default.createDirectory(at: archive.deletingLastPathComponent(), withIntermediateDirectories: true)
             guard (try? FileManager.default.copyItem(at: directory.appending(path: path), to: archive)) != nil else { return false }
         }
         let requests = SessionSummary.section("Pedidos", in: page.body).prefix(3).map { "- " + MemoryText.clip($0, 140) }

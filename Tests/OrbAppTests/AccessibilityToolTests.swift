@@ -162,7 +162,7 @@ struct UIReadToolTests {
         system.apps = [FakeAccessibility.app("Notas", "com.apple.Notes", pid: 100, active: active),
                        FakeAccessibility.app("Safari", "com.apple.Safari", pid: 200)]
         system.roots[100] = fakeApp(windows: windows, menus: menus)
-        let store = UISnapshotStore(directory: nil)
+        let store = UISnapshotStore()
         return (UIReadTool(system: system, store: store, sessions: patientSessions), system, store)
     }
 
@@ -237,7 +237,7 @@ struct UIReadToolTests {
         #expect(UIAppResolver.resolve(nil, in: system.apps, ownPID: 1, ownBundleID: "app.orb") == .failure(.frontmostIsOrb))
         #expect(UIAppResolver.resolve("Orb", in: system.apps, ownPID: 1, ownBundleID: "app.orb") == .failure(.isOrb))
         #expect(UIAppResolver.resolve("app.orb", in: system.apps, ownPID: 999, ownBundleID: "app.orb") == .failure(.isOrb),
-                "the Claude Code tools server is another process of the same app")
+                "a helper process of the same app is the Orb too")
         #expect(UIAppResolver.resolve("notas", in: system.apps, ownPID: 1, ownBundleID: "app.orb") == .success(notes))
         #expect(UIAppResolver.resolve(nil, in: [], ownPID: 1, ownBundleID: nil) == .failure(.noFrontmost))
     }
@@ -286,7 +286,7 @@ struct UIReadToolTests {
     }
 
     @Test func readIsSafeAndNeedsTheMacCapability() {
-        let tool = UIReadTool(system: FakeAccessibility(), store: UISnapshotStore(directory: nil))
+        let tool = UIReadTool(system: FakeAccessibility(), store: UISnapshotStore())
         #expect(tool.risk(.object([:])) == .safe && tool.capability == .computerUse && tool.kind == .computer)
         #expect(tool.summary(.object(["app": .string("Notas"), "query": .string("x")])).title == "Lendo a interface de Notas")
     }
@@ -305,12 +305,12 @@ struct UIActToolTests {
         var root: FakeElement
     }
 
-    private func rig(windows: [FakeElement], menus: [FakeElement]? = nil, directory: URL? = nil) -> Rig {
+    private func rig(windows: [FakeElement], menus: [FakeElement]? = nil) -> Rig {
         let system = FakeAccessibility()
         system.apps = [FakeAccessibility.app("Notas", "com.apple.Notes", pid: 100, active: true)]
         let root = fakeApp(windows: windows, menus: menus)
         system.roots[100] = root
-        let store = UISnapshotStore(directory: directory)
+        let store = UISnapshotStore()
         return Rig(read: UIReadTool(system: system, store: store, sessions: patientSessions),
                    act: UIActTool(system: system, store: store, settle: .none, sessions: patientSessions), system: system, store: store, root: root)
     }
@@ -622,7 +622,7 @@ struct UIActToolTests {
 
     @Test func aPartialAppNameStillFindsTheReadingOfTheFullName() {
         let outlook = AccessibilityApp(name: "Microsoft Outlook", bundleID: "com.microsoft.Outlook", pid: 7)
-        let store = UISnapshotStore(directory: nil)
+        let store = UISnapshotStore()
         store.save(UISnapshot(app: outlook, windowIndex: 1, windowTitle: "Caixa", entries: ["w1.5": .init(rawRole: "AXButton", label: "Excluir", secure: false)]), bot: nil)
         let tool = UIActTool(system: FakeAccessibility(), store: store, settle: .none, sessions: patientSessions)
         let call: JSONValue = .object(["action": .string("press"), "id": .string("w1.5"), "app": .string("Outlook")])
@@ -631,7 +631,7 @@ struct UIActToolTests {
     }
 
     @Test func whenReadingsDisagreeOnAnIdTheDangerousOneDecides() {
-        let store = UISnapshotStore(directory: nil)
+        let store = UISnapshotStore()
         let notes = AccessibilityApp(name: "Notas", bundleID: "com.apple.Notes", pid: 1)
         let safari = AccessibilityApp(name: "Safari", bundleID: "com.apple.Safari", pid: 2)
         func reading(_ app: AccessibilityApp, _ label: String, at seconds: TimeInterval) -> UISnapshot {
@@ -723,53 +723,20 @@ struct UISnapshotStoreTests {
     }
 
     @Test func eachOrbKeepsItsOwnReading() {
-        let store = UISnapshotStore(directory: nil)
+        let store = UISnapshotStore()
         let one = UUID(), two = UUID()
         store.save(snapshot(label: "Um"), bot: one)
         store.save(snapshot(label: "Dois"), bot: two)
         #expect(store.snapshot(bot: one, app: notes)?.entries["w1.1"]?.label == "Um")
         #expect(store.snapshot(bot: two, app: notes)?.entries["w1.1"]?.label == "Dois")
-        #expect(store.snapshot(bot: UUID(), app: notes) == nil, "no file mirror here")
+        #expect(store.snapshot(bot: UUID(), app: notes) == nil)
         #expect(store.candidates(matching: "com.apple.notes").count == 2 && store.candidates(matching: "Safari").isEmpty)
         #expect(store.candidates(matching: nil).count == 2)
     }
 
-    @Test func aReadingMadeByAnotherProcessIsFoundThroughTheMirrorFile() throws {
-        let folder = FileManager.default.temporaryDirectory.appending(path: "OrbAX-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: folder) }
-        let toolsServer = UISnapshotStore(directory: folder)
-        toolsServer.save(snapshot(label: "Apagar"), bot: nil)
-
-        let appProcess = UISnapshotStore(directory: folder)
-        #expect(appProcess.candidates(matching: "Notas").first?.entries["w1.1"]?.label == "Apagar")
-        #expect(appProcess.snapshot(bot: UUID(), app: notes)?.entries["w1.1"]?.label == "Apagar")
-        // Garbage in the folder is ignored.
-        try Data("lixo".utf8).write(to: folder.appending(path: "ax-lixo.json"))
-        #expect(appProcess.candidates(matching: nil).count == 1)
-    }
-
-    @Test func oldReadingsAreForgottenAndTheirFilesDeleted() throws {
-        let folder = FileManager.default.temporaryDirectory.appending(path: "OrbAX-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: folder) }
-        let clock = OSAllocatedUnfairLock(initialState: Date(timeIntervalSince1970: 1_000_000))
-        let store = UISnapshotStore(directory: folder, maxAge: 3_600, now: { clock.withLock { $0 } })
-        store.save(snapshot(label: "Apagar", at: clock.withLock { $0 }), bot: nil)
-        let other = UISnapshotStore(directory: folder, maxAge: 3_600, now: { clock.withLock { $0 } })
-        #expect(other.candidates(matching: "Notas").count == 1)
-        #expect(other.snapshot(bot: UUID(), app: notes) != nil)
-
-        clock.withLock { $0 = $0.addingTimeInterval(3_601) }
-        #expect(other.snapshot(bot: UUID(), app: notes) == nil, "an hour later the screen it described is long gone")
-        #expect(((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []).filter { $0.hasPrefix("ax-") }.isEmpty)
-        store.save(snapshot(label: "Novo", at: clock.withLock { $0 }), bot: nil)
-        clock.withLock { $0 = $0.addingTimeInterval(3_601) }
-        #expect(other.candidates(matching: nil).isEmpty)
-        #expect(store.candidates(matching: nil).isEmpty, "in memory too")
-    }
-
     @Test func anOldReadingInMemoryIsNotUsedToValidateIds() {
         let clock = OSAllocatedUnfairLock(initialState: Date(timeIntervalSince1970: 1_000_000))
-        let store = UISnapshotStore(directory: nil, maxAge: 3_600, now: { clock.withLock { $0 } })
+        let store = UISnapshotStore(maxAge: 3_600, now: { clock.withLock { $0 } })
         let bot = UUID()
         store.save(snapshot(label: "Apagar", at: clock.withLock { $0 }), bot: bot)
         clock.withLock { $0 = $0.addingTimeInterval(3_599) }
@@ -779,17 +746,8 @@ struct UISnapshotStoreTests {
         #expect(store.candidates(matching: nil).isEmpty)
     }
 
-    @Test func aSnapshotFileWithMissingFieldsStillLoads() throws {
-        let json = #"{"app":{"name":"Notas","pid":5},"entries":{"w1":{"rawRole":"AXWindow"},"w1.2":{"bogus":1}},"extra":true}"#
-        let loaded = try JSONDecoder().decode(UISnapshot.self, from: Data(json.utf8))
-        #expect(loaded.app.pid == 5 && loaded.windowIndex == nil && loaded.windowTitle == "")
-        #expect(loaded.entries["w1"]?.label == "" && loaded.entries["w1.2"]?.secure == false)
-        let bare = try JSONDecoder().decode(UISnapshot.self, from: Data(#"{"app":{"name":"X","pid":1},"entries":7}"#.utf8))
-        #expect(bare.entries.isEmpty)
-    }
-
     @Test func newestReadingsComeFirst() {
-        let store = UISnapshotStore(directory: nil)
+        let store = UISnapshotStore()
         store.save(snapshot(app: AccessibilityApp(name: "Antigo", bundleID: nil, pid: 1), at: Date.now.addingTimeInterval(-20)), bot: nil)
         store.save(snapshot(app: AccessibilityApp(name: "Novo", bundleID: nil, pid: 2), at: Date.now.addingTimeInterval(-10)), bot: nil)
         #expect(store.candidates(matching: nil).map(\.app.name) == ["Novo", "Antigo"])

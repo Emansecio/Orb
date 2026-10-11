@@ -101,16 +101,10 @@ enum LocalConnectorServer {
         await MCPStdioServer.respond(to: request, handler: Handler(connector: connector))
     }
 
-    /// The response to one stdin line; nil for a line that is not a JSON object (the connector never answers parse errors) and for notifications.
-    static func respond(toLine line: String, connector: any LocalConnector) async -> JSONValue? {
-        await MCPStdioServer.respond(toLine: line, handler: Handler(connector: connector))
-    }
-
     /// A local connector as an MCP server: its tools, listed with their annotations, and its calls.
     private struct Handler: MCPServerHandler {
         let connector: any LocalConnector
         var serverName: String { "orb-local" }
-        var answersParseErrors: Bool { false }
 
         func listedTools() -> [JSONValue] { connector.tools.map(listed) }
 

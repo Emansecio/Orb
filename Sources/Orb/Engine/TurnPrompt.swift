@@ -55,7 +55,7 @@ enum TurnPreface {
             + "<memory_notes>\n" + brief.related + "\n</memory_notes>"
     }
 
-    /// `content` without its preface (for a Claude Code session catching up on messages another model answered).
+    /// `content` without its preface.
     static func stripped(_ content: String) -> String {
         guard content.hasPrefix(openTag), let end = content.range(of: closeTag) else { return content }
         return String(content[end.upperBound...].drop { $0.isNewline })

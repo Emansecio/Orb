@@ -14,7 +14,7 @@ struct QueuedMessages: View {
         ForEach(lane.queued) { message in
             // Each bubble says where it goes; "Parar e enviar" speaks for the whole queue and shows once, under the last one.
             QueuedBubble(message: message, whenText: whenText(message.delivery), canInterrupt: QueuedMessages.canInterrupt(canSteer: model.canSteer(botID), pendingPictures: lane.pendingPictures), needsYou: needsYou,
-                         isLast: message.id == lane.queued.last?.id, canSwitch: model.steersMidTurn(botID),
+                         isLast: message.id == lane.queued.last?.id, canSwitch: model.canSteer(botID),
                          edit: { model.unqueue(message.id, botID: botID) },
                          switchMode: { model.switchDelivery(message.id, botID: botID) },
                          interrupt: { model.stopAndSend(botID) })

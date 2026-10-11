@@ -475,14 +475,11 @@ struct UIMarksTests {
         #expect(merged.entries["w1.1"]?.label == "Título")
     }
 
-    @Test func marksAndGeometrySurviveTheStoreAndItsFile() throws {
-        let directory = FileManager.default.temporaryDirectory.appending(path: "orb-marks-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let store = UISnapshotStore(directory: directory)
+    @Test func marksAndGeometrySurviveTheStore() throws {
+        let store = UISnapshotStore()
         let snapshot = UISnapshot.merging(reading(candidates: [save, cancel]), into: outline(takenAt: .now))
         store.save(snapshot, bot: nil)
-        let other = UISnapshotStore(directory: directory) // another process reads the file
-        let loaded = try #require(other.snapshot(bot: nil, app: editor))
+        let loaded = try #require(store.snapshot(bot: nil, app: editor))
         #expect(loaded.marks == [1: "w1.2", 2: "w1.3"] && loaded.shot == geometry)
         #expect(loaded.entries["w1.3"]?.frame == cancel.frame && loaded.entries["w1.3"]?.actionable == true)
         // Saving again with the next screenshot merges with what the store holds.

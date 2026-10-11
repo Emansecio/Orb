@@ -67,23 +67,6 @@ import Testing
         #expect(!(await bank.snapshot()).interviewPending)
     }
 
-    @Test func aBankInAnotherProcessDoesNotBringBackAFolderThatWasDeleted() async throws {
-        let directory = root.appending(path: "filho")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let child = MemoryBank(directory: directory, createsRoot: false)
-        func saved(_ result: RememberOutcome) -> Bool { if case .saved = result { true } else { false } }
-        #expect(saved(await child.remember("Gosta de café.", kind: .preferencia)))
-
-        try FileManager.default.removeItem(at: directory) // the Orb was deleted meanwhile
-        #expect(await child.remember("Outra coisa.", kind: .fato) == .failed)
-        #expect(!FileManager.default.fileExists(atPath: directory.path))
-
-        // The app's own bank still makes its folder when it has to.
-        let own = MemoryBank(directory: directory)
-        #expect(saved(await own.remember("Gosta de chá.", kind: .preferencia)))
-        #expect(FileManager.default.fileExists(atPath: directory.path))
-    }
-
     @Test func interviewAnswersGrowTheIdentity() async {
         let bank = bank()
         await bank.ensureIdentity(notes: "", interview: true)

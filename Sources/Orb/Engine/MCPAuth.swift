@@ -215,10 +215,10 @@ actor MCPAuth {
     /// A valid access token, renewed shortly before it ends; nil when there is no login. `forceRefresh` is for a token the
     /// server just refused: if another caller renewed a moment ago, that fresh token is returned instead.
     /// Throws `MCPAuthRequired` when the login can no longer be renewed.
-    func accessToken(_ id: UUID, forceRefresh: Bool = false, minimumLife: TimeInterval = MCPAuth.renewalMargin) async throws -> String? {
+    func accessToken(_ id: UUID, forceRefresh: Bool = false) async throws -> String? {
         guard let current = credential(id), current.hasToken else { return nil }
         let left = current.expiresAt?.timeIntervalSinceNow
-        let ending = left.map { $0 < minimumLife } ?? false
+        let ending = left.map { $0 < Self.renewalMargin } ?? false
         let justRefreshed = lastRefresh[id].map { -$0.timeIntervalSinceNow < 10 } ?? false
         if !(ending || (forceRefresh && !justRefreshed)) && refreshing[id] == nil { return current.accessToken }
         // A token that has not ended yet still works when nothing can renew it (no refresh token) or the renewal failed for a passing reason.

@@ -173,9 +173,6 @@ extension AppModel {
         sessions[botID]?.routineID.flatMap { id in routines.first { $0.id == id }?.name }
     }
 
-    /// Whether a queued message can reach the model before the turn ends (at its next step), and not only after it.
-    func steersMidTurn(_ botID: UUID) -> Bool { canSteer(botID) }
-
     /// The composer's send: starts a turn when the Orb is free, queues the message when it is working. Returns false
     /// when nothing was sent, so the composer keeps what you wrote.
     @discardableResult
@@ -239,18 +236,17 @@ extension AppModel {
         if !pictures.isEmpty { prompt += Self.pictureNote(pictures, modelSees: nil) }
         // Asking to remember something mid-turn: the model is told to save it (the turn's grants were fixed when it
         // began, so saving may still ask for approval). Sent after the turn, `send` handles it as a message of its own.
-        if steersMidTurn(botID), MemoryIntent.detect(typed) != nil {
+        if MemoryIntent.detect(typed) != nil {
             prompt += MemoryIntent.instruction(tool: "remember")
         }
-        lane.enqueue(SteeredMessage(text: typed, files: files, pictures: pictures, prompt: prompt,
-                                    delivery: steersMidTurn(botID) ? delivery : .afterTask))
+        lane.enqueue(SteeredMessage(text: typed, files: files, pictures: pictures, prompt: prompt, delivery: delivery))
         live(botID).scrolled() // scrolls the chat down to the "na fila" bubble, which changes no transcript revision
     }
 
     /// Moves a waiting message between "into the task" and "after the task". Does nothing when it was delivered meanwhile.
     func switchDelivery(_ id: UUID, botID: UUID) {
         let lane = composerLane(botID)
-        guard steersMidTurn(botID), let current = lane.queued.first(where: { $0.id == id })?.delivery else { return }
+        guard canSteer(botID), let current = lane.queued.first(where: { $0.id == id })?.delivery else { return }
         _ = lane.setDelivery(id, to: current.other)
     }
 

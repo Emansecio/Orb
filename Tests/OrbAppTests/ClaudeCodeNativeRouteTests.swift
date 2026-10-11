@@ -75,7 +75,7 @@ private struct RecordingModel: LLMClient {
         let asked = Asked()
         let (model, botID) = setUp(asked)
         #expect(model.send("primeiro", to: botID, fromUser: true))
-        #expect(model.steersMidTurn(botID), "a message sent during the turn reaches the model between its steps, as for any provider")
+        #expect(model.canSteer(botID), "a message sent during the turn reaches the model between its steps, as for any provider")
         await waitUntil("the turn to end") { !model.isWorking(botID) && model.session(botID).turnTask == nil }
         #expect(model.live(botID).lastUsage == TokenUsage(input: 100, output: 20))
         #expect(UsageBilling.of(.claudeCode, account: model.account(.claudeCode)) == .plan)

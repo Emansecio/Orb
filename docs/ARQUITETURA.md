@@ -45,7 +45,7 @@ Tudo em `Sources/Orb/`.
 |---|---|
 | `OrbApp.swift` | `Launcher` (`@main`: com `--pipe-tools` roda só o servidor que declara as ferramentas ao CLI, sem janela), `OrbApp` (janela, Ajustes, barra de menus), `AppDelegate`, `AppCommands` (menu "Orbs"), `OrbSheet` (`--render-orbs`), `Snapshot` (`--snapshot`) |
 | `AppIcon.swift` | o ícone do app (`--render-icon`): CoreGraphics puro, desenhado direto em cada tamanho na grade do macOS (ladrilho de 824 em 1024, sombra padrão; desde o macOS 26 o sistema põe qualquer outro formato num quadrado cinza), vidro perolado claro e o Orb índigo da marca o maior possível (690), com o `GelShader` (port de `art/orbgen/Body.swift`, por pixel na CPU), rosto sem óculos e uma variante simples até 64 px |
-| `AppModel.swift` | `@MainActor @Observable`: Orbs, rotinas, skills, conectores, provedores, modelo padrão, nível de contexto das conversas; criar/apagar Orb, `send`, `runClaudeCode`, `compactNow`, rotinas e fila, conexão de provedores, salvar |
+| `AppModel.swift` | `@MainActor @Observable`: Orbs, rotinas, skills, conectores, provedores, modelo padrão, nível de contexto das conversas; criar/apagar Orb, `send`, `compactNow`, rotinas e fila, conexão de provedores, salvar |
 | `AppModel+Approvals / +Commands / +ContextUI / +MemoryUI / +RoutinesUI / +Schedule / +Steering / +Transcript` | o que cada área pede ao modelo: `decide` e banners; comandos, paleta e barra de menus; dados do medidor; esquecer/desfazer; modelos de rotina e listas; a ferramenta `schedule` (o Orb cria, lista, pausa e apaga as próprias rotinas); fila "enquanto trabalha"; "Tentar de novo"/"Continuar" |
 | `BotSession.swift`, `BotSession+Turn.swift`, `BotSession+Conversation.swift` | a maquinaria de um Orb: conversa em memória (carregar, descarregar, salvar, estacionar durante rotina), turno (id, eventos, texto em stream, cartões), uso de tokens, trechos para a memória |
 | `BotLive.swift` | o que as telas leem de um Orb: configurações, `status`, `activity` (com "digitando" e a olhada ao ser escolhido), `needsYou`, não lidas, memória, medidor. `WritesOnlyChanges` (`assign`, `writeIfChanged`) |
@@ -76,7 +76,7 @@ Tudo em `Sources/Orb/`.
 | `ProviderTransport.swift`, `SSE.swift`, `Retry.swift`, `WireEncoder.swift` | o que os clientes dividem: requisição autorizada (renova 401), erros legíveis, `Retry-After`, leitor SSE incremental, retentativa com recuo, JSON ordenado |
 | `ChatGPTAuth.swift` | login "Sign in with ChatGPT" (registro dinâmico, PKCE, retorno em 127.0.0.1), token no Keychain |
 | `OAuthLoopback.swift` | o que os logins dividem: `randomToken`, o desafio PKCE `S256` e o `LoopbackCallback` (ouvinte único em 127.0.0.1, com portas preferidas e a opção de não aceitar outra; abre sem prender uma thread) |
-| `MCPAuth.swift` | `actor` do login OAuth 2.1 dos conectores remotos. O `HTTPTransport` recebe um `MCPTokenProvider` e põe `Authorization: Bearer` em todo pedido; um 401 renova uma vez e repete, depois vira `MCPAuthRequired` (`signIn`, `expired`, `moreScope`), que o `MCPManager` transforma em `MCPStatus.needsSignIn`/`.needsMorePermission`. O 401 sem token lê o `WWW-Authenticate` (`MCPChallenge`). `signIn` sonda o servidor, descobre a PRM (RFC 9728: o endereço do desafio, depois o caminho do endpoint, depois a raiz) e os metadados do servidor de login (RFC 8414 e OIDC, na ordem da spec), recusa sem `S256`, usa o app pré-registrado do modelo ou do editor (`MCPServerConfig.oauth`), reaproveita o que o Orb registrou antes (mesmo issuer e mesma porta) ou registra de novo (RFC 7591: `application_type` native, `token_endpoint_auth_method` none), monta a URL (`state`, `code_challenge`, `resource`, parâmetros extras), espera o retorno, confere `iss` (RFC 9207, pela tabela da spec 2026-07-28) e `state` antes de usar o código, e troca. A credencial (`MCPOAuthCredential`: issuer, cliente, segredo, porta registrada, tokens, validade, escopos, endpoint, método, resource) é um JSON só na conta `mcp.<id>.oauth` do Keychain. A renovação é única por conector (as chamadas simultâneas compartilham uma), grava a rotação e, quando o serviço encerra o login (`invalid_grant`, `invalid_client`, `unauthorized_client`, `invalid_refresh_token`), apaga os tokens e pede o login; um `invalid_client` apaga também o cliente que o Orb registrou. Um erro passageiro não apaga nada, e um token que ainda não venceu continua valendo quando não há como renová-lo. `withBearer` (e `bearers`, que também devolve os conectores cujo login acabou, para o `MCPManager.loginEnded` pôr "Sessão expirou" no cartão) entrega ao Claude Code um token renovado se tiver menos de 30 min de vida e há refresh token; sem ele, ou se a renovação falha, vai o token atual enquanto valer. Um login que termina depois de "Sair da conta" ou de apagar o conector é cancelado (nada é gravado). Só entra em HTTPS (ou loopback): o conector `http://` fora do loopback não faz login nem recebe Bearer, e um redirect nunca desce de HTTPS para HTTP. Sair da conta e apagar o conector pedem a revogação (RFC 7009) em segundo plano quando o servidor de login anuncia `revocation_endpoint`. Sem escopo no desafio vale o do modelo ou do editor, depois o `scopes_supported` da PRM (a escolha explícita da pessoa vence um palpite do servidor) |
+| `MCPAuth.swift` | `actor` do login OAuth 2.1 dos conectores remotos. O `HTTPTransport` recebe um `MCPTokenProvider` e põe `Authorization: Bearer` em todo pedido; um 401 renova uma vez e repete, depois vira `MCPAuthRequired` (`signIn`, `expired`, `moreScope`), que o `MCPManager` transforma em `MCPStatus.needsSignIn`/`.needsMorePermission`. O 401 sem token lê o `WWW-Authenticate` (`MCPChallenge`). `signIn` sonda o servidor, descobre a PRM (RFC 9728: o endereço do desafio, depois o caminho do endpoint, depois a raiz) e os metadados do servidor de login (RFC 8414 e OIDC, na ordem da spec), recusa sem `S256`, usa o app pré-registrado do modelo ou do editor (`MCPServerConfig.oauth`), reaproveita o que o Orb registrou antes (mesmo issuer e mesma porta) ou registra de novo (RFC 7591: `application_type` native, `token_endpoint_auth_method` none), monta a URL (`state`, `code_challenge`, `resource`, parâmetros extras), espera o retorno, confere `iss` (RFC 9207, pela tabela da spec 2026-07-28) e `state` antes de usar o código, e troca. A credencial (`MCPOAuthCredential`: issuer, cliente, segredo, porta registrada, tokens, validade, escopos, endpoint, método, resource) é um JSON só na conta `mcp.<id>.oauth` do Keychain. A renovação é única por conector (as chamadas simultâneas compartilham uma), grava a rotação e, quando o serviço encerra o login (`invalid_grant`, `invalid_client`, `unauthorized_client`, `invalid_refresh_token`), apaga os tokens e pede o login; um `invalid_client` apaga também o cliente que o Orb registrou. Um erro passageiro não apaga nada, e um token que ainda não venceu continua valendo quando não há como renová-lo. Um login que termina depois de "Sair da conta" ou de apagar o conector é cancelado (nada é gravado). Só entra em HTTPS (ou loopback): o conector `http://` fora do loopback não faz login nem recebe Bearer, e um redirect nunca desce de HTTPS para HTTP. Sair da conta e apagar o conector pedem a revogação (RFC 7009) em segundo plano quando o servidor de login anuncia `revocation_endpoint`. Sem escopo no desafio vale o do modelo ou do editor, depois o `scopes_supported` da PRM (a escolha explícita da pessoa vence um palpite do servidor) |
 | `ContextBudget.swift`, `ContextWindow.swift`, `ContextCondensing.swift`, `ConversationLedger.swift`, `ContextMeter.swift`, `Compaction.swift`, `ToolDigest.swift`, `ToolOutputSpill.swift` | janela, compactação e medidor: veja [CONTEXTO.md](CONTEXTO.md) |
 | `TurnPrompt.swift`, `SystemPrompt.swift`, `WorkspaceSnapshot.swift`, `WorkspaceChanges.swift`, `FolderInstructions.swift` | o prompt: sistema estável + prefácio por mensagem (`<orb_context>`: hora, pasta, memória); instruções da pasta (`ORB.md`/`AGENTS.md`/`CLAUDE.md`) |
 | `PermissionPolicy.swift`, `ApprovalGate.swift`, `ApprovalBatch.swift`, `DangerousCommand.swift`, `ShellCommandLine.swift` | permissões: veja [PERMISSOES.md](PERMISSOES.md) |
@@ -124,9 +124,7 @@ notificações); `wait` relê a cada notificação ou a cada 250 ms.
 
 **Apps em segundo plano: tomada de tela.** O desenho completo está em [USO-DO-COMPUTADOR.md](USO-DO-COMPUTADOR.md). `ScreenTakeover.swift`
 é o único lugar que traz outro app para a frente e usa mouse e teclado de verdade (`.cghidEventTap`). `LiveScreenOwner` (o
-`ScreenOwner` ao vivo, entregue por `LiveAccessibilitySystem.screen`) pega uma trava de sistema com `flock` não bloqueante em
-`~/Library/Caches/<bundle id>/takeover.lock` (o app e o servidor MCP do Claude Code são processos diferentes; a trava some com o
-processo), guarda o app da frente, a janela focada e o cursor, traz o alvo com `AXFrontmost` (espera `AXApplicationActivated` até
+`ScreenOwner` ao vivo, entregue por `LiveAccessibilitySystem.screen`) pega a trava do app (`TakeoverLock.shared`, em memória e não bloqueante: um takeover por vez, o segundo recebe "ocupado" em vez de esperar), guarda o app da frente, a janela focada e o cursor, traz o alvo com `AXFrontmost` (espera `AXApplicationActivated` até
 500 ms, com sondagem do app da frente por baixo), roda o corpo com um `LiveTakeoverHand` (`CGEventSource(.privateState)`, arrasto
 em 15 passos, texto em pedaços de 20 unidades UTF-16; aborta se o cursor real se afastar mais de 3 pt do lugar em que foi posto,
 solta o botão se o arrasto para no meio; 10 s no total e 2 s por etapa) e **sempre** devolve, numa `Task.detached` aguardada (a
@@ -135,12 +133,13 @@ restauração não é cancelável): `AXFrontmost` no app anterior, `AXMain` na j
 pôs). Tudo o que toca o macOS fica atrás de `TakeoverPlatform`/`TakeoverEventPoster` (testes com um mundo falso), e as chamadas
 bloqueantes rodam numa fila própria (`TakeoverQueue`), nunca no pool cooperativo. O aviso "Orb está usando a tela — mexa o mouse
 para parar" é um `NSPanel` não ativante (`TakeoverHUD`) que o app mostra ao receber uma notificação distribuída
-(`TakeoverBroadcast`) de qualquer processo que segure a tomada: funciona igual nos dois motores.
+(`TakeoverBroadcast`) de qualquer processo que segure a tomada.
 
-**Servidor MCP: uma tarefa por requisição.** `MCPServerLoop` (em `MCPStdioServer.swift`) atende cada requisição em uma `Task` guardada
-em `[id: Task]`, com a escrita em stdout serializada; `notifications/cancelled` cancela a requisição (que não recebe resposta),
-e o fim de stdin ou `SIGTERM`/`SIGINT` (`DispatchSource.makeSignalSource`) cancelam tudo, esperam até 1,5 s pelas restaurações de
-takeover e saem com `exit(0)`. As respostas continuam byte a byte as de `MCPStdioServer.respond`.
+**Servidor MCP do cano: uma tarefa por requisição.** `ClaudePipeServer.Loop` (em `ClaudePipe/ClaudePipeTools.swift`) atende cada linha de
+stdin em uma `Task`, com a escrita em stdout serializada. As `tools/call` correm lado a lado (cada uma espera, por polling, o arquivo do
+seu `tool_use_id` na caixa de correio, até 30 min); o handshake e a listagem respondem em ordem. `notifications/cancelled` encerra a espera
+de uma chamada (que não recebe resposta) e o fim de stdin faz `exit(0)`. As respostas de `initialize`, `ping` e `tools/list` são as de
+`MCPStdioServer.respond`.
 
 **Codificação dos arquivos de texto.** `TextFile.decode` tenta UTF-8, depois BOM (UTF-16/32), UTF-16 sem marca e por fim Windows-1252
 (Latin-1 se houver byte indefinido). Um arquivo UTF-8 com poucos bytes soltos (um caractere cortado no fim de um log) continua
@@ -211,11 +210,10 @@ baixarem de novo. `save_to` baixa até 100 MB num arquivo temporário e move no 
 passa do limite. Erros de rede e de HTTP voltam em português, com o endereço e uma dica. O `Info.plist` do app traz
 `NSAllowsArbitraryLoads` para o macOS não bloquear `http://`.
 
-**Sem ferramenta de busca.** Não há `web_search` nativo: raspar DuckDuckGo, Bing ou Google não é confiável (CAPTCHA, páginas de
-bloqueio, links de rastreamento) nem respeita o `robots.txt`. O prompt manda o Orb usar a busca/API do próprio site
-(`api.php` da Wikipedia, `api.github.com/search`, registros de pacotes, a documentação oficial). Com o Claude Code há o
-`WebSearch` dele. A busca do provedor (ferramenta de servidor da Anthropic, `web_search` da OpenAI) ou uma chave Brave
-opcional seriam o caminho se isso virar requisito.
+**Busca.** `web_search` (`WebSearchTool`) devolve títulos, endereços e trechos pelo provedor que o Orb escolheu (DuckDuckGo, Google pelo
+navegador do Orb ou TinyFish, com chave); a página de resultados não é uma API, então quando o formato muda a ferramenta diz que não achou
+nada em vez de inventar. Vale para qualquer modelo, o do Claude Code incluído: o `claude` não tem ferramenta de busca própria no cano. Veja o
+README ("Pesquisa").
 
 Os nomes e as descrições das ferramentas para o modelo são em inglês; o que aparece para você (título e detalhe de cada
 linha, cartões) é em português (`AgentTool.summary`).
@@ -255,7 +253,7 @@ capacidades, conectores ou rotinas. Nos modos de desenvolvedor a detecção de `
 conectores já instalados), `ConnectorGallery` (a grade de serviços e o estado de cada cartão: disponível, conectado, desligado, precisa de
 atenção, em breve), `LocalConnectorSetup` (estados "sem permissão", "negado", "sem conta", "pronto" e o "Conectar", que é o único que mostra o
 diálogo do macOS), `SlackApp` (manifesto e link de criação do app do Slack, presets de escopos), `BrandMarks` (os logotipos dos serviços da galeria, do Simple Icons, CC0, embutidos como caminhos SVG: slug → caminho + cor; `withoutLogo` lista os que o Simple Icons não tem, que ficam com o símbolo (hoje nenhum: o Slack vem da 13.21.0, a última versão que o tinha)), `SVGPathData` (leitor de `d` de SVG para `Path`: M L H V C S Q T A Z, relativos, números colados e flags de arco sem separador) e `BrandGlyph` (o caminho já lido, os limites reais e o tratamento: cor da marca sobre o escuro, branco sobre o escuro para marcas quase pretas ou branco sobre a cor da marca para as escuras; `BrandTile` e `BrandShape` desenham, centralizando e dimensionando pelo limite real; `ConnectorIcon` e o `icon` de `orbSheet` usam o mesmo cartão), `ConnectorCatalog` (o que cada conector ofereceu
-da última vez, em `conectores/<id>.json`: serve ao índice, à resolução das chamadas, às anotações do Claude Code, à contagem do cartão e
+da última vez, em `conectores/<id>.json`: serve ao índice, à resolução das chamadas, às anotações que a permissão lê, à contagem do cartão e
 a "Ver ferramentas"), `SkillCatalog` (Skills.sh + GitHub),
 `ConnectorSecrets` (segredos de conectores no Keychain, `@keychain` no `state.json`; `oauthAccount` é a conta do login), `AppModel+ConnectorLogin` (`signIn(connector:)`, `signOut`, `removeConnector`, que apaga a conta do login), `OrbScope` (conectores e skills por
 Orb: "Usar com").
@@ -293,8 +291,7 @@ ComposerView ── AppModel.submit ─┬─ Orb livre ─► AppModel.send ─
    (`ComposerLane.enqueue`) com um modo: ↩ = `.steer` (o `AgentEngine` a entrega no próximo passo, `deliverSteering`, e o app a
    mostra no ponto em que o Orb a recebeu, com `TranscriptItem.duringTask`), ⇥ = `.afterTask` (`ComposerAction.tab` decide a
    tecla: só com o Orb trabalhando e algo no campo; com as sugestões de skill abertas o ⇥ completa a skill). Quem não entregou até o
-   fim, e as `.afterTask`, seguem juntas como o próximo pedido em `settleSteering` (o mesmo caminho do Claude Code, que não recebe
-   nada no meio do turno: lá `enqueue` grava tudo como `.afterTask` e o balão diz isso). Falha ou parada devolvem tudo ao campo;
+   fim, e as `.afterTask`, seguem juntas como o próximo pedido em `settleSteering`. Falha ou parada devolvem tudo ao campo;
    `switchDelivery` troca o modo de uma pendente (a fila e a lista do balão mudam juntas; uma já entregue não muda). Senão a mensagem vai
    para `AppModel.send`. Uma rotina trabalhando bloqueia o envio (o compositor avisa).
 2. **`AppModel.send`** valida (texto ou anexo, turno em andamento, provedor pronto; sem provedor, `setupNudge` faz o cartão de primeiro
@@ -311,10 +308,11 @@ ComposerView ── AppModel.submit ─┬─ Orb livre ─► AppModel.send ─
 5. **Laço** (`AgentEngine.play`, até 30 passos): entrega mensagens da fila; ajusta a janela (`ContextWindow.fit` com o
    `ContextCut` do turno); chama o modelo com até 4 tentativas e recuo (`withRetries`, status "Provedor ocupado", "Limite do provedor" ou
    "Conexão caiu, tentando de novo em N s", conforme o erro); trata o motivo de parada (recusa, resposta cortada, estouro de contexto); roda as chamadas
-   (`runCalls`: um cartão para o que pergunta junto, leituras em paralelo, o resto em ordem); registra cada mensagem. O
-   Claude Code faz o análogo num processo `claude -p`, com os pedidos `can_use_tool` vindo para o mesmo `ApprovalGate`.
-6. **Eventos.** `TurnEvent`: `status`, `text`, `toolStarted`/`toolFinished` (com `files`: o que a ferramenta criou ou alterou; `write_file`/`edit_file` e Write/Edit/MultiEdit do Claude Code, mais as imagens que a ferramenta devolve; `BotSession.takeOver` deixa o arquivo só na última chamada do turno que o tocou), `approval`, `message` (vai para o histórico do
-   modelo), `notice`, `failed`, `usage`/`requestUsage`/`pendingUsage`/`reportedCost`, `compacted`, `taskPaused`, `steered`, `session`.
+   (`runCalls`: um cartão para o que pergunta junto, leituras em paralelo, o resto em ordem); registra cada mensagem. Com
+   um modelo do Claude Code o laço é o mesmo: só a chamada ao modelo muda (`ClaudeCodeClient.stream`, que mantém o processo `claude -p` do turno
+   parado entre um passo e outro); as ferramentas, as permissões e o `ApprovalGate` são do Orb.
+6. **Eventos.** `TurnEvent`: `status`, `text`, `toolStarted`/`toolFinished` (com `files`: o que a ferramenta criou ou alterou, `write_file`/`edit_file`, mais as imagens que a ferramenta devolve; `BotSession.takeOver` deixa o arquivo só na última chamada do turno que o tocou), `approval`, `message` (vai para o histórico do
+   modelo), `notice`, `failed`, `usage`/`requestUsage`/`pendingUsage`, `compacted`, `taskPaused`, `steered`.
 7. **Aplicação** (`BotSession.apply`, na thread principal): o texto vai para `pendingText` e é publicado em `LiveText` a cada
    33 ms, **sem tocar na lista de itens**; ferramentas e cartões viram itens da conversa; `message` entra em
    `Conversation.messages`; o `BotLive` recebe status, ferramenta em uso, "falando" e "esperando você", e a frase da linha de trabalho (`work`,
@@ -322,7 +320,7 @@ ComposerView ── AppModel.submit ─┬─ Orb livre ─► AppModel.send ─
 8. **Fim** (`finishTurn`): zera status; agenda a página de sessão da memória (30 min depois); fecha a execução da rotina;
    notifica (se o app está em segundo plano) e conta não lidas; o Orb comemora (`happy`) ou erra (`error`); entrega a fila que
    ficou; grava a conversa de uma vez; começa a próxima rotina que esperava por este Orb. Por último (fora de rotinas): avisa
-   da skill que o turno propôs e, se o motor foi o nativo e os passos do modelo com ferramentas chegaram a 10 (e a tarefa não parou no limite), começa em segundo plano a
+   da skill que o turno propôs e, se os passos do modelo com ferramentas chegaram a 10 (e a tarefa não parou no limite), começa em segundo plano a
    revisão da conversa (`reviewSkillsIfDue`: mesmo pedido e histórico do turno, só `recall`/`remember` skill, cancelada por qualquer
    mensagem e por redefinir; o prompt da revisão só orienta o turno, `promptOnlySteers`, então as saídas do turno seguem inteiras
    como na última chamada dele; com 5 propostas esperando, a revisão nem chama o modelo).
@@ -345,8 +343,9 @@ memoria/<Orb>/…                  a memória (páginas .md + index.sqlite, _pro
 anexos/<Orb>/<uuid>.jpg|png      imagens reduzidas (a conversa guarda o caminho); saem com o Orb ou com a conversa anterior que só elas usava (as cópias `.corrupt-…` também contam como uso)
 perfil/foto-<8 hex>.jpg|png      a foto da usuária (quadrada, até 256 px; nome novo a cada troca, a antiga é apagada); nunca vai a provedor nem a ferramenta; o Redefinir apaga a pasta
 saidas/<Orb>/*.txt               saídas grandes de ferramentas; limpas por idade (14 dias) e tamanho (200 MB)
-agendamentos/                    a caixa de correio do `schedule` no Claude Code (`<id>.json` pedido, `<id>.reply` resposta); vazia
-                                 fora de uma chamada, e limpa quando o app começa a ouvir
+claude-pipe/cwd/                 a pasta (vazia) em que o `claude` roda como cano até o modelo; nenhum projeto à vista
+claude-pipe/runs/<uuid>/         os arquivos de um processo do `claude` (prompt do sistema, declaração das ferramentas, configuração do MCP, caixa de correio dos resultados);
+                                 apagada quando o processo termina, e as que um app que caiu deixou somem depois de um dia
 uso/aaaa-mm.json                 histórico de uso: uma linha por hora × Orb × modelo × origem, só números (veja "Uso e custos")
 *.corrupt-<aaaammdd-hhmmss>      cópia de um arquivo que não pôde ser lido (nunca sobrescrito)
 .migrado-do-openbot              marca de que a migração do OpenBot já foi feita
@@ -404,11 +403,10 @@ destrutivo não tem tecla. Nos testes, `AppModel.resetEnvironment` (argumentos, 
 
 Cada resposta do provedor traz os tokens do pedido (`TokenUsage`); o app os soma por hora, e o custo é calculado na hora de mostrar.
 
-- **Registro.** `BotSession.apply` entrega a `AppModel.recordUsage` cada `TurnEvent.requestUsage` (uma chamada do motor nativo) e, num
-  turno do Claude Code, o `.usage` do turno (o CLI informa o turno inteiro: um "pedido") com o `.reportedCost` que vem logo depois
-  (`total_cost_usd`, no mesmo balde). O modelo é o do turno (`BotSession.turnModel`); a origem é `routine` se há uma rotina rodando,
+- **Registro.** `BotSession.apply` entrega a `AppModel.recordUsage` cada `TurnEvent.requestUsage` (uma chamada ao modelo, também com o Claude Code: o cano lê os tokens
+  do fluxo do CLI). O modelo é o do turno (`BotSession.turnModel`); a origem é `routine` se há uma rotina rodando,
   senão `chat`; `auxiliary` é para chamadas do próprio app fora de um turno: hoje a revisão de skills em segundo plano (`reviewSkillsIfDue` repassa cada
-  `.requestUsage` e `.reportedCost` a `recordUsage`; o resumo da compactação é por regras e não gasta nada). Um pedido interrompido
+  `.requestUsage` a `recordUsage`; o resumo da compactação é por regras e não gasta nada). Um pedido interrompido
   pelo botão Parar também é cobrado: o transporte anuncia os tokens de entrada assim que o provedor os informa (`LLMEvent.usage`,
   o `message_start` da Anthropic, antes de qualquer saída), o motor repassa como `TurnEvent.pendingUsage` e `BotSession.play`, que
   é quem ainda lê o fluxo depois do Parar, registra o último que não foi seguido de um `.requestUsage`.
@@ -425,10 +423,10 @@ Cada resposta do provedor traz os tokens do pedido (`TokenUsage`); o app os soma
   Preços que mudam com o tempo ficam em `PriceTable.adjustments` (fator sobre o preço da tabela, escolhido pela hora da linha:
   DeepSeek fora do pico = metade; Gemini Flash 3.6-3.8 = dobro a partir de 2027-01-01). A gravação de cache de 1 h
   (`TokenUsage.cacheWrite1h`, lida de `usage.cache_creation` da Anthropic; subconjunto de `cacheWrite`) tem preço próprio
-  (`ModelPrice.cacheWrite1h`, 2× a entrada). A correção vence também sobre o valor do CLI nos planos. `PriceDraft` é o texto do editor
+  (`ModelPrice.cacheWrite1h`, 2× a entrada). A correção vence também sobre o equivalente calculado nos planos. `PriceDraft` é o texto do editor
   e conserva o que ele não mostra (a escrita de 1 h) para que salvar sem mudar nada não altere o preço. `UsageBilling.of(provedor)` diz se é por uso, plano (ChatGPT,
-  Claude Code, OpenCode Go: `incluído`, com o equivalente do CLI ou da tabela) ou local (Ollama, LM Studio, gateway em localhost: grátis).
-  O custo não é gravado (só o que o CLI informa): corrigir um preço corrige o passado.
+  Claude Code, OpenCode Go: `incluído`, com o equivalente da tabela de preços) ou local (Ollama, LM Studio, gateway em localhost: grátis).
+  O custo não é gravado (a não ser o `reportedCost` que linhas antigas do Claude Code trazem): corrigir um preço corrige o passado.
 - **Página.** `UsageModel.reload` descarrega o recorder, lê os meses do período no `Store` e soma em `Task.detached`
   (`UsageReport.make`, pura); um resultado de uma leitura mais velha nunca substitui o de uma mais nova. Só roda ao abrir, ao
   trocar de período, ao corrigir um preço e ao voltar ao app; nada contínuo. Animações: `Motion.content` em valores e barras, nada com Reduzir movimento.
@@ -457,7 +455,7 @@ modelo de provedor com formato desconhecido sai da lista. A gravação increment
 - Ao sair (`willTerminate`): `stopTurnsForQuit` interrompe os turnos (os cartões fecham e a conversa diz "Você interrompeu"), `undoChatChangesForQuit` desfaz uma "Nova conversa" ou
   reabertura cujo arquivamento ainda está na fila (a conversa aberta volta ao disco e a cópia recém-arquivada some, para ela não
   aparecer duas vezes), o estado e os rascunhos são salvos, e `ChildProcessGroups.killAllNow` e `BackgroundJobs.killAllNow()` encerram os grupos de processos que o app iniciou: os comandos em
-  segundo plano, o Claude Code e o `run_command` em primeiro plano (cada um lidera um grupo próprio, que a morte do app não alcança).
+  segundo plano, o `claude` do Claude Code e o `run_command` em primeiro plano (cada um lidera um grupo próprio, que a morte do app não alcança).
 - Leituras: fila concorrente própria, coordenada por arquivo (`FileGate`): uma leitura espera as gravações *daquele* arquivo
   (nunca vê um arquivo pela metade nem uma versão velha) e não espera as dos outros. O nome de um arquivo para o `FileGate`,
   as filas de escrita e os selos (`FileKey`) sai só do texto do caminho: `standardizedFileURL` olha o disco (tira o `/private`
@@ -489,7 +487,7 @@ modelo de provedor com formato desconhecido sai da lista. A gravação increment
 - Um turno tem um **id** (`BotSession.turnID`). Um turno parado ainda pode estar terminando a montagem ou escoando eventos
   enquanto o próximo roda: só o turno atual (`isCurrent`) muda o estado do Orb.
 - Parar (`BotSession.stop`) cancela a `Task` do turno, nega os cartões abertos, fecha a resposta, acrescenta "Você
-  interrompeu esta resposta" e encerra o turno. Os motores respeitam `Task.isCancelled` (e o processo do Claude Code recebe
+  interrompeu esta resposta" e encerra o turno. O motor respeita `Task.isCancelled` (e o processo do Claude Code recebe
   `interrupt`, fecha a entrada e é terminado se não sair).
 - Em rotina, a conversa da rotina assume o lugar da conversa do chat (que fica "estacionada" em `parkedChat`) enquanto ela
   roda: um Orb faz uma coisa por vez, e a rotina espera (fila de uma por rotina) se o Orb está ocupado.
@@ -523,7 +521,6 @@ linhas de ferramenta, brilho, Orbs): sem translação, escala nem pulso; o Orb f
 swift test                                   # a suíte inteira, em paralelo
 swift test --filter ContextWindowTests       # um arquivo/suíte
 ORB_LIVE_TESTS=1 swift test --filter LiveCatalogTests      # catálogos reais (internet)
-ORB_LIVE_TESTS=1 swift test --filter ClaudeCodeLiveTests   # o `claude` real, deslogado (flags, handshake, modelos)
 ```
 
 São mais de 2.000 testes em `Tests/OrbAppTests`, em Swift Testing (`@Test`, `@Suite`, `#expect`, `#require`).
@@ -538,7 +535,7 @@ São mais de 2.000 testes em `Tests/OrbAppTests`, em Swift Testing (`@Test`, `@S
   passado direto ao `AgentEngine.run`. Cada arquivo define o seu, pequeno (respostas roteirizadas, portas que só abrem quando
   o teste manda, gravação das requisições); o que mais de um arquivo usa mora em `TestSupport/` (`ReplayLLM` e `Recorder` para o
   contexto, `RaisedFlag`, `notifies(reading:whenYouDo:)`, `hasPython`, as visões do `AppModel` que só os testes leem). O Claude Code é testado com um `claude` falso, um script que o
-  próprio teste grava (`ORB_CLAUDE_PATH` faz o app usar outro executável).
+  próprio teste grava e passa ao `ClaudeCodeClient` (`ORB_CLAUDE_PATH` faz o app usar outro executável).
 - **Fixtures sem binários**: PDFs e PNGs são desenhados na hora (`Fixtures`), e o AX (Acessibilidade) é uma árvore falsa
   injetável (`AccessibilitySystem`, com `TestSupport/AccessibilityFakes.swift`; a tomada de tela tem o seu mundo falso em
   `ScreenTakeoverTests`).
@@ -592,7 +589,7 @@ verificação do Claude Code (`AppModel(devRun:)`); `ORB_SEND` continua funciona
 | `ORB_CLAUDE_PATH=/caminho/claude` | outro executável como Claude Code (um falso, nos testes) |
 | `ORB_DEBUG_USAGE=1` | uma linha por chamada ao modelo no stderr: tokens, cache lido/escrito |
 | `ORB_SNAPSHOT_WIDTH` / `ORB_SNAPSHOT_HEIGHT` / `ORB_SNAPSHOT_WAIT` | tamanho (1100×760) e espera em segundos (8) de `--snapshot` |
-| `ORB_LIVE_TESTS=1` | liga as suítes que usam a rede ou o `claude` real |
+| `ORB_LIVE_TESTS=1` | liga as suítes que usam a rede (catálogos reais) |
 | `ORB_SIGN_IDENTITY="Nome"` | (em `scripts/bundle.sh`) assina com outra identidade |
 
 ### `--snapshot`

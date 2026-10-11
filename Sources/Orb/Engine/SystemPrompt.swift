@@ -198,7 +198,7 @@ enum BrowserPrompt {
             return ""
         case .fetchOnly:
             guard let status else { return "" }
-            return status.modelNote(fetchTools: "web_fetch and web_search") ?? ""
+            return status.modelNote ?? ""
         case .browser:
             let engine = bot.browserEngine
             var lines = [

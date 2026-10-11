@@ -199,14 +199,14 @@ struct AgentBrowserSessionGuardTests {
 
     @Test func theLoginShellsAgentBrowserSettingsAreStrippedAndProxiesKept() {
         let shell = ["PATH": "/usr/bin", "AGENT_BROWSER_PROFILE": "/Users/me/Chrome", "AGENT_BROWSER_EXECUTABLE_PATH": "/Applications/Brave",
-                     "agent_browser_args": "--no-sandbox", "AGENT_BROWSER_CONFIG": "/Users/me/ab.json", "ORB_TINYFISH_KEY": "tf-secret",
+                     "agent_browser_args": "--no-sandbox", "AGENT_BROWSER_CONFIG": "/Users/me/ab.json",
                      "HTTPS_PROXY": "http://proxy:3128", "NO_PROXY": "localhost", "HOME": "/Users/me"]
         let cleaned = AgentBrowserConfig.sanitized(shell)
         #expect(Set(cleaned.keys) == ["PATH", "HTTPS_PROXY", "NO_PROXY", "HOME"])
         var obscura = config(.obscura)
         obscura.allowPrivateNetwork = true
         let environment = obscura.environment(base: shell)
-        #expect(environment["AGENT_BROWSER_PROFILE"] == nil && environment["AGENT_BROWSER_CONFIG"] == nil && environment["ORB_TINYFISH_KEY"] == nil)
+        #expect(environment["AGENT_BROWSER_PROFILE"] == nil && environment["AGENT_BROWSER_CONFIG"] == nil)
         #expect(environment["AGENT_BROWSER_OBSCURA_STEALTH"] == "1" && environment["AGENT_BROWSER_IDLE_TIMEOUT_MS"] == "1800000", "what the app sets stays")
         #expect(environment["HTTPS_PROXY"] == "http://proxy:3128")
     }
@@ -225,14 +225,14 @@ struct AgentBrowserSessionGuardTests {
         esac
         """.write(to: script, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
-        let shell = ["PATH": "/usr/bin:/bin", "AGENT_BROWSER_PROFILE": "/Users/me/Chrome", "ORB_TINYFISH_KEY": "tf-secret", "HTTPS_PROXY": "http://proxy:3128"]
+        let shell = ["PATH": "/usr/bin:/bin", "AGENT_BROWSER_PROFILE": "/Users/me/Chrome", "HTTPS_PROXY": "http://proxy:3128"]
         let configuration = AgentBrowserConfig(executable: script.path, session: "orb-real", engine: .chrome, stateDirectory: state)
         let driver = AgentBrowserDriver(config: configuration, environment: { shell })
         _ = try await driver.open("https://a.test/")
         _ = try await driver.read()
         let seen = try String(contentsOf: log, encoding: .utf8)
         #expect(seen.contains(state.resolvingSymlinksInPath().path), "ran in the app's folder: \(seen)")
-        #expect(!seen.contains("AGENT_BROWSER_PROFILE") && !seen.contains("tf-secret"), "\(seen)")
+        #expect(!seen.contains("AGENT_BROWSER_PROFILE"), "\(seen)")
         #expect(seen.contains("AGENT_BROWSER_IDLE_TIMEOUT_MS=1800000") && seen.contains("HTTPS_PROXY=http://proxy:3128"))
         #expect(seen.contains("--config \(state.appending(path: "agent-browser.json").path)"))
     }

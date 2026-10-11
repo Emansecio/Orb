@@ -176,27 +176,23 @@ private struct TakeoverRig {
     let owner: LiveScreenOwner
     let indicator = FakeIndicator()
     let events = FakeAccessibilityEvents()
-    let lockURL: URL
+    let lock: TakeoverLock
     let notesWindow = fake("AXWindow", title: "Nota", actions: ["AXRaise"])
     let safariWindow = fake("AXWindow", title: "Página")
 
-    init(front: TakeoverFront? = safari, cursor: CGPoint = CGPoint(x: 500, y: 300), lockURL: URL = TakeoverRig.temporaryLock(),
+    init(front: TakeoverFront? = safari, cursor: CGPoint = CGPoint(x: 500, y: 300), lock: TakeoverLock = TakeoverLock(),
          activationTimeout: Duration = .milliseconds(120), stepLimit: Duration = .seconds(30)) {
         world = FakeTakeoverWorld(front: front, cursor: cursor)
         notesWindow.settable = ["AXMain"]
         safariWindow.settable = ["AXMain"]
         world.windows = [10: safariWindow, 20: notesWindow]
-        self.lockURL = lockURL
-        var owner = LiveScreenOwner(platform: world, events: events, indicator: indicator, lockURL: lockURL)
+        self.lock = lock
+        var owner = LiveScreenOwner(platform: world, events: events, indicator: indicator, lock: lock)
         owner.activationTimeout = activationTimeout
         owner.restoreTimeout = .milliseconds(120)
         owner.stepLimit = stepLimit
         owner.pause = .zero
         self.owner = owner
-    }
-
-    static func temporaryLock() -> URL {
-        FileManager.default.temporaryDirectory.appending(path: "OrbTakeover-\(UUID().uuidString)").appending(path: "takeover.lock")
     }
 
     func takeOver<Value: Sendable>(limit: Duration = .seconds(120), window: Bool = true,
@@ -399,12 +395,12 @@ struct ScreenTakeoverTests {
         #expect(!report.restoreFailed && !rig.world.log.contains { $0.hasPrefix("activate") })
     }
 
-    // MARK: The system-wide lock
+    // MARK: The lock
 
     @Test func onlyOneTakeoverRunsAtATimeAndTheOtherIsRefusedAtOnce() async throws {
-        let url = TakeoverRig.temporaryLock()
-        let first = TakeoverRig(lockURL: url)
-        let second = TakeoverRig(lockURL: url)
+        let lock = TakeoverLock()
+        let first = TakeoverRig(lock: lock)
+        let second = TakeoverRig(lock: lock)
         let inside = TakeoverGate(), finish = TakeoverGate()
         let running = Task {
             try await first.takeOver { _ in
@@ -424,26 +420,11 @@ struct ScreenTakeoverTests {
 
     @Test func theLockIsReleasedAfterAnErrorToo() async throws {
         struct Boom: Error {}
-        let url = TakeoverRig.temporaryLock()
-        let rig = TakeoverRig(lockURL: url)
+        let lock = TakeoverLock()
+        let rig = TakeoverRig(lock: lock)
         _ = try? await rig.takeOver { _ in throw Boom() }
-        let lock = try TakeoverLock.acquire(at: url)
+        try lock.acquire()
         lock.release()
-    }
-
-    @Test func theLockFileLivesInTheAppsCachesFolder() {
-        let url = TakeoverLock.defaultURL(bundleID: "dev.example.Orb")
-        #expect(url.path.hasSuffix("/Library/Caches/dev.example.Orb/takeover.lock"))
-        #expect(TakeoverLock.defaultURL(bundleID: nil).lastPathComponent == "takeover.lock")
-    }
-
-    @Test func aLockIsHeldPerOpenFileSoTwoHoldersInOneProcessConflict() throws {
-        let url = TakeoverRig.temporaryLock()
-        let first = try TakeoverLock.acquire(at: url)
-        #expect(throws: TakeoverFailure.busy) { try TakeoverLock.acquire(at: url) }
-        first.release()
-        first.release()
-        try TakeoverLock.acquire(at: url).release()
     }
 
     // MARK: The person's mouse

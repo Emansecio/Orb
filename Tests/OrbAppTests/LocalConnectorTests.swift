@@ -194,18 +194,7 @@ struct LocalConnectorServerTests {
         #expect(await LocalConnectorServer.respond(to: .object(["method": .string("notifications/initialized")]), connector: connector) == nil)
     }
 
-    private struct Quiet: MCPServerHandler {
-        var serverName: String { "quiet" }
-        var answersParseErrors: Bool { false }
-        func listedTools() -> [JSONValue] { [] }
-        func offers(_ tool: String) -> Bool { false }
-        func call(_ tool: String, arguments: JSONValue) async -> JSONValue { MCPStdioServer.textResult("") }
-    }
-
-    @Test func aLineThatIsNotJSONIsSkippedWhenTheHandlerSaysSoAndAnUnknownMethodIsAnError() async throws {
-        #expect(await MCPStdioServer.respond(toLine: "{nao é json", handler: Quiet()) == nil)
-        #expect(await LocalConnectorServer.respond(toLine: "{nao é json", connector: connector) == nil)
-        #expect(await LocalConnectorServer.respond(toLine: "[1, 2]", connector: connector) == nil)
+    @Test func anUnknownMethodIsAnErrorAndPingAnswers() async throws {
         let unknown = try #require(await LocalConnectorServer.respond(to: .object(["id": .number(7), "method": .string("resources/list")]), connector: connector))
         #expect(unknown["error"]?["code"]?.int == -32601 && unknown["id"] == .number(7))
         let ping = try #require(await LocalConnectorServer.respond(to: .object(["id": .number(8), "method": .string("ping")]), connector: connector))

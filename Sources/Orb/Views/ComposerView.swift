@@ -202,7 +202,7 @@ struct ComposerView: View {
     /// The line under the card: how the keys work, shown only when it helps and nothing else is being said.
     private func hint(_ lane: ComposerLane) -> String {
         if isQueueing, hasContent {
-            return ComposerHint.queueing(steersMidTurn: model.steersMidTurn(botID), needsYou: model.live(botID).needsYou,
+            return ComposerHint.queueing(needsYou: model.live(botID).needsYou,
                                          typesInComposer: isFocused && hasText, compact: isCompact)
         }
         if isWorking { return "" }
@@ -302,8 +302,8 @@ struct ComposerView: View {
         }
         .buttonStyle(RoundActionStyle(isEnabled: action == .stop || canSend))
         .disabled(action != .stop && !canSend)
-        .accessibilityLabel(action.title(isRoutine: routine != nil, steers: model.steersMidTurn(botID)))
-        .help(action.help(isRoutine: routine != nil, steers: model.steersMidTurn(botID)))
+        .accessibilityLabel(action.title(isRoutine: routine != nil))
+        .help(action.help(isRoutine: routine != nil))
         // ⌘↩ sends when the Orb is free; while it works ⌘↩ means "stop and send" (see `shortcuts`).
         .keyboardShortcut(action == .send ? AppShortcut.commandReturn : nil)
     }
@@ -686,7 +686,7 @@ enum ComposerAction: Equatable {
     var title: String {
         switch self {
         case .send: "Enviar"
-        case .queue: "Colocar na fila"
+        case .queue: "Direcionar"
         case .stop: "Parar"
         }
     }
@@ -694,21 +694,19 @@ enum ComposerAction: Equatable {
     var help: String {
         switch self {
         case .send: "Enviar (↩)"
-        case .queue: "Colocar na fila (↩)"
+        case .queue: "Direcionar o Orb (↩); ⇥ deixa para depois da tarefa"
         case .stop: "\(CommandName.stop) (\(AppShortcut.stop.label))"
         }
     }
 
-    /// Stopping during a routine says so: it ends the routine's run. Queueing says "Direcionar" where the Orb takes the
-    /// message in the middle of the task (`steers`), which is what ↩ does there; ⇥ is the queue.
-    func title(isRoutine: Bool, steers: Bool = false) -> String {
-        if self == .queue, steers { return "Direcionar" }
-        return self == .stop && isRoutine ? "Parar a rotina" : title
+    /// Stopping during a routine says so: it ends the routine's run. Queueing says "Direcionar": the Orb takes the
+    /// message in the middle of the task, which is what ↩ does there; ⇥ is the queue.
+    func title(isRoutine: Bool) -> String {
+        self == .stop && isRoutine ? "Parar a rotina" : title
     }
 
-    func help(isRoutine: Bool, steers: Bool = false) -> String {
-        if self == .queue, steers { return "Direcionar o Orb (↩); ⇥ deixa para depois da tarefa" }
-        return self == .stop && isRoutine ? "Parar a rotina (\(AppShortcut.stop.label))" : help
+    func help(isRoutine: Bool) -> String {
+        self == .stop && isRoutine ? "Parar a rotina (\(AppShortcut.stop.label))" : help
     }
 
     /// Stop keeps its own (dark) button next to the queueing one, so a turn can still be ended with a message typed.
@@ -720,9 +718,9 @@ enum ComposerHint {
     /// ↩ steers the task, ⇥ waits for its end, ⌘↩ stops and sends. With a permission request open, ⌘↩ typed
     /// in the composer stops the turn (which refuses the request) and sends; from anywhere else it still allows the
     /// request (see `ApprovalShortcut`), and the line says so.
-    static func queueing(steersMidTurn: Bool, needsYou: Bool, typesInComposer: Bool, compact: Bool = false) -> String {
+    static func queueing(needsYou: Bool, typesInComposer: Bool, compact: Bool = false) -> String {
         let command = AppShortcut.commandReturn.label
-        let keys = steersMidTurn ? "↩ direciona · ⇥ fila" : "↩ fila"
+        let keys = "↩ direciona · ⇥ fila"
         if needsYou {
             if !typesInComposer { return compact ? "\(command) permite o pedido" : "\(keys) · \(command) permite o pedido" }
             // A narrow composer gets the same promises in fewer words, so the line is whole rather than cut with "…".

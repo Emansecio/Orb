@@ -133,11 +133,11 @@ enum QuickAskSend: Equatable {
     }
 
     /// The panel's key hint.
-    static func hint(isWorking: Bool, canSteer: Bool, midTurn: Bool = true) -> String {
+    static func hint(isWorking: Bool, canSteer: Bool) -> String {
         let newLine = "\(CommandName.newLineKeys) nova linha"
         if !isWorking { return "↩ envia · \(newLine)" }
         guard canSteer else { return "Rotina rodando · \(newLine)" }
-        return midTurn ? "↩ direciona · \(newLine)" : "↩ fila · \(newLine)"
+        return "↩ direciona · \(newLine)"
     }
 }
 
@@ -234,8 +234,7 @@ struct QuickAskView: View {
                     .help(Tip.openMainWindow)
                 Spacer()
                 Text(QuickAskSend.hint(isWorking: selectedID.map(model.isWorking) ?? false,
-                                       canSteer: selectedID.map(model.canSteer) ?? false,
-                                       midTurn: selectedID.map(model.steersMidTurn) ?? true))
+                                       canSteer: selectedID.map(model.canSteer) ?? false))
                     .font(.system(size: 11))
                     .foregroundStyle(Palette.muted)
             }

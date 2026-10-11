@@ -331,7 +331,7 @@ final class UILiveElements: @unchecked Sendable {
         }
     }
 
-    /// The reference behind `id` in the reading `generation` (taken at `takenAt`, so a snapshot of another process
+    /// The reference behind `id` in the reading `generation` (taken at `takenAt`, so another reading
     /// that happens to carry the same number is not mistaken for it).
     func element(bot: UUID?, pid: Int32, generation: Int, takenAt: Date, id: String) -> Found? {
         let now = ContinuousClock.now

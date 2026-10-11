@@ -14,8 +14,10 @@ foco do usuário. Este documento é o contrato da implementação (pacotes WP0, 
 4. `ui_act` sem `app` age no app da frente (`UIAppResolver`) — o app em que o usuário está.
 5. IPC bloqueante no pool cooperativo (`runDetached`): vários Orbs ou um app travado esgotam o pool.
 6. Espera fixa de 300 ms (`settle`) depois de cada ação; nenhuma notificação AX é usada.
-7. `MCPStdioServer.run` atende uma requisição por vez na thread do stdin, não trata `notifications/cancelled` e só vê o EOF
-   quando a ferramenta termina: parar o turno no Claude Code não interrompe uma espera longa.
+7. O servidor MCP stdio que então servia as ferramentas do Orb ao Claude Code, atendia uma requisição por vez
+   na thread do stdin, não tratava `notifications/cancelled` e só via o EOF quando a ferramenta terminava: parar o turno não
+   interrompia uma espera longa. (Hoje as ferramentas rodam no motor do Orb, em processo, e param com a tarefa do turno, também com o
+   Claude Code.)
 8. `screenshot` usa `CGWindowListCopyWindowInfo(.optionOnScreenOnly)` (não acha janelas em outro Space), pega a primeira
    janela da lista e não a janela AX, e chama `CGRequestScreenCaptureAccess()` a cada captura enquanto falta permissão.
 9. O teto de caracteres das specs (`ToolSpecEconomyTests`) está praticamente cheio — conflito com o navegador.
@@ -91,7 +93,7 @@ Acessibilidade só a imagem; `CGRequestScreenCaptureAccess` no máximo uma vez p
   em `AXSessions.shared` (`AccessibilitySession.swift`): no máximo 4 sessões em voo; prazos leitura 4/8 s, ação 2 s, espera
   = timeout + 0,5 s; estourado → "\(app) não respondeu" e a sessão fica `busy` até a chamada presa voltar; chamadas novas
   falham em < 20 ms ("ainda ocupado").
-- `AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 1.0)` uma vez por processo (app e filho MCP) + 1,0 s na raiz.
+- `AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 1.0)` uma vez por processo + 1,0 s na raiz.
 - Primeiro `.cannotComplete` aborta a leitura com corte `.hung`: `read(_:) -> AXRead` expõe a falha.
 - `UILiveElements` em memória (bot, pid, geração): `id → referência AX viva`; ≤ 4.000 referências, LRU de 6 snapshots por
   (bot, pid), validade 10 min; resolve pela referência viva (conferência barata) e cai no percurso por caminho;
@@ -103,11 +105,10 @@ Acessibilidade só a imagem; `CGRequestScreenCaptureAccess` no máximo uma vez p
   `DispatchSource.makeProcessSource(.exit)`; entrada ociosa 30 s sai; ≤ 16 apps.
 - `settle`: assina antes de agir, espera a primeira notificação (≤ 400 ms) + 60 ms de silêncio, então lê; sem suporte, 150 ms.
 - ScreenCaptureKit só avulso (sem stream).
-- Cancelamento: no motor nativo pela tarefa; no `MCPStdioServer`, uma `Task` por requisição num registro `[id: Task]` com
-  escrita serializada, `notifications/cancelled`, EOF/SIGTERM cancelam tudo, esperam ≤ 1,5 s pelas restaurações de
-  takeover e saem. `type` para entre pedaços e informa quanto digitou.
-- Concorrência: por pid em série; por processo ≤ 4 sessões AX, 2 capturas SCK, 1 Vision; takeover 1 no sistema inteiro
-  (`flock` não bloqueante em `~/Library/Caches/<bundle>/takeover.lock`).
+- Cancelamento: pela tarefa do turno. O servidor MCP do cano (`ClaudePipeServer.Loop`) atende cada requisição numa `Task` e
+  trata `notifications/cancelled`. `type` para entre pedaços e informa quanto digitou.
+- Concorrência: por pid em série; por processo ≤ 4 sessões AX, 2 capturas SCK, 1 Vision; takeover 1 por vez no app
+  (`TakeoverLock.shared`, em memória, não bloqueante).
 
 | Medida | Meta |
 |---|---|
@@ -188,12 +189,11 @@ app e cursor (≤ 2 pt). Opcional Finder/TextEdit só leitura com `ORB_AX_SMOKE_
   cancelamento; testes de cancelamento do MCP; smoke completo verde neste Mac; CI verde com smoke desligado.
 
 **Coordenação com o navegador:** `PermissionPolicy.swift` não muda aqui; tetos de specs combinados (17.500 / sub-tetos);
-`SystemPrompt.swift` só nas linhas de `computerUse`; `OrbToolsMCPServer.swift` não muda; `MCPStdioServer.swift` muda o
-modelo de concorrência (ferramentas do navegador servidas por MCP precisam ser seguras para cancelamento); o prompt diz
-que conteúdo web vai para as ferramentas do navegador.
+`SystemPrompt.swift` só nas linhas de `computerUse`; `MCPStdioServer.swift` muda o modelo de concorrência (uma `Task` por requisição,
+cancelável); o prompt diz que conteúdo web vai para as ferramentas do navegador.
 
 **Revisão final:** `grep` sem `activate(`, `AXRaise`, `AXMain`, `.cghidEventTap` fora de `ScreenTakeover.swift`; sem
 `_AX`, `CGS`, `SLS`, `CGWindowListCreateImage`, `PostToPSN`; nenhuma chamada AX na main nem em `runDetached`; timeout
-global no app e no filho MCP; toda saída de takeover passa pela restauração; `UISnapshot` antigo decodifica; rechecagem de
+global no app; toda saída de takeover passa pela restauração; `UISnapshot` antigo decodifica; rechecagem de
 perigo em `click`, `key` e `steps`; nenhum valor de campo seguro em logs, legenda ou cartão; tetos de specs; testes antigos
-alterados só onde manda; smoke neste Mac pelos dois motores.
+alterados só onde manda; smoke neste Mac.

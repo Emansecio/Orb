@@ -104,71 +104,13 @@ struct KeyStrokeTests {
     }
 }
 
-// MARK: - Snapshots and apps
+// MARK: - Apps
 
-struct SnapshotCompatibilityTests {
-    /// A snapshot as the version before this one stored it: no generation, marks, shot, frames or launch date.
-    private let oldJSON = """
-    {"app":{"name":"Notas","bundleID":"com.apple.Notes","pid":100},"windowIndex":0,"windowTitle":"Notas",
-     "entries":{"w1":{"rawRole":"AXWindow","label":"Notas","secure":false},
-                "w1.1":{"rawRole":"AXTextField","label":"Buscar","secure":true}},
-     "takenAt":780000000}
-    """
-
-    @Test func anOldSnapshotStillDecodesWithDefaultsForTheNewFields() throws {
-        let snapshot = try JSONDecoder().decode(UISnapshot.self, from: Data(oldJSON.utf8))
-        #expect(snapshot.app == notes)
-        #expect(snapshot.app.launchDate == nil)
-        #expect(snapshot.windowIndex == 0 && snapshot.windowTitle == "Notas")
-        #expect(snapshot.entries.count == 2)
-        #expect(snapshot.entries["w1.1"]?.secure == true)
-        #expect(snapshot.entries["w1.1"]?.frame == nil && snapshot.entries["w1.1"]?.actionable == false)
-        #expect(snapshot.generation == 0 && snapshot.marks.isEmpty && snapshot.shot == nil)
-    }
-
-    @Test func aSnapshotWithEverythingRoundTripsAndWritesMarksWithStringKeys() throws {
-        let launched = Date(timeIntervalSince1970: 1_700_000_000)
-        let shot = ShotGeometry(pixelWidth: 1280, pixelHeight: 800, scale: 2, windowFrame: CGRect(x: -1440, y: 25, width: 640, height: 400), windowID: 4242)
-        let snapshot = UISnapshot(
-            app: AccessibilityApp(name: "Notas", bundleID: "com.apple.Notes", pid: 100, launchDate: launched), windowIndex: 1,
-            windowTitle: "Notas", entries: ["w1.2": .init(rawRole: "AXButton", label: "Salvar", secure: false, frame: CGRect(x: 10, y: 20, width: 80, height: 24), actionable: true)],
-            takenAt: Date(timeIntervalSince1970: 1_700_000_100), generation: 7, marks: [1: "w1.2", 12: "w1.9.3"], shot: shot)
-        let data = try JSONEncoder().encode(snapshot)
-        #expect(try JSONDecoder().decode(UISnapshot.self, from: data) == snapshot)
-        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
-        #expect(object["marks"] as? [String: String] == ["1": "w1.2", "12": "w1.9.3"])
-    }
-
-    @Test func fieldsOfTheWrongTypeDoNotMakeTheSnapshotUnreadable() throws {
-        let json = """
-        {"app":{"name":"Notas","bundleID":"com.apple.Notes","pid":100,"launchDate":"ontem"},"windowTitle":"Notas",
-         "entries":{"w1":{"rawRole":"AXWindow","label":"Notas","secure":false,"frame":"grande","actionable":"sim"}},
-         "takenAt":780000000,"generation":"x","marks":[1,2,3],"shot":{"pixelWidth":"muito"}}
-        """
-        let snapshot = try JSONDecoder().decode(UISnapshot.self, from: Data(json.utf8))
-        #expect(snapshot.app.launchDate == nil)
-        #expect(snapshot.entries["w1"]?.frame == nil && snapshot.entries["w1"]?.actionable == false)
-        #expect(snapshot.generation == 0 && snapshot.marks.isEmpty && snapshot.shot == nil)
-    }
-
-    @Test func theStoreKeepsTheNewFieldsThroughItsFile() throws {
-        let directory = FileManager.default.temporaryDirectory.appending(path: "OrbAccessibilityTests-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let snapshot = UISnapshot(app: notes, windowIndex: 0, windowTitle: "Notas", entries: [:], generation: 3, marks: [5: "w1.1"])
-        UISnapshotStore(directory: directory).save(snapshot, bot: nil)
-        // A second store (another process) reads it from the file.
-        #expect(UISnapshotStore(directory: directory).snapshot(bot: nil, app: notes)?.marks == [5: "w1.1"])
-        #expect(UISnapshotStore(directory: directory).snapshot(bot: nil, app: notes)?.generation == 3)
-    }
-
-    @Test func theLaunchDateIsOptionalInAnAppAndDoesNotChangeItsOldIdentity() throws {
-        let plain = try JSONDecoder().decode(AccessibilityApp.self, from: Data(#"{"name":"Notas","bundleID":"com.apple.Notes","pid":100}"#.utf8))
-        #expect(plain == notes)
+struct AppIdentityTests {
+    @Test func theLaunchDateIsOptionalInAnAppAndDoesNotChangeItsOldIdentity() {
         let dated = AccessibilityApp(name: "Notas", bundleID: "com.apple.Notes", pid: 100, launchDate: Date(timeIntervalSince1970: 5))
-        #expect(try JSONDecoder().decode(AccessibilityApp.self, from: JSONEncoder().encode(dated)) == dated)
+        #expect(AccessibilityApp(name: "Notas", bundleID: "com.apple.Notes", pid: 100) == notes)
         #expect(dated != notes)
-        let noBundle = try JSONDecoder().decode(AccessibilityApp.self, from: Data(#"{"name":"X","pid":1}"#.utf8))
-        #expect(noBundle.bundleID == nil)
     }
 }
 

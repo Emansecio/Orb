@@ -185,7 +185,7 @@ final class BotSession {
     /// Tokens the last turn used, summed over its model calls (for a context meter).
     private(set) var usage: TokenUsage?
     /// Tokens of the latest model call alone: `promptTokens` is how full the context is now and `cacheHitRatio` how
-    /// much of it the provider's cache served (native engine only; for the context meter).
+    /// much of it the provider's cache served (for the context meter).
     private(set) var requestUsage: TokenUsage?
     /// What the latest compaction did (on its own or on request), for the context meter.
     var lastCompaction: CompactionReport?

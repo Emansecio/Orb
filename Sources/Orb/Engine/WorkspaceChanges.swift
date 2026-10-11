@@ -15,8 +15,8 @@ extension WorkspaceSnapshot {
     /// - `lastHash`: the hash of the snapshot the model last got (nil: none recorded).
     /// - `seen`: that snapshot (`forComparison`), to tell what is different now (nil: not recorded, as in conversations
     ///   from before this was kept).
-    /// - `modelHasSnapshot`: whether the model can still read a whole snapshot (its history holds one, or its Claude Code
-    ///   session was started with one). When it cannot, it gets the whole one again.
+    /// - `modelHasSnapshot`: whether the model can still read a whole snapshot (its history holds one).
+    ///   When it cannot, it gets the whole one again.
     func report(lastHash: String?, seen: WorkspaceSnapshot?, modelHasSnapshot: Bool) -> WorkspaceReport {
         guard modelHasSnapshot, let lastHash else { return .full }
         if lastHash == hash {
