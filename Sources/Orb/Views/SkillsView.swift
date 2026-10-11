@@ -321,6 +321,8 @@ private struct CatalogSkillCard: View {
     let entry: CatalogSkill
     let onOpen: () -> Void
     @State private var document: SkillDocument?
+    /// The SKILL.md could not be read (gone from its repository, or GitHub refused): the card says so instead of waiting.
+    @State private var failure: String?
     @State private var isHovering = false
 
     var body: some View {
@@ -348,6 +350,8 @@ private struct CatalogSkillCard: View {
                 Group {
                     if let document {
                         Text(document.description.isEmpty ? "Sem descrição." : document.description)
+                    } else if let failure {
+                        Label(failure, systemImage: "exclamationmark.circle").foregroundStyle(Palette.faint)
                     } else {
                         // Static: a grid of cards loading at once shouldn't run a shimmer each.
                         Text("Carregando descrição…").foregroundStyle(Palette.faint)
@@ -357,7 +361,7 @@ private struct CatalogSkillCard: View {
                 .foregroundStyle(Palette.muted)
                 .lineLimit(3, reservesSpace: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .animateChanges(of: document == nil)
+                .animateChanges(of: document == nil && failure == nil)
                 HStack(spacing: 6) {
                     if entry.isFromKnownSource {
                         CatalogBadge(text: "Fonte conhecida", symbol: "checkmark.seal.fill", tint: Palette.accentText)
@@ -372,7 +376,10 @@ private struct CatalogSkillCard: View {
         .buttonStyle(.plain)
         .help(Tip.openSkillDetails)
         .onHover { isHovering = $0 }
-        .task { document = try? await SkillCatalog.shared.document(for: entry) }
+        .task {
+            do { document = try await SkillCatalog.shared.document(for: entry) }
+            catch { if !Task.isCancelled { failure = CatalogError.cardText(for: error) } }
+        }
     }
 }
 

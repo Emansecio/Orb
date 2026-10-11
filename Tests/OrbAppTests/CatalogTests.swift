@@ -86,6 +86,84 @@ struct CatalogTests {
     }
 }
 
+/// A repository on a stub network: SKILL.md files by path, and how often each address was asked for.
+private final class StubRepository: @unchecked Sendable {
+    let files: [String: String]
+    var listingStatus = 200
+    private let lock = NSLock()
+    private var asked: [String: Int] = [:]
+
+    init(_ files: [String: String]) { self.files = files }
+
+    func count(_ fragment: String) -> Int { lock.withLock { asked.filter { $0.key.contains(fragment) }.map(\.value).reduce(0, +) } }
+
+    func fetch(_ request: URLRequest) -> (Data, Int) {
+        let url = request.url?.absoluteString ?? ""
+        lock.withLock { asked[url, default: 0] += 1 }
+        if url.contains("/git/trees/") {
+            guard listingStatus == 200 else { return (Data(), listingStatus) }
+            let tree = files.keys.sorted().map { "{\"path\":\"\($0)\"}" }.joined(separator: ",")
+            return (Data("{\"tree\":[\(tree)]}".utf8), 200)
+        }
+        let path = url.components(separatedBy: "/HEAD/").last ?? ""
+        return files[path].map { (Data($0.utf8), 200) } ?? (Data("404".utf8), 404)
+    }
+}
+
+struct SkillLocatingTests {
+    private func skill(_ id: String) -> CatalogSkill {
+        CatalogSkill(id: "o/r/\(id)", repo: "o/r", skillId: id, name: id, installs: 0)
+    }
+
+    private func markdown(_ name: String, _ description: String) -> String {
+        "---\nname: \(name)\ndescription: \(description)\n---\n# \(name)\nFaça assim."
+    }
+
+    @Test func aSkillIsFoundByTheNameItsFileDeclares() async throws {
+        let repo = StubRepository([
+            ".cursor/skills/taste-skill/SKILL.md": markdown("design-taste-frontend", "cópia de outra ferramenta"),
+            "skills/taste-skill/SKILL.md": markdown("design-taste-frontend", "Frontend com gosto."),
+            "skills/brandkit/SKILL.md": markdown("brandkit", "Marca."),
+        ])
+        let catalog = SkillCatalog { (repo.fetch($0)) }
+        let document = try await catalog.document(for: skill("design-taste-frontend"))
+        #expect(document.description == "Frontend com gosto.") // the repository's own copy, not a tool's mirror
+        #expect(document.folderURL.absoluteString.hasSuffix("o/r/tree/HEAD/skills/taste-skill"))
+        // Another card of the same repository: the listing is not asked for again.
+        _ = try await catalog.document(for: skill("brandkit"))
+        #expect(repo.count("/git/trees/") == 1)
+    }
+
+    @Test func aPluginsSkillIsFoundByItsOwnName() async throws {
+        let repo = StubRepository(["plugins/stitch-design/skills/extract-design-md/SKILL.md": markdown("extract-design-md", "Extrai.")])
+        let catalog = SkillCatalog { (repo.fetch($0)) }
+        #expect(try await catalog.document(for: skill("stitch::extract-design-md")).description == "Extrai.")
+    }
+
+    @Test func oneThatIsGoneSaysSoInsteadOfWaiting() async throws {
+        let repo = StubRepository(["skills/impeccable/SKILL.md": markdown("impeccable", "Design.")])
+        let catalog = SkillCatalog { (repo.fetch($0)) }
+        await #expect(throws: CatalogError.self) { try await catalog.document(for: skill("frontend-design")) }
+        do { _ = try await catalog.document(for: skill("frontend-design")) } catch {
+            #expect(CatalogError.cardText(for: error).contains("renomeada ou removida"))
+        }
+    }
+
+    @Test func aRefusedListingIsTriedAgainLater() async throws {
+        let repo = StubRepository(["skills/taste-skill/SKILL.md": markdown("design-taste-frontend", "Frontend.")])
+        repo.listingStatus = 403
+        let catalog = SkillCatalog { (repo.fetch($0)) }
+        do {
+            _ = try await catalog.document(for: skill("design-taste-frontend"))
+            Issue.record("the refused listing must fail")
+        } catch {
+            #expect(CatalogError.cardText(for: error).contains("limitou"))
+        }
+        repo.listingStatus = 200
+        #expect(try await catalog.document(for: skill("design-taste-frontend")).description == "Frontend.")
+    }
+}
+
 /// Hits the real catalogs: `ORB_LIVE_TESTS=1 swift test --filter LiveCatalogTests`.
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["ORB_LIVE_TESTS"] != nil))
 struct LiveCatalogTests {
@@ -96,6 +174,14 @@ struct LiveCatalogTests {
         #expect(document.name == "pdf")
         #expect(!document.description.isEmpty)
         #expect(document.instructions.count > 200)
+    }
+
+    @Test func findsASkillWhoseFolderHasAnotherName() async throws {
+        let skill = CatalogSkill(id: "leonxlnx/taste-skill/design-taste-frontend", repo: "leonxlnx/taste-skill",
+                                 skillId: "design-taste-frontend", name: "design-taste-frontend", installs: 0)
+        let document = try await SkillCatalog().document(for: skill)
+        #expect(document.name == "design-taste-frontend")
+        #expect(!document.description.isEmpty)
     }
 
     @Test func connectsToAPublicRemoteServer() async throws {

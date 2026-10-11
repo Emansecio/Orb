@@ -34,10 +34,25 @@ actor SkillCatalog {
     private static let github = URL(string: "https://github.com")!
     private static let raw = URL(string: "https://raw.githubusercontent.com")!
 
-    private let session: URLSession
-    private var documents: [String: SkillDocument] = [:]
+    /// One request: the body and the HTTP status. Tests hand in their own.
+    typealias Fetch = @Sendable (URLRequest) async throws -> (Data, Int)
 
-    init(session: URLSession = .shared) { self.session = session }
+    private let send: Fetch
+    private var documents: [String: SkillDocument] = [:]
+    /// Each repository's SKILL.md files, listed once (several cards of a search often come from the same repository,
+    /// and GitHub allows few listings an hour without an account).
+    private var trees: [String: Task<[String], Error>] = [:]
+    /// The SKILL.md files already read, by "owner/repo/path": a search reads the same ones for several cards.
+    private var files: [String: Task<String?, Never>] = [:]
+
+    init(session: URLSession = .shared) {
+        send = { request in
+            let (data, response) = try await session.data(for: request)
+            return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
+        }
+    }
+
+    init(fetch: @escaping Fetch) { send = fetch }
 
     /// Up to `limit` skills matching `query` (at least 2 characters), most installed first.
     func search(_ query: String, limit: Int = 40) async throws -> [CatalogSkill] {
@@ -57,10 +72,7 @@ actor SkillCatalog {
     /// The skill's SKILL.md (cached).
     func document(for skill: CatalogSkill) async throws -> SkillDocument {
         if let cached = documents[skill.id] { return cached }
-        let path = try await locate(skill)
-        guard let text = String(data: try await fetch(Self.raw.appending(path: "\(skill.repo)/HEAD/\(path)")), encoding: .utf8) else {
-            throw CatalogError.unreadable(skill.name)
-        }
+        let (path, text) = try await locate(skill)
         let parsed = Self.parse(text)
         let folder = (path as NSString).deletingLastPathComponent
         let document = SkillDocument(
@@ -73,33 +85,78 @@ actor SkillCatalog {
         return document
     }
 
-    /// Path of the SKILL.md inside the repo: common layouts first, then the repository tree.
-    private func locate(_ skill: CatalogSkill) async throws -> String {
+    /// The SKILL.md of `skill` and its path in the repository. The index names a skill by the `name` its SKILL.md
+    /// declares, and the folder is often called something else ("design-taste-frontend" lives in
+    /// `skills/taste-skill/`): the common layouts first, then the repository's SKILL.md files, by folder and then by
+    /// the name inside.
+    private func locate(_ skill: CatalogSkill) async throws -> (path: String, text: String) {
         let id = skill.skillId
         for path in ["skills/\(id)/SKILL.md", "\(id)/SKILL.md", "skills/.curated/\(id)/SKILL.md", ".claude/skills/\(id)/SKILL.md"] {
-            if (try? await fetch(Self.raw.appending(path: "\(skill.repo)/HEAD/\(path)"), method: "HEAD")) != nil {
-                return path
-            }
+            if let text = await file(skill.repo, path) { return (path, text) }
         }
-        guard let treeURL = URL(string: "https://api.github.com/repos/\(skill.repo)/git/trees/HEAD?recursive=1") else {
-            throw CatalogError.unreadable(skill.name)
+        let paths = try await skillFiles(in: skill.repo)
+        // A plugin's skill comes as "plugin::skill" ("stitch::extract-design-md"); its folder has the skill's own name.
+        let bare = id.components(separatedBy: "::").last ?? id
+        if let path = paths.first(where: { $0.hasSuffix("/\(id)/SKILL.md") || $0.hasSuffix("/\(bare)/SKILL.md") }),
+           let text = await file(skill.repo, path) {
+            return (path, text)
         }
-        let paths = (try await fetchJSON(treeURL)["tree"]?.array ?? []).compactMap { $0["path"]?.string }
-        if let match = paths.first(where: { $0.hasSuffix("/\(id)/SKILL.md") }) ?? paths.first(where: { $0 == "SKILL.md" }) {
-            return match
+        // By the name inside, read together (raw files are not limited like the listing), the repository's own copy before
+        // the ones other tools keep in dot-folders.
+        let candidates = Array(paths.sorted { Self.isMirror($0) == Self.isMirror($1) ? $0 < $1 : !Self.isMirror($0) }
+            .prefix(Self.maxNameLookups))
+        let texts = await withTaskGroup(of: (Int, String?).self) { group in
+            for (index, path) in candidates.enumerated() { group.addTask { (index, await self.file(skill.repo, path)) } }
+            var texts = [String?](repeating: nil, count: candidates.count)
+            for await (index, text) in group { texts[index] = text }
+            return texts
         }
-        throw CatalogError.unreadable(skill.name)
+        for (path, text) in zip(candidates, texts) {
+            if let text, let name = Self.parse(text).fields["name"],
+               name.caseInsensitiveCompare(id) == .orderedSame || name.caseInsensitiveCompare(bare) == .orderedSame { return (path, text) }
+        }
+        if paths == ["SKILL.md"], let text = texts.first ?? nil { return ("SKILL.md", text) }
+        throw CatalogError.missing(skill.name)
+    }
+
+    /// SKILL.md files whose name is looked at, at most: a repository of hundreds of skills is not read whole for one card.
+    static let maxNameLookups = 60
+
+    /// A copy of a skill kept for another tool (`.cursor/skills/…`, `.gemini/skills/…`).
+    private static func isMirror(_ path: String) -> Bool { path.hasPrefix(".") }
+
+    /// The SKILL.md files of `repo`, listed once.
+    private func skillFiles(in repo: String) async throws -> [String] {
+        if let listing = trees[repo] { return try await listing.value }
+        guard let url = URL(string: "https://api.github.com/repos/\(repo)/git/trees/HEAD?recursive=1") else { return [] }
+        let listing = Task { [self] in
+            (try await fetchJSON(url)["tree"]?.array ?? []).compactMap { $0["path"]?.string }
+                .filter { $0 == "SKILL.md" || $0.hasSuffix("/SKILL.md") }
+        }
+        trees[repo] = listing
+        do {
+            return try await listing.value
+        } catch {
+            trees[repo] = nil // a refusal (the hourly limit) is tried again on the next search
+            throw error
+        }
+    }
+
+    /// A file of `repo` at HEAD, or nil when it is not there.
+    private func file(_ repo: String, _ path: String) async -> String? {
+        let key = "\(repo)/\(path)"
+        if let reading = files[key] { return await reading.value }
+        let url = Self.raw.appending(path: "\(repo)/HEAD/\(path)")
+        let reading = Task { [self] in (try? await fetch(url)).flatMap { String(data: $0, encoding: .utf8) } }
+        files[key] = reading
+        return await reading.value
     }
 
     // MARK: Network
 
-    private func fetch(_ url: URL, method: String = "GET") async throws -> Data {
-        var request = URLRequest(url: url, timeoutInterval: 20)
-        request.httpMethod = method
-        let (data, response) = try await session.data(for: request)
-        guard let status = (response as? HTTPURLResponse)?.statusCode, (200..<300).contains(status) else {
-            throw CatalogError.http((response as? HTTPURLResponse)?.statusCode ?? 0)
-        }
+    private func fetch(_ url: URL) async throws -> Data {
+        let (data, status) = try await send(URLRequest(url: url, timeoutInterval: 20))
+        guard (200..<300).contains(status) else { throw CatalogError.http(status) }
         return data
     }
 
@@ -147,6 +204,8 @@ enum CatalogError: LocalizedError {
     case http(Int)
     case invalidResponse
     case unreadable(String)
+    /// The index still lists it, but its repository no longer has it (renamed or removed).
+    case missing(String)
 
     var errorDescription: String? {
         switch self {
@@ -154,6 +213,18 @@ enum CatalogError: LocalizedError {
         case .http(let status): "O catálogo respondeu HTTP \(status)."
         case .invalidResponse: "O catálogo devolveu uma resposta inesperada."
         case .unreadable(let name): "Não encontrei o SKILL.md de “\(name)” no GitHub."
+        case .missing(let name): "“\(name)” não está mais no repositório: foi renomeada ou removida. Procure pelo nome novo."
+        }
+    }
+}
+
+extension CatalogError {
+    /// What a skill's card says when its SKILL.md is not there: the short form of the reason.
+    static func cardText(for error: Error) -> String {
+        switch error as? CatalogError {
+        case .missing?: "Não está mais no repositório (renomeada ou removida)."
+        case .http(403)?: "O GitHub limitou as consultas; abra para tentar de novo."
+        default: "Descrição indisponível; abra para tentar de novo."
         }
     }
 }
