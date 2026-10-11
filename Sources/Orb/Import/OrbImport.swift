@@ -59,6 +59,8 @@ struct OrbImport: Equatable, Sendable {
     var asInstructions = false
     /// The free text itself, for reading it the other way.
     var freeText = ""
+    /// The marketplace page it was read from (`GrokMarketplace`); empty for everything else.
+    var link = ""
 
     var isEmpty: Bool { identity == nil && preferences.isEmpty && facts.isEmpty && procedures.isEmpty && skills.isEmpty }
 }

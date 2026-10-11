@@ -298,6 +298,7 @@ enum Snapshot {
         case "new-orb": AnyView(NewBotSheet(height: height.map { CGFloat($0) }))
         case "new-orb-import": AnyView(NewBotSheet(height: height.map { CGFloat($0) }, startsImporting: true))
         case "new-orb-import-preview": NewBotSnapshots.importSheet(height: height.map { CGFloat($0) }, confirmed: false)
+        case "new-orb-marketplace": NewBotSnapshots.marketplaceSheet(height: height.map { CGFloat($0) })
         case "new-orb-imported": NewBotSnapshots.importSheet(height: height.map { CGFloat($0) }, confirmed: true)
         case "new-orb-kept": NewBotSnapshots.keptSheet(height: height.map { CGFloat($0) })
         case "sidebar", "sidebar-profile": AnyView(SidebarView().frame(width: 280))

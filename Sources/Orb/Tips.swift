@@ -132,11 +132,13 @@ enum Tip {
 
     // MARK: Import
 
-    static let importFromAssistant = "Traz o que outro assistente já sabe sobre você para o novo Orb"
+    static let importFromAssistant = "Traz outro assistente ou um bot do marketplace do Grok Bot para o novo Orb"
     static let startFromKeptMemory = "Começa o Orb a partir da memória guardada de um Orb apagado"
     static let importBack = "Volta à criação do Orb, sem importar"
     static let importCopyPrompt = "Copia o prompt para você colar no outro assistente"
     static let importChooseFile = "Escolhe o arquivo ou a pasta que o outro assistente exportou"
+    static let importSource = "Escolhe entre outro assistente e um bot do marketplace do Grok Bot"
+    static let importOpenMarketplace = "Abre o marketplace do Grok Bot no navegador"
     static let importReadLocal = "Lê as configurações deste assistente que estão neste Mac"
     static let importKind = "Diz se o texto são instruções do assistente ou lembranças sobre você"
     static let importItem = "Marcado, este item vai para o novo Orb"

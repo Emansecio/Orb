@@ -569,6 +569,22 @@ enum NewBotSnapshots {
         return AnyView(confirmed ? NewBotSheet(height: height, imported: found) : NewBotSheet(height: height, draft: found))
     }
 
+    /// `--snapshot new-orb-marketplace`: a Grok Bot marketplace bot read from its link, in the preview.
+    static func marketplaceSheet(height: CGFloat?) -> AnyView {
+        let bot = MarketplaceBot(
+            id: "researchy", name: "Researchy", creatorName: "Farzad",
+            description: "A research and fact-check desk that runs every pass with live web search, for sourced, dated claims.",
+            summary: "A research and fact-check desk with live web search.",
+            memories: [.init(name: "memory 1", description: "Every research or fact-check uses live search. Never a training-only pass."),
+                       .init(name: "memory 2", description: "Deliver the result as soon as the run ends; do not wait to be asked."),
+                       .init(name: "memory 3", description: "Run every pass without asking for permission.")],
+            skills: [.init(name: "Research pass", description: "Use when running a live research or fact-check.",
+                           content: "Launch the research, wait until it exits, then deliver sourced dated claims.")],
+            integrations: [.init(name: "Notion", description: "Notion MCP server.")])
+        guard let found = try? GrokMarketplace.orbImport(bot, link: .page(bot.id)) else { return AnyView(NewBotSheet(height: height)) }
+        return AnyView(NewBotSheet(height: height, draft: found))
+    }
+
     static func seed(_ profile: KeptProfile, pages: Int, at date: Date, in root: URL) {
         let folder = KeptMemories.folder(in: root).appending(path: KeptMemories.folderName(for: profile.name, at: date))
         let facts = folder.appending(path: MemoryKind.fato.folder)

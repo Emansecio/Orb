@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 /// Fixed words of the import, shared by the panel, the sheet and the tests.
 enum ImportText {
     static let title = "Importar de outro assistente"
-    static let hint = "Traga o que o ChatGPT, o Gemini ou outro assistente já sabe de você."
+    static let hint = "Traga o que o ChatGPT ou o Gemini já sabe de você, ou um bot pronto do marketplace do Grok Bot."
     static let confirm = "Usar esta importação"
     static let notCreatedYet = "Nada foi criado ainda."
     static let suspicious = "Revise: parece dar ordens ao Orb"
@@ -34,6 +34,23 @@ enum ImportText {
     }
 }
 
+/// Where an import comes from: another assistant's answer (or file), or a bot of the Grok Bot marketplace by its link.
+enum ImportSource: String, CaseIterable, Identifiable {
+    case assistant, marketplace
+
+    var id: Self { self }
+
+    var label: String {
+        switch self {
+        case .assistant: "Outro assistente"
+        case .marketplace: "Marketplace do Grok Bot"
+        }
+    }
+
+    /// Whether `imported` was read from this source.
+    func made(_ imported: OrbImport) -> Bool { imported.link.isEmpty == (self == .assistant) }
+}
+
 struct ImportPanel: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -42,7 +59,9 @@ struct ImportPanel: View {
     @Binding var draft: OrbImport?
     let onBack: () -> Void
 
+    @State private var source = ImportSource.assistant
     @State private var pasted = ""
+    @State private var link = ""
     @State private var error: String?
     @State private var isReading = false
     @State private var reading: Task<Void, Never>?
@@ -60,10 +79,17 @@ struct ImportPanel: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     header
-                    promptStep
-                    answerStep
-                    if let draft {
-                        ImportPreview(imported: Binding(get: { draft }, set: { self.draft = $0 }), onKind: { read(text: draft.freeText, asInstructions: $0) })
+                    sourcePicker
+                    switch source {
+                    case .assistant:
+                        promptStep
+                        answerStep
+                    case .marketplace:
+                        linkStep
+                    }
+                    if let draft, source.made(draft) {
+                        ImportPreview(imported: Binding(get: { draft }, set: { self.draft = $0 }), step: source == .assistant ? 3 : 2,
+                                      onKind: { read(text: draft.freeText, asInstructions: $0) })
                             .id(Self.previewID)
                             .transition(.adapted(.rise, reduceMotion: reduceMotion))
                     }
@@ -72,13 +98,18 @@ struct ImportPanel: View {
             }
             .scrollIndicators(.automatic)
             .animation(Motion.adapted(Motion.enter, reduceMotion: reduceMotion), value: draft != nil)
+            .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: source)
             // A short window shows the prompt and the answer first: the preview must come into view when it is ready.
             .onChange(of: draft != nil) {
                 guard draft != nil else { return }
                 withAnimation(Motion.adapted(Motion.enter, reduceMotion: reduceMotion)) { proxy.scrollTo(Self.previewID, anchor: .top) }
             }
             .task { // "Revisar" comes back to a preview that already exists
-                guard draft != nil else { return }
+                guard let draft else { return }
+                if !draft.link.isEmpty {
+                    source = .marketplace
+                    link = draft.link
+                }
                 await Task.yield()
                 proxy.scrollTo(Self.previewID, anchor: .top)
             }
@@ -96,6 +127,7 @@ struct ImportPanel: View {
         .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: isTargeted)
         .dropDestination(for: URL.self) { urls, _ in
             guard let url = urls.first else { return false }
+            source = .assistant
             read(url)
             return true
         } isTargeted: { isTargeted = $0 }
@@ -108,6 +140,16 @@ struct ImportPanel: View {
         }
         .onChange(of: pasted) {
             readSoon()
+        }
+        .onChange(of: link) {
+            readLinkSoon()
+        }
+        .onChange(of: source) {
+            // Each source keeps its own reading: what the other one was doing stops, and its preview is not this one's.
+            reading?.cancel()
+            isReading = false
+            error = nil
+            if let draft, !source.made(draft) { self.draft = nil }
         }
     }
 
@@ -126,6 +168,47 @@ struct ImportPanel: View {
                 .foregroundStyle(Palette.ink)
                 .accessibilityAddTraits(.isHeader)
         }
+    }
+
+    private var sourcePicker: some View {
+        Picker("Importar de", selection: $source) {
+            ForEach(ImportSource.allCases) { Text($0.label).tag($0) }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .help(Tip.importSource)
+    }
+
+    private var linkStep: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            StepLabel("1. Cole o link de um bot")
+            Text("Abra um bot no marketplace do Grok Bot, copie o endereço da página (ou o link do botão Add) e cole aqui. O Orb lê as instruções, as memórias e as skills dele.")
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            TextField("Link do bot", text: $link, prompt: Text("https://x.ai/bot/marketplace/bots/…"))
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 12))
+                .onSubmit { readLinkSoon(delay: .zero) }
+            HStack(spacing: 8) {
+                Button("Abrir o marketplace") { NSWorkspace.shared.open(GrokMarketplace.home) }
+                    .buttonStyle(SecondaryPillStyle())
+                    .help(Tip.importOpenMarketplace)
+                Spacer(minLength: 0)
+                ZStack {
+                    if isReading { DelayedSpinner().transition(.opacity) }
+                }
+                .motion(Motion.content, value: isReading)
+            }
+            if let error {
+                Text(error)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.warn)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .transition(.adapted(.rise, reduceMotion: reduceMotion))
+            }
+        }
+        .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: error)
     }
 
     private var promptStep: some View {
@@ -230,6 +313,44 @@ struct ImportPanel: View {
         }
     }
 
+    /// A pasted link reads by itself, a moment after the last change: the marketplace page, off the main thread.
+    private func readLinkSoon(delay: Duration = .milliseconds(400)) {
+        reading?.cancel()
+        let text = link.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            isReading = false
+            error = nil
+            if let draft, !draft.link.isEmpty { self.draft = nil }
+            return
+        }
+        reading = Task {
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            guard let found = GrokMarketplace.link(in: text) else {
+                isReading = false
+                error = MarketplaceFailure.notALink.errorDescription
+                return
+            }
+            // The same bot already in the preview ("Revisar", or Return on the same link) is not read again.
+            if let draft, draft.link == found.url.absoluteString { return }
+            isReading = true
+            let outcome = await Task.detached(priority: .userInitiated) { () -> Result<OrbImport, any Error> in
+                do { return .success(try await GrokMarketplace.read(found)) } catch { return .failure(error) }
+            }.value
+            guard !Task.isCancelled else { return }
+            isReading = false
+            switch outcome {
+            case .success(let imported):
+                error = nil
+                draft = imported
+                AccessibilityNotification.Announcement(ImportText.announcement(imported)).post()
+            case .failure(let failure):
+                if let draft, !draft.link.isEmpty { self.draft = nil }
+                error = (failure as? MarketplaceFailure ?? .unreadable).errorDescription
+            }
+        }
+    }
+
     /// The same text read the other way (instructions or memories): it comes from where the preview came from.
     private func read(text: String, asInstructions: Bool) {
         reading?.cancel()
@@ -283,12 +404,13 @@ private struct StepLabel: View {
 /// What would be imported, each item with a checkbox. Items that look like orders to the Orb start unchecked.
 private struct ImportPreview: View {
     @Binding var imported: OrbImport
+    let step: Int
     let onKind: @MainActor @Sendable (Bool) -> Void
 
     var body: some View {
         let plan = imported.plan()
         VStack(alignment: .leading, spacing: 10) {
-            StepLabel("3. Prévia")
+            StepLabel("\(step). Prévia")
             VStack(alignment: .leading, spacing: 2) {
                 Text("De: \(imported.source)").font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.secondary)
                 let who = [imported.name, imported.role].filter { !$0.isEmpty }.joined(separator: " · ")
@@ -320,7 +442,7 @@ private struct ImportPreview: View {
                     }
                 }
                 group("Preferências", $imported.preferences)
-                group("Sobre você", $imported.facts)
+                group(imported.link.isEmpty ? "Sobre você" : "O que ele sabe", $imported.facts)
                 group("Procedimentos", $imported.procedures)
                 if !imported.skills.isEmpty {
                     ImportGroup("Skills", count: imported.skills.count) {
