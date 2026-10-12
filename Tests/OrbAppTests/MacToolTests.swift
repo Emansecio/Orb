@@ -511,10 +511,10 @@ struct MacToolTests {
             WindowCandidate(id: 5, pid: 300, layer: 0, width: 1000, height: 800, alpha: 1),
             WindowCandidate(id: 6, pid: 200, layer: 0, width: 800, height: 600, alpha: 1),
         ]
-        #expect(WindowCandidate.front(in: windows, onlyPID: nil, excludingPID: 999)?.id == 5)
-        #expect(WindowCandidate.front(in: windows, onlyPID: 200, excludingPID: 999)?.id == 6)
-        #expect(WindowCandidate.front(in: windows, onlyPID: 777, excludingPID: 999) == nil)
-        #expect(WindowCandidate.front(in: [], onlyPID: nil, excludingPID: 1) == nil)
+        #expect(WindowCandidate.front(in: windows, excludingPIDs: [999])?.id == 5)
+        #expect(WindowCandidate.front(in: windows, excludingPIDs: [999, 300])?.id == 6)
+        #expect(WindowCandidate.front(in: windows, excludingPIDs: [999, 300, 200]) == nil)
+        #expect(WindowCandidate.front(in: [], excludingPIDs: [1]) == nil)
     }
 
     @Test func parsesTheSystemWindowList() {

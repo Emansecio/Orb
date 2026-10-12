@@ -48,8 +48,6 @@ struct OrbProposalTests {
     @Test func theModelIsTheCreatorsAndTheFolderIsItsOwn() {
         #expect(make(from: creator(model: "custom/modelo")).model == "custom/modelo")
         #expect(make().model == "")
-        let proposal = make()
-        #expect(proposal.folderDisplay(base: URL(fileURLWithPath: "/nonexistent-base")).hasSuffix("/Pesquisador"))
     }
 
     @Test func aLookTheCatalogKnowsIsKeptAndTheRestIsIgnored() {

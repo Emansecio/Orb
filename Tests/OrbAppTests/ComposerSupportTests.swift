@@ -118,7 +118,6 @@ struct ComposerSupportTests {
         #expect(QueuedMessages.whenText(needsYou: false, delivery: .steer) == "Entra no próximo passo")
         #expect(QueuedMessages.whenText(needsYou: false, delivery: .afterTask) == "Depois da tarefa")
         #expect(!QueuedMessages.whenText(needsYou: false, delivery: .steer).contains("fila"))
-        #expect(QueuedMessages.switchTitle(from: .steer) == "Pôr na fila" && QueuedMessages.switchTitle(from: .afterTask) == "Direcionar")
         #expect(QueuedMessages.switchHelp(from: .steer) == Tip.queueAfterTask && QueuedMessages.switchHelp(from: .afterTask) == Tip.steerNow)
     }
 

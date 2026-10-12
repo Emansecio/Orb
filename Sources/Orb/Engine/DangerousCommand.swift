@@ -49,13 +49,6 @@ enum DangerousCommand {
         return nil
     }
 
-    /// Why reading this file is dangerous (private keys, saved passwords and tokens), or nil. Reading never changes
-    /// anything, but what it shows reaches the model, and from there anything it can send out (a web page it fetches,
-    /// a command), so these always need the user's word, "Automático" included.
-    static func reason(forReading url: URL, home: URL = FileManager.default.homeDirectoryForCurrentUser) -> String? {
-        SensitiveFiles(home: home).reason(for: url.standardizedFileURL.path)
-    }
-
     /// The files that hold secrets. Compares paths as text (no file system access), so a walk over thousands of
     /// files can ask it for each one.
     struct SensitiveFiles: Sendable {

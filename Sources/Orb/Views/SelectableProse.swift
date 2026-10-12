@@ -39,7 +39,7 @@ enum ProseSegment: Equatable {
 @MainActor
 enum ProseText {
     static let size: CGFloat = 14
-    /// Between the items of a list, as `MarkdownBlockView` has them.
+    /// Between the items of a list.
     static let itemSpacing: CGFloat = 4
     /// Where a list's text starts past its marker (the marker column, 18, and the gap, 8), and the indent of each level.
     static let markerWidth: CGFloat = 18
@@ -278,7 +278,7 @@ final class ProseTextView: NSTextView, @preconcurrency NSLayoutManagerDelegate {
         if selectedRange().length > 0 { super.rightMouseDown(with: event) } else { nextResponder?.rightMouseDown(with: event) }
     }
 
-    /// The bar beside a quote, as `MarkdownBlockView` draws it.
+    /// The bar beside a quote.
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
         guard let textStorage, let layoutManager, let textContainer else { return }

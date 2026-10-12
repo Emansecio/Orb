@@ -1,4 +1,5 @@
 import Foundation
+@testable import Orb
 
 /// Sample data for the group screens' `--snapshot` modes (docs/MULTI-ORBS.md, WP6): a group of three, a thread with the
 /// person's message, the plan, the assignments, the answers, a pause card, and the numbers of a request in progress. Fixed ids and

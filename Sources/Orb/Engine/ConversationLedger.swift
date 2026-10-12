@@ -178,11 +178,6 @@ struct ConversationLedger: Codable, Sendable, Equatable {
         return ledger
     }
 
-    var isEmpty: Bool {
-        original == nil && goal == nil && entries.isEmpty && changed.isEmpty && read.isEmpty && failures.isEmpty
-            && lastReply == nil && legacy == nil
-    }
-
     // MARK: Codable (tolerant: every field may be missing, a newer version may add more)
 
     private enum CodingKeys: String, CodingKey {

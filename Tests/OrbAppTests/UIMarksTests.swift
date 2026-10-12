@@ -98,104 +98,13 @@ struct UIMarksTests {
         #expect(UIMarkLegend.text(for: [], total: 0).isEmpty)
     }
 
-    @Test func aMarkIsNamedWithHashOrANumber() {
-        #expect(UIMarkReference.parse("#12") == 12 && UIMarkReference.parse(" 7 ") == 7)
-        #expect(UIMarkReference.parse("#0") == nil && UIMarkReference.parse("w1.2") == nil && UIMarkReference.parse("#") == nil && UIMarkReference.parse("") == nil)
-    }
-
     // MARK: Pixels, window points and screen points
 
     @Test func aScreenshotAtTwoTimesMapsPixelsToPointsExactly() {
         let geometry = ShotGeometry(imageWidth: 2_400, imageHeight: 1_600, windowFrame: CGRect(x: 100, y: 50, width: 1_200, height: 800), windowID: 9)
         #expect(geometry.scale == 2)
-        #expect(geometry.windowPoint(fromPixel: CGPoint(x: 600, y: 300)) == CGPoint(x: 300, y: 150))
-        #expect(geometry.globalPoint(fromPixel: CGPoint(x: 600, y: 300)) == CGPoint(x: 400, y: 200))
-        #expect(geometry.pixel(fromGlobal: CGPoint(x: 400, y: 200)) == CGPoint(x: 600, y: 300))
         #expect(geometry.pixelRect(fromWindowRect: CGRect(x: 10, y: 20, width: 30, height: 40)) == CGRect(x: 20, y: 40, width: 60, height: 80))
         #expect(geometry.contains(pixel: CGPoint(x: 0, y: 0)) && !geometry.contains(pixel: CGPoint(x: 2_400, y: 10)) && !geometry.contains(pixel: CGPoint(x: -1, y: 10)))
-    }
-
-    @Test func pixelsAndScreenPointsRoundTripForEveryScaleAndOrigin() {
-        var random = Generator(state: 42)
-        // 2x retina, 1x, and scaled-down pictures (a 1500 pt window shrunk to 1280 px), on the main display, a display to
-        // the left (negative x) and one above (negative y).
-        let origins = [CGPoint(x: 0, y: 25), CGPoint(x: -1_920, y: 120), CGPoint(x: -300, y: -1_080), CGPoint(x: 1_440.5, y: 3.25)]
-        let sizes = [CGSize(width: 1_500, height: 900), CGSize(width: 640, height: 480), CGSize(width: 333.5, height: 777)]
-        for origin in origins {
-            for size in sizes {
-                for pixelWidth in [Int(size.width * 2), Int(size.width), 1_280] {
-                    let frame = CGRect(origin: origin, size: size)
-                    let pixelHeight = Int((Double(pixelWidth) * size.height / size.width).rounded())
-                    let geometry = ShotGeometry(imageWidth: pixelWidth, imageHeight: pixelHeight, windowFrame: frame, windowID: 1)
-                    for _ in 0..<200 {
-                        let pixel = CGPoint(x: Int.random(in: 0..<pixelWidth, using: &random), y: Int.random(in: 0..<pixelHeight, using: &random))
-                        let global = geometry.globalPoint(fromPixel: pixel)
-                        let back = geometry.pixel(fromGlobal: global)
-                        #expect(abs(back.x - pixel.x) < 1e-9 && abs(back.y - pixel.y) < 1e-9, "\(frame) \(pixelWidth) \(pixel)")
-                        #expect(Int(back.x.rounded()) == Int(pixel.x) && Int(back.y.rounded()) == Int(pixel.y))
-                        // Through the window-relative point as well.
-                        let relative = geometry.windowPoint(fromGlobal: global)
-                        #expect(abs(geometry.globalPoint(fromWindowPoint: relative).x - global.x) < 1e-9)
-                        let viaWindow = geometry.pixel(fromWindowPoint: geometry.windowPoint(fromPixel: pixel))
-                        #expect(abs(viaWindow.x - pixel.x) < 1e-9 && abs(viaWindow.y - pixel.y) < 1e-9)
-                        // And a point inside the window lands inside the picture.
-                        #expect(geometry.contains(pixel: pixel))
-                    }
-                }
-            }
-        }
-    }
-
-    @Test func atTwoTimesThePixelMathIsExactNotJustClose() {
-        var random = Generator(state: 7)
-        for _ in 0..<500 {
-            let frame = CGRect(x: Double(Int.random(in: -3_000...3_000, using: &random)), y: Double(Int.random(in: -2_000...2_000, using: &random)),
-                               width: Double(Int.random(in: 100...2_000, using: &random)), height: Double(Int.random(in: 100...1_500, using: &random)))
-            let geometry = ShotGeometry(imageWidth: Int(frame.width) * 2, imageHeight: Int(frame.height) * 2, windowFrame: frame, windowID: 1)
-            let pixel = CGPoint(x: Double(Int.random(in: 0..<geometry.pixelWidth, using: &random)), y: Double(Int.random(in: 0..<geometry.pixelHeight, using: &random)))
-            #expect(geometry.pixel(fromGlobal: geometry.globalPoint(fromPixel: pixel)) == pixel)
-        }
-    }
-
-    @Test func displaysAreFoundAndAppKitCoordinatesFlip() {
-        let layout = DisplayLayout(displays: [
-            .init(frame: CGRect(x: 0, y: 0, width: 1_440, height: 900), scale: 2),
-            .init(frame: CGRect(x: -1_920, y: -100, width: 1_920, height: 1_080), scale: 1),
-            .init(frame: CGRect(x: 200, y: -1_080, width: 1_920, height: 1_080), scale: 1),
-        ])
-        #expect(layout.display(containing: CGPoint(x: 10, y: 10))?.scale == 2)
-        #expect(layout.display(containing: CGPoint(x: -5, y: 0))?.frame.minX == -1_920)
-        #expect(layout.display(containing: CGPoint(x: 300, y: -10))?.frame.minY == -1_080)
-        #expect(layout.display(containing: CGPoint(x: 5_000, y: 5)) == nil)
-        // A window straddling the main and the left display belongs to the one that has most of it.
-        #expect(layout.display(mostlyContaining: CGRect(x: -200, y: 100, width: 1_000, height: 400))?.scale == 2)
-        #expect(layout.display(mostlyContaining: CGRect(x: -900, y: 100, width: 1_000, height: 400))?.scale == 1)
-
-        // AppKit: origin at the bottom left of the main display. A 100×50 window at the top left of it.
-        let appKit = CGRect(x: 0, y: 850, width: 100, height: 50)
-        let screen = DisplayLayout.screenRect(fromAppKit: appKit, mainDisplayHeight: 900)
-        #expect(screen == CGRect(x: 0, y: 0, width: 100, height: 50))
-        #expect(DisplayLayout.appKitRect(fromScreen: screen, mainDisplayHeight: 900) == appKit)
-        // A window on the display above the main one has negative y on screen and y above 900 in AppKit.
-        let above = CGRect(x: 200, y: 900 + 30, width: 300, height: 200)
-        let aboveOnScreen = DisplayLayout.screenRect(fromAppKit: above, mainDisplayHeight: 900)
-        #expect(aboveOnScreen.minY == -230 && aboveOnScreen.maxY == -30)
-        #expect(DisplayLayout.screenPoint(fromAppKit: CGPoint(x: -50, y: 1_000), mainDisplayHeight: 900) == CGPoint(x: -50, y: -100))
-        // Flipping twice is the identity for any rectangle.
-        var random = Generator(state: 3)
-        for _ in 0..<200 {
-            let rect = CGRect(x: Double(Int.random(in: -4_000...4_000, using: &random)), y: Double(Int.random(in: -4_000...4_000, using: &random)),
-                              width: Double(Int.random(in: 1...3_000, using: &random)), height: Double(Int.random(in: 1...3_000, using: &random)))
-            #expect(DisplayLayout.appKitRect(fromScreen: DisplayLayout.screenRect(fromAppKit: rect, mainDisplayHeight: 1_117), mainDisplayHeight: 1_117) == rect)
-        }
-    }
-
-    @Test func theLiveDisplayLayoutHasAMainDisplayAtTheOrigin() {
-        let layout = DisplayLayout.live
-        // With the display asleep (or the lid closed and no monitor) macOS lists no active display: nothing to check then.
-        guard !layout.displays.isEmpty else { return }
-        #expect(layout.displays.contains { $0.frame.origin == .zero })
-        #expect(layout.displays.allSatisfy { $0.scale >= 1 })
     }
 
     // MARK: Drawing

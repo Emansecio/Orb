@@ -91,7 +91,6 @@ enum Spacing {
     static let controlGap: CGFloat = s
     /// Inside a card, and between the parts of a card.
     static let cardPadding: CGFloat = l
-    static let cardGap: CGFloat = m
     /// Between cards of a grid or a list.
     static let cardSpacing: CGFloat = 14
     /// Between the sections of a page.

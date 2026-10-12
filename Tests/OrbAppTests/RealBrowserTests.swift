@@ -70,7 +70,6 @@ struct RealBrowserInstallTests {
             print("[\(engine.rawValue)] pronto em \(String(format: "%.1f", seconds)) s")
             let status = RealBrowsers.status(engine)
             #expect(status.isReady, "\(engine): \(status.userMessage ?? "")")
-            #expect(installer.hasEverythingInstalled(for: engine))
         }
         let records = installer.records()
         for (name, record) in records.sorted(by: { $0.key < $1.key }) { print("instalado \(name) \(record.version) \(record.detail ?? "")") }

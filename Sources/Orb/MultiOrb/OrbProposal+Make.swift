@@ -165,9 +165,4 @@ extension OrbProposal {
         if orb != original.orb { parts.append("outra aparência") }
         return parts.joined(separator: ", ")
     }
-
-    /// `~/Orbs/<name>`, the folder the card shows (the name the folder would get now).
-    func folderDisplay(base: URL = OrbFolder.defaultBase) -> String {
-        OrbFolder.display(OrbFolder.availableURL(for: name, in: base))
-    }
 }

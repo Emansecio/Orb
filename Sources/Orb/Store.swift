@@ -490,15 +490,6 @@ struct Store: Sendable {
 
     // A member's conversation in a group is `conversations/<botID>/grupo-<groupID>.json`: the one side-conversation API
     // (`saveSideConversation(prefix:)`, with `grupoPrefix`), under the group's names.
-    func saveGroupSideConversation(_ conversation: Conversation, group groupID: UUID, for botID: UUID,
-                                   then done: (@Sendable (Bool) -> Void)? = nil) {
-        saveSideConversation(conversation, prefix: Self.grupoPrefix, id: groupID, for: botID, then: done)
-    }
-
-    func readGroupSideConversation(group groupID: UUID, for botID: UUID) -> StoreRead<Conversation> {
-        readSideConversation(prefix: Self.grupoPrefix, id: groupID, for: botID)
-    }
-
     func deleteGroupSideConversation(group groupID: UUID, for botID: UUID) {
         deleteSideConversation(prefix: Self.grupoPrefix, id: groupID, for: botID)
     }
