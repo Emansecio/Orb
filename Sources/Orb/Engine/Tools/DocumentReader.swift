@@ -103,7 +103,7 @@ enum DocumentReader {
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
             throw ToolError("Não consegui abrir a imagem \(url.lastPathComponent).")
         }
-        let bytes = ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
+        let bytes = AttachmentKind.fileSize(Int64(size))
         var output = "Imagem \(url.pathExtension.uppercased()): \(image.width)×\(image.height) px (\(bytes))."
 
         let request = VNRecognizeTextRequest()
