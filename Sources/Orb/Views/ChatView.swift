@@ -184,8 +184,9 @@ private struct TranscriptList: View {
     @State private var entrances = TranscriptEntrances()
     /// The messages a compaction folded are on show (`CompactedFold`): until the Orb is left or compacted again.
     @State private var showsFolded = false
-    /// The runs of actions opened into their lines, by the id of their row (its first action's, which holds while the run grows).
-    @State private var openToolRuns: Set<UUID> = []
+    /// The runs of actions and the work of requests opened into their lines, by the id of their row (its first item's,
+    /// which holds while the run grows).
+    @State private var openRuns: Set<UUID> = []
 
     var body: some View {
         let transcript = model.orbTranscript(look.id)
@@ -294,10 +295,10 @@ private struct TranscriptList: View {
                 // A hit among the folded messages, or in a run of actions on one line, opens them first; the scroll
                 // waits for their rows.
                 let opensFold = !showsFolded && transcript.folds(jump.itemID)
-                let run = closedToolRun(holding: jump.itemID, in: transcript.rows)
-                if opensFold || run != nil {
+                let runs = closedRuns(holding: jump.itemID, in: transcript.rows)
+                if opensFold || !runs.isEmpty {
                     if opensFold { showsFolded = true }
-                    if let run { openToolRuns.insert(run) }
+                    openRuns.formUnion(runs)
                     Task { @MainActor in
                         await Task.yield()
                         scrollToFound(jump, proxy)
@@ -376,22 +377,38 @@ private struct TranscriptList: View {
                 .modifier(RowEntrance(id: row.id, style: items[0].kind.entrance, isNew: entrances.isNew(row.id), entrances: entrances))
                 .transition(.identity)
         case .tools(let items):
-            ToolGroupRow(items: items, botID: look.id, orb: look.orb, isOpen: openToolRuns.contains(row.id) || ToolGroupRow.opensInSnapshots,
+            ToolGroupRow(items: items, botID: look.id, orb: look.orb, isOpen: openRuns.contains(row.id) || ToolGroupRow.opensInSnapshots,
                          find: items.contains { $0.id == found?.itemID } ? found : nil) {
-                if openToolRuns.remove(row.id) == nil { openToolRuns.insert(row.id) }
+                if openRuns.remove(row.id) == nil { openRuns.insert(row.id) }
             }
             .equatable()
             .modifier(RowEntrance(id: row.id, style: items[0].kind.entrance, isNew: entrances.isNew(row.id), entrances: entrances))
             .transition(.identity)
+        case .work(let items, let seconds):
+            WorkGroupRow(items: items, seconds: seconds, isOpen: openRuns.contains(row.id) || ToolGroupRow.opensInSnapshots) {
+                if openRuns.remove(row.id) == nil { openRuns.insert(row.id) }
+            } content: {
+                // Opened: the request's work as it was while it ran (its runs of actions folded as usual).
+                ForEach(TranscriptFolding.rows(for: items)) { inner in
+                    AnyView(foldedRow(inner, lastReplyID: lastReplyID, redoID: redoID, dropping: dropping, found: found))
+                }
+            }
+            .transition(.identity)
         }
     }
 
-    /// The row of a run of actions folded with `itemID` in it, nil when none is (or it is open already).
-    private func closedToolRun(holding itemID: UUID, in rows: [TranscriptRowModel]?) -> UUID? {
-        rows?.first { row in
-            guard case .tools(let items) = row, !openToolRuns.contains(row.id) else { return false }
-            return items.contains { $0.id == itemID }
-        }?.id
+    /// The folded rows that hide `itemID` (a request's work, and the run of actions in it), outermost first; empty when
+    /// nothing folds it.
+    private func closedRuns(holding itemID: UUID, in rows: [TranscriptRowModel]?) -> [UUID] {
+        guard let row = rows?.first(where: { row in
+            switch row {
+            case .tools(let items), .work(let items, _): items.contains { $0.id == itemID }
+            default: false
+            }
+        }) else { return [] }
+        let here = openRuns.contains(row.id) ? [] : [row.id]
+        guard case .work(let items, _) = row else { return here }
+        return here + closedRuns(holding: itemID, in: TranscriptFolding.rows(for: items))
     }
 
     /// The line in place of what a compaction folded; opening it puts the messages back above it.

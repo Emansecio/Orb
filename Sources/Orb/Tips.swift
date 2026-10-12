@@ -98,6 +98,7 @@ enum Tip {
     static let editMessage = "Põe esta mensagem no campo para editar; o que veio depois sai da conversa"
     static let cancelEdit = "Desiste da edição; o campo volta como estava"
     static func toggleOutput(isExpanded: Bool) -> String { isExpanded ? "Oculta o resultado desta ação" : "Mostra o resultado desta ação" }
+    static func toggleWork(isOpen: Bool) -> String { isOpen ? "Recolhe o trabalho deste pedido numa linha" : "Mostra o que o Orb disse e fez neste pedido" }
     static func toggleActions(isOpen: Bool) -> String { isOpen ? "Recolhe estas ações numa linha" : "Mostra cada uma destas ações" }
     static func toggleRequest(isOpen: Bool) -> String { isOpen ? "Oculta os detalhes deste pedido" : "Mostra os detalhes deste pedido" }
     static let denyWithNote = "Recusa o pedido e diz ao Orb o que fazer no lugar"
@@ -289,7 +290,7 @@ enum Tip {
          macPermissions, showInstructions, openFolderInFinder("Orb"), openFolderInTerminal("Orb"),
          createFirstOrb, showWelcome, skillsPage, keptMemoryInFinder, dismissNotice, deleteWithMemory,
          deleteKeepingMemory, profile(callName: "Ana"), profile(callName: nil),
-         copyReply, copyMarkdown, redoReply, editMessage, cancelEdit, toggleOutput(isExpanded: true), toggleOutput(isExpanded: false), toggleRequest(isOpen: true), toggleRequest(isOpen: false), toggleActions(isOpen: true), toggleActions(isOpen: false),
+         copyReply, copyMarkdown, redoReply, editMessage, cancelEdit, toggleOutput(isExpanded: true), toggleOutput(isExpanded: false), toggleRequest(isOpen: true), toggleRequest(isOpen: false), toggleActions(isOpen: true), toggleActions(isOpen: false), toggleWork(isOpen: true), toggleWork(isOpen: false),
          routineUseAuto, routineUseReadOnly, randomLook, denyWithNote, showAllActions, deny, allowOptions,
          handoffDone, handoffCancel, browserEngine, searchProvider, installBrowserEngine, addSearchKey,
          menuBarItem, connectModel, openMainWindow, closeReply, openChatInApp, reviewRiskyInApp, allowOnce, allowBatchOnce,

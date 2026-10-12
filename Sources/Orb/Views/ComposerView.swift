@@ -26,6 +26,8 @@ struct ComposerView: View {
     @State private var isSlashDismissed = false
     /// The edit being sent would drop actions that changed things on the Mac: waiting for the person to say yes.
     @State private var isConfirmingEdit = false
+    /// The height of the whole message as laid out; the field shows up to `ComposerField.maxHeight` of it and scrolls the rest.
+    @State private var fieldHeight = ComposerField.lineHeight
 
     /// Card width below which the chips lose their words.
     private nonisolated static let compactBelow: CGFloat = 520
@@ -140,22 +142,31 @@ struct ComposerView: View {
             }
             slashSuggestions(matches)
 
-            TextField(placeholder, text: draft, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(Palette.conversationFont)
-                .foregroundStyle(Palette.ink)
-                .lineLimit(1...8)
-                .focused($isFocused)
-                .onSubmit { send() }
-                .onKeyPress(.upArrow) { moveSlash(-1) }
-                .onKeyPress(.downArrow) { moveSlash(1) }
-                .onKeyPress(keys: [.tab]) { handleTab($0) }
-                .onKeyPress(.escape) { handleEscape() }
-                .onChange(of: draft.wrappedValue) {
-                    isSlashDismissed = false
-                    slashIndex = 0 // a new word means a new list: the highlight starts at its top
-                }
-                .padding(.horizontal, 4)
+            // The whole message is laid out in a scroll view as tall as it is, up to `maxHeight`: past that the wheel and
+            // the trackpad scroll the message (not the chat behind it) and its scroller shows. The field's own limit
+            // would keep the caret in view but take no scrolling, so the caret is followed here (`ComposerCaretFollower`).
+            ScrollView(.vertical) {
+                TextField(placeholder, text: draft, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(Palette.conversationFont)
+                    .foregroundStyle(Palette.ink)
+                    .focused($isFocused)
+                    .onSubmit { send() }
+                    .onKeyPress(.upArrow) { moveSlash(-1) }
+                    .onKeyPress(.downArrow) { moveSlash(1) }
+                    .onKeyPress(keys: [.tab]) { handleTab($0) }
+                    .onKeyPress(.escape) { handleEscape() }
+                    .onChange(of: draft.wrappedValue) {
+                        isSlashDismissed = false
+                        slashIndex = 0 // a new word means a new list: the highlight starts at its top
+                    }
+                    .padding(.horizontal, 4)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fieldHeight = $0 }
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .scrollIndicators(.automatic)
+            .frame(height: min(max(fieldHeight, ComposerField.lineHeight), ComposerField.maxHeight))
+            .background { ComposerCaretFollower() }
 
             bar
         }
@@ -798,5 +809,69 @@ struct ComposerSurface: View {
             .animation(reduceMotion ? nil : Motion.hover(isDropTargeted), value: isDropTargeted)
             // The microphone opening or closing: a color change, so it fades even under Reduce Motion.
             .animation(Motion.hover(isDictating), value: isDictating)
+    }
+}
+
+/// The message field's measures: one line of the conversation's font, and how tall it grows before it scrolls.
+enum ComposerField {
+    static let lineHeight = ceil(NSLayoutManager().defaultLineHeight(for: .systemFont(ofSize: 14)))
+    static let maxLines: CGFloat = 10
+    static let maxHeight = lineHeight * maxLines
+}
+
+/// Keeps the caret of the message field in view once the message is taller than the field: the field lives in a scroll
+/// view of SwiftUI, which the text editor's own scrolling does not move. Watches the selection of the window's text
+/// editor and, when that editor is the one in the scroll view this sits behind, scrolls the caret into view (after the
+/// field has grown with the new line, so twice: now and once laid out).
+struct ComposerCaretFollower: NSViewRepresentable {
+    func makeNSView(context: Context) -> FollowerView { FollowerView() }
+    func updateNSView(_ view: FollowerView, context: Context) {}
+
+    final class FollowerView: NSView {
+        private var observer: NSObjectProtocol?
+
+        /// Leaving the window lets the observation go (and a view that leaves for good leaves its window first).
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+            observer = nil
+            guard window != nil else { return }
+            observer = NotificationCenter.default.addObserver(forName: NSTextView.didChangeSelectionNotification, object: nil,
+                                                              queue: .main) { [weak self] note in
+                let editor = note.object as? NSTextView
+                MainActor.assumeIsolated {
+                    guard let self, let editor else { return }
+                    self.follow(editor)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.follow(editor) }
+                }
+            }
+        }
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        private func follow(_ editor: NSTextView) {
+            guard let window, editor.window === window, window.firstResponder === editor,
+                  let scroll = editor.enclosingScrollView, let document = scroll.documentView,
+                  scroll.convert(scroll.bounds, to: nil).intersects(convert(bounds, to: nil)) else { return }
+            guard let caret = Self.caret(in: editor) else { return }
+            document.scrollToVisible(document.convert(caret, from: editor).insetBy(dx: 0, dy: -4))
+        }
+
+        /// Where the caret is, in the editor's coordinates (`firstRect` will not do: it answers from the field's own
+        /// one-line clip). After a line break at the end it is the empty line's.
+        private static func caret(in editor: NSTextView) -> NSRect? {
+            guard let layout = editor.layoutManager, let container = editor.textContainer else { return nil }
+            let selection = editor.selectedRange()
+            var rect: NSRect
+            if selection.location >= (editor.string as NSString).length, !layout.extraLineFragmentRect.isEmpty {
+                rect = layout.extraLineFragmentRect
+            } else {
+                let glyphs = layout.glyphRange(forCharacterRange: NSRange(location: selection.location, length: 0),
+                                               actualCharacterRange: nil)
+                rect = layout.boundingRect(forGlyphRange: glyphs, in: container)
+            }
+            rect.size.width = max(rect.width, 1)
+            return rect.offsetBy(dx: editor.textContainerOrigin.x, dy: editor.textContainerOrigin.y)
+        }
     }
 }

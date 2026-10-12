@@ -67,10 +67,11 @@ struct CompactedFoldTests {
     @Test func foldedRowsCountOnlyRowsMadeOfFoldedItems() {
         let atlas = OrbRef(id: UUID(), name: "Atlas"), lia = OrbRef(id: UUID(), name: "Lia")
         let created = TranscriptItem(.event(OrbEvent(kind: .orbCreated, actor: atlas, subject: lia, detail: nil, chainID: nil)))
-        let items = [ask("a"), created, say("1"), ask("b"), say("2"), compacted]
+        let alsoCreated = TranscriptItem(.event(OrbEvent(kind: .orbCreated, actor: atlas, subject: lia, detail: nil, chainID: nil)))
+        let items = [ask("a"), created, alsoCreated, say("1"), ask("b"), say("2"), compacted]
         let transcript = OrbTranscript(items: items)
-        #expect(transcript.rows != nil)
-        #expect(transcript.fold.count == 3)
+        #expect(transcript.rows != nil) // the two events fold into one row
+        #expect(transcript.fold.count == 4)
         #expect(transcript.foldedRows == 3)
     }
 }

@@ -241,9 +241,12 @@ Se o motor escolhido não estiver instalado, o Orb fica só com `web_fetch` e `w
   quantas ações ele já fez ("16 s · 3 ações"). Entre um passo e outro ela diz "Pensando…". Quando espera por você, ela fica
   parada em laranja ("Esperando sua resposta"); quando espera para tentar de novo, mostra a contagem ("Conexão caiu ·
   tentando de novo", "em 8 s"). A barra lateral e o painel da barra de menus dizem a mesma coisa. As linhas de ferramenta
-  acima dela são o histórico do turno: ações seguidas, sem nada dito entre elas, ficam numa linha só ("Rodou 7 comandos e
-  leu 1 arquivo", com "1 falhou" se algo falhou e o tempo do conjunto) que abre com um clique; os arquivos que elas
-  fizeram continuam à vista, e a busca (⌘F) abre a linha quando o resultado está dentro. Cada frase fica ao menos 0,7 s na tela, e com o VoiceOver ligado ela é anunciada
+  acima dela são o histórico do turno: ações seguidas, sem nada dito entre elas (e os cartões de permissão já
+  respondidos no meio delas), ficam numa linha só ("Rodou 7 comandos e leu 1 arquivo", com "1 falhou" se algo falhou e o
+  tempo do conjunto) que abre com um clique; os arquivos que elas fizeram continuam à vista. Quando o pedido termina, o
+  trabalho até a resposta (o que o Orb foi dizendo e as ações) vira uma linha ("Trabalhou por 1 min 05 s · rodou 11
+  comandos e leu 1 arquivo") e a resposta fica à vista logo abaixo; avisos do meio do trabalho também. Enquanto ele
+  trabalha, tudo fica aberto. A busca (⌘F) abre essas linhas quando o resultado está dentro. Cada frase fica ao menos 0,7 s na tela, e com o VoiceOver ligado ela é anunciada
   com educação (no máximo uma vez a cada 8 s). Com "Reduzir movimento" as frases só trocam de opacidade.
 - **Quando algo dá errado**, a mensagem vem com a ação: "Tentar de novo" (reenvia, se nada tinha sido feito; se já tinha
   respondido, pede para continuar), "Continuar", "Abrir Ajustes" (chave inválida, sem modelo) ou, numa conversa grande demais, "Compactar

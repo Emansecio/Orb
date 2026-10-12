@@ -39,7 +39,7 @@ enum ToolTally {
     static let namedLimit = 3
 
     /// "Rodou 7 comandos, leu 1 arquivo e fez 2 buscas". An action of a kind not named comes last as "outras".
-    static func summary(_ calls: [ToolCall]) -> String {
+    static func summary(_ calls: [ToolCall], capitalized: Bool = true) -> String {
         var order: [Act] = []
         var counts: [Act: Int] = [:]
         for call in calls {
@@ -56,7 +56,7 @@ enum ToolTally {
         let rest = order.dropFirst(namedLimit).reduce(0) { $0 + counts[$1]! }
         if rest > 0 { parts.append("mais \(rest) \(rest == 1 ? "ação" : "ações")") }
         let line = PortugueseList.join(parts)
-        return line.prefix(1).uppercased() + line.dropFirst()
+        return capitalized ? line.prefix(1).uppercased() + line.dropFirst() : line
     }
 
     /// "fez 2 outras ações", after kinds that were named.
@@ -78,6 +78,13 @@ enum ToolTally {
         let start = calls.map(\.startedAt).min()!
         guard let end = calls.compactMap(\.finishedAt).max() else { return nil }
         return max(0, end.timeIntervalSince(start))
+    }
+
+    /// "Trabalhou por 1 min 05 s · rodou 11 comandos e leu 1 arquivo": the line of a finished request's work (without
+    /// the time when it is not known).
+    static func work(_ calls: [ToolCall], seconds: Int?) -> String {
+        let time = seconds.map { "Trabalhou por \(ElapsedFormat.text(seconds: $0))" } ?? "Trabalhou"
+        return calls.isEmpty ? time : "\(time) · \(summary(calls, capitalized: false))"
     }
 
     /// The symbol of the row: the one of its actions when they are all of one kind, a stack otherwise.

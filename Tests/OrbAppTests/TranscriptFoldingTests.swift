@@ -123,8 +123,9 @@ struct TranscriptFoldingTests {
 
     @Test("Chat sem linhas de Orb não tem dobra: a lista é a de hoje")
     func plainChatHasNoRows() {
-        #expect(!TranscriptFolding.hasFoldableItems([say("oi"), TranscriptItem(.user(text: "tudo bem", attachments: []))]))
-        #expect(TranscriptFolding.hasFoldableItems([event(.renamed, actor: atlas, detail: "Atlas Pro")]))
+        #expect(TranscriptFolding.foldedRows([say("oi"), TranscriptItem(.user(text: "tudo bem", attachments: []))], boundary: 0, liveTail: false) == nil)
+        // A lone event is a row as it is: nothing folds.
+        #expect(TranscriptFolding.foldedRows([event(.renamed, actor: atlas, detail: "Atlas Pro")], boundary: 0, liveTail: false) == nil)
         let many = (0..<10_000).map { _ in say("x") }
         #expect(OrbTranscript(items: many).rows == nil)
     }

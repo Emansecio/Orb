@@ -18,15 +18,82 @@ struct ToolRunFoldingTests {
 
     private func say(_ text: String) -> TranscriptItem { TranscriptItem(.bot(text: text, isStreaming: false)) }
 
+    private func ask(_ text: String = "Levante os leads", duringTask: Bool = false) -> TranscriptItem {
+        TranscriptItem(.user(text: text, attachments: []), duringTask: duringTask)
+    }
+
+    private func card(_ decision: ApprovalDecision?) -> TranscriptItem {
+        TranscriptItem(.approval(ApprovalRequest(toolName: "run_command", title: "Rodando no Terminal", command: "ls", reason: "",
+                                                 decision: decision)))
+    }
+
     @Test func actionsOneAfterAnotherFoldIntoOneRowAndALoneOneStaysALine() {
-        let ask = TranscriptItem(.user(text: "Levante os leads", attachments: []))
+        let ask = ask()
         let read = tool("Lendo arquivo", .file)
         let runs = [tool(), tool(), tool()]
         let lone = tool()
-        let items = [ask, read] + runs + [say("A fila trouxe 61 conversas."), lone, say("Pronto.")]
-        #expect(TranscriptFolding.rows(for: items) == [
-            .single(ask), .tools([read] + runs), .single(items[5]), .single(lone), .single(items[7]),
-        ])
+        let items = [ask, read] + runs + [say("A fila trouxe 61 conversas."), lone]
+        // The request still runs: what it did so far stays in view, its actions one line per run.
+        #expect(TranscriptFolding.rows(for: items, liveTail: true) == [.single(ask), .tools([read] + runs), .single(items[5]), .single(lone)])
+    }
+
+    @Test func aFinishedRequestFoldsItsWorkAndKeepsItsAnswer() {
+        let request = ask()
+        let work = [tool("Lendo arquivo", .file), tool(), say("A fila trouxe 61 conversas."), tool(), tool()]
+        let answer = say("Respondi os 12 leads pendentes.")
+        let items = [request] + work + [answer]
+        #expect(TranscriptFolding.rows(for: items) == [.single(request), .work(work, seconds: nil), .single(answer)])
+        // While it runs, nothing folds into a work row.
+        #expect(!TranscriptFolding.rows(for: items, liveTail: true).contains { if case .work = $0 { true } else { false } })
+        // Only the last request is the running one.
+        let next = ask("E os de ontem?")
+        #expect(TranscriptFolding.rows(for: items + [next, tool()], liveTail: true)[1] == .work(work, seconds: nil))
+    }
+
+    @Test func aNoticeInTheWorkStaysInViewRightAfterIt() {
+        let notice = TranscriptItem(.notice("O provedor não está reaproveitando o início das conversas (cache)."))
+        let work = [tool(), say("Lendo em lotes."), notice, tool(), tool()]
+        let answer = say("Pronto.")
+        let rows = TranscriptFolding.rows(for: [ask()] + work + [answer])
+        #expect(rows.dropFirst().first == .work([work[0], work[1], work[3], work[4]], seconds: nil))
+        #expect(Array(rows.suffix(2)) == [.single(notice), .single(answer)])
+    }
+
+    @Test func whatMustStayInViewKeepsTheWorkUnfolded() {
+        let answer = say("Pronto.")
+        // A request that is one run of actions is one line already.
+        let oneRun = [ask(), tool(), tool(), answer]
+        #expect(TranscriptFolding.rows(for: oneRun) == [.single(oneRun[0]), .tools([oneRun[1], oneRun[2]]), .single(answer)])
+        // Actions after the Orb's last words: no answer to keep below the fold.
+        let unanswered = [ask(), tool(), say("Vou ver."), tool()]
+        #expect(!TranscriptFolding.rows(for: unanswered).contains { if case .work = $0 { true } else { false } })
+        // A card that waits for you never folds.
+        let waiting = [ask(), tool(), say("Preciso de permissão."), tool(), card(nil), answer]
+        #expect(!TranscriptFolding.rows(for: waiting).contains { if case .work = $0 { true } else { false } })
+        // A message you sent during the task splits the request: it stays in view.
+        let steered = ask("Inclua os de ontem", duringTask: true)
+        let rows = TranscriptFolding.rows(for: [ask(), tool(), say("Lendo."), tool(), steered, tool(), say("Lendo mais."), tool(), answer])
+        #expect(rows.contains(.single(steered)))
+        #expect(rows.filter { if case .work = $0 { true } else { false } }.count == 1)
+    }
+
+    @Test func theWorkSaysHowLongTheRequestTook() {
+        var request = ask()
+        request.date = Date(timeIntervalSince1970: 1_000)
+        var answer = say("Pronto.")
+        answer.date = request.date.addingTimeInterval(65)
+        let work = [tool(), say("Lendo."), tool()]
+        #expect(TranscriptFolding.rows(for: [request] + work + [answer])[1] == .work(work, seconds: 65))
+        let calls = Array(repeating: call("Rodando no Terminal"), count: 11) + [call("Lendo arquivo", .file)]
+        #expect(ToolTally.work(calls, seconds: 65) == "Trabalhou por 1 min 05 s · rodou 11 comandos e leu 1 arquivo")
+        #expect(ToolTally.work(calls, seconds: nil) == "Trabalhou · rodou 11 comandos e leu 1 arquivo")
+    }
+
+    @Test func anAnsweredCardGoesWithTheActionsAndOneThatWaitsEndsThem() {
+        let answered = [tool(), card(.once), tool(), card(.deny)]
+        #expect(TranscriptFolding.rows(for: answered) == [.tools(answered)])
+        let first = tool(), waiting = card(nil), last = tool()
+        #expect(TranscriptFolding.rows(for: [first, waiting, last]) == [.single(first), .single(waiting), .single(last)])
     }
 
     @Test func aNoticeOrACardThatNeedsYouEndsTheRun() {
@@ -52,9 +119,7 @@ struct ToolRunFoldingTests {
         #expect(TranscriptFolding.rows(for: items, boundary: 3) == [.tools(Array(items[..<3])), .single(items[3])])
     }
 
-    @Test func onlyTwoActionsInARowMakeAChatFold() {
-        #expect(!TranscriptFolding.hasFoldableItems([tool(), say("oi"), tool()]))
-        #expect(TranscriptFolding.hasFoldableItems([say("oi"), tool(), tool()]))
+    @Test func aChatWhereNothingFoldsHasNoRows() {
         #expect(OrbTranscript(items: [tool(), say("oi"), tool()]).rows == nil)
         #expect(OrbTranscript(items: [tool(), tool()]).rows?.count == 1)
     }

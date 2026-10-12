@@ -828,6 +828,65 @@ struct ToolGroupRow: View, Equatable {
     }
 }
 
+/// The work of a finished request before its answer, on one line: how long it took and what was done ("Trabalhou por 1
+/// min 05 s · rodou 11 comandos e leu 1 arquivo"), and how many actions failed. A click puts back what the Orb said while it
+/// worked and its actions, as they were (`content`); the answer stays below, always in view.
+struct WorkGroupRow<Content: View>: View {
+    let items: [TranscriptItem]
+    let seconds: Int?
+    let isOpen: Bool
+    let toggle: () -> Void
+    @ViewBuilder let content: () -> Content
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let calls = items.compactMap { if case .tool(let call) = $0.kind { call } else { nil } }
+        let line = ToolTally.work(calls, seconds: seconds)
+        let failures = ToolTally.failures(calls)
+        VStack(alignment: .leading, spacing: 12) {
+            Button(action: toggle) {
+                HStack(spacing: 8) {
+                    Image(systemName: "checklist")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.faint)
+                        .frame(width: 14)
+                    Text(line)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.muted)
+                        .lineLimit(1)
+                    if let failures {
+                        HStack(spacing: 4) {
+                            Image(systemName: "exclamationmark.circle")
+                            Text(failures)
+                        }
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.danger)
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Palette.faint)
+                        .rotationEffect(.degrees(isOpen ? 90 : 0))
+                        .animation(reduceMotion ? nil : Motion.content, value: isOpen)
+                    Spacer(minLength: 0)
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .padding(.leading, gutter)
+            .help(Tip.toggleWork(isOpen: isOpen))
+            .accessibilityLabel(failures.map { "\(line), \($0)" } ?? line)
+            .accessibilityValue(isOpen ? "expandido" : "recolhido")
+            .accessibilityHint(isOpen ? "Recolhe o trabalho" : "Mostra o que o Orb disse e fez")
+            if isOpen {
+                VStack(alignment: .leading, spacing: 12) { content() }
+                    .transition(.adapted(.unfold, reduceMotion: reduceMotion))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: isOpen)
+    }
+}
+
 // MARK: - Notices
 
 /// A line of the transcript that is not anyone's speech ("Você interrompeu esta resposta", "Conversa compactada…").

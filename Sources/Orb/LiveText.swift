@@ -136,6 +136,15 @@ final class OrbTranscript {
     /// The chat is now another conversation (call before `show`).
     func swapped() { swaps &+= 1 }
 
+    /// A request of the Orb runs in this chat: its work stays unfolded until it ends (`TranscriptFolding.workStretches`).
+    private(set) var isLive = false
+
+    func setLive(_ live: Bool) {
+        guard live != isLive else { return }
+        isLive = live
+        refold()
+    }
+
     init(items: [TranscriptItem] = []) {
         self.items = items
         refold()
@@ -157,7 +166,7 @@ final class OrbTranscript {
     /// The rows and what a compaction folded, from the items: the rows end where the fold does, so none is half in it.
     private func refold() {
         let fold = CompactedFold.of(items)
-        rows = TranscriptFolding.hasFoldableItems(items) ? TranscriptFolding.rows(for: items, boundary: fold.count) : nil
+        rows = TranscriptFolding.foldedRows(items, boundary: fold.count, liveTail: isLive)
         if fold != self.fold { self.fold = fold }
         guard let rows, fold.count > 0 else {
             if foldedRows != 0 { foldedRows = 0 }

@@ -26,6 +26,12 @@ extension Snapshot {
             lane.files = [AttachedFile(url: URL(fileURLWithPath: "/Users/x/Documentos/relatório.pdf")),
                           AttachedFile(url: URL(fileURLWithPath: "/Users/x/Documentos/orçamento.xlsx"))]
             return AnyView(ChatView(botID: bot.id))
+        case "chat-long-draft":
+            // A message taller than the field: it shows ten lines and scrolls the rest.
+            seedConversation(model, bot: bot)
+            model.setDraft((1...24).map { "Linha \($0) de uma mensagem longa, colada ou ditada, que passa da altura do campo." }
+                .joined(separator: "\n"), for: bot.id)
+            return AnyView(ChatView(botID: bot.id))
         case "chat-dictation", "chat-dictating", "chat-dictating-start":
             // The microphone beside Send: off, listening (red, its halo at a loud moment, the words in the field), opening.
             // With a model, so the context ring sits beside the microphone as it does in use.

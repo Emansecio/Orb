@@ -673,7 +673,10 @@ final class AppModel {
         let live = live(botID)
         let was = live.isWorking
         live.setStatus(text)
-        if live.isWorking != was { refreshPresence() }
+        if live.isWorking != was {
+            refreshPresence()
+            sessions[botID]?.transcript?.setLive(live.isWorking)
+        }
     }
 
     func setAwaitingApproval(_ isWaiting: Bool, of botID: UUID) {

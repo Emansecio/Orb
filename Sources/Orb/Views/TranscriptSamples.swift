@@ -46,7 +46,7 @@ enum TranscriptSample {
         let reply = TranscriptItem(.bot(text: markdown, isStreaming: false))
         let tool = TranscriptItem(.tool(ToolCall(kind: .shell, title: "Rodando no Terminal", detail: "ls -la ~/Downloads",
                                                  state: .done, output: "total 8\ndrwxr-xr-x  3 voce  staff   96 Oct  7 10:00 .")))
-        let items: [TranscriptItem]
+        var items: [TranscriptItem]
         switch screen {
         case "transcript-approvals":
             let batch = [ApprovalItem(toolName: "write_file", title: "Gravando arquivo", command: "~/Projetos/app/README.md"),
@@ -87,9 +87,10 @@ enum TranscriptSample {
             items = [TranscriptItem(.user(text: "Publica o site de novo, agora com a versão 2.4", attachments: [])), tool,
                      TranscriptItem(.bot(text: "Publicado: a versão 2.4 já está no ar e o rodapé confere.", isStreaming: false)),
                      TranscriptItem(.notice("Skill proposta: /publicar-site — Publicar site"))]
-        case "transcript-tools", "transcript-tools-open":
+        case "transcript-tools", "transcript-tools-open", "transcript-work", "transcript-work-open":
             // The shape of a long task: words of the Orb between runs of commands, a notice in the middle, one failure.
-            ToolGroupRow.opensInSnapshots = screen == "transcript-tools-open"
+            // `transcript-work`: the same request finished, with its answer (its work folds into one line).
+            ToolGroupRow.opensInSnapshots = screen.hasSuffix("-open")
             let folder = "\"/Users/voce/Projetos/AcessosFit-Brain/scripts"
             func run(_ detail: String, _ kind: ToolCall.Kind = .shell, _ title: String = "Rodando no Terminal",
                      _ state: ToolCall.State = .done) -> TranscriptItem {
@@ -112,6 +113,10 @@ enum TranscriptSample {
                      run("python3.14 - <<'PY'"),
                      run("python3.14 - <<'PY'"),
                      run("python3.14 - <<'PY' > /tmp/af_report.txt")]
+            if screen.hasPrefix("transcript-work") {
+                items[0].date = .now.addingTimeInterval(-65)
+                items.append(TranscriptItem(.bot(text: "Pronto: dos 61 contatos, 12 eram leads sem resposta. Respondi os 12 conforme o Brain e deixei o relatório em /tmp/af_report.txt.", isStreaming: false)))
+            }
         case "transcript-retry":
             items = [user, TranscriptItem(.notice("Não deu certo: Sem conexão com o provedor: A conexão com a Internet parece estar desligada."))]
         default:
