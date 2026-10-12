@@ -195,9 +195,13 @@ Se o motor escolhido não estiver instalado, o Orb fica só com `web_fetch` e `w
   tela dele) aparece sob a linha da ferramenta, como cartão "novo" ou "alterado" ou como miniatura, uma vez só por turno.
   Arquivos criados por comandos do Terminal não entram.
 - **Ditar.** O microfone ao lado de Enviar (macOS 26 ou mais novo) abre o reconhecimento de fala do próprio Mac: grátis,
-  sem internet e sem o áudio sair do Mac. O texto aparece no campo enquanto você fala, já pontuado; clique de novo (ou Esc)
-  para parar e revisar, ou dê ↩ para parar e enviar na hora. Digitar no campo encerra o ditado. Na primeira vez o macOS pede
-  o microfone e, se faltar, baixa o modelo de fala do idioma (uma vez só).
+  sem internet e sem o áudio sair do Mac. O texto aparece no campo enquanto você fala, e a versão pontuada toma o lugar das
+  palavras a cada trecho; clique de novo (ou Esc) para parar e revisar, ou dê ↩ para parar e enviar. Ao parar, o modelo do
+  Orb (o menor do mesmo fabricante: Haiku no Claude Code) lê o texto com as últimas mensagens da conversa e os nomes dos Orbs
+  e skills, e acerta pontuação, acentos e palavras ouvidas errado, sem resumir nem responder; o ↩ espera esse ajuste (alguns
+  segundos) e Esc durante ele mantém o texto como foi ditado. Só o texto vai ao modelo, nunca o áudio, e o custo aparece em
+  Uso como chamada auxiliar; desliga em Ajustes → Geral. Digitar no campo encerra o ditado. Na primeira vez o macOS pede o
+  microfone e, se faltar, baixa o modelo de fala do idioma (uma vez só).
 - **Escrever com o Orb trabalhando.** O compositor continua livre, com dois modos, e a dica sob o campo mostra as teclas:
   **↩ direciona** (a mensagem chega ao Orb no próximo passo da tarefa, sem interrompê-la), **⇥ põe na fila** (ela espera a
   tarefa terminar e segue como o próximo pedido; várias juntas, na ordem em que você enviou) e **⌘↩ para e envia agora** (leva

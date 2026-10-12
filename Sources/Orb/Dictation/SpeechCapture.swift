@@ -6,8 +6,9 @@ import Speech
 // audio leaves it. The model for the language is downloaded by the system once, the first time.
 
 /// What the microphone has given so far. Two recognizers hear the same audio: a quick one, whose words show while they
-/// are said, and an exact one, slower and better (punctuation, words it is surer of), whose sentences take the place of
-/// the quick ones over the same stretch of audio as they come (most at the end). Pure, so the tests can read it.
+/// are said, and an exact one, slower and better (punctuation, words it is surer of), whose text takes the place of the
+/// quick one over the same stretch of audio as it comes: its draft at the end of each window it hears (about every
+/// 11 s), its sentences seconds later. Pure, so the tests can read it.
 struct DictationText: Equatable, Sendable {
     struct Sentence: Equatable, Sendable {
         var text: String
@@ -17,7 +18,9 @@ struct DictationText: Equatable, Sendable {
 
     /// The exact recognizer's sentences: what stays.
     var settled: [Sentence] = []
-    /// The quick recognizer's sentences past the last exact one.
+    /// The exact recognizer's draft past its last sentence: already punctuated, it may still change.
+    var exactDraft: Sentence?
+    /// The quick recognizer's sentences past what the exact one has given.
     var quick: [Sentence] = []
     /// What the quick recognizer is still guessing, after its last sentence.
     var guessing = ""
@@ -27,26 +30,49 @@ struct DictationText: Equatable, Sendable {
     static let slack = 0.3
 
     var whole: String {
-        (settled.map(\.text) + quick.map(\.text) + [guessing]).reduce("") { Self.joined($0, $1) }
+        (settled.map(\.text) + [exactDraft?.text ?? ""] + quick.map(\.text) + [guessing]).reduce("") { Self.joined($0, $1) }
     }
 
     private var settledEnd: Double { settled.last?.end ?? -1 }
+    /// Where in the audio the exact recognizer's text ends, sentences and draft.
+    private var exactEnd: Double { max(settledEnd, exactDraft?.end ?? -1) }
 
     /// A piece from the quick recognizer (`isFinal`: a sentence it will not change) or a sentence from the exact one,
     /// with where it ends in the audio.
     mutating func take(_ text: String, isFinal: Bool, isExact: Bool = false, end: Double) {
         if isExact {
-            guard isFinal else { return }
-            settled.append(Sentence(text: text, end: end))
+            if isFinal {
+                settled.append(Sentence(text: text, end: end))
+                if let draft = exactDraft {
+                    exactDraft = draft.end <= end + Self.slack ? nil : Self.drafted(draft, after: text)
+                }
+            } else {
+                exactDraft = Sentence(text: text, end: end)
+            }
             quick.removeAll { $0.end <= end + Self.slack }
             if guessEnd <= end + Self.slack { guessing = "" }
         } else if isFinal {
             guessing = ""
-            if end > settledEnd + Self.slack { quick.append(Sentence(text: text, end: end)) }
+            if end > exactEnd + Self.slack { quick.append(Sentence(text: text, end: end)) }
         } else {
-            guessing = end > settledEnd + Self.slack ? text : ""
+            guessing = end > exactEnd + Self.slack ? text : ""
             guessEnd = end
         }
+    }
+
+    /// The exact draft past a sentence that was just settled out of its beginning: without that sentence (by its text,
+    /// or by its count of words when the recognizer reworded it), until the next draft takes its place.
+    static func drafted(_ draft: Sentence, after sentence: String) -> Sentence? {
+        let settled = sentence.trimmingCharacters(in: .whitespaces)
+        var rest: Substring
+        if draft.text.hasPrefix(settled) {
+            rest = draft.text.dropFirst(settled.count)
+        } else {
+            let words = settled.split(whereSeparator: \.isWhitespace).count
+            rest = Substring(draft.text.split(whereSeparator: \.isWhitespace).dropFirst(words).joined(separator: " "))
+        }
+        let text = rest.trimmingCharacters(in: .whitespaces)
+        return text.isEmpty ? nil : Sentence(text: text, end: draft.end)
     }
 
     /// Two pieces with one space between them (none when either side already has one, or is empty).
@@ -93,11 +119,12 @@ final class SpeechCapture: @unchecked Sendable {
                heard: @escaping @MainActor @Sendable (String, Bool, Bool, Double) -> Void,
                level: @escaping @MainActor @Sendable (Float) -> Void) async throws {
         // The quick one reports as the words are said (without `fastResults` it waits for the end of the speech); the
-        // exact one only its sentences, as good as the recognizer gets. Each has its own analyzer: in one, the quick
+        // exact one its draft at the end of each window it hears (punctuated) and then its sentences, as good as the
+        // recognizer gets. Each has its own analyzer: in one, the quick
         // mode would make both quick.
         let quick = SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [.volatileResults, .fastResults],
                                       attributeOptions: [])
-        let exact = SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [], attributeOptions: [])
+        let exact = SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [.volatileResults], attributeOptions: [])
         if let request = try await AssetInventory.assetInstallationRequest(supporting: [quick, exact]) {
             await downloading()
             try await request.downloadAndInstall()

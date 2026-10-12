@@ -408,9 +408,10 @@ struct ComposerView: View {
 
     /// Esc closes the skill suggestions first; with none open, it gives up the edit of a message.
     private func handleEscape() -> KeyPress.Result {
-        // Esc while dictating closes the microphone; what was said stays in the field.
+        // Esc while dictating closes the microphone; what was said stays in the field. While the model reads it over,
+        // Esc keeps it as it was dictated.
         if model.dictation.isActive(for: botID) {
-            Task { await model.dictation.finish() }
+            if model.dictation.phase == .reviewing { model.dictation.skipReview() } else { Task { await model.dictation.finish() } }
             return .handled
         }
         switch ComposerAction.escape(slashIsOpen: !slashMatches.isEmpty, isEditing: isEditing) {

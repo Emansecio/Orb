@@ -30,6 +30,30 @@ struct DictationTextTests {
         #expect(text.whole == "O Orb abre a lista. E me manda um resumo, por favor.")
     }
 
+    @Test func theExactDraftShowsPunctuatedBeforeItsSentencesSettle() {
+        var text = DictationText()
+        text.take("abre a planilha de vendas e me manda um resumo", isFinal: true, end: 11)
+        text.take("por favor", isFinal: false, end: 12)
+        // At the end of the window it heard, the exact recognizer's draft takes the place of the quick words under it.
+        text.take("Abre a planilha de vendas e me manda um resumo,", isFinal: false, isExact: true, end: 11.2)
+        #expect(text.whole == "Abre a planilha de vendas e me manda um resumo, por favor")
+        // A sentence settled out of the draft's beginning leaves only the rest of it, without saying it twice.
+        text.take("Abre a planilha de vendas.", isFinal: true, isExact: true, end: 5)
+        #expect(text.whole == "Abre a planilha de vendas. e me manda um resumo, por favor")
+        // The sentence that reaches the draft's end takes it all.
+        text.take("E me manda um resumo, por favor.", isFinal: true, isExact: true, end: 12)
+        #expect(text.whole == "Abre a planilha de vendas. E me manda um resumo, por favor.")
+        #expect(text.exactDraft == nil && text.quick.isEmpty)
+    }
+
+    @Test func aDraftLosesASettledSentenceByItsTextOrByItsWords() {
+        let draft = DictationText.Sentence(text: "Abre a planilha. Me manda o resumo", end: 9)
+        #expect(DictationText.drafted(draft, after: "Abre a planilha.") == .init(text: "Me manda o resumo", end: 9))
+        // Reworded when it settled: as many words come off.
+        #expect(DictationText.drafted(draft, after: "Abra a planilha.") == .init(text: "Me manda o resumo", end: 9))
+        #expect(DictationText.drafted(draft, after: "Abre a planilha. Me manda o resumo") == nil)
+    }
+
     @Test func whatIsSaidGoesAfterWhatWasTyped() {
         #expect(DictationText.draft(base: "", spoken: "  Oi") == "Oi")
         #expect(DictationText.draft(base: "Resuma", spoken: "o relatório") == "Resuma o relatório")

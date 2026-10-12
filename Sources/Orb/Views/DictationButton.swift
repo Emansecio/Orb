@@ -18,7 +18,7 @@ struct DictationButton: View {
                 .font(.system(size: 13, weight: isOn ? .bold : .regular))
                 .foregroundStyle(isOn ? Palette.onInk : Palette.muted)
                 .contentTransition(.symbolEffect(.replace))
-                .symbolEffect(.pulse, options: .repeating, isActive: phase == .starting || phase == .downloading || phase == .finishing)
+                .symbolEffect(.pulse, options: .repeating, isActive: [.starting, .downloading, .finishing, .reviewing].contains(phase))
                 .frame(width: 28, height: 28)
                 .background { Circle().fill(isOn ? Palette.danger : .clear) }
                 .background {
@@ -47,6 +47,7 @@ struct DictationButton: View {
         case .downloading: "arrow.down.circle"
         case .listening: "mic.fill"
         case .finishing: "ellipsis"
+        case .reviewing: "sparkles"
         }
     }
 
@@ -61,6 +62,7 @@ struct DictationButton: View {
         case .downloading: "Baixando o reconhecimento de fala do Mac (só desta vez)…"
         case .listening: "Ouvindo… ↩ envia · Esc encerra"
         case .finishing: "Terminando de transcrever…"
+        case .reviewing: "Ajustando o texto com o modelo… · Esc mantém como foi ditado"
         }
     }
 

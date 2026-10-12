@@ -16,6 +16,8 @@ final class Dictation {
         case listening
         /// The microphone is closed; the last words are being settled.
         case finishing
+        /// The Orb's model reads the text over (`DictationReview`); Esc keeps it as it was dictated.
+        case reviewing
     }
 
     private(set) var botID: UUID?
@@ -32,6 +34,15 @@ final class Dictation {
     @ObservationIgnored private var written: String?
     @ObservationIgnored private var write: (UUID, String) -> Void = { _, _ in }
     @ObservationIgnored private var fail: (UUID, String) -> Void = { _, _ in }
+    /// Reads the dictated text over once the microphone closes (nil: no review); nil back keeps the text as it is.
+    @ObservationIgnored private var review: (@MainActor (String) async -> String?)?
+    /// The closing under way (settling the last words, then the review): a second `finish` waits for it instead of
+    /// returning early, so a message sent with ↩ meanwhile goes with the final text.
+    @ObservationIgnored private var closing: Task<Void, Never>?
+    @ObservationIgnored private var reviewTask: Task<String?, Never>?
+    /// The closing waiting for the review: resumed by its answer, by Esc or typing, or by the time limit, whichever
+    /// comes first (a call that hangs never holds the message).
+    @ObservationIgnored private var reviewWait: CheckedContinuation<String?, Never>?
 
     /// The Mac can dictate here: the recognizer is macOS 26's, and the app must say why it wants the microphone (the
     /// development build, without an Info.plist, would be killed by the system for asking).
@@ -56,14 +67,15 @@ final class Dictation {
     func isActive(for botID: UUID) -> Bool { self.botID == botID && phase != .idle }
 
     /// Opens the microphone for `botID` (closing another Orb's dictation, keeping its text). `draft` reads the field,
-    /// `write` replaces it, `fail` shows why dictation could not start.
+    /// `write` replaces it, `fail` shows why dictation could not start, `review` reads the text over at the end.
     func start(for botID: UUID, vocabulary: [String], draft: String, write: @escaping (UUID, String) -> Void,
-               fail: @escaping (UUID, String) -> Void) {
+               fail: @escaping (UUID, String) -> Void, review: (@MainActor (String) async -> String?)? = nil) {
         if self.botID != nil { cancel() }
         guard #available(macOS 26, *) else { return }
         self.botID = botID
         self.write = write
         self.fail = fail
+        self.review = review
         base = draft
         written = draft
         text = DictationText()
@@ -95,21 +107,67 @@ final class Dictation {
         }
     }
 
-    /// Closes the microphone and waits for the last words; they are in the field when this returns.
+    /// Closes the microphone, waits for the last words and for the review; the final text is in the field when this
+    /// returns. Called again meanwhile, it waits for the same closing.
     func finish() async {
-        guard botID != nil, phase != .finishing, #available(macOS 26, *), let capture = capture as? SpeechCapture else { return }
+        if let closing { return await closing.value }
+        guard botID != nil, #available(macOS 26, *), let capture = capture as? SpeechCapture else { return }
         starting?.cancel()
         phase = .finishing
         level = 0
-        await capture.finish()
-        guard self.capture === capture else { return }
-        end()
+        let closing = Task { @MainActor [weak self] in
+            await capture.finish()
+            guard let self, self.capture === capture else { return }
+            await self.reviewText()
+            guard self.capture === capture else { return }
+            self.end()
+        }
+        self.closing = closing
+        await closing.value
+    }
+
+    /// Esc while the text is being read over: it stays as dictated, and the closing ends now.
+    func skipReview() {
+        guard phase == .reviewing, let reviewTask else { return }
+        settleReview(reviewTask, with: nil)
+    }
+
+    /// The model reads the dictated words over; what comes back takes their place (what was typed before stays).
+    private func reviewText() async {
+        let spoken = text.whole.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let review, let botID, DictationReview.isWorthReviewing(spoken) else { return }
+        phase = .reviewing
+        let task = Task { @MainActor in await review(spoken) }
+        reviewTask = task
+        let revised = await withCheckedContinuation { wait in
+            reviewWait = wait
+            Task { @MainActor in self.settleReview(task, with: await task.value) }
+            Task { @MainActor in
+                try? await Task.sleep(for: DictationReview.timeLimit)
+                self.settleReview(task, with: nil)
+            }
+        }
+        guard let revised, self.botID == botID, revised != spoken else { return }
+        let draft = DictationText.draft(base: base, spoken: revised)
+        written = draft
+        write(botID, draft)
+    }
+
+    /// The review's answer (nil: keep the text as dictated) to the closing that waits for it, once; a review given up
+    /// on is cancelled.
+    private func settleReview(_ task: Task<String?, Never>, with revised: String?) {
+        guard reviewTask == task, let wait = reviewWait else { return }
+        reviewTask = nil
+        reviewWait = nil
+        if revised == nil { task.cancel() }
+        wait.resume(returning: revised)
     }
 
     /// Stops at once: what is in the field stays as it is.
     func cancel() {
         guard botID != nil else { return }
         starting?.cancel()
+        if let reviewTask { settleReview(reviewTask, with: nil) }
         if #available(macOS 26, *), let capture = capture as? SpeechCapture { Task { await capture.cancel() } }
         end()
     }
@@ -123,7 +181,7 @@ final class Dictation {
     // MARK: From the recognizer
 
     private func moved(_ capture: AnyObject, to phase: Phase) {
-        guard self.capture === capture, self.phase != .finishing else { return }
+        guard self.capture === capture, self.phase != .finishing, self.phase != .reviewing else { return }
         self.phase = phase
     }
 
@@ -151,6 +209,9 @@ final class Dictation {
     private func end() {
         capture = nil
         starting = nil
+        closing = nil
+        if let reviewTask { settleReview(reviewTask, with: nil) }
+        review = nil
         botID = nil
         phase = .idle
         level = 0

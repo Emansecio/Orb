@@ -109,6 +109,7 @@ struct GeneralSettings: View {
     @State private var learnedWindows: [LearnedWindowRow] = []
     @AppStorage(AppModel.notifyWhenDoneKey) private var notifyWhenDone = true
     @AppStorage(SkillReview.settingKey) private var proposeSkills = true
+    @AppStorage(DictationReview.settingKey) private var reviewDictation = true
     @AppStorage(GlobalHotKey.defaultsKey) private var globalShortcut = false
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var loginError: String?
@@ -153,6 +154,17 @@ struct GeneralSettings: View {
                     }
                 }
                 .help(Tip.proposeSkills)
+                if Dictation.isSupported {
+                    Toggle(isOn: $reviewDictation) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Ajustar o ditado com o modelo do Orb")
+                            Text("Ao parar de ditar, o texto vai ao modelo do Orb (um menor do mesmo provedor, quando há) com as últimas mensagens da conversa, para corrigir pontuação e palavras mal entendidas. Uma chamada curta por ditado; o áudio nunca sai do Mac. Esc durante o ajuste mantém o texto como foi ditado.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .help(Tip.reviewDictation)
+                }
                 // MARK: MultiOrb (WP1)
                 Toggle(isOn: Binding(get: { orbsCanTalk }, set: { setOrbsCanTalk($0) })) {
                     VStack(alignment: .leading, spacing: 2) {
