@@ -56,6 +56,8 @@ enum ProseText {
         let text = NSMutableAttributedString()
         for (index, block) in blocks.enumerated() {
             let isLast = index == blocks.count - 1
+            // Only the block being written is parsed fresh; the ones before it are final, so a flush reuses them.
+            let cached = cached || !isLast
             if index > 0 { text.append(NSAttributedString(string: "\n")) }
             let start = text.length
             switch block {
@@ -77,7 +79,7 @@ enum ProseText {
             case .list(let items):
                 for (number, item) in items.enumerated() {
                     if number > 0 { text.append(NSAttributedString(string: "\n")) }
-                    text.append(listItem(item, cached: cached, highlight: highlight, spacing: number == items.count - 1 ? 0 : itemSpacing))
+                    text.append(listItem(item, cached: cached || number < items.count - 1, highlight: highlight, spacing: number == items.count - 1 ? 0 : itemSpacing))
                 }
             case .code, .table, .rule:
                 continue // never in a run (`ProseSegment`)
@@ -202,6 +204,10 @@ enum ProseText {
 /// The text view of a run of prose: read-only, selectable, transparent, laid out at the width SwiftUI gives it.
 final class ProseTextView: NSTextView, @preconcurrency NSLayoutManagerDelegate {
     private var heights: [CGFloat: CGFloat] = [:]
+    /// The text has a quote to draw a bar beside (`drawBackground`).
+    private var hasQuote = false
+    /// The last width SwiftUI proposed, for a proposal without one.
+    var lastWidth: CGFloat?
 
     convenience init() {
         self.init(usingTextLayoutManager: false)
@@ -226,6 +232,10 @@ final class ProseTextView: NSTextView, @preconcurrency NSLayoutManagerDelegate {
 
     func show(_ text: NSAttributedString) {
         textStorage?.setAttributedString(text)
+        hasQuote = false
+        text.enumerateAttribute(ProseText.quoteKey, in: NSRange(location: 0, length: text.length)) { value, _, stop in
+            if value != nil { hasQuote = true; stop.pointee = true }
+        }
         heights = [:]
         invalidateIntrinsicContentSize()
     }
@@ -237,6 +247,8 @@ final class ProseTextView: NSTextView, @preconcurrency NSLayoutManagerDelegate {
         container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
         layout.ensureLayout(for: container)
         let height = ceil(layout.usedRect(for: container).height)
+        // A few widths at most: a window being resized goes through many.
+        if heights.count >= 4 { heights = [:] }
         heights[width] = height
         return height
     }
@@ -281,7 +293,7 @@ final class ProseTextView: NSTextView, @preconcurrency NSLayoutManagerDelegate {
     /// The bar beside a quote.
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
-        guard let textStorage, let layoutManager, let textContainer else { return }
+        guard hasQuote, let textStorage, let layoutManager, let textContainer else { return }
         NSColor(Palette.lineStrong).setFill()
         textStorage.enumerateAttribute(ProseText.quoteKey, in: NSRange(location: 0, length: textStorage.length)) { value, range, _ in
             guard value != nil else { return }
@@ -333,7 +345,9 @@ struct SelectableProse: NSViewRepresentable {
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: ProseTextView, context: Context) -> CGSize? {
-        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? 10_000
+        let proposed = proposal.width.flatMap { $0.isFinite ? $0 : nil }
+        if let proposed { nsView.lastWidth = proposed }
+        let width = proposed ?? nsView.lastWidth ?? 10_000
         return CGSize(width: width, height: nsView.height(forWidth: width))
     }
 }

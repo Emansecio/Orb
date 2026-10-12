@@ -195,15 +195,24 @@ enum MarkdownBlocks {
         guard rest.isEmpty || rest.first == " " || rest.first == "\t" else { return nil }
         var text = rest.trimmingCharacters(in: .whitespaces)
         // An optional closing run of hashes after a space ("## Título ##"); "C#" keeps its own.
-        if let closing = text.range(of: #" +#+$"#, options: .regularExpression) { text.removeSubrange(closing) }
+        var end = text.endIndex
+        while end > text.startIndex, text[text.index(before: end)] == "#" { end = text.index(before: end) }
+        if end < text.endIndex, end > text.startIndex, text[text.index(before: end)] == " " {
+            while end > text.startIndex, text[text.index(before: end)] == " " { end = text.index(before: end) }
+            text.removeSubrange(end...)
+        }
         return (hashes, text)
     }
 
     private static func isRule(_ line: Substring) -> Bool {
         guard indent(of: line) <= 3 else { return false }
-        let marks = line.filter { $0 != " " && $0 != "\t" }
-        guard marks.count >= 3, let first = marks.first, "-*_".contains(first) else { return false }
-        return marks.allSatisfy { $0 == first }
+        guard let first = line.first(where: { $0 != " " && $0 != "\t" }), "-*_".contains(first) else { return false }
+        var count = 0
+        for character in line where character != " " && character != "\t" {
+            guard character == first else { return false }
+            count += 1
+        }
+        return count >= 3
     }
 
     private static func isQuote(_ line: Substring) -> Bool {
