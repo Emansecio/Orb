@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// `Orb --snapshot transcript[-approvals|-notices|-failed|-attachments|-outputs] out.png`: a seeded conversation of the first Orb for visual
+/// `Orb --snapshot transcript[-approvals|-notices|-compacted|-failed|-attachments|-outputs] out.png`: a seeded conversation of the first Orb for visual
 /// review of the replies' Markdown, the approval cards and the notices with an action. Dev aid; nothing is saved.
 @MainActor
 enum TranscriptSample {
@@ -72,6 +72,15 @@ enum TranscriptSample {
             items = [user, reply,
                      TranscriptItem(.notice("Conversa compactada: o começo virou um resumo.")),
                      TranscriptItem(.notice(AgentEngineNotice.paused))]
+        case "transcript-compacted":
+            // Two older requests folded by "Compactar agora"; the last exchange and the notice stay.
+            let older = [("Lista os PDFs da pasta", "São 12 PDFs, a maioria contratos de 2024."),
+                         ("Quais são de 2025?", "Três: o de aluguel, o da academia e o do seguro.")]
+            items = older.flatMap { asked, said in
+                [TranscriptItem(.user(text: asked, attachments: [])), TranscriptItem(.bot(text: said, isStreaming: false))]
+            } + [TranscriptItem(.user(text: "Move esses três para Contratos/2025", attachments: [])),
+                 TranscriptItem(.bot(text: "Pronto: os três estão em `Contratos/2025`.", isStreaming: false)),
+                 TranscriptItem(.notice("Compactei a conversa: os 2 primeiros pedidos viraram um resumo (≈ 58 mil → 19 mil tokens)."))]
         case "transcript-failed":
             items = [user, TranscriptItem(.notice("Não deu certo: Chave ou login inválido (401). Confira em Ajustes → Modelos. Detalhe do provedor: invalid x-api-key"))]
         case "transcript-skill-proposal":

@@ -100,6 +100,9 @@ final class CompactionFlowTests {
         let asked = try #require(items.firstIndex { if case .user(let text, _) = $0.kind { text.hasPrefix("leia o arquivo") } else { false } })
         let said = try #require(items.firstIndex { if case .notice(let text) = $0.kind { text.hasPrefix("Compactei a conversa:") } else { false } })
         #expect(said > asked)
+        // The chat folds everything before the request in progress into one line.
+        let fold = model.orbTranscript(botID).fold
+        #expect(fold.count == asked && fold.messages > 0)
         let conversation = try #require(model.conversations[botID])
         #expect(conversation.compactions == 1)
         // The summary is the conversation's ledger, extended with what left the window.

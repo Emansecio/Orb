@@ -97,6 +97,47 @@ extension ChatView {
     }
 }
 
+/// The line that stands for the messages a compaction folded: how many, and the button that shows them again (or hides
+/// them once more). The messages open above it, so the line and what follows it stay where they were.
+struct CompactedFoldLine: View {
+    let fold: CompactedFold
+    let isOpen: Bool
+    let toggle: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: toggle) {
+            HStack(spacing: 8) {
+                Image(systemName: "rectangle.compress.vertical")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Palette.faint)
+                Text(fold.title)
+                    .foregroundStyle(Palette.muted)
+                Text(isOpen ? "Ocultar" : "Mostrar")
+                    .fontWeight(.medium)
+                    .foregroundStyle(Palette.accentText)
+                // The chevron turns its sign rather than turning: nothing rotates in a row that folds under Reduce Motion.
+                Image(systemName: isOpen ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Palette.accentText)
+            }
+            .font(.system(size: 12))
+            .lineLimit(1)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .background(Color.primary.opacity(isHovered ? 0.08 : 0.05), in: .capsule)
+            .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 4)
+        .help(isOpen ? "Oculta de novo as mensagens que viraram resumo" : "Mostra as mensagens que viraram resumo (o Orb segue com o resumo)")
+        .accessibilityLabel(fold.title)
+        .accessibilityHint(isOpen ? "Oculta essas mensagens" : "Mostra essas mensagens")
+    }
+}
+
 /// What the chat shows while files are dragged over it: where they go, before they are let go.
 private struct ChatDropOverlay: View {
     var body: some View {
@@ -141,6 +182,8 @@ private struct TranscriptList: View {
     @State private var follower = BottomFollower()
     /// Which rows just arrived (they come in; the rest are simply there), and when the conversation itself was replaced.
     @State private var entrances = TranscriptEntrances()
+    /// The messages a compaction folded are on show (`CompactedFold`): until the Orb is left or compacted again.
+    @State private var showsFolded = false
 
     var body: some View {
         let transcript = model.orbTranscript(look.id)
@@ -184,13 +227,28 @@ private struct TranscriptList: View {
                         EmptyChatView(look: look, presented: presentedEmptyChats)
                             .transition(.opacity)
                     }
+                    // What a compaction folded stays out of the list until the line above the rest opens it: a long chat
+                    // that was compacted lays out only what came after.
+                    let fold = transcript.fold
                     // MARK: MultiOrb (WP2): a chat with exchanges between Orbs or repeated events is drawn from its folded rows.
                     if let rows = transcript.rows {
-                        ForEach(rows) { row in
+                        if showsFolded {
+                            ForEach(rows[..<transcript.foldedRows]) { row in
+                                foldedRow(row, lastReplyID: lastReplyID, redoID: redoID, dropping: dropping, found: found)
+                            }
+                        }
+                        if fold.count > 0 { foldLine(fold, proxy) }
+                        ForEach(rows[transcript.foldedRows...]) { row in
                             foldedRow(row, lastReplyID: lastReplyID, redoID: redoID, dropping: dropping, found: found)
                         }
                     } else {
-                        ForEach(items) { item in
+                        if showsFolded {
+                            ForEach(items[..<fold.count]) { item in
+                                itemRow(item, lastReplyID: lastReplyID, redoID: redoID, dropping: dropping, found: found)
+                            }
+                        }
+                        if fold.count > 0 { foldLine(fold, proxy) }
+                        ForEach(items[fold.count...]) { item in
                             itemRow(item, lastReplyID: lastReplyID, redoID: redoID, dropping: dropping, found: found)
                         }
                     }
@@ -229,7 +287,20 @@ private struct TranscriptList: View {
             .modifier(KeepsBottom(follows: follows))
             .environment(\.replyGrew, replyGrew(proxy))
             .onChange(of: follows) { follower.follows = follows }
-            .onChange(of: find.jump) { if let jump = find.jump { scrollToFound(jump, proxy) } }
+            .onChange(of: find.jump) {
+                guard let jump = find.jump else { return }
+                // A hit among the folded messages opens them first; the scroll waits for their rows.
+                if !showsFolded, transcript.folds(jump.itemID) {
+                    showsFolded = true
+                    Task { @MainActor in
+                        await Task.yield()
+                        scrollToFound(jump, proxy)
+                    }
+                } else {
+                    scrollToFound(jump, proxy)
+                }
+            }
+            .onChange(of: transcript.fold.count) { showsFolded = false }
             .onChange(of: transcript.revision) {
                 find.itemsChanged()
                 if BottomFollower.anchorsItself {
@@ -300,6 +371,31 @@ private struct TranscriptList: View {
                 .transition(.identity)
         }
     }
+
+    /// The line in place of what a compaction folded; opening it puts the messages back above it.
+    private func foldLine(_ fold: CompactedFold, _ proxy: ScrollViewProxy) -> some View {
+        CompactedFoldLine(fold: fold, isOpen: showsFolded) { toggleFold(proxy) }
+            .id(FoldAnchor.id)
+            .transition(.identity)
+    }
+
+    /// Opens or closes what a compaction folded, without animating the list (that would lay out every row again). Opened,
+    /// the last of those messages show right above the line, which stays in view; the chat stops following its end
+    /// meanwhile, as when you scroll up to read.
+    private func toggleFold(_ proxy: ScrollViewProxy) {
+        showsFolded.toggle()
+        let anchor = showsFolded ? UnitPoint(x: 0.5, y: 0.75) : .top
+        if showsFolded { followsBottom = false }
+        Task { @MainActor in
+            await Task.yield()
+            proxy.scrollTo(FoldAnchor.id, anchor: anchor)
+            // Again once the rows around it are laid out: the first scroll goes by estimated heights.
+            try? await Task.sleep(for: .milliseconds(150))
+            proxy.scrollTo(FoldAnchor.id, anchor: anchor)
+        }
+    }
+
+    private enum FoldAnchor { static let id = "compacted-fold" }
 
     /// A row inside a folded one: no entrance of its own.
     private func plainRow(_ item: TranscriptItem) -> some View {

@@ -129,6 +129,9 @@ final class OrbTranscript {
     /// then its rows are its items. Made once per change of `items`, not per view pass.
     private(set) var rows: [TranscriptRowModel]?
     // MARK: end MultiOrb (WP2)
+    /// What a compaction folded at the top of the chat (`CompactedFold`), and how many of `rows` hold only those items.
+    private(set) var fold = CompactedFold.none
+    private(set) var foldedRows = 0
 
     /// The chat is now another conversation (call before `show`).
     func swapped() { swaps &+= 1 }
@@ -136,6 +139,7 @@ final class OrbTranscript {
     init(items: [TranscriptItem] = []) {
         self.items = items
         rows = TranscriptFolding.hasFoldableItems(items) ? TranscriptFolding.rows(for: items) : nil
+        refold()
     }
 
     /// Shows `items`. The same array again (one conversation mutation that left the items alone) changes nothing.
@@ -145,7 +149,25 @@ final class OrbTranscript {
         // MARK: MultiOrb (WP2)
         rows = TranscriptFolding.hasFoldableItems(items) ? TranscriptFolding.rows(for: items) : nil
         // MARK: end MultiOrb (WP2)
+        refold()
         revision &+= 1
+    }
+
+    /// Whether the item is one of those the compaction folded.
+    func folds(_ itemID: UUID) -> Bool {
+        items[..<fold.count].contains { $0.id == itemID }
+    }
+
+    private func refold() {
+        let fold = CompactedFold.of(items)
+        if fold != self.fold { self.fold = fold }
+        guard let rows, fold.count > 0 else {
+            if foldedRows != 0 { foldedRows = 0 }
+            return
+        }
+        let folded = Set(items[..<fold.count].lazy.map(\.id))
+        let count = rows.prefix { row in row.items.allSatisfy { folded.contains($0.id) } }.count
+        if count != foldedRows { foldedRows = count }
     }
 }
 

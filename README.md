@@ -465,6 +465,10 @@ janela vai antes para a memória do Orb. As mensagens continuam salvas na conver
 - **Compactar agora** (ou `/compactar` e, se quiser, um foco: `/compactar decisões sobre o banco`) resume já. Não roda com o
   Orb respondendo. O resultado vira um aviso na conversa: "Compactei a conversa: os 5 primeiros pedidos viraram um resumo (≈ 58
   mil → 19 mil tokens)."
+- Depois de compactar (por você ou sozinho), o que virou resumo se recolhe numa faixa no alto da conversa: "47 mensagens
+  anteriores foram resumidas · Mostrar". Nada é apagado: "Mostrar" traz as mensagens de volta logo acima da faixa, "Ocultar"
+  recolhe de novo, e a busca (⌘F) abre a faixa sozinha quando o resultado está lá dentro. Ao voltar para o Orb ela está
+  recolhida, e a conversa abre mais rápido por isso.
 - Você não precisa decidir nada: o anel só informa, e o Orb sabe a hora e o jeito de compactar. Ele dobra o começo quando a
   conversa passa do que cabe e também quando você volta depois de uns 5 minutos (o cache do provedor já esfriou, então dobrar
   não custa nada a mais). Antes da dobra, em segundo plano, ele pede ao modelo mais barato do mesmo fabricante (um "haiku" na

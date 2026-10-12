@@ -51,6 +51,10 @@ struct CompactionReport: Sendable, Equatable {
         self.fold = fold
     }
 
+    /// How the notice of older turns become a summary starts, now and in older versions: the chat folds what came before
+    /// the latest one (`CompactedFold`).
+    static let foldNoticePrefixes = ["Compactei a conversa:", "Conversa compactada:"]
+
     /// The line shown in the transcript.
     var notice: String {
         switch kind {
@@ -61,7 +65,7 @@ struct CompactionReport: Sendable, Equatable {
             } else {
                 what = foldedMessages == 1 ? "1 mensagem antiga virou um resumo" : "\(foldedMessages) mensagens antigas viraram um resumo"
             }
-            return "Compactei a conversa: \(what)\(range)."
+            return "\(Self.foldNoticePrefixes[0]) \(what)\(range)."
         case .steps:
             let what = foldedMessages == 1 ? "o primeiro passo" : "os \(foldedMessages) primeiros passos"
             return "Neste pedido, resumi \(what) para caber no modelo\(range)."
