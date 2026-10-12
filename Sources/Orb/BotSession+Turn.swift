@@ -212,13 +212,15 @@ extension BotSession {
             model.live(self.id).runningTool = openTool
             mutateItems { items in
                 let files = Self.takeOver(produced, in: &items)
-                for index in items.indices {
+                // Call ids are unique and the call is recent: search from the end and stop at the match.
+                for index in items.indices.reversed() {
                     if case .tool(var call) = items[index].kind, call.id == id {
                         call.state = state
                         call.output = output
                         call.files = files.isEmpty ? nil : files
                         call.finishedAt = .now
                         items[index].kind = .tool(call)
+                        break
                     }
                 }
             }

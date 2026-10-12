@@ -196,6 +196,8 @@ final class DelegationHub: DelegationService {
             let envelope = request.envelope
             let body = envelope.from.id == envelope.to.id ? envelope.text : OrbEnvelopeText.request(envelope)
             let prompt = preface.isEmpty ? body : preface + "\n\n" + body
+            // Read off the main thread while `starting` still holds the Orb, so nothing else takes it meanwhile.
+            let read = await model.store.readSideConversationAsync(prefix: Store.grupoPrefix, id: envelope.groupID ?? request.id, for: botID)
             self.starting.remove(botID)
             guard let current = self.requests[request.id], current.state == .queued else { return self.schedulePump(botID) }
             if self.chainStates[current.envelope.chainID]?.cancelled == true {
@@ -207,7 +209,6 @@ final class DelegationHub: DelegationService {
                 self.queues[botID, default: []].insert(current.id, at: 0)
                 return
             }
-            let read = model.store.readSideConversation(prefix: Store.grupoPrefix, id: current.envelope.groupID ?? current.id, for: botID)
             model.addNotice(AppModel.labeled(read.notice, for: model.bot(botID)))
             let conversation = read.value?.closingInterruptedTurn() ?? Conversation()
             if !self.startRun(current, conversation: conversation, text: prompt, origin: .orb(current.envelope), resuming: false) {
