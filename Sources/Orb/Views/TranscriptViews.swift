@@ -327,7 +327,7 @@ private struct GreetingReplies: View {
         // Read here, not handed down: once the greeting is on screen the Orb counts as presented, so the buttons that
         // come back after an erased draft only fade in.
         let enters = EmptyChatEntrance.plays(for: botID, in: presented)
-        let isTyping = !(model.drafts[botID] ?? "").isEmpty
+        let isTyping = !model.draftText(botID).isEmpty
         VStack(spacing: 6) {
             if !isTyping {
                 ForEach(Array(OrbGreeting.Reply.allCases.enumerated()), id: \.element) { index, reply in

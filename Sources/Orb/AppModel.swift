@@ -68,7 +68,24 @@ final class AppModel {
 
     // MARK: UI state
 
-    var drafts: [UUID: String] = [:]
+    var drafts: [UUID: String] = [:] {
+        didSet { syncDraftBoxes() }
+    }
+    /// One observable text per Orb, mirroring `drafts`: the composer reads its own, so typing in one Orb does not
+    /// redraw the composer of any other (the dictionary is a single observation for all of them).
+    @ObservationIgnored private var draftBoxes: [UUID: DraftText] = [:]
+
+    /// What the composer of this Orb shows; reading it depends on this Orb's draft only.
+    func draftText(_ botID: UUID) -> String {
+        if let box = draftBoxes[botID] { return box.text }
+        let box = DraftText(text: drafts[botID] ?? "")
+        draftBoxes[botID] = box
+        return box.text
+    }
+
+    private func syncDraftBoxes() {
+        for (id, box) in draftBoxes where box.text != (drafts[id] ?? "") { box.text = drafts[id] ?? "" }
+    }
     /// The drafts as last written to `rascunhos.json` (see `saveDraftsIfChanged`).
     @ObservationIgnored var savedDrafts: [UUID: ComposerDraft] = [:]
     var showInspector = true
@@ -2084,4 +2101,10 @@ struct ConnectionSources: Sendable {
         hasChatGPTCredential: { await ChatGPTAuth.shared.credential != nil },
         signOutOfChatGPT: { await ChatGPTAuth.shared.signOut() },
         claudeCodeStatus: { await ClaudeCode.shared.status() })
+}
+
+/// The text of one Orb's composer, observable on its own (see `AppModel.draftText`).
+@Observable final class DraftText {
+    var text: String
+    init(text: String) { self.text = text }
 }
