@@ -1224,6 +1224,26 @@ struct AccessibilityHangTests {
         await #expect(throws: CancellationError.self) { try await task.value }
         #expect(started.duration(to: clock.now) < .seconds(25), "not the 30 s of the work")
     }
+
+    @Test func workStoppedWhileWaitingInTheAppsQueueNeverRuns() async throws {
+        let sessions = AXSessions()
+        let app = AccessibilityApp(name: "Ocupado", bundleID: nil, pid: 6_002)
+        let busy = DispatchSemaphore(value: 0)
+        let running = OSAllocatedUnfairLock(initialState: false)
+        let acted = OSAllocatedUnfairLock(initialState: false)
+        let first = Task { try await sessions.run(app, within: .seconds(60)) { running.withLock { $0 = true }; busy.wait(); return 1 } }
+        try #require(await waitUntil("the first work holds the app's queue") { running.withLock { $0 } })
+        // The click waits behind it in the same app's queue; Stop comes before its turn.
+        let click = Task { try await sessions.run(app, within: .seconds(60)) { acted.withLock { $0 = true }; return 2 } }
+        try await Task.sleep(for: .milliseconds(100))
+        click.cancel()
+        await #expect(throws: CancellationError.self) { try await click.value }
+        busy.signal()
+        _ = try await first.value
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(!acted.withLock { $0 }, "a stopped click must not reach the app")
+        #expect(sessions.runningCount == 0)
+    }
 }
 
 @MainActor

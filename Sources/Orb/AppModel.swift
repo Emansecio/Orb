@@ -228,7 +228,7 @@ final class AppModel {
     @ObservationIgnored private var stateSave: Task<Void, Never>?
     /// How long a conversation nobody is looking at stays in memory (tests shorten it).
     @ObservationIgnored var conversationKeepAlive = Duration.seconds(300)
-    @ObservationIgnored private var didReportSaveFailure = false
+    @ObservationIgnored private(set) var didReportSaveFailure = false
     /// When the Mac last woke from sleep: a routine that came due meanwhile waits for the network (see `runDueRoutines`).
     @ObservationIgnored private var wokeAt: Date?
     /// Since when the Mac is going to sleep or asleep: the scheduler's timer can resume before the wake notification arrives,
@@ -883,7 +883,11 @@ final class AppModel {
     /// Reloads the provider's live model list; picks a default model if there is none yet.
     func refreshModels(_ kind: ProviderKind) async throws {
         guard let current = account(kind) else { return }
+        let generation = keychainGeneration
         let fetched = try await loadModels(current)
+        // A list asked for with a key or address that changed meanwhile (signed out, another key, another server) is
+        // not this provider's any more: it would bring back the models of what was just let go of.
+        guard generation == keychainGeneration, account(kind)?.baseURL == current.baseURL else { return }
         modelRefreshFailures[kind] = nil
         updateProvider(kind) {
             // Read inside the update, so a model added by hand while the list was loading is kept.
@@ -1732,6 +1736,9 @@ final class AppModel {
             let read = await store.readRoutineConversationAsync(routine: routine.id, for: botID)
             startingRoutines[botID] = nil
             beginRoutine(routine.id, of: botID, read: read)
+            // It did not run (nothing to send, the routine or the Orb gone meanwhile): what waits for the Orb goes on now,
+            // as after a turn, instead of waiting for the next message.
+            if !isResetting, bot(botID) != nil, sessions[botID]?.turnTask == nil { startNextQueuedWork(for: botID) }
         }
     }
 

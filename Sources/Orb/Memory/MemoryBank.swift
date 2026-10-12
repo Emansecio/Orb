@@ -394,15 +394,18 @@ actor MemoryBank {
 
     /// Saves the page summarizing a conversation stretch (see `SessionSummary`). The first one the Orb answered
     /// ends the first-conversation interview, answered or not.
-    func saveSession(_ page: MemoryPage, now: Date = .now) {
+    /// Returns whether the page was written.
+    @discardableResult
+    func saveSession(_ page: MemoryPage, now: Date = .now) -> Bool {
         prepare(now: now)
         var page = page
         if FileManager.default.fileExists(atPath: directory.appending(path: page.path).path) {
             page.path = uniquePath("sessoes", String(page.path.dropFirst("sessoes/".count).dropLast(".md".count)))
         }
-        guard write(page) else { return }
+        guard write(page) else { return false }
         if page.body.contains("## Última resposta") { finishInterview() }
         sweep(now: now)
+        return true
     }
 
     /// ai-memory's retention: salience·e^(−λ·age) + σ·ln(1+uses)·e^(−μ·days since last use).

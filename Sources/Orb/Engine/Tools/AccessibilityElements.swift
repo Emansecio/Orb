@@ -388,13 +388,17 @@ struct LiveAccessibilityElement: AccessibilityElement, @unchecked Sendable {
         return AXUIElementIsAttributeSettable(ref, name as CFString, &settable) == .success && settable.boolValue
     }
 
+    // Every effect checks for Stop right before it reaches the app: work that was queued, waited for a slot or read the
+    // app for a while does nothing once the turn was stopped (what already reached the app cannot be taken back).
     func perform(_ action: String) throws {
         Self.offMain()
+        try AXWork.checkCancellation()
         try Self.check(AXUIElementPerformAction(ref, action as CFString))
     }
 
     func setValue(_ value: AXAttributeValue, for name: String) throws {
         Self.offMain()
+        try AXWork.checkCancellation()
         let converted: CFTypeRef
         switch value {
         case .string(let text): converted = text as CFString

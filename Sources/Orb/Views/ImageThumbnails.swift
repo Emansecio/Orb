@@ -45,8 +45,10 @@ struct ImageThumbnail: View {
             // Born from the cache with this very picture: nothing to decode, and no second pass over the body.
             // (Compared with the cached copy of `path`, so a view reused for another path still loads it.)
             if let image, image === Thumbnails.cached(path: path, side: decodeSide) { return }
-            image = await Thumbnails.image(at: path, side: decodeSide)
-            failed = image == nil
+            let decoded = await Thumbnails.image(at: path, side: decodeSide)
+            guard !Task.isCancelled else { return } // the view shows another picture now
+            image = decoded
+            failed = decoded == nil
         }
     }
 }
@@ -59,6 +61,8 @@ enum Thumbnails {
     nonisolated(unsafe) private static let cache: NSCache<NSString, NSImage> = {
         let cache = NSCache<NSString, NSImage>()
         cache.countLimit = 300
+        // And by memory: a conversation full of photos keeps the most recent ~64 MB of decoded copies.
+        cache.totalCostLimit = 64 << 20
         return cache
     }()
 
@@ -75,8 +79,13 @@ enum Thumbnails {
         let key = key(path, side)
         if let cached = cache.object(forKey: key) { return cached }
         let image = await Task.detached { decode(path: path, side: side) }.value
-        if let image { cache.setObject(image, forKey: key) }
+        if let image { cache.setObject(image, forKey: key, cost: cost(of: image)) }
         return image
+    }
+
+    /// The bytes of the decoded bitmap (4 per pixel).
+    static func cost(of image: NSImage) -> Int {
+        image.representations.first.map { $0.pixelsWide * $0.pixelsHigh * 4 } ?? 0
     }
 
     private static func decode(path: String, side: CGFloat) -> NSImage? {

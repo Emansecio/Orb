@@ -45,18 +45,19 @@ extension AppModel {
                                                                   credentials: Self.credentials(for: ref.provider),
                                                                   conversationID: identity + "-resumo")
             var note: ChunkSummarizer.Note?
-            if let client { note = try? await ChunkSummarizer.write(plan, client: client, model: writer?.id ?? ref.model) }
+            if let client { note = await ChunkSummarizer.write(plan, client: client, model: writer?.id ?? ref.model) }
+            if let usage = note?.usage, !self.isResetting, self.bot(botID) != nil {
+                // On the Uso page, apart from the chat: a call the app made for itself, counted whether or not it gave a
+                // note (a reply too short, cut or failed was still billed).
+                self.recordAuxiliaryUsage(usage, botID: botID, model: ModelRef(provider: ref.provider, model: writer?.id ?? ref.model).text)
+                if CacheHealth.logsUsage {
+                    FileHandle.standardError.write(Data(("stretch note: " + CacheHealth.logLine(step: 0, usage: usage) + "\n").utf8))
+                }
+            }
             guard !Task.isCancelled else { return } // the Orb, the conversation or the whole app was let go of meanwhile
             session.chunkAttempts[stretch, default: 0] += 1
-            if let note {
-                if let usage = note.usage {
-                    // On the Uso page, apart from the chat: a call the app made for itself.
-                    self.recordAuxiliaryUsage(usage, botID: botID, model: ModelRef(provider: ref.provider, model: writer?.id ?? ref.model).text)
-                    if CacheHealth.logsUsage {
-                        FileHandle.standardError.write(Data(("stretch note: " + CacheHealth.logLine(step: 0, usage: usage) + "\n").utf8))
-                    }
-                }
-                session.keepStretchNote(ChunkSummary(start: plan.range.lowerBound, end: plan.range.upperBound, text: note.text))
+            if let text = note?.text {
+                session.keepStretchNote(ChunkSummary(start: plan.range.lowerBound, end: plan.range.upperBound, text: text))
             }
             session.chunkTask = nil
         }

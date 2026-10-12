@@ -623,6 +623,17 @@ extension AgentEngineTests {
         #expect(approvals(events).isEmpty)
     }
 
+    @Test func aReplyWithManyReadsRunsAFewAtATime() async {
+        let gauge = Gauge()
+        let count = AgentEngine.parallelTools * 2 + 3
+        // The first ones wait until a full share runs together; with no cap, the rest would join them.
+        let calls = (0..<count).map { lookCall("r\($0)", ms: 50, name: "\($0)", together: $0 < AgentEngine.parallelTools ? AgentEngine.parallelTools : nil) }
+        let script = Script([[.toolCalls(calls)], [.text("Pronto")]])
+        let events = await run(AgentEngine(), request(script, mode: .ask, runs: Counter(), tools: [LookTool(gauge: gauge)]))
+        #expect(await gauge.peak == AgentEngine.parallelTools)
+        #expect(messages(events).filter { $0.role == .tool }.map(\.toolCallID) == calls.map(\.id))
+    }
+
     @Test func callsThatChangeThingsStayInOrderBetweenParallelReads() async {
         let gauge = Gauge()
         let runs = Counter()

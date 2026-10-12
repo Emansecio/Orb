@@ -149,30 +149,41 @@ final class AXSessions: @unchecked Sendable {
         guard await acquire(until: started + deadline) else {
             throw ToolError(AXSessionMessage.timedOut(app, after: deadline))
         }
+        // Stopped while it waited for a slot: the slot passes on and nothing reaches the app.
+        if Task.isCancelled {
+            release()
+            throw CancellationError()
+        }
         session.state.withLock { $0.lastUsed = .now }
 
         let call = CallGate<T>()
         let token = AXWorkToken()
-        session.submit {
-            let result: Result<T, any Error>
-            do { result = .success(try AXWorkToken.$current.withValue(token) { try work() }) } catch { result = .failure(error) }
-            session.state.withLock { state in
-                if call.finish() { state.overdue -= 1 }
-                state.lastUsed = .now
-            }
-            self.release()
-            call.resolve(result)
-        }
-        // The deadline; a no-op when the work came back first (the gate is resolved once).
-        let wait = Self.interval(ContinuousClock.now.duration(to: started + deadline))
-        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + wait) {
-            session.state.withLock { state in
-                if call.markOverdue() { state.overdue += 1 }
-            }
-            call.resolve(.failure(ToolError(AXSessionMessage.timedOut(app, after: deadline))))
-        }
+        // Submitted from inside the handler, so a stop that came first has cancelled the token before the work is queued,
+        // and work still waiting in the app's queue when Stop comes does nothing once its turn arrives.
         return try await withTaskCancellationHandler {
-            try await call.value()
+            session.submit {
+                let result: Result<T, any Error>
+                if token.isCancelled {
+                    result = .failure(CancellationError())
+                } else {
+                    do { result = .success(try AXWorkToken.$current.withValue(token) { try work() }) } catch { result = .failure(error) }
+                }
+                session.state.withLock { state in
+                    if call.finish() { state.overdue -= 1 }
+                    state.lastUsed = .now
+                }
+                self.release()
+                call.resolve(result)
+            }
+            // The deadline; a no-op when the work came back first (the gate is resolved once).
+            let wait = Self.interval(ContinuousClock.now.duration(to: started + deadline))
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + wait) {
+                session.state.withLock { state in
+                    if call.markOverdue() { state.overdue += 1 }
+                }
+                call.resolve(.failure(ToolError(AXSessionMessage.timedOut(app, after: deadline))))
+            }
+            return try await call.value()
         } onCancel: {
             token.cancel()
             call.resolve(.failure(CancellationError()))

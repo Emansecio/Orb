@@ -59,7 +59,28 @@ import Testing
         session.keepRequestedMemory(succeeded: true)
         let bank = model.memory.bank(for: session.id)
         await waitUntil("the fact") { await !bank.snapshot().items(.fato).isEmpty }
-        #expect(notices(session).contains { $0.hasPrefix("Guardado na memória: prefiro respostas curtas") })
+        #expect(await waitUntil("the notice, once it was kept") { notices(session).contains { $0.hasPrefix("Guardado na memória: prefiro respostas curtas") } })
+    }
+
+    @Test func whatCouldNotBeKeptIsNotSaidToBeKept() async {
+        let (model, session) = setUp()
+        session.append(.user(text: "memorize que prefiro respostas curtas", attachments: []))
+        session.memoryRequest = (MemoryIntent(content: "prefiro respostas curtas"), 0)
+        model.memory.bank(for: session.id).close() // the page cannot be written
+        session.keepRequestedMemory(succeeded: true)
+        #expect(await waitUntil("the notice") { notices(session).contains { $0.hasPrefix("Não consegui guardar na memória") } })
+        #expect(!notices(session).contains { $0.hasPrefix("Guardado na memória") })
+    }
+
+    @Test func aStretchWhosePageWasNotWrittenIsTakenAgainNextTime() async {
+        let (model, session) = setUp()
+        session.append(.user(text: "vamos planejar a viagem", attachments: []))
+        session.append(.bot(text: "Combinado: saímos sexta.", isStreaming: false))
+        model.memory.bank(for: session.id).close()
+        #expect(session.saveMemory())
+        #expect(!session.hasUnsavedStretch()) // marked at once, so a second save does not take it twice
+        #expect(await waitUntil("the mark goes back") { session.hasUnsavedStretch() })
+        #expect(session.conversation?.memorySavedCount == 0)
     }
 
     /// The body is what you said, so the same fact saved later by the model is the same page.

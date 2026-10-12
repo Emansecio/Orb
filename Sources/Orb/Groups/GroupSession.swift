@@ -110,6 +110,11 @@ final class GroupSession {
         persist(conversation)
     }
 
+    /// The write `saveNow` handed over failed: the thread is unsaved again (unless the group is gone).
+    func markUnsaved() {
+        if persist != nil { isDirty = true }
+    }
+
     /// Cancels the pending save (the group is deleted: its file goes, and nothing may bring it back).
     func discard() {
         saveTask?.cancel()

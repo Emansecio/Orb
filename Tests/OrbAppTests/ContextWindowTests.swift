@@ -688,6 +688,18 @@ struct ContextEngineTests {
         #expect(failures(events).count == 1)
     }
 
+    @Test func aWindowTheInstructionsAndToolsFillIsSaidSo() async throws {
+        // 90% of 2,000 tokens, less the reply's room and the request's own overhead, is under the history's minimum.
+        #expect(ContextBudget(modelWindow: 2_000).refined(overheadTokens: 100).isCrowded)
+        #expect(!ContextBudget(modelWindow: 16_000).refined(overheadTokens: 8_000).isCrowded)
+        #expect(!ContextBudget.fallback.isCrowded)
+        let overflow = LLMError.http(status: 400, message: "maximum context length is 2000 tokens")
+        let recorder = Recorder([], failures: [overflow, overflow])
+        let events = await collect(engineRequest(recorder, budget: ContextBudget(modelWindow: 2_000)))
+        let failure = try #require(failures(events).first)
+        #expect(failure.contains("quase enchem a janela de 2 mil tokens"))
+    }
+
     @Test func otherErrorsAreNotRetried() async {
         let recorder = Recorder([], failures: [LLMError.http(status: 401, message: "invalid api key")])
         let events = await collect(engineRequest(recorder, budget: .fallback))

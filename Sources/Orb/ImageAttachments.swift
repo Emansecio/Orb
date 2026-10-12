@@ -34,6 +34,9 @@ enum ImageProcessing {
     /// request would only get heavier).
     static let maxSide = 1568
     static let maxOriginalBytes = 20 * 1_048_576
+    /// Pictures one message may carry: each is shrunk to well under a megabyte, so this keeps a message inside what the
+    /// providers take in one request (Anthropic: 32 MB).
+    static let maxPerMessage = 20
     static let jpegQuality = 0.85
     /// A picture with transparency stays PNG when that is no bigger than this; otherwise it becomes JPEG on white.
     static let pngKeepLimit = 1_000_000

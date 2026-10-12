@@ -346,7 +346,7 @@ struct ChunkCallTests {
     @Test func oneRequestWithTheInstructionsAndNoTools() async throws {
         let writer = Writer(events: [.text("O usuário pediu "), .text("um app e o Orb o criou. Decidiu-se usar SQLite."),
                                      .finished(.done, TokenUsage(input: 900, output: 40))])
-        let note = try #require(try await ChunkSummarizer.write(plan, client: writer, model: "modelo"))
+        let note = await ChunkSummarizer.write(plan, client: writer, model: "modelo")
         #expect(note.text == "O usuário pediu um app e o Orb o criou. Decidiu-se usar SQLite.")
         #expect(note.usage?.output == 40)
         let sent = await writer.seen.requests
@@ -363,16 +363,23 @@ struct ChunkCallTests {
     @Test func aNoteIsFlatAndHasACeiling() async throws {
         let long = String(repeating: "palavra ", count: 700)
         let writer = Writer(events: [.text("# Título\n\n- um\n- dois\n" + long), .finished(.done, nil)])
-        let note = try #require(try await ChunkSummarizer.write(plan, client: writer, model: "m"))
-        #expect(!note.text.contains("\n"))
-        #expect(note.text.count <= ChunkSummary.maxLength)
+        let text = try #require(await ChunkSummarizer.write(plan, client: writer, model: "m").text)
+        #expect(!text.contains("\n"))
+        #expect(text.count <= ChunkSummary.maxLength)
     }
 
-    @Test func aReplyTooShortOrAFailureMakesNoNote() async throws {
-        #expect(try await ChunkSummarizer.write(plan, client: Writer(events: [.text("ok")]), model: "m") == nil)
-        await #expect(throws: LLMError.self) {
-            _ = try await ChunkSummarizer.write(plan, client: Writer(failure: LLMError.network(code: -1009, message: "offline")), model: "m")
-        }
+    @Test func aReplyTooShortOrAFailureMakesNoNoteButKeepsWhatItCost() async throws {
+        let short = await ChunkSummarizer.write(plan, client: Writer(events: [.text("ok"), .finished(.done, TokenUsage(input: 900, output: 1))]), model: "m")
+        #expect(short.text == nil && short.usage == TokenUsage(input: 900, output: 1))
+        let failed = await ChunkSummarizer.write(plan, client: Writer(failure: LLMError.network(code: -1009, message: "offline")), model: "m")
+        #expect(failed.text == nil && failed.usage == nil)
+        // The input the provider reported first is kept when the reply is cut before its end.
+        let long = String(repeating: "palavra ", count: 700)
+        let cut = await ChunkSummarizer.write(plan, client: Writer(events: [.usage(TokenUsage(input: 800, output: 0)), .text(long)]), model: "m")
+        #expect(cut.text != nil && cut.usage == TokenUsage(input: 800, output: 0))
+        // A final report without numbers does not erase the ones already given.
+        let unsaid = await ChunkSummarizer.write(plan, client: Writer(events: [.usage(TokenUsage(input: 700, output: 0)), .text("ok"), .finished(.done, nil)]), model: "m")
+        #expect(unsaid.usage == TokenUsage(input: 700, output: 0))
     }
 }
 

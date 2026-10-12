@@ -117,6 +117,22 @@ struct OrbGroupMembershipTests {
         #expect(world.model.group(world.groupID)?.orchestratorID == world.pesquisador.id)
     }
 
+    @Test @MainActor func aThreadWhoseWriteFailedStaysUnsavedAndIsNotLetGoOf() async throws {
+        let world = GroupWorld()
+        // A file where the groups' folder goes: the write fails.
+        let folder = world.root.appending(path: "conversations/\(GroupFiles.threadFolder)")
+        try? FileManager.default.removeItem(at: folder)
+        try FileManager.default.createDirectory(at: folder.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: folder)
+        world.session.append(.user(text: "oi", attachments: []))
+        world.model.saveGroupSessionsNow()
+        #expect(!world.session.isDirty)
+        world.store.flush()
+        #expect(await waitUntil("the failed write marks the thread unsaved") { world.session.isDirty })
+        world.model.unloadIdleGroupSessions(idle: .zero)
+        #expect(world.model.groupSessions[world.groupID] != nil)
+    }
+
     @Test @MainActor func takingOutOneOfTwoDissolvesTheGroup() async {
         let world = GroupWorld(members: 2)
         let id = world.groupID

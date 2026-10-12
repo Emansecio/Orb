@@ -352,9 +352,11 @@ struct ImportPanel: View {
         }
         isReading = true
         readingLink = page
-        let outcome = await Task.detached(priority: .userInitiated) { () -> Result<OrbImport, any Error> in
+        let reading = Task.detached(priority: .userInitiated) { () -> Result<OrbImport, any Error> in
             do { return .success(try await GrokMarketplace.read(found)) } catch { return .failure(error) }
-        }.value
+        }
+        // Another link (or closing the panel) stops the request too, not only the wait for it.
+        let outcome = await withTaskCancellationHandler { await reading.value } onCancel: { reading.cancel() }
         guard !Task.isCancelled else {
             if readingLink == page { readingLink = nil }
             return

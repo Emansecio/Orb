@@ -157,6 +157,21 @@ struct ContextBudget: Sendable, Equatable {
         return max(minimumTokens, min(free, level.cap(window: window)))
     }
 
+    /// Whether what each request carries besides the history (system prompt, tool specs, room for the reply) leaves it
+    /// less than its minimum: then a refusal is about the Orb's instructions and tools, not about the conversation.
+    var isCrowded: Bool {
+        guard let window else { return false }
+        return Int(Double(min(window, Self.largestWindow)) * Self.windowShare) - overheadTokens - replyTokens < Self.minimumTokens
+    }
+
+    /// What a refused request says when the window is crowded (`isCrowded`): shrinking the history cannot help.
+    var crowdedFailure: String {
+        func thousands(_ tokens: Int) -> String { tokens >= 1_000 ? "\(tokens / 1_000) mil" : "\(tokens)" }
+        return "As instruções e as ferramentas deste Orb (cerca de \(thousands(overheadTokens)) tokens) quase enchem a janela de "
+            + "\(thousands(window ?? 0)) tokens deste modelo, e não sobra espaço para a conversa. Use um modelo com janela maior "
+            + "ou desligue ferramentas e conectores deste Orb."
+    }
+
     /// The same budget once the real overhead of the request (its system prompt and tool specs) is known.
     func refined(overheadTokens: Int) -> ContextBudget {
         guard let window else { return self }

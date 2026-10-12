@@ -574,6 +574,20 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(model.queuedRoutines.isEmpty)
     }
 
+    @Test @MainActor func aRoutineThatDoesNotRunLetsTheNextOneInTheQueueGo() async throws {
+        let (model, bot, routine) = setUp()
+        let empty = Routine(name: "Sem instruções", botID: bot.id, prompt: "  ", schedule: .everyHours(1))
+        model.routines.insert(empty, at: 0)
+        model.runRoutine(empty.id)
+        model.runRoutine(routine.id) // the Orb is being taken by the first: this one waits
+        #expect(model.queuedRoutines == [routine.id])
+        await waitUntil("the second routine ran") { model.routines.first { $0.id == routine.id }?.runs.isEmpty == false }
+        await waitUntilIdle(model, bot.id)
+        #expect(model.routines.first { $0.id == empty.id }?.runs.first?.summary == "Não rodou: a rotina está sem instruções.")
+        #expect(model.routines.first { $0.id == routine.id }?.runs.first?.succeeded == true)
+        #expect(model.queuedRoutines.isEmpty)
+    }
+
     @Test @MainActor func theMacIsKeptAwakeOnlyWhileARoutineRuns() async throws {
         let gate = Gate()
         let stub = StubModel(gate: gate)

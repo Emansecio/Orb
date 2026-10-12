@@ -346,7 +346,8 @@ actor AgentEngine {
         } catch is CancellationError {
             // The user stopped the turn; the UI already says so.
         } catch {
-            if !Task.isCancelled { out.yield(.failed(error.localizedDescription)) }
+            guard !Task.isCancelled else { return }
+            out.yield(.failed(ContextOverflow.matches(error) && budget.isCrowded ? budget.crowdedFailure : error.localizedDescription))
         }
     }
 
@@ -454,6 +455,8 @@ actor AgentEngine {
         + "and keep each call short."
     /// Steps left when the model is told how many it has.
     static let warningSteps = 3
+    /// Calls that run without asking (reads) of one reply that run at the same time; the rest start as these finish.
+    static let parallelTools = 8
 
     static func stepWarning(remaining: Int) -> String {
         "[Orb: restam \(remaining) chamadas de ferramenta neste turno; priorize e termine com um resumo do que fez e do que falta]"
@@ -512,15 +515,22 @@ actor AgentEngine {
             }
             let batch = Array(calls[index..<end])
             let snapshot = allowed // looking never changes the approvals
+            // At most `parallelTools` at a time: a reply with a hundred reads does not open a hundred processes at once.
             let outcomes = await withTaskGroup(of: (Int, ToolOutcome).self) { group in
-                for (offset, call) in batch.enumerated() {
+                var calls = batch.enumerated().makeIterator()
+                func startNext() {
+                    guard let (offset, call) = calls.next() else { return }
                     group.addTask {
                         var local = snapshot
                         return (offset, await self.execute(call, request: request, reason: reason, allowed: &local, out: out))
                     }
                 }
+                for _ in 0..<Self.parallelTools { startNext() }
                 var done: [Int: ToolOutcome] = [:]
-                for await (offset, outcome) in group { done[offset] = outcome }
+                while let (offset, outcome) = await group.next() {
+                    done[offset] = outcome
+                    startNext()
+                }
                 return done
             }
             for (offset, call) in batch.enumerated() {

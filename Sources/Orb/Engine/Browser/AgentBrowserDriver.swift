@@ -515,8 +515,9 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
     func back() async throws -> BrowserPage {
         let data = try await send(["back"])
         let title = (try? await send(["get", "title"]))?["title"]?.string ?? ""
-        let fallback = try? await currentURL()
-        return BrowserPage(url: data["url"]?.string ?? fallback ?? "", title: title)
+        // The address is asked for only when the answer to "back" did not bring it (one process fewer).
+        if let url = data["url"]?.string, !url.isEmpty { return BrowserPage(url: url, title: title) }
+        return BrowserPage(url: (try? await currentURL()) ?? "", title: title)
     }
 
     func tabs() async throws -> [BrowserTab] {

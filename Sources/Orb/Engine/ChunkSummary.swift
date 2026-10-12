@@ -235,28 +235,35 @@ enum ChunkSummarizer {
 
     // MARK: The call
 
-    /// What the model wrote and what it cost.
+    /// What the model wrote (nil when the reply is too short to be a note, or the request failed) and what it cost: the
+    /// cost is kept either way, since a call that gave no note was still billed.
     struct Note: Sendable, Equatable {
-        var text: String
+        var text: String?
         var usage: TokenUsage?
     }
 
     /// Asks `model` for the note on `plan`. One request, no tools, no retry here: it stops reading once the note is
-    /// longer than it may be. nil when the reply is too short to be a note; throws what the client throws.
-    static func write(_ plan: Plan, client: any LLMClient, model: String) async throws -> Note? {
-        var text = "", usage: TokenUsage?
-        for try await event in client.forShortReply.stream(model: model, messages: prompt(for: plan), tools: [], toolChoice: .none) {
-            switch event {
-            case .text(let piece):
-                text += piece
-            case .finished(_, let used):
-                usage = used
-            case .reasoning, .toolCalls, .usage:
-                break
+    /// longer than it may be. A failed request gives no note, but keeps what the provider had already said it used.
+    static func write(_ plan: Plan, client: any LLMClient, model: String) async -> Note {
+        var text = "", usage: TokenUsage?, failed = false
+        do {
+            for try await event in client.forShortReply.stream(model: model, messages: prompt(for: plan), tools: [], toolChoice: .none) {
+                switch event {
+                case .text(let piece):
+                    text += piece
+                case .usage(let used):
+                    usage = used
+                case .finished(_, let used):
+                    usage = used ?? usage
+                case .reasoning, .toolCalls:
+                    break
+                }
+                if text.count > ChunkSummary.maxLength + 400 { break }
             }
-            if text.count > ChunkSummary.maxLength + 400 { break }
+        } catch {
+            failed = true
         }
         let note = ConversationLedger.clip(text, ChunkSummary.maxLength)
-        return note.count >= minimumLength ? Note(text: note, usage: usage) : nil
+        return Note(text: !failed && note.count >= minimumLength ? note : nil, usage: usage)
     }
 }

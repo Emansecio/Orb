@@ -410,6 +410,7 @@ struct ListDirectoryTool: AgentTool {
                 return
             }
             for entry in entries.sorted(by: { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }) {
+                try Task.checkCancellation() // a wide tree is still being counted when the user stops
                 let values = try? entry.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey, .contentModificationDateKey])
                 // A link to a folder reports isDirectory false; follow it to see what it points at.
                 let isFolder = values?.isDirectory == true || (values?.isSymbolicLink == true && entry.isExistingDirectory)

@@ -235,22 +235,34 @@ extension BotSession {
     /// a page of their own, so each one gets there exactly once.
     @discardableResult
     func saveMemory(ifIdleFor gap: TimeInterval? = nil, upTo end: Int? = nil, notes: [String] = []) -> Bool {
+        let savedBefore = conversation?.memorySavedCount ?? 0
         guard let stretch = pendingStretch(ifIdleFor: gap, upTo: end) else {
             guard gap == nil, !notes.isEmpty else { return false }
             persistStretch([], notes: notes)
             return true
         }
-        persistStretch(stretch, notes: notes)
+        persistStretch(stretch, notes: notes, savedBefore: savedBefore)
         return true
     }
 
-    func persistStretch(_ stretch: [TranscriptItem], notes: [String] = []) {
+    /// `savedBefore`: where the saved mark was before `pendingStretch` moved it past `stretch`. When the page cannot be
+    /// written the mark goes back there, so the next save (a pause, a compaction) takes the stretch again.
+    func persistStretch(_ stretch: [TranscriptItem], notes: [String] = [], savedBefore: Int? = nil) {
         guard let model else { return }
-        let bank = model.memory.bank(for: id), botID = id
-        Task.detached(priority: .utility) { [weak model] in
-            if let page = SessionSummary.page(from: stretch, notes: notes) { await bank.saveSession(page) }
+        let bank = model.memory.bank(for: id), botID = id, mark = conversation?.memorySavedCount
+        Task.detached(priority: .utility) { [weak model, weak self] in
+            var written = true
+            if let page = SessionSummary.page(from: stretch, notes: notes) { written = await bank.saveSession(page) }
+            if !written, let savedBefore { await self?.unmarkStretch(at: mark, back: savedBefore) }
             await model?.refreshMemory(botID)
         }
+    }
+
+    /// The page of the stretch up to `mark` was not written: the stretch is not saved (unless the mark moved on meanwhile).
+    func unmarkStretch(at mark: Int?, back earlier: Int) {
+        guard let mark, conversation?.memorySavedCount == mark else { return }
+        conversation?.memorySavedCount = earlier
+        scheduleSave(delay: 0)
     }
 
     /// When you asked the Orb to remember something and the turn ended without it saving, the app keeps what you
@@ -278,12 +290,13 @@ extension BotSession {
             append(.notice("Não deu para saber o que guardar na memória. Diga, por exemplo: “memorize que …”."))
             return
         }
-        append(.notice("\(NoticeAction.keptMemoryPrefix) \(MemoryText.clip(content, 160))"))
         let bank = model.memory.bank(for: id), botID = id
-        Task {
+        Task { [weak self] in
             // The body is what you said, as when the model saves it (who asked stays in the origin), so the same fact
-            // saved later is recognized as this one.
-            await bank.remember(content, kind: .fato, title: content, origin: .voce)
+            // saved later is recognized as this one. The chat says it was kept once it was.
+            let outcome = await bank.remember(content, kind: .fato, title: content, origin: .voce)
+            self?.append(.notice(outcome == .failed ? "Não consegui guardar na memória: \(MemoryText.clip(content, 160))"
+                                 : "\(NoticeAction.keptMemoryPrefix) \(MemoryText.clip(content, 160))"))
             await model.refreshMemory(botID)
         }
     }

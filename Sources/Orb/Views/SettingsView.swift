@@ -147,7 +147,7 @@ struct GeneralSettings: View {
                 Toggle(isOn: $proposeSkills) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Propor skills com o que os Orbs aprendem")
-                        Text("Depois de tarefas longas, o Orb revisa o que fez e pode propor uma skill. Usa uma chamada extra ao modelo, quase toda em cache. Nada é salvo sem você aprovar.")
+                        Text("Depois de tarefas longas, o Orb revisa o que fez e pode propor uma skill. Costuma usar uma chamada extra ao modelo (até \(SkillReview.maxSteps) quando propõe algo), quase toda em cache. Nada é salvo sem você aprovar.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

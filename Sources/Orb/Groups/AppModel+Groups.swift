@@ -46,13 +46,21 @@ extension AppModel {
             }
         }
         let session = GroupSession(groupID: id, conversation: conversation)
-        session.persist = { [store] saved in store.saveGroupConversation(saved, group: id) }
+        // A write that failed leaves the thread unsaved again: memory holds the only copy, so it is not let go of and
+        // quitting writes it again (as an Orb's conversation, `reportSaveFailure`).
+        session.persist = { [store, weak session] saved in
+            store.saveGroupConversation(saved, group: id) { written in
+                guard !written else { return }
+                Task { @MainActor in session?.markUnsaved() }
+            }
+        }
         groupSessions[id] = session
         return session
     }
 
     /// Lets go of the threads nobody looks at: no request running, nothing left to save, not the open one, unused for `idle`.
     func unloadIdleGroupSessions(idle: Duration = .seconds(600)) {
+        guard !didReportSaveFailure else { return } // after a failed save, memory may be the only copy
         for (id, session) in groupSessions {
             guard selection != .group(id), !groupHub.isActive(id), !session.isDirty,
                   ContinuousClock.now - session.lastUsed > idle else { continue }

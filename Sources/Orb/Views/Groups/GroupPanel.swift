@@ -200,7 +200,7 @@ private struct GroupSettingsTab: View {
                         Text("Tokens: \(GroupBudgetText.thousands(group.budget.maxTokens))")
                             .font(.system(size: 13)).foregroundStyle(Palette.secondary)
                     }
-                    Text("Quando um pedido chega ao limite, o grupo pausa e pergunta se deve continuar.")
+                    Text("Quando um pedido chega ao limite, o grupo pausa e pergunta se deve continuar. O que já estava rodando termina, então o total pode passar um pouco do limite.")
                         .font(.system(size: 11))
                         .foregroundStyle(Palette.faint)
                 }

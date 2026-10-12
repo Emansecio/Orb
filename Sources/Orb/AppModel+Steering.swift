@@ -62,6 +62,9 @@ final class ComposerLane {
     var error: String?
     /// Pictures pasted or dropped that are still being shrunk and saved off the main thread. Sending waits for 0.
     var pendingPictures = 0
+    /// The pictures being prepared, in the order they were attached: one that is ready waits for the ones attached
+    /// before it, so a small picture never jumps ahead of a big one ("compare a primeira com a segunda").
+    @ObservationIgnored private var arriving: [(id: UUID, picture: ImageAttachment?, done: Bool)] = []
     /// The message of the chat that the composer is editing, if it is (see `AppModel+Rewind`).
     var editing: MessageEdit?
     /// Messages sent during a turn that are not in the transcript yet, oldest first. This list is what the chat
@@ -70,6 +73,24 @@ final class ComposerLane {
     @ObservationIgnored let queue = SteeringQueue()
 
     var hasAttachments: Bool { !files.isEmpty || !pictures.isEmpty }
+
+    /// Holds a place for a picture about to be prepared.
+    func reservePicture() -> UUID {
+        let id = UUID()
+        arriving.append((id, nil, false))
+        pendingPictures += 1
+        return id
+    }
+
+    /// The picture of `id` is ready (nil: it failed): it and the ones after it that are ready join in order.
+    func pictureArrived(_ id: UUID, _ picture: ImageAttachment?) {
+        if let index = arriving.firstIndex(where: { $0.id == id }) { arriving[index] = (id, picture, true) }
+        while let first = arriving.first, first.done {
+            arriving.removeFirst()
+            if let picture = first.picture { pictures.append(picture) }
+        }
+        pendingPictures -= 1
+    }
 
     /// The chip's text while pictures are prepared.
     nonisolated static func preparingText(_ count: Int) -> String { count == 1 ? "Preparando imagem…" : "Preparando \(count) imagens…" }

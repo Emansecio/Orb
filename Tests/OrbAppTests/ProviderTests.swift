@@ -457,6 +457,24 @@ struct ModelRefreshBackoffTests {
         #expect(calls.count == 4 && model.providers[0].models.map(\.id) == ["llama"])
     }
 
+    @Test @MainActor func aListThatArrivesAfterSigningOutIsNotKept() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "OrbModelRefresh-\(UUID().uuidString)")
+        defer { removeTestFolder(root) }
+        let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)
+        model.providers = [ProviderAccount(kind: .ollama)]
+        let answer = AsyncStream<Void>.makeStream()
+        model.loadModels = { _ in
+            for await _ in answer.stream { break }
+            return [ProviderModel(id: "llama", name: "llama", format: .chat)]
+        }
+        let refresh = Task { try await model.refreshModels(.ollama) }
+        try await Task.sleep(for: .milliseconds(50))
+        model.signOut(.ollama)
+        answer.continuation.yield()
+        try await refresh.value
+        #expect(model.providers[0].models.isEmpty)
+    }
+
     @Test @MainActor func aRefusedKeyIsNotAskedForAgainForSixHours() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "OrbModelRefresh-\(UUID().uuidString)")
         defer { removeTestFolder(root) }

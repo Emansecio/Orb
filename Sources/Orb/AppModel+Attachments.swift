@@ -19,15 +19,22 @@ extension AppModel {
     }
 
     /// A picture being prepared: sending waits until it is in (see `ComposerAction.canSend`).
+    /// They join in the order they were attached, however long each takes; past `ImageProcessing.maxPerMessage` the
+    /// rest is turned down (the provider would refuse the whole message).
     func attachPicture(to botID: UUID, _ load: @escaping @Sendable (ImageStore, UUID) async throws -> ImageAttachment) {
         let lane = composerLane(botID)
         lane.error = nil
+        guard lane.pictures.count + lane.pendingPictures < ImageProcessing.maxPerMessage else {
+            lane.error = "Até \(ImageProcessing.maxPerMessage) imagens por mensagem; mande as outras na próxima."
+            return
+        }
         let store = images
-        lane.pendingPictures += 1
+        let place = lane.reservePicture()
         Task {
-            defer { lane.pendingPictures -= 1 }
-            do { lane.pictures.append(try await load(store, botID)) }
+            var loaded: ImageAttachment?
+            do { loaded = try await load(store, botID) }
             catch { lane.error = error.localizedDescription }
+            lane.pictureArrived(place, loaded)
         }
     }
 

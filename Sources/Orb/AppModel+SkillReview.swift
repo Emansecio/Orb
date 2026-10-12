@@ -62,13 +62,19 @@ extension AppModel {
             }
             // Nothing of it reaches the chat or the history, but what it costs is real: each call goes to the usage
             // history as the app's own (`auxiliary`), so the Uso page shows it apart from the chat's.
+            // A call stopped midway (the user wrote) is billed for the input the provider already reported, as in a turn.
+            var unfinished: TokenUsage?
             for await event in engine.run(request) {
                 guard let usedModel else { continue }
                 switch event {
-                case .requestUsage(let used): recordUsage(UsageTotals(used), botID: botID, model: usedModel, source: .auxiliary)
+                case .pendingUsage(let used): unfinished = used
+                case .requestUsage(let used):
+                    unfinished = nil
+                    recordUsage(UsageTotals(used), botID: botID, model: usedModel, source: .auxiliary)
                 default: break
                 }
             }
+            if let unfinished, let usedModel { recordUsage(UsageTotals(unfinished), botID: botID, model: usedModel, source: .auxiliary) }
             usageLog.flush()
             guard !Task.isCancelled else { return }
             session.skillReview = nil
