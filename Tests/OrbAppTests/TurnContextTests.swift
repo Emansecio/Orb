@@ -172,10 +172,6 @@ struct CapabilityPromptTests {
         return (model, model.bots[0])
     }
 
-    @MainActor private func waitUntilIdle(_ model: AppModel, _ botID: UUID) async {
-        await waitUntil("the turn to end") { !model.isWorking(botID) }
-    }
-
     @Test @MainActor func aNativeTurnRecordsTheSnapshotOnlyWhenItsMessageIsStored() {
         let (model, bot) = model()
         model.session(bot.id).pendingMarks = DeliveryMarks(workspaceHash: "w1", workspace: nil)

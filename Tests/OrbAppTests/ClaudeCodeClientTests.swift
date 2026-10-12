@@ -243,15 +243,6 @@ private func collect(_ stream: AsyncThrowingStream<LLMEvent, Error>) async throw
     return events
 }
 
-private func waitUntil(timeout: Duration = .seconds(10), _ condition: () -> Bool) async -> Bool {
-    let end = ContinuousClock.now + timeout
-    while ContinuousClock.now < end {
-        if condition() { return true }
-        try? await Task.sleep(for: .milliseconds(25))
-    }
-    return condition()
-}
-
 private func arguments(of launch: JSONValue?) -> [String] { (launch?["args"]?.array ?? []).compactMap { $0.string } }
 
 private let readFile = ToolSpec(name: "read_file", description: "Reads a file", parameters: .schema(["path": .property("string")], required: ["path"]))

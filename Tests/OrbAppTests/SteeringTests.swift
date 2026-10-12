@@ -199,10 +199,6 @@ struct SteeringEngineTests {
         model.transcript(id).compactMap { if case .user(let text, _) = $0.kind { text } else { nil } }
     }
 
-    @MainActor private func waitUntilIdle(_ model: AppModel, _ id: UUID) async {
-        await waitUntil("the Orb to finish") { !model.isWorking(id) && model.turns[id] == nil && !model.isStartingRoutine }
-    }
-
     @Test @MainActor func aMessageSentDuringATurnIsQueuedAndShownAsWaiting() async throws {
         let gate = Latch()
         let client = HeldModel(gate: gate)

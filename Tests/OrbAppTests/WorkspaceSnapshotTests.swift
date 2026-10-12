@@ -11,7 +11,7 @@ private final class Folder {
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     }
 
-    deinit { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+    deinit { removeTestFolder(url.deletingLastPathComponent()) }
 
     @discardableResult
     func write(_ path: String, _ text: String = "x") throws -> URL {

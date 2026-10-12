@@ -7,14 +7,6 @@ import Testing
 
 // MARK: - Helpers
 
-private func call(_ id: String, _ name: String, _ arguments: String) -> ToolCallRequest {
-    ToolCallRequest(id: id, name: name, arguments: arguments)
-}
-
-private func assistant(_ text: String = "", calls: [ToolCallRequest] = []) -> ChatMessage {
-    ChatMessage(role: .assistant, content: text, toolCalls: calls)
-}
-
 /// A turn: the request, one tool step (`name` with `arguments`) answered by `output`, and a reply.
 private func step(_ request: String, tool name: String = "read_file", arguments: String = "{}", output: String = "ok",
                   isError: Bool = false, reply: String = "feito") -> [ChatMessage] {

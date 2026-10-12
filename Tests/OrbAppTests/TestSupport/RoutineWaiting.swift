@@ -10,3 +10,8 @@ extension AppModel {
         await waitUntil("the routine to start", poll: .milliseconds(1)) { !self.isStartingRoutine }
     }
 }
+
+/// Returns once the Orb has finished its turn: not working, no turn task, and no routine being started for it.
+@MainActor func waitUntilIdle(_ model: AppModel, _ botID: UUID) async {
+    await waitUntil("the Orb to finish its turn") { !model.isWorking(botID) && model.session(botID).turnTask == nil && !model.isStartingRoutine }
+}

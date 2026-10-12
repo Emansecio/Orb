@@ -6,10 +6,6 @@ import Testing
 
 // MARK: - Helpers
 
-private func call(_ id: String, _ name: String = "read_file", _ arguments: String = "{}") -> ToolCallRequest {
-    ToolCallRequest(id: id, name: name, arguments: arguments)
-}
-
 /// One finished turn: the request, `steps` tool rounds with `output`-sized results, and a final answer.
 private func turn(_ request: String, steps: Int = 1, output: Int = 100, tag: String = "t") -> [ChatMessage] {
     var messages: [ChatMessage] = [.user(request)]

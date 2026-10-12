@@ -6,10 +6,6 @@ import Testing
 // that starts with a steps note only, the steady state of a long conversation, the "/compactar" command, and the
 // numbers of Claude Code's manual compaction.
 
-private func call(_ id: String, _ name: String, _ arguments: String) -> ToolCallRequest {
-    ToolCallRequest(id: id, name: name, arguments: arguments)
-}
-
 private let firstRequest = "Construa o app Atlas com SQLite e rode os testes a cada mudança"
 
 /// A request, `steps` tool steps each answered by `output` characters, and a reply.

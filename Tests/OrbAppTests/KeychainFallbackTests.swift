@@ -20,16 +20,10 @@ import Testing
         func has(_ account: String, in service: String) -> Bool { stored[key(account, service)] != nil }
     }
 
-    private final class Preferences: PreferenceStore {
-        var values: [String: Any] = [:]
-        func object(forKey key: String) -> Any? { values[key] }
-        func set(_ value: Any?, forKey key: String) { values[key] = value }
-    }
-
     private let own = Keychain.service, legacy = Keychain.legacyService
 
-    private func setUp() -> (Items, Preferences, LegacyKeychainLedger) {
-        let preferences = Preferences()
+    private func setUp() -> (Items, FakePreferences, LegacyKeychainLedger) {
+        let preferences = FakePreferences()
         return (Items(), preferences, LegacyKeychainLedger(preferences: preferences))
     }
 
@@ -105,7 +99,7 @@ import Testing
             func read(_ account: String, service: String) -> String? { service == Keychain.legacyService ? "k" : nil }
             func replace(_ value: String, account: String, service: String) -> Bool { false }
         }
-        let preferences = Preferences()
+        let preferences = FakePreferences()
         let ledger = LegacyKeychainLedger(preferences: preferences)
         #expect(Keychain.lookup("openai", service: own, items: Locked(), ledger: ledger) == "k") // it still works now
         #expect(!ledger.handled("openai"))

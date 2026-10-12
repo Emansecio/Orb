@@ -7,6 +7,9 @@ import Testing
 import UniformTypeIdentifiers
 @testable import Orb
 
+/// The lines of a tool's output.
+func lines(_ output: String) -> [String] { output.split(separator: "\n").map(String.init) }
+
 /// A throwaway working directory for tool tests, removed when the test ends.
 final class ToolWorkspace {
     let directory: URL

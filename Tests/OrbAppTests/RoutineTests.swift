@@ -96,10 +96,6 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
 
     /// Returns when the Orb has no turn: closing a turn starts the next queued routine in the same step, so there
     /// is no moment in between where it looks idle.
-    @MainActor private func waitUntilIdle(_ model: AppModel, _ botID: UUID) async {
-        await waitUntil("the Orb to finish its turn") { !model.isWorking(botID) && model.turns[botID] == nil && !model.isStartingRoutine }
-    }
-
     private func notices(_ items: [TranscriptItem]) -> [String] {
         items.compactMap { if case .notice(let text) = $0.kind { text } else { nil } }
     }

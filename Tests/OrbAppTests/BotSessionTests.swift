@@ -121,10 +121,6 @@ private struct WritingModel: LLMClient {
         return result
     }
 
-    @MainActor private func waitUntilIdle(_ model: AppModel, _ botID: UUID) async {
-        await waitUntil("the Orb to finish its turn") { !model.isWorking(botID) && model.session(botID).turnTask == nil && !model.isStartingRoutine }
-    }
-
     @MainActor private func modelCalls(_ gates: Gates, _ count: Int) async {
         await waitUntil("\(count) model call(s)") { await gates.calls.count >= count }
     }
