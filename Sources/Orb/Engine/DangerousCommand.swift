@@ -596,6 +596,11 @@ enum DangerousCommand {
     /// Apps whose scripted `send` (or Return in their window) delivers something to other people and cannot be taken back.
     /// Matched against the whole text of a string literal (a name or a bundle id), so a longer sentence that mentions
     /// an app does not count.
+    /// `scriptRules` compiled once.
+    private static let compiledScriptRules: [(regex: NSRegularExpression, reason: String)] = scriptRules.compactMap { rule in
+        (try? NSRegularExpression(pattern: rule.pattern, options: [.caseInsensitive])).map { ($0, rule.reason) }
+    }
+
     private static let messagingApps = #"^(?:mail|messages|mensagens|(?:microsoft )?outlook|whatsapp|telegram|slack|signal|discord|microsoft teams|com\.apple\.mail|com\.apple\.MobileSMS|com\.microsoft\.Outlook|net\.whatsapp\.WhatsApp|ru\.keepcoder\.Telegram|com\.tinyspeck\.slackmacgap)(?:\.app)?$"#
 
     /// A script split into what runs and what is only text: `code` has its comments removed and every string literal
@@ -700,7 +705,8 @@ enum DangerousCommand {
                 if let reason = check(piece, scope: scope, home: home, depth: depth + 1) { return "monta um comando de shell que \(reason)" }
             }
         }
-        for rule in scriptRules where code.range(of: rule.pattern, options: [.regularExpression, .caseInsensitive]) != nil {
+        let codeRange = NSRange(code.startIndex..., in: code)
+        for rule in compiledScriptRules where rule.regex.firstMatch(in: code, range: codeRange) != nil {
             return rule.reason
         }
         // Filtering with `whose` and then deleting removes everything that matches.

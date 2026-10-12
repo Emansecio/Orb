@@ -237,6 +237,15 @@ struct LearnedContext: Codable, Sendable, Equatable {
 extension ContextOverflow {
     /// The window size a provider's refusal states ("maximum context length is 8192 tokens", "prompt is too long:
     /// 213456 tokens > 200000 maximum"), or nil when it gives no number.
+    /// Each pattern captures the window in its last group; the first one that matches wins.
+    private static let windowExpressions: [NSRegularExpression] = [
+        #"maximum context length (?:is|of)? ?(\d{4,8})"#,
+        #"\d{4,8} tokens? ?> ?(\d{4,8})"#,
+        #"context (?:length|window|size)(?: limit)?[:=]? ?(?:is |of )?(\d{4,8})"#,
+        #"n_ctx(?:_seq)? ?[=:] ?(\d{4,8})"#,
+        #"(?:limit|maximum|max)(?: is| of|:|=)? ?(\d{4,8}) tokens"#,
+    ].compactMap { try? NSRegularExpression(pattern: $0) }
+
     static func reportedWindow(_ error: Error) -> Int? {
         let message: String
         switch error {
@@ -252,17 +261,8 @@ extension ContextOverflow {
     static func reportedWindow(in message: String) -> Int? {
         // "128,000" and "128_000" read as one number.
         let text = message.lowercased().replacingOccurrences(of: #"(?<=\d)[,_](?=\d{3})"#, with: "", options: .regularExpression)
-        // Each pattern captures the window in its last group; the first one that matches wins.
-        let patterns = [
-            #"maximum context length (?:is|of)? ?(\d{4,8})"#,
-            #"\d{4,8} tokens? ?> ?(\d{4,8})"#,
-            #"context (?:length|window|size)(?: limit)?[:=]? ?(?:is |of )?(\d{4,8})"#,
-            #"n_ctx(?:_seq)? ?[=:] ?(\d{4,8})"#,
-            #"(?:limit|maximum|max)(?: is| of|:|=)? ?(\d{4,8}) tokens"#,
-        ]
-        for pattern in patterns {
-            guard let regex = try? NSRegularExpression(pattern: pattern),
-                  let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+        for regex in windowExpressions {
+            guard let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
                   match.numberOfRanges > 1, let range = Range(match.range(at: match.numberOfRanges - 1), in: text),
                   let value = Int(text[range]), (1_000...10_000_000).contains(value) else { continue }
             return value

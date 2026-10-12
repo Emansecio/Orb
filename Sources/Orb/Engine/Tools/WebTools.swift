@@ -245,8 +245,8 @@ struct WebFetchTool: AgentTool {
 
     /// `max_chars` characters from `offset`, with a note on where to continue. A page is cut at the last line
     /// break (or space) near its end, not in the middle of a word or an address, and the note says where it really stopped.
-    static func page(of text: String, arguments: JSONValue, truncatedDownload: Int?, cutAfter: Int? = nil) -> String {
-        let total = text.count
+    static func page(of text: String, arguments: JSONValue, truncatedDownload: Int?, cutAfter: Int? = nil, characters: Int? = nil) -> String {
+        let total = characters ?? text.count
         let offset = arguments.integer("offset", default: 0, in: 0...Int.max)
         let length = arguments.integer("max_chars", default: defaultCharacters, in: 1...maxCharacters)
         if total == 0 { return "(sem texto)" }
@@ -416,11 +416,14 @@ actor WebPageCache {
         /// Seconds the download was given when it was cut by time instead of size.
         var cutAfter: Int?
         var date = Date()
+        /// `text.count`, set when stored, so each continuation does not count the whole page again.
+        var characters: Int?
 
         /// What the model gets: the header, then the page from `offset`, or the passages around `find`.
         func render(arguments: JSONValue, find: String?) -> String {
             let body = find.map { WebFetchTool.passages(of: $0, in: text) }
-                ?? WebFetchTool.page(of: text, arguments: arguments, truncatedDownload: truncatedDownload, cutAfter: cutAfter)
+                ?? WebFetchTool.page(of: text, arguments: arguments, truncatedDownload: truncatedDownload, cutAfter: cutAfter,
+                                         characters: characters)
             return header + "\n\n" + body
         }
     }
@@ -440,9 +443,11 @@ actor WebPageCache {
         return found.entry
     }
 
-    func store(_ entry: Entry, for address: String) {
+    func store(_ stored: Entry, for address: String) {
         entries.removeAll { $0.address == address }
-        guard entry.text.utf8.count <= Self.largestText else { return }
+        guard stored.text.utf8.count <= Self.largestText else { return }
+        var entry = stored
+        entry.characters = entry.text.count
         entries.append((address, entry))
         if entries.count > Self.capacity { entries.removeFirst(entries.count - Self.capacity) }
     }

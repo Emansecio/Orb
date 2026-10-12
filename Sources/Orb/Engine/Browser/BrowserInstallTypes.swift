@@ -281,8 +281,10 @@ enum BrowserVersion {
 /// Reads `42/184 MB` out of what `agent-browser install` and `python -m cloakbrowser install` print as they download
 /// ("  9/184 MB (5%)", "Download progress: 59% (82/140 MB)").
 enum DownloadProgressLine {
+    private static let progress = try? NSRegularExpression(pattern: #"(\d+)\s*/\s*(\d+)\s*MB"#)
+
     static func parse(_ text: String) -> (received: Int64, total: Int64)? {
-        guard let regex = try? NSRegularExpression(pattern: #"(\d+)\s*/\s*(\d+)\s*MB"#) else { return nil }
+        guard let regex = progress else { return nil }
         let range = NSRange(text.startIndex..., in: text)
         guard let match = regex.matches(in: text, range: range).last,
               let first = Range(match.range(at: 1), in: text), let second = Range(match.range(at: 2), in: text),

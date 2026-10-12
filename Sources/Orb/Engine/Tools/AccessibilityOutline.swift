@@ -252,8 +252,12 @@ enum UIOutlineBuilder {
         let roots = visit(window, id: prefix, depth: 0, webDepth: nil, wanted: wanted, limits: limits, walk: &walk)
         var outline = UIOutline(cuts: walk.cuts, cancelled: walk.cancelled, failure: walk.failure, windowFrame: walk.windowFrame)
         let listed = roots.filter(\.keep)
-        outline.total = listed.reduce(0) { $0 + count($1) }
-        outline.matched = wanted == nil ? 0 : listed.reduce(0) { $0 + countMatches($1) }
+        for node in listed {
+            let counted = counts(node)
+            outline.total += counted.total
+            outline.matched += counted.matched
+        }
+        if wanted == nil { outline.matched = 0 }
         var ordered: [(node: Node, depth: Int)] = []
         for node in listed { collect(node, depth: 0, limits: limits, into: &ordered) }
         if outline.total > ordered.count { outline.cuts.insert(.lines) }
@@ -334,9 +338,15 @@ enum UIOutlineBuilder {
         return [node]
     }
 
-    private static func count(_ node: Node) -> Int { 1 + node.children.filter(\.keep).reduce(0) { $0 + count($1) } }
-    private static func countMatches(_ node: Node) -> Int {
-        (node.matches ? 1 : 0) + node.children.filter(\.keep).reduce(0) { $0 + countMatches($1) }
+    /// Kept nodes in the subtree, and how many of them match the query, in one pass.
+    private static func counts(_ node: Node) -> (total: Int, matched: Int) {
+        var result = (total: 1, matched: node.matches ? 1 : 0)
+        for child in node.children where child.keep {
+            let inner = counts(child)
+            result.total += inner.total
+            result.matched += inner.matched
+        }
+        return result
     }
 
     private static func collect(_ node: Node, depth: Int, limits: UIOutlineLimits, into ordered: inout [(node: Node, depth: Int)]) {
