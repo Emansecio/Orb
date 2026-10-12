@@ -25,9 +25,9 @@ Cada item fica marcado aqui quando entra na `main`.
 
 | Leva | Itens | Estado |
 |---|---|---|
-| 1 | C40–C49, E57–E63, F64–F68 | em andamento |
-| 2 | D50–D56 | — |
-| 3 | A1–A9 | — |
+| 1 | C40–C49, E57–E63, F64–F68 | feita; fora: 61 (stubs com comportamentos distintos), parte do 49 (`BrowserHub.closeAll` fica) |
+| 2 | D50–D56 | feita; fora: 51 (os dois switches não são o mesmo mapeamento), `leftOff` do 56 |
+| 3 | A1–A9 | em andamento |
 | 4 | B10–B39 | — |
 
 
