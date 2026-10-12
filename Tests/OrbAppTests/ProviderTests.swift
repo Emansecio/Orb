@@ -52,8 +52,8 @@ struct ProviderTests {
         """))
         let models = ModelCatalog.openCodeModels(
             live: ["glm-5.3", "claude-haiku-5-5", "gpt-5.6-luna", "gemini-x", "big-pickle", "old", "unknown"], metadata: metadata)
-        #expect(models.map(\.id) == ["glm-5.3", "claude-haiku-5-5", "gpt-5.6-luna", "big-pickle"])
-        #expect(models.map(\.format) == [.chat, .messages, .responses, .chat])
+        #expect(models.map(\.id) == ["glm-5.3", "claude-haiku-5-5", "gpt-5.6-luna"])
+        #expect(models.map(\.format) == [.chat, .messages, .responses])
         #expect(models[0].contextLength == 200_000)
     }
 

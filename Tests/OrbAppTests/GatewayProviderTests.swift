@@ -42,7 +42,7 @@ struct GatewayCatalogTests {
      "no-tools":{"name":"No Tools","tool_call":false,"cost":{"input":1,"output":1}}}
     """
 
-    @Test func freeModelsAreListedAndZenSaysTheyMayUseYourData() throws {
+    @Test func goKeepsItsFreeModelButZenDoesNot() throws {
         let metadata = try #require(JSONValue.parse(goMetadata))
         let live = ["glm-5.3", "minimax-m3", "qwen3.8-max", "gpt-6-luna", "longcat-2.5-preview-free", "alpha-x", "no-tools", "omen-alpha"]
         let go = ModelCatalog.openCodeModels(live: live, metadata: metadata, provider: .opencodeGo)
@@ -50,9 +50,8 @@ struct GatewayCatalogTests {
         #expect(go.map(\.format) == [.chat, .messages, .messages, .responses, .chat])
         #expect(go[1].supportsImages == true && go[0].supportsImages == false)
         let zen = ModelCatalog.openCodeModels(live: live, metadata: metadata, provider: .opencodeZen)
-        #expect(zen.count == 5)
-        #expect(zen.first { $0.id == "longcat-2.5-preview-free" }?.name == "LongCat 2.5 Preview Free" + ModelCatalog.openCodeFreeNote)
-        #expect(go.last?.name == "LongCat 2.5 Preview Free")
+        #expect(!zen.map(\.id).contains("longcat-2.5-preview-free"))
+        #expect(zen.count == 4)
     }
 
     @Test func modelsTheZenDocsRetiredAreDroppedOnceTheirDayPasses() throws {
@@ -93,9 +92,8 @@ struct GatewayCatalogTests {
         #expect(Dictionary(uniqueKeysWithValues: zen.map { ($0.id, $0.format) }) == [
             "claude-opus-5-5": .messages, "gpt-6-sol": .responses, "grok-4.7": .responses, "muse-spark-1.3": .responses,
             "qwen3.8-max": .chat, "qwen3.8-flash": .messages, "minimax-m3": .chat, "kimi-k3": .chat, "glm-5.3": .chat,
-            "deepseek-v4-pro": .chat, "mistral-large-4": .chat, "big-pickle": .chat, "nemotron-3-ultra-free": .chat,
+            "deepseek-v4-pro": .chat, "mistral-large-4": .chat,
         ])
-        #expect(zen.first { $0.id == "big-pickle" }?.name == "big-pickle" + ModelCatalog.openCodeFreeNote)
         // On Go the docs put MiniMax and every Qwen model on /messages, and keep the free model.
         let go = ModelCatalog.openCodeModels(live: ["minimax-m3", "qwen3.8-max", "longcat-2.5-preview-free"], metadata: nil,
                                              provider: .opencodeGo)

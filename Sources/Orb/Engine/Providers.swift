@@ -77,7 +77,7 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .claudeCode: "Usa o login do Claude Code instalado no seu Mac (Pro ou Max) só para chegar ao modelo. O prompt, as ferramentas e a memória são do Orb, e o app nunca vê nem guarda a sua sessão."
         case .openai: "Modelos GPT pela API da OpenAI, cobrados por uso."
         case .anthropic: "Modelos Claude pela API da Anthropic, cobrados por uso."
-        case .opencodeZen: "Gateway da OpenCode com modelos testados em agentes (Claude, GPT, Grok e abertos; os modelos Gemini, que usam outro formato, ainda não aparecem). Pré-pago: cobra do seu saldo pelo uso, sem margem sobre o preço do modelo. Os modelos gratuitos funcionam só com a chave, sem saldo, e aparecem marcados: podem usar seus dados."
+        case .opencodeZen: "Gateway da OpenCode com modelos testados em agentes (Claude, GPT, Grok e abertos; os modelos Gemini, que usam outro formato, ainda não aparecem). Pré-pago: cobra do seu saldo pelo uso, sem margem sobre o preço do modelo. Os modelos gratuitos, que podem usar seus dados, ficam fora da lista."
         case .opencodeGo: "Assinatura da OpenCode (Go US$ 10/mês, Go Plus US$ 40/mês) com modelos abertos como GLM, Kimi, DeepSeek e Qwen. O uso tem limite por modelo em janelas de 5 horas, semana e mês; passando do limite, os modelos gratuitos seguem funcionando, e o saldo do Zen cobre se você ativar \"Use balance\" no console."
         case .commandCode: "Modelos de vários laboratórios (Claude, GPT, DeepSeek, Kimi, GLM…) pela API da Command Code. Precisa de um plano com acesso à API: Provider (pago por uso), GOAT, Pro, Max ou Team. O plano Go não inclui a API. Os modelos gratuitos ou promocionais, que podem rodar sob outros termos, ficam fora da lista."
         case .xai: "Modelos Grok pela API da xAI."
@@ -360,24 +360,25 @@ enum ModelCatalog {
 
     /// Live ids filtered and typed with models.dev: `provider.npm` @ai-sdk/anthropic → Messages, @ai-sdk/openai →
     /// Responses, absent → chat (the same mapping the OpenCode docs give per endpoint); Google-format (a per-model
-    /// path), deprecated, alpha and tool-less models are left out. The free models of Zen may train on the prompts
-    /// during their free period, so their names say so (`openCodeFreeNote`); they need only the key, no balance. The
-    /// one in the Go plan (zero retention) is part of the subscription. Without metadata (models.dev unreachable) the
-    /// formats come from the endpoint tables of the docs instead.
+    /// path), deprecated, alpha, tool-less and, for Zen, free models are left out. The free models of Zen may train
+    /// on the prompts during their free period; the one in the Go plan (zero retention) is part of the subscription
+    /// and the only thing that keeps working past its limits, so Go keeps it. Without metadata (models.dev
+    /// unreachable) the formats come from the endpoint tables of the docs instead.
     static func openCodeModels(live: [String], metadata: JSONValue?, provider: ProviderKind = .opencodeZen,
                                now: Date = .now) -> [ProviderModel] {
-        let marksFree = provider == .opencodeZen
+        let keepsFree = provider == .opencodeGo
         return live.compactMap { id in
             guard !isOpenCodeDeprecated(id, now: now) else { return nil }
             guard let metadata else {
                 guard !id.contains("alpha"), provider != .opencodeGo || openCodeGoDocumentedIDs.contains(id),
-                      let format = documentedOpenCodeFormat(id, provider: provider) else { return nil }
-                return ProviderModel(id: id, name: marksFree && isOpenCodeFree(id) ? id + openCodeFreeNote : id, format: format)
+                      let format = documentedOpenCodeFormat(id, provider: provider),
+                      keepsFree || !isOpenCodeFree(id) else { return nil }
+                return ProviderModel(id: id, name: id, format: format)
             }
             guard let info = metadata[id] else { return nil }
             guard !["deprecated", "alpha"].contains(info["status"]?.string ?? ""), info["tool_call"]?.bool != false else { return nil }
             let cost = info["cost"]
-            let isFree = cost?["input"]?.number == 0 && cost?["output"]?.number == 0
+            if !keepsFree && cost?["input"]?.number == 0 && cost?["output"]?.number == 0 { return nil }
             let format: APIFormat
             switch info["provider"]?["npm"]?.string {
             case nil, "@ai-sdk/openai-compatible": format = .chat
@@ -385,7 +386,7 @@ enum ModelCatalog {
             case "@ai-sdk/openai": format = .responses
             default: return nil
             }
-            return ProviderModel(id: id, name: (info["name"]?.string ?? id) + (marksFree && isFree ? openCodeFreeNote : ""), format: format,
+            return ProviderModel(id: id, name: info["name"]?.string ?? id, format: format,
                                  contextLength: info["limit"]?["context"]?.int, supportsImages: supportsImages(in: info),
                                  price: modelsDevPrice(cost))
         }
@@ -419,9 +420,6 @@ enum ModelCatalog {
     }
 
     /// Free ids carry "free" (and Zen's first free model, "big-pickle", does not).
-    /// After the name of a free Zen model: free, but the prompts may be used to train it.
-    static let openCodeFreeNote = " (grátis, pode usar seus dados)"
-
     private static func isOpenCodeFree(_ id: String) -> Bool { id.contains("free") || id == "big-pickle" }
 
     /// The wire format the OpenCode docs list for a model id (Zen and Go share the paths): Claude on `/messages`,
