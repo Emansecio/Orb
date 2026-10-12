@@ -1,5 +1,6 @@
 import Foundation
 import ImageIO
+import os
 import UniformTypeIdentifiers
 
 // Pictures the Orb is shown: the user's attachments and what tools return (screenshots). A picture is decoded,
@@ -227,14 +228,47 @@ struct ImageStore: Sendable {
 // MARK: - On the wire
 
 enum ImageWire {
+    /// Base64 of recent files, keyed by path + size + modification date (an edited file misses). Bounded by bytes
+    /// and read by the clients off the main thread.
+    private static let cache = OSAllocatedUnfairLock(initialState: Base64Cache())
+
+    private struct Base64Cache {
+        var entries: [String: String] = [:]
+        var order: [String] = []
+        var bytes = 0
+        static let limit = 48 * 1024 * 1024
+
+        mutating func store(_ value: String, for key: String) {
+            guard value.utf8.count <= Self.limit / 2, entries[key] == nil else { return }
+            entries[key] = value
+            order.append(key)
+            bytes += value.utf8.count
+            while bytes > Self.limit, !order.isEmpty {
+                let oldest = order.removeFirst()
+                bytes -= entries.removeValue(forKey: oldest)?.utf8.count ?? 0
+            }
+        }
+    }
+
+    private static func base64(ofFileAt path: String) -> String? {
+        let url = URL(fileURLWithPath: path)
+        let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+        let key = "\(path)|\(values?.fileSize ?? -1)|\(values?.contentModificationDate?.timeIntervalSince1970 ?? 0)"
+        if let hit = cache.withLock({ $0.entries[key] }) { return hit }
+        guard let data = try? Data(contentsOf: url), !data.isEmpty else { return nil }
+        let encoded = data.base64EncodedString()
+        cache.withLock { $0.store(encoded, for: key) }
+        return encoded
+    }
+
     /// The text and picture data of a message as the clients send them. A picture whose file is gone becomes a
     /// line of text, so a deleted file never fails the whole request.
     static func payload(of message: ChatMessage) -> (text: String, images: [(mediaType: String, base64: String)]) {
         var text = message.content
         var images: [(mediaType: String, base64: String)] = []
         for image in message.images {
-            if let data = try? Data(contentsOf: URL(fileURLWithPath: image.path)), !data.isEmpty {
-                images.append((image.mediaType, data.base64EncodedString()))
+            if let encoded = base64(ofFileAt: image.path) {
+                images.append((image.mediaType, encoded))
             } else {
                 text += (text.isEmpty ? "" : "\n") + "[imagem indisponível: \(image.path)]"
             }

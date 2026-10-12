@@ -233,6 +233,11 @@ enum ClaudePipeSession {
     private static func transcript<S: Sequence>(_ messages: S) -> String where S.Element == ChatMessage {
         let list = Array(messages)
         var claimed = Set<Int>()
+        // Positions of the `.tool` results per call id, ascending; a call takes the first one after its message.
+        var results: [String: [Int]] = [:]
+        for (index, message) in list.enumerated() where message.role == .tool {
+            if let id = message.toolCallID { results[id, default: []].append(index) }
+        }
         var lines: [String] = []
         for (index, message) in list.enumerated() {
             switch message.role {
@@ -244,7 +249,7 @@ enum ClaudePipeSession {
             case .assistant:
                 if !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { lines.append("Assistente: " + message.content) }
                 for call in message.toolCalls {
-                    let found = list.indices.first { $0 > index && !claimed.contains($0) && list[$0].role == .tool && list[$0].toolCallID == call.id }
+                    let found = results[call.id]?.first { $0 > index && !claimed.contains($0) }
                     if let found { claimed.insert(found) }
                     lines.append(describe(call, result: found.map { list[$0] }))
                 }
