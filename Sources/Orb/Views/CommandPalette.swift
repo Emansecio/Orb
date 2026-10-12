@@ -46,6 +46,16 @@ enum PaletteSearch {
     /// title that starts with it, then anywhere in the title, then the subtitle or keywords. Ties keep the order of
     /// the groups and of `entries`. Nothing typed keeps the order of the groups.
     static func rank(_ entries: [PaletteEntry], query: String) -> [PaletteEntry] {
+        rank(entries, folded: fold(entries), query: query)
+    }
+
+    /// The title and the subtitle + keywords of each entry, normalized once, so a keystroke normalizes only the query.
+    static func fold(_ entries: [PaletteEntry]) -> [(title: String, rest: String)] {
+        entries.map { (normalize($0.title), normalize([$0.subtitle ?? "", $0.keywords].joined(separator: " "))) }
+    }
+
+    /// `rank` with `folded` = `fold(entries)` already made.
+    static func rank(_ entries: [PaletteEntry], folded: [(title: String, rest: String)], query: String) -> [PaletteEntry] {
         let words = normalize(query).split(whereSeparator: \.isWhitespace).map(String.init)
         let indexed = entries.enumerated().map { (index: $0.offset, entry: $0.element) }
         guard !words.isEmpty else {
@@ -53,8 +63,7 @@ enum PaletteSearch {
         }
         var scored: [(score: Int, index: Int, entry: PaletteEntry)] = []
         for (index, entry) in indexed {
-            let title = normalize(entry.title)
-            let rest = normalize([entry.subtitle ?? "", entry.keywords].joined(separator: " "))
+            let (title, rest) = (folded[index].title, folded[index].rest)
             var total = 0
             var matchesAll = true
             for word in words {
@@ -142,9 +151,10 @@ struct CommandPalette: View {
     @State private var query = ""
     @State private var selected = 0
     @State private var entries: [PaletteEntry] = []
+    @State private var folded: [(title: String, rest: String)] = []
     @FocusState private var isFocused: Bool
 
-    private var results: [PaletteEntry] { PaletteSearch.rank(entries, query: query) }
+    private var results: [PaletteEntry] { PaletteSearch.rank(entries, folded: folded, query: query) }
 
     var body: some View {
         let results = results
@@ -241,6 +251,7 @@ struct CommandPalette: View {
     private func build() {
         entries = PaletteBuilder.entries(orbs: model.botIDs.map { model.live($0).look }, current: model.commandBotID,
                                          routines: model.routines, skills: model.skills, groups: model.groups)
+        folded = PaletteSearch.fold(entries)
     }
 
     private func run(_ results: [PaletteEntry]) {

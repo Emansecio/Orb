@@ -309,7 +309,9 @@ enum GrokMarketplace {
             return words.allSatisfy { text.contains($0) }
         }
         let first = words[0]
-        return matching.filter { MemoryText.fold($0.name).hasPrefix(first) } + matching.filter { !MemoryText.fold($0.name).hasPrefix(first) }
+        var starts: [MarketplaceBot] = [], others: [MarketplaceBot] = []
+        for bot in matching { if MemoryText.fold(bot.name).hasPrefix(first) { starts.append(bot) } else { others.append(bot) } }
+        return starts + others
     }
 
     // MARK: Into the import

@@ -53,8 +53,9 @@ struct ProviderSettings: View {
                 // The card to connect and the default model trade places by fading, in the Form's own rows (`.quiet`).
                 Section { FirstRunCard(style: .settings, run: firstRun).transition(.quiet) }
             } else {
+                let noModels = model.modelChoices.isEmpty
                 Section {
-                    if model.modelChoices.isEmpty {
+                    if noModels {
                         LabeledContent("Modelo padrão") {
                             Text("Nenhum modelo ainda").foregroundStyle(Palette.muted)
                         }
@@ -62,12 +63,12 @@ struct ProviderSettings: View {
                         ModelPicker(selection: $model.defaultModel, title: "Modelo padrão", allowsDefault: false)
                     }
                 } footer: { FormFootnote {
-                    Text(model.modelChoices.isEmpty
+                    Text(noModels
                          ? "Conecte um provedor abaixo: os modelos dele aparecem aqui."
                          : model.isProviderReady || !model.hasCheckedConnections
                          ? "Usado por Orbs sem modelo próprio."
                          : "O modelo padrão não está disponível. Escolha outro.")
-                        .textSwap(model.modelChoices.isEmpty ? 0 : model.isProviderReady || !model.hasCheckedConnections ? 1 : 2)
+                        .textSwap(noModels ? 0 : model.isProviderReady || !model.hasCheckedConnections ? 1 : 2)
                 } }
             }
             ForEach(ProviderGroup.allCases) { group in
