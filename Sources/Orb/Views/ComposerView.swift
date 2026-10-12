@@ -34,7 +34,7 @@ struct ComposerView: View {
 
     private var draft: Binding<String> {
         Binding(
-            get: { model.drafts[botID, default: ""] },
+            get: { model.draftText(botID) },
             set: { model.editDraft($0, for: botID) } // typing: the Orb watches you (the app's own changes use setDraft)
         )
     }
