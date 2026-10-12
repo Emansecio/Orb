@@ -206,8 +206,6 @@ final class ProseTextView: NSTextView, @preconcurrency NSLayoutManagerDelegate {
     private var heights: [CGFloat: CGFloat] = [:]
     /// The text has a quote to draw a bar beside (`drawBackground`).
     private var hasQuote = false
-    /// The last width SwiftUI proposed, for a proposal without one.
-    var lastWidth: CGFloat?
 
     convenience init() {
         self.init(usingTextLayoutManager: false)
@@ -345,9 +343,7 @@ struct SelectableProse: NSViewRepresentable {
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: ProseTextView, context: Context) -> CGSize? {
-        let proposed = proposal.width.flatMap { $0.isFinite ? $0 : nil }
-        if let proposed { nsView.lastWidth = proposed }
-        let width = proposed ?? nsView.lastWidth ?? 10_000
+        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? 10_000
         return CGSize(width: width, height: nsView.height(forWidth: width))
     }
 }
