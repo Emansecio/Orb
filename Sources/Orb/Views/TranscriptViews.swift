@@ -708,6 +708,126 @@ struct ToolCallLine: View {
     }
 }
 
+/// The Orb's actions one after another, folded into one quiet line in the place of their lines: what they did ("Rodou
+/// 7 comandos e leu 1 arquivo"), how many failed, and how long they took. A click opens it into the lines themselves
+/// (each still opens into its output), set in under the line's words. What must not hide stays below the folded line:
+/// the files the actions made and the button to a macOS permission one of them was refused. While the actions run the
+/// line is in the quietest ink and only counts: the "now" is the working line at the end of the chat.
+struct ToolGroupRow: View, Equatable {
+    let items: [TranscriptItem]
+    let botID: UUID
+    let orb: OrbConfig
+    let isOpen: Bool
+    /// The result of the find bar, when it is one of these actions.
+    var find: FindFocus?
+    let toggle: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var permissionProblem: MacPermissionProblem?
+
+    /// Review snapshots cannot press the line: they draw every run open.
+    static var opensInSnapshots = false
+
+    nonisolated static func == (lhs: ToolGroupRow, rhs: ToolGroupRow) -> Bool {
+        lhs.items == rhs.items && lhs.botID == rhs.botID && lhs.orb == rhs.orb && lhs.isOpen == rhs.isOpen && lhs.find == rhs.find
+    }
+
+    private var calls: [ToolCall] {
+        items.compactMap { if case .tool(let call) = $0.kind { call } else { nil } }
+    }
+
+    var body: some View {
+        let calls = calls
+        let isRunning = calls.contains { $0.state == .running }
+        let summary = ToolTally.summary(calls)
+        let failures = ToolTally.failures(calls)
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                header(summary: summary, failures: failures, span: ToolTally.span(calls), isRunning: isRunning, symbol: ToolTally.symbol(calls))
+                if !isOpen { keptInView(calls) }
+            }
+            .padding(.leading, gutter)
+            if isOpen {
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                    TranscriptRow(item: item, botID: botID, orb: orb, find: item.id == find?.itemID ? find : nil)
+                        .equatable()
+                        .padding(.leading, 22) // under the line's words, past its symbol
+                        // The find bar scrolls to an action by its id; the first one's is the row's own.
+                        .id(index == 0 ? AnyHashable("\(item.id)-first") : AnyHashable(item.id))
+                        .transition(reduceMotion ? .quiet : AnyTransition.unfold.animation(Motion.enter.delay(Motion.staggerDelay(index))))
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: isOpen)
+        .task(id: calls.map(\.state)) {
+            permissionProblem = isRunning ? nil : calls.lazy.compactMap(\.permissionProblemToShow).first
+        }
+    }
+
+    private func header(summary: String, failures: String?, span: TimeInterval?, isRunning: Bool, symbol: String) -> some View {
+        Button(action: toggle) {
+            HStack(spacing: 8) {
+                Image(systemName: symbol)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.faint)
+                    .frame(width: 14)
+                Text(summary)
+                    .font(.system(size: 12))
+                    .foregroundStyle(isRunning ? Palette.faint : Palette.muted)
+                    .lineLimit(1)
+                    // A new action changes a count, once per action (never per token): the number rolls.
+                    .contentTransition(reduceMotion ? .opacity : .numericText())
+                    .animation(Motion.content, value: summary)
+                if let failures {
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.circle")
+                        Text(failures)
+                    }
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.danger)
+                    .transition(.adapted(.mark, reduceMotion: reduceMotion))
+                }
+                if let span {
+                    (Text(span, format: .number.precision(.fractionLength(1))) + Text(" s"))
+                        .font(.system(size: 11))
+                        .monospacedDigit()
+                        .foregroundStyle(Palette.faint)
+                        .transition(.adapted(.mark, reduceMotion: reduceMotion))
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Palette.faint)
+                    .rotationEffect(.degrees(isOpen ? 90 : 0))
+                    .animation(reduceMotion ? nil : Motion.content, value: isOpen)
+                Spacer(minLength: 0)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .help(Tip.toggleActions(isOpen: isOpen))
+        // The last action ending: the marks of the result come in (see `ToolCallLine`).
+        .motion(Motion.enter, value: isRunning)
+        .motion(Motion.enter, value: failures)
+        .accessibilityLabel(failures.map { "\(summary), \($0)" } ?? summary)
+        .accessibilityValue(isOpen ? "expandido" : "recolhido")
+        .accessibilityHint(isOpen ? "Recolhe as ações" : "Mostra cada ação")
+    }
+
+    /// Under the folded line, what one of its actions would have shown under its own: the files they made, and the way
+    /// to a permission of the Mac that one was refused.
+    @ViewBuilder private func keptInView(_ calls: [ToolCall]) -> some View {
+        if let problem = permissionProblem {
+            OpenPrivacySettingsButton(problem: problem).padding(.leading, 22)
+        }
+        // A file two of them changed is listed once.
+        var seen = Set<String>()
+        let files = calls.filter { $0.state == .done }.flatMap { $0.files ?? [] }.filter { seen.insert($0.path).inserted }
+        if !files.isEmpty {
+            ProducedFilesView(files: files).padding(.leading, 22)
+        }
+    }
+}
+
 // MARK: - Notices
 
 /// A line of the transcript that is not anyone's speech ("Você interrompeu esta resposta", "Conversa compactada…").

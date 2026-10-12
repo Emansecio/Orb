@@ -8,6 +8,9 @@ enum TranscriptRowModel: Identifiable, Equatable {
     case events(OrbEvent.Kind, [TranscriptItem])
     /// Messages between Orbs of one exchange, in order (two or more): "3 mensagens com Revisor".
     case exchange([TranscriptItem])
+    /// The Orb's actions one after another, with nothing said between them (two or more): "Rodou 7 comandos e leu 1
+    /// arquivo", which opens into their lines.
+    case tools([TranscriptItem])
 
     /// The id of the first item: it stays the same while the row grows, so its expanded state survives.
     var id: UUID { items[0].id }
@@ -16,7 +19,7 @@ enum TranscriptRowModel: Identifiable, Equatable {
     var items: [TranscriptItem] {
         switch self {
         case .single(let item): [item]
-        case .events(_, let items), .exchange(let items): items
+        case .events(_, let items), .exchange(let items), .tools(let items): items
         }
     }
 }
@@ -24,14 +27,20 @@ enum TranscriptRowModel: Identifiable, Equatable {
 /// Folds a chat's Orb lines (exchanges between Orbs, events) into rows (`TranscriptFolding.rows`). Pure: the same items
 /// always fold the same way, so the rules are tested without a view.
 enum TranscriptFolding {
-    /// Whether the chat holds an exchange or an event: only then is there anything to fold (`OrbTranscript.rows`).
+    /// Whether the chat holds an exchange, an event or two actions in a row: only then is there anything to fold
+    /// (`OrbTranscript.rows`).
     static func hasFoldableItems(_ items: [TranscriptItem]) -> Bool {
-        items.contains { item in
+        var afterTool = false
+        for item in items {
             switch item.kind {
-            case .orbMessage, .event: true
-            default: false
+            case .orbMessage, .event: return true
+            case .tool:
+                if afterTool { return true }
+                afterTool = true
+            default: afterTool = false
             }
         }
+        return false
     }
 
     /// The rows of a chat. Rules (see docs/MULTI-ORBS.md, 5):
@@ -39,8 +48,10 @@ enum TranscriptFolding {
     ///   that repeat (creation, joining and leaving a group, routines);
     /// - adjacent messages between Orbs (`orbMessage`, and `delegationReceived`) become one exchange; a tool line between two
     ///   of them does not break it: it comes after the exchange's row;
+    /// - adjacent actions (`.tool`) become one row of actions; anything between them (a word of the Orb, a card that needs
+    ///   you, a notice) ends it, and so does `boundary` (the end of what a compaction folded: a row is all folded or not);
     /// - a lone item stays as it is.
-    static func rows(for items: [TranscriptItem]) -> [TranscriptRowModel] {
+    static func rows(for items: [TranscriptItem], boundary: Int = 0) -> [TranscriptRowModel] {
         var rows: [TranscriptRowModel] = []
         rows.reserveCapacity(items.count)
         var index = 0
@@ -83,10 +94,21 @@ enum TranscriptFolding {
                 rows.append(group.count > 1 ? .events(kind, group) : .single(item))
                 continue
             }
+            if isToolLine(item) {
+                var next = index + 1
+                while next < items.count, next != boundary, isToolLine(items[next]) { next += 1 }
+                rows.append(next - index > 1 ? .tools(Array(items[index..<next])) : .single(item))
+                index = next
+                continue
+            }
             rows.append(.single(item))
             index += 1
         }
         return rows
+    }
+
+    static func isToolLine(_ item: TranscriptItem) -> Bool {
+        if case .tool = item.kind { true } else { false }
     }
 
     /// `orbMessage`, and the event that says an Orb asked this chat's Orb for help: both are lines of an exchange.

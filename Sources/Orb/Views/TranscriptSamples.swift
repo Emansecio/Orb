@@ -87,6 +87,31 @@ enum TranscriptSample {
             items = [TranscriptItem(.user(text: "Publica o site de novo, agora com a versão 2.4", attachments: [])), tool,
                      TranscriptItem(.bot(text: "Publicado: a versão 2.4 já está no ar e o rodapé confere.", isStreaming: false)),
                      TranscriptItem(.notice("Skill proposta: /publicar-site — Publicar site"))]
+        case "transcript-tools", "transcript-tools-open":
+            // The shape of a long task: words of the Orb between runs of commands, a notice in the middle, one failure.
+            ToolGroupRow.opensInSnapshots = screen == "transcript-tools-open"
+            let folder = "\"/Users/voce/Projetos/AcessosFit-Brain/scripts"
+            func run(_ detail: String, _ kind: ToolCall.Kind = .shell, _ title: String = "Rodando no Terminal",
+                     _ state: ToolCall.State = .done) -> TranscriptItem {
+                let start = Date.now.addingTimeInterval(-60)
+                return TranscriptItem(.tool(ToolCall(kind: kind, title: title, detail: detail, state: state, output: "ok",
+                                                     startedAt: start, finishedAt: start.addingTimeInterval(0.2))))
+            }
+            items = [TranscriptItem(.user(text: "Levante os leads de 01/10 até hoje e responda os pendentes", attachments: [])),
+                     TranscriptItem(.bot(text: "Vou revisar a skill, levantar os leads e então responder os pendentes.", isStreaming: false)),
+                     run("/Users/voce/Projetos/AcessosFit-Brain/skills/whatsapp/SKILL.md", .file, "Lendo arquivo"),
+                     run("python3 \(folder)/fila.py\" --desde 2025-10-01"),
+                     run("python3 \(folder)/fila.py\" --resumo"),
+                     TranscriptItem(.bot(text: "A fila trouxe 61 conversas; agora vou ler o histórico de cada uma em lotes.", isStreaming: false)),
+                     run("cd \(folder)\" && ls"),
+                     TranscriptItem(.notice("O provedor não está reaproveitando o início das conversas (cache), o que deixa cada passo mais caro. Se continuar, confira o modelo e o provedor em Ajustes → Modelos.")),
+                     run("python3.14 \(folder)/historico.py\" --lote 1"),
+                     run("python3.14 \(folder)/historico.py\" --lote 2"),
+                     run("python3.14 \(folder)/historico.py\" --lote 3", .shell, "Rodando no Terminal", .failed),
+                     run("python3.14 \(folder)/historico.py\" --lote 3"),
+                     run("python3.14 - <<'PY'"),
+                     run("python3.14 - <<'PY'"),
+                     run("python3.14 - <<'PY' > /tmp/af_report.txt")]
         case "transcript-retry":
             items = [user, TranscriptItem(.notice("Não deu certo: Sem conexão com o provedor: A conexão com a Internet parece estar desligada."))]
         default:

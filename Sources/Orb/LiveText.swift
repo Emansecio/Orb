@@ -138,7 +138,6 @@ final class OrbTranscript {
 
     init(items: [TranscriptItem] = []) {
         self.items = items
-        rows = TranscriptFolding.hasFoldableItems(items) ? TranscriptFolding.rows(for: items) : nil
         refold()
     }
 
@@ -146,9 +145,6 @@ final class OrbTranscript {
     func show(_ items: [TranscriptItem]) {
         guard !self.items.isSameStorage(as: items) else { return }
         self.items = items
-        // MARK: MultiOrb (WP2)
-        rows = TranscriptFolding.hasFoldableItems(items) ? TranscriptFolding.rows(for: items) : nil
-        // MARK: end MultiOrb (WP2)
         refold()
         revision &+= 1
     }
@@ -158,8 +154,10 @@ final class OrbTranscript {
         items[..<fold.count].contains { $0.id == itemID }
     }
 
+    /// The rows and what a compaction folded, from the items: the rows end where the fold does, so none is half in it.
     private func refold() {
         let fold = CompactedFold.of(items)
+        rows = TranscriptFolding.hasFoldableItems(items) ? TranscriptFolding.rows(for: items, boundary: fold.count) : nil
         if fold != self.fold { self.fold = fold }
         guard let rows, fold.count > 0 else {
             if foldedRows != 0 { foldedRows = 0 }

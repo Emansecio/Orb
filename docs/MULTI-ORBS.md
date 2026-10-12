@@ -370,12 +370,13 @@ Painel do Orb (`BotInspector` cabeçalho): linha "Criado por Atlas" em `Palette.
 ## 5. Eventos (WP2)
 
 - Itens `.event` entram por `AppModel.append(.event(...), to:)`; quem gera: criação de Orb (WP3), rotina criada pela ferramenta `schedule` (`AppModel.schedule` ganha `append(.event(.routineCreated…))`), renomear (`BotInspector`/`update` quando `name` muda: `.event(renamed, actor: antigo, detail: novo)` no chat do Orb), grupo (WP5), cadeia parada (WP1).
-- **Dobra** (`TranscriptFolding`, puro, `Sources/Orb/MultiOrb/TranscriptFolding.swift`, WP2): percorre os itens uma vez e devolve `[TranscriptRowModel]` (`.single(TranscriptItem)` | `.events(kind, [TranscriptItem])` | `.exchange([TranscriptItem])`). Regras:
+- **Dobra** (`TranscriptFolding`, puro, `Sources/Orb/MultiOrb/TranscriptFolding.swift`, WP2): percorre os itens uma vez e devolve `[TranscriptRowModel]` (`.single(TranscriptItem)` | `.events(kind, [TranscriptItem])` | `.exchange([TranscriptItem])` | `.tools([TranscriptItem])`). Regras:
   - eventos **adjacentes** do mesmo `kind` (e mesmo `actor` quando existe) viram uma linha: "Atlas criou 3 Orbs: A, B e C", "A, B e C entraram no grupo X", "Atlas criou 2 rotinas";
   - `.orbMessage`/`.event(delegationReceived)` adjacentes (sem item de outro tipo no meio) viram uma troca: 1 item = a própria linha; ≥ 2 itens e 1 parceiro = "N mensagens com Revisor"; ≥ 2 e P ≥ 2 parceiros = "N mensagens com P Orbs", ou, só com envios, "Pediu ajuda a P Orbs";
   - linhas de ferramenta (`ToolCallLine`) **do mesmo turno** entre duas mensagens de Orb não interrompem a troca (são ignoradas na adjacência, mas continuam visíveis).
-  - O `id` da linha dobrada é o id do primeiro item. Expandido/recolhido é `@State` da linha.
-- **Custo**: `OrbTranscript` guarda `hasMultiOrbItems` (calculado em `show`) e `rows` (cache por `revision`); sem itens multi-Orb a lista é a de hoje, sem custo. `ChatView` itera `rows`; nada de dobra no `body`.
+  - ações (`.tool`) **adjacentes**, duas ou mais, viram uma linha recolhida ("Rodou 7 comandos e leu 1 arquivo", `ToolTally`, com "1 falhou" e o tempo do conjunto); fala do Orb, cartão de permissão ou aviso no meio quebram a linha, e ela termina onde termina a dobra da compactação (`boundary`). Vale para qualquer chat, não só multi-Orb; os arquivos que as ações fizeram e o botão de permissão do macOS ficam visíveis sob a linha recolhida (`ToolGroupRow`);
+  - O `id` da linha dobrada é o id do primeiro item. Expandido/recolhido é `@State` da linha (das ações, um conjunto em `TranscriptList`, que a busca abre quando o resultado está dentro).
+- **Custo**: `OrbTranscript` guarda `hasMultiOrbItems` (calculado em `show`) e `rows` (cache por `revision`); sem itens multi-Orb nem duas ações seguidas a lista é a de hoje, sem custo. `ChatView` itera `rows`; nada de dobra no `body`.
 - Busca (⌘F): `ConversationSearch` extrai o texto de `.event` (sentence) e `.orbMessage` (text) para o índice.
 - Memória/sessões e contagem de `ConversationSummary.messageCount` ignoram estes itens (`default`).
 
