@@ -5,10 +5,6 @@ import Testing
 // Compaction as the app and the Claude Code engine see it: catch-up for a new session, the CLI's own compaction
 // events, decisions in memory pages, and "Compactar agora" / the notices in AppModel.
 
-private func call(_ id: String, _ name: String, _ arguments: String) -> ToolCallRequest {
-    ToolCallRequest(id: id, name: name, arguments: arguments)
-}
-
 private let firstRequest = "Construa o app Atlas com SQLite e rode os testes a cada mudança"
 
 /// A turn: the request, a tool step answered by `output`, and a reply.

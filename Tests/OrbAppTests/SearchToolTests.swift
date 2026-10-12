@@ -12,8 +12,6 @@ final class SearchToolTests {
         try await workspace.run(tool, arguments)
     }
 
-    private func lines(_ output: String) -> [String] { output.split(separator: "\n").map(String.init) }
-
     // MARK: grep
 
     @Test func grepFindsMatchesAsPathLineText() async throws {

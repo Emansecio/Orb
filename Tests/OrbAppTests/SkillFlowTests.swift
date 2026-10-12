@@ -2,47 +2,6 @@ import Foundation
 import Testing
 @testable import Orb
 
-/// What a model call was given, and the answers it gives in order (the last repeats): a turn of the app without a provider.
-private actor Script {
-    struct Call { var messages: [ChatMessage]; var tools: [String]; var system: String }
-    private(set) var calls: [Call] = []
-    private var answers: [[LLMEvent]]
-    /// The model call (1 = the first) that waits for `release()` before it answers.
-    private let holdsCall: Int?
-    private var released = false
-
-    init(_ answers: [[LLMEvent]], holdsCall: Int? = nil) {
-        self.answers = answers
-        self.holdsCall = holdsCall
-    }
-
-    func release() { released = true }
-
-    /// Sets the answers after the init (when they need what `setUp` made).
-    func setAnswers(_ new: [[LLMEvent]]) { answers = new }
-
-    func answer(_ messages: [ChatMessage], _ tools: [ToolSpec]) async -> [LLMEvent] {
-        calls.append(Call(messages: Array(messages.dropFirst()), tools: tools.map(\.name), system: messages.first?.content ?? ""))
-        let number = calls.count
-        let events = answers.count > 1 ? answers.removeFirst() : answers.first ?? []
-        while holdsCall == number, !released { try? await Task.sleep(for: .milliseconds(5)) }
-        return events
-    }
-}
-
-private struct ScriptedModel: LLMClient {
-    let script: Script
-
-    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
-        AsyncThrowingStream { continuation in
-            Task {
-                for event in await script.answer(messages, tools) { continuation.yield(event) }
-                continuation.finish()
-            }
-        }
-    }
-}
-
 private func said(_ text: String) -> [LLMEvent] { [.text(text), .finished(.done, nil)] }
 
 private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uuidString) -> [LLMEvent] {
@@ -60,7 +19,7 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
         removeTestFolder(root)
     }
 
-    @MainActor private func setUp(_ script: Script) -> (AppModel, UUID) {
+    @MainActor private func setUp(_ script: CallScript) -> (AppModel, UUID) {
         var state = AppState.initial
         let folder = root.appending(path: "pasta")
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -73,18 +32,14 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
         model.homeFolder = root
         model.providers = [ProviderAccount(kind: .custom)]
         model.defaultModel = "custom/modelo"
-        model.clientOverride = { ScriptedModel(script: script) }
+        model.clientOverride = { CallScriptModel(script: script) }
         return (model, state.bots[0].id)
-    }
-
-    @MainActor private func waitUntilIdle(_ model: AppModel, _ botID: UUID) async {
-        await waitUntil("the Orb to finish its turn") { !model.isWorking(botID) && model.session(botID).turnTask == nil }
     }
 
     // MARK: The skills the tools can load
 
     @Test @MainActor func everyMessagePublishesTheSkillsTheOrbMayUse() async {
-        let script = Script([said("oi")])
+        let script = CallScript([said("oi")])
         let (model, botID) = setUp(script)
         let other = UUID()
         model.skills = [Skill(slug: "resumir", name: "Resumir", summary: "Resume", instructions: "Resuma em 5 tópicos.", source: Skill.builtInSource),
@@ -121,7 +76,7 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
     }
 
     @Test @MainActor func aLongTurnEndsWithAReviewThatKeepsAProposalAndTellsOnce() async throws {
-        let script = Script(steps(10) + [said("pronto"), proposing(SkillSamples.good), said("Propus /publicar-site.")])
+        let script = CallScript(steps(10) + [said("pronto"), proposing(SkillSamples.good), said("Propus /publicar-site.")])
         let (model, botID) = setUp(script)
         #expect(model.send("publica o site", to: botID))
         await waitUntilIdle(model, botID)
@@ -151,7 +106,7 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
 
     @Test @MainActor func theReviewSendsTheBigOutputsAndArgumentsOfTheTurnWholeLikeItsLastCall() async throws {
         // A file read bigger than a preview, and a call with arguments bigger than the shortened ones.
-        let script = Script([])
+        let script = CallScript([])
         let (model, botID) = setUp(script)
         let file = root.appending(path: "pasta/grande.txt")
         try String(repeating: "linha de texto do arquivo\n", count: 400).write(to: file, atomically: true, encoding: .utf8)
@@ -171,7 +126,7 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
     }
 
     @Test @MainActor func noReviewIsPaidForWhileFiveProposalsWait() async throws {
-        let script = Script(steps(10) + [said("pronto"), said("Nothing to save.")])
+        let script = CallScript(steps(10) + [said("pronto"), said("Nothing to save.")])
         let (model, botID) = setUp(script)
         let bank = model.memory.bank(for: botID)
         for index in 0..<MemoryBank.maximumProposals {
@@ -189,7 +144,7 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
         func counted(_ events: [LLMEvent]) -> [LLMEvent] {
             events.map { if case .finished(let reason, nil) = $0 { .finished(reason, TokenUsage(input: 10, output: 5)) } else { $0 } }
         }
-        let script = Script((steps(10) + [said("pronto"), proposing(SkillSamples.good), said("Propus /publicar-site.")]).map(counted))
+        let script = CallScript((steps(10) + [said("pronto"), proposing(SkillSamples.good), said("Propus /publicar-site.")]).map(counted))
         let (model, botID) = setUp(script)
         #expect(model.send("publica o site", to: botID))
         await waitUntilIdle(model, botID)
@@ -211,7 +166,7 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
     }
 
     @Test @MainActor func aShortTurnHasNoReview() async {
-        let script = Script(steps(SkillReview.threshold - 1) + [said("pronto")])
+        let script = CallScript(steps(SkillReview.threshold - 1) + [said("pronto")])
         let (model, botID) = setUp(script)
         #expect(model.send("oi", to: botID))
         await waitUntilIdle(model, botID)
@@ -221,7 +176,7 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
 
     @Test @MainActor func tenCallsInOneStepAreOneStepNotAReview() async {
         // Independent reads run together (the prompt asks for it): the count is of the model's steps, as in Hermes.
-        let script = Script([recalls(10), said("pronto")])
+        let script = CallScript([recalls(10), said("pronto")])
         let (model, botID) = setUp(script)
         #expect(model.send("oi", to: botID))
         await waitUntilIdle(model, botID)
@@ -230,7 +185,7 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
     }
 
     @Test @MainActor func theCountGrowsAcrossTurnsAndStartsOverAtTheReview() async {
-        let script = Script(steps(6) + [said("um")] + steps(6) + [said("dois"), said("Nothing to save.")])
+        let script = CallScript(steps(6) + [said("um")] + steps(6) + [said("dois"), said("Nothing to save.")])
         let (model, botID) = setUp(script)
         #expect(model.send("primeiro", to: botID))
         await waitUntilIdle(model, botID)
@@ -243,7 +198,7 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
     }
 
     @Test @MainActor func theSwitchInAjustesTurnsTheReviewOff() async {
-        let script = Script(steps(10) + [said("pronto")])
+        let script = CallScript(steps(10) + [said("pronto")])
         let (model, botID) = setUp(script)
         let suite = UserDefaults(suiteName: "OrbSkillFlow-\(UUID().uuidString)")!
         suite.set(false, forKey: SkillReview.settingKey)
@@ -255,7 +210,7 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
     }
 
     @Test @MainActor func anOrbThatOnlyReadsDoesNotReview() async {
-        let script = Script(steps(10) + [said("pronto")])
+        let script = CallScript(steps(10) + [said("pronto")])
         let (model, botID) = setUp(script)
         model.bots[0].permissionMode = .readOnly
         #expect(model.send("publica", to: botID))
@@ -266,7 +221,7 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
 
     @Test @MainActor func aMessageFromTheUserStopsTheReview() async {
         // The review's model call (the third) waits; the user writes meanwhile.
-        let script = Script(steps(10) + [said("pronto"), proposing(SkillSamples.good), said("ok"), said("segunda")], holdsCall: 12)
+        let script = CallScript(steps(10) + [said("pronto"), proposing(SkillSamples.good), said("ok"), said("segunda")], holdsCall: 12)
         let (model, botID) = setUp(script)
         #expect(model.send("publica", to: botID))
         await waitUntilIdle(model, botID)
@@ -283,13 +238,13 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
     }
 
     @Test @MainActor func onlyStepsOfOrbsOwnEngineInConversationsCount() {
-        let script = Script([])
+        let script = CallScript([])
         let (model, botID) = setUp(script)
         let session = model.session(botID)
         let read = ToolCallRequest(id: "a", name: "read_file", arguments: "{}")
         let step = ChatMessage(role: .assistant, content: "", toolCalls: [read, ToolCallRequest(id: "b", name: "read_file", arguments: "{}")])
         let base = TurnRequest(bot: model.bots[0], model: "m", system: "s", history: [], prompt: "",
-                               client: ScriptedModel(script: script), tools: [], context: ToolContext(workingDirectory: root))
+                               client: CallScriptModel(script: script), tools: [], context: ToolContext(workingDirectory: root))
         // A turn of Claude Code keeps no request for a review: its steps are not counted.
         model.apply(.message(step), to: botID)
         #expect(session.stepsSinceSkill == 0)
@@ -313,11 +268,11 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
     }
 
     @Test @MainActor func aTaskLeftHalfWayDoesNotStartAReview() async {
-        let script = Script([said("Nothing to save.")])
+        let script = CallScript([said("Nothing to save.")])
         let (model, botID) = setUp(script)
         let session = model.session(botID)
         let base = TurnRequest(bot: model.bots[0], model: "m", system: "s", history: [], prompt: "",
-                               client: ScriptedModel(script: script), tools: [], context: ToolContext(workingDirectory: root))
+                               client: CallScriptModel(script: script), tools: [], context: ToolContext(workingDirectory: root))
         func finish(paused: Bool) {
             let turn = session.beginTurn()
             session.reviewBase = base
@@ -337,7 +292,7 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
     @Test @MainActor func aReviewInAnOrbInAskModeNeverOpensACard() async throws {
         // The model tries to save a preference in the review: nobody would see the card, so it is refused at once.
         let preference = call("remember", .object(["fact": .string("Gosta de respostas curtas."), "tipo": .string("preferencia")]))
-        let script = Script(steps(10) + [said("pronto"), preference, said("Nothing to save.")])
+        let script = CallScript(steps(10) + [said("pronto"), preference, said("Nothing to save.")])
         let (model, botID) = setUp(script)
         model.bots[0].permissionMode = .ask
         #expect(model.send("publica", to: botID))
@@ -353,7 +308,7 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
 
     @Test @MainActor func aReviewOfACompactedConversationStartsWhereTheLastTurnEnded() async throws {
         // The turns before the summary are not sent again, and the summary is the one the turn sent: same prefix.
-        let script = Script(steps(10) + [said("pronto"), said("Nothing to save.")])
+        let script = CallScript(steps(10) + [said("pronto"), said("Nothing to save.")])
         let (model, botID) = setUp(script)
         model.providers[0].models = [ProviderModel(id: "modelo", name: "Modelo", format: .chat, contextLength: 16_000)]
         var old = Conversation()
@@ -379,7 +334,7 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
     }
 
     @Test @MainActor func resettingStopsAReviewInProgress() async {
-        let (model, botID) = setUp(Script([said("oi")]))
+        let (model, botID) = setUp(CallScript([said("oi")]))
         let review = Task<Void, Never> { try? await Task.sleep(for: .seconds(30)) }
         model.session(botID).skillReview = review
         await model.stopForReset(wait: .milliseconds(200))
@@ -387,7 +342,7 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
     }
 
     @Test @MainActor func aProposalIsToldAfterTheRoutineThatHadTheOrbNotInsideIt() async {
-        let (model, botID) = setUp(Script([said("oi")]))
+        let (model, botID) = setUp(CallScript([said("oi")]))
         _ = await model.memory.bank(for: botID).proposeSkill(SkillSamples.good)
         let session = model.session(botID)
         session.routineID = UUID()
@@ -406,7 +361,7 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
     }
 
     @Test @MainActor func aNewProposalBecomesALearnedSkillOfTheOrbThatProposedIt() async throws {
-        let (model, botID) = setUp(Script([said("oi")]))
+        let (model, botID) = setUp(CallScript([said("oi")]))
         await propose(SkillSamples.good, in: model, botID)
         let draft = try #require(await model.skillDraft("publicar-site", from: botID))
         #expect(!draft.isUpdate && draft.orbName == model.bots[0].name)
@@ -422,7 +377,7 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
     }
 
     @Test @MainActor func anImprovementKeepsTheSkillAndItsUsesAndScope() async throws {
-        let (model, botID) = setUp(Script([said("oi")]))
+        let (model, botID) = setUp(CallScript([said("oi")]))
         let other = UUID()
         var mine = Skill(slug: "publicar-site", name: "Meu deploy", summary: "antigo", instructions: "antigas", source: Skill.learnedSource)
         mine.uses = 7
@@ -438,7 +393,7 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
     }
 
     @Test @MainActor func aCommandTakenByAnotherSkillGetsANumber() async throws {
-        let (model, botID) = setUp(Script([said("oi")]))
+        let (model, botID) = setUp(CallScript([said("oi")]))
         model.skills.append(Skill(slug: "publicar-site", name: "Do app", summary: "", instructions: "x", source: Skill.builtInSource))
         model.skills.append(Skill(slug: "publicar-site-2", name: "Outra", summary: "", instructions: "x", source: Skill.builtInSource))
         let unrelated = SkillSamples.changed("name: publicar-site", "name: publicar-site-3")
@@ -452,7 +407,7 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
     }
 
     @Test @MainActor func discardingKeepsTheSkillsAsTheyWere() async throws {
-        let (model, botID) = setUp(Script([said("oi")]))
+        let (model, botID) = setUp(CallScript([said("oi")]))
         await propose(SkillSamples.good, in: model, botID)
         let draft = try #require(await model.skillDraft("publicar-site", from: botID))
         let before = model.skills.count

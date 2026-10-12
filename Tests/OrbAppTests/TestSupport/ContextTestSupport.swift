@@ -3,6 +3,14 @@ import Foundation
 
 // What the context suites share: building conversations, checking them, and driving the engine with a scripted model.
 
+func call(_ id: String, _ name: String = "read_file", _ arguments: String = "{}") -> ToolCallRequest {
+    ToolCallRequest(id: id, name: name, arguments: arguments)
+}
+
+func assistant(_ text: String = "", calls: [ToolCallRequest] = []) -> ChatMessage {
+    ChatMessage(role: .assistant, content: text, toolCalls: calls)
+}
+
 func characters(_ messages: [ChatMessage]) -> Int { messages.contextCharacters }
 
 /// Whether `later` starts with all of `earlier` (the provider's cache would still hold).
@@ -35,6 +43,9 @@ actor Recorder {
         self.responses = responses
         self.failures = failures
     }
+
+    /// Replaces the replies still to give (when they need what `setUp` made).
+    func reset(with replies: [[LLMEvent]]) { responses = replies }
 
     func next(_ messages: [ChatMessage]) throws -> [LLMEvent] {
         received.append(messages)

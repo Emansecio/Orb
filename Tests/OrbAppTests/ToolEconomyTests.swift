@@ -224,8 +224,6 @@ final class ToolOutputSizeTests {
         try await workspace.run(tool, arguments)
     }
 
-    private func lines(_ output: String) -> [String] { output.split(separator: "\n").map(String.init) }
-
     // MARK: read_file
 
     @Test func aBigFileComesInPagesThatNeverLoseTheirMiddle() async throws {

@@ -2,51 +2,6 @@ import Foundation
 import Testing
 @testable import Orb
 
-/// What a model call was given, and the answers it gives in order (the last repeats).
-private actor Script {
-    struct Call { var messages: [ChatMessage]; var tools: [String]; var system: String }
-    private(set) var calls: [Call] = []
-    private var answers: [[LLMEvent]]
-    private let failsCall: Int?
-    private let holdsCall: Int?
-    private var released = false
-
-    init(_ answers: [[LLMEvent]], failsCall: Int? = nil, holdsCall: Int? = nil) {
-        self.answers = answers
-        self.failsCall = failsCall
-        self.holdsCall = holdsCall
-    }
-
-    func release() { released = true }
-
-    func answer(_ messages: [ChatMessage], _ tools: [ToolSpec]) async -> [LLMEvent]? {
-        calls.append(Call(messages: Array(messages.dropFirst()), tools: tools.map(\.name), system: messages.first?.content ?? ""))
-        let number = calls.count
-        if failsCall == number { return nil }
-        let events = answers.count > 1 ? answers.removeFirst() : answers.first ?? []
-        while holdsCall == number, !released { try? await Task.sleep(for: .milliseconds(5)) }
-        return events
-    }
-}
-
-private struct ScriptedModel: LLMClient {
-    let script: Script
-
-    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
-        AsyncThrowingStream { continuation in
-            Task {
-                guard let events = await script.answer(messages, tools) else {
-                    continuation.finish(throwing: LLMError.notConfigured)
-                    return
-                }
-                for event in events { continuation.yield(event) }
-                continuation.finish()
-            }
-        }
-    }
-}
-
-
 private func said(_ text: String) -> [LLMEvent] { [.text(text), .finished(.done, nil)] }
 
 private func drafting(_ json: String) -> [LLMEvent] {
@@ -64,7 +19,7 @@ private func drafting(_ json: String) -> [LLMEvent] {
         removeTestFolder(root)
     }
 
-    @MainActor private func setUp(_ script: Script) -> (AppModel, WizardRunner) {
+    @MainActor private func setUp(_ script: CallScript) -> (AppModel, WizardRunner) {
         let store = Store(directory: root)
         var state = AppState.initial
         state.providers = [ProviderAccount(kind: .custom)]
@@ -75,7 +30,7 @@ private func drafting(_ json: String) -> [LLMEvent] {
         model.homeFolder = root
         model.providers = [ProviderAccount(kind: .custom)]
         model.defaultModel = "custom/modelo"
-        model.clientOverride = { ScriptedModel(script: script) }
+        model.clientOverride = { CallScriptModel(script: script) }
         let runner = WizardRunner(model: model)
         runner.orbsBase = root.appending(path: "Orbs")
         return (model, runner)
@@ -92,14 +47,14 @@ private func drafting(_ json: String) -> [LLMEvent] {
     // MARK: Turns
 
     @MainActor @Test func theAssistantOpensAlreadySpeaking() {
-        let (_, runner) = setUp(Script([said("oi")]))
+        let (_, runner) = setUp(CallScript([said("oi")]))
         #expect(botTexts(runner) == [WizardPrompt.firstLine])
         #expect(runner.offersSuggestions && runner.draft.revision == 0)
         #expect(WizardPrompt.suggestions.count == 3)
     }
 
     @MainActor @Test func twoTurnsFillTheDraftAndGrowTheChat() async throws {
-        let script = Script([drafting(#"{"name":"Maia","role":"Cuida da agenda"}"#), said("Como você prefere que ele trabalhe?"),
+        let script = CallScript([drafting(#"{"name":"Maia","role":"Cuida da agenda"}"#), said("Como você prefere que ele trabalhe?"),
                              drafting(#"{"instructions":"Você é a Maia.","capabilities":["browser"],"ready":true}"#), said("Tudo certo, é só criar.")])
         // The runner holds the app weakly (the sheet keeps it in the app): the test keeps it alive across both turns.
         let (model, runner) = setUp(script)
@@ -133,7 +88,7 @@ private func drafting(_ json: String) -> [LLMEvent] {
     }
 
     @MainActor @Test func talkingAgainTakesTheFinalCardAway() async {
-        let script = Script([drafting(#"{"name":"Maia","ready":true}"#), said("Pronto."), said("Claro, mudo.")])
+        let script = CallScript([drafting(#"{"name":"Maia","ready":true}"#), said("Pronto."), said("Claro, mudo.")])
         let (_, runner) = setUp(script)
         runner.send("oi")
         await settled(runner)
@@ -148,7 +103,7 @@ private func drafting(_ json: String) -> [LLMEvent] {
 
     @MainActor @Test func theStepLimitClosesWithWhatThereIs() async {
         // The model never stops calling the tool: after 14 steps the app closes the interview itself.
-        let script = Script([drafting(#"{"name":"Maia"}"#)])
+        let script = CallScript([drafting(#"{"name":"Maia"}"#)])
         let (_, runner) = setUp(script)
         runner.send("oi")
         await settled(runner)
@@ -160,7 +115,7 @@ private func drafting(_ json: String) -> [LLMEvent] {
     }
 
     @MainActor @Test func theThirtiethMessageClosesTheSession() async {
-        let script = Script([said("Mais uma pergunta?")])
+        let script = CallScript([said("Mais uma pergunta?")])
         let (model, runner) = setUp(script)
         _ = runner.applyDraft(.object(["name": .string("Maia")]))
         for number in 1...WizardRunner.maxUserMessages {
@@ -176,7 +131,7 @@ private func drafting(_ json: String) -> [LLMEvent] {
     }
 
     @MainActor @Test func aFailureCanBeTriedAgainFromTheSameState() async {
-        let script = Script([said("Voltei."), said("Segue.")], failsCall: 1)
+        let script = CallScript([said("Voltei."), said("Segue.")], failsCall: 1)
         let (_, runner) = setUp(script)
         runner.send("quero um Orb")
         await settled(runner)
@@ -193,7 +148,7 @@ private func drafting(_ json: String) -> [LLMEvent] {
     }
 
     @MainActor @Test func leavingForTheFormMidAnswerOffersTryAgainForTheUnansweredMessage() async {
-        let script = Script([said("Voltei.")], holdsCall: 1)
+        let script = CallScript([said("Voltei.")], holdsCall: 1)
         let (_, runner) = setUp(script)
         runner.send("quero um Orb")
         await waitUntil("the model to be asked") { await script.calls.count == 1 }
@@ -209,7 +164,7 @@ private func drafting(_ json: String) -> [LLMEvent] {
     }
 
     @MainActor @Test func withoutAUsableModelItSaysSo() {
-        let (model, runner) = setUp(Script([said("oi")]))
+        let (model, runner) = setUp(CallScript([said("oi")]))
         model.providers = []
         #expect(runner.send("oi"))
         #expect(runner.failure == WizardRunner.unavailable && !runner.isThinking)
@@ -218,7 +173,7 @@ private func drafting(_ json: String) -> [LLMEvent] {
     // MARK: Ending
 
     @MainActor @Test func cancelDiscardsEverythingAndStopsTheTurn() async {
-        let script = Script([drafting(#"{"name":"Maia"}"#), said("Ok.")], holdsCall: 2)
+        let script = CallScript([drafting(#"{"name":"Maia"}"#), said("Ok.")], holdsCall: 2)
         let (model, runner) = setUp(script)
         let botsBefore = model.bots.map(\.id)
         runner.send("oi")
@@ -237,7 +192,7 @@ private func drafting(_ json: String) -> [LLMEvent] {
     }
 
     @MainActor @Test func criarMakesTheOrbTheDraftDescribes() async throws {
-        let script = Script([drafting(#"{"name":"Maia","role":"Cuida da agenda","instructions":"Você é a Maia. Seja breve.","capabilities":["browser","connectors"],"mode":"auto","look":{"color":"menta","hair":"franja"}}"#), said("Pronto.")])
+        let script = CallScript([drafting(#"{"name":"Maia","role":"Cuida da agenda","instructions":"Você é a Maia. Seja breve.","capabilities":["browser","connectors"],"mode":"auto","look":{"color":"menta","hair":"franja"}}"#), said("Pronto.")])
         let (model, runner) = setUp(script)
         runner.send("oi")
         await settled(runner)
@@ -259,7 +214,7 @@ private func drafting(_ json: String) -> [LLMEvent] {
     }
 
     @MainActor @Test func criarNeedsAName() {
-        let (model, runner) = setUp(Script([said("oi")]))
+        let (model, runner) = setUp(CallScript([said("oi")]))
         let before = model.bots.count
         #expect(runner.create() == nil && model.bots.count == before)
     }
@@ -268,7 +223,7 @@ private func drafting(_ json: String) -> [LLMEvent] {
     /// A Claude Code model runs the assistant on the native engine like any provider: the client is the one the app hands out
     /// (`clientOverride` here), the Orb's own tool is the only one offered, and the draft is filled by the engine's tool call.
     @MainActor @Test func theAssistantRunsOnAClaudeCodeModelThroughTheNativeEngine() async throws {
-        let script = Script([drafting(#"{"name":"Maia","role":"Cuida da agenda"}"#), said("Como ela deve trabalhar?")])
+        let script = CallScript([drafting(#"{"name":"Maia","role":"Cuida da agenda"}"#), said("Como ela deve trabalhar?")])
         let (model, runner) = setUp(script)
         model.providers = [ProviderAccount(kind: .claudeCode)]
         model.publishConnections([.claudeCode])
@@ -285,7 +240,7 @@ private func drafting(_ json: String) -> [LLMEvent] {
 
     @MainActor @Test func theAssistantsCallsAreFiledUnderCriacaoDeOrb() async throws {
         let usage = TokenUsage(input: 120, output: 30)
-        let script = Script([[.text("Oi!"), .finished(.done, usage)]])
+        let script = CallScript([[.text("Oi!"), .finished(.done, usage)]])
         let (model, runner) = setUp(script)
         runner.send("oi")
         await settled(runner)

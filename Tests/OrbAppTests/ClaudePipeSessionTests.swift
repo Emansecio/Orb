@@ -7,10 +7,6 @@ struct ClaudePipeSessionTests {
         ToolCallRequest(id: id, name: name, arguments: arguments)
     }
 
-    private func assistant(_ text: String, calls: [ToolCallRequest] = []) -> ChatMessage {
-        ChatMessage(role: .assistant, content: text, toolCalls: calls)
-    }
-
     private func decode(_ lines: [String]) throws -> [JSONValue] {
         try lines.map { try #require(JSONValue.parse($0)) }
     }

@@ -8,10 +8,6 @@ import Testing
 
 // MARK: - Helpers
 
-private func call(_ id: String, _ name: String = "read_file", _ arguments: String = "{}") -> ToolCallRequest {
-    ToolCallRequest(id: id, name: name, arguments: arguments)
-}
-
 private func turn(_ request: String, output: Int, tag: String) -> [ChatMessage] {
     [.user(request), ChatMessage(role: .assistant, content: "", toolCalls: [call(tag, "read_file", #"{"path":"/tmp/\#(tag).txt"}"#)]),
      .tool(tag, String(repeating: "x", count: output)), ChatMessage(role: .assistant, content: "Resposta de \(request)")]
