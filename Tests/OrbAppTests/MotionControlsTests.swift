@@ -39,6 +39,10 @@ struct MotionControlsTests {
         // A file being dragged over wins over the focus.
         #expect(ComposerSurface.stroke(isFocused: true, isDropTargeted: true) == Palette.accentText)
         #expect(ComposerSurface.stroke(isFocused: false, isDropTargeted: true) == Palette.accentText)
+        // An open microphone turns it red, focused or not; a file dragged over still wins.
+        #expect(ComposerSurface.stroke(isFocused: true, isDropTargeted: false, isDictating: true) == Palette.danger.opacity(0.45))
+        #expect(ComposerSurface.stroke(isFocused: false, isDropTargeted: false, isDictating: true) == Palette.danger.opacity(0.45))
+        #expect(ComposerSurface.stroke(isFocused: true, isDropTargeted: true, isDictating: true) == Palette.accentText)
         #expect(ComposerSurface.fill(isFocused: false) == Palette.surface)
         #expect(ComposerSurface.fill(isFocused: true) == Palette.surfaceFocused)
     }

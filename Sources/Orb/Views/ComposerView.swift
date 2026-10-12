@@ -169,7 +169,12 @@ struct ComposerView: View {
                                     error: lane.error != nil, banner: lane.editing != nil))
         // The shadow belongs to the background alone: on the whole card every key in the field re-rendered the text,
         // chips and buttons into an offscreen pass to cast it.
-        .background { ComposerSurface(isFocused: isFocused, isDropTargeted: isDropTargeted, reduceMotion: reduceMotion) }
+        // Reads the dictation's phase, never its level: the card does not re-render with the voice.
+        .background {
+            ComposerSurface(isFocused: isFocused, isDropTargeted: isDropTargeted,
+                            isDictating: model.dictation.isActive(for: botID) && model.dictation.phase == .listening,
+                            reduceMotion: reduceMotion)
+        }
         .onGeometryChange(for: Bool.self) { $0.size.width < Self.compactBelow } action: { isCompact = $0 }
     }
 
@@ -258,11 +263,7 @@ struct ComposerView: View {
     private var bar: some View {
         let action = ComposerAction.current(isWorking: isWorking, canSend: canSend, waitsOnChain: model.live(botID).chainWork != nil)
         return HStack(spacing: 2) {
-            Button("Anexar", systemImage: "plus") { isImporting = true }
-                .labelStyle(.iconOnly)
-                .buttonStyle(CircleGhostStyle(side: 28, fontSize: 13))
-                .help(Tip.attach)
-            SkillsChip(botID: botID, compact: isCompact) { insert("/\($0) ") }
+            ComposerPlusMenu(botID: botID, attach: { isImporting = true }) { insert("/\($0) ") }
             PermissionChip(botID: botID, compact: isCompact) { isFocused = true }
             Spacer(minLength: 8)
             ContextMeterChip(botID: botID, gauge: gauge, compact: isCompact)
@@ -277,14 +278,16 @@ struct ComposerView: View {
     }
 
     /// One round button that is Send or Stop: its symbol is swapped (not the button), so the change reads as the same
-    /// control changing meaning. While the Orb works and a message is typed, Stop steps back beside it as a dark
-    /// button and the main one queues the message.
+    /// control changing meaning. While the Orb works and a message is typed, Stop steps back beside it as a plain round
+    /// icon (like "+" and the microphone), so the white button is the one thing the eye finds, and it queues the message.
     @ViewBuilder private func actionButtons(_ action: ComposerAction) -> some View {
         let routine = model.runningRoutineName(botID)
         HStack(spacing: 6) {
             if action.showsSecondaryStop {
                 Button("Parar", systemImage: "stop.fill") { model.stop(botID) }
-                    .buttonStyle(RoundActionStyle(isEnabled: true, isSecondary: true))
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(CircleGhostStyle(side: 28, fontSize: 11))
+                    .foregroundStyle(Palette.secondary)
                     .help("\(CommandName.stop) (\(AppShortcut.stop.label))")
                     .transition(.opacity)
             }
@@ -583,23 +586,20 @@ private struct PreparingChip: View {
     }
 }
 
-/// White circular send/stop button. Stepping back (`isSecondary`) when Send is next to it: a dark button.
-/// Enabling fades the fill (`Motion.content`); pressing scales it to 0.92 (`Motion.press`). Reduce Motion: the
-/// state changes at once and a press dims instead of shrinking.
+/// White circular send/stop button. Enabling fades the fill (`Motion.content`); pressing scales it to 0.92
+/// (`Motion.press`). Reduce Motion: the state changes at once and a press dims instead of shrinking.
 private struct RoundActionStyle: ButtonStyle {
     let isEnabled: Bool
-    var isSecondary = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .labelStyle(.iconOnly)
             .font(.system(size: 13, weight: .bold))
-            .foregroundStyle(isSecondary ? Palette.ink : Palette.onInk)
+            .foregroundStyle(Palette.onInk)
             .frame(width: 28, height: 28)
-            .background(isSecondary ? Palette.raised : Palette.ink.opacity(isEnabled ? 1 : 0.25), in: .circle)
+            .background(Palette.ink.opacity(isEnabled ? 1 : 0.25), in: .circle)
             .animation(Motion.availability(reduceMotion: reduceMotion), value: isEnabled)
-            .overlay { if isSecondary { Circle().strokeBorder(Palette.lineStrong) } }
             .scaleEffect(ComposerAction.pressVisual(pressed: configuration.isPressed, reduceMotion: reduceMotion).scale)
             .opacity(ComposerAction.pressVisual(pressed: configuration.isPressed, reduceMotion: reduceMotion).opacity)
             .animation(reduceMotion ? nil : Motion.press, value: configuration.isPressed)
@@ -760,10 +760,12 @@ enum PasteGate {
 }
 
 /// The card around the message field: its border and background answer the focus like a hover does (in 0.10 s, out
-/// 0.22 s), the background 2 % lighter and the border `lineStrong`. No glow: the Orb is the color on screen.
+/// 0.22 s), the background 2 % lighter and the border `lineStrong`. No glow: the Orb is the color on screen. While the
+/// microphone listens the border turns a faint red, so an open microphone is seen from across the room.
 struct ComposerSurface: View {
     let isFocused: Bool
     let isDropTargeted: Bool
+    var isDictating = false
     let reduceMotion: Bool
 
     /// The card's shadow: black below it; while a file is dragged over, an accent glow all around.
@@ -774,8 +776,11 @@ struct ComposerSurface: View {
     /// The card's fill: `surface`, 2 % lighter while the field has the focus.
     static func fill(isFocused: Bool) -> Color { isFocused ? Palette.surfaceFocused : Palette.surface }
 
-    static func stroke(isFocused: Bool, isDropTargeted: Bool) -> Color {
-        isDropTargeted ? Palette.accentText : (isFocused ? Palette.lineStrong : Palette.line)
+    /// A file dragged over wins (it is what happens next), then the open microphone, then the focus.
+    static func stroke(isFocused: Bool, isDropTargeted: Bool, isDictating: Bool = false) -> Color {
+        if isDropTargeted { return Palette.accentText }
+        if isDictating { return Palette.danger.opacity(0.45) }
+        return isFocused ? Palette.lineStrong : Palette.line
     }
 
     var body: some View {
@@ -783,10 +788,15 @@ struct ComposerSurface: View {
         let shadow = Self.shadow(isDropTargeted: isDropTargeted)
         shape.fill(Self.fill(isFocused: isFocused))
             .shadow(color: shadow.color, radius: 18, y: shadow.y)
-            .overlay { shape.strokeBorder(Self.stroke(isFocused: isFocused, isDropTargeted: isDropTargeted), lineWidth: isDropTargeted ? 2 : 1) }
+            .overlay {
+                shape.strokeBorder(Self.stroke(isFocused: isFocused, isDropTargeted: isDropTargeted, isDictating: isDictating),
+                                   lineWidth: isDropTargeted ? 2 : 1)
+            }
             // On the surface only: the field, its chips and its height never animate with the focus.
             .animation(Motion.focus(isFocused, reduceMotion: reduceMotion), value: isFocused)
             // The drop highlight (border, glow) answers like a hover: fast in, slow out; at once under Reduce Motion.
             .animation(reduceMotion ? nil : Motion.hover(isDropTargeted), value: isDropTargeted)
+            // The microphone opening or closing: a color change, so it fades even under Reduce Motion.
+            .animation(Motion.hover(isDictating), value: isDictating)
     }
 }

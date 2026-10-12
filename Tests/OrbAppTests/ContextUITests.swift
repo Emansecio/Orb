@@ -135,6 +135,14 @@ struct ContextReadingTests {
         #expect(ContextTone(share: 2) == .full)
     }
 
+    /// Below 70% the bar shows the ring alone, unless someone points at it; from there on the number stays.
+    @Test func thePercentageShowsWhenItIsWorthReading() {
+        #expect(!ContextTone.calm.showsPercent(pointing: false))
+        #expect(ContextTone.calm.showsPercent(pointing: true))
+        #expect(ContextTone.warming.showsPercent(pointing: false))
+        #expect(ContextTone.full.showsPercent(pointing: false))
+    }
+
     @Test func cacheHitComesFromTheLastRequest() throws {
         let hit = TokenUsage(input: 1_800, output: 100, cacheRead: 8_200, cacheWrite: 0)
         let withCache = try #require(ContextReading.make(input(conversation(turns: 2), usage: hit)))

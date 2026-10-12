@@ -1,7 +1,7 @@
 import SwiftUI
 
-// The small controls under the message field: what the Orb may do (permissions), the skills, and the model. Each
-// shows its state in words when there is room and only its icon when the composer is narrow.
+// The small controls under the message field: the "+" (attach, skills), what the Orb may do (permissions) and the
+// model. The permission chip says its mode in words only when it is not the usual one (and there is room).
 
 /// A pill-shaped button for the composer's bar: icon and text, a soft fill on hover, a filled one when `filled`.
 struct ComposerChipStyle: ButtonStyle {
@@ -38,7 +38,7 @@ struct PermissionChip: View {
         Button { isOpen.toggle() } label: {
             HStack(spacing: 5) {
                 Image(systemName: permission.mode.symbol)
-                if !compact { Text(PermissionChipText.label(permission)).lineLimit(1).fixedSize() }
+                if !compact, let text = PermissionChipText.barLabel(permission) { Text(text).lineLimit(1).fixedSize() }
             }
             .foregroundStyle(Self.tint(permission.mode))
         }
@@ -164,30 +164,43 @@ private struct PermissionRow: View {
 
 // MARK: Skills
 
-/// "Skills": a popover with search, each skill with its summary. Picking one puts `/slug` in the message.
-struct SkillsChip: View {
+/// The "+" that starts the bar: a short menu to attach files or to pick a skill. The skill list (with search) opens
+/// from the "+" itself; picking one puts `/slug` in the message, as `/` typed at the start of the field does.
+struct ComposerPlusMenu: View {
     @Environment(AppModel.self) private var model
     /// The Orb whose skills are listed (a skill can be limited to some Orbs).
     let botID: UUID
-    let compact: Bool
+    let attach: () -> Void
     let onPick: (String) -> Void
-    @State private var isOpen = false
+    @State private var isSkillsOpen = false
 
     var body: some View {
-        Button { isOpen.toggle() } label: {
-            HStack(spacing: 5) {
-                Image(systemName: "wand.and.stars")
-                if !compact { Text("Skills") }
-            }
+        Menu {
+            Button("Anexar arquivos…", systemImage: "paperclip", action: attach)
+            Button("Usar skill…", systemImage: "wand.and.stars", action: openSkills)
+        } label: {
+            Image(systemName: "plus")
         }
-        .buttonStyle(ComposerChipStyle())
-        .help(Tip.skills)
-        .accessibilityLabel("Skills")
-        .popover(isPresented: $isOpen, arrowEdge: .bottom) {
+        .menuStyle(.button)
+        .buttonStyle(CircleGhostStyle(side: 28, fontSize: 13))
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(Tip.attach)
+        .accessibilityLabel("Anexar ou usar skill")
+        .popover(isPresented: $isSkillsOpen, arrowEdge: .bottom) {
             SkillsPopover(skills: model.skills(for: botID)) { slug in
-                isOpen = false
+                isSkillsOpen = false
                 onPick(slug)
             }
+        }
+    }
+
+    /// The menu is still closing when its item runs: the list opens a turn later, so the popover is not shown and
+    /// taken away with the menu.
+    private func openSkills() {
+        Task { @MainActor in
+            await Task.yield()
+            isSkillsOpen = true
         }
     }
 }

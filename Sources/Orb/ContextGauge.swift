@@ -91,6 +91,10 @@ enum ContextTone: Equatable, Sendable {
     init(share: Double) {
         self = share >= ContextReading.fullAt ? .full : (share >= ContextReading.warmsAt ? .warming : .calm)
     }
+
+    /// The bar's meter says its percentage when it is worth reading: from `warmsAt` on, or while someone looks at it
+    /// (`pointing`: the pointer is over it or its popover is open). Below that the ring alone tells enough.
+    func showsPercent(pointing: Bool) -> Bool { self != .calm || pointing }
 }
 
 /// Everything the meter needs to know about one Orb's conversation, taken on the main thread and measured elsewhere.

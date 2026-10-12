@@ -170,6 +170,16 @@ struct ComposerSupportTests {
         #expect(PermissionChipText.grantsTitle(PermissionState(mode: .ask, rules: [])) == nil)
     }
 
+    /// The bar says nothing beside the icon in the mode every Orb starts in, only its grants' count; any other mode in words.
+    @Test func theBarNamesOnlyAModeThatIsNotTheUsualOne() {
+        let rules = [PermissionRule.shell("git"), .shell("brew")]
+        #expect(PermissionChipText.barLabel(PermissionState(mode: .ask, rules: [])) == nil)
+        #expect(PermissionChipText.barLabel(PermissionState(mode: .ask, rules: rules)) == "2")
+        #expect(PermissionChipText.barLabel(PermissionState(mode: .auto, rules: rules)) == "Automático")
+        #expect(PermissionChipText.barLabel(PermissionState(mode: .readOnly, rules: [])) == "Só leitura")
+        #expect(PermissionChipText.barLabel(PermissionState(mode: .bypass, rules: [])) == "Sem pedir permissão")
+    }
+
     /// One order everywhere (the Orb's panel, the new-Orb sheet and the composer all list `allCases`) and one wording:
     /// the long description of a mode starts with its short one.
     @Test func everyPickerListsTheModesInOneOrderWithTheRiskiestLast() {

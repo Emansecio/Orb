@@ -27,7 +27,8 @@ struct DictationButton: View {
                         .fill(Palette.danger.opacity(0.28))
                         .scaleEffect(phase == .listening && !reduceMotion ? 1 + CGFloat(dictation.level) * 0.4 : 1)
                         .opacity(phase == .listening ? 1 : 0)
-                        .animation(reduceMotion ? nil : .smooth(duration: 0.12), value: dictation.level)
+                        // Glides between the readings (about ten a second) instead of stepping.
+                        .animation(reduceMotion ? nil : .smooth(duration: 0.15), value: dictation.level)
                 }
                 .contentShape(.circle)
         }
@@ -58,7 +59,7 @@ struct DictationButton: View {
         case .idle: nil
         case .starting: "Abrindo o microfone…"
         case .downloading: "Baixando o reconhecimento de fala do Mac (só desta vez)…"
-        case .listening: "Ouvindo · ↩ envia · clique no microfone ou Esc para parar"
+        case .listening: "Ouvindo… ↩ envia · Esc encerra"
         case .finishing: "Terminando de transcrever…"
         }
     }

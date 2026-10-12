@@ -10,7 +10,7 @@ import SwiftUI
 enum Tip {
     // MARK: Attachments
 
-    static let attach = "Anexa arquivos ou imagens à mensagem, ou solte-os aqui"
+    static let attach = "Anexa arquivos ou escolhe uma skill; também dá para soltar arquivos ou digitar /"
     static let removeAttachment = "Tira o anexo desta mensagem"
     static let previewAttachment = "Abre a pré-visualização (Quick Look); arraste para levar o arquivo"
     static let previewImage = "Abre a imagem em pré-visualização (Quick Look)"
@@ -19,7 +19,6 @@ enum Tip {
 
     // MARK: Composer
 
-    static let skills = "Escolhe uma skill para a mensagem, ou digite / no começo"
     static let manageGrants = "Abre as liberações permanentes deste Orb no painel"
     static let adjustContext = "Abre Ajustes para escolher quanto das conversas o Orb guarda"
     static let chooseModel = "Escolhe o modelo da lista"
@@ -281,7 +280,7 @@ enum Tip {
     /// Every fixed text above, for the test that holds them to the style.
     static var all: [String] {
         [attach, removeAttachment, previewAttachment, previewImage, missingAttachment, moreAttachments,
-         skills, manageGrants, adjustContext, chooseModel, forgetWindow, suggestion, queueAfterTask, steerNow,
+         manageGrants, adjustContext, chooseModel, forgetWindow, suggestion, queueAfterTask, steerNow,
          newRoutine, editRoutine, deleteRoutine, runRoutineNow, runRoutineAgain, queuedRoutine, routineConversation,
          copyReport, openReportFile, runOnceNow, routinePermissions, allRoutines,
          routineToggle(isOn: true), routineToggle(isOn: false),

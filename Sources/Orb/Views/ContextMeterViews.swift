@@ -98,13 +98,17 @@ struct ContextRing: View {
 
 // MARK: - Meter in the bar
 
-/// The meter as a chip in the composer's bar: the ring and the percentage (the ring alone when the composer is narrow).
-/// Hidden while the conversation is empty. A button, so Tab reaches it with keyboard navigation on; it opens the popover.
+/// The meter as a chip in the composer's bar: the ring, and its percentage to the left of it (as the battery's is)
+/// when there is something to read in it: from 70% on, while the pointer is over it, or while its popover is open.
+/// The bar ends at the right, so the number grows the chip leftwards and the ring under the pointer stays put. Never
+/// the number when the composer is narrow. Hidden while the conversation is empty. A button, so Tab reaches it with
+/// keyboard navigation on; it opens the popover.
 struct ContextMeterChip: View {
     let botID: UUID
     let gauge: ContextGauge
     let compact: Bool
     @State private var isOpen = false
+    @State private var isHovering = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -115,19 +119,24 @@ struct ContextMeterChip: View {
     }
 
     private func chip(_ reading: ContextReading) -> some View {
-        Button { isOpen.toggle() } label: {
+        let showsPercent = !compact && reading.tone.showsPercent(pointing: isHovering || isOpen)
+        return Button { isOpen.toggle() } label: {
             HStack(spacing: 5) {
-                ContextRing(fraction: reading.fraction, tone: reading.tone)
-                if !compact {
+                if showsPercent {
                     Text("\(reading.percent)%")
                         .monospacedDigit()
                         .foregroundStyle(reading.tone == .calm ? Palette.muted : reading.tone.color)
                         // The number rolls to the next one once per turn (never per token); it fades under Reduce Motion.
                         .contentTransition(reduceMotion ? .identity : .numericText())
                         .animation(Motion.content, value: reading.percent)
+                        .transition(.opacity)
                 }
+                ContextRing(fraction: reading.fraction, tone: reading.tone)
             }
+            // The number comes and goes with the chip widening or narrowing under it; under Reduce Motion it only fades.
+            .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: showsPercent)
         }
+        .onHover { isHovering = $0 }
         .buttonStyle(ComposerChipStyle())
         .transition(.opacity) // appears with a fade once the first message is measured
         .help("Contexto desta conversa: \(reading.spokenState)")

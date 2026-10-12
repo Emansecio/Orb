@@ -56,6 +56,18 @@ struct DictationTextTests {
         #expect(!dictation.isActive(for: botID) && dictation.level == 0)
     }
 
+    /// The halo rises with the voice at once and falls back slowly: a pause between syllables does not drop it to nothing.
+    @Test func theHaloRisesFastAndFallsSlowly() {
+        let risen = Dictation.envelope(0, toward: 1)
+        #expect(risen > 0.5 && risen < 1)
+        var level: Float = 1
+        level = Dictation.envelope(level, toward: 0)
+        #expect(level > 0.7) // one quiet buffer (a tenth of a second) keeps most of it
+        for _ in 0..<15 { level = Dictation.envelope(level, toward: 0) }
+        #expect(level < 0.02) // a second and a half of silence lets it go
+        #expect(Dictation.envelope(0.4, toward: 0.4) == 0.4)
+    }
+
     @Test func aBuildThatCannotSayWhyItWantsTheMicrophoneShowsNoButton() {
         // The test runner has no Info.plist: asking for the microphone there would get the process killed.
         #expect(!Dictation.isSupported)

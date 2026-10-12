@@ -138,7 +138,14 @@ final class Dictation {
 
     private func heard(_ loudness: Float, from capture: AnyObject) {
         guard self.capture === capture, phase == .listening else { return }
-        level = loudness
+        level = Self.envelope(level, toward: loudness)
+    }
+
+    /// The button's halo follows the voice as a meter's needle does: it rises most of the way to a louder buffer at
+    /// once, and falls back a quarter of the way per buffer (about ten a second), so it breathes instead of flickering
+    /// between syllables.
+    nonisolated static func envelope(_ level: Float, toward loudness: Float) -> Float {
+        level + (loudness - level) * (loudness > level ? 0.6 : 0.25)
     }
 
     private func end() {

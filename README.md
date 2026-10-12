@@ -288,7 +288,7 @@ Quando o Orb precisa de você, aparece um cartão na conversa e o Orb espera ("E
 
 Painel do Orb → **Pasta e acessos** → **Liberações** lista cada "Sempre permitir" ("Rodar comandos git", "Gravar em
 ~/Projetos/app", "Usar create_issue (github)"), com **Remover** e **Remover todas**. Valem no "Perguntar antes"; remover uma vale
-já para a próxima ação do Orb, mesmo no meio de uma tarefa. O compositor mostra o número ("Perguntar antes · 4").
+já para a próxima ação do Orb, mesmo no meio de uma tarefa. O compositor mostra o número ao lado da mão (no modo padrão o chip é só o ícone; outro modo aparece por extenso).
 
 ### Instruções da pasta
 
@@ -465,7 +465,8 @@ Os modelos têm uma janela limitada. O Orb mede quanto da janela a conversa ocup
 esquecer: o pedido original, as decisões, os arquivos mexidos, os erros em aberto e as pendências sobrevivem, e o que sai da
 janela vai antes para a memória do Orb. As mensagens continuam salvas na conversa.
 
-- **O anel** no compositor mostra a porcentagem da janela (some quando não há histórico). Clique para o painel "Contexto desta
+- **O anel** no compositor mostra quanto da janela está em uso (some quando não há histórico); a porcentagem aparece ao lado dele
+  a partir de 70%, ou ao passar o mouse. Clique para o painel "Contexto desta
   conversa": quanto está em uso, o que é mantido palavra por palavra (contado em pedidos seus), quanto veio do cache do provedor e quanto "Compactar
   agora" liberaria.
 - **Compactar agora** (ou `/compactar` e, se quiser, um foco: `/compactar decisões sobre o banco`) resume já. Não roda com o
