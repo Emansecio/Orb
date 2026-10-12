@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import Orb
 
-// The folding of a chat's lines between Orbs (docs/MULTI-ORBS.md, 5 and 8.3, WP2): which lines fold together, the words of a
+// The folding of a chat's lines between Orbs (docs/historico/MULTI-ORBS.md, 5 and 8.3, WP2): which lines fold together, the words of a
 // folded row, and that a chat without such lines is left as it is.
 
 @MainActor

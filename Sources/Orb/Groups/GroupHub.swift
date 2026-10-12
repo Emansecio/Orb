@@ -1,7 +1,7 @@
 import AppKit
 import Foundation
 
-/// The runtime of the groups: the loop of docs/MULTI-ORBS.md 7.3. The person's message goes to the orchestrator (or to the members
+/// The runtime of the groups: the loop of docs/historico/MULTI-ORBS.md 7.3. The person's message goes to the orchestrator (or to the members
 /// it @mentions); the orchestrator plans and assigns with `orbs ask`; the members work in turns of their own, in parallel, and talk
 /// to each other when they need to; every answer wakes whoever asked, until the orchestrator closes the round with the final
 /// answer and nothing is left to do. A request has a budget (turns and tokens); when it is spent the group pauses and the

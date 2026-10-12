@@ -77,7 +77,7 @@ extension OrbProposal {
         return nil
     }
 
-    /// The proposal for `creator` and the arguments of `orb_propose` (the rules of docs/MULTI-ORBS.md 4.2). Pure: whatever the
+    /// The proposal for `creator` and the arguments of `orb_propose` (the rules of docs/historico/MULTI-ORBS.md 4.2). Pure: whatever the
     /// model sent, the result never has more than the creator, no connectors, and a look that exists.
     /// `existingNames`: the Orbs there are now, to warn that the folder gets another name.
     static func make(from creator: Bot, args: JSONValue, existingNames: [String] = []) -> OrbProposal {

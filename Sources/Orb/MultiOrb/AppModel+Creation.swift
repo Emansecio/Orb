@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Orb creates Orb (`orb_propose`): what the app knows for the proposal, the creation once the person says "Criar", and the
-/// edits of "Editar antes" (docs/MULTI-ORBS.md 4).
+/// edits of "Editar antes" (docs/historico/MULTI-ORBS.md 4).
 extension AppModel {
     /// What `orb_propose` needs for `bot`: who it is, the Orbs there are, and how to create the one the person accepts.
     func orbCreationSupport(for bot: Bot) -> OrbCreationSupport {

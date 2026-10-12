@@ -38,7 +38,7 @@ enum TranscriptFolding {
         return rows.count == items.count ? nil : rows
     }
 
-    /// The rows of a chat. Rules (see docs/MULTI-ORBS.md, 5):
+    /// The rows of a chat. Rules (see docs/historico/MULTI-ORBS.md, 5):
     /// - adjacent events of one kind (and one actor, when they have one) become one row; the kinds that fold are the ones
     ///   that repeat (creation, joining and leaving a group, routines);
     /// - adjacent messages between Orbs (`orbMessage`, and `delegationReceived`) become one exchange; a tool line between two

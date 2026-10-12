@@ -317,7 +317,7 @@ struct WizardPreviewPane: View {
 
 /// The card that closes the interview: what is about to be created and the two ways out besides the footer's "Criar Orb". (The Orb creation card of the
 /// "Orb cria Orb" feature, `OrbProposalCard`, is built for a proposal that waits in a chat; this one is the assistant's own
-/// and has the same look. TODO: swap for `OrbProposalCard` fed by the draft when that card takes a draft.)
+/// and has the same look. Not `OrbProposalCard`: that card takes a finished proposal, not a draft.)
 struct WizardReadyCard: View {
     let draft: OrbDraft
     let adjust: () -> Void

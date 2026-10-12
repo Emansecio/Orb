@@ -3,7 +3,7 @@ import Testing
 @testable import Orb
 
 // Orbs asking each other for work, the parts that need no running model: the rules, the words the model reads, the roster in the
-// system prompt, Claude Code's mailbox and the tools server's flags (docs/MULTI-ORBS.md, WP1).
+// system prompt, Claude Code's mailbox and the tools server's flags (docs/historico/MULTI-ORBS.md, WP1).
 
 private let atlas = OrbRef(id: UUID(uuidString: "00000000-0000-4000-8000-0000000000A1")!, name: "Atlas")
 private let pesquisador = OrbRef(id: UUID(uuidString: "00000000-0000-4000-8000-0000000000B2")!, name: "Pesquisador")

@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import Orb
 
-// The contract types of several Orbs working together (docs/MULTI-ORBS.md, WP0): they save and load, an old file opens
+// The contract types of several Orbs working together (docs/historico/MULTI-ORBS.md, WP0): they save and load, an old file opens
 // with defaults, a newer one loses only what it must, and the quiet defaults leave the app as it was.
 
 private func roundTrip<T: Codable & Equatable>(_ value: T) throws -> T {

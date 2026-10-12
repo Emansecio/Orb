@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import Orb
 
-// The Orb's lines while it talks to other Orbs (docs/MULTI-ORBS.md, 8.1 to 8.3, WP2): the phrases of the work line, the
+// The Orb's lines while it talks to other Orbs (docs/historico/MULTI-ORBS.md, 8.1 to 8.3, WP2): the phrases of the work line, the
 // conversing face, and what the search finds of the lines between Orbs.
 
 @Suite("Linha de trabalho entre Orbs")

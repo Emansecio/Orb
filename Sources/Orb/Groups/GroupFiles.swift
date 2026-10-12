@@ -1,6 +1,6 @@
 import Foundation
 
-/// Where a group keeps its files in the data folder (see docs/MULTI-ORBS.md, 2.7).
+/// Where a group keeps its files in the data folder (see docs/historico/MULTI-ORBS.md, 2.7).
 enum GroupFiles {
     /// `conversations/_grupos/<groupID>.json`: the group's thread. `memoria/_grupos/<groupID>/`: its board.
     static let threadFolder = "_grupos"

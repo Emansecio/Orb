@@ -1,7 +1,7 @@
 import AppKit
 import Foundation
 
-// The app's side of the groups (docs/MULTI-ORBS.md, 7): making, changing and deleting them, keeping them true to the Orbs that
+// The app's side of the groups (docs/historico/MULTI-ORBS.md, 7): making, changing and deleting them, keeping them true to the Orbs that
 // exist, a group's thread and live state, and the doors the person uses to talk to a group, continue it, end it or stop it.
 // The loop itself is `GroupHub`.
 
