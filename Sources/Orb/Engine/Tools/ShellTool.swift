@@ -72,14 +72,14 @@ struct RunCommandTool: AgentTool {
                 + "encontrado, ele pode estar instalado: tente de novo daqui a pouco]"
         }
         if result.isBinary {
-            output = "[saída binária de \(ByteCountFormatter.string(fromByteCount: Int64(result.totalBytes), countStyle: .file)) omitida; "
+            output = "[saída binária de \(AttachmentKind.fileSize(Int64(result.totalBytes))) omitida; "
                 + "redirecione para um arquivo, ou use file, strings ou xxd]"
         } else if let file = result.fullOutputFile {
             // The same shape as the note of `ToolOutputCap`, so that shortening the conversation later keeps it whole.
             let cut = result.fullOutputCut
-                ? ", file cut at \(ByteCountFormatter.string(fromByteCount: Int64(StreamCapture.maxSpillBytes), countStyle: .file))" : ""
+                ? ", file cut at \(AttachmentKind.fileSize(Int64(StreamCapture.maxSpillBytes)))" : ""
             output += ContextText.savedNoteOpen + "\(file.path) (\(result.totalLines) lines, "
-                + "\(ByteCountFormatter.string(fromByteCount: Int64(result.totalBytes), countStyle: .file))\(cut)); "
+                + "\(AttachmentKind.fileSize(Int64(result.totalBytes)))\(cut)); "
                 + "read it with read_file (offset/limit) or grep instead of running the command again]"
         }
         if result.leftoversAlive || result.leftOutputOpen {

@@ -66,7 +66,7 @@ struct TranslatedKeyLayout: KeyLayout {
 
 /// The US keyboard, the layout assumed when the system cannot be asked.
 enum USKeyLayout {
-    private static let keys: [UInt16: (String, String)] = [
+    static let keys: [UInt16: (String, String)] = [
         0: ("a", "A"), 1: ("s", "S"), 2: ("d", "D"), 3: ("f", "F"), 4: ("h", "H"), 5: ("g", "G"), 6: ("z", "Z"), 7: ("x", "X"),
         8: ("c", "C"), 9: ("v", "V"), 11: ("b", "B"), 12: ("q", "Q"), 13: ("w", "W"), 14: ("e", "E"), 15: ("r", "R"),
         16: ("y", "Y"), 17: ("t", "T"), 18: ("1", "!"), 19: ("2", "@"), 20: ("3", "#"), 21: ("4", "$"), 22: ("6", "^"),

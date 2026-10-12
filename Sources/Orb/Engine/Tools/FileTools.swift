@@ -74,7 +74,7 @@ struct ReadFileTool: AgentTool {
         }
         let data = try FileAccess.translating(url, writing: false) { try Data(contentsOf: url, options: .mappedIfSafe) }
         guard let file = TextFile.decode(data) else {
-            let bytes = ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
+            let bytes = AttachmentKind.fileSize(Int64(size))
             throw ToolError("\(url.path) é um arquivo binário (\(bytes)); não dá para ler como texto. "
                 + (Self.binaryAdvice(for: url) ?? "Use run_command (file, strings, xxd) se precisar inspecioná-lo."))
         }
@@ -175,7 +175,7 @@ struct WriteFileTool: AgentTool {
             let size = (try? FileManager.default.attributesOfItem(atPath: target.path))?[.size] as? Int
             let append = arguments.flag("append")
             if let size {
-                let formatted = ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
+                let formatted = AttachmentKind.fileSize(Int64(size))
                 lines.append(append ? "Acrescenta ao final (hoje com \(formatted))" : "Substitui (\(formatted))")
             } else {
                 lines.append("Novo arquivo")
@@ -421,7 +421,7 @@ struct ListDirectoryTool: AgentTool {
                         if isFolder {
                             details = date ?? ""
                         } else {
-                            let size = ByteCountFormatter.string(fromByteCount: Int64(values?.fileSize ?? 0), countStyle: .file)
+                            let size = AttachmentKind.fileSize(Int64(values?.fileSize ?? 0))
                             details = [size, date].compactMap { $0 }.joined(separator: ", ")
                         }
                         lines.append(prefix + name + (isFolder ? "/" : "") + (details.isEmpty ? "" : "  (\(details))"))

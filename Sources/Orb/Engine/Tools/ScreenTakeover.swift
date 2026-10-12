@@ -636,14 +636,10 @@ final class LiveTakeoverPoster: TakeoverEventPoster, @unchecked Sendable {
         return layout ?? usLayout
     }
 
+    /// The unshifted US keys (from `USKeyLayout`), without the space bar.
     private static let usLayout: [Character: UInt16] = {
-        let rows: [(String, [UInt16])] = [
-            ("asdfhgzxcv", [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]), ("bqweryt", [11, 12, 13, 14, 15, 16, 17]),
-            ("123465=97-80", [18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29]), ("]ou[ip", [30, 31, 32, 33, 34, 35]),
-            ("lj'k;\\,/nm.", [37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47]), ("`", [50]),
-        ]
         var map: [Character: UInt16] = [:]
-        for (characters, codes) in rows { for (character, code) in zip(characters, codes) { map[character] = code } }
+        for (code, pair) in USKeyLayout.keys where code != 49 { if let character = pair.0.first { map[character] = code } }
         return map
     }()
 }

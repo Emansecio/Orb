@@ -124,8 +124,12 @@ enum AttachmentKind {
 
     /// "2,1 MB"; nil when the size is unknown.
     static func size(_ bytes: Int?) -> String? {
-        guard let bytes else { return nil }
-        return ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+        bytes.map { fileSize(Int64($0)) }
+    }
+
+    /// "2,1 MB": the one way sizes are written (Finder style).
+    static func fileSize(_ bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 }
 

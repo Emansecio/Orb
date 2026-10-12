@@ -118,7 +118,7 @@ struct WebFetchTool: AgentTool {
             }
             let target = context.url(for: destination)
             let size = try await Self.download(bytes, to: target)
-            return ToolResult(text: "\(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)) (\(response.mimeType ?? "tipo desconhecido")) de \(finalURL.absoluteString) salvos em \(WriteFileTool.location(target, target.resolvingLinkChain))")
+            return ToolResult(text: "\(AttachmentKind.fileSize(Int64(size))) (\(response.mimeType ?? "tipo desconhecido")) de \(finalURL.absoluteString) salvos em \(WriteFileTool.location(target, target.resolvingLinkChain))")
         }
 
         let mimeType = (response.mimeType ?? "").lowercased()
@@ -127,7 +127,7 @@ struct WebFetchTool: AgentTool {
         // one would otherwise be read up to the limit just to say it is not text.
         if !Self.isReadable(mimeType, wantsImage: wantsImage) {
             let size = response.expectedContentLength > 0
-                ? ByteCountFormatter.string(fromByteCount: response.expectedContentLength, countStyle: .file) + " " : ""
+                ? AttachmentKind.fileSize(response.expectedContentLength) + " " : ""
             return ToolResult(text: header + "\nConteúdo \(mimeType) de \(size)(não é texto). Use save_to para baixá-lo.")
         }
         // A generic type may hide a PDF, so it is read up to the PDF limit until the first bytes show it is not one.
@@ -168,10 +168,10 @@ struct WebFetchTool: AgentTool {
         } else if wantsImage, mimeType.hasPrefix("image/"), mimeType != "image/svg+xml", !cut,
                   let store = context.imageStore, let botID = context.botID,
                   let image = try? await store.attach(data, name: url.lastPathComponent.isEmpty ? "imagem" : url.lastPathComponent, botID: botID) {
-            let size = ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file)
+            let size = AttachmentKind.fileSize(Int64(data.count))
             return ToolResult(text: header + "\nImagem \(mimeType) de \(size), anexada para você ver.", images: [image])
         } else {
-            let bytes = ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file)
+            let bytes = AttachmentKind.fileSize(Int64(data.count))
             return ToolResult(text: header + "\nConteúdo \(mimeType.isEmpty ? "de tipo desconhecido" : mimeType) de \(cut ? "mais de " : "")\(bytes) (não é texto). Use save_to para baixá-lo.")
         }
 
