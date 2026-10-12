@@ -4,17 +4,30 @@ import Testing
 
 /// Dictation into the composer: how what is heard becomes the draft (`DictationText`) and how the button reads.
 struct DictationTextTests {
-    @Test func guessesAreReplacedAndSettledWordsKept() {
+    @Test func theQuickWordsShowWhileTheyAreSaid() {
         var text = DictationText()
-        text.take("Abre a", isFinal: false)
-        text.take("Abre a planilha", isFinal: false)
+        text.take("Abre a", isFinal: false, end: 1)
+        text.take("Abre a planilha", isFinal: false, end: 2)
         #expect(text.whole == "Abre a planilha")
-        text.take("Abre a planilha.", isFinal: true)
-        #expect(text.whole == "Abre a planilha." && text.guessing.isEmpty)
-        text.take("Depois", isFinal: false)
-        #expect(text.whole == "Abre a planilha. Depois")
-        text.take(" Depois me manda.", isFinal: true)
-        #expect(text.whole == "Abre a planilha. Depois me manda.")
+        text.take("Abre a planilha de vendas", isFinal: true, end: 3)
+        text.take("depois me", isFinal: false, end: 4)
+        #expect(text.whole == "Abre a planilha de vendas depois me")
+    }
+
+    @Test func theExactSentenceTakesThePlaceOfTheQuickOneOverTheSameAudio() {
+        var text = DictationText()
+        text.take("O IRB abre a lista", isFinal: true, end: 7.74)
+        text.take("e me manda um", isFinal: false, end: 8.7)
+        // The exact recognizer ends its sentence a little before the quick one did: it still covers it.
+        text.take("O Orb abre a lista.", isFinal: true, isExact: true, end: 7.68)
+        #expect(text.whole == "O Orb abre a lista. e me manda um")
+        text.take(" e me manda um resumo", isFinal: true, end: 9.88)
+        text.take("E me manda um resumo, por favor.", isFinal: true, isExact: true, end: 9.88)
+        #expect(text.whole == "O Orb abre a lista. E me manda um resumo, por favor.")
+        // A quick piece of audio the exact recognizer already settled is not shown twice.
+        text.take("por favor", isFinal: false, end: 9.8)
+        text.take("por favor", isFinal: true, end: 9.9)
+        #expect(text.whole == "O Orb abre a lista. E me manda um resumo, por favor.")
     }
 
     @Test func whatIsSaidGoesAfterWhatWasTyped() {
@@ -52,10 +65,20 @@ struct DictationTextTests {
 import AVFoundation
 import Speech
 
-/// The microphone's path without a microphone: speech made by `say`, cut in the buffers a microphone gives, converted
-/// as `SpeechCapture` converts them and streamed to the recognizer. Runs where macOS 26 has Portuguese installed.
+/// The microphone's path without a microphone: speech made by `say`, handed to `SpeechCapture` in the buffers a
+/// microphone gives and at the pace of speech. Runs where macOS 26 has Portuguese installed.
 struct DictationRecognizerTests {
-    @Test func spokenPortugueseBecomesPunctuatedText() async throws {
+    @MainActor private final class Heard {
+        var text = DictationText()
+        var shownBeforeTheEnd = ""
+        var audioEnded = false
+        func take(_ piece: String, _ isFinal: Bool, _ isExact: Bool, _ end: Double) {
+            text.take(piece, isFinal: isFinal, isExact: isExact, end: end)
+            if !audioEnded { shownBeforeTheEnd = text.whole }
+        }
+    }
+
+    @Test @MainActor func theWordsShowWhileTheyAreSaidAndTheExactTextStays() async throws {
         guard #available(macOS 26, *) else { return }
         guard let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: "pt-BR")),
               await SpeechTranscriber.installedLocales.contains(where: { $0.identifier == locale.identifier }) else { return }
@@ -70,31 +93,23 @@ struct DictationRecognizerTests {
         say.waitUntilExit()
         guard say.terminationStatus == 0, let file = try? AVAudioFile(forReading: audio) else { return } // no Portuguese voice
 
-        let transcriber = SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [.volatileResults], attributeOptions: [])
-        let analyzer = SpeechAnalyzer(modules: [transcriber])
-        let format = try #require(await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]))
-        let (stream, input) = AsyncStream<AnalyzerInput>.makeStream()
-        let reader = Task {
-            var text = DictationText(), guesses = 0
-            for try await result in transcriber.results {
-                if !result.isFinal { guesses += 1 }
-                text.take(String(result.text.characters), isFinal: result.isFinal)
-            }
-            return (text, guesses)
-        }
-        try await analyzer.start(inputSequence: stream)
-        let converter = try #require(AVAudioConverter(from: file.processingFormat, to: format))
+        let heard = Heard()
+        let capture = SpeechCapture()
+        capture.listensToMicrophone = false
+        try await capture.start(locale: locale, vocabulary: [], downloading: {}, heard: { heard.take($0, $1, $2, $3) }, level: { _ in })
         while file.framePosition < file.length {
             let buffer = try #require(AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 4096))
             try file.read(into: buffer, frameCount: 4096)
-            if let converted = SpeechCapture.convert(buffer, with: converter, to: format) { input.yield(AnalyzerInput(buffer: converted)) }
+            capture.feed(buffer)
+            try await Task.sleep(for: .seconds(Double(buffer.frameLength) / buffer.format.sampleRate)) // as fast as it is said
         }
-        input.finish()
-        try await analyzer.finalizeAndFinishThroughEndOfInput()
-        let (text, guesses) = try await reader.value
-        #expect(guesses > 0) // the words came while they were said, not only at the end
-        let heard = text.whole.lowercased()
-        #expect(heard.contains("planilha") && heard.contains("resumo"), "\(text.whole)")
-        #expect(text.whole.hasSuffix(".") || text.whole.hasSuffix("?"), "\(text.whole)")
+        heard.audioEnded = true
+        await capture.finish()
+        // Most of it showed while it was said, not only once the microphone closed.
+        #expect(heard.shownBeforeTheEnd.lowercased().contains("planilha"), "\(heard.shownBeforeTheEnd)")
+        let final = heard.text.whole
+        #expect(final.lowercased().contains("planilha") && final.lowercased().contains("resumo"), "\(final)")
+        #expect(!heard.text.settled.isEmpty && heard.text.quick.isEmpty, "the exact text is what stays")
+        #expect(final.hasSuffix("."), "\(final)")
     }
 }

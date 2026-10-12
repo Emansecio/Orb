@@ -76,7 +76,9 @@ final class Dictation {
                 guard let locale = await SpeechCapture.locale() else { throw SpeechCapture.Failure.noLanguage }
                 try await capture.start(locale: locale, vocabulary: vocabulary,
                                         downloading: { [weak self] in self?.moved(capture, to: .downloading) },
-                                        heard: { [weak self] piece, isFinal in self?.heard(piece, isFinal: isFinal, from: capture) },
+                                        heard: { [weak self] piece, isFinal, isExact, end in
+                                            self?.heard(piece, isFinal: isFinal, isExact: isExact, end: end, from: capture)
+                                        },
                                         level: { [weak self] loudness in self?.heard(loudness, from: capture) })
                 // Stopped while the microphone was opening: it closes now instead of staying open for nobody.
                 guard let self, self.capture === capture, self.phase != .finishing else { return await capture.cancel() }
@@ -125,9 +127,9 @@ final class Dictation {
         self.phase = phase
     }
 
-    private func heard(_ piece: String, isFinal: Bool, from capture: AnyObject) {
+    private func heard(_ piece: String, isFinal: Bool, isExact: Bool, end: Double, from capture: AnyObject) {
         guard self.capture === capture, let botID else { return }
-        text.take(piece, isFinal: isFinal)
+        text.take(piece, isFinal: isFinal, isExact: isExact, end: end)
         let draft = DictationText.draft(base: base, spoken: text.whole)
         guard draft != written else { return }
         written = draft
