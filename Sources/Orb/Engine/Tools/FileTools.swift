@@ -390,9 +390,6 @@ struct ListDirectoryTool: AgentTool {
         var lines: [String] = []
         var total = 0
         var unreadable = 0
-        let dates = DateFormatter()
-        dates.locale = Locale(identifier: "en_US_POSIX")
-        dates.dateFormat = "yyyy-MM-dd HH:mm"
 
         func list(_ directory: URL, prefix: String, level: Int) throws {
             let keys: [URLResourceKey] = [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey, .contentModificationDateKey]
@@ -419,7 +416,7 @@ struct ListDirectoryTool: AgentTool {
                     total += 1
                     if lines.count < maxEntries {
                         // Dates are most of a line's length and rarely matter for a tree: they come with a single level.
-                        let date = depth == 1 ? values?.contentModificationDate.map(dates.string(from:)) : nil
+                        let date = depth == 1 ? values?.contentModificationDate.map { LocalDates.text($0) } : nil
                         let details: String
                         if isFolder {
                             details = date ?? ""

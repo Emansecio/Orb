@@ -468,8 +468,7 @@ actor AgentEngine {
     /// (`steering`, and anything queued after `turnStart`) are no request starting a task either, but stay in its record.
     private static func progress(in messages: [ChatMessage], pickedUp: Bool, turnStart: Int, nudge: Int? = nil, steering: [Int] = []) -> String? {
         let users = messages.indices.filter {
-            $0 <= turnStart && $0 != nudge && !steering.contains($0) && messages[$0].role == .user
-                && !messages[$0].content.hasPrefix(ContextSummary.marker)
+            $0 <= turnStart && $0 != nudge && !steering.contains($0) && messages[$0].isConversationRequest
         }
         guard let start = pickedUp && users.count >= 2 ? users[users.count - 2] : users.last else { return nil }
         return ProgressRecord.text(task: messages.indices.filter { $0 >= start && $0 != nudge }.map { messages[$0] })

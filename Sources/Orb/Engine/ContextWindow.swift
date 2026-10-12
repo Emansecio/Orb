@@ -346,6 +346,9 @@ extension ChatMessage {
     /// which is about this).
     static let imageTokens = 1_600
 
+    /// A message of the user that is no summary of the start of the conversation.
+    var isConversationRequest: Bool { role == .user && !content.hasPrefix(ContextSummary.marker) }
+
     /// Rough size for budgeting: text, tool calls, reasoning kept for the provider, pictures and a little
     /// per-message overhead.
     var contextCharacters: Int {
@@ -366,7 +369,7 @@ extension [ChatMessage] {
     /// long turn cannot fill the window with pictures.
     func elidingOldImages(turns: Int = 3, maxToolImages: Int = 6) -> [ChatMessage] {
         guard contains(where: { !$0.images.isEmpty }) else { return self }
-        let userTurns = indices.filter { self[$0].role == .user && !self[$0].content.hasPrefix(ContextSummary.marker) }
+        let userTurns = indices.filter { self[$0].isConversationRequest }
         let oldest = userTurns.count > turns ? userTurns[userTurns.count - turns] : 0
         let recentToolImages = Set(indices.filter { self[$0].role == .tool && !self[$0].images.isEmpty && $0 >= oldest }
             .suffix(maxToolImages))

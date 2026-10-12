@@ -60,6 +60,13 @@ final class ComposerLane {
     /// Pictures already decoded, shrunk and saved (see `ImageStore`); they go with the message as images.
     var pictures: [ImageAttachment] = []
     var error: String?
+
+    /// Attaches the files and pictures of a saved draft that are still on disk.
+    func attachExisting(files paths: [String], pictures saved: [ImageAttachment]) {
+        files = paths.filter { FileManager.default.fileExists(atPath: $0) }.map { AttachedFile(url: URL(fileURLWithPath: $0)) }
+        pictures = saved.filter { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
     /// Pictures pasted or dropped that are still being shrunk and saved off the main thread. Sending waits for 0.
     var pendingPictures = 0
     /// The pictures being prepared, in the order they were attached: one that is ready waits for the ones attached
@@ -166,8 +173,7 @@ extension AppModel {
             guard let draft = saved[bot.id] else { continue }
             if !draft.text.isEmpty { drafts[bot.id] = draft.text }
             let lane = composerLane(bot.id)
-            lane.files = draft.files.filter { FileManager.default.fileExists(atPath: $0) }.map { AttachedFile(url: URL(fileURLWithPath: $0)) }
-            lane.pictures = draft.pictures.filter { FileManager.default.fileExists(atPath: $0.path) }
+            lane.attachExisting(files: draft.files, pictures: draft.pictures)
         }
     }
 

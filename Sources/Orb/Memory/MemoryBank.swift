@@ -149,12 +149,14 @@ actor MemoryBank {
     /// Returns how many pages were kept.
     @discardableResult
     func importPages(_ pages: [ImportPlan.Page], now: Date = .now) -> Int {
-        pages.filter { page in
+        var kept = 0
+        for page in pages {
             switch remember(page.text, kind: page.kind, title: page.title.isEmpty ? nil : page.title, origin: .voce, now: now) {
-            case .saved, .updated, .alreadyKnown: true
-            case .empty, .failed: false
+            case .saved, .updated, .alreadyKnown: kept += 1
+            case .empty, .failed: break
             }
-        }.count
+        }
+        return kept
     }
 
     /// Your own edit of the identity notes (from the panel). Notes above `identityMaximumLength` are refused,

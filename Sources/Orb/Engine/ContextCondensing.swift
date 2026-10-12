@@ -22,7 +22,7 @@ enum ContextCondensing {
     /// Index of the message that starts the second-to-last turn: everything before it may be condensed, the last two
     /// turns stay as they were. 0 when there is nothing to condense yet.
     static func frontier(in messages: [ChatMessage]) -> Int {
-        let users = messages.indices.filter { messages[$0].role == .user && !messages[$0].content.hasPrefix(ContextSummary.marker) }
+        let users = messages.indices.filter { messages[$0].isConversationRequest }
         return users.count >= 2 ? users[users.count - 2] : 0
     }
 

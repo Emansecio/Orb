@@ -233,8 +233,7 @@ extension AppModel {
 
     private func restore(_ draft: ComposerDraft, in lane: ComposerLane, of botID: UUID) {
         setDraft(draft.text, for: botID)
-        lane.files = draft.files.filter { FileManager.default.fileExists(atPath: $0) }.map { AttachedFile(url: URL(fileURLWithPath: $0)) }
-        lane.pictures = draft.pictures.filter { FileManager.default.fileExists(atPath: $0.path) }
+        lane.attachExisting(files: draft.files, pictures: draft.pictures)
         lane.error = nil
     }
 }

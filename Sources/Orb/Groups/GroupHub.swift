@@ -490,10 +490,6 @@ extension GroupPresence {
 
     /// "A", "A e B", "A, B e C".
     static func list(_ names: [String]) -> String {
-        switch names.count {
-        case 0: ""
-        case 1: names[0]
-        default: names.dropLast().joined(separator: ", ") + " e " + names[names.count - 1]
-        }
+        PortugueseList.join(names)
     }
 }

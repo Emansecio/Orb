@@ -129,6 +129,6 @@ extension Conversation {
 
     /// The user's requests among `messages[range]`: what the chat shows as your bubbles, not the model's steps between them.
     func requestCount(in range: Range<Int>) -> Int {
-        messages[range.clamped(to: messages.indices)].reduce(0) { $0 + ($1.role == .user && !$1.content.hasPrefix(ContextSummary.marker) ? 1 : 0) }
+        messages[range.clamped(to: messages.indices)].reduce(0) { $0 + ($1.isConversationRequest ? 1 : 0) }
     }
 }

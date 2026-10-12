@@ -54,11 +54,7 @@ enum GroupPresence {
     }
 
     static func names(_ names: [String]) -> String {
-        switch names.count {
-        case 0: ""
-        case 1: names[0]
-        default: names.dropLast().joined(separator: ", ") + " e " + names[names.count - 1]
-        }
+        PortugueseList.join(names)
     }
 
     private static func verb(_ state: GroupPresenceState, plural: Bool) -> String {

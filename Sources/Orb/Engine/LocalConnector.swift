@@ -205,9 +205,17 @@ enum LocalDates {
 
     /// `2026-10-12 09:00` in the Mac's time zone, or `2026-10-12` for an all-day event: what the model reads back.
     static func text(_ date: Date, allDay: Bool = false) -> String {
+        (allDay ? dayFormatter : minuteFormatter).string(from: date)
+    }
+
+    // Formatting with a shared DateFormatter is thread-safe (macOS 14+).
+    private static let minuteFormatter = formatter("yyyy-MM-dd HH:mm")
+    private static let dayFormatter = formatter("yyyy-MM-dd")
+
+    private static func formatter(_ format: String) -> DateFormatter {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = allDay ? "yyyy-MM-dd" : "yyyy-MM-dd HH:mm"
-        return formatter.string(from: date)
+        formatter.dateFormat = format
+        return formatter
     }
 }
