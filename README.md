@@ -713,7 +713,7 @@ Rodando pelo SwiftPM (sem um `.app`), ele só fecha: abra de novo. Nos modos de 
 
 ```bash
 swift build          # compila o executável
-swift test           # mais de 2.000 testes (motor, provedores, Claude Code, ferramentas, MCP, Orbs, dados)
+swift test           # mais de 3.900 testes (motor, provedores, Claude Code, ferramentas, MCP, Orbs, dados)
 ./scripts/bundle.sh  # monta e assina build/Orb.app
 ```
 
