@@ -512,6 +512,12 @@ extension ToolCall {
 enum AutomationPreflight {
     /// Names of the apps a script addresses: `tell application "X"`, `application id "…"`, or JXA's `Application("X")`.
     /// Full-line comments are ignored; the result keeps first-seen order without repeats.
+    // `app`/`application`, optionally `id`, then a quoted name: covers tell blocks, one-liners and "of application".
+    private static let applescriptAppExpression = try? NSRegularExpression(
+        pattern: #"\bapp(?:lication)?\s+(?:id\s+)?"([^"\n]+)""#, options: [.caseInsensitive])
+    private static let javascriptAppExpression = try? NSRegularExpression(
+        pattern: #"\bApplication\s*\(\s*(?:"([^"\n]+)"|'([^'\n]+)')\s*\)"#)
+
     static func appNames(in script: String, language: AppleScript.Language) -> [String] {
         let code = script.split(separator: "\n", omittingEmptySubsequences: false).filter { line in
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -521,12 +527,7 @@ enum AutomationPreflight {
             }
         }.joined(separator: "\n")
 
-        let pattern = switch language {
-        // `app`/`application`, optionally `id`, then a quoted name: covers tell blocks, one-liners and "of application".
-        case .applescript: #"\bapp(?:lication)?\s+(?:id\s+)?"([^"\n]+)""#
-        case .javascript: #"\bApplication\s*\(\s*(?:"([^"\n]+)"|'([^'\n]+)')\s*\)"#
-        }
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: language == .applescript ? [.caseInsensitive] : []) else { return [] }
+        guard let regex = language == .applescript ? applescriptAppExpression : javascriptAppExpression else { return [] }
         let range = NSRange(code.startIndex..., in: code)
         var seen = Set<String>()
         var names: [String] = []

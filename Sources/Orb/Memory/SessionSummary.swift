@@ -85,9 +85,7 @@ enum SessionSummary {
 
         let calendar = Calendar(identifier: .gregorian)
         let spansDays = !calendar.isDate(first.0, inSameDayAs: requests.last?.0 ?? first.0)
-        let time = DateFormatter()
-        time.locale = Locale(identifier: "pt_BR")
-        time.dateFormat = spansDays ? "dd/MM HH:mm" : "HH:mm"
+        let time = spansDays ? Self.dayTimeFormatter : Self.timeFormatter
         var body = ""
         let summaries = notes.map { line($0, ChunkSummary.maxLength) }.filter { !$0.isEmpty }
         if !summaries.isEmpty { body += resumoHeading + summaries.map { "- \($0)" }.joined(separator: "\n") + "\n\n" }
@@ -112,14 +110,28 @@ enum SessionSummary {
                           kind: .sessao, title: line(first.1, 70), body: body, created: start, updated: end, origin: .automatico)
     }
 
-    /// Where a session page starting at `date` is written: `sessoes/<aaaa-mm-dd-hhmm>-<6 hex>.md` (the hex keeps two pages of
-    /// the same minute apart).
-    static func sessionPath(at date: Date) -> String {
+    // Shared formatters (thread-safe to format with on macOS 14+); never mutated after creation.
+    private static let timeFormatter = ptBRFormatter("HH:mm")
+    private static let dayTimeFormatter = ptBRFormatter("dd/MM HH:mm")
+    private static let stampFormatter: DateFormatter = {
         let stamp = DateFormatter()
         stamp.locale = Locale(identifier: "en_US_POSIX")
         stamp.calendar = Calendar(identifier: .gregorian)
         stamp.dateFormat = "yyyy-MM-dd-HHmm"
-        return "sessoes/\(stamp.string(from: date))-\(String(UUID().uuidString.prefix(6)).lowercased()).md"
+        return stamp
+    }()
+
+    private static func ptBRFormatter(_ format: String) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "pt_BR")
+        formatter.dateFormat = format
+        return formatter
+    }
+
+    /// Where a session page starting at `date` is written: `sessoes/<aaaa-mm-dd-hhmm>-<6 hex>.md` (the hex keeps two pages of
+    /// the same minute apart).
+    static func sessionPath(at date: Date) -> String {
+        "sessoes/\(Self.stampFormatter.string(from: date))-\(String(UUID().uuidString.prefix(6)).lowercased()).md"
     }
 
     /// The bullet lines under `## <title>` in a session page.

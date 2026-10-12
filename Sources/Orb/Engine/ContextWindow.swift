@@ -650,12 +650,15 @@ enum ToolOutputCap {
     static func apply(_ output: String, botID: UUID, callID: String, toolNames: Set<String> = readers,
                       directory: URL = defaultDirectory) -> String {
         guard !toolNames.isDisjoint(with: readers) else {
-            guard output.count > limitWithoutFiles else { return output }
-            let omitted = output.count - headWithoutFiles - tailWithoutFiles
+            // utf8.count is O(1) and never smaller than count, so under the limit in bytes means under it in characters.
+            guard output.utf8.count > limitWithoutFiles else { return output }
+            let length = output.count
+            guard length > limitWithoutFiles else { return output }
+            let omitted = length - headWithoutFiles - tailWithoutFiles
             return String(output.prefix(headWithoutFiles)) + ContextText.marker(omitted) + String(output.suffix(tailWithoutFiles))
                 + "\n[the middle of this output was cut and cannot be read back; ask for narrower output]"
         }
-        guard output.count > limit else { return output }
+        guard output.utf8.count > limit, output.count > limit else { return output }
         let safeID = String(callID.map { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" ? $0 : "_" }.prefix(80))
         // Providers may omit call IDs (the clients fall back to "call_0"), so the name never depends on the ID alone.
         let unique = String(UUID().uuidString.prefix(8))

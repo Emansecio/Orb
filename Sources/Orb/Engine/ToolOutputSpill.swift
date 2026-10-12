@@ -21,13 +21,14 @@ extension ToolOutputCap {
                         maxBytesPerOrb: Int = ToolOutputCap.maxBytesPerOrb, now: Date = .now) -> Int {
         let manager = FileManager.default
         let keys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey]
+        let keySet = Set(keys)
         guard let folders = try? manager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { return 0 }
         var deleted = 0
         for folder in folders {
             guard let entries = try? manager.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys) else { continue }
             var kept: [(url: URL, date: Date, size: Int)] = []
             for url in entries {
-                guard let values = try? url.resourceValues(forKeys: Set(keys)), values.isRegularFile == true else { continue }
+                guard let values = try? url.resourceValues(forKeys: keySet), values.isRegularFile == true else { continue }
                 let date = values.contentModificationDate ?? .distantPast
                 if now.timeIntervalSince(date) > maxAge {
                     if (try? manager.removeItem(at: url)) != nil { deleted += 1 }

@@ -193,6 +193,7 @@ struct WorkspaceSnapshot: Sendable, Equatable, Codable {
     /// fraction of a second at most.
     private static func recentFiles(in folder: URL, maxVisited: Int = 5_000, deadline: Duration = .seconds(1.5)) -> [RecentFile] {
         let keys: [URLResourceKey] = [.isRegularFileKey, .isDirectoryKey, .contentModificationDateKey]
+        let keySet = Set(keys)
         guard let walker = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: keys,
                                                           options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { return [] }
         let clock = ContinuousClock()
@@ -202,7 +203,7 @@ struct WorkspaceSnapshot: Sendable, Equatable, Codable {
         while let url = walker.nextObject() as? URL {
             visited += 1
             if visited > maxVisited || (visited % 64 == 0 && (clock.now > end || Task.isCancelled)) { break }
-            guard let values = try? url.resourceValues(forKeys: Set(keys)) else { continue }
+            guard let values = try? url.resourceValues(forKeys: keySet) else { continue }
             if values.isDirectory == true {
                 if walker.level >= 2 || skippedFolders.contains(url.lastPathComponent) { walker.skipDescendants() }
             } else if values.isRegularFile == true, let modified = values.contentModificationDate {

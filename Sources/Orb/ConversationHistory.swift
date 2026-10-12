@@ -39,10 +39,7 @@ extension Conversation {
         if starts.count > keepingRuns, let cut = starts.suffix(keepingRuns).first {
             copy.items.removeSubrange(0..<cut)
         }
-        let format = DateFormatter()
-        format.locale = Locale(identifier: "pt_BR")
-        format.dateFormat = "dd/MM/yyyy 'às' HH:mm"
-        copy.items.append(TranscriptItem(.notice(Self.routineRunMarker + format.string(from: date))))
+        copy.items.append(TranscriptItem(.notice(Self.routineRunMarker + RoutineFormats.runDate.string(from: date))))
         return copy
     }
 }
@@ -97,13 +94,23 @@ extension RoutineRun {
     }
 }
 
+/// Shared formatters (thread-safe to format with on macOS 14+); never mutated after creation.
+private enum RoutineFormats {
+    static let runDate = make("pt_BR", "dd/MM/yyyy 'às' HH:mm")
+    static let stamp = make("en_US_POSIX", "yyyy-MM-dd HHmm")
+
+    private static func make(_ locale: String, _ format: String) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: locale)
+        formatter.dateFormat = format
+        return formatter
+    }
+}
+
 enum RoutineReport {
     /// `yyyy-MM-dd HHmm`: the report's file name, and how a run is dated in prompts.
     static func stamp(_ date: Date) -> String {
-        let format = DateFormatter()
-        format.locale = Locale(identifier: "en_US_POSIX")
-        format.dateFormat = "yyyy-MM-dd HHmm"
-        return format.string(from: date)
+        RoutineFormats.stamp.string(from: date)
     }
 
     /// Saves the report as `Rotinas/<routine>/<yyyy-MM-dd HHmm>.md` inside the Orb's folder and returns that path
@@ -113,10 +120,7 @@ enum RoutineReport {
         let directoryName = safeName(routine)
         let directory = folder.appendingPathComponent("Rotinas", isDirectory: true)
             .appendingPathComponent(directoryName, isDirectory: true)
-        let format = DateFormatter()
-        format.locale = Locale(identifier: "pt_BR")
-        format.dateFormat = "dd/MM/yyyy 'às' HH:mm"
-        let body = "# \(routine)\n\n_\(orb) · \(format.string(from: date))_\n\n\(report.trimmingCharacters(in: .whitespacesAndNewlines))\n"
+        let body = "# \(routine)\n\n_\(orb) · \(RoutineFormats.runDate.string(from: date))_\n\n\(report.trimmingCharacters(in: .whitespacesAndNewlines))\n"
         do {
             try files.createDirectory(at: directory, withIntermediateDirectories: true)
             var name = stamp(date), attempt = 1

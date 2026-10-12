@@ -477,7 +477,8 @@ enum PermissionPolicy {
             return "o nome da ferramenta indica que ela abre um pull request (create_pull_request) e o conector não a marca como só leitura"
         }
         // Writing a file or a branch on the service is a commit others see (`create_or_update_file`, `create_branch`).
-        if !Set(words).isDisjoint(with: ["create", "update", "write", "edit"]), !Set(words).isDisjoint(with: ["file", "files", "branch", "contents"]) {
+        let wordSet = Set(words)
+        if !wordSet.isDisjoint(with: ["create", "update", "write", "edit"]), !wordSet.isDisjoint(with: ["file", "files", "branch", "contents"]) {
             return "o nome da ferramenta indica que ela grava arquivos no serviço (\(toolName)) e o conector não a marca como só leitura"
         }
         return nil

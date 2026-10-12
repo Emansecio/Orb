@@ -157,19 +157,23 @@ actor LocalTransport: MCPTransport {
 enum LocalDates {
     static func parse(_ text: String?) -> Date? {
         guard let text = text?.trimmingCharacters(in: .whitespaces), !text.isEmpty else { return nil }
-        let zoned = ISO8601DateFormatter()
-        zoned.formatOptions = [.withInternetDateTime]
-        if let date = zoned.date(from: text) { return date }
-        zoned.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = zoned.date(from: text) { return date }
-        for format in ["yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm", "yyyy-MM-dd HH:mm", "yyyy-MM-dd"] {
-            let formatter = DateFormatter()
-            formatter.locale = Locale(identifier: "en_US_POSIX")
-            formatter.dateFormat = format
-            if let date = formatter.date(from: text) { return date }
-        }
+        if let date = zonedFormatter.date(from: text) ?? fractionalFormatter.date(from: text) { return date }
+        for formatter in localParsers { if let date = formatter.date(from: text) { return date } }
         return nil
     }
+
+    // Shared formatters, parsed from any thread (safe on macOS 14+); never mutated after creation.
+    nonisolated(unsafe) private static let zonedFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+    nonisolated(unsafe) private static let fractionalFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    private static let localParsers = ["yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm", "yyyy-MM-dd HH:mm", "yyyy-MM-dd"].map(formatter)
 
     static func required(_ arguments: JSONValue, _ key: String) throws -> Date {
         guard let text = arguments.nonEmptyString(key) else { throw ToolError("Faltou o argumento \"\(key)\".") }
