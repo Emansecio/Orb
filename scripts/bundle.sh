@@ -63,3 +63,8 @@ else
   echo "Dica: assinatura temporária (ad-hoc); o macOS esquece as permissões a cada compilação. Rode scripts/make-signing-identity.sh uma vez para manter."
 fi
 echo "Pronto: $APP"
+# An Orb open from this bundle now runs code that no longer matches the disk: macOS stops handing it the keys it keeps in
+# the Keychain (a key pasted in it is written but not read back). It has to be opened again.
+if pgrep -f "$PWD/$APP/Contents/MacOS/Orb" >/dev/null 2>&1; then
+  echo "Atenção: o Orb está aberto com a versão anterior. Feche (⌘Q) e abra de novo; até lá ele não lê as chaves do Keychain."
+fi

@@ -762,8 +762,16 @@ final class AppModel {
     /// Saves (or, when empty, removes) the provider's key and reloads its models.
     func setKey(_ key: String, for kind: ProviderKind) async throws {
         keychainGeneration += 1
-        connectionSources.storeKey(key.trimmingCharacters(in: .whitespacesAndNewlines), kind)
+        let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        connectionSources.storeKey(key, kind)
         await refreshConnections()
+        // Written but not read back: the Keychain no longer trusts this copy of the app (its file was replaced while it
+        // ran, by an update or a new build). Said, instead of the row going back to "Falta a chave" without a word.
+        if !key.isEmpty, !storedKeys.contains(kind) {
+            throw ToolError(RunningCode.wasReplaced
+                ? "A chave foi gravada, mas o Orb foi atualizado enquanto estava aberto e o macOS não deixa esta cópia ler o Keychain. Feche o Orb (⌘Q) e abra de novo: a chave já estará lá."
+                : "O Keychain não guardou a chave. Tente de novo; se continuar, feche e abra o Orb.")
+        }
         try await refreshModels(kind)
         adoptDefaultModel(from: kind) // a default that cannot be used (its login was revoked) gives way to the key just saved
     }

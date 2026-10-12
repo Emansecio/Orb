@@ -61,6 +61,16 @@ final class ConnectionsRefreshTests {
         return model
     }
 
+    @Test func aKeyThatIsWrittenButNotReadBackIsSaidInsteadOfLost() async {
+        let model = AppModel(store: Store(directory: root), runsBackgroundWork: false, devRun: false)
+        // The Keychain takes the key and gives nothing back, as for an app replaced while it runs.
+        model.connectionSources = ConnectionSources(keyedProviders: { [] }, storeKey: { _, _ in },
+                                                    hasChatGPTCredential: { false }, signOutOfChatGPT: {}, claudeCodeStatus: nil)
+        model.providers = [ProviderAccount(kind: .commandCode)]
+        await #expect(throws: ToolError.self) { try await model.setKey("ck-123", for: .commandCode) }
+        #expect(!model.storedKeys.contains(.commandCode))
+    }
+
     @Test func aSignOutDuringARefreshIsNotUndoneByIt() async {
         let status = FakeStatus(held: 1, loggedInAfterHold: true, loggedInAtOnce: true)
         let model = model(keys: FakeKeys([.openai]), status: status)
