@@ -20,9 +20,18 @@ struct MarkdownChunk: View, Equatable {
         if blocks.isEmpty {
             if streaming { Text("●").foregroundColor(Palette.muted) }
         } else {
+            // Paragraphs, headings, lists and quotes in a row are one text, so a drag selects across them; code, tables
+            // and rules are drawn by themselves between those runs.
+            let segments = ProseSegment.of(blocks)
             VStack(alignment: .leading, spacing: markdownBlockSpacing) {
-                ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
-                    MarkdownBlockView(block: block, cursor: streaming && index == blocks.count - 1, highlight: highlight).equatable()
+                ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
+                    let cursor = streaming && index == segments.count - 1
+                    switch segment {
+                    case .prose(let run):
+                        SelectableProse(blocks: run, cursor: cursor, cached: cached, highlight: highlight)
+                    case .block(let block):
+                        MarkdownBlockView(block: block, cursor: cursor, highlight: highlight).equatable()
+                    }
                 }
             }
         }
