@@ -335,7 +335,8 @@ actor MemoryBank {
             left -= text.count + 2
         }
         take(profile, into: &pinned) // who the user is (`UserProfile.promptSection`), before how to work with them
-        if let identity = identity(), !identity.body.isEmpty {
+        let identityPage = identity() // read once for the whole brief
+        if let identity = identityPage, !identity.body.isEmpty {
             take("## Your identity (how the user wants you to work)\n" + Self.headAndTail(identity.body, Self.identityShare), into: &pinned)
         }
         let preferences = items(.preferencia, limit: 40)
@@ -343,7 +344,7 @@ actor MemoryBank {
             take("## The user's preferences with you\n" + MemoryText.clip(preferences.map { "- " + MemoryText.clip(MemoryText.flatten($0.body), 240) }
                 .joined(separator: "\n"), Self.preferencesShare), into: &pinned)
         }
-        if identity()?.interviewPending == true, userTurns <= 4 {
+        if identityPage?.interviewPending == true, userTurns <= 4 {
             take("""
             ## Getting to know the user
             This is your first conversation with the user and the app has already greeted them, so do not introduce yourself \
