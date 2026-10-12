@@ -34,7 +34,8 @@ extension AppModel {
         learnedContexts
             .filter { $0.value.isFresh(at: now) }
             .map { key, learned in
-                LearnedWindowRow(id: key, name: modelName(forModel: key).isEmpty ? key : modelName(forModel: key),
+                let name = modelName(forModel: key)
+                return LearnedWindowRow(id: key, name: name.isEmpty ? key : name,
                                  tokens: learned.tokens, date: learned.date, isEstimate: learned.inferred == true)
             }
             .sorted { ($0.date, $0.id) > ($1.date, $1.id) }

@@ -176,8 +176,9 @@ struct ModelListing: Equatable {
 
     init(choices: [(account: ProviderAccount, models: [ProviderModel])], recents: [String], query: String) {
         let typed = !query.trimmingCharacters(in: .whitespaces).isEmpty
+        let words = ModelSearch.words(query)
         groups = choices.compactMap { choice in
-            let models = typed ? choice.models.filter { ModelSearch.matches($0, query) } : choice.models
+            let models = typed ? choice.models.filter { ModelSearch.matches($0, words: words) } : choice.models
             return models.isEmpty ? nil : Group(provider: choice.account.kind, models: models)
         }
         guard !typed else {

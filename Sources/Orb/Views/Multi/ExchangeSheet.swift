@@ -33,11 +33,12 @@ struct ExchangeSheet: View {
                         .padding(.vertical, 24)
                 } else {
                     // Messages of one Orb in a row share its avatar and header (as an Orb's replies do in the chat).
+                    let firstOf = Dictionary(messages.enumerated().map { ($0.element.from.id, $0.offset) }, uniquingKeysWith: { first, _ in first })
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(Array(messages.enumerated()), id: \.offset) { index, message in
                             let continues = index > 0 && messages[index - 1].from.id == message.from.id
                             // The role is said once per Orb, at its first message; later headers show the name only.
-                            let isFirst = messages.firstIndex(where: { $0.from.id == message.from.id }) == index
+                            let isFirst = firstOf[message.from.id] == index
                             VStack(alignment: .leading, spacing: 4) {
                                 OrbSpeechBubble(orb: model.live(message.from.id).look.orb, name: message.from.name,
                                                 role: isFirst ? model.bot(message.from.id)?.role : nil,

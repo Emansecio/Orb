@@ -206,7 +206,8 @@ private struct AllModelsSheet: View {
     @State private var query = ""
 
     var body: some View {
-        let shown = models.filter { ModelSearch.matches($0, query) }
+        let words = ModelSearch.words(query)
+        let shown = models.filter { ModelSearch.matches($0, words: words) }
         VStack(spacing: 0) {
             HStack {
                 TextField("Buscar modelo", text: $query)

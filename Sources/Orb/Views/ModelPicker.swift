@@ -98,7 +98,13 @@ enum ModelSearch {
     }
 
     static func matches(_ model: ProviderModel, _ query: String) -> Bool {
-        let words = query.split(whereSeparator: \.isWhitespace)
+        matches(model, words: words(query))
+    }
+
+    /// The words of a query, split once for a whole list.
+    static func words(_ query: String) -> [Substring] { query.split(whereSeparator: \.isWhitespace) }
+
+    static func matches(_ model: ProviderModel, words: [Substring]) -> Bool {
         guard !words.isEmpty else { return true }
         let haystack = model.name + " " + model.id
         return words.allSatisfy { haystack.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
@@ -138,7 +144,8 @@ private struct ModelChooser: View {
     @State private var query = ""
 
     var body: some View {
-        let shown = choices.map { (account: $0.account, models: $0.models.filter { ModelSearch.matches($0, query) }) }
+        let words = ModelSearch.words(query)
+        let shown = choices.map { (account: $0.account, models: $0.models.filter { ModelSearch.matches($0, words: words) }) }
             .filter { !$0.models.isEmpty }
         VStack(spacing: 0) {
             ModelSearchField(query: $query) {
