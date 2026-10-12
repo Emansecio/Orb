@@ -28,7 +28,7 @@ Cada item fica marcado aqui quando entra na `main`.
 | 1 | C40–C49, E57–E63, F64–F68 | feita; fora: 61 (stubs com comportamentos distintos), parte do 49 (`BrowserHub.closeAll` fica) |
 | 2 | D50–D56 | feita; fora: 51 (os dois switches não são o mesmo mapeamento), `leftOff` do 56 |
 | 3 | A1–A9 (+ B10–B12) | feita: 1, 2, 4, 5, 8, 3 (só a delegação), 10, 11 (só o limite de larguras), 12; fora: 3 nos grupos (`groupSession` síncrono com 15 chamadores), 6 (ganho desprezível; o `==` profundo evita reavaliar), 7 (Editar já só existe no hover; Refazer precisa ficar montado pelo diálogo), 9 (o cache é da main; aquecer exigiria mudar o fechamento do turno) |
-| 4 | B13–B39 | em andamento |
+| 4 | B13–B39 | feita: 15, 16, 17, 19, 22, 26 (contagem da outline), 27 (contagem guardada no cache de páginas), 33 (parte), 37; fora: 13, 14, 18, 20, 21, 23, 24, 25, 28, 29, 30, 31, 32, 34, 35, 36, 38, 39 (ganho pequeno demais para o risco, mudariam comportamento ou mexeriam em gravação, abertura do app ou envio; o 30 não procede: são tamanhos diferentes de propósito) |
 
 
 ## A. Performance, prioridade alta (9)
