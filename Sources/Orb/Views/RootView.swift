@@ -2,7 +2,6 @@ import SwiftUI
 
 struct RootView: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Closes the Orb's panel when the window gets narrow and opens it again when it is wide (unless you chose).
     @State private var autoClose = InspectorAutoClose()
     /// What the last automatic change set, to tell it from the user's own toggle.

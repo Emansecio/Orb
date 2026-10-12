@@ -82,9 +82,6 @@ final class BrowserInstaller: Sendable {
         }
     }
 
-    /// Whether everything the engine needs from the app's folder is installed.
-    func hasEverythingInstalled(for engine: BrowserEngineKind) -> Bool { engine.components.allSatisfy { isInstalled($0) } }
-
     // MARK: Installing
 
     /// Installs what `engine` is missing (or exactly `components`, to update), in order. Throws `CancellationError` when the

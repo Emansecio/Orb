@@ -505,16 +505,7 @@ struct WindowCandidate: Equatable, Sendable {
         }
     }
 
-    /// The top-most normal window (layer 0, visible, not a sliver such as a toolbar strip), optionally of one app,
-    /// never of `excludingPID`.
-    static func front(in windows: [WindowCandidate], onlyPID: Int32?, excludingPID: Int32) -> WindowCandidate? {
-        windows.first { window in
-            window.layer == 0 && window.alpha > 0 && window.width >= 80 && window.height >= 60
-                && window.pid != excludingPID && (onlyPID.map { $0 == window.pid } ?? true)
-        }
-    }
-
-    /// The same, never of any of `excludingPIDs`.
+    /// The top-most normal window (layer 0, visible, not a sliver such as a toolbar strip), never of `excludingPIDs`.
     static func front(in windows: [WindowCandidate], excludingPIDs: Set<Int32>) -> WindowCandidate? {
         windows.first { window in
             window.layer == 0 && window.alpha > 0 && window.width >= 80 && window.height >= 60 && !excludingPIDs.contains(window.pid)

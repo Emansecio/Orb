@@ -194,7 +194,6 @@ final class BotSession {
     func setUsage(_ total: TokenUsage) { assign(\.usage, to: total) }
 
     func setRequestUsage(_ used: TokenUsage) { assign(\.requestUsage, to: used) }
-    func clearRequestUsage() { assign(\.requestUsage, to: nil) }
 }
 
 extension BotSession: WritesOnlyChanges {}

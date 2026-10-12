@@ -46,36 +46,15 @@ struct MarkdownBlockView: View, Equatable {
 
     var body: some View {
         switch block {
-        case .paragraph(let source):
-            inline(source)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        case .heading(let level, let text):
-            inline(text)
-                .font(.system(size: Self.headingSize(level), weight: .semibold))
-                .padding(.top, level <= 2 ? 4 : 2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityAddTraits(.isHeader)
-        case .list(let items):
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(Array(items.enumerated()), id: \.offset) { index, item in
-                    ListItemRow(item: item, cursor: cursor && index == items.count - 1, highlight: highlight).equatable()
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        case .quote(let source):
-            inline(source)
-                .foregroundStyle(Palette.secondary)
-                .padding(.leading, 12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .overlay(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 1).fill(Palette.lineStrong).frame(width: 2)
-                }
         case .code(let language, let code, _):
             CodeBlockView(language: language, code: code, streaming: cursor, highlight: highlight)
         case .table(let table):
             TableBlockView(table: table, streaming: cursor, highlight: highlight)
         case .rule:
             Rectangle().fill(Palette.line).frame(height: 1).padding(.vertical, 4)
+        default:
+            // Prose blocks go to `SelectableProse`, never here.
+            EmptyView()
         }
     }
 
@@ -85,12 +64,6 @@ struct MarkdownBlockView: View, Equatable {
         case 2: 15.5
         default: 14.5
         }
-    }
-
-    /// Text with the Markdown of its inline syntax applied (and the cursor after it while the reply is written).
-    private func inline(_ source: String) -> some View {
-        let text = Text(markdownText(source, cached: !cursor, highlight: highlight))
-        return cursor ? text + Text(" ●").foregroundColor(Palette.muted) : text
     }
 }
 
@@ -114,39 +87,6 @@ enum FindMarking {
 
     static func marked(_ text: String, query: String?) -> AttributedString {
         marked(AttributedString(text), query: query)
-    }
-}
-
-/// Equatable, so while a long list streams only the item being written is evaluated again.
-private struct ListItemRow: View, Equatable {
-    let item: MarkdownListItem
-    let cursor: Bool
-    var highlight: String?
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            marker
-                .frame(width: 18, alignment: .trailing)
-                .accessibilityHidden(true)
-            let text = Text(markdownText(item.text, cached: !cursor, highlight: highlight))
-            (cursor ? text + Text(" ●").foregroundColor(Palette.muted) : text)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.leading, CGFloat(item.depth) * 18)
-        .accessibilityElement(children: .combine)
-    }
-
-    @ViewBuilder private var marker: some View {
-        switch item.marker {
-        case .bullet:
-            Text(item.depth == 0 ? "•" : "◦").foregroundStyle(Palette.muted)
-        case .number(let number):
-            Text("\(number).").monospacedDigit().foregroundStyle(Palette.muted)
-        case .task(let done):
-            Image(systemName: done ? "checkmark.square.fill" : "square")
-                .font(.system(size: 12))
-                .foregroundStyle(done ? Palette.accentText : Palette.muted)
-        }
     }
 }
 

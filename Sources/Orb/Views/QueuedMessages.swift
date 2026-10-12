@@ -49,9 +49,6 @@ struct QueuedMessages: View {
         delivery == .steer ? "arrow.turn.down.right" : "clock"
     }
 
-    /// The bubble's button that moves the message to the other mode, named for where it would go.
-    nonisolated static func switchTitle(from delivery: SteeringDelivery) -> String { delivery == .steer ? "Pôr na fila" : "Direcionar" }
-
     nonisolated static func switchHelp(from delivery: SteeringDelivery) -> String { delivery == .steer ? Tip.queueAfterTask : Tip.steerNow }
 }
 

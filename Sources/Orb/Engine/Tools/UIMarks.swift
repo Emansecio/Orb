@@ -12,27 +12,6 @@ import UniformTypeIdentifiers
 
 extension ShotGeometry {
     // The picture shows the window at `scale` pixels per point, its top-left pixel being the window's top-left corner.
-    // Window-relative points are what snapshots store for elements; global points are screen coordinates (origin at the
-    // top left of the main display, negative to the left of or above it), which is what events and Accessibility frames use.
-
-    func windowPoint(fromPixel pixel: CGPoint) -> CGPoint { CGPoint(x: pixel.x / scale, y: pixel.y / scale) }
-    func pixel(fromWindowPoint point: CGPoint) -> CGPoint { CGPoint(x: point.x * scale, y: point.y * scale) }
-
-    func globalPoint(fromPixel pixel: CGPoint) -> CGPoint {
-        CGPoint(x: windowFrame.minX + pixel.x / scale, y: windowFrame.minY + pixel.y / scale)
-    }
-
-    func pixel(fromGlobal point: CGPoint) -> CGPoint {
-        CGPoint(x: (point.x - windowFrame.minX) * scale, y: (point.y - windowFrame.minY) * scale)
-    }
-
-    func globalPoint(fromWindowPoint point: CGPoint) -> CGPoint {
-        CGPoint(x: windowFrame.minX + point.x, y: windowFrame.minY + point.y)
-    }
-
-    func windowPoint(fromGlobal point: CGPoint) -> CGPoint {
-        CGPoint(x: point.x - windowFrame.minX, y: point.y - windowFrame.minY)
-    }
 
     func pixelRect(fromWindowRect rect: CGRect) -> CGRect {
         CGRect(x: rect.minX * scale, y: rect.minY * scale, width: rect.width * scale, height: rect.height * scale)
@@ -48,57 +27,6 @@ extension ShotGeometry {
         self.init(pixelWidth: width, pixelHeight: height, scale: frame.width > 0 ? Double(width) / frame.width : 1,
                   windowFrame: frame, windowID: windowID)
     }
-}
-
-/// The displays, in the coordinates Accessibility and events use (origin at the top left of the main display, y down),
-/// with the scale factor of each. AppKit has its own: origin at the bottom left of the main display, y up.
-struct DisplayLayout: Sendable, Equatable {
-    struct Display: Sendable, Equatable {
-        var frame: CGRect
-        /// Pixels per point.
-        var scale: CGFloat
-    }
-
-    var displays: [Display]
-
-    func display(containing point: CGPoint) -> Display? { displays.first { $0.frame.contains(point) } }
-
-    /// The display that has most of `rect`.
-    func display(mostlyContaining rect: CGRect) -> Display? {
-        displays.max { $0.frame.intersection(rect).area < $1.frame.intersection(rect).area }
-            .flatMap { $0.frame.intersection(rect).area > 0 ? $0 : nil }
-    }
-
-    /// A rectangle in AppKit's coordinates, in the screen coordinates the rest of the code uses.
-    static func screenRect(fromAppKit rect: CGRect, mainDisplayHeight: CGFloat) -> CGRect {
-        CGRect(x: rect.minX, y: mainDisplayHeight - rect.maxY, width: rect.width, height: rect.height)
-    }
-
-    /// The reverse (a flip is its own inverse).
-    static func appKitRect(fromScreen rect: CGRect, mainDisplayHeight: CGFloat) -> CGRect {
-        screenRect(fromAppKit: rect, mainDisplayHeight: mainDisplayHeight)
-    }
-
-    static func screenPoint(fromAppKit point: CGPoint, mainDisplayHeight: CGFloat) -> CGPoint {
-        CGPoint(x: point.x, y: mainDisplayHeight - point.y)
-    }
-
-    /// The displays attached now (Core Graphics, safe from any thread).
-    static var live: DisplayLayout {
-        var count: UInt32 = 0
-        CGGetActiveDisplayList(0, nil, &count)
-        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
-        CGGetActiveDisplayList(count, &ids, &count)
-        return DisplayLayout(displays: ids.prefix(Int(count)).map { id in
-            let bounds = CGDisplayBounds(id)
-            let pixels = CGDisplayCopyDisplayMode(id).map { CGFloat($0.pixelWidth) } ?? bounds.width
-            return Display(frame: bounds, scale: bounds.width > 0 ? pixels / bounds.width : 1)
-        })
-    }
-}
-
-private extension CGRect {
-    var area: CGFloat { isNull || isEmpty ? 0 : width * height }
 }
 
 // MARK: - Choosing the marks
@@ -295,16 +223,6 @@ enum UIMarkLegend {
         if total > marks.count { notes.append("\(marks.count) de \(total) elementos acionáveis") }
         if !notes.isEmpty { text += "\n(" + notes.joined(separator: "; ") + ")" }
         return text
-    }
-}
-
-/// How an argument names a mark: "#12" (or just 12).
-enum UIMarkReference {
-    static func parse(_ text: String) -> Int? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let digits = trimmed.hasPrefix("#") ? String(trimmed.dropFirst()) : trimmed
-        guard !digits.isEmpty, digits.allSatisfy(\.isASCII), digits.allSatisfy(\.isNumber), let number = Int(digits), number > 0 else { return nil }
-        return number
     }
 }
 

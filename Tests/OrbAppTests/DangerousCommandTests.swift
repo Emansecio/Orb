@@ -173,7 +173,7 @@ struct DangerousCommandTests {
             "/Users/teste/Downloads/chave.P12", "/tmp/server.key", "/Users/teste/backup/id_rsa",
         ]
         for path in secret {
-            #expect(DangerousCommand.reason(forReading: URL(fileURLWithPath: path), home: home) != nil, Comment(rawValue: path))
+            #expect(DangerousCommand.SensitiveFiles(home: home).reason(for: path) != nil, Comment(rawValue: path))
         }
         let fine = [
             "/Users/teste/.ssh/id_rsa.pub", "/Users/teste/.ssh/known_hosts", "/Users/teste/.ssh/config", "/Users/teste/.aws/config",
@@ -182,7 +182,7 @@ struct DangerousCommandTests {
             "/Users/teste/Projetos/app/environment.swift", "/Users/teste/keys.txt",
         ]
         for path in fine {
-            #expect(DangerousCommand.reason(forReading: URL(fileURLWithPath: path), home: home) == nil, Comment(rawValue: path))
+            #expect(DangerousCommand.SensitiveFiles(home: home).reason(for: path) == nil, Comment(rawValue: path))
         }
     }
 

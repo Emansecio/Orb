@@ -403,9 +403,6 @@ struct ScreenshotToolTests {
         #expect(snapshot.windowIndex == 1 && snapshot.windowTitle == "Doc")
         #expect(snapshot.entries["w1.1"]?.frame == CGRect(x: 20, y: 20, width: 80, height: 24))
         #expect(snapshot.entries["w1.1"]?.label == "Salvar" && snapshot.entries["w1.1"]?.actionable == true)
-        // A click at pixel (100, 100) of the picture is at (50, 50) in the window and (150, 100) on screen.
-        #expect(shot.windowPoint(fromPixel: CGPoint(x: 100, y: 100)) == CGPoint(x: 50, y: 50))
-        #expect(shot.globalPoint(fromPixel: CGPoint(x: 100, y: 100)) == CGPoint(x: 150, y: 100))
         try? FileManager.default.removeItem(at: rig.folder)
     }
 
@@ -711,7 +708,7 @@ struct WindowCaptureSmokeTests {
         // Cover it with a flat magenta window above everything: a screen grab would show magenta, the window's own pixels will not.
         _ = NSApplication.shared
         let mainHeight = NSScreen.screens.first?.frame.height ?? 0
-        let cover = NSWindow(contentRect: DisplayLayout.appKitRect(fromScreen: target.frame, mainDisplayHeight: mainHeight),
+        let cover = NSWindow(contentRect: CGRect(x: target.frame.minX, y: mainHeight - target.frame.maxY, width: target.frame.width, height: target.frame.height),
                              styleMask: .borderless, backing: .buffered, defer: false)
         cover.level = .screenSaver
         cover.backgroundColor = NSColor(srgbRed: 1, green: 0, blue: 1, alpha: 1)

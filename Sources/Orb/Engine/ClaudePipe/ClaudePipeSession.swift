@@ -51,8 +51,6 @@ struct ClaudePipeFolders: Sendable, Equatable {
 /// Turns the engine's conversation into what the Claude Code CLI takes in: a session file it resumes (the history), and
 /// one user message on stdin (the prompt). The CLI is only a transport; the conversation is the Orb's.
 enum ClaudePipeSession {
-    /// The MCP server that declares the Orb's tools to the CLI.
-    static let serverName = "orb"
     /// How the CLI names those tools: `mcp__<server>__<tool>`.
     static let toolPrefix = "mcp__orb__"
 

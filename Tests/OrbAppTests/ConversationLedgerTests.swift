@@ -448,7 +448,7 @@ struct LedgerIncrementalTests {
     }
 
     @Test func anEmptyLegacyTextIsNothing() {
-        #expect(ConversationLedger(legacy: "  \n ").isEmpty)
+        #expect(ConversationLedger(legacy: "  \n ") == ConversationLedger())
     }
 }
 
@@ -464,7 +464,7 @@ struct LedgerPersistenceTests {
 
     @Test func aLedgerWithMissingOrUnknownFieldsStillDecodes() throws {
         let empty = try JSONDecoder().decode(ConversationLedger.self, from: Data("{}".utf8))
-        #expect(empty.isEmpty)
+        #expect(empty == ConversationLedger())
         let partial = #"{"original":"algo","entries":[{"text":"a","isDecision":false},{"nope":1}],"future":{"x":1},"changed":["/p/a"]}"#
         let decoded = try JSONDecoder().decode(ConversationLedger.self, from: Data(partial.utf8))
         #expect(decoded.original == "algo" && decoded.changed == ["/p/a"])
