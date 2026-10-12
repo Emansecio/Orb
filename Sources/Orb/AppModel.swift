@@ -171,6 +171,8 @@ final class AppModel {
     @ObservationIgnored let images: ImageStore
     /// The text of the files attached in the composers, read as they are attached (see `AttachmentText`).
     @ObservationIgnored let attachmentTexts = AttachmentTextCache()
+    /// The microphone of the composer (one Orb at a time).
+    @ObservationIgnored let dictation = Dictation()
     /// Models ("provider/model") that answered that they cannot read pictures, so later turns do not try again.
     @ObservationIgnored private var visionRejected: Set<String> = []
     /// Context windows learned from refusals ("provider/model"); they shrink the history budget of that model.
@@ -705,6 +707,7 @@ final class AppModel {
     /// You changed the draft in the composer (typing, completing a `/skill`, dropping a file's name in): it is kept,
     /// and the Orb watches you type until you pause (see `BotLive.noteComposing`).
     func editDraft(_ text: String, for botID: UUID) {
+        dictation.draftEdited(text, for: botID)
         setDraft(text, for: botID)
         liveBot(botID)?.noteComposing(draftIsEmpty: text.isEmpty)
     }

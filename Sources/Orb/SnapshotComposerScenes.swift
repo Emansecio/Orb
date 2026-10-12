@@ -9,7 +9,14 @@ extension Snapshot {
     @MainActor
     static func composerScene(_ screen: String, model: AppModel) -> AnyView? {
         guard let bot = model.bots.first else { return nil }
+        Dictation.showsInSnapshots = true // the microphone is drawn as on a Mac that can dictate
         switch screen {
+        case "chat-working-dictating":
+            // Dictating while the Orb works: Stop, the microphone (listening) and the button that queues, side by side.
+            let view = workingTurn("chat-working", model: model, bot: bot)
+            model.setDraft("e confere também a pasta de downloads", for: bot.id)
+            model.dictation.pose(.listening, level: 0.4, for: bot.id)
+            return view
         case "chat-working", "chat-working-wait", "chat-working-retry", "chat-attachments-queued":
             return workingTurn(screen, model: model, bot: bot)
         case "chat-typed":
@@ -18,6 +25,19 @@ extension Snapshot {
             let lane = model.composerLane(bot.id)
             lane.files = [AttachedFile(url: URL(fileURLWithPath: "/Users/x/Documentos/relatório.pdf")),
                           AttachedFile(url: URL(fileURLWithPath: "/Users/x/Documentos/orçamento.xlsx"))]
+            return AnyView(ChatView(botID: bot.id))
+        case "chat-dictation", "chat-dictating", "chat-dictating-start":
+            // The microphone beside Send: off, listening (red, its halo at a loud moment, the words in the field), opening.
+            // With a model, so the context ring sits beside the microphone as it does in use.
+            seedConversation(model, bot: bot)
+            seedProviders(model)
+            Dictation.showsInSnapshots = true
+            if screen == "chat-dictating" {
+                model.setDraft("Abre a planilha de vendas e me diz quais clientes compraram mais neste mês, por favor", for: bot.id)
+                model.dictation.pose(.listening, level: 0.7, for: bot.id)
+            } else if screen == "chat-dictating-start" {
+                model.dictation.pose(.starting, for: bot.id)
+            }
             return AnyView(ChatView(botID: bot.id))
         case "chat-attachments":
             // Two pictures (drawn here, in the run's data folder), a file and one picture still being prepared.

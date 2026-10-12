@@ -46,6 +46,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>NSCalendarsFullAccessUsageDescription</key><string>O Orb lê e cria eventos da sua Agenda, inclusive da conta Google que você adicionou ao Mac, quando você pede.</string>
   <key>NSRemindersFullAccessUsageDescription</key><string>O Orb lê e cria lembretes no app Lembretes quando você pede.</string>
   <key>NSAppleEventsUsageDescription</key><string>O Orb controla outros apps quando você pede, como Mail, Calendário, Notas, Finder e navegadores.</string>
+  <key>NSMicrophoneUsageDescription</key><string>O Orb usa o microfone quando você clica para ditar uma mensagem. O áudio é transcrito no próprio Mac e não sai dele.</string>
+  <key>NSSpeechRecognitionUsageDescription</key><string>O Orb transcreve o que você dita no próprio Mac.</string>
 </dict>
 </plist>
 PLIST

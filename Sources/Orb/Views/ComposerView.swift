@@ -106,6 +106,8 @@ struct ComposerView: View {
     /// The composer stays when another Orb is chosen (ChatView): what was open for the last one closes, and the new
     /// Orb's field takes the keys as a newly opened chat's does.
     private func orbChanged() {
+        // A dictation into the Orb left behind closes there, with its last words.
+        if let dictating = model.dictation.botID, dictating != botID { Task { await model.dictation.finish() } }
         isImporting = false
         isModelOpen = false
         isConfirmingEdit = false
@@ -199,6 +201,7 @@ struct ComposerView: View {
 
     /// The line under the card: how the keys work, shown only when it helps and nothing else is being said.
     private func hint(_ lane: ComposerLane) -> String {
+        if let dictating = DictationButton.hint(model.dictation, botID: botID) { return dictating }
         if isQueueing, hasContent {
             return ComposerHint.queueing(needsYou: model.live(botID).needsYou,
                                          typesInComposer: isFocused && hasText, compact: isCompact)
@@ -264,6 +267,7 @@ struct ComposerView: View {
             Spacer(minLength: 8)
             ContextMeterChip(botID: botID, gauge: gauge, compact: isCompact)
             ModelChip(botID: botID, isOpen: $isModelOpen)
+            if Dictation.isSupported { DictationButton(botID: botID) }
             actionButtons(action)
         }
         .foregroundStyle(Palette.muted)
@@ -309,7 +313,13 @@ struct ComposerView: View {
     /// Shortcuts that belong to the composer without a visible button: ⌘↩ to stop and send, ⇧⌘M for the model list.
     private var shortcuts: some View {
         ZStack {
-            Button("Parar e enviar") { model.stopAndSend(botID, draft: draft.wrappedValue) }
+            Button("Parar e enviar") {
+                guard model.dictation.isActive(for: botID) else { return model.stopAndSend(botID, draft: draft.wrappedValue) }
+                Task {
+                    await model.dictation.finish()
+                    model.stopAndSend(botID, draft: draft.wrappedValue)
+                }
+            }
                 .keyboardShortcut(AppShortcut.commandReturn)
                 .disabled(!ComposerAction.stopAndSendEnabled(isQueueing: isQueueing, canSend: canSend, queuedCount: lane.queued.count,
                                                              pendingPictures: lane.pendingPictures, isEditing: isEditing))
@@ -384,6 +394,11 @@ struct ComposerView: View {
 
     /// Esc closes the skill suggestions first; with none open, it gives up the edit of a message.
     private func handleEscape() -> KeyPress.Result {
+        // Esc while dictating closes the microphone; what was said stays in the field.
+        if model.dictation.isActive(for: botID) {
+            Task { await model.dictation.finish() }
+            return .handled
+        }
         switch ComposerAction.escape(slashIsOpen: !slashMatches.isEmpty, isEditing: isEditing) {
         case .closeSkillList: return dismissSlash()
         case .cancelEdit:
@@ -437,6 +452,14 @@ struct ComposerView: View {
     }
 
     private func send(delivery: SteeringDelivery = .steer) {
+        // ↩ while dictating: the microphone closes, the last words land in the field, and the message goes.
+        if model.dictation.isActive(for: botID) {
+            Task {
+                await model.dictation.finish()
+                send(delivery: delivery)
+            }
+            return
+        }
         // With the suggestions open, Return completes the highlighted skill instead of sending a bare "/res" (a whole "/resumir" is sent).
         if completeSlash(forReturn: true) { return }
         guard canSend else { return }
