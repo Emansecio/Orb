@@ -199,8 +199,10 @@ Se o motor escolhido não estiver instalado, o Orb fica só com `web_fetch` e `w
   tarefa terminar e segue como o próximo pedido; várias juntas, na ordem em que você enviou) e **⌘↩ para e envia agora** (leva
   as duas); com um pedido de permissão aberto, isso recusa o pedido (parar sempre recusa) e envia. O ⇥ só vale com o Orb
   trabalhando e algo no campo; com as sugestões de skill abertas ele completa a skill, como antes. Cada mensagem pendente
-  diz para onde vai ("Entra no próximo passo", "Depois da tarefa"), e um botão no balão troca o modo depois de enviada
-  ("Pôr na fila" / "Direcionar"). Uma mensagem que entrou no meio da tarefa aparece no chat onde o Orb a recebeu, com a
+  diz para onde vai ("Entra no próximo passo", "Depois da tarefa"), e o balão tem ícones para editar, trocar o modo depois
+  de enviada (relógio: pôr na fila; seta: direcionar) e parar e enviar; passar o mouse sobre um ícone diz o que ele faz na
+  linha do balão. Parar e enviar também leva a mensagem que acabou de entrar na tarefa e ainda não teve resposta (ela sai
+  da tarefa parada e vai como o novo pedido, sem repetir). Uma mensagem que entrou no meio da tarefa aparece no chat onde o Orb a recebeu, com a
   marca "Durante a tarefa" (guardada na conversa). Se o Orb espera sua
   resposta a um pedido, o que ia entrar no próximo passo só entra depois dela.
   Dá para tirar uma mensagem da espera ("Editar"). Se o turno falhar ou for parado, o que estava esperando (nos dois modos) volta para o campo. O que está no campo (texto, arquivos e imagens anexados) e o que voltou da fila ficam guardados em `rascunhos.json` ao fechar o app e voltam na próxima abertura (arquivos que sumiram ficam de fora).

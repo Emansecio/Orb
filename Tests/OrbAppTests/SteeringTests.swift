@@ -464,6 +464,51 @@ struct SteeringEngineTests {
         await waitUntilIdle(model, bot.id)
     }
 
+    @Test @MainActor func stopAndSendRightAfterTheMessageEnteredTheTaskSendsItAsTheNewRequest() async throws {
+        let gate = Latch()
+        let client = HeldModel(gate: gate)
+        let (model, bot) = setUp(client)
+        model.submit("primeiro", to: bot.id)
+        await waitUntil("the model call") { await client.seen.count >= 1 }
+        model.submit("roda novamente", to: bot.id)
+        // The engine hands it to the model at the next step, a moment before the click.
+        let queued = try #require(model.composerLane(bot.id).queued.first)
+        var copy = ChatMessage.user(queued.prompt)
+        copy.itemID = queued.id
+        model.apply(.message(copy), to: bot.id)
+        model.apply(.steered(queued.id), to: bot.id)
+        #expect(model.composerLane(bot.id).queued.isEmpty)
+
+        model.stopAndSend(bot.id)
+        // It left the stopped task and went as the request that follows, once, not as a message during the task.
+        #expect(userTexts(model, bot.id) == ["primeiro", "roda novamente"])
+        let last = try #require(model.transcript(bot.id).last { if case .user = $0.kind { true } else { false } })
+        #expect(last.duringTask != true)
+        #expect(model.isWorking(bot.id))
+        await gate.open()
+        await waitUntilIdle(model, bot.id)
+        // The model has it once too: the copy delivered into the stopped task left with its bubble.
+        let conversation = try #require(model.conversations[bot.id])
+        #expect(conversation.messages.filter { $0.role == .user && $0.content.contains("roda novamente") }.count == 1)
+    }
+
+    @Test @MainActor func aMessageTheOrbAlreadyActedOnIsNotSentAgain() async throws {
+        let gate = Latch()
+        let client = HeldModel(gate: gate)
+        let (model, bot) = setUp(client)
+        model.submit("primeiro", to: bot.id)
+        await waitUntil("the model call") { await client.seen.count >= 1 }
+        model.submit("olha também o README", to: bot.id)
+        let queued = try #require(model.composerLane(bot.id).queued.first)
+        model.apply(.steered(queued.id), to: bot.id)
+        model.append(.tool(ToolCall(kind: .file, title: "Lendo arquivo", detail: "README.md", state: .done)), to: bot.id)
+
+        model.stopAndSend(bot.id) // nothing waits, and what was delivered was read: just a stop
+        #expect(!model.isWorking(bot.id))
+        #expect(userTexts(model, bot.id) == ["primeiro", "olha também o README"])
+        await gate.open()
+    }
+
     @Test @MainActor func stopAndSendTakesWhatIsTypedToo() async throws {
         let gate = Latch()
         let client = HeldModel(gate: gate)

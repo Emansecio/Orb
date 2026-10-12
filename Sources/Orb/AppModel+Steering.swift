@@ -275,10 +275,17 @@ extension AppModel {
             let isCommand = lane.files.isEmpty && lane.pictures.isEmpty && CompactionCommand.parse(draft) != nil // stays in the composer
             if !isCommand, !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || lane.hasAttachments { queueMessage(draft, to: botID) }
         }
-        let waiting = lane.takeAll()
+        var waiting = lane.takeAll()
+        // A message that reached the task a moment before the click, and that the Orb has not answered yet, is what the
+        // click was about: it leaves the stopped task and goes as the new request (taken before the stop closes the turn).
+        let unanswered = session(botID).turnTask != nil ? session(botID).unansweredSteered() : []
         // A routine waiting for this Orb must not take it between the stop and the send: the message goes first, and
         // the routine starts when that turn ends (or now, when nothing was sent).
         stop(botID, startsQueuedRoutines: false)
+        if !unanswered.isEmpty {
+            session(botID).withdrawSteered(unanswered.map(\.id))
+            waiting = unanswered + waiting
+        }
         if let message = SteeredMessage.merged(waiting),
            send(message.text, attachments: message.files, images: message.pictures, to: botID) {
             live(botID).scrolled() // you asked for this send

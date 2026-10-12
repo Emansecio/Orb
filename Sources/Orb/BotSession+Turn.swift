@@ -142,6 +142,37 @@ extension BotSession {
         finishTurn(turn, succeeded: false, userStopped: true, startsQueuedRoutines: startsQueuedRoutines)
     }
 
+    /// The messages you sent into the task in progress that it has not acted on yet: the last ones the chat shows as
+    /// "durante a tarefa", with nothing of the Orb after them (no reply, no step). Only text ones (a message with
+    /// attachments stays where it is). Read before the turn is stopped.
+    func unansweredSteered() -> [SteeredMessage] {
+        var found: [SteeredMessage] = []
+        for item in (conversation?.items ?? []).reversed() {
+            switch item.kind {
+            case .user(let text, let attachments):
+                guard item.duringTask == true else { return found } // the start of the turn
+                guard attachments.isEmpty else { return found }
+                found.insert(SteeredMessage(id: item.id, text: text, files: [], pictures: [], prompt: text), at: 0)
+            case .notice:
+                continue
+            default:
+                return found // the Orb did something after it: it was read
+            }
+        }
+        return found
+    }
+
+    /// Takes messages delivered into a stopped task back out of it (the chat's bubble and the model's copy), so they can go
+    /// as a request of their own without showing twice.
+    func withdrawSteered(_ ids: [UUID]) {
+        let ids = Set(ids)
+        changeConversation { conversation in
+            conversation.items.removeAll { ids.contains($0.id) }
+            conversation.messages.removeAll { $0.itemID.map(ids.contains) ?? false }
+        }
+        scheduleSave(delay: Self.streamingSaveInterval)
+    }
+
     /// Records the marks of the turn's prompt when it has been delivered: when the user message (with the snapshot) is stored.
     func recordMarks() {
         guard let marks = pendingMarks else { return }

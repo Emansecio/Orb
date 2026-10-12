@@ -103,29 +103,68 @@ private struct QueuedBubble: View {
         .accessibilityLabel("Mensagem pendente (\(whenText)): \(message.text)")
     }
 
+    /// Where the message goes; while the pointer is on one of the buttons, what that button does (at once, where a tooltip
+    /// would wait a second).
     private var stateLine: some View {
-        Label(whenText, systemImage: symbol)
+        let hint = hovered.map(hintText)
+        return Label(hint ?? whenText, systemImage: hovered.map(hintSymbol) ?? symbol)
             .font(.system(size: 11))
-            .foregroundStyle(Palette.muted)
+            .foregroundStyle(hint == nil ? Palette.muted : Palette.secondary)
             .lineLimit(1)
+            .contentTransition(.identity)
+    }
+
+    private enum Action { case edit, switchMode, interrupt }
+
+    @State private var hovered: Action?
+
+    private func hintText(_ action: Action) -> String {
+        switch action {
+        case .edit: "Editar: volta para o campo de mensagem"
+        case .switchMode: message.delivery == .steer ? "Pôr na fila: entra depois da tarefa" : "Direcionar: entra no próximo passo"
+        case .interrupt: needsYou ? "Parar e enviar agora (recusa o pedido aberto)" : "Parar o que o Orb faz e enviar agora"
+        }
+    }
+
+    private func hintSymbol(_ action: Action) -> String {
+        switch action {
+        case .edit: "pencil"
+        case .switchMode: switchSymbol
+        case .interrupt: "arrow.up.circle.fill"
+        }
+    }
+
+    /// The mode the message would move to, by its own symbol (the one its state line has in that mode).
+    private var switchSymbol: String {
+        QueuedMessages.whenSymbol(delivery: message.delivery == .steer ? .afterTask : .steer)
     }
 
     private var buttons: some View {
-        HStack(spacing: 10) {
-            Button("Editar", action: edit)
-                .help("Tirar da fila e voltar ao campo de mensagem para editar")
+        HStack(spacing: 2) {
+            iconButton(.edit, symbol: "pencil", help: "Editar: tira da fila e volta ao campo de mensagem", action: edit)
             if canSwitch {
-                Button(QueuedMessages.switchTitle(from: message.delivery), action: switchMode)
-                    .help(QueuedMessages.switchHelp(from: message.delivery))
+                iconButton(.switchMode, symbol: switchSymbol, help: QueuedMessages.switchHelp(from: message.delivery), action: switchMode)
             }
             if isLast, canInterrupt {
-                Button("Parar e enviar", action: interrupt)
-                    .help(needsYou
-                          ? "Interrompe o que o Orb está fazendo, recusa o pedido aberto e envia o que está na fila agora"
-                          : "Interrompe o que o Orb está fazendo e envia o que está na fila agora (\(AppShortcut.commandReturn.label))")
+                iconButton(.interrupt, symbol: "arrow.up.circle.fill", tint: Palette.accentText,
+                           help: needsYou
+                               ? "Parar e enviar: interrompe o que o Orb está fazendo, recusa o pedido aberto e envia agora"
+                               : "Parar e enviar: interrompe o que o Orb está fazendo e envia agora (\(AppShortcut.commandReturn.label))",
+                           action: interrupt)
             }
         }
-        .buttonStyle(.link)
-        .font(.system(size: 11))
+    }
+
+    private func iconButton(_ kind: Action, symbol: String, tint: Color = Palette.muted, help: String,
+                            action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).foregroundStyle(tint)
+        }
+        .buttonStyle(CircleGhostStyle(side: 24, fontSize: 12))
+        .help(help)
+        .accessibilityLabel(hintText(kind))
+        .onHover { inside in
+            if inside { hovered = kind } else if hovered == kind { hovered = nil }
+        }
     }
 }
