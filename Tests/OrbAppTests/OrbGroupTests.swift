@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import Orb
 
-// Groups of Orbs (docs/MULTI-ORBS.md, 7.1): making and changing them, the invariants that keep them true to the Orbs that exist,
+// Groups of Orbs (docs/historico/MULTI-ORBS.md, 7.1): making and changing them, the invariants that keep them true to the Orbs that exist,
 // and what is saved of them.
 
 private func exists(_ root: URL, _ path: String) -> Bool { FileManager.default.fileExists(atPath: root.appending(path: path).path) }

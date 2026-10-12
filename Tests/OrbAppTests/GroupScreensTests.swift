@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import Orb
 
-// The group screens' rules as plain values (docs/MULTI-ORBS.md, WP6): the stacked avatars, the presence words, the budget
+// The group screens' rules as plain values (docs/historico/MULTI-ORBS.md, WP6): the stacked avatars, the presence words, the budget
 // text, the new group's rules, the mentions, the shortcut and the sidebar's spoken words.
 
 @Suite("Pilha de avatares")

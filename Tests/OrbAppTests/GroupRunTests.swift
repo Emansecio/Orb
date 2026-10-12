@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import Orb
 
-// The loop of a group (docs/MULTI-ORBS.md, 7.3), played with a fake delegation service: the person speaks, the orchestrator plans
+// The loop of a group (docs/historico/MULTI-ORBS.md, 7.3), played with a fake delegation service: the person speaks, the orchestrator plans
 // and assigns, the members work in parallel and talk to each other on their own, every answer wakes whoever asked, and the
 // orchestrator closes the round. Plus the budget, the pause, Parar grupo, unread and the banners.
 

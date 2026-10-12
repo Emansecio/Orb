@@ -1,6 +1,6 @@
 import Foundation
 
-/// Sample data for the group screens' `--snapshot` modes (docs/MULTI-ORBS.md, WP6): a group of three, a thread with the
+/// Sample data for the group screens' `--snapshot` modes (docs/historico/MULTI-ORBS.md, WP6): a group of three, a thread with the
 /// person's message, the plan, the assignments, the answers, a pause card, and the numbers of a request in progress. Fixed ids and
 /// dates, so a snapshot is the same every time. Put the thread into a `GroupSession` with `seedConversation(_:)`.
 enum GroupSnapshotsData {

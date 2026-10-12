@@ -61,7 +61,7 @@ enum ProposalSpeech {
 }
 
 /// The card an Orb's proposal for a new Orb opens: the new Orb on a little stage, what it is for, what it may use, and Criar /
-/// Editar antes / Não criar (docs/MULTI-ORBS.md 8.4). Criar is ⌘↩ and Esc is Não criar, as on the other cards. Answered, it
+/// Editar antes / Não criar (docs/historico/MULTI-ORBS.md 8.4). Criar is ⌘↩ and Esc is Não criar, as on the other cards. Answered, it
 /// folds into one line, "Criado: Pesquisador".
 struct OrbProposalCard: View {
     @Environment(AppModel.self) private var model

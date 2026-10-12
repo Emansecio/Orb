@@ -1,6 +1,6 @@
 import Foundation
 
-// The group's board as the panel's "Quadro" tab uses it (docs/MULTI-ORBS.md, 7.7): the objective, the agreements the person
+// The group's board as the panel's "Quadro" tab uses it (docs/historico/MULTI-ORBS.md, 7.7): the objective, the agreements the person
 // writes and what the members saved, read from the group's memory bank. The panel reads `groupBoard`, a copy the app keeps up to
 // date (`refreshGroupBoard` runs when the tab opens and after each change), so a view never waits on the bank.
 

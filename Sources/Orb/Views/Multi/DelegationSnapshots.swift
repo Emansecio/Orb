@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// `--snapshot` modes of the exchange lines, the folds, the exchange view and the sidebar while Orbs talk (docs/MULTI-ORBS.md,
+/// `--snapshot` modes of the exchange lines, the folds, the exchange view and the sidebar while Orbs talk (docs/historico/MULTI-ORBS.md,
 /// 8.1 to 8.3 and 9, WP2). Made-up data in the snapshot's own folder, never the user's: `Orb --snapshot <mode> out.png`.
 ///
 /// - `events`: one line of each kind of event, in Atlas's chat (the one asked for help has its avatar and opens the exchange).

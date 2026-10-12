@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// "Criado por Atlas" under the Orb's name in its panel, for an Orb another Orb made (docs/MULTI-ORBS.md 4.4). The name is a
+/// "Criado por Atlas" under the Orb's name in its panel, for an Orb another Orb made (docs/historico/MULTI-ORBS.md 4.4). The name is a
 /// link to the creator while it exists; deleting the creator leaves the line with the name it had.
 struct CreatedByLine: View {
     @Environment(AppModel.self) private var model

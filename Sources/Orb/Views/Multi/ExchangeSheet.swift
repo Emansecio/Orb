@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The read-only view of one exchange between Orbs: the two Orbs at the top, linked by a still dotted line, and every
-/// message of the exchange as the Orb's bubble on the left (the same as a group's, docs/MULTI-ORBS.md 8.3 and 8.10). Nothing
+/// message of the exchange as the Orb's bubble on the left (the same as a group's, docs/historico/MULTI-ORBS.md 8.3 and 8.10). Nothing
 /// here answers or changes anything; "Ver o trabalho" of the one who answered is offered only when `onOpenWork` is given.
 struct ExchangeSheet: View {
     @Environment(AppModel.self) private var model
