@@ -16,7 +16,7 @@ struct ReadOnlyCommandTests {
         let looking = [
             "ls", "ls -la", "ls -la src", "pwd", "git status", "git status --short", "git log --oneline -n 5", "git diff", "git diff HEAD~1 -- a.swift",
             "git show HEAD", "git branch", "git branch -a", "git branch --list 'feat*'", "git remote -v", "git rev-parse --show-toplevel",
-            "git -C ../outro status", "git stash list", "git tag", "git tag --list", "git config --get user.name", "git config --list",
+            "git -C ../outro status", "git stash list", "git tag", "git tag --list", "git tag -l 'v*'", "git tag --contains HEAD", "git tag --points-at HEAD", "git tag -n",
             "git ls-files", "git blame a.swift", "git log --format=%an | sort | uniq -c",
             "cat README.md", "head -n 20 a.swift", "tail -n 50 build.log", "wc -l a.swift b.swift", "file a.png", "stat a.txt", "du -sh .",
             "df -h", "which node", "whoami", "uname -a", "date +%s", "echo oi", "basename /a/b.txt", "find . -name '*.swift'",
@@ -95,41 +95,61 @@ struct ReadOnlyCommandTests {
         #expect(ShellCommandLine.parse("a=(b c)").substitutions.isEmpty)
     }
 
-    @Test func gitConfigReadsOnlyWhenTheReadingOptionComesFirst() {
+    /// `git config` prints remote URLs with tokens embedded (`https://user:token@host/…`), so no form of it counts as reading.
+    @Test func gitConfigIsNeverReadOnly() {
         for command in ["git config --get user.name", "git config --get-all remote.origin.url", "git config --list", "git config -l",
-                        "git config --global --get user.email", "git config --show-origin --get user.name", "git config --get-regexp alias"] {
+                        "git config --global --get user.email", "git config --show-origin --get user.name", "git config --get-regexp alias",
+                        "git config --show-origin --list", "git config user.name foo --get", "git config core.fsmonitor 'touch X; false' --get",
+                        "git config user.name foo --list", "git config --get", "git config --list user.name", "git config --get a b c",
+                        "git config --get user.name --unset", "git config --get --file x a", "git config --global user.name foo --get"] {
+            #expect(!readOnly(command), Comment(rawValue: command))
+        }
+        // `git remote -v` stays a read.
+        #expect(readOnly("git remote -v"))
+    }
+
+    /// `git tag` only lists when nothing in it creates, deletes, forces, signs or annotates a tag.
+    @Test func gitTagReadsOnlyAsAPureListing() {
+        for command in ["git tag", "git tag -l", "git tag --list", "git tag -l 'v1.*'", "git tag --list 'v*'", "git tag -n", "git tag -n5 -l",
+                        "git tag --contains HEAD", "git tag --points-at HEAD", "git tag --sort=-creatordate", "git tag --merged main"] {
             #expect(readOnly(command), Comment(rawValue: command))
         }
-        for command in ["git config user.name foo --get", "git config core.fsmonitor 'touch X; false' --get", "git config user.name foo --list",
-                        "git config --get", "git config --list user.name", "git config --get a b c", "git config --get user.name --unset",
-                        "git config --get --file x a", "git config --global user.name foo --get"] {
+        for command in ["git tag --list -d v1", "git tag -l -d v1", "git tag -d v1 --list", "git tag --list --delete v1", "git tag -ld v1",
+                        "git tag --list -f v1", "git tag --list --force", "git tag -l -a v1", "git tag --list -s v1", "git tag --list -u key v1",
+                        "git tag -l -m msg v1", "git tag -l -F file v1", "git tag -l -e v1", "git tag v1", "git tag --del v1", "git tag --list --del v1",
+                        "git tag --sort=x v1", "git tag --annotate v1 -l", "git tag -f v1 HEAD"] {
             #expect(!readOnly(command), Comment(rawValue: command))
         }
     }
 
-    /// The real git, in a throwaway repository: the lines accepted as reading leave the configuration as it was.
-    @Test func gitConfigAcceptedAsReadingChangesNothing() async throws {
-        let directory = FileManager.default.temporaryDirectory.appending(path: "OrbReadOnlyGit-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let environment = ["PATH": "/usr/bin:/bin", "HOME": directory.path, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null"]
-        func git(_ arguments: [String]) async throws -> ProcessOutput {
-            try await ProcessRunner.run("/usr/bin/git", arguments, directory: directory, environment: environment, timeout: .seconds(20))
+    /// Input redirections in any spelling are no read: the file they open is not among the words the checks look at.
+    @Test func inputRedirectionsInAnySpellingAreNeverReadOnly() {
+        for command in ["cat 0<~/.aws/credentials", "cat 0<~/.netrc", "cat 0<.env", "head 0<~/.config/gh/hosts.yml", "cat <~/.netrc",
+                        "cat < ~/.netrc", "cat 0< ~/.netrc", "cat 0<>~/.netrc", "cat <>~/.netrc", "cat 3<~/.netrc", "cat <&3", "cat 0<&3", "cat 0<&-",
+                        "cat 00<~/.netrc", "cat a.txt<b.txt", "head -n1 0<README.md", "< README.md cat", "<README.md cat"] {
+            #expect(!readOnly(command), Comment(rawValue: command))
         }
-        _ = try await git(["init", "-q", "."])
-        let config = directory.appending(path: ".git/config")
-        let before = try String(contentsOf: config, encoding: .utf8)
-        // What the classifier accepts leaves the configuration alone, whatever the key.
-        let accepted = [["config", "--get", "user.name"], ["config", "--list"], ["config", "--local", "--get-all", "core.bare"],
-                        ["config", "--get-regexp", "core"]]
-        for arguments in accepted {
-            #expect(readOnly("git " + arguments.joined(separator: " ")), Comment(rawValue: "\(arguments)"))
-            _ = try await git(arguments)
+        // Output redirections that discard or duplicate stay as they were.
+        for command in ["ls 2>&1", "ls 2>/dev/null", "echo 0 | cat"] {
+            #expect(readOnly(command), Comment(rawValue: command))
         }
-        #expect(try String(contentsOf: config, encoding: .utf8) == before)
-        // What it refuses is what really writes (the reason it is refused).
-        for command in ["git config user.name foo --get"] { #expect(!readOnly(command), Comment(rawValue: command)) }
-        _ = try await git(["config", "user.name", "foo", "--get"])
+        #expect(!readOnly("ls > out.txt"))
+    }
+
+    @Test func theParserSeesEveryInputRedirectionAsAnOperatorWithItsTarget() {
+        func words(_ text: String) -> [String] { ShellCommandLine.parse(text).segments.first?.words ?? [] }
+        #expect(words("cat 0<~/.netrc") == ["cat", "<", "~/.netrc"])
+        #expect(words("cat <~/.netrc") == ["cat", "<", "~/.netrc"])
+        #expect(words("cat < ~/.netrc") == ["cat", "<", "~/.netrc"])
+        #expect(words("cat 3<> ~/.netrc") == ["cat", "<>", "~/.netrc"])
+        #expect(words("cat 0<&3") == ["cat", "<&", "3"])
+        // Not an input redirection: quoted, escaped, a heredoc, a process substitution.
+        #expect(words("echo '0<x' \\<y") == ["echo", "0<x", "<y"])
+        #expect(words("cat \\<y") == ["cat", "<y"])
+        #expect(words("cat <<EOF") == ["cat", "<<EOF"])
+        #expect(ShellCommandLine.parse("diff <(ls) <(ls)").substitutions == ["ls", "ls"])
+        #expect(ShellCommandLine.parse("ls 2>&1").isPlain)
+        #expect(!ShellCommandLine.parse("ls > out").isPlain)
     }
 
     /// getopt_long and git's parse-options accept any unique prefix of a long option and groups of short ones.

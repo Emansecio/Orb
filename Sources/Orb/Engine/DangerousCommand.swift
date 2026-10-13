@@ -13,16 +13,19 @@ enum DangerousCommand {
         var directory: URL
     }
 
-    /// Why the shell command is dangerous, or nil if nothing recognized matches.
-    static func reason(for command: String, in scope: Scope? = nil, home: URL = FileManager.default.homeDirectoryForCurrentUser) -> String? {
-        check(command, scope: scope, home: home, depth: 0)
+    /// Why the shell command is dangerous, or nil if nothing recognized matches. `directory` is where the command really runs
+    /// (the home folder when nil and the scope names none): relative paths resolve from it even when the Orb has no folder of its
+    /// own, so `cat .aws/credentials` is seen as the secret it is while the Orb works in the home folder.
+    static func reason(for command: String, in scope: Scope? = nil, directory: URL? = nil,
+                       home: URL = FileManager.default.homeDirectoryForCurrentUser) -> String? {
+        check(command, scope: scope, directory: directory, home: home, depth: 0)
     }
 
     /// Why running this AppleScript or JavaScript for Automation is dangerous, or nil.
     /// `language` is the one the script is written in; when nil, both readings are tried and the first reason wins.
-    static func reason(forAppleScript script: String, language: AppleScript.Language? = nil, in scope: Scope? = nil,
+    static func reason(forAppleScript script: String, language: AppleScript.Language? = nil, in scope: Scope? = nil, directory: URL? = nil,
                        home: URL = FileManager.default.homeDirectoryForCurrentUser) -> String? {
-        checkScript(script, language: language, scope: scope, home: home, depth: 0)
+        checkScript(script, language: language, scope: scope, directory: directory, home: home, depth: 0)
     }
 
     /// Why writing to this file is dangerous (shell startup files, SSH keys, login items), or nil. Symbolic
@@ -60,8 +63,25 @@ enum DangerousCommand {
 
         static let message = "lê chaves, senhas ou credenciais guardadas neste Mac"
 
-        private static let folders = [".ssh", ".gnupg", ".aws", ".kube", "library/keychains", ".config/gcloud"]
-        private static let files = [".netrc", ".npmrc", ".pypirc", ".git-credentials", ".config/gh/hosts.yml", ".docker/config.json"]
+        private static let folders = [".ssh", ".gnupg", ".aws", ".kube", "library/keychains", ".config/gcloud", ".azure", ".config/op",
+                                       "library/cookies"]
+        private static let files = [
+            ".netrc", ".npmrc", ".pypirc", ".git-credentials", ".config/gh/hosts.yml", ".docker/config.json",
+            // Shell history keeps pasted tokens and passwords.
+            ".zsh_history", ".bash_history",
+            // Tokens of other tools' logins and package registries.
+            ".codex/auth.json", ".claude/.credentials.json", ".terraform.d/credentials.tfrc.json", ".cargo/credentials",
+            ".cargo/credentials.toml", ".gem/credentials", ".m2/settings.xml", ".yarnrc.yml", ".pgpass", ".my.cnf", ".config/hub",
+        ]
+        /// Browser profiles hold saved passwords and session cookies, but also plenty of harmless files: only these
+        /// files, wherever they sit under the profile folder.
+        private static let browserData: [(folder: String, names: Set<String>)] = [
+            ("library/application support/google/chrome", ["cookies", "login data", "login data for account", "web data"]),
+            ("library/application support/bravesoftware/brave-browser", ["cookies", "login data", "login data for account", "web data"]),
+            ("library/application support/microsoft edge", ["cookies", "login data", "login data for account", "web data"]),
+            ("library/application support/arc/user data", ["cookies", "login data", "login data for account", "web data"]),
+            ("library/application support/firefox/profiles", ["logins.json", "key4.db", "cookies.sqlite"]),
+        ]
         /// Inside a secrets folder these are not secret.
         private static let harmless = ["known_hosts", "known_hosts.old", "config"]
         private static let secretExtensions: Set<String> = ["pem", "p12", "pfx", "key", "keychain", "keychain-db", "kdbx"]
@@ -75,6 +95,7 @@ enum DangerousCommand {
             for home in homes where path.hasPrefix(home + "/") {
                 let relative = String(path.dropFirst(home.count + 1)).lowercased()
                 if Self.files.contains(relative) { return Self.message }
+                for data in Self.browserData where relative.hasPrefix(data.folder + "/") && data.names.contains(name) { return Self.message }
                 for folder in Self.folders where relative == folder || relative.hasPrefix(folder + "/") {
                     // Public keys, `known_hosts` and the SSH and AWS `config` files hold no secrets.
                     if folder == ".ssh", name.hasSuffix(".pub") || Self.harmless.contains(name) { return nil }
@@ -145,7 +166,11 @@ enum DangerousCommand {
         var directories: [URL]
         var known = true
 
-        init(_ scope: Scope?) { directories = scope.map { [$0.directory.standardizedFileURL] } ?? [] }
+        /// Always starts in the folder the command really runs in: the scope's (the Orb's own folder) tunes only how
+        /// tolerant `rm` is of build output, never whether relative paths to secrets resolve.
+        init(_ scope: Scope?, directory: URL?, home: URL) {
+            directories = [(scope?.directory ?? directory ?? home).standardizedFileURL]
+        }
 
         mutating func move(_ command: (name: String, arguments: [String]), home: URL) {
             switch command.name {
@@ -165,13 +190,13 @@ enum DangerousCommand {
         }
     }
 
-    private static func check(_ command: String, scope: Scope?, home: URL, depth: Int, place start: Place? = nil) -> String? {
+    private static func check(_ command: String, scope: Scope?, directory: URL?, home: URL, depth: Int, place start: Place? = nil) -> String? {
         guard depth < maxDepth else { return "usa comandos aninhados demais para conferir" }
         if command.range(of: #":\(\)\s*\{\s*:\|:&\s*\};:"#, options: .regularExpression) != nil { return "trava o sistema (fork bomb)" }
         if command.range(of: #">\s*/dev/(r?disk|sd)\w*"#, options: .regularExpression) != nil { return "grava direto num disco" }
 
         let line = ShellCommandLine.parse(command)
-        var place = start ?? Place(scope)
+        var place = start ?? Place(scope, directory: directory, home: home)
         var downloadInChain = false
         for segment in line.segments {
             if segment.separator != .pipe { downloadInChain = false }
@@ -190,7 +215,7 @@ enum DangerousCommand {
         }
         // A `$( )` runs where the shell is by then, after the `cd` of an earlier segment: `place` now holds every folder it may be in.
         for body in line.substitutions {
-            if let reason = check(body, scope: scope, home: home, depth: depth + 1, place: place) { return reason }
+            if let reason = check(body, scope: scope, directory: directory, home: home, depth: depth + 1, place: place) { return reason }
         }
         return nil
     }
@@ -282,7 +307,7 @@ enum DangerousCommand {
                 if word == "-e" { afterScriptFlag = true; continue }
                 if word == "-l" || word == "-s" { skipNext = true; continue }
                 guard afterScriptFlag || !word.hasPrefix("-") || word.contains(where: \.isWhitespace) else { continue }
-                if let reason = checkScript(word, language: language, scope: scope, home: home, depth: depth + 1) { return reason }
+                if let reason = checkScript(word, language: language, scope: scope, directory: place.directories.first, home: home, depth: depth + 1) { return reason }
             }
             return nil
         case "eval":
@@ -507,12 +532,12 @@ enum DangerousCommand {
         // `sh -c 'script'`, also `-lc` and `-ic`: the script is a command line of its own.
         guard let flag = arguments.firstIndex(where: { $0.hasPrefix("-") && !$0.hasPrefix("--") && $0.contains("c") }),
               flag + 1 < arguments.count else { return nil }
-        return check(arguments[flag + 1], scope: scope, home: home, depth: depth + 1, place: place)
+        return check(arguments[flag + 1], scope: scope, directory: nil, home: home, depth: depth + 1, place: place)
     }
 
     private static func evalReason(_ arguments: [String], scope: Scope?, home: URL, depth: Int, place: Place) -> String? {
         if arguments.contains(where: downloadsCode) { return "baixa e executa um script da internet" }
-        return check(arguments.joined(separator: " "), scope: scope, home: home, depth: depth + 1, place: place)
+        return check(arguments.joined(separator: " "), scope: scope, directory: nil, home: home, depth: depth + 1, place: place)
     }
 
     /// `$(curl …)`, `<(curl …)` or backticks around a download: the output runs as code.
@@ -673,15 +698,15 @@ enum DangerousCommand {
     }
 
     /// With the language known the script is read as that language; when it is not, as both, and the first reason wins.
-    private static func checkScript(_ script: String, language: AppleScript.Language?, scope: Scope?, home: URL, depth: Int) -> String? {
+    private static func checkScript(_ script: String, language: AppleScript.Language?, scope: Scope?, directory: URL?, home: URL, depth: Int) -> String? {
         guard let language else {
-            return checkScript(script, javaScript: false, scope: scope, home: home, depth: depth)
-                ?? checkScript(script, javaScript: true, scope: scope, home: home, depth: depth)
+            return checkScript(script, javaScript: false, scope: scope, directory: directory, home: home, depth: depth)
+                ?? checkScript(script, javaScript: true, scope: scope, directory: directory, home: home, depth: depth)
         }
-        return checkScript(script, javaScript: language == .javascript, scope: scope, home: home, depth: depth)
+        return checkScript(script, javaScript: language == .javascript, scope: scope, directory: directory, home: home, depth: depth)
     }
 
-    private static func checkScript(_ script: String, javaScript: Bool, scope: Scope?, home: URL, depth: Int) -> String? {
+    private static func checkScript(_ script: String, javaScript: Bool, scope: Scope?, directory: URL?, home: URL, depth: Int) -> String? {
         guard depth < maxDepth else { return "usa scripts aninhados demais para conferir" }
         let text = scan(script, javaScript: javaScript)
         // `do shell script "…"` (and JXA's `doShellScript('…')`) runs shell text.
@@ -692,7 +717,7 @@ enum DangerousCommand {
                 for group in 1...3 {
                     guard let r = Range(match.range(at: group), in: script) else { continue }
                     let inner = script[r].replacingOccurrences(of: "\\\"", with: "\"").replacingOccurrences(of: "\\\\", with: "\\")
-                    if let reason = check(inner, scope: scope, home: home, depth: depth + 1) { return reason }
+                    if let reason = check(inner, scope: scope, directory: directory, home: home, depth: depth + 1) { return reason }
                 }
             }
         }
@@ -702,7 +727,7 @@ enum DangerousCommand {
         // literal: judge the script's strings together and one by one.
         if code.range(of: #"(?:do\s+shell\s+script|doShellScript\s*\()\s*[^"\s]"#, options: [.regularExpression, .caseInsensitive]) != nil {
             for piece in [text.strings.joined()] + text.strings {
-                if let reason = check(piece, scope: scope, home: home, depth: depth + 1) { return "monta um comando de shell que \(reason)" }
+                if let reason = check(piece, scope: scope, directory: directory, home: home, depth: depth + 1) { return "monta um comando de shell que \(reason)" }
             }
         }
         let codeRange = NSRange(code.startIndex..., in: code)

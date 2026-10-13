@@ -192,6 +192,76 @@ struct DangerousCommandTests {
         #expect(sensitive.reason(for: "/var/root/.ssh/id_rsa") != nil || sensitive.reason(for: "/private/var/root/.ssh/id_rsa") != nil)
     }
 
+    @Test func moreSecretsAreRecognizedWhenRead() {
+        let sensitive = DangerousCommand.SensitiveFiles(home: home)
+        let secret = [
+            ".zsh_history", ".bash_history", ".codex/auth.json", ".claude/.credentials.json", ".azure/accessTokens.json",
+            ".terraform.d/credentials.tfrc.json", ".cargo/credentials", ".cargo/credentials.toml", ".gem/credentials", ".m2/settings.xml",
+            ".yarnrc.yml", ".pgpass", ".my.cnf", ".config/hub", ".config/op/config", "Library/Cookies/Cookies.binarycookies",
+            "Library/Application Support/Google/Chrome/Default/Cookies", "Library/Application Support/Google/Chrome/Default/Login Data",
+            "Library/Application Support/Google/Chrome/Profile 1/Login Data For Account", "Library/Application Support/Google/Chrome/Default/Web Data",
+            "Library/Application Support/BraveSoftware/Brave-Browser/Default/Login Data",
+            "Library/Application Support/Microsoft Edge/Default/Cookies", "Library/Application Support/Arc/User Data/Default/Web Data",
+            "Library/Application Support/Firefox/Profiles/abc.default/logins.json", "Library/Application Support/Firefox/Profiles/abc.default/key4.db",
+            "Library/Application Support/Firefox/Profiles/abc.default/cookies.sqlite",
+        ]
+        for path in secret {
+            #expect(sensitive.reason(for: "/Users/teste/" + path) != nil, Comment(rawValue: path))
+        }
+        let fine = [
+            ".config/starship.toml", ".config/git/ignore", ".config", ".cargo/config.toml", ".cargo/bin/rustc", ".m2/repository/x.pom", ".yarnrc",
+            ".azure-notes.txt", ".zsh_history.bak.txt", "Library/Application Support/Google/Chrome/Default/Preferences",
+            "Library/Application Support/Google/Chrome/Default/History", "Library/Application Support/Code/User/settings.json",
+            "Library/Application Support/Firefox/Profiles/abc.default/prefs.js", "Library/Application Support/Arc/StorableSidebar.json",
+            "Library/Cookies2/x",
+        ]
+        for path in fine {
+            #expect(sensitive.reason(for: "/Users/teste/" + path) == nil, Comment(rawValue: path))
+        }
+        // The browser rule only applies under the browser's folder.
+        #expect(sensitive.reason(for: "/Users/teste/Documents/Cookies") == nil)
+        #expect(sensitive.reason(for: "/Users/teste/Documents/Login Data") == nil)
+    }
+
+    /// `N<file`, `N<> file` and `<&N` are input redirections like `< file`: the file they open is a path read.
+    @Test func secretsReadThroughAnInputRedirectionAreSeen() {
+        for command in ["cat < ~/.netrc", "cat <~/.netrc", "cat 0<~/.netrc", "cat 0< ~/.netrc", "cat 0<>~/.netrc", "cat 3<~/.aws/credentials",
+                        "cat 0<$HOME/.ssh/id_rsa", "zsh -c 'cat 0<~/.netrc'", "cat a.txt<~/.netrc", "head 0<~/.config/gh/hosts.yml"] {
+            #expect(reason(command, in: scope()) != nil, Comment(rawValue: command))
+            #expect(reason(command) != nil, Comment(rawValue: command))
+        }
+        #expect(reason("cat ~/.netrc", in: scope()) != nil)
+        for command in ["cat 0<README.md", "cat < notas.txt", "cat <&3", "ls 2>&1", "cat 0<~/.ssh/known_hosts"] {
+            #expect(reason(command, in: scope()) == nil, Comment(rawValue: command))
+        }
+    }
+
+    /// With no folder of its own (the home folder as the Orb's folder) relative paths still resolve from where the command runs.
+    @Test func relativeSecretsAreSeenWhenTheOrbWorksInTheHomeFolder() {
+        func reason(_ command: String, directory: URL? = nil) -> String? {
+            DangerousCommand.reason(for: command, in: nil, directory: directory ?? home, home: home)
+        }
+        for command in ["cat .aws/credentials", "cat .netrc", "cat .ssh/id_rsa", "cat ~/.aws/credentials", "cat 0<.netrc", "cat < .aws/credentials",
+                        "cd .ssh && cat id_rsa", "zsh -c 'cat .netrc'", "head .zsh_history"] {
+            #expect(reason(command) != nil, Comment(rawValue: command))
+        }
+        for command in ["cat .ssh/known_hosts", "cat .ssh/id_rsa.pub", "cat README.md", "cat Documents/notas.txt", "ls .ssh"] {
+            #expect(reason(command) == nil, Comment(rawValue: command))
+        }
+        // From a project folder, `.netrc` is the project's own file; with no directory at all the home folder is assumed.
+        #expect(reason("cat .netrc", directory: home.appending(path: "Projetos/app")) == nil)
+        #expect(DangerousCommand.reason(for: "cat .netrc", home: home) != nil)
+        // Through the policy: the Orb works in the home folder, so there is no scope, and still the card asks.
+        let inHome = PermissionPolicy.call(for: RunCommandTool(), arguments: .object(["command": .string("cat .aws/credentials")]),
+                                           context: ToolContext(workingDirectory: home), home: home)
+        #expect(inHome.danger != nil)
+        let withCwd = PermissionPolicy.call(for: RunCommandTool(), arguments: .object(["command": .string("cat credentials"), "cwd": .string(".aws")]),
+                                            context: ToolContext(workingDirectory: home), home: home)
+        #expect(withCwd.danger != nil)
+        // Build output is still only tolerated inside an Orb's own folder.
+        #expect(reason("rm -rf node_modules") != nil)
+    }
+
     @Test func parserSplitsLikeAShell() {
         func words(_ text: String) -> [[String]] { ShellCommandLine.parse(text).segments.map(\.words) }
         #expect(words("a b; c && d || e | f\ng & h") == [["a", "b"], ["c"], ["d"], ["e"], ["f"], ["g"], ["h"]])

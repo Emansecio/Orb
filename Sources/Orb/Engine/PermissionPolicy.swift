@@ -370,11 +370,11 @@ enum PermissionPolicy {
 
         if let text = arguments["command"]?.string {
             call.command = ShellCommandLine.parse(text)
-            danger = danger ?? DangerousCommand.reason(for: text, in: scope, home: home)
+            danger = danger ?? DangerousCommand.reason(for: text, in: scope, directory: directory, home: home)
         } else if let script = arguments["script"]?.string {
             // No language means AppleScript (the tool's default); one it does not know is read both ways.
             let named = arguments.nonEmptyString("language")?.lowercased() ?? AppleScript.Language.applescript.rawValue
-            danger = danger ?? DangerousCommand.reason(forAppleScript: script, language: AppleScript.Language(rawValue: named), in: scope, home: home)
+            danger = danger ?? DangerousCommand.reason(forAppleScript: script, language: AppleScript.Language(rawValue: named), in: scope, directory: directory, home: home)
         }
         switch family {
         case .writeFiles:

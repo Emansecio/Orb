@@ -191,26 +191,19 @@ enum ReadOnlyCommand {
             let listing: Set<String> = ["-a", "-r", "-v", "-vv", "--all", "--remotes", "--verbose", "--list", "--show-current", "--merged", "--no-merged"]
             return tail.allSatisfy { listing.contains($0) || (!$0.hasPrefix("-") && options.contains("--list")) }
         case "tag":
-            return tail.isEmpty || options.contains("--list") || options.contains("-l") && tail.allSatisfy { $0 != "-d" && $0 != "-f" }
+            // A pure listing: no option that deletes, forces, signs or annotates (`--list -d v1` deletes), and a name only
+            // as the pattern of `-l`/`--list` or the value of an option that implies listing; otherwise the name is a new tag.
+            let changing = ["--delete", "--force", "--annotate", "--sign", "--local-user", "--message", "--file", "--edit"]
+            if hasShortOption(Array(tail), "dfasuFme") || tail.contains(where: { abbreviates($0, anyOf: changing) }) { return false }
+            let operands = tail.filter { !$0.hasPrefix("-") }
+            let listsByName = tail.contains { $0 == "-l" || $0 == "--list" }
+            let implies = tail.contains { ["--contains", "--no-contains", "--points-at", "--merged", "--no-merged"].contains($0) || $0.hasPrefix("-n") }
+            return operands.isEmpty || listsByName || implies
         case "stash":
             return tail.first == "list" || tail.first == "show"
         case "config":
-            // The reading option comes first (after scopes): `git config k v --get` is still a write of `k`.
-            let scopes: Set<String> = ["--show-origin", "--local", "--global", "--system"]
-            var rest = tail[...]
-            while let first = rest.first, scopes.contains(first) { rest = rest.dropFirst() }
-            guard let reading = rest.first else { return false }
-            rest = rest.dropFirst()
-            var operands = 0
-            for word in rest where !scopes.contains(word) {
-                if word.hasPrefix("-") { return false }
-                operands += 1
-            }
-            switch reading {
-            case "--list", "-l": return operands == 0
-            case "--get", "--get-all", "--get-regexp": return (1...2).contains(operands)
-            default: return false
-            }
+            // Never read-only: even a plain read (`--list`, `--get-regexp`, `--show-origin`) prints remote URLs with tokens in them.
+            return false
         case "reflog":
             return tail.isEmpty || tail.first == "show" || tail.first?.hasPrefix("-") == true
         default:

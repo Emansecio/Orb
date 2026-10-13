@@ -139,8 +139,7 @@ struct ShellCommandLine: Equatable, Sendable {
                         add(c)
                         index += 2
                     } else {
-                        add(c)
-                        index += 1
+                        redirectInput()
                     }
                 case "#" where !inWord:
                     while index < chars.count, !chars[index].isNewline { index += 1 }
@@ -228,6 +227,22 @@ struct ShellCommandLine: Equatable, Sendable {
             let stop = min(cursor + 1, chars.count)
             word.append(contentsOf: chars[index..<stop])
             index = stop
+        }
+
+        /// An unquoted `<` that is not a heredoc or `<( )`: `< file`, `<file`, `0<file`, `3<> file`, `<&3`. The operator becomes a
+        /// word of its own (`<`, `<>` or `<&`, the target following as the next word), so a file read this way is judged like
+        /// any other path and no word hides it behind a descriptor number (`0<~/.netrc`). A descriptor number stuck to the
+        /// operator belongs to it and is dropped from the words.
+        private mutating func redirectInput() {
+            if inWord, !word.isEmpty, word.allSatisfy({ $0.isASCII && $0.isNumber }) {
+                word = ""
+                inWord = false
+            }
+            endWord()
+            var operatorWord = "<"
+            if let next = peek(), next == ">" || next == "&" { operatorWord.append(next) }
+            words.append(operatorWord)
+            index += operatorWord.count
         }
 
         /// `>` and `>>`: writing to a file counts as a redirect, duplicating a descriptor (`2>&1`) and
