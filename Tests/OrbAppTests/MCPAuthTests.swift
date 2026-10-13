@@ -191,15 +191,16 @@ struct MCPSignInTests {
         #expect(!addresses.contains { $0.contains("at-1") || $0.contains("rt-1") })
     }
 
-    @Test func aStateThatDoesNotMatchIsRefusedBeforeTheCodeIsUsed() async throws {
+    @Test func aStateThatDoesNotMatchIsIgnoredAndTheCodeIsNeverUsed() async throws {
+        // The loopback answers a forged callback with an error page and keeps waiting for the real one, which never comes here.
         let service = FakeOAuthService()
-        let auth = MCPAuth(vault: MemoryVault(), session: service.session)
+        let auth = MCPAuth(vault: MemoryVault(), session: service.session, signInTimeout: .seconds(1))
         let browser = FakeOAuthService.Browser { $0["state"] = "forged" }
         do {
             _ = try await auth.signIn(connector(service), open: browser.open)
-            Issue.record("expected a refusal")
+            Issue.record("expected the sign-in to time out")
         } catch {
-            #expect(message(error) == "O login voltou com um estado inválido; tente de novo.")
+            #expect(message(error) == "O login demorou demais; tente de novo.")
         }
         #expect(!service.requests.contains { $0.label == "auth POST /token" })
     }

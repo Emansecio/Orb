@@ -738,11 +738,36 @@ struct SystemKeychainItems: KeychainItems {
     }
 
     func replace(_ value: String, account: String, service: String) -> Bool {
-        SecItemDelete(Self.baseQuery(account, service: service) as CFDictionary)
-        guard !value.isEmpty else { return true }
-        var item = Self.baseQuery(account, service: service)
-        item[kSecValueData as String] = Data(value.utf8)
-        return SecItemAdd(item as CFDictionary, nil) == errSecSuccess
+        let query = Self.baseQuery(account, service: service)
+        guard !value.isEmpty else {
+            SecItemDelete(query as CFDictionary)
+            return true
+        }
+        let data = Data(value.utf8)
+        return Self.store(
+            update: { SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary) },
+            add: {
+                var item = query
+                item[kSecValueData as String] = data
+                return SecItemAdd(item as CFDictionary, nil)
+            })
+    }
+
+    /// Updates the item in place and only adds it when there is none, so a failed write never costs the key that was there
+    /// (deleting first would lose, say, the ChatGPT refresh token and force a new login). The statuses come from closures so
+    /// the order of the steps runs in tests without touching the real Keychain.
+    static func store(update: () -> OSStatus, add: () -> OSStatus) -> Bool {
+        switch update() {
+        case errSecSuccess:
+            return true
+        case errSecItemNotFound:
+            let added = add()
+            // Another writer created it between the two calls: the value goes in as an update.
+            if added == errSecDuplicateItem { return update() == errSecSuccess }
+            return added == errSecSuccess
+        default:
+            return false
+        }
     }
 
     private static func baseQuery(_ account: String, service: String) -> [String: Any] {

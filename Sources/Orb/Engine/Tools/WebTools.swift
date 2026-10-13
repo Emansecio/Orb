@@ -32,7 +32,11 @@ struct WebFetchTool: AgentTool {
     /// How long the body is read for before what arrived is used; a parameter so tests need not wait 30 s.
     let readDeadline: Duration
 
-    init(session: URLSession = .shared, pdfLimit: Int = WebFetchTool.maxPDFBytes, textLimit: Int = WebFetchTool.maxBytes,
+    /// Own ephemeral session: no persistent cookies and no cache shared with the rest of the app, so a page fetched here
+    /// cannot read or set the app's cookies. Redirects are decided per task by `WebRedirectPolicy`.
+    static let defaultSession = URLSession(configuration: .ephemeral)
+
+    init(session: URLSession = WebFetchTool.defaultSession, pdfLimit: Int = WebFetchTool.maxPDFBytes, textLimit: Int = WebFetchTool.maxBytes,
          cache: WebPageCache = .shared, readDeadline: Duration = WebFetchTool.readDeadline) {
         self.session = session
         self.pdfLimit = pdfLimit
@@ -104,7 +108,12 @@ struct WebFetchTool: AgentTool {
     private func fetch(_ url: URL, destination: String?, arguments: JSONValue, context: ToolContext, find: String?, wantsImage: Bool) async throws -> ToolResult {
         var request = URLRequest(url: url, timeoutInterval: 20)
         request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
-        let (bytes, response) = try await session.bytes(for: request)
+        // The permission was granted for this address's host, so a redirect only goes on within it (see `WebRedirectPolicy`).
+        let redirects = WebRedirectPolicy()
+        let (bytes, response) = try await session.bytes(for: request, delegate: redirects)
+        if let refused = redirects.refused {
+            throw ToolError(Self.redirectMessage(from: url, to: refused))
+        }
         let finalURL = response.url ?? url
         // The status is known from the headers alone; do not download an error page's body to find out.
         if let status = (response as? HTTPURLResponse)?.statusCode, status >= 400 {
@@ -333,6 +342,12 @@ struct WebFetchTool: AgentTool {
     }
 
     /// A network failure in Portuguese, with the host and what to do about it.
+    /// What the model is told when a redirect was not followed: where the site points to, and how to go there with the permission
+    /// for that address asked as usual.
+    static func redirectMessage(from url: URL, to target: URL) -> String {
+        "\(url.host() ?? url.absoluteString) redirecionou para outro endereço (\(target.absoluteString)), e o web_fetch não segue redirecionamentos para outro site nem de https para http. Se quiser ir até lá, chame web_fetch com essa URL; assim a permissão para o novo endereço é avaliada normalmente."
+    }
+
     static func explain(_ error: URLError, url: URL) -> ToolError {
         let host = url.host() ?? url.absoluteString
         switch error.code {
@@ -457,4 +472,39 @@ actor WebPageCache {
 
 extension ToolBox {
     static let webTools: [any AgentTool] = [WebFetchTool()]
+}
+
+
+/// Follows a redirect only within the host the request started at (case and a trailing dot aside), and only to the same scheme
+/// or from `http` up to `https`, never down to `http`. A refused redirect is not followed and is remembered, so the caller can
+/// say where it pointed: the permission to fetch covers the original host, not wherever it sends the request.
+final class WebRedirectPolicy: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let lock = NSLock()
+    private var refusedTarget: URL?
+    /// The address of the first redirect that was not followed, if any.
+    var refused: URL? { lock.withLock { refusedTarget } }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        // The hop's own origin, not the first one: a chain that stays on the host stays allowed all the way.
+        let origin = response.url ?? task.originalRequest?.url
+        if Self.follows(from: origin, to: request.url) {
+            completionHandler(request)
+        } else {
+            if let target = request.url { lock.withLock { if refusedTarget == nil { refusedTarget = target } } }
+            completionHandler(nil)
+        }
+    }
+
+    static func follows(from original: URL?, to target: URL?) -> Bool {
+        guard let from = original, let to = target, let fromHost = normalizedHost(from), let toHost = normalizedHost(to),
+              fromHost == toHost, let fromScheme = from.scheme?.lowercased(), let toScheme = to.scheme?.lowercased() else { return false }
+        return fromScheme == toScheme || (fromScheme == "http" && toScheme == "https")
+    }
+
+    private static func normalizedHost(_ url: URL) -> String? {
+        guard var host = url.host(percentEncoded: false)?.lowercased(), !host.isEmpty else { return nil }
+        while host.hasSuffix(".") { host.removeLast() }
+        return host.isEmpty ? nil : host
+    }
 }

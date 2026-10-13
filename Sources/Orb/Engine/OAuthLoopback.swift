@@ -22,6 +22,9 @@ enum OAuthLoopback {
 }
 
 /// One-shot HTTP listener on 127.0.0.1 that captures the OAuth redirect's query string.
+/// Only the real redirect ends the wait: a request to another path gets a 404, and one to the callback path with a missing or wrong
+/// `state` gets an error page, and both are ignored (anything on the machine can reach this port, a browser asking for
+/// `/favicon.ico` included). With the right `state`, a `code` ends the wait with success and an `error` ends it with that error.
 /// Tries the preferred ports in order (ChatGPT's conventional 1455 by default), then, unless told otherwise, any free port
 /// (the docs allow the port to vary).
 final class LoopbackCallback: Sendable {
@@ -32,15 +35,15 @@ final class LoopbackCallback: Sendable {
 
     /// Opens the listener. `exactPortOnly`: a server that compares the redirect to the letter cannot be sent anywhere else, so no
     /// other port is tried.
-    static func open(path: String, preferredPorts: [UInt16] = [1455], exactPortOnly: Bool = false) async throws -> LoopbackCallback {
+    static func open(path: String, state: String, preferredPorts: [UInt16] = [1455], exactPortOnly: Bool = false) async throws -> LoopbackCallback {
         var listener: NWListener?
         for port in preferredPorts where listener == nil { listener = await bind(port) }
         if listener == nil && !exactPortOnly { listener = await bind(nil) }
         guard let listener, listener.port != nil else { throw ToolError("Não foi possível abrir a porta local para o login.") }
-        return LoopbackCallback(listener: listener, path: path)
+        return LoopbackCallback(listener: listener, path: path, state: state)
     }
 
-    private init(listener: NWListener, path: String) {
+    private init(listener: NWListener, path: String, state: String) {
         (result, continuation) = AsyncStream.makeStream(of: [String: String].self)
         let bound = listener.port?.rawValue ?? 0
         self.listener = listener
@@ -51,15 +54,46 @@ final class LoopbackCallback: Sendable {
             connection.receive(minimumIncompleteLength: 1, maximumLength: 16_384) { data, _, _, _ in
                 let request = data.map { String(decoding: $0, as: UTF8.self) } ?? ""
                 let target = request.split(separator: " ").dropFirst().first.map(String.init) ?? ""
-                let page = "<html><body style=\"font-family:-apple-system;background:#070707;color:#fcfcfc;text-align:center;padding-top:80px\"><h2>Pronto!</h2><p>Pode voltar para o app.</p></body></html>"
-                let reply = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: \(page.utf8.count)\r\nConnection: close\r\n\r\n\(page)"
+                let outcome = Self.classify(target: target, path: path, state: state)
+                let reply = Self.http(outcome.status, outcome.page)
                 connection.send(content: Data(reply.utf8), completion: .contentProcessed { _ in connection.cancel() })
-                guard let components = URLComponents(string: target), components.path == path else { return }
-                var query: [String: String] = [:]
-                for item in components.queryItems ?? [] { query[item.name] = item.value ?? "" }
-                continuation.yield(query)
+                if let query = outcome.query { continuation.yield(query) }
             }
         }
+    }
+
+    /// What one request means: the page to answer with and, only for the real redirect, the query that ends the wait.
+    struct Outcome: Equatable {
+        var status: Int
+        var page: String
+        var query: [String: String]?
+    }
+
+    static func classify(target: String, path: String, state: String) -> Outcome {
+        guard let components = URLComponents(string: target), components.path == path else {
+            return Outcome(status: 404, page: card("Não encontrado", "Esta página não existe."), query: nil)
+        }
+        var query: [String: String] = [:]
+        for item in components.queryItems ?? [] { query[item.name] = item.value ?? "" }
+        guard query["state"] == state else {
+            return Outcome(status: 400, page: card("Pedido inválido", "Este endereço não faz parte do login em andamento. Feche esta aba."), query: nil)
+        }
+        if query["error"] != nil {
+            return Outcome(status: 200, page: card("Login não concluído", "O acesso não foi concedido. Pode voltar para o app e tentar de novo."), query: query)
+        }
+        if query["code"] != nil {
+            return Outcome(status: 200, page: card("Pronto!", "Pode voltar para o app."), query: query)
+        }
+        return Outcome(status: 400, page: card("Pedido inválido", "A resposta do login veio incompleta. Pode voltar para o app e tentar de novo."), query: nil)
+    }
+
+    private static func card(_ title: String, _ message: String) -> String {
+        "<html><body style=\"font-family:-apple-system;background:#070707;color:#fcfcfc;text-align:center;padding-top:80px\"><h2>\(title)</h2><p>\(message)</p></body></html>"
+    }
+
+    private static func http(_ status: Int, _ page: String) -> String {
+        let reason = status == 200 ? "OK" : status == 404 ? "Not Found" : "Bad Request"
+        return "HTTP/1.1 \(status) \(reason)\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: \(page.utf8.count)\r\nConnection: close\r\n\r\n\(page)"
     }
 
     /// A listener on 127.0.0.1 that reached `.ready` (nil port = any free port). Waiting does not hold a thread: a thread blocked

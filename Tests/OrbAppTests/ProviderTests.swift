@@ -347,7 +347,7 @@ struct ChatGPTAuthTests {
 
     @Test func cancellingTheSignInEndsTheWaitForTheBrowser() async throws {
         // The "Cancelar" button cancels the sign-in task; the loopback wait must end at once, not after its 5 minutes.
-        let callback = try await LoopbackCallback.open(path: "/auth/callback")
+        let callback = try await LoopbackCallback.open(path: "/auth/callback", state: "esperado")
         defer { callback.stop() }
         let waiting = Task { try await callback.wait(timeout: .seconds(300)) }
         try await Task.sleep(for: .milliseconds(100))

@@ -150,7 +150,7 @@ actor ChatGPTAuth {
     func signIn(open: @Sendable (URL) async -> Void) async throws -> ChatGPTCredential {
         let verifier = OAuthLoopback.randomToken()
         let state = OAuthLoopback.randomToken()
-        let callback = try await LoopbackCallback.open(path: Self.callbackPath)
+        let callback = try await LoopbackCallback.open(path: Self.callbackPath, state: state)
         defer { callback.stop() }
         let redirect = "http://127.0.0.1:\(callback.port)\(Self.callbackPath)"
         let reuse = credential?.clientID
@@ -170,7 +170,8 @@ actor ChatGPTAuth {
         let query = try await callback.wait(timeout: .seconds(300))
         guard query["state"] == state else { throw ToolError("O login voltou com um estado inválido; tente de novo.") }
         if let error = query["error"] {
-            throw ToolError(error == "access_denied" ? "Login cancelado ou uso do plano do ChatGPT não liberado." : "O login falhou: \(error)")
+            throw ToolError(error == "access_denied" ? "Login cancelado ou uso do plano do ChatGPT não liberado."
+                            : "O login falhou: \(query["error_description"].flatMap { $0.isEmpty ? nil : $0 } ?? error)")
         }
         guard let code = query["code"] else { throw ToolError("O login não devolveu um código.") }
         // First sign-in must return the issued client id; later sign-ins may omit it but must not change it.

@@ -378,10 +378,11 @@ actor MCPAuth {
         let preRegistered = settings.clientID?.trimmingCharacters(in: .whitespaces).nonEmpty
         let reusable = preRegistered == nil && stored.clientID != nil && stored.issuer == server.issuer
         let fixed = settings.redirect.flatMap(URL.init(string:))
+        let verifier = OAuthLoopback.randomToken(), state = OAuthLoopback.randomToken()
         let callback: LoopbackCallback
         do {
             let ports = fixed?.port.map { [UInt16($0)] } ?? (reusable ? stored.registrationPort.map { [$0] } ?? [] : [])
-            callback = try await LoopbackCallback.open(path: fixed?.path ?? Self.callbackPath, preferredPorts: ports, exactPortOnly: fixed != nil)
+            callback = try await LoopbackCallback.open(path: fixed?.path ?? Self.callbackPath, state: state, preferredPorts: ports, exactPortOnly: fixed != nil)
         } catch {
             guard let port = fixed?.port else { throw error }
             throw ToolError("A porta \(port) do login está ocupada. Feche o que a usa e tente de novo.")
@@ -408,7 +409,6 @@ actor MCPAuth {
         stored.issuer = server.issuer
 
         // The request. The issuer is noted before the browser opens: the answer is checked against it.
-        let verifier = OAuthLoopback.randomToken(), state = OAuthLoopback.randomToken()
         let scope = Self.scopeToAsk(challenge: challenge, settings: settings, supported: protectedResource.scopes,
                                     granted: stored.hasToken ? stored.scopes : "", extra: extraScope,
                                     offersOffline: server.scopes.contains("offline_access"))
