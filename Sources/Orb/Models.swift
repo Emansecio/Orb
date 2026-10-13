@@ -23,7 +23,7 @@ enum PermissionMode: String, CaseIterable, Identifiable, Codable, Sendable {
     var shortSummary: String {
         switch self {
         case .ask: "Pede sua aprovação antes de mudar arquivos, rodar comandos ou usar a web."
-        case .auto: "Trabalha sozinho e só pergunta antes do que reconhece como destrutivo (apagar, sudo, push --force). Não protege contra instruções escondidas em páginas, e-mails ou arquivos que o Orb lê."
+        case .auto: "Trabalha sozinho e só pergunta antes do que reconhece como destrutivo (apagar, sudo, push --force). Não protege contra instruções escondidas no que o Orb lê."
         case .readOnly: "Só lê e pesquisa. Não muda nada no seu Mac."
         case .bypass: "Nunca pergunta, nem em ações destrutivas."
         }
