@@ -108,12 +108,12 @@ jobs:
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
       # O app empacotado de verdade: o bundle.sh monta o Orb.app (ícone, Info.plist com a versão do git) e assina. No CI
-      # não há a identidade "Orb Local", então ele cai na assinatura ad-hoc; não abre nem encerra o app. Compila em release
-      # (o que de fato é distribuído), depois do swift test para uma falha de build de release não esconder o resultado dos testes.
+      # não há a identidade "Orb Local", então ele cai na assinatura ad-hoc; não abre nem encerra o app. Em debug, que reaproveita
+      # o build do swift test; vem depois dele para uma falha aqui não esconder o resultado dos testes.
       - name: Montar e assinar o Orb.app
         run: |
           set -euo pipefail
-          scripts/bundle.sh release
+          scripts/bundle.sh debug
           app=build/Orb.app
           test -f "$app/Contents/Info.plist"
           test -x "$app/Contents/MacOS/Orb"
