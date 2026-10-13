@@ -210,6 +210,9 @@ struct SettingsRouterTests {
         #expect(GeneralSettings.versionText(["CFBundleShortVersionString": "1.2.0", "CFBundleVersion": "7"]) == "1.2.0 (7)")
         #expect(GeneralSettings.versionText(["CFBundleShortVersionString": "1.2.0"]) == "1.2.0")
         #expect(GeneralSettings.versionText([:]) == "versão de desenvolvimento")
+        #expect(GeneralSettings.versionText(["CFBundleShortVersionString": "1.0.243", "CFBundleVersion": "243", "OrbGitCommit": "9ac1745"]) == "1.0.243 · 9ac1745")
+        #expect(GeneralSettings.versionText(["CFBundleShortVersionString": "1.0.243", "CFBundleVersion": "243"]) == "1.0.243")
+        #expect(GeneralSettings.versionText(["CFBundleShortVersionString": "1.0.0", "CFBundleVersion": "1", "OrbGitCommit": "unknown"]) == "1.0.0 (1)")
     }
 }
 

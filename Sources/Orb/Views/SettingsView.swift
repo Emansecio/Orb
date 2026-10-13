@@ -310,10 +310,12 @@ struct GeneralSettings: View {
     /// Where a deleted Orb's memory goes when you keep it.
     static var keptMemoriesFolder: URL { Store.standard.directory.appending(path: "memoria/_guardadas") }
 
-    /// "1.0.0 (1)", or "versão de desenvolvimento" when run outside the bundled app.
+    /// "1.0.243 · 9ac1745" (the commit `scripts/bundle.sh` wrote down), "1.2.0 (7)" when there is no commit and the build
+    /// is not already in the version, or "versão de desenvolvimento" when run outside the bundled app.
     static func versionText(_ info: [String: Any]? = Bundle.main.infoDictionary) -> String {
         guard let version = info?["CFBundleShortVersionString"] as? String else { return "versão de desenvolvimento" }
-        guard let build = info?["CFBundleVersion"] as? String, !build.isEmpty else { return version }
+        if let commit = info?["OrbGitCommit"] as? String, !commit.isEmpty, commit != "unknown" { return "\(version) · \(commit)" }
+        guard let build = info?["CFBundleVersion"] as? String, !build.isEmpty, !version.hasSuffix(".\(build)") else { return version }
         return "\(version) (\(build))"
     }
 

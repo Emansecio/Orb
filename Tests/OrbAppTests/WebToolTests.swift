@@ -690,11 +690,13 @@ final class EndlessStreamProtocol: URLProtocol {
         // deadline, and a cut with nothing read is a different case from the one these tests are about.
         client?.urlProtocol(self, didLoad: stream.chunk)
         Self.streams.withLock { $0[host]?.served += stream.chunk.count }
-        DispatchQueue.global().async { [self] in
-            while running.withLock({ $0 }) {
+        // URLProtocol is not Sendable; this loop is the only code that touches it after `startLoading` returns.
+        nonisolated(unsafe) let me = self
+        DispatchQueue.global().async {
+            while me.running.withLock({ $0 }) {
                 Thread.sleep(forTimeInterval: stream.interval)
-                guard running.withLock({ $0 }) else { break }
-                client?.urlProtocol(self, didLoad: stream.chunk)
+                guard me.running.withLock({ $0 }) else { break }
+                me.client?.urlProtocol(me, didLoad: stream.chunk)
                 Self.streams.withLock { $0[host]?.served += stream.chunk.count }
             }
         }
@@ -828,14 +830,16 @@ final class SlowBodyProtocol: URLProtocol {
         if served.announcesLength { headers["Content-Length"] = String(served.body.count) }
         guard let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: headers) else { return }
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        DispatchQueue.global().async { [self] in
+        // URLProtocol is not Sendable; this loop is the only code that touches it after `startLoading` returns.
+        nonisolated(unsafe) let me = self
+        DispatchQueue.global().async {
             var start = 0
-            while start < served.body.count, running.withLock({ $0 }) {
-                client?.urlProtocol(self, didLoad: served.body.subdata(in: start..<min(start + served.piece, served.body.count)))
+            while start < served.body.count, me.running.withLock({ $0 }) {
+                me.client?.urlProtocol(me, didLoad: served.body.subdata(in: start..<min(start + served.piece, served.body.count)))
                 start += served.piece
                 Thread.sleep(forTimeInterval: served.interval)
             }
-            if running.withLock({ $0 }) { client?.urlProtocolDidFinishLoading(self) }
+            if me.running.withLock({ $0 }) { me.client?.urlProtocolDidFinishLoading(me) }
         }
     }
 
