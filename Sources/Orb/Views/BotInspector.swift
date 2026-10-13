@@ -76,6 +76,11 @@ struct BotInspector: View {
                 let result = await WorkspaceFiles.load(botID: bot.id, folder: bot.workingURL, refresh: true)
                 if !Task.isCancelled { listing = result }
             }
+            // While the panel is open the list follows the folder: what the Orb (or anyone) writes or deletes shows up
+            // in a moment, not only at the end of the turn.
+            .task(id: bot.workingDirectory) {
+                for await _ in FolderWatcher.changes(in: bot.workingURL) { filesRefresh += 1 }
+            }
             // The turn may have created or changed files.
             .onChange(of: live.isWorking) { wasWorking, isWorking in
                 if wasWorking && !isWorking { filesRefresh += 1 }

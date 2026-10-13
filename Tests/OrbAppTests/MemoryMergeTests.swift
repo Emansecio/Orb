@@ -121,6 +121,27 @@ private struct Merger: LLMClient {
         #expect(await bank.applyMerge(now: start) == nil) // a second "Unificar" changes nothing
     }
 
+    @Test @MainActor func unifyingShowsTheNewPagesInThePanelAtOnce() async throws {
+        let model = AppModel(store: Store(directory: root.appending(path: "data")), runsBackgroundWork: false)
+        let botID = model.createBot(name: "Atlas", role: "Teste", orb: OrbConfig(), model: "", mode: .ask, identity: "",
+                                    interview: false, folder: .home).id
+        let bank = model.memory.bank(for: botID)
+        let (server1, server2, date) = (server1, server2, start)
+        for (name, body) in [("a", server1), ("b", server2)] {
+            await bank.write(MemoryPage(path: "fatos/\(name).md", kind: .fato, title: name, body: body, created: date, updated: date,
+                                        origin: .orb))
+        }
+        await model.refreshMemory(botID)
+        #expect(model.live(botID).memory.items.map(\.title).sorted() == ["a", "b"])
+        let group = MemoryMerge.Group(kind: "fato", sources: [.init(path: "fatos/a.md", body: server1), .init(path: "fatos/b.md", body: server2)],
+                                      title: "Servidor de produção", body: "O servidor de produção fica em 10.0.0.12, porta 8443.")
+        #expect(await bank.saveMergeProposal([group], askedCount: 2))
+
+        await model.applyMemoryMerge(botID)
+        // The Memória tab is a snapshot: it shows the merged page without waiting for the end of a turn.
+        #expect(model.live(botID).memory.items.map(\.title) == ["Servidor de produção"])
+    }
+
     @Test func theNoticeOffersToMergeOnlyWhileTheProposalWaits() {
         let notice = NoticeAction.memoryMergePrefix + " 4 páginas parecidas viram 2: “A”, “B”."
         #expect(NoticeAction.actions(for: notice) == [.mergeMemory, .openMemory])

@@ -11,7 +11,9 @@ struct QueuedMessages: View {
     var body: some View {
         let presented = presented
         let lane = model.composerLane(botID)
-        ForEach(lane.queued) { message in
+        // Its own identity, not the message's: once delivered, the message's id names its row of the transcript, and two
+        // children of the same lazy stack with one id make SwiftUI reuse this bubble for that row.
+        ForEach(lane.queued, id: \.queuedRowID) { message in
             // Each bubble says where it goes; "Parar e enviar" speaks for the whole queue and shows once, under the last one.
             QueuedBubble(message: message, whenText: whenText(message.delivery), canInterrupt: QueuedMessages.canInterrupt(canSteer: model.canSteer(botID), pendingPictures: lane.pendingPictures), needsYou: needsYou,
                          isLast: message.id == lane.queued.last?.id, canSwitch: model.canSteer(botID),
@@ -50,6 +52,11 @@ struct QueuedMessages: View {
     }
 
     nonisolated static func switchHelp(from delivery: SteeringDelivery) -> String { delivery == .steer ? Tip.queueAfterTask : Tip.steerNow }
+}
+
+extension SteeredMessage {
+    /// The identity of its bubble while it waits (see `QueuedMessages`), distinct from the transcript row it becomes.
+    var queuedRowID: String { "fila-" + id.uuidString }
 }
 
 private struct QueuedBubble: View {

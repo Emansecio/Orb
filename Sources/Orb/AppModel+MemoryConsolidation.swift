@@ -28,6 +28,7 @@ extension AppModel {
             }
             guard let consolidated = result.pinned, await bank.applyConsolidation(consolidated, replacing: pinned) else { return }
             session.memoryConsolidationTried = nil // done: the next pass waits for the threshold, not the clock
+            await refreshMemory(botID) // the panel's Memória tab shows the pages as they are now
         }
     }
 
@@ -89,5 +90,6 @@ extension AppModel {
         case let done?: "Memória unificada: \(done.pages) páginas viraram \(done.groups). Os originais estão em _arquivo/consolidacoes."
         }
         append(.notice(text), to: botID)
+        await refreshMemory(botID)
     }
 }

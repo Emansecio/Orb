@@ -121,6 +121,12 @@ struct ComposerSupportTests {
         #expect(QueuedMessages.switchHelp(from: .steer) == Tip.queueAfterTask && QueuedMessages.switchHelp(from: .afterTask) == Tip.steerNow)
     }
 
+    @Test func aWaitingBubbleDoesNotShareItsIdentityWithTheRowItBecomes() {
+        // Both are children of the chat's lazy stack: with one id, SwiftUI showed the delivered message as still waiting.
+        let message = SteeredMessage(text: "oi", prompt: "oi")
+        #expect(message.queuedRowID != message.id.uuidString && message.queuedRowID.contains(message.id.uuidString))
+    }
+
     @Test func tabQueuesForAfterTheTaskOnlyWithTheOrbWorkingAndSomethingToSend() {
         func tab(slash: Bool = false, working: Bool = true, content: Bool = true, steer: Bool = true, pending: Int = 0, plain: Bool = true) -> ComposerAction.TabKey {
             let canSend = ComposerAction.canSend(hasContent: content, isWorking: working, canSteer: steer, pendingPictures: pending)
