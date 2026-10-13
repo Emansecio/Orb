@@ -8,6 +8,8 @@ final class CommandRelease: Sendable {
     /// How long a command runs before a message sends it to the background: a quick one just ends, and the message
     /// reaches the model right after it.
     static let messageGrace: Duration = .seconds(3)
+    /// How long a command runs before the "Segundo plano" button shows: a quick one ends without it flashing by.
+    static let buttonDelay: Duration = .milliseconds(1500)
 
     private struct State {
         var pressed = false

@@ -18,6 +18,7 @@ enum CommandName {
     static let writeMessage = "Escrever uma mensagem"
     static let findInConversation = "Buscar na conversa"
     static let stop = "Parar a resposta"
+    static let sendToBackground = "Mandar o comando para segundo plano"
     static let openFolder = "Abrir pasta do Orb no Finder"
     static let toggleInspector = "Mostrar ou ocultar o painel do Orb"
     static let shortcuts = "Atalhos do teclado"
@@ -40,6 +41,8 @@ enum AppShortcut {
     static let goTo = KeyboardShortcut("k")
     static let writeMessage = KeyboardShortcut("l")
     static let stop = KeyboardShortcut(".")
+    /// ⌘B: the command the Orb waits for goes on in the background (the "Segundo plano" button of the working line).
+    static let sendToBackground = KeyboardShortcut("b")
     static let openFolder = KeyboardShortcut("o", modifiers: [.command, .shift])
     static let previousBot = KeyboardShortcut(.upArrow, modifiers: .option)
     static let nextBot = KeyboardShortcut(.downArrow, modifiers: .option)
@@ -73,7 +76,7 @@ enum AppShortcut {
     static let contextual: [KeyboardShortcut] = [commandReturn, chooseModel, undoForget, find, findNext, findPrevious, settings]
 
     /// Every key above, for the tests that check that none is used twice.
-    static let all: [KeyboardShortcut] = [newBot, newGroup, toggleInspector, goTo, writeMessage, stop,
+    static let all: [KeyboardShortcut] = [newBot, newGroup, toggleInspector, goTo, writeMessage, stop, sendToBackground,
                                           openFolder, previousBot, nextBot, routines, connectors, skills]
         + (0..<9).map(bot(at:))
 }
@@ -105,7 +108,7 @@ extension KeyboardShortcut {
 /// A command a key answers to, so the places that show a key (the palette) ask the catalog for it by command.
 enum ShortcutCommand: String, CaseIterable, Sendable {
     case newBot, newGroup, goTo, toggleInspector, settings
-    case writeMessage, stop, openFolder, send, newLine, queueAfterTask, stopAndSend, chooseModel, cancelEdit
+    case writeMessage, stop, sendToBackground, openFolder, send, newLine, queueAfterTask, stopAndSend, chooseModel, cancelEdit
     case goToBot, previousBot, nextBot, routines, connectors, skills
     case allowApproval, denyApproval
     case compactOrSave, undoForget, find, findNext, findPrevious
@@ -145,6 +148,7 @@ enum ShortcutCatalog {
         ShortcutGroup(title: "Conversa", items: [
             ShortcutItem(.writeMessage, AppShortcut.writeMessage, CommandName.writeMessage),
             ShortcutItem(.stop, AppShortcut.stop, CommandName.stop),
+            ShortcutItem(.sendToBackground, AppShortcut.sendToBackground, CommandName.sendToBackground + " (enquanto o Orb espera um comando do Terminal)"),
             ShortcutItem(.openFolder, AppShortcut.openFolder, CommandName.openFolder),
             ShortcutItem(command: .send, keys: "↩", title: "Enviar a mensagem (com o Orb trabalhando, direciona a tarefa)"),
             ShortcutItem(command: .queueAfterTask, keys: "⇥", title: "Pôr na fila para depois da tarefa (Orb trabalhando e algo escrito)"),

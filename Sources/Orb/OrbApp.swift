@@ -171,6 +171,9 @@ struct AppCommands: Commands {
             Button(CommandName.stop) { model.stopSelection() }
                 .keyboardShortcut(AppShortcut.stop)
                 .disabled(!model.canStopSelection)
+            Button(CommandName.sendToBackground) { model.sendCurrentCommandToBackground() }
+                .keyboardShortcut(AppShortcut.sendToBackground)
+                .disabled(!model.canSendCommandToBackground)
             Button(CommandName.newGroup) { showMain(); model.showNewGroup = true }
                 .keyboardShortcut(AppShortcut.newGroup)
                 .disabled(sheetOpen || model.botIDs.count < 2)

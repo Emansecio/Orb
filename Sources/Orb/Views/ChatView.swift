@@ -902,6 +902,15 @@ private struct WorkingLine: View {
     /// The last phrase there was: when the turn ends the line is still fading out for a moment, and must say the
     /// same words until it is gone instead of falling back to "Pensando".
     @State private var lastWork = WorkPhrase.line(status: "Pensando")
+    /// The command has been waited for long enough to show the "Segundo plano" button.
+    @State private var showsRelease = false
+    /// The button was pressed: the command goes to the background at its next check.
+    @State private var releasing = false
+
+    private func sendToBackground() {
+        releasing = true
+        model.sendCommandToBackground(of: look.id)
+    }
 
     var body: some View {
         let live = model.live(look.id)
@@ -930,14 +939,18 @@ private struct WorkingLine: View {
                     // instead of staying drawn where the line used to be.
                     .geometryGroup()
                     WorkMeterView(work: work, since: live.workingSince)
-                    // A command holds the turn: it can go on by itself while you talk to the Orb.
-                    if live.commandWaited {
-                        Button("Segundo plano", systemImage: "arrow.down.right.square") { model.sendCommandToBackground(of: look.id) }
+                    // A command holds the turn: it can go on by itself while you talk to the Orb. The button waits a
+                    // moment (`CommandRelease.buttonDelay`), so a quick command ends before it ever shows, and once
+                    // pressed it stands dimmed until the command is let go (a quarter of a second at most).
+                    if live.commandWaited && showsRelease {
+                        Button("Segundo plano", systemImage: "arrow.down.right.square") { sendToBackground() }
                             .buttonStyle(GhostStyle(tint: nil))
                             .lineLimit(1)
                             .fixedSize()
                             .layoutPriority(1)
-                            .help("Deixar o comando rodando em segundo plano e voltar a falar com o Orb")
+                            .disabled(releasing)
+                            .opacity(releasing ? 0.5 : 1)
+                            .help(Tip.sendToBackground)
                             .transition(.adapted(.swap, reduceMotion: reduceMotion))
                     }
                     // MARK: MultiOrb (WP2): the Orb waits for other Orbs' answers: the line stops the conversation.
@@ -955,10 +968,28 @@ private struct WorkingLine: View {
                 .animation(reduceMotion ? nil : Motion.content, value: work.phraseKey)
             }
             .onChange(of: live.shownWork, initial: true) { _, new in if let new { lastWork = new } }
+            .task(id: live.commandWaited) {
+                releasing = false
+                showsRelease = false
+                guard model.live(look.id).commandWaited else { return }
+                try? await Task.sleep(for: CommandRelease.buttonDelay)
+                guard !Task.isCancelled else { return }
+                withAnimation(Motion.adapted(Motion.enter, reduceMotion: reduceMotion)) { showsRelease = true }
+            }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(work.tone == .waiting ? "\(look.name) precisa de você" : "\(look.name) está trabalhando")
             .accessibilityValue(work.text)
             .accessibilityAddTraits(.updatesFrequently)
+            // The line is one element for VoiceOver: its buttons are its actions. The command one is there at once,
+            // without the delay the eye needs.
+            .accessibilityActions {
+                if live.commandWaited && !releasing {
+                    Button(CommandName.sendToBackground) { sendToBackground() }
+                }
+                if live.chainWork != nil {
+                    Button("Parar a conversa entre Orbs") { model.stop(look.id) }
+                }
+            }
             if model.routineWaitingForYou(look.id) != nil {
                 // The card is in the routine's conversation, not in this chat.
                 Button("Ver pedido") { model.showRoutineRequest(of: look.id) }

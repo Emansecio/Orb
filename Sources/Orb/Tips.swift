@@ -136,6 +136,7 @@ enum Tip {
     static let allowOnce = "Permite esta ação só desta vez"
     static let allowBatchOnce = "Permite todas estas ações, só desta vez"
     static let routineRequest = "Abre a conversa da rotina, onde está o pedido de permissão"
+    static let sendToBackground = "Deixa o comando rodando em segundo plano e volta a conversa com o Orb (\(AppShortcut.sendToBackground.label)). Mandar uma mensagem com o comando rodando há mais de 3 segundos faz o mesmo"
     static func chooseOrb(named name: String) -> String { "Escolhe \(name) para receber a mensagem" }
 
     // MARK: Import

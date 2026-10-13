@@ -124,6 +124,13 @@ extension AppModel {
         return selectedBotID.map { canStop($0) } ?? false
     }
 
+    /// ⌘B: the command the open Orb waits for goes on in the background, like the "Segundo plano" button.
+    func sendCurrentCommandToBackground() {
+        if let id = selectedBotID, live(id).commandWaited { sendCommandToBackground(of: id) }
+    }
+
+    var canSendCommandToBackground: Bool { selectedBotID.map { live($0).commandWaited } ?? false }
+
     /// The Orb works, or idles waiting on a chain of requests to other Orbs (`chainWork`): either can be stopped.
     private func canStop(_ botID: UUID) -> Bool { isWorking(botID) || live(botID).chainWork != nil }
 
