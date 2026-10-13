@@ -54,7 +54,7 @@ struct ToolSpecEconomyTests {
     /// The guidance the shorter descriptions must still give: limits, safety notes and when to use the tool.
     @Test func theDescriptionsKeepTheirLimitsAndAdvice() throws {
         let needles: [String: [String]] = [
-            "run_command": ["cd, export", "cwd", "120", "600", "20 KB", "background: true", "job_output", "job_list", "job_stop", "stdin"],
+            "run_command": ["cd, export", "cwd", "120", "600", "20 KB", "background: true", "job_output", "without id", "job_stop", "stdin"],
             "read_file": ["offset", "limit", "pages", "PDF", "OCR", "not file content", "never include"],
             "write_file": ["append", "edit_file", "UTF-8"],
             "edit_file": ["old_text", "replace_all", "unique", "Read the file first", "line-number prefix", "write_file"],
@@ -74,7 +74,7 @@ struct ToolSpecEconomyTests {
             "ui_act": ["ui_read", "interface mudou", "always asks the user first", "pick_menu", "Accessibility"],
             "remember": ["long-term memory", "near-duplicates", "tipo skill", "SKILL.md", "skill"],
             "recall": ["long-term memory", "before asking", "/name"],
-            "clipboard_write": ["replacing"], "notify": ["not for ordinary replies"], "processes": ["app_quit"],
+            "clipboard_write": ["replacing"], "notify": ["not for ordinary replies"],
         ]
         for (name, words) in needles {
             let tool = try #require(ToolBox.all.first { $0.spec.name == name }, "\(name)")

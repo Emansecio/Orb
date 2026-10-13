@@ -342,74 +342,6 @@ struct AppsListTool: AgentTool {
     }
 }
 
-struct ProcessInfoRow: Equatable, Sendable {
-    var pid: Int
-    var cpu: Double
-    var memoryPercent: Double
-    var residentKB: Int
-    var command: String
-
-    var name: String { command.split(separator: "/").last.map(String.init) ?? command }
-}
-
-enum ProcessListParser {
-    /// Parses `ps -o pid=,pcpu=,pmem=,rss=,comm=`; the command is last because its path may contain spaces.
-    static func parse(_ output: String) -> [ProcessInfoRow] {
-        output.split(whereSeparator: \.isNewline).compactMap { line in
-            let fields = line.split(separator: " ", maxSplits: 4, omittingEmptySubsequences: true)
-            guard fields.count == 5, let pid = Int(fields[0]),
-                  let cpu = Double(fields[1].replacingOccurrences(of: ",", with: ".")),
-                  let memory = Double(fields[2].replacingOccurrences(of: ",", with: ".")),
-                  let rss = Int(fields[3]) else { return nil }
-            return ProcessInfoRow(pid: pid, cpu: cpu, memoryPercent: memory, residentKB: rss,
-                                  command: fields[4].trimmingCharacters(in: .whitespaces))
-        }
-    }
-
-    static func megabytes(_ kilobytes: Int) -> String {
-        kilobytes >= 1_048_576 ? String(format: "%.1f GB", Double(kilobytes) / 1_048_576) : "\(kilobytes / 1024) MB"
-    }
-
-    static func format(_ rows: [ProcessInfoRow], sortedBy sort: String) -> String {
-        guard !rows.isEmpty else { return "Nenhum processo encontrado." }
-        let header = "Maiores consumidores de \(sort == "memory" ? "memória" : "CPU") (PID · CPU · memória · nome):"
-        let lines = rows.map { row in
-            "\(row.pid) · \(String(format: "%.1f", row.cpu))% · \(megabytes(row.residentKB)) (\(String(format: "%.1f", row.memoryPercent))%) · \(row.name)"
-        }
-        return header + "\n" + lines.joined(separator: "\n")
-    }
-}
-
-struct ProcessesTool: AgentTool {
-    let spec = ToolSpec(
-        name: "processes",
-        description: """
-        Show the processes using the most CPU or memory now (PID, CPU %, memory, name), to find what slows or \
-        heats the Mac. Quit a culprit with app_quit.
-        """,
-        parameters: .schema([
-            "sort": .object(["type": .string("string"),
-                             "enum": .array(["cpu", "memory"].map(JSONValue.string))]),
-            "limit": .property("integer", "Processes (default 15, max 50)."),
-        ]))
-
-    var kind: ToolCall.Kind { .computer }
-    var capability: Capability? { .computerUse }
-    func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
-
-    func summary(_ arguments: JSONValue) -> (title: String, detail: String) { ("Vendo os processos", "") }
-
-    func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
-        let sort = arguments["sort"]?.string == "memory" ? "memory" : "cpu"
-        let limit = arguments.integer("limit", default: 15, in: 1...50)
-        // The whole table is longer than the default output cap, and only its sorted head matters.
-        let result = try await ProcessRunner.run("/bin/ps", ["-A", sort == "memory" ? "-m" : "-r", "-o", "pid=,pcpu=,pmem=,rss=,comm="],
-                                                 timeout: .seconds(10), outputLimit: 2_000_000)
-        guard !result.timedOut, result.status == 0 else { throw ToolError("Não consegui listar os processos.") }
-        return ProcessListParser.format(Array(ProcessListParser.parse(result.output).prefix(limit)), sortedBy: sort)
-    }
-}
-
 struct AppQuitTool: AgentTool {
     let spec = ToolSpec(
         name: "app_quit",
@@ -588,6 +520,6 @@ enum TrashGuard {
 extension ToolBox {
     static let macAppTools: [any AgentTool] = [
         ShortcutsListTool(), ShortcutsRunTool(), ClipboardReadTool(), ClipboardWriteTool(), ScreenshotTool(),
-        NotifyTool(), AppsListTool(), ProcessesTool(), AppQuitTool(), TrashTool(),
+        NotifyTool(), AppsListTool(), AppQuitTool(), TrashTool(),
     ]
 }

@@ -18,6 +18,7 @@ struct OrbProposeTool: AgentTool {
             "role": .property("string", "One line."),
             "instructions": .property("string", "How it should work, up to \(OrbProposeTool.instructionsLimit) characters."),
             "capabilities": .object(["type": .string("array"),
+                                     "description": .string("Only what the role needs: each adds tools to every request. Empty: all of yours."),
                                      "items": .object(["type": .string("string"),
                                                        "enum": .array(["terminal", "browser", "computerUse"].map(JSONValue.string))])]),
             "look": JSONValue.schema(Dictionary(uniqueKeysWithValues: OrbProposeTool.looks.map { key in

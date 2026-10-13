@@ -427,7 +427,7 @@ enum PermissionPolicy {
         case "ui_read", "ui_act": return .appInterface
         case "browse_click", "browse_fill", "browse_select", "browse_press", "browse_show": return .browserPage
         case "remember", "recall": return .memory
-        case "job_output", "job_list", "job_stop": return .jobs
+        case "job_output", "job_stop": return .jobs
         case "schedule": return .schedule
         case "orbs": return .delegation
         case "group_remember", "group_recall": return .groupMemory

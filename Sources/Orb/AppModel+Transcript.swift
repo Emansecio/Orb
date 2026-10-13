@@ -34,7 +34,7 @@ enum NoticeAction: Equatable, Sendable {
     var help: String {
         switch self {
         case .retry: "Refaz o pedido que não deu certo"
-        case .continueTurn: "Envia “\(Self.continueMessage)” para o Orb seguir de onde parou"
+        case .continueTurn: "Pede para o Orb seguir de onde parou"
         case .openSettings: "Abre os Ajustes para ver o modelo, a chave ou o login"
         case .compact: "Resume o começo da conversa e envia a última mensagem de novo"
         case .openMemory: "Abre a aba Memória, no painel do Orb"
@@ -56,6 +56,21 @@ enum NoticeAction: Equatable, Sendable {
     /// What the message sent by "Continuar" says.
     static let continueMessage = "continua"
 
+    /// How the notice for a background process that ended by itself starts.
+    static let jobEndedPrefix = "Processo em segundo plano "
+
+    /// The command goes on a line of its own: "Continuar" sends only the first one (`continueMessage(after:)`).
+    static func jobEnded(_ job: BackgroundJobs.Snapshot) -> String {
+        jobEndedPrefix + "\(job.id) \(job.statusText).\n\(job.command.clipped(to: 160))"
+    }
+
+    /// What "Continuar" sends under `notice`: after a process ended, which one and where its output is. Never the command:
+    /// the model wrote it, maybe from a page it read, and here it would come as the user's own words.
+    static func continueMessage(after notice: String) -> String {
+        guard notice.hasPrefix(jobEndedPrefix), let line = notice.split(separator: "\n").first else { return continueMessage }
+        return line + " Veja a saída com job_output e siga a tarefa."
+    }
+
     static let failurePrefix = "Não deu certo: "
     /// How the notice for a fact the app kept by itself (not the model) starts.
     static let keptMemoryPrefix = "Guardado na memória:"
@@ -75,7 +90,9 @@ enum NoticeAction: Equatable, Sendable {
     /// The actions that fit a notice, most useful first; none for the notices that only inform.
     static func actions(for notice: String) -> [NoticeAction] {
         if notice.hasPrefix("Conecte um modelo") { return [.openSettings] }
-        if notice.hasPrefix("Pausei depois de") || notice.hasPrefix("A resposta passou do limite") { return [.continueTurn] }
+        if notice.hasPrefix("Pausei depois de") || notice.hasPrefix("A resposta passou do limite") || notice.hasPrefix(jobEndedPrefix) {
+            return [.continueTurn]
+        }
         // Wrongly detected, it is one click to the page to forget.
         if notice.hasPrefix(keptMemoryPrefix) { return [.openMemory] }
         if proposedSlug(in: notice) != nil { return [.reviewSkill] }
@@ -162,11 +179,12 @@ extension AppModel {
         }
     }
 
-    /// "Continuar": says "continua" to the Orb, which goes on from where it paused or was cut.
+    /// "Continuar": says "continua" to the Orb, which goes on from where it paused or was cut (`notice`: the one clicked,
+    /// whose words may say more, see `NoticeAction.continueMessage(after:)`).
     @discardableResult
-    func continueTurn(_ botID: UUID) -> Bool {
+    func continueTurn(_ botID: UUID, after notice: String = "") -> Bool {
         // Not `fromUser`: that would also clear the draft you may be typing. The click is yours, so the chat follows.
-        guard send(NoticeAction.continueMessage, to: botID) else { return false }
+        guard send(NoticeAction.continueMessage(after: notice), to: botID) else { return false }
         live(botID).scrolled()
         return true
     }

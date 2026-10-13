@@ -473,16 +473,30 @@ struct SkillProposalValidationTests {
         await bank.proposeSkill(SkillSamples.changed("Confirme que a branch é `main`", "Confirme que a branch é `release`"))
         #expect(await bank.proposals().count == 1)
         #expect(await bank.proposal("publicar-site")?.instructions.contains("`release`") == true)
-        for name in ["revisar-pr", "gerar-relatorio", "limpar-cache", "migrar-banco"] {
-            #expect(await bank.proposeSkill(SkillSamples.changed("name: publicar-site", "name: \(name)")
-                .replacingOccurrences(of: "Publica o site em produção", with: "Faz \(name.replacingOccurrences(of: "-", with: " ")) completo")) == .proposed(slug: name, isUpdate: false))
+        await bank.discardProposal("publicar-site")
+        // Five other tasks waiting (written as the app keeps them: a proposal that copied another would be sent back, see below).
+        let folder = file(bank, MemoryBank.proposalsFolder)
+        for name in ["revisar-pr", "gerar-relatorio", "limpar-cache", "migrar-banco", "ajustar-fontes"] {
+            let other = SkillProposal(slug: name, summary: "Cuida de \(name)", instructions: "Rode `\(name).sh` e leia `\(name).log`.")
+            try? Data(other.markdown().utf8).write(to: folder.appending(path: name + ".md"))
         }
-        let sixth = await bank.proposeSkill(SkillSamples.changed("name: publicar-site", "name: ajustar-fontes")
-            .replacingOccurrences(of: "Publica o site em produção", with: "Ajusta as fontes do projeto inteiro"))
+        #expect(await bank.proposals().count == 5)
+        let sixth = await bank.proposeSkill(SkillSamples.good)
         guard case .refused(let reason) = sixth else { Issue.record("a sixth proposal was kept"); return }
         #expect(reason.contains("already waiting"))
         // Changing one that waits is still possible.
-        #expect(await bank.proposeSkill(SkillSamples.good) == .proposed(slug: "publicar-site", isUpdate: false))
+        #expect(await bank.proposeSkill(SkillSamples.changed("name: publicar-site", "name: revisar-pr"))
+            == .proposed(slug: "revisar-pr", isUpdate: false))
+    }
+
+    @Test func aProposalThatRepeatsOneStillWaitingIsSentBackToImproveThatOne() async {
+        // Two reviews in a row proposed /subir-lp-docker and /publicar-lp-docker for the same task, and both got saved.
+        let bank = bank()
+        await bank.proposeSkill(SkillSamples.good)
+        let copy = await bank.proposeSkill(SkillSamples.changed("name: publicar-site", "name: subir-site-producao"))
+        guard case .refused(let reason) = copy else { Issue.record("a second proposal for the same task was kept"); return }
+        #expect(reason.contains("/publicar-site already covers this"))
+        #expect(await bank.proposals().map(\.slug) == ["publicar-site"])
     }
 
     @Test func aRefusedProposalLeavesNothingBehind() async {

@@ -401,6 +401,9 @@ final class AppModel {
         // Tokens an older version left in the data file move to the Keychain with the next save.
         if secrets.hasUnprotectedSecrets(connectors) { scheduleStateSave() }
         if readsFirstLater, let first = state.bots.first { beginLoading(first.id) }
+        Task { [weak self, changes = jobs.changes] in
+            for await botID in changes { await self?.showJobs(of: botID) }
+        }
         guard runsBackgroundWork else { return }
         let outputs = outputsDirectory
         // A developer run shares the user's $TMPDIR (`ORB_DATA_DIR` only moves the data), so it leaves alone what a running app wrote.
@@ -1663,6 +1666,26 @@ final class AppModel {
     }
 
     func closeStreaming(_ botID: UUID) { session(botID).closeStreaming() }
+
+    /// Puts the Orb's running background processes above its message box, and says in the chat when one it showed ended by
+    /// itself while the Orb was idle: the turn that started it may be long over. A stop is the user's or the Orb's own doing,
+    /// and during a turn the Orb is there to look (a notice would only split the reply being written).
+    func showJobs(of botID: UUID) async {
+        let all = await jobs.list(botID: botID)
+        let live = live(botID)
+        if !isWorking(botID) {
+            for shown in live.jobs {
+                guard let job = all.first(where: { $0.id == shown.id }), !job.isActive, job.state != .stopped else { continue }
+                append(.notice(NoticeAction.jobEnded(job)), to: botID)
+            }
+        }
+        live.setJobs(all.filter(\.isActive))
+    }
+
+    /// The strip's stop button. The strip follows by itself (`showJobs`), and a stop says nothing in the chat.
+    func stopJob(_ id: String, of botID: UUID) {
+        Task { _ = try? await jobs.stop(botID: botID, id: id) }
+    }
 
     func append(_ kind: TranscriptItem.Kind, to botID: UUID, duringTask: Bool = false, id: UUID? = nil) {
         session(botID).append(kind, duringTask: duringTask, id: id)

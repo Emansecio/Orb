@@ -453,7 +453,7 @@ final class RunCommandTests {
         #expect(started.contains("Processo em segundo plano 1: rodando"))
         #expect(started.contains("ready"))
 
-        let listing = try await JobListTool().run(.object([:]), context: context)
+        let listing = try await JobOutputTool().run(.object([:]), context: context)
         #expect(listing.contains("1  rodando") && listing.contains("echo ready; sleep 60"))
 
         let output = try await JobOutputTool().run(.object(["id": .string("1"), "lines": .number(5)]), context: context)
@@ -463,14 +463,14 @@ final class RunCommandTests {
 
         let stopped = try await JobStopTool().run(.object(["id": .string("1")]), context: context)
         #expect(stopped.contains("parado"))
-        #expect(try await JobListTool().run(.object([:]), context: context).contains("parado"))
+        #expect(try await JobOutputTool().run(.object([:]), context: context).contains("parado"))
         await #expect(throws: ToolError.self) { try await JobStopTool().run(.object(["id": .string("9")]), context: context) }
         await #expect(throws: ToolError.self) { try await JobStopTool().run(.object([:]), context: context) }
     }
 
     @Test func jobToolsNeedAnOrb() async throws {
         let bare = ToolContext(workingDirectory: directory)
-        await #expect(throws: ToolError.self) { try await JobListTool().run(.object([:]), context: bare) }
+        await #expect(throws: ToolError.self) { try await JobOutputTool().run(.object([:]), context: bare) }
         await #expect(throws: ToolError.self) {
             try await RunCommandTool().run(.object(["command": .string("true"), "background": .bool(true)]), context: bare)
         }

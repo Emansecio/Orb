@@ -468,6 +468,44 @@ extension AgentEngineTests {
         #expect(failures(events).isEmpty)
     }
 
+    @Test func aTurnThatWorkedAndEndsOnAPromiseIsAskedOnceToKeepIt() async {
+        let runs = Counter()
+        let script = Script([[touchCall], [.text("Li o arquivo. Vou adaptar o script agora.")], [touchCall], [.text("Pronto.")],
+                             [.text("Vou conferir de novo.")]])
+        let events = await run(AgentEngine(), request(script, mode: .bypass, runs: runs))
+        #expect(await script.received[2].last == .user(AgentEngine.promiseNudge))
+        #expect(await runs.value == 2, "the promised step ran")
+        #expect(await script.received.count == 4, "once per turn: after the second answer the turn ends")
+        #expect(!messages(events).contains { $0.content == AgentEngine.promiseNudge })
+    }
+
+    @Test func aPromiseBeforeAnyWorkOrAQuestionEndsTheTurn() async {
+        // The first answer of a turn: nothing was done yet, so "vou" is a reply ("Entendido, vou ignorar a carta").
+        let first = Script([[.text("Entendido, vou ignorar essa parte.")]])
+        _ = await run(AgentEngine(), request(first, mode: .bypass, runs: Counter()))
+        #expect(await first.received.count == 1)
+        let asks = Script([[touchCall], [.text("Vou publicar agora, pode ser?")]])
+        _ = await run(AgentEngine(), request(asks, mode: .bypass, runs: Counter()))
+        #expect(await asks.received.count == 2)
+    }
+
+    @Test func tellsAPromiseFromAStatement() {
+        // Endings of real turns: the first three stopped with the work undone, the others are answers.
+        for promise in ["Vou adaptar a captura do token para o navegador alternativo.",
+                        "Feito o diagnóstico.\n\nVou precisar diagnosticar como o site inicializa o reCAPTCHA, em vez de repetir o teste.",
+                        "Em seguida respondo todas as conversas acionáveis.", "Let me check the logs.", "Li o arquivo. Agora vou rodar o build.",
+                        "I’ll run it now."] {
+            #expect(AgentEngine.endsOnPromise(promise), "\(promise)")
+        }
+        for answer in ["Guardei na memória, então não vou iniciá-la sem o seu sim.", "Não vou inventar resultado.",
+                       "Quer que eu revise o nginx.conf agora?", "Vou subir o site, pode ser?", "O site está no ar.",
+                       "Vou fazer isso.\n\nPronto: o site está no ar.", "", "Let me know if you need anything.",
+                       "Rodei os testes e em seguida corrigi o erro.", "Se você aprovar, vou publicar.",
+                       "Os passos a seguir:\n- rodar o build\n- publicar", "Vou rodar o build. Pronto, passou."] {
+            #expect(!AgentEngine.endsOnPromise(answer), "\(answer)")
+        }
+    }
+
     @Test func aCutOffWithNoTextRecordsNoEmptyAssistantMessage() async {
         let script = Script([[.finished(.maxTokens, nil)], [.text("ok"), .finished(.done, nil)]])
         let events = await run(AgentEngine(), request(script, mode: .ask, runs: Counter()))
@@ -1180,7 +1218,7 @@ struct TurnOrchestrationTests {
 
     @Test func routinesGetMoreStepsThanConversations() {
         #expect(AgentEngine.routineMaxSteps > AgentEngine.defaultMaxSteps)
-        #expect(AgentEngine.defaultMaxSteps == 30 && AgentEngine.routineMaxSteps == 60)
+        #expect(AgentEngine.defaultMaxSteps == 100 && AgentEngine.routineMaxSteps == 150)
     }
 }
 

@@ -112,8 +112,8 @@ struct ToolOutcome: Sendable {
 /// Runs bot turns: the model ↔ tools loop, gated by the bot's permission mode.
 actor AgentEngine {
     /// Model calls per turn for a conversation, and for a routine (nobody is there to say "continua").
-    static let defaultMaxSteps = 30
-    static let routineMaxSteps = 60
+    static let defaultMaxSteps = 100
+    static let routineMaxSteps = 150
 
     /// Waits between retries of a transient provider failure (tests skip the wait).
     private let retrySleep: @Sendable (TimeInterval) async throws -> Void
@@ -335,6 +335,15 @@ actor AgentEngine {
                         continuedForSteering = true
                         continue
                     }
+                    // A turn that already worked and ends on a promise ("vou rodar…") would stop with the work undone: ask
+                    // for it once. Not in the wizard or a review (`onlyTools`: conversations, not tasks). `nudge` holds one
+                    // index, so this and the "continue" after a cut share it: whichever comes first (`continuedAfterCut`).
+                    if !isLastStep, step > 1, nudge == nil, !continuedAfterCut, request.onlyTools == nil, Self.endsOnPromise(said) {
+                        continuedAfterCut = true
+                        nudge = messages.count
+                        messages.append(.user(Self.promiseNudge))
+                        continue
+                    }
                     if isLastStep { out.yield(.notice(Self.pausedNotice(after: maxSteps))) }
                     return
                 }
@@ -448,6 +457,28 @@ actor AgentEngine {
 
     static let interruptedMarker = "\n\n[resposta interrompida]"
     static let continueNudge = "continue"
+    static let promiseNudge = "You ended your reply on something you said you would do, without doing it. Do it now with your tools; "
+        + "if it really needs the user first, say what in one sentence."
+    /// A first-person future the model did not negate ("vou", "I'll"), or a sentence opening on what comes next ("Em seguida
+    /// respondo…"), in the last sentence of a reply. Measured on real conversations: it catches the "Vou adaptar…" endings
+    /// and passes "não vou iniciá-la sem o seu sim", "Let me know…" and a past "e em seguida corrigi".
+    private static let promise = try! NSRegularExpression(
+        pattern: #"(?<!não )(?<!nao )\b(vou|irei|vamos)\b|^(em seguida|a seguir)\b|\b(I['’]ll|I will)\b|\blet me\b(?! know)"#,
+        options: [.caseInsensitive])
+    /// An offer that waits for the user ("Se você aprovar, vou publicar."): doing it now would skip their yes.
+    private static let offer = try! NSRegularExpression(pattern: #"\b(se (você|vc|quiser|preferir|aprovar|concordar)|if you)\b"#,
+                                                        options: [.caseInsensitive])
+
+    static func endsOnPromise(_ text: String) -> Bool {
+        let reply = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !reply.isEmpty, !reply.hasSuffix("?") else { return false }
+        // The last sentence: after the last end of sentence or line break before the closing mark.
+        let body = reply.dropLast(".!".contains(reply.last ?? " ") ? 1 : 0)
+        let start = body.range(of: #"[.!?]\s+|\n"#, options: [.regularExpression, .backwards])?.upperBound ?? body.startIndex
+        let sentence = String(body[start...]).trimmingCharacters(in: .whitespaces)
+        let range = NSRange(sentence.startIndex..., in: sentence)
+        return promise.firstMatch(in: sentence, range: range) != nil && offer.firstMatch(in: sentence, range: range) == nil
+    }
     /// What the turn says when the model's reply was cut off at its limit (the Orb sighs at the end of such a turn).
     static let cutShortNotice = "A resposta passou do limite do modelo e foi cortada. Diga “continua” para seguir."
     static let cutOffResult = "Error: your reply hit the output limit while writing this call, so it was NOT run. Split the work into "

@@ -331,3 +331,42 @@ struct ModelChip: View {
         .popover(isPresented: $isOpen, arrowEdge: .bottom) { ModelPopover(botID: botID) { isOpen = false } }
     }
 }
+
+// MARK: Background processes
+
+/// The processes the Orb left running (`run_command` with background), one line each: what runs, for how long, and a
+/// button to stop it. Once the turn that started them ends nothing else on screen says they are there.
+struct JobsStrip: View {
+    @Environment(AppModel.self) private var model
+    let botID: UUID
+    let jobs: [BackgroundJobs.Snapshot]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(jobs, id: \.id) { job in
+                HStack(spacing: 6) {
+                    Image(systemName: "terminal")
+                        .foregroundStyle(Palette.faint)
+                    Text(job.command)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(Palette.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(job.command)
+                        .accessibilityLabel("Rodando em segundo plano: \(job.command)")
+                    Spacer(minLength: 4)
+                    Text(job.startedAt, style: .timer)
+                        .monospacedDigit()
+                        .foregroundStyle(Palette.faint)
+                    Button("Parar", systemImage: "stop.fill") { model.stopJob(job.id, of: botID) }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(ComposerChipStyle())
+                        .help("Parar este processo e o que ele iniciou")
+                }
+                .accessibilityElement(children: .contain) // the stop button stays reachable
+            }
+        }
+        .font(.system(size: 11))
+        .padding(.horizontal, 4)
+    }
+}

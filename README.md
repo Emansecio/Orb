@@ -255,8 +255,8 @@ Se o motor escolhido não estiver instalado, o Orb fica só com `web_fetch` e `w
 - **Quando algo dá errado**, a mensagem vem com a ação: "Tentar de novo" (reenvia, se nada tinha sido feito; se já tinha
   respondido, pede para continuar), "Continuar", "Abrir Ajustes" (chave inválida, sem modelo) ou, numa conversa grande demais, "Compactar
   e tentar de novo" (resume o começo e reenvia; só aparece quando há o que resumir). Limite de uso (429) e instabilidade do provedor são tentados de novo sozinhos algumas vezes, com a espera à vista.
-- **Tarefas longas.** Um turno tem até 30 passos (60 numa rotina). Ao chegar lá o Orb deixa um registro do que fez e avisa
-  "Pausei depois de 30 passos…": diga **"continua"**.
+- **Tarefas longas.** Um turno tem até 100 passos (150 numa rotina). Ao chegar lá o Orb deixa um registro do que fez e avisa
+  "Pausei depois de 100 passos…": diga **"continua"**.
 - **Skills.** `/resumir`, `/organizar` e `/revisar` vêm prontas; veja [Conectores e skills](#conectores-e-skills).
 
 ## Permissões

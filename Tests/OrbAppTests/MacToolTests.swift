@@ -42,7 +42,7 @@ struct MacToolTests {
             ("shortcuts_list", .safe, .computerUse), ("shortcuts_run", .sensitive, .computerUse),
             ("clipboard_read", .safe, .computerUse), ("clipboard_write", .sensitive, .computerUse),
             ("screenshot", .safe, .computerUse), ("notify", .safe, nil),
-            ("apps_list", .safe, .computerUse), ("processes", .safe, .computerUse),
+            ("apps_list", .safe, .computerUse),
             ("app_quit", .sensitive, .computerUse), ("trash", .sensitive, .terminal),
             ("applescript", .sensitive, .computerUse), ("browser_tab", .safe, .computerUse),
             ("open", .sensitive, nil),
@@ -351,35 +351,6 @@ struct MacToolTests {
     @Test func listsTheAppsRunningNow() async throws {
         let text = try await run(AppsListTool(), [:])
         #expect(text.contains("pid") || text == "Nenhum app aberto.")
-    }
-
-    @Test func parsesPsOutput() {
-        let output = """
-          402  39.7  0.5  80032 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
-        53948  19,0  3.9 660864 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
-        garbage line
-         1  0.0  0.0  1024 launchd
-
-        """
-        let rows = ProcessListParser.parse(output)
-        #expect(rows.count == 3)
-        #expect(rows[0] == ProcessInfoRow(pid: 402, cpu: 39.7, memoryPercent: 0.5, residentKB: 80032,
-                                          command: "/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer"))
-        #expect(rows[0].name == "WindowServer")
-        #expect(rows[1].name == "Google Chrome")
-        #expect(rows[1].cpu == 19.0)
-        #expect(ProcessListParser.megabytes(660_864) == "645 MB")
-        #expect(ProcessListParser.megabytes(2_097_152) == "2.0 GB")
-        let table = ProcessListParser.format(rows, sortedBy: "cpu")
-        #expect(table.hasPrefix("Maiores consumidores de CPU"))
-        #expect(table.contains("402 · 39.7% · 78 MB (0.5%) · WindowServer"))
-    }
-
-    @Test func processesToolReturnsTheBusiestOnes() async throws {
-        let text = try await run(ProcessesTool(), ["limit": .number(5)])
-        #expect(text.split(separator: "\n").count == 6)
-        let byMemory = try await run(ProcessesTool(), ["sort": .string("memory"), "limit": .number(3)])
-        #expect(byMemory.contains("memória"))
     }
 
     // MARK: app_quit

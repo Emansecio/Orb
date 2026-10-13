@@ -100,6 +100,8 @@ final class BotLive {
     /// depends on its own Orb only.
     private(set) var lastUsage: TokenUsage?
     private(set) var compactedTo: Int?
+    /// The processes the Orb left running (`run_command` with background), shown above the message box until they end.
+    private(set) var jobs: [BackgroundJobs.Snapshot] = []
 
     // MARK: What the activity follows
 
@@ -201,6 +203,8 @@ final class BotLive {
     func setLastUsage(_ usage: TokenUsage?) { assign(\.lastUsage, to: usage) }
 
     func setCompactedTo(_ tokens: Int?) { assign(\.compactedTo, to: tokens) }
+
+    func setJobs(_ list: [BackgroundJobs.Snapshot]) { assign(\.jobs, to: list) }
 
     func setUnread(_ count: Int) { assign(\.unread, to: count) }
 

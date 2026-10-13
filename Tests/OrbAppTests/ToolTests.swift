@@ -152,13 +152,13 @@ final class ToolTests {
     // MARK: Catalog
 
     /// Anything that can change the Mac or send data out (web, open, saving to memory) must go through the
-    /// approval gate. Searching the Orb's own memory, looking at the Mac (apps, processes, clipboard, screen, the
+    /// approval gate. Searching the Orb's own memory, looking at the Mac (apps, clipboard, screen, the
     /// browser's front tab, Shortcuts names, another app's interface through ui_read) and showing a notification only read or notify.
     @Test func onlyLocalReadsRunWithoutAsking() {
         let safe = ToolBox.all.filter { $0.risk(.object(["target": .string("https://example.com")])) == .safe }
         #expect(Set(safe.map(\.spec.name)) == [
-            "read_file", "list_directory", "search_files", "grep", "glob", "recall", "job_output", "job_list", "job_stop",
-            "shortcuts_list", "clipboard_read", "screenshot", "notify", "apps_list", "processes", "browser_tab", "ui_read",
+            "read_file", "list_directory", "search_files", "grep", "glob", "recall", "job_output", "job_stop",
+            "shortcuts_list", "clipboard_read", "screenshot", "notify", "apps_list", "browser_tab", "ui_read",
             // The Orb's own browser: they look at the page it already has open (which asked first), and "Só leitura" refuses them
             // all the same (`PermissionCall.readsLivePage`).
             "browse_snapshot", "browse_read", "browse_screenshot", "browse_scroll", "browse_back", "browse_tabs", "browse_close",

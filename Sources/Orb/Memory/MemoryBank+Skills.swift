@@ -16,8 +16,13 @@ extension MemoryBank {
     func proposeSkill(_ text: String) -> SkillProposalOutcome {
         guard !isClosed else { return .refused("The memory is not available now.") }
         let skills = skillDigests()
+        // The proposals still waiting count as skills too: otherwise a second one for the same task passes while the first
+        // waits, and the user ends up saving both.
+        let waiting = proposals().filter { pending in !skills.contains { $0.slug == pending.slug } }.map {
+            SkillDigest(slug: $0.slug, name: $0.slug, summary: $0.summary, instructions: $0.instructions, improvable: true)
+        }
         let proposal: SkillProposal
-        switch SkillProposal.validate(text, among: skills) {
+        switch SkillProposal.validate(text, among: skills + waiting) {
         case .failure(let refusal): return .refused(refusal.message)
         case .success(let valid): proposal = valid
         }

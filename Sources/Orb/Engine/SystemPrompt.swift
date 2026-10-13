@@ -15,12 +15,20 @@ enum PromptParts {
 
     static let language = "Reply in the user's language (Brazilian Portuguese unless they write otherwise). Be brief and concrete."
     static let useTools = "Use tools to find out and to act instead of asking the user to do it; read before you change things."
-    static let announce = "Before a tool that changes something, say in one short sentence what you are about to do and why."
-    static let behaviour = [useTools + " " + announce]
+    static let announce = "Before a tool that changes something, say in one short sentence what you are about to do and why, and make that call in the same reply."
+    /// Small models announce a step and end the turn there; the user then has to say "continua".
+    static let persist = "Keep working until the task is done or you need the user's answer. Never end your turn on a promise (\"vou fazer X\"): do X now. If something blocks you, say what and ask."
+    static let behaviour = [useTools + " " + announce, persist]
 
     static func roaming(_ bot: Bot) -> String {
-        "Your folder \(bot.workingURL.path) is your home base, not a boundary: read and act anywhere on the Mac when the task needs it, "
+        let base = "Your folder \(bot.workingURL.path) is your home base, not a boundary: read and act anywhere on the Mac when the task needs it, "
             + "and say where you are working."
+        // Scripts written to /tmp are gone by the next conversation; in the Orb's own folder (`~/Orbs/<Name>`, not a folder of
+        // the user's such as a repository) the workspace snapshot shows them.
+        guard bot.workingURL.standardizedFileURL.path.hasPrefix(OrbFolder.defaultBase.standardizedFileURL.path + "/"),
+              bot.capabilities.contains(.terminal) else { return base }
+        return base + " Save the scripts and files you make for the work there (scripts/ for code you may run again), never in /tmp: "
+            + "they must last and be found again."
     }
 
     /// Who the user is and what their Mac is like. No date and
@@ -124,7 +132,7 @@ enum PromptParts {
     static let workHabits = """
     ## Working on longer tasks
     Say the plan in a line or two, run independent reads and searches together, check the result after changing things (run the \
-    build or tests, reread the file), and finish with what changed and what is left.
+    build or tests, reread the file), and finish with what changed; mention what is left only if you could not do it, and why.
     """
 
     /// How to work with other apps without taking over the person's Mac. Only for an Orb that may control apps: in the
@@ -203,11 +211,9 @@ enum BrowserPrompt {
             let engine = bot.browserEngine
             var lines = [
                 "## Your browser",
-                "You have your own browser (browse_*): a real \(engine.label) engine that runs JavaScript"
+                "You have your own browser (browse_open and the other browse_* tools): a real \(engine.label) engine that runs JavaScript"
                     + (engine.keepsProfile ? " and keeps the user's logins between runs" : " (headless, with no saved logins)")
                     + ". web_search and web_fetch are lighter for public pages; use the browser for JavaScript pages, logins and forms.",
-                "Work in this order: browse_open, browse_snapshot, then browse_click / browse_fill / browse_select with the refs it lists; "
-                    + "snapshot again after the page changes. browse_read gives the text. Close with browse_close when the web work is done.",
                 "A login, a 2FA code, a captcha, a consent wall or anything else only the person can do is theirs: never type a password "
                     + "or card number, never try to solve a captcha or get around a block.",
             ]

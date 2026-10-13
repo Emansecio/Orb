@@ -967,7 +967,7 @@ private struct NoticeLine: View {
     private func perform(_ action: NoticeAction) {
         switch action {
         case .retry: model.retryLastTurn(botID)
-        case .continueTurn: model.continueTurn(botID)
+        case .continueTurn: model.continueTurn(botID, after: text)
         case .openSettings: SettingsRouter.open(.models, using: openSettings)
         case .compact: model.compactAndRetry(botID)
         case .openMemory: model.showMemory(of: botID)

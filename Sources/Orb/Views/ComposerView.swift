@@ -126,7 +126,11 @@ struct ComposerView: View {
 
     private func card(_ lane: ComposerLane) -> some View {
         let matches = slashMatches
+        let jobs = model.live(botID).jobs
         return VStack(alignment: .leading, spacing: 10) {
+            if !jobs.isEmpty {
+                JobsStrip(botID: botID, jobs: jobs).transition(.adapted(.unfold, reduceMotion: reduceMotion))
+            }
             if lane.editing != nil {
                 editingBanner.transition(.adapted(.unfold, reduceMotion: reduceMotion))
             }
@@ -177,7 +181,7 @@ struct ComposerView: View {
         // count or by a key): one discrete value, so the field's own height keeps following the typing (§2.5).
         .animation(reduceMotion ? Motion.fade : Motion.content,
                    value: CardParts(suggestions: !matches.isEmpty, strip: lane.hasAttachments || lane.pendingPictures > 0,
-                                    error: lane.error != nil, banner: lane.editing != nil))
+                                    error: lane.error != nil, banner: lane.editing != nil, jobs: jobs.count))
         // The shadow belongs to the background alone: on the whole card every key in the field re-rendered the text,
         // chips and buttons into an offscreen pass to cast it.
         // Reads the dictation's phase, never its level: the card does not re-render with the voice.
@@ -522,6 +526,8 @@ private struct CardParts: Equatable {
     var strip: Bool
     var error: Bool
     var banner: Bool
+    /// Lines of running processes: each one that comes or goes changes the card's height once (they are rare).
+    var jobs: Int
 }
 
 /// A picture waiting to be sent: its thumbnail with a remove button.

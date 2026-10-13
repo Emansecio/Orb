@@ -60,6 +60,10 @@ actor BackgroundJobs {
     /// A log past this size is emptied, so a chatty server cannot fill the disk.
     static let maxLogBytes = 50_000_000
 
+    /// The Orb whose jobs just changed (one started, ended or was stopped), so the app can show what still runs.
+    nonisolated let changes: AsyncStream<UUID>
+    private nonisolated let changed: AsyncStream<UUID>.Continuation
+
     private let directory: URL
     private var jobs: [UUID: [String: Job]] = [:]
     private var lastID: [UUID: Int] = [:]
@@ -80,11 +84,14 @@ actor BackgroundJobs {
     /// watch interval, `stop` meets the group watcher between its kill and its final check every time.
     init(directory: URL = FileManager.default.temporaryDirectory.appending(path: "orb-jobs"),
          firstOutputWindow: Duration = .seconds(1), endsAtFirstOutput: Bool = false, watchInterval: Duration = .seconds(1)) {
+        (changes, changed) = AsyncStream.makeStream(of: UUID.self, bufferingPolicy: .bufferingNewest(100))
         self.directory = directory
         self.firstOutputWindow = firstOutputWindow
         self.endsAtFirstOutput = endsAtFirstOutput
         self.watchInterval = watchInterval
     }
+
+    deinit { changed.finish() }
 
     // MARK: Starting
 
@@ -134,6 +141,7 @@ actor BackgroundJobs {
         var job = Job(snapshot: snapshot, pid: pid)
         job.logWatch = Task { [weak self] in await self?.watchGroup(botID: botID, id: id, pid: pid, log: log) }
         jobs[botID, default: [:]][id] = job
+        changed.yield(botID)
 
         let deadline = ContinuousClock.now + firstOutputWindow
         while jobs[botID]?[id]?.snapshot.isRunning == true, !Task.isCancelled, ContinuousClock.now < deadline,
@@ -168,6 +176,7 @@ actor BackgroundJobs {
         await terminate(botID, Array((jobs[botID] ?? [:]).keys))
         jobs[botID] = nil
         lastID[botID] = nil
+        changed.yield(botID)
         try? FileManager.default.removeItem(at: directory.appending(path: botID.uuidString))
     }
 
@@ -212,6 +221,7 @@ actor BackgroundJobs {
                 jobs[botID]?[target.id] = job
             }
         }
+        if !targets.isEmpty { changed.yield(botID) }
     }
 
     // MARK: Bookkeeping
@@ -220,7 +230,7 @@ actor BackgroundJobs {
         guard let job = jobs[botID]?[id] else {
             let known = (jobs[botID] ?? [:]).keys.sorted { (Int($0) ?? 0) < (Int($1) ?? 0) }
             throw ToolError("Não existe o processo em segundo plano \"\(id)\"."
-                + (known.isEmpty ? " Este Orb não tem nenhum." : " Os deste Orb: \(known.joined(separator: ", ")). job_list mostra todos."))
+                + (known.isEmpty ? " Este Orb não tem nenhum." : " Os deste Orb: \(known.joined(separator: ", ")). job_output sem id mostra todos."))
         }
         return job
     }
@@ -235,6 +245,7 @@ actor BackgroundJobs {
         jobs[botID]?[id] = job
         // Once the group is empty its id may be reused by someone else, so it must never be signalled again.
         forgetGroupIfGone(job.pid)
+        changed.yield(botID)
     }
 
     private func groupExists(_ pid: pid_t) -> Bool { kill(-pid, 0) == 0 }
@@ -269,6 +280,9 @@ actor BackgroundJobs {
         forgetGroupIfGone(pid)
         if jobs[botID]?[id]?.snapshot.leftoverRunning == true, !groupExists(pid) {
             jobs[botID]?[id]?.snapshot.leftoverRunning = false
+            // Emptied by a stop still in progress: it is a stop, not an end the chat should report.
+            if jobs[botID]?[id]?.stopRequested == true { jobs[botID]?[id]?.snapshot.state = .stopped }
+            changed.yield(botID)
         }
     }
 

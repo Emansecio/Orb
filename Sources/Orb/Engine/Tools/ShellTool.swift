@@ -14,8 +14,8 @@ struct RunCommandTool: AgentTool {
         Each call is a fresh shell: cd, export and aliases do NOT persist; use cwd or chain steps (cd x && make).
         Killed after timeout_seconds (default 120, max 600). Output over ~20 KB keeps its start and end; the \
         full text is saved to the file named at the end (read_file or grep it, do not rerun).
-        For servers and watchers pass background: true: you get a job id and the first output; then job_output, \
-        job_list, job_stop. A plain `cmd &` is untracked.
+        For servers and watchers pass background: true: you get a job id and the first output; then job_output \
+        (without id: all jobs) and job_stop. A plain `cmd &` is untracked.
         """,
         parameters: .schema([
             "command": .property("string"),
@@ -130,7 +130,7 @@ private extension JSONValue {
     func jobID() throws -> String {
         if let text = nonEmptyString("id") { return text }
         if let number = self["id"]?.int { return String(number) }
-        throw ToolError("Faltou o argumento \"id\". job_list mostra os processos em segundo plano.")
+        throw ToolError("Faltou o argumento \"id\". job_output sem id mostra os processos em segundo plano.")
     }
 }
 
@@ -144,11 +144,12 @@ private extension ToolContext {
 struct JobOutputTool: AgentTool {
     let spec = ToolSpec(
         name: "job_output",
-        description: "Latest output of a background process (run_command with background: true) and whether it still runs.",
+        description: "Latest output of a background process (run_command with background: true) and whether it still runs; "
+            + "without id, the list of all of them.",
         parameters: .schema([
             "id": .property("string"),
             "lines": .property("integer", "Last lines to show (default 50, max 500)."),
-        ], required: ["id"]))
+        ]))
 
     var kind: ToolCall.Kind { .shell }
     var capability: Capability? { .terminal }
@@ -156,37 +157,21 @@ struct JobOutputTool: AgentTool {
     func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
 
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) {
-        ("Lendo a saída do processo", (try? arguments.jobID()) ?? "")
+        guard let id = try? arguments.jobID() else { return ("Listando processos em segundo plano", "") }
+        return ("Lendo a saída do processo", id)
     }
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
         let (jobs, botID) = try context.backgroundJobs()
+        guard (try? arguments.jobID()) != nil else {
+            let all = await jobs.list(botID: botID)
+            guard !all.isEmpty else { return "Nenhum processo em segundo plano." }
+            return all.map { "\($0.id)  \($0.statusText)  \($0.command)  (em \($0.directory))" }.joined(separator: "\n")
+        }
         let lines = arguments.integer("lines", default: 50, in: 1...500)
         let result = try await jobs.output(botID: botID, id: try arguments.jobID(), lines: lines)
         return "Processo \(result.job.id) (\(result.job.statusText)): \(result.job.command)\n"
             + (result.text.isEmpty ? "(sem saída)" : result.text)
-    }
-}
-
-struct JobListTool: AgentTool {
-    let spec = ToolSpec(
-        name: "job_list",
-        description: "List the background processes, running or finished.",
-        parameters: .schema([:]))
-
-    var kind: ToolCall.Kind { .shell }
-    var capability: Capability? { .terminal }
-    func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
-
-    func summary(_ arguments: JSONValue) -> (title: String, detail: String) {
-        ("Listando processos em segundo plano", "")
-    }
-
-    func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
-        let (jobs, botID) = try context.backgroundJobs()
-        let all = await jobs.list(botID: botID)
-        guard !all.isEmpty else { return "Nenhum processo em segundo plano." }
-        return all.map { "\($0.id)  \($0.statusText)  \($0.command)  (em \($0.directory))" }.joined(separator: "\n")
     }
 }
 
@@ -215,5 +200,5 @@ struct JobStopTool: AgentTool {
 }
 
 extension ToolBox {
-    static let shellTools: [any AgentTool] = [RunCommandTool(), JobOutputTool(), JobListTool(), JobStopTool()]
+    static let shellTools: [any AgentTool] = [RunCommandTool(), JobOutputTool(), JobStopTool()]
 }

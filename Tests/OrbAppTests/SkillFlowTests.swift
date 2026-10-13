@@ -129,10 +129,14 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
         let script = CallScript(steps(10) + [said("pronto"), said("Nothing to save.")])
         let (model, botID) = setUp(script)
         let bank = model.memory.bank(for: botID)
+        // Five different tasks waiting (copies of one would be sent back to improve the first).
+        let folder = bank.directory.appending(path: MemoryBank.proposalsFolder)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         for index in 0..<MemoryBank.maximumProposals {
-            let skill = SkillSamples.good.replacingOccurrences(of: "publicar-site", with: "publicar-site-\(index)")
-            guard case .proposed = await bank.proposeSkill(skill) else { Issue.record("proposal \(index) refused"); return }
+            let other = SkillProposal(slug: "tarefa-\(index)", summary: "Cuida da tarefa \(index)", instructions: "Rode `tarefa-\(index).sh`.")
+            try Data(other.markdown().utf8).write(to: folder.appending(path: other.slug + ".md"))
         }
+        #expect(await bank.proposals().count == MemoryBank.maximumProposals)
         #expect(model.send("publica o site", to: botID))
         await waitUntilIdle(model, botID)
         await waitUntil("the review to give up") { model.session(botID).skillReview == nil }
@@ -400,6 +404,8 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
         await propose(unrelated, in: model, botID)
         let draft = try #require(await model.skillDraft("publicar-site-3", from: botID))
         #expect(!draft.isUpdate && draft.skill.slug == "publicar-site-3")
+        // Out of the way: a proposal still waiting for the same task would send the next one back.
+        await model.memory.bank(for: botID).discardProposal("publicar-site-3")
         // The proposal's own command is taken: the skill is saved with the next free one.
         await propose(SkillSamples.good, in: model, botID)
         let renamed = try #require(await model.skillDraft("publicar-site", from: botID))

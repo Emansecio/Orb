@@ -80,13 +80,13 @@ Cada ferramenta declara três coisas (`AgentTool`):
 | `connector` | ferramentas de conectores (`Servidor__ferramenta`) |
 | `memory` | `remember`, `recall` |
 | `schedule` | `schedule` (criar, pausar, retomar, apagar) |
-| `jobs` | `job_output`, `job_list`, `job_stop` |
+| `jobs` | `job_output` (sem `id`, lista todos), `job_stop` |
 
 Detalhes que costumam surpreender:
 
 - **O que é `.safe`** (roda sem perguntar, até em "Só leitura"): `read_file`, `list_directory`, `search_files`, `grep`,
-  `glob`, `recall`, `job_output`, `job_list`, `job_stop`, `shortcuts_list`, `clipboard_read`, `screenshot`, `apps_list`,
-  `processes`, `browser_tab`, `notify`, `ui_read`. Parar um processo é seguro pelo mesmo motivo de ler a saída dele: só alcança
+  `glob`, `recall`, `job_output`, `job_stop`, `shortcuts_list`, `clipboard_read`, `screenshot`, `apps_list`,
+  `browser_tab`, `notify`, `ui_read`. Parar um processo é seguro pelo mesmo motivo de ler a saída dele: só alcança
   processos em segundo plano que o próprio Orb iniciou (e que já passaram pela aprovação do comando que os começou).
 - **Dois casos em que o `.safe` da ferramenta não vale.** (1) **Segredos**: `read_file` e `grep` de uma chave ou credencial (`~/.ssh` menos `.pub`/`known_hosts`/`config`, `~/.aws` menos `config`, `~/.gnupg`,
   `~/.kube`, `~/.config/gcloud`, `~/Library/Keychains`, `~/.netrc`, `~/.npmrc`, `~/.config/gh/hosts.yml`,

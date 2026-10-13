@@ -139,5 +139,5 @@ enum TranscriptSample {
 }
 
 private enum AgentEngineNotice {
-    static let paused = AgentEngine.pausedNotice(after: 30)
+    static let paused = AgentEngine.pausedNotice(after: 100)
 }
