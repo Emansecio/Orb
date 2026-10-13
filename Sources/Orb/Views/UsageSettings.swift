@@ -7,7 +7,7 @@ import Charts
 
 /// The words and numbers of the page.
 enum UsageFormat {
-    private static let locale = Locale(identifier: "pt_BR")
+    private static let locale = Locale.app
 
     /// "US$ 12,40"; below a cent "< US$ 0,01".
     static func dollars(_ value: Double) -> String {
@@ -190,6 +190,7 @@ struct UsageSettings: View {
             }
             .chartForegroundStyleScale(domain: series.map(\.id), range: colors)
             .chartLegend(.hidden)
+            .environment(\.locale, .app)
             .chartXScale(domain: report.interval.start...end)
             .chartXAxis {
                 AxisMarks(values: unit == .hour ? .stride(by: .hour, count: 3) : .automatic(desiredCount: 6)) { _ in

@@ -23,7 +23,7 @@ enum PermissionMode: String, CaseIterable, Identifiable, Codable, Sendable {
     var shortSummary: String {
         switch self {
         case .ask: "Pede sua aprovação antes de mudar arquivos, rodar comandos ou usar a web."
-        case .auto: "Trabalha sozinho e só pergunta em ações destrutivas (apagar, sudo, push --force)."
+        case .auto: "Trabalha sozinho e só pergunta antes do que reconhece como destrutivo (apagar, sudo, push --force). Não protege contra instruções escondidas em páginas, e-mails ou arquivos que o Orb lê."
         case .readOnly: "Só lê e pesquisa. Não muda nada no seu Mac."
         case .bypass: "Nunca pergunta, nem em ações destrutivas."
         }
@@ -630,7 +630,7 @@ enum Schedule: Codable, Hashable, Sendable {
         case .daily(let hour, let minute):
             "Todo dia às \(Self.time(hour, minute))"
         case .weekly(let weekday, let hour, let minute):
-            "\([1, 7].contains(weekday) ? "Todo" : "Toda") \(Calendar.current.weekdaySymbols[((weekday - 1) % 7 + 7) % 7]) às \(Self.time(hour, minute))"
+            "\([1, 7].contains(weekday) ? "Todo" : "Toda") \(Calendar.app.weekdaySymbols[((weekday - 1) % 7 + 7) % 7]) às \(Self.time(hour, minute))"
         case .everyHours(let hours):
             hours == 1 ? "A cada hora" : "A cada \(hours) horas"
         case .everyMinutes(let minutes):

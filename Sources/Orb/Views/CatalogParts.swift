@@ -354,8 +354,8 @@ extension Int {
     var installsLabel: String {
         let value = Double(self)
         let number: String = switch self {
-        case 1_000_000...: (value / 1_000_000).formatted(.number.precision(.fractionLength(0...1))) + " mi"
-        case 1_000...: (value / 1_000).formatted(.number.precision(.fractionLength(0))) + " mil"
+        case 1_000_000...: (value / 1_000_000).formatted(.number.precision(.fractionLength(0...1)).locale(.app)) + " mi"
+        case 1_000...: (value / 1_000).formatted(.number.precision(.fractionLength(0)).locale(.app)) + " mil"
         default: "\(self)"
         }
         return number + (self == 1 ? " instalação" : " instalações")

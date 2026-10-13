@@ -18,7 +18,7 @@ enum ImageAttachmentError: LocalizedError, Equatable {
         switch self {
         case .tooLarge(let name, let bytes):
             let megabytes = (Double(bytes) / 1_048_576 * 10).rounded() / 10
-            return "A imagem “\(name)” tem \(megabytes.formatted(.number.precision(.fractionLength(0...1)))) MB; o limite é "
+            return "A imagem “\(name)” tem \(megabytes.formatted(.number.precision(.fractionLength(0...1)).locale(.app))) MB; o limite é "
                 + "\(ImageProcessing.maxOriginalBytes / 1_048_576) MB. Reduza a imagem e tente de novo."
         case .unreadable(let name):
             return "Não consegui abrir “\(name)” como imagem. Os formatos aceitos são PNG, JPEG, HEIC, GIF, WebP e TIFF."

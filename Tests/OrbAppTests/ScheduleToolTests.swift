@@ -43,6 +43,43 @@ struct OnceAndCronScheduleTests {
                 == date("2026-10-15T09:00:00Z"))
     }
 
+    @Test func aCronLineOnASpringForwardDayRunsInOrderAndOnlyOnce() throws {
+        var ny = Calendar(identifier: .gregorian)
+        ny.timeZone = TimeZone(identifier: "America/New_York")!
+        // 2026-03-08: 02:00-03:00 does not exist in New York. 00:30 and 01:30 are standard time, from 03:00 on daylight time.
+        let cron = try CronExpression("0,30 2,3 * * *")
+        var runs: [Date] = []
+        var cursor = date("2026-03-08T04:00:00Z") // 23:00 on the 7th
+        for _ in 0..<5 {
+            guard let next = cron.next(after: cursor, calendar: ny) else { break }
+            runs.append(next)
+            cursor = next
+        }
+        #expect(runs.count == 5)
+        #expect(runs == runs.sorted() && Set(runs).count == runs.count) // in order, nothing twice
+        // Whatever the skipped times become, nothing may be lost or run after a later real time: the last real ones are 03:00 and 03:30.
+        #expect(runs.contains(date("2026-03-08T07:00:00Z")) && runs.contains(date("2026-03-08T07:30:00Z")))
+        // The earliest candidate after a reference is returned, not the first one the loop meets.
+        for reference in [date("2026-03-08T06:30:00Z"), date("2026-03-08T07:00:00Z")] {
+            let next = try #require(cron.next(after: reference, calendar: ny))
+            let candidates = [(2, 0), (2, 30), (3, 0), (3, 30)].compactMap { hour, minute -> Date? in
+                var parts = DateComponents(year: 2026, month: 3, day: 8, hour: hour, minute: minute)
+                parts.calendar = ny
+                return ny.date(from: parts)
+            }.filter { $0 > reference }
+            #expect(next == candidates.min())
+        }
+    }
+
+    @Test func theWeeklyDescriptionIsPortugueseWhateverTheMacLanguage() {
+        #expect(Calendar.app.locale?.identifier == "pt_BR")
+        #expect(Calendar.app.weekdaySymbols.first == "domingo")
+        #expect(Schedule.weekly(weekday: 1, hour: 9, minute: 0).label == "Todo domingo às 09:00")
+        #expect(Schedule.weekly(weekday: 2, hour: 18, minute: 30).label == "Toda segunda-feira às 18:30")
+        #expect(Locale.app.identifier == "pt_BR")
+        #expect(1234.5.formatted(.number.precision(.fractionLength(1)).locale(.app)) == "1.234,5")
+    }
+
     @Test func aCronLineReadsListsRangesStepsAndNames() throws {
         let cron = try CronExpression("*/20 9-17/4 * jan,JUL mon-fri")
         #expect(cron.minutes == [0, 20, 40] && cron.hours == [9, 13, 17])

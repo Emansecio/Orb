@@ -33,11 +33,7 @@ final class StdioServerRegistry: Sendable {
 
     /// Ends every server now, synchronously (the app is quitting): SIGTERM, a moment to leave, then SIGKILL.
     func killAllNow(wait: TimeInterval = 0.3) {
-        let groups = live.withLock { Array($0) }.filter { kill(-$0, 0) == 0 }
-        groups.forEach { kill(-$0, SIGTERM) }
-        let deadline = Date.now.addingTimeInterval(wait)
-        while Date.now < deadline, groups.contains(where: { kill(-$0, 0) == 0 }) { usleep(20_000) }
-        groups.filter { kill(-$0, 0) == 0 }.forEach { kill(-$0, SIGKILL) }
+        ProcessGroups.terminate(live.withLock { Array($0) }, grace: .seconds(wait))
         live.withLock { $0.removeAll() }
     }
 }

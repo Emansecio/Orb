@@ -209,11 +209,7 @@ actor BackgroundJobs {
     /// Kills every job's process group right away and deletes the logs; for `willTerminate`, which cannot wait
     /// for the actor. Blocks for at most half a second.
     nonisolated func killAllNow() {
-        let groups = liveGroups.withLock { Array($0) }.filter { kill(-$0, 0) == 0 }
-        groups.forEach { kill(-$0, SIGTERM) }
-        let deadline = Date.now.addingTimeInterval(0.5)
-        while Date.now < deadline, groups.contains(where: { kill(-$0, 0) == 0 }) { usleep(20_000) }
-        groups.filter { kill(-$0, 0) == 0 }.forEach { kill(-$0, SIGKILL) }
+        ProcessGroups.terminate(liveGroups.withLock { Array($0) }, grace: .milliseconds(500))
         try? FileManager.default.removeItem(at: directory)
     }
 

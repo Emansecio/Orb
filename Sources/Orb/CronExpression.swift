@@ -41,6 +41,9 @@ struct CronExpression: Hashable, Sendable {
             guard let day = calendar.date(byAdding: .day, value: offset, to: start) else { return nil }
             let parts = calendar.dateComponents([.year, .month, .day, .weekday], from: day)
             guard let month = parts.month, months.contains(month), matches(day: parts.day, weekday: parts.weekday) else { continue }
+            // Daylight saving can move a skipped time forward past a later one, so the loop order is not the time order:
+            // take the earliest real instant of the day (two times landing on the same instant count once).
+            var earliest: Date?
             for hour in hours {
                 for minute in minutes {
                     var time = parts
@@ -48,9 +51,11 @@ struct CronExpression: Hashable, Sendable {
                     time.hour = hour
                     time.minute = minute
                     // A time skipped by daylight saving comes out moved forward, which is still a run that day.
-                    if let candidate = calendar.date(from: time), candidate > date { return candidate }
+                    guard let candidate = calendar.date(from: time), candidate > date else { continue }
+                    if earliest.map({ candidate < $0 }) ?? true { earliest = candidate }
                 }
             }
+            if let earliest { return earliest }
         }
         return nil
     }

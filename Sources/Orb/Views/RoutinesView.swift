@@ -788,7 +788,7 @@ struct RoutineEditor: View {
                 // taking their new height at once looks calmer than a table sliding them.
                 if kind == .weekly {
                     Picker("Dia", selection: $weekday) {
-                        ForEach(1...7, id: \.self) { Text(Calendar.current.weekdaySymbols[$0 - 1].capitalized).tag($0) }
+                        ForEach(1...7, id: \.self) { Text(Calendar.app.weekdaySymbols[$0 - 1].capitalized).tag($0) }
                     }
                     .transition(.quiet)
                 }

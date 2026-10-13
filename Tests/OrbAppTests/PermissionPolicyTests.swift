@@ -742,5 +742,8 @@ struct PermissionModeTextTests {
         #expect(PermissionMode.auto.summary.contains("Ler senhas e chaves"))
         // The short line under the picker stays short.
         #expect(!PermissionMode.auto.shortSummary.contains("senhas"))
+        // It says plainly that it only recognizes the destructive and does not guard against what the Orb reads.
+        #expect(PermissionMode.auto.shortSummary.contains("reconhece como destrutivo"))
+        #expect(PermissionMode.auto.shortSummary.contains("instruções escondidas"))
     }
 }

@@ -110,10 +110,6 @@ enum ChildProcessGroups {
     /// it to those groups (for tests, which share the registry with each other). Blocks for at most half a second.
     static func killAllNow(including extra: [pid_t] = [], only: Set<pid_t>? = nil) {
         let registered = live.withLock { only.map($0.intersection) ?? $0 }
-        let groups = (Array(registered) + (only == nil ? extra : [])).filter { kill(-$0, 0) == 0 }
-        groups.forEach { kill(-$0, SIGTERM) }
-        let deadline = Date.now.addingTimeInterval(0.5)
-        while Date.now < deadline, groups.contains(where: { kill(-$0, 0) == 0 }) { usleep(20_000) }
-        groups.filter { kill(-$0, 0) == 0 }.forEach { kill(-$0, SIGKILL) }
+        ProcessGroups.terminate(Array(registered) + (only == nil ? extra : []), grace: .milliseconds(500))
     }
 }

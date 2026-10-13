@@ -545,7 +545,7 @@ struct ConnectorToolsSheet: View {
 
     private var subtitle: String {
         guard let catalog else { return "Lista guardada da última vez que o conector ligou." }
-        return "\(ConnectorStatusText.toolCount(catalog.tools.count)) · atualizada \(catalog.updatedAt.formatted(.relative(presentation: .named)))"
+        return "\(ConnectorStatusText.toolCount(catalog.tools.count)) · atualizada \(catalog.updatedAt.formatted(.relative(presentation: .named).locale(.app)))"
     }
 
     /// What the sheet shows: loading, the tools, or why there are none.

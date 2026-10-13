@@ -586,7 +586,7 @@ struct SkillEditor: View {
                             .transition(.quiet)
                     }
                     Spacer(minLength: 8)
-                    Text("\(skill.instructions.count.formatted()) caracteres").monospacedDigit()
+                    Text("\(skill.instructions.count.formatted(.number.locale(.app))) caracteres").monospacedDigit()
                 }
             } }
             Section {

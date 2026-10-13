@@ -156,7 +156,8 @@ enum ProcessRunner {
     /// SIGTERM to the whole process group, then SIGKILL to whatever is left 2 seconds later.
     private static func terminateGroup(_ pid: pid_t) {
         kill(-pid, SIGTERM)
-        DispatchQueue.global().asyncAfter(deadline: .now() + 2) { kill(-pid, SIGKILL) }
+        // Only if the group is still there: once it is gone its id may belong to someone else.
+        DispatchQueue.global().asyncAfter(deadline: .now() + 2) { if ProcessGroups.exists(pid) { kill(-pid, SIGKILL) } }
     }
 
     /// Where the output read goes: the capture for the result, or the log once the command was detached.

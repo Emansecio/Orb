@@ -968,7 +968,7 @@ enum RelativeTime {
     /// One formatter for every row: making one costs more than formatting with it.
     nonisolated(unsafe) private static let formatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
-        formatter.locale = Locale(identifier: "pt_BR")
+        formatter.locale = .app
         formatter.unitsStyle = .short
         return formatter
     }()
