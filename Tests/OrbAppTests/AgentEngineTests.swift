@@ -120,6 +120,33 @@ private struct BrokenTool: AgentTool {
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String { throw ToolError("não deu") }
 }
 
+/// Runs, but reports a failure the way `run_command` does for a non-zero exit: a result, not a thrown error.
+private struct SadTool: AgentTool {
+    var spec: ToolSpec { ToolSpec(name: "sad", description: "Ends badly", parameters: .schema([:])) }
+    var kind: ToolCall.Kind { .file }
+    var capability: Capability? { nil }
+    func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
+    func summary(_ arguments: JSONValue) -> (title: String, detail: String) { ("Falhando", "") }
+    func run(_ arguments: JSONValue, context: ToolContext) async throws -> String { "" }
+    func runWithImages(_ arguments: JSONValue, context: ToolContext) async throws -> ToolResult {
+        ToolResult(text: "Código de saída: 2", failed: true)
+    }
+}
+
+/// Plays `run_command` for a build or test: passes or fails as its arguments say.
+private struct CheckTool: AgentTool {
+    var spec: ToolSpec { ToolSpec(name: "run_command", description: "Runs", parameters: .schema([:])) }
+    var kind: ToolCall.Kind { .shell }
+    var capability: Capability? { nil }
+    func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
+    func summary(_ arguments: JSONValue) -> (title: String, detail: String) { ("Rodando", "") }
+    func run(_ arguments: JSONValue, context: ToolContext) async throws -> String { "" }
+    func runWithImages(_ arguments: JSONValue, context: ToolContext) async throws -> ToolResult {
+        let passes = arguments["ok"]?.bool == true
+        return ToolResult(text: "Código de saída: \(passes ? 0 : 1)\n", failed: !passes)
+    }
+}
+
 struct AgentEngineTests {
     /// What "Sempre permitir" on the `touch` test tool (a file tool) used to be, now a rule for its family.
     private let touchRule = PermissionRule(family: .writeFiles)
@@ -468,15 +495,69 @@ extension AgentEngineTests {
         #expect(failures(events).isEmpty)
     }
 
-    @Test func aTurnThatWorkedAndEndsOnAPromiseIsAskedOnceToKeepIt() async {
+    @Test func aTurnThatWorkedAndEndsOnAPromiseIsAskedToKeepIt() async {
         let runs = Counter()
-        let script = Script([[touchCall], [.text("Li o arquivo. Vou adaptar o script agora.")], [touchCall], [.text("Pronto.")],
-                             [.text("Vou conferir de novo.")]])
+        let script = Script([[touchCall], [.text("Li o arquivo. Vou adaptar o script agora.")], [touchCall], [.text("Vou conferir de novo.")],
+                             [touchCall], [.text("Vou rodar mais uma vez.")], [.text("nunca pedido")]])
         let events = await run(AgentEngine(), request(script, mode: .bypass, runs: runs))
         #expect(await script.received[2].last == .user(AgentEngine.promiseNudge))
-        #expect(await runs.value == 2, "the promised step ran")
-        #expect(await script.received.count == 4, "once per turn: after the second answer the turn ends")
+        #expect(await script.received[4].last == .user(AgentEngine.promiseNudge), "it worked since the first reminder")
+        #expect(await runs.value == 3, "each promised step ran")
+        #expect(await script.received.count == 6, "\(AgentEngine.reminderLimit(unattended: false)) reminders a turn at most")
         #expect(!messages(events).contains { $0.content == AgentEngine.promiseNudge })
+    }
+
+    private func checkCall(_ id: String, passes: Bool) -> LLMEvent {
+        .toolCalls([ToolCallRequest(id: id, name: "run_command", arguments: #"{"command":"swift test","ok":\#(passes)}"#)])
+    }
+
+    @Test func aTestThatFailedLastIsNotReportedAsPassing() async {
+        let script = Script([[checkCall("t1", passes: false)], [.text("Pronto, os testes passaram.")],
+                             [checkCall("t2", passes: true)], [.text("Corrigido, tudo passando.")]])
+        let events = await run(AgentEngine(), request(script, mode: .bypass, runs: Counter(), tools: [CheckTool()]))
+        let reminder = await script.received[2].last
+        #expect(reminder?.role == .user && reminder?.content.hasPrefix("Before you finish: the last check you ran (`swift test`)") == true)
+        #expect(await script.received.count == 4, "the test passed again: the turn ends")
+        #expect(!messages(events).contains { $0.content.hasPrefix("Before you finish") })
+    }
+
+    @Test func aFailureTheReplyOwnsUpToOrAPassingTestEndsTheTurn() async {
+        let honest = Script([[checkCall("t1", passes: false)], [.text("Pronto, mas 2 testes ainda falham: X e Y.")]])
+        _ = await run(AgentEngine(), request(honest, mode: .bypass, runs: Counter(), tools: [CheckTool()]))
+        #expect(await honest.received.count == 2)
+        let green = Script([[checkCall("t1", passes: false)], [checkCall("t2", passes: true)], [.text("Pronto, tudo passando.")]])
+        _ = await run(AgentEngine(), request(green, mode: .bypass, runs: Counter(), tools: [CheckTool()]))
+        #expect(await green.received.count == 3)
+    }
+
+    @Test func aReminderNotActedOnIsNotRepeated() async {
+        let script = Script([[touchCall], [.text("Vou adaptar o script agora.")], [.text("Vou adaptar, sim.")], [.text("nunca pedido")]])
+        _ = await run(AgentEngine(), request(script, mode: .bypass, runs: Counter()))
+        #expect(await script.received.count == 3)
+    }
+
+    @Test func aFirstAnswerThatPromisesToStartNowIsAskedToDoIt() async {
+        let runs = Counter()
+        let script = Script([[.text("Deixa eu olhar os arquivos primeiro.")], [touchCall], [.text("Pronto.")]])
+        _ = await run(AgentEngine(), request(script, mode: .bypass, runs: runs))
+        #expect(await script.received[1].last == .user(AgentEngine.promiseNudge))
+        #expect(await runs.value == 1)
+    }
+
+    @Test func anUnattendedRunIsNotLeftOnAQuestion() async {
+        var unattended = request(Script([]), mode: .bypass, runs: Counter())
+        let script = Script([[touchCall], [.text("Achei 3 arquivos. Quer que eu apague?")],
+                             [.text("Achei 3 arquivos antigos. Sugestão: apagá-los.")]])
+        unattended.client = ScriptedLLM(script: script)
+        unattended.unattended = true
+        _ = await run(AgentEngine(), unattended)
+        #expect(await script.received[2].last == .user(AgentEngine.unattendedNudge))
+        #expect(AgentEngine.unattendedNudge.contains("suggestion")) // what was not asked for is only suggested
+        #expect(await script.received.count == 3)
+        // In a chat the same question is the user's to answer.
+        let attended = Script([[touchCall], [.text("Achei 3 arquivos. Quer que eu apague?")]])
+        _ = await run(AgentEngine(), request(attended, mode: .bypass, runs: Counter()))
+        #expect(await attended.received.count == 2)
     }
 
     @Test func aPromiseBeforeAnyWorkOrAQuestionEndsTheTurn() async {
@@ -484,6 +565,8 @@ extension AgentEngineTests {
         let first = Script([[.text("Entendido, vou ignorar essa parte.")]])
         _ = await run(AgentEngine(), request(first, mode: .bypass, runs: Counter()))
         #expect(await first.received.count == 1)
+        #expect(AgentEngine.stopReminder("Entendido, vou seguir estas regras:\n- A\n- B", workedBefore: false, unattended: false) == nil)
+        #expect(AgentEngine.stopReminder("Deixa eu ver os logs:", workedBefore: false, unattended: false) == AgentEngine.promiseNudge)
         let asks = Script([[touchCall], [.text("Vou publicar agora, pode ser?")]])
         _ = await run(AgentEngine(), request(asks, mode: .bypass, runs: Counter()))
         #expect(await asks.received.count == 2)
@@ -494,14 +577,18 @@ extension AgentEngineTests {
         for promise in ["Vou adaptar a captura do token para o navegador alternativo.",
                         "Feito o diagnóstico.\n\nVou precisar diagnosticar como o site inicializa o reCAPTCHA, em vez de repetir o teste.",
                         "Em seguida respondo todas as conversas acionáveis.", "Let me check the logs.", "Li o arquivo. Agora vou rodar o build.",
-                        "I’ll run it now."] {
+                        "I’ll run it now.", "Deixa eu verificar os logs:", "Vou fazer assim:\n- rodar o build\n- publicar",
+                        "I'm going to rebuild it."] {
             #expect(AgentEngine.endsOnPromise(promise), "\(promise)")
         }
         for answer in ["Guardei na memória, então não vou iniciá-la sem o seu sim.", "Não vou inventar resultado.",
                        "Quer que eu revise o nginx.conf agora?", "Vou subir o site, pode ser?", "O site está no ar.",
                        "Vou fazer isso.\n\nPronto: o site está no ar.", "", "Let me know if you need anything.",
                        "Rodei os testes e em seguida corrigi o erro.", "Se você aprovar, vou publicar.",
-                       "Os passos a seguir:\n- rodar o build\n- publicar", "Vou rodar o build. Pronto, passou."] {
+                       "Os passos a seguir:\n- rodar o build\n- publicar", "Vou rodar o build. Pronto, passou.",
+                       "Vou aguardar sua resposta.", "A partir de agora vou responder em português.",
+                       "Vou publicar depois que você aprovar.", "Vou te avisar quando o build terminar.",
+                       "Caso queira, vou também limpar o cache.", "I'll merge it once you approve."] {
             #expect(!AgentEngine.endsOnPromise(answer), "\(answer)")
         }
     }
@@ -598,11 +685,11 @@ extension AgentEngineTests {
         #expect(result?.content.hasPrefix(AgentEngine.cutOffResult) == true)
     }
 
-    @Test func aSecondCutOffEndsWithANotice() async {
+    @Test func aCutOffPastTheLimitEndsWithANotice() async {
         let cut = [LLMEvent.text("texto"), .finished(.maxTokens, nil)]
-        let script = Script([cut, cut, cut])
+        let script = Script([cut, cut, cut, cut])
         let events = await run(AgentEngine(), request(script, mode: .ask, runs: Counter()))
-        #expect(await script.received.count == 2)
+        #expect(await script.received.count == AgentEngine.cutContinueLimit + 1)
         #expect(notices(events).count == 1)
         #expect(failures(events).isEmpty)
     }
@@ -675,7 +762,7 @@ extension AgentEngineTests {
         let results = messages(events).filter { $0.role == .tool }.map(\.content)
         #expect(results.count == 4)
         let warning = AgentEngine.stepWarning(remaining: 3)
-        #expect(warning.hasPrefix("[Orb: restam 3 chamadas de ferramenta neste turno;"))
+        #expect(warning.hasPrefix("[Orb: restam 3 passos neste turno;"))
         // Only the result of the step after which 3 remain carries it, at the end.
         #expect(results.map { $0.hasSuffix(warning) } == [false, true, false, false])
         #expect(results[1] == "viu x\n\n" + warning)
@@ -771,12 +858,13 @@ extension AgentEngineTests {
         let calls = [ToolCallRequest(id: "a", name: "nope", arguments: "{}"),
                      ToolCallRequest(id: "b", name: "broken", arguments: "{bad"),
                      ToolCallRequest(id: "c", name: "broken", arguments: "{}"),
-                     ToolCallRequest(id: "d", name: "look", arguments: "{}")]
+                     ToolCallRequest(id: "d", name: "look", arguments: "{}"),
+                     ToolCallRequest(id: "e", name: "sad", arguments: "{}")]
         let script = Script([[.toolCalls(calls)], [.text("Ok")]])
-        let tools: [any AgentTool] = [BrokenTool(), LookTool(gauge: Gauge())]
+        let tools: [any AgentTool] = [BrokenTool(), LookTool(gauge: Gauge()), SadTool()]
         let events = await run(AgentEngine(), request(script, mode: .auto, runs: Counter(), tools: tools))
         let results = messages(events).filter { $0.role == .tool }
-        #expect(results.map(\.isError) == [true, true, true, false])
+        #expect(results.map(\.isError) == [true, true, true, false, true])
         #expect(results[2].content == "Error: não deu")
     }
 

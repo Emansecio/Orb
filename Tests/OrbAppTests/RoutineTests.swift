@@ -156,6 +156,25 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(onDisk.messages.count == 2 && onDisk.messages.first?.content == "oi")
     }
 
+    /// The `schedule` tool's run and run_now start the same run as the Rotinas page's button.
+    @Test @MainActor func theOrbCanRunATaskNowOrCreateOneThatRunsAtOnce() async throws {
+        let (model, bot, routine) = setUp()
+        let said = try model.schedule(.object(["action": .string("run"), "name": .string("Resumo da manhã")]), orb: bot.id)
+        #expect(said.hasPrefix("Pedi para rodar “Resumo da manhã” agora."))
+        await model.routineStarted()
+        #expect(model.isRoutineRunning(routine.id))
+        await waitUntilIdle(model, bot.id)
+        #expect(model.routines[0].runs.count == 1)
+
+        _ = try model.schedule(.object(["action": .string("create"), "name": .string("Já"), "prompt": .string("resuma"),
+                                        "when": .object(["kind": .string("daily"), "hour": .number(9)]), "run_now": .bool(true)]), orb: bot.id)
+        let created = try #require(model.routines.last)
+        await model.routineStarted()
+        #expect(model.isRoutineRunning(created.id))
+        await waitUntilIdle(model, bot.id)
+        #expect(model.routines.last?.runs.count == 1 && model.routines.last?.isEnabled == true)
+    }
+
     @Test @MainActor func theRunIsRecordedInTheRoutinesHistory() async throws {
         let (model, bot, routine) = setUp()
         model.runRoutine(routine.id)

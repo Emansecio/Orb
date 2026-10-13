@@ -261,4 +261,32 @@ import Testing
         let order = ["Alfa", "Bravo", "Mike", "Zeta"].compactMap { pinned.range(of: $0)?.lowerBound }
         #expect(order.count == 4 && order == order.sorted())
     }
+
+    // MARK: The task in progress
+
+    @Test func aMessageThatPointsBackSearchesByTheTaskInProgress() async {
+        let bank = await seeded()
+        let task = TurnPreface.taskContext(history: [.user("Qual banco de dados o projeto Fênix usa?"), ChatMessage(role: .assistant, content: "Postgres.")], goal: nil)
+        #expect(task == "Qual banco de dados o projeto Fênix usa?")
+        for message in ["faz igual ao anterior", "de novo", "continua", "Faz o mesmo", "faz isso"] {
+            let brief = await bank.brief(for: message, context: task, conversationIsNew: false)
+            #expect(brief.related.contains("Postgres 16"), "\"\(message)\" should find the task's memory")
+        }
+    }
+
+    @Test func aMessageWithATopicOfItsOwnIgnoresTheTask() async {
+        let task = "Qual banco de dados o projeto Fênix usa?"
+        #expect(MemoryText.lookupTerms("Quando é a reunião com o cliente Acme?", context: task) == ["reuniao", "cliente", "acme"])
+        // "novo" alone names something new; thanks still search nothing.
+        #expect(MemoryText.lookupTerms("cria um projeto novo", context: task) == MemoryText.topicTerms("cria um projeto novo"))
+        #expect(MemoryText.lookupTerms("obrigado!", context: task).isEmpty)
+        #expect(MemoryText.lookupTerms("faz igual", context: "").isEmpty)
+        // "novo" inside another phrase is no "de novo".
+        #expect(MemoryText.lookupTerms("pede novo orçamento", context: task) == MemoryText.topicTerms("pede novo orçamento"))
+    }
+
+    @Test func theTaskTakesTheLatestRequestsAndTheGoal() {
+        let history: [ChatMessage] = [.user("primeiro"), ChatMessage(role: .assistant, content: "a"), .user("segundo"), ChatMessage(role: .assistant, content: "b"), .user("terceiro")]
+        #expect(TurnPreface.taskContext(history: history, goal: "Migrar o banco") == "terceiro\nsegundo\nMigrar o banco")
+    }
 }

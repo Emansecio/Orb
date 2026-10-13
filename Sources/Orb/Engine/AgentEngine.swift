@@ -51,6 +51,9 @@ struct TurnRequest: Sendable {
     var chunks: [ChunkSummary] = []
     /// Upper bound on model calls in this turn, so a confused model cannot loop forever.
     var maxSteps = AgentEngine.defaultMaxSteps
+    /// Nobody reads the turn while it runs (a routine run): a reply that ends on a question or an offer would wait for
+    /// an answer that never comes, so the engine treats it like a promise (`stopReminder`).
+    var unattended = false
     /// Grants for this turn only that the user's own request already gave (saving to memory when asked to remember).
     var turnGrants: [PermissionRule] = []
     /// The permission mode and rules as they are now, read at every tool call. nil keeps the ones in `bot` as
@@ -172,9 +175,17 @@ actor AgentEngine {
             out.yield(.usage(total))
         }
         var warnedAboutCache = false
-        var continuedAfterCut = false
-        // Where in `messages` the "continue" after a cut reply went (it steers the turn; it starts none).
-        var nudge: Int? = request.promptOnlySteers ? messages.count - 1 : nil
+        // The engine's own recoveries, each with its own allowance, so one used up does not leave the others without
+        // theirs: the "continue" after replies cut at the output limit, one more try after an empty reply, and the
+        // reminders after a reply that stopped short (`stopReminder`).
+        var cutContinues = 0
+        var retriedSilence = false
+        var reminders = 0
+        // Whether tools ran since the last reminder: a reminder only follows another one after real work, so a model
+        // that keeps announcing without acting is not asked forever.
+        var workedSinceReminder = false
+        // Where in `messages` the engine's own messages went (they steer the turn; they start none).
+        var nudges: [Int] = request.promptOnlySteers ? [messages.count - 1] : []
         // Where in `messages` the user's messages sent during the turn went (more steps of it, not new turns).
         var steered: [Int] = []
         // Whether the last step ended only because the user was steering: with nothing to hand over now (the message
@@ -183,6 +194,8 @@ actor AgentEngine {
         // Counts repeated calls and failures; `circling`: the last step's results told the model it was going in circles.
         var watch = LoopWatch()
         var circling = false
+        // What the calls showed, to check a reply that says the work is done (`CompletionWatch`).
+        var completion = CompletionWatch()
         var sendImages = request.supportsImages != false
         if !sendImages, !request.images.isEmpty { out.yield(.notice(ImageRejection.notice)) }
 
@@ -204,7 +217,7 @@ actor AgentEngine {
                 while true {
                     var windowHasImages = false
                     do {
-                        let (window, fit) = Self.fitted(messages, to: budget, cut: &cut, continuing: picksUpTask, nudge: nudge, steering: steered,
+                        let (window, fit) = Self.fitted(messages, to: budget, cut: &cut, continuing: picksUpTask, nudges: nudges, steering: steered,
                                                            sendImages: sendImages)
                         windowHasImages = window.contains { !$0.images.isEmpty }
                         if let fit {
@@ -298,10 +311,10 @@ actor AgentEngine {
                 case .maxTokens:
                     // A reply with no text (all the budget went to reasoning) is no message: providers reject empty ones.
                     if !said.isEmpty { record(assistant, in: &messages, out: out) }
-                    if !continuedAfterCut && !isLastStep {
-                        continuedAfterCut = true
+                    if cutContinues < Self.cutContinueLimit && !isLastStep {
+                        cutContinues += 1
                         // Not recorded: it only steers this turn and is no message of the user's.
-                        nudge = messages.count
+                        nudges.append(messages.count)
                         messages.append(.user(Self.continueNudge))
                         continue
                     }
@@ -315,7 +328,7 @@ actor AgentEngine {
                     // On the last step the model may have only tried to call tools: that is the limit, not silence.
                     if isLastStep && !reply.calls.isEmpty {
                         // Nothing else says where the task stands: leave a record for the "continua" that follows.
-                        if let progress = Self.progress(in: messages, pickedUp: picksUpTask, turnStart: turnStart, nudge: nudge, steering: steered) {
+                        if let progress = Self.progress(in: messages, pickedUp: picksUpTask, turnStart: turnStart, nudges: nudges, steering: steered) {
                             record(ChatMessage(role: .assistant, content: progress), in: &messages, out: out)
                             out.yield(.taskPaused)
                         }
@@ -323,17 +336,17 @@ actor AgentEngine {
                         return
                     }
                     // Silence is often a hiccup of the provider or the model (most often right after tool results): one
-                    // more try, told so, before calling it a failure. It shares `nudge` with the other two.
-                    if !isLastStep, nudge == nil, !continuedAfterCut {
-                        continuedAfterCut = true
-                        nudge = messages.count
+                    // more try, told so, before calling it a failure.
+                    if !isLastStep, !retriedSilence {
+                        retriedSilence = true
+                        nudges.append(messages.count)
                         messages.append(.user(Self.silenceNudge))
                         continue
                     }
                     out.yield(.failed(Self.silenceFailure))
                     return
                 }
-                if calls.isEmpty && isLastStep, let progress = Self.progress(in: messages, pickedUp: picksUpTask, turnStart: turnStart, nudge: nudge, steering: steered) {
+                if calls.isEmpty && isLastStep, let progress = Self.progress(in: messages, pickedUp: picksUpTask, turnStart: turnStart, nudges: nudges, steering: steered) {
                     // The model's closing words, with the record of the steps after them (one message, so the roles
                     // keep alternating; the transcript shows only what the model wrote).
                     var closing = assistant
@@ -349,14 +362,17 @@ actor AgentEngine {
                         continuedForSteering = true
                         continue
                     }
-                    // A turn that already worked and ends on a promise ("vou rodar…") would stop with the work undone: ask
-                    // for it once. Not in the wizard or a review (`onlyTools`: conversations, not tasks). `nudge` holds one
-                    // index, so this, the "continue" after a cut and the try after silence share it: whichever comes first
-                    // (`continuedAfterCut`).
-                    if !isLastStep, step > 1, nudge == nil, !continuedAfterCut, request.onlyTools == nil, Self.endsOnPromise(said) {
-                        continuedAfterCut = true
-                        nudge = messages.count
-                        messages.append(.user(Self.promiseNudge))
+                    // A reply that stops short ("vou rodar…" with nothing run, or a question in a run nobody reads), or
+                    // says the work is done when the calls showed otherwise (`CompletionWatch`), would end the turn with the
+                    // work undone: the model is reminded, at most `reminderLimit` times, and again only after it did some work. Not in the wizard or a review (`onlyTools`: conversations, not tasks).
+                    if !isLastStep, request.onlyTools == nil, reminders < Self.reminderLimit(unattended: request.unattended),
+                       reminders == 0 || workedSinceReminder,
+                       let reminder = Self.stopReminder(said, workedBefore: step > 1, unattended: request.unattended)
+                        ?? completion.reminder(for: said) {
+                        reminders += 1
+                        workedSinceReminder = false
+                        nudges.append(messages.count)
+                        messages.append(.user(reminder))
                         continue
                     }
                     if isLastStep { out.yield(.notice(Self.pausedNotice(after: maxSteps))) }
@@ -364,7 +380,8 @@ actor AgentEngine {
                 }
 
                 circling = await runCalls(calls, request: request, reason: said, allowed: &allowed, toolNames: toolNames, note: note,
-                                          watch: &watch, messages: &messages, out: out)
+                                          watch: &watch, completion: &completion, messages: &messages, out: out)
+                workedSinceReminder = true
                 try Task.checkCancellation()
             }
         } catch is CancellationError {
@@ -472,30 +489,93 @@ actor AgentEngine {
 
     static let interruptedMarker = "\n\n[resposta interrompida]"
     static let continueNudge = "continue"
+    /// Replies cut at the output limit that are continued in one turn (more would be a model that cannot finish).
+    static let cutContinueLimit = 2
     static let silenceNudge = "Your last reply was empty. Reply now: carry on with your tools, or answer in text."
     static let silenceFailure = "O modelo não respondeu."
-    static let promiseNudge = "You ended your reply on something you said you would do, without doing it. Do it now with your tools; "
-        + "if it really needs the user first, say what in one sentence."
-    /// A first-person future the model did not negate ("vou", "I'll"), or a sentence opening on what comes next ("Em seguida
-    /// respondo…"), in the last sentence of a reply. Measured on real conversations: it catches the "Vou adaptar…" endings
-    /// and passes "não vou iniciá-la sem o seu sim", "Let me know…" and a past "e em seguida corrigi".
+    static let promiseNudge = "You ended your reply on something you said you would do, without doing it. Do it now with your tools, "
+        + "in this reply, without announcing it again; if it really needs the user first, say what in one sentence."
+    static let unattendedNudge = "[Automatic run] Nobody reads this run while it works, so nobody will answer a question, approve an "
+        + "offer or wait for a promise. If the task still has work it asks for, decide by yourself and do it now with your tools. "
+        + "Do not do what the task does not ask for, above all what deletes, sends or cannot be undone: put it in the report as a "
+        + "suggestion. If it is done, or something only the user can solve blocks it, write the final report now, with no question at the end."
+
+    /// Reminders in one turn: a run nobody reads gets one more, since there nobody can say "continua".
+    static func reminderLimit(unattended: Bool) -> Int { unattended ? 3 : 2 }
+
+    /// What to remind the model of when its reply, with no tool calls, ends the turn too early (nil: the turn may end).
+    /// `workedBefore`: the turn already made calls. Before any, "vou…" is often only a reply ("Entendido, vou ignorar
+    /// essa parte"), so only a promise of the very next step counts ("Vou verificar agora.", "Deixa eu ver:").
+    /// `unattended`: nobody will answer, so ending on a question or an offer stops the run too.
+    static func stopReminder(_ said: String, workedBefore: Bool, unattended: Bool) -> String? {
+        let promised = endsOnPromise(said)
+        if unattended, promised || endsWaitingForUser(said) { return unattendedNudge }
+        if promised, workedBefore || promisesNextStep(said) { return promiseNudge }
+        return nil
+    }
+
+    /// A first-person future the model did not negate ("vou", "farei", "I'll"), or a sentence opening on what comes next
+    /// ("Em seguida respondo…"), in the last sentence of a reply. Measured on real conversations: it catches the "Vou
+    /// adaptar…" endings and passes "não vou iniciá-la sem o seu sim", "Let me know…" and a past "e em seguida corrigi".
     private static let promise = try! NSRegularExpression(
-        pattern: #"(?<!não )(?<!nao )\b(vou|irei|vamos)\b|^(em seguida|a seguir)\b|\b(I['’]ll|I will)\b|\blet me\b(?! know)"#,
+        pattern: #"(?<!não )(?<!nao )\b(vou|irei|vamos|farei|faremos|deixa eu|deixe-me|deixa-me)\b|^(em seguida|a seguir)\b"#
+            + #"|\b(I['’]ll|I will|I['’]m going to|I am going to)\b|\blet me\b(?! know)"#,
         options: [.caseInsensitive])
-    /// An offer that waits for the user ("Se você aprovar, vou publicar."): doing it now would skip their yes.
-    private static let offer = try! NSRegularExpression(pattern: #"\b(se (você|vc|quiser|preferir|aprovar|concordar)|if you)\b"#,
-                                                        options: [.caseInsensitive])
+    /// What waits for the user or holds from now on rather than promising a step: an offer ("Se você aprovar, vou
+    /// publicar."), waiting ("Vou aguardar sua resposta."), a standing rule ("A partir de agora vou responder em inglês.").
+    private static let notAStep = try! NSRegularExpression(
+        pattern: #"\b(se (você|vc|quiser|preferir|aprovar|concordar)|if you|quando (você|vc)|assim que (você|vc)|when you"#
+            + #"|depois que (você|vc)|após (a |sua )?(aprova|confirma)\w*|caso (você|vc|queira|prefira|aprove)|com (seu|sua|o seu|a sua) (ok|aprova\w*|sim)"#
+            + #"|once you|after you|te aviso|avis(ar|o) quando|let you know"#
+            + #"|aguard\w*|esper(ar|o|ando)|wait\w*|à disposição|a partir de agora|daqui (pra|para) frente|from now on)\b"#,
+        options: [.caseInsensitive])
+    /// The promise is of the very next step, not of something later or a habit.
+    private static let nextStep = try! NSRegularExpression(
+        pattern: #"\b(agora|já|now|right away|primeiro|first|deixa eu|deixe-me|deixa-me|let me)\b"#, options: [.caseInsensitive])
+    /// An ending that hands the turn to the user: a question, or an offer to do more.
+    private static let handsOver = try! NSRegularExpression(
+        pattern: #"(?<!não )(?<!nao )\b(posso|quer que eu|deseja que eu|gostaria que eu|prefere|se (você|vc) quiser|se quiser|should I|shall I"#
+            + #"|do you want|would you like|want me to|let me know)\b"#,
+        options: [.caseInsensitive])
 
     static func endsOnPromise(_ text: String) -> Bool {
         let reply = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !reply.isEmpty, !reply.hasSuffix("?") else { return false }
-        // The last sentence: after the last end of sentence or line break before the closing mark.
-        let body = reply.dropLast(".!".contains(reply.last ?? " ") ? 1 : 0)
-        let start = body.range(of: #"[.!?]\s+|\n"#, options: [.regularExpression, .backwards])?.upperBound ?? body.startIndex
-        let sentence = String(body[start...]).trimmingCharacters(in: .whitespaces)
+        let sentence = lastSentence(of: reply)
         let range = NSRange(sentence.startIndex..., in: sentence)
-        return promise.firstMatch(in: sentence, range: range) != nil && offer.firstMatch(in: sentence, range: range) == nil
+        return promise.firstMatch(in: sentence, range: range) != nil && notAStep.firstMatch(in: sentence, range: range) == nil
     }
+
+    static func endsWaitingForUser(_ text: String) -> Bool {
+        let reply = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !reply.isEmpty else { return false }
+        if reply.hasSuffix("?") { return true }
+        let sentence = lastSentence(of: reply)
+        return handsOver.firstMatch(in: sentence, range: NSRange(sentence.startIndex..., in: sentence)) != nil
+    }
+
+    private static func promisesNextStep(_ text: String) -> Bool {
+        let sentence = lastSentence(of: text.trimmingCharacters(in: .whitespacesAndNewlines))
+        return nextStep.firstMatch(in: sentence, range: NSRange(sentence.startIndex..., in: sentence)) != nil
+    }
+
+    /// The last sentence of a reply, after the last end of sentence or line break before its closing mark. A reply that
+    /// ends on a list is judged by the line that opens the list ("Vou fazer assim:" then the steps), keeping its colon.
+    private static func lastSentence(of reply: String) -> String {
+        var lines = reply.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+        while lines.last?.isEmpty == true { lines.removeLast() }
+        let listed = lines.count > 1 && isListItem(lines.last ?? "")
+        while listed, let last = lines.last, isListItem(last) || last.isEmpty { lines.removeLast() }
+        let text = listed ? lines.last ?? "" : lines.joined(separator: "\n")
+        let body = text.dropLast(".!".contains(text.last ?? " ") ? 1 : 0)
+        let start = body.range(of: #"[.!?]\s+|\n"#, options: [.regularExpression, .backwards])?.upperBound ?? body.startIndex
+        return String(body[start...]).trimmingCharacters(in: .whitespaces)
+    }
+
+    private static func isListItem(_ line: String) -> Bool {
+        line.range(of: #"^([-*•]|\d+[.)])\s"#, options: .regularExpression) != nil
+    }
+
     /// What the turn says when the model's reply was cut off at its limit (the Orb sighs at the end of such a turn).
     static let cutShortNotice = "A resposta passou do limite do modelo e foi cortada. Diga “continua” para seguir."
     static let cutOffResult = "Error: your reply hit the output limit while writing this call, so it was NOT run. Split the work into "
@@ -509,19 +589,19 @@ actor AgentEngine {
     static let parallelTools = 8
 
     static func stepWarning(remaining: Int) -> String {
-        "[Orb: restam \(remaining) chamadas de ferramenta neste turno; priorize e termine com um resumo do que fez e do que falta]"
+        "[Orb: restam \(remaining) passos neste turno; priorize e termine com um resumo do que fez e do que falta]"
     }
 
     /// The steps of the task `messages` end with, written as a progress record (nil when it made no tool calls).
-    /// `pickedUp`: the turn's request only picks up the task before it. `nudge`: the index of the "continue" the engine
+    /// `pickedUp`: the turn's request only picks up the task before it. `nudges`: the indexes of the messages the engine
     /// added, which is no request. `turnStart`: the index of the message that opened the turn; the messages sent during it
     /// (`steering`, and anything queued after `turnStart`) are no request starting a task either, but stay in its record.
-    private static func progress(in messages: [ChatMessage], pickedUp: Bool, turnStart: Int, nudge: Int? = nil, steering: [Int] = []) -> String? {
+    private static func progress(in messages: [ChatMessage], pickedUp: Bool, turnStart: Int, nudges: [Int] = [], steering: [Int] = []) -> String? {
         let users = messages.indices.filter {
-            $0 <= turnStart && $0 != nudge && !steering.contains($0) && messages[$0].isConversationRequest
+            $0 <= turnStart && !nudges.contains($0) && !steering.contains($0) && messages[$0].isConversationRequest
         }
         guard let start = pickedUp && users.count >= 2 ? users[users.count - 2] : users.last else { return nil }
-        return ProgressRecord.text(task: messages.indices.filter { $0 >= start && $0 != nudge }.map { messages[$0] })
+        return ProgressRecord.text(task: messages.indices.filter { $0 >= start && !nudges.contains($0) }.map { messages[$0] })
     }
 
     /// The part of `pausedNotice` only the chat can act on: where the notice is read as why a run did not finish (a
@@ -539,18 +619,20 @@ actor AgentEngine {
     /// time; everything else runs alone, in order. `note`, and what `watch` has to say about the turn going in circles,
     /// go at the end of the last result. Returns whether `watch` said something.
     private func runCalls(_ calls: [ToolCallRequest], request: TurnRequest, reason: String, allowed: inout [PermissionRule],
-                          toolNames: Set<String>, note: String?, watch: inout LoopWatch, messages: inout [ChatMessage],
+                          toolNames: Set<String>, note: String?, watch: inout LoopWatch, completion: inout CompletionWatch,
+                          messages: inout [ChatMessage],
                           out: AsyncStream<TurnEvent>.Continuation) async -> Bool {
         let (calls, request) = await resolved(calls, in: request)
         var circling = false
         func append(_ outcome: ToolOutcome, for call: ToolCallRequest) {
             let kind = request.tools.first { $0.spec.name == call.name }?.kind
-            // A file read is the file: asked for again, it comes back. Anything else may not.
+            // A file read is the file: asked for again, it comes back. Anything else may not, a failed build's log least.
             var text = ToolOutputCap.apply(outcome.text, botID: request.bot.id, callID: call.id, toolNames: toolNames,
-                                           directory: request.outputsDirectory, keepsCopy: !outcome.isError && kind != .file)
+                                           directory: request.outputsDirectory, keepsCopy: kind != .file)
             // A call the user refused never ran: it is no failure of its own, nor a result to compare.
             if !outcome.text.hasPrefix(PermissionPolicy.refusalPrefix) {
                 watch.record(call, result: outcome.text, failed: outcome.isError, live: LoopWatch.isLive(call.name, kind: kind))
+                completion.record(call, result: outcome.text, failed: outcome.isError)
             }
             if call == calls.last {
                 let loop = watch.note()
@@ -681,14 +763,14 @@ actor AgentEngine {
     /// `cut` is what earlier calls of this turn decided to leave out: it holds still until the history is over the
     /// budget again, and then moves in one go (see `ContextWindow.fit`), so most calls extend the previous request
     /// and the provider's cache keeps working.
-    /// `nudge`: index in `messages` of the engine's "continue"; `steering`: those of the user's messages sent during the
+    /// `nudges`: indexes in `messages` of the engine's own messages; `steering`: those of the user's messages sent during the
     /// turn (see `ContextWindow.fit`), which the model reads under `steeringFrame`. Only the request carries it: the
     /// chat, the history and the summary keep the user's own words.
     private static func fitted(_ messages: [ChatMessage], to budget: ContextBudget, cut: inout ContextCut, continuing: Bool = false,
-                               nudge: Int? = nil, steering: [Int] = [], sendImages: Bool = true) -> (messages: [ChatMessage], fit: ContextWindow?) {
+                               nudges: [Int] = [], steering: [Int] = [], sendImages: Bool = true) -> (messages: [ChatMessage], fit: ContextWindow?) {
         guard let system = messages.first, system.role == .system else { return (messages, nil) }
         let fit = ContextWindow.fit(Array(messages.dropFirst()), budget: budget, cut: &cut, continuing: continuing,
-                                    nudge: nudge.map { $0 - 1 }, steering: steering.map { $0 - 1 })
+                                    nudges: nudges.map { $0 - 1 }, steering: steering.map { $0 - 1 })
         let steered = Set(steering.compactMap { messages[$0].itemID })
         let window = [system] + fit.messages.map { message in
             guard message.role == .user, let id = message.itemID, steered.contains(id) else { return message }
@@ -746,7 +828,8 @@ actor AgentEngine {
             return ToolOutcome("Error: unknown tool \(call.name).", isError: true)
         }
         guard let arguments = JSONValue.parse(call.arguments) else {
-            return ToolOutcome("Error: the arguments are not valid JSON.", isError: true)
+            return ToolOutcome("Error: the arguments are not valid JSON. Send one JSON object"
+                + tool.spec.argumentsHint + " and call \(call.name) again.", isError: true)
         }
         let summary = tool.summary(arguments, context: request.context)
 
@@ -829,7 +912,7 @@ actor AgentEngine {
             let files = (target.map { [ProducedFile(path: $0.url.path, created: !$0.existed)] } ?? [])
                 + result.images.map { ProducedFile(path: $0.path, created: true) }
             out.yield(.toolFinished(id: started.id, state: result.failed ? .failed : .done, output: Self.preview(result.text), files: files))
-            return ToolOutcome(result.text, images: result.images)
+            return ToolOutcome(result.text, isError: result.failed, images: result.images)
         } catch {
             let message = error.localizedDescription
             out.yield(.toolFinished(id: started.id, state: .failed, output: message))

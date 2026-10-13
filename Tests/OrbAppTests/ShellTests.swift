@@ -256,6 +256,12 @@ final class RunCommandTests {
         #expect(try await result("exit 1").text.hasPrefix("Código de saída: 1"))
     }
 
+    @Test func theShellsOwnCodesSayWhatToFix() async throws {
+        #expect(try await run("comando_que_nao_existe_xyz").hasPrefix("Código de saída: 127 (comando não encontrado"))
+        #expect(RunCommandTool.hint(forExitCode: 126).contains("não pode ser executado"))
+        #expect(RunCommandTool.hint(forExitCode: 130) == Signals.hint(forExitCode: 130) && RunCommandTool.hint(forExitCode: 2) == "")
+    }
+
     /// With launchd's bare PATH (the shell could not be asked), `-c` would not find tools set up by the login profile.
     private func fallbackContext() throws -> ToolContext {
         let bin = directory.appending(path: "fakebin")

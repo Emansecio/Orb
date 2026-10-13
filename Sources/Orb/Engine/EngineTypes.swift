@@ -266,6 +266,17 @@ struct ToolSpec: Hashable, Sendable {
     var description: String
     /// JSON Schema of the arguments object.
     var parameters: JSONValue
+
+    /// The arguments in a few words, for a call the model sent broken: " with: path (string, required), limit (integer)".
+    var argumentsHint: String {
+        guard case .object(let properties)? = parameters["properties"], !properties.isEmpty else { return "" }
+        let required = Set(parameters["required"]?.array?.compactMap(\.string) ?? [])
+        let fields = properties.keys.sorted { (required.contains($0) ? 0 : 1, $0) < (required.contains($1) ? 0 : 1, $1) }.map { key in
+            let type = properties[key]?["type"]?.string.map { " (\($0)" + (required.contains(key) ? ", required)" : ")") }
+            return key + (type ?? (required.contains(key) ? " (required)" : ""))
+        }
+        return " with: " + fields.joined(separator: ", ")
+    }
 }
 
 // MARK: - LLM client
@@ -568,6 +579,9 @@ struct ToolContext: Sendable {
     var botID: UUID?
     /// Background jobs of every Orb (one per app); nil where the app does not offer them.
     var jobs: BackgroundJobs?
+    /// Lets a `run_command` the turn waits for go on as one of `jobs` (the user pressed "Segundo plano" or wrote to the Orb);
+    /// nil where nobody can ask (routines, tests), and commands are then waited for to the end.
+    var release: CommandRelease?
     /// What `schedule` asks of the app on this Orb's behalf; nil where the app offers no scheduling (some tests).
     var schedule: ScheduleHandler?
     /// The user's Terminal environment that commands run in.

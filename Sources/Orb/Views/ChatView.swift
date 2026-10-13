@@ -930,6 +930,16 @@ private struct WorkingLine: View {
                     // instead of staying drawn where the line used to be.
                     .geometryGroup()
                     WorkMeterView(work: work, since: live.workingSince)
+                    // A command holds the turn: it can go on by itself while you talk to the Orb.
+                    if live.commandWaited {
+                        Button("Segundo plano", systemImage: "arrow.down.right.square") { model.sendCommandToBackground(of: look.id) }
+                            .buttonStyle(GhostStyle(tint: nil))
+                            .lineLimit(1)
+                            .fixedSize()
+                            .layoutPriority(1)
+                            .help("Deixar o comando rodando em segundo plano e voltar a falar com o Orb")
+                            .transition(.adapted(.swap, reduceMotion: reduceMotion))
+                    }
                     // MARK: MultiOrb (WP2): the Orb waits for other Orbs' answers: the line stops the conversation.
                     if live.chainWork != nil {
                         Button("Parar", systemImage: "stop.fill") { model.stop(look.id) }

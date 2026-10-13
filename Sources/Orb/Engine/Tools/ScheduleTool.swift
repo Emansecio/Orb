@@ -6,10 +6,15 @@ typealias ScheduleHandler = @Sendable (JSONValue) async throws -> String
 
 /// One call of `schedule`, checked: what was asked and, for a new task, when it runs.
 enum ScheduleCommand: Equatable {
-    /// `goal`: what success looks like, for a task that works toward one (`RoutineGoal`).
-    case create(name: String, prompt: String, schedule: Schedule, goal: String? = nil)
+    /// `goal`: what success looks like, for a task that works toward one (`RoutineGoal`). `enabled`: false creates it
+    /// paused. `runNow`: its first run starts at once (as soon as the Orb is free), not at the first scheduled time.
+    case create(name: String, prompt: String, schedule: Schedule, goal: String? = nil, enabled: Bool = true, runNow: Bool = false)
+    /// Changes what is given of an existing task and keeps the rest. `goal` "" removes the goal.
+    case update(name: String, prompt: String? = nil, schedule: Schedule? = nil, goal: String? = nil)
     case list
     case setEnabled(String, Bool)
+    /// Runs the task once now (as soon as the Orb is free), like the Rotinas page's button.
+    case run(String)
     case delete(String)
 
     static let promptLimit = 4_000
@@ -19,24 +24,45 @@ enum ScheduleCommand: Equatable {
         let action = arguments["action"]?.string?.lowercased()
         switch action {
         case "create":
-            let prompt = try arguments.requiredString("prompt").trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !prompt.isEmpty, prompt.count <= Self.promptLimit else {
-                throw ToolError("O prompt precisa ter de 1 a \(Self.promptLimit) caracteres.")
-            }
+            let prompt = try Self.prompt(try arguments.requiredString("prompt"))
             let name = RoutineText.resolvedName(MemoryText.flatten(arguments["name"]?.string ?? ""), prompt: prompt)
-            let goal = MemoryText.flatten(arguments["goal"]?.string ?? "")
+            let goal = Self.goal(arguments["goal"]?.string ?? "")
+            let runNow = arguments["run_now"]?.bool ?? false
+            let enabled = arguments["enabled"]?.bool ?? true
+            guard enabled || !runNow else { throw ToolError("Uma tarefa criada pausada não roda agora: use enabled ou run_now, não os dois.") }
             self = .create(name: String(name.prefix(Self.nameLimit)), prompt: prompt, schedule: try Self.schedule(arguments["when"]),
-                           goal: goal.isEmpty ? nil : MemoryText.clip(goal, RoutineGoal.targetLimit))
+                           goal: goal.isEmpty ? nil : goal, enabled: enabled, runNow: runNow)
+        case "update":
+            let name = try Self.taskName(arguments)
+            let prompt = try arguments["prompt"]?.string.map(Self.prompt)
+            let schedule = try arguments["when"].map { try Self.schedule($0) }
+            let goal = arguments["goal"]?.string.map(Self.goal)
+            guard prompt != nil || schedule != nil || goal != nil else {
+                throw ToolError("Para update, diga o que muda: prompt, when ou goal (goal vazio tira a meta).")
+            }
+            self = .update(name: name, prompt: prompt, schedule: schedule, goal: goal)
         case "list":
             self = .list
         case "pause", "resume":
             self = .setEnabled(try Self.taskName(arguments), action == "resume")
+        case "run":
+            self = .run(try Self.taskName(arguments))
         case "delete":
             self = .delete(try Self.taskName(arguments))
         default:
-            throw ToolError("\"action\" deve ser create, list, pause, resume ou delete.")
+            throw ToolError("\"action\" deve ser create, update, list, pause, resume, run ou delete.")
         }
     }
+
+    private static func prompt(_ text: String) throws -> String {
+        let prompt = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty, prompt.count <= promptLimit else {
+            throw ToolError("O prompt precisa ter de 1 a \(promptLimit) caracteres.")
+        }
+        return prompt
+    }
+
+    private static func goal(_ text: String) -> String { MemoryText.clip(MemoryText.flatten(text), RoutineGoal.targetLimit) }
 
     private static func taskName(_ arguments: JSONValue) throws -> String {
         let name = try arguments.requiredString("name").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -106,26 +132,29 @@ struct ScheduleTool: AgentTool {
     let spec = ToolSpec(
         name: "schedule",
         description: """
-        Your own scheduled tasks (routines), run by themselves while the app is open: repeating, once at a moment \
-        (kind once, at), or on a cron line (kind cron: expression "minute hour day month weekday", optional time_zone \
-        such as America/Sao_Paulo). create: prompt is what to do on each run, self-contained (nobody answers during a run); goal, optional, is what success looks like: each run \
-        then reports its progress and the task pauses once the goal is met. pause, resume and delete take the name. At \
-        most 20 tasks, 15 minutes or more apart; a run cannot create tasks.
+        Your scheduled tasks (routines), run while the app is open. create: prompt is what each run does, self-contained \
+        (nobody answers in a run); goal (optional): what success looks like, pausing it once met. update: the \
+        name and what changes (goal "" removes it); pause, resume, run (once now), delete: the name. At most 20 tasks, \
+        15+ minutes apart; a run can only pause tasks. When the user describes something to do regularly or later, \
+        propose it with ask_user (name, when, what) and create it once they agree, unless they asked for it already.
         """,
         parameters: .schema([
-            "action": .object(["type": .string("string"), "enum": .array(["create", "list", "pause", "resume", "delete"].map(JSONValue.string))]),
+            "action": .object(["type": .string("string"),
+                               "enum": .array(["create", "update", "list", "pause", "resume", "run", "delete"].map(JSONValue.string))]),
             "name": .property("string"),
             "prompt": .property("string"),
             "goal": .property("string"),
+            "enabled": .property("boolean", "create: false = paused"),
+            "run_now": .property("boolean", "create: true = also run once now"),
             "when": JSONValue.schema([
                 "kind": .property("string", "daily, weekly, every_minutes, every_hours, once or cron"),
                 "hour": .property("integer"),
                 "minute": .property("integer"),
                 "weekday": .property("integer", "1 = Sunday"),
                 "n": .property("integer", "minutes 15-720, hours 1-24"),
-                "at": .property("string", "once: 2026-10-14T09:00, the Mac's clock unless an offset is given"),
-                "expression": .property("string", "cron: 5 fields, at least 15 minutes apart"),
-                "time_zone": .property("string", "cron: IANA name; the Mac's when left out"),
+                "at": .property("string", "once: 2026-10-14T09:00, Mac's clock"),
+                "expression": .property("string", "cron: minute hour day month weekday"),
+                "time_zone": .property("string", "cron: IANA name, else Mac's"),
             ], required: ["kind"]),
         ], required: ["action"]))
 
@@ -146,11 +175,17 @@ struct ScheduleTool: AgentTool {
     /// What the card says before the task exists, on one line: its name, when it runs and what it will be asked to do.
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) {
         switch try? ScheduleCommand(arguments) {
-        case .create(let name, let prompt, let schedule, let goal)?:
+        case .create(let name, let prompt, let schedule, let goal, let enabled, let runNow)?:
             return ("Agendando tarefa", "“\(name)” · \(schedule.label) · " + MemoryText.clip(MemoryText.flatten(prompt), 400)
-                + (goal.map { " · Meta: " + MemoryText.clip($0, 200) } ?? ""))
+                + (goal.map { " · Meta: " + MemoryText.clip($0, 200) } ?? "")
+                + (enabled ? "" : " · Criada pausada") + (runNow ? " · Roda agora uma vez" : ""))
+        case .update(let name, let prompt, let schedule, let goal)?:
+            let changes = [schedule.map(\.label), prompt.map { "Faz: " + MemoryText.clip(MemoryText.flatten($0), 300) },
+                           goal.map { $0.isEmpty ? "Sem meta" : "Meta: " + MemoryText.clip($0, 200) }].compactMap { $0 }
+            return ("Alterando tarefa agendada", "“\(name)” · " + changes.joined(separator: " · "))
         case .list?: return ("Listando tarefas agendadas", "")
         case .setEnabled(let name, let on)?: return (on ? "Retomando tarefa agendada" : "Pausando tarefa agendada", name)
+        case .run(let name)?: return ("Rodando tarefa agendada agora", name)
         case .delete(let name)?: return ("Apagando tarefa agendada", name)
         case nil: return ("Agendando tarefa", "")
         }

@@ -223,6 +223,32 @@ enum MemoryText {
         return topic.filter { seen.insert(stem($0)).inserted }
     }
 
+    /// The terms to look memories up by for `message` in a conversation about `context` (the task in progress): the
+    /// message's own topic, unless it only points back at the task ("faz igual ao anterior", "continua", "de novo"), when
+    /// the words of the task stand in for the ones it leaves out. A message with a topic of its own keeps it alone.
+    static func lookupTerms(_ message: String, context: String) -> [String] {
+        let own = topicTerms(message)
+        let rest = own.filter { !pointers.contains($0) }
+        // All the words, stopwords too: "isso" and "it" point back as well as "anterior" does.
+        let tokens = fold(message).components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+        let spaced = " " + tokens.joined(separator: " ") + " "
+        guard rest.count < 2, tokens.contains(where: pointers.contains) || pointingPhrases.contains(where: { spaced.contains(" \($0) ") })
+        else { return own }
+        var seen = Set(rest.map(stem))
+        let task = topicTerms(context).filter { !pointers.contains($0) && seen.insert(stem($0)).inserted }
+        return rest + task.prefix(contextTerms)
+    }
+
+    /// How many of the task's words a message that points back borrows: the latest request comes first in `context`.
+    static let contextTerms = 6
+    /// Words (folded) a message uses to point at the task in progress instead of naming it.
+    private static let pointers: Set<String> = [
+        "anterior", "igual", "mesmo", "mesma", "mesmos", "mesmas", "novamente", "denovo", "continua", "continue", "continuar",
+        "isso", "disso", "nisso", "aquilo", "daquilo", "dele", "dela", "deles", "delas", "again", "same", "previous", "that", "it",
+    ]
+    /// The same, said in two words ("faz de novo"; "novo" alone names something new).
+    private static let pointingPhrases = ["de novo", "outra vez", "one more time"]
+
     /// How many of `terms` appear in `text` (as a word, or the start of one, singular or plural).
     static func matchCount(of terms: [String], in text: String) -> Int {
         let tokens = Set(words(text))

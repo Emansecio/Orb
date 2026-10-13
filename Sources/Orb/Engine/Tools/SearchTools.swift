@@ -201,7 +201,7 @@ struct GrepTool: AgentTool {
         let include = try arguments.nonEmptyString("include").map { try GlobPattern($0) }
 
         let root = arguments.nonEmptyString("path").map(context.url(for:)) ?? context.workingDirectory
-        guard FileManager.default.fileExists(atPath: root.path) else { throw ToolError("Caminho não encontrado: \(root.path)") }
+        guard FileManager.default.fileExists(atPath: root.path) else { throw ToolError.notFound("Caminho não encontrado", root) }
         if !root.isExistingDirectory { try root.requireRegularFile() }
         let deadline = ContinuousClock.now + timeBudget
         let workingDirectory = context.workingDirectory
@@ -532,7 +532,7 @@ struct GlobTool: AgentTool {
             ?? arguments.nonEmptyString("path").map(context.url(for:)) ?? context.workingDirectory
         let pattern = try GlobPattern(patternText, anchored: split != nil)
         let limit = arguments.integer("max_results", default: 200, in: 1...1000)
-        guard root.isExistingDirectory else { throw ToolError("Pasta não encontrada: \(root.path)") }
+        guard root.isExistingDirectory else { throw ToolError.notFound("Pasta não encontrada", root) }
 
         let (walked, matches) = try await runDetached {
             let walked = try FileWalker.files(under: root, deadline: .now + .seconds(20))

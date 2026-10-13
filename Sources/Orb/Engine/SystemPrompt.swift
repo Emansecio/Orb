@@ -17,7 +17,11 @@ enum PromptParts {
     static let useTools = "Use tools to find out and to act instead of asking the user to do it; read before you change things."
     static let announce = "Before a tool that changes something, say in one short sentence what you are about to do and why, and make that call in the same reply."
     /// Small models announce a step and end the turn there; the user then has to say "continua".
-    static let persist = "Keep working until the task is done or you need the user's answer. Never end your turn on a promise (\"vou fazer X\"): do X now. If something blocks you, say what and ask."
+    /// Models also stop to ask for what the request already allows, or end on a plan or an offer of the next step.
+    static let persist = "Keep working until the task is done; the request already allows its ordinary steps. If a detail is missing, "
+        + "assume something reasonable, say so and go on; ask only if a wrong guess is costly. Never end your turn on a promise "
+        + "(\"vou fazer X\") or an unstarted plan: do the steps the request covers now. Offering what goes beyond it is fine. End when it is done (say how you "
+        + "checked), the user must decide, or you are blocked (say by what). Your role and the user's standing instructions are rules."
     static let behaviour = [useTools + " " + announce, persist]
 
     static func roaming(_ bot: Bot) -> String {

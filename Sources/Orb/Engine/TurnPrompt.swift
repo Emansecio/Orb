@@ -101,6 +101,13 @@ enum TurnPreface {
         return String(text[..<cut.lowerBound])
     }
 
+    /// The task in progress, for finding the memories of a message that only points back at it ("faz igual ao
+    /// anterior"): the user's latest requests in `history` (newest first), then the goal its summary noted, if any.
+    static func taskContext(history: [ChatMessage], goal: String?) -> String {
+        let requests = history.reversed().lazy.filter(\.isConversationRequest).prefix(2).map { requestWords($0.content) }
+        return (Array(requests) + [goal ?? ""]).filter { !$0.isEmpty }.joined(separator: "\n")
+    }
+
     /// What the user typed in a stored message, for the summaries (`ConversationLedger`, `ToolDigest`): without the
     /// preface and without what the app adds around it. A skill's instructions give way to "/Name request", the file and
     /// picture lists to their names, and the instruction to save a memory goes.

@@ -25,6 +25,7 @@ extension BotSession {
         base.requestItem = nil
         base.turnGrants = []
         base.steering = nil
+        base.context.release = nil
         reviewBase = base
         reviewFrom = conversation?.messages.count ?? 0
     }
@@ -115,6 +116,7 @@ extension BotSession {
     /// at once: the caller has something to send first and starts the queue itself if it does not. `notice`: what the
     /// chat says about it.
     func stop(startsQueuedRoutines: Bool = true, notice: String = BotSession.stoppedNotice) {
+        resumableSince = nil // a process left running after a stop does not bring the Orb back by itself
         guard let task = turnTask, let turn = turnID, let model else { return }
         task.cancel()
         ApprovalNotifications.clear(model.pendingApprovals(of: id).map(\.id))
@@ -395,6 +397,7 @@ extension BotSession {
             Task { await model.collectSkillProposals(botID) }
             if completed { model.reviewSkillsIfDue(self) } // a task left half way teaches little
             if completed { model.consolidateMemoryIfDue(self) }
+            if completed { model.proposeMemoryMergeIfDue(self) }
         }
     }
 

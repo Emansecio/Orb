@@ -115,6 +115,22 @@ extension OrbDriverTests {
         }
     }
 
+    @Test func aBigHairdoDoesNotHideTheBubble() async throws {
+        // An afro shrinks the Orb inside its 30 pt sidebar box below the bubble's size: the box decides, not the Orb.
+        try #require(NSScreen.main != nil)
+        let look = OrbConfig(hair: "black-power")
+        let shrunk = (30 * OrbFootprint.fit(look).scale).rounded()
+        try #require(shrunk < OrbGeometry.bubbleBox)
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 300))
+        let view = OrbAnimationView(frame: NSRect(x: 40, y: 40, width: 60, height: 60))
+        view.configure(config: look, activity: .waiting, size: shrunk, showsBubble: true, followsPointer: false,
+                       interactive: false, live: false)
+        content.addSubview(view)
+        let win = placementWindow(content)
+        defer { closePlacement(win) }
+        await waitUntil("the question mark") { view.isBubbleShown }
+    }
+
     @Test func aRestingOrbShowsTheBubbleOfItsNewActivity() async throws {
         try #require(NSScreen.main != nil)
         let content = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 300))

@@ -73,6 +73,7 @@ Tudo em `Sources/Orb/`.
 |---|---|
 | `EngineTypes.swift` | contratos: `JSONValue`, `ChatMessage`, `LLMClient`/`LLMEvent`/`LLMError`, `TokenUsage`, `CacheHealth`, `AgentTool`, `ToolRisk`, `ToolContext`, `MCPServerConfig` |
 | `AgentEngine.swift` | o laço do turno: modelo ↔ ferramentas, até 100 passos (150 em rotinas), retentativas, cortes por limite, grupos de aprovação, `TurnEvent`/`TurnRequest` |
+| `CompletionWatch.swift` | confere, sem chamar modelo, a resposta que fecharia o turno contra o que as chamadas mostraram: se o último build/teste/lint (`run_command`, no começo de um passo e sem pipe que esconda o código de saída) falhou e a resposta diz que está pronto sem admitir a falha, ou se ela diz ter salvo um caminho do Mac que não existe, o modelo recebe um lembrete (da mesma cota do `stopReminder`) para corrigir ou contar a verdade |
 | `Providers.swift` | `ProviderKind`, `ProviderAccount`, `ModelRef` (`provedor/modelo`), `ModelCatalog` (listas ao vivo), qual cliente para qual formato |
 | `OpenAIClient.swift`, `ResponsesClient.swift`, `AnthropicClient.swift` | os três formatos (chat completions, Responses, Messages): corpo da requisição e mapeamento dos eventos |
 | `ProviderTransport.swift`, `SSE.swift`, `Retry.swift`, `WireEncoder.swift` | o que os clientes dividem: requisição autorizada (renova 401), erros legíveis, `Retry-After`, leitor SSE incremental, retentativa com recuo, JSON ordenado |
@@ -95,7 +96,7 @@ Tudo em `Sources/Orb/`.
 
 | Capacidade | Ferramentas | Arquivos |
 |---|---|---|
-| Terminal e arquivos | `run_command` (`background: true`; saída acima de 20 KB é salva inteira em `saidas/<orb>/comando-….txt`), `job_output` (sem `id`, lista todos), `job_stop`, `read_file` (texto, PDF, Word/RTF/ODT, Excel .xlsx e .xls, PowerPoint .pptx, imagens com OCR), `write_file`, `edit_file`, `list_directory`, `search_files` (Spotlight), `grep` (um arquivo informado em `path` vai até 200 MB, em streaming), `glob` (aceita padrão absoluto), `trash` (também com Controlar apps); o ambiente vem do shell `-lic` da usuária (5 s) e, se ele estoura, o perfil de login responde na hora e a nova tentativa roda em segundo plano (15 s), com espera que dobra de 30 s até 5 min | `ShellTool`, `BackgroundJobs`, `ProcessRunner`, `ShellEnvironment`, `FileTools`, `SearchTools`, `TextFile`, `DocumentReader`, `OfficeReader`, `LegacyExcelReader`, `ReadOnlyCommand` |
+| Terminal e arquivos | `run_command` (`background: true`; saída acima de 20 KB é salva inteira em `saidas/<orb>/comando-….txt`), `job_output` (sem `id`, lista todos), `job_stop`, `read_file` (texto, PDF, Word/RTF/ODT, Excel .xlsx e .xls, PowerPoint .pptx, imagens com OCR), `write_file`, `edit_file`, `list_directory`, `search_files` (Spotlight), `grep` (um arquivo informado em `path` vai até 200 MB, em streaming), `glob` (aceita padrão absoluto), `trash` (também com Controlar apps); o ambiente vem do shell `-lic` da usuária (5 s) e, se ele estoura, o perfil de login responde na hora e a nova tentativa roda em segundo plano (15 s), com espera que dobra de 30 s até 5 min | `ShellTool`, `BackgroundJobs`, `CommandRelease`, `ProcessRunner`, `ShellEnvironment`, `FileTools`, `SearchTools`, `TextFile`, `DocumentReader`, `OfficeReader`, `LegacyExcelReader`, `ReadOnlyCommand` |
 | Navegar na web | `web_fetch` (páginas, PDF, JSON, imagens; `offset`/`find` para páginas longas; `save_to`), `web_search` (DuckDuckGo, Google, TinyFish), e com um motor instalado `browse_open/snapshot/read/screenshot/click/fill/select/press/scroll/back/tabs/show/close` | `WebTools`, `HTMLText`, `WebSearchTool`, `BrowseTools`, `Engine/Browser/` |
 | Controlar apps do Mac | `applescript`, `shortcuts_list/run`, `clipboard_read/write`, `screenshot` (janela com marcas numeradas e OCR), `apps_list`, `app_quit`, `trash`, `browser_tab`, `ui_read`, `ui_act` | `MacTools`, `MacAppTools`, `BrowserTools`, `ScreenshotTool`, `WindowCapture`, `UIMarks`, `SyntheticInput`, `AccessibilityTools`/`Elements`/`Outline`/`Session`/`Events`/`Contracts`, `ScreenTakeover`, `AppleScriptSupport` |
 | Sempre | `open`, `notify`, `remember`, `recall`, `schedule` | `MacTools`, `MacAppTools`, `ScheduleTool` |
@@ -159,11 +160,32 @@ junto com o app. `ChildProcessGroups` registra os grupos do `ProcessRunner` (at�
 processo sair; `SpawnedProcess.watch` espera a saída por um `DispatchSource`, sem prender uma thread por filho); no `willTerminate`, `killAllNow` manda SIGTERM a todos, mais os dos jobs em segundo plano, e SIGKILL ao que sobrar
 meio segundo depois. Sobras de um `cmd &` que o `run_command` já devolveu, avisadas no resultado, continuam fora do registro.
 
+**Comando que vai para o segundo plano no meio.** Um `run_command` em primeiro plano não prende a conversa: enquanto ele roda, a
+linha "agora" do chat mostra **Segundo plano**, e uma mensagem para a tarefa (o ↩ do compositor) faz o mesmo se o comando já passou
+de 3 s (`CommandRelease.messageGrace`; um comando rápido só termina). O `ProcessRunner` confere o pedido a cada 250 ms
+(`Detach.when`); ao soltar, a saída lida até ali e o resto passam a ir para um log em `orb-jobs/<orb>/comando-….log`, e
+`BackgroundJobs.adopt` assume o processo como um job comum (`job_output`/`job_stop`, aviso ao terminar). O modelo recebe o id do job
+e a instrução de atender a usuária. Quem ouve a saída do processo é decidido sob uma trava só (`ChildEnd`): ou o comando volta com o
+código de saída, ou o job registra o fim, nunca os dois nem nenhum. Rotinas e pedidos de outro Orb, que ninguém acompanha, esperam
+seus comandos até o fim (`ToolContext.release` é nil).
+
+**Continuar sozinho quando o processo termina.** Se um job que o Orb abriu depois da sua última mensagem termina com o Orb
+parado, `AppModel.showJobs` manda o mesmo "continue" do botão Continuar (aparece como sua mensagem), para ele ler o resultado e
+seguir. Só vale sem rascunho no compositor, fora de rotinas, até você apertar Parar e até 3 vezes por mensagem sua
+(`resumesAfterJobs`); um job que
+termina no meio de um turno só vira aviso, como antes.
+
+**Erros que dizem o que fazer.** Arquivo ou pasta que não existe (`read_file`, `edit_file`, `list_directory`, buscas, o `cwd` do
+`run_command`) volta com até 3 caminhos parecidos (`ToolError.notFound`, `URL.lookalikes`: mesmo nome com outra caixa ou extensão,
+ou 1 letra de diferença, 2 em nomes de 8 ou mais, na pasta mais próxima que existe). Os códigos 127 e 126 do shell explicam a causa
+(`RunCommandTool.hint`). Argumentos que não são JSON válido voltam com os campos da ferramenta (`ToolSpec.argumentsHint`). Toda
+ferramenta que falha chega ao modelo marcada como erro (`ToolOutcome.isError`).
+
 **`schedule`.** Uma tarefa agendada **é** uma `Routine` do Orb (a mesma página, o mesmo agendador de 30 s, a mesma fila e o mesmo
-relatório; logo depois de o Mac acordar, `runDueRoutines` espera 45 s pela rede, `AppModel.wakeSettleTime`; ele sabe que o Mac dormiu pelo aviso de sono, pelo despertar ou por uma volta do agendador muito distante da anterior, porque o cronômetro pode voltar antes da notificação): a ferramenta só dá ao Orb o jeito de criá-la, listá-la, pausá-la, retomá-la e apagá-la. `ScheduleCommand` confere a
+relatório; logo depois de o Mac acordar, `runDueRoutines` espera 45 s pela rede, `AppModel.wakeSettleTime`; ele sabe que o Mac dormiu pelo aviso de sono, pelo despertar ou por uma volta do agendador muito distante da anterior, porque o cronômetro pode voltar antes da notificação): a ferramenta dá ao Orb o jeito de criá-la (já ativa ou pausada, e opcionalmente rodando uma vez na hora, `run_now`), alterá-la (`update`: só o que vier de prompt, horário e meta; um horário novo conta a partir de agora), listá-la, pausá-la, retomá-la, rodá-la agora (`run`, como o botão da página Rotinas: entra na fila se o Orb estiver ocupado) e apagá-la. Quando você descreve algo a fazer com regularidade, a descrição da ferramenta orienta o Orb a propor a tarefa (com `ask_user`) e só criá-la depois do seu sim, a menos que você já tenha pedido. `ScheduleCommand` confere a
 chamada (`daily`, `weekly`, `every_minutes` de 15 a 720, `every_hours` de 1 a 24; nome, prompt de até 4.000 caracteres); quem
-executa é `AppModel.schedule(_:orb:)`, que só vê as rotinas do Orb que chamou, recusa o 21º, o nome repetido e a criação vinda
-de dentro de uma rotina, e responde em português ("Agendei “X”: a cada 30 minutos. Próxima execução: …"), que é também o que o
+executa é `AppModel.schedule(_:orb:)`, que só vê as rotinas do Orb que chamou, recusa o 21º, o nome repetido e criar, alterar, disparar,
+retomar ou apagar tarefas de dentro de uma rotina (ela só pode pausar), e responde em português ("Agendei “X”: a cada 30 minutos. Próxima execução: …"), que é também o que o
 chat mostra como resultado da ferramenta. A chamada chega por `ToolContext.schedule` (um fecho preso ao Orb), com qualquer modelo. Uma execução que passa do próprio intervalo (a cada 15 min,
 levando 20) conta a próxima a partir do fim dela (`finishRoutineRun`), então nada se acumula.
 

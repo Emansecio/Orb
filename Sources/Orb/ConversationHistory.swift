@@ -55,8 +55,10 @@ enum RoutinePrompt {
         var text = """
         [Automatic run] This is the scheduled routine “\(name)”, started by the app, not a message from the user. \
         The user is not here: do not ask questions, do not wait for answers or confirmations, and do not offer choices. \
-        Make reasonable assumptions and do the work with your tools. If something blocks you, say so in your report \
-        instead of asking. Finish with a short report (a few lines, plain text): what you did and what you found. Its \
+        Make reasonable assumptions and do the whole task with your tools, every step it asks for, in this run: there is no \
+        later turn to finish it in. What it does not ask for, above all what deletes, sends or cannot be undone, goes in \
+        your report as a suggestion. If something blocks you, try another way, and only then say so in your report instead \
+        of asking. Finish with a short report (a few lines, plain text): what you did and what you found. Its \
         first line is shown to the user as a notification, so make it a complete summary on its own.
         """
         if let report = previous?.report, !report.isEmpty, let date = previous?.date {

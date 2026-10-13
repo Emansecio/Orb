@@ -102,6 +102,8 @@ final class BotLive {
     private(set) var compactedTo: Int?
     /// The processes the Orb left running (`run_command` with background), shown above the message box until they end.
     private(set) var jobs: [BackgroundJobs.Snapshot] = []
+    /// The turn waits for a command that can go on in the background (`CommandRelease`): the working line offers it.
+    private(set) var commandWaited = false
 
     // MARK: What the activity follows
 
@@ -205,6 +207,8 @@ final class BotLive {
     func setCompactedTo(_ tokens: Int?) { assign(\.compactedTo, to: tokens) }
 
     func setJobs(_ list: [BackgroundJobs.Snapshot]) { assign(\.jobs, to: list) }
+
+    func setCommandWaited(_ waited: Bool) { assign(\.commandWaited, to: waited) }
 
     func setUnread(_ count: Int) { assign(\.unread, to: count) }
 

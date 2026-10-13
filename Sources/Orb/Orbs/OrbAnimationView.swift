@@ -11,6 +11,8 @@ struct AnimatedOrb: NSViewRepresentable {
     let config: OrbConfig
     let activity: OrbActivity
     let size: CGFloat
+    /// nil: the bubble shows when `size` is big enough (`OrbGeometry.bubbleBox`).
+    var showsBubble: Bool?
     let followsPointer: Bool
     /// Changing this value makes the orb give its big jump (what a click does).
     let poke: Int
@@ -68,7 +70,7 @@ struct AnimatedOrb: NSViewRepresentable {
     }
 
     private func update(_ view: OrbAnimationView) {
-        view.configure(config: config, activity: activity, celebration: celebration, size: size,
+        view.configure(config: config, activity: activity, celebration: celebration, size: size, showsBubble: showsBubble,
                        followsPointer: followsPointer, interactive: interactive, live: live)
     }
 }
@@ -88,6 +90,8 @@ final class OrbAnimationView: NSView {
     private(set) var activity: OrbActivity = .idle
     private var celebration = OrbCelebration.big
     private var size: CGFloat = 28
+    /// The status bubble shows: the box the Orb sits in is big enough (`OrbGeometry.bubbleBox`), whatever its look shrank it to.
+    private var showsBubble = true
     private var followsPointer = true
     private var interactive = false
     private var live = true
@@ -257,13 +261,14 @@ final class OrbAnimationView: NSView {
     // MARK: Configuration
 
     func configure(config: OrbConfig, activity: OrbActivity, celebration: OrbCelebration = .big, size: CGFloat,
-                   followsPointer: Bool, interactive: Bool, live: Bool) {
+                   showsBubble: Bool? = nil, followsPointer: Bool, interactive: Bool, live: Bool) {
         let resized = size != self.size, restyled = config != self.config
         let resumed = live && !self.live
         self.config = config
         self.activity = activity
         self.celebration = celebration
         self.size = size
+        self.showsBubble = showsBubble ?? (size >= OrbGeometry.bubbleBox)
         self.followsPointer = followsPointer
         self.interactive = interactive
         self.live = live
@@ -372,7 +377,7 @@ final class OrbAnimationView: NSView {
         // A resting orb runs no frames to move its bubble or open its mouth: it gets the new rest pose right here.
         let resting = window != nil && isResting
         if resting {
-            bubbleIn.value = shown.bubble == nil || size < 26 ? 0 : 1
+            bubbleIn.value = shown.bubble == nil || !showsBubble ? 0 : 1
             lastPose = restPose
         }
         if !sameFace {
@@ -380,6 +385,24 @@ final class OrbAnimationView: NSView {
         } else if resting {
             apply(lastPose)
         }
+    }
+
+    /// Features that change with the expression: a new one replaces the old in the same view.
+    private static let swapsInPlace: Set<OrbLayer.Kind> = [.eyes, .mouth, .brows]
+
+    private static func fade(_ duration: CFTimeInterval) -> CATransition {
+        let fade = CATransition()
+        fade.type = .fade
+        fade.duration = duration
+        return fade
+    }
+
+    /// A layer that was not there fades in.
+    private static func appear(_ duration: CFTimeInterval) -> CABasicAnimation {
+        let appear = CABasicAnimation(keyPath: "opacity")
+        appear.fromValue = 0
+        appear.duration = duration
+        return appear
     }
 
     /// The activities a click makes smile (the others are busy, or asking, or failing: they stay as they are).
@@ -396,22 +419,25 @@ final class OrbAnimationView: NSView {
     ///
     /// Bitmaps that are not decoded yet are decoded in the background and the orb keeps showing what it
     /// showed (nothing, the first time) until they are all there: the main thread never waits for a PNG.
-    /// `waited`: this is the rebuild after that decoding.
-    private func rebuild(resize: Bool = false, waited: Bool = false) {
+    /// `decoded`: this is the rebuild after that decoding, with the bitmaps it made.
+    private func rebuild(resize: Bool = false, decoded: [OrbLayer: CGImage]? = nil) {
         guard window != nil else { return }
         let scale = backingScale, side = side
         let resize = resize || needsResize || scale != builtScale
         let layers = config.layers(eyes: shown.eyes, mouth: shown.mouth(base: config.mouth), brows: shown.brows)
+        let waited = decoded != nil
         imageRequest += 1
         if !waited {
             let reusable = resize ? [] : Set(placed.map(\.layer))
-            let missing = layers.filter { !reusable.contains($0) && OrbImages.cached($0.path, pixels: side * scale, tint: $0.tint) == nil }
-            if !missing.isEmpty {
+            let needed = layers.filter { !reusable.contains($0) }
+            if needed.contains(where: { OrbImages.cached($0.path, pixels: side * scale, tint: $0.tint) == nil }) {
                 needsResize = resize
                 let request = imageRequest
-                OrbImages.load(missing, pixels: side * scale) { [weak self] in
+                OrbImages.load(needed, pixels: side * scale) { [weak self] images in
                     guard let self, request == self.imageRequest else { return }
-                    self.rebuild(waited: true)
+                    var decoded: [OrbLayer: CGImage] = [:]
+                    for (layer, image) in zip(needed, images) { decoded[layer] = image }
+                    self.rebuild(decoded: decoded)
                 }
                 // A resize with layers on screen (another display, another size): until the new bitmaps are
                 // there, the old ones stand in, stretched to the new geometry (never a decode on this thread).
@@ -443,18 +469,30 @@ final class OrbAnimationView: NSView {
 
         let current = placed.map(\.layer)
         if resize || layers != current {
-            if waited || (!current.isEmpty && !resize) {
-                let fade = CATransition()
-                fade.type = .fade
-                fade.duration = 0.18
-                orb.add(fade, forKey: "swap")
-            }
+            let fades = waited || (!current.isEmpty && !resize)
+            // A new Orb or a new size fades in as a whole. A changed feature crossfades on its own: the Orb moves
+            // meanwhile, and fading all of it would blend it with a still picture of itself.
+            let fadesWhole = fades && (current.isEmpty || resize)
+            if fadesWhole { orb.add(Self.fade(0.18), forKey: "swap") }
             // Layers that stay (body, cheeks, hair…) are reused; only changed features get new bitmaps.
             var reusable = resize ? [:] : Dictionary(placed.map { ($0.layer, $0) }, uniquingKeysWith: { first, _ in first })
+            // The eyes, mouth or brows of another expression take over the view the old ones had.
+            let wanted = Set(layers)
+            var swappable = Dictionary(reusable.values.filter { !wanted.contains($0.layer) && Self.swapsInPlace.contains($0.layer.kind) }
+                .map { ($0.layer.kind, $0) }, uniquingKeysWith: { first, _ in first })
             placed = layers.map { item in
                 if let kept = reusable.removeValue(forKey: item) { return kept }
+                let image = decoded?[item] ?? OrbImages.cgImage(item.path, pixels: side * scale, tint: item.tint)
+                if item.kind == .mouth {
+                    mouthImage = image
+                    shownViseme = nil
+                }
+                if let old = swappable.removeValue(forKey: item.kind) {
+                    if fades { old.view.add(Self.fade(0.18), forKey: "swap") }
+                    old.view.contents = image
+                    return Placed(layer: item, view: old.view, isLoose: item.isLoose)
+                }
                 let view = CALayer()
-                let image = OrbImages.cgImage(item.path, pixels: side * scale, tint: item.tint)
                 view.contents = image
                 view.contentsGravity = .resize
                 // Bitmaps match the on-screen size, so plain linear filtering (no mipmaps) is the sharpest.
@@ -463,11 +501,8 @@ final class OrbAnimationView: NSView {
                 view.bounds = CGRect(x: 0, y: 0, width: side, height: side)
                 if item.kind == .eyes { view.anchorPoint = CGPoint(x: 0.5, y: 1 - OrbGeometry.eyeLine) }
                 if item.isLoose { view.anchorPoint = CGPoint(x: 0.5, y: 1 - OrbGeometry.crownLine) }
-                if item.kind == .mouth {
-                    view.anchorPoint = CGPoint(x: 0.5, y: 1 - OrbGeometry.mouthLine)
-                    mouthImage = image
-                    shownViseme = nil
-                }
+                if item.kind == .mouth { view.anchorPoint = CGPoint(x: 0.5, y: 1 - OrbGeometry.mouthLine) }
+                if fades && !fadesWhole { view.add(Self.appear(0.18), forKey: "swap") }
                 return Placed(layer: item, view: view, isLoose: item.isLoose)
             }
             orb.sublayers = placed.map(\.view)
@@ -475,7 +510,7 @@ final class OrbAnimationView: NSView {
             freshLayers = true
         }
 
-        if let text = shown.bubble, size >= 26, text != shownBubble {
+        if let text = shown.bubble, showsBubble, text != shownBubble {
             // A new symbol replacing a visible one pops in instead of just swapping.
             if shownBubble != nil, bubbleIn.value > 0.5 { bubbleIn.value = 0.55 }
             shownBubble = text
@@ -688,7 +723,7 @@ final class OrbAnimationView: NSView {
         jump = nil
         glanceStart = nil
         cueBlinkStart = nil
-        bubbleIn.value = shown.bubble == nil || size < 26 ? 0 : 1
+        bubbleIn.value = shown.bubble == nil || !showsBubble ? 0 : 1
         lastPose = restPose
         apply(lastPose)
     }
@@ -798,7 +833,7 @@ final class OrbAnimationView: NSView {
     /// mouth stays open, as the static orb draws it).
     private var restPose: OrbPose {
         var pose = OrbPose.rest
-        if shown.bubble == nil || size < 26 {
+        if shown.bubble == nil || !showsBubble {
             pose.bubbleOpacity = 0
             pose.bubbleScale = 0.4
         }
@@ -879,7 +914,7 @@ final class OrbAnimationView: NSView {
         pose.blink = max(blinker.amount(at: time, using: &rng) * blinkFactor, flourish.squint)
         speak(&pose, at: time, dt: dt)
 
-        bubbleIn.step(toward: shown.bubble != nil && size >= 26 ? 1 : 0, dt: dt, response: 0.35, damping: 0.6)
+        bubbleIn.step(toward: shown.bubble != nil && showsBubble ? 1 : 0, dt: dt, response: 0.35, damping: 0.6)
         let appear = max(0, bubbleIn.value)
         pose.bubbleScale = 0.4 + 0.6 * appear
         pose.bubbleOpacity = min(1, appear) * (0.8 + 0.2 * sin(t * 2.4))
@@ -1033,7 +1068,7 @@ final class OrbAnimationView: NSView {
     private func loadVisemes() {
         guard !visemesLoading, let layers = config.visemeLayers() else { return }
         visemesLoading = true
-        OrbImages.load(Array(layers.values), pixels: builtPixels) { [weak self] in
+        OrbImages.load(Array(layers.values), pixels: builtPixels) { [weak self] _ in
             guard let self else { return }
             visemesLoading = false
             // A resting orb runs no frames: it picks the shapes up here (the open mouth of "speaking").

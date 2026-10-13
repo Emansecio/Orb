@@ -63,7 +63,7 @@ struct RunCommandTool: AgentTool {
     func runWithImages(_ arguments: JSONValue, context: ToolContext) async throws -> ToolResult {
         let command = try arguments.requiredString("command")
         let directory = arguments.nonEmptyString("cwd").map(context.url(for:)) ?? context.workingDirectory
-        guard directory.isExistingDirectory else { throw ToolError("Pasta não encontrada: \(directory.path)") }
+        guard directory.isExistingDirectory else { throw ToolError.notFound("Pasta não encontrada", directory) }
         let shell = await context.shell.resolved()
 
         if arguments["background"]?.bool == true {
@@ -71,8 +71,20 @@ struct RunCommandTool: AgentTool {
         }
         let seconds = arguments.integer("timeout_seconds", default: Self.defaultTimeout, in: 1...Self.maxTimeout)
         let spill = Self.spillFile(context: context)
+        var detach: ProcessRunner.Detach?
+        if let release = context.release, let jobs = context.jobs, let botID = context.botID {
+            let log = jobs.logFolder(for: botID).appending(path: "comando-\(UUID().uuidString.prefix(8).lowercased()).log")
+            detach = ProcessRunner.Detach(log: log, when: release.isRequested(after:))
+            release.begin()
+        }
+        defer { if detach != nil { context.release?.end() } }
+        let startedAt = Date.now
         let result = try await ProcessRunner.run(shell.shell, shell.arguments(for: command), directory: directory, environment: shell.environment,
-                                                 timeout: .seconds(seconds), outputLimit: Self.outputLimit, spillTo: spill)
+                                                 timeout: .seconds(seconds), outputLimit: Self.outputLimit, spillTo: spill, detach: detach)
+        if let process = result.detached, let jobs = context.jobs, let botID = context.botID {
+            let job = await jobs.adopt(botID: botID, command: command, directory: directory, startedAt: startedAt, process: process)
+            return ToolResult(text: Self.detachedText(job, output: result))
+        }
         var output = result.output.isEmpty ? "(sem saída)" : result.output
         if !shell.isFromUserShell {
             output += "\n[aviso: não consegui ler o PATH do Terminal; rodei com o perfil de login. Se um programa não foi "
@@ -101,8 +113,32 @@ struct RunCommandTool: AgentTool {
         if let signal = result.signal {
             return ToolResult(text: "Código de saída: encerrado pelo sinal \(Signals.describe(signal))\n\(output)", failed: true)
         }
-        return ToolResult(text: "Código de saída: \(result.status)\(Signals.hint(forExitCode: result.status))\n\(output)",
+        return ToolResult(text: "Código de saída: \(result.status)\(Self.hint(forExitCode: result.status))\n\(output)",
                           failed: Self.failed(status: result.status, printed: !result.output.isEmpty))
+    }
+
+    /// What the shell's own codes mean, so the model fixes the call instead of retrying it: 127 and 126 come from the
+    /// shell before the program runs; above 128 a signal ended it.
+    static func hint(forExitCode code: Int32) -> String {
+        switch code {
+        case 127: " (comando não encontrado: confira o nome com command -v, ou se a ferramenta está instalada e no PATH)"
+        case 126: " (o arquivo existe mas não pode ser executado: falta permissão de execução, ou não é um programa)"
+        default: Signals.hint(forExitCode: code)
+        }
+    }
+
+    /// What the model reads for a command that went on in the background while it ran (`CommandRelease`): the user wants the
+    /// Orb back, so it is told to answer them, and where the rest of the command is.
+    static func detachedText(_ job: BackgroundJobs.Snapshot, output: ProcessOutput) -> String {
+        let printed = output.isBinary ? "(saída binária)" : output.output.isEmpty ? "(sem saída ainda)" : output.output
+        return """
+        [O comando continua rodando em segundo plano como o processo \(job.id), porque o usuário quis falar com você \
+        enquanto ele roda. Atenda o usuário agora; quando precisar do resultado, job_output(id: "\(job.id)") mostra a saída \
+        e se ele terminou, job_stop(id: "\(job.id)") encerra.]
+        Log completo: \(job.logPath)
+        Saída até aqui:
+        \(printed)
+        """
     }
 
     static func failed(status: Int32, printed: Bool) -> Bool {

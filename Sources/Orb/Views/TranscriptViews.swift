@@ -1028,7 +1028,7 @@ private struct NoticeLine: View {
     let botID: UUID
     /// Whether the conversation has something older to summarize, read once for a notice that offers to compact.
     @State private var canCompact = false
-    /// Whether the skill a notice proposes still waits for a decision, read for a notice that offers to review it.
+    /// Whether the skill (or the memory merge) a notice proposes still waits for a decision, read for a notice that offers it.
     @State private var hasProposal = false
     @State private var reviewing: SkillDraft?
     @State private var showsProviderDetail = false
@@ -1097,6 +1097,7 @@ private struct NoticeLine: View {
         .accessibilityLabel(TranscriptSpeech.notice(failure.map { "não deu certo. " + $0 } ?? text))
         .task(id: id) {
             if let slug = NoticeAction.proposedSlug(in: text) { hasProposal = await model.hasSkillProposal(slug, of: botID) }
+            if text.hasPrefix(NoticeAction.memoryMergePrefix) { hasProposal = await model.hasMemoryMergeProposal(botID, notice: text) }
             guard NoticeAction.actions(for: text).contains(.compact), let input = model.contextInput(for: botID) else { return }
             canCompact = await Task.detached { ContextReading.make(input)?.canCompact ?? false }.value
         }
@@ -1156,6 +1157,9 @@ private struct NoticeLine: View {
         case .reviewSkill:
             guard let slug = NoticeAction.proposedSlug(in: text) else { return }
             Task { reviewing = await model.skillDraft(slug, from: botID) }
+        case .mergeMemory:
+            hasProposal = false
+            Task { await model.applyMemoryMerge(botID) }
         }
     }
 }

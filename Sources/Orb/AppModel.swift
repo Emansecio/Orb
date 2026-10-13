@@ -1442,7 +1442,11 @@ final class AppModel {
                 append(.orbMessage(item), to: botID, id: index == 0 ? bubble : nil)
             }
         }
-        if fromUser { setDraft("", for: botID) }
+        if fromUser {
+            setDraft("", for: botID)
+            session.resumableSince = .now
+            session.resumedAfterJobs = 0
+        }
         setStatus("Pensando", of: botID)
         session.resetWork()
         session.showWork(WorkPhrase.line(status: "Pensando"))
@@ -1522,9 +1526,14 @@ final class AppModel {
         session.turnModel = ref.text
         let turn = session.beginTurn()
         let steering = composerLane(botID).queue // messages sent during the turn reach the model between its steps
+        let release = CommandRelease(steering: steering) { [weak self] waited in
+            Task { @MainActor in self?.live(botID).setCommandWaited(waited) }
+        }
+        session.commandRelease = release
         session.turnTask = Task { [self] in
             guard !Task.isCancelled else { return } // stopped before it began
-            let brief = await bank.brief(for: typed, conversationIsNew: history.isEmpty, userTurns: userTurns,
+            let brief = await bank.brief(for: typed, context: TurnPreface.taskContext(history: history, goal: ledger?.goal),
+                                         conversationIsNew: history.isEmpty, userTurns: userTurns,
                                          canSave: bot.permissionMode != .readOnly, alreadySent: sentMemories,
                                          profile: profile.promptSection)
             let inputs = await TurnPromptInputs.gather(bot: bot, skills: skills, brief: brief)
@@ -1548,6 +1557,8 @@ final class AppModel {
                 ? await browserHub.status(for: bot.browserEngine) : nil
             let browserAvailability = BrowserAvailability(capabilities: bot.capabilities, engine: bot.browserEngine, status: browserStatus)
             var context = baseContext
+            // A run nobody watches (a routine, a request from another Orb) waits for its commands to the end.
+            if session.routineID == nil || session.sideKind == .group { context.release = release }
             context.browser = BrowserAccess(hub: browserHub, engine: browserAvailability == .browser ? bot.browserEngine : .simple,
                                             searchProvider: bot.searchProvider, searchKeys: SearchKeys(vault: secretVault))
             // MARK: MultiOrb (WP3)
@@ -1573,7 +1584,7 @@ final class AppModel {
             let request = TurnRequest(bot: bot, model: ref.model, system: system, history: history,
                                       prompt: TurnPreface.prepend(built.preface, to: message),
                                       client: client, tools: tools, context: context, budget: budget, ledger: ledger,
-                                      chunks: chunks, maxSteps: maxSteps,
+                                      chunks: chunks, maxSteps: maxSteps, unattended: session.routineID != nil && session.sideKind != .group,
                                       turnGrants: turnGrants, permissions: permissionSource(for: bot),
                                       images: pictures, requestItem: bubble, supportsImages: sees,
                                       onImagesRejected: { [weak self] in Task { @MainActor in self?.visionRejected.insert(ref.text) } },
@@ -1676,17 +1687,41 @@ final class AppModel {
 
     /// Puts the Orb's running background processes above its message box, and says in the chat when one it showed ended by
     /// itself while the Orb was idle: the turn that started it may be long over. A stop is the user's or the Orb's own doing,
-    /// and during a turn the Orb is there to look (a notice would only split the reply being written).
+    /// and during a turn the Orb is there to look (a notice would only split the reply being written). A process of the task
+    /// you last asked for lets the Orb go on with it by itself (`resumesByItself`), as the notice's "Continuar" would.
     func showJobs(of botID: UUID) async {
         let all = await jobs.list(botID: botID)
         let live = live(botID)
+        var resumeAfter: String?
         if !isWorking(botID) {
             for shown in live.jobs {
                 guard let job = all.first(where: { $0.id == shown.id }), !job.isActive, job.state != .stopped else { continue }
-                append(.notice(NoticeAction.jobEnded(job)), to: botID)
+                let notice = NoticeAction.jobEnded(job)
+                append(.notice(notice), to: botID)
+                if resumesByItself(after: job, of: botID) { resumeAfter = notice }
             }
         }
         live.setJobs(all.filter(\.isActive))
+        // As "Continuar" sends it, but without bringing the chat to its end: you may be reading further up.
+        if let notice = resumeAfter, send(NoticeAction.continueMessage(after: notice), to: botID) {
+            session(botID).resumedAfterJobs += 1
+        }
+    }
+
+    /// Times an Orb goes on by itself after its processes end, between two messages of yours.
+    static let resumesAfterJobs = 3
+
+    /// Whether `job` ending lets the Orb go on without a click: it started after your last message (not in a routine's or
+    /// another Orb's run since), the Orb did not go on by itself too often already, and you are not typing to it.
+    func resumesByItself(after job: BackgroundJobs.Snapshot, of botID: UUID) -> Bool {
+        guard let session = sessions[botID], let since = session.resumableSince else { return false }
+        return job.startedAt >= since && session.resumedAfterJobs < Self.resumesAfterJobs && session.routineID == nil
+            && drafts[botID, default: ""].isEmpty
+    }
+
+    /// The working line's "Segundo plano": the command the turn waits for goes on as a background job, and the Orb talks again.
+    func sendCommandToBackground(of botID: UUID) {
+        sessions[botID]?.commandRelease?.press()
     }
 
     /// The strip's stop button. The strip follows by itself (`showJobs`), and a stop says nothing in the chat.

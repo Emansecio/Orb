@@ -119,8 +119,15 @@ final class BotSession {
     @ObservationIgnored var turnID: UUID?
     /// The routine whose run is the running turn.
     var routineID: UUID? {
-        didSet { if (oldValue == nil) != (routineID == nil) { model?.syncActivities() } }
+        didSet {
+            if (oldValue == nil) != (routineID == nil) { model?.syncActivities() }
+            if routineID != nil { resumableSince = nil } // what a side run starts is not the task you asked for
+        }
     }
+    /// Since when a background process that ends lets the Orb go on by itself (`AppModel.resumesByItself`): your last
+    /// message, until a routine's or another Orb's run, or a stop. `resumedAfterJobs` counts the times it did since.
+    @ObservationIgnored var resumableSince: Date?
+    @ObservationIgnored var resumedAfterJobs = 0
     /// When the running routine's run began.
     @ObservationIgnored var routineStart: Date?
     // MARK: MultiOrb (WP1)
@@ -167,8 +174,14 @@ final class BotSession {
     /// The pass that shortens the pinned memory (`MemoryConsolidation`), while it runs, and when the last one began.
     @ObservationIgnored var memoryConsolidation: Task<Void, Never>?
     @ObservationIgnored var memoryConsolidationTried: Date?
+    /// The pass that proposes merging alike pages (`MemoryMerge`), while it runs, and when the last failed one began.
+    @ObservationIgnored var memoryMerge: Task<Void, Never>?
+    @ObservationIgnored var memoryMergeTried: Date?
     /// The proposals the chat already told about (the command and when it was written), so each is told once.
     @ObservationIgnored var announcedProposals: [String: Date] = [:]
+
+    /// The running turn's way to let a command go on in the background (the working line's "Segundo plano").
+    @ObservationIgnored var commandRelease: CommandRelease?
 
     // MARK: Composer
 

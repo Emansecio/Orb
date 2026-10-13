@@ -289,11 +289,12 @@ actor MemoryBank {
     /// The memories worth putting in front of the model with `message`, best first, at most `limit`. Unlike `recall` (the
     /// model asking), this runs on every message, so it is picky: a message that only greets or confirms searches
     /// nothing; a page must have at least two of the message's distinct words when it has three or more (one when
-    /// fewer); and `isSent` leaves out what the conversation already carries.
-    func related(to message: String, limit: Int = MemoryBank.relatedLimit, excluding: Set<String> = [],
+    /// fewer); and `isSent` leaves out what the conversation already carries. `context`: the task in progress (latest
+    /// request first), whose words stand in for a message that only points back at it (`MemoryText.lookupTerms`).
+    func related(to message: String, context: String = "", limit: Int = MemoryBank.relatedLimit, excluding: Set<String> = [],
                  isSent: (MemoryHit) -> Bool = { _ in false }, now: Date = .now) -> [MemoryHit] {
         prepare(now: now)
-        let terms = MemoryText.topicTerms(message)
+        let terms = MemoryText.lookupTerms(message, context: context)
         guard !terms.isEmpty, let match = MemoryText.ftsQuery(terms.joined(separator: " ")) else { return [] }
         let required = terms.count >= 3 ? 2 : 1
         // Wider than `limit`: what the filters drop must not leave the message with fewer memories than it deserves.
@@ -316,8 +317,8 @@ actor MemoryBank {
     ///
     /// The memories related to the message are only those that fit it (see `related(to:)`), and not the ones the
     /// conversation carries already: `alreadySent` holds the related lines (or just their `relatedHeaders`) of its
-    /// latest messages, and a memory is sent again only when it changed.
-    func brief(for message: String, conversationIsNew: Bool, userTurns: Int = 1,
+    /// latest messages, and a memory is sent again only when it changed. `context`: the task in progress (see `related(to:)`).
+    func brief(for message: String, context: String = "", conversationIsNew: Bool, userTurns: Int = 1,
                canSave: Bool = true, alreadySent: [String] = [], budget: Int = MemoryBank.briefBudget, profile: String = "",
                now: Date = .now) -> MemoryBrief {
         prepare(now: now)
@@ -358,7 +359,7 @@ actor MemoryBank {
         var notes: [String] = []
         var shown: Set<String> = [Self.identityPath]
         shown.formUnion(preferences.map(\.path))
-        let related = related(to: message, excluding: shown,
+        let related = related(to: message, context: context, excluding: shown,
                               isSent: { hit in Self.isSent(Self.relatedHeader(hit), in: alreadySent) }, now: now)
         var relatedLines: [String] = []
         for hit in related {
@@ -509,7 +510,7 @@ actor MemoryBank {
 
     /// Opens the index on first use (off the main thread) and picks up hand edits every `reconcileInterval`. An index
     /// that could not be opened is tried again every `indexRetryInterval`, not given up for the whole session.
-    private func prepare(now: Date) {
+    func prepare(now: Date) {
         if !isPrepared || (index == nil && now >= nextIndexAttempt) {
             isPrepared = true
             index = openIndex()
@@ -584,7 +585,7 @@ actor MemoryBank {
 
     /// Newest first; pages saved in the same instant keep one order (by path), because the pinned memory is part of the
     /// system prompt and its order must not change between two messages.
-    private func items(_ kind: MemoryKind, limit: Int) -> [MemorySnapshot.Item] {
+    func items(_ kind: MemoryKind, limit: Int) -> [MemorySnapshot.Item] {
         index?.rows("SELECT path, title, body, updated, compacted FROM pages WHERE kind = ? ORDER BY updated DESC, path LIMIT ?",
                     [.text(kind.rawValue), .int(limit)]).map { row in
             MemorySnapshot.Item(path: row.text(0), kind: kind, title: row.text(1), body: row.text(2),
@@ -592,14 +593,21 @@ actor MemoryBank {
         } ?? []
     }
 
-    private func read(_ path: String) -> MemoryPage? {
+    /// Pages of these kinds not compacted, counted in the index without reading them.
+    func count(_ kinds: [MemoryKind]) -> Int {
+        let marks = kinds.map { _ in "?" }.joined(separator: ", ")
+        return index?.rows("SELECT count(*) FROM pages WHERE compacted = 0 AND kind IN (\(marks))",
+                           kinds.map { .text($0.rawValue) }).first?.int(0) ?? 0
+    }
+
+    func read(_ path: String) -> MemoryPage? {
         let url = directory.appending(path: path)
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
         return MemoryPage.parse(text, path: path, modified: Self.modificationDate(url))
     }
 
     @discardableResult
-    private func write(_ page: MemoryPage) -> Bool {
+    func write(_ page: MemoryPage) -> Bool {
         guard !isClosed else { return false }
         let url = directory.appending(path: page.path)
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -646,7 +654,7 @@ actor MemoryBank {
         }
     }
 
-    private func uniquePath(_ folder: String, _ slug: String) -> String {
+    func uniquePath(_ folder: String, _ slug: String) -> String {
         let base = slug.isEmpty ? "nota" : slug
         while true {
             let path = "\(folder)/\(base)-\(String(UUID().uuidString.prefix(4)).lowercased()).md"

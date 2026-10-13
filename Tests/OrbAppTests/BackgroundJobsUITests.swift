@@ -51,6 +51,28 @@ import Testing
         #expect(afterQuit.hasPrefix(NoticeAction.continueMessage + ".") && afterQuit.contains("Confira antes de repetir"))
     }
 
+    @Test @MainActor func aProcessOfTheTaskYouAskedForLetsTheOrbGoOnByItself() {
+        let (model, botID) = makeModel()
+        let session = model.session(botID)
+        func job(startedAt: Date) -> BackgroundJobs.Snapshot {
+            BackgroundJobs.Snapshot(id: "1", command: "make", directory: "/", logPath: "/x", startedAt: startedAt, state: .exited(0))
+        }
+        let asked = Date.now
+        #expect(!model.resumesByItself(after: job(startedAt: asked), of: botID), "you never asked for anything")
+        session.resumableSince = asked
+        #expect(model.resumesByItself(after: job(startedAt: asked + 1), of: botID))
+        #expect(!model.resumesByItself(after: job(startedAt: asked - 1), of: botID), "started before your last message")
+
+        model.setDraft("espera", for: botID)
+        #expect(!model.resumesByItself(after: job(startedAt: asked + 1), of: botID), "you are typing to it")
+        model.setDraft("", for: botID)
+        session.resumedAfterJobs = AppModel.resumesAfterJobs
+        #expect(!model.resumesByItself(after: job(startedAt: asked + 1), of: botID), "it went on by itself enough")
+        session.resumedAfterJobs = 0
+        session.routineID = UUID()
+        #expect(session.resumableSince == nil, "what a routine starts is not your task")
+    }
+
     @Test @MainActor func aStoppedJobLeavesTheStripWithoutAWord() async throws {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let (model, botID) = makeModel()

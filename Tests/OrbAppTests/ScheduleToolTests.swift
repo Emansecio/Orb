@@ -6,8 +6,8 @@ import Testing
 // Orb's own), its permissions in each mode and in both engines, and the mailbox Claude Code's server uses.
 
 private func call(_ action: String, name: String? = nil, prompt: String? = nil, when: JSONValue? = nil,
-                  goal: String? = nil) -> JSONValue {
-    var object: [String: JSONValue] = ["action": .string(action)]
+                  goal: String? = nil, extra: [String: JSONValue] = [:]) -> JSONValue {
+    var object: [String: JSONValue] = extra.merging(["action": .string(action)]) { $1 }
     if let name { object["name"] = .string(name) }
     if let prompt { object["prompt"] = .string(prompt) }
     if let when { object["when"] = when }
@@ -75,7 +75,7 @@ struct OnceAndCronScheduleTests {
 
     @Test func theToolCreatesOneTimeAndCronTasks() throws {
         func when(_ fields: [String: JSONValue]) throws -> Schedule {
-            guard case .create(_, _, let schedule, _) = try ScheduleCommand(call("create", prompt: "x", when: .object(fields))) else { throw ToolError("") }
+            guard case .create(_, _, let schedule, _, _, _) = try ScheduleCommand(call("create", prompt: "x", when: .object(fields))) else { throw ToolError("") }
             return schedule
         }
         let local = try #require(ScheduleCommand.moment("2099-01-02T09:00"))
@@ -144,11 +144,11 @@ struct ScheduleCommandTests {
     }
 
     @Test func theNameDefaultsToTheStartOfThePromptAndIsKeptShort() throws {
-        guard case .create(let name, _, _, _) = try ScheduleCommand(call("create", prompt: "Resuma meus e-mails novos de hoje", when: daily9)) else {
+        guard case .create(let name, _, _, _, _, _) = try ScheduleCommand(call("create", prompt: "Resuma meus e-mails novos de hoje", when: daily9)) else {
             Issue.record("not a create"); return
         }
         #expect(name == "Resuma meus e-mails novos…")
-        guard case .create(let long, _, _, _) = try ScheduleCommand(call("create", name: String(repeating: "n", count: 200), prompt: "x", when: daily9)) else {
+        guard case .create(let long, _, _, _, _, _) = try ScheduleCommand(call("create", name: String(repeating: "n", count: 200), prompt: "x", when: daily9)) else {
             Issue.record("not a create"); return
         }
         #expect(long.count == ScheduleCommand.nameLimit)
@@ -156,7 +156,7 @@ struct ScheduleCommandTests {
 
     @Test func eachKindOfWhenIsReadAndItsLimitsAreEnforced() throws {
         func when(_ fields: [String: JSONValue]) throws -> Schedule {
-            guard case .create(_, _, let schedule, _) = try ScheduleCommand(call("create", prompt: "x", when: .object(fields))) else { throw ToolError("") }
+            guard case .create(_, _, let schedule, _, _, _) = try ScheduleCommand(call("create", prompt: "x", when: .object(fields))) else { throw ToolError("") }
             return schedule
         }
         #expect(try when(["kind": .string("daily"), "hour": .number(9), "minute": .number(30)]) == .daily(hour: 9, minute: 30))
@@ -202,7 +202,26 @@ struct ScheduleCommandTests {
         #expect(try ScheduleCommand(call("pause", name: "A")) == .setEnabled("A", false))
         #expect(try ScheduleCommand(call("resume", name: "A")) == .setEnabled("A", true))
         #expect(try ScheduleCommand(call("delete", name: "A")) == .delete("A"))
-        for action in ["pause", "resume", "delete"] { #expect(throws: ToolError.self) { try ScheduleCommand(call(action)) } }
+        for action in ["pause", "resume", "delete", "run", "update"] { #expect(throws: ToolError.self) { try ScheduleCommand(call(action)) } }
+        #expect(try ScheduleCommand(call("run", name: "A")) == .run("A"))
+    }
+
+    @Test func aCreateCanStartPausedOrRunAtOnce() throws {
+        #expect(try ScheduleCommand(call("create", name: "A", prompt: "x", when: daily9, extra: ["enabled": .bool(false)]))
+                == .create(name: "A", prompt: "x", schedule: .daily(hour: 9, minute: 0), enabled: false))
+        #expect(try ScheduleCommand(call("create", name: "A", prompt: "x", when: daily9, extra: ["run_now": .bool(true)]))
+                == .create(name: "A", prompt: "x", schedule: .daily(hour: 9, minute: 0), runNow: true))
+        // Paused and run now at once contradict each other.
+        #expect(throws: ToolError.self) {
+            try ScheduleCommand(call("create", name: "A", prompt: "x", when: daily9, extra: ["enabled": .bool(false), "run_now": .bool(true)]))
+        }
+    }
+
+    @Test func anUpdateChangesOnlyWhatItGives() throws {
+        #expect(try ScheduleCommand(call("update", name: "A", when: every(minutes: 30))) == .update(name: "A", schedule: .everyMinutes(30)))
+        #expect(try ScheduleCommand(call("update", name: "A", prompt: "  novo  ", goal: "")) == .update(name: "A", prompt: "novo", goal: ""))
+        #expect(throws: ToolError.self) { try ScheduleCommand(call("update", name: "A")) } // nothing to change
+        #expect(throws: ToolError.self) { try ScheduleCommand(call("update", name: "A", prompt: "  ")) }
     }
 }
 
@@ -482,6 +501,48 @@ struct SchedulePermissionTests {
         #expect(model.routines.count == 1)
         _ = try run(model, atlas, call("list"))
         _ = try run(model, atlas, call("pause", name: "Manhã"))
+    }
+
+    @Test @MainActor func aTaskCanBeCreatedPaused() throws {
+        let (model, atlas, _) = setUp()
+        let said = try run(model, atlas, call("create", name: "Depois", prompt: "x", when: daily9, extra: ["enabled": .bool(false)]))
+        #expect(model.routines.first?.isEnabled == false)
+        #expect(said.contains("criada pausada") && !said.contains("Próxima execução"))
+    }
+
+    @Test @MainActor func anUpdateKeepsWhatItDoesNotChangeAndCountsANewScheduleFromNow() throws {
+        let (model, atlas, _) = setUp()
+        _ = try run(model, atlas, call("create", name: "Manhã", prompt: "resuma", when: daily9, goal: "Caixa zerada"))
+        let id = model.routines[0].id
+        model.routines[0].goal?.check = GoalCheck(progress: 50, status: .onTrack, note: "metade")
+        model.routines[0].lastRun = Date.now.addingTimeInterval(-3_600)
+        model.routines[0].runs = [RoutineRun(date: .now, succeeded: true, summary: "ok")]
+
+        _ = try run(model, atlas, call("update", name: "manha", prompt: "resuma e arquive"))
+        #expect(model.routines[0].prompt == "resuma e arquive" && model.routines[0].goal?.check != nil && model.routines[0].runs.count == 1)
+        #expect(model.routines[0].schedule == .daily(hour: 9, minute: 0) && model.routines[0].lastRun != nil)
+
+        let said = try run(model, atlas, call("update", name: "Manhã", when: every(minutes: 30), goal: "Caixa com 10"))
+        #expect(model.routines[0].id == id && model.routines[0].schedule == .everyMinutes(30) && model.routines[0].lastRun == nil)
+        #expect(model.routines[0].nextRun > Date.now.addingTimeInterval(29 * 60))
+        #expect(model.routines[0].goal == RoutineGoal(target: "Caixa com 10")) // a new goal starts unmeasured
+        #expect(said.hasPrefix("Alterei “Manhã”: a cada 30 minutos, próxima execução: ") && said.contains("Meta: Caixa com 10"))
+
+        _ = try run(model, atlas, call("update", name: "Manhã", goal: ""))
+        #expect(model.routines[0].goal == nil)
+        #expect(throws: ToolError.self) { try run(model, atlas, call("update", name: "Outra", prompt: "y")) }
+    }
+
+    @Test @MainActor func aRunOfATaskCannotChangeOrStartTasks() throws {
+        let (model, atlas, _) = setUp()
+        _ = try run(model, atlas, call("create", name: "Manhã", prompt: "x", when: daily9))
+        model.session(atlas.id).routineID = model.routines[0].id // as during its run
+        #expect(throws: ToolError.self) { try run(model, atlas, call("update", name: "Manhã", prompt: "outra coisa")) }
+        #expect(throws: ToolError.self) { try run(model, atlas, call("run", name: "Manhã")) }
+        _ = try run(model, atlas, call("pause", name: "Manhã")) // stopping is fine
+        #expect(throws: ToolError.self) { try run(model, atlas, call("resume", name: "Manhã")) }
+        #expect(throws: ToolError.self) { try run(model, atlas, call("delete", name: "Manhã")) }
+        #expect(model.routines[0].prompt == "x" && !model.routines[0].isEnabled)
     }
 
     @Test @MainActor func anOrbThatIsGoneCannotSchedule() {

@@ -139,6 +139,27 @@ extension String {
     func clipped(to limit: Int) -> String {
         count > limit ? String(prefix(limit)) + "…" : self
     }
+
+    /// Levenshtein distance, or nil once it is past `limit` (names of very different length are rejected without the work).
+    func editDistance(to other: String, limit: Int) -> Int? {
+        let a = Array(self), b = Array(other)
+        guard abs(a.count - b.count) <= limit else { return nil }
+        guard !a.isEmpty, !b.isEmpty else { return max(a.count, b.count) }
+        var row = Array(0...b.count)
+        for i in 1...a.count {
+            var previous = row[0]
+            row[0] = i
+            var best = row[0]
+            for j in 1...b.count {
+                let current = row[j]
+                row[j] = Swift.min(row[j] + 1, row[j - 1] + 1, previous + (a[i - 1] == b[j - 1] ? 0 : 1))
+                previous = current
+                best = Swift.min(best, row[j])
+            }
+            if best > limit { return nil }
+        }
+        return row[b.count] <= limit ? row[b.count] : nil
+    }
 }
 
 extension URL {
@@ -172,6 +193,31 @@ extension URL {
         return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
     }
 
+    /// Up to three paths that look like this missing one, for the "not found" error: the model mistypes a name, gets the
+    /// case wrong or guesses the extension far more often than the file is really gone. Only the nearest folder that
+    /// exists is read (one listing, no walk), compared with the first part of the path that is missing.
+    var lookalikes: [String] {
+        var folder = deletingLastPathComponent()
+        var missing = lastPathComponent
+        while !folder.isExistingDirectory, folder.path != "/" {
+            missing = folder.lastPathComponent
+            folder = folder.deletingLastPathComponent()
+        }
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else { return [] }
+        let wanted = missing.lowercased()
+        let stem = (wanted as NSString).deletingPathExtension
+        // A short name is near too many others: one letter off at most, none below 3 letters.
+        let typos = wanted.count >= 8 ? 2 : wanted.count >= 3 ? 1 : 0
+        let scored = names.prefix(5_000).lazy.filter { !$0.hasPrefix(".") || missing.hasPrefix(".") }.compactMap { name -> (Int, String)? in
+            let lower = name.lowercased()
+            if lower == wanted { return (0, name) }
+            if (lower as NSString).deletingPathExtension == stem, !stem.isEmpty { return (1, name) }
+            guard typos > 0 else { return nil }
+            return lower.editDistance(to: wanted, limit: typos).map { (1 + $0, name) }
+        }
+        return scored.sorted { $0 < $1 }.prefix(3).map { folder.appending(path: $0.1).path }
+    }
+
     /// An ordinary file once links are followed: not a device, a pipe or a socket, which have no size and can block a read
     /// forever (a FIFO without a writer) or never end (`/dev/zero`).
     var isRegularFileResolved: Bool {
@@ -184,5 +230,14 @@ extension URL {
             throw ToolError("\(path) não é um arquivo comum (é um dispositivo, pipe ou socket); ler isso pode não terminar. "
                 + "Use run_command com head -c se precisar mesmo.")
         }
+    }
+}
+
+extension ToolError {
+    /// "Arquivo não encontrado" with the lookalike paths (`URL.lookalikes`) and what to do next.
+    static func notFound(_ message: String, _ url: URL, advice: String = "") -> ToolError {
+        let near = url.lookalikes
+        let hint = near.isEmpty ? "" : " Caminhos parecidos: " + near.joined(separator: ", ") + "."
+        return ToolError("\(message): \(url.path).\(hint)" + (advice.isEmpty ? "" : " " + advice))
     }
 }

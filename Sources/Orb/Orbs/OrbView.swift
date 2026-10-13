@@ -45,14 +45,15 @@ struct OrbView: View {
     var body: some View {
         let fit = fits ? OrbFootprint.fit(config) : (scale: 1, offset: .zero)
         let orb = (size * fit.scale).rounded()
+        let showsBubble = size >= OrbGeometry.bubbleBox
         Group {
             if animated && !reduceMotion && !OrbView.forceStatic {
-                AnimatedOrb(config: config, activity: activity, size: orb, followsPointer: followsPointer,
+                AnimatedOrb(config: config, activity: activity, size: orb, showsBubble: showsBubble, followsPointer: followsPointer,
                             poke: poke, ack: ack, landing: landing, glance: glance, cue: cue, celebration: celebration,
                             interactive: interactive,
                             live: !paused && (appearsActive || OrbView.animateInactive))
             } else {
-                OrbFrame(config: config, activity: activity, size: orb, pose: .rest)
+                OrbFrame(config: config, activity: activity, size: orb, pose: .rest, showsBubble: showsBubble)
             }
         }
         .frame(width: orb, height: orb)
@@ -79,6 +80,8 @@ struct OrbFrame: View {
     let activity: OrbActivity
     let size: CGFloat
     let pose: OrbPose
+    /// nil: the bubble shows when `size` is big enough (`OrbGeometry.bubbleBox`).
+    var showsBubble: Bool?
 
     @Environment(\.displayScale) private var displayScale
     /// Counts bitmap batches that finished decoding: the canvas draws again when one arrives.
@@ -137,7 +140,7 @@ struct OrbFrame: View {
             .overlay {
                 Canvas(rendersAsynchronously: true) { context, _ in
                     OrbPainter(config: config, activity: activity, layers: drawn, size: size, side: side, scale: scale,
-                               pose: pose, decodedBatches: batches)
+                               pose: pose, showsBubble: showsBubble ?? (size >= OrbGeometry.bubbleBox), decodedBatches: batches)
                         .draw(in: &context)
                 }
                 .frame(width: side, height: side)
@@ -147,15 +150,17 @@ struct OrbFrame: View {
             // background and the orb appears when they are ready.
             .task(id: wanted) {
                 guard !OrbImages.decodesSynchronously else { return }
-                if !OrbImages.isCached(wanted.layers, pixels: wanted.pixels) {
-                    await OrbImages.load(wanted.layers, pixels: wanted.pixels)
+                var images = OrbImages.cachedImages(wanted.layers, pixels: wanted.pixels)
+                if images == nil {
+                    let loaded = await OrbImages.load(wanted.layers, pixels: wanted.pixels)
                     // A newer set was asked for meanwhile (this task was cancelled): it takes over.
                     guard !Task.isCancelled else { return }
                     decodedBatches += 1
+                    // The bitmaps themselves: the cache may have dropped some already.
+                    let all = loaded.compactMap { $0 }
+                    images = all.count == loaded.count ? all : nil
                 }
-                if let images = OrbImages.cachedImages(wanted.layers, pixels: wanted.pixels) {
-                    complete = Complete(bitmaps: wanted, images: images)
-                }
+                if let images { complete = Complete(bitmaps: wanted, images: images) }
             }
     }
 }
@@ -170,6 +175,7 @@ private struct OrbPainter {
     /// Display scale: bitmaps are decoded at exactly the drawn pixel size.
     let scale: CGFloat
     let pose: OrbPose
+    let showsBubble: Bool
     /// Not used by the drawing: it makes the canvas redraw when more bitmaps are decoded.
     var decodedBatches = 0
 
@@ -228,7 +234,7 @@ private struct OrbPainter {
             layerContext.draw(Image(decorative: image, scale: 1).interpolation(.high), in: CGRect(x: 0, y: 0, width: side, height: side))
         }
 
-        if let bubble = activity.bubble, size >= 26 {
+        if let bubble = activity.bubble, showsBubble {
             drawBubble(bubble, in: &context, center: CGPoint(x: center.x + size * 0.48, y: center.y - size * 0.5 - lift))
         }
     }

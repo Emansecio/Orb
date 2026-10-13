@@ -120,15 +120,15 @@ struct ContextWindow: Sendable, Equatable {
     /// `continuing`: the last user message of the input only picks up the task before it (a task that stopped at
     /// the step limit), so that task's outputs are the fresh ones and its turn is not dropped from under it.
     /// `paused`: the input ends with such a task, before the message that picks it up: it still counts as in progress.
-    /// `nudge`: index in the input of a user message the engine added only to steer the turn (the "continue" after a
-    /// reply cut by the output limit): part of the turn in progress, never the start of one, so the turn's request
-    /// is never folded away from under it.
-    /// `steering`: indexes in the input of the messages the user sent while the turn ran: like the nudge, one more step of
+    /// `nudges`: indexes in the input of user messages the engine added only to steer the turn (the "continue" after a
+    /// reply cut by the output limit, the reminder after a promise): part of the turn in progress, never the start of
+    /// one, so the turn's request is never folded away from under it.
+    /// `steering`: indexes in the input of the messages the user sent while the turn ran: like a nudge, one more step of
     /// the turn in progress (the request that started it stays the turn's start, its outputs stay whole).
     /// `foldAbove`: the share of the budget past which the history is folded down to the low-water mark (1: only when
     /// it is over the budget; less when folding is free anyway, see `Conversation.isCacheCold`).
     static func fit(_ input: [ChatMessage], budget: ContextBudget, cut: inout ContextCut, condensing: Int = 0,
-                    continuing: Bool = false, paused: Bool = false, nudge: Int? = nil, steering: [Int] = [],
+                    continuing: Bool = false, paused: Bool = false, nudges: [Int] = [], steering: [Int] = [],
                     foldAbove: Double = 1) -> ContextWindow {
         let limit = budget.characters
         let covered = min(max(cut.covered, 0), input.count)
@@ -151,8 +151,8 @@ struct ContextWindow: Sendable, Equatable {
         let origin = covered + pairLength + start
 
         // The task in progress: the latest request, or, for a task picked up again, the one before it.
-        let nudgeIndex = nudge.map { $0 - origin }
-        let stepIndexes = Set(([nudgeIndex].compactMap { $0 }) + steering.map { $0 - origin })
+        let nudgeIndexes = Set(nudges.map { $0 - origin })
+        let stepIndexes = nudgeIndexes.union(steering.map { $0 - origin })
         let users = raw.indices.filter { raw[$0].role == .user && !stepIndexes.contains($0) }
         let pickedUp = continuing && users.count >= 2
         let taskStart = pickedUp ? users[users.count - 2] : (users.last ?? -1)
@@ -307,8 +307,8 @@ struct ContextWindow: Sendable, Equatable {
         cut.skipped = skipped
         cut.settled = settled
         let skippedRange = skipped > 0 ? (dropped + 1)..<(dropped + 1 + skipped) : 0..<0
-        // The nudge is no word of the user's: it leaves no line.
-        let skippedSteps = skippedRange.filter { $0 != nudgeIndex }.map { raw[$0] }
+        // A nudge is no word of the user's: it leaves no line.
+        let skippedSteps = skippedRange.filter { !nudgeIndexes.contains($0) }.map { raw[$0] }
 
         // Messages before the first user message (a slice that began mid-turn) are just left out, not summarized.
         // What leaves the window is absorbed into the ledger once; the summary is rendered from it (never nested).

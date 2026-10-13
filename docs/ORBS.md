@@ -236,7 +236,8 @@ e o Equilibrado ficava com a fixação × 1,0 dos auxiliares).
 
 - **Os olhos seguem o cursor** em toda a janela, num raio de `max(320 pt, 5 × tamanho)`.
   Olhos, sobrancelhas, boca, cabelo e acessórios se deslocam em profundidades diferentes
-  (paralaxe), então o Orb parece virar a cabeça.
+  (paralaxe), então o Orb parece virar a cabeça. Óculos e monóculo (`OrbLayer.isEyewear`) andam com os olhos, e as lentes
+  não escorregam para fora deles.
 - Cada atividade define o quanto o cursor pode “roubar” o olhar (`pointerWeight`): parado obedece
   totalmente; digitando no terminal quase não tira o olho do trabalho; com erro ou dormindo, ignora.
 - **Passar o mouse por cima**: o Orb cresce um pouco (com uma leve sobra de mola), encara o ponteiro e,
@@ -267,7 +268,9 @@ Tudo em [`Orbs/OrbMotion.swift`](../Sources/Orb/Orbs/OrbMotion.swift) (funções
 - **Sombra no chão** (`OrbShadow`): fica mais estreita, mais achatada e mais fraca conforme o Orb sobe, e mais
   larga quando ele amassa no pouso ou cresce no hover. Em repouso é igual à de antes; o Orb estático usa a mesma.
 - **Troca de atividade sem saltos**: corpo, olhar, brilho e peso do ponteiro misturam a atividade anterior e
-  a nova por 0,35 s (`OrbBodyMotion.mix`), a expressão faz crossfade de 0,18 s e o corpo dá um balanço leve.
+  a nova por 0,35 s (`OrbBodyMotion.mix`), a expressão faz crossfade de 0,18 s e o corpo dá um balanço leve. O
+  crossfade é só da feição que mudou (olhos, boca e sobrancelhas trocam a imagem na mesma camada): fundir o Orb inteiro
+  misturaria o corpo, que se move, com uma foto parada dele. Só um Orb que aparece ou muda de tamanho funde inteiro.
   Uma troca que chega no meio de outra parte do corpo que estava na tela naquele instante (`OrbActivityBlend`),
   não da atividade que pesava pouco: ferramentas rápidas entre dois pensamentos não dão salto.
 - **Movimento secundário**: cabelo e acessórios de cabeça (não os óculos, `OrbLayer.isLoose`) atrasam um
@@ -289,7 +292,9 @@ Tudo em [`Orbs/OrbMotion.swift`](../Sources/Orb/Orbs/OrbMotion.swift) (funções
 - **Balão** entra e sai com escala e opacidade em mola, em vez de aparecer de uma vez. Trocar de símbolo com
   ele aberto (… → ?) dá um pulinho de escala em vez de só trocar o texto. O fundo é quase opaco (cor do chrome,
   `OrbGeometry.bubbleFill`), para o laço e a aba dos chapéus não aparecerem através dele. Um Orb em repouso
-  (janela inativa) recebe o balão e a boca da nova atividade na hora, sem esperar quadros.
+  (janela inativa) recebe o balão e a boca da nova atividade na hora, sem esperar quadros. Quem decide se há balão é a
+  caixa do avatar (a partir de `OrbGeometry.bubbleBox`, 26 pt), não o Orb: um black power ou uma cartola encolhem o
+  Orb dentro dos 30 pt da barra lateral (`OrbFootprint`), e o `?` de "precisa de você" continua aparecendo.
 - **Pausar e voltar sem salto**: um Orb animado que deve ficar quieto (`OrbView(paused:)`, ou janela inativa)
   não é mais trocado pelo `OrbFrame` estático: ele desliza até a pose de repouso (a mesma do estático, mola de
   0,45 s, `OrbPose.mix`), para o display link e volta deslizando ao retomar. Um Orb novo também começa em
@@ -361,13 +366,16 @@ atual:
   de 0,5 s ficaria ligado), e ao entrar em repouso o sorriso do clique e a pose segurada da ferramenta, se ainda não
   venceram, são descartados: com os quadros parados nada reavaliaria o prazo e o rosto congelaria.
 - **Imagens decodificadas fora da thread principal.** `OrbImages.cached` nunca decodifica; `OrbImages.load` decodifica em
-  segundo plano (`.needed`, em paralelo; `.prewarm`, um por vez em prioridade baixa) e avisa na thread principal. A view
+  segundo plano (`.needed`, em paralelo; `.prewarm`, um por vez em prioridade baixa) e avisa na thread principal
+  entregando os próprios bitmaps: quem montar as camadas usa esses, e o cache despejar um no meio não vira decodificação
+  na thread principal. A view
   mantém o que mostra até as camadas novas chegarem, e o `OrbFrame` estático nunca desenha parte de um conjunto: mostra o
   último conjunto completo (ou nada). Ele guarda as próprias imagens desse conjunto (o cache é limitado e pode despejá-las). Depois da abertura, `OrbImages.prewarmResting` prepara as camadas de repouso de
   todos os Orbs nos tamanhos das primeiras telas (o Orb selecionado primeiro); ao montar um Orb animado, as expressões das
   atividades são pré-decodificadas (um Orb grande, só as prováveis: parado, pensando, falando, feliz, esperando).
 - **Imagens no tamanho exato.** `OrbImages` decodifica com ImageIO direto no tamanho em pixels em que a camada é desenhada
-  (`bitmapSide`, até 640 px; sem guardar o PNG inteiro), assa a tinta e guarda num `NSCache` limitado a 96 MB (e as camadas
+  (`bitmapSide`, até 640 px; sem guardar o PNG inteiro), assa a tinta (multiplica os canais pré-multiplicados e mantém o
+  alfa, então a borda suave escurece como o resto, sem contorno claro) e guarda num `NSCache` limitado a 96 MB (e as camadas
   sem tinta, que o seletor de cor reaproveita, em outro de 24 MB). O lado das imagens (`OrbGeometry.imageSide`) é um número
   inteiro de pixels, centrado no Orb com deslocamento inteiro, então um Orb parado mapeia 1:1 na tela, com filtro linear e
   sem mipmaps. Mudar a janela para uma tela com outra escala reconstrói bitmaps e texto.

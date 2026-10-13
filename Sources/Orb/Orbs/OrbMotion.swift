@@ -29,13 +29,17 @@ struct OrbPose: Equatable {
 
     static let rest = OrbPose()
 
+    /// How far from the crown the hair's ends reach (fraction of the orb size): long hair hangs to the bottom of the
+    /// body, about a whole orb below the crown (a swing moves it along that radius, not the body's).
+    static let hairReach = Double(OrbGeometry.orbBottom - OrbGeometry.crownLine) * Double(OrbGeometry.imageScale)
+
     /// Largest on-screen change between two poses, in device pixels (opacity changes count as a few pixels).
     /// Frames whose change is below a fraction of a pixel can be skipped.
     func pixelDistance(to other: OrbPose, size: Double, scale: Double) -> Double {
         let length = max(abs(lift - other.lift), abs(shake - other.shake), abs(bubbleBob - other.bubbleBob),
                          hypot(eyeLead.x - other.eyeLead.x, eyeLead.y - other.eyeLead.y),
                          hypot(hairLag.x - other.hairLag.x, hairLag.y - other.hairLag.y),
-                         abs(hairSwing - other.hairSwing) * .pi / 360,
+                         abs(hairSwing - other.hairSwing) * .pi / 180 * Self.hairReach,
                          hypot(look.x - other.look.x, look.y - other.look.y) * OrbLayer.maxDepth,
                          abs(squash - other.squash) / 2, abs(hover - other.hover) * 0.02,
                          abs(tilt - other.tilt) * .pi / 360, abs(blink - other.blink) * 0.12,

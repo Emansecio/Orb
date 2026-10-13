@@ -364,11 +364,11 @@ private struct BotRow: Equatable {
 private struct BotRowContent: View, Equatable {
     let row: BotRow
 
-    /// The ring around the avatar: the partner's color while two Orbs exchange messages (MultiOrb, WP2), amber while
-    /// the Orb waits for you, blue while it works.
+    /// The ring around the avatar: amber while the Orb waits for you (even mid-exchange: you come first), the partner's
+    /// color while two Orbs exchange messages (MultiOrb, WP2), blue while it works.
     private var ring: Color? {
-        if let partner = row.partner { return OrbCatalog.shared.palette(partner.color).core }
         if row.needsYou { return Palette.warn }
+        if let partner = row.partner { return OrbCatalog.shared.palette(partner.color).core }
         return row.workText != nil ? Palette.accent : nil
     }
 

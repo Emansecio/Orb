@@ -24,20 +24,35 @@ struct ProcessOutput: Sendable {
     var fullOutputCut = false
     /// Mostly unreadable bytes (an executable, an archive): `output` is a placeholder, not the data.
     var isBinary = false
+    /// The command still runs: the caller stopped waiting for it (`ProcessRunner.Detach`). `output` is what it printed so far.
+    var detached: DetachedProcess?
 }
 
 /// Runs an executable directly (no shell) with a timeout, task cancellation and capped merged output.
 /// `executable` must be a full path. Arguments and environment reach the child byte for byte (see `SpawnedProcess`).
 enum ProcessRunner {
+    /// When to stop waiting for a command and leave it running (`CommandRelease`), and the log its output goes to from then
+    /// on: what was read so far first, then the rest as it comes.
+    struct Detach: Sendable {
+        var log: URL
+        /// Asked a few times a second while the command runs, with how long it has run.
+        var when: @Sendable (Duration) -> Bool
+    }
+
+    /// How often `Detach.when` is asked.
+    static let detachCheck = Duration.milliseconds(250)
+
     /// `environment` replaces the inherited one when given. `spillTo`: a file to write the whole stream to when it is
     /// longer than `outputLimit` (the result keeps only the start and end); never created for shorter output.
     /// `onOutput`: called with each piece of output as it arrives (from a background queue), for progress lines.
+    /// `detach`: the command may be left running; the result then has `detached` and the output read until then.
     static func run(_ executable: String, _ arguments: [String], directory: URL? = nil, environment: [String: String]? = nil,
-                    timeout: Duration, outputLimit: Int = 20_000, spillTo: URL? = nil,
+                    timeout: Duration, outputLimit: Int = 20_000, spillTo: URL? = nil, detach: Detach? = nil,
                     onOutput: (@Sendable (Data) -> Void)? = nil) async throws -> ProcessOutput {
         try Task.checkCancellation()
         let pipe = Pipe()
-        let (exited, exitedContinuation) = AsyncStream<ChildExit>.makeStream()
+        let (waited, waitedContinuation) = AsyncStream<ChildEnd.Wait>.makeStream()
+        let end = ChildEnd(runner: waitedContinuation)
         let pid: pid_t
         do {
             pid = try SpawnedProcess.start(executable, arguments, directory: directory, environment: environment,
@@ -50,23 +65,26 @@ enum ProcessRunner {
         // Only the child writes now, so the reader sees the end of the stream when the last writer is gone.
         try? pipe.fileHandleForWriting.close()
         ChildProcessGroups.insert(pid)
-        // Leftovers (`cmd &`) are not ours to track after the call: the warning in the result says so.
+        // Leftovers (`cmd &`) are not ours to track after the call: the warning in the result says so. A detached command
+        // is the background jobs' to track (`BackgroundJobs.adopt`).
         defer { ChildProcessGroups.remove(pid) }
-        SpawnedProcess.watch(pid) {
-            exitedContinuation.yield($0)
-            exitedContinuation.finish()
-        }
+        let started = ContinuousClock.now
+        SpawnedProcess.watch(pid) { end.report($0) }
 
-        // Read as data arrives so a chatty child never blocks on a full pipe.
-        let buffer = OSAllocatedUnfairLock(initialState: StreamCapture(limit: outputLimit, spillTo: spillTo))
+        // Read as data arrives so a chatty child never blocks on a full pipe. Once detached, into the log instead. The
+        // handler holds the pipe until the end of the stream, which a detached command reaches after this returns.
+        let reading = OSAllocatedUnfairLock(initialState: Reading(capture: StreamCapture(limit: outputLimit, spillTo: spillTo)))
         let (drained, drainedContinuation) = AsyncStream<Never>.makeStream()
-        pipe.fileHandleForReading.readabilityHandler = { handle in
+        pipe.fileHandleForReading.readabilityHandler = { [pipe] handle in
             let data = handle.availableData
             if data.isEmpty {
                 handle.readabilityHandler = nil
+                if let log = reading.withLock({ $0.log }) {
+                    try? log.close()
+                    try? pipe.fileHandleForReading.close()
+                }
                 drainedContinuation.finish()
-            } else {
-                buffer.withLock { $0.append(data) }
+            } else if reading.withLock({ $0.take(data) }) {
                 onOutput?(data)
             }
         }
@@ -76,15 +94,37 @@ enum ProcessRunner {
             terminateGroup(pid)
             return true
         }
-        let ended = await withTaskCancellationHandler {
-            var iterator = exited.makeAsyncIterator()
+        let watcher = detach.map { detach in
+            Task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: detachCheck)
+                    guard !Task.isCancelled, detach.when(ContinuousClock.now - started),
+                          let log = Self.openLog(detach.log) else { continue }
+                    if end.detach(into: log) { return }
+                    try? log.close()
+                    try? FileManager.default.removeItem(at: detach.log)
+                }
+            }
+        }
+        let outcome = await withTaskCancellationHandler {
+            var iterator = waited.makeAsyncIterator()
             return await iterator.next()
         } onCancel: {
             terminateGroup(pid)
         }
+        watcher?.cancel()
         watchdog.cancel()
         let timedOut = await watchdog.value
+
+        if case .detached(let log)? = outcome, let detach {
+            // Everything read so far goes first into the log, and from now on the handler writes there.
+            let captured = reading.withLock { $0.handOver(to: log) }
+            return ProcessOutput(status: 0, output: captured.text, timedOut: false, totalBytes: captured.bytes,
+                                 totalLines: captured.lines, isBinary: captured.isBinary,
+                                 detached: DetachedProcess(pid: pid, log: detach.log, end: end))
+        }
         try Task.checkCancellation()
+        let ended: ChildExit? = if case .ended(let exit)? = outcome { exit } else { nil }
 
         // Background children may keep the pipe open; give the remaining output a moment, not forever.
         let drainedInTime = await withTaskGroup(of: Bool.self) { group in
@@ -98,17 +138,117 @@ enum ProcessRunner {
         try? pipe.fileHandleForReading.close()
         // The leader is gone; the group id lives on while anything it started is still running.
         let leftoversAlive = kill(-pid, 0) == 0
-        let captured = buffer.withLock { $0.finish() }
+        let captured = reading.withLock { $0.capture.finish() }
         return ProcessOutput(status: ended?.status ?? -1, signal: ended.flatMap { $0.signaled ? $0.status : nil },
                              output: captured.text, timedOut: timedOut, leftOutputOpen: !drainedInTime, leftoversAlive: leftoversAlive,
                              totalBytes: captured.bytes, totalLines: captured.lines, fullOutputFile: captured.file,
                              fullOutputCut: captured.fileCut, isBinary: captured.isBinary)
     }
 
+    /// A new, private log open for appending; nil when it cannot be made (the command is then waited for as before).
+    private static func openLog(_ url: URL) -> FileHandle? {
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        // O_APPEND so that emptying an oversized log (`BackgroundJobs`) does not leave the writes past a hole.
+        let descriptor = open(url.path, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, 0o600)
+        return descriptor < 0 ? nil : FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+    }
+
     /// SIGTERM to the whole process group, then SIGKILL to whatever is left 2 seconds later.
     private static func terminateGroup(_ pid: pid_t) {
         kill(-pid, SIGTERM)
         DispatchQueue.global().asyncAfter(deadline: .now() + 2) { kill(-pid, SIGKILL) }
+    }
+
+    /// Where the output read goes: the capture for the result, or the log once the command was detached.
+    private struct Reading {
+        var capture: StreamCapture
+        var log: FileHandle?
+
+        /// True when it went to the capture (and so counts as the command's output, for `onOutput`).
+        mutating func take(_ data: Data) -> Bool {
+            guard let log else { capture.append(data); return true }
+            try? log.write(contentsOf: data)
+            return false
+        }
+
+        /// Writes what was read into `log` (the whole of it: the saved file when the capture kept only the start and end),
+        /// switches to it and gives what the result shows.
+        mutating func handOver(to log: FileHandle) -> (text: String, bytes: Int, lines: Int, isBinary: Bool) {
+            let captured = capture.finish()
+            if let file = captured.file, let whole = try? Data(contentsOf: file) {
+                try? log.write(contentsOf: whole)
+            } else {
+                try? log.write(contentsOf: Data(captured.text.utf8))
+            }
+            self.log = log
+            return (captured.text, captured.bytes, captured.lines, captured.isBinary)
+        }
+    }
+}
+
+/// A command `ProcessRunner` stopped waiting for while it still ran: its process group, the log its output goes to, and
+/// its end, for the background job that takes it over (`BackgroundJobs.adopt`).
+struct DetachedProcess: Sendable {
+    let pid: pid_t
+    let log: URL
+    let end: ChildEnd
+}
+
+/// Who hears that a command's process ended: the runner waiting for it or, once the runner let it go on
+/// (`ProcessRunner.Detach`), whoever took it over. One lock decides which, so the end is told exactly once.
+final class ChildEnd: Sendable {
+    enum Wait: Sendable {
+        case ended(ChildExit)
+        /// The runner stopped waiting; the output goes to this log.
+        case detached(FileHandle)
+    }
+
+    private struct State {
+        var exit: ChildExit?
+        var detached = false
+        var listener: (@Sendable (ChildExit) -> Void)?
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
+    private let runner: AsyncStream<Wait>.Continuation
+
+    init(runner: AsyncStream<Wait>.Continuation) { self.runner = runner }
+
+    /// From `SpawnedProcess.watch`.
+    func report(_ exit: ChildExit) {
+        let (detached, listener) = state.withLock { state in
+            state.exit = exit
+            return (state.detached, state.listener)
+        }
+        if detached {
+            listener?(exit)
+        } else {
+            runner.yield(.ended(exit))
+            runner.finish()
+        }
+    }
+
+    /// Ends the runner's wait while the process runs on. False when it has already ended (it is then waited for as usual).
+    func detach(into log: FileHandle) -> Bool {
+        let detached = state.withLock { state in
+            guard state.exit == nil, !state.detached else { return false }
+            state.detached = true
+            return true
+        }
+        if detached {
+            runner.yield(.detached(log))
+            runner.finish()
+        }
+        return detached
+    }
+
+    /// After `detach`: `listener` is called once, when the process ends (at once if it has already).
+    func onEnd(_ listener: @escaping @Sendable (ChildExit) -> Void) {
+        let ended = state.withLock { state in
+            state.listener = listener
+            return state.exit
+        }
+        if let ended { listener(ended) }
     }
 }
 

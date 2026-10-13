@@ -243,7 +243,7 @@ struct EngineNudgeTests {
         // Without knowing the nudge, the cut lands on it: the request leaves the window.
         #expect(!unaware.messages.contains { $0.content == Self.request })
         var cut = ContextCut()
-        let window = ContextWindow.fit(input, budget: budget, cut: &cut, nudge: start + 2)
+        let window = ContextWindow.fit(input, budget: budget, cut: &cut, nudges: [start + 2])
         #expect(window.messages.contains { $0.content == Self.request })
         #expect(window.droppedCount <= start && cut.covered <= start)
         #expect(window.foldedCount == window.droppedCount)

@@ -20,6 +20,8 @@ enum NoticeAction: Equatable, Sendable {
     case openMemory
     /// The Orb proposed a skill (or a better version of one): read it and decide.
     case reviewSkill
+    /// The app proposed merging alike memory pages (`MemoryMerge`): accept it.
+    case mergeMemory
 
     var title: String {
         switch self {
@@ -30,6 +32,7 @@ enum NoticeAction: Equatable, Sendable {
         case .compact: "Compactar e tentar de novo"
         case .openMemory: "Ver na memória"
         case .reviewSkill: "Revisar"
+        case .mergeMemory: "Unificar"
         }
     }
 
@@ -43,6 +46,7 @@ enum NoticeAction: Equatable, Sendable {
         case .compact: "Resume o começo da conversa e envia a última mensagem de novo"
         case .openMemory: "Abre a aba Memória, no painel do Orb"
         case .reviewSkill: "Abre a skill proposta para você ler e decidir"
+        case .mergeMemory: "Junta as páginas parecidas; os originais ficam no arquivo da memória"
         }
     }
 
@@ -55,6 +59,7 @@ enum NoticeAction: Equatable, Sendable {
         case .compact: "arrow.triangle.merge"
         case .openMemory: "brain"
         case .reviewSkill: "wand.and.stars"
+        case .mergeMemory: "square.stack.3d.down.right"
         }
     }
 
@@ -84,6 +89,8 @@ enum NoticeAction: Equatable, Sendable {
     static let failurePrefix = "Não deu certo: "
     /// How the notice for a fact the app kept by itself (not the model) starts.
     static let keptMemoryPrefix = "Guardado na memória:"
+    /// How the notice proposing a `MemoryMerge` starts.
+    static let memoryMergePrefix = "Unificação de memória proposta:"
     /// How the notices for a skill the Orb proposed start: a new one ("Skill proposta: /publicar-site — Publicar site") and
     /// a better version of one that exists ("Melhoria proposta para /publicar-site").
     static let proposalPrefix = "Skill proposta:"
@@ -106,6 +113,7 @@ enum NoticeAction: Equatable, Sendable {
         }
         // Wrongly detected, it is one click to the page to forget.
         if notice.hasPrefix(keptMemoryPrefix) { return [.openMemory] }
+        if notice.hasPrefix(memoryMergePrefix) { return [.mergeMemory, .openMemory] }
         if proposedSlug(in: notice) != nil { return [.reviewSkill] }
         guard notice.hasPrefix(failurePrefix) else { return [] }
         // Only the app's own sentence decides: what follows "Detalhe do provedor:" is free text.
@@ -117,10 +125,10 @@ enum NoticeAction: Equatable, Sendable {
     }
 
     /// `actions(for:)` without "Compactar e tentar de novo" when the conversation has nothing older to summarize, and
-    /// without "Revisar" once the proposal is gone (saved, discarded or deleted). With another model to try
+    /// without "Revisar" or "Unificar" once the proposal is gone (saved, discarded, deleted, applied or expired). With another model to try
     /// (`canSwitchModel`), a failure that can be tried again also offers "Outro modelo", right after "Tentar de novo".
     static func actions(for notice: String, canCompact: Bool, hasProposal: Bool = true, canSwitchModel: Bool = false) -> [NoticeAction] {
-        actions(for: notice).filter { ($0 != .compact || canCompact) && ($0 != .reviewSkill || hasProposal) }
+        actions(for: notice).filter { ($0 != .compact || canCompact) && (![.reviewSkill, .mergeMemory].contains($0) || hasProposal) }
             .flatMap { $0 == .retry && canSwitchModel ? [.retry, .otherModel] : [$0] }
     }
 

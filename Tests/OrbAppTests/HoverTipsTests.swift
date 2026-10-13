@@ -58,14 +58,14 @@ struct HoverTipsTests {
     }
 
     @Test func everyNoticeButtonAndPermissionRowActionHasATip() {
-        let notices: [NoticeAction] = [.retry, .otherModel, .continueTurn, .openSettings, .compact, .openMemory, .reviewSkill]
+        let notices: [NoticeAction] = [.retry, .otherModel, .continueTurn, .openSettings, .compact, .openMemory, .reviewSkill, .mergeMemory]
         for action in notices {
             #expect(!action.help.isEmpty && action.help.count <= 90 && !action.help.hasSuffix("."), "\(action.help)")
         }
         // A new case has to be added here, or this fails to compile its exhaustive switch.
         for action in notices {
             switch action {
-            case .retry, .otherModel, .continueTurn, .openSettings, .compact, .openMemory, .reviewSkill: break
+            case .retry, .otherModel, .continueTurn, .openSettings, .compact, .openMemory, .reviewSkill, .mergeMemory: break
             }
         }
         for action in [PermissionRowAction.ask, .openAppAndAsk(appName: "Notas"), .openSystemSettings, .test, .relaunch] {

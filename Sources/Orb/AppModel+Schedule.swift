@@ -23,7 +23,7 @@ extension AppModel {
         guard let orb = bot(botID) else { throw ToolError("Este Orb não existe mais.") }
         let own = routines(for: botID)
         switch try ScheduleCommand(arguments) {
-        case .create(let name, let prompt, let schedule, let goal):
+        case .create(let name, let prompt, let schedule, let goal, let enabled, let runNow):
             // A run that reads an e-mail or a page must not be able to plant tasks that outlive it.
             guard sessions[botID]?.routineID == nil else { throw ToolError("Uma tarefa agendada não cria outras tarefas.") }
             guard own.count < Self.scheduledTaskLimit else {
@@ -32,15 +32,39 @@ extension AppModel {
             guard !own.contains(where: { $0.name.sameName(as: name) }) else {
                 throw ToolError("Já existe uma tarefa chamada “\(name)”. Escolha outro nome ou apague a antiga.")
             }
-            let routine = Routine(name: name, botID: botID, prompt: prompt, schedule: schedule, goal: goal.map { RoutineGoal(target: $0) })
+            var routine = Routine(name: name, botID: botID, prompt: prompt, schedule: schedule, goal: goal.map { RoutineGoal(target: $0) })
+            routine.isEnabled = enabled
             routines.append(routine)
             show(routine, of: botID)
+            if runNow { runRoutine(routine.id) }
             // Nobody is there during a run: in "Perguntar antes" it waits for you, which is worth knowing now.
             let waits = RoutineText.waitsForAnswer(orbMode: orb.permissionMode, routineMode: nil)
-            return "Agendei “\(name)”: \(schedule.label.lowercasedFirst). \(RoutineText.preview(nextRun: routine.nextRun)). "
+            return "Agendei “\(name)”: \(schedule.label.lowercasedFirst). "
+                + (enabled ? "\(RoutineText.preview(nextRun: routine.nextRun)). " : "Ela foi criada pausada e só roda depois de retomada. ")
+                + (runNow ? Self.runNowNote + " " : "")
                 + (goal == nil ? "" : "Cada execução informa o progresso da meta, e a tarefa pausa quando ela for alcançada. ")
                 + "Ela aparece na aba Rotinas do painel, onde dá para pausar ou apagar."
                 + (waits ? " Como \(orb.name) pergunta antes de agir, cada execução espera a sua aprovação (em Automático ela roda sozinha)." : "")
+        case .update(let name, let prompt, let schedule, let goal):
+            guard sessions[botID]?.routineID == nil else { throw ToolError("Uma tarefa agendada não altera tarefas.") }
+            let current = try own.named(name)
+            guard let index = routines.firstIndex(where: { $0.id == current.id }) else { throw ToolError("Não achei a tarefa “\(name)”.") }
+            if let prompt { routines[index].prompt = prompt }
+            if let goal, goal != routines[index].goal?.target {
+                // The last check measured the old goal: a new one starts unmeasured.
+                routines[index].goal = goal.isEmpty ? nil : RoutineGoal(target: goal)
+            }
+            if let schedule, schedule != routines[index].schedule {
+                // Counted from now, as the editor does: not from when the task was created.
+                routines[index].schedule = schedule
+                routines[index].createdAt = .now
+                routines[index].lastRun = nil
+            }
+            let routine = routines[index]
+            show(routine, of: botID)
+            return "Alterei “\(routine.name)”: \(routine.schedule.label.lowercasedFirst), "
+                + (routine.isEnabled ? RoutineText.preview(nextRun: routine.nextRun).lowercasedFirst : "pausada") + "."
+                + (routine.goal.map { " Meta: \(MemoryText.clip($0.target, 120))." } ?? "")
         case .list:
             guard !own.isEmpty else { return "Nenhuma tarefa agendada." }
             return own.map { routine in
@@ -51,17 +75,29 @@ extension AppModel {
                 return "- “\(routine.name)”: \(routine.schedule.label.lowercasedFirst), \(state). Faz: \(MemoryText.clip(MemoryText.flatten(routine.prompt), 120))" + goal
             }.joined(separator: "\n")
         case .setEnabled(let name, let enabled):
+            // A run may stop tasks, never start them again.
+            guard !enabled || sessions[botID]?.routineID == nil else { throw ToolError("Uma tarefa agendada não retoma outras tarefas.") }
             let routine = try own.named(name)
             guard routine.isEnabled != enabled else { return "“\(routine.name)” já estava \(enabled ? "ativa" : "pausada")." }
             setRoutineEnabled(routine.id, enabled)
             return enabled ? "Retomei “\(routine.name)”. \(RoutineText.preview(of: routine.schedule))."
                 : "Pausei “\(routine.name)”. Ela não roda até ser retomada."
+        case .run(let name):
+            guard sessions[botID]?.routineID == nil else { throw ToolError("Uma tarefa agendada não dispara outras tarefas.") }
+            let routine = try own.named(name)
+            guard !isRoutineRunning(routine.id) else { return "“\(routine.name)” já está rodando." }
+            runRoutine(routine.id)
+            return "Pedi para rodar “\(routine.name)” agora. " + Self.runNowNote
         case .delete(let name):
+            guard sessions[botID]?.routineID == nil else { throw ToolError("Uma tarefa agendada não apaga tarefas; pode só pausá-las.") }
             let routine = try own.named(name)
             deleteRoutine(routine.id)
             return "Apaguei “\(routine.name)”."
         }
     }
+
+    /// The run waits for the Orb's current turn (this one, when the Orb asked in its chat) to end.
+    static let runNowNote = "A execução começa assim que este Orb estiver livre e tem conversa própria; o resultado aparece no chat quando ela terminar."
 
     func setRoutineEnabled(_ id: UUID, _ enabled: Bool) {
         guard let index = routines.firstIndex(where: { $0.id == id }) else { return }

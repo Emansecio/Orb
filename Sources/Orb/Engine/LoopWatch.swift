@@ -8,7 +8,7 @@ struct LoopWatch: Sendable {
     static let repeatingNote = "[Orb: você fez esta mesma chamada \(repeats) vezes e recebeu o mesmo resultado; repetir não muda nada. "
         + "Tente outro caminho ou, se está esperando algo ou travado, pare e diga ao usuário o que falta]"
     static let failingNote = "[Orb: as últimas \(repeats) chamadas de ferramenta falharam. Não repita o que falhou: entenda por quê e "
-        + "tente outro caminho, ou diga ao usuário o que te bloqueia e pergunte]"
+        + "tente outro caminho; pare só se for algo que só o usuário resolve, e diga o quê]"
 
     /// Times each call (tool, arguments and result) was seen this turn, by its hash.
     private var seen: [Int: Int] = [:]

@@ -1,7 +1,8 @@
 import Foundation
 import os
 
-/// Commands that keep running after `run_command` returns (dev servers, watchers, long builds).
+/// Commands that keep running after `run_command` returns (dev servers, watchers, long builds): started so
+/// (`background: true`), or taken over while the turn waited for them (`adopt`, see `CommandRelease`).
 ///
 /// Each job is a shell in its own process group writing to a log file, so nothing depends on a pipe that
 /// closes with the tool call. Jobs belong to one Orb and end when stopped, when the Orb is deleted or when
@@ -35,7 +36,7 @@ actor BackgroundJobs {
         var statusText: String {
             let base = switch state {
             case .running: "rodando há \(Self.duration(Date.now.timeIntervalSince(startedAt)))"
-            case .exited(let code): "terminou com código \(code)\(Signals.hint(forExitCode: code))"
+            case .exited(let code): "terminou com código \(code)\(RunCommandTool.hint(forExitCode: code))"
             case .signaled(let number): "encerrado pelo sinal \(Signals.describe(number))"
             case .stopped: "parado"
             }
@@ -111,7 +112,7 @@ actor BackgroundJobs {
             throw ToolError("Já há \(running) processos em segundo plano rodando. Pare algum com job_stop antes de iniciar outro.")
         }
         let id = String((lastID[botID] ?? 0) + 1)
-        let botDirectory = directory.appending(path: botID.uuidString)
+        let botDirectory = logFolder(for: botID)
         let log = botDirectory.appending(path: "\(id).log")
         do { try FileManager.default.createDirectory(at: botDirectory, withIntermediateDirectories: true) } catch {
             throw ToolError("Não consegui criar a pasta de logs: \(error.localizedDescription)")
@@ -149,6 +150,28 @@ actor BackgroundJobs {
             try? await Task.sleep(for: .milliseconds(50))
         }
         return (jobs[botID]?[id]?.snapshot ?? snapshot, Self.tail(of: log, lines: 40))
+    }
+
+    /// Where the logs of an Orb's jobs go (deleted with them by `forget` and when the app quits).
+    nonisolated func logFolder(for botID: UUID) -> URL { directory.appending(path: botID.uuidString) }
+
+    /// Takes over a command `run_command` stopped waiting for (`ProcessRunner.Detach`): from now on it is one of the Orb's
+    /// jobs, its output going on into `process.log`. Not held to `maxRunningPerOrb`, since it is running already.
+    func adopt(botID: UUID, command: String, directory workingDirectory: URL, startedAt: Date, process: DetachedProcess) -> Snapshot {
+        let id = String((lastID[botID] ?? 0) + 1)
+        lastID[botID] = (lastID[botID] ?? 0) + 1
+        let pid = process.pid
+        liveGroups.withLock { _ = $0.insert(pid) }
+        let snapshot = Snapshot(id: id, command: command, directory: workingDirectory.path, logPath: process.log.path,
+                                startedAt: startedAt, state: .running)
+        var job = Job(snapshot: snapshot, pid: pid)
+        job.logWatch = Task { [weak self] in await self?.watchGroup(botID: botID, id: id, pid: pid, log: process.log) }
+        jobs[botID, default: [:]][id] = job
+        process.end.onEnd { [weak self] exit in
+            Task { await self?.ended(botID: botID, id: id, exit: exit) }
+        }
+        changed.yield(botID)
+        return snapshot
     }
 
     // MARK: Looking

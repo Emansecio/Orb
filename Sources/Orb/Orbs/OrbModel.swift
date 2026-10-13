@@ -488,16 +488,20 @@ enum OrbImages {
     private static let prewarmQueue = DispatchQueue(label: "orb.images.prewarm", qos: .utility)
 
     /// Decodes `layers` (those not cached yet) off the main thread. `completion` runs on the main actor once
-    /// all of them are in the cache, or failed to decode (a missing file does not wait forever).
+    /// all of them are decoded, or failed to (a missing file does not wait forever), with their bitmaps in `layers`'
+    /// order (nil: failed): the caller holds them, so the bounded cache dropping one meanwhile costs no decode on the main thread.
     static func load(_ layers: [OrbLayer], pixels: CGFloat, priority: Priority = .needed,
-                     completion: (@MainActor @Sendable () -> Void)? = nil) {
+                     completion: (@MainActor @Sendable ([CGImage?]) -> Void)? = nil) {
         let missing = layers.filter { cached($0.path, pixels: pixels, tint: $0.tint) == nil }
-        guard !missing.isEmpty else {
-            if let completion { Task { @MainActor in completion() } }
-            return
-        }
         let finish: @Sendable () -> Void = {
-            if let completion { Task { @MainActor in completion() } }
+            // Off the main thread: a bitmap the cache dropped since is decoded again here.
+            guard let completion else { return }
+            let images = layers.map { cgImage($0.path, pixels: pixels, tint: $0.tint) }
+            Task { @MainActor in completion(images) }
+        }
+        guard !missing.isEmpty else {
+            if completion != nil { DispatchQueue.global(qos: .userInitiated).async(execute: finish) }
+            return
         }
         switch priority {
         case .needed:
@@ -516,9 +520,10 @@ enum OrbImages {
     }
 
     /// `load`, for views that draw from a `.task`.
-    static func load(_ layers: [OrbLayer], pixels: CGFloat) async {
+    @discardableResult
+    static func load(_ layers: [OrbLayer], pixels: CGFloat) async -> [CGImage?] {
         await withCheckedContinuation { continuation in
-            load(layers, pixels: pixels) { continuation.resume() }
+            load(layers, pixels: pixels) { continuation.resume(returning: $0) }
         }
     }
 
@@ -555,15 +560,22 @@ enum OrbImages {
         guard let space = CGColorSpace(name: CGColorSpace.sRGB),
               let context = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0, space: space,
                                       bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-        let rect = CGRect(x: 0, y: 0, width: side, height: side)
-        context.interpolationQuality = .high
-        context.draw(decoded, in: rect)
-        context.setBlendMode(.multiply)
-        context.setFillColor(red: CGFloat((tint >> 16) & 0xFF) / 255, green: CGFloat((tint >> 8) & 0xFF) / 255,
-                             blue: CGFloat(tint & 0xFF) / 255, alpha: 1)
-        context.fill(rect)
-        context.setBlendMode(.destinationIn)
-        context.draw(decoded, in: rect)
+        context.draw(decoded, in: CGRect(x: 0, y: 0, width: side, height: side))
+        guard let data = context.data else { return nil }
+        // Multiplies the premultiplied channels and keeps alpha: a soft edge darkens like the rest. (A multiply fill
+        // also blends in white where the pixel is see-through, so edges came out lighter than the hair.)
+        let pixels = data.assumingMemoryBound(to: UInt8.self)
+        let r = Int(tint >> 16 & 0xFF), g = Int(tint >> 8 & 0xFF), b = Int(tint & 0xFF)
+        let times = { (value: UInt8, factor: Int) in UInt8((Int(value) * factor + 127) / 255) }
+        for y in 0..<side {
+            var i = y * context.bytesPerRow
+            for _ in 0..<side {
+                pixels[i] = times(pixels[i], r)
+                pixels[i + 1] = times(pixels[i + 1], g)
+                pixels[i + 2] = times(pixels[i + 2], b)
+                i += 4
+            }
+        }
         return context.makeImage()
     }
 
@@ -605,16 +617,18 @@ struct OrbLayer: Identifiable, Hashable, Sendable {
         case .eyes: 0.075
         case .brows: 0.07
         case .mouth, .mustache, .cheeks: 0.055
+        case .accessory where isEyewear: 0.075   // on the eyes: the lenses stay over them
         case .hair, .accessory: 0.025
         }
     }
 
     static let maxDepth = 0.075
 
+    /// Glasses and the monocle: worn on the eyes, not on the head.
+    var isEyewear: Bool { kind == .accessory && (path.contains("oculos") || path.contains("monoculo")) }
+
     /// Hair and head-worn accessories trail the head a little; eyewear stays put on the face.
-    var isLoose: Bool {
-        kind == .hair || (kind == .accessory && !path.contains("oculos") && !path.contains("monoculo"))
-    }
+    var isLoose: Bool { kind == .hair || (kind == .accessory && !isEyewear) }
 }
 
 /// Where things sit in the rendered layer images, as fractions measured from the top.
@@ -629,6 +643,9 @@ enum OrbGeometry {
     static let orbBottom: CGFloat = 0.755
     /// Opacity of the status bubble's fill (the chrome's color), live and static.
     static let bubbleFill: Double = 0.92
+    /// Smallest box (points) that shows the status bubble (`?`, `!`, `…`): the box, not the Orb, which a big hair or hat
+    /// shrinks inside it.
+    static let bubbleBox: CGFloat = 26
 
     /// Side of the layer images (points) for an orb of `size` points at `scale`: about `imageScale × size`, but a
     /// whole number of device pixels and centered on the orb's frame at a whole-pixel offset, so a resting orb's

@@ -37,7 +37,7 @@ struct ReadFileTool: AgentTool {
         let requested = context.url(for: try arguments.requiredString("path"))
         if requested.isInLinkLoop { throw ToolError("Link simbólico em loop (aponta de volta para si mesmo): \(requested.path)") }
         let url = requested.resolvingLinkChain
-        guard FileManager.default.fileExists(atPath: url.path) else { throw ToolError("Arquivo não encontrado: \(url.path)") }
+        guard FileManager.default.fileExists(atPath: url.path) else { throw ToolError.notFound("Arquivo não encontrado", url) }
         guard !url.isExistingDirectory else { throw ToolError("\(url.path) é uma pasta; use list_directory.") }
         try url.requireRegularFile()
         let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
@@ -269,7 +269,7 @@ struct EditFileTool: AgentTool {
         let new = try arguments.requiredString("new_text", allowEmpty: true)
         let replaceAll = arguments.flag("replace_all")
         guard FileManager.default.fileExists(atPath: target.path) else {
-            throw ToolError("Arquivo não encontrado: \(url.path). Para criar um arquivo novo use write_file.")
+            throw ToolError.notFound("Arquivo não encontrado", url, advice: "Para criar um arquivo novo use write_file.")
         }
         guard !target.isExistingDirectory else { throw ToolError("\(url.path) é uma pasta.") }
         try target.requireRegularFile()
@@ -381,7 +381,7 @@ struct ListDirectoryTool: AgentTool {
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
         let url = arguments.nonEmptyString("path").map(context.url(for:)) ?? context.workingDirectory
-        guard url.isExistingDirectory else { throw ToolError("Pasta não encontrada: \(url.path)") }
+        guard url.isExistingDirectory else { throw ToolError.notFound("Pasta não encontrada", url) }
         let depth = arguments.integer("depth", default: 1, in: 1...Self.maxDepth)
         let showHidden = arguments.flag("show_hidden")
         let pattern = try arguments.nonEmptyString("pattern").map { try GlobPattern($0) }

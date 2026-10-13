@@ -104,9 +104,57 @@ struct OrbPerformanceTests {
         #expect(OrbImages.cached("hair/topete", pixels: 143, tint: 0x336699)?.width == 143)
     }
 
+    @Test func loadingHandsOverTheBitmapsInOrder() async {
+        // The caller keeps them: the cache may drop a bitmap before the rebuild that needs it.
+        let ghost = OrbLayer(kind: .eyes, path: "eyes/does-not-exist", tint: nil)
+        let hair = OrbLayer(kind: .hair, path: "hair/topete", tint: 0x336699)
+        let images = await OrbImages.load([hair, ghost], pixels: 159)
+        #expect(images.count == 2)
+        #expect(images.first??.width == 159)
+        #expect(images.last! == nil)
+    }
+
+    @Test func aTintDarkensSoftEdgesAsMuchAsTheRest() throws {
+        // A multiply that saw white where the hair is see-through left its edges lighter than the hair.
+        let tint: UInt32 = 0x804020
+        let plain = try #require(OrbImages.cgImage("hair/topete", pixels: 157, tint: nil))
+        let tinted = try #require(OrbImages.cgImage("hair/topete", pixels: 157, tint: tint))
+        let (a, b) = (rgba(plain), rgba(tinted))
+        let factors = [Int(tint >> 16 & 0xFF), Int(tint >> 8 & 0xFF), Int(tint & 0xFF)]
+        var softEdges = 0, wrong = 0
+        for i in stride(from: 0, to: a.count, by: 4) {
+            if a[i + 3] > 0 && a[i + 3] < 255 { softEdges += 1 }
+            if b[i + 3] != a[i + 3] { wrong += 1 }
+            for c in 0..<3 where abs(Int(b[i + c]) - Int(a[i + c]) * factors[c] / 255) > 1 { wrong += 1 }
+        }
+        #expect(softEdges > 0)
+        #expect(wrong == 0)
+    }
+
+    /// The image's premultiplied RGBA bytes.
+    private func rgba(_ image: CGImage) -> [UInt8] {
+        var bytes = [UInt8](repeating: 0, count: image.width * image.height * 4)
+        bytes.withUnsafeMutableBytes { buffer in
+            let context = CGContext(data: buffer.baseAddress, width: image.width, height: image.height, bitsPerComponent: 8,
+                                    bytesPerRow: image.width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        }
+        return bytes
+    }
+
+    @Test func glassesMoveWithTheEyes() {
+        let glasses = OrbLayer(kind: .accessory, path: "accessories/oculos-redondos", tint: nil)
+        let hat = OrbLayer(kind: .accessory, path: "accessories/cartola", tint: nil)
+        #expect(glasses.depth == OrbLayer(kind: .eyes, path: "eyes/pontos", tint: nil).depth)
+        #expect(!glasses.isLoose)
+        #expect(hat.depth < glasses.depth)
+        #expect(hat.isLoose)
+    }
+
     @Test func loadingCompletesOnTheMainActor() async {
         await withCheckedContinuation { continuation in
-            OrbImages.load([OrbLayer(kind: .eyes, path: "eyes/pontos", tint: nil)], pixels: 147) {
+            OrbImages.load([OrbLayer(kind: .eyes, path: "eyes/pontos", tint: nil)], pixels: 147) { _ in
                 #expect(Thread.isMainThread)
                 continuation.resume()
             }
