@@ -289,9 +289,25 @@ enum PermissionPolicy {
         for segment in line.segments {
             if isTransparent(segment) { continue }
             guard prefixes.contains(where: { segment.words.starts(with: $0) }) else { return false }
+            // A rule for `git` is about the subcommand, not about settings put on the line: `git -c alias.x='!cmd' x`
+            // starts with the same word but runs whatever the setting says.
+            if segment.words.first == "git", gitChangesConfiguration(segment.words) { return false }
             covered = true
         }
         return covered
+    }
+
+    /// Whether a `git` command has, before its subcommand, a global option that changes the configuration it runs under or
+    /// where it works (`-c`, `--config-env`, `--exec-path`, `--git-dir`, `--work-tree`, `--namespace`). `-C dir` is harmless.
+    private static func gitChangesConfiguration(_ words: [String]) -> Bool {
+        var index = 1
+        while index < words.count, words[index].hasPrefix("-"), words[index] != "--" {
+            let word = words[index]
+            let name = String(word.prefix { $0 != "=" })
+            if ["-c", "--config-env", "--exec-path", "--git-dir", "--work-tree", "--namespace"].contains(name) { return true }
+            index += ["-C", "--super-prefix", "--attr-source"].contains(word) ? 2 : 1
+        }
+        return false
     }
 
     /// `cd dir` only moves; models chain it in front of the real command (`cd app && npm test`).

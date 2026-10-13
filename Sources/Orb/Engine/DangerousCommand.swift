@@ -480,11 +480,49 @@ enum DangerousCommand {
 
     // MARK: Specific commands
 
+    private static let gitProgramReason = "roda um programa definido na linha de comando do git"
+    private static let programSettingNames: Set<String> = [
+        "textconv", "command", "external", "program", "helper", "hookspath", "sshcommand", "askpass", "editor", "pager",
+        "alternaterefscommand", "packobjectshook", "fsmonitor", "cmd",
+    ]
+    private static let programSettingSuffixes = ["command", "program", "helper", "editor", "pager", "hook", "hookspath"]
+
+    /// Whether `name=value` (a `git -c` argument) or `name=ENVVAR` (`--config-env`, where the value cannot be seen) is a
+    /// setting that makes git start a program: aliases that begin with `!`, pagers, editors, filters, drivers, helpers,
+    /// hooks, `ssh` and `gpg` commands. Names are compared without regard to case.
+    /// - Parameter runsProgramFromValue: true for `-c`, where the value is the text itself; false for `--config-env`, where
+    ///   it names a variable, so only the name can be judged (and every alias counts).
+    private static func configSetting(_ setting: String, runsProgramFromValue: Bool) -> Bool {
+        let name = String(setting.prefix { $0 != "=" }).lowercased()
+        let value: String? = setting.contains("=") ? String(setting.drop { $0 != "=" }.dropFirst()) : nil
+        let parts = name.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+        guard let section = parts.first, let last = parts.last, parts.count >= 2 else { return false }
+        if section == "alias" { return !runsProgramFromValue || value?.hasPrefix("!") == true }
+        if section == "color" { return false }
+        if section == "pager" { return true }
+        if section == "filter", ["clean", "smudge", "process"].contains(last) { return true }
+        if section == "merge", last == "driver" { return true }
+        if section == "protocol", last == "allow" { return true }
+        if section == "core", last == "fsmonitor", runsProgramFromValue, let value {
+            // A switch for the built-in monitor is not a program.
+            return !["true", "false", "yes", "no", "on", "off", "1", "0", ""].contains(value.lowercased())
+        }
+        return programSettingNames.contains(last) || programSettingSuffixes.contains { last.hasSuffix($0) }
+    }
+
     private static func gitReason(_ arguments: [String]) -> String? {
-        // Skip options before the subcommand (`git -C dir -c k=v push`).
+        // Skip options before the subcommand (`git -C dir -c k=v push`), but a setting that makes git run a program
+        // (`-c alias.x='!rm -rf ~/x' x`, `-c core.pager=…`, `--exec-path=…`) is a command in disguise.
         var rest = arguments[...]
         while let first = rest.first, first.hasPrefix("-") {
-            rest = rest.dropFirst(["-C", "-c", "--git-dir", "--work-tree", "--namespace"].contains(first) ? 2 : 1)
+            let value = rest.dropFirst().first
+            if first == "-c", let value, configSetting(value, runsProgramFromValue: true) { return gitProgramReason }
+            if first == "--config-env", let value, configSetting(value, runsProgramFromValue: false) { return gitProgramReason }
+            if first.hasPrefix("--config-env="), configSetting(String(first.dropFirst("--config-env=".count)), runsProgramFromValue: false) {
+                return gitProgramReason
+            }
+            if first.hasPrefix("--exec-path=") { return gitProgramReason }
+            rest = rest.dropFirst(["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--super-prefix", "--attr-source"].contains(first) ? 2 : 1)
         }
         guard let sub = rest.first else { return nil }
         let args = Arguments(Array(rest.dropFirst()))

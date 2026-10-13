@@ -19,6 +19,13 @@ enum ReadOnlyCommand {
         for segment in line.segments {
             guard segment.separator != .background,
                   isReadOnly(segment.words, directories: directories, home: home, sensitive: sensitive) else { return false }
+            // `git status` and `git diff` run the programs a repository's config names (`core.fsmonitor`, `diff.external`,
+            // textconv, clean filters, hooks), so a read of a repository that sets one is not exempt. The folders are the
+            // ones git may run in: the shell's, moved by `-C`; one the text does not show is never exempt.
+            if segment.words.first == "git" {
+                guard let gitDirectories = GitRepoTrust.workingDirectories(arguments: Array(segment.words.dropFirst()), directories: directories, home: home),
+                      gitDirectories.allSatisfy(GitRepoTrust.isSafeToRead(directory:)) else { return false }
+            }
             if segment.words.first == "cd" {
                 guard segment.words.count == 2, let target = DangerousCommand.directory(afterCD: segment.words[1], from: directories, home: home)
                 else { return false }
