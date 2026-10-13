@@ -79,7 +79,7 @@ import Testing
 
     // MARK: Sheets
 
-    @Test func aDestructiveSheetCanKeepReturnFromItsPrimaryButton() {
+    @Test @MainActor func aDestructiveSheetCanKeepReturnFromItsPrimaryButton() {
         #expect(SheetFooter.primaryShortcut(isDefault: true) == .defaultAction)
         #expect(SheetFooter.primaryShortcut(isDefault: false) == nil)
     }

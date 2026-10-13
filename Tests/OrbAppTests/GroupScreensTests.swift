@@ -7,18 +7,18 @@ import Testing
 
 @Suite("Pilha de avatares")
 struct StackedAvatarsTests {
-    @Test func upToThreeOrbsAreAllShown() {
+    @Test @MainActor func upToThreeOrbsAreAllShown() {
         #expect(StackedAvatars.plan(count: 1) == (1, 0))
         #expect(StackedAvatars.plan(count: 2) == (2, 0))
         #expect(StackedAvatars.plan(count: 3) == (3, 0))
     }
 
-    @Test func pastThreeTheThirdPlaceBecomesThePlusPill() {
+    @Test @MainActor func pastThreeTheThirdPlaceBecomesThePlusPill() {
         #expect(StackedAvatars.plan(count: 4) == (2, 2))
         #expect(StackedAvatars.plan(count: 8) == (2, 6))
     }
 
-    @Test func overlapIsNineAndTheAvatarIs24() {
+    @Test @MainActor func overlapIsNineAndTheAvatarIs24() {
         #expect(StackedAvatars.overlap == 9)
     }
 }

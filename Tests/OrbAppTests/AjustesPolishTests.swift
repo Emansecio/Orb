@@ -206,7 +206,7 @@ struct SettingsRouterTests {
         #expect(SettingsTab.allCases.map(\.title) == ["Geral", "Modelos", "Navegador", "Uso", "Permissões"])
     }
 
-    @Test func theVersionLineReadsTheBundleOrSaysItIsADevBuild() {
+    @Test @MainActor func theVersionLineReadsTheBundleOrSaysItIsADevBuild() {
         #expect(GeneralSettings.versionText(["CFBundleShortVersionString": "1.2.0", "CFBundleVersion": "7"]) == "1.2.0 (7)")
         #expect(GeneralSettings.versionText(["CFBundleShortVersionString": "1.2.0"]) == "1.2.0")
         #expect(GeneralSettings.versionText([:]) == "versão de desenvolvimento")

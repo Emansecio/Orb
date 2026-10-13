@@ -248,7 +248,8 @@ struct LocalConnectorInstallTests {
 
 struct KeyValueRowTests {
     @Test func aFieldThatOutlivesItsRowNeitherCrashesNorTouchesAnotherRow() {
-        var store = [KeyValueRow(key: "A", value: "1"), KeyValueRow(key: "B", value: "2")]
+        // The Binding closures are @Sendable; the test is single-threaded, so nothing races on the array.
+        nonisolated(unsafe) var store = [KeyValueRow(key: "A", value: "1"), KeyValueRow(key: "B", value: "2")]
         let rows = Binding(get: { store }, set: { store = $0 })
         let last = store[1]
         let binding = KeyValueRow.binding(in: rows, id: last.id, fallback: last)

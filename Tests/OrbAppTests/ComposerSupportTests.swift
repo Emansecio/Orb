@@ -27,7 +27,7 @@ struct ComposerSupportTests {
         }
     }
 
-    @Test func theSkillsPopoverHeightFollowsTheWholeListNotTheFilter() {
+    @Test @MainActor func theSkillsPopoverHeightFollowsTheWholeListNotTheFilter() {
         #expect(SkillsPopover.height(skillCount: 3, listHeight: nil) == CGFloat(3 * 52 + 48)) // the estimate before it is measured
         #expect(SkillsPopover.height(skillCount: 3, listHeight: 150) == CGFloat(198)) // the measured list wins
         #expect(SkillsPopover.height(skillCount: 0, listHeight: nil) == CGFloat(52 + 48))

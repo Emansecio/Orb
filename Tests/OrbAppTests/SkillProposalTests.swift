@@ -469,8 +469,8 @@ struct SkillProposalValidationTests {
 
     @Test func theSameCommandReplacesItsProposalAndTheLimitHoldsForOthers() async {
         let bank = bank()
-        await bank.proposeSkill(SkillSamples.good)
-        await bank.proposeSkill(SkillSamples.changed("Confirme que a branch é `main`", "Confirme que a branch é `release`"))
+        _ = await bank.proposeSkill(SkillSamples.good)
+        _ = await bank.proposeSkill(SkillSamples.changed("Confirme que a branch é `main`", "Confirme que a branch é `release`"))
         #expect(await bank.proposals().count == 1)
         #expect(await bank.proposal("publicar-site")?.instructions.contains("`release`") == true)
         await bank.discardProposal("publicar-site")
@@ -492,7 +492,7 @@ struct SkillProposalValidationTests {
     @Test func aProposalThatRepeatsOneStillWaitingIsSentBackToImproveThatOne() async {
         // Two reviews in a row proposed /subir-lp-docker and /publicar-lp-docker for the same task, and both got saved.
         let bank = bank()
-        await bank.proposeSkill(SkillSamples.good)
+        _ = await bank.proposeSkill(SkillSamples.good)
         let copy = await bank.proposeSkill(SkillSamples.changed("name: publicar-site", "name: subir-site-producao"))
         guard case .refused(let reason) = copy else { Issue.record("a second proposal for the same task was kept"); return }
         #expect(reason.contains("/publicar-site already covers this"))
@@ -540,7 +540,7 @@ struct SkillProposalValidationTests {
     @Test func proposalsAndTheCopyOfSkillsAreNotMemoryPages() async {
         let bank = bank()
         await bank.remember("Publica o site com make deploy.", kind: .procedimento)
-        await bank.proposeSkill(SkillSamples.good)
+        _ = await bank.proposeSkill(SkillSamples.good)
         await bank.publishSkills([SkillDigest(slug: "resumir", name: "Resumir", summary: "Resume", instructions: "Resuma.", improvable: false)])
         await bank.reconcile()
         let snapshot = await bank.snapshot()
@@ -554,7 +554,7 @@ struct SkillProposalValidationTests {
 
     @Test func aMemoryAdoptedByAnotherOrbBringsNoProposalsOrSkills() async throws {
         let bank = bank()
-        await bank.proposeSkill(SkillSamples.good)
+        _ = await bank.proposeSkill(SkillSamples.good)
         await bank.publishSkills([SkillDigest(slug: "resumir", name: "Resumir", summary: "Resume", instructions: "Resuma.", improvable: false)])
         let target = root.appending(path: "novo")
         try KeptMemories.adopt(bank.directory, into: target)

@@ -2,7 +2,8 @@
 # Builds Orb.app from the SwiftPM executable, for local use.
 # Signing: with ORB_SIGN_IDENTITY, or the self-signed "Orb Local" identity when the keychain has it
 # (scripts/make-signing-identity.sh), the app keeps the same identity across rebuilds and macOS keeps its
-# Automation / Accessibility / Full Disk Access grants. Otherwise it is ad-hoc signed and macOS asks again each build.
+# Automation / Accessibility / Full Disk Access grants. Otherwise (no identity in the keychain, as on CI, or
+# ORB_SIGN_IDENTITY=-) it is ad-hoc signed and macOS asks again each build. The script never opens or quits the app.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -25,7 +26,28 @@ for size in 16 32 128 256 512; do
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+# Version from git, so "Sobre" and diagnostics can tell builds apart: the build number is the commit count, the short
+# version is 1.0.<count>, and OrbGitCommit is the short hash ("-dirty" when tracked files have uncommitted changes).
+# Falls back to 1.0.0 / 1 / unknown outside a git repository or when git fails.
+BUILD_NUMBER="1"
+SHORT_VERSION="1.0.0"
+GIT_COMMIT="unknown"
+if COUNT="$(git rev-list --count HEAD 2>/dev/null)" && [[ "$COUNT" == <1-> ]]; then
+  BUILD_NUMBER="$COUNT"
+  SHORT_VERSION="1.0.$COUNT"
+  if HASH="$(git rev-parse --short HEAD 2>/dev/null)" && [[ -n "$HASH" ]]; then
+    GIT_COMMIT="$HASH"
+    if [[ -n "$(git status --porcelain --untracked-files=no 2>/dev/null || true)" ]]; then
+      GIT_COMMIT="$HASH-dirty"
+    fi
+  fi
+fi
+echo "Versão $SHORT_VERSION (build $BUILD_NUMBER, commit $GIT_COMMIT)"
+
+# The heredoc is not quoted so the version values above are expanded; the text below has no other $ or backtick.
+# NSAllowsArbitraryLoads stays true on purpose: model providers over plain HTTP (a server on the local network or over
+# Tailscale, set up by the user) and web_fetch of HTTP-only sites need loads that App Transport Security would block.
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -36,8 +58,9 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleExecutable</key><string>Orb</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.0.0</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleShortVersionString</key><string>$SHORT_VERSION</string>
+  <key>CFBundleVersion</key><string>$BUILD_NUMBER</string>
+  <key>OrbGitCommit</key><string>$GIT_COMMIT</string>
   <key>CFBundleDevelopmentRegion</key><string>pt-BR</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
@@ -57,16 +80,17 @@ if [[ -z "$SIGN_IDENTITY" ]]; then
   IDENTITIES="$(security find-identity -v -p codesigning 2>/dev/null || true)"
   [[ "$IDENTITIES" == *'"Orb Local"'* ]] && SIGN_IDENTITY="Orb Local"
 fi
-if [[ -n "$SIGN_IDENTITY" ]]; then
+if [[ -n "$SIGN_IDENTITY" && "$SIGN_IDENTITY" != "-" ]]; then
   codesign --force --sign "$SIGN_IDENTITY" "$APP" >/dev/null
   echo "Assinado com \"$SIGN_IDENTITY\": as permissões do macOS sobrevivem a novas compilações."
 else
   codesign --force --sign - "$APP" >/dev/null
-  echo "Dica: assinatura temporária (ad-hoc); o macOS esquece as permissões a cada compilação. Rode scripts/make-signing-identity.sh uma vez para manter."
+  echo "Assinatura ad-hoc (sem identidade fixa)."
+  [[ -n "${CI:-}" ]] || echo "Dica: assinatura temporária (ad-hoc); o macOS esquece as permissões a cada compilação. Rode scripts/make-signing-identity.sh uma vez para manter."
 fi
 echo "Pronto: $APP"
 # An Orb open from this bundle now runs code that no longer matches the disk: macOS stops handing it the keys it keeps in
 # the Keychain (a key pasted in it is written but not read back). It has to be opened again.
-if pgrep -f "$PWD/$APP/Contents/MacOS/Orb" >/dev/null 2>&1; then
+if [[ -z "${CI:-}" ]] && pgrep -f "$PWD/$APP/Contents/MacOS/Orb" >/dev/null 2>&1; then
   echo "Atenção: o Orb está aberto com a versão anterior. Feche (⌘Q) e abra de novo; até lá ele não lê as chaves do Keychain."
 fi

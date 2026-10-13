@@ -99,7 +99,7 @@ struct MCPHTTPLimitsTests {
         await remote.open(receive: { _ in }, closed: { error in failure.withLock { $0 = (error as? ToolError)?.message } })
         // The POSTs to the announced endpoint answer 405 too; only the stream matters here.
         _ = try? await remote.send(initialize)
-        try await waitUntil("the stream to be dropped") { failure.withLock { $0 } != nil }
+        await waitUntil("the stream to be dropped") { failure.withLock { $0 } != nil }
         #expect(failure.withLock { $0 } == "O conector Remoto mandou uma resposta grande demais.")
     }
 }

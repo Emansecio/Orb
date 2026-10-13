@@ -33,7 +33,7 @@ struct MotionControlsTests {
         #expect(Motion.focus(false, reduceMotion: true) == nil)
     }
 
-    @Test func theFocusedCardHasTheStrongBorderAndASlightlyLighterFill() {
+    @Test @MainActor func theFocusedCardHasTheStrongBorderAndASlightlyLighterFill() {
         #expect(ComposerSurface.stroke(isFocused: false, isDropTargeted: false) == Palette.line)
         #expect(ComposerSurface.stroke(isFocused: true, isDropTargeted: false) == Palette.lineStrong)
         // A file being dragged over wins over the focus.
@@ -47,7 +47,7 @@ struct MotionControlsTests {
         #expect(ComposerSurface.fill(isFocused: true) == Palette.surfaceFocused)
     }
 
-    @Test func theCardCastsABlackShadowBelowAndAnAccentGlowWhileAFileIsDraggedOver() {
+    @Test @MainActor func theCardCastsABlackShadowBelowAndAnAccentGlowWhileAFileIsDraggedOver() {
         let rest = ComposerSurface.shadow(isDropTargeted: false)
         #expect(rest.color == Color.black.opacity(0.35) && rest.y == 8)
         let drop = ComposerSurface.shadow(isDropTargeted: true)

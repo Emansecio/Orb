@@ -4,7 +4,7 @@ import os
 
 /// A fake network for the login tests: URLSession asks it, never the internet. It answers by host from a handler and writes
 /// down every request (with its body), so a test can check what was sent, to whom and in which order.
-final class FakeNetwork: URLProtocol, @unchecked Sendable {
+final class FakeNetwork: URLProtocol {
     struct Request: Sendable {
         var url: URL
         var method: String

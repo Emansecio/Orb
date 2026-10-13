@@ -128,7 +128,7 @@ struct FakeBrowserSetup {
 
 /// Answers the requests of the search tests from a closure (the status and body for a request). Tests that use it run one
 /// at a time, because the closure is shared.
-final class SearchStubProtocol: URLProtocol, @unchecked Sendable {
+final class SearchStubProtocol: URLProtocol {
     typealias Handler = @Sendable (URLRequest) -> (status: Int, body: Data)
     static let handler = OSAllocatedUnfairLock<Handler>(initialState: { _ in (404, Data()) })
     static let requests = OSAllocatedUnfairLock<[URLRequest]>(initialState: [])

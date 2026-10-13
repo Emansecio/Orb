@@ -34,7 +34,7 @@ import Testing
 
     /// Presses a key in the alert's panel and says which button took it.
     private func pressed(_ characters: String, keyCode: UInt16, in alert: NSAlert) -> String? {
-        final class Probe: NSObject {
+        @MainActor final class Probe: NSObject {
             var hit: String?
             @objc func press(_ sender: NSButton) { hit = sender.title }
         }
