@@ -529,6 +529,33 @@ struct ToolOutputCapTests {
         #expect(aged.content.components(separatedBy: "characters omitted from the middle").count == 2)
     }
 
+    @Test func anOutputThatCannotBeAskedForAgainIsKeptWholeWithACopyForWhenItAges() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "orb-teste-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let botID = UUID()
+        let output = "INICIO" + String(repeating: "m", count: 9_000) + "MEIO" + String(repeating: "m", count: 9_000) + "FIM"
+
+        let kept = ToolOutputCap.apply(output, botID: botID, callID: "c1", directory: directory, keepsCopy: true)
+        #expect(kept.hasPrefix(output)) // whole: only the note is added
+        let file = try #require(try savedFiles(in: directory, botID).first)
+        #expect(try String(contentsOf: file, encoding: .utf8) == output)
+
+        // Later the conversation shortens it: the middle is gone from the window, not from reach.
+        let messages: [ChatMessage] = [.user("rode"), ChatMessage(role: .assistant, content: "", toolCalls: [call("c1", "run_command")]),
+                                       .tool("c1", kept), ChatMessage(role: .assistant, content: "pronto"), .user("e agora?")]
+        let aged = try #require(messages.modelContext().first { $0.role == .tool })
+        #expect(!aged.content.contains("MEIO"))
+        #expect(aged.content.contains(file.lastPathComponent))
+
+        // Short ones, those a tool saved already (`run_command`) and file reads (`keepsCopy: false`) are left alone.
+        let short = String(repeating: "s", count: ToolOutputCap.copiedFrom)
+        #expect(ToolOutputCap.apply(short, botID: botID, callID: "c2", directory: directory, keepsCopy: true) == short)
+        let spilled = output + ContextText.savedNoteOpen + "/tmp/x.txt; read it]"
+        #expect(ToolOutputCap.apply(spilled, botID: botID, callID: "c3", directory: directory, keepsCopy: true) == spilled)
+        #expect(ToolOutputCap.apply(output, botID: botID, callID: "c4", directory: directory) == output)
+        #expect(try savedFiles(in: directory, botID).count == 1)
+    }
+
     @Test func withoutFileToolsALongPageStaysInlineAndNothingIsSaved() {
         let directory = FileManager.default.temporaryDirectory.appending(path: "orb-teste-" + UUID().uuidString)
         let page = String(repeating: "p", count: 30_300)   // web_fetch: 30,000 characters plus its header

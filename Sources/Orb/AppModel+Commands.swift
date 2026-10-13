@@ -116,7 +116,7 @@ extension AppModel {
     /// ⌘.: stops the open Orb's answer.
     func stopCurrent() {
         if case .group(let id) = selection, isGroupWorking(id) { stopGroup(id); return } // MultiOrb (WP5): the open group
-        if let id = selectedBotID, canStop(id) { stop(id) }
+        if let id = selectedBotID, canStop(id) { stopTurn(id) }
     }
 
     var canStopCurrent: Bool {

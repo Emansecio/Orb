@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// `Orb --snapshot transcript[-approvals|-notices|-compacted|-failed|-attachments|-outputs] out.png`: a seeded conversation of the first Orb for visual
-/// review of the replies' Markdown, the approval cards and the notices with an action. Dev aid; nothing is saved.
+/// `Orb --snapshot transcript[-approvals|-long-command|-question|-quote|-notices|-compacted|-failed|-attachments|-outputs|-screen-steps] out.png`:
+/// a seeded conversation of the first Orb for visual review of the replies' Markdown, the approval cards and the notices
+/// with an action. Dev aid; nothing is saved.
 @MainActor
 enum TranscriptSample {
     static let markdown = """
@@ -64,6 +65,34 @@ enum TranscriptSample {
                                                               reason: "", suggestions: [.shell("brew", "upgrade"), .shell("brew")]))),
                      TranscriptItem(.approval(ApprovalRequest(toolName: "run_command", title: "Apagando arquivos", command: "rm -rf ~/Downloads/antigos",
                                                               reason: "Esta ação não pode ser desfeita.", isDangerous: true)))]
+        case "transcript-long-command":
+            let script = (["set -e", "cd ~/Projetos/app"] + (1...28).map { "swift test --filter Suite\($0) | tee -a /tmp/log.txt" })
+                .joined(separator: "\n")
+            items = [user, TranscriptItem(.approval(ApprovalRequest(toolName: "run_command", title: "Rodando no Terminal",
+                                                                    command: script, reason: "")))]
+        case "transcript-question":
+            // Yesterday's question, answered, and a new one waiting: a time separator above each moment.
+            let yesterday = Date.now.addingTimeInterval(-26 * 3600)
+            var asked = ApprovalRequest.question(OrbQuestion(text: "Os PDFs de contratos vão para onde?",
+                                                             options: ["Contratos/2024 e Contratos/2025", "Uma pasta só, Contratos"]),
+                                                 botName: bot.name)
+            asked.decision = .once
+            asked.question?.answer = "Contratos/2024 e Contratos/2025"
+            var earlier = [user, TranscriptItem(.approval(asked)),
+                           TranscriptItem(.bot(text: "Pronto: 12 PDFs separados por ano.", isStreaming: false))]
+            for index in earlier.indices { earlier[index].date = yesterday.addingTimeInterval(Double(index) * 60) }
+            let open = ApprovalRequest.question(OrbQuestion(text: "Achei 20 imagens duplicadas (310 MB). O que faço com elas?",
+                                                            options: ["Mover para a Lixeira", "Deixar numa pasta Duplicadas",
+                                                                      "Não mexer agora"]),
+                                                botName: bot.name)
+            items = earlier + [TranscriptItem(.user(text: "Agora as imagens", attachments: [])), TranscriptItem(.approval(open))]
+        case "transcript-quote":
+            // A message that quotes a passage of the reply above it.
+            items = [user, reply,
+                     TranscriptItem(.user(text: "> Mover os PDFs para Contratos/\n\nPode, mas separa por ano.", attachments: [])),
+                     TranscriptItem(.bot(text: "Combinado: `Contratos/2024` e `Contratos/2025`.", isStreaming: false))]
+        case "transcript-screen-steps":
+            items = AttachmentSnapshots.screenSteps()
         case "transcript-attachments":
             items = AttachmentSnapshots.conversation()
         case "transcript-outputs":

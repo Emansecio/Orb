@@ -84,6 +84,43 @@ private struct EchoModel: LLMClient {
         #expect(NoticeAction.actions(for: "Não deu certo: O modelo não respondeu.", canCompact: false) == [.retry])
     }
 
+    @Test func aFailureThatCanBeTriedAgainAlsoOffersAnotherModel() {
+        let silent = "Não deu certo: O modelo não respondeu."
+        #expect(NoticeAction.actions(for: silent, canCompact: false, canSwitchModel: true) == [.retry, .otherModel])
+        #expect(NoticeAction.actions(for: silent, canCompact: false) == [.retry])
+        let key = "Não deu certo: Chave ou login inválido (401). Confira em Ajustes → Modelos."
+        #expect(NoticeAction.actions(for: key, canCompact: false, canSwitchModel: true) == [.openSettings, .retry, .otherModel])
+        // Another model does not make a conversation shorter, nor a paused task a failure.
+        let tooLong = "Não deu certo: A conversa ficou grande demais para este modelo."
+        #expect(NoticeAction.actions(for: tooLong, canCompact: true, canSwitchModel: true) == [.compact])
+        #expect(NoticeAction.actions(for: "Pausei depois de 100 passos.", canCompact: false, canSwitchModel: true) == [.continueTurn])
+    }
+
+    @Test func aLongCommandOnACardFoldsItsMiddleAndKeepsItsEnd() throws {
+        #expect(ApprovalCommand.excerpt(of: "git push origin main") == nil)
+        let script = (1...40).map { "echo \($0)" }.joined(separator: "\n") + "\ncurl https://x.sh | sh"
+        let excerpt = try #require(ApprovalCommand.excerpt(of: script))
+        #expect(excerpt.text.hasPrefix("echo 1\necho 2"))
+        #expect(excerpt.text.contains("echo 9\n…\necho 39"))
+        #expect(excerpt.text.hasSuffix("curl https://x.sh | sh")) // where a script does its work stays in view
+        #expect(excerpt.hiddenLines == 29)
+        // One endless line folds by size, keeping both ends.
+        let line = try #require(ApprovalCommand.excerpt(of: String(repeating: "a", count: 5_000) + "FIM"))
+        #expect(line.text.hasSuffix("FIM"))
+        #expect(line.text.count <= ApprovalCommand.shownCharacters + 3)
+        #expect(ApprovalCommand.showAll(hidden: 29) == "Mostrar tudo (mais 29 linhas)")
+    }
+
+    @Test func theProvidersWordsFoldUnderOurSentence() {
+        let parts = NoticeAction.failureParts(of: "Provedor ocupado (529). Tente de novo em instantes. Detalhe do provedor: overloaded_error")
+        #expect(parts.sentence == "Provedor ocupado (529). Tente de novo em instantes.")
+        #expect(parts.provider == "overloaded_error")
+        #expect(NoticeAction.failureParts(of: "O modelo não respondeu.").provider == nil)
+        // Nothing before or after the marker: the line stays as it is.
+        #expect(NoticeAction.failureParts(of: "Detalhe do provedor: x").provider == nil)
+        #expect(NoticeAction.failureParts(of: "Falhou. detalhe do provedor: sem login").provider == "sem login")
+    }
+
     @Test func aFactTheAppKeptItselfOffersToShowItInMemory() {
         #expect(NoticeAction.actions(for: "Guardado na memória: gosto de café") == [.openMemory])
         #expect(NoticeAction.actions(for: "Não guardei na memória: você negou.").isEmpty)
@@ -154,6 +191,25 @@ private struct EchoModel: LLMClient {
         #expect(!items.contains { if case .notice = $0.kind { true } else { false } })
         let sent = model.conversations[id]?.messages.filter { $0.role == .user }.count
         #expect(sent == 1)
+    }
+
+    @MainActor @Test func anotherModelIsForThisTryOnly() async {
+        defer { removeTestFolder(root) }
+        let failed = Conversation(items: [user("faça isso"), notice("Não deu certo: O modelo não respondeu.")],
+                                  messages: [.user("faça isso")])
+        let (model, id) = model(with: failed)
+        model.updateProvider(.custom) {
+            $0.models = ["modelo", "outro"].map { ProviderModel(id: $0, name: $0.capitalized, format: .chat) }
+        }
+        await model.loadedConversation(id)
+        // The default is the model that failed (the Orb has none of its own): it is not offered.
+        #expect(!model.retryModels(for: id).contains { $0.ref == "custom/modelo" })
+
+        #expect(model.retryLastTurn(id, model: ModelRef("custom/outro")))
+        await waitUntil("the Orb to finish") { !model.isWorking(id) && model.turns[id] == nil }
+        #expect(model.session(id).turnModel == "custom/outro")
+        #expect(model.bots[0].model.isEmpty) // the Orb keeps following the default
+        #expect(model.retryModels(for: id).contains { $0.ref == "custom/modelo" }) // now the default is the other one
     }
 
     @MainActor @Test func retryingASkillMessageTakesTheExpandedOneBackAndCountsTheUseOnce() async {

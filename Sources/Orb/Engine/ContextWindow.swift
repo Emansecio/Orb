@@ -647,8 +647,11 @@ enum ToolOutputCap {
 
     /// `toolNames`: the tools the bot has. The note about the saved file only names tools it can use.
     /// The note comes last, so shortening the output later (`ContextText.preview`) keeps the path.
+    /// `keepsCopy`: an output that cannot simply be asked for again (a command, a page, a connector; not a file read)
+    /// is saved even when it fits, once it is longer than what an old output keeps (`ContextWindow.toolOutputPreview`):
+    /// when the conversation later shortens it, the note is the way back to the middle it cut.
     static func apply(_ output: String, botID: UUID, callID: String, toolNames: Set<String> = readers,
-                      directory: URL = defaultDirectory) -> String {
+                      directory: URL = defaultDirectory, keepsCopy: Bool = false) -> String {
         guard !toolNames.isDisjoint(with: readers) else {
             // utf8.count is O(1) and never smaller than count, so under the limit in bytes means under it in characters.
             guard output.utf8.count > limitWithoutFiles else { return output }
@@ -658,24 +661,36 @@ enum ToolOutputCap {
             return String(output.prefix(headWithoutFiles)) + ContextText.marker(omitted) + String(output.suffix(tailWithoutFiles))
                 + "\n[the middle of this output was cut and cannot be read back; ask for narrower output]"
         }
-        guard output.utf8.count > limit, output.count > limit else { return output }
+        guard output.utf8.count > limit, output.count > limit else {
+            guard keepsCopy, output.utf8.count > copiedFrom, output.count > copiedFrom,
+                  !output.contains(ContextText.savedNoteOpen), // the tool saved it already (`run_command`)
+                  let file = save(output, botID: botID, callID: callID, directory: directory) else { return output }
+            return output + ContextText.savedNoteOpen + "\(file.path); \(readAdvice(toolNames))]"
+        }
+        let note = save(output, botID: botID, callID: callID, directory: directory)
+            .map { "full output saved at \($0.path); \(readAdvice(toolNames))" }
+            ?? "the rest of the output could not be saved; run the command again with narrower output"
+        return String(output.prefix(head)) + ContextText.marker(output.count - head - tail) + String(output.suffix(tail))
+            + "\n[\(note)]"
+    }
+
+    /// Outputs longer than this are saved even when they fit (`keepsCopy`): an old one keeps this much.
+    static let copiedFrom = ContextWindow.toolOutputPreview
+
+    /// Writes `output` to a file of its own; nil when it could not.
+    private static func save(_ output: String, botID: UUID, callID: String, directory: URL) -> URL? {
         let safeID = String(callID.map { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" ? $0 : "_" }.prefix(80))
         // Providers may omit call IDs (the clients fall back to "call_0"), so the name never depends on the ID alone.
         let unique = String(UUID().uuidString.prefix(8))
         let folder = directory.appending(path: botID.uuidString)
         let file = folder.appending(path: (safeID.isEmpty ? unique : safeID + "-" + unique) + ".txt")
-        let saved: Bool
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             try output.write(to: file, atomically: true, encoding: .utf8)
-            saved = true
+            return file
         } catch {
-            saved = false
+            return nil
         }
-        let note = saved ? "full output saved at \(file.path); \(readAdvice(toolNames))"
-            : "the rest of the output could not be saved; run the command again with narrower output"
-        return String(output.prefix(head)) + ContextText.marker(output.count - head - tail) + String(output.suffix(tail))
-            + "\n[\(note)]"
     }
 
     private static func readAdvice(_ toolNames: Set<String>) -> String {

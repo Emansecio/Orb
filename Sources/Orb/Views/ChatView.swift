@@ -66,7 +66,9 @@ struct ChatView: View {
         .onDrop(of: AppModel.droppableTypes, isTargeted: $isDropTargeted) { model.attachDropped($0, to: botID) }
         .background(Palette.canvas)
         .navigationTitle(look.name)
-        .navigationSubtitle(model.modelName(forModel: live.modelID))
+        // Under the name, what the Orb is doing while it works (with the sidebar hidden, the only place that says so
+        // above the fold), and its model when it is free.
+        .navigationSubtitle(live.needsYou ? "Precisa de você" : live.shownWork?.text ?? model.modelName(forModel: live.modelID))
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button("Buscar na conversa", systemImage: "magnifyingglass") { find.open() }
@@ -135,6 +137,37 @@ struct CompactedFoldLine: View {
         .help(isOpen ? "Oculta de novo as mensagens que viraram resumo" : "Mostra as mensagens que viraram resumo (o Orb segue com o resumo)")
         .accessibilityLabel(fold.title)
         .accessibilityHint(isOpen ? "Oculta essas mensagens" : "Mostra essas mensagens")
+    }
+}
+
+/// The time above a new moment of the conversation: "Hoje, 14:05". A heading for VoiceOver, so the rotor walks the
+/// conversation by its moments; its words change at midnight ("Hoje" becomes "Ontem") without the chat changing. The
+/// timeline's dates are midnights, today's first: only the day of "now" matters to the label.
+struct TimeSeparatorLine: View {
+    let date: Date
+
+    var body: some View {
+        TimelineView(Midnights()) { context in
+            Text(TimeSeparators.label(date, now: context.date))
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Palette.faint)
+                .monospacedDigit()
+                .frame(maxWidth: .infinity)
+                .padding(.top, 6)
+                .accessibilityAddTraits(.isHeader)
+        }
+    }
+}
+
+/// Every midnight from the start of today, by the calendar (a day of a change of clocks is not 24 hours long).
+private struct Midnights: TimelineSchedule {
+    func entries(from startDate: Date, mode: TimelineScheduleMode) -> AnyIterator<Date> {
+        let calendar = Calendar.current
+        var next = calendar.startOfDay(for: startDate)
+        return AnyIterator {
+            defer { next = calendar.date(byAdding: .day, value: 1, to: next) ?? next.addingTimeInterval(86_400) }
+            return next
+        }
     }
 }
 
@@ -233,26 +266,35 @@ private struct TranscriptList: View {
                     // What a compaction folded stays out of the list until the line above the rest opens it: a long chat
                     // that was compacted lays out only what came after.
                     let fold = transcript.fold
+                    let breaks = transcript.timeBreaks
                     // MARK: MultiOrb (WP2): a chat with exchanges between Orbs or repeated events is drawn from its folded rows.
                     if let rows = transcript.rows {
                         if showsFolded {
                             ForEach(rows[..<transcript.foldedRows]) { row in
-                                foldedRow(row, lastReplyID: lastReplyID, redoID: redoID, dropping: dropping, found: found)
+                                timed(row.id, breaks) {
+                                    foldedRow(row, lastReplyID: lastReplyID, redoID: redoID, dropping: dropping, found: found)
+                                }
                             }
                         }
                         if fold.count > 0 { foldLine(fold, proxy) }
                         ForEach(rows[transcript.foldedRows...]) { row in
-                            foldedRow(row, lastReplyID: lastReplyID, redoID: redoID, dropping: dropping, found: found)
+                            timed(row.id, breaks) {
+                                foldedRow(row, lastReplyID: lastReplyID, redoID: redoID, dropping: dropping, found: found)
+                            }
                         }
                     } else {
                         if showsFolded {
                             ForEach(items[..<fold.count]) { item in
-                                itemRow(item, lastReplyID: lastReplyID, redoID: redoID, dropping: dropping, found: found)
+                                timed(item.id, breaks) {
+                                    itemRow(item, lastReplyID: lastReplyID, redoID: redoID, dropping: dropping, found: found)
+                                }
                             }
                         }
                         if fold.count > 0 { foldLine(fold, proxy) }
                         ForEach(items[fold.count...]) { item in
-                            itemRow(item, lastReplyID: lastReplyID, redoID: redoID, dropping: dropping, found: found)
+                            timed(item.id, breaks) {
+                                itemRow(item, lastReplyID: lastReplyID, redoID: redoID, dropping: dropping, found: found)
+                            }
                         }
                     }
                     // end MultiOrb (WP2)
@@ -289,6 +331,17 @@ private struct TranscriptList: View {
             }))
             .modifier(KeepsBottom(follows: follows))
             .environment(\.replyGrew, replyGrew(proxy))
+            .environment(\.revealQuote, RevealQuoteAction { [model, find, look] quote, messageID in
+                let items = model.orbTranscript(look.id).items
+                guard let index = items.firstIndex(where: { $0.id == messageID }),
+                      let source = MessageQuote.source(of: quote, before: index, in: items) else {
+                    // The reply is gone (redone, or the quote was typed by hand): say so instead of doing nothing.
+                    NSSound.beep()
+                    model.announceForAccessibility("Trecho não encontrado na conversa")
+                    return
+                }
+                find.reveal(quoteOf: source, words: MessageQuote.probe(quote))
+            })
             .onChange(of: follows) { follower.follows = follows }
             .onChange(of: find.jump) {
                 guard let jump = find.jump else { return }
@@ -343,14 +396,23 @@ private struct TranscriptList: View {
         }
     }
 
-    /// What a growing reply calls: nothing where the scroll view keeps the bottom itself.
+    /// A row with the time above it when it begins a new moment of the conversation (`TimeSeparators`).
+    @ViewBuilder
+    /// One stack either way, so a row whose separator comes or goes keeps its identity (and what is typed in a card).
+    private func timed(_ rowID: UUID, _ breaks: [UUID: Date], @ViewBuilder row: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let date = breaks[rowID] { TimeSeparatorLine(date: date) }
+            row()
+        }
+    }
+
     /// One item of the chat as a row, entering by itself when it is new.
     @ViewBuilder
     private func itemRow(_ item: TranscriptItem, lastReplyID: UUID?, redoID: UUID?, dropping: Set<UUID>, found: FindFocus?) -> some View {
         let isNew = entrances.isNew(item.id)
         TranscriptRow(item: item, botID: look.id, orb: look.orb, entering: isNew,
                       isLastReply: item.id == lastReplyID, offersRedo: item.id == redoID,
-                      isDropping: dropping.contains(item.id), find: item.id == found?.itemID ? found : nil)
+                      isDropping: dropping.contains(item.id), find: item.id == found?.itemID ? found : nil, editable: true)
             .equatable()
             // The row comes in by itself, not through an animation of the list (which would lay every row out again); the
             // list's own animation must not add a transition of its own.
@@ -438,10 +500,11 @@ private struct TranscriptList: View {
 
     /// A row inside a folded one: no entrance of its own.
     private func plainRow(_ item: TranscriptItem) -> some View {
-        TranscriptRow(item: item, botID: look.id, orb: look.orb)
+        TranscriptRow(item: item, botID: look.id, orb: look.orb, editable: true)
             .equatable()
     }
 
+    /// What a growing reply calls: nothing where the scroll view keeps the bottom itself.
     private func replyGrew(_ proxy: ScrollViewProxy) -> ReplyGrewAction? {
         guard !BottomFollower.anchorsItself else { return nil }
         let follower = follower
@@ -497,8 +560,9 @@ private struct TranscriptList: View {
 
 /// Keeps the end of the conversation in view where the scroll view can do it itself (macOS 15): it opens at the
 /// bottom, and stays there while content grows and the user has not scrolled up. A scroll to an id after every
-/// change instead costs as much as the conversation is long, and on a long one it stops short of the end.
-private struct KeepsBottom: ViewModifier {
+/// change instead costs as much as the conversation is long, and on a long one it stops short of the end. The group's
+/// thread keeps its bottom the same way.
+struct KeepsBottom: ViewModifier {
     let follows: Bool
 
     func body(content: Content) -> some View {
@@ -620,8 +684,8 @@ private final class ScrollTouch {
 /// Stops following new content while the user scrolls away from the bottom and resumes once they
 /// scroll back down (or only touched the trackpad: `FollowRule`). Needs scroll phases (macOS 15); on macOS 14 the chat
 /// always follows. `resumed` is called when following resumes with the end out of reach (the list grew during the
-/// touch), to glide back to it.
-private struct BottomFollowing: ViewModifier {
+/// touch), to glide back to it. The group's thread follows the same way.
+struct BottomFollowing: ViewModifier {
     @Binding var isFollowing: Bool
     let resumed: @MainActor () -> Void
     /// Made on first appearance, not as an initial value (which would build one on every body of the list).
@@ -694,6 +758,8 @@ private struct EmptyChatView: View {
     @State private var enters: Bool
     /// Set when the Orb lands (its own squash and wobble).
     @State private var landed = 0
+    /// The routine a routine or goal idea opens in the editor; nothing is created until it is saved there.
+    @State private var draft: Routine?
 
     init(look: BotLook, presented: PresentedOrbs?) {
         self.look = look
@@ -733,11 +799,14 @@ private struct EmptyChatView: View {
                                    capabilities: EmptyChatContent.capabilityNames(for: bot))
                         .entrance(.rise.delayed(EmptyChatEntrance.contextDelay), enters: enters)
                     VStack(spacing: 6) {
-                        let suggestions = EmptyChatContent.suggestions(for: bot, interviewPending: live.memory.interviewPending)
+                        let suggestions = EmptyChatContent.suggestions(for: bot, interviewPending: live.memory.interviewPending,
+                                                                       offersRoutines: !model.routines.contains { $0.botID == look.id })
                         ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, suggestion in
-                            SuggestionButton(symbol: suggestion.symbol, text: suggestion.text) {
-                                model.send(suggestion.symbol == "questionmark.bubble" ? EmptyChatContent.interviewRequest : suggestion.text,
-                                           to: look.id)
+                            SuggestionButton(symbol: suggestion.symbol, text: suggestion.text, caption: suggestion.caption) {
+                                switch suggestion.action {
+                                case .send(let text): model.send(text, to: look.id)
+                                case .openEditor(let template): draft = model.draftRoutine(from: template, botID: look.id)
+                                }
                             }
                             .entrance(.staggered(index, start: EmptyChatEntrance.suggestionsStart), enters: enters)
                         }
@@ -750,6 +819,7 @@ private struct EmptyChatView: View {
         .frame(maxWidth: .infinity)
         .animateChanges(of: showsFirstRun)
         .onAppear { presented?.insert(look.id) }
+        .sheet(item: $draft) { RoutineEditor(routine: $0) }
     }
 }
 
@@ -775,6 +845,8 @@ private struct OrbContextLine: View {
 struct SuggestionButton: View {
     let symbol: String
     let text: String
+    /// What an idea makes ("Cria uma meta"), at the trailing end; nil for a prompt that is sent.
+    var caption: String?
     let action: () -> Void
     @State private var isHovering = false
 
@@ -782,12 +854,18 @@ struct SuggestionButton: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Image(systemName: symbol)
-                    .foregroundStyle(Palette.faint)
+                    .foregroundStyle(caption == nil ? Palette.faint : Palette.accentText)
                     .frame(width: 18)
                 Text(text)
                     .foregroundStyle(Palette.secondary)
                     .multilineTextAlignment(.leading)
                 Spacer()
+                if let caption {
+                    Text(caption)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Palette.faint)
+                        .fixedSize()
+                }
                 Image(systemName: "arrow.up.right")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(Palette.hint)
@@ -803,7 +881,7 @@ struct SuggestionButton: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .help(Tip.suggestion)
+        .help(caption == nil ? Tip.suggestion : Tip.routineIdea)
         .onHover { isHovering = $0 }
     }
 }

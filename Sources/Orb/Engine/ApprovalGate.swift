@@ -7,11 +7,14 @@ struct ApprovalAnswer: Sendable, Equatable {
     var rule: PermissionRule?
     /// For a denial: what the user wants the Orb to do instead (cleaned by `ApprovalNote.clean`).
     var note: String?
+    /// For a question (`ask_user`): the answer (cleaned by `OrbQuestion.clean`).
+    var reply: String?
 
-    init(decision: ApprovalDecision, rule: PermissionRule? = nil, note: String? = nil) {
+    init(decision: ApprovalDecision, rule: PermissionRule? = nil, note: String? = nil, reply: String? = nil) {
         self.decision = decision
         self.rule = rule
         self.note = ApprovalNote.clean(note)
+        self.reply = OrbQuestion.clean(reply)
     }
 
     static let deny = ApprovalAnswer(decision: .deny)
@@ -52,6 +55,18 @@ extension ApprovalGate {
         open(card.id, botID: botID, alwaysAsks: true, isHandoff: true)
         show(card)
         return await wait(for: card.id).decision != .deny
+    }
+}
+
+extension ApprovalGate {
+    /// The card of `ask_user`: `show` puts it in the conversation, and this waits for the person's answer; nil when they
+    /// skipped the question or pressed Parar. Like a hand-off, a change of permission mode never answers it.
+    func ask(_ question: OrbQuestion, botName: String, botID: UUID, show: (ApprovalRequest) -> Void) async -> String? {
+        let card = ApprovalRequest.question(question, botName: botName)
+        open(card.id, botID: botID, alwaysAsks: true, isHandoff: true)
+        show(card)
+        let answer = await wait(for: card.id)
+        return answer.decision == .deny ? nil : answer.reply
     }
 }
 

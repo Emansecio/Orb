@@ -17,7 +17,7 @@ extension Snapshot {
             model.setDraft("e confere também a pasta de downloads", for: bot.id)
             model.dictation.pose(.listening, level: 0.4, for: bot.id)
             return view
-        case "chat-working", "chat-working-wait", "chat-working-retry", "chat-attachments-queued":
+        case "chat-working", "chat-working-wait", "chat-working-retry", "chat-attachments-queued", "chat-working-steered":
             return workingTurn(screen, model: model, bot: bot)
         case "chat-typed":
             seedConversation(model, bot: bot)
@@ -59,6 +59,10 @@ extension Snapshot {
             // Files dragged over the chat, before they are let go: anywhere on it takes them.
             seedConversation(model, bot: bot)
             return AnyView(ChatView(botID: bot.id, showsDrop: true))
+        case "chat-empty-ideas":
+            // An empty chat with a model and no routine: the prompts, then the routine and goal ideas with their captions.
+            seedProviders(model)
+            return AnyView(ChatView(botID: bot.id))
         case "chat-slash":
             model.skills = [Skill(slug: "resumir", name: "Resumir", summary: "Resume um texto ou arquivo em poucos tópicos.", instructions: "x"),
                             Skill(slug: "revisar", name: "Revisar código", summary: "Revisa mudanças e aponta riscos.", instructions: "x"),
@@ -150,6 +154,9 @@ extension Snapshot {
         case "chat-working-retry":
             // Long enough that the countdown still has a number when the picture is taken.
             model.apply(.status(Retry.waitStatus(seconds: 40, after: LLMError.network(code: -1009, message: "offline"))), to: id)
+        case "chat-working-steered":
+            // A message of yours reached the task and the Orb has not acted on it yet: its bubble offers "Parar e enviar".
+            items.append(TranscriptItem(.user(text: "Roda de novo, era a internet aqui.", attachments: []), duringTask: true))
         default:
             let build = ToolCall(kind: .shell, title: "Rodando no Terminal", detail: "swift build --jobs 6")
             if screen == "chat-working" {

@@ -20,7 +20,7 @@ enum ToolBox {
             if browseToolNames.contains(tool.spec.name), browser != .browser { return false }
             return accessibilityGranted || !accessibilityToolNames.contains(tool.spec.name)
         }
-        return base + multiOrbTools.filter { tool in
+        return base + (multi.askUser ? [AskUserTool()] : []) + multiOrbTools.filter { tool in
             switch tool.spec.name {
             case "orbs": multi.orbs
             case OrbProposeTool.name: multi.propose

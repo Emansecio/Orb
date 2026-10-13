@@ -202,8 +202,11 @@ import Testing
 
         let model = launch(async: true)
         await model.loadedConversation(bots[0].id)
-        guard case .bot(let text, let streaming) = model.transcript(bots[0].id).last?.kind else { Issue.record("no reply"); return }
+        let items = model.transcript(bots[0].id)
+        guard case .bot(let text, let streaming) = items.dropLast().last?.kind else { Issue.record("no reply"); return }
         #expect(text == "meio" && !streaming)
+        // And it says the app closed there, with "Continuar" to pick it up.
+        guard case .notice(BotSession.quitNotice) = items.last?.kind else { Issue.record("no notice"); return }
     }
 
     @Test @MainActor func aDeletedOrbDoesNotLeaveALoadBehind() async throws {

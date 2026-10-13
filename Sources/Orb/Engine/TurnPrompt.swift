@@ -26,8 +26,11 @@ enum TurnPreface {
 
     /// `snapshot` only when the model has not seen it yet; `changes` (a `WorkspaceSnapshot.changes(since:)` block) when
     /// the folder changed since the one it has; `notes` is memory text already fenced as data.
-    static func make(now: Date, timeZone: String, snapshot: WorkspaceSnapshot?, changes: String = "", notes: String) -> String {
+    /// `memory`, a `memoryUpdate` block, when the Orb's memory changed since the system prompt was frozen.
+    static func make(now: Date, timeZone: String, snapshot: WorkspaceSnapshot?, changes: String = "", notes: String,
+                     memory: String = "") -> String {
         var parts = ["Now: \(now.formatted(date: .complete, time: .shortened)) (\(timeZone))."]
+        if !memory.isEmpty { parts.append(memory) }
         if let snapshot { parts.append(snapshot.text) }
         if !changes.isEmpty { parts.append(changes) }
         if !notes.isEmpty { parts.append(notes) }
@@ -36,12 +39,36 @@ enum TurnPreface {
     }
 
     /// The preface for what `report` says about the folder: the whole `snapshot`, the changes, or nothing.
-    static func make(now: Date, timeZone: String, report: WorkspaceReport, snapshot: WorkspaceSnapshot, notes: String) -> String {
+    static func make(now: Date, timeZone: String, report: WorkspaceReport, snapshot: WorkspaceSnapshot, notes: String,
+                     memory: String = "") -> String {
         switch report {
-        case .nothing: make(now: now, timeZone: timeZone, snapshot: nil, notes: notes)
-        case .full: make(now: now, timeZone: timeZone, snapshot: snapshot, notes: notes)
-        case .changes(let changes): make(now: now, timeZone: timeZone, snapshot: nil, changes: changes, notes: notes)
+        case .nothing: make(now: now, timeZone: timeZone, snapshot: nil, notes: notes, memory: memory)
+        case .full: make(now: now, timeZone: timeZone, snapshot: snapshot, notes: notes, memory: memory)
+        case .changes(let changes): make(now: now, timeZone: timeZone, snapshot: nil, changes: changes, notes: notes, memory: memory)
         }
+    }
+
+    static let memoryTag = "memory_update"
+
+    /// The Orb's memory (`MemoryBrief.stable`) as a message's preface carries it once it changed: the system prompt keeps
+    /// the memory the conversation started with, so the provider's prompt cache is not lost with every new fact.
+    static func memoryUpdate(_ memory: String) -> String {
+        "<\(memoryTag)>\nYour memory changed since this conversation began. It now reads as follows, in place of the memory "
+            + "in the system prompt:\n" + Fence.neutralize(memory, tags: [memoryTag, name]) + "\n</\(memoryTag)>"
+    }
+
+    /// The newest `memoryUpdate` block the model can still read in `history` (condensing drops the older ones' prefaces).
+    static func latestMemoryUpdate(in history: [ChatMessage]) -> String? {
+        for message in history.reversed() where message.role == .user && message.content.hasPrefix(openTag) {
+            // Only the preface: a block pasted in the message itself is not the app's.
+            guard let close = message.content.range(of: closeTag) else { continue }
+            let preface = message.content[..<close.lowerBound]
+            guard let start = preface.range(of: "<\(memoryTag)>\n"),
+                  let end = preface.range(of: "\n</\(memoryTag)>", range: start.upperBound..<preface.endIndex)
+            else { continue }
+            return String(preface[start.lowerBound..<end.upperBound])
+        }
+        return nil
     }
 
     static let name = "orb_context"
@@ -127,10 +154,13 @@ struct DeliveryMarks: Sendable, Equatable {
     var workspaceHash: String
     /// The snapshot as the model now has it (`WorkspaceSnapshot.forComparison`), to tell what changed next time.
     var workspace: WorkspaceSnapshot?
+    /// The memory the system prompt carried (`Conversation.memoryInPrompt`).
+    var memory: String?
 
     func record(in conversation: inout Conversation) {
         conversation.workspaceHash = workspaceHash
         conversation.workspaceSeen = workspace
+        conversation.memoryInPrompt = memory
     }
 }
 
@@ -166,23 +196,31 @@ enum TurnPrompt {
         var workspaceHash: String
         /// What `Conversation.workspaceSeen` becomes.
         var workspace: WorkspaceSnapshot
+        /// What `Conversation.memoryInPrompt` becomes.
+        var memory: String
 
-        var marks: DeliveryMarks { DeliveryMarks(workspaceHash: workspaceHash, workspace: workspace) }
+        var marks: DeliveryMarks { DeliveryMarks(workspaceHash: workspaceHash, workspace: workspace, memory: memory) }
     }
 
     /// `lastWorkspaceHash` and `lastWorkspace`: the snapshot the conversation last sent. The model gets the whole snapshot
     /// when `history` holds none (a new conversation, a compacted start) or nothing is
     /// recorded of the last one; only what changed when the folder changed; and nothing about the folder otherwise.
+    /// `memoryInPrompt`: the memory this conversation's system prompt has carried so far. It stays there unchanged (a new
+    /// start, with no history, takes the memory as it is now); a memory that changed goes in the preface instead, once,
+    /// and again only if the model can no longer read it there.
     static func native(_ inputs: TurnPromptInputs, history: [ChatMessage], lastWorkspaceHash: String?,
-                       lastWorkspace: WorkspaceSnapshot? = nil) -> Native {
+                       lastWorkspace: WorkspaceSnapshot? = nil, memoryInPrompt: String? = nil) -> Native {
         let report = inputs.snapshot.report(lastHash: lastWorkspaceHash, seen: lastWorkspace,
                                             modelHasSnapshot: TurnPreface.hasSnapshot(in: history))
         // The full notes (where you left off, other titles) once, at the start; later only what fits the message.
         let notes = history.isEmpty ? inputs.brief.notes : TurnPreface.relatedNotes(inputs.brief)
-        return Native(system: SystemPrompt.make(bot: inputs.bot, skills: inputs.skills, memory: inputs.brief.stable,
+        let frozen = (history.isEmpty ? nil : memoryInPrompt) ?? inputs.brief.stable
+        let current = TurnPreface.memoryUpdate(inputs.brief.stable)
+        let known = TurnPreface.latestMemoryUpdate(in: history) ?? TurnPreface.memoryUpdate(frozen)
+        return Native(system: SystemPrompt.make(bot: inputs.bot, skills: inputs.skills, memory: frozen,
                                                 environment: inputs.environment, folder: inputs.folderSection),
                       preface: TurnPreface.make(now: inputs.now, timeZone: inputs.environment.timeZone, report: report,
-                                                snapshot: inputs.snapshot, notes: notes),
-                      workspaceHash: inputs.snapshot.hash, workspace: inputs.snapshot.forComparison)
+                                                snapshot: inputs.snapshot, notes: notes, memory: known == current ? "" : current),
+                      workspaceHash: inputs.snapshot.hash, workspace: inputs.snapshot.forComparison, memory: frozen)
     }
 }

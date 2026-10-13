@@ -182,7 +182,8 @@ import Testing
         let store = Store(directory: root)
         store.save(state)
         for bot in state.bots {
-            store.save(Conversation(items: [TranscriptItem(.user(text: "oi", attachments: []))], messages: [.user("oi")]), for: bot.id)
+            // A reply, not a request: a conversation that ends in an unanswered request opens as interrupted.
+            store.save(Conversation(items: [TranscriptItem(.bot(text: "Olá!", isStreaming: false))], messages: [ChatMessage(role: .assistant, content: "Olá!")]), for: bot.id)
         }
         store.flush()
         let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)

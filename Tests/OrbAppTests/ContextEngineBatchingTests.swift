@@ -294,7 +294,7 @@ struct EngineNudgeTests {
         #expect(received.count == 3)
         for window in received.dropFirst() {
             #expect(window.contains { $0.role == .tool && $0.content.count >= 9_000 })
-            #expect(window.contains { $0.content == "usa tabs" })
+            #expect(window.contains { $0.content == AgentEngine.steeringFrame + "\n\nusa tabs" })
         }
     }
 }

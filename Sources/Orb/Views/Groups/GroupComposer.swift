@@ -5,8 +5,9 @@ import SwiftUI
 struct GroupComposer: View {
     /// The names of the members: what a mention can call.
     let names: [String]
+    /// The draft: kept by the app per group, so it is still there after a visit to another conversation.
+    @Binding var text: String
     let onSend: (String) -> Void
-    @State private var text = ""
     @State private var selected = 0
     @FocusState private var isFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion

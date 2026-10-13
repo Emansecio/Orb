@@ -18,6 +18,28 @@ final class AttachmentPresentationTests {
         return url.path
     }
 
+    // MARK: Screen steps
+
+    @Test func capturesOfARunBecomeStepsNamedByWhatTheyShow() {
+        func call(_ title: String, _ detail: String, _ picture: String? = nil, _ state: ToolCall.State = .done) -> ToolCall {
+            ToolCall(kind: .browser, title: title, detail: detail, state: state, output: "ok",
+                     files: picture.map { [ProducedFile(path: "/x/\($0).png", created: true)] })
+        }
+        let calls = [call("Abrindo a página", "loja.com"), call("Capturando a página", "", "a"),
+                     call("Clicando", "Comprar"), call("Capturando a página", "", "b"),
+                     call("Capturando a janela", "Safari", "c"), call("Capturando a página", "", "d", .failed),
+                     // A chart a command drew is a result, not a step.
+                     ToolCall(kind: .shell, title: "Executando", detail: "python plot.py", state: .done, output: "ok",
+                              files: [ProducedFile(path: "/x/grafico.png", created: true)]),
+                     call("Gravando arquivo", "/x/notas.md")]
+        let steps = ScreenStepsStrip.steps(of: calls)
+        #expect(steps?.map(\.path) == ["/x/a.png", "/x/b.png", "/x/c.png"])
+        // The action before a capture names it, once; a capture that names its window keeps that.
+        #expect(steps?.map(\.caption) == ["loja.com", "Comprar", "Safari"])
+        // One capture stays the thumbnail of its own line.
+        #expect(ScreenStepsStrip.steps(of: Array(calls.prefix(2))) == nil)
+    }
+
     // MARK: Layout
 
     @Test func picturesAndFilesAreToldApart() {

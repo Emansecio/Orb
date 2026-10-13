@@ -24,6 +24,7 @@ enum Tip {
     static let chooseModel = "Escolhe o modelo da lista"
     static let forgetWindow = "Esquece o tamanho de janela aprendido para este modelo"
     static let suggestion = "Envia esta sugestão ao Orb"
+    static let routineIdea = "Abre o editor de rotina já preenchido; nada é criado antes de salvar"
     static let queueAfterTask = "Deixa esta mensagem para depois da tarefa, em vez de entrar no próximo passo"
     static let steerNow = "Entrega esta mensagem ao Orb no próximo passo da tarefa"
 
@@ -60,6 +61,7 @@ enum Tip {
     static let copyReport = "Copia o relatório desta execução"
     static let openReportFile = "Abre o arquivo do relatório"
     static let runOnceNow = "Roda a rotina assim que for criada, para ver se funciona"
+    static let cronExpression = "Cinco campos: minuto, hora, dia do mês, mês e dia da semana. Ex.: 0 9 * * 1-5 roda às 9h de segunda a sexta"
     static let routinePermissions = "Define como a rotina pede permissão, já que ninguém responde"
     static let allRoutines = "Abre a página Rotinas, com as de todos os Orbs"
     static func routineToggle(isOn: Bool) -> String { isOn ? "Pausa esta rotina" : "Ativa esta rotina" }
@@ -110,6 +112,12 @@ enum Tip {
     static let allowOptions = "Permite só nesta tarefa ou sempre; remova depois em Liberações"
     static let handoffDone = "Você terminou no navegador: o Orb continua de onde parou"
     static let handoffCancel = "Você não vai fazer isso: o Orb segue sem esse passo"
+    static let pickAnswer = "Responde com esta opção"
+    static let quoteSelection = "Leva o trecho selecionado para a sua próxima mensagem, como citação"
+    static let goToQuote = "Vai até o trecho citado na resposta do Orb"
+    static let answerQuestion = "Envia o que você escreveu como resposta. Escrever no campo de mensagem também responde"
+    static let answerInApp = "Abre a conversa para responder à pergunta"
+    static let skipQuestion = "Deixa a pergunta sem resposta: o Orb segue com o que puder decidir sozinho"
 
     // MARK: Orb panel: browser
     static let browserEngine = "Qual navegador o Orb usa para páginas com JavaScript e logins"
@@ -253,6 +261,8 @@ enum Tip {
         case .ask: "Pede esta permissão ao macOS"
         case .openAppAndAsk(let name): "Abre \(name) e pede a permissão a ele"
         case .openSystemSettings: "Abre os Ajustes do Sistema nesta permissão"
+        case .test: "Usa a permissão de verdade, só olhando, para ver se funciona"
+        case .relaunch: "Fecha e abre o Orb de novo para o macOS aplicar a permissão"
         }
     }
 
@@ -283,7 +293,7 @@ enum Tip {
     /// Every fixed text above, for the test that holds them to the style.
     static var all: [String] {
         [attach, removeAttachment, previewAttachment, previewImage, missingAttachment, moreAttachments,
-         manageGrants, adjustContext, chooseModel, forgetWindow, suggestion, queueAfterTask, steerNow,
+         manageGrants, adjustContext, chooseModel, forgetWindow, suggestion, routineIdea, queueAfterTask, steerNow,
          newRoutine, editRoutine, deleteRoutine, runRoutineNow, runRoutineAgain, queuedRoutine, routineConversation,
          copyReport, openReportFile, runOnceNow, routinePermissions, allRoutines,
          routineToggle(isOn: true), routineToggle(isOn: false),

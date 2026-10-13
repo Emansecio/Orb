@@ -182,6 +182,65 @@ private struct WritingModel: LLMClient {
         #expect(texts(model, b).notices == ["aviso de Luna"])
     }
 
+    // MARK: A card nobody answers
+
+    @Test @MainActor func aCardLeftADayStopsTheTaskAndSaysWhy() async throws {
+        let gates = Gates()
+        let (model, a, _, _) = setUp(gates)
+        await model.loadRemainingConversations()
+        defer { Task { await gates.openAll(allKeys) } }
+        #expect(model.send("PEDIDO-A", to: a))
+        await modelCalls(gates, 1)
+        let card = ApprovalRequest(toolName: "run_command", title: "Rodando no Terminal", command: "rm -rf build", reason: "")
+        model.apply(.approval(card), to: a)
+        #expect(model.isPending(card.id, of: a))
+
+        model.giveUpWaiting(on: card.id, of: a)
+        #expect(!model.isWorking(a) && !model.isPending(card.id, of: a))
+        #expect(texts(model, a).notices == [ApprovalWait.gaveUpNotice])
+        // Answered meanwhile (or already given up on): nothing more happens.
+        model.giveUpWaiting(on: card.id, of: a)
+        #expect(texts(model, a).notices == [ApprovalWait.gaveUpNotice])
+        #expect(ApprovalWait.reminder(ApprovalWait.remindAfter) == "Esperando há 1 h · ")
+        #expect(ApprovalWait.reminder(.seconds(30 * 60)) == "Esperando há 30 min · ")
+    }
+
+    @Test @MainActor func writingInTheMessageBoxAnswersTheOrbsOpenQuestion() async throws {
+        let gates = Gates()
+        let (model, a, _, _) = setUp(gates)
+        await model.loadRemainingConversations()
+        defer { Task { await gates.openAll(allKeys) } }
+        #expect(model.send("PEDIDO-A", to: a))
+        await modelCalls(gates, 1)
+        let card = ApprovalRequest.question(OrbQuestion(text: "Qual pasta?", options: ["Downloads", "Mesa"]), botName: "Atlas")
+        model.apply(.approval(card), to: a)
+        #expect(model.openQuestion(of: a) == card.id)
+
+        #expect(model.submit("  a da Mesa  ", to: a))
+        #expect(model.openQuestion(of: a) == nil && !model.isPending(card.id, of: a))
+        let answered = model.transcript(a).compactMap { item -> ApprovalRequest? in
+            if case .approval(let request) = item.kind { request } else { nil }
+        }
+        #expect(answered.first?.question?.answer == "a da Mesa" && answered.first?.decision == .once)
+        #expect(model.composerLane(a).queue.isEmpty) // an answer, not a message waiting for the task
+        #expect(texts(model, a).user == ["PEDIDO-A"])
+
+        // With a question open, a command or a message longer than an answer keeps is not taken as the answer.
+        let second = ApprovalRequest.question(OrbQuestion(text: "E agora?"), botName: "Atlas")
+        model.apply(.approval(second), to: a)
+        #expect(!model.submit("/compactar", to: a))
+        #expect(model.submit(String(repeating: "a", count: OrbQuestion.answerLimit + 1), to: a))
+        #expect(model.openQuestion(of: a) == second.id && model.composerLane(a).queued.count == 1)
+    }
+
+    @Test @MainActor func citarPutsTheWordsAtTheStartOfTheDraft() async {
+        let gates = Gates()
+        let (model, a, _, _) = setUp(gates)
+        model.setDraft("por quê?", for: a)
+        model.quote("Apagar as duplicadas", for: a)
+        #expect(model.draftText(a) == "> Apagar as duplicadas\n\npor quê?")
+    }
+
     // MARK: Stop and send again
 
     @Test @MainActor func aStoppedTurnCannotReachTheTurnSentRightAfterIt() async throws {
@@ -356,7 +415,7 @@ private struct WritingModel: LLMClient {
     // MARK: Reading and writing the conversation
 
     @Test @MainActor func anOrbsConversationIsReadWhenFirstNeededAndWrittenBack() async throws {
-        let said = Conversation(items: [TranscriptItem(.user(text: "lembra disso", attachments: []))], messages: [.user("lembra disso")])
+        let said = Conversation(items: [TranscriptItem(.bot(text: "lembra disso", isStreaming: false))], messages: [ChatMessage(role: .assistant, content: "lembra disso")])
         let (model, a, b, _) = setUp(Gates(), lunaChat: said)
         let luna = model.session(b)
         #expect(luna.isUnloaded && luna.conversation == nil) // only the Orb on screen is read at launch
@@ -374,7 +433,7 @@ private struct WritingModel: LLMClient {
     }
 
     @Test @MainActor func aReadUnderWayIsLeftBehindWhenTheConversationIsNeededAtOnce() async throws {
-        let said = Conversation(items: [TranscriptItem(.user(text: "antes", attachments: []))], messages: [.user("antes")])
+        let said = Conversation(items: [TranscriptItem(.bot(text: "antes", isStreaming: false))], messages: [ChatMessage(role: .assistant, content: "antes")])
         let (model, _, b, _) = setUp(Gates(), lunaChat: said)
         let luna = model.session(b)
         let reading = try #require(luna.beginLoading())

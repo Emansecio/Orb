@@ -122,7 +122,7 @@ struct SteeringEngineTests {
         let events = await run(request(client, steering: queue))
         let calls = await client.seen.calls
         #expect(calls.count == 2)
-        #expect(calls[0].last?.content == "use a pasta X")
+        #expect(calls[0].last?.content == AgentEngine.steeringFrame + "\n\nuse a pasta X")
         #expect(events.contains { if case .steered = $0 { true } else { false } })
         #expect(queue.isEmpty)
     }
@@ -141,7 +141,7 @@ struct SteeringEngineTests {
         #expect(calls.count == 2)
         // Second call: system, prompt, assistant's tool call, its result, then the steering message.
         #expect(calls[1].map(\.role) == [.system, .user, .assistant, .tool, .user])
-        #expect(calls[1].last?.content == "não, use a pasta X")
+        #expect(calls[1].last?.content == AgentEngine.steeringFrame + "\n\nnão, use a pasta X")
         let ids = events.compactMap { event -> UUID? in if case .steered(let id) = event { id } else { nil } }
         #expect(ids.count == 1)
     }
@@ -232,7 +232,7 @@ struct SteeringEngineTests {
         #expect(await client.seen.count == 2) // one turn, two model calls
         // The model saw it in the same conversation, after its own first answer.
         let second = await client.seen.calls[1]
-        #expect(second.last?.content == "segundo")
+        #expect(second.last?.content == AgentEngine.steeringFrame + "\n\nsegundo")
     }
 
     @Test @MainActor func aFileAloneIsSentAsAMessageWithTheDefaultRequest() async throws {
@@ -413,6 +413,38 @@ struct SteeringEngineTests {
         await waitUntilIdle(model, bot.id)
         #expect(await client.seen.count == 2)
         #expect(model.drafts[bot.id, default: ""] == "")
+    }
+
+    @Test @MainActor func quittingMidTaskSaysTheAppClosedAndOffersToContinue() async throws {
+        let gate = Latch()
+        let client = HeldModel(gate: gate)
+        let (model, bot) = setUp(client)
+        model.submit("primeiro", to: bot.id)
+        await waitUntil("the model call") { await client.seen.count >= 1 }
+        model.stopTurnsForQuit()
+        let notices = model.transcript(bot.id).compactMap { if case .notice(let text) = $0.kind { text } else { nil } }
+        #expect(notices.last == BotSession.quitNotice) // not "Você interrompeu": you did not
+        #expect(NoticeAction.actions(for: BotSession.quitNotice) == [.continueTurn])
+        await gate.open()
+        await waitUntilIdle(model, bot.id)
+    }
+
+    @Test @MainActor func quittingMidRoutineRunAsksToCheckBeforeRepeatingAndOffersNoContinue() async throws {
+        let gate = Latch()
+        let client = HeldModel(gate: gate)
+        let (model, bot) = setUp(client)
+        let routine = Routine(name: "R", botID: bot.id, prompt: "faça", schedule: .everyHours(1))
+        model.routines = [routine]
+        model.runRoutine(routine.id)
+        await model.routineStarted()
+        await waitUntil("the model call") { await client.seen.count >= 1 }
+        model.stopTurnsForQuit()
+        await waitUntil("the run to be recorded") { model.routines.first?.runs.count == 1 }
+        let run = try #require(model.routines.first?.runs.first)
+        #expect(!run.succeeded && run.summary == BotSession.quitSideNotice)
+        #expect(NoticeAction.actions(for: BotSession.quitSideNotice).isEmpty)
+        await gate.open()
+        await waitUntilIdle(model, bot.id)
     }
 
     @Test @MainActor func stopAndSendGoesBeforeARoutineWaitingForTheOrb() async throws {
@@ -854,7 +886,7 @@ struct SteeringModesEngineTests {
 
         let calls = await client.seen.calls
         #expect(calls.count == 2)
-        #expect(calls[1].last?.content == "use a pasta X") // the other one is nowhere in what the model saw
+        #expect(calls[1].last?.content == AgentEngine.steeringFrame + "\n\nuse a pasta X") // the other one is nowhere in what the model saw
         #expect(!calls[1].contains { $0.content == "depois de tudo" })
         let ids = events.compactMap { event -> UUID? in if case .steered(let id) = event { id } else { nil } }
         #expect(ids == [steer.id])
@@ -922,8 +954,67 @@ extension SteeringModelTests {
         #expect(shown.map(\.duringTask) == [false, true, false]) // only the one that entered the task is marked
         let calls = await client.seen.calls
         #expect(calls.count == 3) // the task (two calls), then the waiting message as a turn of its own
-        #expect(calls[1].last?.content == "não, só o Engine")
+        #expect(calls[1].last?.content == AgentEngine.steeringFrame + "\n\nnão, só o Engine")
         #expect(!calls[1].contains { $0.content == "depois da tarefa" })
+    }
+
+    /// The user's message reached the running task (the engine took it at a step boundary) and the Orb has not acted on it.
+    @MainActor private func deliverWhileWorking(_ text: String, model: AppModel, bot: Bot) throws -> UUID {
+        model.submit(text, to: bot.id)
+        let lane = model.composerLane(bot.id)
+        let id = try #require(lane.queued.first?.id)
+        _ = lane.queue.drain()
+        model.deliverSteered(id, to: bot.id)
+        return id
+    }
+
+    @Test @MainActor func stoppingGivesBackWhatReachedTheTaskUnanswered() async throws {
+        let gate = Latch()
+        let client = HeldModel(gate: gate)
+        let (model, bot) = setUp(client)
+        model.submit("primeiro", to: bot.id)
+        await waitUntil("the model call") { await client.seen.count >= 1 }
+        let id = try deliverWhileWorking("roda novamente", model: model, bot: bot)
+        model.submit("e depois isto", to: bot.id, delivery: .afterTask)
+        #expect(model.unansweredSteered(of: bot.id) == [id]) // its bubble offers "Parar e enviar", and ⌘↩ works
+
+        model.stopTurn(bot.id)
+        #expect(!model.isWorking(bot.id))
+        #expect(userTexts(model, bot.id) == ["primeiro"]) // not left in a task that will never answer it
+        #expect(model.drafts[bot.id] == "roda novamente\n\ne depois isto") // in the order you wrote them
+        #expect(model.unansweredSteered(of: bot.id).isEmpty)
+        #expect(await client.seen.count == 1) // a stop sends nothing
+        await gate.open()
+    }
+
+    @Test @MainActor func stopAndSendFromTheBubbleSendsWhatReachedTheTaskUnanswered() async throws {
+        let gate = Latch()
+        let client = HeldModel(gate: gate)
+        let (model, bot) = setUp(client)
+        model.submit("primeiro", to: bot.id)
+        await waitUntil("the model call") { await client.seen.count >= 1 }
+        _ = try deliverWhileWorking("roda novamente", model: model, bot: bot)
+
+        model.stopAndSend(bot.id)
+        await gate.open()
+        await waitUntilIdle(model, bot.id)
+        #expect(userTexts(model, bot.id) == ["primeiro", "roda novamente"])
+        let calls = await client.seen.calls
+        // A request of its own (after the turn's context), not a steer.
+        let sent = try #require(calls.count == 2 ? calls[1].last?.content : nil)
+        #expect(sent.hasSuffix("\n\nroda novamente") && !sent.contains(AgentEngine.steeringFrame))
+    }
+
+    @Test func aMessageIsUnansweredUntilTheOrbDoesSomethingAfterIt() {
+        let start = TranscriptItem(.user(text: "tarefa", attachments: []))
+        let steered = TranscriptItem(.user(text: "use X", attachments: []), duringTask: true)
+        let notice = TranscriptItem(.notice("aviso"))
+        let picture = TranscriptItem(.user(text: "veja", attachments: ["/a.png"]), duringTask: true)
+        let reply = TranscriptItem(.bot(text: "ok", isStreaming: true))
+        #expect(TranscriptItem.unansweredSteered(in: [start, steered, notice]) == [steered.id])
+        #expect(TranscriptItem.unansweredSteered(in: [start, steered, reply]).isEmpty) // the Orb started answering
+        #expect(TranscriptItem.unansweredSteered(in: [start, steered, picture]).isEmpty) // one with attachments stays
+        #expect(TranscriptItem.unansweredSteered(in: [start]).isEmpty) // the request itself is no steered message
     }
 
     @Test @MainActor func aWaitingMessageSwitchesModeUntilItIsDelivered() async throws {

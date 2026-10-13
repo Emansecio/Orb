@@ -12,24 +12,39 @@ struct MCPTool: AgentTool {
     let serverID: UUID
     let manager: MCPManager
 
-    init(serverName: String, remote: ToolSpec, serverID: UUID, manager: MCPManager, annotations: MCPToolAnnotations = .none) {
+    /// `siblings`: the names of the connector's other tools, which the name must not become (see `modelName`).
+    init(serverName: String, remote: ToolSpec, serverID: UUID, manager: MCPManager, annotations: MCPToolAnnotations = .none,
+         siblings: [String] = []) {
         self.serverName = serverName
         toolName = remote.name
         self.serverID = serverID
         self.manager = manager
         self.annotations = annotations
         let description = remote.description.isEmpty ? remote.name : remote.description
-        spec = ToolSpec(name: Self.modelName(server: serverName, tool: remote.name),
+        spec = ToolSpec(name: Self.modelName(server: serverName, tool: remote.name, siblings: siblings),
                         description: "[\(serverName)] \(description)", parameters: remote.parameters)
     }
 
-    /// `<server>__<tool>` restricted to `[a-zA-Z0-9_-]` and 64 characters, as model APIs require.
-    static func modelName(server: String, tool: String) -> String {
-        let scalars = "\(server)__\(tool)".unicodeScalars.map { scalar -> Character in
+    /// `<server>__<tool>` restricted to `[a-zA-Z0-9_-]` and 64 characters, as model APIs require; the engine runs, and the
+    /// rules allow, a tool by this name. Two tools never share one: a name cut to fit, or one that another tool of the
+    /// connector (`siblings`) would also become (`files.read` beside `files_read`), ends in a short hash of the original.
+    static func modelName(server: String, tool: String, siblings: [String] = []) -> String {
+        let safeServer = safe(server), safeTool = safe(tool)
+        let name = safeServer + "__" + safeTool
+        let clashes = safeTool != tool && siblings.contains { $0 != tool && safe($0) == safeTool }
+        guard name.count > 64 || clashes else { return name }
+        let hash = "\(server)__\(tool)".utf8.reduce(UInt32(2_166_136_261)) { ($0 ^ UInt32($1)) &* 16_777_619 } // FNV-1a
+        let suffix = String(String(hash, radix: 16).suffix(6))
+        // A long server name is cut first, so "__" (how a connector's tool is told apart) survives.
+        let kept = String(safeServer.prefix(32)) + "__" + safeTool
+        return String(kept.prefix(64 - suffix.count - 1)) + "_" + suffix
+    }
+
+    private static func safe(_ text: String) -> String {
+        String(text.unicodeScalars.map { scalar -> Character in
             scalar.isASCII && (CharacterSet.alphanumerics.contains(scalar) || scalar == "_" || scalar == "-")
                 ? Character(scalar) : "_"
-        }
-        return String(scalars.prefix(64))
+        })
     }
 
     var kind: ToolCall.Kind { .connector }

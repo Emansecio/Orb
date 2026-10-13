@@ -99,7 +99,7 @@ struct RoutinesUITests {
 
     @Test func templatesFillTheRoutineForTheChosenOrb() throws {
         let botID = UUID()
-        #expect(RoutineTemplate.all.map(\.title) == ["Resumo da manhã", "Organizar arquivos", "Revisar a semana"])
+        #expect(RoutineTemplate.all.map(\.title) == ["Resumo da manhã", "Organizar arquivos", "Revisar a semana", "Mesa em ordem"])
         #expect(Set(RoutineTemplate.all.map(\.id)).count == RoutineTemplate.all.count)
         for template in RoutineTemplate.all {
             let routine = template.routine(for: botID)

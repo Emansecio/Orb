@@ -685,7 +685,7 @@ private final class Hooks: GroupTurnHooks {
         #expect(throws: DelegationRefusal.switchedOff) {
             try model.delegation.submit(from: team.atlas.id, to: "Revisor", text: "x", kind: .ask, messageID: UUID(), groupID: nil)
         }
-        #expect(model.multiOrbOffering(for: team.atlas.id) == MultiOrbOffering(propose: true)) // only the creation tool stays (WP3)
+        #expect(model.multiOrbOffering(for: team.atlas.id) == MultiOrbOffering(propose: true, askUser: true)) // only the creation tool stays (WP3), and asking you
         model.orbsCanTalk = true
         #expect(model.multiOrbOffering(for: team.atlas.id).orbs)
     }

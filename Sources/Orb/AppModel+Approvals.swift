@@ -19,6 +19,12 @@ extension AppModel {
     /// The card the keyboard answers: the Orb's newest open one.
     func newestPendingApprovalID(of botID: UUID) -> UUID? { pendingApprovals(of: botID).last?.id }
 
+    /// The Orb's open question (`ask_user`), when its newest open card is one: the message box answers it.
+    func openQuestion(of botID: UUID) -> UUID? {
+        guard let newest = pendingApprovals(of: botID).last, newest.isQuestion else { return nil }
+        return newest.id
+    }
+
     /// Every Orb's open cards, for the menu bar. Only reads conversations while some Orb is waiting, so the panel
     /// does not redraw with every streamed token otherwise.
     var pendingApprovals: [PendingApproval] {
@@ -76,14 +82,48 @@ extension AppModel {
         // For VoiceOver, when the card appears in the chat being shown (the banner covers the other cases).
         if selectedBot?.id == botID, let name = bot(botID)?.name {
             announceForAccessibility(request.isProposal ? "\(name) quer criar um Orb"
+                                     : request.isQuestion ? "\(name) pergunta: \(request.command)"
                                      : request.isHandoff ? "\(name) espera você terminar no navegador" : "\(name) precisa da sua permissão")
         }
+        watchUnanswered(request, of: botID)
+        postBanner(for: request, of: botID)
+    }
+
+    /// The card's banner, unless the user is looking at it. `waited`: how long it has waited, for the reminder, whose
+    /// banner takes the place of the first one (same identifier) instead of piling up.
+    private func postBanner(for request: ApprovalRequest, of botID: UUID, waited: Duration? = nil) {
         guard let bot = bot(botID),
               ApprovalNotifications.shouldPost(appIsActive: NSApp?.isActive ?? false, selectedBotID: selectedBot?.id,
                                                botID: botID, enabled: Self.notificationsEnabled),
               ApprovalNotifications.isAvailable else { return }
-        let payload = ApprovalNotifications.payload(botName: bot.name, botID: botID, request: request)
+        var payload = ApprovalNotifications.payload(botName: bot.name, botID: botID, request: request)
+        if let waited { payload.body = ApprovalWait.reminder(waited) + payload.body }
         Task { await ApprovalNotifications.post(payload) { [weak self] in self?.isPending(request.id, of: botID) == true } }
+    }
+
+    /// A card nobody answers: one more banner after `ApprovalWait.remindAfter`, and after `giveUpAfter` the Orb stops
+    /// waiting (`giveUpWaiting`). Each step first looks whether the card is still open; an answer, Parar or the end of
+    /// the turn simply leaves nothing for it to do.
+    /// Both steps are counted from when the card opened, on a clock that runs while the Mac sleeps: a reminder that comes
+    /// late (the Mac woke) says how long it really waited.
+    private func watchUnanswered(_ request: ApprovalRequest, of botID: UUID) {
+        let opened = ContinuousClock.now
+        Task { [weak self] in
+            try? await Task.sleep(until: opened + ApprovalWait.remindAfter, clock: .continuous)
+            guard let self, isPending(request.id, of: botID) else { return }
+            postBanner(for: request, of: botID, waited: opened.duration(to: .now))
+        }
+        Task { [weak self] in
+            try? await Task.sleep(until: opened + ApprovalWait.giveUpAfter, clock: .continuous)
+            self?.giveUpWaiting(on: request.id, of: botID)
+        }
+    }
+
+    /// The card is still open after a day: the Orb stops the task, as Parar would, so a forgotten question no longer
+    /// holds its chat or the routines queued behind it, and the chat says why.
+    func giveUpWaiting(on approvalID: UUID, of botID: UUID) {
+        guard isPending(approvalID, of: botID) else { return }
+        stop(botID, notice: ApprovalWait.gaveUpNotice)
     }
 
     func isPending(_ approvalID: UUID, of botID: UUID) -> Bool {
@@ -110,16 +150,18 @@ extension AppModel {
 extension AppModel {
     /// Your answer to an approval card. `rule` is the standing rule picked under "Sempre…"; "Sempre" without one
     /// takes the card's first suggestion, and "Só nesta tarefa" grants that rule until the turn ends. `note` is what
-    /// you told the Orb to do instead of what it asked, on a denial. A card already answered stays as it was (a
-    /// banner can be tapped after the card was answered in the app or the app was closed).
-    func decide(_ decision: ApprovalDecision, rule: PermissionRule? = nil, note: String? = nil, approvalID: UUID, botID: UUID) {
+    /// you told the Orb to do instead of what it asked, on a denial; `reply`, your answer to a question (`ask_user`), which
+    /// `.deny` skips. A card already answered stays as it was (a banner can be tapped after the card was answered in the app or
+    /// the app was closed).
+    func decide(_ decision: ApprovalDecision, rule: PermissionRule? = nil, note: String? = nil, reply: String? = nil,
+                approvalID: UUID, botID: UUID) {
         // Loaded first: a banner can arrive before this Orb's conversation was read, and a card left open by a run that
         // closed is already denied once it is. Only an open card is answered.
         guard bot(botID) != nil else { return }
         if sessions[botID]?.isLoading == true { // a read is under way: wait for it instead of reading the file again here
             Task {
                 await loadedConversation(botID)
-                decide(decision, rule: rule, note: note, approvalID: approvalID, botID: botID)
+                decide(decision, rule: rule, note: note, reply: reply, approvalID: approvalID, botID: botID)
             }
             return
         }
@@ -127,12 +169,14 @@ extension AppModel {
         guard isPending(approvalID, of: botID) else { return }
         var chosen = rule
         let note = decision == .deny ? ApprovalNote.clean(note) : nil
+        let reply = decision == .deny ? nil : OrbQuestion.clean(reply)
         let session = session(botID)
         session.mutateItems { items in
             for index in items.indices {
                 if case .approval(var request) = items[index].kind, request.id == approvalID {
                     request.decision = decision
                     request.note = note
+                    request.question?.answer = reply
                     // A grouped card's "Só nesta tarefa" grants every rule it offered (the engine reads them from the card).
                     if decision == .always || (decision == .task && !request.isBatch) { chosen = chosen ?? request.suggestions.first }
                     items[index].kind = .approval(request)
@@ -145,7 +189,20 @@ extension AppModel {
         if decision == .always, let chosen, chosen.isValid {
             update(botID) { if !$0.permissionRules.contains(chosen) { $0.permissionRules.append(chosen) } }
         }
-        let answer = ApprovalAnswer(decision: decision, rule: chosen, note: note)
+        let answer = ApprovalAnswer(decision: decision, rule: chosen, note: note, reply: reply)
         Task { await gate.resolve(approvalID: approvalID, answer: answer) }
+    }
+}
+
+/// How long an open card waits for its answer (`AppModel.watchUnanswered`).
+enum ApprovalWait {
+    static let remindAfter: Duration = .seconds(60 * 60)
+    static let giveUpAfter: Duration = .seconds(24 * 60 * 60)
+    static let gaveUpNotice = "Ninguém respondeu em 24 horas: o Orb parou de esperar"
+
+    /// What the reminder's banner says before the card's own line: "Esperando há 1 h · ".
+    static func reminder(_ waited: Duration) -> String {
+        let minutes = Int(waited.components.seconds / 60)
+        return "Esperando há " + (minutes >= 60 ? "\(minutes / 60) h" : "\(minutes) min") + " · "
     }
 }

@@ -574,6 +574,14 @@ actor MemoryBank {
         return nil
     }
 
+    /// The preference pages a `MemoryConsolidation` may rewrite, newest first: not the ones you wrote, nor the long ones.
+    func consolidablePreferences(now: Date = .now) -> [MemorySnapshot.Item] {
+        prepare(now: now)
+        return items(.preferencia, limit: 1_000).filter {
+            $0.body.count <= MemoryConsolidation.itemLength && read($0.path)?.origin != .voce
+        }
+    }
+
     /// Newest first; pages saved in the same instant keep one order (by path), because the pinned memory is part of the
     /// system prompt and its order must not change between two messages.
     private func items(_ kind: MemoryKind, limit: Int) -> [MemorySnapshot.Item] {

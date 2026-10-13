@@ -210,7 +210,7 @@ final class DelegationHub: DelegationService {
                 return
             }
             model.addNotice(AppModel.labeled(read.notice, for: model.bot(botID)))
-            let conversation = read.value?.closingInterruptedTurn() ?? Conversation()
+            let conversation = read.value?.closingInterruptedTurn(notice: BotSession.quitSideNotice) ?? Conversation()
             if !self.startRun(current, conversation: conversation, text: prompt, origin: .orb(current.envelope), resuming: false) {
                 self.schedulePump(botID)
             }
@@ -281,11 +281,11 @@ final class DelegationHub: DelegationService {
         if finished, let current {
             if !current.openChildren.isEmpty || inbox[botID]?.contains(where: { $0.servingRequest == requestID }) == true {
                 waits = true
-            } else if succeeded {
-                let said = reply.map { OrbEnvelopeText.sanitize($0) } ?? ""
-                outcome = (.ok, said.isEmpty ? "Concluí, sem nada a relatar." : said)
             } else {
-                outcome = (.failed, "Não consegui: " + Self.reason(in: own))
+                let said = reply.map { OrbEnvelopeText.sanitize($0) } ?? ""
+                outcome = succeeded ? (.ok, said.isEmpty ? "Concluí, sem nada a relatar." : said)
+                    // What it got to say (a task stopped at the step limit says how far it went) goes with the reason.
+                    : (.failed, "Não consegui: " + Self.reason(in: own) + (said.isEmpty ? "" : "\n\n" + said))
             }
         }
         own.items.settingReceived(requestID, to: !finished ? .cancelled : waits ? .open : (outcome?.status == .ok ? .replied : .failed))
@@ -335,7 +335,8 @@ final class DelegationHub: DelegationService {
         for item in conversation.items.reversed() {
             guard case .notice(let text) = item.kind, !text.hasPrefix(Conversation.routineRunMarker) else { continue }
             let lead = "Não deu certo: "
-            return text.hasPrefix(lead) ? String(text.dropFirst(lead.count)) : text
+            let why = text.replacing(AgentEngine.continueHint, with: "")
+            return why.hasPrefix(lead) ? String(why.dropFirst(lead.count)) : why
         }
         return "o pedido não terminou."
     }
@@ -468,7 +469,10 @@ final class DelegationHub: DelegationService {
             if (inbox[botID]?.count ?? 0) != before { touched.insert(botID) }
         }
         // Their requests are marked first, so the end of each turn finds nothing to answer.
-        for botID in running { model.session(botID).stop(startsQueuedRoutines: false) }
+        for botID in running {
+            model.session(botID).stop(startsQueuedRoutines: false,
+                                      notice: isShuttingDown ? BotSession.quitSideNotice : BotSession.stoppedNotice)
+        }
         refresh(Array(touched))
         // A group's chain says it stopped in the group's own thread (`groupStopped`), never in its orchestrator's private chat.
         if reason == .user, chain.groupID == nil, !isShuttingDown, !alreadyCancelled, !open.isEmpty || hadInbox, model.bot(chain.originBot) != nil {

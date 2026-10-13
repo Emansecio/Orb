@@ -32,18 +32,23 @@ import Testing
     @Test @MainActor func aJobIsShownWhileItRunsAndItsEndIsToldInTheChat() async throws {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let (model, botID) = makeModel()
-        try await start("sleep 4; exit 3", in: model, for: botID)
+        // It ends only once it has been seen running: a busy machine may take a while to show it.
+        let command = "until [ -e go ]; do sleep 0.1; done; exit 3"
+        try await start(command, in: model, for: botID)
         await wait { model.live(botID).jobs.count == 1 }
-        #expect(model.live(botID).jobs.first?.command == "sleep 4; exit 3")
+        #expect(model.live(botID).jobs.first?.command == command)
+        FileManager.default.createFile(atPath: root.appending(path: "go").path, contents: nil)
 
         await wait { !notices(model, botID).isEmpty }
         #expect(model.live(botID).jobs.isEmpty)
         let notice = try #require(notices(model, botID).first)
-        #expect(notice.hasPrefix(NoticeAction.jobEndedPrefix) && notice.contains("código 3") && notice.contains("sleep 4"))
+        #expect(notice.hasPrefix(NoticeAction.jobEndedPrefix) && notice.contains("código 3") && notice.contains("until [ -e go ]"))
         #expect(NoticeAction.actions(for: notice) == [.continueTurn])
         let sent = NoticeAction.continueMessage(after: notice)
-        #expect(sent.contains("job_output") && sent.contains("código 3") && !sent.contains("sleep"), "never the command: \(sent)")
+        #expect(sent.contains("job_output") && sent.contains("código 3") && !sent.contains("until"), "never the command: \(sent)")
         #expect(NoticeAction.continueMessage(after: "Pausei depois de 100 passos") == NoticeAction.continueMessage)
+        let afterQuit = NoticeAction.continueMessage(after: BotSession.quitNotice)
+        #expect(afterQuit.hasPrefix(NoticeAction.continueMessage + ".") && afterQuit.contains("Confira antes de repetir"))
     }
 
     @Test @MainActor func aStoppedJobLeavesTheStripWithoutAWord() async throws {

@@ -61,7 +61,8 @@ private struct GroupConversation: View {
             GroupHeaderBar(group: group, live: live)
             GroupThreadView(group: group, transcript: session.transcript)
             GroupPresenceBar(group: group, live: live)
-            GroupComposer(names: names) { message in
+            GroupComposer(names: names, text: Binding(get: { model.draftText(group.id) },
+                                                      set: { model.setDraft($0, for: group.id) })) { message in
                 model.postUserMessage(message, to: group.id)
             }
         }
@@ -103,10 +104,13 @@ private struct GroupThreadView: View {
     let group: OrbGroup
     let transcript: OrbTranscript
     private let bottomID = "group-bottom"
+    /// Whether new words take the thread to its end: not while you read further up (see `BottomFollowing`).
+    @State private var followsBottom = true
 
     var body: some View {
         let items = transcript.items
         let lastSpeaker = items.last { Self.answerer($0) != nil }?.id
+        let lastSentID = items.last { if case .user = $0.kind { true } else { false } }?.id
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
@@ -128,8 +132,15 @@ private struct GroupThreadView: View {
                 .frame(maxWidth: .infinity)
                 .animation(Motion.adapted(Motion.exit, reduceMotion: reduceMotion), value: items.isEmpty)
             }
-            .defaultScrollAnchor(.bottom)
+            .modifier(KeepsBottom(follows: followsBottom))
+            .modifier(BottomFollowing(isFollowing: $followsBottom, resumed: { proxy.scrollTo(bottomID, anchor: .bottom) }))
+            .onAppear { proxy.scrollTo(bottomID, anchor: .bottom) } // macOS 14 has no scroll anchor to open at the end
             .onChange(of: transcript.revision) {
+                if followsBottom { proxy.scrollTo(bottomID, anchor: .bottom) }
+            }
+            .onChange(of: lastSentID) {
+                // What you just sent always shows, and brings the thread back to following its end.
+                followsBottom = true
                 proxy.scrollTo(bottomID, anchor: .bottom)
             }
         }

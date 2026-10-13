@@ -493,7 +493,7 @@ struct QuickAskApprovalCard: View {
                             .foregroundStyle(Palette.muted)
                     }
                     Text(row.command)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(.system(size: 11, design: request.isQuestion ? .default : .monospaced))
                         .foregroundStyle(Palette.secondary)
                         .lineLimit(request.isBatch ? 1 : 4)
                         .truncationMode(.middle)
@@ -511,17 +511,17 @@ struct QuickAskApprovalCard: View {
                     .foregroundStyle(Palette.warn)
             }
             ActionRow {
-                Button(request.isProposal ? "Não criar" : request.isHandoff ? "Cancelar" : "Não permitir") {
+                Button(request.isProposal ? "Não criar" : request.isQuestion ? "Pular" : request.isHandoff ? "Cancelar" : "Não permitir") {
                     model.decide(.deny, approvalID: request.id, botID: entry.bot.id)
                 }
                 .buttonStyle(GhostStyle())
-                .help(request.isHandoff ? Tip.handoffCancel : Tip.deny)
+                .help(request.isQuestion ? Tip.skipQuestion : request.isHandoff ? Tip.handoffCancel : Tip.deny)
                 .hangsOnLeadingEdge()
             } trailing: {
-                if request.isDangerous || request.isProposal { // a new Orb is read in the app before it is created
-                    Button("Abrir o app", action: openApp)
+                if request.isDangerous || request.isProposal || request.isQuestion { // a new Orb, or an answer, is given in the app
+                    Button(request.isQuestion ? "Responder" : "Abrir o app", action: openApp)
                         .buttonStyle(SecondaryPillStyle())
-                        .help(Tip.reviewRiskyInApp)
+                        .help(request.isQuestion ? Tip.answerInApp : Tip.reviewRiskyInApp)
                 } else {
                     Button(request.isHandoff ? "Pronto" : request.isBatch ? "Permitir as \(request.items.count)" : "Permitir") {
                         model.decide(.once, approvalID: request.id, botID: entry.bot.id)
@@ -534,6 +534,6 @@ struct QuickAskApprovalCard: View {
         .padding(10)
         .card(radius: 10, stroke: Palette.lineStrong)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(request.isHandoff ? "\(entry.bot.name) espera você terminar no navegador" : "\(entry.bot.name) precisa da sua permissão")
+        .accessibilityLabel(request.isQuestion ? "\(entry.bot.name) pergunta" : request.isHandoff ? "\(entry.bot.name) espera você terminar no navegador" : "\(entry.bot.name) precisa da sua permissão")
     }
 }

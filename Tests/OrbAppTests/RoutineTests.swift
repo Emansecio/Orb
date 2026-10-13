@@ -171,6 +171,38 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(saved.lastRun != nil && saved.lastResult?.hasPrefix("Tudo em ordem.") == true)
     }
 
+    // MARK: A goal
+
+    @Test @MainActor func aGoalsRunIsAskedForTheLineAndItsCheckGoesIntoTheGoalAndTheHistory() async throws {
+        let stub = StubModel(reply: "Movi 14 arquivos.\nProgresso: 35% · em dia · faltam 26")
+        let (model, bot, routine) = setUp(stub)
+        model.routines[0].goal = RoutineGoal(target: "Downloads em ordem")
+        model.runRoutine(routine.id)
+        await model.routineStarted()
+        await waitUntilIdle(model, bot.id)
+
+        let prompt = try #require(await stub.calls.received.first?.last { $0.role == .user }).content
+        #expect(prompt.contains("Goal of this routine") && prompt.contains("Downloads em ordem"))
+        let saved = try #require(model.routines.first)
+        let check = GoalCheck(progress: 35, status: .onTrack, note: "faltam 26")
+        #expect(saved.goal?.check == check && saved.runs.first?.check == check)
+        #expect(saved.isEnabled)
+        #expect(notices(model.transcript(bot.id)).last?.hasPrefix("Rotina “Resumo da manhã” terminou: Movi 14 arquivos.") == true)
+    }
+
+    @Test @MainActor func aGoalReachedPausesTheRoutineAndTheChatSaysSo() async throws {
+        let (model, bot, routine) = setUp(StubModel(reply: "Tudo em pastas.\nProgresso: 100% · concluída · nada solto"))
+        model.routines[0].goal = RoutineGoal(target: "Downloads em ordem")
+        model.runRoutine(routine.id)
+        await model.routineStarted()
+        await waitUntilIdle(model, bot.id)
+
+        #expect(model.routines[0].goal?.check?.status == .done)
+        #expect(!model.routines[0].isEnabled)
+        let line = try #require(notices(model.transcript(bot.id)).last)
+        #expect(line.hasPrefix("Rotina “Resumo da manhã” alcançou a meta e foi pausada: Tudo em pastas."))
+    }
+
     @Test @MainActor func theHistoryKeepsTheLastRunsAndEachRunStartsFromScratch() async throws {
         let stub = StubModel()
         let (model, bot, routine) = setUp(stub)
@@ -330,6 +362,40 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         await waitUntilIdle(model, bot.id)
         #expect(model.routines[0].runs.count == 1)
         #expect(model.routines[0].nextRun > .now.addingTimeInterval(14 * 60))
+    }
+
+    @Test @MainActor func aOneTimeRoutineSwitchesItselfOffAfterItsRunButNotAfterATestRun() async throws {
+        let (model, bot, routine) = setUp()
+        let moment = Date.now.addingTimeInterval(3600)
+        model.routines[0].schedule = .once(moment)
+        model.routines[0].createdAt = .now
+        model.runRoutine(routine.id) // "Rodar agora", before its moment
+        await model.routineStarted()
+        await waitUntilIdle(model, bot.id)
+        #expect(model.routines[0].isEnabled && model.routines[0].nextRun == moment)
+
+        model.routines[0].lastRun = moment.addingTimeInterval(-60) // its moment came
+        model.routines[0].schedule = .once(.now.addingTimeInterval(-1))
+        model.runRoutine(routine.id)
+        await model.routineStarted()
+        await waitUntilIdle(model, bot.id)
+        #expect(!model.routines[0].isEnabled && model.routines[0].runs.count == 2)
+        #expect(RoutineText.nextRun(of: model.routines[0]) == nil)
+    }
+
+    @Test @MainActor func aTestRunStillGoingWhenTheMomentComesLeavesTheMomentDue() async throws {
+        let gate = Gate()
+        let (model, bot, routine) = setUp(StubModel(gate: gate))
+        model.routines[0].schedule = .once(.now.addingTimeInterval(3600))
+        model.routines[0].createdAt = .now
+        model.runRoutine(routine.id) // "Rodar agora", before its moment
+        await model.routineStarted()
+        let started = try #require(model.routines[0].lastRun)
+        let moment = started.addingTimeInterval(0.001) // the moment comes while it runs
+        model.routines[0].schedule = .once(moment)
+        await gate.open()
+        await waitUntilIdle(model, bot.id)
+        #expect(model.routines[0].isEnabled && model.routines[0].nextRun == moment)
     }
 
     @Test @MainActor func aRoutineDueWhileTheMacSleptWaitsForTheNetworkAfterWaking() async throws {
@@ -551,6 +617,26 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(!run.succeeded && run.summary.hasPrefix("Não deu certo"))
         #expect(model.routines[0].lastResult == "Não terminou: veja a conversa.")
         #expect(model.transcript(bot.id).count == 3)
+    }
+
+    @Test @MainActor func aRoutineStoppedAtTheStepLimitIsAFailedRunThatSaysWhy() async throws {
+        let gate = Gate()
+        let stub = StubModel(gate: gate)
+        let (model, bot, routine) = setUp(stub)
+        model.runRoutine(routine.id)
+        await waitForModelCalls(stub)
+        // The engine ran out of steps: it says so and marks the task paused.
+        let paused = AgentEngine.pausedNotice(after: 100)
+        model.apply(.notice(paused), to: bot.id)
+        model.apply(.taskPaused, to: bot.id)
+        await gate.open()
+        await waitUntilIdle(model, bot.id)
+
+        let run = try #require(model.routines[0].runs.first)
+        // The reason, once, without the "continua" only the chat can act on.
+        let why = paused.replacing(AgentEngine.continueHint, with: "")
+        #expect(!run.succeeded && run.summary == why)
+        #expect(notices(model.transcript(bot.id)).last?.hasSuffix(why) == true)
     }
 
     @Test @MainActor func aRoutineWithoutAModelDoesNotRunAndLeavesTheChatAlone() async throws {

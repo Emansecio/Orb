@@ -22,10 +22,13 @@ struct TranscriptRow: View, Equatable {
     /// This is the result a search in the conversation has chosen: its text is marked and a wash fades behind it. Only the
     /// row of that result is given one, so choosing another result redraws two rows.
     var find: FindFocus?
+    /// The row is in the Orb's own chat, where a message of yours can be edited (not in a routine's run, an exchange…).
+    var editable = false
 
     nonisolated static func == (lhs: TranscriptRow, rhs: TranscriptRow) -> Bool {
         lhs.item == rhs.item && lhs.botID == rhs.botID && lhs.orb == rhs.orb && lhs.isLastReply == rhs.isLastReply
             && lhs.offersRedo == rhs.offersRedo && lhs.isDropping == rhs.isDropping && lhs.find == rhs.find
+            && lhs.editable == rhs.editable
     }
 
     var body: some View {
@@ -39,7 +42,7 @@ struct TranscriptRow: View, Equatable {
         switch item.kind {
         case .user(let text, let attachments):
             UserBubble(text: text, attachments: attachments, duringTask: item.duringTask == true, botID: botID, itemID: item.id,
-                       highlight: find?.query)
+                       editable: editable, highlight: find?.query)
         case .bot(let text, let isStreaming):
             BotMessage(orb: orb, botID: botID, text: text, live: isStreaming ? model.liveText(for: item.id, of: botID) : nil,
                        isLastReply: isLastReply, offersRedo: offersRedo, highlight: find?.query)
@@ -48,6 +51,8 @@ struct TranscriptRow: View, Equatable {
         case .approval(let request):
             if let proposal = request.proposal { // MultiOrb (WP3): an Orb proposes a new Orb
                 OrbProposalCard(request: request, proposal: proposal, botID: botID, pulses: entering)
+            } else if let question = request.question {
+                QuestionCard(request: request, question: question, botID: botID, pulses: entering)
             } else {
                 ApprovalCard(request: request, botID: botID, pulses: entering)
             }
@@ -90,9 +95,10 @@ private let gutter: CGFloat = 36
 
 /// What VoiceOver says for the rows of the transcript, so it says who spoke instead of reading the avatar.
 enum TranscriptSpeech {
-    static func user(text: String, attachmentCount: Int, duringTask: Bool = false) -> String {
+    static func user(text: String, quote: String? = nil, attachmentCount: Int, duringTask: Bool = false) -> String {
         let attached = attachmentCount == 0 ? "" : attachmentCount == 1 ? ", com 1 anexo" : ", com \(attachmentCount) anexos"
-        return "Você: \(text)\(attached)" + (duringTask ? ", durante a tarefa" : "")
+        let quoted = quote.map { "citando \"\($0)\": " } ?? ""
+        return "Você: \(quoted)\(text)\(attached)" + (duringTask ? ", durante a tarefa" : "")
     }
 
     /// "Anexo: relatório.pdf, PDF, 2,1 MB", or why there is nothing to open.
@@ -117,12 +123,14 @@ enum TranscriptSpeech {
 // MARK: - Messages
 
 private struct UserBubble: View {
+    @Environment(AppModel.self) private var model
     let text: String
     let attachments: [String]
     /// It reached the Orb in the middle of its task (see `TranscriptItem.duringTask`): a small, quiet line says so.
     var duringTask = false
     let botID: UUID
     let itemID: UUID
+    var editable = false
 
     var highlight: String?
 
@@ -139,27 +147,43 @@ private struct UserBubble: View {
                     .accessibilityHidden(true) // the message's own label starts with "Você"
                 if !attachments.isEmpty { AttachmentStack(paths: attachments) }
                 if !text.isEmpty {
-                    userText
-                        .font(Palette.conversationFont)
-                        .foregroundStyle(Palette.ink)
-                        .textSelection(.enabled)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .background(Palette.userBubble, in: .rect(cornerRadius: 16))
-                        .contextMenu { Button("Copiar") { Clipboard.copy(text) } }
-                        .accessibilityLabel(TranscriptSpeech.user(text: text, attachmentCount: attachments.count, duringTask: duringTask))
+                    let parts = MessageQuote.split(text)
+                    VStack(alignment: .leading, spacing: 6) {
+                        if let quote = parts.quote { QuotedPassage(quote: quote, itemID: itemID) }
+                        if !parts.body.isEmpty { userText(parts.body) }
+                    }
+                    .font(Palette.conversationFont)
+                    .foregroundStyle(Palette.ink)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(Palette.userBubble, in: .rect(cornerRadius: 16))
+                    .contextMenu {
+                        Button("Copiar") { Clipboard.copy(text) }
+                        // Without the mouse too; when it cannot be edited now, the reason is said instead.
+                        if editable { Button("Editar") { model.editOrExplain(itemID: itemID, of: botID) } }
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityActions {
+                        if editable { Button("Editar") { model.editOrExplain(itemID: itemID, of: botID) } }
+                    }
+                    .accessibilityLabel(TranscriptSpeech.user(text: parts.body, quote: parts.quote, attachmentCount: attachments.count,
+                                                              duringTask: duringTask))
                 }
                 if duringTask {
-                    Label("Durante a tarefa", systemImage: "arrow.turn.down.right")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Palette.muted)
-                        .accessibilityHidden(!text.isEmpty) // the bubble's label already says it
+                    HStack(spacing: 4) {
+                        Label("Durante a tarefa", systemImage: "arrow.turn.down.right")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Palette.muted)
+                            .accessibilityHidden(!text.isEmpty) // the bubble's label already says it
+                        SendNowButton(botID: botID, itemID: itemID)
+                    }
                 }
             }
             .overlay(alignment: .leading) {
                 // To the left of the bubble, in the space the row leaves; the row's hover keeps it up while the pointer
                 // travels to it. Made only while hovered: whether the message can be edited is looked at then.
-                if hovering {
+                if hovering, editable {
                     EditMessageButton(botID: botID, itemID: itemID)
                         .offset(x: -34)
                         .transition(.opacity)
@@ -172,8 +196,78 @@ private struct UserBubble: View {
         .animation(Motion.hover(hovering), value: hovering)
     }
 
-    @ViewBuilder private var userText: some View {
+    @ViewBuilder private func userText(_ text: String) -> some View {
         if highlight != nil { Text(FindMarking.marked(text, query: highlight)) } else { Text(text) }
+    }
+}
+
+/// The part of a reply a message of yours quotes (`MessageQuote`), above what you wrote: a click goes back to the reply.
+private struct QuotedPassage: View {
+    @Environment(\.revealQuote) private var revealQuote
+    let quote: String
+    /// The message that quotes it: the reply is looked for before it.
+    let itemID: UUID
+    @State private var hovering = false
+
+    var body: some View {
+        Button { revealQuote?.reveal(quote, itemID) } label: {
+            HStack(alignment: .top, spacing: 8) {
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(hovering ? Palette.accentText : Palette.lineStrong)
+                    .frame(width: 2)
+                Text(quote)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.secondary)
+                    .lineLimit(3)
+                    .multilineTextAlignment(.leading)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(revealQuote == nil)
+        .clickablePointer()
+        .onHover { hovering = $0 }
+        .animation(Motion.hover(hovering), value: hovering)
+        .help(Tip.goToQuote)
+        .accessibilityLabel("Citação: \(quote)")
+        .accessibilityHint("Vai até o trecho na resposta")
+    }
+}
+
+/// What a click on a quote in a message of yours does: takes the chat to the reply it came from (set by the chat's list).
+/// Equal whatever its closure: it only reaches the list's own state.
+struct RevealQuoteAction: Equatable {
+    let reveal: @MainActor (_ quote: String, _ messageID: UUID) -> Void
+
+    nonisolated static func == (lhs: RevealQuoteAction, rhs: RevealQuoteAction) -> Bool { true }
+}
+
+extension EnvironmentValues {
+    @Entry var revealQuote: RevealQuoteAction?
+}
+
+/// "Parar e enviar" on a message of yours that reached the task and that the Orb has not acted on yet. The queue's bubble
+/// had the button until the message went in, often a fraction of a second after it was sent: here it stays until the Orb
+/// answers it (or the turn ends), so a click never lands where the button was.
+private struct SendNowButton: View {
+    @Environment(AppModel.self) private var model
+    let botID: UUID
+    let itemID: UUID
+
+    var body: some View {
+        if model.unansweredSteered(of: botID).contains(itemID) {
+            Button("Parar e enviar", systemImage: "arrow.up.circle.fill") {
+                // A click while the button fades out, after the Orb answered: nothing to send any more.
+                guard model.unansweredSteered(of: botID).contains(itemID) else { return }
+                model.stopAndSend(botID)
+            }
+                .buttonStyle(GhostStyle(tint: Palette.accentText))
+                .controlSize(.small)
+                .clickablePointer()
+                .help("Interrompe o que o Orb está fazendo e envia esta mensagem agora (\(AppShortcut.commandReturn.label))")
+                .transition(.opacity)
+        }
     }
 }
 
@@ -213,6 +307,8 @@ private struct BotMessage: View {
     var highlight: String?
 
     @State private var hovering = false
+    /// What is selected in the reply's text, for "Citar".
+    @State private var selection: String?
 
     /// Read from this Orb's own state, so reordering or adding Orbs does not redraw the reply. A deleted Orb's
     /// stand-in has no name.
@@ -239,13 +335,18 @@ private struct BotMessage: View {
             .overlay(alignment: .bottomTrailing) {
                 // Past the text's last line end, in the space the right padding leaves; the row's hover keeps it up
                 // while the pointer travels to it.
+                // Shown while something is selected too: "Citar" is for the selection.
                 if live == nil {
-                    MessageActions(text: text, botID: botID, offersRedo: offersRedo)
-                        .offset(x: offersRedo ? 90 : 62)
-                        .opacity(hovering ? 1 : 0)
-                        .allowsHitTesting(hovering)
+                    let shows = hovering || selection != nil
+                    MessageActions(text: text, botID: botID, offersRedo: offersRedo, selection: selection)
+                        .fixedSize()
+                        .alignmentGuide(.trailing) { $0[.leading] - 6 }
+                        .opacity(shows ? 1 : 0)
+                        .allowsHitTesting(shows)
                 }
             }
+            .environment(\.proseSelection, live == nil ? ProseSelectionAction(
+                changed: { selection = $0 }, quote: { [model, botID] in model.quote($0, for: botID) }) : nil)
             .padding(.leading, 44)
             .padding(.trailing, 90)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -346,12 +447,30 @@ private struct GreetingReplies: View {
 /// The small buttons beside a finished reply: copy it as text, copy it as Markdown, and, on the last reply of an idle
 /// chat, ask for it again.
 private struct MessageActions: View {
+    @Environment(AppModel.self) private var model
     let text: String
     let botID: UUID
     let offersRedo: Bool
+    /// The words selected in the reply: "Citar" puts them in your next message.
+    var selection: String?
 
     var body: some View {
         HStack(spacing: 4) {
+            if let selection {
+                Button { model.quote(selection, for: botID) } label: {
+                    Label("Citar", systemImage: "text.quote")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Palette.ink)
+                        .padding(.horizontal, 10)
+                        .frame(height: 26)
+                        .background(Palette.surface, in: .capsule)
+                        .overlay(Capsule().strokeBorder(Palette.line, lineWidth: 1))
+                        .contentShape(.capsule)
+                }
+                .buttonStyle(.plain)
+                .help(Tip.quoteSelection)
+                .transition(.opacity)
+            }
             CopyButton(symbol: "doc.on.doc", help: Tip.copyReply, copiedHelp: "Copiado") {
                 Clipboard.copy(MarkdownBlocks.plainText(of: text))
             }
@@ -467,13 +586,16 @@ private struct ClosedParagraphs: View {
     }
 }
 
-/// Reads only the paragraph being written.
+/// Reads only the paragraph being written (and how many came before it, which changes only when it ends).
 private struct LastParagraph: View {
     let live: LiveText
     @Environment(\.replyGrew) private var replyGrew
 
     var body: some View {
+        // Each paragraph is a view of its own, so its first words fade in as the rest do (`TextFade`) instead of
+        // replacing the last one's text at once.
         MarkdownChunk(source: live.tail, streaming: true, cached: false)
+            .id(live.closed.count)
             .onChange(of: live.tail.utf8.count) { replyGrew?() }
     }
 }
@@ -819,9 +941,15 @@ struct ToolGroupRow: View, Equatable {
         if let problem = permissionProblem {
             OpenPrivacySettingsButton(problem: problem).padding(.leading, 22)
         }
-        // A file two of them changed is listed once.
+        // What the Orb saw along the way, step by step; then the other files, a file two of them changed listed once.
+        let steps = ScreenStepsStrip.steps(of: calls)
+        let pictured = Set(steps?.map(\.path) ?? [])
         var seen = Set<String>()
-        let files = calls.filter { $0.state == .done }.flatMap { $0.files ?? [] }.filter { seen.insert($0.path).inserted }
+        let files = calls.filter { $0.state == .done }.flatMap { $0.files ?? [] }
+            .filter { !pictured.contains($0.path) && seen.insert($0.path).inserted }
+        if let steps {
+            ScreenStepsStrip(steps: steps).padding(.leading, 22)
+        }
         if !files.isEmpty {
             ProducedFilesView(files: files).padding(.leading, 22)
         }
@@ -903,21 +1031,27 @@ private struct NoticeLine: View {
     /// Whether the skill a notice proposes still waits for a decision, read for a notice that offers to review it.
     @State private var hasProposal = false
     @State private var reviewing: SkillDraft?
+    @State private var showsProviderDetail = false
 
     var body: some View {
-        let actions = NoticeAction.actions(for: text, canCompact: canCompact, hasProposal: hasProposal)
         let failure = NoticeAction.failureDetail(of: text)
+        // Read only under a failure that is the chat's last word: the menu lists them, the button needs one.
+        let otherModels = failure != nil && offersActions ? model.retryModels(for: botID) : []
+        let actions = NoticeAction.actions(for: text, canCompact: canCompact, hasProposal: hasProposal,
+                                           canSwitchModel: !otherModels.isEmpty)
         VStack(spacing: 8) {
             if let failure {
+                let parts = NoticeAction.failureParts(of: failure)
                 VStack(spacing: 2) {
                     Label("Não deu certo", systemImage: "exclamationmark.triangle.fill")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Palette.warn)
-                    Text(failure)
+                    Text(parts.sentence)
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.muted)
                         .multilineTextAlignment(.center)
                         .textSelection(.enabled)
+                    if let provider = parts.provider { providerDetail(provider) }
                 }
             } else {
                 Text(text)
@@ -928,11 +1062,26 @@ private struct NoticeLine: View {
             if !actions.isEmpty, offersActions {
                 HStack(spacing: 8) {
                     ForEach(actions, id: \.self) { action in
-                        Button { perform(action) } label: {
-                            Label(action.title, systemImage: action.symbol)
+                        if action == .otherModel {
+                            Menu {
+                                ForEach(otherModels, id: \.ref) { other in
+                                    Button("\(other.name) · \(other.provider)") { model.retryLastTurn(botID, model: ModelRef(other.ref)) }
+                                }
+                            } label: {
+                                Label(action.title, systemImage: action.symbol)
+                            }
+                            .menuStyle(.button)
+                            .menuIndicator(.hidden)
+                            .buttonStyle(NoticeActionStyle(prominent: false))
+                            .fixedSize()
+                            .help(action.help)
+                        } else {
+                            Button { perform(action) } label: {
+                                Label(action.title, systemImage: action.symbol)
+                            }
+                            .buttonStyle(NoticeActionStyle(prominent: action == actions.first))
+                            .help(action.help)
                         }
-                        .buttonStyle(NoticeActionStyle(prominent: action == actions.first))
-                        .help(action.help)
                     }
                 }
                 .transition(.opacity)
@@ -959,6 +1108,38 @@ private struct NoticeLine: View {
         }
     }
 
+    /// The provider's own words about a failure, folded under "Detalhes": the sentence above says what to do.
+    private func providerDetail(_ provider: String) -> some View {
+        VStack(spacing: 4) {
+            Button {
+                showsProviderDetail.toggle()
+            } label: {
+                HStack(spacing: 3) {
+                    Text("Detalhes")
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8, weight: .semibold))
+                        .rotationEffect(.degrees(showsProviderDetail ? 90 : 0))
+                }
+                .font(.system(size: 11))
+                .foregroundStyle(Palette.faint)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .clickablePointer()
+            .help(showsProviderDetail ? "Esconde a mensagem do provedor" : "Mostra a mensagem do provedor")
+            if showsProviderDetail {
+                Text(provider)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(Palette.faint)
+                    .multilineTextAlignment(.center)
+                    .textSelection(.enabled)
+                    .transition(.opacity)
+            }
+        }
+        .padding(.top, 2)
+        .motion(Motion.content, value: showsProviderDetail)
+    }
+
     /// The last item of the chat, with nothing running. (Read only by notices that have an action.)
     private var offersActions: Bool {
         model.orbTranscript(botID).items.last?.id == id && !model.live(botID).isWorking
@@ -967,6 +1148,7 @@ private struct NoticeLine: View {
     private func perform(_ action: NoticeAction) {
         switch action {
         case .retry: model.retryLastTurn(botID)
+        case .otherModel: break // a menu of models, built in `body`
         case .continueTurn: model.continueTurn(botID, after: text)
         case .openSettings: SettingsRouter.open(.models, using: openSettings)
         case .compact: model.compactAndRetry(botID)
@@ -994,6 +1176,38 @@ private struct NoticeActionStyle: ButtonStyle {
 }
 
 // MARK: - Approvals
+
+/// A long command on an approval card: its first lines and its last, with the middle one click away (a script of 200
+/// lines would push the buttons off the window). The end stays in view because that is where a script does its work
+/// (`… | sh`), and a risky command is never folded.
+enum ApprovalCommand {
+    static let headLines = 9
+    static let tailLines = 3
+    static let shownCharacters = 1_200
+
+    /// The start and end of `command` and how many lines are left out between them; nil when it is short enough to
+    /// show whole.
+    static func excerpt(of command: String) -> (text: String, hiddenLines: Int)? {
+        let lines = command.split(separator: "\n", omittingEmptySubsequences: false)
+        guard lines.count > headLines + tailLines + 1 || command.count > shownCharacters else { return nil }
+        let head = lines.prefix(headLines).joined(separator: "\n"), tail = lines.suffix(tailLines).joined(separator: "\n")
+        let hidden = max(lines.count - headLines - tailLines, 0)
+        guard hidden > 0, head.count + tail.count <= shownCharacters else {
+            // Few long lines: the characters at both ends.
+            let end = shownCharacters / 4
+            return (String(command.prefix(shownCharacters - end)) + "\n…\n" + String(command.suffix(end)), hidden)
+        }
+        return (head + "\n…\n" + tail, hidden)
+    }
+
+    static func showAll(hidden lines: Int) -> String {
+        switch lines {
+        case 0: "Mostrar tudo"
+        case 1: "Mostrar tudo (mais 1 linha)"
+        default: "Mostrar tudo (mais \(lines) linhas)"
+        }
+    }
+}
 
 /// What an answered approval card says on its one line.
 enum ApprovalSummary {
@@ -1050,6 +1264,8 @@ struct ApprovalCard: View {
     @State private var isOpen = false
     /// A group's actions past the first `visibleItems`, shown once asked for.
     @State private var showsAllItems = false
+    /// A long command opens whole on request: what is approved is never hidden, only folded.
+    @State private var showsWholeCommand = false
     /// Changes once to play the pulse.
     @State private var pulse = 0
     /// The button a keyboard shortcut is pressing (shown for `ApprovalShortcut.pressDuration` before it answers).
@@ -1187,13 +1403,25 @@ struct ApprovalCard: View {
         if request.isBatch {
             batchList
         } else if !request.command.isEmpty {
-            Text(request.command)
-                .font(.system(size: 12, design: request.isHandoff ? .default : .monospaced))
-                .foregroundStyle(Palette.secondary)
-                .textSelection(.enabled)
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Palette.raised, in: .rect(cornerRadius: 8))
+            let excerpt = request.isDangerous ? nil : ApprovalCommand.excerpt(of: request.command)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(showsWholeCommand ? request.command : excerpt?.text ?? request.command)
+                    .font(.system(size: 12, design: request.isHandoff ? .default : .monospaced))
+                    .foregroundStyle(Palette.secondary)
+                    .textSelection(.enabled)
+                if let excerpt {
+                    Button(showsWholeCommand ? "Mostrar menos" : ApprovalCommand.showAll(hidden: excerpt.hiddenLines)) {
+                        showsWholeCommand.toggle()
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Palette.accentText)
+                    .clickablePointer()
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Palette.raised, in: .rect(cornerRadius: 8))
         }
         if let note = request.note {
             Text("Você disse: \(note)")

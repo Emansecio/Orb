@@ -111,7 +111,7 @@ struct RoutinesView: View {
 
 // MARK: Empty state
 
-/// Nothing yet: what a routine is, one button, and three to start from.
+/// Nothing yet: what a routine is, one button, and the templates to start from.
 private struct RoutinesEmptyState: View {
     let start: RoutineStart
     let onNew: () -> Void
@@ -146,7 +146,7 @@ private struct RoutinesEmptyState: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Palette.muted)
                 ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: 12) { templateCards(width: 236) }
+                    HStack(alignment: .top, spacing: 12) { templateCards(width: 176) }
                         .fixedSize(horizontal: false, vertical: true)
                     VStack(spacing: 12) { templateCards(width: nil) }
                         .frame(maxWidth: 360)
@@ -186,7 +186,7 @@ private struct TemplateCard: View {
                 Text(template.title)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Palette.ink)
-                Text(template.whenText)
+                Text(template.goal == nil ? template.whenText : "\(template.whenText) · com meta")
                     .font(.caption.weight(.medium))
                     .foregroundStyle(Palette.secondary)
                 Text(template.prompt)
@@ -203,7 +203,7 @@ private struct TemplateCard: View {
         .buttonStyle(.plain)
         .help(Tip.routineTemplate(for: start))
         .onHover { isHovering = $0 }
-        .accessibilityLabel("\(template.title), \(template.whenText)")
+        .accessibilityLabel("\(template.title), \(template.whenText)\(template.goal == nil ? "" : ", com meta")")
         .accessibilityHint(start.templateHint)
     }
 }
@@ -253,6 +253,7 @@ private struct RoutineCard: View {
                     .font(.callout)
                 NextRunLine(routine: routine)
             }
+            if let goal = routine.goal { GoalProgressView(goal: goal) }
             Divider()
             if routine.runs.isEmpty {
                 Text(routine.lastResult ?? "Ainda não rodou.")
@@ -323,6 +324,84 @@ struct NextRunLine: View {
     }
 }
 
+/// A routine's goal at a glance: what it is after, how far the last check put it (a thin bar in the status's color)
+/// and that check's note; an orange flag when it needs attention. Also in the Orb's panel, with its type size and
+/// without the note (the last run's line right under it says much the same).
+struct GoalProgressView: View {
+    let goal: RoutineGoal
+    var font: Font = .caption
+    var showsNote = true
+
+    var body: some View {
+        let check = goal.check
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: check?.status.symbol ?? "target")
+                    .foregroundStyle(check?.status.tint ?? Palette.faint)
+                Text(goal.target)
+                    .foregroundStyle(Palette.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 6)
+                Text(check?.label ?? "sem avaliação")
+                    .monospacedDigit()
+                    .foregroundStyle(check.map { $0.status == .onTrack ? Palette.accentText : $0.status.tint } ?? Palette.faint)
+                    .fixedSize()
+            }
+            GoalBar(progress: check?.progress ?? 0, tint: check?.status.tint ?? Palette.accent)
+            if showsNote, let note = check?.note, !note.isEmpty {
+                Text(note)
+                    .foregroundStyle(Palette.muted)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .font(font)
+        .help(goal.target)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(goal.spokenSummary)
+        .accessibilityValue(goal.target)
+    }
+}
+
+/// The goal's 5 pt bar; it grows to a new check with the content curve (at once under Reduce Motion).
+private struct GoalBar: View {
+    let progress: Int
+    let tint: Color
+
+    var body: some View {
+        Capsule()
+            .fill(Palette.lineStrong)
+            .frame(height: 5)
+            .overlay(alignment: .leading) {
+                GeometryReader { proxy in
+                    Capsule()
+                        .fill(tint)
+                        .frame(width: progress > 0 ? max(proxy.size.width * Double(progress) / 100, 5) : 0)
+                }
+            }
+            .animateChanges(of: progress)
+            .accessibilityHidden(true)
+    }
+}
+
+extension GoalStatus {
+    var tint: Color {
+        switch self {
+        case .onTrack: Palette.accent
+        case .attention: Palette.warn
+        case .done: Palette.ok
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .onTrack: "target"
+        case .attention: "flag.fill"
+        case .done: "checkmark.seal.fill"
+        }
+    }
+}
+
 /// The routine's recent runs, newest first: the latest in full, the others behind a disclosure. Each one opens its
 /// report.
 private struct RunHistory: View {
@@ -371,6 +450,16 @@ private struct RunLine: View {
                         .multilineTextAlignment(.leading)
                 }
                 Spacer(minLength: 4)
+                // A goal's runs read as its timeline: where each check put it.
+                if let check = run.check {
+                    HStack(spacing: 3) {
+                        if check.status == .attention { Image(systemName: "flag.fill") }
+                        Text("\(check.progress)%").monospacedDigit()
+                    }
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(check.status == .onTrack ? Palette.secondary : check.status.tint)
+                    .help(check.label)
+                }
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(Palette.faint)
@@ -383,7 +472,8 @@ private struct RunLine: View {
         .buttonStyle(RunLineStyle())
         .help(Tip.openRunReport)
         .padding(.horizontal, -6)
-        .accessibilityLabel("\(run.succeeded ? "Deu certo" : "Não deu certo"), \(RoutineText.stamp(run.date)). \(run.summary)")
+        .accessibilityLabel("\(run.succeeded ? "Deu certo" : "Não deu certo"), \(RoutineText.stamp(run.date)). \(run.summary)"
+                            + (run.check.map { ". " + $0.spokenLabel } ?? ""))
         .accessibilityHint("Abre o relatório desta execução")
     }
 }
@@ -440,7 +530,7 @@ private struct RoutineRunSheet: View {
             }
             .onPreferenceChange(ContentHeightKey.self) { contentHeight = $0 }
             .frame(height: max(80, min(contentHeight, 340)))
-            .orbSheet(title, subtitle: [how, RoutineText.duration(of: run)].compactMap { $0 }.joined(separator: " · "),
+            .orbSheet(title, subtitle: [how, RoutineText.duration(of: run), run.check?.label].compactMap { $0 }.joined(separator: " · "),
                       size: .medium) {
                 footer(run: run)
             }
@@ -620,16 +710,25 @@ struct RoutineEditor: View {
     @Environment(\.dismiss) private var dismiss
     @State var routine: Routine
 
-    private enum Kind: String, CaseIterable { case daily, weekly, hourly, minutes }
+    private enum Kind: String, CaseIterable { case daily, weekly, hourly, minutes, once, cron }
 
     @State private var kind = Kind.daily
     @State private var time = Calendar.current.date(from: DateComponents(hour: 9, minute: 0)) ?? .now
     @State private var weekday = 2
     @State private var hours = 4
     @State private var minutes = 30
+    @State private var onceDate = Calendar.current.date(byAdding: .day, value: 1, to: .now) ?? .now
+    @State private var cronExpression = "0 9 * * 1-5"
+    /// Empty: the Mac's own time zone.
+    @State private var cronTimeZone = ""
     @State private var showsAdvanced = false
     @State private var runsNow = false
     @State private var isConfirmingDelete = false
+    /// The "Meta" section, apart from `routine.goal` so switching it off and on keeps what was typed.
+    @State private var tracksGoal = false
+    /// Read once when the editor opens, so turning the goal on or off does not move the section.
+    @State private var leadsWithGoal = false
+    @State private var goalTarget = ""
 
     private var isStored: Bool { model.routines.contains { $0.id == routine.id } }
     /// Fixed when the editor opens: the routine may be deleted meanwhile (the Orb can do it from the chat) and it is
@@ -637,18 +736,29 @@ struct RoutineEditor: View {
     @State private var opensNew: Bool?
     private var isNew: Bool { opensNew ?? !isStored }
     private var hasPrompt: Bool { !routine.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var trimmedGoal: String { goalTarget.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var lacksGoal: Bool { tracksGoal && trimmedGoal.isEmpty }
     private var bot: Bot? { model.bot(routine.botID) }
 
     /// The schedule as the controls have it now.
     private var draftSchedule: Schedule {
         let parts = Calendar.current.dateComponents([.hour, .minute], from: time)
         let hour = parts.hour ?? 9, minute = parts.minute ?? 0
+        let zone = cronTimeZone.trimmingCharacters(in: .whitespaces)
         return switch kind {
         case .daily: .daily(hour: hour, minute: minute)
         case .weekly: .weekly(weekday: weekday, hour: hour, minute: minute)
         case .hourly: .everyHours(hours)
         case .minutes: .everyMinutes(minutes)
+        case .once: .once(onceDate)
+        case .cron: .cron(expression: cronExpression.trimmingCharacters(in: .whitespaces),
+                          timeZone: zone.isEmpty ? nil : zone)
         }
+    }
+
+    /// Why the schedule cannot be saved; a routine saved earlier with a moment now past is not this editor's to block.
+    private var scheduleProblem: String? {
+        !isNew && draftSchedule == routine.schedule ? nil : draftSchedule.problem()
     }
 
     var body: some View {
@@ -663,12 +773,16 @@ struct RoutineEditor: View {
                 // Right under the Orb it depends on, so it is seen before the rest of the form.
                 Section { waitingWarning(bot).transition(.quiet) }
             }
+            // A routine made for a goal (a goal idea or template) shows it first: below "O que fazer" it would open off screen.
+            if leadsWithGoal { goalSection }
             Section("Quando") {
                 Picker("Repetir", selection: $kind) {
                     Text("Todo dia").tag(Kind.daily)
                     Text("Toda semana").tag(Kind.weekly)
                     Text("A cada X horas").tag(Kind.hourly)
                     Text("A cada X minutos").tag(Kind.minutes)
+                    Text("Uma vez só").tag(Kind.once)
+                    Text("Expressão cron").tag(Kind.cron)
                 }
                 // What the kind of repetition adds or swaps fades by itself (`.quiet`): a Form is a table, and its rows
                 // taking their new height at once looks calmer than a table sliding them.
@@ -683,6 +797,16 @@ struct RoutineEditor: View {
                         .transition(.quiet)
                 } else if kind == .minutes {
                     Stepper("A cada \(minutes) min", value: $minutes, in: Schedule.minuteRange, step: 5)
+                        .transition(.quiet)
+                } else if kind == .once {
+                    DatePicker("Data e hora", selection: $onceDate, displayedComponents: [.date, .hourAndMinute])
+                        .transition(.quiet)
+                } else if kind == .cron {
+                    TextField("Expressão", text: $cronExpression, prompt: Text("minuto hora dia mês dia-da-semana"))
+                        .font(.body.monospaced())
+                        .help(Tip.cronExpression)
+                        .transition(.quiet)
+                    TextField("Fuso", text: $cronTimeZone, prompt: Text(TimeZone.current.identifier))
                         .transition(.quiet)
                 } else {
                     DatePicker("Horário", selection: $time, displayedComponents: .hourAndMinute)
@@ -701,6 +825,7 @@ struct RoutineEditor: View {
                         .help(Tip.runOnceNow)
                 }
             }
+            if !leadsWithGoal { goalSection }
             Section {
                 DisclosureGroup("Avançado", isExpanded: $showsAdvanced) {
                     Picker("Permissões da rotina", selection: $routine.permissionMode) {
@@ -724,7 +849,7 @@ struct RoutineEditor: View {
                         destructive: { isConfirmingDelete = true },
                         cancel: { dismiss() },
                         primaryTitle: isNew ? "Criar rotina" : "Salvar",
-                        isPrimaryDisabled: !hasPrompt,
+                        isPrimaryDisabled: !hasPrompt || lacksGoal || scheduleProblem != nil,
                         primary: save)
         }
         .confirmationDialog("Apagar “\(RoutineText.resolvedName(routine.name, prompt: routine.prompt))”?",
@@ -742,6 +867,8 @@ struct RoutineEditor: View {
     /// What the footer says: what is missing, or that the run would wait (the warning itself is further down).
     private var footerMessage: String? {
         if !hasPrompt { return "Escreva o que o Orb deve fazer." }
+        if lacksGoal { return "Escreva como saber que a meta deu certo." }
+        if let scheduleProblem { return scheduleProblem }
         if let bot, RoutineText.waitsForAnswer(orbMode: bot.permissionMode, routineMode: routine.permissionMode) {
             return "\(bot.name) vai esperar sua aprovação."
         }
@@ -783,6 +910,24 @@ struct RoutineEditor: View {
         .padding(.vertical, 2)
     }
 
+    /// "Meta": whether runs track a goal, and what reaching it looks like.
+    private var goalSection: some View {
+        Section("Meta") {
+            Toggle("Acompanhar uma meta", isOn: $tracksGoal)
+                .help("Cada execução confere o progresso até a meta ser alcançada")
+            if tracksGoal {
+                PlaceholderTextEditor(placeholder: "Como saber que deu certo. Ex.: Nenhum arquivo antigo solto na pasta Downloads.",
+                                      text: $goalTarget, minHeight: 44)
+                    .transition(.quiet)
+                Text("A cada execução o Orb confere o progresso, dá um pequeno passo quando é seguro e termina o relatório com uma linha como “Progresso: 35% · em dia”. Quando a meta é alcançada, a rotina pausa sozinha.")
+                    .font(.caption)
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .transition(.quiet)
+            }
+        }
+    }
+
     /// The warning's way out: set the mode and show it under "Avançado", where it can be changed back.
     private func choose(_ mode: PermissionMode) {
         routine.permissionMode = mode
@@ -793,6 +938,9 @@ struct RoutineEditor: View {
         opensNew = !isStored
         let calendar = Calendar.current
         showsAdvanced = routine.permissionMode != nil
+        tracksGoal = routine.goal != nil
+        leadsWithGoal = tracksGoal
+        goalTarget = routine.goal?.target ?? ""
         switch routine.schedule {
         case .daily(let hour, let minute):
             kind = .daily
@@ -807,13 +955,21 @@ struct RoutineEditor: View {
         case .everyMinutes(let value):
             kind = .minutes
             minutes = Schedule.clampedMinutes(value)
+        case .once(let date):
+            kind = .once
+            onceDate = date
+        case .cron(let expression, let timeZone):
+            kind = .cron
+            cronExpression = expression
+            cronTimeZone = timeZone ?? ""
         }
     }
 
     private func save() {
-        guard hasPrompt else { return }
+        guard hasPrompt, !lacksGoal, scheduleProblem == nil else { return }
         let schedule = draftSchedule
         routine.name = RoutineText.resolvedName(routine.name, prompt: routine.prompt)
+        routine.goal = tracksGoal ? RoutineGoal(target: String(trimmedGoal.prefix(RoutineGoal.targetLimit))) : nil
         if schedule != routine.schedule {
             // Count the next run from now, not from when the routine was created.
             routine.schedule = schedule
@@ -827,6 +983,11 @@ struct RoutineEditor: View {
             routine.runs = current.runs
             routine.lastResult = current.lastResult
             routine.isEnabled = current.isEnabled
+            // The last check measured the goal as it was: a new target starts unmeasured.
+            if let goal = routine.goal, goal.target == current.goal?.target {
+                routine.goal?.check = current.goal?.check
+                routine.goal?.updatedAt = current.goal?.updatedAt
+            }
             if routine.schedule == current.schedule { routine.lastRun = current.lastRun }
             model.routines[index] = routine
         } else if isNew {
@@ -842,7 +1003,8 @@ struct RoutineEditor: View {
 /// Screens of this file for `Orb --snapshot <mode> out.png` (see `Snapshot`).
 @MainActor
 enum RoutinesSnapshots {
-    /// Two routines of the first Orb (one with a good and a failed run) so the routine screens have something to show.
+    /// Routines of the first Orb (one with a good and a failed run, two with a goal: on track and needing attention) so
+    /// the routine screens have something to show.
     static func seed(_ model: AppModel) {
         guard model.routines.isEmpty, let bot = model.bots.first else { return }
         var morning = Routine(name: "Resumo da manhã", botID: bot.id,
@@ -857,7 +1019,31 @@ enum RoutinesSnapshots {
         ]
         let weekly = Routine(name: "Revisar a semana", botID: bot.id, prompt: "Revise a minha semana.",
                              schedule: .weekly(weekday: 6, hour: 17, minute: 0))
-        model.routines = [morning, weekly]
+        model.routines = [morning, weekly,
+                          goal(RoutineTemplate.desktopGoal.routine(for: bot.id), checks: [
+                              (35, .onTrack, "Faltam 26 arquivos antigos; movi 14 para Documentos."),
+                              (20, .onTrack, "Movi 9 imagens para Imagens."),
+                              (8, .onTrack, ""),
+                          ]),
+                          goal(Routine(name: "Conciliar faturas", botID: bot.id, prompt: "Confira as faturas do mês.",
+                                       schedule: .everyHours(4), goal: RoutineGoal(target: "Todas as faturas do mês conciliadas.")),
+                               checks: [(60, .attention, "Duas faturas sem comprovante: preciso de você."), (55, .onTrack, "")])]
+    }
+
+    /// A routine whose runs, newest first, reported these checks.
+    private static func goal(_ routine: Routine, checks: [(Int, GoalStatus, String)]) -> Routine {
+        var routine = routine
+        routine.runs = checks.enumerated().map { index, check in
+            let date = Date.now.addingTimeInterval(-86_400 * Double(index + 1))
+            let line = GoalCheck(progress: check.0, status: check.1, note: check.2)
+            return RoutineRun(date: date, finishedAt: date.addingTimeInterval(95), succeeded: true,
+                              summary: check.2.isEmpty ? "Conferi o progresso da meta." : check.2,
+                              report: "Progresso: \(line.label)", check: line)
+        }
+        routine.lastRun = routine.runs.first?.date
+        routine.goal?.check = routine.runs.first?.check
+        routine.goal?.updatedAt = routine.lastRun
+        return routine
     }
 
     static func view(_ screen: String, model: AppModel) -> AnyView? {
@@ -867,6 +1053,12 @@ enum RoutinesSnapshots {
             return AnyView(RoutineEditor(routine: routine))
         case "routine-editor-new":
             guard let routine = model.draftRoutine(from: RoutineTemplate.all[1]) else { return nil }
+            return AnyView(RoutineEditor(routine: routine))
+        case "empty-routines":
+            // Not seeded (the name does not start with "routine"): the empty page and its templates.
+            return AnyView(RoutinesView())
+        case "routine-editor-goal":
+            guard let routine = model.draftRoutine(from: RoutineTemplate.desktopGoal) else { return nil }
             return AnyView(RoutineEditor(routine: routine))
         case "routine-run", "routine-run-failed":
             guard let routine = model.routines.first,

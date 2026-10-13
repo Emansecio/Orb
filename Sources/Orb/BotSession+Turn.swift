@@ -112,8 +112,9 @@ extension BotSession {
     }
 
     /// Stops the running turn. `startsQueuedRoutines: false` keeps a routine that was waiting for the Orb from taking it
-    /// at once: the caller has something to send first and starts the queue itself if it does not.
-    func stop(startsQueuedRoutines: Bool = true) {
+    /// at once: the caller has something to send first and starts the queue itself if it does not. `notice`: what the
+    /// chat says about it.
+    func stop(startsQueuedRoutines: Bool = true, notice: String = BotSession.stoppedNotice) {
         guard let task = turnTask, let turn = turnID, let model else { return }
         task.cancel()
         ApprovalNotifications.clear(model.pendingApprovals(of: id).map(\.id))
@@ -138,28 +139,26 @@ extension BotSession {
                 }
             }
         }
-        append(.notice("Você interrompeu esta resposta"))
+        append(.notice(notice))
         finishTurn(turn, succeeded: false, userStopped: true, startsQueuedRoutines: startsQueuedRoutines)
     }
 
-    /// The messages you sent into the task in progress that it has not acted on yet: the last ones the chat shows as
-    /// "durante a tarefa", with nothing of the Orb after them (no reply, no step). Only text ones (a message with
-    /// attachments stays where it is). Read before the turn is stopped.
+    static let stoppedNotice = "Você interrompeu esta resposta"
+    /// A task of your own chat that the app closed on (a quit, or a crash found at the next launch): "Continuar" picks it up.
+    nonisolated static let quitNotice = "O app foi fechado no meio desta tarefa."
+    /// The same for a routine's run, another Orb's request or a group's turn: nothing picks those up by itself, and running
+    /// one again could repeat what it already did.
+    nonisolated static let quitSideNotice = "Interrompido: o app foi fechado no meio desta tarefa. Confira o que já foi feito antes de repetir."
+
+    /// The messages you sent into the task in progress that it has not acted on yet (see `TranscriptItem.unansweredSteered`).
+    /// Read before the turn is stopped.
     func unansweredSteered() -> [SteeredMessage] {
-        var found: [SteeredMessage] = []
-        for item in (conversation?.items ?? []).reversed() {
-            switch item.kind {
-            case .user(let text, let attachments):
-                guard item.duringTask == true else { return found } // the start of the turn
-                guard attachments.isEmpty else { return found }
-                found.insert(SteeredMessage(id: item.id, text: text, files: [], pictures: [], prompt: text), at: 0)
-            case .notice:
-                continue
-            default:
-                return found // the Orb did something after it: it was read
-            }
+        let items = conversation?.items ?? []
+        let ids = Set(TranscriptItem.unansweredSteered(in: items))
+        return items.compactMap { item in
+            guard ids.contains(item.id), case .user(let text, _) = item.kind else { return nil }
+            return SteeredMessage(id: item.id, text: text, files: [], pictures: [], prompt: text)
         }
-        return found
     }
 
     /// Takes messages delivered into a stopped task back out of it (the chat's bubble and the model's copy), so they can go
@@ -316,6 +315,10 @@ extension BotSession {
         guard turnID == turn, turnTask != nil, let model else { return }
         let botID = id
         let ranRoutine = routineID != nil
+        // A task that stopped at the step limit is not done: a routine run or another Orb's request records that it did
+        // not finish, and why (the engine's "Pausei depois de…", the run's last notice).
+        let paused = conversation?.isTaskPaused ?? false
+        let completed = succeeded && !paused
         // What the celebration is measured by, before the end of the turn clears it.
         let turnSeconds = model.live(id).workingSince.map { Date.now.timeIntervalSince($0) } ?? 0
         let turnActions = actionsThisTurn
@@ -361,15 +364,15 @@ extension BotSession {
         if let routineID {
             if isOrbRun {
                 model.delegation.finishSideRun(id, runID: routineID, kind: kind ?? .delegation, serving: serving,
-                                               succeeded: succeeded, userStopped: userStopped, reply: reply)
+                                               succeeded: completed, userStopped: userStopped, reply: reply)
             } else {
-                model.finishRoutineRun(id, routineID: routineID, succeeded: succeeded, reply: reply)
+                model.finishRoutineRun(id, routineID: routineID, succeeded: completed, reply: reply)
             }
         }
         if userStopped {
             model.live(id).cued(.blink)
         } else if succeeded {
-            if cutShort || (conversation?.isTaskPaused ?? false) {
+            if cutShort || paused {
                 model.live(id).cued(.sigh) // left half way: no joy
             } else {
                 celebrate(OrbCelebration.level(seconds: turnSeconds, actions: turnActions, ranRoutine: ranRoutine,
@@ -390,7 +393,8 @@ extension BotSession {
         // (you asked for a skill, or the Orb proposed one) is told now; the review comes in the background.
         if !ranRoutine {
             Task { await model.collectSkillProposals(botID) }
-            if succeeded, !(conversation?.isTaskPaused ?? false) { model.reviewSkillsIfDue(self) } // a task left half way teaches little
+            if completed { model.reviewSkillsIfDue(self) } // a task left half way teaches little
+            if completed { model.consolidateMemoryIfDue(self) }
         }
     }
 
@@ -584,5 +588,26 @@ extension BotSession {
             if case .approval(let request) = $0.kind { request.decision == nil } else { false }
         }
         if !stillOpen { model?.setAwaitingApproval(false, of: id) }
+    }
+}
+
+extension TranscriptItem {
+    /// The messages you sent into the task in progress that it has not acted on yet: the last ones the chat shows as
+    /// "durante a tarefa", with nothing of the Orb after them (no reply, no step). Only text ones (a message with
+    /// attachments stays where it is).
+    static func unansweredSteered(in items: [TranscriptItem]) -> [UUID] {
+        var found: [UUID] = []
+        for item in items.reversed() {
+            switch item.kind {
+            case .user(_, let attachments):
+                guard item.duringTask == true, attachments.isEmpty else { return found } // the start of the turn
+                found.insert(item.id, at: 0)
+            case .notice:
+                continue
+            default:
+                return found // the Orb did something after it: it was read
+            }
+        }
+        return found
     }
 }

@@ -180,6 +180,9 @@ actor AgentEngine {
         // Whether the last step ended only because the user was steering: with nothing to hand over now (the message
         // was put back for after the task meanwhile), there is no step to take.
         var continuedForSteering = false
+        // Counts repeated calls and failures; `circling`: the last step's results told the model it was going in circles.
+        var watch = LoopWatch()
+        var circling = false
         var sendImages = request.supportsImages != false
         if !sendImages, !request.images.isEmpty { out.yield(.notice(ImageRejection.notice)) }
 
@@ -192,7 +195,10 @@ actor AgentEngine {
                 if continuedForSteering, delivered.isEmpty { return }
                 continuedForSteering = false
                 steered += delivered
-                out.yield(.status("Pensando"))
+                // While the model reads that it was going in circles, the working line says it is changing course.
+                let thinking = circling ? Self.changingCourse : "Pensando"
+                circling = false
+                out.yield(.status(thinking))
                 var reply = Reply()
                 var contextRetried = false
                 while true {
@@ -204,7 +210,7 @@ actor AgentEngine {
                         if let fit {
                             for report in announced.reports(after: fit, cut: cut, input: messages.dropFirst()) { out.yield(.compacted(report)) }
                         }
-                        reply = try await respond(to: window, request: request, specs: specs,
+                        reply = try await respond(to: window, request: request, specs: specs, thinking: thinking,
                                                   toolChoice: isLastStep ? .none : .auto, out: out, onDiscardedUsage: countDiscarded)
                         // The smaller history worked: that is what this model's window really is.
                         if let learned = learnedWindow {
@@ -314,9 +320,17 @@ actor AgentEngine {
                             out.yield(.taskPaused)
                         }
                         out.yield(.notice(Self.pausedNotice(after: maxSteps)))
-                    } else {
-                        out.yield(.failed("O modelo não respondeu."))
+                        return
                     }
+                    // Silence is often a hiccup of the provider or the model (most often right after tool results): one
+                    // more try, told so, before calling it a failure. It shares `nudge` with the other two.
+                    if !isLastStep, nudge == nil, !continuedAfterCut {
+                        continuedAfterCut = true
+                        nudge = messages.count
+                        messages.append(.user(Self.silenceNudge))
+                        continue
+                    }
+                    out.yield(.failed(Self.silenceFailure))
                     return
                 }
                 if calls.isEmpty && isLastStep, let progress = Self.progress(in: messages, pickedUp: picksUpTask, turnStart: turnStart, nudge: nudge, steering: steered) {
@@ -337,7 +351,8 @@ actor AgentEngine {
                     }
                     // A turn that already worked and ends on a promise ("vou rodar…") would stop with the work undone: ask
                     // for it once. Not in the wizard or a review (`onlyTools`: conversations, not tasks). `nudge` holds one
-                    // index, so this and the "continue" after a cut share it: whichever comes first (`continuedAfterCut`).
+                    // index, so this, the "continue" after a cut and the try after silence share it: whichever comes first
+                    // (`continuedAfterCut`).
                     if !isLastStep, step > 1, nudge == nil, !continuedAfterCut, request.onlyTools == nil, Self.endsOnPromise(said) {
                         continuedAfterCut = true
                         nudge = messages.count
@@ -348,8 +363,8 @@ actor AgentEngine {
                     return
                 }
 
-                await runCalls(calls, request: request, reason: said, allowed: &allowed, toolNames: toolNames, note: note,
-                               messages: &messages, out: out)
+                circling = await runCalls(calls, request: request, reason: said, allowed: &allowed, toolNames: toolNames, note: note,
+                                          watch: &watch, messages: &messages, out: out)
                 try Task.checkCancellation()
             }
         } catch is CancellationError {
@@ -405,7 +420,7 @@ actor AgentEngine {
     }
 
     /// Streams one response, retrying transient provider failures while nothing has been shown yet.
-    private func respond(to window: [ChatMessage], request: TurnRequest, specs: [ToolSpec], toolChoice: ToolChoice,
+    private func respond(to window: [ChatMessage], request: TurnRequest, specs: [ToolSpec], thinking: String = "Pensando", toolChoice: ToolChoice,
                          out: AsyncStream<TurnEvent>.Continuation, onDiscardedUsage: (TokenUsage) -> Void) async throws -> Reply {
         var reply = Reply()
         do {
@@ -414,7 +429,7 @@ actor AgentEngine {
             }, operation: {
                 if let used = reply.usage { onDiscardedUsage(used) } // an earlier attempt broke off after reporting its use
                 reply = Reply() // an attempt that failed before showing anything leaves nothing behind
-                out.yield(.status("Pensando"))
+                out.yield(.status(thinking))
                 do {
                     for try await event in request.client.stream(model: request.model, messages: window, tools: specs, toolChoice: toolChoice) {
                         switch event {
@@ -457,6 +472,8 @@ actor AgentEngine {
 
     static let interruptedMarker = "\n\n[resposta interrompida]"
     static let continueNudge = "continue"
+    static let silenceNudge = "Your last reply was empty. Reply now: carry on with your tools, or answer in text."
+    static let silenceFailure = "O modelo não respondeu."
     static let promiseNudge = "You ended your reply on something you said you would do, without doing it. Do it now with your tools; "
         + "if it really needs the user first, say what in one sentence."
     /// A first-person future the model did not negate ("vou", "I'll"), or a sentence opening on what comes next ("Em seguida
@@ -486,6 +503,8 @@ actor AgentEngine {
         + "and keep each call short."
     /// Steps left when the model is told how many it has.
     static let warningSteps = 3
+    /// The working line while the model reads that it was going in circles (`LoopWatch`).
+    static let changingCourse = "Mudando de abordagem"
     /// Calls that run without asking (reads) of one reply that run at the same time; the rest start as these finish.
     static let parallelTools = 8
 
@@ -505,23 +524,39 @@ actor AgentEngine {
         return ProgressRecord.text(task: messages.indices.filter { $0 >= start && $0 != nudge }.map { messages[$0] })
     }
 
+    /// The part of `pausedNotice` only the chat can act on: where the notice is read as why a run did not finish (a
+    /// routine's history, another Orb's request), it is dropped.
+    static let continueHint = " Diga “continua” e eu sigo de onde parei."
+
     static func pausedNotice(after steps: Int) -> String {
-        "Pausei depois de \(steps) passos neste turno. Diga “continua” e eu sigo de onde parei."
+        "Pausei depois de \(steps) passos neste turno." + continueHint
     }
 
     // MARK: Tool calls
 
     /// Runs one step's tool calls and records their results in the order of the calls, each as soon as it and the
     /// ones before it are done. Consecutive calls that only look (risk `.safe`, so nothing to ask) run at the same
-    /// time; everything else runs alone, in order. `note` goes at the end of the last result.
+    /// time; everything else runs alone, in order. `note`, and what `watch` has to say about the turn going in circles,
+    /// go at the end of the last result. Returns whether `watch` said something.
     private func runCalls(_ calls: [ToolCallRequest], request: TurnRequest, reason: String, allowed: inout [PermissionRule],
-                          toolNames: Set<String>, note: String?, messages: inout [ChatMessage],
-                          out: AsyncStream<TurnEvent>.Continuation) async {
+                          toolNames: Set<String>, note: String?, watch: inout LoopWatch, messages: inout [ChatMessage],
+                          out: AsyncStream<TurnEvent>.Continuation) async -> Bool {
         let (calls, request) = await resolved(calls, in: request)
+        var circling = false
         func append(_ outcome: ToolOutcome, for call: ToolCallRequest) {
+            let kind = request.tools.first { $0.spec.name == call.name }?.kind
+            // A file read is the file: asked for again, it comes back. Anything else may not.
             var text = ToolOutputCap.apply(outcome.text, botID: request.bot.id, callID: call.id, toolNames: toolNames,
-                                           directory: request.outputsDirectory)
-            if let note, call == calls.last { text += "\n\n" + note }
+                                           directory: request.outputsDirectory, keepsCopy: !outcome.isError && kind != .file)
+            // A call the user refused never ran: it is no failure of its own, nor a result to compare.
+            if !outcome.text.hasPrefix(PermissionPolicy.refusalPrefix) {
+                watch.record(call, result: outcome.text, failed: outcome.isError, live: LoopWatch.isLive(call.name, kind: kind))
+            }
+            if call == calls.last {
+                let loop = watch.note()
+                circling = loop != nil
+                for added in [note, loop].compactMap({ $0 }) { text += "\n\n" + added }
+            }
             let message = ChatMessage.tool(call.id, text, isError: outcome.isError, images: outcome.images)
             messages.append(message)
             out.yield(.message(message))
@@ -568,6 +603,7 @@ actor AgentEngine {
             }
             index = end
         }
+        return circling
     }
 
     /// The step's calls with each `connector_call` replaced by the call of the real tool it names (`GitHub__create_issue`,
@@ -586,7 +622,7 @@ actor AgentEngine {
                 resolved.append(call)
                 continue
             }
-            request.tools.append(found.tool)
+            if !request.tools.contains(where: { $0.spec.name == found.tool.spec.name }) { request.tools.append(found.tool) }
             resolved.append(ToolCallRequest(id: call.id, name: found.tool.spec.name, arguments: found.arguments.jsonString))
         }
         return (resolved, request)
@@ -627,13 +663,18 @@ actor AgentEngine {
         return (indices, [:])
     }
 
-    /// Whether the call is a known tool with valid arguments whose risk is `.safe`, so it never waits for the user.
+    /// Whether the call is a known tool with valid arguments whose risk is `.safe`, so it never waits for the user. A tool
+    /// whose whole work is a card for the person (`waitsForThePerson`) runs alone: two questions asked at once would be
+    /// two cards, answered in whatever order they happened to open.
     private static func runsWithoutAsking(_ call: ToolCallRequest, request: TurnRequest) -> Bool {
-        guard let tool = request.tools.first(where: { $0.spec.name == call.name }),
+        guard !waitsForThePerson.contains(call.name),
+              let tool = request.tools.first(where: { $0.spec.name == call.name }),
               let arguments = JSONValue.parse(call.arguments) else { return false }
         // Judged as the policy will judge it: a read of a private key asks, a command that only looks does not.
         return PermissionPolicy.call(for: tool, arguments: arguments, context: request.context).risk == .safe
     }
+
+    static let waitsForThePerson: Set<String> = [AskUserTool.name, OrbProposeTool.name]
 
     /// What the model is sent: the system prompt and the turn so far, fitted to the budget. `messages` itself stays
     /// whole, so trimming is recomputed from the full record before every call.
@@ -641,15 +682,27 @@ actor AgentEngine {
     /// budget again, and then moves in one go (see `ContextWindow.fit`), so most calls extend the previous request
     /// and the provider's cache keeps working.
     /// `nudge`: index in `messages` of the engine's "continue"; `steering`: those of the user's messages sent during the
-    /// turn (see `ContextWindow.fit`).
+    /// turn (see `ContextWindow.fit`), which the model reads under `steeringFrame`. Only the request carries it: the
+    /// chat, the history and the summary keep the user's own words.
     private static func fitted(_ messages: [ChatMessage], to budget: ContextBudget, cut: inout ContextCut, continuing: Bool = false,
                                nudge: Int? = nil, steering: [Int] = [], sendImages: Bool = true) -> (messages: [ChatMessage], fit: ContextWindow?) {
         guard let system = messages.first, system.role == .system else { return (messages, nil) }
         let fit = ContextWindow.fit(Array(messages.dropFirst()), budget: budget, cut: &cut, continuing: continuing,
                                     nudge: nudge.map { $0 - 1 }, steering: steering.map { $0 - 1 })
-        let window = [system] + fit.messages
+        let steered = Set(steering.compactMap { messages[$0].itemID })
+        let window = [system] + fit.messages.map { message in
+            guard message.role == .user, let id = message.itemID, steered.contains(id) else { return message }
+            var framed = message
+            framed.content = steeringFrame + "\n\n" + message.content
+            return framed
+        }
         return (sendImages ? window : window.strippingImages(), fit)
     }
+
+    /// What a message the user sent during the turn is read under: without it, a weak model answers the new message and
+    /// drops the work it was doing.
+    static let steeringFrame = "[Sent while you were working on the request above. Read this first: it may change that work, add to it, "
+        + "stop it, or be about something else. Then, unless it says otherwise, carry on with whatever part of that work is unfinished.]"
 
     /// What the compactions of one turn have told so far. The window is fitted again before every model call, so
     /// without this the same fold would be seen at every step: a fold is reported when the cut moves (and only the
@@ -758,6 +811,9 @@ actor AgentEngine {
             context.handoff = { [self] page in
                 await handoff(page: page, resuming: summary.title, request: request, out: out)
             }
+            context.askUser = { [self] question in
+                await ask(question, resuming: summary.title, request: request, out: out)
+            }
             // MARK: MultiOrb (WP3)
             if tool.spec.name == OrbProposeTool.name, var creation = context.orbCreation {
                 // The mode as it is now, not as it was when the turn began: the tool refuses to propose in read-only.
@@ -772,7 +828,7 @@ actor AgentEngine {
             let result = try await tool.runWithImages(arguments, context: context)
             let files = (target.map { [ProducedFile(path: $0.url.path, created: !$0.existed)] } ?? [])
                 + result.images.map { ProducedFile(path: $0.path, created: true) }
-            out.yield(.toolFinished(id: started.id, state: .done, output: Self.preview(result.text), files: files))
+            out.yield(.toolFinished(id: started.id, state: result.failed ? .failed : .done, output: Self.preview(result.text), files: files))
             return ToolOutcome(result.text, images: result.images)
         } catch {
             let message = error.localizedDescription
@@ -790,6 +846,17 @@ actor AgentEngine {
         }
         out.yield(.status(title))
         return done
+    }
+
+    /// The card of `ask_user`: it waits, like an approval, for the person's answer; nil when they skipped it (or pressed Parar).
+    private func ask(_ question: OrbQuestion, resuming title: String, request: TurnRequest,
+                     out: AsyncStream<TurnEvent>.Continuation) async -> String? {
+        let answer = await gate.ask(question, botName: request.bot.name, botID: request.bot.id) { card in
+            out.yield(.approval(card))
+            out.yield(.status("Esperando sua resposta"))
+        }
+        out.yield(.status(title))
+        return answer
     }
 
     // MARK: MultiOrb (WP3)

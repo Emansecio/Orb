@@ -96,7 +96,9 @@ enum ConnectorGateway {
     /// cannot hold are ignored (`GitHub` for `github`).
     static func connector(named name: String, in connectors: [MCPServerConfig]) throws -> MCPServerConfig {
         let wanted = name.trimmingCharacters(in: .whitespaces)
-        func key(_ text: String) -> String { MCPTool.modelName(server: text, tool: "").lowercased() }
+        func key(_ text: String) -> String {
+            String(text.lowercased().unicodeScalars.map { $0.isASCII && CharacterSet.alphanumerics.contains($0) ? Character($0) : "_" })
+        }
         if let found = connectors.first(where: { $0.name == wanted }) ?? connectors.first(where: { key($0.name) == key(wanted) }) {
             return found
         }
@@ -117,7 +119,8 @@ enum ConnectorGateway {
         guard let found = catalog.tools.first(where: { $0.name == name }) else {
             throw ToolError("\(config.name) não tem a ferramenta \(name). Chame connector_tools(connector: \"\(config.name)\") para ver a lista.")
         }
-        let tool = MCPTool(serverName: config.name, remote: found.spec, serverID: config.id, manager: manager, annotations: found.annotations)
+        let tool = MCPTool(serverName: config.name, remote: found.spec, serverID: config.id, manager: manager,
+                           annotations: found.annotations, siblings: catalog.tools.map(\.name))
         return (tool, passedArguments(arguments["arguments"]))
     }
 

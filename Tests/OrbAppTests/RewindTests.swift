@@ -519,6 +519,20 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
         #expect(users(model.transcript(id)) == ["a", "b", "c"])
     }
 
+    @MainActor @Test func editingFromTheMenuSaysWhyWhenTheMessageCannotBeEdited() async throws {
+        defer { removeTestFolder(root) }
+        var chat = conversation(["a", "b"])
+        let index = try #require(chat.items.firstIndex { if case .user("b", _) = $0.kind { true } else { false } })
+        chat.items[index].duringTask = true
+        let (model, id) = model(with: chat)
+        await model.loadedConversation(id)
+
+        model.editOrExplain(itemID: try #require(row("b", in: model, id)).id, of: id)
+        #expect(!model.isEditing(id) && model.composerLane(id).error == RewindRefusal.steered.reason)
+        model.editOrExplain(itemID: try #require(row("a", in: model, id)).id, of: id)
+        #expect(model.isEditing(id) && model.composerLane(id).error == nil)
+    }
+
     @MainActor @Test func sendingAnEditReplacesTheMessageAndDropsEverythingAfterIt() async throws {
         defer { removeTestFolder(root) }
         var chat = conversation(["a", "b", "c"])

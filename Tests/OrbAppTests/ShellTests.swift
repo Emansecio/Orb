@@ -243,6 +243,19 @@ final class RunCommandTests {
         #expect(output.contains("ok-ç dumb cat cat"))
     }
 
+    @Test func aCommandThatEndsBadlyShowsAsFailedButANoIsAnAnswer() async throws {
+        func result(_ command: String) async throws -> ToolResult {
+            try await RunCommandTool().runWithImages(.object(["command": .string(command)]), context: context)
+        }
+        #expect(try await result("echo ok").failed == false)
+        #expect(try await result("echo quebrou >&2; exit 2").failed)
+        #expect(try await result("kill -TERM $$").failed)
+        // `grep` finding nothing: exit 1, nothing printed.
+        #expect(try await result("echo abc | grep xyz").failed == false)
+        #expect(try await result("echo erro; exit 1").failed)
+        #expect(try await result("exit 1").text.hasPrefix("Código de saída: 1"))
+    }
+
     /// With launchd's bare PATH (the shell could not be asked), `-c` would not find tools set up by the login profile.
     private func fallbackContext() throws -> ToolContext {
         let bin = directory.appending(path: "fakebin")

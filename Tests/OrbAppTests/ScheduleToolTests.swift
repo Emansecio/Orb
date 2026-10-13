@@ -5,11 +5,13 @@ import Testing
 // Tasks the Orb schedules itself: the interval schedule, the `schedule` tool (checking, results, limits, only the
 // Orb's own), its permissions in each mode and in both engines, and the mailbox Claude Code's server uses.
 
-private func call(_ action: String, name: String? = nil, prompt: String? = nil, when: JSONValue? = nil) -> JSONValue {
+private func call(_ action: String, name: String? = nil, prompt: String? = nil, when: JSONValue? = nil,
+                  goal: String? = nil) -> JSONValue {
     var object: [String: JSONValue] = ["action": .string(action)]
     if let name { object["name"] = .string(name) }
     if let prompt { object["prompt"] = .string(prompt) }
     if let when { object["when"] = when }
+    if let goal { object["goal"] = .string(goal) }
     return .object(object)
 }
 
@@ -17,6 +19,83 @@ private func every(minutes: Int) -> JSONValue { .object(["kind": .string("every_
 private let daily9: JSONValue = .object(["kind": .string("daily"), "hour": .number(9)])
 
 // MARK: - The schedule
+
+struct OnceAndCronScheduleTests {
+    private let utc: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar
+    }()
+
+    private func date(_ text: String) -> Date { try! Date(text, strategy: .iso8601) }
+
+    @Test func aCronLineFindsItsNextTimeInItsTimeZone() {
+        let friday = date("2026-10-16T09:00:00Z")
+        #expect(Schedule.cron(expression: "30 8 * * 1-5", timeZone: nil).next(after: friday, calendar: utc) == date("2026-10-19T08:30:00Z"))
+        // 9:00 in São Paulo is 12:00 UTC.
+        #expect(Schedule.cron(expression: "0 9 * * *", timeZone: "America/Sao_Paulo").next(after: date("2026-10-13T00:00:00Z"), calendar: utc)
+                == date("2026-10-13T12:00:00Z"))
+        // Day of the month and of the week both restricted: either one, here the Monday before the 1st.
+        #expect(Schedule.cron(expression: "0 0 1 * 1", timeZone: nil).next(after: date("2026-10-13T10:00:00Z"), calendar: utc)
+                == date("2026-10-19T00:00:00Z"))
+        // A step in the day field still counts as "any": every other day, not every day (as cron does it).
+        #expect(Schedule.cron(expression: "0 9 */2 * *", timeZone: nil).next(after: date("2026-10-13T10:00:00Z"), calendar: utc)
+                == date("2026-10-15T09:00:00Z"))
+    }
+
+    @Test func aCronLineReadsListsRangesStepsAndNames() throws {
+        let cron = try CronExpression("*/20 9-17/4 * jan,JUL mon-fri")
+        #expect(cron.minutes == [0, 20, 40] && cron.hours == [9, 13, 17])
+        #expect(cron.months == [1, 7] && cron.weekdays == [2, 3, 4, 5, 6])
+        #expect(try CronExpression("0 9 * * 7").weekdays == [1]) // 7 is Sunday too
+        #expect(try CronExpression("5/30 * * * *").minutes == [5, 35])
+    }
+
+    @Test func aBadOrTooFrequentCronLineIsRefusedAndNeverRuns() {
+        for bad in ["* * * * *", "0,10 * * * *", "0 9 * *", "60 9 * * *", "0 9 * * 8", "0 9-8 * * *", "*/0 * * * *", "0 9 * * xyz"] {
+            #expect(throws: CronExpression.Invalid.self, "\(bad)") { try CronExpression(bad) }
+            #expect(Schedule.cron(expression: bad, timeZone: nil).problem() != nil, "\(bad)")
+        }
+        let never = Schedule.cron(expression: "0 0 30 2 *", timeZone: nil)
+        #expect(never.next(after: .now) == .distantFuture && never.problem() != nil)
+        #expect(Schedule.cron(expression: "0 9 * * *", timeZone: "Marte/Base").problem()?.hasPrefix("Fuso desconhecido") == true)
+        #expect(Schedule.cron(expression: "0 9 * * *", timeZone: "America/Sao_Paulo").problem() == nil)
+    }
+
+    @Test func aOneTimeScheduleRunsAtItsMomentAndThenNeverAgain() throws {
+        let moment = date("2026-10-14T09:00:00Z")
+        #expect(Schedule.once(moment).next(after: moment.addingTimeInterval(-60)) == moment)
+        #expect(Schedule.once(moment).next(after: moment) == .distantFuture)
+        #expect(Schedule.once(moment).problem(now: moment.addingTimeInterval(1)) != nil)
+        #expect(RoutineText.preview(nextRun: .distantFuture).hasPrefix("Nenhuma execução"))
+        for schedule in [Schedule.once(moment), .cron(expression: "0 9 * * 1-5", timeZone: "America/Sao_Paulo")] {
+            #expect(try JSONDecoder().decode(Schedule.self, from: JSONEncoder().encode(schedule)) == schedule)
+        }
+    }
+
+    @Test func theToolCreatesOneTimeAndCronTasks() throws {
+        func when(_ fields: [String: JSONValue]) throws -> Schedule {
+            guard case .create(_, _, let schedule, _) = try ScheduleCommand(call("create", prompt: "x", when: .object(fields))) else { throw ToolError("") }
+            return schedule
+        }
+        let local = try #require(ScheduleCommand.moment("2099-01-02T09:00"))
+        #expect(Calendar.current.dateComponents([.year, .hour, .minute], from: local) == DateComponents(year: 2099, hour: 9, minute: 0))
+        #expect(ScheduleCommand.moment("2099-01-02T09:00:00-03:00") == date("2099-01-02T12:00:00Z"))
+        #expect(try when(["kind": .string("once"), "at": .string("2099-01-02T09:00")]) == .once(local))
+        #expect(try when(["kind": .string("cron"), "expression": .string(" 0 9 * * 1-5 "), "time_zone": .string("America/Sao_Paulo")])
+                == .cron(expression: "0 9 * * 1-5", timeZone: "America/Sao_Paulo"))
+        #expect(try when(["kind": .string("cron"), "expression": .string("0 9 * * *")]) == .cron(expression: "0 9 * * *", timeZone: nil))
+        for bad: [String: JSONValue] in [
+            ["kind": .string("once"), "at": .string("2000-01-01T09:00")],
+            ["kind": .string("once"), "at": .string("amanhã")],
+            ["kind": .string("once")],
+            ["kind": .string("cron"), "expression": .string("* * * * *")],
+            ["kind": .string("cron"), "expression": .string("0 9 * * *"), "time_zone": .string("Marte/Base")],
+        ] {
+            #expect(throws: ToolError.self) { try when(bad) }
+        }
+    }
+}
 
 struct IntervalScheduleTests {
     @Test func nextRunIsTheIntervalAfterTheLastRun() {
@@ -65,11 +144,11 @@ struct ScheduleCommandTests {
     }
 
     @Test func theNameDefaultsToTheStartOfThePromptAndIsKeptShort() throws {
-        guard case .create(let name, _, _) = try ScheduleCommand(call("create", prompt: "Resuma meus e-mails novos de hoje", when: daily9)) else {
+        guard case .create(let name, _, _, _) = try ScheduleCommand(call("create", prompt: "Resuma meus e-mails novos de hoje", when: daily9)) else {
             Issue.record("not a create"); return
         }
         #expect(name == "Resuma meus e-mails novos…")
-        guard case .create(let long, _, _) = try ScheduleCommand(call("create", name: String(repeating: "n", count: 200), prompt: "x", when: daily9)) else {
+        guard case .create(let long, _, _, _) = try ScheduleCommand(call("create", name: String(repeating: "n", count: 200), prompt: "x", when: daily9)) else {
             Issue.record("not a create"); return
         }
         #expect(long.count == ScheduleCommand.nameLimit)
@@ -77,7 +156,7 @@ struct ScheduleCommandTests {
 
     @Test func eachKindOfWhenIsReadAndItsLimitsAreEnforced() throws {
         func when(_ fields: [String: JSONValue]) throws -> Schedule {
-            guard case .create(_, _, let schedule) = try ScheduleCommand(call("create", prompt: "x", when: .object(fields))) else { throw ToolError("") }
+            guard case .create(_, _, let schedule, _) = try ScheduleCommand(call("create", prompt: "x", when: .object(fields))) else { throw ToolError("") }
             return schedule
         }
         #expect(try when(["kind": .string("daily"), "hour": .number(9), "minute": .number(30)]) == .daily(hour: 9, minute: 30))
@@ -245,6 +324,24 @@ struct SchedulePermissionTests {
         #expect(routine.permissionMode == nil) // never more permissive than the Orb: it uses the Orb's
         #expect(said.hasPrefix("Agendei “E-mails”: a cada 30 minutos. Próxima execução: "))
         #expect(said.contains("aba Rotinas"))
+    }
+
+    @Test @MainActor func aTaskCanWorkTowardAGoal() throws {
+        let (model, atlas, _) = setUp()
+        model.update(atlas.id) { $0.permissionMode = .auto }
+        let said = try run(model, atlas, call("create", name: "Downloads", prompt: "arrume um pouco", when: daily9,
+                                              goal: "  Downloads\nsem arquivos antigos  "))
+        #expect(model.routines.first?.goal == RoutineGoal(target: "Downloads sem arquivos antigos"))
+        #expect(said.contains("progresso da meta"))
+        #expect(try run(model, atlas, call("list")).contains("Meta: Downloads sem arquivos antigos"))
+
+        // Without one (or with only blanks) it is a plain task.
+        _ = try run(model, atlas, call("create", name: "Outra", prompt: "x", when: daily9, goal: "   "))
+        #expect(model.routines.last?.goal == nil)
+        #expect(try ScheduleCommand(call("create", name: "A", prompt: "x", when: daily9))
+                == .create(name: "A", prompt: "x", schedule: .daily(hour: 9, minute: 0), goal: nil))
+        let summary = ScheduleTool().summary(call("create", name: "A", prompt: "x", when: daily9, goal: "Caixa zerada"))
+        #expect(summary.detail.hasSuffix("· Meta: Caixa zerada"))
     }
 
     @Test @MainActor func inAskModeTheResultWarnsThatEachRunWaitsForYou() throws {

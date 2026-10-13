@@ -64,7 +64,7 @@ extension BotSession {
     }
 
     private func install(_ read: StoreRead<Conversation>) {
-        conversation = read.value?.closingInterruptedTurn() ?? Conversation()
+        conversation = read.value?.closingInterruptedTurn(notice: BotSession.quitNotice) ?? Conversation()
         lastUsed = .now
         rewriteIfItLostItems(read)
     }

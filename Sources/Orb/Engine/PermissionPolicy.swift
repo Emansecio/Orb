@@ -212,8 +212,10 @@ enum PermissionVerdict: Equatable, Sendable {
 }
 
 enum PermissionPolicy {
-    static let readOnlyDenial = "Not run: the user set you to read-only mode. Explain what you would do instead."
-    static let userDenial = "Not run: the user denied this action. Do not retry it; ask or suggest an alternative."
+    static let readOnlyDenial = refusalPrefix + " set you to read-only mode. Explain what you would do instead."
+    static let userDenial = refusalPrefix + " denied this action. Do not retry it; ask or suggest an alternative."
+    /// How both refusals start: a call they answer never ran.
+    static let refusalPrefix = "Not run: the user"
 
     // MARK: Evaluate
 

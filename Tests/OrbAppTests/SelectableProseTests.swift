@@ -62,7 +62,8 @@ struct SelectableProseTests {
 
     @Test func theViewIsAsTallAsItsLinesAtTheWidthItIsGiven() {
         let view = ProseTextView()
-        view.show(ProseText.make([.paragraph(String(repeating: "palavra ", count: 20))], cursor: false, cached: false, highlight: nil))
+        view.show(ProseText.make([.paragraph(String(repeating: "palavra ", count: 20))], cursor: false, cached: false, highlight: nil),
+                  cursor: false, fades: false)
         let wide = view.height(forWidth: 2_000), narrow = view.height(forWidth: 200)
         #expect(wide > 10 && wide < 30)
         #expect(narrow > wide * 4)

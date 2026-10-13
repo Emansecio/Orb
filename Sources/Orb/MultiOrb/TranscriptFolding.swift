@@ -117,11 +117,12 @@ enum TranscriptFolding {
         if case .tool = item.kind { true } else { false }
     }
 
-    /// An action, or a permission card already answered (never one that waits for you, nor an Orb's proposal).
+    /// An action, or a permission card already answered (never one that waits for you, an Orb's proposal or a question: what was
+    /// asked and answered stays in view).
     static func joinsToolRun(_ item: TranscriptItem) -> Bool {
         switch item.kind {
         case .tool: true
-        case .approval(let request): request.decision != nil && request.proposal == nil
+        case .approval(let request): request.decision != nil && request.proposal == nil && request.question == nil
         default: false
         }
     }

@@ -54,13 +54,20 @@ struct RunCommandTool: AgentTool {
     }
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
+        try await runWithImages(arguments, context: context).text
+    }
+
+    /// A command that ended badly (an exit code other than 0, a signal, the time running out) shows as failed in the
+    /// activity; the model reads the code in the text either way. Exit 1 with nothing printed is how `grep`, `test` and
+    /// friends say "no": an answer, not a failure.
+    func runWithImages(_ arguments: JSONValue, context: ToolContext) async throws -> ToolResult {
         let command = try arguments.requiredString("command")
         let directory = arguments.nonEmptyString("cwd").map(context.url(for:)) ?? context.workingDirectory
         guard directory.isExistingDirectory else { throw ToolError("Pasta não encontrada: \(directory.path)") }
         let shell = await context.shell.resolved()
 
         if arguments["background"]?.bool == true {
-            return try await startInBackground(command, directory: directory, shell: shell, context: context)
+            return ToolResult(text: try await startInBackground(command, directory: directory, shell: shell, context: context))
         }
         let seconds = arguments.integer("timeout_seconds", default: Self.defaultTimeout, in: 1...Self.maxTimeout)
         let spill = Self.spillFile(context: context)
@@ -88,13 +95,18 @@ struct RunCommandTool: AgentTool {
                 + "; para servidores e watchers use background: true, que dá um id para job_output e job_stop]"
         }
         if result.timedOut {
-            return output + "\n[tempo esgotado após \(seconds) s; o processo foi encerrado. Para comandos longos use timeout_seconds "
-                + "(máx. \(Self.maxTimeout)) ou background: true com job_output]"
+            return ToolResult(text: output + "\n[tempo esgotado após \(seconds) s; o processo foi encerrado. Para comandos longos use "
+                + "timeout_seconds (máx. \(Self.maxTimeout)) ou background: true com job_output]", failed: true)
         }
         if let signal = result.signal {
-            return "Código de saída: encerrado pelo sinal \(Signals.describe(signal))\n\(output)"
+            return ToolResult(text: "Código de saída: encerrado pelo sinal \(Signals.describe(signal))\n\(output)", failed: true)
         }
-        return "Código de saída: \(result.status)\(Signals.hint(forExitCode: result.status))\n\(output)"
+        return ToolResult(text: "Código de saída: \(result.status)\(Signals.hint(forExitCode: result.status))\n\(output)",
+                          failed: Self.failed(status: result.status, printed: !result.output.isEmpty))
+    }
+
+    static func failed(status: Int32, printed: Bool) -> Bool {
+        status != 0 && !(status == 1 && !printed)
     }
 
     /// Where the whole output goes if it outgrows the limit: the Orb's folder of saved outputs, next to the files

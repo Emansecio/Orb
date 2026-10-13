@@ -23,7 +23,7 @@ extension AppModel {
         guard let orb = bot(botID) else { throw ToolError("Este Orb não existe mais.") }
         let own = routines(for: botID)
         switch try ScheduleCommand(arguments) {
-        case .create(let name, let prompt, let schedule):
+        case .create(let name, let prompt, let schedule, let goal):
             // A run that reads an e-mail or a page must not be able to plant tasks that outlive it.
             guard sessions[botID]?.routineID == nil else { throw ToolError("Uma tarefa agendada não cria outras tarefas.") }
             guard own.count < Self.scheduledTaskLimit else {
@@ -32,19 +32,23 @@ extension AppModel {
             guard !own.contains(where: { $0.name.sameName(as: name) }) else {
                 throw ToolError("Já existe uma tarefa chamada “\(name)”. Escolha outro nome ou apague a antiga.")
             }
-            let routine = Routine(name: name, botID: botID, prompt: prompt, schedule: schedule)
+            let routine = Routine(name: name, botID: botID, prompt: prompt, schedule: schedule, goal: goal.map { RoutineGoal(target: $0) })
             routines.append(routine)
             show(routine, of: botID)
             // Nobody is there during a run: in "Perguntar antes" it waits for you, which is worth knowing now.
             let waits = RoutineText.waitsForAnswer(orbMode: orb.permissionMode, routineMode: nil)
             return "Agendei “\(name)”: \(schedule.label.lowercasedFirst). \(RoutineText.preview(nextRun: routine.nextRun)). "
+                + (goal == nil ? "" : "Cada execução informa o progresso da meta, e a tarefa pausa quando ela for alcançada. ")
                 + "Ela aparece na aba Rotinas do painel, onde dá para pausar ou apagar."
                 + (waits ? " Como \(orb.name) pergunta antes de agir, cada execução espera a sua aprovação (em Automático ela roda sozinha)." : "")
         case .list:
             guard !own.isEmpty else { return "Nenhuma tarefa agendada." }
             return own.map { routine in
                 let state = routine.isEnabled ? RoutineText.nextRun(of: routine)?.lowercasedFirst ?? "" : "pausada"
-                return "- “\(routine.name)”: \(routine.schedule.label.lowercasedFirst), \(state). Faz: \(MemoryText.clip(MemoryText.flatten(routine.prompt), 120))"
+                let goal = routine.goal.map { goal in
+                    " Meta: \(MemoryText.clip(goal.target, 120))" + (goal.check.map { " (\($0.label))" } ?? "")
+                } ?? ""
+                return "- “\(routine.name)”: \(routine.schedule.label.lowercasedFirst), \(state). Faz: \(MemoryText.clip(MemoryText.flatten(routine.prompt), 120))" + goal
             }.joined(separator: "\n")
         case .setEnabled(let name, let enabled):
             let routine = try own.named(name)

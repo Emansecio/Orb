@@ -506,6 +506,80 @@ extension AgentEngineTests {
         }
     }
 
+    // MARK: Going in circles
+
+    @Test func theThirdCallWithTheSameResultTellsTheModelToChangeCourse() async throws {
+        let script = Script([[touchCall], [touchCall], [touchCall], [.text("Mudei de caminho")]])
+        let events = await run(AgentEngine(), request(script, mode: .bypass, runs: Counter()))
+        let results = messages(events).filter { $0.role == .tool }.map(\.content)
+        #expect(results == ["ok", "ok", "ok\n\n" + LoopWatch.repeatingNote])
+        // The working line says so while the model reads it (the whole call, not "Pensando"), and only then.
+        let lines = statuses(events)
+        let changing = try #require(lines.firstIndex(of: AgentEngine.changingCourse), "\(lines)")
+        #expect(lines[..<changing].filter { $0 == "Tocando" }.count == 3)
+        #expect(!lines[changing...].contains("Pensando"), "\(lines)")
+    }
+
+    @Test func threeFailuresInARowTellTheModelToStopRetrying() async {
+        let calls = (1...3).map { LLMEvent.toolCalls([ToolCallRequest(id: "b\($0)", name: "broken", arguments: #"{"n":\#($0)}"#)]) }
+        let script = Script(calls.map { [$0] } + [[.text("Não consegui: falta acesso")]])
+        let events = await run(AgentEngine(), request(script, mode: .bypass, runs: Counter(), tools: [BrokenTool()]))
+        let results = messages(events).filter { $0.role == .tool }.map(\.content)
+        #expect(results.count == 3)
+        #expect(!results[1].contains("[Orb:"))
+        #expect(results[2].hasSuffix(LoopWatch.failingNote))
+    }
+
+    @Test func onScreenTheSameWordsAreNoLoopButFailuresStillAre() {
+        let scroll = ToolCallRequest(id: "s", name: "browse_scroll", arguments: "{}")
+        var watch = LoopWatch()
+        for _ in 1...6 { watch.record(scroll, result: "Scrolled down 600 px.", failed: false, live: true) }
+        #expect(watch.note() == nil)
+        for _ in 1...3 { watch.record(scroll, result: "Error", failed: true, live: true) }
+        #expect(watch.note() == LoopWatch.failingNote)
+        #expect(watch.note() == nil, "told once")
+        // A success in between starts the count of failures over.
+        let read = ToolCallRequest(id: "r", name: "read_file", arguments: #"{"path":"a"}"#)
+        watch.record(read, result: "x", failed: true)
+        watch.record(read, result: "y", failed: false)
+        watch.record(read, result: "x", failed: true)
+        #expect(watch.note() == nil)
+    }
+
+    @Test func theSameOutputAtAnotherMomentIsStillTheSameResult() {
+        let run = ToolCallRequest(id: "c", name: "run_command", arguments: #"{"command":"make"}"#)
+        var watch = LoopWatch()
+        for (second, file) in [(1, "a1b2c3d4"), (7, "e5f6a7b8"), (9, "0c0d0e0f")] {
+            watch.record(run, result: """
+                Código de saída: 2
+                2026-10-12T14:0\(second):11Z build took 1.\(second)s, request_id: r-\(second)
+                [full output saved at /tmp/orb-saidas/x/comando-\(file).txt (900 lines, 40 KB); read it with read_file]
+                """, failed: false)
+        }
+        #expect(watch.note() == LoopWatch.repeatingNote)
+        // A job being waited on is not a loop, even when a quiet log reads the same for a minute; a page fetched again is.
+        #expect(LoopWatch.isLive("job_output", kind: .shell) && LoopWatch.isLive("browse_scroll", kind: .browser))
+        #expect(!LoopWatch.isLive("web_fetch", kind: .browser) && !LoopWatch.isLive("run_command", kind: .shell))
+        let poll = ToolCallRequest(id: "j", name: "job_output", arguments: #"{"id":"1"}"#)
+        for _ in 1...3 { watch.record(poll, result: "Processo 1 (rodando há 2 min): make\n…", failed: false, live: true) }
+        #expect(watch.note() == nil)
+    }
+
+    @Test func aMessageSentDuringTheTurnReachesTheModelFramedAndTheChatAsWritten() async {
+        let queue = SteeringQueue()
+        var bot = Bot(name: "Teste", role: "", orb: OrbConfig(), permissionMode: .bypass)
+        bot.permissionRules = []
+        let script = Script([[touchCall], [.text("Feito, na pasta X")]])
+        let steered = TurnRequest(bot: bot, model: "fake", system: "sys", history: [], prompt: "oi",
+                                  client: ScriptedLLM(script: script), tools: [SteeringTouchTool(queue: queue)],
+                                  context: ToolContext(workingDirectory: URL(fileURLWithPath: NSTemporaryDirectory())),
+                                  maxSteps: 5, steering: queue)
+        let events = await run(AgentEngine(), steered)
+        let sent = await script.received[1].filter { $0.role == .user }.map(\.content)
+        #expect(sent == ["oi", AgentEngine.steeringFrame + "\n\nuse a pasta X"])
+        #expect(messages(events).filter { $0.role == .user }.map(\.content) == ["oi", "use a pasta X"])
+    }
+
     @Test func aCutOffWithNoTextRecordsNoEmptyAssistantMessage() async {
         let script = Script([[.finished(.maxTokens, nil)], [.text("ok"), .finished(.done, nil)]])
         let events = await run(AgentEngine(), request(script, mode: .ask, runs: Counter()))
@@ -540,18 +614,24 @@ extension AgentEngineTests {
         #expect(messages(events).last?.content == "Não posso ajudar com isso.")
     }
 
-    @Test func anEmptyReplyIsAFailureNotASuccess() async {
+    @Test func aSecondEmptyReplyIsAFailureNotASuccess() async {
         for reply in [[LLMEvent.finished(.done, nil)], [.text("  \n"), .finished(.done, nil)], []] {
-            let events = await run(AgentEngine(), request(Script([reply]), mode: .ask, runs: Counter()))
-            #expect(failures(events) == ["O modelo não respondeu."])
+            let script = Script([reply, reply])
+            let events = await run(AgentEngine(), request(script, mode: .ask, runs: Counter()))
+            #expect(failures(events) == [AgentEngine.silenceFailure])
             #expect(messages(events).map(\.role) == [.user])
+            #expect(await script.received.count == 2)
         }
     }
 
-    @Test func anEmptyReplyAfterToolsIsAlsoAFailure() async {
-        let script = Script([[touchCall], [.finished(.done, nil)]])
+    @Test func anEmptyReplyGetsOneMoreTryToldWhy() async {
+        let script = Script([[touchCall], [.finished(.done, nil)], [.text("Pronto")]])
         let events = await run(AgentEngine(), request(script, mode: .auto, runs: Counter()))
-        #expect(failures(events) == ["O modelo não respondeu."])
+        #expect(failures(events).isEmpty)
+        #expect(await script.received[2].last?.content == AgentEngine.silenceNudge)
+        // The nudge steers the turn only: the chat keeps what the user and the model said.
+        #expect(messages(events).map(\.role) == [.user, .assistant, .tool, .assistant])
+        #expect(messages(events).last?.content == "Pronto")
     }
 
     @Test func anIncompleteReplyIsAFailureThatKeepsWhatWasShown() async {
@@ -1053,6 +1133,24 @@ struct ModelTests {
         }
         #expect(call.state == .failed)
         #expect(request.decision == .deny)
+    }
+
+    @Test func reopeningAfterACrashSaysWhereTheTaskWasCutOffOnce() {
+        let notice = BotSession.quitNotice
+        var running = Conversation()
+        running.items = [TranscriptItem(.user(text: "faça", attachments: [])), TranscriptItem(.bot(text: "meio", isStreaming: true))]
+        let closed = running.closingInterruptedTurn(notice: notice)
+        guard case .notice(notice) = closed.items.last?.kind else { Issue.record("no notice"); return }
+        // Read again at the next launch, nothing is running anymore: no second notice.
+        #expect(closed.closingInterruptedTurn(notice: notice).items.count == closed.items.count)
+
+        var unanswered = Conversation()
+        unanswered.items = [TranscriptItem(.user(text: "faça", attachments: []))]
+        #expect(unanswered.closingInterruptedTurn(notice: notice).items.count == 2) // your message got no answer
+
+        var finished = Conversation()
+        finished.items = [TranscriptItem(.user(text: "faça", attachments: [])), TranscriptItem(.bot(text: "feito", isStreaming: false))]
+        #expect(finished.closingInterruptedTurn(notice: notice).items.count == 2)
     }
 
     @Test func skillExpansion() throws {

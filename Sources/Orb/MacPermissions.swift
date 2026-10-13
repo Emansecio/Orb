@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 import Foundation
+import ScreenCaptureKit
 
 // macOS privacy permissions (TCC) as the Orb sees them: what is granted, how to ask, how to explain a failure.
 // Nothing here prompts unless a function is named `request…`; the blocking system calls always run off the main actor.
@@ -345,6 +346,81 @@ enum Blocking {
             continuation = nil
             lock.unlock()
             waiting?.resume(returning: value)
+        }
+    }
+}
+
+// MARK: - Live tests
+
+/// What a real, harmless use of a granted permission found. The flag can say yes while the permission does nothing:
+/// Screen Recording turned on applies only to a reopened app, and an Accessibility entry left by an older build of the
+/// Orb can read as granted while every call is refused.
+enum PermissionTestOutcome: Equatable, Sendable {
+    case working
+    /// Granted on paper, but the capture came back empty or the Accessibility read was refused.
+    case broken
+    /// The test could not tell (no display listed, the Dock did not answer): nothing is known either way.
+    case inconclusive
+
+    /// A test capture: refused by ScreenCaptureKit, or a single flat colour, means the permission is not in effect.
+    static func screenRecording(_ capture: Result<CGImage, any Error>) -> PermissionTestOutcome {
+        switch capture {
+        case .success(let image): ScreenshotImage.isBlank(image) ? .broken : .working
+        case .failure(let error): CaptureFallbackPolicy.isPermissionDenied(error) ? .broken : .inconclusive
+        }
+    }
+
+    /// A test read of another app: only "API disabled" blames the permission; a busy or missing app says nothing.
+    static func accessibility(_ read: AXRead) -> PermissionTestOutcome {
+        switch read {
+        case .values(let values): values.isEmpty ? .inconclusive : .working
+        case .failed(.apiDisabled): .broken
+        case .failed: .inconclusive
+        }
+    }
+}
+
+/// The live tests the settings tab runs on a granted row, injectable so the tab is tested without capturing or reading.
+struct MacPermissionTester: Sendable {
+    var run: @Sendable (MacPermissionKind) async -> PermissionTestOutcome
+
+    static let live = MacPermissionTester { kind in
+        switch kind {
+        case .screenRecording: await captureSample()
+        case .accessibility: await readDock()
+        case .automation, .fullDiskAccess: .inconclusive
+        }
+    }
+
+    /// The longer side of the test capture, in pixels: enough for `ScreenshotImage.isBlank`, cheap to take.
+    static let sampleSide = 320
+
+    /// One small frame of the main display through ScreenCaptureKit, the API the tools capture with. Kept in memory only.
+    private static func captureSample() async -> PermissionTestOutcome {
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            guard let display = content.displays.first(where: { $0.displayID == CGMainDisplayID() }) ?? content.displays.first else {
+                return .inconclusive
+            }
+            let size = ImageScaling.targetSize(width: display.width, height: display.height, maxSide: sampleSide)
+            let configuration = SCStreamConfiguration()
+            configuration.width = size.width
+            configuration.height = size.height
+            configuration.showsCursor = false
+            let filter = SCContentFilter(display: display, excludingWindows: [])
+            return .screenRecording(.success(try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)))
+        } catch {
+            return .screenRecording(.failure(error))
+        }
+    }
+
+    /// Reads the Dock's role, nothing else: the Dock always runs, and while this tab is open the app in front is the Orb
+    /// itself. Never clicks, types or moves anything.
+    private static func readDock() async -> PermissionTestOutcome {
+        await Blocking.run(fallback: .inconclusive, timeout: .seconds(5)) {
+            guard let dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first else { return .inconclusive }
+            let app = AccessibilityApp(name: "Dock", bundleID: "com.apple.dock", pid: dock.processIdentifier)
+            return .accessibility(LiveAccessibilitySystem().root(of: app).read(["AXRole"]))
         }
     }
 }

@@ -365,7 +365,7 @@ final class AppModel {
             let read = store.readConversation(first.id)
             notices += Self.labeled(read.notice, for: first).map { [$0] } ?? []
             let shown = session(first.id)
-            shown.conversation = read.value?.closingInterruptedTurn() ?? Conversation()
+            shown.conversation = read.value?.closingInterruptedTurn(notice: BotSession.quitNotice) ?? Conversation()
             shown.isUnloaded = false
             shown.lastUsed = .now
         }
@@ -443,7 +443,7 @@ final class AppModel {
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 ApprovalNotifications.clear(self?.pendingApprovals.map(\.id) ?? [])
-                self?.stopTurnsForQuit() // before the save: the cards close and "Você interrompeu" is written
+                self?.stopTurnsForQuit() // before the save: the cards close and each cut-off task says the app closed on it
                 self?.saveNow()
                 // Commands and CLIs in the middle of a turn lead process groups of their own and would outlive the app.
                 ChildProcessGroups.killAllNow(including: self?.jobs.runningGroups ?? [])
@@ -718,7 +718,8 @@ final class AppModel {
         scheduleStateSave()
     }
 
-    /// The draft in the composer, kept per Orb. Writing what is already there does nothing (no draft counts as "").
+    /// The draft in the composer, kept per Orb (and per group, under its id). Writing what is already there does nothing
+    /// (no draft counts as "").
     /// An emptied draft (sent, cleared) also ends the Orb's watching you type; other changes made by the app (a
     /// queued message given back, a skill inserted) do not start it.
     func setDraft(_ text: String, for botID: UUID) {
@@ -1389,10 +1390,12 @@ final class AppModel {
     /// turn that starts while a message is being edited ends (see below).
     /// `origin`: where the text comes from. A request from another Orb or the answers to the Orb's own requests (`SendOrigin`)
     /// enter the conversation as `.orbMessage` lines, not as your bubble; they read no memory request, expand no skill, and
-    /// the turn carries the grant for `orbs` (see `DelegationHub`).
+    /// the turn carries the grant for `orbs` (see `DelegationHub`). `model`: another model for this turn only ("Outro modelo"
+    /// under a failure); the Orb keeps its own.
     @discardableResult
     func send(_ text: String, attachments: [URL] = [], images pictures: [ImageAttachment] = [], to botID: UUID,
-              fromUser: Bool = false, bubble: UUID = UUID(), endsEdit: Bool = true, origin: SendOrigin = .user) -> Bool {
+              fromUser: Bool = false, bubble: UUID = UUID(), endsEdit: Bool = true, origin: SendOrigin = .user,
+              model override: ModelRef? = nil) -> Bool {
         let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let session = session(botID)
         guard !isResetting, !typed.isEmpty || !pictures.isEmpty || !attachments.isEmpty, session.turnTask == nil,
@@ -1404,7 +1407,7 @@ final class AppModel {
             runCompactionCommand(focus: focus, for: botID)
             return true
         }
-        guard let ref = modelRef(for: bot), let account = account(ref.provider), account.isEnabled, isUsable(account) else {
+        guard let ref = override ?? modelRef(for: bot), let account = account(ref.provider), account.isEnabled, isUsable(account) else {
             if !hasCheckedConnections {
                 // `connected` is empty only because nobody has looked yet: no card, no notice. The composer waits for the
                 // look and sends then (`ComposerView.send`); what was typed stays.
@@ -1513,6 +1516,7 @@ final class AppModel {
         let lastWorkspaceHash = session.conversation?.workspaceHash
         let sessionID = session.gatewaySessionID()
         let lastWorkspace = session.conversation?.workspaceSeen
+        let memoryInPrompt = session.conversation?.memoryInPrompt
         let sentMemories = TurnPreface.relatedLines(in: history)
 
         session.turnModel = ref.text
@@ -1527,7 +1531,8 @@ final class AppModel {
             let files = await attachmentTexts.texts(attachments)
             let message = prompt + AttachmentText.block(for: attachments, texts: files, room: attachmentRoom)
             guard session.isCurrent(turn) else { return } // stopped while preparing
-            let built = TurnPrompt.native(inputs, history: history, lastWorkspaceHash: lastWorkspaceHash, lastWorkspace: lastWorkspace)
+            let built = TurnPrompt.native(inputs, history: history, lastWorkspaceHash: lastWorkspaceHash, lastWorkspace: lastWorkspace,
+                                          memoryInPrompt: memoryInPrompt)
             let client: any LLMClient
             do {
                 guard let made = clientOverride?() ?? account.client(for: modelInfo, credentials: Self.credentials(for: ref.provider),
@@ -1648,14 +1653,16 @@ final class AppModel {
     /// requests) and the transcript says it was interrupted.
     func stopTurnsForQuit() {
         delegation.isShuttingDown = true // the turns that end now answer nobody and start nothing
-        for id in sessions.keys where sessions[id]?.turnTask != nil { stop(id, startsQueuedRoutines: false) }
+        for (id, session) in sessions where session.turnTask != nil {
+            stop(id, startsQueuedRoutines: false, notice: session.routineID == nil ? BotSession.quitNotice : BotSession.quitSideNotice)
+        }
     }
 
     /// Stops the Orb's running turn. Stopping is for the whole conversation between Orbs it takes part in: whatever the Orb asked
     /// and is waiting for, and whatever it was asked and is working on, stops too (even when its own turn is over and it only waits).
-    func stop(_ botID: UUID, startsQueuedRoutines: Bool = true) {
+    func stop(_ botID: UUID, startsQueuedRoutines: Bool = true, notice: String = BotSession.stoppedNotice) {
         for chain in delegation.chains(involving: botID) { delegation.cancelChain(chain, by: .user) }
-        sessions[botID]?.stop(startsQueuedRoutines: startsQueuedRoutines)
+        sessions[botID]?.stop(startsQueuedRoutines: startsQueuedRoutines, notice: notice)
     }
 
     func apply(_ event: TurnEvent, to botID: UUID) { session(botID).apply(event) } // internal for tests
@@ -1811,7 +1818,7 @@ final class AppModel {
         // The routine's own conversation takes the chat's place while it runs (the chat is written and parked).
         // The previous run's conversation, when it could not be written, is only in memory: the file is older.
         let previous = unsavedRoutineConversations[routine.id]?.conversation ?? read.value
-        session.startRoutineRun(routine.id, conversation: (previous?.closingInterruptedTurn() ?? Conversation()).startingRoutineRun(at: started),
+        session.startRoutineRun(routine.id, conversation: (previous?.closingInterruptedTurn(notice: BotSession.quitSideNotice) ?? Conversation()).startingRoutineRun(at: started),
                                 at: started)
         let hasPrompt = !routine.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         if hasPrompt, send(routine.prompt, to: botID) {
@@ -1898,17 +1905,28 @@ final class AppModel {
             }
         } else {
             let why = own.items.reversed().lazy.compactMap { item -> String? in
-                if case .notice(let text) = item.kind, !text.hasPrefix(Conversation.routineRunMarker) { text } else { nil }
+                if case .notice(let text) = item.kind, !text.hasPrefix(Conversation.routineRunMarker) {
+                    text.replacing(AgentEngine.continueHint, with: "")
+                } else { nil }
             }.first
             run.summary = Conversation.clipped(why ?? "Não terminou.", to: RoutineRun.summaryLimit)
         }
-        recordRun(run, routineID: routineID)
         if let index = routines.firstIndex(where: { $0.id == routineID }) {
+            // The report's progress line moves the goal, if the routine has one; a goal reached pauses the routine.
+            if succeeded { run.check = routines[index].recordGoalCheck(from: reply, at: finished) }
             routines[index].lastResult = succeeded ? reply.map { String($0.prefix(160)) } : "Não terminou: veja a conversa."
             // A run that outlasted its slot (every 15 minutes, taking 20) must not start the next one at once: count from now.
-            if routines[index].nextRun <= finished { routines[index].lastRun = finished }
+            // A task for one moment counts only a run that began at it: a test run still going when the moment came
+            // leaves the moment due.
+            let testRunBeforeMoment = if case .once = routines[index].schedule { started < routines[index].nextRun } else { false }
+            if routines[index].nextRun <= finished, !testRunBeforeMoment { routines[index].lastRun = finished }
+            // A task for one moment is done once that moment has run (a test run before it is not): it stays in the
+            // list, switched off, with its history.
+            if case .once = routines[index].schedule, routines[index].nextRun == .distantFuture { routines[index].isEnabled = false }
         }
-        let outcome = succeeded ? "terminou: \(run.summary)" : "não terminou: \(run.summary)"
+        recordRun(run, routineID: routineID)
+        let outcome = run.check?.status == .done ? "alcançou a meta e foi pausada: \(run.summary)"
+            : succeeded ? "terminou: \(run.summary)" : "não terminou: \(run.summary)"
         append(.notice("Rotina “\(routine.name)” \(outcome)" + (run.reportFile.map { " (relatório em \($0))" } ?? "")), to: botID)
     }
 
@@ -1936,7 +1954,8 @@ final class AppModel {
     /// What the model gets for a turn: a routine's run is told that nobody is there.
     private func unattendedPrompt(_ prompt: String, for botID: UUID) -> String {
         guard let routineID = sessions[botID]?.routineID, let routine = routines.first(where: { $0.id == routineID }) else { return prompt }
-        return RoutinePrompt.unattended(prompt, routine: routine.name, previous: routine.runs.first { $0.report != nil })
+        return RoutinePrompt.unattended(prompt, routine: routine.name, previous: routine.runs.first { $0.report != nil },
+                                        goal: routine.goal)
     }
 
     /// The status line says which routine the Orb is busy with.

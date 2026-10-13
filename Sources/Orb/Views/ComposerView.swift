@@ -299,7 +299,7 @@ struct ComposerView: View {
         let routine = model.runningRoutineName(botID)
         HStack(spacing: 6) {
             if action.showsSecondaryStop {
-                Button("Parar", systemImage: "stop.fill") { model.stop(botID) }
+                Button("Parar", systemImage: "stop.fill") { model.stopTurn(botID) }
                     .labelStyle(.iconOnly)
                     .buttonStyle(CircleGhostStyle(side: 28, fontSize: 11))
                     .foregroundStyle(Palette.secondary)
@@ -314,7 +314,7 @@ struct ComposerView: View {
 
     private func mainButton(_ action: ComposerAction, routine: String?) -> some View {
         Button {
-            if action == .stop { model.stop(botID) } else { send() }
+            if action == .stop { model.stopTurn(botID) } else { send() }
         } label: {
             Image(systemName: action.symbol)
                 .contentTransition(.symbolEffect(.replace))
@@ -339,7 +339,9 @@ struct ComposerView: View {
                 }
             }
                 .keyboardShortcut(AppShortcut.commandReturn)
-                .disabled(!ComposerAction.stopAndSendEnabled(isQueueing: isQueueing, canSend: canSend, queuedCount: lane.queued.count,
+                // What waits counts the messages that reached the task unanswered too: their bubble left the queue already.
+                .disabled(!ComposerAction.stopAndSendEnabled(isQueueing: isQueueing, canSend: canSend,
+                                                             queuedCount: lane.queued.count + model.unansweredSteered(of: botID).count,
                                                              pendingPictures: lane.pendingPictures, isEditing: isEditing))
             Button("Escolher modelo") { isModelOpen.toggle() }
                 .keyboardShortcut(AppShortcut.chooseModel)

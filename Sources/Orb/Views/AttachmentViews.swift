@@ -187,6 +187,68 @@ struct ProducedFilesView: View {
     }
 }
 
+/// The captures of the screen or a page that a run of actions took, in order, as a strip: what the Orb saw at each
+/// step, with the step that took it. A click opens them in Quick Look, where the arrows go from step to step.
+struct ScreenStepsStrip: View {
+    struct Step: Equatable {
+        var path: String
+        var caption: String
+    }
+
+    let steps: [Step]
+
+    /// From this many captures on, a run gets the strip; fewer stay as the thumbnails of their lines.
+    nonisolated static let minimum = 2
+    private static let tile = CGSize(width: 120, height: 76)
+
+    var body: some View {
+        let all = steps.map(\.path)
+        VStack(alignment: .leading, spacing: 6) {
+            Text("\(steps.count) capturas, em ordem")
+                .font(.system(size: 11))
+                .foregroundStyle(Palette.faint)
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: 8) {
+                    ForEach(Array(steps.enumerated()), id: \.element.path) { index, step in
+                        VStack(alignment: .leading, spacing: 3) {
+                            ImageTile(path: step.path, size: Self.tile, all: all, label: "Passo \(index + 1): \(step.caption)")
+                            Text("\(index + 1) · \(step.caption)")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Palette.muted)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .frame(width: Self.tile.width, alignment: .leading)
+                                .accessibilityHidden(true)
+                        }
+                    }
+                }
+            }
+            .scrollClipDisabled()
+        }
+    }
+
+    /// The captures of `calls` that are still pictures, each named by what it shows: the window it names, or else the
+    /// action just before it (a capture of the page says nothing by itself: "Capturando a página"). Only what looked at
+    /// the screen or a page: a chart a command drew or a picture written to a file is a result, not a step. nil when
+    /// there are too few for a strip.
+    nonisolated static func steps(of calls: [ToolCall]) -> [Step]? {
+        var steps: [Step] = []
+        var before: ToolCall?
+        for call in calls where call.state == .done {
+            let looks = call.kind == .computer || call.kind == .browser
+            let pictures = !looks ? [] : (call.files ?? []).filter { $0.path.hasPrefix("/") && ImageProcessing.isImageFile(URL(fileURLWithPath: $0.path)) }
+            guard !pictures.isEmpty else {
+                before = call
+                continue
+            }
+            let named = call.detail.isEmpty ? before.map { $0.detail.isEmpty ? $0.title : $0.detail } : call.detail
+            steps += pictures.map { Step(path: $0.path, caption: named ?? call.title) }
+            before = nil
+        }
+        return steps.count >= minimum ? steps : nil
+    }
+}
+
 // MARK: - Actions
 
 extension View {

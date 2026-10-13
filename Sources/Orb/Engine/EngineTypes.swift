@@ -590,6 +590,9 @@ struct ToolContext: Sendable {
     /// Waits for the person to finish what only they can do in the browser window `browse_show` opened. The engine sets it for the
     /// tool call (it opens the card and waits); nil where nobody can answer, and `browse_show` then tells the model to ask and stop.
     var handoff: HandoffHandler?
+    /// Asks the person a question (`ask_user`) and waits for the answer, nil when they skipped it. The engine sets it for the tool
+    /// call; the tool is only offered where the person is (`MultiOrbOffering.askUser`).
+    var askUser: QuestionHandler?
     /// Whether the permission check (the approval card, when there was one) judged this very call dangerous: set by the
     /// engine before the tool runs, so a tool that checks again at run time (`ui_act`) holds to what the card showed
     /// instead of judging anew from state that may have changed. Nil where no check was made (tests).
@@ -615,6 +618,7 @@ struct ToolContext: Sendable {
 /// Opens the hand-off card for the page shown (its address and title) and waits: true when the person clicked "Pronto", false
 /// when they cancelled (or pressed Parar).
 typealias HandoffHandler = @Sendable (_ page: String) async -> Bool
+typealias QuestionHandler = @Sendable (OrbQuestion) async -> String?
 
 protocol AgentTool: Sendable {
     var spec: ToolSpec { get }
@@ -651,6 +655,8 @@ protocol AgentTool: Sendable {
 struct ToolResult: Sendable {
     var text: String
     var images: [ImageAttachment] = []
+    /// The tool ran but what it ran went wrong (a command's exit code): the activity shows it failed, the model reads why.
+    var failed = false
 }
 
 extension AgentTool {

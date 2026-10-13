@@ -804,6 +804,7 @@ private struct RoutineRow: View {
                     .controlSize(.mini)
                     .help(Tip.routineToggle(isOn: current.isEnabled))
             }
+            if let goal = current.goal { GoalProgressView(goal: goal, font: .system(size: 12), showsNote: false) }
             VStack(alignment: .leading, spacing: 6) {
                 RoutineNextLine(routine: current)
                 RoutineLastLine(routine: current)
@@ -881,8 +882,8 @@ private struct RoutineRow: View {
     }
 }
 
-/// The routine's kind at a glance: a clock that turns for an interval, a calendar for a weekday, a clock for a time of
-/// day; tinted while it is on, gray while it is paused.
+/// The routine's kind at a glance: a clock that turns for an interval, a calendar for a weekday or a cron line, a clock
+/// for a time of day, a "1" for a single run; tinted while it is on, gray while it is paused.
 private struct RoutineGlyph: View {
     static let side: CGFloat = 30
     let schedule: Schedule
@@ -891,8 +892,9 @@ private struct RoutineGlyph: View {
     private var symbol: String {
         switch schedule {
         case .everyHours, .everyMinutes: "arrow.triangle.2.circlepath"
-        case .weekly: "calendar"
+        case .weekly, .cron: "calendar"
         case .daily: "clock"
+        case .once: "1.circle"
         }
     }
 

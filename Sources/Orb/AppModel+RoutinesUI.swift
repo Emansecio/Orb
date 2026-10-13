@@ -17,19 +17,19 @@ struct RoutineTemplate: Identifiable, Equatable, Sendable {
     /// Only where a restriction is safe whatever the Orb has: a template never asks for more permission than the Orb
     /// has (the editor says so when the Orb would wait for an answer).
     let permissionMode: PermissionMode?
+    /// What success looks like, for a template that works toward a goal: the editor opens with "Meta" on.
+    var goal: String?
 
     /// "Todo dia às 08:30"
     var whenText: String { schedule.label }
 
     func routine(for botID: UUID) -> Routine {
-        Routine(name: title, botID: botID, prompt: prompt, schedule: schedule, permissionMode: permissionMode)
+        Routine(name: title, botID: botID, prompt: prompt, schedule: schedule, permissionMode: permissionMode,
+                goal: goal.map { RoutineGoal(target: $0) })
     }
 
     static let all: [RoutineTemplate] = [
-        RoutineTemplate(
-            id: "resumo-da-manha", title: "Resumo da manhã", symbol: "sun.max",
-            prompt: "Faça um resumo da minha manhã usando os conectores de agenda e de e-mail, se eu tiver algum: o que está na minha agenda de hoje e os e-mails não lidos que parecem importantes. Se faltar um conector, diga qual e siga com o que der. Termine com o que eu deveria fazer primeiro, em até 5 tópicos curtos.",
-            schedule: .daily(hour: 8, minute: 30), permissionMode: nil),
+        morningSummary,
         RoutineTemplate(
             id: "organizar-arquivos", title: "Organizar arquivos", symbol: "tray.full",
             prompt: "Organize os arquivos da pasta de trabalho deste Orb: separe-os em pastas por tipo (imagens, documentos, outros), não apague nada e, no fim, liste o que ficou de fora e por quê.",
@@ -38,7 +38,22 @@ struct RoutineTemplate: Identifiable, Equatable, Sendable {
             id: "revisar-a-semana", title: "Revisar a semana", symbol: "calendar",
             prompt: "Revise a minha semana: o que mudou nesta pasta e nos relatórios das rotinas nos últimos 7 dias, o que parece pendente e três sugestões para a próxima semana.",
             schedule: .weekly(weekday: 6, hour: 17, minute: 0), permissionMode: .readOnly),
+        desktopGoal,
     ]
+
+    /// Also offered in an empty chat (`EmptyChatContent`), as the routine idea.
+    static let morningSummary = RoutineTemplate(
+        id: "resumo-da-manha", title: "Resumo da manhã", symbol: "sun.max",
+        prompt: "Faça um resumo da minha manhã usando os conectores de agenda e de e-mail, se eu tiver algum: o que está na minha agenda de hoje e os e-mails não lidos que parecem importantes. Se faltar um conector, diga qual e siga com o que der. Termine com o que eu deveria fazer primeiro, em até 5 tópicos curtos.",
+        schedule: .daily(hour: 8, minute: 30), permissionMode: nil)
+
+    /// Also offered in an empty chat, as the goal idea: something a run can measure with its tools (old files left
+    /// loose) and move a little at a time without risk (moving, never deleting).
+    static let desktopGoal = RoutineTemplate(
+        id: "meta-mesa", title: "Mesa em ordem", symbol: "target",
+        prompt: "Confira a Mesa (~/Desktop): conte os arquivos soltos nela com mais de 7 dias e mova alguns deles para pastas por tipo (Imagens, Documentos, Outros) dentro da Mesa. Não apague nada.",
+        schedule: .daily(hour: 18, minute: 0), permissionMode: nil,
+        goal: "Nenhum arquivo com mais de 7 dias solto na Mesa: os antigos ficam em pastas por tipo.")
 }
 
 /// What "Nova rotina" (or a template) does, given what the app has: the routines page never shows a dead end.
@@ -167,8 +182,8 @@ enum RoutineText {
 
     /// The card's line: "Próxima: em 3 h · hoje às 09:00". nil while the routine is switched off.
     static func nextRun(of routine: Routine, now: Date = .now, calendar: Calendar = .current) -> String? {
-        guard routine.isEnabled else { return nil }
         let date = routine.nextRun
+        guard routine.isEnabled, date != .distantFuture else { return nil }
         return "Próxima: \(relative(until: date, now: now)) · \(dayAndTime(date, now: now, calendar: calendar))"
     }
 
@@ -178,7 +193,8 @@ enum RoutineText {
     }
 
     static func preview(nextRun date: Date, now: Date = .now, calendar: Calendar = .current) -> String {
-        "Próxima execução: \(dayAndTime(date, now: now, calendar: calendar)) (\(relative(until: date, now: now)))"
+        guard date != .distantFuture else { return "Nenhuma execução à frente: confira a data ou a expressão." }
+        return "Próxima execução: \(dayAndTime(date, now: now, calendar: calendar)) (\(relative(until: date, now: now)))"
     }
 
     /// A run's date in the history: "hoje 09:00", "ontem 09:00", "seg 09:00", "5 de out. 09:00".

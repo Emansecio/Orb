@@ -189,9 +189,22 @@ struct MCPConnectionTests {
 struct MCPToolNameTests {
     @Test func sanitizesModelNames() {
         #expect(MCPTool.modelName(server: "GitHub", tool: "create_issue") == "GitHub__create_issue")
+        // Saved "Sempre permitir" rules name tools this way: a name that only had to be cleaned stays as it was.
         #expect(MCPTool.modelName(server: "Meu Café", tool: "files.read") == "Meu_Caf___files_read")
-        let long = MCPTool.modelName(server: String(repeating: "s", count: 50), tool: String(repeating: "t", count: 50))
+        let long = MCPTool.modelName(server: String(repeating: "s", count: 70), tool: String(repeating: "t", count: 50))
         #expect(long.count == 64)
-        #expect(long.hasPrefix(String(repeating: "s", count: 50) + "__"))
+        #expect(long.hasPrefix(String(repeating: "s", count: 32) + "__")) // the cut keeps the "__"
+    }
+
+    @Test func toolsWhoseNamesOnlyFitWhenChangedStillGetNamesOfTheirOwn() {
+        // The same once sanitized, or the same in their first 64 characters: never the same name.
+        let siblings = ["files.read", "files_read"]
+        let dotted = MCPTool.modelName(server: "Docs", tool: "files.read", siblings: siblings)
+        #expect(dotted != "Docs__files_read" && dotted.hasPrefix("Docs__files_read_"))
+        #expect(MCPTool.modelName(server: "Docs", tool: "files_read", siblings: siblings) == "Docs__files_read")
+        let prefix = String(repeating: "t", count: 70)
+        let a = MCPTool.modelName(server: "S", tool: prefix + "a"), b = MCPTool.modelName(server: "S", tool: prefix + "b")
+        #expect(a != b && a.count == 64 && b.count == 64)
+        #expect(MCPTool.modelName(server: "S", tool: prefix + "a") == a) // stable: rules "Sempre permitir" keep matching
     }
 }

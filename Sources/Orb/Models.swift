@@ -225,11 +225,17 @@ struct Conversation: Codable, Sendable {
     /// The snapshot behind `workspaceHash` (without its recent files), so a later message can say only what changed in the
     /// folder instead of sending the whole snapshot again. Nil in conversations from before it was kept.
     var workspaceSeen: WorkspaceSnapshot?
+    /// The memory (`MemoryBrief.stable`) this conversation's system prompt carries: kept as it was so the provider's
+    /// prompt cache lasts, while a change reaches the model in a message's preface (`TurnPreface.memoryUpdate`).
+    var memoryInPrompt: String?
 
-    /// After a quit or crash mid-turn: nothing is streaming, running or waiting anymore.
-    func closingInterruptedTurn() -> Conversation {
+    /// After a quit or crash mid-turn: nothing is streaming, running or waiting anymore. `notice` goes at the end when a turn
+    /// was cut off there (something was still going, or your message got no answer), so the chat says what happened.
+    func closingInterruptedTurn(notice: String? = nil) -> Conversation {
         var copy = self
+        var cutOff = if case .user = items.last?.kind { true } else { false }
         for index in copy.items.indices {
+            let before = copy.items[index].kind
             switch copy.items[index].kind {
             case .bot(let text, true):
                 copy.items[index].kind = .bot(text: text, isStreaming: false)
@@ -250,7 +256,9 @@ struct Conversation: Codable, Sendable {
             default:
                 break
             }
+            if copy.items[index].kind != before { cutOff = true }
         }
+        if cutOff, let notice { copy.items.append(TranscriptItem(.notice(notice))) }
         return copy
     }
 }
@@ -278,6 +286,7 @@ extension Conversation {
         gatewaySessionID = try c.decodeIfPresent(String.self, forKey: .gatewaySessionID)
         // Only helps to save tokens: whatever cannot be read here is sent whole next time instead of failing the conversation.
         workspaceSeen = (try? c.decodeIfPresent(WorkspaceSnapshot.self, forKey: .workspaceSeen)) ?? nil
+        memoryInPrompt = (try? c.decodeIfPresent(String.self, forKey: .memoryInPrompt)) ?? nil
     }
 }
 
@@ -403,15 +412,55 @@ struct ApprovalRequest: Identifiable, Codable, Sendable, Equatable {
     /// An Orb proposes a new Orb (`orb_propose`): the card shows it and asks Criar / Editar antes / Não criar. Like a hand-off
     /// it is not a permission: it has no rules to grant, never groups, and a change of permission mode does not answer it.
     var proposal: OrbProposal?
+    /// The Orb asks the person something (`ask_user`) and waits for the answer. Like a hand-off it is not a permission: it has no
+    /// rules to grant, never groups, and a change of permission mode does not answer it.
+    var question: OrbQuestion?
 
     var isBatch: Bool { items.count > 1 }
     var isProposal: Bool { proposal != nil }
+    var isQuestion: Bool { question != nil }
 
     /// The card `browse_show` opens. `page` is the address (and title) of the page left open in the window.
     static func handoff(botName: String, page: String) -> ApprovalRequest {
         ApprovalRequest(toolName: "browse_show", title: "\(botName) abriu o navegador para você", command: page,
                         reason: "Termine lá o que falta (entrar no site, digitar um código, resolver a verificação) e clique em Pronto.",
                         isHandoff: true)
+    }
+
+    /// The card of `ask_user`.
+    static func question(_ question: OrbQuestion, botName: String) -> ApprovalRequest {
+        ApprovalRequest(toolName: AskUserTool.name, title: "\(botName) pergunta", command: question.text, reason: "", question: question)
+    }
+}
+
+/// A question an Orb asks the person (`ask_user`): what it wants to know, the answers it offers to pick from (none: the
+/// person writes one), and the answer given.
+struct OrbQuestion: Codable, Sendable, Equatable {
+    static let textLimit = 600
+    static let optionLimit = 6
+    static let optionLength = 120
+    static let answerLimit = 2_000
+
+    var text: String
+    var options: [String] = []
+    /// What the person answered: one of `options` or their own words. nil while open, and when they skipped it.
+    var answer: String?
+
+    /// Trimmed and cut to the limits; repeated or empty options are dropped.
+    init(text: String, options: [String] = []) {
+        self.text = String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(Self.textLimit))
+        var kept: [String] = []
+        for option in options where kept.count < Self.optionLimit {
+            let clean = String(option.trimmingCharacters(in: .whitespacesAndNewlines).prefix(Self.optionLength))
+            if !clean.isEmpty, !kept.contains(clean) { kept.append(clean) }
+        }
+        self.options = kept
+    }
+
+    /// An answer as it is kept and sent: trimmed and capped; nil when nothing is left.
+    static func clean(_ answer: String?) -> String? {
+        guard let text = answer?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+        return String(text.prefix(answerLimit))
     }
 }
 
@@ -431,6 +480,7 @@ extension ApprovalRequest {
         isHandoff = try c.value(.isHandoff, default: false)
         // Only the card's contents: a proposal this version cannot read leaves a plain card the person can still answer.
         proposal = (try? c.decodeIfPresent(OrbProposal.self, forKey: .proposal)) ?? nil
+        question = (try? c.decodeIfPresent(OrbQuestion.self, forKey: .question)) ?? nil
     }
 }
 
@@ -451,6 +501,8 @@ struct Routine: Identifiable, Codable, Sendable {
     var permissionMode: PermissionMode?
     /// The most recent runs, newest first (`Routine.keptRuns` of them).
     var runs: [RoutineRun] = []
+    /// What the routine works toward, checked on each run; nil for a plain routine.
+    var goal: RoutineGoal?
 
     static let keptRuns = 10
 
@@ -477,6 +529,8 @@ extension Routine {
         lastResult = try c.decodeIfPresent(String.self, forKey: .lastResult)
         permissionMode = try c.decodeIfPresent(PermissionMode.self, forKey: .permissionMode)
         runs = try c.lossyArray(.runs)
+        // A goal this version cannot read leaves a plain routine, never a routine that does not load.
+        goal = (try? c.decodeIfPresent(RoutineGoal.self, forKey: .goal)) ?? nil
     }
 }
 
@@ -493,6 +547,8 @@ struct RoutineRun: Identifiable, Codable, Sendable, Equatable {
     var report: String?
     /// Where the report was saved inside the Orb's folder (only Orbs with a folder of their own get one).
     var reportFile: String?
+    /// The goal's check this run reported, for a routine with a goal: the history is the goal's timeline.
+    var check: GoalCheck?
 }
 
 extension RoutineRun {
@@ -505,6 +561,7 @@ extension RoutineRun {
         summary = try c.value(.summary, default: "")
         report = try c.decodeIfPresent(String.self, forKey: .report)
         reportFile = try c.decodeIfPresent(String.self, forKey: .reportFile)
+        check = (try? c.decodeIfPresent(GoalCheck.self, forKey: .check)) ?? nil
     }
 }
 
@@ -514,6 +571,10 @@ enum Schedule: Codable, Hashable, Sendable {
     case weekly(weekday: Int, hour: Int, minute: Int)
     case everyHours(Int)
     case everyMinutes(Int)
+    /// Runs once, at that moment; the routine switches itself off after the run.
+    case once(Date)
+    /// A cron line (`CronExpression`) read in `timeZone` (an identifier, "America/Sao_Paulo"), or in the Mac's own when nil.
+    case cron(expression: String, timeZone: String?)
 
     /// What `everyMinutes` accepts: never under 15, or a task would keep the Orb (and the provider's bill) busy.
     static let minuteRange = 15...720
@@ -530,7 +591,38 @@ enum Schedule: Codable, Hashable, Sendable {
             date.addingTimeInterval(Double(max(1, hours)) * 3600)
         case .everyMinutes(let minutes):
             date.addingTimeInterval(Double(Self.clampedMinutes(minutes)) * 60)
+        case .once(let moment):
+            moment > date ? moment : .distantFuture
+        case .cron(let expression, let timeZone):
+            // A line that does not parse (a hand-edited file) or never matches does not run, rather than run at a wrong time.
+            (try? CronExpression(expression))?.next(after: date, calendar: Self.calendar(calendar, in: timeZone)) ?? .distantFuture
         }
+    }
+
+    /// Why this schedule cannot be saved as it is (a moment already past, a cron line that does not parse or never
+    /// happens, a time zone this Mac does not know), or nil.
+    func problem(now: Date = .now) -> String? {
+        switch self {
+        case .once(let moment):
+            return moment > now ? nil : "Escolha uma data e hora no futuro."
+        case .cron(let expression, let timeZone):
+            if let timeZone, TimeZone(identifier: timeZone) == nil {
+                return "Fuso desconhecido: “\(timeZone)”. Use um nome como America/Sao_Paulo."
+            }
+            do { _ = try CronExpression(expression) } catch {
+                return (error as? CronExpression.Invalid)?.reason ?? "Expressão cron inválida."
+            }
+            return next(after: now) == .distantFuture ? "Essa expressão cron nunca acontece." : nil
+        default:
+            return nil
+        }
+    }
+
+    /// `base` in `timeZone`, when it names one this Mac knows.
+    static func calendar(_ base: Calendar, in timeZone: String?) -> Calendar {
+        var calendar = base
+        if let zone = timeZone.flatMap(TimeZone.init(identifier:)) { calendar.timeZone = zone }
+        return calendar
     }
 
     var label: String {
@@ -543,7 +635,18 @@ enum Schedule: Codable, Hashable, Sendable {
             hours == 1 ? "A cada hora" : "A cada \(hours) horas"
         case .everyMinutes(let minutes):
             "A cada \(Self.clampedMinutes(minutes)) minutos"
+        case .once(let moment):
+            "Uma vez, \(Self.dayAndTime(moment))"
+        case .cron(let expression, let timeZone):
+            "Cron “\(expression)”" + (timeZone.map { " (fuso \($0))" } ?? "")
         }
+    }
+
+    /// "em 14/10/2026 às 09:00", on this Mac's clock.
+    private static func dayAndTime(_ date: Date) -> String {
+        let parts = Calendar.current.dateComponents([.day, .month, .year, .hour, .minute], from: date)
+        return String(format: "em %02d/%02d/%04d às ", parts.day ?? 0, parts.month ?? 0, parts.year ?? 0)
+            + time(parts.hour ?? 0, parts.minute ?? 0)
     }
 
     /// A file edited by hand (or by a version with another limit) never makes a task run every minute.

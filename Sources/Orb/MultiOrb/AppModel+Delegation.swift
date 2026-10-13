@@ -30,7 +30,7 @@ extension AppModel {
         let inGroup = turnGroup(of: botID) != nil
         let hasTeam = inGroup || (orbsCanTalk && bots.count > 1)
         let ownChat = sessions[botID].map { $0.routineID == nil && $0.sideKind == nil } ?? true
-        return MultiOrbOffering(orbs: hasTeam, propose: ownChat, groupMemory: false)
+        return MultiOrbOffering(orbs: hasTeam, propose: ownChat, groupMemory: false, askUser: ownChat)
     }
 
     /// The system prompt's section about the teammates (empty when there are none).

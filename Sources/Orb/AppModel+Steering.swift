@@ -162,6 +162,11 @@ extension AppModel {
             let draft = ComposerDraft(text: drafts[bot.id] ?? "", files: lane?.files.map(\.url.path) ?? [], pictures: lane?.pictures ?? [])
             if !draft.isEmpty { result[bot.id] = draft }
         }
+        // A group's composer has only text, kept under the group's id.
+        for group in groups {
+            let draft = ComposerDraft(text: drafts[group.id] ?? "")
+            if !draft.isEmpty { result[group.id] = draft }
+        }
         return result
     }
 
@@ -174,6 +179,9 @@ extension AppModel {
             if !draft.text.isEmpty { drafts[bot.id] = draft.text }
             let lane = composerLane(bot.id)
             lane.attachExisting(files: draft.files, pictures: draft.pictures)
+        }
+        for group in groups {
+            if let text = saved[group.id]?.text, !text.isEmpty { drafts[group.id] = text }
         }
     }
 
@@ -215,6 +223,14 @@ extension AppModel {
                 lane.error = nil
             }
             return sent
+        }
+        // The Orb waits on a question of its own (`ask_user`): what is written answers it, instead of waiting behind it. Not a
+        // command, nor a message with files or longer than an answer keeps: those stay messages.
+        if delivery == .steer, lane.files.isEmpty, lane.pictures.isEmpty, CompactionCommand.parse(text) == nil,
+           text.count <= OrbQuestion.answerLimit, let reply = OrbQuestion.clean(text), let question = openQuestion(of: botID) {
+            decide(.once, reply: reply, approvalID: question, botID: botID)
+            setDraft("", for: botID)
+            return true
         }
         // "/compactar" is a command of the composer, not a message: queued, it would reach the model as one. It waits in
         // the composer for the end of the turn, as `send` runs it (which it does only without attachments).
@@ -282,6 +298,29 @@ extension AppModel {
     func unqueue(_ id: UUID, botID: UUID) {
         guard let message = composerLane(botID).withdraw(id) else { return }
         giveBack([message], to: botID)
+    }
+
+    /// The messages of yours that reached the running task and that the Orb has not acted on yet: "Parar e enviar" still
+    /// takes them out of it and sends them as a request of their own (their bubble offers it, and ⌘↩).
+    func unansweredSteered(of botID: UUID) -> [UUID] {
+        guard isWorking(botID), canSteer(botID) else { return [] }
+        return TranscriptItem.unansweredSteered(in: transcript(botID))
+    }
+
+    /// Your "Parar" (the composer's button, ⌘.). What you said that the Orb never acted on comes back to the composer,
+    /// before what was still queued (which the end of the turn gives back too, `settleSteering`): it would otherwise stay
+    /// in a stopped task that will never answer it, and you would have to write it again.
+    func stopTurn(_ botID: UUID) {
+        let hadTurn = session(botID).turnTask != nil
+        let unanswered = canSteer(botID) ? session(botID).unansweredSteered() : []
+        // Like "Parar e enviar": a routine waiting for this Orb starts only once the chat is settled (it would take the
+        // conversation the message is withdrawn from).
+        stop(botID, startsQueuedRoutines: false)
+        if !unanswered.isEmpty {
+            session(botID).withdrawSteered(unanswered.map(\.id))
+            giveBack(unanswered, to: botID)
+        }
+        if hadTurn { startNextQueuedWork(for: botID) } // what the stop would have started (an Orb that only waited started nothing)
     }
 
     /// "Parar e enviar": ends the turn now and sends what was queued (with the draft, when there is one) as the

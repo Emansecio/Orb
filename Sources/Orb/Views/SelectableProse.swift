@@ -51,6 +51,8 @@ enum ProseText {
     static let quoteKey = NSAttributedString.Key("OrbQuote")
     /// What a range stands for in a copy (a list marker with its tabs, a checkbox picture).
     static let plainKey = NSAttributedString.Key("OrbPlain")
+    /// Ends the text being written.
+    static let cursor = " ●"
 
     static func make(_ blocks: [MarkdownBlock], cursor: Bool, cached: Bool, highlight: String?) -> NSAttributedString {
         let text = NSMutableAttributedString()
@@ -94,8 +96,8 @@ enum ProseText {
             }
         }
         if cursor {
-            text.append(NSAttributedString(string: " ●", attributes: [.font: NSFont.systemFont(ofSize: size),
-                                                                     .foregroundColor: NSColor(Palette.muted)]))
+            text.append(NSAttributedString(string: Self.cursor, attributes: [.font: NSFont.systemFont(ofSize: size),
+                                                                          .foregroundColor: NSColor(Palette.muted)]))
         }
         return text
     }
@@ -206,6 +208,12 @@ final class ProseTextView: NSTextView, @preconcurrency NSLayoutManagerDelegate {
     private var heights: [CGFloat: CGFloat] = [:]
     /// The text has a quote to draw a bar beside (`drawBackground`).
     private var hasQuote = false
+    /// The text shown, without the cursor: what a flush that only adds to it continues.
+    private var shownBody: String?
+    private lazy var fade = TextFade(view: self)
+    /// Told what is selected (its text as a copy gives it, nil when nothing is), and what "Citar" quotes; set where a
+    /// reply can be quoted (`EnvironmentValues.proseSelection`).
+    var selection: ProseSelectionAction?
 
     convenience init() {
         self.init(usingTextLayoutManager: false)
@@ -228,8 +236,15 @@ final class ProseTextView: NSTextView, @preconcurrency NSLayoutManagerDelegate {
         setAccessibilityRole(.staticText)
     }
 
-    func show(_ text: NSAttributedString) {
+    /// `fades`: the text is the one being written, and what it adds to the text shown fades in (`TextFade`).
+    func show(_ text: NSAttributedString, cursor: Bool, fades: Bool) {
+        let body = (text.string as NSString).substring(to: text.length - (cursor ? (ProseText.cursor as NSString).length : 0))
+        let added = fades ? TextFade.added(body, after: shownBody) : nil
+        // Words still fading keep fading while the text only grows (or loses its cursor); anything else shows at once.
+        if shownBody.map({ !(body as NSString).hasPrefix($0) }) ?? true { fade.finish() }
+        shownBody = body
         textStorage?.setAttributedString(text)
+        if let added { fade.fade(added) } else { fade.restore() }
         hasQuote = false
         text.enumerateAttribute(ProseText.quoteKey, in: NSRange(location: 0, length: text.length)) { value, _, stop in
             if value != nil { hasQuote = true; stop.pointee = true }
@@ -260,6 +275,12 @@ final class ProseTextView: NSTextView, @preconcurrency NSLayoutManagerDelegate {
         return text.character(at: next) == 0x0A || text.character(at: next - 1) == 0x0A ? 0 : Palette.conversationLineSpacing
     }
 
+    /// A fade runs only on screen: it starts once the view is in a window and ends, at once, when it leaves it.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil { fade.finish() } else { fade.run() }
+    }
+
     /// Only the last view a selection was made in shows one: a click elsewhere lets it go.
     override func resignFirstResponder() -> Bool {
         let resigned = super.resignFirstResponder()
@@ -267,20 +288,39 @@ final class ProseTextView: NSTextView, @preconcurrency NSLayoutManagerDelegate {
         return resigned
     }
 
-    /// The copy is the text as it reads (markers as "• ", breaks as breaks), not the tabs that place them.
+    /// The selection is told once it is made (not while the mouse drags it), after the view is done updating.
+    override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
+        super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
+        guard !stillSelecting, let selection else { return }
+        let text = selectedText
+        DispatchQueue.main.async { selection.changed(text.isEmpty ? nil : text) }
+    }
+
+    /// The selection as it reads (markers as "• ", breaks as breaks), not the tabs that place them.
+    private var selectedText: String {
+        guard let textStorage else { return "" }
+        return ProseText.plain(textStorage, ranges: selectedRanges.map(\.rangeValue)).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     override func copy(_ sender: Any?) {
-        guard let textStorage else { return }
-        let text = ProseText.plain(textStorage, ranges: selectedRanges.map(\.rangeValue))
+        let text = selectedText
         guard !text.isEmpty else { return }
         Clipboard.copy(text)
     }
 
-    /// With text selected, a right click offers to copy it; without, the reply's own menu ("Copiar", "Copiar como
-    /// Markdown") comes up as before.
+    @objc private func quoteSelection(_ sender: Any?) {
+        let text = selectedText
+        guard !text.isEmpty else { return }
+        selection?.quote(text)
+    }
+
+    /// With text selected, a right click offers to copy it (and to quote it, where a reply can be quoted); without, the
+    /// reply's own menu ("Copiar", "Copiar como Markdown") comes up as before.
     override func menu(for event: NSEvent) -> NSMenu? {
         guard selectedRange().length > 0 else { return nil }
         let menu = NSMenu()
         menu.addItem(withTitle: "Copiar", action: #selector(copy(_:)), keyEquivalent: "")
+        if selection != nil { menu.addItem(withTitle: "Citar", action: #selector(quoteSelection(_:)), keyEquivalent: "") }
         return menu
     }
 
@@ -336,14 +376,30 @@ struct SelectableProse: NSViewRepresentable {
 
     /// The text is set again only when it changed: setting it would also drop a selection being made.
     private func update(_ view: ProseTextView, context: Context) {
+        view.selection = context.environment.proseSelection
         let shown = Shown(blocks: blocks, cursor: cursor, highlight: highlight)
         guard context.coordinator.shown != shown else { return }
         context.coordinator.shown = shown
-        view.show(ProseText.make(blocks, cursor: cursor, cached: cached, highlight: highlight))
+        view.show(ProseText.make(blocks, cursor: cursor, cached: cached, highlight: highlight), cursor: cursor,
+                  fades: cursor && !context.environment.accessibilityReduceMotion)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: ProseTextView, context: Context) -> CGSize? {
         let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? 10_000
         return CGSize(width: width, height: nsView.height(forWidth: width))
     }
+}
+
+/// What a reply's text views tell about their selection (`ProseTextView.selection`): what is selected, for the reply's
+/// "Citar" button, and the quote itself. Equal whatever its closures: they only reach the reply's own state.
+struct ProseSelectionAction: Equatable {
+    let changed: @MainActor (String?) -> Void
+    let quote: @MainActor (String) -> Void
+
+    nonisolated static func == (lhs: ProseSelectionAction, rhs: ProseSelectionAction) -> Bool { true }
+}
+
+extension EnvironmentValues {
+    /// Set by a finished reply: its selected words can be quoted.
+    @Entry var proseSelection: ProseSelectionAction?
 }

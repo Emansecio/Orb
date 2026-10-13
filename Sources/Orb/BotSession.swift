@@ -164,6 +164,9 @@ final class BotSession {
     @ObservationIgnored var reviewFrom = 0
     /// The review that runs now, in the background. It stops when you write.
     @ObservationIgnored var skillReview: Task<Void, Never>?
+    /// The pass that shortens the pinned memory (`MemoryConsolidation`), while it runs, and when the last one began.
+    @ObservationIgnored var memoryConsolidation: Task<Void, Never>?
+    @ObservationIgnored var memoryConsolidationTried: Date?
     /// The proposals the chat already told about (the command and when it was written), so each is told once.
     @ObservationIgnored var announcedProposals: [String: Date] = [:]
 

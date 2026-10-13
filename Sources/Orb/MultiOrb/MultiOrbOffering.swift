@@ -9,10 +9,13 @@ struct MultiOrbOffering: Sendable, Equatable {
     var propose = false
     /// `group_remember` and `group_recall`: only in a group's turn.
     var groupMemory = false
+    /// `ask_user`: only in an Orb's own chat, where the person is to answer (a routine or a request reports what it needs).
+    var askUser = false
 
-    init(orbs: Bool = false, propose: Bool = false, groupMemory: Bool = false) {
+    init(orbs: Bool = false, propose: Bool = false, groupMemory: Bool = false, askUser: Bool = false) {
         self.orbs = orbs
         self.propose = propose
         self.groupMemory = groupMemory
+        self.askUser = askUser
     }
 }

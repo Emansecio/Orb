@@ -248,6 +248,27 @@ final class ConversationFind {
         }
     }
 
+    // MARK: Quotes
+
+    /// A quote in a message of yours was clicked (`MessageQuote`): the chat goes to the reply it came from, marks the quoted
+    /// words and washes behind the reply for a moment, as a search hit does, with the bar closed. The marks go with the wash,
+    /// and the chat follows the end of the conversation again.
+    func reveal(quoteOf itemID: UUID, words: String) {
+        jumpTokens += 1
+        jump = FindJump(token: jumpTokens, itemID: itemID, anchorY: 0.3, glides: false)
+        focus = FindFocus(itemID: itemID, query: words, isFlashing: true)
+        pausesFollowing = true
+        flashTask?.cancel()
+        let flash = delays.flash
+        flashTask = Task { [weak self] in
+            try? await Task.sleep(for: flash)
+            guard !Task.isCancelled, let self, focus?.itemID == itemID, !isOpen else { return }
+            focus = nil
+            jump = nil
+            pausesFollowing = false
+        }
+    }
+
     // MARK: What the bar says
 
     /// "3 de 12", "Sem resultados", "Buscando…", or nothing before a query.

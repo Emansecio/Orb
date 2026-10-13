@@ -57,6 +57,25 @@ enum AttachmentSnapshots {
         ]
     }
 
+    /// `transcript-screen-steps`: a run in the browser and a Mac app, folded, with the strip of what the Orb saw.
+    static func screenSteps() -> [TranscriptItem] {
+        func call(_ kind: ToolCall.Kind, _ title: String, _ detail: String, picture: String? = nil) -> TranscriptItem {
+            let files = picture.map { [ProducedFile(path: Snapshot.sampleImage(named: $0, hue: 0.12 * CGFloat($0.count % 7)).path, created: true)] }
+            return TranscriptItem(.tool(ToolCall(kind: kind, title: title, detail: detail, state: .done, output: "ok",
+                                                 startedAt: .now - 30, finishedAt: .now - 29, files: files)))
+        }
+        return [
+            TranscriptItem(.user(text: "Coloca o fone no carrinho e me mostra o total", attachments: [])),
+            call(.browser, "Abrindo a página", "loja.exemplo.com/fones"),
+            call(.browser, "Capturando a página", "", picture: "loja"),
+            call(.browser, "Clicando", "Adicionar ao carrinho"),
+            call(.browser, "Capturando a página", "", picture: "carrinho"),
+            call(.computer, "Fazendo 2 passos em Safari", "Rolar → Clicar em Finalizar"),
+            call(.computer, "Capturando a janela", "Safari · Checkout", picture: "checkout-total"),
+            TranscriptItem(.bot(text: "O fone está no carrinho: total de R$ 349,90, frete grátis.", isStreaming: false)),
+        ]
+    }
+
     /// Two messages waiting in the queue, one with pictures and files.
     static func queue(_ lane: ComposerLane) {
         let pictures = pictures(3).map { ImageAttachment(path: $0, mediaType: "image/png", width: 240, height: 180) }

@@ -44,7 +44,7 @@ enum ApprovalNotifications {
 
     static func payload(botName: String, botID: UUID, request: ApprovalRequest) -> Payload {
         Payload(identifier: request.id.uuidString, title: botName, body: body(for: request), threadID: botID.uuidString,
-                category: request.isProposal ? "" : request.isHandoff ? handoffCategory : request.isDangerous ? dangerousCategory : category, // a creation card has no quick answer: a tap opens the card
+                category: request.isProposal || request.isQuestion ? "" : request.isHandoff ? handoffCategory : request.isDangerous ? dangerousCategory : category, // a creation card or a question has no quick answer: a tap opens the card
                 userInfo: [botKey: botID.uuidString, approvalKey: request.id.uuidString])
     }
 

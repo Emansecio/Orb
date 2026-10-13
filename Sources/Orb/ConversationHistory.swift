@@ -49,8 +49,9 @@ extension Conversation {
 enum RoutinePrompt {
     /// What the model gets for a routine run: nobody is there, so it must not ask or wait. English, like the rest of
     /// the prompts. `previous` is the last run's report, so a routine like "tell me what changed" has something to
-    /// compare against without carrying the whole last conversation.
-    static func unattended(_ prompt: String, routine name: String, previous: RoutineRun? = nil) -> String {
+    /// compare against without carrying the whole last conversation. A routine with a `goal` is also told where the
+    /// goal stood and how to end its report (`goalSection`).
+    static func unattended(_ prompt: String, routine name: String, previous: RoutineRun? = nil, goal: RoutineGoal? = nil) -> String {
         var text = """
         [Automatic run] This is the scheduled routine “\(name)”, started by the app, not a message from the user. \
         The user is not here: do not ask questions, do not wait for answers or confirmations, and do not offer choices. \
@@ -62,7 +63,25 @@ enum RoutinePrompt {
             text += "\n\nReport of the previous run (\(RoutineReport.stamp(date))), in case you need to compare:\n"
                 + Conversation.clipped(report, to: RoutineRun.promptReportLimit)
         }
+        if let goal { text += "\n\n" + goalSection(goal) }
         return text + "\n\nTask:\n" + prompt
+    }
+
+    /// The goal, its last check, and the one line the report must end with. A readable line rather than hidden JSON:
+    /// small models get it right, and it reads fine in the report (`GoalCheck.parse` reads it back).
+    static func goalSection(_ goal: RoutineGoal) -> String {
+        let last = goal.check.map { check in
+            "Last check\(goal.updatedAt.map { " (\(RoutineReport.stamp($0)))" } ?? ""): \(check.label)"
+                + (check.note.isEmpty ? "." : " · \(check.note)")
+        } ?? "No check yet: this is the first."
+        return """
+        Goal of this routine (what success looks like, in the user's words): \(MemoryText.flatten(goal.target))
+        \(last)
+        On this run, check with your tools where the goal stands. Take the next small step toward it only if it is safe \
+        and can be undone; otherwise just report. End your report with exactly one line in this shape, in Portuguese:
+        Progresso: <0-100>% · <em dia | atenção | concluída> · <nota curta>
+        Use "atenção" when the goal is stuck, at risk or needs the user, and "concluída" only once it is met.
+        """
     }
 }
 

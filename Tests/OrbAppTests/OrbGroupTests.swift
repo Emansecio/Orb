@@ -229,4 +229,12 @@ struct OrbGroupInvariantTests {
         let session = try #require(reopened.groupSession(world.groupID))
         #expect(session.items.contains { if case .user(let text, _) = $0.kind { text == "Olá, grupo" } else { false } })
     }
+
+    @Test @MainActor func aGroupsUnsentDraftIsKeptLikeAnOrbs() {
+        let world = GroupWorld()
+        world.model.setDraft("ainda escrevendo", for: world.groupID)
+        world.model.saveNow()
+        let reopened = AppModel(store: world.store, runsBackgroundWork: false)
+        #expect(reopened.draftText(world.groupID) == "ainda escrevendo")
+    }
 }

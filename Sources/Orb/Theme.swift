@@ -45,6 +45,10 @@ enum Palette {
     static let lineStrong = Color(hex: 0xFCFCFC, opacity: 0.15)
     static let ghostHover = Color.white.opacity(0.05)
     static let ghostSelected = Color.white.opacity(0.09)
+    /// A round icon button under the pointer, and pressed: lighter than `ghostSelected`, which on the canvas (#070707)
+    /// reads as almost nothing around a 24 pt symbol.
+    static let ghostCircleHover = Color.white.opacity(0.14)
+    static let ghostCirclePressed = Color.white.opacity(0.22)
 
     // Semantic
     static let accent = Color(hex: 0x1084FE)
@@ -418,19 +422,34 @@ struct SecondaryPillStyle: ButtonStyle {
 }
 
 /// Round icon button with a circular hover fill: `side` wide (28 in the composer, 32 in the sidebar), the symbol at `fontSize`.
+/// Under the pointer the fill shows and the pointer is a hand; pressed, the fill darkens and the button gives a little.
 struct CircleGhostStyle: ButtonStyle {
     let side: CGFloat
     let fontSize: CGFloat
     @State private var isHovering = false
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeBody(configuration: Configuration) -> some View {
+        let pressed = configuration.isPressed
         configuration.label
             .font(.system(size: fontSize))
             .frame(width: side, height: side)
-            .hoverFill(configuration.isPressed || isHovering, pressed: configuration.isPressed, in: .circle,
-                       color: Palette.ghostSelected)
+            .hoverFill(pressed || (isHovering && isEnabled), pressed: pressed, in: .circle,
+                       color: pressed ? Palette.ghostCirclePressed : Palette.ghostCircleHover)
+            .scaleEffect(pressed && !reduceMotion ? 0.9 : 1)
+            .animation(reduceMotion ? nil : Motion.press, value: pressed)
             .contentShape(.circle)
             .onHover { isHovering = $0 }
+            .clickablePointer(isEnabled)
+    }
+}
+
+extension View {
+    /// The pointing hand over something that can be clicked. The system sets it and puts the arrow back, also when the
+    /// view goes away under the pointer (macOS 15 and later; earlier systems keep the arrow).
+    @ViewBuilder func clickablePointer(_ isOn: Bool = true) -> some View {
+        if #available(macOS 15, *) { pointerStyle(isOn ? .link : nil) } else { self }
     }
 }
 

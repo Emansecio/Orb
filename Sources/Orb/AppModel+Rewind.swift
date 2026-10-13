@@ -124,6 +124,15 @@ extension AppModel {
         return true
     }
 
+    /// "Editar" from the message's menu or from VoiceOver, which are there whether or not it can be edited now: edits it,
+    /// or says why not, under the composer and aloud.
+    func editOrExplain(itemID: UUID, of botID: UUID) {
+        guard !beginEditing(itemID: itemID, of: botID) else { return }
+        let reason = (editRefusal(itemID: itemID, of: botID) ?? .missing).reason
+        composerLane(botID).error = reason
+        announceForAccessibility(reason)
+    }
+
     /// The edit is given up (Esc, the banner's button, another chat opening): the composer gets back what it held.
     func cancelEditing(_ botID: UUID) {
         guard let lane = sessions[botID]?.lane, let edit = lane.editing else { return }

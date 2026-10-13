@@ -291,8 +291,9 @@ import Testing
         let store = Store(directory: root)
         store.save(state)
         for (index, bot) in state.bots.enumerated() {
-            store.save(Conversation(items: [TranscriptItem(.user(text: "conversa \(index)", attachments: []))],
-                                    messages: [.user("conversa \(index)")]), for: bot.id)
+            // A reply, not a request: a conversation that ends in an unanswered request opens as interrupted.
+            store.save(Conversation(items: [TranscriptItem(.bot(text: "conversa \(index)", isStreaming: false))],
+                                    messages: [ChatMessage(role: .assistant, content: "conversa \(index)")]), for: bot.id)
         }
         store.flush()
         return (state.bots, state.bots[0].id, state.bots[1].id)

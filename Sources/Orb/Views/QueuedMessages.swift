@@ -155,7 +155,8 @@ private struct QueuedBubble: View {
     private func iconButton(_ kind: Action, symbol: String, tint: Color = Palette.muted, help: String,
                             action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol).foregroundStyle(tint)
+            // Lit under the pointer: the gray symbol on the faint circle was the whole of the feedback.
+            Image(systemName: symbol).foregroundStyle(hovered == kind && tint == Palette.muted ? Palette.ink : tint)
         }
         .buttonStyle(CircleGhostStyle(side: 24, fontSize: 12))
         .help(help)

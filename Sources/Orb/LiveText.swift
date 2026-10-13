@@ -132,6 +132,8 @@ final class OrbTranscript {
     /// What a compaction folded at the top of the chat (`CompactedFold`), and how many of `rows` hold only those items.
     private(set) var fold = CompactedFold.none
     private(set) var foldedRows = 0
+    /// The rows a time separator goes above (`TimeSeparators`), by row id, with the time each shows.
+    private(set) var timeBreaks: [UUID: Date] = [:]
 
     /// The chat is now another conversation (call before `show`).
     func swapped() { swaps &+= 1 }
@@ -168,6 +170,8 @@ final class OrbTranscript {
         let fold = CompactedFold.of(items)
         rows = TranscriptFolding.foldedRows(items, boundary: fold.count, liveTail: isLive)
         if fold != self.fold { self.fold = fold }
+        let breaks = TimeSeparators.breaks(rows.map { $0.map { ($0.id, $0.items.map(\.date)) } } ?? items.map { ($0.id, [$0.date]) })
+        if breaks != timeBreaks { timeBreaks = breaks }
         guard let rows, fold.count > 0 else {
             if foldedRows != 0 { foldedRows = 0 }
             return

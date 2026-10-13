@@ -330,7 +330,7 @@ struct GeneralSettings: View {
 
 // MARK: - Snapshots
 
-/// `--snapshot settings-general | settings-profile | settings-reset | settings-models | settings-perms | first-run-banner`: each tab of Ajustes on its own
+/// `--snapshot settings-general | settings-profile | settings-reset | settings-models | settings-perms[-tested|-stale] | first-run-banner`: each tab of Ajustes on its own
 /// (the tab bar does not render offscreen), at the size the window gives it.
 @MainActor
 enum SettingsSnapshots {
@@ -352,6 +352,7 @@ enum SettingsSnapshots {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading))
         case "settings-models": (tab, content) = (.models, AnyView(ProviderSettings()))
         case "settings-perms": (tab, content) = (.permissions, AnyView(MacPermissionsView()))
+        case "settings-perms-tested", "settings-perms-stale": (tab, content) = (.permissions, AnyView(MacPermissionsView(sample: permissionsSample(screen))))
         case let name where name.hasPrefix("settings-usage"): return nil // `UsageSnapshots` draws it (it needs the model)
         default: return nil
         }
@@ -359,5 +360,19 @@ enum SettingsSnapshots {
             .frame(width: 640, height: tab.height)
             .background(Palette.chrome)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading))
+    }
+
+    /// Permissões with fixed rows, read from nothing: `settings-perms-tested` after both tests (Accessibility works, the
+    /// capture came back empty), `settings-perms-stale` with Accessibility refused despite its flag and Screen Recording
+    /// waiting for the Orb to reopen.
+    private static func permissionsSample(_ screen: String) -> MacPermissionsModel {
+        var statuses = Dictionary(uniqueKeysWithValues: MacPermissionChecker.allKinds.map { ($0, MacPermissionStatus.granted) })
+        if screen == "settings-perms-tested" {
+            return MacPermissionsModel(sample: statuses, notifications: .allowed,
+                                       tests: [.accessibility: .working, .screenRecording: .broken])
+        }
+        statuses[.screenRecording] = .notGranted
+        return MacPermissionsModel(sample: statuses, notifications: .allowed, tests: [.accessibility: .broken],
+                                   awaitsRelaunch: [.screenRecording])
     }
 }

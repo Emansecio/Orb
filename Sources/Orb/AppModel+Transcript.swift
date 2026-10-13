@@ -8,6 +8,8 @@ import AppKit
 enum NoticeAction: Equatable, Sendable {
     /// The turn failed: try it again.
     case retry
+    /// The turn failed: try it again once with another model (a menu of them, see `AppModel.retryModels(for:)`).
+    case otherModel
     /// The turn paused or its reply was cut: say "continua".
     case continueTurn
     /// The problem is the model, its key or its login: open Ajustes.
@@ -22,6 +24,7 @@ enum NoticeAction: Equatable, Sendable {
     var title: String {
         switch self {
         case .retry: "Tentar de novo"
+        case .otherModel: "Outro modelo"
         case .continueTurn: "Continuar"
         case .openSettings: "Abrir Ajustes"
         case .compact: "Compactar e tentar de novo"
@@ -34,6 +37,7 @@ enum NoticeAction: Equatable, Sendable {
     var help: String {
         switch self {
         case .retry: "Refaz o pedido que não deu certo"
+        case .otherModel: "Refaz o pedido com outro modelo, só desta vez"
         case .continueTurn: "Pede para o Orb seguir de onde parou"
         case .openSettings: "Abre os Ajustes para ver o modelo, a chave ou o login"
         case .compact: "Resume o começo da conversa e envia a última mensagem de novo"
@@ -45,6 +49,7 @@ enum NoticeAction: Equatable, Sendable {
     var symbol: String {
         switch self {
         case .retry: "arrow.clockwise"
+        case .otherModel: "arrow.triangle.swap"
         case .continueTurn: "play.fill"
         case .openSettings: "gearshape"
         case .compact: "arrow.triangle.merge"
@@ -67,6 +72,11 @@ enum NoticeAction: Equatable, Sendable {
     /// What "Continuar" sends under `notice`: after a process ended, which one and where its output is. Never the command:
     /// the model wrote it, maybe from a page it read, and here it would come as the user's own words.
     static func continueMessage(after notice: String) -> String {
+        // The tool that ran when the app closed is answered "not run", and may have run all the same.
+        if notice == BotSession.quitNotice {
+            return continueMessage + ". O app fechou no meio da tarefa: a última ação pode ter sido feita, no todo ou em "
+                + "parte. Confira antes de repetir."
+        }
         guard notice.hasPrefix(jobEndedPrefix), let line = notice.split(separator: "\n").first else { return continueMessage }
         return line + " Veja a saída com job_output e siga a tarefa."
     }
@@ -90,14 +100,15 @@ enum NoticeAction: Equatable, Sendable {
     /// The actions that fit a notice, most useful first; none for the notices that only inform.
     static func actions(for notice: String) -> [NoticeAction] {
         if notice.hasPrefix("Conecte um modelo") { return [.openSettings] }
-        if notice.hasPrefix("Pausei depois de") || notice.hasPrefix("A resposta passou do limite") || notice.hasPrefix(jobEndedPrefix) {
+        if notice.hasPrefix("Pausei depois de") || notice.hasPrefix("A resposta passou do limite") || notice.hasPrefix(jobEndedPrefix)
+            || notice == BotSession.quitNotice {
             return [.continueTurn]
         }
         // Wrongly detected, it is one click to the page to forget.
         if notice.hasPrefix(keptMemoryPrefix) { return [.openMemory] }
         if proposedSlug(in: notice) != nil { return [.reviewSkill] }
         guard notice.hasPrefix(failurePrefix) else { return [] }
-        // Only the app's own sentence decides: what follows "Detalhe do provedor:" (or "Detalhe do Claude Code:") is free text.
+        // Only the app's own sentence decides: what follows "Detalhe do provedor:" is free text.
         let reason = ourSentence(of: notice.dropFirst(failurePrefix.count).lowercased())
         if reason.contains("grande demais") { return [.compact] }
         // Out of balance: trying again is right once the balance is topped up; Ajustes only if another model is wanted.
@@ -106,9 +117,11 @@ enum NoticeAction: Equatable, Sendable {
     }
 
     /// `actions(for:)` without "Compactar e tentar de novo" when the conversation has nothing older to summarize, and
-    /// without "Revisar" once the proposal is gone (saved, discarded or deleted).
-    static func actions(for notice: String, canCompact: Bool, hasProposal: Bool = true) -> [NoticeAction] {
+    /// without "Revisar" once the proposal is gone (saved, discarded or deleted). With another model to try
+    /// (`canSwitchModel`), a failure that can be tried again also offers "Outro modelo", right after "Tentar de novo".
+    static func actions(for notice: String, canCompact: Bool, hasProposal: Bool = true, canSwitchModel: Bool = false) -> [NoticeAction] {
         actions(for: notice).filter { ($0 != .compact || canCompact) && ($0 != .reviewSkill || hasProposal) }
+            .flatMap { $0 == .retry && canSwitchModel ? [.retry, .otherModel] : [$0] }
     }
 
     /// The part of a failure the app wrote, before the provider's own words.
@@ -128,6 +141,15 @@ enum NoticeAction: Equatable, Sendable {
     /// A failure notice split into its heading and the detail.
     static func failureDetail(of notice: String) -> String? {
         notice.hasPrefix(failurePrefix) ? String(notice.dropFirst(failurePrefix.count)) : nil
+    }
+
+    /// A failure's detail split into the app's own sentence and the provider's words after it ("Detalhe do provedor: …"),
+    /// which the chat folds away: they are for whoever needs to dig, in the provider's language.
+    static func failureParts(of detail: String) -> (sentence: String, provider: String?) {
+        guard let marker = detail.range(of: "Detalhe do provedor:", options: .caseInsensitive) else { return (detail, nil) }
+        let provider = detail[marker.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+        let sentence = detail[..<marker.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
+        return provider.isEmpty || sentence.isEmpty ? (detail, nil) : (sentence, provider)
     }
 }
 
@@ -167,6 +189,15 @@ enum RetryPlan: Equatable, Sendable {
 }
 
 extension AppModel {
+    /// The models "Outro modelo" offers for a failed turn: the app's default and the ones used lately, still available,
+    /// without the one that failed (the last turn's, or the Orb's own).
+    func retryModels(for botID: UUID) -> [(ref: String, name: String, provider: String)] {
+        let failed = sessions[botID]?.turnModel ?? bot(botID).flatMap { modelRef(for: $0)?.text }
+        var seen: Set<String> = failed.map { [$0] } ?? []
+        return ModelListing(choices: modelChoices, recents: [defaultModel] + RecentModels().ids, query: "").recents
+            .filter { seen.insert($0.ref).inserted }
+    }
+
     /// One of the quick replies under a new Orb's greeting. The message goes as the person's own (`fromUser`: with no
     /// model connected it pulses the connect card instead of leaving a notice, and the replies stay).
     func answerGreeting(_ reply: OrbGreeting.Reply, for botID: UUID) {
@@ -182,25 +213,25 @@ extension AppModel {
     /// "Continuar": says "continua" to the Orb, which goes on from where it paused or was cut (`notice`: the one clicked,
     /// whose words may say more, see `NoticeAction.continueMessage(after:)`).
     @discardableResult
-    func continueTurn(_ botID: UUID, after notice: String = "") -> Bool {
+    func continueTurn(_ botID: UUID, after notice: String = "", model: ModelRef? = nil) -> Bool {
         // Not `fromUser`: that would also clear the draft you may be typing. The click is yours, so the chat follows.
-        guard send(NoticeAction.continueMessage(after: notice), to: botID) else { return false }
+        guard send(NoticeAction.continueMessage(after: notice), to: botID, model: model) else { return false }
         live(botID).scrolled()
         return true
     }
 
     /// "Tentar de novo": a turn that failed before doing anything is taken back and its message sent again (the
     /// conversation shows it once). One that had begun to answer or run tools asks the Orb to go on instead, so
-    /// nothing runs twice.
+    /// nothing runs twice. `model`: another model for this one try (`retryModels(for:)`).
     @discardableResult
-    func retryLastTurn(_ botID: UUID) -> Bool {
+    func retryLastTurn(_ botID: UUID, model: ModelRef? = nil) -> Bool {
         guard !isWorking(botID), sessions[botID]?.turnTask == nil, bot(botID) != nil else { return false }
         guard let items = loadedConversation(botID)?.items else { return false }
         switch RetryPlan.plan(for: items) {
         case .none:
             return false
         case .continueTurn:
-            return continueTurn(botID)
+            return continueTurn(botID, model: model)
         case .resend(let text, let attachments, let range):
             // What the model's history holds of the failed message (its picture attachments), taken back with it.
             let removedItems = Array(items[range])
@@ -219,7 +250,7 @@ extension AppModel {
             let pictures = removedMessage?.images ?? []
             let pictured = Set(pictures.map(\.path))
             let files = attachments.filter { !pictured.contains($0) }.map { URL(fileURLWithPath: $0) }
-            if send(text, attachments: files, images: pictures, to: botID) {
+            if send(text, attachments: files, images: pictures, to: botID, model: model) {
                 // The failed attempt already counted the skill's use; sending again counted it a second time.
                 if let skill = SystemPrompt.expandSkill(in: text, skills: skillsForRetry)?.skill,
                    let index = skills.firstIndex(where: { $0.id == skill.id }), skills[index].uses > 0 {
@@ -275,5 +306,16 @@ extension AppModel {
         guard NSWorkspace.shared.isVoiceOverEnabled, NSApp?.isActive == true, selectedBot?.id == botID,
               let name = bot(botID)?.name, workAnnouncer.shouldAnnounce(line, at: .now) else { return }
         announceForAccessibility("\(name): \(line.text)", priority: .low)
+    }
+}
+
+extension AppModel {
+    /// "Citar": the words selected in a reply go to the start of the Orb's draft as a quote (`MessageQuote`), and the
+    /// cursor to the message box, to write about them.
+    func quote(_ text: String, for botID: UUID) {
+        let draft = MessageQuote.draft(quoting: text, before: draftText(botID))
+        guard draft != draftText(botID) else { return }
+        setDraft(draft, for: botID)
+        request(.focusComposer, of: botID)
     }
 }

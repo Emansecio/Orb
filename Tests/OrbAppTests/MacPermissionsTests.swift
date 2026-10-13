@@ -618,12 +618,12 @@ struct MacPermissionsModelTests {
         #expect(model.canAsk(.screenRecording))
         await model.ask(.screenRecording)
         #expect(model.status(of: .screenRecording) == .notGranted)
-        #expect(model.askedInVain.contains(.screenRecording))
-        #expect(!model.canAsk(.screenRecording), "only Abrir Ajustes is left")
+        #expect(model.awaitsRelaunch.contains(.screenRecording))
+        #expect(!model.canAsk(.screenRecording), "only Reabrir and Abrir Ajustes are left")
         #expect(model.canAsk(.accessibility))
         stub.screenRecording = true
         await model.refresh()
         #expect(model.status(of: .screenRecording) == .granted)
-        #expect(model.askedInVain.isEmpty)
+        #expect(model.awaitsRelaunch.isEmpty)
     }
 }

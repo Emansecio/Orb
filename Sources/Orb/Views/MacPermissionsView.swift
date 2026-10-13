@@ -8,18 +8,37 @@ import UserNotifications
 final class MacPermissionsModel {
     private(set) var statuses: [MacPermissionKind: MacPermissionStatus] = [:]
     private(set) var asking: Set<MacPermissionKind> = []
-    /// Rows whose "Pedir agora" was pressed and changed nothing: macOS shows the Screen Recording prompt only once,
-    /// so from then on only System Settings can grant it.
-    private(set) var askedInVain: Set<MacPermissionKind> = []
+    /// Screen Recording once macOS can no longer grant it by itself: "Pedir agora" changed nothing (the prompt shows only
+    /// once), or the user went to System Settings to turn it on. Either way the switch takes effect only in a reopened Orb.
+    private(set) var awaitsRelaunch: Set<MacPermissionKind> = []
+    /// What the live test of a granted row found, until its status changes.
+    private(set) var tests: [MacPermissionKind: PermissionTestOutcome] = [:]
+    private(set) var testing: Set<MacPermissionKind> = []
     /// Whether the Orb may post banners (nil until read).
     private(set) var notifications: NotificationPermission?
     private let checker: MacPermissionChecker
+    private let tester: MacPermissionTester
     private let readNotifications: @MainActor () async -> NotificationPermission
 
-    init(checker: MacPermissionChecker = .live,
+    /// The rows read again while the tab is open: each a quick yes/no. Automation (one question per app) waits for the
+    /// app to come back to the front.
+    static let watched: [MacPermissionKind] = [.accessibility, .screenRecording, .fullDiskAccess]
+
+    init(checker: MacPermissionChecker = .live, tester: MacPermissionTester = .live,
          notifications: @escaping @MainActor () async -> NotificationPermission = { await NotificationPermission.current() }) {
         self.checker = checker
+        self.tester = tester
         readNotifications = notifications
+    }
+
+    /// Fixed rows for `--snapshot`: nothing is read, asked or tested.
+    convenience init(sample statuses: [MacPermissionKind: MacPermissionStatus], notifications: NotificationPermission,
+                     tests: [MacPermissionKind: PermissionTestOutcome] = [:], awaitsRelaunch: Set<MacPermissionKind> = []) {
+        self.init()
+        self.statuses = statuses
+        self.notifications = notifications
+        self.tests = tests
+        self.awaitsRelaunch = awaitsRelaunch
     }
 
     /// What the tab's header says, from what has been read so far.
@@ -30,16 +49,45 @@ final class MacPermissionsModel {
     /// Whether the row offers "Pedir agora".
     func canAsk(_ kind: MacPermissionKind) -> Bool {
         guard let status = statuses[kind] else { return false }
-        return status.canShowSystemPrompt && kind.canBeAskedNow && !askedInVain.contains(kind)
+        return status.canShowSystemPrompt && kind.canBeAskedNow && !awaitsRelaunch.contains(kind)
     }
 
-    /// Reads every status again without prompting. Safe to call whenever the tab appears or the app comes back to the front.
-    func refresh() async {
-        let fresh = await checker.statuses()
+    func row(_ kind: MacPermissionKind) -> PermissionRowState {
+        PermissionRowState.make(kind: kind, status: statuses[kind], isAsking: asking.contains(kind), canAsk: canAsk(kind),
+                                awaitsRelaunch: awaitsRelaunch.contains(kind), test: tests[kind], isTesting: testing.contains(kind))
+    }
+
+    /// Reads the statuses again without prompting. Safe to call whenever the tab appears or the app comes back to the front.
+    func refresh(_ kinds: [MacPermissionKind] = MacPermissionChecker.allKinds) async {
+        let fresh = await checker.statuses(of: kinds)
         // A request in flight owns its row; its own refresh follows.
-        statuses = fresh.merging(statuses.filter { asking.contains($0.key) }) { _, current in current }
-        askedInVain = askedInVain.filter { statuses[$0] != .granted }
+        statuses.merge(fresh.filter { !asking.contains($0.key) }) { _, new in new }
+        awaitsRelaunch = awaitsRelaunch.filter { statuses[$0] != .granted }
+        tests = tests.filter { statuses[$0.key] == .granted }
         notifications = await readNotifications()
+    }
+
+    /// Reads the `watched` rows every `interval` until the task is cancelled (the tab went away). System Settings does
+    /// not bring the Orb back to the front, so this is how a switch turned there shows up here.
+    func watch(every interval: Duration = .seconds(2)) async {
+        while (try? await Task.sleep(for: interval)) != nil {
+            await refresh(Self.watched)
+        }
+    }
+
+    /// Uses a granted permission for real (a tiny capture, a read of the Dock) and keeps what it found.
+    func test(_ kind: MacPermissionKind) async {
+        guard !testing.contains(kind) else { return }
+        testing.insert(kind)
+        let outcome = await tester.run(kind)
+        testing.remove(kind)
+        tests[kind] = outcome
+    }
+
+    /// Opens the row's pane. For Screen Recording the row then offers to reopen the Orb, the only way the switch applies.
+    func openSettings(_ kind: MacPermissionKind, open: (MacPrivacyPane) -> Void = { $0.open() }) {
+        open(kind.pane)
+        if kind == .screenRecording { awaitsRelaunch.insert(kind) }
     }
 
     /// Asks macOS to allow banners (its dialog shows once; after a refusal only System Settings changes it).
@@ -73,7 +121,7 @@ final class MacPermissionsModel {
         let answer = await checker.requestInBackground(kind)
         asking.remove(kind)
         statuses[kind] = answer
-        if kind == .screenRecording, answer != .granted { askedInVain.insert(kind) }
+        if kind == .screenRecording, answer != .granted { awaitsRelaunch.insert(kind) }
         await refresh()
     }
 }
@@ -162,13 +210,17 @@ struct MacPermissionsSummary: Equatable {
     var automationText: String { "\(automationGranted) de \(automationTotal) liberados" }
 }
 
-/// The one button a row offers.
+/// A button a row offers.
 enum PermissionRowAction: Equatable {
     case ask
     case openAppAndAsk(appName: String)
     case openSystemSettings
+    /// Uses a granted permission for real, read-only (`MacPermissionTester`).
+    case test
+    /// Quits and opens the Orb again (`AppRelaunch`): macOS applies Screen Recording only to a reopened app.
+    case relaunch
 
-    /// Nil while the status is unknown or when nothing is left to do.
+    /// The button of a row that is not granted; nil while the status is unknown or when nothing is left to do.
     static func resolve(kind: MacPermissionKind, status: MacPermissionStatus?, canAsk: Bool) -> PermissionRowAction? {
         guard let status, status != .granted else { return nil }
         if case .automation(let target) = kind, status == .appNotRunning { return .openAppAndAsk(appName: target.name) }
@@ -180,16 +232,83 @@ enum PermissionRowAction: Equatable {
         case .ask: "Pedir agora"
         case .openAppAndAsk(let name): "Abrir \(name) e pedir"
         case .openSystemSettings: "Abrir Ajustes do Sistema"
+        case .test: "Testar"
+        case .relaunch: "Reabrir o Orb"
         }
+    }
+}
+
+/// What a row shows next to its buttons.
+enum PermissionBadge: Equatable {
+    case loading
+    case asking
+    case testing
+    case status(MacPermissionStatus)
+    /// The live test used the permission and it worked.
+    case working
+    /// Granted on paper, but the live test came back empty or refused.
+    case broken
+}
+
+/// A permission row from everything the tab knows about it: the flag, the live test, whether only a reopened Orb can
+/// apply it.
+struct PermissionRowState: Equatable {
+    var badge: PermissionBadge
+    var actions: [PermissionRowAction]
+    /// Replaces the row's description when there is something to say.
+    var note: String?
+
+    static let screenRecordingBroken = "A captura voltou vazia: o macOS só aplica a permissão depois de reabrir o Orb."
+    static let accessibilityBroken = "O macOS diz que está liberado, mas o Orb não consegue ler os apps: remova o Orb da lista "
+        + "de Acessibilidade e adicione de novo."
+    static let inconclusive = "Não deu para testar agora. Tente de novo em instantes."
+    static let awaitingRelaunch = "Ligue o Orb em Ajustes do Sistema e reabra o Orb: o macOS só aplica a gravação de tela num app reaberto."
+    static let appClosed = "Precisa estar aberto para verificar. O botão abre o app e pede a permissão."
+
+    static func make(kind: MacPermissionKind, status: MacPermissionStatus?, isAsking: Bool, canAsk: Bool,
+                     awaitsRelaunch: Bool, test: PermissionTestOutcome?, isTesting: Bool) -> PermissionRowState {
+        let fallback = PermissionRowAction.resolve(kind: kind, status: status, canAsk: canAsk).map { [$0] } ?? []
+        guard let status else { return PermissionRowState(badge: .loading, actions: []) }
+        if isAsking { return PermissionRowState(badge: .asking, actions: fallback) }
+        if status == .granted, kind.canBeTested {
+            if isTesting { return PermissionRowState(badge: .testing, actions: [.test]) }
+            switch test {
+            case .working?:
+                return PermissionRowState(badge: .working, actions: [.test])
+            case .broken?:
+                return kind == .screenRecording
+                    ? PermissionRowState(badge: .broken, actions: [.relaunch], note: screenRecordingBroken)
+                    : PermissionRowState(badge: .broken, actions: [.openSystemSettings], note: accessibilityBroken)
+            case .inconclusive?:
+                return PermissionRowState(badge: .status(.granted), actions: [.test], note: inconclusive)
+            case nil:
+                return PermissionRowState(badge: .status(.granted), actions: [.test])
+            }
+        }
+        if awaitsRelaunch { return PermissionRowState(badge: .status(status), actions: [.openSystemSettings, .relaunch], note: awaitingRelaunch) }
+        if status == .appNotRunning, case .automation = kind { return PermissionRowState(badge: .status(status), actions: fallback, note: appClosed) }
+        return PermissionRowState(badge: .status(status), actions: fallback)
     }
 }
 
 // MARK: - The tab
 
 struct MacPermissionsView: View {
-    @State private var model = MacPermissionsModel()
+    @State private var model: MacPermissionsModel
     @State private var showsAutomation = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// False for a `--snapshot` sample, whose rows are fixed.
+    private let readsTheSystem: Bool
+
+    init() {
+        _model = State(initialValue: MacPermissionsModel())
+        readsTheSystem = true
+    }
+
+    init(sample: MacPermissionsModel) {
+        _model = State(initialValue: sample)
+        readsTheSystem = false
+    }
 
     var body: some View {
         let summary = model.summary
@@ -205,7 +324,8 @@ struct MacPermissionsView: View {
             } header: {
                 Text("Essenciais")
             } footer: { FormFootnote {
-                Text("A gravação de tela só vale depois de reabrir o Orb, e o macOS pergunta uma vez só.")
+                Text("A gravação de tela só vale depois de reabrir o Orb, e o macOS pergunta uma vez só. Testar usa a permissão "
+                     + "de verdade, só olhando, sem salvar nada.")
             } }
             Section {
                 DisclosureGroup(isExpanded: $showsAutomation) {
@@ -238,8 +358,13 @@ struct MacPermissionsView: View {
         }
         .formStyle(.grouped)
         .orbFormBackground()
-        .task { await model.refresh() }
+        .task {
+            guard readsTheSystem else { return }
+            await model.refresh()
+            await model.watch()
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            guard readsTheSystem else { return }
             Task { await model.refresh() }
         }
     }
@@ -275,42 +400,48 @@ private struct MacPermissionsHeader: View {
 private struct MacPermissionRow: View {
     let kind: MacPermissionKind
     let model: MacPermissionsModel
+    @Environment(AppModel.self) private var app
+    @State private var confirmsRelaunch = false
 
     var body: some View {
-        let status = model.status(of: kind)
-        let isAsking = model.asking.contains(kind)
-        let action = PermissionRowAction.resolve(kind: kind, status: status, canAsk: model.canAsk(kind))
+        let row = model.row(kind)
+        let isBusy = row.badge == .asking || row.badge == .testing
         LabeledContent {
             HStack(spacing: 8) {
-                StatusBadge(status: status, isAsking: isAsking)
-                if let action {
+                StatusBadge(badge: row.badge)
+                ForEach(row.actions, id: \.title) { action in
                     Button(action.title) { perform(action) }
                         .controlSize(.small)
                         .help(Tip.permissionAction(action))
-                        .disabled(isAsking)
+                        .disabled(isBusy)
                 }
+            }
+            .confirmationDialog("Reabrir o Orb agora?", isPresented: $confirmsRelaunch) {
+                Button("Reabrir", role: .destructive) { AppRelaunch.finish() }
+            } message: {
+                Text("Há Orbs trabalhando: o que estão fazendo é interrompido.")
             }
         } label: {
             VStack(alignment: .leading, spacing: 2) {
                 Text(kind.title)
-                    .foregroundStyle(status == .appNotRunning ? Palette.muted : Palette.ink)
-                Text(detail(status))
+                    .foregroundStyle(model.status(of: kind) == .appNotRunning ? Palette.muted : Palette.ink)
+                Text(row.note ?? kind.detail)
                     .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-    }
-
-    private func detail(_ status: MacPermissionStatus?) -> String {
-        if model.askedInVain.contains(kind) { return "O macOS não pergunta de novo: ligue o Orb em Ajustes do Sistema." }
-        if status == .appNotRunning, case .automation = kind { return "Precisa estar aberto para verificar. O botão abre o app e pede a permissão." }
-        return kind.detail
     }
 
     private func perform(_ action: PermissionRowAction) {
         switch action {
         case .ask: Task { await model.ask(kind) }
         case .openAppAndAsk: Task { await model.openAppAndAsk(kind) }
-        case .openSystemSettings: kind.pane.open()
+        case .openSystemSettings: model.openSettings(kind)
+        case .test: Task { await model.test(kind) }
+        case .relaunch:
+            // Quitting stops every turn and command in progress: asked first when there is one.
+            let busy = app.bots.contains { app.isWorking($0.id) || app.live($0.id).jobs.contains(where: \.isRunning) }
+            if busy { confirmsRelaunch = true } else { AppRelaunch.finish() }
         }
     }
 }
@@ -323,7 +454,7 @@ private struct NotificationRow: View {
         let state = model.notifications
         LabeledContent {
             HStack(spacing: 8) {
-                StatusBadge(status: state?.status, isAsking: false)
+                StatusBadge(badge: state.map { .status($0.status) } ?? .loading)
                 switch state {
                 case .notDetermined?:
                     Button("Pedir agora") { Task { await model.askNotifications() } }.controlSize(.small)
@@ -348,8 +479,7 @@ private struct NotificationRow: View {
 }
 
 private struct StatusBadge: View {
-    let status: MacPermissionStatus?
-    let isAsking: Bool
+    let badge: PermissionBadge
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// What comes after the spinner (granted, a warning): the same mark as everywhere (`mark`), growing from 0.6 in `Motion.enter`.
@@ -358,28 +488,34 @@ private struct StatusBadge: View {
     var body: some View {
         // Spinner → mark swap in place, one over the other, so the row does not shift while they trade.
         ZStack(alignment: .trailing) {
-            if isAsking {
+            switch badge {
+            case .loading:
+                ProgressView().controlSize(.small)
+                    .transition(.opacity)
+            case .asking, .testing:
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.small)
-                    Text("Aguardando você").font(.caption).foregroundStyle(.secondary)
+                    Text(badge == .asking ? "Aguardando você" : "Testando…").font(.caption).foregroundStyle(.secondary)
                 }
                 .transition(.opacity)
-            } else if let status {
+            case .status(let status):
                 Label(status.label, systemImage: status.symbol)
                     .font(.caption)
                     .foregroundStyle(status.tint)
                     .transition(mark)
-            } else {
-                ProgressView().controlSize(.small)
-                    .transition(.opacity)
+            case .working:
+                Label("Funcionando", systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(Palette.ok)
+                    .transition(mark)
+            case .broken:
+                Label("Não funciona", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(Palette.warn)
+                    .transition(mark)
             }
         }
-        .motion(Motion.content, value: BadgeKey(status: status, isAsking: isAsking))
-    }
-
-    private struct BadgeKey: Equatable {
-        var status: MacPermissionStatus?
-        var isAsking: Bool
+        .motion(Motion.content, value: badge)
     }
 }
 
@@ -469,4 +605,7 @@ extension MacPermissionKind {
         if case .fullDiskAccess = self { return false }
         return true
     }
+
+    /// Whether a granted row offers "Testar": the two permissions whose flag can say yes while they do nothing.
+    var canBeTested: Bool { self == .accessibility || self == .screenRecording }
 }

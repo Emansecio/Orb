@@ -109,7 +109,8 @@ clique nela traz a tela de volta (e "Novo Orb" no pé da barra lateral só apare
 
 A **barra lateral** tem os seus Orbs, o **Espaço de trabalho** (Rotinas, Conectores, Skills), **Novo Orb** (só com Orbs na lista) e **Ajustes**. Uma
 linha mostra o que o Orb está fazendo ("Pensando…"), "Precisa de você" quando ele espera uma permissão e um ponto quando há
-mensagens não lidas; o botão direito abre o menu do Orb (abrir pasta, personalizar, ver
+mensagens não lidas; um anel em volta do rosto diz o mesmo de relance (azul trabalhando, âmbar esperando você). O título da
+janela traz, sob o nome do Orb, o que ele está fazendo, ou o modelo quando está livre. O botão direito abre o menu do Orb (abrir pasta, personalizar, ver
 rotinas, apagar). No meio fica o chat; à direita, o painel do Orb.
 
 No canto inferior esquerdo da barra lateral fica a **sua foto** (um círculo; sem foto, a inicial do seu nome ou uma silhueta):
@@ -183,6 +184,11 @@ Se o motor escolhido não estiver instalado, o Orb fica só com `web_fetch` e `w
 - **Escrever.** ↩ envia, ⇧↩ (ou ⌥↩) pula de linha. Digite `/` para ver as skills (↑↓ escolhem, ↩ ou ⇥ completam, Esc fecha).
 - **Respostas** vêm em Markdown de verdade: títulos, listas (inclusive de tarefas), tabelas, citações e blocos de código com
   botão "Copiar". Passe o mouse sobre uma resposta para "Copiar" ou "Copiar como Markdown". Para copiar só um trecho, clique e arraste: a seleção atravessa parágrafos, títulos e listas da resposta (blocos de código e tabelas têm a sua).
+- **Citar um trecho.** Com um trecho de uma resposta selecionado, **Citar** (ao lado de Copiar, ou no clique direito) põe o
+  trecho no começo da sua mensagem como citação (`> …`), e o cursor vai para o campo. Na conversa, a citação aparece em cima
+  do que você escreveu; um clique nela volta à resposta de onde veio, com o trecho marcado por um instante.
+- **Hora na conversa.** Uma linha discreta ("Hoje, 14:05", "Ontem, 09:12", "Quinta-feira, 10:00", "3 de outubro, 14:05")
+  marca o começo da conversa, cada dia novo e cada retomada depois de 15 minutos ou mais de silêncio.
 - **Anexos.** O botão `+`, ⌘V ou soltar em qualquer ponto do chat (a conversa toda vira o alvo, sem abrir nada; vale também imagem arrastada direto do navegador) anexa. Imagens (PNG, JPEG, HEIC, GIF, WebP, TIFF; até 20 MB cada)
   são reduzidas (um chip "Preparando imagem…" aparece e o envio espera), entram na ordem em que foram anexadas (até 20 por mensagem) e são enviadas ao modelo se ele enxerga; se ele não enxerga, só o caminho vai e o app avisa. Outros arquivos
   vão com o texto deles dentro da mensagem, lido pelo app assim que são anexados: PDF, Word (.docx, .doc, .rtf, .odt), Excel (.xlsx e o .xls antigo, inclusive o que é página da web salva como .xls), PowerPoint (.pptx), CSV, Markdown, TXT, JSON e qualquer arquivo de texto. Assim qualquer Orb os lê, mesmo sem "Terminal e arquivos"; o que passa de uma página por arquivo (cerca de 24 mil caracteres, três páginas por mensagem, menos num modelo local de janela pequena) é cortado com a indicação de onde continuar, e o que não dá para ler aqui (zip, binários) segue só como caminho, para o Orb abrir com as ferramentas; um arquivo sozinho, sem texto, já pode ser enviado (o Orb recebe "Veja o(s) arquivo(s) anexado(s).") ou colocado na fila. A captura de tela que o Orb tira
@@ -193,6 +199,9 @@ Se o motor escolhido não estiver instalado, o Orb fica só com `web_fetch` e `w
   Clicar abre o Quick Look (← e → passam de um anexo para o outro); o botão direito oferece Abrir, Mostrar no Finder, Copiar e Copiar
   caminho; dá para arrastar o arquivo para fora. O que o Orb cria ou altera com as ferramentas de arquivo (e as capturas de
   tela dele) aparece sob a linha da ferramenta, como cartão "novo" ou "alterado" ou como miniatura, uma vez só por turno.
+  Quando um trecho de ações recolhido tirou duas ou mais capturas (no navegador ou num app do Mac), ele mostra uma tira com
+  todas, em ordem, cada uma com o que a antecedeu ("Adicionar ao carrinho"); o clique abre o Quick Look, onde ← e → vão de
+  passo em passo.
   Arquivos criados por comandos do Terminal não entram.
 - **Ditar.** O microfone ao lado de Enviar (macOS 26 ou mais novo) abre o reconhecimento de fala do próprio Mac: grátis,
   sem internet e sem o áudio sair do Mac. O texto aparece no campo enquanto você fala, e a versão pontuada toma o lugar das
@@ -211,7 +220,9 @@ Se o motor escolhido não estiver instalado, o Orb fica só com `web_fetch` e `w
   de enviada (relógio: pôr na fila; seta: direcionar) e parar e enviar; passar o mouse sobre um ícone diz o que ele faz na
   linha do balão. Parar e enviar também leva a mensagem que acabou de entrar na tarefa e ainda não teve resposta (ela sai
   da tarefa parada e vai como o novo pedido, sem repetir). Uma mensagem que entrou no meio da tarefa aparece no chat onde o Orb a recebeu, com a
-  marca "Durante a tarefa" (guardada na conversa). Se o Orb espera sua
+  marca "Durante a tarefa" (guardada na conversa) e, enquanto o Orb ainda não agiu sobre ela, o botão "Parar e enviar" ao lado
+  (o balão da fila some quando ela entra, muitas vezes em menos de um segundo). Parar sozinho (botão ou ⌘.) devolve essa
+  mensagem ao campo, em vez de deixá-la numa tarefa que não vai respondê-la. Se o Orb espera sua
   resposta a um pedido, o que ia entrar no próximo passo só entra depois dela.
   Dá para tirar uma mensagem da espera ("Editar"). Se o turno falhar ou for parado, o que estava esperando (nos dois modos) volta para o campo. O que está no campo (texto, arquivos e imagens anexados) e o que voltou da fila ficam guardados em `rascunhos.json` ao fechar o app e voltam na próxima abertura (arquivos que sumiram ficam de fora).
 - **Buscar na conversa.** **⌘F** (ou a lupa da barra do chat, ou "Buscar na conversa" em ⌘K) abre uma barra no alto do chat:
@@ -255,6 +266,12 @@ Se o motor escolhido não estiver instalado, o Orb fica só com `web_fetch` e `w
 - **Quando algo dá errado**, a mensagem vem com a ação: "Tentar de novo" (reenvia, se nada tinha sido feito; se já tinha
   respondido, pede para continuar), "Continuar", "Abrir Ajustes" (chave inválida, sem modelo) ou, numa conversa grande demais, "Compactar
   e tentar de novo" (resume o começo e reenvia; só aparece quando há o que resumir). Limite de uso (429) e instabilidade do provedor são tentados de novo sozinhos algumas vezes, com a espera à vista.
+  **Outro modelo** refaz o pedido uma vez com o modelo padrão do app ou um dos usados há pouco, sem mudar o do Orb. A frase do
+  aviso é do Orb; a mensagem do provedor fica recolhida em **Detalhes**. Uma resposta vazia ganha uma nova tentativa sozinha
+  antes de virar falha.
+- **Quando o Orb anda em círculos** (a mesma chamada com o mesmo resultado três vezes, ou três falhas seguidas), o próprio
+  resultado avisa o modelo para mudar de caminho ou dizer o que o bloqueia, e a linha de trabalho mostra "Mudando de abordagem".
+  É uma contagem, sem chamar outro modelo; horários, IDs e caminhos de saídas salvas não contam como diferença.
 - **Tarefas longas.** Um turno tem até 100 passos (150 numa rotina). Ao chegar lá o Orb deixa um registro do que fez e avisa
   "Pausei depois de 100 passos…": diga **"continua"**.
 - **Skills.** `/resumir`, `/organizar` e `/revisar` vêm prontas; veja [Conectores e skills](#conectores-e-skills).
@@ -277,7 +294,8 @@ leitura; e comandos que só olham (`ls`, `git status`, `git log`, `cat`…) não
 Quando o Orb precisa de você, aparece um cartão na conversa e o Orb espera ("Esperando sua resposta").
 
 - **Permitir** (**⌘↩**) libera só aquela ação. **Não permitir** (**Esc**) nega e o Orb não tenta de novo. Os atalhos valem para o
-  cartão mais novo do Orb aberto; o Esc não vale enquanto você digita.
+  cartão mais novo do Orb aberto; o Esc não vale enquanto você digita. Um comando longo mostra o começo e as últimas
+  linhas, com **Mostrar tudo (mais N linhas)** para o meio; um comando arriscado aparece sempre inteiro.
 - **Dizer o que fazer em vez disso** nega e manda a sua instrução ao Orb ("use a lixeira").
 - O menu ao lado de Permitir: **Só nesta tarefa** (até o Orb terminar) e **Sempre permitir…**, com até três regras de
   tamanhos diferentes (por exemplo "comandos `git push`", "comandos `git`", "gravar em `~/Projetos/app`", "acessar
@@ -292,6 +310,16 @@ Quando o Orb precisa de você, aparece um cartão na conversa e o Orb espera ("E
 - **Pela notificação.** Se o app está em segundo plano, ou outro Orb está aberto, o pedido chega como banner com **Permitir** e
   **Não permitir**; nos perigosos, o Permitir exige desbloquear o Mac. A **barra de menus** lista os pedidos de todos os Orbs
   (um perigoso só se resolve no app) e a barra lateral marca o Orb que espera.
+- **Pedido esquecido.** Um cartão sem resposta por 1 hora manda mais um aviso ("Esperando há 1 h"); depois de 24 horas o Orb
+  para de esperar, interrompe a tarefa e diz na conversa por quê, para não prender o chat nem as rotinas da fila.
+
+### Perguntas do Orb
+
+No seu chat com ele, o Orb pode **perguntar** em vez de adivinhar: uma escolha que só você faz, um detalhe que ele não tem como
+descobrir. A pergunta chega num cartão com as opções que ele sugeriu (um clique responde), uma linha para responder com as suas
+palavras e **Pular** (**Esc**), que o deixa seguir com o que der para decidir sozinho. Escrever no campo de mensagem normal
+também responde. Respondida, a pergunta fica na conversa com a sua resposta marcada. Rotinas e pedidos de outros Orbs não
+perguntam: dizem no relatório o que falta.
 
 ### Liberações
 
@@ -313,10 +341,16 @@ Ajustes (**⌘,**) → **Permissões** mostra o que o macOS já deixa o Orb faze
   estimativa: o macOS não informa; o Orb tenta abrir uma pasta protegida) e **Notificações**.
 - **Apps que o Orb controla** (Automação): Mail, Calendário, Notas, Lembretes, Finder, System Events, Mensagens, Safari e Música.
 
-Cada linha mostra o estado (Liberado, Negado, Não pedido…) e **um** botão: **Pedir agora** (o macOS mostra o aviso dele),
+Cada linha mostra o estado (Liberado, Negado, Não pedido…) e o botão que resolve: **Pedir agora** (o macOS mostra o aviso dele),
 **Abrir `<app>` e pedir** (Automação de um app fechado) ou **Abrir Ajustes do Sistema** (leva ao painel certo). A aba só olha,
-atualiza quando você volta ao app e tem **Verificar de novo**. Gravação do Áudio do Sistema e da Tela e Acesso Total ao Disco só valem depois de
-**reabrir o Orb**.
+atualiza quando você volta ao app (e a cada 2 s enquanto está aberta, para a chave virada em Ajustes do Sistema aparecer na hora) e tem
+**Verificar de novo**. Gravação do Áudio do Sistema e da Tela e Acesso Total ao Disco só valem depois de **reabrir o Orb**.
+
+Acessibilidade e Gravação do Áudio do Sistema e da Tela liberadas ganham **Testar**, que usa a permissão de verdade sem mexer em
+nada: uma captura pequena da tela (nunca salva) e a leitura do Dock. O resultado é **Funcionando** ou o conserto: captura vazia
+oferece **Reabrir o Orb**; Acessibilidade recusada apesar de liberada (sobra de uma compilação antiga) pede para remover o Orb da
+lista e adicionar de novo. Depois de "Pedir agora" ou de ir aos Ajustes do Sistema pela gravação de tela, a linha também oferece
+**Reabrir o Orb** em vez de pedir de novo.
 
 - Antes de rodar um AppleScript, o Orb mostra o aviso de Automação dos apps que o script usa e espera você responder (um app
   conhecido que está fechado é aberto escondido antes, para o aviso não cair dentro do tempo do script). App recusado falha na hora.
@@ -443,7 +477,9 @@ dentro dela na primeira abertura, na ordem em que aconteceram.
 ### Rotinas
 
 Uma **rotina** é uma tarefa que um Orb faz sozinho, no horário, **enquanto o app está aberto** (página **Rotinas**,
-⌥⌘R; também na aba Rotinas do painel). Há modelos prontos: "Resumo da manhã", "Organizar arquivos" e "Revisar a semana".
+⌥⌘R; também na aba Rotinas do painel). Há modelos prontos: "Resumo da manhã", "Organizar arquivos", "Revisar a semana" e
+a meta "Mesa em ordem". O chat vazio de um Orb sem rotinas também sugere uma ou duas ideias marcadas "Cria uma rotina" ou
+"Cria uma meta": o clique abre o editor já preenchido, e nada é criado antes de você salvar.
 Sem nenhum Orb, "Nova rotina" e os modelos continuam valendo: com um modelo conectado o app cria o Atlas (como "Começar com o
 Atlas") e abre o editor para ele, sem sair de Rotinas; sem modelo, abre a tela de boas-vindas no cartão que conecta um, com um
 aviso dizendo por quê.
@@ -462,6 +498,12 @@ aviso dizendo por quê.
 - **Conversa própria.** Cada rotina roda numa conversa só dela, nunca no seu chat: o chat ganha só uma linha no fim ("Rotina
   'Resumo da manhã' terminou: …"). Em **Ver conversa** você lê a execução. Fica o histórico das últimas 10 execuções, com
   relatório, e a próxima execução sabe o que a anterior encontrou.
+- **Metas.** No editor, "Acompanhar uma meta" pede "como saber que deu certo". A cada execução o Orb confere onde a meta
+  está, dá um pequeno passo só se for seguro e reversível, e termina o relatório com uma linha como
+  `Progresso: 35% · em dia · faltam 26 arquivos` ("em dia", "atenção" ou "concluída"). O cartão mostra uma barra fina (azul,
+  laranja com uma bandeira quando pede atenção, verde quando concluída) e o histórico vira a linha do tempo da meta. Sem a
+  linha, o progresso fica como estava; meta concluída pausa a rotina e o chat avisa. O Orb também cria rotinas com meta pela
+  ferramenta `schedule` (campo `goal`).
 - **Relatório em arquivo.** Se o Orb tem pasta própria, cada execução grava `Rotinas/<nome>/<aaaa-mm-dd hhmm>.md` nela.
 - **Permissões.** Ninguém está lá para responder, então uma rotina em "Perguntar antes" **espera por você** (o editor avisa e
   oferece "Usar Automático" e "Usar Só leitura"). Em Avançado: "Permissões da rotina" (Igual ao Orb, Automático ou Só leitura).
@@ -495,6 +537,9 @@ janela vai antes para a memória do Orb. As mensagens continuam salvas na conver
   ou com o modelo ocupado o Orb resume do jeito de sempre.
 - **Ajustes → Geral → Contexto das conversas**: *Econômico* (cerca de 40 mil tokens palavra por palavra, gasta menos por
   mensagem), *Equilibrado* (80 mil, o padrão) ou *Amplo* (até 60% da janela, nunca menos que o Equilibrado; custa mais por mensagem). Vale para todos os Orbs.
+- Um resultado de ferramenta que não se pede de novo igual (um comando, uma página, um conector; não a leitura de um arquivo)
+  e passa de 4 mil caracteres é salvo também num arquivo, em `saidas/`. Quando a conversa mais tarde o encurta, o caminho fica
+  e o Orb relê o miolo com `read_file` em vez de rodar tudo de novo.
 - Se um provedor recusa uma conversa por tamanho, o Orb aprende a janela real daquele modelo (**Janelas aprendidas**, com
   "Esquecer", útil depois de aumentar o limite do servidor).
 

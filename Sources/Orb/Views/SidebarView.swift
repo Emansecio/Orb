@@ -364,23 +364,31 @@ private struct BotRow: Equatable {
 private struct BotRowContent: View, Equatable {
     let row: BotRow
 
+    /// The ring around the avatar: the partner's color while two Orbs exchange messages (MultiOrb, WP2), amber while
+    /// the Orb waits for you, blue while it works.
+    private var ring: Color? {
+        if let partner = row.partner { return OrbCatalog.shared.palette(partner.color).core }
+        if row.needsYou { return Palette.warn }
+        return row.workText != nil ? Palette.accent : nil
+    }
+
     var body: some View {
         let (look, workText, activity, needsYou) = (row.look, row.workText, row.activity, row.needsYou)
         HStack(spacing: 8) {
             // Only the selected bot and bots with something going on move; the rest rest (no frames at all).
             BotAvatar(orb: look.orb, size: 30, activity: activity, celebration: row.celebration,
                       paused: !row.isSelected && activity == .idle, ack: row.ack, landing: row.landing, glance: row.glance, cue: row.cue)
-                // MARK: MultiOrb (WP2): a 1.5 pt ring in the partner's color while the two exchange messages. It fades in and out
-                // (opacity only, so it is the same under Reduce Motion).
+                // A 1.5 pt ring that says what is going on at a glance. It fades in and out (opacity only, so it is the same
+                // under Reduce Motion).
                 .overlay {
-                    if let partner = row.partner {
+                    if let ring {
                         Circle()
-                            .strokeBorder(OrbCatalog.shared.palette(partner.color).core.opacity(0.55), lineWidth: 1.5)
+                            .strokeBorder(ring.opacity(0.55), lineWidth: 1.5)
                             .frame(width: 36, height: 36)
                             .transition(.opacity)
                     }
                 }
-                .animation(Motion.fade, value: row.partner)
+                .animation(Motion.fade, value: ring)
             VStack(alignment: .leading, spacing: 1) {
                 Text(look.name)
                     .font(.system(size: 13, weight: .medium))
