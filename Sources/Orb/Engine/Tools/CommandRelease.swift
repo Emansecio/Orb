@@ -14,6 +14,7 @@ final class CommandRelease: Sendable {
     private struct State {
         var pressed = false
         var running = 0
+        var released = 0
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
@@ -50,6 +51,16 @@ final class CommandRelease: Sendable {
         }
         if last { onWaiting(false) }
     }
+
+    /// A command went on in the background. The engine starts none of the step's later calls after it: they were asked for
+    /// as if it had ended, and the user wants the Orb back (`AgentEngine.runCalls`).
+    func released() { state.withLock { $0.released += 1 } }
+
+    /// How many commands of the turn went on in the background so far.
+    var releasedCount: Int { state.withLock { $0.released } }
+
+    /// A message for the running task is waiting: the model is told to answer it, not just to go on.
+    var userWrote: Bool { steering?.hasSteering == true }
 
     /// Whether a command that has run for `elapsed` should stop being waited for.
     func isRequested(after elapsed: Duration) -> Bool {

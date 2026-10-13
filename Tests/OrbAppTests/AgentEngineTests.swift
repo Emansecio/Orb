@@ -54,6 +54,19 @@ private struct SteeringTouchTool: AgentTool {
     }
 }
 
+/// A command the user let go on in the background while it ran (`CommandRelease`): it tells the turn's release so.
+private struct LetGoTool: AgentTool {
+    var spec: ToolSpec { ToolSpec(name: "letgo", description: "Runs and is let go", parameters: .schema([:])) }
+    var kind: ToolCall.Kind { .shell }
+    var capability: Capability? { nil }
+    func risk(_ arguments: JSONValue) -> ToolRisk { .sensitive }
+    func summary(_ arguments: JSONValue) -> (title: String, detail: String) { ("Rodando", "") }
+    func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
+        context.release?.released()
+        return "foi para segundo plano"
+    }
+}
+
 private actor Counter {
     private(set) var value = 0
     func increment() { value += 1 }
@@ -148,6 +161,37 @@ private struct CheckTool: AgentTool {
 }
 
 struct AgentEngineTests {
+    @Test func aCommandLetGoEndsTheStepWithoutRunningTheCallsAfterIt() async throws {
+        let runs = Counter()
+        let script = Script([
+            [.toolCalls([ToolCallRequest(id: "c1", name: "letgo", arguments: "{}"),
+                         ToolCallRequest(id: "c2", name: "touch", arguments: "{}"),
+                         ToolCallRequest(id: "c3", name: "touch", arguments: "{}")])],
+            [.text("pronto")],
+        ])
+        var turn = request(script, mode: .auto, runs: runs, tools: [LetGoTool(), TouchTool(runs: runs)])
+        turn.context.release = CommandRelease(steering: nil)
+        _ = await run(AgentEngine(), turn)
+
+        #expect(await runs.value == 0)
+        let second = await script.received[1]
+        let results = second.filter { $0.role == .tool }
+        #expect(results.map(\.toolCallID) == ["c1", "c2", "c3"])
+        #expect(results[1].content == AgentEngine.skippedAfterRelease && results[2].content == AgentEngine.skippedAfterRelease)
+    }
+
+    @Test func withoutACommandLetGoEveryCallOfTheStepRuns() async throws {
+        let runs = Counter()
+        let script = Script([
+            [.toolCalls([ToolCallRequest(id: "c1", name: "touch", arguments: "{}"),
+                         ToolCallRequest(id: "c2", name: "touch", arguments: "{}")])],
+            [.text("pronto")],
+        ])
+        var turn = request(script, mode: .auto, runs: runs)
+        turn.context.release = CommandRelease(steering: nil)
+        _ = await run(AgentEngine(), turn)
+        #expect(await runs.value == 2)
+    }
     /// What "Sempre permitir" on the `touch` test tool (a file tool) used to be, now a rule for its family.
     private let touchRule = PermissionRule(family: .writeFiles)
 

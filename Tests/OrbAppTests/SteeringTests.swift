@@ -235,6 +235,23 @@ struct SteeringEngineTests {
         #expect(second.last?.content == AgentEngine.steeringFrame + "\n\nsegundo")
     }
 
+    @Test @MainActor func lettingTheCommandGoSendsWhatWasQueuedForAfterTheTaskIntoIt() async throws {
+        let gate = Latch()
+        let client = HeldModel(gate: gate)
+        let (model, bot) = setUp(client)
+        model.submit("primeiro", to: bot.id)
+        await waitUntil("the model call") { await client.seen.count >= 1 }
+        #expect(model.submit("depois", to: bot.id, delivery: .afterTask))
+
+        model.sendCommandToBackground(of: bot.id)
+        // Whoever lets the command go wants to talk now: the message goes into the task, not after it.
+        #expect(model.composerLane(bot.id).queued.map(\.delivery) == [.steer])
+        await gate.open()
+        await waitUntilIdle(model, bot.id)
+        #expect(userTexts(model, bot.id) == ["primeiro", "depois"])
+        #expect(await client.seen.count == 2) // delivered inside the same turn
+    }
+
     @Test @MainActor func aFileAloneIsSentAsAMessageWithTheDefaultRequest() async throws {
         let client = HeldModel()
         let (model, bot) = setUp(client)

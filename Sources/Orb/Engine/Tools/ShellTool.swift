@@ -83,7 +83,8 @@ struct RunCommandTool: AgentTool {
                                                  timeout: .seconds(seconds), outputLimit: Self.outputLimit, spillTo: spill, detach: detach)
         if let process = result.detached, let jobs = context.jobs, let botID = context.botID {
             let job = await jobs.adopt(botID: botID, command: command, directory: directory, startedAt: startedAt, process: process)
-            return ToolResult(text: Self.detachedText(job, output: result))
+            context.release?.released()
+            return ToolResult(text: Self.detachedText(job, output: result, userWrote: context.release?.userWrote ?? false))
         }
         var output = result.output.isEmpty ? "(sem saída)" : result.output
         if !shell.isFromUserShell {
@@ -127,14 +128,18 @@ struct RunCommandTool: AgentTool {
         }
     }
 
-    /// What the model reads for a command that went on in the background while it ran (`CommandRelease`): the user wants the
-    /// Orb back, so it is told to answer them, and where the rest of the command is.
-    static func detachedText(_ job: BackgroundJobs.Snapshot, output: ProcessOutput) -> String {
+    /// What the model reads for a command that went on in the background while it ran (`CommandRelease`). With a message
+    /// of the user waiting (it comes right after this), the model answers it; without one, the user only chose not to wait,
+    /// so the model goes on with what does not need the result, or ends the turn saying what is still running.
+    static func detachedText(_ job: BackgroundJobs.Snapshot, output: ProcessOutput, userWrote: Bool) -> String {
         let printed = output.isBinary ? "(saída binária)" : output.output.isEmpty ? "(sem saída ainda)" : output.output
+        let why = userWrote
+            ? "porque o usuário quis falar com você enquanto ele roda. Atenda a mensagem dele agora"
+            : "porque o usuário preferiu não esperar por ele. Siga com o que não depende do resultado; se tudo depende, "
+                + "encerre o turno dizendo o que ficou rodando (o fim dele chega como aviso na conversa)"
         return """
-        [O comando continua rodando em segundo plano como o processo \(job.id), porque o usuário quis falar com você \
-        enquanto ele roda. Atenda o usuário agora; quando precisar do resultado, job_output(id: "\(job.id)") mostra a saída \
-        e se ele terminou, job_stop(id: "\(job.id)") encerra.]
+        [O comando continua rodando em segundo plano como o processo \(job.id), \(why). Quando precisar do resultado, \
+        job_output(id: "\(job.id)") mostra a saída e se ele terminou, job_stop(id: "\(job.id)") encerra.]
         Log completo: \(job.logPath)
         Saída até aqui:
         \(printed)

@@ -645,8 +645,19 @@ actor AgentEngine {
         }
 
         let confirmed = await confirmBatch(calls, request: request, reason: reason, allowed: &allowed, out: out)
+        // A command that went on in the background (`CommandRelease`) ends the step: the calls after it were asked for as
+        // if it had ended, and the user wants the Orb back. They are answered without running, and the model asks again.
+        let releasedBefore = request.context.release?.releasedCount ?? 0
         var index = 0
         while index < calls.count, !Task.isCancelled {
+            if (request.context.release?.releasedCount ?? 0) > releasedBefore {
+                for call in calls[index...] {
+                    let message = ChatMessage.tool(call.id, Self.skippedAfterRelease)
+                    messages.append(message)
+                    out.yield(.message(message))
+                }
+                break
+            }
             if let refused = confirmed.refused[index] {
                 append(refused, for: calls[index])
                 index += 1
@@ -687,6 +698,10 @@ actor AgentEngine {
         }
         return circling
     }
+
+    /// What the model reads for a call of the step not run because a command before it went on in the background.
+    static let skippedAfterRelease = "[Não executado: um comando anterior desta resposta foi para segundo plano antes de "
+        + "terminar, e esta chamada pode depender do resultado dele. Chame de novo se ainda fizer sentido.]"
 
     /// The step's calls with each `connector_call` replaced by the call of the real tool it names (`GitHub__create_issue`,
     /// with the arguments inside), and the request with those tools added. Everything after this (the approval cards, the

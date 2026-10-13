@@ -109,6 +109,9 @@ final class CommandReleaseTests {
 
         let text = try await run.value
         #expect(text.contains("segundo plano como o processo 1") && text.contains("job_output(id: \"1\")"))
+        // Nobody wrote: the model goes on with what does not need the result, it has no message to answer.
+        #expect(text.contains("preferiu não esperar") && !text.contains("Atenda"))
+        #expect(release.releasedCount == 1)
         #expect(!waiting.withLock { $0 })
         letItFinish()
         #expect(await waitForEnd(of: "1")?.state == .exited(0))
@@ -125,7 +128,7 @@ final class CommandReleaseTests {
 
         let long = try await RunCommandTool().run(.object(["command": .string(waitsForGo)]),
                                                   context: context(release: CommandRelease(steering: queue, grace: .milliseconds(300))))
-        #expect(long.contains("segundo plano como o processo 1"))
+        #expect(long.contains("segundo plano como o processo 1") && long.contains("Atenda a mensagem dele"))
         letItFinish()
         #expect(await waitForEnd(of: "1")?.state == .exited(0))
     }

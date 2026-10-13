@@ -1720,8 +1720,13 @@ final class AppModel {
     }
 
     /// The working line's "Segundo plano": the command the turn waits for goes on as a background job, and the Orb talks again.
+    /// Messages queued for after the task go now too: whoever lets the command go wants to talk, and a message waiting
+    /// for the end of the turn would otherwise leave the Orb told to answer the user with nothing to answer.
     func sendCommandToBackground(of botID: UUID) {
-        sessions[botID]?.commandRelease?.press()
+        guard let session = sessions[botID], let release = session.commandRelease else { return }
+        let lane = session.composerLane()
+        for message in lane.queued where message.delivery == .afterTask { _ = lane.setDelivery(message.id, to: .steer) }
+        release.press()
     }
 
     /// The strip's stop button. The strip follows by itself (`showJobs`), and a stop says nothing in the chat.
