@@ -66,7 +66,7 @@ struct MemoryTab: View {
                         .help(Tip.memoryShowKind)
                 }
             } header: {
-                Text("\(group.title) · \(group.items.count)")
+                MemoryGroupHeader(group: group)
             }
         }
         // A page forgotten fades out in `Motion.exit` and the rest close the gap. Bound to the memory's own ids, not to what the
@@ -154,6 +154,21 @@ private struct IdentityBlock: View {
     }
 }
 
+/// A group's title with its count a step quieter: "Preferências  2".
+private struct MemoryGroupHeader: View {
+    let group: MemoryGroup
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(group.title)
+            Text("\(group.items.count)")
+                .foregroundStyle(Palette.hint)
+                .monospacedDigit()
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
 /// The search line of a memory (an Orb's, or a group's board: the same field).
 struct MemorySearchField: View {
     @Binding var query: String
@@ -163,8 +178,11 @@ struct MemorySearchField: View {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
-            TextField("Buscar na memória", text: $query)
+            // The hint inside the field: in a Form a field's title would become a label column beside it.
+            TextField("Buscar na memória", text: $query, prompt: Text("Buscar na memória"))
                 .textFieldStyle(.plain)
+                .labelsHidden()
+                .lineLimit(1)
             if !query.isEmpty {
                 Button("Limpar busca", systemImage: "xmark.circle.fill") { query = "" }
                     .labelStyle(.iconOnly)
@@ -207,6 +225,9 @@ struct MemoryRow: View {
         HStack(alignment: .top, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(Self.text(of: item))
+                    .font(.callout)
+                    .foregroundStyle(Palette.ink.opacity(0.9))
+                    .lineSpacing(1.5)
                     .lineLimit(isExpanded ? nil : (item.kind == .sessao ? 1 : lineLimit))
                     .fixedSize(horizontal: false, vertical: true)
                     .motion(Motion.content, value: isExpanded)
@@ -227,15 +248,18 @@ struct MemoryRow: View {
                     }
                 }
                 Text(Self.caption(of: item))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.faint)
+                    .padding(.top, 1)
             }
             Spacer(minLength: 4)
             Button("Esquecer", systemImage: "trash", action: forget)
                 .labelStyle(.iconOnly)
                 .buttonStyle(.borderless)
-                .foregroundStyle(.secondary)
-                .opacity(isHovering ? 1 : 0.45)
+                .foregroundStyle(Palette.muted)
+                .font(.system(size: 11))
+                // Only under the pointer: a list of lembranças, not of trash cans. VoiceOver and the menu always have it.
+                .opacity(isHovering ? 1 : 0)
                 .animation(Motion.hover(isHovering), value: isHovering)
                 .help(Tip.forget)
                 .accessibilityLabel("Esquecer: \(item.title)")
@@ -251,7 +275,22 @@ struct MemoryRow: View {
     }
 
     static func text(of item: MemorySnapshot.Item) -> String {
-        item.kind == .sessao || item.title == item.body ? item.title : item.body
+        let text = item.kind == .sessao || item.title == item.body ? item.title : item.body
+        return displayed(text)
+    }
+
+    /// The text as the row shows it: without the list mark it was written with ("- ", "* ", "1. "), which on its own
+    /// line in a card only adds noise. The page keeps it.
+    nonisolated static func displayed(_ text: String) -> String {
+        let trimmed = text.drop { $0 == " " }
+        if let first = trimmed.first, "-*•".contains(first), trimmed.dropFirst().first == " " {
+            return String(trimmed.dropFirst(2))
+        }
+        let digits = trimmed.prefix { $0.isNumber }
+        if (1...2).contains(digits.count), trimmed.dropFirst(digits.count).hasPrefix(". ") || trimmed.dropFirst(digits.count).hasPrefix(") ") {
+            return String(trimmed.dropFirst(digits.count + 2))
+        }
+        return text
     }
 
     /// What an opened conversation shows under its title: the model's summary, then what was decided and what was left
@@ -317,7 +356,7 @@ struct MemorySheet: View {
                             .transition(MemoryMotion.forgotten(reduceMotion: reduceMotion, isSearching: !query.isEmpty))
                     }
                 } header: {
-                    Text("\(group.title) · \(group.items.count)")
+                    MemoryGroupHeader(group: group)
                 }
                 .transition(.opacity)
             }

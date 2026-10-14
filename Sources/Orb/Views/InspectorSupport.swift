@@ -19,6 +19,12 @@ enum InspectorTab: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// The name under the icon in the panel's bar: one line each, so the bar keeps one height ("Pasta e acessos" stays
+    /// the tab's full name, said to VoiceOver and in its tip).
+    var shortTitle: String {
+        self == .folder ? "Pasta" : title
+    }
+
     var symbol: String {
         switch self {
         case .general: "slider.horizontal.3"

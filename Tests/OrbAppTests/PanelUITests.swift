@@ -26,6 +26,19 @@ import Testing
         #expect(InspectorTab.allCases.map(\.title) == ["Geral", "Memória", "Pasta e acessos", "Rotinas"])
     }
 
+    @Test func theBarShowsEachTabOnOneShortLine() {
+        #expect(InspectorTab.allCases.map(\.shortTitle) == ["Geral", "Memória", "Pasta", "Rotinas"])
+    }
+
+    @Test func aRowLeavesOutTheListMarkTheTextWasWrittenWith() {
+        #expect(MemoryRow.displayed("- Preço: R$ 50") == "Preço: R$ 50")
+        #expect(MemoryRow.displayed("1. Cupom só com aprovação") == "Cupom só com aprovação")
+        #expect(MemoryRow.displayed("12) Segunda regra") == "Segunda regra")
+        #expect(MemoryRow.displayed("2026. Um ano") == "2026. Um ano")
+        #expect(MemoryRow.displayed("-3 graus") == "-3 graus")
+        #expect(MemoryRow.displayed("Sem marca") == "Sem marca")
+    }
+
     @Test func eachOrbRemembersItsOwnTab() {
         let defaults = defaults()
         let a = UUID(), b = UUID()

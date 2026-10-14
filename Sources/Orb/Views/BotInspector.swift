@@ -171,39 +171,43 @@ struct BotInspector: View {
 
     // MARK: Top of the panel
 
-    /// Who the Orb is, always visible: avatar, name and role (editable), and the way to change its look (the look
-    /// itself is said in the link's tip, so the header keeps to three short lines).
+    /// Who the Orb is, always visible: avatar, name and role (editable), and one quiet line under them with the way to
+    /// change its look (the look itself is said in the tip) and, for an Orb another made, who made it.
     private func header(_ bot: Bot) -> some View {
         let summary = AppearanceSummary.text(for: bot.orb)
         return HStack(alignment: .center, spacing: 14) {
-            LiveBotAvatar(botID: bot.id, orb: bot.orb, size: 60, interactive: true) // the only part that follows the activity
-            VStack(alignment: .leading, spacing: 4) {
+            LiveBotAvatar(botID: bot.id, orb: bot.orb, size: 56, interactive: true) // the only part that follows the activity
+            VStack(alignment: .leading, spacing: 5) {
                 InspectorHeader(bot: bot)
                     .id(bot.id)
-                Button("Personalizar…") {
-                    editorHeight = NewBotSheetLayout.height(preferred: 720)
-                    isEditingOrb = true
+                HStack(spacing: 6) {
+                    Button("Personalizar…") {
+                        editorHeight = NewBotSheetLayout.height(preferred: 720)
+                        isEditingOrb = true
+                    }
+                    .buttonStyle(QuietTextStyle())
+                    .fixedSize()
+                    .help("\(Tip.customizeOrb) (\(summary))")
+                    if bot.createdByName != nil {
+                        Text("·").foregroundStyle(Palette.hint).accessibilityHidden(true)
+                    }
+                    CreatedByLine(bot: bot) // MultiOrb (WP3)
                 }
-                .buttonStyle(.link)
-                .font(.caption)
-                .fixedSize()
-                .help("\(Tip.customizeOrb) (\(summary))")
-                CreatedByLine(bot: bot) // MultiOrb (WP3)
+                .font(.system(size: 11))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         // The same side padding as the form's cards below, so the header, the buttons, the tabs and the cards share edges.
         .padding(.horizontal, Spacing.xl)
-        .padding(.top, 16)
+        .padding(.top, 18)
         .padding(.bottom, 14)
     }
 
-    /// What people do most with an Orb's folder, one click each from any tab: equal tiles, each with its name under
-    /// the icon.
+    /// What people do most with an Orb's folder, one click each from any tab: two quiet buttons of one line, side by side.
     private func quickActions(_ bot: Bot) -> some View {
         let folderIsMissing = listing?.folder == .missing
         return HStack(spacing: 8) {
-            quickAction("Pasta", "folder", help: Tip.openFolderInFinder(bot.name)) {
+            quickAction("Finder", "folder", help: Tip.openFolderInFinder(bot.name)) {
                 OrbFolder.showInFinder(bot.workingURL)
             }
             .disabled(folderIsMissing)
@@ -213,17 +217,17 @@ struct BotInspector: View {
             .disabled(folderIsMissing)
         }
         .padding(.horizontal, Spacing.xl)
-        .padding(.bottom, 14)
+        .padding(.bottom, 12)
     }
 
     private func quickAction(_ title: String, _ symbol: String, help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            VStack(spacing: 4) {
+            HStack(spacing: 6) {
                 Image(systemName: symbol)
-                    .font(.system(size: 14))
-                    .frame(height: 18)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Palette.muted)
                 Text(title)
-                    .font(.system(size: 11))
+                    .font(.system(size: 12))
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
@@ -626,17 +630,15 @@ private struct InspectorTabBar: View {
                 } label: {
                     VStack(spacing: 3) {
                         Image(systemName: tab.symbol)
-                            .frame(height: 18)
-                            .font(.system(size: 14))
-                        Text(tab.title)
+                            .frame(height: 16)
+                            .font(.system(size: 13))
+                        Text(tab.shortTitle)
                             .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
-                            .lineLimit(2)
-                            .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: false, vertical: true)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
                     }
                     .foregroundStyle(isSelected ? Palette.ink : Palette.muted)
-                    .padding(.top, 6)
-                    .frame(maxWidth: .infinity, minHeight: 56, maxHeight: 56, alignment: .top)
+                    .frame(maxWidth: .infinity, minHeight: 44, maxHeight: 44)
                     .padding(.horizontal, 2)
                     .background {
                         if isSelected {
@@ -657,7 +659,11 @@ private struct InspectorTabBar: View {
         // jumps under Reduce Motion.
         .animation(Motion.selection(reduceMotion: reduceMotion), value: selection)
         .padding(.horizontal, Spacing.xl)
-        .padding(.bottom, 4)
+        .padding(.bottom, 8)
+        // A hairline under the bar: the tab's content scrolls under it, not into the buttons.
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Palette.line).frame(height: 1)
+        }
         // For VoiceOver and the keyboard this is one group of tabs, which a segmented picker already is.
         .accessibilityRepresentation {
             Picker("Seções do painel", selection: $selection) {
@@ -690,11 +696,18 @@ private struct InspectorHeader: View {
                 .font(.system(size: 15, weight: .semibold))
                 .focused($focus, equals: .name)
                 .onSubmit(commitName)
-            TextField("Papel", text: $role, prompt: Text("Papel"))
+            // Up to two lines, so a long role reads whole instead of stopping mid-word; Return still ends the edit.
+            TextField("Papel", text: $role, prompt: Text("Papel"), axis: .vertical)
+                .lineLimit(1...2)
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .focused($focus, equals: .role)
                 .onSubmit(commitRole)
+                // Return ends the edit (the role is one line that wraps), as in the name above.
+                .onKeyPress(.return) {
+                    focus = nil
+                    return .handled
+                }
         }
         .textFieldStyle(.plain)
         .labelsHidden() // in a Form a field shows its title beside the text
@@ -717,7 +730,7 @@ private struct InspectorHeader: View {
     }
 
     private func commitRole() {
-        model.setRole(bot.id, to: role)
+        model.setRole(bot.id, to: role.replacingOccurrences(of: "\n", with: " "))
         if let current = model.bot(bot.id) { role = current.role }
     }
 }
@@ -1037,11 +1050,26 @@ private struct QuickActionTileStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .foregroundStyle(isEnabled ? Palette.ink : Palette.faint)
-            .padding(.horizontal, 6)
-            .frame(maxWidth: .infinity, minHeight: 48)
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity, minHeight: 28)
             .hoverFill(isEnabled && (configuration.isPressed || isHovering), pressed: configuration.isPressed,
-                       in: .rect(cornerRadius: 8), color: Palette.ghostSelected, resting: Palette.raised)
-            .contentShape(.rect(cornerRadius: 8))
+                       in: .rect(cornerRadius: 7), color: Palette.ghostSelected, resting: Palette.surface)
+            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Palette.line))
+            .contentShape(.rect(cornerRadius: 7))
             .onHover { isHovering = $0 }
+    }
+}
+
+/// A small text button that stays gray until the pointer is on it ("Personalizar…" under the Orb's name): the header
+/// keeps its one color, the blue left to what leads elsewhere.
+private struct QuietTextStyle: ButtonStyle {
+    @State private var isHovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(configuration.isPressed ? Palette.secondary : isHovering ? Palette.ink : Palette.muted)
+            .contentShape(Rectangle())
+            .onHover { isHovering = $0 }
+            .animation(Motion.hover(isHovering), value: isHovering)
     }
 }
