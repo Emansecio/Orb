@@ -54,7 +54,9 @@ enum Palette {
     static let accent = Color(hex: 0x1084FE)
     static let accentText = Color(hex: 0x459FFE)
     static let ok = Color(hex: 0x00C972)
+    /// Red: something ran and failed (a command, a run, a connection, a login), or an action that destroys.
     static let danger = Color(hex: 0xFF263C)
+    /// Orange: nothing failed, but it needs you or deserves care (an approval waiting, a sign-in, a risky setting).
     static let warn = Color(hex: 0xFF9800)
     // What a search in the conversation marks: the text it found, and the wash that fades behind the message it brought into view.
     static let findMatch = Color(hex: 0xFF9800, opacity: 0.4)
@@ -361,6 +363,9 @@ struct PillMetrics {
 
 /// White pill: the primary action.
 struct PrimaryPillStyle: ButtonStyle {
+    /// Red with white text, for a primary action that destroys something (delete, reset, a risky command): white says
+    /// "do this", red says "this cannot be taken back".
+    var isDestructive = false
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.controlSize) private var controlSize
 
@@ -368,10 +373,11 @@ struct PrimaryPillStyle: ButtonStyle {
         let metrics = PillMetrics.of(controlSize)
         configuration.label
             .font(metrics.font)
-            .foregroundStyle(Palette.onInk)
+            .foregroundStyle(isDestructive ? Color.white : Palette.onInk)
             .padding(.horizontal, metrics.horizontal)
             .frame(minHeight: metrics.height)
-            .background(Palette.ink.opacity(configuration.isPressed ? 0.8 : (isEnabled ? 1 : 0.3)), in: .capsule)
+            .background((isDestructive ? Palette.danger : Palette.ink)
+                .opacity(configuration.isPressed ? 0.8 : (isEnabled ? 1 : 0.3)), in: .capsule)
             .contentShape(.capsule)
     }
 }

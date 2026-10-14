@@ -89,7 +89,7 @@ struct PermissionPopover: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("O que este Orb pode fazer sem perguntar")
+            Text("Quando este Orb pede sua permissão")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Palette.muted)
                 .padding(.horizontal, 14)

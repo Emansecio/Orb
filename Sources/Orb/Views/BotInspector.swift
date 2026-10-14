@@ -57,7 +57,7 @@ struct BotInspector: View {
                     .formStyle(.grouped)
                     .scrollContentBackground(.hidden)
                     .id(tab)
-                    .transition(.opacity)
+                    .transition(.pageSwap)
                 }
                 .motion(Motion.crossFade, value: tab)
                 // The task the Orb just scheduled from the chat (`AppModel.freshRoutine`, only set with this panel on screen)
@@ -464,16 +464,8 @@ struct BotInspector: View {
                 .chipButton()
                 .help(Tip.recreateFolder)
                 .transition(.quiet)
-        } else {
-            HStack(spacing: 8) {
-                Button("Abrir no Finder", systemImage: "folder") { OrbFolder.showInFinder(bot.workingURL) }
-                    .help(Tip.openFolderInFinder(bot.name))
-                Button("Abrir no Terminal", systemImage: "terminal") { OrbFolder.openInTerminal(bot.workingURL) }
-                    .help(Tip.openFolderInTerminal(bot.name))
-            }
-            .chipButton()
-            .transition(.quiet)
         }
+        // A folder that is there opens from the Finder and Terminal buttons over the tabs.
         Menu {
             Button("Escolher pasta…", systemImage: "folder.badge.gearshape") { isPickingFolder = true }
             if state == .ownFolder {
@@ -485,9 +477,11 @@ struct BotInspector: View {
                 Button("Criar pasta própria", systemImage: "folder.badge.plus") { attempt { try model.createOwnFolder(for: bot.id) } }
             }
         } label: {
-            Text("Mudar pasta")
+            Text("Mudar pasta…")
         }
         .menuStyle(.button)
+        // Without the system's blue arrow, the same chip as "Recriar" and the others; the "…" says it opens more.
+        .menuIndicator(.hidden)
         .chipButton()
         .fixedSize()
         .help(Tip.changeFolder)
@@ -519,8 +513,10 @@ struct BotInspector: View {
                         .foregroundStyle(.secondary)
                         .transition(.quiet)
                 }
+                // The git column only when some file has a marker: a folder without git lists names from the edge.
+                let showsMarkers = listing.files.contains { $0.marker != nil }
                 ForEach(listing.files) { file in
-                    WorkspaceFileRow(file: file)
+                    WorkspaceFileRow(file: file, showsMarker: showsMarkers)
                 }
             } header: {
                 HStack {
@@ -547,7 +543,7 @@ struct BotInspector: View {
     @ViewBuilder
     private func routinesTab(_ bot: Bot) -> some View {
         let routines = model.routines(for: bot.id)
-        // Each routine is a card of its own; the first one carries the tab's title.
+        // Each routine is a card of its own, with no heading: "Rotinas" is already the tab's name right above.
         if routines.isEmpty {
             Section {
                 VStack(alignment: .leading, spacing: 6) {
@@ -560,15 +556,11 @@ struct BotInspector: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.vertical, 4)
-            } header: {
-                Text("Rotinas")
             }
         }
-        ForEach(Array(routines.enumerated()), id: \.element.id) { index, routine in
+        ForEach(routines) { routine in
             Section {
                 RoutineRow(routine: routine) { editingRoutine = routine }
-            } header: {
-                if index == 0 { Text("Rotinas") }
             }
         }
         Section {
@@ -695,13 +687,11 @@ private struct InspectorTabBar: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(Palette.line).frame(height: 1)
         }
-        // For VoiceOver and the keyboard this is one group of tabs, which a segmented picker already is.
-        .accessibilityRepresentation {
-            Picker("Seções do painel", selection: $selection) {
-                ForEach(InspectorTab.allCases) { Text($0.title).tag($0) }
-            }
-            .pickerStyle(.segmented)
-        }
+        // For VoiceOver this is one named group of the tab buttons themselves (each says whether it is the selected one).
+        // Not a segmented picker standing in for them: its segments are laid out on their own and point beside the
+        // buttons, so a click by accessibility landed on the next tab.
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Seções do painel")
     }
 }
 
@@ -795,14 +785,18 @@ private struct InspectorHeader: View {
 /// A file of the folder: a git marker (or nothing for a recent file), its name and when it changed.
 private struct WorkspaceFileRow: View {
     let file: WorkspaceFile
+    /// Whether the list has a git column: off when no file of it has a marker, so no row starts with an empty gap.
+    var showsMarker = true
 
     var body: some View {
         HStack(spacing: 8) {
-            Text(file.marker?.rawValue ?? "")
-                .font(.caption2.monospaced().weight(.semibold))
-                .foregroundStyle(color)
-                .frame(width: 22)
-                .help(file.marker?.help ?? "")
+            if showsMarker {
+                Text(file.marker?.rawValue ?? "")
+                    .font(.caption2.monospaced().weight(.semibold))
+                    .foregroundStyle(color)
+                    .frame(width: 22)
+                    .help(file.marker?.help ?? "")
+            }
             Text(file.path)
                 .lineLimit(1)
                 .truncationMode(.head)
@@ -1057,18 +1051,28 @@ private struct RoutineLastLine: View {
 }
 
 enum RelativeTime {
-    /// "há 5 min", "em 2 h": for dates a little before or after now.
+    /// "há 5 min", "em 2 h", "há 3 semanas": for dates a little before or after now. "agora" within a minute either way,
+    /// never "em 0 seg." for something just saved. Written by hand, not with `RelativeDateTimeFormatter`: its short style
+    /// says "há 39 min." and "há 1 sem." (with the abbreviation's period), where the rest of the app (the routines'
+    /// "em 9 h 57 min") has none.
     static func text(_ date: Date, now: Date = .now) -> String {
-        formatter.localizedString(for: date, relativeTo: now)
+        let seconds = date.timeIntervalSince(now)
+        guard abs(seconds) >= 60 else { return "agora" }
+        return (seconds < 0 ? "há " : "em ") + span(abs(seconds))
     }
 
-    /// One formatter for every row: making one costs more than formatting with it.
-    nonisolated(unsafe) private static let formatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.locale = .app
-        formatter.unitsStyle = .short
-        return formatter
-    }()
+    /// "5 min", "2 h", "1 dia", "3 semanas", "1 mês", "2 anos": the largest unit that fits, rounded down.
+    static func span(_ seconds: TimeInterval) -> String {
+        let minutes = Int(seconds / 60)
+        if minutes < 60 { return "\(minutes) min" }
+        let hours = minutes / 60
+        if hours < 24 { return "\(hours) h" }
+        let days = hours / 24
+        if days < 7 { return days == 1 ? "1 dia" : "\(days) dias" }
+        if days < 30 { return days / 7 == 1 ? "1 semana" : "\(days / 7) semanas" }
+        if days < 365 { return days / 30 == 1 ? "1 mês" : "\(days / 30) meses" }
+        return days / 365 == 1 ? "1 ano" : "\(days / 365) anos"
+    }
 }
 
 enum InstructionsText {

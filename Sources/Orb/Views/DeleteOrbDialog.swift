@@ -123,6 +123,7 @@ struct DeleteOrbSheet: View {
                             cancel: { model.deletingBotID = nil },
                             primaryTitle: "Apagar e guardar a memória",
                             primaryIsDefault: false, // deleting is never what a reflex Return does; Esc still cancels
+                            primaryIsDestructive: true, // the Orb goes either way: red, not the white of "do this"
                             destructiveHelp: Tip.deleteWithMemory, primaryHelp: Tip.deleteKeepingMemory,
                             primary: { model.confirmDelete(botID, keepMemory: true) })
             }

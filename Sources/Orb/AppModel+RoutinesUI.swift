@@ -201,7 +201,8 @@ enum RoutineText {
     static func nextRun(of routine: Routine, now: Date = .now, calendar: Calendar = .current) -> String? {
         let date = routine.nextRun
         guard routine.isEnabled, date != .distantFuture else { return nil }
-        return "Próxima: \(relative(until: date, now: now)) · \(dayAndTime(date, now: now, calendar: calendar))"
+        // The day first, then how long until it: the same order as the Orb's panel and the editor's preview.
+        return "Próxima: \(dayAndTime(date, now: now, calendar: calendar)) · \(relative(until: date, now: now))"
     }
 
     /// The editor's preview of a schedule that has not been saved: "Próxima execução: amanhã às 09:00 (em 3 h)".

@@ -601,8 +601,8 @@ struct SchedulePermissionTests {
     @Test func theRowSaysWhenAnIntervalTaskRunsNextAndNothingWhilePaused() {
         let start = Date(timeIntervalSince1970: 1_800_000_000)
         var routine = Routine(name: "E-mails", botID: UUID(), prompt: "x", schedule: .everyMinutes(30), createdAt: start)
-        #expect(RoutineText.nextRun(of: routine, now: start)?.hasPrefix("Próxima: em 30 min") == true)
-        #expect(RoutineText.nextRun(of: routine, now: start.addingTimeInterval(20 * 60))?.hasPrefix("Próxima: em 10 min") == true)
+        #expect(RoutineText.nextRun(of: routine, now: start)?.hasSuffix("· em 30 min") == true)
+        #expect(RoutineText.nextRun(of: routine, now: start.addingTimeInterval(20 * 60))?.hasSuffix("· em 10 min") == true)
         routine.isEnabled = false
         #expect(RoutineText.nextRun(of: routine, now: start) == nil) // the row says "Pausada" instead
     }

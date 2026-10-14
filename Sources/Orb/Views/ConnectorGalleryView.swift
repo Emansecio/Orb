@@ -191,12 +191,14 @@ private struct ServiceCard: View {
     @ViewBuilder private var label: some View {
         switch status {
         case .available:
+            // The secondary pill, not the white one: with a dozen cards side by side, white on each would make every card
+            // the screen's main action.
             Text("Conectar")
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Palette.onInk)
+                .foregroundStyle(Palette.ink)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 4)
-                .background(Palette.ink, in: .capsule)
+                .background(Color.white.opacity(0.1), in: .capsule)
         case .connected:
             CatalogBadge(text: "Conectado", symbol: "checkmark.circle.fill", tint: Palette.ok)
         case .off:

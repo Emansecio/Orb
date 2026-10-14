@@ -140,7 +140,7 @@ struct ComposerView: View {
             if let error = lane.error {
                 Text(error)
                     .font(.caption)
-                    .foregroundStyle(Palette.warn)
+                    .foregroundStyle(Palette.danger)
                     .padding(.horizontal, 4)
                     .transition(.adapted(.unfold, reduceMotion: reduceMotion))
             }

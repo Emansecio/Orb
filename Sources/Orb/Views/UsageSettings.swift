@@ -269,7 +269,8 @@ struct UsageSettings: View {
                     ForEach(0..<24, id: \.self) { hour in
                         let fraction = peak > 0 ? Double(report.hourly[hour]) / Double(peak) : 0
                         RoundedRectangle(cornerRadius: 2)
-                            .fill(hour == busiest ? Palette.ink : Palette.faint.opacity(0.55))
+                            // The blue of the chart above (its first series), the busiest hour at full strength.
+                            .fill(hour == busiest ? Palette.accentText : Palette.accentText.opacity(0.35))
                             .frame(height: max(3, 44 * fraction))
                             .frame(maxWidth: .infinity)
                     }

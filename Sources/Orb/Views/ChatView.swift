@@ -26,7 +26,7 @@ struct ChatView: View {
         ZStack {
             TranscriptList(look: look, find: find)
                 .id(botID)
-                .transition(.opacity)
+                .transition(.pageSwap)
         }
         .motion(Motion.crossFade, value: botID)
         .overlay(alignment: .top) {

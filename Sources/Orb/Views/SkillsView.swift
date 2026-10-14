@@ -176,7 +176,7 @@ private struct InstalledSkillRow: View {
                         .help(Tip.copySlug(skill.slug))
                 }
                 if !skill.summary.isEmpty {
-                    Text(skill.summary)
+                    Text(MemoryText.tidyEllipsis(skill.summary))
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.muted)
                         .lineLimit(2)
@@ -435,10 +435,10 @@ struct SkillPreview: View {
                                     .font(.system(size: 13))
                                     .foregroundStyle(Palette.secondary)
                             }
+                            // In normal case, as every other heading in the app's sheets ("Chave", "Usar com", "Quando").
                             Text("Instruções que o Orb vai seguir")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(Palette.muted)
-                                .textCase(.uppercase)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Palette.ink)
                             Text(document.instructions)
                                 .font(.system(size: 12).monospaced())
                                 .foregroundStyle(Palette.secondary)
@@ -450,7 +450,7 @@ struct SkillPreview: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .transition(.opacity)
                     } else if let error {
-                        Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(Palette.warn)
+                        Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(Palette.danger)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .transition(.opacity)
                     } else {

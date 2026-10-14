@@ -75,8 +75,55 @@ struct CatalogTabBar: View {
     }
 }
 
-/// What a catalog page shows under its tabs. Another tab cross-fades with the one before (§2.13), the two laid over each
-/// other instead of stacked while they swap; the page's `tab` is what the fade is bound to.
+/// The same pill switch for any set of tabs that move between parts of one screen (the "Quem ele é | Aparência" of the
+/// new Orb sheet). Native segmented controls stay for picking a value inside a form; a switch that moves between parts
+/// looks like the catalog's, so the two never nest with the same face.
+struct PillTabs<Value: Hashable>: View {
+    struct Item {
+        let value: Value
+        let title: String
+        let symbol: String
+    }
+
+    @Binding var selection: Value
+    let items: [Item]
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var pillSpace
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(items, id: \.value) { item in pill(item) }
+        }
+        .animation(Motion.selection(reduceMotion: reduceMotion), value: selection)
+        .padding(3)
+        .background(Color.white.opacity(0.06), in: .capsule)
+    }
+
+    private func pill(_ item: Item) -> some View {
+        let isSelected = selection == item.value
+        return Button {
+            selection = item.value
+        } label: {
+            Label(item.title, systemImage: item.symbol)
+                .labelStyle(FixedIconLabelStyle())
+                .font(.system(size: 12, weight: .medium))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .foregroundStyle(isSelected ? Palette.onInk : Palette.secondary)
+                .background {
+                    if isSelected {
+                        Capsule().fill(Palette.ink).matchedGeometryEffect(id: "pilula", in: pillSpace)
+                    }
+                }
+                .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(CatalogTab.traits(isSelected: isSelected))
+    }
+}
+
+/// What a catalog page shows under its tabs. Another tab fades in over the one before (§2.13), which leaves faster
+/// (`.pageSwap`): the two are laid over each other instead of stacked while they swap; the page's `tab` drives the fade.
 struct CatalogTabContent<Content: View>: View {
     let tab: CatalogTab
     @ViewBuilder let content: Content
@@ -85,7 +132,7 @@ struct CatalogTabContent<Content: View>: View {
         ZStack {
             content
                 .id(tab)
-                .transition(.opacity)
+                .transition(.pageSwap)
         }
         .motion(Motion.crossFade, value: tab)
     }

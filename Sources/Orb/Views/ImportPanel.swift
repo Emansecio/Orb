@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 /// Fixed words of the import, shared by the panel, the sheet and the tests.
 enum ImportText {
     static let title = "Importar de outro assistente"
+    static let fromMarketplace = "Importar um bot do Grok Bot ou de outro assistente"
     static let hint = "Traga o que o ChatGPT ou o Gemini já sabe de você, ou um bot pronto do marketplace do Grok Bot."
     static let confirm = "Usar esta importação"
     static let notCreatedYet = "Nada foi criado ainda."
@@ -59,7 +60,7 @@ struct ImportPanel: View {
     @Binding var draft: OrbImport?
     let onBack: () -> Void
 
-    @State private var source = ImportSource.assistant
+    @State private var source: ImportSource
     @State private var pasted = ""
     @State private var link = ""
     @State private var error: String?
@@ -73,6 +74,12 @@ struct ImportPanel: View {
     @State private var locals: [LocalAssistant] = []
     /// Whether the preview came from the pasted text: emptying the text takes it away, a file's or folder's stays.
     @State private var draftIsFromText = false
+
+    init(draft: Binding<OrbImport?>, opensOn: ImportSource = .assistant, onBack: @escaping () -> Void) {
+        _draft = draft
+        _source = State(initialValue: opensOn)
+        self.onBack = onBack
+    }
 
     private static let previewID = "preview"
 
@@ -203,7 +210,7 @@ struct ImportPanel: View {
             if let error {
                 Text(error)
                     .font(.system(size: 12))
-                    .foregroundStyle(Palette.warn)
+                    .foregroundStyle(Palette.danger)
                     .fixedSize(horizontal: false, vertical: true)
                     .transition(.adapted(.rise, reduceMotion: reduceMotion))
             }
@@ -267,7 +274,7 @@ struct ImportPanel: View {
             if let error {
                 Text(error)
                     .font(.system(size: 12))
-                    .foregroundStyle(Palette.warn)
+                    .foregroundStyle(Palette.danger)
                     .fixedSize(horizontal: false, vertical: true)
                     .transition(.adapted(.rise, reduceMotion: reduceMotion))
             }
@@ -521,7 +528,7 @@ private struct ImportRow: View {
         Toggle(isOn: $item.isOn) {
             VStack(alignment: .leading, spacing: 2) {
                 if !item.title.isEmpty { Text(item.title).font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.ink) }
-                Text(item.text)
+                Text(ImportRow.shown(item.text))
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.secondary)
                     .lineLimit(lines)
@@ -534,6 +541,16 @@ private struct ImportRow: View {
         .toggleStyle(.checkbox)
         .help(Tip.importItem)
         .accessibilityElement(children: .combine)
+    }
+
+    /// The text as read, not as typed: Markdown list marks ("- ", "* ") become "• ". What is imported stays as it was.
+    static func shown(_ text: String) -> String {
+        text.split(separator: "\n", omittingEmptySubsequences: false).map { line in
+            let indent = line.prefix { $0 == " " || $0 == "\t" }
+            let rest = line.dropFirst(indent.count)
+            guard rest.hasPrefix("- ") || rest.hasPrefix("* ") else { return String(line) }
+            return String(indent) + "• " + String(rest.dropFirst(2))
+        }.joined(separator: "\n")
     }
 }
 

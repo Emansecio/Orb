@@ -54,7 +54,7 @@ struct ResetOrbSheet: View {
         .orbSheet("Redefinir o Orb?", size: .medium) {
             // A destructive sheet: Return does nothing here, and nothing in the alert answers Return either.
             SheetFooter(message: isRunning ? "Redefinindo…" : problem, cancel: { if !isRunning { dismiss() } },
-                        primaryTitle: "Redefinir…", isPrimaryDisabled: isRunning, primaryIsDefault: false,
+                        primaryTitle: "Redefinir…", isPrimaryDisabled: isRunning, primaryIsDefault: false, primaryIsDestructive: true,
                         primaryHelp: Tip.resetConfirm, primary: ask)
         }
         .task {

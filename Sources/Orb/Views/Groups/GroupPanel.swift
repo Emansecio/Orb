@@ -28,7 +28,7 @@ struct GroupPanel: View {
                     }
                 }
                 .id(tab)
-                .transition(.opacity)
+                .transition(.pageSwap)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .motion(Motion.adapted(Motion.crossFade, reduceMotion: reduceMotion), value: tab)
             }

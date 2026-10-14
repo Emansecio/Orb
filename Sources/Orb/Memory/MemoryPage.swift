@@ -319,14 +319,29 @@ enum MemoryText {
         return forms
     }
 
-    /// Shortens to `limit` characters on a word boundary.
+    /// Shortens to `limit` characters on a word boundary, dropping the punctuation left at the cut so it ends in one "…"
+    /// (never "perfil.…").
     static func clip(_ text: String, _ limit: Int) -> String {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count > limit else { return trimmed }
         let cut = trimmed.prefix(limit)
         let end = cut.lastIndex(where: \.isWhitespace) ?? cut.endIndex
-        return String(cut[..<end]) + "…"
+        var kept = String(cut[..<end])
+        while let last = kept.unicodeScalars.last, clipDangling.contains(last) { kept.unicodeScalars.removeLast() }
+        return kept + "…"
     }
+
+    /// A text already cut by an older `clip` ("perfil.…") with its "…" right after the word, as `clip` cuts now.
+    static func tidyEllipsis(_ text: String) -> String {
+        guard text.hasSuffix("…") else { return text }
+        var kept = String(text.dropLast())
+        while let last = kept.unicodeScalars.last, clipDangling.contains(last) { kept.unicodeScalars.removeLast() }
+        return kept + "…"
+    }
+
+    /// Punctuation and blanks a cut leaves hanging before its "…"; closing brackets and quotes stay.
+    static let clipDangling = CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters)
+        .subtracting(CharacterSet(charactersIn: ")]}\"”»"))
 
     /// One line: whitespace and newlines collapsed, control characters and leading `#` removed. Used for anything
     /// that came from a conversation before it goes into a title or the prompt, so it can't fake a section.

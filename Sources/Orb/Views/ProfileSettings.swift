@@ -46,7 +46,7 @@ struct ProfileSettings: View {
             if let photoError {
                 Label(photoError, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
-                    .foregroundStyle(Palette.warn)
+                    .foregroundStyle(Palette.danger)
             }
             field("Nome", prompt: "Como você se chama", \.name, limit: UserProfile.nameLimit)
             field("Como te chamar", prompt: model.profile.name.split(separator: " ").first.map(String.init) ?? "Opcional",

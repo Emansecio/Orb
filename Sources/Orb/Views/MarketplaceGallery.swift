@@ -39,7 +39,7 @@ struct MarketplaceGallery: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(message)
                         .font(.system(size: 12))
-                        .foregroundStyle(Palette.warn)
+                        .foregroundStyle(Palette.danger)
                         .fixedSize(horizontal: false, vertical: true)
                     Button("Tentar de novo") { attempt += 1 }
                         .buttonStyle(SecondaryPillStyle())

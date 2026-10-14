@@ -311,7 +311,7 @@ struct RoutineRunState: Equatable {
     let isQueued: Bool
 }
 
-/// "Próxima: em 3 h · hoje às 09:00", kept right as the minutes pass; "Concluída" once a one-time routine ran; "Pausada" when it is switched off.
+/// "Próxima: hoje às 09:00 · em 3 h", kept right as the minutes pass; "Concluída" once a one-time routine ran; "Pausada" when it is switched off.
 struct NextRunLine: View {
     let routine: Routine
 
@@ -562,7 +562,7 @@ private struct RoutineRunSheet: View {
             if !run.succeeded {
                 Label(run.summary, systemImage: "exclamationmark.triangle")
                     .font(.system(size: 13))
-                    .foregroundStyle(Palette.warn)
+                    .foregroundStyle(Palette.danger)
                     .fixedSize(horizontal: false, vertical: true)
             } else if (run.report ?? "").isEmpty {
                 Text(run.summary)

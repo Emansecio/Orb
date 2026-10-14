@@ -18,6 +18,9 @@ enum Motion {
     static let emphasis = Animation.spring(response: 0.45, dampingFraction: 0.72)
     /// Something that goes away.
     static let exit = Animation.easeOut(duration: 0.16)
+    /// The page, tab or Orb that leaves a swap (`AnyTransition.pageSwap`): gone in half the time the new one takes to come,
+    /// so the two are never seen laid over each other at the same strength.
+    static let swapOut = Animation.easeOut(duration: 0.08)
     /// How long `exit` lasts: what has to wait for something to be gone (rows that fade before they are removed).
     static let exitDuration = Duration.milliseconds(160)
     /// What replaces every movement under Reduce Motion.
@@ -50,6 +53,12 @@ extension Motion {
 }
 
 extension AnyTransition {
+    /// One content replacing another in the same place (pattern A of docs/MOVIMENTO.md): the new one fades in at the
+    /// swap's pace, the old one fades out at `Motion.swapOut`, faster, so the old screen does not linger under the new.
+    static var pageSwap: AnyTransition {
+        .asymmetric(insertion: .opacity, removal: .opacity.animation(Motion.swapOut))
+    }
+
     /// Rises 6 pt and appears; leaves by fading only.
     static var rise: AnyTransition {
         .asymmetric(insertion: .opacity.combined(with: .offset(y: 6)), removal: .opacity)

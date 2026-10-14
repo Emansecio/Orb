@@ -118,7 +118,7 @@ private struct BrowserEngineRowView: View {
         case .failed:
             Label(row.statusText, systemImage: "exclamationmark.triangle.fill")
                 .font(.caption)
-                .foregroundStyle(Palette.warn)
+                .foregroundStyle(Palette.danger)
                 .fixedSize(horizontal: false, vertical: true)
         case .installing:
             HStack(spacing: 6) {
@@ -194,7 +194,7 @@ private struct SearchKeySection: View {
             if let failure {
                 Label(failure, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
-                    .foregroundStyle(Palette.warn)
+                    .foregroundStyle(Palette.danger)
             }
         } header: {
             Text("Pesquisa na web")

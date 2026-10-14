@@ -94,10 +94,10 @@ enum DetailPage: Hashable {
         }
     }
 
-    /// How the page comes and goes: a cross-fade. The welcome screen leaves faster (`Motion.exit`) when you make the
-    /// first Orb, so the new Orb's chat does not wait for it.
+    /// How the page comes and goes: a fade, the old page gone faster than the new one arrives (`.pageSwap`). The welcome
+    /// screen leaves at `Motion.exit` when you make the first Orb, so the new Orb's chat does not wait for it.
     var transition: AnyTransition {
-        self == .welcome ? .asymmetric(insertion: .opacity, removal: .opacity.animation(Motion.exit)) : .opacity
+        self == .welcome ? .asymmetric(insertion: .opacity, removal: .opacity.animation(Motion.exit)) : .pageSwap
     }
 }
 

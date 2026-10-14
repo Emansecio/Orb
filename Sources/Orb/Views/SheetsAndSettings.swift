@@ -156,11 +156,12 @@ struct NewBotSheet: View {
 
     /// "Quem ele é | Aparência", full width at the top of the sheet.
     private var tabPicker: some View {
-        Picker("Parte do Orb", selection: Binding(get: { tab }, set: { tab = $0 })) {
-            ForEach(NewOrbTab.allCases) { Text($0.title).tag($0) }
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
+        // The pill switch of the catalog pages, not a segmented control: "Criar conversando | Formulário" below is one,
+        // and two segmented controls one inside the other read as the same level.
+        PillTabs(selection: Binding(get: { tab }, set: { tab = $0 }),
+                 items: NewOrbTab.allCases.map { .init(value: $0, title: $0.title, symbol: $0.symbol) })
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("Parte do Orb")
         .accessibilityIdentifier("new-orb-tab")
         .padding(.horizontal, 20)
@@ -240,11 +241,13 @@ struct NewBotSheet: View {
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
                     if !isImporting { modePicker.transition(.opacity) }
+                    if !isImporting && creation == .assistant { assistantImportLink.transition(.opacity) }
                     // A ZStack, not a Group: a Group hands its modifiers to each child, so the form and the import panel
                     // would sit side by side while they swap, and the one coming in would repeat the sheet's entrance.
                     ZStack {
                         if isImporting {
-                            ImportPanel(draft: $draft, onBack: { isImporting = false })
+                            ImportPanel(draft: $draft, opensOn: creation == .assistant ? .marketplace : .assistant,
+                                        onBack: { isImporting = false })
                                 .transition(.opacity)
                         } else if creation == .assistant {
                             WizardChatView(runner: wizard, look: orb).transition(.opacity)
@@ -267,6 +270,19 @@ struct NewBotSheet: View {
                     .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: creation)
                     .frame(width: 440)
             }
+    }
+
+    /// The import in "Criar conversando", where the form's "Começar de" is not shown: it opens on the Grok Bot gallery.
+    private var assistantImportLink: some View {
+        Button { isImporting = true } label: {
+            Label(ImportText.fromMarketplace, systemImage: "square.and.arrow.down").font(.system(size: 12))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Palette.accentText)
+        .help(Tip.importFromAssistant)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
     }
 
     private var form: some View {
@@ -393,6 +409,10 @@ struct NewBotSheet: View {
         importFill = ImportFill(giving: draft, name: &name, role: &role)
         imported = draft
         isImporting = false
+        if creation == .assistant { // the import shows (and is created) in the form
+            wizard.stopTalking()
+            userMode = .form
+        }
     }
 
     /// "Remover": the import goes, and the name and role it filled in go with it unless they were changed since.
@@ -471,6 +491,8 @@ private struct NewBotFolderSection: View {
                     }
                 }
                 .menuStyle(.button)
+                // Without the system's blue arrow: a plain small button like the others in the sheet, the "…" says it opens more.
+                .menuIndicator(.hidden)
                 .controlSize(.small)
                 .fixedSize()
                 .help(Tip.changeFolder)

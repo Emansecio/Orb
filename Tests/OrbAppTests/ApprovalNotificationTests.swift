@@ -254,6 +254,20 @@ private extension ApprovalRequest {
         #expect(model.needsYou(botID))
     }
 
+    @Test @MainActor func onlyTheCardTheKeysAnswerNamesThem() async {
+        let model = model()
+        let botID = model.bots[0].id
+        let older = card("ls"), newer = card("pwd")
+        // A card the conversation does not hold (a sample) shows them.
+        #expect(model.showsApprovalKeys(older.id, of: botID))
+        await open(model, older, for: botID)
+        await open(model, newer, for: botID)
+        #expect(!model.showsApprovalKeys(older.id, of: botID))
+        #expect(model.showsApprovalKeys(newer.id, of: botID))
+        model.decide(.deny, approvalID: newer.id, botID: botID)
+        #expect(model.showsApprovalKeys(older.id, of: botID))
+    }
+
     @Test @MainActor func denyingWithANoteMarksTheCardAndAnswersTheEngine() async {
         let model = model()
         let botID = model.bots[0].id

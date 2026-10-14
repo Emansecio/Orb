@@ -19,6 +19,13 @@ extension AppModel {
     /// The card the keyboard answers: the Orb's newest open one.
     func newestPendingApprovalID(of botID: UUID) -> UUID? { pendingApprovals(of: botID).last?.id }
 
+    /// Whether a card shows the keys (⌘↩, esc): only the one they answer, so two open cards never both claim them. A card
+    /// the conversation does not hold (a sample) shows them.
+    func showsApprovalKeys(_ approvalID: UUID, of botID: UUID) -> Bool {
+        guard let newest = newestPendingApprovalID(of: botID) else { return true }
+        return newest == approvalID
+    }
+
     /// The Orb's open question (`ask_user`), when its newest open card is one: the message box answers it.
     func openQuestion(of botID: UUID) -> UUID? {
         guard let newest = pendingApprovals(of: botID).last, newest.isQuestion else { return nil }

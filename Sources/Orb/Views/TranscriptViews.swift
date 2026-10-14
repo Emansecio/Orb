@@ -754,6 +754,9 @@ struct ToolCallLine: View {
                         + Text("  \(call.detail)").foregroundColor(Palette.faint))
                         .font(.system(size: 12))
                         .lineLimit(1)
+                        // Cut in the middle: the verb stays and so does the end of a command, where what tells two runs
+                        // apart usually is ("… --filter Suite26").
+                        .truncationMode(.middle)
                     stateMark
                     if call.output != nil {
                         Image(systemName: "chevron.right")
@@ -1045,7 +1048,7 @@ private struct NoticeLine: View {
                 VStack(spacing: 2) {
                     Label("Não deu certo", systemImage: "exclamationmark.triangle.fill")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Palette.warn)
+                        .foregroundStyle(Palette.danger)
                     Text(parts.sentence)
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.muted)
@@ -1286,8 +1289,13 @@ struct ApprovalCard: View {
     private var orbName: String { model.live(botID).look.name }
 
     private var isPending: Bool { request.decision == nil }
+    /// Whether this is the card ⌘↩ and esc answer, so its buttons name the keys.
+    private var showsKeys: Bool { model.showsApprovalKeys(request.id, of: botID) }
     private var allowTitle: String { request.isHandoff ? "Pronto" : request.isBatch ? "Permitir as \(request.items.count)" : "Permitir" }
     private var denyTitle: String { request.isHandoff ? "Cancelar" : "Não permitir" }
+    /// A request the gate marks as risky (deleting files, sudo, force push) gets the red pill: white is "go ahead".
+    private var allowFill: Color { request.isDangerous ? Palette.danger : Palette.ink }
+    private var allowText: Color { request.isDangerous ? .white : Palette.onInk }
     private var hasMoreOptions: Bool { !request.suggestions.isEmpty || request.isBatch }
     private static let visibleItems = 8
 
@@ -1484,9 +1492,11 @@ struct ApprovalCard: View {
         Button(action: deny) {
             HStack(spacing: 6) {
                 Text(denyTitle)
-                Text("esc")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.muted)
+                if showsKeys {
+                    Text("esc")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.muted)
+                }
             }
         }
         .buttonStyle(GhostStyle())
@@ -1507,12 +1517,14 @@ struct ApprovalCard: View {
                 HStack(spacing: 7) {
                     Text(allowTitle)
                         .contentTransition(.numericText())
-                    Text(AppShortcut.commandReturn.label)
-                        .font(.system(size: 11))
-                        .opacity(0.55)
+                    if showsKeys {
+                        Text(AppShortcut.commandReturn.label)
+                            .font(.system(size: 11))
+                            .opacity(0.55)
+                    }
                 }
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Palette.onInk)
+                .foregroundStyle(allowText)
                 .padding(.leading, 14)
                 .padding(.trailing, hasMoreOptions ? 10 : 14)
                 .frame(minHeight: ControlHeight.regular)
@@ -1523,7 +1535,7 @@ struct ApprovalCard: View {
             .accessibilityLabel(allowTitle)
             .accessibilityHint("Atalho: ⌘↩")
             if hasMoreOptions {
-                Rectangle().fill(Palette.onInk.opacity(0.25)).frame(width: 1, height: 16)
+                Rectangle().fill(allowText.opacity(0.25)).frame(width: 1, height: 16)
                     .accessibilityHidden(true)
                 Menu {
                     if let suggestion = request.suggestions.first {
@@ -1549,7 +1561,7 @@ struct ApprovalCard: View {
                 } label: {
                     Image(systemName: "chevron.down")
                         .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(Palette.onInk)
+                        .foregroundStyle(allowText)
                         .frame(width: 30, height: ControlHeight.regular)
                         .contentShape(.rect)
                 }
@@ -1561,7 +1573,7 @@ struct ApprovalCard: View {
                 .accessibilityLabel("Sempre permitir e outras opções")
             }
         }
-        .background(Palette.ink, in: .capsule)
+        .background(allowFill, in: .capsule)
         .opacity(pressed == .allow ? 0.85 : 1)
         .scaleEffect(pressed == .allow ? ApprovalShortcut.pressScale : 1)
         .animation(Motion.press, value: pressed)

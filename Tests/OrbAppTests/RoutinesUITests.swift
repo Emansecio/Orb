@@ -93,7 +93,7 @@ struct RoutinesUITests {
         var routine = Routine(name: "Resumo", botID: UUID(), prompt: "x", schedule: .everyHours(4))
         routine.createdAt = date(2026, 10, 7, 12, 0)
         routine.lastRun = date(2026, 10, 8, 11, 0)
-        #expect(RoutineText.nextRun(of: routine, now: now, calendar: calendar) == "Próxima: em 3 h · hoje às 15:00")
+        #expect(RoutineText.nextRun(of: routine, now: now, calendar: calendar) == "Próxima: hoje às 15:00 · em 3 h")
         routine.isEnabled = false
         #expect(RoutineText.nextRun(of: routine, now: now, calendar: calendar) == nil)
     }

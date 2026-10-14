@@ -40,7 +40,7 @@ struct ClaudeCodeAccountRow: View {
             if let error {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
-                    .foregroundStyle(Palette.warn)
+                    .foregroundStyle(Palette.danger)
             }
         }
         .confirmationDialog("Sair do Claude Code?", isPresented: $isConfirmingSignOut) {

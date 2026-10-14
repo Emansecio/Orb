@@ -145,6 +145,12 @@ final class FirstRunModel {
 
     /// Looks for Claude Code and local servers. Quiet and read-only: `claude auth status` and two local requests.
     func detect() async {
+        // A developer run (`--snapshot`) asks nothing of the machine: no real `claude`, so no capture shows this Mac's
+        // account. The cards then read as on a Mac where nothing was found.
+        guard !DevRun.isActive else {
+            hasDetected = true
+            return
+        }
         async let status = ClaudeCode.shared.status()
         async let servers = LocalServerProbe.running()
         claude = await status
@@ -533,7 +539,7 @@ struct FirstRunCard: View {
                     if let failure = steps.failure, failure.choice == .key {
                         Label(failure.message, systemImage: "exclamationmark.triangle.fill")
                             .font(.system(size: 12))
-                            .foregroundStyle(Palette.warn)
+                            .foregroundStyle(Palette.danger)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -599,7 +605,7 @@ private struct FirstRunRow: View {
                 case .failed(let message):
                     Text(message)
                         .font(.system(size: 12))
-                        .foregroundStyle(Palette.warn)
+                        .foregroundStyle(Palette.danger)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -710,7 +716,7 @@ struct FirstRunBanner: View {
                     if !(isCompact && steps.failure == nil && steps.working == nil && steps.connectedName == nil) {
                         Text(subtitle)
                             .font(.system(size: 12))
-                            .foregroundStyle(steps.failure == nil ? Palette.muted : Palette.warn)
+                            .foregroundStyle(steps.failure == nil ? Palette.muted : Palette.danger)
                             .fixedSize(horizontal: false, vertical: true)
                             .contentTransition(.opacity)
                     }

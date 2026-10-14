@@ -77,7 +77,7 @@ struct WelcomeOfferView: View {
         } else if let failure {
             Label(failure, systemImage: "exclamationmark.triangle.fill")
                 .font(.system(size: 12))
-                .foregroundStyle(Palette.warn)
+                .foregroundStyle(Palette.danger)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: 400)

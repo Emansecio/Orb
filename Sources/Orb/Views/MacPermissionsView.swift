@@ -511,7 +511,7 @@ private struct StatusBadge: View {
             case .broken:
                 Label("Não funciona", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
-                    .foregroundStyle(Palette.warn)
+                    .foregroundStyle(Palette.danger)
                     .transition(mark)
             }
         }

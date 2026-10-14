@@ -248,7 +248,7 @@ private struct ProviderRow: View {
         if let error {
             Label(error, systemImage: "exclamationmark.triangle.fill")
                 .font(.caption)
-                .foregroundStyle(Palette.warn)
+                .foregroundStyle(Palette.danger)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -287,6 +287,7 @@ private struct ProviderRow: View {
                 HStack {
                     Text(email ?? "ChatGPT").foregroundStyle(.secondary)
                     Button("Sair") { isConfirmingSignOut = true }
+                        .buttonStyle(.borderless) // as "Trocar" and "Remover…" in the other rows
                         .help(Tip.signOutChatGPT)
                 }
             }

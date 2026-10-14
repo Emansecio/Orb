@@ -13,6 +13,13 @@ enum NewOrbTab: String, CaseIterable, Identifiable, Sendable {
         case .look: "Aparência"
         }
     }
+
+    var symbol: String {
+        switch self {
+        case .who: "person.text.rectangle"
+        case .look: "paintpalette"
+        }
+    }
 }
 
 /// The two ways the new-Orb sheet creates an Orb: by talking to the assistant, or by filling in the form.

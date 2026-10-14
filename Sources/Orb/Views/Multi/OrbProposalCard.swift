@@ -101,6 +101,8 @@ struct OrbProposalCard: View {
     }
 
     private var isPending: Bool { request.decision == nil }
+    /// Whether this is the card ⌘↩ and esc answer, so its buttons name the keys.
+    private var showsKeys: Bool { model.showsApprovalKeys(request.id, of: botID) }
     /// What the card shows: while pending, what "Criar" will create (the draft, even with the editor closed); the proposal once answered.
     private var shown: OrbProposal { isPending ? draft : proposal }
     private var creator: String { proposal.creator.name }
@@ -428,9 +430,11 @@ struct OrbProposalCard: View {
         Button(action: create) {
             HStack(spacing: 7) {
                 Text("Criar")
-                Text(AppShortcut.commandReturn.label)
-                    .font(.system(size: 11))
-                    .opacity(0.55)
+                if showsKeys {
+                    Text(AppShortcut.commandReturn.label)
+                        .font(.system(size: 11))
+                        .opacity(0.55)
+                }
             }
             .font(.system(size: 13, weight: .medium))
             .foregroundStyle(Palette.onInk)
@@ -462,9 +466,11 @@ struct OrbProposalCard: View {
         Button(action: decline) {
             HStack(spacing: 6) {
                 Text("Não criar")
-                Text("esc")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.muted)
+                if showsKeys {
+                    Text("esc")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.muted)
+                }
             }
         }
         .buttonStyle(GhostStyle())

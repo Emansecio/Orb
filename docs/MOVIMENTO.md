@@ -326,7 +326,7 @@ listas longas.
 
 | Padrão | Quando | Como | Reduzir movimento |
 |---|---|---|---|
-| **A. Troca de conteúdo** | página, Orb, aba, categoria, vazio e cheio | fade cruzado sem direção, num `ZStack { conteúdo.id(chave).transition(.opacity) }` (nunca num stack ou `Group`) com `.motion(Motion.crossFade, value: chave)` | fade de 0,15 s |
+| **A. Troca de conteúdo** | página, Orb, aba, categoria, vazio e cheio | fade sem direção, num `ZStack { conteúdo.id(chave).transition(.pageSwap) }` (nunca num stack ou `Group`) com `.motion(Motion.crossFade, value: chave)`: o novo entra em 0,18 s e o velho sai em 0,08 s (`Motion.swapOut`), para as duas telas não aparecerem misturadas; vazio e cheio ainda usam `.opacity` | fade de 0,15 s |
 | **B. Algo novo num fluxo** | linha, cartão, aviso, campo | `.arrive`/`.rise`, saída só por opacidade em `Motion.exit`, vizinhas deslizam em `Motion.content`; preso a ids ou a um booleano, nunca à contagem | só opacidade, vizinhas trocam na hora (`.adapted` devolve `.quiet`) |
 | **C. Troca no lugar** | texto, selo, rótulo | `.transition(.opacity)`/`.contentTransition(.opacity)` e `animateChanges`/`textSwap` | na hora (ou fade) |
 | **D. Carregando, depois pronto** | spinner que vira conteúdo | `DelayedSpinner` (150 ms) e o conteúdo por `.opacity` em `ZStack`, `.motion(Motion.content, value: fase)` | fade de 0,15 s |

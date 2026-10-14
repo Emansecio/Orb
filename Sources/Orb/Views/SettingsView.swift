@@ -29,15 +29,9 @@ enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Each tab is as tall as it needs, not as the tallest.
-    var height: CGFloat {
-        switch self {
-        case .general: 760
-        case .models, .permissions: 640
-        case .browser: 720
-        case .usage: 700
-        }
-    }
+    /// One height for every tab: a window that grew and shrank at each click jumped under the pointer (SwiftUI does not
+    /// animate the Settings window's frame). A taller tab scrolls inside it, as its `Form` already does.
+    var height: CGFloat { 720 }
 }
 
 /// Opens Ajustes on a given tab: from the first-use card, a failed tool, a provider error.
@@ -141,7 +135,7 @@ struct GeneralSettings: View {
                 if let loginError {
                     Label(loginError, systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
-                        .foregroundStyle(Palette.warn)
+                        .foregroundStyle(Palette.danger)
                         .transition(.quiet)
                 }
                 Toggle("Me avisar quando um Orb terminar ou precisar de mim", isOn: $notifyWhenDone)

@@ -415,8 +415,8 @@ private struct ConnectorCard: View {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(Palette.ok)
                 Text(text).foregroundStyle(Palette.secondary)
             case .failed(let message):
-                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Palette.warn)
-                Text(ConnectorStatusText.shortError(message)).foregroundStyle(Palette.warn).lineLimit(2)
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Palette.danger)
+                Text(ConnectorStatusText.shortError(message)).foregroundStyle(Palette.danger).lineLimit(2)
             case .none:
                 EmptyView()
             }
@@ -447,7 +447,7 @@ private struct ConnectorCard: View {
             } label: {
                 Text("Não conectou: \(ConnectorStatusText.shortError(message))")
                     .font(.system(size: 12))
-                    .foregroundStyle(Palette.warn)
+                    .foregroundStyle(Palette.danger)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -488,7 +488,7 @@ private struct ConnectorCard: View {
                 CatalogBadge(text: count.map { "Pronto · \(ConnectorStatusText.toolCount($0))" } ?? "Pronto", symbol: "checkmark.circle")
                     .help("Liga sozinho quando um Orb precisar")
             case .failed:
-                CatalogBadge(text: "Erro", symbol: "exclamationmark.triangle.fill", tint: Palette.warn)
+                CatalogBadge(text: "Erro", symbol: "exclamationmark.triangle.fill", tint: Palette.danger)
             case .starting:
                 CatalogBadge(text: "Conectando…", symbol: "hourglass")
             case .needsSignIn(let expired):
@@ -920,7 +920,7 @@ struct ConnectorEditor: View {
             Outcome(symbol: "checkmark.circle.fill", tint: Palette.ok, title: "Conectado",
                     detail: ConnectorStatusText.toolsAvailable(count))
         case .failed(let message):
-            Outcome(symbol: "exclamationmark.triangle.fill", tint: Palette.warn, title: "Não conectou",
+            Outcome(symbol: "exclamationmark.triangle.fill", tint: Palette.danger, title: "Não conectou",
                     detail: ConnectorStatusText.shortError(message), full: message)
         }
     }

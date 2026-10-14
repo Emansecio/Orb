@@ -128,6 +128,8 @@ struct SheetFooter: View {
     let primaryTitle: String
     var isPrimaryDisabled = false
     var primaryIsDefault = true
+    /// The primary action destroys something (deleting, resetting): the pill is red instead of white.
+    var primaryIsDestructive = false
     /// False when the only button closes the sheet anyway (a finished connection): Esc still does it.
     var showsCancel = true
     /// Hover texts for the buttons whose label alone does not say what they do (the plain "Cancelar" and "Salvar" need none).
@@ -163,7 +165,7 @@ struct SheetFooter: View {
                     .help(cancelHelp)
             }
             Button(primaryTitle, action: primary)
-                .buttonStyle(PrimaryPillStyle())
+                .buttonStyle(PrimaryPillStyle(isDestructive: primaryIsDestructive))
                 .keyboardShortcut(SheetFooter.primaryShortcut(isDefault: primaryIsDefault))
                 .help(primaryHelp)
                 .disabled(isPrimaryDisabled)

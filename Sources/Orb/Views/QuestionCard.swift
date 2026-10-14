@@ -28,6 +28,8 @@ struct QuestionCard: View {
     }
 
     private var isPending: Bool { request.decision == nil }
+    /// Whether this is the card esc answers, so "Pular" names the key.
+    private var showsKeys: Bool { model.showsApprovalKeys(request.id, of: botID) }
     private var orbName: String { model.live(botID).look.name }
 
     var body: some View {
@@ -72,7 +74,7 @@ struct QuestionCard: View {
                 Button(action: skip) {
                     HStack(spacing: 6) {
                         Text("Pular")
-                        Text("esc").font(.system(size: 11)).foregroundStyle(Palette.muted)
+                        if showsKeys { Text("esc").font(.system(size: 11)).foregroundStyle(Palette.muted) }
                     }
                 }
                 .buttonStyle(GhostStyle())

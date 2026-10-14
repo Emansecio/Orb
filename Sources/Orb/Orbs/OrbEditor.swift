@@ -91,7 +91,7 @@ struct OrbEditor: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .id(category)
-            .transition(.opacity)
+            .transition(.pageSwap)
         }
         .motion(Motion.crossFade, value: category)
     }
@@ -353,9 +353,9 @@ struct OrbEditor: View {
 
     private func group(_ group: (title: String, categories: [OrbCategory])) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(group.title.uppercased())
-                .font(.system(size: 11, weight: .semibold))
-                .tracking(0.5)
+            // The sidebar's section title (`SectionTitle`): normal case, not the only capitals in the app.
+            Text(group.title)
+                .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Palette.faint)
                 .padding(.leading, 6)
                 .accessibilityAddTraits(.isHeader)
