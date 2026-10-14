@@ -65,14 +65,19 @@ private struct SearchableModelField: View {
     var body: some View {
         LabeledContent(title) {
             Button { isOpen = true } label: {
-                // Looks like the pop-up button of a Picker in a Form: the value and a small round chevron.
-                HStack(spacing: 8) {
-                    Text(currentLabel).lineLimit(1).truncationMode(.middle).foregroundStyle(.primary)
+                // Looks like the pop-up button of a Picker in a Form (the "Esforço" and "Modo" rows beside it): the value
+                // in the same weight and color, and the chevron in the same small rounded box.
+                HStack(spacing: 6) {
+                    Text(currentLabel).lineLimit(1).truncationMode(.middle)
+                        .fontWeight(.medium)
+                        .foregroundStyle(Palette.ink)
                     Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 9, weight: .semibold))
-                        .frame(width: 20, height: 20)
-                        .background(Palette.ghostSelected, in: .circle)
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Palette.ink)
+                        .frame(width: 15, height: 17)
+                        .background(Palette.ghostSelected, in: .rect(cornerRadius: 4))
                 }
+                .padding(.trailing, 2) // the native pop-up keeps its box this far in from the row's edge
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
