@@ -179,15 +179,26 @@ enum MemoryText {
         seen = []
         for word in unique.sorted(by: { $0.count > $1.count }) {
             for variant in variants(word) where seen.insert(variant).inserted {
-                terms.append(prefixes(variant) ? "\"\(variant)\"*" : "\"\(variant)\"")
+                if prefixes(variant) {
+                    terms.append("\"\(variant)\"*")
+                } else {
+                    terms.append("\"\(variant)\"")
+                    if variant.count == 3 { terms.append("\"\(variant)s\"") } // "voo" finds "voos", "app" finds "apps"
+                }
             }
             if terms.count >= limit { break }
         }
         return terms.isEmpty ? nil : terms.prefix(limit).joined(separator: " OR ")
     }
 
-    /// Whether a variant is long enough to match by prefix: "sp"* would match "sprint", so short ones match exactly.
-    static func prefixes(_ variant: String) -> Bool { variant.count >= 4 }
+    /// Whether a variant is long enough to match by prefix: "sp"* would match "sprint", so short ones match exactly
+    /// (three letters also with an "s": `shortForm`). Numbers keep the prefix: "10" finds "10h".
+    static func prefixes(_ variant: String) -> Bool { variant.count >= 4 || variant.contains(where: \.isNumber) }
+
+    /// Whether `token` is the short `form` itself, or its plural when `form` has three letters ("voo" and "voos").
+    static func shortForm(_ form: String, matches token: String) -> Bool {
+        token == form || (form.count == 3 && token == form + "s")
+    }
 
     /// Acknowledgements and pleasantries (folded): a message made only of these, with `greetings`, says nothing to look up.
     private static let chatter: Set<String> = [
@@ -257,7 +268,7 @@ enum MemoryText {
     static func matchCount(of terms: [String], in text: String) -> Int {
         let tokens = Set(words(text))
         return terms.filter { term in
-            variants(term).contains { form in tokens.contains { prefixes(form) ? $0.hasPrefix(form) : $0 == form } }
+            variants(term).contains { form in tokens.contains { prefixes(form) ? $0.hasPrefix(form) : shortForm(form, matches: $0) } }
         }.count
     }
 
@@ -268,12 +279,13 @@ enum MemoryText {
         guard !text.isEmpty else { return [] }
         tagger.string = text
         tagger.setLanguage(.portuguese, range: text.startIndex..<text.endIndex)
+        let all = text.startIndex..<text.endIndex, options: NLTagger.Options = [.omitPunctuation, .omitWhitespace]
+        // Two passes, not one tagger call inside the other's enumeration.
+        let lemmas = Set(tagger.tags(in: all, unit: .word, scheme: .lemma, options: options).compactMap { $0.0 == nil ? nil : $0.1.lowerBound })
         var nouns = Set<String>()
-        tagger.enumerateTags(in: text.startIndex..<text.endIndex, unit: .word, scheme: .lexicalClass,
-                             options: [.omitPunctuation, .omitWhitespace]) { tag, range in
-            let hasLemma = tagger.tag(at: range.lowerBound, unit: .word, scheme: .lemma).0 != nil
-            if tag == .noun || !hasLemma { nouns.formUnion(words(String(text[range]))) }
-            return true
+        for (tag, range) in tagger.tags(in: all, unit: .word, scheme: .lexicalClass, options: options)
+        where tag == .noun || !lemmas.contains(range.lowerBound) {
+            nouns.formUnion(words(String(text[range])))
         }
         return nouns
     }

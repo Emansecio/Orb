@@ -118,8 +118,9 @@ private struct IdentityBlock: View {
                     .foregroundStyle(.secondary)
             }
             if memory.preferencesOverflow > 0 {
-                Text("\(memory.preferencesOverflow) \(memory.preferencesOverflow == 1 ? "preferência não cabe" : "preferências não cabem") no que \(name) sempre vê; "
-                     + (canSummarize ? "\(name) vai resumi-las sozinho." : "ele as encontra só quando busca."))
+                Text("\(memory.preferencesOverflow) \(memory.preferencesOverflow == 1 ? "preferência não cabe" : "preferências não cabem") inteira\(memory.preferencesOverflow == 1 ? "" : "s") no que \(name) sempre vê; "
+                     + (canSummarize && memory.preferencesConsolidate
+                        ? "\(name) vai juntar as mais curtas sozinho." : "o resto é encontrado só quando \(name) busca."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

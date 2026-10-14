@@ -192,6 +192,13 @@ import Testing
             + (0..<8).map { "- " + String(repeating: "d\($0)", count: 100) }.joined(separator: "\n")
             + "\n\n## Última resposta\n" + String(repeating: "u", count: 900)
         #expect(MemoryBank.leftOff(big).count <= MemoryBank.leftOffShare + 1)
+        // What was left open survives a full summary and decisions; a decision is not repeated as a request.
+        let open = "## Resumo\n(marca)\n- " + String(repeating: "r", count: 900) + "\n\n## Pedidos\n- 10:00 — Usar zirconia no cache\n"
+            + "- 10:05 — " + String(repeating: "p", count: 300) + "\n\n## Decisões\n- Usar zirconia no cache\n- " + String(repeating: "d", count: 300)
+            + "\n\n## O que foi feito\n- " + String(repeating: "f", count: 300) + "\n\n## Pendências\n- Falta o certificado"
+        let shown = MemoryBank.leftOff(open)
+        #expect(shown.contains("- Left open: Falta o certificado"))
+        #expect(!shown.contains("Asked: 10:00 — Usar zirconia"))
     }
 
     @Test func compactedSessionsKeepDecisionsAndSummarySearchable() async throws {
@@ -717,7 +724,7 @@ struct MemoryIntentTests {
         let body = text + "\n\n" + MemoryBank.identityNotesHeader + "\n" + notes.joined(separator: "\n")
         let shown = MemoryBank.identityBlock(body, MemoryBank.identityShare)
         #expect(shown.count <= MemoryBank.identityShare && shown.hasPrefix(text) && !shown.contains("[…]"))
-        #expect(shown.contains("older notes not shown here") && shown.contains("nota número 6") && !shown.contains("nota número 1 "))
+        #expect(shown.contains("older notes left out of this prompt") && shown.contains("nota número 6") && !shown.contains("nota número 1 "))
         #expect(MemoryBank.identityBlock("curta", MemoryBank.identityShare) == "curta")
         let huge = String(repeating: "x", count: 2_000) + "\n" + MemoryBank.identityNotesHeader + "\n- uma nota"
         #expect(MemoryBank.identityBlock(huge, MemoryBank.identityShare).contains("[…]")) // the text alone does not fit

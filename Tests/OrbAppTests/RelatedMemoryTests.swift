@@ -1,4 +1,5 @@
 import Foundation
+import NaturalLanguage
 import Testing
 @testable import Orb
 
@@ -288,5 +289,68 @@ import Testing
     @Test func theTaskTakesTheLatestRequestsAndTheGoal() {
         let history: [ChatMessage] = [.user("primeiro"), ChatMessage(role: .assistant, content: "a"), .user("segundo"), ChatMessage(role: .assistant, content: "b"), .user("terceiro")]
         #expect(TurnPreface.taskContext(history: history, goal: "Migrar o banco") == "terceiro\nsegundo\nMigrar o banco")
+    }
+
+    // MARK: Subject words
+
+    /// `seeded`, plus facts everyday messages should find although they share only one noun with them.
+    func everyday() async -> MemoryBank {
+        let bank = await seeded()
+        for (title, fact) in [("Cachorro se chama Thor", "Meu cachorro se chama Thor, é um labrador de 3 anos."),
+                              ("Usa Node 20 no projeto loja", "O projeto loja-web roda em Node 20 e usa pnpm."),
+                              ("Relatórios em PDF", "Prefere receber relatórios em PDF, nunca em planilha."),
+                              ("Para publicar o site", "Para publicar o site: rodar os testes, depois npm run deploy na pasta ~/sites/loja."),
+                              ("Erro do checkout", "O checkout dava erro 500 quando o cupom era aplicado; corrigido com outro gateway.")] {
+            await bank.remember(fact, title: title)
+        }
+        return bank
+    }
+
+    @Test func verbsAndAdverbsDoNotRaiseTheBar() async {
+        let bank = await everyday()
+        for (message, title) in [("o Thor tá doente, o que faço?", "Thor"),
+                                 ("preciso levar o cachorro no veterinário amanhã", "Thor"),
+                                 ("vou atualizar a versão do node, qual uso hoje?", "Node 20"),
+                                 ("me manda o relatório em xlsx", "Relatórios"),
+                                 ("vou publicar a página nova", "publicar o site"),
+                                 ("o pagamento do checkout voltou a falhar", "checkout")] {
+            let titles = await bank.related(to: message).map(\.title)
+            #expect(titles.contains { $0.contains(title) }, "\"\(message)\" should bring \(title), got: \(titles)")
+        }
+    }
+
+    @Test func manyWordsButNoSubjectStillBringNothing() async {
+        let bank = await everyday()
+        for message in ["Preciso de ajuda para escolher uma cor para o projeto do cliente novo",
+                        "Qual é a capital da Austrália e quantos habitantes tem?",
+                        "escreve um email educado recusando o convite",
+                        "traduz esse texto pro espanhol pra mim",
+                        "hoje eu tenho que fazer muita coisa, me ajuda a organizar o dia"] {
+            let titles = await bank.related(to: message).map(\.title)
+            #expect(titles.isEmpty, "\"\(message)\" should bring nothing, got: \(titles)")
+        }
+    }
+
+    @Test func aMessageWithSubjectsNeedsOneOfThemNotJustAVerb() async {
+        let bank = await everyday()
+        await bank.remember("Amanhã tenho dentista às 15h.", title: "Dentista amanhã")
+        let titles = await bank.related(to: "configurar o servidor e testar o deploy amanhã").map(\.title)
+        #expect(!titles.contains { $0.contains("Dentista") }, "got: \(titles)")
+        #expect(titles.contains { $0.contains("deploy") || $0.contains("publicar") }, "got: \(titles)")
+    }
+
+    @Test func theTaggerKeepsNounsAndNamesNotVerbs() {
+        let nouns = MemoryText.topicNouns("o Thor tá doente, o que faço com o checkout?", tagger: NLTagger(tagSchemes: [.lexicalClass, .lemma]))
+        #expect(nouns.contains("thor") && nouns.contains("checkout"))
+        #expect(!nouns.contains("faco") && !nouns.contains("ta"))
+        #expect(MemoryText.isTopic("cachorros", in: ["cachorro"]) && !MemoryText.isTopic("faco", in: ["cachorro"]))
+    }
+
+    @Test func shortWordsMatchExactlyOrAsTheirPlural() {
+        #expect(MemoryText.ftsQuery("voo")?.contains("\"voos\"") == true)
+        #expect(MemoryText.ftsQuery("sp")?.contains("*") == false)
+        #expect(MemoryText.matchCount(of: ["voo"], in: "Dois voos marcados para novembro") == 1)
+        #expect(MemoryText.matchCount(of: ["sp"], in: "Planejamento da sprint de março") == 0)
+        #expect(MemoryText.matchCount(of: ["10"], in: "Reunião toda terça às 10h") == 1) // numbers keep the prefix
     }
 }

@@ -28,6 +28,8 @@ struct MemorySnapshot: Equatable, Sendable {
     var items: [Item] = []
     /// Preferences the system prompt cuts or leaves out (see `MemoryBank.preferenceBlock`): found only by `recall`.
     var preferencesOverflow = 0
+    /// Whether a consolidation pass will shorten the preferences that do not fit (see `MemoryConsolidation.isDue`).
+    var preferencesConsolidate = false
 
     func items(_ kind: MemoryKind) -> [Item] { items.filter { $0.kind == kind } }
     var isEmpty: Bool { identity.isEmpty && items.isEmpty }
@@ -103,6 +105,8 @@ actor MemoryBank {
     /// What the memories related to one message may take: up to `relatedLimit` of them, each cut to `relatedSnippet`
     /// characters (the rest is one `recall` away).
     static let relatedShare = 900, relatedLimit = 3, relatedSnippet = 220
+    /// The most of a message (and its task) the tagger reads for `related`: a long paste would slow every turn.
+    static let taggedLength = 2_000
     /// How often hand edits to the pages are picked up while the app runs.
     static let reconcileInterval: TimeInterval = 20
     /// How long after the index failed to open the next try waits.
@@ -303,15 +307,24 @@ actor MemoryBank {
         prepare(now: now)
         let terms = MemoryText.lookupTerms(message, context: context)
         guard !terms.isEmpty, let match = MemoryText.ftsQuery(terms.joined(separator: " ")) else { return [] }
-        // Only subject words raise the bar. The tagger sees the context too, so terms borrowed from it are judged alike.
-        // Nothing tagged (empty or unknown language): every term counts, as before.
-        let nouns = MemoryText.topicNouns(context.isEmpty ? message : message + ". " + context, tagger: tagger)
-        let subject = nouns.isEmpty ? terms.count : terms.filter { MemoryText.isTopic($0, in: nouns) }.count
-        let required = subject >= 3 ? 2 : 1
+        // Only subject words raise the bar (fewer than three terms need one either way, so no tagging then). The tagger
+        // sees the context too, so terms borrowed from it are judged alike. Nothing tagged (empty or unknown language):
+        // every term counts, as before.
+        var subject = terms
+        if terms.count >= 3 {
+            let text = context.isEmpty ? message : message + ". " + context
+            let nouns = MemoryText.topicNouns(String(text.prefix(Self.taggedLength)), tagger: tagger)
+            if !nouns.isEmpty { subject = terms.filter { MemoryText.isTopic($0, in: nouns) } }
+        }
+        let required = subject.count >= 3 ? 2 : 1
+        // A message naming two subjects or more: a page must have one of them, not just a verb or an adverb it shares.
+        let needsSubject = subject.count >= 2 && subject.count < terms.count
         // Wider than `limit`: what the filters drop must not leave the message with fewer memories than it deserves.
         let candidates = search(match: match, words: Set(terms.map(MemoryText.stem)), rows: 4 * limit + excluding.count, excluding: excluding)
-        let hits = candidates.filter { MemoryText.matchCount(of: terms, in: $0.text) >= required && !isSent($0.hit) }
-            .prefix(limit).map(\.hit)
+        let hits = candidates.filter {
+            MemoryText.matchCount(of: terms, in: $0.text) >= required && !isSent($0.hit)
+                && (!needsSubject || MemoryText.matchCount(of: subject, in: $0.text) >= 1)
+        }.prefix(limit).map(\.hit)
         bump(hits.map(\.path), now: now)
         return Array(hits)
     }
@@ -369,8 +382,12 @@ actor MemoryBank {
 
         var notes: [String] = []
         var shown: Set<String> = [Self.identityPath]
-        // Only the preferences the prompt shows whole; a cut or left-out one can still come back as a related memory.
-        shown.formUnion(preferences.prefix(preferenceLayout.whole).map(\.path))
+        // The preferences the prompt shows. A left-out one can still come back as a related memory, and so can a cut one
+        // long enough (past `snippet`'s 400) for its related line to show another part of it.
+        shown.formUnion(preferences.prefix(preferenceLayout.displayed).filter {
+            let length = MemoryText.flatten($0.body).count
+            return length <= preferenceLayout.each || length <= 400
+        }.map(\.path))
         let related = related(to: message, context: context, excluding: shown,
                               isSent: { hit in Self.isSent(Self.relatedHeader(hit), in: alreadySent) }, now: now)
         var relatedLines: [String] = []
@@ -460,15 +477,18 @@ actor MemoryBank {
         let identity = identity()
         shownKey = snapshotKey(identity: identity)
         let items = index?.rows("""
-            SELECT path, kind, title, body, updated, compacted FROM pages WHERE kind != 'identidade' ORDER BY updated DESC
+            SELECT path, kind, title, body, updated, compacted FROM pages WHERE kind != 'identidade' ORDER BY updated DESC, path
             """).compactMap { row -> MemorySnapshot.Item? in
             guard let kind = MemoryKind(rawValue: row.text(1)) else { return nil }
             return MemorySnapshot.Item(path: row.text(0), kind: kind, title: row.text(2), body: row.text(3),
                                        date: Date(timeIntervalSince1970: row.double(4) ?? 0), compacted: row.int(5) == 1)
         } ?? []
         let preferences = items.filter { $0.kind == .preferencia }.prefix(Self.pinnedPreferenceLimit).map { MemoryText.flatten($0.body) }
+        // Whether a consolidation pass would shorten them: only short preferences the Orb wrote (`isDue`).
+        let consolidable = consolidablePreferences(now: now).prefix(Self.pinnedPreferenceLimit).map { MemoryText.flatten($0.body) }
         return MemorySnapshot(identity: identity?.body ?? "", interviewPending: identity?.interviewPending ?? false, items: items,
-                              preferencesOverflow: Self.preferenceBlock(preferences).overflow)
+                              preferencesOverflow: Self.preferenceBlock(preferences).overflow,
+                              preferencesConsolidate: Self.preferenceBlock(consolidable).overflow > 0)
     }
 
     /// The snapshot, or nil when nothing the panel shows changed since the last one (the pages are not read and
@@ -658,10 +678,11 @@ actor MemoryBank {
         let requests = SessionSummary.section("Pedidos", in: page.body).prefix(3).map { "- " + MemoryText.clip($0, 140) }
         let decisions = SessionSummary.section("Decisões", in: page.body).suffix(8).map { "- " + MemoryText.clip($0, 160) }
         // The model's notes keep their mark (data, never instructions) and are cut to ~600 characters in all.
+        // The newest first (as `leftOff` shows them), back in their order; a sliver too short to say anything is left out.
         var notes: [String] = [], used = 0
-        for note in SessionSummary.section("Resumo", in: page.body) where used < 600 {
+        for note in SessionSummary.section("Resumo", in: page.body).reversed() where 600 - used >= 80 {
             let clipped = MemoryText.clip(note, 600 - used)
-            notes.append("- " + clipped)
+            notes.insert("- " + clipped, at: 0)
             used += clipped.count
         }
         let references = MemoryText.keepTokens(page.body).map { "- \($0)" }
@@ -755,7 +776,7 @@ actor MemoryBank {
 
     /// Conversation-derived text for the prompt: one line, no fake sections, no fence breaking.
     static func untrusted(_ text: String) -> String {
-        MemoryText.flatten(text).replacingOccurrences(of: "memory_notes", with: "memory notes")
+        MemoryText.flatten(text).replacingOccurrences(of: "memory_notes", with: "memory notes", options: .caseInsensitive)
     }
 
     /// Long identities keep their start (what you wrote) and their end (the newest notes from the interview).
@@ -771,7 +792,7 @@ actor MemoryBank {
         let notes = identityNotes(in: body).map { String($0.dropFirst(2)) }
         guard !notes.isEmpty else { return headAndTail(body, limit) }
         for kept in stride(from: notes.count - 1, through: 0, by: -1) {
-            let marker = "(+\(notes.count - kept) older notes not shown here; recall finds them)"
+            let marker = "(+\(notes.count - kept) older notes left out of this prompt)"
             let text = replacingIdentityNotes(in: body, with: [marker] + notes.suffix(kept))
             if text.count <= limit { return text }
         }
@@ -783,11 +804,13 @@ actor MemoryBank {
 
     /// The preferences (flattened bodies, newest first) as the prompt lists them: each cut to
     /// `max(240, share / count)` characters, the list within `share`, and a last line counting the older ones
-    /// that did not fit. `whole`: how many leading preferences are shown uncut. `overflow`: those cut or left out.
+    /// that did not fit. `whole`: how many are shown uncut. `overflow`: those cut or left out. `displayed`: how many
+    /// leading ones have a line (whole or cut), each cut to `each`.
     /// The one rule for the brief and the panel.
-    static func preferenceBlock(_ bodies: [String], share: Int = preferencesShare) -> (text: String, whole: Int, overflow: Int) {
-        guard !bodies.isEmpty else { return ("", 0, 0) }
-        let each = min(max(240, share / bodies.count), share - 3) // + "- " and the ellipsis
+    static func preferenceBlock(_ bodies: [String], share: Int = preferencesShare)
+        -> (text: String, whole: Int, overflow: Int, displayed: Int, each: Int) {
+        guard !bodies.isEmpty else { return ("", 0, 0, 0, 0) }
+        let each = min(max(240, share / bodies.count), share - 4) // + "- ", the ellipsis and the line break
         let reserve = 80 // the "+N" line
         var lines: [String] = [], used = 0, whole = 0, cut = 0, stopped = false
         for (index, body) in bodies.enumerated() {
@@ -801,22 +824,27 @@ actor MemoryBank {
         }
         let hidden = bodies.count - lines.count
         if stopped, hidden > 0 { lines.append("- (+\(hidden) older preferences not shown here; recall finds them)") }
-        return (lines.joined(separator: "\n"), whole, hidden + cut)
+        return (lines.joined(separator: "\n"), whole, hidden + cut, bodies.count - hidden, each)
     }
 
-    /// A session page as a few flattened lines: what was asked, done and left open, and the last answer.
+    /// A session page as a few flattened lines: the model's newest note, what was asked, decided, left open and done,
+    /// and the last answer.
     static func leftOff(_ body: String) -> String {
         var lines: [String] = []
         // The newest model note, then what was asked and decided.
         if let note = SessionSummary.section("Resumo", in: body).last { lines.append("- Summary: " + untrusted(MemoryText.clip(note, 200))) }
-        let asked = SessionSummary.section("Pedidos", in: body).suffix(3)
-        if !asked.isEmpty { lines.append("- Asked: " + asked.map { untrusted(MemoryText.clip($0, 160)) }.joined(separator: " | ")) }
         let decided = SessionSummary.section("Decisões", in: body).suffix(3)
+        // A decision is one of the requests in so many words: not twice.
+        let asked = SessionSummary.section("Pedidos", in: body).suffix(3).filter { request in
+            !decided.contains { request.contains(String($0.prefix(60))) }
+        }
+        if !asked.isEmpty { lines.append("- Asked: " + asked.map { untrusted(MemoryText.clip($0, 160)) }.joined(separator: " | ")) }
         if !decided.isEmpty { lines.append("- Decided: " + decided.map { untrusted(MemoryText.clip($0, 140)) }.joined(separator: " | ")) }
-        let done = SessionSummary.section("O que foi feito", in: body).suffix(4)
-        if !done.isEmpty { lines.append("- Done: " + done.map { untrusted(MemoryText.clip($0, 120)) }.joined(separator: " | ")) }
+        // What was left open before what was done: past the share, the end is what goes.
         let open = SessionSummary.section("Pendências", in: body).prefix(3)
         if !open.isEmpty { lines.append("- Left open: " + open.map { untrusted(MemoryText.clip($0, 140)) }.joined(separator: " | ")) }
+        let done = SessionSummary.section("O que foi feito", in: body).suffix(4)
+        if !done.isEmpty { lines.append("- Done: " + done.map { untrusted(MemoryText.clip($0, 120)) }.joined(separator: " | ")) }
         if let answer = SessionSummary.paragraph("Última resposta", in: body) {
             lines.append("- Your last answer: " + untrusted(MemoryText.clip(answer, 200)))
         }

@@ -52,7 +52,8 @@ final class MemoryIndex {
         if version != 0, version != Self.schemaVersion {
             sqlite3_exec(db, "DROP TABLE IF EXISTS pages_fts; DROP TABLE IF EXISTS pages; DROP TABLE IF EXISTS meta;", nil, nil, nil)
         }
-        var schema = "PRAGMA synchronous = NORMAL;\n"
+        // A checkpoint brings the log back to this size (without it, the file stays as large as it ever grew).
+        var schema = "PRAGMA synchronous = NORMAL;\nPRAGMA journal_size_limit = 1048576;\n"
         if rows("PRAGMA journal_mode").first?.text(0).lowercased() != "wal" { schema += "PRAGMA journal_mode = WAL;\n" }
         if version != Self.schemaVersion { schema += "PRAGMA user_version = \(Self.schemaVersion);\n" }
         schema += """
