@@ -25,6 +25,8 @@ struct MemorySnapshot: Equatable, Sendable {
     var identity = ""
     var interviewPending = false
     var items: [Item] = []
+    /// Preferences the system prompt cuts or leaves out (see `MemoryBank.preferenceBlock`): found only by `recall`.
+    var preferencesOverflow = 0
 
     func items(_ kind: MemoryKind) -> [Item] { items.filter { $0.kind == kind } }
     var isEmpty: Bool { identity.isEmpty && items.isEmpty }
@@ -338,12 +340,12 @@ actor MemoryBank {
         take(profile, into: &pinned) // who the user is (`UserProfile.promptSection`), before how to work with them
         let identityPage = identity() // read once for the whole brief
         if let identity = identityPage, !identity.body.isEmpty {
-            take("## Your identity (how the user wants you to work)\n" + Self.headAndTail(identity.body, Self.identityShare), into: &pinned)
+            take("## Your identity (how the user wants you to work)\n" + Self.identityBlock(identity.body, Self.identityShare), into: &pinned)
         }
-        let preferences = items(.preferencia, limit: 40)
+        let preferences = items(.preferencia, limit: Self.pinnedPreferenceLimit)
+        let preferenceLayout = Self.preferenceBlock(preferences.map { MemoryText.flatten($0.body) })
         if !preferences.isEmpty {
-            take("## The user's preferences with you\n" + MemoryText.clip(preferences.map { "- " + MemoryText.clip(MemoryText.flatten($0.body), 240) }
-                .joined(separator: "\n"), Self.preferencesShare), into: &pinned)
+            take("## The user's preferences with you\n" + preferenceLayout.text, into: &pinned)
         }
         if identityPage?.interviewPending == true, userTurns <= 4 {
             take("""
@@ -358,7 +360,8 @@ actor MemoryBank {
 
         var notes: [String] = []
         var shown: Set<String> = [Self.identityPath]
-        shown.formUnion(preferences.map(\.path))
+        // Only the preferences the prompt shows whole; a cut or left-out one can still come back as a related memory.
+        shown.formUnion(preferences.prefix(preferenceLayout.whole).map(\.path))
         let related = related(to: message, context: context, excluding: shown,
                               isSent: { hit in Self.isSent(Self.relatedHeader(hit), in: alreadySent) }, now: now)
         var relatedLines: [String] = []
@@ -454,7 +457,9 @@ actor MemoryBank {
             return MemorySnapshot.Item(path: row.text(0), kind: kind, title: row.text(2), body: row.text(3),
                                        date: Date(timeIntervalSince1970: row.double(4) ?? 0), compacted: row.int(5) == 1)
         } ?? []
-        return MemorySnapshot(identity: identity?.body ?? "", interviewPending: identity?.interviewPending ?? false, items: items)
+        let preferences = items.filter { $0.kind == .preferencia }.prefix(Self.pinnedPreferenceLimit).map { MemoryText.flatten($0.body) }
+        return MemorySnapshot(identity: identity?.body ?? "", interviewPending: identity?.interviewPending ?? false, items: items,
+                              preferencesOverflow: Self.preferenceBlock(preferences).overflow)
     }
 
     /// The snapshot, or nil when nothing the panel shows changed since the last one (the pages are not read and
@@ -743,6 +748,46 @@ actor MemoryBank {
     static func headAndTail(_ text: String, _ limit: Int) -> String {
         guard text.count > limit else { return text }
         return String(text.prefix(limit / 2 - 20)) + "\n[…]\n" + String(text.suffix(limit / 2 - 20))
+    }
+
+    /// The identity as the prompt shows it. Past `limit` the older notes go first (the newest are at the end of the
+    /// list), with a line saying how many; the text you wrote is cut (`headAndTail`) only when it alone does not fit.
+    static func identityBlock(_ body: String, _ limit: Int) -> String {
+        guard body.count > limit else { return body }
+        let notes = identityNotes(in: body).map { String($0.dropFirst(2)) }
+        guard !notes.isEmpty else { return headAndTail(body, limit) }
+        for kept in stride(from: notes.count - 1, through: 0, by: -1) {
+            let marker = "(+\(notes.count - kept) older notes not shown here; recall finds them)"
+            let text = replacingIdentityNotes(in: body, with: [marker] + notes.suffix(kept))
+            if text.count <= limit { return text }
+        }
+        return headAndTail(body, limit)
+    }
+
+    /// Preferences read from the index at most (the prompt shows far fewer).
+    static let pinnedPreferenceLimit = 200
+
+    /// The preferences (flattened bodies, newest first) as the prompt lists them: each cut to
+    /// `max(240, share / count)` characters, the list within `share`, and a last line counting the older ones
+    /// that did not fit. `whole`: how many leading preferences are shown uncut. `overflow`: those cut or left out.
+    /// The one rule for the brief and the panel.
+    static func preferenceBlock(_ bodies: [String], share: Int = preferencesShare) -> (text: String, whole: Int, overflow: Int) {
+        guard !bodies.isEmpty else { return ("", 0, 0) }
+        let each = min(max(240, share / bodies.count), share - 3) // + "- " and the ellipsis
+        let reserve = 80 // the "+N" line
+        var lines: [String] = [], used = 0, whole = 0, cut = 0, stopped = false
+        for (index, body) in bodies.enumerated() {
+            let clipped = MemoryText.clip(body, each)
+            let line = "- " + clipped
+            let more = index < bodies.count - 1
+            guard used + line.count + 1 <= share - (more ? reserve : 0) else { stopped = true; break }
+            lines.append(line)
+            used += line.count + 1
+            if body.count <= each { whole += 1 } else { cut += 1 }
+        }
+        let hidden = bodies.count - lines.count
+        if stopped, hidden > 0 { lines.append("- (+\(hidden) older preferences not shown here; recall finds them)") }
+        return (lines.joined(separator: "\n"), whole, hidden + cut)
     }
 
     /// A session page as a few flattened lines: what was asked, done and left open, and the last answer.

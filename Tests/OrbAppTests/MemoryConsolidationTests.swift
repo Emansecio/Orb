@@ -32,13 +32,36 @@ private struct Consolidator: LLMClient {
             == MemoryConsolidation.Pinned(notes: ["Responder sempre em português do Brasil"], preferences: ["Prefere respostas longas e detalhadas"]))
         #expect(MemoryConsolidation.parse("Claro! Aqui está a memória organizada.", from: original) == nil) // no layout
         #expect(MemoryConsolidation.parse("## Notes\n## Preferences\n", from: original) == nil) // nothing left
-        let longer = "## Notes\n" + (1...5).map { "- nota \($0)" }.joined(separator: "\n") + "\n## Preferences\n"
-        #expect(MemoryConsolidation.parse(longer, from: original) == nil) // not fewer items
+        let longer = "## Notes\n" + (1...6).map { "- nota \($0)" }.joined(separator: "\n") + "\n## Preferences\n"
+        #expect(MemoryConsolidation.parse(longer, from: original) == nil) // more items than before (as many, but shorter, is accepted now)
         let noNotes = MemoryConsolidation.Pinned(preferences: ["a", "b", "c"])
         #expect(MemoryConsolidation.parse("## Notes\n- a\n## Preferences\n", from: noNotes) == nil) // notes from nowhere
         let many = MemoryConsolidation.Pinned(preferences: (1...40).map { "preferência \($0)" })
         let hardlyShorter = "## Notes\n## Preferences\n" + (1...(MemoryConsolidation.ceiling + 1)).map { "- preferência \($0)" }.joined(separator: "\n")
         #expect(MemoryConsolidation.parse(hardlyShorter, from: many) == nil) // past the ceiling
+    }
+
+    @Test func aPassIsDueWhenWhatItCanShortenDoesNotFit() {
+        let few = MemoryConsolidation.Pinned(notes: ["a", "b"], preferences: ["c"])
+        #expect(!MemoryConsolidation.isDue(few, identityLength: 100))
+        let big = MemoryConsolidation.Pinned(preferences: (1...12).map { "Preferência \($0) " + String(repeating: "x", count: 200) })
+        #expect(big.count < MemoryConsolidation.threshold)
+        #expect(MemoryConsolidation.isDue(big, identityLength: 0)) // the preferences overflow their share
+        let notes = MemoryConsolidation.Pinned(notes: (1...4).map { _ in String(repeating: "n", count: 200) })
+        #expect(MemoryConsolidation.isDue(notes, identityLength: MemoryBank.identityShare + 200)) // shortening the notes helps
+        #expect(!MemoryConsolidation.isDue(notes, identityLength: MemoryBank.identityShare + 2_000)) // what you wrote is the excess
+        #expect(MemoryConsolidation.isDue(MemoryConsolidation.Pinned(preferences: (1...31).map { "p\($0)" }), identityLength: 0))
+        // A long preference is not consolidable (it is not in `Pinned`), so on its own it never makes a pass due.
+        #expect(!MemoryConsolidation.isDue(MemoryConsolidation.Pinned(preferences: ["curta"]), identityLength: 0))
+    }
+
+    @Test func aVersionWithFewerCharactersIsKeptEvenWithAsManyItems() {
+        let long = MemoryConsolidation.Pinned(notes: ["Responder sempre em português do Brasil, com calma e detalhes"], preferences: ["Gosta de respostas curtas e diretas, sem rodeios"])
+        let reply = "## Notes\n- Responder em português do Brasil\n## Preferences\n- Gosta de respostas curtas"
+        #expect(MemoryConsolidation.parse(reply, from: long)?.count == 2)
+        #expect(MemoryConsolidation.parse(reply, from: long)?.characters ?? 0 < long.characters)
+        let same = "## Notes\n- Responder sempre em português do Brasil, com calma e detalhes\n## Preferences\n- Gosta de respostas curtas e diretas, sem rodeios"
+        #expect(MemoryConsolidation.parse(same, from: long) == nil) // as many items and no fewer characters
     }
 
     @Test func theItemsGoFencedAsData() {

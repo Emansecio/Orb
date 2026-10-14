@@ -1,7 +1,7 @@
 import Foundation
 
 extension AppModel {
-    /// Starts a `MemoryConsolidation` pass when the Orb's pinned memory has grown past its threshold: in the background,
+    /// Starts a `MemoryConsolidation` pass when the Orb's pinned memory has grown past its threshold (or no longer fits its share): in the background,
     /// without a word in the chat, at most once a day for a pass that gave nothing. Not in an Orb that only reads (its
     /// memory changes only when you ask).
     func consolidateMemoryIfDue(_ session: BotSession, now: Date = .now) {
@@ -15,7 +15,8 @@ extension AppModel {
         session.memoryConsolidation = Task {
             defer { session.memoryConsolidation = nil }
             let pinned = await bank.pinnedForConsolidation()
-            guard pinned.count > MemoryConsolidation.threshold, !isResetting,
+            let identityLength = await bank.identityLength()
+            guard MemoryConsolidation.isDue(pinned, identityLength: identityLength), !isResetting,
                   let client = clientOverride?() ?? account.client(for: account.models.first { $0.id == model },
                                                                    credentials: Self.credentials(for: ref.provider),
                                                                    conversationID: botID.uuidString + "-memoria") else { return }

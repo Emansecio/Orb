@@ -27,7 +27,7 @@ struct MemoryTab: View {
         let truncates = query.isEmpty && memory.items.count > MemoryGroups.searchableAbove
 
         Section {
-            IdentityBlock(memory: memory, name: name, edit: editIdentity,
+            IdentityBlock(memory: memory, name: name, canSummarize: model.bot(botID)?.permissionMode != .readOnly, edit: editIdentity,
                           restartInterview: { model.restartInterview(of: botID) })
         } header: {
             Text("Como \(name) funciona")
@@ -99,6 +99,7 @@ struct MemoryTab: View {
 private struct IdentityBlock: View {
     let memory: MemorySnapshot
     let name: String
+    let canSummarize: Bool
     let edit: () -> Void
     let restartInterview: () -> Void
 
@@ -112,7 +113,13 @@ private struct IdentityBlock: View {
                 .truncationMode(.middle)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if memory.identity.count > MemoryBank.identityShare {
-                Text("Longa: em cada conversa vão o começo e o fim (cerca de \(MemoryBank.identityShare) caracteres).")
+                Text("Longa: em cada conversa vão cerca de \(MemoryBank.identityShare) caracteres; as notas mais antigas saem primeiro.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if memory.preferencesOverflow > 0 {
+                Text("\(memory.preferencesOverflow) \(memory.preferencesOverflow == 1 ? "preferência não cabe" : "preferências não cabem") no que \(name) sempre vê; "
+                     + (canSummarize ? "\(name) vai resumi-las sozinho." : "ele as encontra só quando busca."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

@@ -678,4 +678,48 @@ struct MemoryIntentTests {
         #expect(MemoryText.keepTokens("veja https://example.com/doc/a e /Users/x/notas.md") == ["https://example.com/doc/a", "/Users/x/notas.md"])
     }
 
+    // MARK: Pinned memory within its share
+
+    @Test func aLongPreferenceGoesInWholeUpToTheShare() async {
+        let rules = (1...140).map { "regra\($0)" }.joined(separator: " ") // ~1 100 characters
+        let bank = bank("longpref")
+        await bank.remember(rules, kind: .preferencia)
+        let pinned = await bank.brief(for: "oi", conversationIsNew: false).pinned
+        #expect(pinned.contains(rules) && !pinned.contains("…"))
+        let block = MemoryBank.preferenceBlock([String(repeating: "palavra ", count: 400)])
+        #expect(block.text.count <= MemoryBank.preferencesShare && block.overflow == 1 && block.whole == 0) // cut, not dropped
+    }
+
+    @Test func manyPreferencesEndWithACountAndStayWithinTheShare() {
+        let bodies = (1...40).map { "Preferência número \($0) " + String(repeating: "detalhe ", count: 15) }
+        let block = MemoryBank.preferenceBlock(bodies)
+        #expect(block.text.count <= MemoryBank.preferencesShare)
+        #expect(block.text.hasPrefix("- Preferência número 1 ") && block.text.contains("older preferences not shown here; recall finds them)"))
+        #expect(block.overflow > 0 && block.whole < bodies.count)
+        #expect(MemoryBank.preferenceBlock(["curta", "outra"]).overflow == 0)
+    }
+
+    @Test func aPreferenceLeftOutOfThePromptCanComeBackAsRelated() async {
+        let bank = bank("leftout")
+        await bank.remember("Para o cardápio do café usar sempre abacaxi fresco zumbaluna", kind: .preferencia, now: Date(timeIntervalSince1970: 1_700_000_000))
+        for index in 1...30 {
+            await bank.remember("Preferência de estilo \(index): " + String(repeating: "texto\(index) ", count: 20), kind: .preferencia,
+                                now: Date(timeIntervalSince1970: 1_700_000_000 + Double(index) * 60))
+        }
+        let brief = await bank.brief(for: "o cardápio do café com zumbaluna", conversationIsNew: false)
+        #expect(brief.pinned.count <= MemoryBank.briefBudget && !brief.pinned.contains("zumbaluna"))
+        #expect(brief.related.contains("zumbaluna"))
+    }
+
+    @Test func aLongIdentityKeepsWhatYouWroteAndDropsTheOldestNotes() {
+        let text = String(repeating: "Escrevi isto eu mesma. ", count: 58) // ~1 330 characters
+        let notes = (1...6).map { "- nota número \($0) sobre como trabalhar" }
+        let body = text + "\n\n" + MemoryBank.identityNotesHeader + "\n" + notes.joined(separator: "\n")
+        let shown = MemoryBank.identityBlock(body, MemoryBank.identityShare)
+        #expect(shown.count <= MemoryBank.identityShare && shown.hasPrefix(text) && !shown.contains("[…]"))
+        #expect(shown.contains("older notes not shown here") && shown.contains("nota número 6") && !shown.contains("nota número 1 "))
+        #expect(MemoryBank.identityBlock("curta", MemoryBank.identityShare) == "curta")
+        let huge = String(repeating: "x", count: 2_000) + "\n" + MemoryBank.identityNotesHeader + "\n- uma nota"
+        #expect(MemoryBank.identityBlock(huge, MemoryBank.identityShare).contains("[…]")) // the text alone does not fit
+    }
 }
