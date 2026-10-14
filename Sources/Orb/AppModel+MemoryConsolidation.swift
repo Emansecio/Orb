@@ -28,7 +28,11 @@ extension AppModel {
                 recordAuxiliaryUsage(usage, botID: botID, model: ModelRef(provider: ref.provider, model: model).text)
             }
             guard let consolidated = result.pinned, await bank.applyConsolidation(consolidated, replacing: pinned) else { return }
-            session.memoryConsolidationTried = nil // done: the next pass waits for the threshold, not the clock
+            // Done: the next pass waits for the threshold, not the clock. Unless what it left still does not fit (a pass
+            // that shortened too little): then a day, or each message would pay for another one.
+            let after = await bank.pinnedForConsolidation()
+            let stillDue = MemoryConsolidation.isDue(after, identityLength: await bank.identityLength())
+            session.memoryConsolidationTried = stillDue ? now : nil
             await refreshMemory(botID) // the panel's Memória tab shows the pages as they are now
         }
     }
