@@ -429,16 +429,29 @@ actor MemoryBank {
     /// ends the first-conversation interview, answered or not.
     /// Returns whether the page was written.
     @discardableResult
-    func saveSession(_ page: MemoryPage, now: Date = .now) -> Bool {
+    func saveSession(_ page: MemoryPage, now: Date = .now) -> Bool { saveSessionPath(page, now: now) != nil }
+
+    /// `saveSession`, saying where the page went (nil when it could not be written).
+    @discardableResult
+    func saveSessionPath(_ page: MemoryPage, now: Date = .now) -> String? {
         prepare(now: now)
         var page = page
         if FileManager.default.fileExists(atPath: directory.appending(path: page.path).path) {
             page.path = uniquePath("sessoes", String(page.path.dropFirst("sessoes/".count).dropLast(".md".count)))
         }
-        guard write(page) else { return false }
+        guard write(page) else { return nil }
         if page.body.contains("## Última resposta") { finishInterview() }
         sweep(now: now)
-        return true
+        return page.path
+    }
+
+    /// Writes `page` over the session page at its path: the same stretch with the model's note (`SessionNote`), which
+    /// arrives after the page. Only while that page is still there as written (no note yet, not compacted, not forgotten).
+    func replaceSession(_ page: MemoryPage) -> Bool {
+        guard page.kind == .sessao, let current = read(page.path), current.kind == .sessao,
+              !current.body.contains("## Resumo"),
+              index?.rows("SELECT compacted FROM pages WHERE path = ?", [.text(page.path)]).first?.int(0) == 0 else { return false }
+        return write(page)
     }
 
     /// ai-memory's retention: salience·e^(−λ·age) + σ·ln(1+uses)·e^(−μ·days since last use).

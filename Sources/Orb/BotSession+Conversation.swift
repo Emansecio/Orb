@@ -234,27 +234,37 @@ extension BotSession {
     /// stretch itself was saved already (a long pause saved it by rules before the fold), the notes go to the memory on
     /// a page of their own, so each one gets there exactly once.
     @discardableResult
-    func saveMemory(ifIdleFor gap: TimeInterval? = nil, upTo end: Int? = nil, notes: [String] = []) -> Bool {
+    /// `summarize`: a stretch saved because the conversation paused may get the model's note (`SessionNote`).
+    func saveMemory(ifIdleFor gap: TimeInterval? = nil, upTo end: Int? = nil, notes: [String] = [], summarize: Bool = false) -> Bool {
         let savedBefore = conversation?.memorySavedCount ?? 0
         guard let stretch = pendingStretch(ifIdleFor: gap, upTo: end) else {
             guard gap == nil, !notes.isEmpty else { return false }
             persistStretch([], notes: notes)
             return true
         }
-        persistStretch(stretch, notes: notes, savedBefore: savedBefore)
+        persistStretch(stretch, notes: notes, savedBefore: savedBefore, summarize: summarize)
         return true
     }
 
     /// `savedBefore`: where the saved mark was before `pendingStretch` moved it past `stretch`. When the page cannot be
     /// written the mark goes back there, so the next save (a pause, a compaction) takes the stretch again.
-    func persistStretch(_ stretch: [TranscriptItem], notes: [String] = [], savedBefore: Int? = nil) {
+    func persistStretch(_ stretch: [TranscriptItem], notes: [String] = [], savedBefore: Int? = nil, summarize: Bool = false) {
         guard let model else { return }
         let bank = model.memory.bank(for: id), botID = id, mark = conversation?.memorySavedCount
+        let writer = summarize && notes.isEmpty ? model.sessionNoteWriter(for: id) : nil
         Task.detached(priority: .utility) { [weak model, weak self] in
-            var written = true
-            if let page = SessionSummary.page(from: stretch, notes: notes) { written = await bank.saveSession(page) }
+            var path: String?, written = true
+            if let page = SessionSummary.page(from: stretch, notes: notes) {
+                path = await bank.saveSessionPath(page)
+                written = path != nil
+            }
             if !written, let savedBefore { await self?.unmarkStretch(at: mark, back: savedBefore) }
             await model?.refreshMemory(botID)
+            // The model's note joins the page written by rules (`SessionNote`).
+            guard let writer, let path, let input = SessionNote.input(from: stretch), let note = await writer(input),
+                  var page = SessionSummary.page(from: stretch, notes: [note]) else { return }
+            page.path = path
+            if await bank.replaceSession(page) { await model?.refreshMemory(botID) }
         }
     }
 
@@ -315,7 +325,7 @@ extension BotSession {
             }
             await self?.model?.loadedConversation(botID) // it may have been let go of while the Orb was idle
             guard !Task.isCancelled else { return }
-            self?.saveMemory()
+            self?.saveMemory(summarize: true)
         }
     }
 

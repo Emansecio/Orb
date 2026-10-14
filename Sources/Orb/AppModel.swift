@@ -1259,7 +1259,7 @@ final class AppModel {
                 let wasInMemory = sessions[bot.id]?.conversation != nil
                 await loadedConversation(bot.id)
                 let session = session(bot.id)
-                if !session.saveMemory(ifIdleFor: SessionSummary.idleGap), session.hasUnsavedStretch() {
+                if !session.saveMemory(ifIdleFor: SessionSummary.idleGap, summarize: true), session.hasUnsavedStretch() {
                     session.scheduleMemorySave()
                 }
                 // Read only for this: it goes back to disk now, not after the keep-alive (it may still be waiting to be

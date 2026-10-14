@@ -110,6 +110,7 @@ struct GeneralSettings: View {
     @AppStorage(AppModel.notifyWhenDoneKey) private var notifyWhenDone = true
     @AppStorage(SkillReview.settingKey) private var proposeSkills = true
     @AppStorage(AutoContinue.settingKey) private var continueLongTasks = true
+    @AppStorage(SessionNote.settingKey) private var summarizeSessions = false
     @AppStorage(DictationReview.settingKey) private var reviewDictation = true
     @AppStorage(GlobalHotKey.defaultsKey) private var globalShortcut = false
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -164,6 +165,15 @@ struct GeneralSettings: View {
                     }
                 }
                 .help(Tip.continueLongTasks)
+                Toggle(isOn: $summarizeSessions) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Resumir com o modelo as conversas longas que vão para a memória")
+                        Text("Quando uma conversa de \(SessionNote.minimumRequests) pedidos ou mais é guardada, o modelo menor do mesmo provedor (quando há) escreve um resumo dela, que entra na página da sessão. Uma chamada curta por conversa. Desligado, a página tem só o que as regras tiram: pedidos, decisões, o que foi feito. Conversas com conectores, modelos locais e o Claude Code nunca são resumidos.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .help(Tip.summarizeSessions)
                 if Dictation.isSupported {
                     Toggle(isOn: $reviewDictation) {
                         VStack(alignment: .leading, spacing: 2) {
