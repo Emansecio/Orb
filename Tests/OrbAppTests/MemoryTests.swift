@@ -177,6 +177,34 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: bank.directory.appending(path: "_arquivo/sessoes/velha.md").path))
     }
 
+    private func richSession(path: String, at date: Date) -> MemoryPage {
+        let body = "## Pedidos\n- 10:00 — Ajustar o servidor\n\n## Decisões\n- Usar zirconia no cache\n- Segunda decisão\n\n"
+            + SessionSummary.resumoHeading + "- Nota sobre quimera do deploy\n\n## Última resposta\nFeito."
+        return MemoryPage(path: path, kind: .sessao, title: "Ajustar o servidor", body: body, created: date, updated: date, origin: .automatico)
+    }
+
+    @Test func leftOffShowsDecisionsAndSummaryWithinItsShare() {
+        let page = richSession(path: "sessoes/x.md", at: .now)
+        let text = MemoryBank.leftOff(page.body)
+        #expect(text.contains("- Summary: Nota sobre quimera do deploy"))
+        #expect(text.contains("- Decided: Usar zirconia no cache | Segunda decisão"))
+        let big = "## Resumo\n(marca)\n- " + String(repeating: "r", count: 900) + "\n\n## Decisões\n"
+            + (0..<8).map { "- " + String(repeating: "d\($0)", count: 100) }.joined(separator: "\n")
+            + "\n\n## Última resposta\n" + String(repeating: "u", count: 900)
+        #expect(MemoryBank.leftOff(big).count <= MemoryBank.leftOffShare + 1)
+    }
+
+    @Test func compactedSessionsKeepDecisionsAndSummarySearchable() async throws {
+        let bank = bank()
+        let now = Date.now
+        await bank.saveSession(richSession(path: "sessoes/velha.md", at: now - 100 * day))
+        await bank.sweep(now: now, force: true)
+        let page = try #require(await bank.snapshot().items.first { $0.path == "sessoes/velha.md" })
+        #expect(page.compacted && page.body.contains(SessionSummary.resumoHeading))
+        #expect(await bank.recall("zirconia").contains { $0.path == "sessoes/velha.md" })
+        #expect(await bank.recall("quimera").contains { $0.path == "sessoes/velha.md" })
+    }
+
     @Test func retentionFollowsAiMemory() {
         #expect(abs(MemoryBank.retention(ageDays: 0, daysSinceAccess: 0, accessCount: 0) - 1) < 1e-9)
         #expect(MemoryBank.retention(ageDays: 35, daysSinceAccess: 35, accessCount: 0) < 0.51)

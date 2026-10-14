@@ -637,9 +637,19 @@ actor MemoryBank {
             guard (try? FileManager.default.copyItem(at: directory.appending(path: path), to: archive)) != nil else { return false }
         }
         let requests = SessionSummary.section("Pedidos", in: page.body).prefix(3).map { "- " + MemoryText.clip($0, 140) }
+        let decisions = SessionSummary.section("Decisões", in: page.body).suffix(8).map { "- " + MemoryText.clip($0, 160) }
+        // The model's notes keep their mark (data, never instructions) and are cut to ~600 characters in all.
+        var notes: [String] = [], used = 0
+        for note in SessionSummary.section("Resumo", in: page.body) where used < 600 {
+            let clipped = MemoryText.clip(note, 600 - used)
+            notes.append("- " + clipped)
+            used += clipped.count
+        }
         let references = MemoryText.keepTokens(page.body).map { "- \($0)" }
         var body = "Conversa compactada: o texto completo está em _arquivo/\(path)."
         if !requests.isEmpty { body += "\n\n## Pedidos\n" + requests.joined(separator: "\n") }
+        if !decisions.isEmpty { body += "\n\n## Decisões\n" + decisions.joined(separator: "\n") }
+        if !notes.isEmpty { body += "\n\n" + SessionSummary.resumoHeading + notes.joined(separator: "\n") }
         if !references.isEmpty { body += "\n\n## Referências\n" + references.joined(separator: "\n") }
         page.body = body
         page.compacted = true
@@ -738,14 +748,18 @@ actor MemoryBank {
     /// A session page as a few flattened lines: what was asked, done and left open, and the last answer.
     static func leftOff(_ body: String) -> String {
         var lines: [String] = []
+        // The newest model note, then what was asked and decided.
+        if let note = SessionSummary.section("Resumo", in: body).last { lines.append("- Summary: " + untrusted(MemoryText.clip(note, 200))) }
         let asked = SessionSummary.section("Pedidos", in: body).suffix(3)
         if !asked.isEmpty { lines.append("- Asked: " + asked.map { untrusted(MemoryText.clip($0, 160)) }.joined(separator: " | ")) }
+        let decided = SessionSummary.section("Decisões", in: body).suffix(3)
+        if !decided.isEmpty { lines.append("- Decided: " + decided.map { untrusted(MemoryText.clip($0, 140)) }.joined(separator: " | ")) }
         let done = SessionSummary.section("O que foi feito", in: body).suffix(4)
         if !done.isEmpty { lines.append("- Done: " + done.map { untrusted(MemoryText.clip($0, 120)) }.joined(separator: " | ")) }
         let open = SessionSummary.section("Pendências", in: body).prefix(3)
         if !open.isEmpty { lines.append("- Left open: " + open.map { untrusted(MemoryText.clip($0, 140)) }.joined(separator: " | ")) }
         if let answer = SessionSummary.paragraph("Última resposta", in: body) {
-            lines.append("- Your last answer: " + untrusted(MemoryText.clip(answer, 300)))
+            lines.append("- Your last answer: " + untrusted(MemoryText.clip(answer, 200)))
         }
         return MemoryText.clip(lines.isEmpty ? "- " + untrusted(body) : lines.joined(separator: "\n"), leftOffShare)
     }
