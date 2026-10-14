@@ -68,7 +68,8 @@ Campos extras (como `tags` do Obsidian) são mantidos quando o app reescreve a p
 | `sessao` | Conversa | `sessoes/` | só "onde paramos" e o que for relacionado | sim |
 
 No painel os grupos se chamam Preferências, Fatos, Procedimentos e "Resumos de conversas"; a identidade tem bloco próprio
-("Como <Orb> funciona"). As notas crescem com o que o Orb aprende (cada nota até 2.000 caracteres), então o editor aceita até
+("Como <Orb> funciona"). Uma conversa fechada mostra só o título; aberta, mostra embaixo, em texto pequeno, o último resumo,
+as últimas decisões ("Decidido: …") e o que ficou pendente (`MemoryRow.details(of:)`, até 3 de cada). As notas crescem com o que o Orb aprende (cada nota até 2.000 caracteres), então o editor aceita até
 12.000 caracteres (`MemoryBank.identityMaximumLength`) e, passando disso, avisa e bloqueia o Salvar em vez de cortar o fim.
 
 ## Ciclo de vida

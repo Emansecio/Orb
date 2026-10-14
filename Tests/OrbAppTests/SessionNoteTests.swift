@@ -108,4 +108,17 @@ final class SessionNoteTests {
         #expect(await bank.replaceSession(again) == false)
         #expect(await bank.read(path)?.body.contains("nota da dobra") == true)
     }
+
+    @Test func anOpenedConversationShowsItsSummaryDecisionsAndWhatWasLeftOpen() throws {
+        var items = stretch(requests: 2)
+        items.append(TranscriptItem(.user(text: "Decidi usar o Postgres 16", attachments: [])))
+        let page = try #require(SessionSummary.page(from: items, notes: ["nota velha", "Migrou para o Postgres 16."]))
+        let item = MemorySnapshot.Item(path: page.path, kind: .sessao, title: page.title, body: page.body, date: .now, compacted: false)
+        #expect(MemoryRow.details(of: item) == ["Migrou para o Postgres 16.", "Decidido: Decidi usar o Postgres 16",
+                                                "Ficou sem resposta: Decidi usar o Postgres 16"])
+        let plain = try #require(SessionSummary.page(from: [TranscriptItem(.user(text: "oi", attachments: [])),
+                                                            TranscriptItem(.bot(text: "olá", isStreaming: false))]))
+        #expect(MemoryRow.details(of: MemorySnapshot.Item(path: plain.path, kind: .sessao, title: plain.title, body: plain.body,
+                                                          date: .now, compacted: false)).isEmpty)
+    }
 }

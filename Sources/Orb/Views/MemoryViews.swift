@@ -185,7 +185,7 @@ private struct MemoryHelp: View {
             Text("Como a memória funciona")
                 .font(.headline)
             Text("\(name) guarda preferências, fatos e procedimentos que aprende com você, e um resumo de cada conversa (salvo depois de 30 minutos sem mensagens ou ao começar outra).")
-            Text("Conversas antigas são compactadas, nunca apagadas sem você. Tudo fica em arquivos .md: dá para abrir no Obsidian e editar à mão.")
+            Text("Conversas antigas são compactadas, nunca apagadas sem você. Tudo fica em arquivos .md na pasta da memória, um por lembrança.")
                 .foregroundStyle(.secondary)
         }
         .font(.callout)
@@ -210,6 +210,22 @@ struct MemoryRow: View {
                     .lineLimit(isExpanded ? nil : (item.kind == .sessao ? 1 : lineLimit))
                     .fixedSize(horizontal: false, vertical: true)
                     .motion(Motion.content, value: isExpanded)
+                if isExpanded, item.kind == .sessao {
+                    let details = Self.details(of: item)
+                    if !details.isEmpty {
+                        VStack(alignment: .leading, spacing: 3) {
+                            ForEach(details, id: \.self) { line in
+                                Text(line)
+                                    .lineLimit(3)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .font(.caption)
+                        .foregroundStyle(Palette.secondary)
+                        .padding(.vertical, 2)
+                        .transition(.quiet)
+                    }
+                }
                 Text(Self.caption(of: item))
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -236,6 +252,18 @@ struct MemoryRow: View {
 
     static func text(of item: MemorySnapshot.Item) -> String {
         item.kind == .sessao || item.title == item.body ? item.title : item.body
+    }
+
+    /// What an opened conversation shows under its title: the model's summary, then what was decided and what was left
+    /// open (each item says what it is: "Ficou sem resposta", "Não deu certo"…), each on a line of its own and only when the
+    /// page has it.
+    static func details(of item: MemorySnapshot.Item) -> [String] {
+        func joined(_ title: String, _ label: String) -> String? {
+            let lines = SessionSummary.section(title, in: item.body).suffix(3)
+            return lines.isEmpty ? nil : label + lines.joined(separator: " · ")
+        }
+        return [SessionSummary.section("Resumo", in: item.body).last, joined("Decisões", "Decidido: "),
+                joined("Pendências", "")].compactMap { $0 }
     }
 
     static func caption(of item: MemorySnapshot.Item) -> String {
@@ -307,7 +335,7 @@ struct MemorySheet: View {
                 .labelStyle(FixedIconLabelStyle())
                 .help(Tip.memoryFolder)
                 .hangsOnLeadingEdge()
-                Text("Arquivos .md: dá para abrir no Obsidian.")
+                Text("Um arquivo .md por lembrança.")
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.muted)
                     .lineLimit(1)
