@@ -17,7 +17,8 @@ struct ToolSpecEconomyTests {
     /// (`web_search`, always offered with "Navegar na web", came after and fits the same ceiling, raised from 15,000.)
     /// Raised to 17,500 for background computer use (docs/USO-DO-COMPUTADOR.md): `ui_read`, `ui_act` and `screenshot` grow, within
     /// their own ceiling below, and the rest stays as it was.
-    private static let specCharsCeiling = 17_500
+    /// Raised to 18,250 for `task_plan` (~720), the plan of a long task kept outside the conversation (docs/AUTONOMIA-2026-10-13.md).
+    private static let specCharsCeiling = 18_250
     /// `ui_read`, `ui_act` and `screenshot` together: waiting, steps, takeover, marks and OCR all have to fit here.
     private static let appControlSpecCharsCeiling = 4_800
     /// The tools of the Orb's own browser are offered only when an engine is installed, so they have a ceiling of their own.
@@ -128,9 +129,9 @@ struct ToolSpecEconomyTests {
         let terminalOnly = ToolBox.offered(for: [.terminal], accessibilityGranted: false)
         #expect(terminalOnly.map(\.spec.name) == ToolBox.offered(for: [.terminal], accessibilityGranted: true).map(\.spec.name))
         #expect(!terminalOnly.contains { $0.capability == .computerUse })
-        // The tools that need no capability (memory, scheduling, open, notify) are always there.
+        // The tools that need no capability (memory, scheduling, open, notify, the task plan) are always there.
         let none = ToolBox.offered(for: [], accessibilityGranted: true).map(\.spec.name)
-        let always: Set = ["open", "notify", "remember", "recall", "schedule"]
+        let always: Set = ["open", "notify", "remember", "recall", "schedule", "task_plan"]
         #expect(Set(none) == always && none.count == always.count)
     }
 

@@ -856,6 +856,82 @@ extension AgentEngineTests {
         #expect(!messages(events).contains { $0.content.contains("[Orb:") })
     }
 
+    // MARK: Task plan
+
+    private func planCall(_ id: String, _ json: String) -> LLMEvent {
+        .toolCalls([ToolCallRequest(id: id, name: TaskPlanTool.name, arguments: json)])
+    }
+
+    private func touch(_ step: Int) -> LLMEvent {
+        .toolCalls([ToolCallRequest(id: "t\(step)", name: "touch", arguments: #"{"n": \#(step)}"#)])
+    }
+
+    private var plannedSteps: TaskPlan {
+        TaskPlan(goal: "Publicar o site", steps: [TaskPlan.Step(text: "Gerar o build"), TaskPlan.Step(text: "Subir")], next: "gerar o build")
+    }
+
+    @Test func theModelMakesAPlanUpdatesItAndIsSentItAsItIsNow() async {
+        let script = Script([
+            [planCall("p1", #"{"action": "set", "goal": "Publicar o site", "steps": ["Gerar o build", "Subir"]}"#)],
+            [planCall("p2", #"{"action": "update", "updates": [{"step": 1, "state": "done"}], "next": "subir"}"#)],
+            [.text("Build feito; falta subir.")],
+        ])
+        var turn = request(script, mode: .ask, runs: Counter(), tools: [TaskPlanTool(), TouchTool(runs: Counter())])
+        let board = TaskPlanBoard()
+        turn.context.taskPlan = board
+        let events = await run(AgentEngine(), turn)
+        // Safe: no approval was asked for, even with the Orb asking before everything.
+        #expect(!events.contains { if case .approval = $0 { true } else { false } })
+        let received = await script.received
+        #expect(received.count == 3)
+        #expect(received[1].last?.content.contains("1. [ ] Gerar o build") == true)
+        let sent = received[2].last?.content ?? ""
+        #expect(sent.contains("1. [feita] Gerar o build"))
+        #expect(sent.contains("2. [ ] Subir"))
+        #expect(sent.contains("Próximo passo: subir"))
+        #expect(board.plan?.steps.map(\.state) == [.done, .pending])
+        // The conversation keeps the same plan from the messages the turn recorded.
+        var chat = Conversation()
+        for message in messages(events) { chat.absorb(message) }
+        #expect(chat.taskPlan?.steps == board.plan?.steps)
+        #expect(chat.taskPlan?.next == "subir")
+    }
+
+    @Test func anOpenPlanIsRecitedWhenTheModelHasNotSeenItForAWhile() async {
+        let interval = AgentEngine.planRecitalInterval
+        let script = Script((1...interval + 1).map { [touch($0)] } + [[.text("Pronto")]])
+        var turn = request(script, mode: .bypass, runs: Counter())
+        turn.context.taskPlan = TaskPlanBoard(plannedSteps)
+        _ = await run(AgentEngine(), turn)
+        let received = await script.received
+        // The results of step `interval` end with the plan; the steps before it do not carry it.
+        #expect(received[interval].last?.content.hasSuffix(plannedSteps.compact()) == true)
+        #expect(!received[1...(interval - 1)].contains { $0.last?.content.contains(TaskPlan.heading) == true })
+        #expect(received[interval + 1].last?.content.contains(TaskPlan.heading) == false)
+    }
+
+    @Test func aFinishedPlanIsNeverRecited() async {
+        var finished = plannedSteps
+        for index in finished.steps.indices { finished.steps[index].state = .done }
+        let interval = AgentEngine.planRecitalInterval
+        let script = Script((1...interval + 1).map { [touch($0)] } + [[.text("Pronto")]])
+        var turn = request(script, mode: .bypass, runs: Counter())
+        turn.context.taskPlan = TaskPlanBoard(finished)
+        _ = await run(AgentEngine(), turn)
+        #expect(!(await script.received).contains { $0.contains { $0.content.contains(TaskPlan.heading) } })
+    }
+
+    @Test func aTurnPausedAtTheStepLimitWritesThePlanInItsRecord() async {
+        let script = Script([[touch(1)], [touch(2)], [touch(3)]])
+        var turn = request(script, mode: .bypass, runs: Counter(), maxSteps: 3)
+        turn.context.taskPlan = TaskPlanBoard(plannedSteps)
+        let events = await run(AgentEngine(), turn)
+        let record = messages(events).last?.content ?? ""
+        #expect(record.hasPrefix(ProgressRecord.marker + "\n" + plannedSteps.compact()))
+        #expect(record.contains("Próximo passo: gerar o build"))
+        #expect(record.contains("[passo 1] touch"))
+    }
+
     // MARK: Parallel tools
 
     @Test func readOnlyCallsRunAtTheSameTimeAndKeepTheirOrder() async {

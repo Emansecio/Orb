@@ -115,11 +115,13 @@ enum ToolDigest {
 enum ProgressRecord {
     static let marker = "[Orb] Progresso até aqui:"
 
-    /// The record for the steps of the task since its request. nil when the task made no tool calls.
-    static func text(task messages: [ChatMessage]) -> String? {
+    /// The record for the steps of the task since its request: the task plan first, while some step is open, so a
+    /// "continua" picks up at the right step. nil when the task made no tool calls.
+    static func text(task messages: [ChatMessage], plan: TaskPlan? = nil) -> String? {
         let lines = ToolDigest.lines(for: messages)
         guard !lines.isEmpty else { return nil }
-        return marker + "\n" + lines.joined(separator: "\n")
+        let planned = plan.flatMap { $0.isActive ? [$0.compact()] : nil } ?? []
+        return ([marker] + planned + lines).joined(separator: "\n")
     }
 
     /// Whether the last message of `history` is such a record (inside the final message or as a message of its own).

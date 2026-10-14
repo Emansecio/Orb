@@ -99,6 +99,7 @@ enum Tip {
     static let redoReply = "Descarta esta resposta e faz o pedido de novo"
     static let editMessage = "Põe esta mensagem no campo para editar; o que veio depois sai da conversa"
     static let cancelEdit = "Desiste da edição; o campo volta como estava"
+    static func togglePlan(isExpanded: Bool) -> String { isExpanded ? "Oculta as etapas do plano" : "Mostra as etapas do plano" }
     static func toggleOutput(isExpanded: Bool) -> String { isExpanded ? "Oculta o resultado desta ação" : "Mostra o resultado desta ação" }
     static func toggleWork(isOpen: Bool) -> String { isOpen ? "Recolhe o trabalho deste pedido numa linha" : "Mostra o que o Orb disse e fez neste pedido" }
     static func toggleActions(isOpen: Bool) -> String { isOpen ? "Recolhe estas ações numa linha" : "Mostra cada uma destas ações" }

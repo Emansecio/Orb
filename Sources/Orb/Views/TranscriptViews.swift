@@ -89,7 +89,7 @@ private struct FindWash: View {
 }
 
 /// Left gutter width shared by bot messages, tool lines and approvals.
-private let gutter: CGFloat = 36
+let gutter: CGFloat = 36
 
 // MARK: - Spoken labels
 

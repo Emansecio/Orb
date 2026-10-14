@@ -3,7 +3,7 @@ import Foundation
 /// The built-in tools offered to the model. Each family lists its own tools next to them (`fileTools` in
 /// FileTools.swift, `shellTools` in ShellTool.swift, …), so adding a tool touches only its family's file.
 enum ToolBox {
-    static let all: [any AgentTool] = shellTools + fileTools + webTools + searchTools + browseTools + macTools + memoryTools + scheduleTools
+    static let all: [any AgentTool] = shellTools + fileTools + webTools + searchTools + browseTools + macTools + memoryTools + scheduleTools + planTools
 
     /// The tools that read or act on another app's interface through Accessibility. Without that permission both
     /// only fail with instructions, so they are not offered (their descriptions are about 950 tokens in every request).

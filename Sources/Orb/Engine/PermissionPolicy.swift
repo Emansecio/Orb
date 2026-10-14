@@ -460,7 +460,7 @@ enum PermissionPolicy {
         case .memory: return .memory
         case .schedule: return .schedule
         case .orbs: return .delegation
-        case .search: return nil
+        case .search, .plan: return nil
         }
     }
 

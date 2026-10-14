@@ -607,6 +607,8 @@ struct ToolContext: Sendable {
     /// Asks the person a question (`ask_user`) and waits for the answer, nil when they skipped it. The engine sets it for the tool
     /// call; the tool is only offered where the person is (`MultiOrbOffering.askUser`).
     var askUser: QuestionHandler?
+    /// The plan of the task (`task_plan`) as this turn leaves it; the app starts it from the conversation's plan.
+    var taskPlan = TaskPlanBoard()
     /// Whether the permission check (the approval card, when there was one) judged this very call dangerous: set by the
     /// engine before the tool runs, so a tool that checks again at run time (`ui_act`) holds to what the card showed
     /// instead of judging anew from state that may have changed. Nil where no check was made (tests).

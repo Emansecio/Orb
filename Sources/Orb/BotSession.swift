@@ -78,6 +78,7 @@ final class BotSession {
     func makeTranscript() -> OrbTranscript {
         if let transcript { return transcript }
         let made = OrbTranscript(items: shownItems)
+        made.showPlan(shownPlan)
         made.setLive(model?.live(id).isWorking == true)
         transcript = made
         return made
@@ -87,7 +88,11 @@ final class BotSession {
     /// touched (`OrbTranscript.show` compares storage, not elements).
     private func showTranscript() {
         transcript?.show(shownItems)
+        transcript?.showPlan(shownPlan)
     }
+
+    /// The plan of the conversation on show, while it still steers the work.
+    var shownPlan: TaskPlan? { (parkedChat ?? conversation)?.activePlan }
 
     // MARK: Streaming
 

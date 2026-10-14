@@ -1508,6 +1508,9 @@ final class AppModel {
                                   outputsDirectory: outputsDirectory,
                                   canSaveFiles: bot.capabilities.contains(.terminal),
                                   computerUseAllowed: bot.capabilities.contains(.computerUse))
+        // The plan the conversation has: the turn's calls change this copy, the conversation keeps its own from them.
+        let plan = session.conversation?.taskPlan
+        context.taskPlan = TaskPlanBoard(plan)
         let userTurns = session.userTurnCount()
         // MARK: MultiOrb (WP1)
         if multi.orbs { context.orbs = delegationHandler(for: botID) }
@@ -1541,7 +1544,7 @@ final class AppModel {
             let message = prompt + AttachmentText.block(for: attachments, texts: files, room: attachmentRoom)
             guard session.isCurrent(turn) else { return } // stopped while preparing
             let built = TurnPrompt.native(inputs, history: history, lastWorkspaceHash: lastWorkspaceHash, lastWorkspace: lastWorkspace,
-                                          memoryInPrompt: memoryInPrompt)
+                                          memoryInPrompt: memoryInPrompt, plan: plan)
             let client: any LLMClient
             do {
                 guard let made = clientOverride?() ?? account.client(for: modelInfo, credentials: Self.credentials(for: ref.provider),

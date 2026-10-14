@@ -292,7 +292,7 @@ final class BotLive {
             case .browser, .computer: return .browsing
             case .file: return .reading
             case .search: return .searching
-            case .connector, .memory, .schedule: return .thinking
+            case .connector, .memory, .schedule, .plan: return .thinking
             case .orbs: return .conversing
             }
         }

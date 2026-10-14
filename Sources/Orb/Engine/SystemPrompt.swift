@@ -136,7 +136,9 @@ enum PromptParts {
     static let workHabits = """
     ## Working on longer tasks
     Say the plan in a line or two, run independent reads and searches together, check the result after changing things (run the \
-    build or tests, reread the file), and finish with what changed; mention what is left only if you could not do it, and why.
+    build or tests, reread the file), and finish with what changed; mention what is left only if you could not do it, and why. \
+    For several steps or past ~15 tool calls (not a question or a quick request), keep a task_plan and update it as you go; \
+    never end a turn with a step in_progress without saying why.
     """
 
     /// How to work with other apps without taking over the person's Mac. Only for an Orb that may control apps: in the

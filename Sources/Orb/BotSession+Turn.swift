@@ -234,7 +234,7 @@ extension BotSession {
         case .message(let message):
             ensureLoaded()
             changeConversation {
-                $0.messages.append(message)
+                $0.absorb(message)
                 if message.role == .assistant { $0.lastModelCall = .now }
             }
             // What the review counts, as Hermes does: steps of the model that ask for tools (ten reads at once are one),

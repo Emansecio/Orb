@@ -94,9 +94,9 @@ struct SystemPromptTests {
         // it is 4,407 for this Orb: the list of skills is only added when there are skills; ~170 more went to working with apps in the
         // background; ~420 more went to doing an announced step in the same reply, not ending a turn on a promise and keeping
         // scripts in the Orb's folder instead of /tmp, which real conversations showed models get wrong; ~290 more went to assuming
-        // instead of asking for what the request allows, not ending on a plan or an offer, and the role being a rule). The prompt
-        // is cached across turns.
-        #expect(system.count < 5_250, "the native system prompt is \(system.count) characters")
+        // instead of asking for what the request allows, not ending on a plan or an offer, and the role being a rule; ~170 more
+        // went to when to keep a task_plan). The prompt is cached across turns.
+        #expect(system.count < 5_400, "the native system prompt is \(system.count) characters")
         for rule in ["Reply in the user's language", "Be brief", "Use tools to find out", "read before you change things",
                      "say in one short sentence what you are about to do", "never retry what the user denied",
                      "Do not emulate a switched-off capability", "sudo cannot work", "prefer the trash tool over rm",

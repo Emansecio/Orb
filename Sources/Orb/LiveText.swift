@@ -134,6 +134,14 @@ final class OrbTranscript {
     private(set) var foldedRows = 0
     /// The rows a time separator goes above (`TimeSeparators`), by row id, with the time each shows.
     private(set) var timeBreaks: [UUID: Date] = [:]
+    /// The task plan while some step of it is open (`Conversation.activePlan`), for the line at the end of the chat.
+    private(set) var plan: TaskPlan?
+
+    /// Shows `plan`; the same plan again changes nothing, so the line is not redrawn for every message of the turn.
+    func showPlan(_ plan: TaskPlan?) {
+        guard plan != self.plan else { return }
+        self.plan = plan
+    }
 
     /// The chat is now another conversation (call before `show`).
     func swapped() { swaps &+= 1 }

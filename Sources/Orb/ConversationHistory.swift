@@ -25,6 +25,7 @@ extension Conversation {
         copy.summary = nil
         copy.summaryCoveredCount = nil
         copy.ledger = nil
+        copy.taskPlan = nil
         copy.compactions = nil
         copy.condensedCount = nil
         copy.taskPaused = nil

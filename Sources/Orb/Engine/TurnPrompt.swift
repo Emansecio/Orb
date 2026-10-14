@@ -28,23 +28,26 @@ enum TurnPreface {
     /// the folder changed since the one it has; `notes` is memory text already fenced as data.
     /// `memory`, a `memoryUpdate` block, when the Orb's memory changed since the system prompt was frozen.
     static func make(now: Date, timeZone: String, snapshot: WorkspaceSnapshot?, changes: String = "", notes: String,
-                     memory: String = "") -> String {
+                     memory: String = "", plan: String = "") -> String {
         var parts = ["Now: \(now.formatted(date: .complete, time: .shortened)) (\(timeZone))."]
         if !memory.isEmpty { parts.append(memory) }
         if let snapshot { parts.append(snapshot.text) }
         if !changes.isEmpty { parts.append(changes) }
         if !notes.isEmpty { parts.append(notes) }
+        // Last, next to the message: where the task stands is what a "continua" needs first.
+        if !plan.isEmpty { parts.append(plan) }
         // What is inside comes from the folder and from memory: none of it can close this fence early and pass for the user's words.
         return openTag + "\n" + Fence.neutralize(parts.joined(separator: "\n\n"), tags: [name]) + "\n" + closeTag
     }
 
     /// The preface for what `report` says about the folder: the whole `snapshot`, the changes, or nothing.
     static func make(now: Date, timeZone: String, report: WorkspaceReport, snapshot: WorkspaceSnapshot, notes: String,
-                     memory: String = "") -> String {
+                     memory: String = "", plan: String = "") -> String {
         switch report {
-        case .nothing: make(now: now, timeZone: timeZone, snapshot: nil, notes: notes, memory: memory)
-        case .full: make(now: now, timeZone: timeZone, snapshot: snapshot, notes: notes, memory: memory)
-        case .changes(let changes): make(now: now, timeZone: timeZone, snapshot: nil, changes: changes, notes: notes, memory: memory)
+        case .nothing: make(now: now, timeZone: timeZone, snapshot: nil, notes: notes, memory: memory, plan: plan)
+        case .full: make(now: now, timeZone: timeZone, snapshot: snapshot, notes: notes, memory: memory, plan: plan)
+        case .changes(let changes):
+            make(now: now, timeZone: timeZone, snapshot: nil, changes: changes, notes: notes, memory: memory, plan: plan)
         }
     }
 
@@ -214,9 +217,10 @@ enum TurnPrompt {
     /// recorded of the last one; only what changed when the folder changed; and nothing about the folder otherwise.
     /// `memoryInPrompt`: the memory this conversation's system prompt has carried so far. It stays there unchanged (a new
     /// start, with no history, takes the memory as it is now); a memory that changed goes in the preface instead, once,
-    /// and again only if the model can no longer read it there.
+    /// and again only if the model can no longer read it there. `plan`: the conversation's task plan, which goes with every
+    /// message while some step is still open (the preface is written once and stays, so the prompt cache keeps it).
     static func native(_ inputs: TurnPromptInputs, history: [ChatMessage], lastWorkspaceHash: String?,
-                       lastWorkspace: WorkspaceSnapshot? = nil, memoryInPrompt: String? = nil) -> Native {
+                       lastWorkspace: WorkspaceSnapshot? = nil, memoryInPrompt: String? = nil, plan: TaskPlan? = nil) -> Native {
         let report = inputs.snapshot.report(lastHash: lastWorkspaceHash, seen: lastWorkspace,
                                             modelHasSnapshot: TurnPreface.hasSnapshot(in: history))
         // The full notes (where you left off, other titles) once, at the start; later only what fits the message.
@@ -227,7 +231,8 @@ enum TurnPrompt {
         return Native(system: SystemPrompt.make(bot: inputs.bot, skills: inputs.skills, memory: frozen,
                                                 environment: inputs.environment, folder: inputs.folderSection),
                       preface: TurnPreface.make(now: inputs.now, timeZone: inputs.environment.timeZone, report: report,
-                                                snapshot: inputs.snapshot, notes: notes, memory: known == current ? "" : current),
+                                                snapshot: inputs.snapshot, notes: notes, memory: known == current ? "" : current,
+                                                plan: plan?.isActive == true ? plan?.compact() ?? "" : ""),
                       workspaceHash: inputs.snapshot.hash, workspace: inputs.snapshot.forComparison, memory: frozen)
     }
 }

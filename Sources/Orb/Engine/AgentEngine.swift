@@ -181,6 +181,9 @@ actor AgentEngine {
         var cutContinues = 0
         var retriedSilence = false
         var reminders = 0
+        // The step the task plan was last in front of the model at: the message that opens the turn carries it
+        // (`TurnPrompt.native`), and so does every `task_plan` result.
+        var planShown = 0
         // Whether tools ran since the last reminder: a reminder only follows another one after real work, so a model
         // that keeps announcing without acting is not asked forever.
         var workedSinceReminder = false
@@ -285,7 +288,10 @@ actor AgentEngine {
                 let calls = isLastStep ? [] : reply.calls
                 let assistant = ChatMessage(role: .assistant, content: reply.text, toolCalls: calls, reasoning: reply.reasoning)
                 // Append-only, so the earlier part of the conversation still hits the provider's cache.
-                let note = maxSteps - step == Self.warningSteps ? Self.stepWarning(remaining: Self.warningSteps) : nil
+                let warning = maxSteps - step == Self.warningSteps ? Self.stepWarning(remaining: Self.warningSteps) : nil
+                let recital = Self.planRecital(request.context.taskPlan.plan, calls: calls, step: step, shown: &planShown)
+                let notes = [warning, recital].compactMap { $0 }
+                let note = notes.isEmpty ? nil : notes.joined(separator: "\n\n")
 
                 switch reply.stop {
                 case .refusal:
@@ -328,7 +334,8 @@ actor AgentEngine {
                     // On the last step the model may have only tried to call tools: that is the limit, not silence.
                     if isLastStep && !reply.calls.isEmpty {
                         // Nothing else says where the task stands: leave a record for the "continua" that follows.
-                        if let progress = Self.progress(in: messages, pickedUp: picksUpTask, turnStart: turnStart, nudges: nudges, steering: steered) {
+                        if let progress = Self.progress(in: messages, pickedUp: picksUpTask, turnStart: turnStart, nudges: nudges, steering: steered,
+                                                        plan: request.context.taskPlan.plan) {
                             record(ChatMessage(role: .assistant, content: progress), in: &messages, out: out)
                             out.yield(.taskPaused)
                         }
@@ -346,7 +353,8 @@ actor AgentEngine {
                     out.yield(.failed(Self.silenceFailure))
                     return
                 }
-                if calls.isEmpty && isLastStep, let progress = Self.progress(in: messages, pickedUp: picksUpTask, turnStart: turnStart, nudges: nudges, steering: steered) {
+                if calls.isEmpty && isLastStep, let progress = Self.progress(in: messages, pickedUp: picksUpTask, turnStart: turnStart, nudges: nudges, steering: steered,
+                                                        plan: request.context.taskPlan.plan) {
                     // The model's closing words, with the record of the steps after them (one message, so the roles
                     // keep alternating; the transcript shows only what the model wrote).
                     var closing = assistant
@@ -596,12 +604,30 @@ actor AgentEngine {
     /// `pickedUp`: the turn's request only picks up the task before it. `nudges`: the indexes of the messages the engine
     /// added, which is no request. `turnStart`: the index of the message that opened the turn; the messages sent during it
     /// (`steering`, and anything queued after `turnStart`) are no request starting a task either, but stay in its record.
-    private static func progress(in messages: [ChatMessage], pickedUp: Bool, turnStart: Int, nudges: [Int] = [], steering: [Int] = []) -> String? {
+    private static func progress(in messages: [ChatMessage], pickedUp: Bool, turnStart: Int, nudges: [Int] = [], steering: [Int] = [],
+                                 plan: TaskPlan? = nil) -> String? {
         let users = messages.indices.filter {
             $0 <= turnStart && !nudges.contains($0) && !steering.contains($0) && messages[$0].isConversationRequest
         }
         guard let start = pickedUp && users.count >= 2 ? users[users.count - 2] : users.last else { return nil }
-        return ProgressRecord.text(task: messages.indices.filter { $0 >= start && !nudges.contains($0) }.map { messages[$0] })
+        return ProgressRecord.text(task: messages.indices.filter { $0 >= start && !nudges.contains($0) }.map { messages[$0] }, plan: plan)
+    }
+
+    /// Steps after which the task plan is put in front of the model again when nothing else showed it.
+    static let planRecitalInterval = 8
+
+    /// The plan, at the end of this step's results, when it is still open and the model has not seen it for
+    /// `planRecitalInterval` steps (a step that calls `task_plan` sees it in the result). Append-only, like `stepWarning`,
+    /// so it costs no cache; the plan never goes anywhere it would have to be taken out again.
+    static func planRecital(_ plan: TaskPlan?, calls: [ToolCallRequest], step: Int, shown: inout Int) -> String? {
+        guard !calls.isEmpty else { return nil }
+        if calls.contains(where: { $0.name == TaskPlanTool.name }) {
+            shown = step
+            return nil
+        }
+        guard let plan, plan.isActive, step - shown >= planRecitalInterval else { return nil }
+        shown = step
+        return plan.compact()
     }
 
     /// The part of `pausedNotice` only the chat can act on: where the notice is read as why a run did not finish (a

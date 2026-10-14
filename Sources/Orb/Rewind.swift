@@ -102,7 +102,7 @@ extension ToolCall {
             return starts(["Agendando", "Apagando"])
         case .orbs:
             return starts(["Falando", "Avisando", "Propondo"]) // another Orb was asked to work, or an Orb was proposed
-        case .search, .memory, .connector:
+        case .search, .memory, .connector, .plan:
             return false // a connector's calls count through the cards that were answered (see `Conversation.dropsChanges`)
         }
     }
@@ -277,7 +277,11 @@ extension Conversation {
     /// derived from the part that goes is forgotten with it, so nothing refers to what is no longer there.
     mutating func rewind(to cut: RewindCut) {
         items.removeSubrange(min(cut.itemIndex, items.count)...)
-        messages.removeSubrange(min(cut.messageIndex, messages.count)...)
+        let dropped = messages[min(cut.messageIndex, messages.count)...]
+        // The plan goes back to what the calls that are left made of it: gone when it was made after the cut. The
+        // messages are never deleted otherwise, so the replay finds every call that is left.
+        if TaskPlan.isChanged(by: dropped) { taskPlan = TaskPlan.replay(Array(messages[..<dropped.startIndex])) }
+        messages.removeSubrange(dropped.startIndex...)
         // Whether the last task paused is read from the history that is left.
         taskPaused = nil
         memorySavedCount = memorySavedCount.map { min($0, items.count) }

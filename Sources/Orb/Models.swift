@@ -228,6 +228,9 @@ struct Conversation: Codable, Sendable {
     /// The memory (`MemoryBrief.stable`) this conversation's system prompt carries: kept as it was so the provider's
     /// prompt cache lasts, while a change reaches the model in a message's preface (`TurnPreface.memoryUpdate`).
     var memoryInPrompt: String?
+    /// The plan of the task in progress (`task_plan`), as the calls in `messages` left it: kept beside them so it does not
+    /// depend on what the summary says, and worked out from them again when "Refazer" cuts some of them away.
+    var taskPlan: TaskPlan?
 
     /// After a quit or crash mid-turn: nothing is streaming, running or waiting anymore. `notice` goes at the end when a turn
     /// was cut off there (something was still going, or your message got no answer), so the chat says what happened.
@@ -287,6 +290,8 @@ extension Conversation {
         // Only helps to save tokens: whatever cannot be read here is sent whole next time instead of failing the conversation.
         workspaceSeen = (try? c.decodeIfPresent(WorkspaceSnapshot.self, forKey: .workspaceSeen)) ?? nil
         memoryInPrompt = (try? c.decodeIfPresent(String.self, forKey: .memoryInPrompt)) ?? nil
+        // A plan this version cannot read is dropped; the calls that made it are still in `messages`.
+        taskPlan = (try? c.decodeIfPresent(TaskPlan.self, forKey: .taskPlan)) ?? nil
     }
 }
 
@@ -295,6 +300,8 @@ struct ToolCall: Identifiable, Codable, Sendable, Equatable {
         case shell, browser, file, search, computer, connector, memory, schedule
         /// The tools that reach other Orbs (`orbs`, `orb_propose`, `orb_draft`).
         case orbs
+        /// `task_plan`: the plan of the task, which only the conversation keeps.
+        case plan
 
         init(from decoder: Decoder) throws { self = try decoder.rawValue(Self.self, fallback: .connector) }
 
@@ -309,6 +316,7 @@ struct ToolCall: Identifiable, Codable, Sendable, Equatable {
             case .memory: "brain"
             case .schedule: "clock.arrow.circlepath"
             case .orbs: "bubble.left.and.bubble.right"
+            case .plan: "checklist"
             }
         }
     }
