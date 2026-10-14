@@ -141,6 +141,8 @@ struct ProviderAccount: Codable, Hashable, Identifiable, Sendable {
     var isEnabled = true
     var models: [ProviderModel] = []
     var modelsUpdatedAt: Date?
+    /// The `ModelCatalog.version` the list was read with; nil for lists from before versions were kept (1).
+    var catalogVersion: Int?
     /// Custom provider only: the wire format its gateway speaks, and any extra request headers it needs.
     var format: APIFormat = .chat
     var headers: [String: String] = [:]
@@ -160,6 +162,7 @@ struct ProviderAccount: Codable, Hashable, Identifiable, Sendable {
         isEnabled = try c.value(.isEnabled, default: true)
         models = try c.lossyArray(.models)
         modelsUpdatedAt = try c.decodeIfPresent(Date.self, forKey: .modelsUpdatedAt)
+        catalogVersion = try? c.decodeIfPresent(Int.self, forKey: .catalogVersion)
         format = try c.value(.format, default: .chat)
         headers = try c.value(.headers, default: [:])
     }
@@ -205,15 +208,20 @@ enum ModelRefreshBackoff {
         return min(maxAge, firstWait * pow(2, Double(min(max(failure.count, 1) - 1, 16))))
     }
 
-    /// Whether the list is due: older than `age` (or never fetched), and not still waiting out a failed attempt.
-    static func isDue(updatedAt: Date?, failure: Failure?, now: Date, age: TimeInterval = maxAge) -> Bool {
+    /// Whether the list is due: older than `age` (or never fetched), or read by an older build that kept less of each
+    /// model (`outdated`), and not still waiting out a failed attempt.
+    static func isDue(updatedAt: Date?, failure: Failure?, now: Date, age: TimeInterval = maxAge, outdated: Bool = false) -> Bool {
         if let failure, now < failure.at.addingTimeInterval(wait(after: failure)) { return false }
-        guard let updatedAt else { return true }
+        guard let updatedAt, !outdated else { return true }
         return now.timeIntervalSince(updatedAt) > age
     }
 }
 
 enum ModelCatalog {
+    /// Goes up when the app starts keeping more of what a provider's list says about each model, so a list read before
+    /// is read again on the next launch instead of hours later. 2: thinking levels (`ProviderModel.efforts`).
+    static let version = 2
+
     /// Words of a model id that mark a model that does not chat: embeddings, rerankers, speech and moderation. Local servers
     /// list everything they hold, so a user of RAG has `bge-m3` next to `qwen3`.
     static let notForChat: Set<String> = ["embed", "embedding", "embeddings", "minilm", "bge", "rerank", "reranker", "tts", "whisper",

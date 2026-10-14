@@ -920,6 +920,7 @@ final class AppModel {
             // Read inside the update, so a model added by hand while the list was loading is kept.
             $0.models = kind == .custom ? ModelCatalog.mergingManual(fetched: fetched, previous: $0.models) : fetched
             $0.modelsUpdatedAt = .now
+            $0.catalogVersion = ModelCatalog.version
         }
         if ModelRef(defaultModel).flatMap({ account($0.provider) }) == nil, let first = ModelCatalog.preferredDefault(fetched) {
             defaultModel = ModelRef(provider: kind, model: first.id).text
@@ -947,7 +948,8 @@ final class AppModel {
     /// refresh the user asks for (`refreshModels`) always tries.
     func refreshAllModels(olderThan age: TimeInterval = 6 * 3600, now: Date = .now) async {
         for account in providers where account.isEnabled && isUsable(account)
-            && ModelRefreshBackoff.isDue(updatedAt: account.modelsUpdatedAt, failure: modelRefreshFailures[account.kind], now: now, age: age) {
+            && ModelRefreshBackoff.isDue(updatedAt: account.modelsUpdatedAt, failure: modelRefreshFailures[account.kind], now: now, age: age,
+                                         outdated: (account.catalogVersion ?? 1) < ModelCatalog.version) {
             do {
                 try await refreshModels(account.kind)
             } catch {

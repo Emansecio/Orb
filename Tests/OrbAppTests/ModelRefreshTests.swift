@@ -50,4 +50,20 @@ import Testing
         #expect(await asked.count == 1)
         #expect(model.providers.first?.models.map(\.id) == ["m"])
     }
+
+    @Test @MainActor func aFreshListReadByAnOlderBuildIsReadAgainAtOnce() async {
+        let asked = Asked()
+        let model = model(failing: false, asked: asked)
+        // Read a minute ago, but by a build that did not keep each model's thinking levels.
+        model.updateProvider(.ollama) {
+            $0.models = [ProviderModel(id: "m", name: "m", format: .chat)]
+            $0.modelsUpdatedAt = .now.addingTimeInterval(-60)
+            $0.catalogVersion = nil
+        }
+        await model.refreshAllModels()
+        #expect(await asked.count == 1)
+        #expect(model.providers.first?.catalogVersion == ModelCatalog.version)
+        await model.refreshAllModels()
+        #expect(await asked.count == 1)
+    }
 }
