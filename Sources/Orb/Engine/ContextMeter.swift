@@ -51,18 +51,15 @@ enum ContextMeter {
     /// soon as it says yes, so a measurement nobody waits for any more stops instead of finishing.
     static func fill(of conversation: Conversation, budget: ContextBudget, compactingShare: Double = compactingShare,
                      isCancelled: () -> Bool) -> ContextFill? {
-        let covered = conversation.summary == nil ? 0 : min(max(conversation.summaryCoveredCount ?? 0, 0), conversation.messages.count)
+        let covered = conversation.coveredMessageCount
         let slice = Array(conversation.messages[covered...])
         let condensing = max((conversation.condensedCount ?? 0) - covered, 0)
         // A task waiting for "continua" keeps its fresh outputs whole in the next request: measure it the same way.
         let paused = conversation.isTaskPaused
 
-        // The history as it stands: nothing new folded away, however far over the budget it is.
-        var cut = ContextCut(summary: conversation.summary, ledger: conversation.currentLedger)
         let unlimited = ContextBudget(tokens: Int.max / 8)
         if isCancelled() { return nil }
-        let current = ContextWindow.fit(slice, budget: unlimited, cut: &cut, condensing: condensing, paused: paused)
-        let history = tokens(current.messages)
+        let history = historyTokens(of: conversation)
 
         // A compaction condenses the older stretch too (see `Conversation.prepareHistory`): what it would fold is
         // measured on the history condensed that far, as `Conversation.compact` does.
@@ -95,6 +92,15 @@ enum ContextMeter {
         return ContextFill(usedTokens: budget.overheadTokens + history, historyTokens: history,
                            overheadTokens: budget.overheadTokens, windowTokens: window,
                            budgetTokens: budget.tokens, foldedMessages: covered, compaction: compaction)
+    }
+
+    /// Tokens of `conversation`'s history as it stands: nothing new folded away, however far over the budget it is.
+    static func historyTokens(of conversation: Conversation) -> Int {
+        let covered = conversation.coveredMessageCount
+        var cut = ContextCut(summary: conversation.summary, ledger: conversation.currentLedger)
+        let current = ContextWindow.fit(Array(conversation.messages[covered...]), budget: ContextBudget(tokens: Int.max / 8), cut: &cut,
+                                        condensing: max((conversation.condensedCount ?? 0) - covered, 0), paused: conversation.isTaskPaused)
+        return tokens(current.messages)
     }
 
     /// The budget a manual compaction fits the history to: `share` of `budget`, or half of what the history takes

@@ -154,6 +154,10 @@ final class BotSession {
     @ObservationIgnored var memoryRequest: (intent: MemoryIntent, from: Int)?
     /// Saves a conversation stretch to memory once the user has been away for `SessionSummary.idleGap`.
     @ObservationIgnored var memoryIdle: Task<Void, Never>?
+    /// The last session page being written (they are written one after the other, see `persistStretch`), and how many
+    /// could not be written.
+    @ObservationIgnored var memoryWrites: Task<String?, Never>?
+    @ObservationIgnored var failedMemoryWrites = 0
     /// Tokens of system prompt and tool specs the engine measured on the last turn (not kept across launches).
     @ObservationIgnored var measuredOverhead: Int?
     /// The model ("provider/model") the running turn uses, for the usage it records.

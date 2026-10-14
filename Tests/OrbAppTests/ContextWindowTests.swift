@@ -706,7 +706,7 @@ struct ContextEngineTests {
     @Test func aSecondOverflowIsReportedInsteadOfLooping() async {
         let overflow = LLMError.http(status: 400, message: "prompt is too long: 300000 tokens > 200000 maximum")
         let recorder = Recorder([], failures: [overflow, overflow])
-        let events = await collect(engineRequest(recorder, budget: .fallback))
+        let events = await collect(engineRequest(recorder, history: longHistory(), budget: .fallback))
         #expect(await recorder.received.count == 2)
         #expect(failures(events).count == 1)
     }

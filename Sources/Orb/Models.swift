@@ -273,19 +273,34 @@ extension Conversation {
     mutating func record(_ marks: DeliveryMarks) { marks.record(in: &self) }
 
     /// Tolerant decoding: an item or message this version can't read (an unknown case after a downgrade) is
-    /// skipped instead of sending the whole conversation to `.corrupt`.
+    /// skipped instead of sending the whole conversation to `.corrupt`, and the counts that point into the lists move
+    /// back past it. A tool result whose call was skipped goes too: the provider refuses a result without its call.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        items = try c.lossyArray(.items)
-        messages = try c.lossyArray(.messages)
-        memorySavedCount = try c.decodeIfPresent(Int.self, forKey: .memorySavedCount)
+        let storedItems: [TranscriptItem?] = try c.lossyOptionals(.items)
+        var storedMessages: [ChatMessage?] = try c.lossyOptionals(.messages)
+        if storedMessages.contains(where: { $0 == nil }) {
+            var calls: Set<String> = []
+            for index in storedMessages.indices {
+                guard let stored = storedMessages[index] else { continue }
+                if stored.role == .assistant { calls.formUnion(stored.toolCalls.map(\.id)) }
+                if stored.role == .tool, !calls.contains(stored.toolCallID ?? "") { storedMessages[index] = nil }
+            }
+        }
+        items = storedItems.compactMap { $0 }
+        messages = storedMessages.compactMap { $0 }
+        let item = Self.kept(storedItems), message = Self.kept(storedMessages)
+        memorySavedCount = try c.decodeIfPresent(Int.self, forKey: .memorySavedCount).map(item)
         summary = try c.decodeIfPresent(String.self, forKey: .summary)
-        summaryCoveredCount = try c.decodeIfPresent(Int.self, forKey: .summaryCoveredCount)
+        summaryCoveredCount = try c.decodeIfPresent(Int.self, forKey: .summaryCoveredCount).map(message)
         // A ledger this version cannot read is dropped (the summary text still stands) instead of losing the conversation.
         ledger = (try? c.decodeIfPresent(ConversationLedger.self, forKey: .ledger)) ?? nil
         compactions = (try? c.decodeIfPresent(Int.self, forKey: .compactions)) ?? nil
-        chunkSummaries = (try? c.decodeIfPresent([ChunkSummary].self, forKey: .chunkSummaries)) ?? nil
-        condensedCount = try c.decodeIfPresent(Int.self, forKey: .condensedCount)
+        chunkSummaries = ((try? c.decodeIfPresent([ChunkSummary].self, forKey: .chunkSummaries)) ?? nil)?.compactMap { note in
+            let start = message(note.start), end = message(note.end)
+            return start < end ? ChunkSummary(start: start, end: end, text: note.text) : nil
+        }
+        condensedCount = try c.decodeIfPresent(Int.self, forKey: .condensedCount).map(message)
         taskPaused = try c.decodeIfPresent(Bool.self, forKey: .taskPaused)
         lastModelCall = (try? c.decodeIfPresent(Date.self, forKey: .lastModelCall)) ?? nil
         workspaceHash = try c.decodeIfPresent(String.self, forKey: .workspaceHash)
@@ -295,6 +310,12 @@ extension Conversation {
         memoryInPrompt = (try? c.decodeIfPresent(String.self, forKey: .memoryInPrompt)) ?? nil
         // A plan this version cannot read is dropped; the calls that made it are still in `messages`.
         taskPlan = (try? c.decodeIfPresent(TaskPlan.self, forKey: .taskPlan)) ?? nil
+    }
+
+    /// Where a position in the stored list lands once the elements that could not be read (nil) are left out.
+    private static func kept<T>(_ stored: [T?]) -> (Int) -> Int {
+        let lost = stored.indices.filter { stored[$0] == nil }
+        return { position in position - lost.prefix { $0 < position }.count }
     }
 }
 

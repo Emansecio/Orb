@@ -164,7 +164,7 @@ struct SessionConnectorTests {
         #expect(result.tokensBefore > result.tokensAfter && result.tokensAfter > 0)
         #expect(result.savedToMemory)
         #expect(result.message.hasPrefix("Compactei a conversa: "))
-        #expect(result.message.hasSuffix(" Guardei o essencial na memória do Orb."))
+        #expect(result.message.hasSuffix(" O essencial vai para a memória do Orb."))
         let notice = try #require(lastNotice(model, botID))
         #expect(result.message.hasPrefix(notice))
         #expect(model.lastCompaction[botID]?.kind == .manual)

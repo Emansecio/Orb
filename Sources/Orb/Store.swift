@@ -906,6 +906,11 @@ extension KeyedDecodingContainer {
     func lossyArray<T: Decodable>(_ key: Key, default fallback: [T] = []) throws -> [T] {
         try decodeIfPresent([Lossy<T>].self, forKey: key)?.compactMap(\.element) ?? fallback
     }
+
+    /// The same list with nil where an element can't be read, so indexes into the stored list can be moved past it.
+    func lossyOptionals<T: Decodable>(_ key: Key) throws -> [T?] {
+        try decodeIfPresent([Lossy<T>].self, forKey: key)?.map(\.element) ?? []
+    }
 }
 
 extension Decoder {

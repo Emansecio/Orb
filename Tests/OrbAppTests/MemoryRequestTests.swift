@@ -83,6 +83,21 @@ import Testing
         #expect(session.conversation?.memorySavedCount == 0)
     }
 
+    /// A later stretch marked before the earlier page failed does not leave the earlier one behind the mark.
+    @Test func aFailedEarlierPageIsTakenAgainWithTheStretchesMarkedSince() async {
+        let (model, session) = setUp()
+        model.memory.bank(for: session.id).close()
+        session.append(.user(text: "Pedido A", attachments: []))
+        session.append(.bot(text: "feito A", isStreaming: false))
+        #expect(session.saveMemory())
+        session.append(.user(text: "Pedido B", attachments: []))
+        session.append(.bot(text: "feito B", isStreaming: false))
+        #expect(session.saveMemory())
+        #expect(await waitUntil("the mark goes back to the first stretch") { session.conversation?.memorySavedCount == 0 })
+        _ = await session.memoryWrites?.value
+        #expect(session.conversation?.memorySavedCount == 0)
+    }
+
     /// The body is what you said, so the same fact saved later by the model is the same page.
     @Test func theFactSavedByTheAppIsRecognizedWhenTheModelSavesItLater() async {
         let (model, session) = setUp()

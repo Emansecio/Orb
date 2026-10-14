@@ -96,7 +96,7 @@ struct EngineLearningTests {
 
     private func run(window: Int?, failures: [Error], learned: Learned) async -> [TurnEvent] {
         let recorder = Recorder([[.text("ok")]], failures: failures)
-        var request = engineRequest(recorder, history: history(), budget: window.map { ContextBudget(modelWindow: $0) } ?? ContextBudget(tokens: 6_000))
+        var request = engineRequest(recorder, history: longHistory(), budget: window.map { ContextBudget(modelWindow: $0) } ?? ContextBudget(tokens: 6_000))
         request.onContextLearned = { tokens, stated in learned.add(tokens, stated: stated) }
         return await collect(request)
     }

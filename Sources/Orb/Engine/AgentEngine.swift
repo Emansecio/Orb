@@ -246,11 +246,18 @@ actor AgentEngine {
                 out.yield(.status(thinking))
                 var reply = Reply()
                 var contextRetried = false
+                var refused: [ChatMessage]? // the request refused for size, so the same one is not sent again
                 while true {
                     var windowHasImages = false
+                    var sent: [ChatMessage] = []
                     do {
                         let (window, fit) = Self.fitted(messages, to: budget, cut: &cut, continuing: picksUpTask, nudges: nudges, steering: steered,
                                                            sendImages: sendImages)
+                        guard window != refused else {
+                            out.yield(.failed(budget.isCrowded ? budget.crowdedFailure : Self.doesNotFit))
+                            return
+                        }
+                        sent = window
                         windowHasImages = window.contains { !$0.images.isEmpty }
                         if let fit {
                             for report in announced.reports(after: fit, cut: cut, input: messages.dropFirst()) { out.yield(.compacted(report)) }
@@ -271,6 +278,7 @@ actor AgentEngine {
                         // already capped the history below what the stated window allows, resizing alone would
                         // send the same request again.
                         contextRetried = true
+                        refused = sent
                         let reported = ContextOverflow.reportedWindow(error)
                         if let stated = reported, let window = budget.window, stated < window {
                             var resized = budget.resized(window: stated)
@@ -284,6 +292,9 @@ actor AgentEngine {
                             // plan below it instead of overflowing again at every cycle.
                             learnedWindow = budget.window.map { (Int(Double($0) * Self.unstatedWindowShare), false) }
                         }
+                        // Never more than half the history refused: after a fold to the low-water mark it is already
+                        // under half the budget, and the budget alone would send it again unchanged.
+                        budget.tokens = min(budget.tokens, ContextBudget.tokens(forCharacters: sent.dropFirst().contextCharacters) / 2)
                     } catch let error where windowHasImages && ImageRejection.matches(error) {
                         // The model cannot read pictures: say so once, remember it, and go on with their paths.
                         sendImages = false
@@ -562,6 +573,10 @@ actor AgentEngine {
         }
         return reply
     }
+
+    /// What a refusal for size says when the history cannot get any smaller: what is left is the request itself.
+    static let doesNotFit = "O pedido não cabe na janela deste modelo, mesmo sem o histórico que dava para resumir. "
+        + "Encurte a mensagem (ou os anexos) ou use um modelo com janela maior."
 
     /// A refusal for size that names no window, answered by a request with half the history: the window is taken to be
     /// this share of the one assumed (a second refusal at the next turn lowers it again). The window may well have

@@ -247,18 +247,24 @@ extension BotSession {
     }
 
     /// `savedBefore`: where the saved mark was before `pendingStretch` moved it past `stretch`. When the page cannot be
-    /// written the mark goes back there, so the next save (a pause, a compaction) takes the stretch again.
+    /// written the mark goes back there, so the next save (a pause, a compaction) takes the stretch again. Pages are
+    /// written one at a time: a stretch marked before an earlier page failed is not written on its own, the next save
+    /// takes it with the failed one.
     func persistStretch(_ stretch: [TranscriptItem], notes: [String] = [], savedBefore: Int? = nil, summarize: Bool = false) {
         guard let model else { return }
-        let bank = model.memory.bank(for: id), botID = id, mark = conversation?.memorySavedCount
+        let bank = model.memory.bank(for: id), botID = id, failures = failedMemoryWrites, previous = memoryWrites
         let writer = summarize && notes.isEmpty ? model.sessionNoteWriter(for: id) : nil
-        Task.detached(priority: .utility) { [weak model, weak self] in
-            var path: String?, written = true
-            if let page = SessionSummary.page(from: stretch, notes: notes) {
-                path = await bank.saveSessionPath(page)
-                written = path != nil
-            }
-            if !written, let savedBefore { await self?.unmarkStretch(at: mark, back: savedBefore) }
+        let written = Task.detached(priority: .utility) { [weak self] () -> String? in
+            _ = await previous?.value
+            if savedBefore != nil, let failed = await self?.failedMemoryWrites, failed != failures { return nil }
+            guard let page = SessionSummary.page(from: stretch, notes: notes) else { return nil }
+            let path = await bank.saveSessionPath(page)
+            if path == nil, let savedBefore { await self?.unmarkStretch(back: savedBefore) }
+            return path
+        }
+        memoryWrites = written
+        Task.detached(priority: .utility) { [weak model] in
+            let path = await written.value
             await model?.refreshMemory(botID)
             // The model's note joins the page written by rules (`SessionNote`).
             guard let writer, let path, let input = SessionNote.input(from: stretch), let note = await writer(input),
@@ -268,9 +274,11 @@ extension BotSession {
         }
     }
 
-    /// The page of the stretch up to `mark` was not written: the stretch is not saved (unless the mark moved on meanwhile).
-    func unmarkStretch(at mark: Int?, back earlier: Int) {
-        guard let mark, conversation?.memorySavedCount == mark else { return }
+    /// The page of a stretch that started at `earlier` was not written: the mark goes back there (never forward, past a
+    /// rewind), taking with it the stretches marked since.
+    func unmarkStretch(back earlier: Int) {
+        failedMemoryWrites += 1
+        guard let saved = conversation?.memorySavedCount, saved > earlier else { return }
         conversation?.memorySavedCount = earlier
         scheduleSave(delay: 0)
     }

@@ -467,7 +467,9 @@ Campo novo precisa de valor padrão: `container.value(_:default:)`, listas com `
 derruba a lista) e enums de texto com `Decoder.rawValue(_:fallback:)`. O que se perdeu vira aviso: `DecodeLoss` conta os itens
 pulados e o `Store` guarda uma cópia do original (`.corrupt-…`) antes de regravar. Um arquivo que não decodifica é **movido**
 para essa cópia (nunca fica no caminho de uma escrita); se nem isso dá, o `FileGate` bloqueia as gravações naquele arquivo até
-o app abrir de novo. Falha ao gravar avisa uma vez. Os avisos aparecem no alerta "Atenção com seus dados"
+o app abrir de novo. Falha ao gravar avisa uma vez. Na conversa, uma mensagem ou item pulado faz os números que apontam para as listas
+(`summaryCoveredCount`, `condensedCount`, as faixas de `chunkSummaries`, `memorySavedCount`) recuarem junto, e um resultado
+de ferramenta cuja chamada foi pulada sai também (o provedor recusa um resultado sem a chamada; `lossyOptionals`). Os avisos aparecem no alerta "Atenção com seus dados"
 (`AppModel.dataNotices`), que trocam o nome do arquivo pelo que ele guarda ("a conversa de Lia", "os ajustes do app";
 `StoreNotice.file` + `AppModel.described`); falha ao gravar o `.meta.json` não avisa (ele se refaz da conversa). Enums de
 texto de versões novas (`OrbTemperament`, `APIFormat`, modo de permissão…) caem no padrão em vez de derrubar o Orb; um

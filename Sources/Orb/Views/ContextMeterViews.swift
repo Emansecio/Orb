@@ -335,7 +335,7 @@ struct ContextPopover: View {
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Palette.ink)
                     if result.savedToMemory {
-                        Text("O essencial ficou guardado na memória do Orb.")
+                        Text("O essencial vai para a memória do Orb.")
                             .font(.system(size: 11)).foregroundStyle(Palette.muted)
                     }
                 } else {

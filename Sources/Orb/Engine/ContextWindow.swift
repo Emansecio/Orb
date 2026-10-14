@@ -230,8 +230,12 @@ struct ContextWindow: Sendable, Equatable {
         let turnStarts = users.filter { !(pickedUp && $0 == users.last) }
         var dropped = 0
         // The model's notes ride in the summary pair too, in a room of their own.
-        let notesRoom = cut.chunks.isEmpty && cut.ledger?.digests.isEmpty != false ? 0 : ConversationLedger.digestRoom
-        func reserve() -> Int { previous != nil || carriedNote != nil || dropped > 0 ? ContextSummary.reserve + notesRoom : 0 }
+        // A steps note folded away with its request becomes one of those notes.
+        let hasNotes = !cut.chunks.isEmpty || cut.ledger?.digests.isEmpty == false
+        func reserve() -> Int {
+            guard previous != nil || carriedNote != nil || dropped > 0 else { return 0 }
+            return ContextSummary.reserve + (hasNotes || carriedNote != nil && dropped > 0 ? ConversationLedger.digestRoom : 0)
+        }
         let charactersBefore = total + (previous != nil || carriedNote != nil ? ContextSummary.pair(
             [previous, carriedNote].compactMap { $0 }.joined(separator: "\n")).contextCharacters : 0)
 
@@ -320,6 +324,8 @@ struct ContextWindow: Sendable, Equatable {
             var extended = base.absorbing(folded)
             let foldedUpTo = origin + dropped
             let carried = cut.chunks.filter { $0.end <= foldedUpTo }.map(\.text)
+            // The steps note of the folded request, without its title (it is about "this request"): older than the stretch's notes.
+            extended.attach(carriedNote.map { [$0.replacingOccurrences(of: ContextSummary.stepsNoteTitle, with: "")] } ?? [])
             extended.attach(carried)
             cut.attachedNotes += carried
             cut.chunks.removeAll { $0.end <= foldedUpTo }

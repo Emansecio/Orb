@@ -37,7 +37,7 @@ histórico (tokens) = máx( 2 000,  mín( 90% da janela − sobrecarga − reser
 |---|---|
 | Janela | a do catálogo do modelo (`ProviderModel.contextLength`); senão 16 000 (Ollama e LM Studio), 128 000 (chat e Responses) ou 200 000 (Messages e Claude Code); o menor entre ela e a **janela aprendida** |
 | Sobrecarga | prompt do sistema + especificações das ferramentas. O motor mede a real (`ContextBudget.overheadTokens`) e avisa o app (`onOverheadMeasured`); antes disso vale 8 000 |
-| Reserva da resposta | 16 000 (Messages, Claude Code) ou 4 000 (demais), nunca mais que 1/8 da janela |
+| Reserva da resposta | 16 000 (Messages, Claude Code) ou 4 000 (demais), nunca mais que 1/8 da janela; no formato Messages vai como `max_tokens` do pedido (`ProviderAccount.client(…, replyTokens:)`), então a resposta nunca pede mais do que o orçamento deixou |
 | Teto do nível | "Contexto das conversas" em Ajustes → Geral: **Econômico** 40 000 · **Equilibrado** 80 000 (padrão) · **Amplo** 60% da janela, nunca menos que o Equilibrado (em janelas abaixo de ~133 mil, 60% seria menos que 80 000). `ContextMemoryLevel`, salvo em `AppState.contextMemory` |
 | Folga para o pedido | `leavingRoom`: tira do orçamento a mensagem nova e o prefácio (até 4 000 caracteres de reserva, `AppModel.prefaceAllowance`), nunca mais que a metade |
 
@@ -54,7 +54,8 @@ Se o provedor recusa o pedido por tamanho (HTTP 400/413 ou erro dentro do stream
   janela: o histórico cai à metade e a janela passa a valer 85% da que se supunha (`unstatedWindowShare`), gravada como
   estimativa, para os turnos seguintes não estourarem de novo a cada ciclo.
 
-Em ambos a nova tentativa é **sempre menor** que a que falhou (senão o teto do nível reenviaria o mesmo pedido). Se a
+Em ambos a nova tentativa é **sempre menor** que a que falhou (senão o teto do nível reenviaria o mesmo pedido). Se o
+histórico já não encolhe (o que sobra é o próprio pedido), não há segundo envio: o turno para com `AgentEngine.doesNotFit`. Se a
 tentativa menor funciona, `onContextLearned` grava o valor em `AppState.learnedContexts["provedor/modelo"]`
 (`LearnedContext`). Vale 21 dias (7 se foi só estimada) e aparece em Ajustes → Geral → "Janelas aprendidas", com "Esquecer"
 (útil depois de aumentar o limite do servidor).
@@ -136,6 +137,7 @@ sobre o trecho que a dobra vai levar:
    limitadas e falham muito, e os roteadores trazem -1). Entre os da mesma palavra, o de menor preço (quando há) e depois o mais novo. Um
    Orb que já está num modelo pequeno não troca. Ollama e LM Studio nunca trocam (carregar outro modelo custaria mais do que
    economiza). Sem candidato, o modelo do Orb escreve.
+   Uma resposta em que o modelo se recusa ("não posso resumir…"), ou um pedido recusado por tamanho, não vira nota (o custo conta).
 5. **Onde fica.** `Conversation.chunkSummaries` (faixa de mensagens + texto; leitura tolerante: um campo ilegível é uma nota
    que nunca é usada). Uma nota por trecho; as de trechos já dobrados saem na próxima.
 6. **Na dobra.** `prepareHistory` entrega à `ContextCut` as notas ainda não dobradas (`chunks`, nos índices da fatia), e o
@@ -182,7 +184,8 @@ Dentro do turno em andamento (`ContextWindow.fit`, passo 4):
   depois limita também as saídas inteiras a 8 000; o nível só sobe;
 - por último, os passos mais antigos da tarefa são **postos de lado**, um por um, até 60% do orçamento (`stepsLowWater`).
   Cada um vira uma linha (`ToolDigest`): `[passo 7] read_file /src/mod3.swift -> ok, 20.000 car.; começa com «func exemplo…»`
-  (até 24 linhas, as mais novas; o resto é contado). O pedido que começou a tarefa e o passo mais novo ficam sempre.
+  (até 24 linhas: as linhas `[usuário]`, até metade, e os passos mais novos; o resto é contado). O pedido que começou a
+  tarefa e o passo mais novo ficam sempre, e uma mensagem mandada durante a tarefa que sai da janela fica no resumo dos passos.
 
 Ao bater no limite de passos (30 por turno, 60 numa rotina) o motor deixa um **registro de progresso**
 (`ProgressRecord`) no histórico e emite `taskPaused`: o próximo "continua" retoma de onde parou. `Conversation.taskPaused`
@@ -203,10 +206,10 @@ instrução de salvar na memória sai. O mesmo vale para as linhas `[usuário]` 
 
 | Seção | Conteúdo | Limite |
 |---|---|---|
-| Pedido original | a primeira mensagem de verdade (≥ 20 caracteres), **fixa**: nunca trocada nem descartada | 600 |
+| Pedido original | a primeira mensagem de verdade (≥ 20 caracteres), **fixa**: nunca trocada nem descartada; se passa do limite, guarda o começo e o fim (um terço), onde costumam ficar as restrições (`clipEnds`) | 600 |
 | Objetivo atual | o pedido mais recente (≥ 10 caracteres) | 200 |
 | Dar atenção a | o foco de "Compactar agora" | 300 |
-| Pedidos e decisões | pedidos (120 caracteres) e decisões (160): frases com "decidi", "vamos usar", "sempre", "nunca", "prefiro", "use", "a partir de agora", "evite"…, e um "sim"/"pode" só como resposta à última pergunta do assistente; sobram os mais novos | 25 linhas, 900 caracteres para decisões e 1 400 no total |
+| Pedidos e decisões | pedidos (120 caracteres) e decisões (160): frases com "decidi", "vamos usar", "sempre", "nunca", "prefiro", "use", "a partir de agora", "evite"… (e o mesmo em inglês: "we decided", "always", "never", "from now on", "don't publish", "instead of"…), e um "sim"/"pode" só como resposta à última pergunta do assistente; sobram os mais novos | 25 linhas, 900 caracteres para decisões e 1 400 no total |
 | Erros e bloqueios | chamadas que falharam ou foram negadas, até a mesma ação funcionar | 5 |
 | Pendente | pedido ainda sem resposta final; última pergunta do assistente | uma de cada |
 | Arquivos alterados / lidos | alterados: `write_file`, `edit_file`, `trash` e, em `run_command`, redirecionamentos, `tee`, `touch`, `mkdir`, `rm`, `mv`, `cp`, `ln`, `sed -i`; lidos: `read_file`, `web_fetch`. Os mais novos; um arquivo alterado sai de "lidos" | 40 cada (420 e 260 caracteres no texto) |
@@ -228,6 +231,9 @@ Quando uma compactação tira mensagens da janela, o que elas continham vai para
 - no envio: `BotSession.announce(report, memoryUpTo:)` grava as páginas de sessão até a mensagem que está sendo enviada, com
   a nota do modelo dos trechos que a dobra levou (seção `## Resumo`);
 - dentro do turno: o fim do turno grava (`compactedInTurn`), também com as notas que as dobras do turno levaram;
+- as páginas são gravadas uma depois da outra (`BotSession.memoryWrites`); o trecho é marcado na hora e, se a gravação
+  falha, a marca volta (`unmarkStretch`) e as gravações que estavam na fila param, para o próximo salvamento levar tudo junto
+  (nada se perde nem se repete). Por isso o aviso diz "O essencial vai para a memória do Orb.", não "foi";
 
 Execuções de rotina não viram sessões. Veja [MEMORIA.md](MEMORIA.md) para o formato da página.
 

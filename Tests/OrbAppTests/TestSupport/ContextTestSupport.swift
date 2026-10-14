@@ -13,6 +13,12 @@ func assistant(_ text: String = "", calls: [ToolCallRequest] = []) -> ChatMessag
 
 func characters(_ messages: [ChatMessage]) -> Int { messages.contextCharacters }
 
+/// About 60,000 tokens of plain conversation: a retry after a refusal for size, with half the budget, sends less of it
+/// (the engine never sends a refused request again unchanged).
+func longHistory() -> [ChatMessage] {
+    (0..<40).flatMap { [ChatMessage.user("pedido \($0) " + String(repeating: "a", count: 3_000)), assistant(String(repeating: "b", count: 3_000))] }
+}
+
 /// Whether `later` starts with all of `earlier` (the provider's cache would still hold).
 func extends(_ earlier: [ChatMessage], _ later: [ChatMessage]) -> Bool {
     later.count >= earlier.count && zip(earlier, later).allSatisfy { $0 == $1 }

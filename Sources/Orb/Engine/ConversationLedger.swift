@@ -255,7 +255,7 @@ struct ConversationLedger: Codable, Sendable, Equatable {
         }
         // The first real request is fixed whatever it says (it often holds a "never…" of its own).
         if original == nil, legacy == nil, text.count >= Self.minimumOriginal {
-            original = Self.clip(text, Self.originalLimit)
+            original = Self.clipEnds(text, Self.originalLimit)
             goal = Self.clip(text, Self.goalLimit)
             return
         }
@@ -439,6 +439,15 @@ struct ConversationLedger: Codable, Sendable, Equatable {
 
     static func clip(_ text: String, _ limit: Int) -> String { MemoryText.clip(MemoryText.flatten(text), limit) }
 
+    /// A long text kept by its start and its last third (a request often ends with what must not be done).
+    static func clipEnds(_ text: String, _ limit: Int) -> String {
+        let flat = MemoryText.flatten(text)
+        guard flat.count > limit else { return flat }
+        let tail = flat.suffix(limit / 3)
+        let start = tail.firstIndex(where: \.isWhitespace).map(tail.index(after:)) ?? tail.startIndex
+        return clip(flat, limit - limit / 3 - 1) + " " + tail[start...]
+    }
+
     private static func firstLine(_ text: String) -> String {
         let line = text.split(whereSeparator: \.isNewline).first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
         return line.map { String($0) } ?? text
@@ -492,6 +501,9 @@ struct ConversationLedger: Codable, Sendable, Equatable {
         #"\b(use|usa|utilize|adote|mantenha|mantenham)\b"#, #"\b(nao|jamais|nunca) (use|usa|utilize|mude|mexa|apague|delete|remova|faca|faça)\b"#,
         #"\bsempre\b"#, #"\bnunca\b"#, #"\bprefiro\b"#, #"\blembre(-se)?\b"#, #"\ba partir de agora\b"#, #"\bcombinado\b"#,
         #"\bnao (quero|precisa|vamos)\b"#, #"\bem vez de\b"#, #"\bao inves de\b"#, #"\bevite\b"#,
+        // The same in English.
+        #"\b(i|we) decided\b"#, #"\b(always|never|avoid|remember)\b"#, #"\bfrom now on\b"#, #"\b(i|we) prefer\b"#,
+        #"\b(do not|don'?t|don’t) (use|change|touch|delete|remove|publish|push|commit|deploy|send)\b"#, #"\binstead of\b"#,
     ]
     private static let decisionExpressions: [NSRegularExpression] = decisionPatterns.compactMap {
         try? NSRegularExpression(pattern: $0, options: [.caseInsensitive])

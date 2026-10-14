@@ -196,10 +196,10 @@ struct AgentEngineTests {
     private let touchRule = PermissionRule(family: .writeFiles)
 
     private func request(_ script: Script, mode: PermissionMode, allowed: [PermissionRule] = [], runs: Counter,
-                         tools: [any AgentTool]? = nil, maxSteps: Int = AgentEngine.defaultMaxSteps) -> TurnRequest {
+                         tools: [any AgentTool]? = nil, maxSteps: Int = AgentEngine.defaultMaxSteps, history: [ChatMessage] = []) -> TurnRequest {
         var bot = Bot(name: "Teste", role: "", orb: OrbConfig(), permissionMode: mode)
         bot.permissionRules = allowed
-        return TurnRequest(bot: bot, model: "fake", system: "sys", history: [], prompt: "oi",
+        return TurnRequest(bot: bot, model: "fake", system: "sys", history: history, prompt: "oi",
                            client: ScriptedLLM(script: script), tools: tools ?? [TouchTool(runs: runs)],
                            context: ToolContext(workingDirectory: URL(fileURLWithPath: NSTemporaryDirectory())),
                            maxSteps: maxSteps)
@@ -426,7 +426,7 @@ extension AgentEngineTests {
         let (engine, waits) = quickEngine()
         let script = Script(responses: [Response(events: [], failure: LLMError.stream(type: "overloaded_error", message: "prompt is too long")),
                                         Response(events: [.text("ok")])])
-        let events = await run(engine, request(script, mode: .ask, runs: Counter()))
+        let events = await run(engine, request(script, mode: .ask, runs: Counter(), history: longHistory()))
         #expect(await waits.value == 0)
         #expect(await script.received.count == 2)
         #expect(failures(events).isEmpty)
@@ -505,7 +505,7 @@ extension AgentEngineTests {
         let (engine, waits) = quickEngine()
         let script = Script(responses: [Response(events: [], failure: LLMError.contextExceeded("too long")),
                                         Response(events: [.text("ok")])])
-        let events = await run(engine, request(script, mode: .ask, runs: Counter()))
+        let events = await run(engine, request(script, mode: .ask, runs: Counter(), history: longHistory()))
         #expect(await script.received.count == 2)
         #expect(await waits.value == 0) // not a transient failure: no waiting
         #expect(failures(events).isEmpty)
@@ -774,7 +774,7 @@ extension AgentEngineTests {
 
     @Test func aContextLimitStopWithNothingShownRetriesWithLessHistory() async {
         let script = Script([[.finished(.contextExceeded, nil)], [.text("ok"), .finished(.done, nil)]])
-        let events = await run(AgentEngine(), request(script, mode: .ask, runs: Counter()))
+        let events = await run(AgentEngine(), request(script, mode: .ask, runs: Counter(), history: longHistory()))
         #expect(await script.received.count == 2)
         #expect(failures(events).isEmpty)
     }

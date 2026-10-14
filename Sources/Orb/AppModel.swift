@@ -1315,7 +1315,7 @@ final class AppModel {
         session.conversation = conversation
         let saved = session.announce(report)
         var message = report.notice
-        if saved { message += " Guardei o essencial na memória do Orb." }
+        if saved { message += " O essencial vai para a memória do Orb." } // written in the background (`persistStretch`)
         scheduleConversationSave(botID, delay: 0)
         return CompactionResult(status: .compacted, foldedMessages: report.foldedMessages,
                                 tokensBefore: report.tokensBefore ?? 0, tokensAfter: report.tokensAfter ?? 0,
@@ -1554,7 +1554,8 @@ final class AppModel {
             do {
                 guard let made = clientOverride?() ?? account.client(for: modelInfo, credentials: Self.credentials(for: ref.provider),
                                                                       conversationID: sessionID,
-                                                                      effort: ReasoningEffort.sent(bot.effort, for: modelInfo)) else { throw LLMError.notConfigured }
+                                                                      effort: ReasoningEffort.sent(bot.effort, for: modelInfo),
+                                                                      replyTokens: budget.replyTokens) else { throw LLMError.notConfigured }
                 client = made
             } catch {
                 session.failSetup(error, turn: turn)

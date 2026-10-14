@@ -253,8 +253,9 @@ enum ChunkSummarizer {
                     text += piece
                 case .usage(let used):
                     usage = used
-                case .finished(_, let used):
+                case .finished(let reason, let used):
                     usage = used ?? usage
+                    if reason == .refusal || reason == .contextExceeded { failed = true } // its text is no note
                 case .reasoning, .toolCalls:
                     break
                 }

@@ -143,7 +143,8 @@ struct ContextBudget: Sendable, Equatable {
         self.init(modelWindow: window, replyTokens: Self.replyTokens(window: window, format: wire), level: level)
     }
 
-    /// Room for the reply: Anthropic's requests ask for up to 16,000 output tokens; the others need less.
+    /// Room for the reply: up to 16,000 output tokens in the Messages format, which sends it as its cap (see
+    /// `ProviderAccount.client`); the others need less.
     static func replyTokens(window: Int, format: APIFormat?) -> Int {
         let wanted = format == .messages || format == .claudeCode ? 16_000 : 4_000
         return min(wanted, window / 8)

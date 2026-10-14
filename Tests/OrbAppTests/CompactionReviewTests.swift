@@ -187,7 +187,8 @@ struct InTurnFoldTests {
         // The next message starts from that summary: nothing is folded a second time.
         var next = kept
         next.messages.append(.user("mais uma pergunta"))
-        let again = next.prepareHistory(budget: budget)
+        // The steps the fold set aside now ride in the summary as a note: a little more room than the bare fit.
+        let again = next.prepareHistory(budget: ContextBudget(tokens: budget.tokens + 1_000))
         #expect(again.compaction == nil)
         #expect(next.compactions == 2)   // the send and the engine's fold, once each
         #expect(next.ledger?.foldedMessages == kept.ledger?.foldedMessages)

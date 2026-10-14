@@ -39,7 +39,11 @@ enum ToolDigest {
             }
         }
         guard lines.count > maxLines else { return lines }
-        return ["(+\(lines.count - maxLines + 1) linhas anteriores)"] + lines.suffix(maxLines - 1)
+        // The user's lines (the newest, up to half the digest) stay; the steps fill the rest, newest first.
+        let pinned = lines.indices.filter { lines[$0].hasPrefix("[usuário]") }.suffix(maxLines / 2)
+        let steps = lines.indices.filter { !pinned.contains($0) }.suffix(maxLines - 1 - pinned.count)
+        let kept = (pinned + steps).sorted()
+        return ["(+\(lines.count - kept.count) linhas anteriores)"] + kept.map { lines[$0] }
     }
 
     /// A call to a connector, through the gateway (`connector_tools`, `connector_call`) or by the tool's own name

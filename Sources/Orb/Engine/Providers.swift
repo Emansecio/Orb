@@ -467,8 +467,10 @@ extension ProviderAccount {
     /// The client for one model: the format decides the wire protocol; OpenCode also wants a stable session id,
     /// and the OpenAI-style formats key their prompt cache to the conversation.
     /// `effort` is the thinking level to send (`ReasoningEffort.sent`): only Claude Code and the Responses API take one.
+    /// `replyTokens`: the room the history left for the reply (`ContextBudget.replyTokens`), the cap the Messages format
+    /// sends, so a full history and the longest reply still fit the window together.
     func client(for model: ProviderModel?, credentials: @escaping CredentialsProvider, conversationID: String,
-                effort: String? = nil) -> (any LLMClient)? {
+                effort: String? = nil, replyTokens: Int? = nil) -> (any LLMClient)? {
         // Claude Code has no address and no key: the installed CLI is only the transport to the model, through the user's login
         // (so `credentials` goes unused). Everything else about the turn (prompt, tools, memory) is the Orb's own.
         if kind == .claudeCode { return ClaudeCodeClient(effort: effort) }
@@ -482,6 +484,7 @@ extension ProviderAccount {
         case .messages:
             var client = AnthropicClient(baseURL: base, credentials: credentials, extraHeaders: headers)
             client.sendsBearer = kind.takesBearerOnMessages
+            if let replyTokens, replyTokens > 0 { client.maxTokens = replyTokens }
             return client
         case .responses:
             // Sign in with ChatGPT takes tools as an `additional_tools` input item, not top-level `tools`.

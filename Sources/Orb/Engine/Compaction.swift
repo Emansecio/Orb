@@ -99,12 +99,12 @@ extension Conversation {
     /// conversation that is not big yet still has turns folded. The latest turn stays whole. `focus` is something the user wants the summary to pay attention to; it stays in the summary until
     /// replaced. Returns nil when there was nothing to fold (a single turn).
     mutating func compact(budget: ContextBudget, share: Double = ContextMeter.compactingShare, focus: String? = nil) -> CompactionReport? {
-        let before = contextFill(budget: budget).historyTokens
+        let before = ContextMeter.historyTokens(of: self)
         let target = ContextMeter.manualBudget(for: self, budget: budget, share: share)
         guard var report = prepareHistory(budget: target, focus: focus).compaction else { return nil }
         report.kind = .manual
         report.tokensBefore = before
-        report.tokensAfter = contextFill(budget: budget).historyTokens
+        report.tokensAfter = ContextMeter.historyTokens(of: self)
         return report
     }
 }
