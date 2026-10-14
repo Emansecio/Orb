@@ -33,7 +33,8 @@ struct ModelPicker: View {
         } else {
             Picker(title, selection: $selection) {
                 if allowsDefault { Text(defaultLabel).tag("") }
-                if !isKnown { Text(ModelRef(selection)?.model ?? selection).tag(selection) }
+                // A model of a provider that is not connected (yet): still said by its name, not its id.
+                if !isKnown { Text(model.modelName(selection)).tag(selection) }
                 ForEach(choices, id: \.account.kind) { choice in
                     Section(choice.account.kind.label) {
                         ForEach(choice.models) { item in
@@ -58,8 +59,7 @@ private struct SearchableModelField: View {
 
     private var currentLabel: String {
         if selection.isEmpty { return allowsDefault ? defaultLabel : "Escolher…" }
-        guard let ref = ModelRef(selection) else { return selection }
-        return model.account(ref.provider)?.models.first { $0.id == ref.model }?.name ?? ref.model
+        return model.modelName(selection)
     }
 
     var body: some View {
@@ -203,5 +203,29 @@ private struct ModelChooser: View {
             done()
         }
         .id(tag)
+    }
+}
+
+extension AppModel {
+    /// How a chosen model ("provider/model") is shown: by the provider's name for it ("Sonnet 5.5") whenever the provider
+    /// is set up, connected or not; by its id otherwise.
+    func modelName(_ selection: String) -> String {
+        guard let ref = ModelRef(selection) else { return selection }
+        return account(ref.provider)?.models.first { $0.id == ref.model }?.name ?? ref.model
+    }
+
+    /// Why the chosen model cannot answer now, for the line under the Orb's picker: its provider was removed, is off,
+    /// is still being checked, or is not connected. Nil when it can (and for the app's default, "").
+    func modelUnavailableNote(_ selection: String) -> String? {
+        guard let ref = ModelRef(selection) else { return nil }
+        // "Claude Code", not "Claude Code (sua assinatura)": the sentence already says what is wrong with it.
+        let provider = ref.provider.label.components(separatedBy: " (").first ?? ref.provider.label
+        guard let account = account(ref.provider) else {
+            return "\(provider) não está mais em Ajustes. Escolha outro modelo ou adicione o provedor de novo."
+        }
+        if !account.isEnabled { return "\(provider) está desligado em Ajustes → Modelos." }
+        if !hasCheckedConnections { return "Conferindo a conexão com \(provider)…" }
+        if !isUsable(account) { return "\(provider) não está conectado. Conecte em Ajustes → Modelos ou escolha outro modelo." }
+        return nil
     }
 }

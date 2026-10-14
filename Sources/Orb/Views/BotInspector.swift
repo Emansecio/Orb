@@ -180,18 +180,26 @@ struct BotInspector: View {
             VStack(alignment: .leading, spacing: 5) {
                 InspectorHeader(bot: bot)
                     .id(bot.id)
-                HStack(spacing: 6) {
-                    Button("Personalizar…") {
-                        editorHeight = NewBotSheetLayout.height(preferred: 720)
-                        isEditingOrb = true
+                let customize = Button("Personalizar…") {
+                    editorHeight = NewBotSheetLayout.height(preferred: 720)
+                    isEditingOrb = true
+                }
+                .buttonStyle(QuietTextStyle())
+                .fixedSize()
+                .help("\(Tip.customizeOrb) (\(summary))")
+                // Who made it beside "Personalizar…" when both fit on the line; under it otherwise, never a name broken in two.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) {
+                        customize
+                        if bot.createdByName != nil {
+                            Text("·").foregroundStyle(Palette.hint).accessibilityHidden(true)
+                        }
+                        CreatedByLine(bot: bot).fixedSize() // MultiOrb (WP3)
                     }
-                    .buttonStyle(QuietTextStyle())
-                    .fixedSize()
-                    .help("\(Tip.customizeOrb) (\(summary))")
-                    if bot.createdByName != nil {
-                        Text("·").foregroundStyle(Palette.hint).accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 3) {
+                        customize
+                        CreatedByLine(bot: bot)
                     }
-                    CreatedByLine(bot: bot) // MultiOrb (WP3)
                 }
                 .font(.system(size: 11))
             }
@@ -260,6 +268,14 @@ struct BotInspector: View {
     private func generalTab(_ bot: Bot) -> some View {
         Section {
             ModelPicker(selection: binding(\.model, of: bot))
+        } footer: {
+            if let note = model.modelUnavailableNote(bot.model) {
+                FormFootnote {
+                    Text(note)
+                        .foregroundStyle(Palette.warn)
+                        .textSwap(note)
+                }
+            }
         }
 
         Section {
@@ -681,6 +697,8 @@ private struct InspectorHeader: View {
     @State private var name: String
     @State private var role: String
     @FocusState private var focus: Field?
+    /// The role's field is on screen (from the click on the text until the focus leaves it).
+    @State private var isEditingRole = false
 
     private enum Field { case name, role }
 
@@ -696,24 +714,43 @@ private struct InspectorHeader: View {
                 .font(.system(size: 15, weight: .semibold))
                 .focused($focus, equals: .name)
                 .onSubmit(commitName)
-            // Up to two lines, so a long role reads whole instead of stopping mid-word; Return still ends the edit.
-            TextField("Papel", text: $role, prompt: Text("Papel"), axis: .vertical)
-                .lineLimit(1...2)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .focused($focus, equals: .role)
-                .onSubmit(commitRole)
-                // Return ends the edit (the role is one line that wraps), as in the name above.
-                .onKeyPress(.return) {
-                    focus = nil
-                    return .handled
-                }
+            // At rest the role is text of up to two lines, ending in "…" when it is longer; a click opens the field, which
+            // grows with what is typed. (A two-line field would show its own first line and scroll the rest away.)
+            if isEditingRole {
+                TextField("Papel", text: $role, prompt: Text("Papel"), axis: .vertical)
+                    .lineLimit(1...4)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .focused($focus, equals: .role)
+                    .onSubmit { focus = nil }
+                    // Return ends the edit (the role is one line that wraps), as in the name above.
+                    .onKeyPress(.return) {
+                        focus = nil
+                        return .handled
+                    }
+                    .onAppear { focus = .role }
+            } else {
+                Text(role.isEmpty ? "Papel" : role)
+                    .font(.callout)
+                    .foregroundStyle(role.isEmpty ? Palette.hint : Palette.secondary)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture { isEditingRole = true }
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityLabel("Papel: \(role)")
+                    .accessibilityAction { isEditingRole = true }
+            }
         }
         .textFieldStyle(.plain)
         .labelsHidden() // in a Form a field shows its title beside the text
         .help("Clique para mudar o nome ou o papel. A pasta do Orb não muda de lugar.")
-        .onChange(of: focus) { old, _ in
-            if old == .name { commitName() } else if old == .role { commitRole() }
+        .onChange(of: focus) { old, new in
+            if old == .name { commitName() } else if old == .role {
+                commitRole()
+                if new != .role { isEditingRole = false }
+            }
         }
         .onChange(of: bot.name) { _, new in if focus != .name { name = new } }
         .onChange(of: bot.role) { _, new in if focus != .role { role = new } }
