@@ -207,6 +207,12 @@ private struct ModelChooser: View {
 }
 
 extension AppModel {
+    /// The catalog entry of the model a bot's `model` string resolves to (its own, or the default when empty).
+    func modelInfo(forModel model: String) -> ProviderModel? {
+        guard let ref = ModelRef(model.isEmpty ? defaultModel : model) else { return nil }
+        return account(ref.provider)?.models.first { $0.id == ref.model }
+    }
+
     /// How a chosen model ("provider/model") is shown: by the provider's name for it ("Sonnet 5.5") whenever the provider
     /// is set up, connected or not; by its id otherwise.
     func modelName(_ selection: String) -> String {

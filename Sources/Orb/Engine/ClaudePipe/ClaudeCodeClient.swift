@@ -46,6 +46,8 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
     private let folders: ClaudePipeFolders
     private let initializeTimeout: Duration
     private let parkTimeout: Duration
+    /// Sent as `--effort` (a level the model lists, see `ReasoningEffort.sent`); nil leaves the CLI's default.
+    private let effort: String?
 
     /// What a step left behind: the live process waiting at the model's tool calls, and the messages of the call that got there.
     private struct Parked {
@@ -66,8 +68,10 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
     private let state = OSAllocatedUnfairLock(initialState: State())
 
     init(launch: @escaping LaunchProvider = ClaudeCodeClient.installedLaunch, orbBinary: URL = ClaudeCodeClient.currentBinary,
-         folders: ClaudePipeFolders = .standard, initializeTimeout: Duration = .seconds(60), parkTimeout: Duration = .seconds(30 * 60)) {
+         folders: ClaudePipeFolders = .standard, initializeTimeout: Duration = .seconds(60), parkTimeout: Duration = .seconds(30 * 60),
+         effort: String? = nil) {
         self.launch = launch
+        self.effort = effort
         self.orbBinary = orbBinary
         self.folders = folders
         self.initializeTimeout = initializeTimeout
@@ -264,6 +268,7 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
             arguments += ["--setting-sources", "", "--disable-slash-commands", "--no-session-persistence", "--permission-prompt-tool", "stdio",
                           "--permission-mode", "default", "--max-turns", "1000"]
             if model != "default", !model.isEmpty { arguments.append("--model=\(model)") }
+            if let effort, !effort.isEmpty { arguments.append("--effort=\(effort)") }
 
             if !split.history.isEmpty {
                 let sessionID = UUID().uuidString.lowercased()

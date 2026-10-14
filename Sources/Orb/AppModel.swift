@@ -1551,7 +1551,8 @@ final class AppModel {
             let client: any LLMClient
             do {
                 guard let made = clientOverride?() ?? account.client(for: modelInfo, credentials: Self.credentials(for: ref.provider),
-                                                                      conversationID: sessionID) else { throw LLMError.notConfigured }
+                                                                      conversationID: sessionID,
+                                                                      effort: ReasoningEffort.sent(bot.effort, for: modelInfo)) else { throw LLMError.notConfigured }
                 client = made
             } catch {
                 session.failSetup(error, turn: turn)

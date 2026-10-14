@@ -26,6 +26,11 @@ struct ProviderModel: Codable, Hashable, Identifiable, Sendable {
     /// Set on a model the user typed in by hand (custom gateway): a refreshed list keeps it even when the gateway's
     /// own list does not name it. Optional so data from before this field decodes unchanged.
     var isManual: Bool?
+    /// The thinking levels the model takes, as the provider names them (see `ReasoningEffort`); nil when its catalog
+    /// does not say, and then the Orb offers none.
+    var efforts: [String]?
+    /// The level the provider uses when none is sent, when its catalog says.
+    var defaultEffort: String?
     /// What a million input tokens cost, from `price` (only used to avoid picking a dearer model for a background note,
     /// see `ChunkSummarizer.model`).
     var inputPrice: Double? { price?.input }
@@ -46,6 +51,8 @@ extension ProviderModel {
         supportsImages = try c.decodeIfPresent(Bool.self, forKey: .supportsImages)
         price = try? c.decodeIfPresent(ModelPrice.self, forKey: .price)
         isManual = try c.decodeIfPresent(Bool.self, forKey: .isManual)
+        efforts = try? c.decodeIfPresent([String].self, forKey: .efforts)
+        defaultEffort = try? c.decodeIfPresent(String.self, forKey: .defaultEffort)
     }
 }
 
@@ -274,8 +281,11 @@ enum ModelCatalog {
     static func chatGPTModels(_ json: JSONValue) -> [ProviderModel] {
         (json["models"]?.array ?? []).compactMap { entry in
             guard entry["visibility"]?.string == "list", let slug = entry["slug"]?.string else { return nil }
+            // Each level comes as {"effort": "low", ...} (a bare "low" is read too).
+            let levels = (entry["supported_reasoning_levels"]?.array ?? []).compactMap { $0["effort"]?.string ?? $0.string }
             return ProviderModel(id: slug, name: entry["display_name"]?.string ?? slug, format: .responses,
-                                 supportsImages: supportsImages(in: entry) ?? openAIFamilySupportsImages(slug))
+                                 supportsImages: supportsImages(in: entry) ?? openAIFamilySupportsImages(slug),
+                                 efforts: ReasoningEffort.levels(levels), defaultEffort: entry["default_reasoning_level"]?.string)
         }
     }
 
@@ -448,10 +458,12 @@ enum ModelCatalog {
 extension ProviderAccount {
     /// The client for one model: the format decides the wire protocol; OpenCode also wants a stable session id,
     /// and the OpenAI-style formats key their prompt cache to the conversation.
-    func client(for model: ProviderModel?, credentials: @escaping CredentialsProvider, conversationID: String) -> (any LLMClient)? {
+    /// `effort` is the thinking level to send (`ReasoningEffort.sent`): only Claude Code and the Responses API take one.
+    func client(for model: ProviderModel?, credentials: @escaping CredentialsProvider, conversationID: String,
+                effort: String? = nil) -> (any LLMClient)? {
         // Claude Code has no address and no key: the installed CLI is only the transport to the model, through the user's login
         // (so `credentials` goes unused). Everything else about the turn (prompt, tools, memory) is the Orb's own.
-        if kind == .claudeCode { return ClaudeCodeClient() }
+        if kind == .claudeCode { return ClaudeCodeClient(effort: effort) }
         guard let base = URL(string: baseURL), base.host != nil else { return nil }
         var headers = kind == .custom ? self.headers : [:]
         if kind == .opencodeZen || kind == .opencodeGo { headers["x-opencode-session"] = conversationID }
@@ -465,10 +477,12 @@ extension ProviderAccount {
             return client
         case .responses:
             // Sign in with ChatGPT takes tools as an `additional_tools` input item, not top-level `tools`.
-            return ResponsesClient(baseURL: base, credentials: credentials, extraHeaders: headers,
-                                   toolsAsInputItem: kind == .chatgpt, conversationID: conversationID)
+            var client = ResponsesClient(baseURL: base, credentials: credentials, extraHeaders: headers,
+                                         toolsAsInputItem: kind == .chatgpt, conversationID: conversationID)
+            client.reasoningEffort = effort
+            return client
         case .claudeCode:
-            return ClaudeCodeClient()
+            return ClaudeCodeClient(effort: effort)
         }
     }
 }

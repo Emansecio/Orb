@@ -68,7 +68,9 @@ enum ClaudeCodeWire {
         return (json["response"]?["response"]?["models"]?.array ?? []).compactMap { entry in
             guard let value = entry["value"]?.string, !value.isEmpty else { return nil }
             let name = value == ClaudeCodeModels.defaultID ? "Padrão do Claude Code" : entry["displayName"]?.string ?? value
-            return ProviderModel(id: value, name: name, format: .claudeCode, contextLength: ClaudeCodeModels.window(of: value), supportsImages: true)
+            let levels = (entry["supportedEffortLevels"]?.array ?? []).compactMap(\.string)
+            return ProviderModel(id: value, name: name, format: .claudeCode, contextLength: ClaudeCodeModels.window(of: value), supportsImages: true,
+                                 efforts: ReasoningEffort.levels(levels))
         }
     }
 }

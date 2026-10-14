@@ -13,6 +13,8 @@ struct ResponsesClient: LLMClient {
     var conversationID: String?
     /// Upper bound on the reply (reasoning included), sent as `max_output_tokens`; nil sends none.
     var maxOutputTokens: Int?
+    /// Sent as `reasoning.effort` (a level the model lists, see `ReasoningEffort.sent`); nil leaves the provider's default.
+    var reasoningEffort: String?
     let session: URLSession
 
     /// Hosts known to accept `prompt_cache_key`. A gateway that checks the body strictly rejects the whole request
@@ -55,7 +57,7 @@ struct ResponsesClient: LLMClient {
             try WireEncoder.encode(Self.requestBody(
                 model: model, messages: messages, tools: tools, toolsAsInputItem: toolsAsInputItem,
                 promptCacheKey: sendsCacheKey ? conversationID : nil, provider: provider, toolChoice: toolChoice,
-                maxOutputTokens: maxOutputTokens), trailing: Self.trailingKeys)
+                maxOutputTokens: maxOutputTokens, effort: reasoningEffort), trailing: Self.trailingKeys)
         }, request: {
             ProviderTransport.authorizedRequest(baseURL.appending(path: "responses"), apiKey: $0, headers: extraHeaders)
         }, mapper: ResponsesStreamAssembler(provider: provider, model: model))
@@ -76,7 +78,7 @@ struct ResponsesClient: LLMClient {
     /// items right before what it produced (the API rejects one that is not followed by its output).
     static func requestBody(model: String, messages: [ChatMessage], tools: [ToolSpec], toolsAsInputItem: Bool = false,
                             promptCacheKey: String? = nil, provider: String = "", toolChoice: ToolChoice = .auto,
-                            maxOutputTokens: Int? = nil) -> JSONValue {
+                            maxOutputTokens: Int? = nil, effort: String? = nil) -> JSONValue {
         let instructions = messages.filter { $0.role == .system }.map(\.content).joined(separator: "\n\n")
         var input: [JSONValue] = []
         for message in messages.movingToolImagesToUserMessages() {
@@ -122,6 +124,7 @@ struct ResponsesClient: LLMClient {
         if !instructions.isEmpty { body["instructions"] = .string(instructions) }
         if let promptCacheKey, !promptCacheKey.isEmpty { body["prompt_cache_key"] = .string(promptCacheKey) }
         if let maxOutputTokens { body["max_output_tokens"] = .number(Double(maxOutputTokens)) }
+        if let effort, !effort.isEmpty { body["reasoning"] = .object(["effort": .string(effort)]) }
         let functions = JSONValue.array(tools.map {
             .object(["type": .string("function"), "name": .string($0.name), "description": .string($0.description),
                      "parameters": $0.parameters, "strict": .bool(false)])

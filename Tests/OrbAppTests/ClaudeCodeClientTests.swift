@@ -211,10 +211,10 @@ private struct Rig {
                        "FAKE_PROJECT_DIR": folders.projectDirectory.path]
     }
 
-    func client(initializeTimeout: Duration = .seconds(20), parkTimeout: Duration = .seconds(60)) -> ClaudeCodeClient {
+    func client(initializeTimeout: Duration = .seconds(20), parkTimeout: Duration = .seconds(60), effort: String? = nil) -> ClaudeCodeClient {
         let launch = ClaudePipeLaunch(executable: script, environment: environment)
         return ClaudeCodeClient(launch: { launch }, orbBinary: URL(fileURLWithPath: "/fake/Orb"), folders: folders,
-                                initializeTimeout: initializeTimeout, parkTimeout: parkTimeout)
+                                initializeTimeout: initializeTimeout, parkTimeout: parkTimeout, effort: effort)
     }
 
     func cleanUp() { try? FileManager.default.removeItem(at: root) }
@@ -255,6 +255,16 @@ private func texts(_ events: [LLMEvent]) -> String {
 struct ClaudeCodeClientTests {
     // MARK: Plain turn
 
+    @Test func theOrbsEffortGoesToTheCLI() async throws {
+        let rig = try Rig(scenario: "text")
+        defer { rig.cleanUp() }
+        _ = try await collect(rig.client(effort: "xhigh").stream(model: "sonnet", messages: [.system("s"), .user("Oi")],
+                                                                 tools: [], toolChoice: .auto))
+        let args = arguments(of: rig.launches.first)
+        #expect(args.contains("--effort=xhigh"))
+        #expect(args.contains("--model=sonnet"))
+    }
+
     @Test func plainTextTurnLaunchesTheCLIStrippedOfItsHarness() async throws {
         let rig = try Rig(scenario: "text")
         defer { rig.cleanUp() }
@@ -284,6 +294,7 @@ struct ClaudeCodeClientTests {
         #expect(value(after: "--max-turns") == "1000")
         #expect(!args.contains("--mcp-config"))
         #expect(!args.contains { $0.hasPrefix("--resume") })
+        #expect(!args.contains { $0.hasPrefix("--effort") })
         #expect(launch["system"]?.string == "Seja breve.")
         #expect(launch["cwd"]?.string == ClaudePipeFolders.realPath(rig.folders.workingDirectory))
         #expect(launch["env"]?["DISABLE_AUTO_COMPACT"]?.string == "1")

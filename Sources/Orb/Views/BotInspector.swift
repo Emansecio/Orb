@@ -266,14 +266,29 @@ struct BotInspector: View {
     /// The model, what the Orb is allowed to do and what it may use.
     @ViewBuilder
     private func generalTab(_ bot: Bot) -> some View {
+        let info = model.modelInfo(forModel: bot.model)
         Section {
             ModelPicker(selection: binding(\.model, of: bot))
+            // A row like "Modo": only for a model whose catalog lists thinking levels.
+            if let levels = info?.efforts {
+                Picker("Esforço", selection: binding(\.effort, of: bot)) {
+                    Text(ReasoningEffort.defaultLabel(for: info)).tag("")
+                    if !bot.effort.isEmpty && !levels.contains(bot.effort) {
+                        Text(ReasoningEffort.label(bot.effort)).tag(bot.effort)
+                    }
+                    ForEach(levels, id: \.self) { Text(ReasoningEffort.label($0)).tag($0) }
+                }
+            }
         } footer: {
             if let note = model.modelUnavailableNote(bot.model) {
                 FormFootnote {
                     Text(note)
                         .foregroundStyle(Palette.warn)
                         .textSwap(note)
+                }
+            } else if info != nil, let note = ReasoningEffort.note(bot.effort, for: info) {
+                FormFootnote {
+                    Text(note).textSwap(note)
                 }
             }
         }

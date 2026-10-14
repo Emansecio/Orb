@@ -91,6 +91,8 @@ struct Bot: Identifiable, Hashable, Codable, Sendable {
     var orb: OrbConfig
     /// Model id; empty means the provider's default model.
     var model = ""
+    /// How hard the model thinks ("Esforço", a level as the provider names it, see `ReasoningEffort`); empty is the model's default.
+    var effort = ""
     var permissionMode = PermissionMode.ask
     var capabilities: Set<Capability> = [.terminal, .browser, .computerUse]
     /// The browser behind "Navegar na web" (see `BrowserEngineKind`). Orbs saved before the engines existed get the default.
@@ -130,6 +132,7 @@ extension Bot {
         role = try c.value(.role, default: "")
         orb = try c.value(.orb, default: OrbConfig())
         model = try c.value(.model, default: "")
+        effort = try c.value(.effort, default: "")
         permissionMode = try c.value(.permissionMode, default: .ask)
         capabilities = Set(try c.lossyArray(.capabilities, default: [.terminal, .browser]))
         browserEngine = (try? c.decodeIfPresent(BrowserEngineKind.self, forKey: .browserEngine)) ?? .default
