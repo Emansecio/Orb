@@ -1,4 +1,5 @@
 import Foundation
+import NaturalLanguage
 import os
 
 /// A search result from an Orb's memory.
@@ -85,6 +86,9 @@ actor MemoryBank {
     /// When an index that failed to open is tried again.
     private var nextIndexAttempt = Date.distantPast
     private var lastReconcile = Date.distantPast
+    private var lastCheckpoint = Date.distantPast
+    /// Reused across messages (`related`); the actor serializes its use.
+    private let tagger = NLTagger(tagSchemes: [.lexicalClass, .lemma])
     private var lastBump: [String: Date] = [:]
     /// Set when the Orb is deleted (or its memory kept elsewhere): nothing is written here anymore, so a late task
     /// can't bring the folder back.
@@ -290,15 +294,20 @@ actor MemoryBank {
 
     /// The memories worth putting in front of the model with `message`, best first, at most `limit`. Unlike `recall` (the
     /// model asking), this runs on every message, so it is picky: a message that only greets or confirms searches
-    /// nothing; a page must have at least two of the message's distinct words when it has three or more (one when
-    /// fewer); and `isSent` leaves out what the conversation already carries. `context`: the task in progress (latest
+    /// nothing; a page must have at least two of the message's distinct words when it has three or more *subject* words
+    /// (nouns, names and foreign terms; verbs and adverbs like "faço" or "hoje" don't count towards that, one when
+    /// fewer; every word still counts as a hit on the page); and `isSent` leaves out what the conversation already carries. `context`: the task in progress (latest
     /// request first), whose words stand in for a message that only points back at it (`MemoryText.lookupTerms`).
     func related(to message: String, context: String = "", limit: Int = MemoryBank.relatedLimit, excluding: Set<String> = [],
                  isSent: (MemoryHit) -> Bool = { _ in false }, now: Date = .now) -> [MemoryHit] {
         prepare(now: now)
         let terms = MemoryText.lookupTerms(message, context: context)
         guard !terms.isEmpty, let match = MemoryText.ftsQuery(terms.joined(separator: " ")) else { return [] }
-        let required = terms.count >= 3 ? 2 : 1
+        // Only subject words raise the bar. The tagger sees the context too, so terms borrowed from it are judged alike.
+        // Nothing tagged (empty or unknown language): every term counts, as before.
+        let nouns = MemoryText.topicNouns(context.isEmpty ? message : message + ". " + context, tagger: tagger)
+        let subject = nouns.isEmpty ? terms.count : terms.filter { MemoryText.isTopic($0, in: nouns) }.count
+        let required = subject >= 3 ? 2 : 1
         // Wider than `limit`: what the filters drop must not leave the message with fewer memories than it deserves.
         let candidates = search(match: match, words: Set(terms.map(MemoryText.stem)), rows: 4 * limit + excluding.count, excluding: excluding)
         let hits = candidates.filter { MemoryText.matchCount(of: terms, in: $0.text) >= required && !isSent($0.hit) }
@@ -496,6 +505,11 @@ actor MemoryBank {
     func reconcile(now: Date = .now) {
         lastReconcile = now
         guard let index else { return }
+        // The access bumps keep the WAL growing until SQLite's own checkpoint; a passive one never blocks readers.
+        if now.timeIntervalSince(lastCheckpoint) >= 3600 {
+            lastCheckpoint = now
+            index.run("PRAGMA wal_checkpoint(PASSIVE)")
+        }
         let files = pageFiles()
         let known = Dictionary(index.rows("SELECT path, mtime FROM pages").map { ($0.text(0), $0.double(1) ?? 0) },
                                uniquingKeysWith: { first, _ in first })

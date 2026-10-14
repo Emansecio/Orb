@@ -1,4 +1,5 @@
 import Foundation
+import NaturalLanguage
 
 // Each Orb's memory is a folder of plain markdown pages (the source of truth, editable by hand or in Obsidian)
 // plus a derived SQLite index for search. The design follows akitaonrails/ai-memory, reduced to one Orb and
@@ -178,12 +179,15 @@ enum MemoryText {
         seen = []
         for word in unique.sorted(by: { $0.count > $1.count }) {
             for variant in variants(word) where seen.insert(variant).inserted {
-                terms.append("\"\(variant)\"*")
+                terms.append(prefixes(variant) ? "\"\(variant)\"*" : "\"\(variant)\"")
             }
             if terms.count >= limit { break }
         }
         return terms.isEmpty ? nil : terms.prefix(limit).joined(separator: " OR ")
     }
+
+    /// Whether a variant is long enough to match by prefix: "sp"* would match "sprint", so short ones match exactly.
+    static func prefixes(_ variant: String) -> Bool { variant.count >= 4 }
 
     /// Acknowledgements and pleasantries (folded): a message made only of these, with `greetings`, says nothing to look up.
     private static let chatter: Set<String> = [
@@ -252,7 +256,31 @@ enum MemoryText {
     /// How many of `terms` appear in `text` (as a word, or the start of one, singular or plural).
     static func matchCount(of terms: [String], in text: String) -> Int {
         let tokens = Set(words(text))
-        return terms.filter { term in variants(term).contains { form in tokens.contains { $0.hasPrefix(form) } } }.count
+        return terms.filter { term in
+            variants(term).contains { form in tokens.contains { prefixes(form) ? $0.hasPrefix(form) : $0 == form } }
+        }.count
+    }
+
+    /// The words of `text` (folded, as in `words`) that name what it is about: nouns, plus words the tagger has no lemma
+    /// for (proper names, foreign terms like "node" or "checkout"). Verbs, adverbs and the like are left out. Empty when
+    /// the tagger recognizes nothing. `tagger` is reused by the caller (it needs `.lexicalClass` and `.lemma`).
+    static func topicNouns(_ text: String, tagger: NLTagger) -> Set<String> {
+        guard !text.isEmpty else { return [] }
+        tagger.string = text
+        tagger.setLanguage(.portuguese, range: text.startIndex..<text.endIndex)
+        var nouns = Set<String>()
+        tagger.enumerateTags(in: text.startIndex..<text.endIndex, unit: .word, scheme: .lexicalClass,
+                             options: [.omitPunctuation, .omitWhitespace]) { tag, range in
+            let hasLemma = tagger.tag(at: range.lowerBound, unit: .word, scheme: .lemma).0 != nil
+            if tag == .noun || !hasLemma { nouns.formUnion(words(String(text[range]))) }
+            return true
+        }
+        return nouns
+    }
+
+    /// Whether `term` is one of the topic words `nouns`: equal, or sharing the first four letters ("cachorros" ~ "cachorro").
+    static func isTopic(_ term: String, in nouns: Set<String>) -> Bool {
+        nouns.contains { $0 == term || ($0.count >= 4 && term.count >= 4 && $0.prefix(4) == term.prefix(4)) }
     }
 
     /// Light Portuguese stem used for comparing: plural and "-ão/-ões/-ães" endings removed.
