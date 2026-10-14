@@ -5,11 +5,14 @@ import Foundation
 struct OrbEvent: Codable, Equatable, Sendable {
     enum Kind: String, Codable, Sendable {
         case orbCreated, joinedGroup, leftGroup, groupCreated, routineCreated, renamed
-        case chainStopped, groupRunDone, groupStopped, delegationReceived, unknown
+        case chainStopped, groupRunDone, groupStopped, delegationReceived, routineRun, unknown
 
         /// A kind from a newer version reads as `unknown`.
         init(from decoder: Decoder) throws { self = try decoder.rawValue(Self.self, fallback: .unknown) }
     }
+
+    /// How a routine's run ended (`routineRun`): an ordinary run stays gray, the others are marked.
+    enum Outcome: String, Codable, Sendable { case finished, failed, attention, goalReached }
 
     var kind: Kind
     /// Who did it.
@@ -21,9 +24,14 @@ struct OrbEvent: Codable, Equatable, Sendable {
     var requestID: UUID?
     var chainID: UUID?
     var groupID: UUID?
+    /// For `routineRun`: the report's first line, its file inside the Orb's folder, and how the run ended.
+    var note: String?
+    var file: String?
+    var outcome: Outcome?
 
     init(kind: Kind, actor: OrbRef? = nil, subject: OrbRef? = nil, detail: String? = nil,
-         requestID: UUID? = nil, chainID: UUID? = nil, groupID: UUID? = nil) {
+         requestID: UUID? = nil, chainID: UUID? = nil, groupID: UUID? = nil,
+         note: String? = nil, file: String? = nil, outcome: Outcome? = nil) {
         self.kind = kind
         self.actor = actor
         self.subject = subject
@@ -31,6 +39,9 @@ struct OrbEvent: Codable, Equatable, Sendable {
         self.requestID = requestID
         self.chainID = chainID
         self.groupID = groupID
+        self.note = note
+        self.file = file
+        self.outcome = outcome
     }
 
     /// Tolerant decoding: a field this version cannot read is left out instead of losing the line.
@@ -43,6 +54,9 @@ struct OrbEvent: Codable, Equatable, Sendable {
         requestID = (try? c.decodeIfPresent(UUID.self, forKey: .requestID)) ?? nil
         chainID = (try? c.decodeIfPresent(UUID.self, forKey: .chainID)) ?? nil
         groupID = (try? c.decodeIfPresent(UUID.self, forKey: .groupID)) ?? nil
+        note = (try? c.decodeIfPresent(String.self, forKey: .note)) ?? nil
+        file = (try? c.decodeIfPresent(String.self, forKey: .file)) ?? nil
+        outcome = (try? c.decodeIfPresent(Outcome.self, forKey: .outcome)) ?? nil
     }
 
     /// The line as the chat shows it ("Atlas criou o Pesquisador"). Pure: the same event always reads the same.
@@ -76,9 +90,30 @@ struct OrbEvent: Codable, Equatable, Sendable {
             return "Você parou o grupo"
         case .delegationReceived:
             return "\(actorName) pediu ajuda \(PortugueseArticle.contraction(for: subjectName)) \(subjectName)"
+        case .routineRun:
+            return headline + (note.map { ": " + $0 } ?? "")
         case .unknown:
             return detail
         }
+    }
+
+    /// A routine's run without its note: "Rotina “Resumo” terminou".
+    var headline: String {
+        let how = switch outcome {
+        case .failed: "não terminou"
+        case .attention: "pede atenção"
+        case .goalReached: "alcançou a meta e foi pausada"
+        case .finished, nil: "terminou"
+        }
+        return "Rotina “\(detail ?? "")” \(how)"
+    }
+
+    /// A run told as text by versions before the event: "Rotina “X” terminou: … (relatório em …)". nil for any other notice.
+    init?(routineNotice text: String) {
+        guard let m = text.wholeMatch(of: /(?s)Rotina “(.+?)” (terminou|não terminou|alcançou a meta e foi pausada): (.*?)(?: \(relatório em (.+)\))?/)
+        else { return nil }
+        let outcome: Outcome = switch m.2 { case "não terminou": .failed; case "terminou": .finished; default: .goalReached }
+        self.init(kind: .routineRun, detail: String(m.1), note: String(m.3), file: m.4.map(String.init), outcome: outcome)
     }
 }
 

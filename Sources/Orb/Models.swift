@@ -190,6 +190,7 @@ struct TranscriptItem: Identifiable, Codable, Sendable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.value(.id, default: UUID())
         kind = try c.decode(Kind.self, forKey: .kind)
+        if case .notice(let text) = kind, let run = OrbEvent(routineNotice: text) { kind = .event(run) }
         date = try c.value(.date, default: Date.now)
         duringTask = try? c.decodeIfPresent(Bool.self, forKey: .duringTask) // a mark that cannot be read is no loss
     }

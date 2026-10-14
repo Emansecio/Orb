@@ -36,6 +36,8 @@ struct EventLineView: View {
                 let found = ExchangeSource.messages(chain: chain, of: asker.id, in: model)
                 ExchangeSheet(messages: found, parties: ExchangeSource.parties(of: found))
             }
+        } else if event.kind == .routineRun {
+            RoutineRunLine(event: event)
         } else {
             HStack(spacing: 6) {
                 Image(systemName: Self.symbol(for: event.kind))
@@ -59,7 +61,7 @@ struct EventLineView: View {
         switch kind {
         case .orbCreated: "sparkles"
         case .joinedGroup, .leftGroup, .groupCreated: "person.2"
-        case .routineCreated: "clock.arrow.circlepath"
+        case .routineCreated, .routineRun: "clock.arrow.circlepath"
         case .renamed: "pencil"
         case .chainStopped, .groupStopped: "stop.circle"
         case .groupRunDone: "checkmark.circle"
@@ -76,6 +78,18 @@ struct EventsSummary: View {
     let unfolded: Bool
 
     var body: some View {
+        if kind == .routineRun, case .event(let last) = items[items.count - 1].kind {
+            // The routine's runs: the count and the last one's line (its note while folded), on the left like each run.
+            let marked = items.lazy.compactMap { if case .event(let event) = $0.kind { event.outcome } else { nil } }
+                .last { $0 == .failed || $0 == .attention }
+            RoutineRunLine(event: last, title: TranscriptFolding.eventsTitle(kind, items), mark: marked ?? last.outcome,
+                           showsNote: !unfolded, chevron: unfolded ? "chevron.down" : "chevron.right")
+        } else {
+            folded
+        }
+    }
+
+    private var folded: some View {
         HStack(spacing: 6) {
             Image(systemName: EventLineView.symbol(for: kind))
                 .font(.system(size: 11))
@@ -93,5 +107,80 @@ struct EventsSummary: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("event-line-folded")
+    }
+}
+
+/// A routine's run in the chat, on the left: a mark (gray for an ordinary run, orange or red when it needs you, green for a
+/// goal reached), what happened, the report's first line in two lines at most, and "Abrir relatório". Folded, `title`
+/// counts the runs and there is no button: the line itself unfolds.
+struct RoutineRunLine: View {
+    @Environment(AppModel.self) private var model
+    let event: OrbEvent
+    var title: String?
+    var mark: OrbEvent.Outcome?
+    var showsNote = true
+    var chevron: String?
+
+    var body: some View {
+        let outcome = mark ?? event.outcome
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: outcome.symbol)
+                .font(.system(size: 11))
+                .foregroundStyle(outcome.tint)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(title ?? event.headline).foregroundStyle(Palette.muted)
+                    if let chevron {
+                        Image(systemName: chevron)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Palette.faint)
+                    }
+                }
+                if showsNote, let note = event.note, !note.isEmpty {
+                    Text(note)
+                        .foregroundStyle(Palette.faint)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if chevron == nil, let url = reportURL {
+                    Button("Abrir relatório") { NSWorkspace.shared.open(url) }
+                        .buttonStyle(.link)
+                        .help(Tip.openReportFile)
+                }
+            }
+        }
+        .font(.system(size: 12))
+        .multilineTextAlignment(.leading)
+        .frame(maxWidth: 560, alignment: .leading)
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("event-line")
+    }
+
+    private var reportURL: URL? {
+        let botID = event.actor?.id ?? model.routines.first { $0.name == event.detail }?.botID // a run told as text has no actor
+        guard let file = event.file, let bot = botID.flatMap({ model.bot($0) }) else { return nil }
+        return bot.workingURL.appendingPathComponent(file)
+    }
+}
+
+extension Optional<OrbEvent.Outcome> {
+    var symbol: String {
+        switch self {
+        case .failed: "xmark.circle.fill"
+        case .attention: "flag.fill"
+        case .goalReached: "checkmark.seal.fill"
+        case .finished, nil: "clock.arrow.circlepath"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .failed: Palette.danger
+        case .attention: Palette.warn
+        case .goalReached: Palette.ok
+        case .finished, nil: Palette.muted
+        }
     }
 }

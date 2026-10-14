@@ -128,7 +128,11 @@ enum TranscriptFolding {
     }
 
     private static func isNotice(_ item: TranscriptItem) -> Bool {
-        if case .notice = item.kind { true } else { false }
+        switch item.kind {
+        case .notice: true
+        case .event(let event): event.kind == .routineRun // a routine's line, like a notice
+        default: false
+        }
     }
 
     /// The work of one finished request, from the item after your message to the one before the Orb's answer.
@@ -169,6 +173,7 @@ enum TranscriptFolding {
     private static func foldsIntoWork(_ item: TranscriptItem) -> Bool {
         switch item.kind {
         case .bot, .tool, .notice: true
+        case .event: isNotice(item)
         case .approval: joinsToolRun(item)
         default: false
         }
@@ -187,16 +192,17 @@ enum TranscriptFolding {
     static func foldableEventKind(of item: TranscriptItem) -> OrbEvent.Kind? {
         guard case .event(let event) = item.kind else { return nil }
         switch event.kind {
-        case .orbCreated, .joinedGroup, .leftGroup, .routineCreated: return event.kind
+        case .orbCreated, .joinedGroup, .leftGroup, .routineCreated, .routineRun: return event.kind
         default: return nil
         }
     }
 
-    /// Two events fold only when they come from the same Orb and, for the group lines, about the same group.
+    /// Two events fold only when they come from the same Orb and, for the group lines, about the same group (for a
+    /// routine's runs, the same routine).
     private static func sameFoldKey(_ lhs: TranscriptItem, _ rhs: TranscriptItem) -> Bool {
         guard case .event(let a) = lhs.kind, case .event(let b) = rhs.kind else { return false }
         guard a.actor?.id == b.actor?.id else { return false }
-        if a.kind == .joinedGroup || a.kind == .leftGroup { return a.detail == b.detail }
+        if [.joinedGroup, .leftGroup, .routineRun].contains(a.kind) { return a.detail == b.detail }
         return true
     }
 
@@ -225,6 +231,10 @@ enum TranscriptFolding {
         case .routineCreated:
             if let who { return "\(who) criou \(count) rotinas" }
             return "\(count) rotinas criadas"
+        case .routineRun:
+            let failed = events.filter { $0.outcome == .failed }.count
+            return ["Rotina “\(group)”", "\(count) rodadas", "última \(RoutineText.dayAndTime(items[items.count - 1].date))",
+                    failed > 0 ? "\(failed) não \(failed == 1 ? "terminou" : "terminaram")" : nil].compactMap { $0 }.joined(separator: " · ")
         default:
             return "\(count) eventos"
         }

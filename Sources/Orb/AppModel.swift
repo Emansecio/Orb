@@ -1979,9 +1979,10 @@ final class AppModel {
             if case .once = routines[index].schedule, routines[index].nextRun == .distantFuture { routines[index].isEnabled = false }
         }
         recordRun(run, routineID: routineID)
-        let outcome = run.check?.status == .done ? "alcançou a meta e foi pausada: \(run.summary)"
-            : succeeded ? "terminou: \(run.summary)" : "não terminou: \(run.summary)"
-        append(.notice("Rotina “\(routine.name)” \(outcome)" + (run.reportFile.map { " (relatório em \($0))" } ?? "")), to: botID)
+        let outcome: OrbEvent.Outcome = !succeeded ? .failed : run.check?.status == .done ? .goalReached
+            : run.check?.status == .attention ? .attention : .finished
+        append(.event(OrbEvent(kind: .routineRun, actor: OrbRef(bot), detail: routine.name, note: run.summary,
+                               file: run.reportFile, outcome: outcome)), to: botID)
     }
 
     /// Writes a finished run's conversation. One that could not be written (a full disk) is kept here, the only copy,

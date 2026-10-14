@@ -251,6 +251,12 @@ private struct RoutineCard: View {
             VStack(alignment: .leading, spacing: 4) {
                 Label(routine.schedule.label, systemImage: "clock")
                     .font(.callout)
+                if let mismatch = RoutineText.nameMismatch(of: routine) {
+                    Label(mismatch, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(Palette.warn)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 NextRunLine(routine: routine)
             }
             if let goal = routine.goal { GoalProgressView(goal: goal) }
@@ -305,7 +311,7 @@ struct RoutineRunState: Equatable {
     let isQueued: Bool
 }
 
-/// "Próxima: em 3 h · hoje às 09:00", kept right as the minutes pass; "Pausada" when it is switched off.
+/// "Próxima: em 3 h · hoje às 09:00", kept right as the minutes pass; "Concluída" once a one-time routine ran; "Pausada" when it is switched off.
 struct NextRunLine: View {
     let routine: Routine
 
@@ -316,6 +322,10 @@ struct NextRunLine: View {
                     .font(.caption)
                     .foregroundStyle(Palette.muted)
             }
+        } else if RoutineText.isConcluded(routine) {
+            Label("Concluída", systemImage: "checkmark.circle")
+                .font(.caption)
+                .foregroundStyle(Palette.muted)
         } else {
             Label("Pausada", systemImage: "pause.circle")
                 .font(.caption)
@@ -338,16 +348,18 @@ struct GoalProgressView: View {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Image(systemName: check?.status.symbol ?? "target")
                     .foregroundStyle(check?.status.tint ?? Palette.faint)
-                Text(goal.target)
+                Text("Meta: \(goal.target)")
                     .foregroundStyle(Palette.secondary)
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 6)
-                Text(check?.label ?? "sem avaliação")
+                Text(check?.label ?? "avaliada na 1ª rodada")
                     .monospacedDigit()
                     .foregroundStyle(check.map { $0.status == .onTrack ? Palette.accentText : $0.status.tint } ?? Palette.faint)
                     .fixedSize()
             }
-            GoalBar(progress: check?.progress ?? 0, tint: check?.status.tint ?? Palette.accent)
+            // No bar before the first check: an empty one reads as 0%.
+            if let check { GoalBar(progress: check.progress, tint: check.status.tint) }
             if showsNote, let note = check?.note, !note.isEmpty {
                 Text(note)
                     .foregroundStyle(Palette.muted)

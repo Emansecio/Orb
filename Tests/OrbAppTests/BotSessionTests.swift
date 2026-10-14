@@ -115,6 +115,7 @@ private struct WritingModel: LLMClient {
             case .user(let text, _): result.user.append(text)
             case .bot(let text, _): result.bot.append(text)
             case .notice(let text): result.notices.append(text)
+            case .event(let event) where event.kind == .routineRun: result.notices.append(event.sentence)
             default: break
             }
         }

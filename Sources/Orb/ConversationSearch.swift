@@ -252,7 +252,7 @@ enum ConversationSearch {
         case .tool(let call): return (.tool, call.title + "  " + call.detail.prefix(400))
         case .approval: return nil
         // MARK: MultiOrb (WP2): the lines between Orbs are searched as the text they read
-        case .event(let event): return (.exchange, event.sentence)
+        case .event(let event): return (event.kind == .routineRun ? .notice : .exchange, event.sentence)
         case .orbMessage(let message):
             let line = ExchangeWords.line(for: message)
             return (.exchange, message.text.isEmpty ? line : line + ": " + message.text)

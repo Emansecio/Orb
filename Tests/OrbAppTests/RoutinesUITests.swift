@@ -27,6 +27,28 @@ struct RoutinesUITests {
         #expect(RoutineText.resolvedName("", prompt: "Faça o backup") == "Faça o backup")
     }
 
+    @Test func aNameThatPromisesARhythmTheScheduleDoesNotKeepIsFlagged() {
+        func mismatch(_ name: String, _ schedule: Schedule) -> String? {
+            RoutineText.nameMismatch(of: Routine(name: name, botID: UUID(), prompt: "x", schedule: schedule))
+        }
+        #expect(mismatch("Checar anúncios AcessosFit (4h)", .once(now)) != nil)
+        #expect(mismatch("Relatório diário", .once(now)) != nil)
+        #expect(mismatch("Checar anúncios (4h)", .everyHours(6)) == "O nome diz 4 h, mas ela roda a cada 6 h.")
+        #expect(mismatch("Checar anúncios (4h)", .everyHours(4)) == nil)
+        #expect(mismatch("Resumo às 9h", .once(now)) == nil) // a time of day is not a rhythm
+    }
+
+    @Test func aTaskForOneMomentThatRanIsConcludedNotPaused() {
+        var routine = Routine(name: "Uma vez", botID: UUID(), prompt: "x", schedule: .once(now))
+        routine.createdAt = now.addingTimeInterval(-60)
+        routine.isEnabled = false
+        #expect(!RoutineText.isConcluded(routine)) // switched off before its moment: paused
+        routine.lastRun = now.addingTimeInterval(60)
+        #expect(RoutineText.isConcluded(routine))
+        routine.schedule = .everyHours(4)
+        #expect(!RoutineText.isConcluded(routine))
+    }
+
     // MARK: Time in words
 
     @Test func timeUntilTheNextRunIsInWords() {

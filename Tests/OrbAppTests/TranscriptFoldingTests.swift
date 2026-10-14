@@ -73,6 +73,33 @@ struct TranscriptFoldingTests {
         #expect(TranscriptFolding.rows(for: other).count == 2)
     }
 
+    @Test
+    func aRunToldAsTextByAnOlderVersionIsReadAsARun() throws {
+        func decoded(_ text: String) throws -> TranscriptItem.Kind {
+            try JSONDecoder().decode(TranscriptItem.self, from: JSONEncoder().encode(TranscriptItem(.notice(text)))).kind
+        }
+        guard case .event(let run) = try decoded("Rotina “WhatsApp (1h)” não terminou: parou no login (relatório em Rotinas/WhatsApp (1h)/2026-10-14 0823.md)")
+        else { Issue.record("the notice must become a run"); return }
+        #expect(run.kind == .routineRun && run.detail == "WhatsApp (1h)" && run.outcome == .failed)
+        #expect(run.note == "parou no login" && run.file == "Rotinas/WhatsApp (1h)/2026-10-14 0823.md")
+        guard case .event(let plain) = try decoded("Rotina “Resumo” terminou: nada novo") else { Issue.record("no report"); return }
+        #expect(plain.outcome == .finished && plain.note == "nada novo" && plain.file == nil)
+        #expect(try decoded("Guardado na memória: x") == .notice("Guardado na memória: x"))
+    }
+
+    @Test("Rodadas seguidas da mesma rotina viram uma linha; de outra rotina não")
+    func routineRunsFoldByRoutine() {
+        func run(_ name: String, _ outcome: OrbEvent.Outcome = .finished) -> TranscriptItem {
+            TranscriptItem(.event(OrbEvent(kind: .routineRun, actor: atlas, detail: name, note: "nada novo", outcome: outcome)))
+        }
+        let same = [run("WhatsApp"), run("WhatsApp", .failed), run("WhatsApp")]
+        #expect(TranscriptFolding.rows(for: same) == [.events(.routineRun, same)])
+        let title = TranscriptFolding.eventsTitle(.routineRun, same)
+        #expect(title.hasPrefix("Rotina “WhatsApp” · 3 rodadas · última ") && title.hasSuffix(" · 1 não terminou"))
+        #expect(TranscriptFolding.rows(for: [run("WhatsApp"), run("Anúncios")]).count == 2)
+        #expect(ConversationSearch.searchable(same[1])?.source == .notice)
+    }
+
     @Test("Mensagens entre Orbs seguidas viram uma troca; uma só fica como linha")
     func messagesFoldIntoOneExchange() {
         let chain = UUID()

@@ -180,6 +180,23 @@ enum RoutineText {
         "\(day(date, now: now, calendar: calendar)) às \(time(date, calendar: calendar))"
     }
 
+    /// A task for one moment that ran at it: switched off for good, not paused (as `finishRoutineRun` leaves it).
+    static func isConcluded(_ routine: Routine) -> Bool {
+        guard case .once = routine.schedule else { return false }
+        return !routine.isEnabled && routine.nextRun == .distantFuture
+    }
+
+    /// A name that promises a rhythm the schedule does not keep: "(4h)" on a task that runs once, or every 6 hours.
+    static func nameMismatch(of routine: Routine) -> String? {
+        guard let match = routine.name.firstMatch(of: /(?i)(?:\(|cada\s*)(\d+)\s*h\b|a cada|diári|diariamente|semanal|todo dia|toda semana|de hora em hora/)
+        else { return nil }
+        switch (routine.schedule, match.1.flatMap { Int($0) }) {
+        case (.once, _): return "O nome sugere repetição, mas ela roda uma vez só."
+        case (.everyHours(let every), let hours?) where hours != every: return "O nome diz \(hours) h, mas ela roda a cada \(every) h."
+        default: return nil
+        }
+    }
+
     /// The card's line: "Próxima: em 3 h · hoje às 09:00". nil while the routine is switched off.
     static func nextRun(of routine: Routine, now: Date = .now, calendar: Calendar = .current) -> String? {
         let date = routine.nextRun

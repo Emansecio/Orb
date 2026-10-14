@@ -725,10 +725,15 @@ private struct InspectorHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            TextField("Nome", text: $name, prompt: Text("Nome"))
+            // Two lines before it is cut, Return still ending the edit, as in the role below.
+            TextField("Nome", text: $name, prompt: Text("Nome"), axis: .vertical)
+                .lineLimit(1...2)
                 .font(.system(size: 15, weight: .semibold))
                 .focused($focus, equals: .name)
-                .onSubmit(commitName)
+                .onKeyPress(.return) {
+                    focus = nil
+                    return .handled
+                }
             // At rest the role is text of up to two lines, ending in "…" when it is longer; a click opens the field, which
             // grows with what is typed. (A two-line field would show its own first line and scroll the rest away.)
             if isEditingRole {
@@ -850,6 +855,7 @@ private struct RoutineRow: View {
     let routine: Routine
     let edit: () -> Void
     @State private var isConfirmingDelete = false
+    @State private var isHovering = false
 
     var body: some View {
         // The routine as it is now (the toggle and the runs change it in the model, not in this copy).
@@ -866,6 +872,12 @@ private struct RoutineRow: View {
                     Text(current.schedule.label)
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.muted)
+                    if let mismatch = RoutineText.nameMismatch(of: current) {
+                        Label(mismatch, systemImage: "exclamationmark.triangle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Palette.warn)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 Spacer(minLength: 6)
                 Toggle("Ativa", isOn: Binding(get: { current.isEnabled }, set: { model.setRoutineEnabled(routine.id, $0) }))
@@ -891,6 +903,7 @@ private struct RoutineRow: View {
         .animateChanges(of: current.isEnabled)
         .animateChanges(of: model.freshRoutine)
         .animateChanges(of: isConfirmingDelete)
+        .onHover { isHovering = $0 }
         .sensoryFeedback(.alignment, trigger: current.isEnabled)
         .transition(.adapted(.arrive, reduceMotion: reduceMotion))
     }
@@ -945,6 +958,9 @@ private struct RoutineRow: View {
                     .foregroundStyle(Palette.secondary)
                     .help(Tip.deleteRoutine)
                     .padding(.trailing, -4)
+                    // Only under the pointer, like the lembranças: a list of routines, not of trash cans.
+                    .opacity(isHovering ? 1 : 0)
+                    .animation(Motion.hover(isHovering), value: isHovering)
             }
         }
         .frame(minHeight: 26)
@@ -987,13 +1003,18 @@ private struct RoutineNextLine: View {
         if routine.isEnabled {
             TimelineView(.periodic(from: .now, by: 60)) { context in
                 Label {
-                    Text("Próxima: \(RoutineText.dayAndTime(routine.nextRun, now: context.date)) · \(RoutineText.relative(until: routine.nextRun, now: context.date))")
+                    // "em 9 h 57 min" never breaks inside.
+                    Text("Próxima: \(RoutineText.dayAndTime(routine.nextRun, now: context.date)) · \(RoutineText.relative(until: routine.nextRun, now: context.date).replacing(" ", with: "\u{A0}"))")
                 } icon: {
                     Image(systemName: "arrow.forward.circle")
                 }
                 .font(.system(size: 12))
                 .foregroundStyle(Palette.secondary)
             }
+        } else if RoutineText.isConcluded(routine) {
+            Label("Concluída: rodou no horário marcado", systemImage: "checkmark.circle")
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.muted)
         } else {
             Label("Pausada: não roda até você ligar de novo", systemImage: "pause.circle")
                 .font(.system(size: 12))
@@ -1005,12 +1026,13 @@ private struct RoutineNextLine: View {
 /// How the last run went: its mark, when, and the first line of its report; "Ainda não rodou" before the first.
 private struct RoutineLastLine: View {
     let routine: Routine
+    @State private var isExpanded = false
 
     var body: some View {
         if let run = routine.runs.first {
             Label {
-                Text("\(RoutineText.stamp(run.date)) · \(run.summary)")
-                    .lineLimit(2)
+                Text("\(RoutineText.stamp(run.date)) · \(MarkdownCache.attributed(isExpanded ? run.report ?? run.summary : run.summary))")
+                    .lineLimit(isExpanded ? nil : 2)
                     .fixedSize(horizontal: false, vertical: true)
             } icon: {
                 Image(systemName: run.succeeded ? "checkmark.circle.fill" : "xmark.circle.fill")
@@ -1020,6 +1042,11 @@ private struct RoutineLastLine: View {
             .foregroundStyle(Palette.muted)
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Última execução \(run.succeeded ? "deu certo" : "não deu certo"), \(RoutineText.stamp(run.date)). \(run.summary)")
+            // A click shows the whole report (as the lembranças do), another folds it back.
+            .contentShape(Rectangle())
+            .onTapGesture { isExpanded.toggle() }
+            .help(isExpanded ? "Clique para recolher" : "Clique para ver o relatório inteiro")
+            .motion(Motion.content, value: isExpanded)
         } else {
             Label(routine.lastResult ?? "Ainda não rodou", systemImage: "circle.dashed")
                 .font(.system(size: 12))

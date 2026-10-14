@@ -96,8 +96,16 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
 
     /// Returns when the Orb has no turn: closing a turn starts the next queued routine in the same step, so there
     /// is no moment in between where it looks idle.
+    /// The chat's notices, and a routine's run as its line reads (with where its report is).
     private func notices(_ items: [TranscriptItem]) -> [String] {
-        items.compactMap { if case .notice(let text) = $0.kind { text } else { nil } }
+        items.compactMap {
+            switch $0.kind {
+            case .notice(let text): text
+            case .event(let event) where event.kind == .routineRun:
+                event.sentence + (event.file.map { " (relatório em \($0))" } ?? "")
+            default: nil
+            }
+        }
     }
 
     private func text(_ message: ChatMessage) -> String { message.content }
