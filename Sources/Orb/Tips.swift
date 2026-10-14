@@ -215,7 +215,7 @@ enum Tip {
     static let notifyWhenDone = "Mostra uma notificação quando um Orb termina ou precisa de você"
     static let proposeSkills = "Deixa o Orb propor skills; nada é salvo sem a sua aprovação"
     static let continueLongTasks = "Deixa o Orb passar do limite de passos sozinho enquanto o plano da tarefa avança"
-    static let summarizeSessions = "Pede ao modelo um resumo das conversas longas guardadas na memória; custa uma chamada curta por conversa"
+    static let summarizeSessions = "Pede ao modelo um resumo das conversas longas guardadas; uma chamada curta por conversa"
     static let reviewDictation = "Corrige o texto ditado com o modelo do Orb antes de você enviar"
     static let orbsCanTalk = "Deixa os Orbs pedirem ajuda uns aos outros; Parar interrompe a conversa toda"
     static let dataFolder = "Mostra no Finder a pasta com conversas, memórias e ajustes"

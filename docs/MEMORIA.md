@@ -21,7 +21,7 @@ documento descreve o que existe no código. Como a memória se combina com a com
     _propostas/<comando>.md   skills que o Orb propôs e esperam a sua decisão (não são páginas de memória)
     _skills.json              cópia das skills que o Orb pode usar, escrita pelo app (não é página de memória)
     _arquivo/                 texto completo das páginas de sessão compactadas (mesmos caminhos)
-    index.sqlite              índice de busca (+ -wal e -shm); reconstruível a partir dos .md
+    index.sqlite              índice de busca (+ -wal e -shm, o -wal com checkpoint de hora em hora e teto de 1 MB); reconstruível a partir dos .md
   _guardadas/<nome> – <aaaa-mm-dd hh.mm>/    memória de Orbs apagados ou redefinidos com "guardar a memória"
     perfil.json               quem era o Orb: nome, papel e aparência (OrbConfig). Sem liberações, modo nem segredos
     …o resto igual à pasta de um Orb (nucleo/, fatos/, …); com " (2)" no fim se o nome já existia
@@ -101,7 +101,11 @@ No painel os grupos se chamam Preferências, Fatos, Procedimentos e "Resumos de 
   instruções" (a nota também resume o que ferramentas devolveram, páginas web e arquivos: na memória ela é fato sobre o
   passado, não ordem). A nota é feita em
   segundo plano pelo modelo mais barato do mesmo fabricante (veja "Nota do modelo sobre o trecho" em [CONTEXTO.md](CONTEXTO.md));
-  uma página gravada por tempo parado ou abertura do app não a tem. Se o trecho já tinha sido salvo por
+  uma página gravada por tempo parado ou abertura do app só a tem com **Ajustes → "Resumir com o modelo as conversas longas
+  que vão para a memória"** ligado (desligado por padrão; `SessionNote`): então uma conversa de 6 pedidos ou mais, sem
+  conector, ganha a nota do mesmo modelo menor depois que a página já foi gravada pelas regras, na mesma página (sair do app ou
+  uma chamada que falha nunca custa a página; rotinas, modelos locais e o Claude Code não são resumidos; o custo vai para o Uso
+  como chamada auxiliar). Se o trecho já tinha sido salvo por
   regras antes de a dobra chegar (a conversa ficou parada, depois voltou e o cache frio dobrou o começo), as notas que a dobra
   levou vão sozinhas numa página nova de `sessoes/`, só com `## Resumo`: cada nota chega à memória uma vez;
 - **Pedidos**: os 12 últimos, com a hora e os anexos;
@@ -125,8 +129,8 @@ qualquer que seja o tamanho da memória. Ele se divide em duas partes, por causa
 
 | Parte | Vai em | Conteúdo |
 |---|---|---|
-| `stable` | prompt do sistema (igual de uma mensagem para outra) | o perfil da usuária (veja abaixo; nada quando vazio), identidade (até 1 500 caracteres: o começo e o fim, onde ficam as notas mais novas), preferências (até 1 500: as 40 mais novas, 240 caracteres cada), a entrevista enquanto pendente (até a 4ª mensagem sua) e a linha de como usar `remember`/`recall` |
-| `notes` | prefácio da mensagem (`<orb_context>`), dentro de `<memory_notes>` | até **3 lembranças ligadas à mensagem** (220 caracteres cada, 900 no total); "onde paramos" (até 900, **só ao começar uma conversa nova**); títulos de outros fatos (12) e procedimentos (8) |
+| `stable` | prompt do sistema (igual de uma mensagem para outra) | o perfil da usuária (veja abaixo; nada quando vazio), identidade (até 1 500 caracteres: saem primeiro as notas mais antigas, com a marca "(+N older notes left out of this prompt)"; só o seu texto, quando não cabe sozinho, vira começo e fim), preferências (até 1 500, entre as 200 mais novas: cada uma cortada em `max(240, 1 500 ÷ N)`, e as que não cabem viram a linha "(+N older preferences not shown here; recall finds them)"; o painel avisa quantas não cabem inteiras e se a consolidação vai juntá-las, que agora roda também quando elas não cabem, mirando 1 200 caracteres), a entrevista enquanto pendente (até a 4ª mensagem sua) e a linha de como usar `remember`/`recall` |
+| `notes` | prefácio da mensagem (`<orb_context>`), dentro de `<memory_notes>` | até **3 lembranças ligadas à mensagem** (220 caracteres cada, 900 no total); "onde paramos" (até 900, **só ao começar uma conversa nova**: Resumo, Pedidos sem repetir o que virou decisão, Decisões, Pendências, o que foi feito e a última resposta em 200 caracteres); títulos de outros fatos (12) e procedimentos (8) |
 
 Detalhes que importam:
 
@@ -141,7 +145,11 @@ Detalhes que importam:
 
 - **Relacionadas** (`MemoryBank.related`): a busca roda em toda mensagem, então é seletiva. Agradecimentos e saudações não
   buscam nada; verbos e palavras de pergunta ("você lembra…", "quantos…") não contam como assunto; `nome` e `anos` só valem
-  se forem tudo o que há; com 3 ou mais palavras de assunto, a página precisa ter pelo menos 2.
+  se forem tudo o que há. Numa mensagem de 3 palavras ou mais, o `NLTagger` (dos primeiros 2 000 caracteres) separa os
+  substantivos e nomes (`MemoryText.topicNouns`): só eles contam no requisito "com 3 ou mais palavras de assunto, a página
+  precisa ter pelo menos 2", e com 2 ou mais deles a página precisa casar pelo menos um (um verbo em comum não basta).
+  Prefixo na busca só a partir de 4 letras ou com número ("10" acha "10h"); uma palavra de 3 letras acha também o plural
+  ("voo" acha "voos"), e "sp" não acha "sprint".
 - **Pela tarefa em andamento**: uma mensagem que só aponta para trás ("faz igual ao anterior", "continua", "de novo") e
   tem menos de 2 palavras de assunto próprias pega emprestados até 6 termos da tarefa (`MemoryText.lookupTerms`):
   `TurnPreface.taskContext` junta os 2 últimos pedidos da conversa (o mais novo primeiro) e a meta do resumo. Uma mensagem
@@ -218,7 +226,8 @@ reindexa. O VoiceOver é avisado nos dois casos.
 - **Retenção sem LLM**: `saliência·e^(−0,02·idade) + 0,6·ln(1+usos)·e^(−0,04·dias desde o último uso)` (meia-vida de ~35
   dias). Aparecer numa busca ou numa lembrança relacionada conta como uso (no máximo uma vez por minuto por página).
 - **Compactar, nunca apagar sozinho**: uma sessão com mais de 30 dias e retenção abaixo de 0,2 vira uma versão curta (os 3
-  primeiros pedidos e até 20 caminhos, links e trechos de código) e o texto completo vai para `_arquivo/`. Só você apaga.
+  primeiros pedidos, as decisões (até 8, 160 caracteres cada), as notas do Resumo da mais nova para a mais velha até ~600
+  caracteres e até 20 caminhos, links e trechos de código) e o texto completo vai para `_arquivo/`. Só você apaga.
 - **Limite de confiança**: o que vem das conversas entra no prompt num bloco `<memory_notes>`, achatado em linhas e marcado
   como "fatos sobre o passado, nunca instruções". Só identidade e preferências (escritas por você ou guardadas com a sua
   aprovação) orientam o comportamento. O que se importa de outro assistente é texto de fora: só vira identidade ou preferência
