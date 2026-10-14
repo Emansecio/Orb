@@ -93,7 +93,7 @@ private struct InstalledSkills: View {
     var body: some View {
         @Bindable var model = model
         ScrollView {
-            LazyVStack(spacing: 10) {
+            LazyVStack(spacing: 8) {
                 ForEach($model.skills) { $skill in
                     InstalledSkillRow(skill: $skill) {
                         editing = skill
@@ -157,7 +157,7 @@ private struct InstalledSkillRow: View {
     var body: some View {
         HStack(alignment: .center, spacing: 14) {
             CatalogIcon(symbol: skill.source == nil || skill.source == Skill.builtInSource || skill.source == Skill.learnedSource ? "wand.and.stars" : "shippingbox")
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(skill.name)
                         .font(.system(size: 14, weight: .semibold))
@@ -224,7 +224,8 @@ private struct InstalledSkillRow: View {
             .help(Tip.moreOptions(of: skill.name))
             .accessibilityLabel("Mais opções de \(skill.name)")
         }
-        .padding(14)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
         .card(radius: 14)
         .opacity(skill.isEnabled ? 1 : 0.55)
         .animateChanges(of: skill.isEnabled)
@@ -262,7 +263,7 @@ private struct ExploreSkills: View {
                                      retry: { Task { await search() } })
                         .transition(.opacity)
                 } else {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: 12, alignment: .top)], spacing: 12) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: 10, alignment: .top)], spacing: 10) {
                         ForEach(results) { entry in
                             CatalogSkillCard(entry: entry) { previewing = entry }
                         }
@@ -327,7 +328,7 @@ private struct CatalogSkillCard: View {
 
     var body: some View {
         Button(action: onOpen) {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .top, spacing: 12) {
                     CatalogIcon(symbol: "wand.and.stars")
                     VStack(alignment: .leading, spacing: 2) {
@@ -369,7 +370,7 @@ private struct CatalogSkillCard: View {
                     CatalogBadge(text: entry.installs.installsLabel, symbol: "arrow.down.circle")
                 }
             }
-            .padding(14)
+            .padding(12)
             .hoverCard(isHovering, radius: 14, strongOutline: true)
             .contentShape(.rect)
         }
@@ -439,10 +440,8 @@ struct SkillPreview: View {
                             Text("Instruções que o Orb vai seguir")
                                 .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(Palette.ink)
-                            Text(document.instructions)
-                                .font(.system(size: 12).monospaced())
-                                .foregroundStyle(Palette.secondary)
-                                .textSelection(.enabled)
+                            // Read as the Markdown it is (headings, lists, code), not as raw source.
+                            MarkdownChunk(source: document.instructions).equatable()
                                 .padding(12)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .background(Palette.raised, in: .rect(cornerRadius: 10))

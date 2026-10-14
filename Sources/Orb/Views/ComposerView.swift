@@ -745,13 +745,13 @@ enum ComposerHint {
     /// request (see `ApprovalShortcut`), and the line says so.
     static func queueing(needsYou: Bool, typesInComposer: Bool, compact: Bool = false) -> String {
         let command = AppShortcut.commandReturn.label
-        let keys = "↩ direciona · ⇥ fila"
+        let keys = "↩ envia agora · ⇥ depois da tarefa"
         if needsYou {
             if !typesInComposer { return compact ? "\(command) permite o pedido" : "\(keys) · \(command) permite o pedido" }
             // A narrow composer gets the same promises in fewer words, so the line is whole rather than cut with "…".
             return compact ? "\(keys) · \(command) recusa e envia" : "\(keys) · \(command) recusa o pedido e envia agora"
         }
-        return compact ? keys : "\(keys) · \(command) para e envia"
+        return compact ? keys : "\(keys) · \(command) para a tarefa e envia"
     }
 }
 

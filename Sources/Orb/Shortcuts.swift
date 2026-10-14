@@ -119,6 +119,9 @@ struct ShortcutItem: Identifiable, Equatable {
     var command: ShortcutCommand
     var keys: String
     var title: String
+    /// The title when it is drawn inside Ajustes → Geral itself, for a title that would otherwise point at the screen
+    /// the person is already on.
+    var titleInGeneral: String? = nil
     var id: String { command.rawValue }
 }
 
@@ -177,7 +180,8 @@ enum ShortcutCatalog {
             ShortcutItem(.undoForget, AppShortcut.undoForget, "Desfazer “Esquecer” da memória (enquanto o aviso está na tela)"),
         ]),
         ShortcutGroup(title: "De qualquer lugar do Mac", items: [
-            ShortcutItem(command: .menuBarPanel, keys: "⌃⌥Espaço", title: "Abrir o painel da barra de menus do Orb (opcional, no menu Orbs ou em Ajustes → Geral)"),
+            ShortcutItem(command: .menuBarPanel, keys: "⌃⌥Espaço", title: "Abrir o painel da barra de menus do Orb (opcional, no menu Orbs ou em Ajustes → Geral)",
+                         titleInGeneral: "Abrir o painel da barra de menus do Orb (opcional, ligue na seção acima)"),
         ]),
     ]
 

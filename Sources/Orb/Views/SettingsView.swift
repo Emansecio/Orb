@@ -144,7 +144,7 @@ struct GeneralSettings: View {
                 Toggle(isOn: $proposeSkills) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Propor skills com o que os Orbs aprendem")
-                        Text("Depois de tarefas longas, o Orb revisa o que fez e pode propor uma skill. Costuma usar uma chamada extra ao modelo (até \(SkillReview.maxSteps) quando propõe algo), quase toda em cache. Nada é salvo sem você aprovar.")
+                        Text("Depois de tarefas longas, o Orb pode propor uma skill. Nada é salvo sem você aprovar.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -153,7 +153,7 @@ struct GeneralSettings: View {
                 Toggle(isOn: $continueLongTasks) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Continuar sozinho em tarefas longas")
-                        Text("Quando o plano está avançando, o Orb segue sem pedir “continua”, até \(AutoContinue.maxStretches) trechos de \(AgentEngine.defaultMaxSteps) passos seguidos. Desligado, ele pausa no limite de passos e espera você.")
+                        Text("O Orb segue sem pedir “continua”, em até \(AutoContinue.maxStretches) trechos de \(AgentEngine.defaultMaxSteps) passos. Desligado, ele pausa e espera você.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -162,7 +162,7 @@ struct GeneralSettings: View {
                 Toggle(isOn: $summarizeSessions) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Resumir com o modelo as conversas longas que vão para a memória")
-                        Text("Quando uma conversa de \(SessionNote.minimumRequests) pedidos ou mais é guardada, o modelo menor do mesmo provedor (quando há) escreve um resumo dela, que entra na página da sessão. Uma chamada curta por conversa. Desligado, a página tem só o que as regras tiram: pedidos, decisões, o que foi feito. Conversas com conectores, modelos locais e o Claude Code nunca são resumidos.")
+                        Text("Um resumo curto, escrito pelo modelo, de cada conversa longa guardada. Conversas com conectores, modelos locais ou o Claude Code ficam de fora.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -172,7 +172,7 @@ struct GeneralSettings: View {
                     Toggle(isOn: $reviewDictation) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Ajustar o ditado com o modelo do Orb")
-                            Text("Ao parar de ditar, o texto vai ao modelo do Orb (um menor do mesmo provedor, quando há) com as últimas mensagens da conversa, para corrigir pontuação e palavras mal entendidas. Uma chamada curta por ditado; o áudio nunca sai do Mac. Esc durante o ajuste mantém o texto como foi ditado.")
+                            Text("Ao parar de ditar, o modelo corrige pontuação e palavras mal entendidas. O áudio nunca sai do Mac.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -183,7 +183,7 @@ struct GeneralSettings: View {
                 Toggle(isOn: Binding(get: { orbsCanTalk }, set: { setOrbsCanTalk($0) })) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Orbs podem conversar entre si")
-                        Text("Os Orbs veem os colegas e pedem ajuda uns aos outros sozinhos, sem cartão por mensagem. Cada um segue as próprias permissões. Parar (⌘.) interrompe a conversa toda. Não afeta grupos.")
+                        Text("Os Orbs pedem ajuda uns aos outros sem cartão por mensagem, cada um com as próprias permissões. Não afeta grupos.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -230,7 +230,7 @@ struct GeneralSettings: View {
             ForEach(ShortcutCatalog.groups) { group in
                 Section("Atalhos · \(group.title)") {
                     ForEach(group.items) { item in
-                        LabeledContent(item.title) {
+                        LabeledContent(item.titleInGeneral ?? item.title) {
                             Text(item.keys)
                                 .font(.system(size: 12, design: .monospaced))
                                 .foregroundStyle(Palette.muted)
@@ -390,5 +390,31 @@ enum SettingsSnapshots {
         statuses[.screenRecording] = .notGranted
         return MacPermissionsModel(sample: statuses, notifications: .allowed, tests: [.accessibility: .broken],
                                    awaitsRelaunch: [.screenRecording])
+    }
+}
+
+/// One short sentence under a setting, with the rest behind "Saiba mais": for notes whose extra detail matters to
+/// few people, so the page is not a wall of gray text.
+struct LearnMoreNote: View {
+    let short: String
+    let more: String
+    @State private var isOpen = false
+
+    var body: some View {
+        // The sentence and the link read as one run of text, the link wrapping with it when the window is narrow.
+        (Text(short + " ") + Text("Saiba mais").foregroundColor(.accentColor))
+            .font(.caption)
+            .fixedSize(horizontal: false, vertical: true)
+            .contentShape(.rect)
+            .onTapGesture { isOpen = true }
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint("Mostra mais detalhes")
+            .popover(isPresented: $isOpen, arrowEdge: .bottom) {
+                Text(more)
+                    .font(.system(size: 12))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(width: 300, alignment: .leading)
+                    .padding(12)
+            }
     }
 }

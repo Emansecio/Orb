@@ -46,11 +46,11 @@ struct ConnectorTemplate: Identifiable, Sendable {
     /// Enters with the person's account (a login in the browser) instead of a key.
     var usesLogin: Bool { config.oauth != nil }
 
-    /// What the card says it needs: "Pede 1 chave", "Sem chave" or "Remoto". Only secrets are "chaves": an ID or a
+    /// What the card says it needs: "Pede 1 chave", "Não precisa de chave" or "Remoto". Only secrets are "chaves": an ID or a
     /// region is just something to fill in.
     var badges: [String] {
         let keys = inputs.filter { $0.isRequired && $0.isSecret }.count
-        return [usesLogin ? "Entra com sua conta" : keys == 0 ? "Sem chave" : keys == 1 ? "Pede 1 chave" : "Pede \(keys) chaves"] + (isRemote ? ["Remoto"] : [])
+        return [usesLogin ? "Entra com sua conta" : keys == 0 ? "Não precisa de chave" : keys == 1 ? "Pede 1 chave" : "Pede \(keys) chaves"] + (isRemote ? ["Remoto"] : [])
     }
 
     func matches(_ category: ConnectorCategory?) -> Bool { category == nil || self.category == category }

@@ -1382,12 +1382,16 @@ private struct KeyValueField: View {
         input?.isSecret == true || secretNames.contains(row.key) || ConnectorSecrets.looksSecret(row.key)
     }
 
+    private var isAuthorizationHeader: Bool { row.key == "Authorization" && input?.prefix.isEmpty == false }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
                 if input != nil {
-                    Text(row.key)
-                        .font(.system(size: 12).monospaced())
+                    // The HTTP header ("Authorization" + "Bearer ") is plumbing: the person sees a key to paste, and the
+                    // prefix is added back when saving.
+                    Text(isAuthorizationHeader ? "Chave de acesso" : row.key)
+                        .font(isAuthorizationHeader ? .system(size: 13) : .system(size: 12).monospaced())
                         .frame(width: 170, alignment: .leading)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -1396,7 +1400,7 @@ private struct KeyValueField: View {
                         .font(.system(size: 12).monospaced())
                         .frame(width: 170)
                 }
-                if let prefix = input?.prefix.trimmingCharacters(in: .whitespaces), !prefix.isEmpty {
+                if !isAuthorizationHeader, let prefix = input?.prefix.trimmingCharacters(in: .whitespaces), !prefix.isEmpty {
                     Text(prefix)
                         .font(.system(size: 12).monospaced())
                         .foregroundStyle(Palette.muted)

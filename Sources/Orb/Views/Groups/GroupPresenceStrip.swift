@@ -48,6 +48,14 @@ enum GroupPresence {
         return "\(names(items)) estão trabalhando…"
     }
 
+    /// The sidebar row's version: several names in a narrow row would end in a cut "…", so they become a count
+    /// ("2 Orbs trabalhando…"). One Orb, or someone waiting for you, keeps the full sentence (the strip names them).
+    static func sidebarText(_ items: [GroupPresenceItem]) -> String? {
+        guard items.count > 1, !items.contains(where: { $0.state == .waitingYou }) else { return text(items) }
+        let allWriting = Set(items.map(\.state)) == [.writing]
+        return "\(items.count) Orbs \(allWriting ? "escrevendo" : "trabalhando")…"
+    }
+
     /// "A", "A e B", "A, B e C".
     static func names(_ items: [GroupPresenceItem]) -> String {
         names(items.map(\.name))

@@ -23,19 +23,20 @@ struct DeleteOrbSummary: Equatable {
                   groupCount: groupCount)
     }
 
-    /// "Some: a conversa, 2 rotinas e sai de 2 grupos."
+    /// "A conversa, 2 rotinas e a participação em 2 grupos vão embora."
     var goes: String {
         var parts = ["a conversa"]
         if routineCount == 1 { parts.append("1 rotina") } else if routineCount > 1 { parts.append("\(routineCount) rotinas") }
         // MARK: MultiOrb (WP6): it also leaves the groups it is in ("também sai de N grupos").
-        if groupCount == 1 { parts.append("sai de 1 grupo") } else if groupCount > 1 { parts.append("sai de \(groupCount) grupos") }
-        return "Some: " + Self.list(parts) + "."
+        if groupCount == 1 { parts.append("a participação em 1 grupo") } else if groupCount > 1 { parts.append("a participação em \(groupCount) grupos") }
+        let subject = Self.list(parts)
+        return subject.prefix(1).uppercased() + subject.dropFirst() + (parts.count == 1 ? " vai embora." : " vão embora.")
     }
 
-    /// "Fica: a pasta ~/Orbs/Atlas e, se você quiser, a memória."
+    /// "A pasta ~/Orbs/Atlas continua no seu Mac e, se você quiser, a memória também."
     var stays: String {
-        if let folder { return "Fica: a pasta \(folder) e, se você quiser, a memória." }
-        return "Fica: tudo o que está no seu Mac e, se você quiser, a memória."
+        if let folder { return "A pasta \(folder) continua no seu Mac e, se você quiser, a memória também." }
+        return "Tudo o que está no seu Mac continua lá e, se você quiser, a memória também."
     }
 
     /// Where a kept memory goes and what each button does with it.
@@ -60,7 +61,7 @@ struct DeleteOrbSummary: Equatable {
     }
 }
 
-/// A line of what a destructive sheet takes away or leaves: a red minus ("Some: …") or a green check ("Fica: …") and the
+/// A line of what a destructive sheet takes away or leaves: a red minus (what goes) or a green check (what stays) and the
 /// sentence. "Apagar Atlas?" and "Redefinir o Orb?" use it.
 struct SummaryLine: View {
     enum Kind {

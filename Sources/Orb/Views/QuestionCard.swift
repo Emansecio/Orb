@@ -40,7 +40,7 @@ struct QuestionCard: View {
                 answeredCard.transition(.opacity)
             }
         }
-        .padding(.leading, 36)
+        .padding(.leading, gutter)
         .frame(maxWidth: 560, alignment: .leading)
         .motion(Motion.content, value: request.decision)
         .onChange(of: replyFocused) { isTyping = replyFocused }

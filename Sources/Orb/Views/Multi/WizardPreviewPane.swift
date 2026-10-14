@@ -259,7 +259,8 @@ struct WizardPreviewPane: View {
                     .foregroundStyle(Palette.secondary)
                     .padding(.horizontal, 9)
                     .padding(.vertical, 4)
-                    .background(flashed.contains(item.field) ? Palette.findWash : Palette.raised, in: .capsule)
+                    // A label, not a button: no fill of its own (only the wash of a change), since nothing here is clickable.
+                    .background(flashed.contains(item.field) ? Palette.findWash : .clear, in: .capsule)
                     .transition(reduceMotion ? .quiet
                                 : AnyTransition.rise.animation(Motion.enter.delay(Motion.staggerDelay(index))))
             }

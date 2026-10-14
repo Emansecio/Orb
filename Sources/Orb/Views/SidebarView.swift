@@ -409,6 +409,8 @@ private struct BotRowContent: View, Equatable {
                 .font(.system(size: 11))
                 .lineLimit(1)
             }
+            // The same height with or without a second line (an Orb with no role), so the rows keep one rhythm.
+            .frame(minHeight: 32, alignment: .leading)
             .animateChanges(of: workText)
             .animateChanges(of: needsYou)
             Spacer(minLength: 4)

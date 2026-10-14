@@ -1,11 +1,13 @@
 import SwiftUI
 
 /// A line of a chat for something that happened between Orbs or to them ("Atlas criou o Pesquisador"): a small symbol for
-/// its kind and the sentence, centred, in the muted ink of the app's notices. The line that says an Orb asked this one for
+/// its kind and the sentence, on the left edge of the replies' text (the chat gives the inset), in the muted ink of the app's notices. The line that says an Orb asked this one for
 /// help also has the asker's mini avatar, and opens the exchange (`ExchangeSheet`) when it is chosen.
 struct EventLineView: View {
     @Environment(AppModel.self) private var model
     let event: OrbEvent
+    /// Centred in a group's thread, where notices sit centred among the bubbles; on the replies' left edge in an Orb's chat.
+    var centered = false
     @State private var showsExchange = false
 
     var body: some View {
@@ -19,12 +21,12 @@ struct EventLineView: View {
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.muted)
                         .lineLimit(2)
-                        .multilineTextAlignment(.center)
+                        .multilineTextAlignment(centered ? .center : .leading)
                     Image(systemName: "chevron.right")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(Palette.faint)
                 }
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity, alignment: centered ? .center : .leading)
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
@@ -47,10 +49,10 @@ struct EventLineView: View {
                 Text(event.sentence)
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.muted)
-                    .multilineTextAlignment(.center)
+                    .multilineTextAlignment(centered ? .center : .leading)
                     .contentTransition(.opacity)
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, alignment: centered ? .center : .leading)
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("event-line")
         }
@@ -98,7 +100,7 @@ struct EventsSummary: View {
             Text(TranscriptFolding.eventsTitle(kind, items))
                 .font(.system(size: 12))
                 .foregroundStyle(Palette.muted)
-                .multilineTextAlignment(.center)
+                .multilineTextAlignment(.leading)
                 .contentTransition(.opacity)
             // The chevron turns its sign rather than turning: nothing rotates in a row that folds under Reduce Motion.
             Image(systemName: unfolded ? "chevron.down" : "chevron.right")
@@ -153,7 +155,7 @@ struct RoutineRunLine: View {
         .font(.system(size: 12))
         .multilineTextAlignment(.leading)
         .frame(maxWidth: 560, alignment: .leading)
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("event-line")
     }

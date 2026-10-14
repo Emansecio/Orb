@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// A message between Orbs in a chat, as one centred line: the two mini avatars and an arrow, the sentence ("Atlas pediu
+/// A message between Orbs in a chat, as one line on the text's left edge: the two mini avatars and an arrow, the sentence ("Atlas pediu
 /// ajuda ao Revisor"), the state of the message and a chevron that unfolds its text (`Motion.panel`). "Ver troca" opens the
 /// exchange read-only (`ExchangeSheet`).
 struct OrbMessageRow: View {
@@ -21,7 +21,7 @@ struct OrbMessageRow: View {
 
     var body: some View {
         let to = message.to ?? message.from
-        VStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 6) {
             Button {
                 unfolded.toggle()
             } label: {
@@ -39,7 +39,7 @@ struct OrbMessageRow: View {
                         .rotationEffect(.degrees(unfolded ? 90 : 0))
                         .animation(Motion.panel(reduceMotion: reduceMotion), value: unfolded)
                 }
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
@@ -72,7 +72,7 @@ struct OrbMessageRow: View {
                 .transition(AnyTransition.adapted(.unfold, reduceMotion: reduceMotion))
             }
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: unfolded)
         .sheet(isPresented: $showsExchange) {
             // The chat's own copy of the exchange; this line alone when the Orb that holds the rest is gone.
@@ -90,34 +90,56 @@ struct ExchangeStateMark: View {
     let state: OrbMessageItem.State
 
     var body: some View {
-        Group {
-            switch state {
-            case .open:
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Palette.faint)
-                    .symbolEffect(.pulse, isActive: !reduceMotion)
-            case .replied:
-                Image(systemName: "checkmark")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Palette.muted)
-                    .transition(AnyTransition.adapted(.mark, reduceMotion: reduceMotion))
-            case .failed, .refused:
-                Image(systemName: "exclamationmark.triangle")
+        // The symbol alone is small and says nothing to someone who has not met it: every state but the answered one also
+        // has its word beside it, in the symbol's colour (the answered one is the quiet, expected case).
+        HStack(spacing: 4) {
+            symbol
+            if state != .replied {
+                Text(Self.tooltip(state))
                     .font(.system(size: 11))
-                    .foregroundStyle(Palette.warn)
-            case .cancelled:
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Palette.faint)
-            case .lost:
-                Image(systemName: "clock.badge.questionmark")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.faint)
+                    .foregroundStyle(tint)
+                    .lineLimit(1)
+                    .fixedSize()
             }
         }
         .accessibilityHidden(true) // the line's value says it (`spoken`)
         .help(Self.tooltip(state))
+    }
+
+    private var tint: Color {
+        switch state {
+        case .failed: Palette.danger
+        case .refused: Palette.warn
+        case .replied: Palette.muted
+        case .open, .cancelled, .lost: Palette.faint
+        }
+    }
+
+    @ViewBuilder private var symbol: some View {
+        switch state {
+        case .open:
+            Image(systemName: "ellipsis")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(tint)
+                .symbolEffect(.pulse, isActive: !reduceMotion)
+        case .replied:
+            Image(systemName: "checkmark")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(tint)
+                .transition(AnyTransition.adapted(.mark, reduceMotion: reduceMotion))
+        case .failed, .refused:
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 11))
+                .foregroundStyle(tint)
+        case .cancelled:
+            Image(systemName: "xmark")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(tint)
+        case .lost:
+            Image(systemName: "clock.badge.questionmark")
+                .font(.system(size: 11))
+                .foregroundStyle(tint)
+        }
     }
 
     /// What the mark says when the pointer rests on it: every state has its words.
@@ -165,12 +187,12 @@ struct FoldedThread<Summary: View, Child: View>: View {
     }
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 6) {
             Button {
                 unfolded.toggle()
             } label: {
                 summary(unfolded)
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(.rect)
             }
             .buttonStyle(.plain)
@@ -182,7 +204,7 @@ struct FoldedThread<Summary: View, Child: View>: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .animation(Motion.adapted(Motion.content, reduceMotion: reduceMotion), value: unfolded)
     }
 

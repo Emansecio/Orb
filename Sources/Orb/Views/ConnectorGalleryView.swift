@@ -156,7 +156,7 @@ private struct ServiceCard: View {
                     note(" ").hidden().accessibilityHidden(true)
                 }
                 HStack(spacing: 6) {
-                    CatalogBadge(text: service.how, symbol: service.localKind != nil ? "desktopcomputer" : service.how.hasPrefix("Login") ? "person.crop.circle" : service.how == "Sem chave" ? nil : "key")
+                    CatalogBadge(text: service.how, symbol: service.localKind != nil ? "desktopcomputer" : service.how.hasPrefix("Login") ? "person.crop.circle" : service.how == "Não precisa de chave" ? nil : "key")
                     Spacer(minLength: 0)
                     label
                 }

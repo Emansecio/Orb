@@ -15,7 +15,8 @@ struct ModelPicker: View {
 
     private var defaultLabel: String {
         guard let ref = ModelRef(model.defaultModel) else { return "Padrão" }
-        let name = model.account(ref.provider)?.models.first { $0.id == ref.model }?.name ?? ref.model
+        // Without the default model's account connected there is no name to show, and the raw id would read as noise.
+        guard let name = model.account(ref.provider)?.models.first(where: { $0.id == ref.model })?.name else { return "Padrão" }
         return "Padrão (\(name))"
     }
 
@@ -131,7 +132,10 @@ struct ModelSearchField: View {
 
     var body: some View {
         TextField("Buscar modelo", text: $query)
-            .textFieldStyle(.roundedBorder)
+            .textFieldStyle(.plain)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(Palette.raised, in: .rect(cornerRadius: 8))
             .focused($isFocused)
             .onSubmit(onSubmit)
             .padding(10)

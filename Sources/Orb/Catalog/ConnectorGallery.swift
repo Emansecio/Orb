@@ -38,7 +38,7 @@ struct ConnectorService: Identifiable, Sendable {
     let summary: String
     let mark: ServiceMark
     let source: Source
-    /// How it connects, in two or three words: "Pelo Mac", "Chave de acesso", "Sem chave".
+    /// How it connects, in two or three words: "Pelo Mac", "Chave de acesso", "Não precisa de chave".
     let how: String
 
     /// The ready-made server behind the card.
@@ -85,13 +85,13 @@ enum ConnectorGallery {
         ConnectorService(id: "lembretes", name: "Lembretes", summary: LocalConnectorKind.lembretes.summary,
                          mark: ServiceMark(symbol: "checklist", monogram: "L", color: 0xFF9500), source: .local(.lembretes), how: "Pelo Mac"),
         ConnectorService(id: "arquivos", name: "Arquivos", summary: "Ler e organizar arquivos de uma pasta do Mac. Você escolhe qual pasta fica liberada.",
-                         mark: ServiceMark(symbol: "folder.fill", monogram: "A", color: 0x636366), source: .template("arquivos"), how: "Sem chave"),
+                         mark: ServiceMark(symbol: "folder.fill", monogram: "A", color: 0x636366), source: .template("arquivos"), how: "Não precisa de chave"),
         ConnectorService(id: "memoria", name: "Memória (grafo)", summary: "Guarda fatos e as relações entre eles para os Orbs consultarem depois.",
-                         mark: ServiceMark(symbol: "brain", monogram: "M", color: 0x7D5BE6), source: .template("memoria"), how: "Sem chave"),
+                         mark: ServiceMark(symbol: "brain", monogram: "M", color: 0x7D5BE6), source: .template("memoria"), how: "Não precisa de chave"),
         ConnectorService(id: "pensamento", name: "Pensamento em etapas", summary: "Ajuda o Orb a pensar passo a passo em problemas difíceis.",
-                         mark: ServiceMark(symbol: "lightbulb.fill", monogram: "P", color: 0xC98A00), source: .template("pensamento"), how: "Sem chave"),
+                         mark: ServiceMark(symbol: "lightbulb.fill", monogram: "P", color: 0xC98A00), source: .template("pensamento"), how: "Não precisa de chave"),
         ConnectorService(id: "fetch", name: "Busca na web (Fetch)", summary: "Baixa uma página da web e converte em texto. O Orb já lê páginas sozinho.",
-                         mark: ServiceMark(symbol: "globe", monogram: "F", color: 0x0A84FF), source: .template("fetch"), how: "Sem chave"),
+                         mark: ServiceMark(symbol: "globe", monogram: "F", color: 0x0A84FF), source: .template("fetch"), how: "Não precisa de chave"),
     ]
 
     /// The installed connector a service stands for, if any.

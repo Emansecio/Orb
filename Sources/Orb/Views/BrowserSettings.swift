@@ -14,17 +14,13 @@ struct BrowserSettings: View {
             } header: {
                 Text("Navegadores")
             } footer: { FormFootnote {
-                Text("Cada Orb escolhe o seu no painel dele. O modo Leitura simples lê páginas sem JavaScript e não precisa de nada instalado. "
-                     + "O que você instala aqui fica na pasta de dados do Orb, sem Homebrew, sem Node e sem pedir senha.")
+                Text("Cada Orb escolhe o seu no painel dele. O que você instala aqui não precisa de Homebrew, Node nem senha.")
             } }
             SearchKeySection()
             Section("Privacidade") {
-                Text("Os navegadores rodam neste Mac, em segundo plano, e guardam os logins de cada Orb em uma pasta separada. "
-                     + "Senhas nunca são digitadas pelo Orb: quando um site pede, ele abre a janela para você. "
-                     + "As buscas do Google e do DuckDuckGo saem do seu IP; a do TinyFish passa pela conta dele.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                LearnMoreNote(short: "Senhas nunca são digitadas pelo Orb: quando um site pede, ele abre a janela para você.",
+                              more: "Os navegadores rodam neste Mac, em segundo plano, e guardam os logins de cada Orb em uma pasta separada. "
+                              + "As buscas do Google e do DuckDuckGo saem do seu IP; a do TinyFish passa pela conta dele.")
             }
         }
         .formStyle(.grouped)
@@ -199,7 +195,7 @@ private struct SearchKeySection: View {
         } header: {
             Text("Pesquisa na web")
         } footer: { FormFootnote {
-            Text(SearchKeyCopy.footer)
+            LearnMoreNote(short: SearchKeyCopy.footer, more: SearchKeyCopy.footerMore)
         } }
         .task { hasKey = await Self.read(keys) }
     }
@@ -228,6 +224,6 @@ private struct SearchKeySection: View {
 enum SearchKeyCopy {
     static let keyPage = URL(string: "https://agent.tinyfish.ai/api-keys")
 
-    static let footer = "O TinyFish é grátis e não pede cartão: crie a conta em agent.tinyfish.ai e cole a chave aqui. "
-        + "Ela fica no Keychain deste Mac. Sem chave, ou quando a cota do dia acaba, a pesquisa usa o DuckDuckGo."
+    static let footer = "O TinyFish é grátis e não pede cartão: crie a conta em agent.tinyfish.ai e cole a chave aqui."
+    static let footerMore = "A chave fica no Keychain deste Mac. Sem chave, ou quando a cota do dia acaba, a pesquisa usa o DuckDuckGo."
 }

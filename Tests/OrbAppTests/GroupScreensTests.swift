@@ -33,6 +33,14 @@ struct GroupPresenceTests {
         #expect(GroupPresence.text([]) == nil)
     }
 
+    @Test func sidebarCountsSeveralMembersAndKeepsOneOrAWaitingName() {
+        #expect(GroupPresence.sidebarText([]) == nil)
+        #expect(GroupPresence.sidebarText([item("Revisor", .working)]) == "Revisor está trabalhando…")
+        #expect(GroupPresence.sidebarText([item("A", .writing), item("B", .writing)]) == "2 Orbs escrevendo…")
+        #expect(GroupPresence.sidebarText([item("A", .writing), item("B", .working)]) == "2 Orbs trabalhando…")
+        #expect(GroupPresence.sidebarText([item("A", .waitingYou), item("B", .working)]) == "A está esperando você")
+    }
+
     @Test func oneMemberSaysWhatItDoes() {
         #expect(GroupPresence.text([item("Pesquisador", .writing)]) == "Pesquisador está escrevendo…")
         #expect(GroupPresence.text([item("Revisor", .working)]) == "Revisor está trabalhando…")
@@ -208,7 +216,7 @@ struct GroupTextsTests {
 
     @Test func deletingAnOrbSaysItLeavesTheGroups() {
         let summary = DeleteOrbSummary(name: "Lia", routineCount: 0, folder: nil, groupCount: 2)
-        #expect(summary.goes.contains("sai de 2 grupos"))
+        #expect(summary.goes.contains("a participação em 2 grupos"))
         let none = DeleteOrbSummary(name: "Lia", routineCount: 0, folder: nil)
         #expect(!none.goes.contains("grupo"))
     }

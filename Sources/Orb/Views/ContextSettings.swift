@@ -17,7 +17,7 @@ struct ContextMemorySettings: View {
         } header: {
             Text("Contexto das conversas")
         } footer: { FormFootnote {
-            Text("Vale para todos os Orbs. Quando passa do limite, o começo da conversa vira um resumo; as mensagens continuam salvas na conversa.")
+            Text("Vale para todos os Orbs. Passando do limite, o começo da conversa vira um resumo; as mensagens continuam salvas.")
         } }
     }
 }
@@ -82,7 +82,7 @@ struct LearnedWindowsSettings: View {
             } header: {
                 Text("Janelas aprendidas")
             } footer: { FormFootnote {
-                Text("O provedor recusou uma conversa grande demais e o Orb passou a respeitar esse limite. Esqueça um se você aumentou o limite do servidor.")
+                Text("O provedor recusou uma conversa grande demais e o Orb respeita esse limite. Esqueça um se aumentou o limite no servidor.")
             } }
         }
     }

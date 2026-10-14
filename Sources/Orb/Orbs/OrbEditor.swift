@@ -276,13 +276,10 @@ struct OrbEditor: View {
     }
 
     private var compactCategoryBar: some View {
-        HStack(spacing: 2) {
-            ForEach(Array([Self.bodyGroup, Self.faceGroup, Self.styleGroup].enumerated()), id: \.offset) { index, group in
-                if index > 0 {
-                    Rectangle().fill(Palette.line).frame(width: 1, height: 18).padding(.horizontal, 5)
-                }
-                ForEach(group.categories) { item in compactCategoryButton(item) }
-            }
+        // Every category with its name under the icon when the width allows it; otherwise icons alone, the chosen one named.
+        ViewThatFits(in: .horizontal) {
+            compactCategoryRow(labeled: true)
+            compactCategoryRow(labeled: false)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
@@ -292,24 +289,49 @@ struct OrbEditor: View {
         .animation(Motion.selection(reduceMotion: reduceMotion), value: category)
     }
 
-    private func compactCategoryButton(_ item: OrbCategory) -> some View {
+    private func compactCategoryRow(labeled: Bool) -> some View {
+        HStack(spacing: 2) {
+            ForEach(Array([Self.bodyGroup, Self.faceGroup, Self.styleGroup].enumerated()), id: \.offset) { index, group in
+                if index > 0 {
+                    Rectangle().fill(Palette.line).frame(width: 1, height: 18).padding(.horizontal, 5)
+                }
+                ForEach(group.categories) { item in compactCategoryButton(item, labeled: labeled) }
+            }
+        }
+    }
+
+    private func compactCategoryButton(_ item: OrbCategory, labeled: Bool) -> some View {
         let isSelected = category == item
         return Button {
             category = item
         } label: {
-            HStack(spacing: 5) {
-                Image(systemName: item.symbol)
-                    .font(.system(size: 13))
-                    .frame(width: 16, height: 16)
-                if isSelected {
-                    Text(item.label)
-                        .font(.system(size: 11, weight: .medium))
-                        .lineLimit(1)
-                        .fixedSize()
+            Group {
+                if labeled {
+                    VStack(spacing: 2) {
+                        Image(systemName: item.symbol)
+                            .font(.system(size: 13))
+                            .frame(width: 16, height: 16)
+                        Text(item.label)
+                            .font(.system(size: 10, weight: isSelected ? .semibold : .medium))
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
+                } else {
+                    HStack(spacing: 5) {
+                        Image(systemName: item.symbol)
+                            .font(.system(size: 13))
+                            .frame(width: 16, height: 16)
+                        if isSelected {
+                            Text(item.label)
+                                .font(.system(size: 11, weight: .medium))
+                                .lineLimit(1)
+                                .fixedSize()
+                        }
+                    }
                 }
             }
-            .padding(.horizontal, 9)
-            .frame(minWidth: 34, minHeight: 30)
+            .padding(.horizontal, labeled ? 7 : 9)
+            .frame(minWidth: 34, minHeight: labeled ? 38 : 30)
             .foregroundStyle(isSelected ? Palette.ink : Palette.muted)
             .background { categoryHighlightShape(isSelected) }
             .contentShape(.rect)

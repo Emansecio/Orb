@@ -168,7 +168,7 @@ private struct GroupThreadView: View {
                                     to: message.to.flatMap { model.liveBot($0.id)?.look })
             }
         case .event(let event):
-            EventLineView(event: event)
+            EventLineView(event: event, centered: true)
         case .groupPause(let pause):
             GroupPauseCard(pause: pause)
         case .notice(let text):

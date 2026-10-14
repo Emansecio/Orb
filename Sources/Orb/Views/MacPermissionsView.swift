@@ -324,8 +324,8 @@ struct MacPermissionsView: View {
             } header: {
                 Text("Essenciais")
             } footer: { FormFootnote {
-                Text("A gravação de tela só vale depois de reabrir o Orb, e o macOS pergunta uma vez só. Testar usa a permissão "
-                     + "de verdade, só olhando, sem salvar nada.")
+                LearnMoreNote(short: "A gravação de tela só vale depois de reabrir o Orb.",
+                              more: "O macOS pergunta uma vez só. Testar usa a permissão de verdade, só olhando, sem salvar nada.")
             } }
             Section {
                 DisclosureGroup(isExpanded: $showsAutomation) {
@@ -415,6 +415,7 @@ private struct MacPermissionRow: View {
                         .help(Tip.permissionAction(action))
                         .disabled(isBusy)
                 }
+                if row.actions.isEmpty { ActionSlot() }
             }
             .confirmationDialog("Reabrir o Orb agora?", isPresented: $confirmsRelaunch) {
                 Button("Reabrir", role: .destructive) { AppRelaunch.finish() }
@@ -464,7 +465,7 @@ private struct NotificationRow: View {
                         .controlSize(.small)
                         .help(Tip.openSystemNotifications)
                 default:
-                    EmptyView()
+                    ActionSlot()
                 }
             }
         } label: {
@@ -475,6 +476,17 @@ private struct NotificationRow: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
+    }
+}
+
+/// The room of a row's one-word button ("Testar") when it has none, so the status of every granted row ends at the same
+/// x and the right edge of the column is one line (the badge sits left of the button).
+private struct ActionSlot: View {
+    var body: some View {
+        Button("Testar") {}
+            .controlSize(.small)
+            .hidden()
+            .accessibilityHidden(true)
     }
 }
 

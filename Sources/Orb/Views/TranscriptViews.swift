@@ -62,9 +62,9 @@ struct TranscriptRow: View, Equatable {
             GreetingMessage(orb: orb, botID: botID, text: text, isLast: isLastReply, highlight: find?.query)
         // MARK: MultiOrb (WP0)
         case .event(let event):
-            EventLineView(event: event)
+            EventLineView(event: event).alignedWithReplyText()
         case .orbMessage(let message):
-            OrbMessageRow(message: message, botID: botID)
+            OrbMessageRow(message: message, botID: botID).alignedWithReplyText()
         case .groupPause(let pause):
             GroupPauseCard(pause: pause)
         }
@@ -88,8 +88,16 @@ private struct FindWash: View {
     }
 }
 
-/// Left gutter width shared by bot messages, tool lines and approvals.
-let gutter: CGFloat = 36
+/// Left gutter width shared by bot messages, tool lines, cards and notices: the replies' text starts here (44 pt), so every row has one left edge.
+let gutter: CGFloat = 44
+
+extension View {
+    /// A line of the chat that is not a message (a notice, an event, a delegation) starts where the replies' text starts, so
+    /// the eye keeps one left edge down the transcript instead of jumping to a centre.
+    func alignedWithReplyText() -> some View {
+        padding(.leading, gutter).padding(.trailing, 90)
+    }
+}
 
 // MARK: - Spoken labels
 
@@ -1042,17 +1050,17 @@ private struct NoticeLine: View {
         let otherModels = failure != nil && offersActions ? model.retryModels(for: botID) : []
         let actions = NoticeAction.actions(for: text, canCompact: canCompact, hasProposal: hasProposal,
                                            canSwitchModel: !otherModels.isEmpty)
-        VStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
             if let failure {
                 let parts = NoticeAction.failureParts(of: failure)
-                VStack(spacing: 2) {
+                VStack(alignment: .leading, spacing: 2) {
                     Label("Não deu certo", systemImage: "exclamationmark.triangle.fill")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Palette.danger)
                     Text(parts.sentence)
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.muted)
-                        .multilineTextAlignment(.center)
+                        .multilineTextAlignment(.leading)
                         .textSelection(.enabled)
                     if let provider = parts.provider { providerDetail(provider) }
                 }
@@ -1060,7 +1068,7 @@ private struct NoticeLine: View {
                 Text(text)
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.muted)
-                    .multilineTextAlignment(.center)
+                    .multilineTextAlignment(.leading)
             }
             if !actions.isEmpty, offersActions {
                 HStack(spacing: 8) {
@@ -1093,9 +1101,9 @@ private struct NoticeLine: View {
         // The buttons come with the notice's turn to be the last thing in the chat (and go when something follows): the
         // transition was there, the trigger was not (§2.13).
         .motion(Motion.content, value: offersActions && !actions.isEmpty)
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 4)
-        .padding(.horizontal, 24)
+        .alignedWithReplyText()
         .accessibilityElement(children: .contain)
         .accessibilityLabel(TranscriptSpeech.notice(failure.map { "não deu certo. " + $0 } ?? text))
         .task(id: id) {
@@ -1114,7 +1122,7 @@ private struct NoticeLine: View {
 
     /// The provider's own words about a failure, folded under "Detalhes": the sentence above says what to do.
     private func providerDetail(_ provider: String) -> some View {
-        VStack(spacing: 4) {
+        VStack(alignment: .leading, spacing: 4) {
             Button {
                 showsProviderDetail.toggle()
             } label: {
@@ -1135,7 +1143,7 @@ private struct NoticeLine: View {
                 Text(provider)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(Palette.faint)
-                    .multilineTextAlignment(.center)
+                    .multilineTextAlignment(.leading)
                     .textSelection(.enabled)
                     .transition(.opacity)
             }

@@ -560,7 +560,7 @@ private struct ImportSkillRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 0) {
                 Toggle(isOn: $skill.isOn) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("/\(skill.slug)").font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.ink)
@@ -572,10 +572,10 @@ private struct ImportSkillRow: View {
                 }
                 .toggleStyle(.checkbox)
                 .help(Tip.importItem)
-                Spacer(minLength: 4)
+                // Under the skill's text, on its left edge (the checkbox's own indent), not loose at the far edge of the column.
                 Button(isShowing ? "Ocultar" : "Ver") { isShowing.toggle() }
                     .buttonStyle(GhostStyle())
-                    .hangsOnTrailingEdge()
+                    .padding(.leading, 7)
                     .help(Tip.importToggleSkill(isShowing: isShowing))
             }
             if isShowing {

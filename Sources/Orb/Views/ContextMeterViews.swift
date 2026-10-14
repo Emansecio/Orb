@@ -284,9 +284,13 @@ struct ContextPopover: View {
                 .foregroundStyle(Palette.muted)
                 .fixedSize(horizontal: false, vertical: true)
             if reading.canCompact {
+                // Same field look as the app's multi-line inputs (PlaceholderTextEditor), not the system bezel.
                 TextField("No que focar no resumo?", text: $focus)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.plain)
                     .font(.system(size: 12))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(Palette.raised, in: .rect(cornerRadius: 8))
                     .disabled(isWorking)
                     .onSubmit(run)
                     .accessibilityLabel("Foco do resumo")

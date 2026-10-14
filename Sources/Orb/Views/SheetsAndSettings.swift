@@ -147,6 +147,11 @@ struct NewBotSheet: View {
         var draft = OrbDraft()
         draft.name = trimmedName
         draft.role = role.trimmingCharacters(in: .whitespaces)
+        // While an import is being reviewed its name and role are not in the fields yet: the preview shows what they would give.
+        if isImporting, let reviewed = self.draft {
+            if draft.name.isEmpty { draft.name = reviewed.name }
+            if draft.role.isEmpty { draft.role = reviewed.role }
+        }
         draft.instructions = identity
         draft.mode = mode
         if let draftCapabilities { draft.capabilities = draftCapabilities }

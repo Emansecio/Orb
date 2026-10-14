@@ -242,7 +242,7 @@ import Testing
         #expect(action(working: false, ready: false) == .nothing)
         #expect(QuickAskSend.blockedNote(name: "Atlas") == "Atlas está rodando uma rotina. Envie quando terminar.")
         #expect(QuickAskSend.hint(isWorking: false, canSteer: false).hasPrefix("↩ envia"))
-        #expect(QuickAskSend.hint(isWorking: true, canSteer: true).hasPrefix("↩ direciona"))
+        #expect(QuickAskSend.hint(isWorking: true, canSteer: true).hasPrefix("↩ envia agora"))
         #expect(QuickAskSend.hint(isWorking: true, canSteer: false).hasPrefix("Rotina rodando"))
     }
 
@@ -312,14 +312,14 @@ import Testing
 
     @Test func deleteSummaryNamesWhatGoesAndWhatStays() {
         let summary = DeleteOrbSummary(name: "Atlas", routineCount: 2, folder: "~/Orbs/Atlas")
-        #expect(summary.goes == "Some: a conversa e 2 rotinas.")
-        #expect(summary.stays == "Fica: a pasta ~/Orbs/Atlas e, se você quiser, a memória.")
+        #expect(summary.goes == "A conversa e 2 rotinas vão embora.")
+        #expect(summary.stays == "A pasta ~/Orbs/Atlas continua no seu Mac e, se você quiser, a memória também.")
     }
 
     @Test func deleteSummaryHandlesSingularsAndNothingElse() {
-        #expect(DeleteOrbSummary(name: "A", routineCount: 1, folder: nil).goes == "Some: a conversa e 1 rotina.")
-        #expect(DeleteOrbSummary(name: "A", routineCount: 0, folder: nil).goes == "Some: a conversa.")
-        #expect(DeleteOrbSummary(name: "A", routineCount: 0, folder: nil).stays.hasPrefix("Fica: tudo o que está no seu Mac"))
+        #expect(DeleteOrbSummary(name: "A", routineCount: 1, folder: nil).goes == "A conversa e 1 rotina vão embora.")
+        #expect(DeleteOrbSummary(name: "A", routineCount: 0, folder: nil).goes == "A conversa vai embora.")
+        #expect(DeleteOrbSummary(name: "A", routineCount: 0, folder: nil).stays.hasPrefix("Tudo o que está no seu Mac continua lá"))
     }
 
     @Test func keptMemoryFolderIsFoundByName() throws {

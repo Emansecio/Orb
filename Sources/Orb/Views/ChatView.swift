@@ -430,12 +430,12 @@ private struct TranscriptList: View {
         case .single(let item):
             itemRow(item, lastReplyID: lastReplyID, redoID: redoID, dropping: dropping, found: found)
         case .events(let kind, let items):
-            FoldedThread(items: items, summary: { EventsSummary(kind: kind, items: items, unfolded: $0) },
+            FoldedThread(items: items, summary: { EventsSummary(kind: kind, items: items, unfolded: $0).alignedWithReplyText() },
                          child: { plainRow($0) })
                 .modifier(RowEntrance(id: row.id, style: items[0].kind.entrance, isNew: entrances.isNew(row.id), entrances: entrances))
                 .transition(.identity)
         case .exchange(let items):
-            FoldedThread(items: items, summary: { ExchangeSummary(items: items, botID: look.id, unfolded: $0) },
+            FoldedThread(items: items, summary: { ExchangeSummary(items: items, botID: look.id, unfolded: $0).alignedWithReplyText() },
                          child: { plainRow($0) })
                 .modifier(RowEntrance(id: row.id, style: items[0].kind.entrance, isNew: entrances.isNew(row.id), entrances: entrances))
                 .transition(.identity)

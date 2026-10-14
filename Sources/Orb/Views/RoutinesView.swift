@@ -192,7 +192,7 @@ private struct TemplateCard: View {
                 Text(template.prompt)
                     .font(.caption)
                     .foregroundStyle(Palette.muted)
-                    .lineLimit(3)
+                    .lineLimit(5)
                     .multilineTextAlignment(.leading)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -201,7 +201,7 @@ private struct TemplateCard: View {
             .contentShape(.rect(cornerRadius: 12))
         }
         .buttonStyle(.plain)
-        .help(Tip.routineTemplate(for: start))
+        .help("\(template.prompt)\n\n\(Tip.routineTemplate(for: start))") // the card cuts a long prompt; the tooltip has it whole
         .onHover { isHovering = $0 }
         .accessibilityLabel("\(template.title), \(template.whenText)\(template.goal == nil ? "" : ", com meta")")
         .accessibilityHint(start.templateHint)
@@ -876,14 +876,11 @@ struct RoutineEditor: View {
         .onAppear(perform: load)
     }
 
-    /// What the footer says: what is missing, or that the run would wait (the warning itself is further down).
+    /// What the footer says: what is missing. The "will wait for approval" case lives only in the warning above.
     private var footerMessage: String? {
         if !hasPrompt { return "Escreva o que o Orb deve fazer." }
         if lacksGoal { return "Escreva como saber que a meta deu certo." }
         if let scheduleProblem { return scheduleProblem }
-        if let bot, RoutineText.waitsForAnswer(orbMode: bot.permissionMode, routineMode: routine.permissionMode) {
-            return "\(bot.name) vai esperar sua aprovação."
-        }
         return nil
     }
 
@@ -1086,3 +1083,4 @@ enum RoutinesSnapshots {
         }
     }
 }
+

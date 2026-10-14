@@ -54,7 +54,8 @@ struct SidebarGroupRow: View {
         let live = model.groupLive(group.id)
         let isSelected = model.selection == .group(group.id)
         let looks = model.groupLooks(group)
-        let presence = GroupPresence.text(model.groupPresence(group, live: live))
+        let presenceItems = model.groupPresence(group, live: live)
+        let presence = GroupPresence.sidebarText(presenceItems)
         let paused: Bool = { if case .paused = live.runState { true } else { false } }()
         let working = live.runState == .running
         Button {
@@ -73,7 +74,10 @@ struct SidebarGroupRow: View {
                         .foregroundStyle(live.needsYou || paused ? Palette.warn : Palette.faint)
                         .lineLimit(1)
                         .contentTransition(.opacity)
+                        .help(GroupPresence.text(presenceItems) ?? "")
                 }
+                // The same height with or without a second line, so the rows keep one rhythm.
+                .frame(minHeight: 32, alignment: .leading)
                 Spacer(minLength: 4)
                 HStack(spacing: 6) {
                     if working { WorkingRing() }

@@ -240,10 +240,16 @@ struct PlaceholderTextEditor: View {
     @Binding var text: String
     var minHeight: CGFloat = 80
 
+    /// One line of a sentence or so: even the shortest of these fields holds it without scrolling.
+    private var fitsWithoutScrolling: Bool { text.count < 90 && !text.contains("\n") }
+
     var body: some View {
         TextEditor(text: $text)
             .font(.system(size: 13))
             .scrollContentBackground(.hidden)
+            // A short line has nothing to scroll: no bar (nor the always-shown track, which `.hidden` keeps) until the text
+            // could outgrow the field.
+            .scrollIndicators(fitsWithoutScrolling ? .never : .automatic)
             .padding(6)
             .frame(minHeight: minHeight)
             .background(Palette.raised, in: .rect(cornerRadius: 8))

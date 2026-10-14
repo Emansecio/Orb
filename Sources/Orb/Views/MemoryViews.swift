@@ -335,19 +335,25 @@ struct MemorySheet: View {
         let groups = MemoryGroups.make(memory.items, matching: query, kind: kind, cache: folded)
 
         Form {
-            Section {
-                MemorySearchField(query: $query)
-                Picker("Mostrar", selection: $kind) {
-                    Text("Tudo").tag(MemoryKind?.none)
-                    ForEach(MemoryGroups.kinds, id: \.self) { Text(MemoryGroup(kind: $0, items: []).title).tag(MemoryKind?.some($0)) }
-                }
-            }
-            if groups.isEmpty {
-                Text(memory.items.isEmpty ? "Ainda não guardou nada."
-                     : query.isEmpty ? "Nada neste tipo de memória." : "Nada na memória com “\(query)”.")
+            // Nothing stored: no search or filter to offer, and the subtitle already says it is empty, so the body
+            // explains how the memory fills instead.
+            if memory.items.isEmpty {
+                Text("A memória cresce a cada conversa: preferências, fatos, procedimentos e um resumo de cada uma.")
                     .foregroundStyle(.secondary)
-                    // Only a different message fades; the query typed into it is not an animation.
-                    .textSwap(memory.items.isEmpty ? 0 : query.isEmpty ? 1 : 2)
+            } else {
+                Section {
+                    MemorySearchField(query: $query)
+                    Picker("Mostrar", selection: $kind) {
+                        Text("Tudo").tag(MemoryKind?.none)
+                        ForEach(MemoryGroups.kinds, id: \.self) { Text(MemoryGroup(kind: $0, items: []).title).tag(MemoryKind?.some($0)) }
+                    }
+                }
+                if groups.isEmpty {
+                    Text(query.isEmpty ? "Nada neste tipo de memória." : "Nada na memória com “\(query)”.")
+                        .foregroundStyle(.secondary)
+                        // Only a different message fades; the query typed into it is not an animation.
+                        .textSwap(query.isEmpty ? 1 : 2)
+                }
             }
             ForEach(groups) { group in
                 Section {

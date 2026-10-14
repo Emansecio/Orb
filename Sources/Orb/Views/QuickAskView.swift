@@ -137,7 +137,7 @@ enum QuickAskSend: Equatable {
         let newLine = "\(CommandName.newLineKeys) nova linha"
         if !isWorking { return "↩ envia · \(newLine)" }
         guard canSteer else { return "Rotina rodando · \(newLine)" }
-        return "↩ direciona · \(newLine)"
+        return "↩ envia agora · \(newLine)"
     }
 }
 
@@ -159,22 +159,18 @@ struct QuickAskView: View {
         let selected = selectedID.flatMap { model.liveBot($0)?.look }
         VStack(alignment: .leading, spacing: 12) {
             PendingApprovalsSection(openApp: open)
-            VStack(alignment: .leading, spacing: 6) {
-                ScrollView(.horizontal) {
-                    HStack(spacing: 8) {
-                        ForEach(model.botIDs, id: \.self) { id in
-                            QuickAskOrbButton(botID: id, selectedID: selectedID, chosen: $botID)
-                        }
-                    }
-                    .padding(.vertical, 3)
-                    .padding(.horizontal, 2)
+            // The Orbs and the chosen one's name share a line while they fit (an Orb alone is not a line of its own); with
+            // many Orbs the avatars scroll above the name, as before.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) {
+                    orbButtons
+                    chosenLabel(selected)
+                    Spacer(minLength: 0)
                 }
-                .scrollIndicators(.never)
-                if let selected {
-                    Text(selected.role.isEmpty ? selected.name : "\(selected.name) · \(selected.role)")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Palette.muted)
-                        .lineLimit(1)
+                VStack(alignment: .leading, spacing: 6) {
+                    ScrollView(.horizontal) { orbButtons }
+                        .scrollIndicators(.never)
+                    chosenLabel(selected)
                 }
             }
             TextField("Mensagem para \(selected?.name ?? "um Orb")", text: $text, axis: .vertical)
@@ -249,6 +245,25 @@ struct QuickAskView: View {
         .padding(14)
         .frame(width: 340)
         .onAppear { isFocused = true }
+    }
+
+    private var orbButtons: some View {
+        HStack(spacing: 8) {
+            ForEach(model.botIDs, id: \.self) { id in
+                QuickAskOrbButton(botID: id, selectedID: selectedID, chosen: $botID)
+            }
+        }
+        .padding(.vertical, 3)
+        .padding(.horizontal, 2)
+    }
+
+    @ViewBuilder private func chosenLabel(_ selected: BotLook?) -> some View {
+        if let selected {
+            Text(selected.role.isEmpty ? selected.name : "\(selected.name) · \(selected.role)")
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.muted)
+                .lineLimit(1)
+        }
     }
 
     private var selectedID: UUID? {

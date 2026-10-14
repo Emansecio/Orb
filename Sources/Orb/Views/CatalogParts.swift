@@ -135,6 +135,14 @@ struct CatalogTabContent<Content: View>: View {
                 .transition(.pageSwap)
         }
         .motion(Motion.crossFade, value: tab)
+        // What scrolls up under the pills fades out instead of being cut. A gradient on top, not a mask: a mask would turn the
+        // scroll content into one flat layer. The page's own top margin is deeper than this, so at rest nothing is dimmed.
+        .overlay(alignment: .top) {
+            LinearGradient(colors: [Palette.canvas, Palette.canvas.opacity(0)], startPoint: .top, endPoint: .bottom)
+                .frame(height: 14)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
     }
 }
 

@@ -300,8 +300,8 @@ struct UsageSettings: View {
     }
 
     private var note: some View {
-        Text("Estimativa pelos preços públicos de \(PriceTable.consultedText); o valor cobrado pelo provedor pode variar. "
-            + "Os preços das listas do OpenRouter e da OpenCode vêm delas. A DeepSeek cobra o dobro nos horários de pico (dias úteis, 01h às 04h e 06h às 10h UTC); a conta já separa os dois. Assinaturas e modelos no seu Mac não são cobrados por token.")
+        LearnMoreNote(short: "Estimativa pelos preços públicos de \(PriceTable.consultedText); o valor cobrado pode variar.",
+                      more: "Os preços das listas do OpenRouter e da OpenCode vêm delas. A DeepSeek cobra o dobro nos horários de pico (dias úteis, 01h às 04h e 06h às 10h UTC); a conta já separa os dois. Assinaturas e modelos no seu Mac não são cobrados por token.")
     }
 }
 

@@ -112,7 +112,7 @@ enum PaletteBuilder {
         list.append(PaletteEntry(id: "new-bot", title: CommandName.newBot, subtitle: nil, symbol: "plus", section: .actions,
                                  shortcut: ShortcutCatalog.keys(for: .newBot), action: .newBot, keywords: "criar adicionar"))
         // MARK: MultiOrb (WP6)
-        list.append(PaletteEntry(id: "new-group", title: CommandName.newGroup, subtitle: "Orbs que trabalham juntos", symbol: "person.3",
+        list.append(PaletteEntry(id: "new-group", title: CommandName.newGroup, subtitle: "Orbs que trabalham juntos", symbol: "person.2",
                                  section: .actions, shortcut: ShortcutCatalog.keys(for: .newGroup), action: .newGroup,
                                  keywords: "grupo equipe orquestrador juntos"))
         list.append(PaletteEntry(id: "import-orb", title: CommandName.importOrb, subtitle: "Trazer o que outro assistente sabe", symbol: "square.and.arrow.down",
@@ -133,7 +133,7 @@ enum PaletteBuilder {
         for group in groups {
             list.append(PaletteEntry(id: "group-\(group.id)", title: "Grupo: \(group.name)",
                                      subtitle: group.memberIDs.count == 1 ? "1 Orb" : "\(group.memberIDs.count) Orbs",
-                                     symbol: "person.3.fill", section: .workspace, action: .group(group.id),
+                                     symbol: "person.2.fill", section: .workspace, action: .group(group.id),
                                      keywords: "grupo equipe orquestrador"))
         }
         for skill in skills where skill.isEnabled {

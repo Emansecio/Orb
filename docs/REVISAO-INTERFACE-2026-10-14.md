@@ -194,6 +194,34 @@ Regras que ficaram valendo, para o próximo controle já nascer certo:
 **Pergunta rápida**
 - Avatar sozinho numa linha inteira acima do nome; daria para pôr na mesma linha de "Atlas · Assistente do seu Mac".
 
+
+### Situação do P2 (14/10, depois da rodada de correções)
+
+| Item | Situação | O que foi feito |
+|------|----------|-----------------|
+| Linhas fora do eixo | Corrigido | Avisos, eventos, delegações, "2 mensagens com…" e rodadas de rotina começam no x do texto da resposta (`alignedWithReplyText()`). No chat de grupo, que tem bolhas e avisos centralizados, os eventos seguem centralizados. |
+| Estados das delegações | Corrigido | Palavra ao lado do ícone: "Aguardando", "Não deu certo" (vermelho), "Recusado", "Cancelado", "Sem resposta". "Respondido" fica só com o ✓. |
+| Botão "trabalhando" | Já existia | Com o campo vazio o botão já vira Parar (quadrado, dica com o atalho); com texto, um Parar redondo aparece ao lado. A linha de teclas perdeu o jargão: "↩ envia agora · ⇥ depois da tarefa · ⌘↩ para a tarefa e envia" (também na Pergunta rápida). |
+| Dica do composer | Já existia | "↩ envia · ⇧↩ nova linha" já aparecia só com o campo focado e vazio; o jargão era o da linha acima. |
+| Corte sob as pílulas | Corrigido | Esmaecimento de 14 pt na cor do fundo sob a barra de Skills/Conectores. A busca de Explorar rola junto com o conteúdo. Não visto rolando (as capturas não rolam). |
+| Recuo dos cartões | Corrigido | Uma margem só (`gutter` = 44) para texto, linhas de ferramenta, plano e cartões de aprovação, pergunta e proposta. |
+| Barra lateral | Corrigido | Altura mínima igual para linhas com e sem subtítulo. O "…" cortado era a presença do grupo: com vários Orbs ativos vira "2 Orbs trabalhando…", com a frase inteira na dica. |
+| Coluna "Liberado" | Corrigido | Linhas sem "Testar" reservam o espaço do botão; todos os estados terminam no mesmo x. |
+| Editor de rotina | Corrigido | Texto curto (uma linha) sem barra nem trilho em qualquer `PlaceholderTextEditor`; o aviso de aprovação fica só no topo. |
+| Memória vazia | Corrigido | Sem itens, a folha esconde busca e filtro e explica como a memória cresce. |
+| Prévia de skill | Corrigido | Instruções renderizadas como Markdown (`MarkdownChunk`). |
+| Instalar conector | Corrigido em parte | "Authorization"/"Bearer" viraram "Chave de acesso" em fonte normal; o prefixo é posto ao salvar. Um rótulo por serviço ("Token do GitHub") ficou para depois: o campo não sabe o nome do serviço. |
+| Importação no Novo Orb | Corrigido | A prévia mostra nome e papel importados; "Ver" logo abaixo da skill; campo vazio sem trilho de rolagem. |
+| Pop-over de contexto | Corrigido | Campo no fundo `Palette.raised` com canto 8, como os outros campos (a busca de modelo também). |
+| Pop-over de modelo | Corrigido | Altura segue a lista (até 320) em vez de 380 fixos. |
+| Rodapés de Ajustes | Corrigido | Textos dos interruptores de Geral em uma frase; Privacidade, chave de pesquisa, Uso e permissões do Mac com uma frase e "Saiba mais" (`LearnMoreNote`). |
+| Cards de Skills | Corrigido | Menos espaço entre linhas e cards, nas instaladas e em Explorar. |
+| Categorias de Aparência | Corrigido | Nome sob o ícone quando cabe; sem espaço, volta ao desenho com o nome só na escolhida. |
+| "Aleatório" duas vezes | Mantido | Um está em "Quem ele é", o outro em "Aparência"; nunca aparecem juntos e fazem a mesma coisa. |
+| Chips de capacidade | Corrigido | Viraram etiqueta, sem fundo de botão (o fundo só pisca quando o assistente muda algo). |
+| Ícone de "Novo grupo…" | Corrigido | `person.2` no lugar de `person.3`, que estourava a coluna de 22 pt. |
+| Avatar da Pergunta rápida | Corrigido | Na mesma linha de "Atlas · Assistente do seu Mac"; com muitos Orbs, volta aos avatares acima. |
+
 ---
 
 ## P3 — Texto e microcopy
@@ -207,6 +235,17 @@ Regras que ficaram valendo, para o próximo controle já nascer certo:
 - Apagar Orb: "Some: a conversa." / "Fica: tudo…" lê como telegrama; "Vai embora: a conversa." / "Continua: …" ou
   frases completas.
 - Templates de rotina cortados em "…" na 3ª linha justamente na parte que explica o que fazem; 4 linhas ou tooltip.
+
+
+### Situação do P3 (14/10, depois da rodada de correções)
+
+| Item | Situação | O que foi feito |
+|------|----------|-----------------|
+| "Sem chave" | Corrigido | "Não precisa de chave" na galeria e nos modelos de conector. |
+| "Padrão (modelo)" | Corrigido | Sem a conta do modelo padrão ligada, mostra só "Padrão". |
+| Atalho em Geral | Corrigido | Dentro de Geral: "(opcional, ligue na seção acima)"; a folha de atalhos mantém o texto original. |
+| Apagar Orb | Corrigido | Frases completas: "A conversa e 2 rotinas vão embora." / "Tudo o que está no seu Mac continua lá e, se você quiser, a memória também." |
+| Modelos de rotina | Corrigido | Até 5 linhas no cartão e o texto inteiro na dica. |
 
 ---
 
