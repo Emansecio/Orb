@@ -883,7 +883,9 @@ extension AgentEngineTests {
         // Safe: no approval was asked for, even with the Orb asking before everything.
         #expect(!events.contains { if case .approval = $0 { true } else { false } })
         let received = await script.received
-        #expect(received.count == 3)
+        // The 4th request: "Subir" is still open when the reply ends the task, so the model is reminded once (`AutoContinue`).
+        #expect(received.count == 4)
+        #expect(received[3].last == .user(AutoContinue.reminder(open: [2])))
         #expect(received[1].last?.content.contains("1. [ ] Gerar o build") == true)
         let sent = received[2].last?.content ?? ""
         #expect(sent.contains("1. [feita] Gerar o build"))
@@ -1779,5 +1781,334 @@ struct ApprovalBatchTests {
         #expect(ApprovalBatch.plan(calls: [stamp("a")], tools: tools, context: context, state: PermissionState(mode: .ask, rules: []), grants: []) == nil)
         #expect(ApprovalBatch.plan(calls: [stamp("a"), stamp("b")], tools: tools, context: context, state: PermissionState(mode: .auto, rules: []), grants: []) == nil)
         #expect(ApprovalBatch.plan(calls: [stamp("a"), stamp("b")], tools: tools, context: context, state: PermissionState(mode: .ask, rules: []), grants: []) != nil)
+    }
+}
+
+// MARK: - The plan at the end of a turn and past the step limit (`AutoContinue`)
+
+/// The lines a turn wrote to its log (`TurnRequest.planLog`).
+private final class PlanLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: [String] = []
+    var lines: [String] { lock.withLock { stored } }
+    func write(_ line: String) { lock.withLock { stored.append(line) } }
+    func has(_ part: String) -> Bool { lines.contains { $0.contains(part) } }
+}
+
+/// `touch`, which on its `at`-th run queues a message of the user (written during that step).
+private struct SayingTouchTool: AgentTool {
+    let queue: SteeringQueue
+    let text: String
+    let at: Int
+    let runs: Counter
+    var spec: ToolSpec { ToolSpec(name: "touch", description: "Touches a file", parameters: .schema([:])) }
+    var kind: ToolCall.Kind { .file }
+    var capability: Capability? { nil }
+    func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
+    func summary(_ arguments: JSONValue) -> (title: String, detail: String) { ("Tocando", "arquivo") }
+    func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
+        await runs.increment()
+        if await runs.value == at { queue.push(SteeredMessage(text: text, prompt: text)) }
+        return "ok"
+    }
+}
+
+/// Whether the consumer of a turn saw the event it waits for.
+private actor Flag {
+    private(set) var isSet = false
+    func set() { isSet = true }
+}
+
+extension AgentEngineTests {
+    private var setPlan: LLMEvent {
+        planCall("p0", #"{"action": "set", "goal": "Publicar o site", "steps": ["Gerar o build", "Subir"]}"#)
+    }
+
+    /// One `task_plan` update of one step.
+    private func mark(_ step: Int, _ state: String = "done", id: String? = nil) -> LLMEvent {
+        planCall(id ?? "u\(step)\(state)", #"{"action": "update", "updates": [{"step": \#(step), "state": "\#(state)"}]}"#)
+    }
+
+    private func steps(_ count: Int) -> TaskPlan {
+        TaskPlan(goal: "Publicar o site", steps: (1...count).map { TaskPlan.Step(text: "Etapa \($0)") }, next: "etapa 1")
+    }
+
+    /// A turn with the plan tool and `touch`, nothing to approve, the plan already on the board (or none) and its log in `log`.
+    private func planTurn(_ script: Script, plan: TaskPlan? = nil, maxSteps: Int = AgentEngine.defaultMaxSteps, stretches: Int = 1,
+                          log: PlanLog = PlanLog(), tools: [any AgentTool] = [TouchTool(runs: Counter())]) -> TurnRequest {
+        var turn = request(script, mode: .bypass, runs: Counter(), tools: [TaskPlanTool()] + tools, maxSteps: maxSteps)
+        turn.context.taskPlan = TaskPlanBoard(plan)
+        turn.stretches = stretches
+        turn.planLog = { log.write($0) }
+        return turn
+    }
+
+    private func planNotices(_ events: [TurnEvent]) -> [String] {
+        events.compactMap { if case .notice(let text) = $0 { text } else { nil } }
+    }
+
+    private func stretchEvents(_ events: [TurnEvent]) -> [Int] {
+        events.compactMap { if case .stretch(let number, _) = $0 { number } else { nil } }
+    }
+
+    private func pauses(_ events: [TurnEvent]) -> Int {
+        events.filter { if case .taskPaused = $0 { true } else { false } }.count
+    }
+
+    private func sawPlanReminder(_ script: Script) async -> Bool {
+        await script.received.contains { $0.contains { $0.role == .user && $0.content.hasPrefix("Before you finish: step") } }
+    }
+
+    // MARK: Closing with steps open
+
+    @Test func aReplyThatEndsWithStepsOpenIsRemindedOnceAndTheSecondEndsTheTurn() async {
+        let log = PlanLog()
+        let script = Script([[setPlan], [touch(1)], [mark(1)], [.text("Build feito.")], [.text("Paro aqui: subir fica para depois.")],
+                             [.text("nunca pedido")]])
+        let events = await run(AgentEngine(), planTurn(script, log: log))
+        let received = await script.received
+        #expect(received.count == 5)
+        #expect(received[4].last == .user(AutoContinue.reminder(open: [2])))
+        #expect(!messages(events).contains { $0.content.hasPrefix("Before you finish") }, "the chat never shows it")
+        #expect(messages(events).last?.content == "Paro aqui: subir fica para depois.")
+        #expect(log.lines == ["lembrete de fechamento: etapas abertas 2"])
+    }
+
+    @Test func theReminderListsEveryOpenStepByNumber() {
+        #expect(AutoContinue.reminder(open: [2]).hasPrefix("Before you finish: step 2 of your task plan is still open."))
+        let many = AutoContinue.reminder(open: [1, 3])
+        #expect(many.hasPrefix("Before you finish: steps 1, 3 of your task plan are still open."))
+        #expect(many.contains("blocked") && many.contains("tell the user"))
+    }
+
+    @Test func aReplyThatAsksTheUserSomethingIsNotReminded() async {
+        let script = Script([[setPlan], [touch(1)], [.text("Subo para produção ou para homologação?")], [.text("nunca pedido")]])
+        _ = await run(AgentEngine(), planTurn(script))
+        #expect(await script.received.count == 3)
+    }
+
+    @Test func aPlanLeftDoneOrBlockedIsNotReminded() async {
+        let both = planCall("u", #"{"action": "update", "updates": [{"step": 1, "state": "done"}, {"step": 2, "state": "blocked", "reason": "falta a senha do servidor"}]}"#)
+        let script = Script([[setPlan], [touch(1)], [both], [.text("Build feito; subir ficou bloqueado sem a senha.")], [.text("nunca pedido")]])
+        _ = await run(AgentEngine(), planTurn(script))
+        #expect(await script.received.count == 4)
+    }
+
+    @Test func aPlanLeftFromAnEarlierTaskIsNotReminded() async {
+        let script = Script([[.text("Olá.")], [.text("nunca pedido")]])
+        _ = await run(AgentEngine(), planTurn(script, plan: plannedSteps))
+        #expect(await script.received.count == 1)
+    }
+
+    @Test func theLastStepIsNotReminded() async {
+        let script = Script([[setPlan], [touch(1)], [.text("Parei no limite.")], [.text("nunca pedido")]])
+        let events = await run(AgentEngine(), planTurn(script, maxSteps: 3))
+        #expect(await script.received.count == 3)
+        #expect(!(await sawPlanReminder(script)))
+        #expect(pauses(events) == 1)
+    }
+
+    @Test func aMessageAskingToStopHoldsTheReminderBack() async {
+        let queue = SteeringQueue()
+        var turn = planTurn(Script([]), tools: [SayingTouchTool(queue: queue, text: "pode parar", at: 1, runs: Counter())])
+        let script = Script([[setPlan], [touch(1)], [.text("Parei, como pediu.")], [.text("nunca pedido")]])
+        turn.client = ScriptedLLM(script: script)
+        turn.steering = queue
+        _ = await run(AgentEngine(), turn)
+        #expect(await script.received.count == 3)
+        #expect(AutoContinue.asksToStop("Pode parar.") && AutoContinue.asksToStop("chega") && AutoContinue.asksToStop("não continue")
+                && AutoContinue.asksToStop("para\n\n[anexo]"))
+        #expect(!AutoContinue.asksToStop("para a pasta X, use Y") && !AutoContinue.asksToStop("parar o servidor antes de subir"))
+    }
+
+    @Test func thePlanReminderSharesTheAllowanceOfTheOtherReminders() async {
+        // Two promises use the allowance: the plan's reminder does not come on top.
+        let promises = Script([[setPlan], [touch(1)], [.text("Vou adaptar o script agora.")], [touch(2)], [.text("Vou conferir de novo.")],
+                               [touch(3)], [.text("Parei por aqui.")], [.text("nunca pedido")]])
+        _ = await run(AgentEngine(), planTurn(promises))
+        #expect(await promises.received.count == 7)
+        #expect(await promises.received[3].last == .user(AgentEngine.promiseNudge))
+        #expect(await promises.received[5].last == .user(AgentEngine.promiseNudge))
+        #expect(!(await sawPlanReminder(promises)))
+        // The plan's reminder uses one: a single promise reminder is left after it.
+        let plan = Script([[setPlan], [touch(1)], [.text("Parei.")], [touch(2)], [.text("Vou conferir de novo.")], [touch(3)],
+                           [.text("Vou rodar mais uma vez.")], [.text("nunca pedido")]])
+        _ = await run(AgentEngine(), planTurn(plan))
+        #expect(await plan.received.count == 7)
+        #expect(await plan.received[3].last == .user(AutoContinue.reminder(open: [1, 2])))
+        #expect(await plan.received[5].last == .user(AgentEngine.promiseNudge))
+    }
+
+    // MARK: Going on past the step limit
+
+    /// Stretch 1 of 4 steps that does step 1 of `plannedSteps` with real work and closes in text.
+    private var movingStretch: [[LLMEvent]] { [[touch(1)], [mark(1)], [touch(2)], [.text("Build feito; falta subir.")]] }
+
+    @Test func aStretchThatMovedThePlanStartsAnotherByItself() async {
+        let log = PlanLog()
+        let script = Script(movingStretch + [[touch(3)], [mark(2)], [.text("Pronto: build feito e site no ar.")], [.text("nunca pedido")]])
+        let events = await run(AgentEngine(), planTurn(script, plan: plannedSteps, maxSteps: 4, stretches: 3, log: log))
+        let received = await script.received
+        #expect(received.count == 7)
+        #expect(stretchEvents(events) == [2])
+        #expect(planNotices(events) == [AutoContinue.notice(stretch: 2, of: 3)])
+        #expect(pauses(events) == 0)
+        #expect(received[4].last == .user(AutoContinue.nudge(stretch: 2, of: 3, steps: 4)))
+        // Where another stretch may follow, the warning before the limit asks for the plan to be current.
+        #expect(messages(events).first { $0.role == .tool }?.content.hasSuffix(AutoContinue.stepWarning(remaining: 3)) == true)
+        // The record of where the task stands is in the history, before the nudge.
+        #expect(received[4].dropLast().last?.content.contains(ProgressRecord.marker) == true)
+        #expect(log.lines == ["trecho 2 de 3 começou sozinho, depois de 4 passos"])
+        #expect(messages(events).last?.content == "Pronto: build feito e site no ar.")
+    }
+
+    @Test func theNewStretchOnlyAddsToWhatTheModelWasSent() async {
+        let script = Script(movingStretch + [[touch(3)], [mark(2)], [.text("Pronto.")]])
+        _ = await run(AgentEngine(), planTurn(script, plan: plannedSteps, maxSteps: 4, stretches: 3))
+        let received = await script.received
+        // Every request starts with the one before it: the provider's cache keeps working across the stretches.
+        for index in 1..<received.count {
+            #expect(Array(received[index].prefix(received[index - 1].count)) == received[index - 1], "request \(index + 1)")
+        }
+        #expect(received[4].count == received[3].count + 2, "the closing words with the record, and the nudge")
+    }
+
+    @Test func aStretchWithoutProgressPausesAndSaysWhy() async {
+        let log = PlanLog()
+        let script = Script([[touch(1)], [touch(2)], [.text("Ainda gerando o build.")], [.text("nunca pedido")]])
+        let events = await run(AgentEngine(), planTurn(script, plan: plannedSteps, maxSteps: 3, stretches: 3, log: log))
+        #expect(await script.received.count == 3)
+        #expect(stretchEvents(events).isEmpty)
+        #expect(pauses(events) == 1)
+        #expect(planNotices(events) == [AutoContinue.stalledNotice(after: 3)])
+        #expect(AutoContinue.stalledNotice(after: 3).hasPrefix("Pausei: o plano não avançou nos últimos 3 passos."))
+        #expect(log.lines == ["pausa por estagnação: o plano não avançou no trecho 1"])
+    }
+
+    @Test func theContinuationStopsAtTheCap() async {
+        let log = PlanLog()
+        let stretch = { (n: Int) -> [[LLMEvent]] in [[touch(n)], [mark(n)], [.text("Etapa \(n) feita.")]] }
+        let script = Script(stretch(1) + stretch(2) + stretch(3) + [[.text("nunca pedido")]])
+        let events = await run(AgentEngine(), planTurn(script, plan: steps(4), maxSteps: 3, stretches: 3, log: log))
+        #expect(await script.received.count == 9)
+        #expect(stretchEvents(events) == [2, 3])
+        #expect(pauses(events) == 1)
+        #expect(planNotices(events).last == AutoContinue.cappedNotice(stretches: 3))
+        #expect(AutoContinue.cappedNotice(stretches: 3).hasPrefix("Pausei depois de 3 trechos seguidos."))
+        #expect(log.lines.last == "pausa no teto: 3 trechos seguidos")
+    }
+
+    @Test func withoutAPlanTheStepLimitPausesAsItDidBefore() async {
+        // As in `aTurnPausedAtTheStepLimitWritesThePlanInItsRecord`, without the plan: allowing stretches changes nothing.
+        func pausedTurn(stretches: Int) async -> [TurnEvent] {
+            let script = Script([[touch(1)], [touch(2)], [touch(3)], [.text("nunca pedido")]])
+            let events = await run(AgentEngine(), planTurn(script, maxSteps: 3, stretches: stretches))
+            #expect(await script.received.count == 3)
+            return events
+        }
+        let before = await pausedTurn(stretches: 1)
+        let now = await pausedTurn(stretches: 3)
+        #expect(messages(now).map(\.content) == messages(before).map(\.content))
+        #expect(planNotices(now) == planNotices(before) && planNotices(now) == [AgentEngine.pausedNotice(after: 3)])
+        #expect(pauses(now) == 1 && pauses(before) == 1)
+        #expect(stretchEvents(now).isEmpty)
+    }
+
+    @Test func withTheSwitchOffAMovingPlanPausesAsItDidBefore() async {
+        let script = Script(movingStretch + [[.text("nunca pedido")]])
+        let events = await run(AgentEngine(), planTurn(script, plan: plannedSteps, maxSteps: 4, stretches: 1))
+        #expect(await script.received.count == 4)
+        #expect(stretchEvents(events).isEmpty)
+        #expect(pauses(events) == 1)
+        #expect(planNotices(events) == [AgentEngine.pausedNotice(after: 4)])
+        #expect(messages(events).first { $0.role == .tool }?.content.hasSuffix(AgentEngine.stepWarning(remaining: 3)) == true)
+    }
+
+    @Test func aMessageOfTheUserStartsTheAllowanceOver() async {
+        let queue = SteeringQueue()
+        let tool = SayingTouchTool(queue: queue, text: "e ajusta o README também", at: 3, runs: Counter())
+        // Stretch 1 does step 1; in stretch 2 the user writes (on the 3rd touch), so it counts as the first again and
+        // the turn may go on twice more, where without the message stretch 2 would have been the last of 2.
+        let script = Script(movingStretch + [[touch(3)], [mark(2)], [touch(4)], [.text("Subi; falta o README.")],
+                                             [touch(5)], [mark(3)], [.text("Pronto, README ajustado.")], [.text("nunca pedido")]])
+        var turn = planTurn(script, plan: steps(3), maxSteps: 4, stretches: 2, tools: [tool])
+        turn.steering = queue
+        let events = await run(AgentEngine(), turn)
+        #expect(await script.received.count == 11)
+        #expect(stretchEvents(events) == [2, 1, 2])
+        #expect(pauses(events) == 0)
+        #expect(!planNotices(events).contains { $0.hasPrefix("Pausei") })
+    }
+
+    @Test func stoppingDuringTheContinuationReallyEndsTheTurn() async {
+        let runs = Counter()
+        let script = Script(movingStretch + (3...30).map { [touch($0)] })
+        // The first call of stretch 2 waits until the user stopped: nothing may run after that.
+        let stopped = Flag()
+        let client = HookedLLM(script: script) { index in
+            while index == 4, !(await stopped.isSet) { try? await Task.sleep(for: .milliseconds(5)) }
+        }
+        var turn = planTurn(script, plan: plannedSteps, maxSteps: 4, stretches: 3, tools: [TouchTool(runs: runs)])
+        turn.client = client
+        let engine = AgentEngine()
+        let second = Flag()
+        let consumer = Task {
+            for await event in engine.run(turn) {
+                if case .stretch(2, _) = event { await second.set() }
+            }
+        }
+        await waitUntil("stretch 2 started") { await second.isSet }
+        consumer.cancel()
+        await consumer.value
+        await stopped.set()
+        await waitUntil("the held call answered") { await script.received.count == 5 }
+        try? await Task.sleep(for: .milliseconds(200))
+        #expect(await script.received.count == 5, "no model call after the stop")
+        #expect(await runs.value == 2, "no tool ran after the stop")
+    }
+
+    // MARK: What counts as moving forward
+
+    @Test func aStepMarkedDoneWithOnlyThePlanToolDoesNotMoveThePlan() async {
+        let log = PlanLog()
+        // Step 1 marked done before any real work; the work after it does not make it earned.
+        let script = Script([[mark(1)], [touch(1)], [.text("Etapa 1 feita.")], [.text("nunca pedido")]])
+        let events = await run(AgentEngine(), planTurn(script, plan: plannedSteps, maxSteps: 3, stretches: 3, log: log))
+        #expect(await script.received.count == 3)
+        #expect(stretchEvents(events).isEmpty)
+        #expect(planNotices(events) == [AutoContinue.stalledNotice(after: 3)])
+        #expect(log.lines.first == "etapa 1 marcada como feita sem trabalho real: não conta como avanço")
+    }
+
+    @Test func aStepMarkedDoneAfterRealWorkMovesThePlan() async {
+        let script = Script([[touch(1)], [mark(1)], [.text("Etapa 1 feita.")], [.text("Etapa 2 feita.")]])
+        let events = await run(AgentEngine(), planTurn(script, plan: plannedSteps, maxSteps: 3, stretches: 3))
+        #expect(stretchEvents(events) == [2])
+    }
+}
+
+extension AgentEngineGatingTests {
+    @Test func onlyThisTaskHoldsInTheNextStretchAndNotInTheNextRequest() async {
+        let runs = Counter()
+        let engine = AgentEngine()
+        let box = PermissionBox(mode: .ask)
+        let mark = { (step: Int) in
+            LLMEvent.toolCalls([ToolCallRequest(id: "u\(step)", name: TaskPlanTool.name,
+                                                arguments: #"{"action": "update", "updates": [{"step": \#(step), "state": "done"}]}"#)])
+        }
+        let script = Script([[touchCall], [mark(1)], [.text("Etapa 1 feita.")], [touchCall], [mark(2)], [.text("Pronto.")]])
+        var first = request(ScriptedLLM(script: script), box: box, tools: [TaskPlanTool(), TouchTool(runs: runs)])
+        first.maxSteps = 3
+        first.stretches = 3
+        first.context.taskPlan = TaskPlanBoard(TaskPlan(goal: "Publicar", steps: [TaskPlan.Step(text: "Build"), TaskPlan.Step(text: "Subir")]))
+        let events = await drive(engine, first) { approval in await engine.gate.resolve(approvalID: approval.id, decision: .task) }
+        #expect(events.contains { if case .stretch(2, _) = $0 { true } else { false } })
+        #expect(approvals(events).count == 1, "the grant covers the touch of stretch 2")
+        #expect(await runs.value == 2)
+        // The next request starts from the saved rules again.
+        let second = request(ScriptedLLM(script: Script([[touchCall], [.text("Pronto")]])), box: box, tools: [TouchTool(runs: runs)])
+        let again = await drive(engine, second) { approval in await engine.gate.resolve(approvalID: approval.id, decision: .deny) }
+        #expect(approvals(again).count == 1)
+        #expect(await runs.value == 2)
     }
 }

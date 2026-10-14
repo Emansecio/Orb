@@ -298,7 +298,7 @@ private struct TranscriptList: View {
                         }
                     }
                     // end MultiOrb (WP2)
-                    TaskPlanStrip(transcript: transcript)
+                    TaskPlanStrip(transcript: transcript, live: live)
                     QueuedMessages(botID: look.id)
                     // A chain of requests the Orb waits on (`chainWork`) keeps its line too, with the button that stops it.
                     if isWorking || live.chainWork != nil {

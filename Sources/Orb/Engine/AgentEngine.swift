@@ -23,6 +23,9 @@ enum TurnEvent: Sendable {
     case pendingUsage(TokenUsage)
     /// The task stopped at the step limit and left a progress record: the next message picks it up.
     case taskPaused
+    /// The turn runs stretch `stretch` of the `limit` its request may run (`AutoContinue`): past the first, it went on by
+    /// itself at the step limit. 1 again when a message of the user gave the request a new allowance.
+    case stretch(Int, of: Int)
     /// A message the user sent during the turn (see `SteeringQueue`) was just handed to the model: the transcript
     /// shows it now, in its place among the steps, instead of as queued.
     case steered(UUID)
@@ -51,6 +54,11 @@ struct TurnRequest: Sendable {
     var chunks: [ChunkSummary] = []
     /// Upper bound on model calls in this turn, so a confused model cannot loop forever.
     var maxSteps = AgentEngine.defaultMaxSteps
+    /// Stretches of `maxSteps` the turn may run: past the first, one starts by itself only while the task plan has open
+    /// steps and moved forward in the stretch before (`PlanProgress`); otherwise the turn pauses at the limit as with 1.
+    var stretches = 1
+    /// Where the engine writes what the task plan made it do (`AutoContinue.writeLog`; tests read it).
+    var planLog: @Sendable (String) -> Void = AutoContinue.writeLog
     /// Nobody reads the turn while it runs (a routine run): a reply that ends on a question or an offer would wait for
     /// an answer that never comes, so the engine treats it like a promise (`stopReminder`).
     var unattended = false
@@ -199,18 +207,39 @@ actor AgentEngine {
         var circling = false
         // What the calls showed, to check a reply that says the work is done (`CompletionWatch`).
         var completion = CompletionWatch()
+        // Whether the task plan moved forward in this stretch, and which stretch of the request's allowance runs
+        // (`AutoContinue`); `stretchStart`, the step the stretch began after.
+        var advance = PlanProgress(plan: request.context.taskPlan.plan)
+        var stretch = 1
+        var stretchStart = 0
+        // The plan's closing reminder is given once per request; a message asking to stop holds it and the stretches back.
+        var remindedOfPlan = false
+        var stopAsked = false
         var sendImages = request.supportsImages != false
         if !sendImages, !request.images.isEmpty { out.yield(.notice(ImageRejection.notice)) }
 
         do {
-            for step in 1...maxSteps {
+            var step = 0
+            while true {
+                step += 1
+                // The step within the stretch: the limit, the warning before it and the record are the stretch's.
+                let stretchStep = step - stretchStart
+                guard stretchStep <= maxSteps else { return }
                 // The last step answers in text (the tools stay listed, so the provider's cache still applies).
-                let isLastStep = step == maxSteps
+                let isLastStep = stretchStep == maxSteps
                 // What the user said since the last call goes to the model now: a step boundary.
                 let delivered = Self.deliverSteering(request.steering, into: &messages, out: out)
                 if continuedForSteering, delivered.isEmpty { return }
                 continuedForSteering = false
                 steered += delivered
+                if let last = delivered.last {
+                    stopAsked = AutoContinue.asksToStop(messages[last].content)
+                    // A message of the user is a new request for the allowance: it starts over from this stretch.
+                    if stretch > 1 {
+                        stretch = 1
+                        out.yield(.stretch(1, of: request.stretches))
+                    }
+                }
                 // While the model reads that it was going in circles, the working line says it is changing course.
                 let thinking = circling ? Self.changingCourse : "Pensando"
                 circling = false
@@ -288,7 +317,10 @@ actor AgentEngine {
                 let calls = isLastStep ? [] : reply.calls
                 let assistant = ChatMessage(role: .assistant, content: reply.text, toolCalls: calls, reasoning: reply.reasoning)
                 // Append-only, so the earlier part of the conversation still hits the provider's cache.
-                let warning = maxSteps - step == Self.warningSteps ? Self.stepWarning(remaining: Self.warningSteps) : nil
+                // Where another stretch may follow, the warning asks for the plan to be current instead (it decides).
+                let mayGoOn = stretch < request.stretches && advance.plan?.openSteps.isEmpty == false
+                let warning = maxSteps - stretchStep != Self.warningSteps ? nil
+                    : mayGoOn ? AutoContinue.stepWarning(remaining: Self.warningSteps) : Self.stepWarning(remaining: Self.warningSteps)
                 let recital = Self.planRecital(request.context.taskPlan.plan, calls: calls, step: step, shown: &planShown)
                 let notes = [warning, recital].compactMap { $0 }
                 let note = notes.isEmpty ? nil : notes.joined(separator: "\n\n")
@@ -330,16 +362,39 @@ actor AgentEngine {
                     break
                 }
 
+                // At the step limit the stretch ends: another one starts by itself while the plan moves forward, or the
+                // task pauses with its record for the "continua" that follows.
+                let end = isLastStep ? Self.stretchEnd(stretch: stretch, of: request.stretches, plan: request.context.taskPlan.plan,
+                                                       advanced: advance.advanced, stopAsked: stopAsked) : nil
+                /// Starts the next stretch: the model reads where it is (after the record) and what is left of the allowance.
+                func beginNextStretch() {
+                    stretch += 1
+                    stretchStart = step
+                    advance.startStretch()
+                    cutContinues = 0
+                    retriedSilence = false
+                    nudges.append(messages.count)
+                    messages.append(.user(AutoContinue.nudge(stretch: stretch, of: request.stretches, steps: maxSteps)))
+                    out.yield(.stretch(stretch, of: request.stretches))
+                    out.yield(.notice(AutoContinue.notice(stretch: stretch, of: request.stretches)))
+                    request.planLog("trecho \(stretch) de \(request.stretches) começou sozinho, depois de \(step) passos")
+                }
+                if let end, end != .goOn { request.planLog(end.logLine(stretch: stretch, steps: maxSteps)) }
+
                 if calls.isEmpty && said.isEmpty {
                     // On the last step the model may have only tried to call tools: that is the limit, not silence.
-                    if isLastStep && !reply.calls.isEmpty {
-                        // Nothing else says where the task stands: leave a record for the "continua" that follows.
+                    if let end, !reply.calls.isEmpty {
+                        // Nothing else says where the task stands: leave a record for the "continua" (or the stretch) that follows.
                         if let progress = Self.progress(in: messages, pickedUp: picksUpTask, turnStart: turnStart, nudges: nudges, steering: steered,
                                                         plan: request.context.taskPlan.plan) {
                             record(ChatMessage(role: .assistant, content: progress), in: &messages, out: out)
-                            out.yield(.taskPaused)
+                            if end != .goOn { out.yield(.taskPaused) }
                         }
-                        out.yield(.notice(Self.pausedNotice(after: maxSteps)))
+                        if end == .goOn {
+                            beginNextStretch()
+                            continue
+                        }
+                        out.yield(.notice(end.notice(steps: maxSteps, stretches: request.stretches)))
                         return
                     }
                     // Silence is often a hiccup of the provider or the model (most often right after tool results): one
@@ -360,7 +415,7 @@ actor AgentEngine {
                     var closing = assistant
                     closing.content += "\n\n" + progress
                     record(closing, in: &messages, out: out)
-                    out.yield(.taskPaused)
+                    if end != .goOn { out.yield(.taskPaused) }
                 } else {
                     record(assistant, in: &messages, out: out)
                 }
@@ -373,22 +428,40 @@ actor AgentEngine {
                     // A reply that stops short ("vou rodar…" with nothing run, or a question in a run nobody reads), or
                     // says the work is done when the calls showed otherwise (`CompletionWatch`), would end the turn with the
                     // work undone: the model is reminded, at most `reminderLimit` times, and again only after it did some work. Not in the wizard or a review (`onlyTools`: conversations, not tasks).
+                    // Last, from the same allowance: a reply that ends the task with steps of its plan still open, once
+                    // per request (`AutoContinue.reminder`).
                     if !isLastStep, request.onlyTools == nil, reminders < Self.reminderLimit(unattended: request.unattended),
-                       reminders == 0 || workedSinceReminder,
-                       let reminder = Self.stopReminder(said, workedBefore: step > 1, unattended: request.unattended)
-                        ?? completion.reminder(for: said) {
-                        reminders += 1
-                        workedSinceReminder = false
-                        nudges.append(messages.count)
-                        messages.append(.user(reminder))
-                        continue
+                       reminders == 0 || workedSinceReminder {
+                        let earlier = Self.stopReminder(said, workedBefore: step > 1, unattended: request.unattended) ?? completion.reminder(for: said)
+                        // Only for a plan of this task (changed in this turn, or the paused one it picks up), and not
+                        // when the reply asks the user something: then the user is the one to answer.
+                        let skipsPlan = earlier != nil || remindedOfPlan || stopAsked || !(advance.touched || picksUpTask)
+                            || Self.endsWaitingForUser(said)
+                        let open = skipsPlan ? [] : request.context.taskPlan.plan?.openSteps ?? []
+                        if let reminder = earlier ?? (open.isEmpty ? nil : AutoContinue.reminder(open: open)) {
+                            if earlier == nil {
+                                remindedOfPlan = true
+                                request.planLog("lembrete de fechamento: etapas abertas " + open.map(String.init).joined(separator: ", "))
+                            }
+                            reminders += 1
+                            workedSinceReminder = false
+                            nudges.append(messages.count)
+                            messages.append(.user(reminder))
+                            continue
+                        }
                     }
-                    if isLastStep { out.yield(.notice(Self.pausedNotice(after: maxSteps))) }
+                    if let end {
+                        if end == .goOn {
+                            beginNextStretch()
+                            continue
+                        }
+                        out.yield(.notice(end.notice(steps: maxSteps, stretches: request.stretches)))
+                    }
                     return
                 }
 
                 circling = await runCalls(calls, request: request, reason: said, allowed: &allowed, toolNames: toolNames, note: note,
-                                          watch: &watch, completion: &completion, messages: &messages, out: out)
+                                          watch: &watch, completion: &completion, advance: &advance, messages: &messages, out: out)
                 workedSinceReminder = true
                 try Task.checkCancellation()
             }
@@ -638,6 +711,40 @@ actor AgentEngine {
         "Pausei depois de \(steps) passos neste turno." + continueHint
     }
 
+    /// How a stretch ends at the step limit (`AutoContinue`).
+    enum StretchEnd: Equatable {
+        /// Another stretch starts by itself.
+        case goOn
+        /// The turn pauses as it always did: one stretch only, no plan with open steps, or the user asked to stop.
+        case pause
+        /// The plan had open steps but none was done with real work in the whole stretch.
+        case stalled
+        /// The plan moved forward, but the request ran all the stretches it may.
+        case capped
+
+        func notice(steps: Int, stretches: Int) -> String {
+            switch self {
+            case .goOn, .pause: AgentEngine.pausedNotice(after: steps)
+            case .stalled: AutoContinue.stalledNotice(after: steps)
+            case .capped: AutoContinue.cappedNotice(stretches: stretches)
+            }
+        }
+
+        func logLine(stretch: Int, steps: Int) -> String {
+            switch self {
+            case .goOn, .pause: "pausa no limite de \(steps) passos (trecho \(stretch))"
+            case .stalled: "pausa por estagnação: o plano não avançou no trecho \(stretch)"
+            case .capped: "pausa no teto: \(stretch) trechos seguidos"
+            }
+        }
+    }
+
+    static func stretchEnd(stretch: Int, of limit: Int, plan: TaskPlan?, advanced: Bool, stopAsked: Bool) -> StretchEnd {
+        guard limit > 1, !stopAsked, plan?.openSteps.isEmpty == false else { return .pause }
+        guard advanced else { return .stalled }
+        return stretch < limit ? .goOn : .capped
+    }
+
     // MARK: Tool calls
 
     /// Runs one step's tool calls and records their results in the order of the calls, each as soon as it and the
@@ -646,7 +753,7 @@ actor AgentEngine {
     /// go at the end of the last result. Returns whether `watch` said something.
     private func runCalls(_ calls: [ToolCallRequest], request: TurnRequest, reason: String, allowed: inout [PermissionRule],
                           toolNames: Set<String>, note: String?, watch: inout LoopWatch, completion: inout CompletionWatch,
-                          messages: inout [ChatMessage],
+                          advance: inout PlanProgress, messages: inout [ChatMessage],
                           out: AsyncStream<TurnEvent>.Continuation) async -> Bool {
         let (calls, request) = await resolved(calls, in: request)
         var circling = false
@@ -659,6 +766,10 @@ actor AgentEngine {
             if !outcome.text.hasPrefix(PermissionPolicy.refusalPrefix) {
                 watch.record(call, result: outcome.text, failed: outcome.isError, live: LoopWatch.isLive(call.name, kind: kind))
                 completion.record(call, result: outcome.text, failed: outcome.isError)
+                let unearned = advance.record(call, failed: outcome.isError)
+                if !unearned.isEmpty {
+                    request.planLog("etapa " + unearned.map(String.init).joined(separator: ", ") + " marcada como feita sem trabalho real: não conta como avanço")
+                }
             }
             if call == calls.last {
                 let loop = watch.note()

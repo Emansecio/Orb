@@ -109,6 +109,7 @@ struct GeneralSettings: View {
     @State private var learnedWindows: [LearnedWindowRow] = []
     @AppStorage(AppModel.notifyWhenDoneKey) private var notifyWhenDone = true
     @AppStorage(SkillReview.settingKey) private var proposeSkills = true
+    @AppStorage(AutoContinue.settingKey) private var continueLongTasks = true
     @AppStorage(DictationReview.settingKey) private var reviewDictation = true
     @AppStorage(GlobalHotKey.defaultsKey) private var globalShortcut = false
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -154,6 +155,15 @@ struct GeneralSettings: View {
                     }
                 }
                 .help(Tip.proposeSkills)
+                Toggle(isOn: $continueLongTasks) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Continuar sozinho em tarefas longas")
+                        Text("Quando o plano está avançando, o Orb segue sem pedir “continua”, até \(AutoContinue.maxStretches) trechos de \(AgentEngine.defaultMaxSteps) passos seguidos. Desligado, ele pausa no limite de passos e espera você.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .help(Tip.continueLongTasks)
                 if Dictation.isSupported {
                     Toggle(isOn: $reviewDictation) {
                         VStack(alignment: .leading, spacing: 2) {
