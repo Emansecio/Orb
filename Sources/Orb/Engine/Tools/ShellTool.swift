@@ -65,6 +65,7 @@ struct RunCommandTool: AgentTool {
         let directory = arguments.nonEmptyString("cwd").map(context.url(for:)) ?? context.workingDirectory
         guard directory.isExistingDirectory else { throw ToolError.notFound("Pasta não encontrada", directory) }
         let shell = await context.shell.resolved()
+        try Task.checkCancellation() // reading the login shell takes seconds the first time: stopped meanwhile, nothing starts
 
         if arguments["background"]?.bool == true {
             return ToolResult(text: try await startInBackground(command, directory: directory, shell: shell, context: context))

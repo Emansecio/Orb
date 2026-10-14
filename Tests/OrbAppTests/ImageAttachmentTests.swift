@@ -467,8 +467,24 @@ struct ImageContextTests {
         }
         let sent = conversation.elidingOldImages()
         let kept = sent.filter { !$0.images.isEmpty }.map(\.content)
-        #expect(kept == (4...9).map { "captura \($0)" })
+        #expect(kept == (5...9).map { "captura \($0)" })
         #expect(sent[2].content == "captura 1\n[imagem anexada: /anexos/s1.jpg]")
+    }
+
+    @Test func screenshotsAreLetGoOfInBatchesSoTheStartOfTheHistoryStaysPut() {
+        var conversation: [ChatMessage] = [.user("faça")]
+        var elided: [[String]] = []
+        for step in 1...14 {
+            conversation.append(ChatMessage(role: .assistant, content: "", toolCalls: [ToolCallRequest(id: "c\(step)", name: "screenshot", arguments: "{}")]))
+            conversation.append(.tool("c\(step)", "captura \(step)", images: [picture("s\(step)")]))
+            let sent = conversation.elidingOldImages()
+            #expect((min(step, 3)...6).contains(sent.filter { !$0.images.isEmpty }.count))
+            elided.append(sent.filter { $0.role == .tool && $0.images.isEmpty }.map(\.content))
+        }
+        // The set of pictures let go of only grows at the 7th and the 11th screenshot; in between it stays the same.
+        let changes = zip(elided, elided.dropFirst()).enumerated().filter { $0.element.0 != $0.element.1 }.map { $0.offset + 2 }
+        #expect(changes == [7, 11])
+        #expect(elided[6].count == 4 && elided[10].count == 8)
     }
 
     @Test func pictureCostCountsTowardTheBudget() {

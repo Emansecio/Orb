@@ -93,6 +93,15 @@ struct ProviderTests {
         let messages = ProviderModel(id: "claude-haiku-5-5", name: "Claude", format: .messages)
         #expect(account.client(for: messages, credentials: { _ in "k" }, conversationID: "abc") is AnthropicClient)
     }
+
+    @Test func xAIClientsCarryAConversationHeader() throws {
+        let account = ProviderAccount(kind: .xai)
+        let model = ProviderModel(id: "grok-4", name: "Grok", format: .chat)
+        let client = try #require(account.client(for: model, credentials: { _ in "k" }, conversationID: "abc") as? OpenAIClient)
+        #expect(client.extraHeaders["x-grok-conv-id"] == "abc")
+        let other = try #require(ProviderAccount(kind: .openrouter).client(for: model, credentials: { _ in "k" }, conversationID: "abc") as? OpenAIClient)
+        #expect(other.extraHeaders["x-grok-conv-id"] == nil)
+    }
 }
 
 struct ProviderExpansionTests {

@@ -69,6 +69,35 @@ struct AnthropicClientTests {
         #expect(bare.jsonString.components(separatedBy: #""cache_control""#).count - 1 == 1)
     }
 
+    @Test func aLongTaskGetsAFourthMarkerWhereItsPreviewsEnd() throws {
+        let tools = [ToolSpec(name: "a", description: "A", parameters: .schema([:]))]
+        var history: [ChatMessage] = [.system("s"), .user("faça")]
+        for step in 0..<4 {
+            history.append(ChatMessage(role: .assistant, content: "", toolCalls: [ToolCallRequest(id: "c\(step)", name: "a", arguments: "{}")]))
+            history.append(.tool("c\(step)", "saída \(step)"))
+        }
+        func markers(_ body: JSONValue) -> Int { body.jsonString.components(separatedBy: #""cache_control""#).count - 1 }
+        func marked(_ body: JSONValue) throws -> [String] {
+            try #require(body["messages"]?.array).flatMap { $0["content"]?.array ?? [] }
+                .filter { $0["cache_control"] != nil }.compactMap { $0["tool_use_id"]?.string }
+        }
+        let body = AnthropicClient.requestBody(model: "m", messages: history, tools: tools, maxTokens: 10, stableToolCallID: "c1")
+        #expect(markers(body) == 4)
+        #expect(try marked(body) == ["c1", "c3"]) // the stable end, and the tail
+        // An id the request no longer has (set aside, folded) adds nothing; the tail itself is one marker, not two.
+        #expect(markers(AnthropicClient.requestBody(model: "m", messages: history, tools: tools, maxTokens: 10, stableToolCallID: "x")) == 3)
+        #expect(markers(AnthropicClient.requestBody(model: "m", messages: history, tools: tools, maxTokens: 10, stableToolCallID: "c3")) == 3)
+        // A history from another provider that repeats ids still gets one marker for it.
+        let repeated = history + [ChatMessage(role: .assistant, content: "", toolCalls: [ToolCallRequest(id: "c1", name: "a", arguments: "{}")]),
+                                  .tool("c1", "de novo"), .user("e agora?")]
+        #expect(markers(AnthropicClient.requestBody(model: "m", messages: repeated, tools: tools, maxTokens: 10, stableToolCallID: "c1")) == 4)
+        // The client carries it; a short reply drops it.
+        let client = AnthropicClient(baseURL: URL(string: "https://api.anthropic.com/v1")!, apiKey: "k")
+        let stable = try #require(client.markingStable(upTo: "c1") as? AnthropicClient)
+        #expect(stable.stableToolCallID == "c1")
+        #expect((stable.forShortReply as? AnthropicClient)?.stableToolCallID == nil)
+    }
+
     // MARK: Stop reason and usage
 
     private func ingest(_ events: [String]) throws -> (output: [LLMEvent], assembler: AnthropicStreamAssembler) {

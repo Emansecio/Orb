@@ -13,6 +13,8 @@ struct AnthropicClient: LLMClient {
     var sendsBearer = false
     /// Whether the last block of the last message gets a cache marker (the tail that the next step of the turn reads).
     var marksTail = true
+    /// The tool result after which a fourth marker goes (see `markingStable(upTo:)`).
+    var stableToolCallID: String?
 
     static let apiVersion = "2023-06-01"
 
@@ -25,6 +27,16 @@ struct AnthropicClient: LLMClient {
         var copy = self
         copy.maxTokens = 1_200
         copy.marksTail = false
+        copy.stableToolCallID = nil
+        return copy
+    }
+
+    /// In a long task the previews of old outputs come in batches some 30 messages before the end, farther back than
+    /// the API looks for an earlier cache entry (20 blocks before each marker): without a marker where the previous
+    /// batch ended, every message would be written to the cache again.
+    func markingStable(upTo toolCallID: String?) -> any LLMClient {
+        var copy = self
+        copy.stableToolCallID = toolCallID
         return copy
     }
 
@@ -47,7 +59,8 @@ struct AnthropicClient: LLMClient {
         return ProviderTransport.stream(session: session, credentials: credentials, acceptsEventStream: false, body: {
             try WireEncoder.encode(Self.requestBody(
                 model: model, messages: messages, tools: tools, maxTokens: maxTokens, provider: provider, toolChoice: toolChoice,
-                stablePrefixTTL: Self.stablePrefixTTL(host: provider), marksTail: marksTail), trailing: Self.trailingKeys)
+                stablePrefixTTL: Self.stablePrefixTTL(host: provider), marksTail: marksTail, stableToolCallID: stableToolCallID),
+                trailing: Self.trailingKeys)
         }, request: { makeRequest("messages", key: $0) }, mapper: AnthropicStreamAssembler(provider: provider, model: model))
     }
 
@@ -121,15 +134,18 @@ extension AnthropicClient {
     /// consecutive turns of the same role are merged (the API expects user/assistant alternation).
     ///
     /// Prompt caching uses explicit markers (the API allows four): the last tool, the system prompt and the last
-    /// block of the last message, so each step of a tool loop reads the previous step's prefix from the cache.
-    /// The first two live `stablePrefixTTL`, the last five minutes (see `stablePrefixTTL(host:)`).
+    /// block of the last message, so each step of a tool loop reads the previous step's prefix from the cache, and in
+    /// a long task the result of `stableToolCallID` (see `markingStable(upTo:)`).
+    /// The first two live `stablePrefixTTL`, the others five minutes (see `stablePrefixTTL(host:)`).
     /// `provider` is the endpoint's host: reasoning recorded by another endpoint or model is not sent back.
     static func requestBody(model: String, messages: [ChatMessage], tools: [ToolSpec], maxTokens: Int,
                             provider: String = "", toolChoice: ToolChoice = .auto,
-                            stablePrefixTTL: CacheTTL = .fiveMinutes, marksTail: Bool = true) -> JSONValue {
+                            stablePrefixTTL: CacheTTL = .fiveMinutes, marksTail: Bool = true, stableToolCallID: String? = nil) -> JSONValue {
         let system = messages.filter { $0.role == .system }.map(\.content).joined(separator: "\n\n")
         var turns: [(role: String, blocks: [JSONValue])] = []
         let lastIndex = messages.lastIndex { $0.role != .system }
+        // One marker at most, even where a history from another provider repeats call ids: a fifth is refused.
+        let stableIndex = stableToolCallID.flatMap { id in messages.lastIndex { $0.role == .tool && $0.toolCallID == id } }
         for (index, message) in messages.enumerated() where message.role != .system {
             let role = message.role == .assistant ? "assistant" : "user"
             var blocks: [JSONValue] = []
@@ -138,6 +154,7 @@ extension AnthropicClient {
                 var result: [String: JSONValue] = ["type": .string("tool_result"), "tool_use_id": .string(message.toolCallID ?? ""),
                                                    "content": toolResultContent(message)]
                 if message.isError { result["is_error"] = .bool(true) }
+                if index == stableIndex { result["cache_control"] = ephemeral }
                 blocks.append(.object(result))
             case .assistant:
                 // Thinking must come back unchanged and first, or the API rejects the turn. This client never turns

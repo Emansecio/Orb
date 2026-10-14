@@ -323,6 +323,7 @@ extension BotSession {
         // not finish, and why (the engine's "Pausei depois de…", the run's last notice).
         let paused = conversation?.isTaskPaused ?? false
         let completed = succeeded && !paused
+        if !completed { reviewBase = nil } // never reviewed: lets go of the client (and Claude Code's parked process)
         // What the celebration is measured by, before the end of the turn clears it.
         let turnSeconds = model.live(id).workingSince.map { Date.now.timeIntervalSince($0) } ?? 0
         let turnActions = actionsThisTurn

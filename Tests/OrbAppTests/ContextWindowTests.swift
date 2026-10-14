@@ -251,6 +251,9 @@ struct ContextWindowTests {
         let outputs = sent.filter { $0.role == .tool }.map(\.content.count)
         #expect(outputs.prefix(5).allSatisfy { $0 < 5_000 })
         #expect(outputs.suffix(3).allSatisfy { $0 == 10_000 })
+        // Where the previews end, the request holds still: that is where a client may mark the cache.
+        #expect(ContextWindow.fit(messages, budget: ContextBudget(tokens: 17_000)).stableToolCallID == "c4")
+        #expect(ContextWindow.fit(messages, budget: .fallback).stableToolCallID == nil)
     }
 
     @Test func hugeOutputsOfTheLastFinishedTurnAreShortenedAtTheRealCallSite() {
@@ -739,5 +742,14 @@ struct ContextEngineTests {
         #expect(ContextOverflow.matches(LLMError.invalidResponse("prompt is too long")))
         #expect(!ContextOverflow.matches(LLMError.invalidResponse("lista de modelos ausente")))
         #expect(!ContextOverflow.matches(LLMError.notConfigured))
+        // A bare "context" is how Go servers say a request timed out or was cancelled: neither is an overflow.
+        #expect(!ContextOverflow.matches(LLMError.stream(type: "server_error", message: "upstream error: context deadline exceeded")))
+        #expect(!ContextOverflow.matches(LLMError.invalidResponse("rpc error: context canceled")))
+        #expect(!ContextOverflow.matches(LLMError.http(status: 400, message: "context canceled")))
+        // A body too large is always one; the other servers' wordings still count.
+        #expect(ContextOverflow.matches(LLMError.http(status: 413, message: "")))
+        #expect(ContextOverflow.matches(LLMError.stream(type: "invalid_request_error", message: "the request exceeds the available context size")))
+        #expect(ContextOverflow.matches(LLMError.http(status: 400, message: "This model's maximum prompt length is 131072 but the request contains 140000 tokens")))
+        #expect(ContextOverflow.matches(LLMError.http(status: 400, message: "input length exceeds the context length")))
     }
 }

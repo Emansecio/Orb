@@ -413,6 +413,28 @@ extension AgentEngineTests {
         #expect(messages(events).last?.content == "Oi!")
     }
 
+    @Test func aResponseCutOffBeforeAnyOutputIsRetried() async {
+        let (engine, waits) = quickEngine()
+        let script = Script(responses: [Response(events: [.finished(.incomplete, nil)]), Response(events: [.text("Oi!")])])
+        let events = await run(engine, request(script, mode: .ask, runs: Counter()))
+        #expect(await script.received.count == 2)
+        #expect(await waits.value == 1)
+        #expect(failures(events).isEmpty)
+        #expect(messages(events).last?.content == "Oi!")
+    }
+
+    @Test func aResponseCutOffOnEveryAttemptIsReportedAsCutOff() async {
+        let (engine, _) = quickEngine()
+        let cut = Response(events: [.finished(.incomplete, TokenUsage(input: 10))])
+        let script = Script(responses: [cut, cut, cut, cut])
+        let events = await run(engine, request(script, mode: .ask, runs: Counter()))
+        #expect(await script.received.count == 4)
+        #expect(failures(events) == ["A resposta foi interrompida: o provedor encerrou antes do fim."])
+        #expect(messages(events).map(\.role) == [.user])
+        let requests = events.compactMap { event -> TokenUsage? in if case .requestUsage(let used) = event { used } else { nil } }
+        #expect(requests.count == 4) // each attempt's use is counted once
+    }
+
     @Test func aDroppedConnectionIsNotBlamedOnTheProvider() async {
         let (engine, _) = quickEngine()
         let script = Script(responses: [Response(events: [], failure: LLMError.network(code: URLError.timedOut.rawValue, message: "timeout")),

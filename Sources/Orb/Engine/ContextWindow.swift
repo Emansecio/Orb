@@ -62,6 +62,10 @@ struct ContextWindow: Sendable, Equatable {
     /// of what it sends: for telling the user what a compaction did.
     var charactersBefore = 0
     var charactersAfter: Int { messages.contextCharacters }
+    /// The call id of the newest output of the task in progress already turned into a preview (nil while all are
+    /// whole). Up to it the request holds still while the task grows, so a client can mark the provider's cache there:
+    /// the next batch of previews then rewrites only what follows (see `LLMClient.markingStable(upTo:)`).
+    var stableToolCallID: String?
 
     /// Old tool outputs (those of earlier turns, and the task's own once past their fresh period), in characters.
     static let toolOutputPreview = 4_000
@@ -343,7 +347,8 @@ struct ContextWindow: Sendable, Equatable {
         }
         return ContextWindow(messages: (messages + body).answeringDanglingToolCalls(), droppedCount: start + dropped,
                              foldedCount: folded.count, summary: summary, ledger: ledger,
-                             skippedSteps: skippedSteps.filter { $0.role == .assistant }.count, charactersBefore: charactersBefore)
+                             skippedSteps: skippedSteps.filter { $0.role == .assistant }.count, charactersBefore: charactersBefore,
+                             stableToolCallID: settled > 0 ? raw[taskOutputs[settled - 1]].toolCallID : nil)
     }
 }
 
@@ -372,13 +377,16 @@ extension Sequence where Element == ChatMessage {
 extension [ChatMessage] {
     /// Pictures in the last `turns` user turns stay; older ones become a line with their path (the conversation
     /// itself keeps them). A task that takes many screenshots keeps only the newest `maxToolImages` of them, so one
-    /// long turn cannot fill the window with pictures.
+    /// long turn cannot fill the window with pictures. Past that they go in batches, down to half and back up: dropping
+    /// one per screenshot changed the start of the history on every step, and the provider's cache missed every time.
     func elidingOldImages(turns: Int = 3, maxToolImages: Int = 6) -> [ChatMessage] {
         guard contains(where: { !$0.images.isEmpty }) else { return self }
         let userTurns = indices.filter { self[$0].isConversationRequest }
         let oldest = userTurns.count > turns ? userTurns[userTurns.count - turns] : 0
-        let recentToolImages = Set(indices.filter { self[$0].role == .tool && !self[$0].images.isEmpty && $0 >= oldest }
-            .suffix(maxToolImages))
+        let toolImages = indices.filter { self[$0].role == .tool && !self[$0].images.isEmpty && $0 >= oldest }
+        let most = Swift.max(1, maxToolImages), least = Swift.max(1, most / 2)
+        let kept = toolImages.count <= most ? toolImages.count : least + (toolImages.count - most - 1) % (most - least + 1)
+        let recentToolImages = Set(toolImages.suffix(kept))
         return enumerated().map { index, message in
             let keep = index >= oldest && (message.role != .tool || recentToolImages.contains(index))
             return keep ? message : message.replacingImages { "[imagem anexada: \($0.path)]" }
@@ -714,20 +722,26 @@ enum ToolOutputCap {
 // MARK: - Context overflow
 
 enum ContextOverflow {
-    /// The provider refused the request for its size (HTTP 400/413, or an error event in the stream, whose message talks about context or length).
+    /// The provider refused the request for its size (HTTP 413, or a 400 or an error event in the stream whose message says
+    /// the context or the prompt is over a limit).
     static func matches(_ error: Error) -> Bool {
         let message: String
         switch error {
         // The clients already recognize most overflows.
         case LLMError.contextExceeded: return true
-        case LLMError.http(let status, let text, _) where status == 400 || status == 413: message = text
+        case LLMError.http(let status, _, _) where status == 413: return true
+        case LLMError.http(let status, let text, _) where status == 400: message = text
         // Responses and Anthropic streams can report the same refusal as an error event in the stream.
         case LLMError.invalidResponse(let text): message = text
         case LLMError.stream(_, let text): message = text
         default: return false
         }
+        // Specific wordings only: a bare "context" is also how Go servers say a request timed out ("context deadline
+        // exceeded") or was cancelled ("context canceled"), and taking those for an overflow folded the history and
+        // shrank the learned window.
         let text = message.lowercased()
-        return ["context", "prompt is too long", "prompt too long", "too long", "too many tokens", "maximum length", "input length"]
-            .contains { text.contains($0) }
+        return LLMError.isContextOverflow(text)
+            || ["too many tokens", "maximum length", "input length", "context size", "maximum prompt length", "input token count"]
+                .contains { text.contains($0) }
     }
 }

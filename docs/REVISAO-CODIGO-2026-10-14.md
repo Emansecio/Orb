@@ -428,3 +428,21 @@ Pontos que parecem candidatos a mudança, mas estão certos. A maioria foi medid
 - **Repasse do `finish_reason` da DeepSeek**: se OpenCode Go e Command Code repassam o valor original.
 - **Busca de ferramentas do Claude Code** no servidor MCP "orb" (`ClaudeCode.swift:96-105` remove `ENABLE_TOOL_SEARCH` desligado): o custo em tokens do lado do CLI.
 - **B3 e B4 não foram reproduzidos** com microfone e CLI reais, porque abrir o app é proibido nesta análise. As duas conclusões vêm da leitura do código.
+
+## 9. Situação da implementação
+
+Todos os 11 achados foram implementados, cada um com teste. Os testes dos arquivos tocados passaram, e a suíte completa rodou sem `RealBrowser` e `BrowserCleanup`.
+
+| ID | O que mudou | Teste |
+|---|---|---|
+| T1 | OpenRouter: `session_id` em todo pedido da conversa e, para modelos `anthropic/` e `~anthropic/`, `cache_control` no topo do pedido (o OpenRouter põe o marcador no último bloco cacheável). | `OpenAIClientTests` |
+| T2 | As capturas antigas saem em lote: passando de 6, ficam 3 e o número sobe de novo até 6 antes do próximo corte. O começo do histórico muda uma vez a cada 4 capturas, e não a cada passo. | `ImageContextTests` (9 capturas mantêm 5; o conjunto apagado só muda na 7ª e na 11ª) |
+| B1 | Só frases específicas contam como estouro. "context deadline exceeded" e "context canceled" deixam de dobrar o histórico e de encolher a janela aprendida. 413 continua contando. | `ContextWindowTests.overflowDetection` |
+| B2 | Resposta cortada antes de mostrar qualquer coisa é tentada de novo como falha passageira. Se todas as tentativas forem cortadas, o aviso continua "A resposta foi interrompida…", com o uso de cada tentativa contado uma vez. | `AgentEngineTests` (2 testes) |
+| B3 | Sair do chat do Orb (outra página, outro Orb, um grupo) fecha o ditado e mantém o que foi dito. Apagar o Orb cancela o ditado. | `DictationLifecycleTests` (3 testes) |
+| T3 | xAI: cabeçalho `x-grok-conv-id` com o id da conversa. | `ProviderTests` |
+| T4 | 4º marcador de cache no resultado da última saída já em prévia (`ContextWindow.stableToolCallID`, `LLMClient.markingStable(upTo:)`). No máximo um, mesmo com ids repetidos de outro provedor. | `AnthropicClientTests`, `ContextWindowTests` |
+| B4 | Turno que não terminou solta o `reviewBase` e, com ele, o processo estacionado do Claude Code. | coberto pela suíte de turnos |
+| B5 | `finish_reason` "insufficient_system_resource" e "error" viram resposta interrompida. | `OpenAIClientTests.mapsFinishReasons` |
+| B6 | Apagar o Orb cancela a consolidação e a unificação de memória em andamento. | coberto pela suíte de apagar Orb |
+| B7 | Comando em segundo plano não começa se o turno foi parado enquanto o shell de login era lido. | `RunCommandTests` |

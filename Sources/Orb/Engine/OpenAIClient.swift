@@ -29,9 +29,12 @@ struct OpenAIClient: LLMClient {
 
     /// OpenAI itself, which accepts `prompt_cache_key`; other compatible servers may reject unknown fields.
     var isOpenAI: Bool { baseURL.host() == "api.openai.com" }
+    /// OpenRouter, which takes a top-level `cache_control` (for Claude) and a `session_id` for sticky routing.
+    var isOpenRouter: Bool { baseURL.host() == "openrouter.ai" }
     private static let usageHosts: Set<String> = ["openrouter.ai", "api.commandcode.ai", "opencode.ai"]
-    /// Only OpenAI itself caches the chat format without markers; elsewhere (OpenRouter with Anthropic models) the
-    /// request would need `cache_control`, which this format does not send.
+    /// Only OpenAI itself caches the chat format without markers. OpenRouter caches Claude when the body carries a
+    /// top-level `cache_control` (sent below), but this property does not know the model, and claiming a cache for
+    /// every OpenRouter model would be wrong for the ones without it.
     var arrangesPromptCache: Bool { isOpenAI }
     /// Servers known to take `stream_options` (local ones may reject it): OpenAI, OpenRouter, Command Code (its docs
     /// show `include_usage`) and OpenCode (whose own client sends it to every OpenAI-compatible endpoint).
@@ -43,7 +46,10 @@ struct OpenAIClient: LLMClient {
         ProviderTransport.stream(session: session, credentials: credentials, body: {
             try WireEncoder.encode(Self.requestBody(
                 model: model, messages: messages, tools: tools, includeUsage: reportsUsage,
-                promptCacheKey: isOpenAI ? conversationID : nil, toolChoice: toolChoice), trailing: Self.trailingKeys)
+                promptCacheKey: isOpenAI ? conversationID : nil,
+                sessionID: isOpenRouter ? conversationID : nil,
+                cacheMarker: isOpenRouter && Self.isAnthropicModel(model),
+                toolChoice: toolChoice), trailing: Self.trailingKeys)
         }, request: {
             ProviderTransport.authorizedRequest(baseURL.appending(path: "chat/completions"), apiKey: $0, headers: extraHeaders)
         }, mapper: ChatStreamMapper())
@@ -70,8 +76,14 @@ extension OpenAIClient {
     /// Last in the body, so the part that repeats comes first (see `WireEncoder`).
     static let trailingKeys = ["messages", "tool_choice"]
 
+    /// A Claude model as OpenRouter names it ("anthropic/claude-…", or an alias such as "~anthropic/claude-…-latest").
+    static func isAnthropicModel(_ model: String) -> Bool {
+        model.hasPrefix("anthropic/") || model.hasPrefix("~anthropic/")
+    }
+
     static func requestBody(model: String, messages: [ChatMessage], tools: [ToolSpec], includeUsage: Bool = false,
-                            promptCacheKey: String? = nil, toolChoice: ToolChoice = .auto) -> JSONValue {
+                            promptCacheKey: String? = nil, sessionID: String? = nil, cacheMarker: Bool = false,
+                            toolChoice: ToolChoice = .auto) -> JSONValue {
         var body: [String: JSONValue] = [
             "model": .string(model),
             "stream": .bool(true),
@@ -79,6 +91,10 @@ extension OpenAIClient {
         ]
         if includeUsage { body["stream_options"] = .object(["include_usage": .bool(true)]) }
         if let promptCacheKey, !promptCacheKey.isEmpty { body["prompt_cache_key"] = .string(promptCacheKey) }
+        // OpenRouter: the same upstream for the whole conversation from the first request on (its cache lives there),
+        // and for Claude the marker without which nothing is cached (OpenRouter puts it on the last cacheable block).
+        if let sessionID, !sessionID.isEmpty { body["session_id"] = .string(sessionID) }
+        if cacheMarker { body["cache_control"] = .object(["type": .string("ephemeral")]) }
         if !tools.isEmpty {
             body["tools"] = .array(tools.map { tool in
                 .object(["type": .string("function"), "function": .object([
@@ -138,6 +154,8 @@ extension OpenAIClient {
         case "tool_calls", "function_call": .toolUse
         case "length": .maxTokens
         case "content_filter": .refusal
+        // DeepSeek's "out of resources" and OpenRouter's normalized "error": the answer was cut off, not finished.
+        case "insufficient_system_resource", "error": .incomplete
         case let other?: .unknown(other)
         case nil: sawDone ? (hasToolCalls ? .toolUse : .done) : .incomplete
         }

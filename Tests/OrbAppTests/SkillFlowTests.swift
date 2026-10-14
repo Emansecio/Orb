@@ -213,6 +213,18 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
         #expect(await script.calls.count == 11)
     }
 
+    @Test @MainActor func aTurnThatDidNotFinishLetsGoOfItsRequest() async {
+        let script = CallScript([said("oi")], failsCall: 2)
+        let (model, botID) = setUp(script)
+        #expect(model.send("oi", to: botID))
+        await waitUntilIdle(model, botID)
+        #expect(model.session(botID).reviewBase != nil) // kept for a review after a finished turn
+        #expect(model.send("de novo", to: botID))
+        await waitUntilIdle(model, botID)
+        // Never reviewed: nothing holds its client (with Claude Code, a parked process) until the next message.
+        #expect(model.session(botID).reviewBase == nil)
+    }
+
     @Test @MainActor func anOrbThatOnlyReadsDoesNotReview() async {
         let script = CallScript(steps(10) + [said("pronto")])
         let (model, botID) = setUp(script)

@@ -263,7 +263,8 @@ actor AgentEngine {
                             for report in announced.reports(after: fit, cut: cut, input: messages.dropFirst()) { out.yield(.compacted(report)) }
                         }
                         reply = try await respond(to: window, request: request, specs: specs, thinking: thinking,
-                                                  toolChoice: isLastStep ? .none : .auto, out: out, onDiscardedUsage: countDiscarded)
+                                                  toolChoice: isLastStep ? .none : .auto, stableToolCallID: fit?.stableToolCallID,
+                                                  out: out, onDiscardedUsage: countDiscarded)
                         // The smaller history worked: that is what this model's window really is.
                         if let learned = learnedWindow {
                             learnedWindow = nil
@@ -530,8 +531,10 @@ actor AgentEngine {
 
     /// Streams one response, retrying transient provider failures while nothing has been shown yet.
     private func respond(to window: [ChatMessage], request: TurnRequest, specs: [ToolSpec], thinking: String = "Pensando", toolChoice: ToolChoice,
+                         stableToolCallID: String? = nil,
                          out: AsyncStream<TurnEvent>.Continuation, onDiscardedUsage: (TokenUsage) -> Void) async throws -> Reply {
         var reply = Reply()
+        let client = request.client.markingStable(upTo: stableToolCallID)
         do {
             try await withRetries(sleep: retrySleep, onWait: { seconds, _, error in
                 out.yield(.status(Retry.waitStatus(seconds: seconds, after: error)))
@@ -540,7 +543,7 @@ actor AgentEngine {
                 reply = Reply() // an attempt that failed before showing anything leaves nothing behind
                 out.yield(.status(thinking))
                 do {
-                    for try await event in request.client.stream(model: request.model, messages: window, tools: specs, toolChoice: toolChoice) {
+                    for try await event in client.stream(model: request.model, messages: window, tools: specs, toolChoice: toolChoice) {
                         switch event {
                         case .text(let delta):
                             if reply.text.isEmpty { out.yield(.status("Escrevendo")) }
@@ -559,6 +562,8 @@ actor AgentEngine {
                         }
                     }
                     if case .contextExceeded = reply.stop, !reply.emitted { throw LLMError.contextExceeded("model_context_window_exceeded") }
+                    // Cut off before anything was shown: a dropped stream, worth another try like any transient failure.
+                    if case .incomplete = reply.stop, !reply.emitted { throw LLMError.stream(type: "api_error", message: Self.cutShort) }
                 } catch where reply.emitted && !(error is CancellationError) {
                     throw StreamInterrupted(underlying: error, partialText: reply.text)
                 } catch where ContextOverflow.matches(error) {
@@ -567,12 +572,17 @@ actor AgentEngine {
                     throw LLMError.contextExceeded(error.localizedDescription)
                 }
             })
+        } catch LLMError.stream(_, let message) where message == Self.cutShort {
+            return reply // every attempt was cut short: the caller reports the interrupted response
         } catch {
             if let used = reply.usage { onDiscardedUsage(used) } // the attempt that ended the response did not finish it
             throw error
         }
         return reply
     }
+
+    /// Marks a response cut off before showing anything, so it is retried and, if every attempt is, reported as cut off.
+    private static let cutShort = "o provedor encerrou a resposta antes do fim"
 
     /// What a refusal for size says when the history cannot get any smaller: what is left is the request itself.
     static let doesNotFit = "O pedido não cabe na janela deste modelo, mesmo sem o histórico que dava para resumir. "

@@ -487,6 +487,17 @@ final class RunCommandTests {
         await #expect(throws: ToolError.self) { try await JobStopTool().run(.object([:]), context: context) }
     }
 
+    @Test func aBackgroundCommandStoppedBeforeItStartsNeverRuns() async throws {
+        let context = context
+        let attempt = Task {
+            withUnsafeCurrentTask { $0?.cancel() } // "Parar" while the login shell was being read
+            return try await RunCommandTool().run(.object(["command": .string("touch rodou"), "background": .bool(true)]), context: context)
+        }
+        await #expect(throws: CancellationError.self) { try await attempt.value }
+        #expect(try await JobOutputTool().run(.object([:]), context: context) == "Nenhum processo em segundo plano.")
+        #expect(!FileManager.default.fileExists(atPath: directory.appending(path: "rodou").path))
+    }
+
     @Test func jobToolsNeedAnOrb() async throws {
         let bare = ToolContext(workingDirectory: directory)
         await #expect(throws: ToolError.self) { try await JobOutputTool().run(.object([:]), context: bare) }

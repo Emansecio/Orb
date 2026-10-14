@@ -181,6 +181,9 @@ struct OpenAIReliabilityTests {
         #expect(reason("length", false, true) == .maxTokens)
         #expect(reason("content_filter", false, true) == .refusal)
         #expect(reason("weird", false, true) == .unknown("weird"))
+        // Cut off upstream (DeepSeek out of resources, OpenRouter's normalized error): not a finished answer.
+        #expect(reason("insufficient_system_resource", false, true) == .incomplete)
+        #expect(reason("error", false, true) == .incomplete)
         #expect(reason(nil, false, true) == .done)
         #expect(reason(nil, true, true) == .toolUse)
         #expect(reason(nil, false, false) == .incomplete)
@@ -246,6 +249,20 @@ struct OpenAIReliabilityTests {
             let body = try #require(StubProtocol.sent(to: host).first?.body)
             #expect(body["stream_options"] == .object(["include_usage": .bool(true)]))
             #expect(body["prompt_cache_key"] == (cacheKey ? .string("bot-1") : nil))
+            // OpenRouter keeps the conversation on one upstream; nobody else gets the field.
+            #expect(body["session_id"] == (cacheKey ? nil : .string("bot-1")))
+            #expect(body["cache_control"] == nil) // model "m" is no Claude
+        }
+        // Claude through OpenRouter is cached only with the top-level marker (aliases included); other models never get it.
+        var router = OpenAIClient(baseURL: URL(string: "https://openrouter.ai/v1")!, apiKey: nil, session: StubProtocol.session)
+        router.conversationID = "bot-1"
+        for (model, marked) in [("anthropic/claude-sonnet-4.5", true), ("~anthropic/claude-sonnet-latest", true),
+                                ("openai/gpt-5", false)] {
+            StubProtocol.queue(host: "openrouter.ai", [.init(body: "data: [DONE]\n\n")])
+            for try await _ in router.stream(model: model, messages: [.user("oi")], tools: []) {}
+            let body = try #require(StubProtocol.sent(to: "openrouter.ai").last?.body)
+            #expect(body["cache_control"] == (marked ? .object(["type": .string("ephemeral")]) : nil))
+            #expect(body["session_id"] == .string("bot-1"))
         }
     }
 

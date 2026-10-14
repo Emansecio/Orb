@@ -184,6 +184,8 @@ final class AppModel {
                 if selection != oldValue { liveBot(id)?.glanced() } // its sidebar Orb glances toward the chat
             }
             if case .group(let id) = selection { groupHub.markRead(id) } // MultiOrb (WP5): looking at the group reads it
+            // The microphone belongs to the Orb on screen: leaving it closes the dictation, keeping what was said.
+            if let dictating = dictation.botID, selection != .bot(dictating) { Task { await dictation.finish() } }
         }
     }
 
@@ -1112,6 +1114,7 @@ final class AppModel {
         let profile = bot(botID).map(KeptProfile.init)
         let session = session(botID)
         liveBot(botID)?.stopComposing() // its watcher task ends with it
+        if dictation.botID == botID { dictation.cancel() } // its field goes away: nothing to write the words into
         session.memoryRequest = nil
         session.lastCompaction = nil
         session.compactedInTurn = false
@@ -1134,6 +1137,8 @@ final class AppModel {
         session.memoryIdle?.cancel()
         session.memoryIdle = nil
         session.skillReview?.cancel()
+        session.memoryConsolidation?.cancel() // they would write pages into the memory that is deleted or kept
+        session.memoryMerge?.cancel()
         let library = memory
         var keeping: Task<URL?, Never>?
         if keepMemory {

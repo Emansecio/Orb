@@ -111,7 +111,8 @@ final class Dictation {
     /// returns. Called again meanwhile, it waits for the same closing.
     func finish() async {
         if let closing { return await closing.value }
-        guard botID != nil, #available(macOS 26, *), let capture = capture as? SpeechCapture else { return }
+        guard botID != nil else { return }
+        guard #available(macOS 26, *), let capture = capture as? SpeechCapture else { return end() } // no microphone open (a posed one)
         starting?.cancel()
         phase = .finishing
         level = 0
