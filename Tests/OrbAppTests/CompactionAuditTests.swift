@@ -137,17 +137,17 @@ struct CompactionAuditTests {
     }
 
     @Test func aRefusedNoteIsNoNote() async {
-        let recorder = Recorder([[.text("Não posso resumir este conteúdo. Envie outra solicitação para continuar."),
-                                  .finished(.refusal, TokenUsage(input: 900, output: 20))]])
-        let note = await ChunkSummarizer.write(.init(range: 0..<2, input: "transcript"), client: ReplayLLM(recorder: recorder), model: "fake")
+        let recorder = CallScript([[.text("Não posso resumir este conteúdo. Envie outra solicitação para continuar."),
+                                  .finished(.refusal, TokenUsage(input: 900, output: 20))]], whenExhausted: .fim)
+        let note = await ChunkSummarizer.write(.init(range: 0..<2, input: "transcript"), client: CallScriptModel(script: recorder), model: "fake")
         #expect(note.text == nil)
         #expect(note.usage == TokenUsage(input: 900, output: 20)) // billed all the same
     }
 
     @Test func aRequestThatCannotShrinkIsNotSentTwice() async throws {
-        let recorder = Recorder([], failures: [LLMError.contextExceeded("too long"), LLMError.contextExceeded("too long")])
+        let recorder = CallScript([], failures: [LLMError.contextExceeded("too long"), LLMError.contextExceeded("too long")], whenExhausted: .fim)
         let request = TurnRequest(bot: Bot(name: "Audit", role: "", orb: OrbConfig(), permissionMode: .bypass), model: "fake",
-                                  system: "sys", history: [], prompt: String(repeating: "u", count: 20_000), client: ReplayLLM(recorder: recorder),
+                                  system: "sys", history: [], prompt: String(repeating: "u", count: 20_000), client: CallScriptModel(script: recorder),
                                   tools: [], context: ToolContext(workingDirectory: FileManager.default.temporaryDirectory),
                                   budget: ContextBudget(tokens: 1_000))
         var failures: [String] = []

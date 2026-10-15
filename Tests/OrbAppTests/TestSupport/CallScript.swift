@@ -74,6 +74,15 @@ actor CallScript {
         self.before = before
     }
 
+    /// The first calls fail with `failures` (one each, before any event is streamed), the next ones get `answers`.
+    init(_ answers: [[LLMEvent]], failures: [any Error], whenExhausted: WhenExhausted) {
+        self.replies = failures.map { ModelReply.failing($0) } + answers.map { ModelReply($0) }
+        self.failsCall = nil
+        self.holdsCall = nil
+        self.whenExhausted = whenExhausted
+        self.before = nil
+    }
+
     init(replies: [ModelReply], failsCall: Int? = nil, holdsCall: Int? = nil, whenExhausted: WhenExhausted = .repeatLast,
          before: (@Sendable (_ index: Int) async -> Void)? = nil) {
         self.replies = replies
