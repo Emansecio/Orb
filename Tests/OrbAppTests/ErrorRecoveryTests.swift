@@ -16,7 +16,7 @@ final class ErrorRecoveryTests {
         try FileManager.default.createDirectory(at: directory.appending(path: "docs"), withIntermediateDirectories: true)
     }
 
-    deinit { try? FileManager.default.removeItem(at: directory) }
+    deinit { removeTestFolder(directory) }
 
     private func near(_ path: String) -> [String] {
         directory.appending(path: path).lookalikes.map { URL(fileURLWithPath: $0).lastPathComponent }

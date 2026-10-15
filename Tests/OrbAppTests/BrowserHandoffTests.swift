@@ -6,26 +6,6 @@ import UserNotifications
 // The hand-off of `browse_show`: the Orb opens its browser in a window for something only the person can do, shows a card in the
 // chat ("Pronto" / "Cancelar") and waits like it does for an approval; the tool then gives the model the person's answer.
 
-/// A model that plays one scripted answer per call.
-private actor HandoffScript {
-    private var responses: [[LLMEvent]]
-    init(_ responses: [[LLMEvent]]) { self.responses = responses }
-    func next() -> [LLMEvent] { responses.isEmpty ? [.text("fim")] : responses.removeFirst() }
-}
-
-private struct HandoffLLM: LLMClient {
-    let script: HandoffScript
-
-    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
-        AsyncThrowingStream { continuation in
-            Task {
-                for event in await script.next() { continuation.yield(event) }
-                continuation.finish()
-            }
-        }
-    }
-}
-
 struct BrowserHandoffEngineTests {
     private let setup = FakeBrowserSetup()
     private let showCall = LLMEvent.toolCalls([ToolCallRequest(id: "c1", name: "browse_show", arguments: "{}")])
@@ -33,7 +13,7 @@ struct BrowserHandoffEngineTests {
     private func request(mode: PermissionMode = .bypass) -> TurnRequest {
         let bot = Bot(name: "Atlas", role: "", orb: OrbConfig(), permissionMode: mode)
         return TurnRequest(bot: bot, model: "fake", system: "sys", history: [], prompt: "entre no site",
-                           client: HandoffLLM(script: HandoffScript([[showCall], [.text("Pronto, entrei.")]])),
+                           client: CallScriptModel(script: CallScript([[showCall], [.text("Pronto, entrei.")]], whenExhausted: .fim)),
                            tools: ToolBox.browseTools, context: setup.context())
     }
 
@@ -196,7 +176,7 @@ struct BrowserHandoffEngineTests {
 
 @Suite final class BrowserHandoffModelTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbHandoff-\(UUID().uuidString)")
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     @MainActor private func model() -> AppModel {
         var state = AppState.initial

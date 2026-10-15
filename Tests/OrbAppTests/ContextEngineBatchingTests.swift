@@ -13,10 +13,10 @@ private func turn(_ request: String, output: Int, tag: String) -> [ChatMessage] 
      .tool(tag, String(repeating: "x", count: output)), ChatMessage(role: .assistant, content: "Resposta de \(request)")]
 }
 
-private func engineRequest(_ recorder: Recorder, history: [ChatMessage] = [], budget: ContextBudget, toolSize: Int = 100,
+private func engineRequest(_ recorder: CallScript, history: [ChatMessage] = [], budget: ContextBudget, toolSize: Int = 100,
                            system: String = "sys", maxSteps: Int = AgentEngine.defaultMaxSteps, prompt: String = "oi") -> TurnRequest {
     TurnRequest(bot: Bot(name: "Teste", role: "", orb: OrbConfig(), permissionMode: .bypass), model: "fake", system: system, history: history,
-                prompt: prompt, client: ReplayLLM(recorder: recorder), tools: [OutputTool(size: toolSize)],
+                prompt: prompt, client: CallScriptModel(script: recorder), tools: [OutputTool(size: toolSize)],
                 context: ToolContext(workingDirectory: FileManager.default.temporaryDirectory), budget: budget, maxSteps: maxSteps)
 }
 
@@ -28,10 +28,6 @@ private func collect(_ request: TurnRequest) async -> [TurnEvent] {
 
 private func recorded(_ events: [TurnEvent]) -> [ChatMessage] {
     events.compactMap { if case .message(let message) = $0 { message } else { nil } }
-}
-
-private func notices(_ events: [TurnEvent]) -> [String] {
-    events.compactMap { if case .notice(let text) = $0 { text } else { nil } }
 }
 
 /// Collects what `onContextLearned` was called with.
@@ -49,7 +45,7 @@ private final class Learned: @unchecked Sendable {
 struct EngineCutTests {
     @Test func aLongTurnKeepsTheStartOfTheRequestBetweenCompactions() async throws {
         let rounds = (0..<40).map { LLMEvent.toolCalls([call("s\($0)", "read_file", #"{"path":"/tmp/f\#($0).txt"}"#)]) }
-        let recorder = Recorder(rounds.map { [$0] } + [[.text("fim")]])
+        let recorder = CallScript(rounds.map { [$0] } + [[.text("fim")]], whenExhausted: .fim)
         let events = await collect(engineRequest(recorder, budget: ContextBudget(tokens: 6_000), toolSize: 1_500, maxSteps: 50))
         #expect(!events.contains { if case .failed = $0 { true } else { false } })
 
@@ -71,13 +67,13 @@ struct EngineCutTests {
         for index in 0..<40 { history += turn("pedido \(index)", output: 4_500, tag: "h\(index)") }
         // ~45,000 tokens of history in a 100,000-token window.
         let budget = ContextBudget(modelWindow: 100_000)
-        let plain = Recorder([[.text("ok")]])
+        let plain = CallScript([[.text("ok")]], whenExhausted: .fim)
         _ = await collect(engineRequest(plain, history: history, budget: budget))
         let withPlain = await plain.received[0]
         #expect(!withPlain.contains { $0.content.hasPrefix(ContextSummary.marker) })
 
         // The same window, but a system prompt of ~43,000 tokens: the history has to make room for it.
-        let heavy = Recorder([[.text("ok")]])
+        let heavy = CallScript([[.text("ok")]], whenExhausted: .fim)
         _ = await collect(engineRequest(heavy, history: history, budget: budget, system: String(repeating: "s", count: 150_000)))
         let withHeavy = await heavy.received[0]
         #expect(withHeavy.contains { $0.content.hasPrefix(ContextSummary.marker) })
@@ -95,7 +91,7 @@ struct EngineLearningTests {
     }
 
     private func run(window: Int?, failures: [Error], learned: Learned) async -> [TurnEvent] {
-        let recorder = Recorder([[.text("ok")]], failures: failures)
+        let recorder = CallScript([[.text("ok")]], failures: failures, whenExhausted: .fim)
         var request = engineRequest(recorder, history: longHistory(), budget: window.map { ContextBudget(modelWindow: $0) } ?? ContextBudget(tokens: 6_000))
         request.onContextLearned = { tokens, stated in learned.add(tokens, stated: stated) }
         return await collect(request)
@@ -127,7 +123,7 @@ struct EngineLearningTests {
         #expect(budget.tokens == 80_000 && budget.resized(window: 128_000).tokens == 80_000)
         let learned = Learned()
         let overflow = LLMError.http(status: 400, message: "maximum context length is 128000 tokens")
-        let recorder = Recorder([[.text("ok")]], failures: [overflow])
+        let recorder = CallScript([[.text("ok")]], failures: [overflow], whenExhausted: .fim)
         var request = engineRequest(recorder, history: long, budget: budget)
         request.onContextLearned = { tokens, stated in learned.add(tokens, stated: stated) }
         let events = await collect(request)
@@ -171,7 +167,7 @@ struct EngineLearningTests {
     @Test func aBudgetOfPlainTokensStillRetriesWithHalfTheHistory() async {
         let learned = Learned()
         let overflow = LLMError.http(status: 400, message: "maximum context length is 4096 tokens")
-        let recorder = Recorder([[.text("ok")]], failures: [overflow])
+        let recorder = CallScript([[.text("ok")]], failures: [overflow], whenExhausted: .fim)
         var request = engineRequest(recorder, history: history(), budget: ContextBudget(tokens: 6_000))
         request.onContextLearned = { tokens, stated in learned.add(tokens, stated: stated) }
         _ = await collect(request)
@@ -194,7 +190,7 @@ struct EngineNudgeTests {
         for index in 0..<6 { history += turn("pedido antigo \(index)", output: 3_000, tag: "h\(index)") }
         let cutReply: [LLMEvent] = [.text("primeira parte"), .finished(.maxTokens, nil)]
         let rounds = (0..<3).map { [LLMEvent.toolCalls([call("s\($0)", "read_file", #"{"path":"/tmp/g\#($0).txt"}"#)])] }
-        let recorder = Recorder([cutReply] + rounds + [[.text("fim")]])
+        let recorder = CallScript([cutReply] + rounds + [[.text("fim")]], whenExhausted: .fim)
         let events = await collect(engineRequest(recorder, history: history, budget: ContextBudget(tokens: 6_000), toolSize: 9_000,
                                                  prompt: Self.request))
         #expect(!events.contains { if case .failed = $0 { true } else { false } })
@@ -221,7 +217,7 @@ struct EngineNudgeTests {
     @Test func aPausedTaskRecordsTheStepsBeforeTheContinueToo() async throws {
         let first = LLMEvent.toolCalls([call("s0", "read_file", #"{"path":"/tmp/f0.txt"}"#)])
         let second = LLMEvent.toolCalls([call("s1", "read_file", #"{"path":"/tmp/f1.txt"}"#)])
-        let recorder = Recorder([[first], [.text("parte"), .finished(.maxTokens, nil)], [second], [.text("Fiz.")]])
+        let recorder = CallScript([[first], [.text("parte"), .finished(.maxTokens, nil)], [second], [.text("Fiz.")]], whenExhausted: .fim)
         let events = await collect(engineRequest(recorder, budget: .fallback, maxSteps: 4))
         let last = try #require(recorded(events).last)
         #expect(last.content.hasPrefix("Fiz.\n\n" + ProgressRecord.marker))
@@ -283,7 +279,7 @@ struct EngineNudgeTests {
         let queue = SteeringQueue()
         let big = LLMEvent.toolCalls([call("s0", "read_file", #"{"path":"/tmp/g.txt"}"#)])
         let next = LLMEvent.toolCalls([call("s1", "read_file", #"{"path":"/tmp/h.txt"}"#)])
-        let recorder = Recorder([[big], [next], [.text("fim")]])
+        let recorder = CallScript([[big], [next], [.text("fim")]], whenExhausted: .fim)
         var request = engineRequest(recorder, budget: .fallback, toolSize: 9_000, prompt: "tarefa")
         request.steering = queue
         // The user speaks while the first tool runs: the message goes in at the next step boundary.
@@ -304,7 +300,7 @@ struct EngineNudgeTests {
 struct EngineStepLimitTests {
     @Test func theLastStepsClosingWordsCarryTheRecordOfTheTask() async throws {
         let rounds = (0..<2).map { LLMEvent.toolCalls([call("s\($0)", "read_file", #"{"path":"/tmp/f\#($0).txt"}"#)]) }
-        let recorder = Recorder(rounds.map { [$0] } + [[.text("Fiz duas leituras.")]])
+        let recorder = CallScript(rounds.map { [$0] } + [[.text("Fiz duas leituras.")]], whenExhausted: .fim)
         let events = await collect(engineRequest(recorder, budget: .fallback, maxSteps: 3))
         let messages = recorded(events)
         let last = try #require(messages.last)
@@ -315,25 +311,25 @@ struct EngineStepLimitTests {
         // The user sees what the model wrote, not the record.
         let shown = events.compactMap { if case .text(let delta) = $0 { delta } else { nil } }.joined()
         #expect(shown == "Fiz duas leituras.")
-        #expect(notices(events) == [AgentEngine.pausedNotice(after: 3)])
+        #expect(events.notices == [AgentEngine.pausedNotice(after: 3)])
         // Roles alternate: the assistant's closing words are one message.
         #expect(messages.map(\.role) == [.user, .assistant, .tool, .assistant, .tool, .assistant])
     }
 
     @Test func aLastStepThatOnlyCalledToolsLeavesTheRecordAsAMessageOfItsOwn() async throws {
         let rounds = (0..<3).map { LLMEvent.toolCalls([call("s\($0)", "read_file", #"{"path":"/tmp/f\#($0).txt"}"#)]) }
-        let recorder = Recorder(rounds.map { [$0] })
+        let recorder = CallScript(rounds.map { [$0] }, whenExhausted: .fim)
         let events = await collect(engineRequest(recorder, budget: .fallback, maxSteps: 3))
         let messages = recorded(events)
         let last = try #require(messages.last)
         #expect(last.role == .assistant && last.toolCalls.isEmpty)
         #expect(last.content.hasPrefix(ProgressRecord.marker))
         #expect(messages.dropLast().last?.role == .tool)
-        #expect(notices(events) == [AgentEngine.pausedNotice(after: 3)])
+        #expect(events.notices == [AgentEngine.pausedNotice(after: 3)])
     }
 
     @Test func aTurnThatFinishesInTimeLeavesNoRecord() async {
-        let recorder = Recorder([[.toolCalls([call("a")])], [.text("Pronto")]])
+        let recorder = CallScript([[.toolCalls([call("a")])], [.text("Pronto")]], whenExhausted: .fim)
         let events = await collect(engineRequest(recorder, budget: .fallback, maxSteps: 5))
         #expect(!recorded(events).contains { $0.content.contains(ProgressRecord.marker) })
         #expect(!events.contains { if case .taskPaused = $0 { true } else { false } })
@@ -341,9 +337,9 @@ struct EngineStepLimitTests {
 
     @Test func hittingTheLimitTellsTheAppTheTaskIsPaused() async {
         let rounds = (0..<3).map { LLMEvent.toolCalls([call("s\($0)", "read_file", #"{"path":"/tmp/f\#($0).txt"}"#)]) }
-        let events = await collect(engineRequest(Recorder(rounds.map { [$0] }), budget: .fallback, maxSteps: 3))
+        let events = await collect(engineRequest(CallScript(rounds.map { [$0] }, whenExhausted: .fim), budget: .fallback, maxSteps: 3))
         #expect(events.contains { if case .taskPaused = $0 { true } else { false } })
-        let closing = await collect(engineRequest(Recorder(rounds.prefix(2).map { [$0] } + [[.text("Fiz.")]]), budget: .fallback, maxSteps: 3))
+        let closing = await collect(engineRequest(CallScript(rounds.prefix(2).map { [$0] } + [[.text("Fiz.")]], whenExhausted: .fim), budget: .fallback, maxSteps: 3))
         #expect(closing.contains { if case .taskPaused = $0 { true } else { false } })
     }
 
@@ -361,14 +357,14 @@ struct EngineStepLimitTests {
 
     @Test func theNextTurnPicksUpWithTheLastOutputsStillWhole() async {
         let rounds = (0..<4).map { LLMEvent.toolCalls([call("s\($0)", "read_file", #"{"path":"/tmp/f\#($0).txt"}"#)]) }
-        let first = Recorder(rounds.map { [$0] } + [[.text("Parei.")]])
+        let first = CallScript(rounds.map { [$0] } + [[.text("Parei.")]], whenExhausted: .fim)
         let firstEvents = await collect(engineRequest(first, budget: .fallback, toolSize: 20_000, maxSteps: 5))
         var conversation = Conversation()
         conversation.messages = recorded(firstEvents)
         #expect(conversation.isTaskPaused)
 
         let prepared = conversation.prepareHistory(budget: .fallback)
-        let second = Recorder([[.text("Continuando.")]])
+        let second = CallScript([[.text("Continuando.")]], whenExhausted: .fim)
         _ = await collect(engineRequest(second, history: prepared.history, budget: .fallback, prompt: "continua"))
         let sent = await second.received[0]
         let outputs = sent.filter { $0.role == .tool }.map(\.content.count)
@@ -381,7 +377,7 @@ struct EngineStepLimitTests {
         finished[finished.count - 1].content = "Parei."
         var other = Conversation()
         other.messages = finished
-        let third = Recorder([[.text("ok")]])
+        let third = CallScript([[.text("ok")]], whenExhausted: .fim)
         _ = await collect(engineRequest(third, history: other.prepareHistory(budget: .fallback).history, budget: .fallback, prompt: "continua"))
         let oldSent = await third.received[0]
         #expect(oldSent.filter { $0.role == .tool }.allSatisfy { $0.content.count < 5_000 })
@@ -394,7 +390,7 @@ struct EngineSavedOutputsTests {
     @Test func bigOutputsGoToTheFolderTheRequestNames() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: "orb-teste-guardadas-" + UUID().uuidString)
         defer { removeTestFolder(directory) }
-        let recorder = Recorder([[.toolCalls([call("big-1")])], [.text("pronto")]])
+        let recorder = CallScript([[.toolCalls([call("big-1")])], [.text("pronto")]], whenExhausted: .fim)
         var request = engineRequest(recorder, budget: .fallback, toolSize: 120_000)
         request.outputsDirectory = directory
         let events = await collect(request)
@@ -640,7 +636,7 @@ struct ContextSettingsTests {
     }
 
     @Test func theEngineReportsItsOverheadSoTheNextTurnPlansWithIt() async {
-        let recorder = Recorder([[.text("ok")]])
+        let recorder = CallScript([[.text("ok")]], whenExhausted: .fim)
         var request = engineRequest(recorder, budget: ContextBudget(modelWindow: 100_000), system: String(repeating: "s", count: 35_000))
         let measured = Learned()
         request.onOverheadMeasured = { measured.add($0) }

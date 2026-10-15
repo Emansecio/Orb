@@ -268,6 +268,7 @@ struct ChatGPTAuthTests {
         StubProtocol.queue(host: "auth-fail.test", [.init(status: 400, body: #"{"error":"access_denied","error_description":"não"}"#), .init(body: Self.tokenReply)])
         async let first: String = auth.accessToken()
         async let second: String = auth.accessToken()
+        // `async let` cannot be captured by the closure of #expect(throws:), so this one keeps the do/catch.
         do {
             _ = try await (first, second)
             Issue.record("should have thrown")
@@ -286,12 +287,10 @@ struct ChatGPTAuthTests {
         let heard = OSAllocatedUnfairLock(initialState: false) // only a post whose sender is `auth` reaches this observer
         let observer = NotificationCenter.default.addObserver(forName: .chatGPTSessionEnded, object: auth, queue: nil) { _ in heard.withLock { $0 = true } }
         defer { NotificationCenter.default.removeObserver(observer) }
-        do {
+        let error = try #require(await #expect(throws: ToolError.self) {
             _ = try await auth.accessToken()
-            Issue.record("should have thrown")
-        } catch let error as ToolError {
-            #expect(error.message == ChatGPTAuth.sessionEndedMessage)
-        }
+        })
+        #expect(error.message == ChatGPTAuth.sessionEndedMessage)
         // So the settings can offer "Entrar" again.
         #expect(await auth.credential == nil)
         #expect(disk.saved == nil)
@@ -319,23 +318,19 @@ struct ChatGPTAuthTests {
         #expect(await auth.credential != nil)
         // A token the API just turned down is not handed back: the failure is the (retryable) one of the service.
         StubProtocol.queue(host: "auth-busy.test", [.init(status: 429, body: "{}")])
-        do {
+        let error = try #require(await #expect(throws: LLMError.self) {
             _ = try await auth.accessToken(forceRefresh: true)
-            Issue.record("should have thrown")
-        } catch let error as LLMError {
-            #expect(error.isRetryable)
-        }
+        })
+        #expect(error.isRetryable)
     }
 
     @Test func aBusyLoginServiceFailsAnExpiredTokenWithARetryableError() async throws {
         let auth = auth(host: "auth-down.test", disk: Disk(credential(expiresIn: -10)))
         StubProtocol.queue(host: "auth-down.test", [.init(status: 503, body: "<html>try later</html>")])
-        do {
+        let error = try #require(await #expect(throws: LLMError.self) {
             _ = try await auth.accessToken()
-            Issue.record("should have thrown")
-        } catch let error as LLMError {
-            #expect(error.isRetryable)
-        }
+        })
+        #expect(error.isRetryable)
         #expect(await auth.credential != nil) // the login itself is untouched
     }
 

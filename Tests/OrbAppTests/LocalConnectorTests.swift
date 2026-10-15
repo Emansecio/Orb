@@ -419,13 +419,11 @@ struct GmailConnectorTests {
         let mail = FakeMail()
         let gmail = connector(mail)
         mail.fail(containing: "send msg", with: ToolError(AppleScript.timeoutMessage(seconds: 90)))
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "expected an error") {
             _ = try await call(gmail, "send_message", draft)
-            Issue.record("expected an error")
-        } catch {
-            let text = (error as? ToolError)?.message ?? ""
-            #expect(text.contains("pode ter sido enviado") && text.contains("Enviados"), "\(text)")
-        }
+        })
+        let text = error.message
+        #expect(text.contains("pode ter sido enviado") && text.contains("Enviados"), "\(text)")
         // A draft that ran out of time is just an error: nothing could have left.
         mail.fail(containing: "save msg", with: ToolError(AppleScript.timeoutMessage(seconds: 90)))
         await #expect(throws: ToolError(AppleScript.timeoutMessage(seconds: 90))) { try await call(gmail, "create_draft", draft) }

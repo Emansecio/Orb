@@ -90,41 +90,13 @@ struct CacheMetricsTests {
 
 // MARK: - The engine reports each request
 
-private actor Replies {
-    private var queue: [[LLMEvent]]
-    init(_ queue: [[LLMEvent]]) { self.queue = queue }
-    func next() -> [LLMEvent] { queue.isEmpty ? [.text("fim")] : queue.removeFirst() }
-}
-
-private struct ReplyingLLM: LLMClient {
-    let replies: Replies
-    var arrangesPromptCache = true
-    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
-        AsyncThrowingStream { continuation in
-            Task {
-                for event in await replies.next() { continuation.yield(event) }
-                continuation.finish()
-            }
-        }
-    }
-}
-
-private struct LookTool: AgentTool {
-    var spec: ToolSpec { ToolSpec(name: "look", description: "Looks", parameters: .schema([:])) }
-    var kind: ToolCall.Kind { .file }
-    var capability: Capability? { nil }
-    func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
-    func summary(_ arguments: JSONValue) -> (title: String, detail: String) { ("Olhando", "") }
-    func run(_ arguments: JSONValue, context: ToolContext) async throws -> String { "visto" }
-}
-
 struct EngineCacheReportTests {
     private let lookCall = LLMEvent.toolCalls([ToolCallRequest(id: "c1", name: "look", arguments: "{}")])
 
     private func events(_ replies: [[LLMEvent]], arrangesCache: Bool = true) async -> [TurnEvent] {
         let bot = Bot(name: "Teste", role: "", orb: OrbConfig(), permissionMode: .auto)
         let request = TurnRequest(bot: bot, model: "fake", system: "sys", history: [], prompt: "oi",
-                                  client: ReplyingLLM(replies: Replies(replies), arrangesPromptCache: arrangesCache), tools: [LookTool()],
+                                  client: CallScriptModel(script: CallScript(replies, whenExhausted: .fim), arrangesPromptCache: arrangesCache), tools: [FixedLookTool()],
                                   context: ToolContext(workingDirectory: URL(fileURLWithPath: NSTemporaryDirectory())))
         var collected: [TurnEvent] = []
         for await event in AgentEngine().run(request) { collected.append(event) }
@@ -137,10 +109,6 @@ struct EngineCacheReportTests {
 
     private func totals(_ events: [TurnEvent]) -> [TokenUsage] {
         events.compactMap { if case .usage(let usage) = $0 { usage } else { nil } }
-    }
-
-    private func notices(_ events: [TurnEvent]) -> [String] {
-        events.compactMap { if case .notice(let text) = $0 { text } else { nil } }
     }
 
     @Test func eachRequestIsReportedAloneBeforeTheTurnsRunningTotal() async throws {
@@ -172,7 +140,7 @@ struct EngineCacheReportTests {
         let all = await events([[lookCall, .finished(.toolUse, miss)], [lookCall, .finished(.toolUse, miss)],
                                 [lookCall, .finished(.toolUse, miss)], [lookCall, .finished(.toolUse, miss)],
                                 [.text("pronto"), .finished(.done, miss)]])
-        #expect(notices(all) == [CacheHealth.notice])
+        #expect(all.notices == [CacheHealth.notice])
     }
 
     @Test func aClientThatNeverAsksForACacheIsNotBlamedForMissingIt() async {
@@ -180,7 +148,7 @@ struct EngineCacheReportTests {
         let all = await events([[lookCall, .finished(.toolUse, miss)], [lookCall, .finished(.toolUse, miss)],
                                 [lookCall, .finished(.toolUse, miss)], [lookCall, .finished(.toolUse, miss)],
                                 [.text("pronto"), .finished(.done, miss)]], arrangesCache: false)
-        #expect(notices(all).isEmpty)
+        #expect(all.notices.isEmpty)
     }
 
     @Test func onlyTheClientsThatArrangeACacheAreHeldToIt() throws {
@@ -201,14 +169,14 @@ struct EngineCacheReportTests {
         let hit = TokenUsage(input: 200, output: 10, cacheRead: 9_000, cacheWrite: 0)
         let all = await events([[lookCall, .finished(.toolUse, write)], [lookCall, .finished(.toolUse, hit)],
                                 [lookCall, .finished(.toolUse, hit)], [.text("pronto"), .finished(.done, hit)]])
-        #expect(notices(all).isEmpty)
+        #expect(all.notices.isEmpty)
     }
 
     @Test func aServerWithoutACacheReportSaysNothing() async {
         let plain = TokenUsage(input: 9_000, output: 10)
         let all = await events([[lookCall, .finished(.toolUse, plain)], [lookCall, .finished(.toolUse, plain)],
                                 [lookCall, .finished(.toolUse, plain)], [.text("pronto"), .finished(.done, plain)]])
-        #expect(notices(all).isEmpty)
+        #expect(all.notices.isEmpty)
     }
 }
 
@@ -220,10 +188,6 @@ struct AppModelCacheReportTests {
         let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
         let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)
         return (model, model.bots[0], root)
-    }
-
-    private func notices(_ model: AppModel, _ bot: Bot) -> [String] {
-        model.transcript(bot.id).compactMap { if case .notice(let text) = $0.kind { text } else { nil } }
     }
 
     @Test func theLatestRequestAndTheTurnTotalAreKeptApart() {
@@ -246,6 +210,6 @@ struct AppModelCacheReportTests {
         model.apply(.notice(CacheHealth.notice), to: bot.id)
         model.apply(.notice("Outro aviso"), to: bot.id)
         // Other notices are not collapsed; the cache one is.
-        #expect(notices(model, bot) == [CacheHealth.notice, "Outro aviso", "Outro aviso"])
+        #expect(model.notices(bot.id) == [CacheHealth.notice, "Outro aviso", "Outro aviso"])
     }
 }

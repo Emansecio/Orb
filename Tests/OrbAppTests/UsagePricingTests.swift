@@ -267,43 +267,37 @@ struct UsagePricingTests {
 
     // MARK: Prices that move with the hour
 
-    private func utc(_ y: Int, _ m: Int, _ d: Int, _ h: Int = 0) -> Date {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = .gmt
-        return calendar.date(from: DateComponents(year: y, month: m, day: d, hour: h))!
-    }
-
     @Test func deepSeekChargesHalfOutsideItsPeakHours() throws {
         // 2026-10-07 is a Wednesday, 2026-10-10 a Saturday.
         let peaks = [1, 2, 3, 6, 7, 8, 9], offPeaks = [0, 4, 5, 10, 15, 23]
-        for hour in peaks { #expect(PriceTable.isDeepSeekPeak(utc(2026, 10, 7, hour)), "\(hour)h") }
-        for hour in offPeaks { #expect(!PriceTable.isDeepSeekPeak(utc(2026, 10, 7, hour)), "\(hour)h") }
-        for hour in 0..<24 { #expect(!PriceTable.isDeepSeekPeak(utc(2026, 10, 10, hour)), "weekend \(hour)h") }
-        let peak = try #require(PriceTable.price(forModel: "deepseek-flash", at: utc(2026, 10, 7, 2)))
-        let off = try #require(PriceTable.price(forModel: "deepseek-flash", at: utc(2026, 10, 7, 15)))
+        for hour in peaks { #expect(PriceTable.isDeepSeekPeak(utcDate(2026, 10, 7, hour)), "\(hour)h") }
+        for hour in offPeaks { #expect(!PriceTable.isDeepSeekPeak(utcDate(2026, 10, 7, hour)), "\(hour)h") }
+        for hour in 0..<24 { #expect(!PriceTable.isDeepSeekPeak(utcDate(2026, 10, 10, hour)), "weekend \(hour)h") }
+        let peak = try #require(PriceTable.price(forModel: "deepseek-flash", at: utcDate(2026, 10, 7, 2)))
+        let off = try #require(PriceTable.price(forModel: "deepseek-flash", at: utcDate(2026, 10, 7, 15)))
         #expect(peak == ModelPrice(input: 0.3, cacheRead: 0.006, output: 1.2))
         #expect(abs(off.input - 0.15) < 1e-12 && abs((off.cacheRead ?? 0) - 0.003) < 1e-12 && abs(off.output - 0.6) < 1e-12)
-        let pro = try #require(PriceTable.price(forModel: "deepseek/deepseek-v4-pro", at: utc(2026, 10, 10, 8)))
+        let pro = try #require(PriceTable.price(forModel: "deepseek/deepseek-v4-pro", at: utcDate(2026, 10, 10, 8)))
         #expect(abs(pro.input - 0.66) < 1e-12 && abs(pro.output - 1.98) < 1e-12)
         // Another model's price does not move, and with no hour the usual (peak) price is the answer.
-        #expect(PriceTable.price(forModel: "gpt-5", at: utc(2026, 10, 10, 8)) == PriceTable.price(forModel: "gpt-5"))
+        #expect(PriceTable.price(forModel: "gpt-5", at: utcDate(2026, 10, 10, 8)) == PriceTable.price(forModel: "gpt-5"))
         #expect(PriceTable.price(forModel: "deepseek-flash") == peak)
     }
 
     @Test func theCostOfARowFollowsItsHour() {
         let totals = UsageTotals(requests: 1, input: 1_000_000, output: 1_000_000)
-        let peak = book().cost(of: totals, model: "commandCode/deepseek-flash", at: utc(2026, 10, 7, 2))
-        let off = book().cost(of: totals, model: "commandCode/deepseek-flash", at: utc(2026, 10, 7, 12))
+        let peak = book().cost(of: totals, model: "commandCode/deepseek-flash", at: utcDate(2026, 10, 7, 2))
+        let off = book().cost(of: totals, model: "commandCode/deepseek-flash", at: utcDate(2026, 10, 7, 12))
         guard case .paid(let high) = peak, case .paid(let low) = off else { Issue.record("not paid"); return }
         #expect(abs(high - 1.5) < 1e-9 && abs(low - 0.75) < 1e-9)
     }
 
     @Test func theGeminiFlashesDoubleOnTheFirstOfJanuary2027() throws {
-        let before = try #require(PriceTable.price(forModel: "gemini-3.8-flash", at: utc(2026, 12, 31, 23)))
-        let after = try #require(PriceTable.price(forModel: "gemini-3.8-flash", at: utc(2027, 1, 1, 0)))
+        let before = try #require(PriceTable.price(forModel: "gemini-3.8-flash", at: utcDate(2026, 12, 31, 23)))
+        let after = try #require(PriceTable.price(forModel: "gemini-3.8-flash", at: utcDate(2027, 1, 1, 0)))
         #expect(before == ModelPrice(input: 0.75, cacheRead: 0.075, output: 3.75))
         #expect(abs(after.input - 1.5) < 1e-12 && abs((after.cacheRead ?? 0) - 0.15) < 1e-12 && abs(after.output - 7.5) < 1e-12)
-        #expect(PriceTable.price(forModel: "gemini-3.5-flash", at: utc(2027, 6, 1)) == PriceTable.price(forModel: "gemini-3.5-flash"))
+        #expect(PriceTable.price(forModel: "gemini-3.5-flash", at: utcDate(2027, 6, 1)) == PriceTable.price(forModel: "gemini-3.5-flash"))
     }
 
     // MARK: The editor

@@ -18,9 +18,9 @@ private func turn(_ request: String, steps: Int = 1, output: Int = 100, tag: Str
     return messages
 }
 
-private func engineRequest(_ recorder: Recorder, history: [ChatMessage] = [], budget: ContextBudget, toolSize: Int = 100,
+private func engineRequest(_ recorder: CallScript, history: [ChatMessage] = [], budget: ContextBudget, toolSize: Int = 100,
                            bot: Bot = Bot(name: "Teste", role: "", orb: OrbConfig(), permissionMode: .bypass)) -> TurnRequest {
-    TurnRequest(bot: bot, model: "fake", system: "sys", history: history, prompt: "oi", client: ReplayLLM(recorder: recorder),
+    TurnRequest(bot: bot, model: "fake", system: "sys", history: history, prompt: "oi", client: CallScriptModel(script: recorder),
                 tools: [OutputTool(size: toolSize)], context: ToolContext(workingDirectory: FileManager.default.temporaryDirectory),
                 budget: budget)
 }
@@ -597,7 +597,7 @@ struct ToolOutputCapTests {
         bot.id = botID
         let folder = ToolOutputCap.defaultDirectory.appending(path: botID.uuidString)
         defer { try? FileManager.default.removeItem(at: folder) }
-        let recorder = Recorder([[.toolCalls([call("big-1")])], [.text("pronto")]])
+        let recorder = CallScript([[.toolCalls([call("big-1")])], [.text("pronto")]], whenExhausted: .fim)
 
         let events = await collect(engineRequest(recorder, budget: .fallback, toolSize: 120_000, bot: bot))
 
@@ -621,7 +621,7 @@ struct ToolOutputCapTests {
 struct ContextEngineTests {
     @Test func theTurnIsTrimmedBeforeEveryModelCallAndKeepsTheRequest() async throws {
         let rounds = (0..<12).map { LLMEvent.toolCalls([call("s\($0)")]) }
-        let recorder = Recorder(rounds.map { [$0] } + [[.text("fim")]])
+        let recorder = CallScript(rounds.map { [$0] } + [[.text("fim")]], whenExhausted: .fim)
         let budget = ContextBudget(tokens: 3_000)   // ≈ 10,500 characters of history
         let events = await collect(engineRequest(recorder, budget: budget, toolSize: 6_000))
 
@@ -646,7 +646,7 @@ struct ContextEngineTests {
         var history: [ChatMessage] = []
         for index in 0..<30 { history += turn("pedido \(index)", steps: 1, output: 600, tag: "h\(index)") }
         let overflow = LLMError.http(status: 400, message: "This model's maximum context length is 128000 tokens")
-        let recorder = Recorder([[.text("ok")]], failures: [overflow])
+        let recorder = CallScript([[.text("ok")]], failures: [overflow], whenExhausted: .fim)
         let events = await collect(engineRequest(recorder, history: history, budget: ContextBudget(tokens: 6_000)))
 
         let received = await recorder.received
@@ -658,7 +658,7 @@ struct ContextEngineTests {
 
     @Test func aTurnThatSetsStepsAsideAnnouncesItOnceWithNumbers() async {
         let rounds = (0..<8).map { LLMEvent.toolCalls([call("s\($0)")]) }
-        let recorder = Recorder(rounds.map { [$0] } + [[.text("fim")]])
+        let recorder = CallScript(rounds.map { [$0] } + [[.text("fim")]], whenExhausted: .fim)
         let events = await collect(engineRequest(recorder, budget: ContextBudget(tokens: 1_500), toolSize: 3_000))
         let reports = events.compactMap { if case .compacted(let report) = $0 { report } else { nil } }
         #expect(reports.count == 1)
@@ -675,7 +675,7 @@ struct ContextEngineTests {
         var history: [ChatMessage] = []
         for index in 0..<8 { history += turn("pedido número \(index) do projeto", steps: 1, output: 3_000, tag: "h\(index)") }
         let rounds = (0..<4).map { LLMEvent.toolCalls([call("s\($0)")]) }
-        let recorder = Recorder(rounds.map { [$0] } + [[.text("fim")]])
+        let recorder = CallScript(rounds.map { [$0] } + [[.text("fim")]], whenExhausted: .fim)
         let events = await collect(engineRequest(recorder, history: history, budget: ContextBudget(tokens: 4_000), toolSize: 3_000))
         let folds = events.compactMap { event -> CompactionReport? in
             if case .compacted(let report) = event, report.kind == .turns { report } else { nil }
@@ -692,7 +692,7 @@ struct ContextEngineTests {
     }
 
     @Test func aShortTurnAnnouncesNothing() async {
-        let recorder = Recorder([[.text("oi")]])
+        let recorder = CallScript([[.text("oi")]], whenExhausted: .fim)
         let events = await collect(engineRequest(recorder, budget: .fallback))
         #expect(!events.contains { if case .notice = $0 { true } else { false } })
     }
@@ -700,7 +700,7 @@ struct ContextEngineTests {
     @Test func anOverflowReportedInsideTheStreamIsRetriedToo() async {
         var history: [ChatMessage] = []
         for index in 0..<8 { history += turn("pedido \(index)", steps: 1, output: 3_000, tag: "h\(index)") }
-        let recorder = Recorder([[.text("ok")]], failures: [LLMError.invalidResponse("Your input exceeds the context window of this model")])
+        let recorder = CallScript([[.text("ok")]], failures: [LLMError.invalidResponse("Your input exceeds the context window of this model")], whenExhausted: .fim)
         let events = await collect(engineRequest(recorder, history: history, budget: ContextBudget(tokens: 4_000)))
         #expect(await recorder.received.count == 2)
         #expect(failures(events).isEmpty)
@@ -708,7 +708,7 @@ struct ContextEngineTests {
 
     @Test func aSecondOverflowIsReportedInsteadOfLooping() async {
         let overflow = LLMError.http(status: 400, message: "prompt is too long: 300000 tokens > 200000 maximum")
-        let recorder = Recorder([], failures: [overflow, overflow])
+        let recorder = CallScript([], failures: [overflow, overflow], whenExhausted: .fim)
         let events = await collect(engineRequest(recorder, history: longHistory(), budget: .fallback))
         #expect(await recorder.received.count == 2)
         #expect(failures(events).count == 1)
@@ -720,14 +720,14 @@ struct ContextEngineTests {
         #expect(!ContextBudget(modelWindow: 16_000).refined(overheadTokens: 8_000).isCrowded)
         #expect(!ContextBudget.fallback.isCrowded)
         let overflow = LLMError.http(status: 400, message: "maximum context length is 2000 tokens")
-        let recorder = Recorder([], failures: [overflow, overflow])
+        let recorder = CallScript([], failures: [overflow, overflow], whenExhausted: .fim)
         let events = await collect(engineRequest(recorder, budget: ContextBudget(modelWindow: 2_000)))
         let failure = try #require(failures(events).first)
         #expect(failure.contains("quase enchem a janela de 2 mil tokens"))
     }
 
     @Test func otherErrorsAreNotRetried() async {
-        let recorder = Recorder([], failures: [LLMError.http(status: 401, message: "invalid api key")])
+        let recorder = CallScript([], failures: [LLMError.http(status: 401, message: "invalid api key")], whenExhausted: .fim)
         let events = await collect(engineRequest(recorder, budget: .fallback))
         #expect(await recorder.received.count == 1)
         #expect(failures(events).count == 1)

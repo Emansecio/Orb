@@ -160,14 +160,12 @@ struct MCPStdioRobustnessTests {
         // The second silent call closes the connection while this one is still waiting for its turn at the server.
         let waiting = Task { try await connection.call("echo", arguments: .object(["text": .string("x")]), timeout: .seconds(20)) }
         await #expect(throws: ToolError.self) { try await connection.call("hang", arguments: .object([:]), timeout: .milliseconds(800)) }
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "expected an error") {
             _ = try await waiting.value
-            Issue.record("expected an error")
-        } catch {
-            let text = (error as? ToolError)?.message ?? "\(error)"
-            #expect(text.contains("reiniciado"), "\(text)")
-            #expect(!text.contains("a tempo"), "\(text)")
-        }
+        })
+        let text = error.message
+        #expect(text.contains("reiniciado"), "\(text)")
+        #expect(!text.contains("a tempo"), "\(text)")
     }
 
     @Test func aServerThatCannotListItsToolsAnymoreIsClosedAtOnce() async throws {

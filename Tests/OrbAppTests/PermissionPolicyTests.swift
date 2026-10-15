@@ -17,7 +17,7 @@ private final class Folders {
         for folder in [orb, elsewhere] { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
     }
 
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     var context: ToolContext { ToolContext(workingDirectory: orb) }
 }

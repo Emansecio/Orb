@@ -170,13 +170,9 @@ struct UIReadToolTests {
         try await tool.run(.object(arguments), context: context)
     }
 
-    private func failure(_ body: () async throws -> String) async -> String {
-        do { _ = try await body(); return "" } catch { return error.localizedDescription }
-    }
-
     @Test func withoutTheAccessibilityPermissionItReturnsThePermissionProblemAndTouchesNothing() async {
         let (tool, system, _) = setup(trusted: false, windows: [fake("AXWindow", title: "A")])
-        let message = await failure { try await read(tool) }
+        let message = await failureMessage { try await read(tool) }
         #expect(message == MacPermissionProblem.accessibility.modelMessage)
         #expect(MacPermissionProblem.detect(in: message) == .accessibility, "the transcript row offers Abrir Ajustes")
         #expect(message.contains("Acessibilidade"))
@@ -199,9 +195,9 @@ struct UIReadToolTests {
         #expect(try await read(tool, ["window": .string("1")]).contains("w1 window “Primeira”"))
         #expect(try await read(tool, ["window": .number(1)]).contains("w1 window “Primeira”"), "a JSON number is a position too")
         #expect(try await read(tool, ["window": .string("primeira")]).contains("w1 window “Primeira”"))
-        let outOfRange = await failure { try await read(tool, ["window": .string("5")]) }
+        let outOfRange = await failureMessage { try await read(tool, ["window": .string("5")]) }
         #expect(outOfRange.contains("2 janelas") && outOfRange.contains("Janelas: 1"))
-        let unknown = await failure { try await read(tool, ["window": .string("nada")]) }
+        let unknown = await failureMessage { try await read(tool, ["window": .string("nada")]) }
         #expect(unknown.contains("Nenhuma janela"))
     }
 
@@ -222,11 +218,11 @@ struct UIReadToolTests {
 
     @Test func anAppThatIsNotRunningOrDoesNotAnswerIsAClearError() async {
         let (tool, system, _) = setup(windows: [])
-        let closed = await failure { try await read(tool, ["app": .string("Pages")]) }
+        let closed = await failureMessage { try await read(tool, ["app": .string("Pages")]) }
         #expect(closed.contains("\"Pages\" não está aberto") && closed.contains("open"))
 
         system.roots[100] = FakeElement() // answers nothing at all, like a hung app
-        let silent = await failure { try await read(tool) }
+        let silent = await failureMessage { try await read(tool) }
         #expect(silent.contains("não respondeu"))
     }
 
@@ -323,10 +319,6 @@ struct UIActToolTests {
         _ = try await rig.read.run(.object([:]), context: context)
     }
 
-    private func failure(_ body: () async throws -> String) async -> String {
-        do { _ = try await body(); return "" } catch { return error.localizedDescription }
-    }
-
     // MARK: Pressing and checking
 
     @Test func pressClicksTheElementTheIdNamedAndReportsWhatChanged() async throws {
@@ -360,12 +352,12 @@ struct UIActToolTests {
 
     @Test func actingBeforeReadingOrWithAnUnknownIdIsRefused() async throws {
         let rig = rig(windows: [fake("AXWindow", title: "A", [fakeButton("X")])])
-        let early = await failure { try await act(rig, ["action": .string("press"), "id": .string("w1.1")]) }
+        let early = await failureMessage { try await act(rig, ["action": .string("press"), "id": .string("w1.1")]) }
         #expect(early.contains("chame ui_read antes"))
         try await readFirst(rig)
-        let unknown = await failure { try await act(rig, ["action": .string("press"), "id": .string("w1.9")]) }
+        let unknown = await failureMessage { try await act(rig, ["action": .string("press"), "id": .string("w1.9")]) }
         #expect(unknown.contains("não está na última leitura"))
-        let malformed = await failure { try await act(rig, ["action": .string("press"), "id": .string("botão salvar")]) }
+        let malformed = await failureMessage { try await act(rig, ["action": .string("press"), "id": .string("botão salvar")]) }
         #expect(malformed.contains("Id inválido"))
     }
 
@@ -381,7 +373,7 @@ struct UIActToolTests {
         var (r, _, target) = build()
         try await readFirst(r)
         target.attrs["AXTitle"] = .string("Salvar como…")
-        var message = await failure { try await act(r, ["action": .string("press"), "id": .string("w1.2")]) }
+        var message = await failureMessage { try await act(r, ["action": .string("press"), "id": .string("w1.2")]) }
         #expect(message.contains(stale) && target.performed.isEmpty)
 
         // Something before it disappeared, so the path now leads to another element. Without the live reference kept from
@@ -391,7 +383,7 @@ struct UIActToolTests {
         try await readFirst(r)
         window.children.removeFirst()
         UILiveElements.shared.forget(bot: context.botID, pid: 100)
-        message = await failure { try await act(r, ["action": .string("press"), "id": .string("w1.2")]) }
+        message = await failureMessage { try await act(r, ["action": .string("press"), "id": .string("w1.2")]) }
         #expect(message.contains(stale) && target.performed.isEmpty)
         // …while the live reference still reaches the very element the reading named, which is pressed (design §3).
         (r, window, target) = build()
@@ -404,14 +396,14 @@ struct UIActToolTests {
         (r, _, target) = build()
         try await readFirst(r)
         target.attrs["AXRole"] = .string("AXCheckBox")
-        message = await failure { try await act(r, ["action": .string("press"), "id": .string("w1.2")]) }
+        message = await failureMessage { try await act(r, ["action": .string("press"), "id": .string("w1.2")]) }
         #expect(message.contains(stale))
 
         // The window has another title now (a different document).
         (r, window, target) = build()
         try await readFirst(r)
         window.attrs["AXTitle"] = .string("Outro documento")
-        message = await failure { try await act(r, ["action": .string("press"), "id": .string("w1.2")]) }
+        message = await failureMessage { try await act(r, ["action": .string("press"), "id": .string("w1.2")]) }
         #expect(message.contains(stale))
 
         // The app was relaunched.
@@ -419,7 +411,7 @@ struct UIActToolTests {
         try await readFirst(r)
         r.system.apps = [FakeAccessibility.app("Notas", "com.apple.Notes", pid: 101, active: true)]
         r.system.roots[101] = r.root
-        message = await failure { try await act(r, ["action": .string("press"), "id": .string("w1.2")]) }
+        message = await failureMessage { try await act(r, ["action": .string("press"), "id": .string("w1.2")]) }
         #expect(message.contains(stale))
     }
 
@@ -441,7 +433,7 @@ struct UIActToolTests {
         try await readFirst(rig)
         #expect(try await act(rig, ["action": .string("press"), "id": .string("w1.1")]).hasPrefix("Selecionei"))
         #expect(row.assignedValue("AXSelected")?.bool == true)
-        let refused = await failure { try await act(rig, ["action": .string("press"), "id": .string("w1.2")]) }
+        let refused = await failureMessage { try await act(rig, ["action": .string("press"), "id": .string("w1.2")]) }
         #expect(refused.contains("não aceita clique") && refused.contains("ShowMenu"))
     }
 
@@ -463,9 +455,9 @@ struct UIActToolTests {
         _ = try await act(rig, ["action": .string("set_value"), "id": .string("w1.2"), "value": .string("7,5")])
         if case .number(let number)? = slider.assignedValue("AXValue") { #expect(number == 7.5) } else { Issue.record("expected a number") }
 
-        let refused = await failure { try await act(rig, ["action": .string("set_value"), "id": .string("w1.3"), "value": .string("x")]) }
+        let refused = await failureMessage { try await act(rig, ["action": .string("set_value"), "id": .string("w1.3"), "value": .string("x")]) }
         #expect(refused.contains("não aceita receber um valor"))
-        let missing = await failure { try await act(rig, ["action": .string("set_value"), "id": .string("w1.1")]) }
+        let missing = await failureMessage { try await act(rig, ["action": .string("set_value"), "id": .string("w1.1")]) }
         #expect(missing.contains("\"value\""))
     }
 
@@ -478,7 +470,7 @@ struct UIActToolTests {
         try await readFirst(rig)
 
         #expect(try await act(rig, ["action": .string("increment"), "id": .string("w1.1")]).contains("valor “4”"))
-        let down = await failure { try await act(rig, ["action": .string("decrement"), "id": .string("w1.1")]) }
+        let down = await failureMessage { try await act(rig, ["action": .string("decrement"), "id": .string("w1.1")]) }
         #expect(down.contains("não aceita diminuir"))
         #expect(try await act(rig, ["action": .string("focus"), "id": .string("w1.2")]).hasPrefix("Dei foco"))
         #expect(field.assignedValue("AXFocused")?.bool == true)
@@ -489,7 +481,7 @@ struct UIActToolTests {
         let inner = fake("AXWindow", title: "Dentro", actions: ["AXRaise"])
         let rig = rig(windows: [fake("AXWindow", title: "A", [inner])])
         try await readFirst(rig)
-        let refused = await failure { try await act(rig, ["action": .string("focus"), "id": .string("w1.1")]) }
+        let refused = await failureMessage { try await act(rig, ["action": .string("focus"), "id": .string("w1.1")]) }
         #expect(refused.contains("não aceita foco"))
         #expect(inner.performed.isEmpty)
     }
@@ -497,9 +489,9 @@ struct UIActToolTests {
     @Test func unknownActionsAndFailuresFromTheAPIAreExplained() async throws {
         let rig = rig(windows: [fake("AXWindow", title: "A", [fakeButton("X")])])
         try await readFirst(rig)
-        let unknown = await failure { try await act(rig, ["action": .string("triple_click"), "id": .string("w1.1")]) }
+        let unknown = await failureMessage { try await act(rig, ["action": .string("triple_click"), "id": .string("w1.1")]) }
         #expect(unknown.contains("Ação desconhecida") && unknown.contains("pick_menu"))
-        let noID = await failure { try await act(rig, ["action": .string("press")]) }
+        let noID = await failureMessage { try await act(rig, ["action": .string("press")]) }
         #expect(noID.contains("\"id\""))
 
         #expect(UIAccess.error(for: AXFailure.cannotComplete, app: notes).localizedDescription.contains("não respondeu a tempo"))
@@ -552,7 +544,7 @@ struct UIActToolTests {
     @Test func pickMenuExplainsWhatWentWrong() async throws {
         let (rig, _, _) = menuRig()
         func attempt(_ path: [String]) async -> String {
-            await failure { try await act(rig, ["action": .string("pick_menu"), "app": .string("Notas"), "menu_path": .array(path.map(JSONValue.string))]) }
+            await failureMessage { try await act(rig, ["action": .string("pick_menu"), "app": .string("Notas"), "menu_path": .array(path.map(JSONValue.string))]) }
         }
         let unknownTop = await attempt(["Arquivos", "Novo"])
         #expect(unknownTop.contains("Não achei “Arquivos” na barra de menus") && unknownTop.contains("Opções: Arquivo, Editar"))
@@ -562,7 +554,7 @@ struct UIActToolTests {
         #expect(disabled.contains("desativado"))
         let noSubmenu = await attempt(["Arquivo", "Novo", "Algo"])
         #expect(noSubmenu.contains("não abre um submenu"))
-        let none = await failure { try await act(rig, ["action": .string("pick_menu"), "app": .string("Notas")]) }
+        let none = await failureMessage { try await act(rig, ["action": .string("pick_menu"), "app": .string("Notas")]) }
         #expect(none.contains("menu_path"))
     }
 
@@ -708,7 +700,7 @@ struct UIActToolTests {
     @Test func actingWithoutThePermissionReturnsTheProblemBeforeTouchingAnything() async {
         let rig = rig(windows: [])
         rig.system.trusted = false
-        let message = await failure { try await act(rig, ["action": .string("pick_menu"), "menu_path": .array([.string("Arquivo")])]) }
+        let message = await failureMessage { try await act(rig, ["action": .string("pick_menu"), "menu_path": .array([.string("Arquivo")])]) }
         #expect(MacPermissionProblem.detect(in: message) == .accessibility)
         #expect(rig.system.rootCalls == 0 && rig.system.activated.isEmpty)
     }

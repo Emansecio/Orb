@@ -16,11 +16,6 @@ import Testing
 
     private func conversationURL(_ id: UUID) -> URL { root.appending(path: "conversations/\(id.uuidString).json") }
 
-    private func put(_ text: String, at url: URL) throws {
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data(text.utf8).write(to: url)
-    }
-
     private func siblings(of url: URL, withPrefix prefix: String) -> [URL] {
         let names = (try? FileManager.default.contentsOfDirectory(atPath: url.deletingLastPathComponent().path)) ?? []
         return names.filter { $0.hasPrefix(prefix) }.sorted().map { url.deletingLastPathComponent().appending(path: $0) }
@@ -71,23 +66,23 @@ import Testing
     @Test func aFileThatCannotBeMovedAsideIsNeverWrittenOver() throws {
         try put("{ not json", at: stateURL)
         try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: root.path) // no moving or replacing
-        let failures = Collected()
-        let store = Store(directory: root) { failures.add($0.message) }
+        let failures = LockedBox<[String]>([])
+        let store = Store(directory: root) { failures.append($0.message) }
         let read = store.readState()
         #expect(read.value == nil && read.notice?.copy == nil && read.notice != nil)
 
         store.save(AppState.initial)
         store.flush()
         #expect(try String(contentsOf: stateURL, encoding: .utf8) == "{ not json")
-        #expect(failures.messages.count == 1)
+        #expect(failures.value.count == 1)
     }
 
     @Test func aFileThatCannotBeReadIsBlockedFromWrites() throws {
         try put("precious", at: stateURL)
         // The folder stays writable: only the guard (not the filesystem) can stop the write.
         try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: stateURL.path)
-        let failures = Collected()
-        let store = Store(directory: root) { failures.add($0.message) }
+        let failures = LockedBox<[String]>([])
+        let store = Store(directory: root) { failures.append($0.message) }
         let read = store.readState()
         guard read.value == nil, read.notice != nil else { // running as root can read it anyway
             try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: stateURL.path)
@@ -99,17 +94,17 @@ import Testing
         store.flush()
         try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: stateURL.path)
         #expect(try String(contentsOf: stateURL, encoding: .utf8) == "precious")
-        #expect(failures.messages.count == 1)
+        #expect(failures.value.count == 1)
     }
 
     @Test func saveFailuresAreReported() throws {
         try put("a file, not a folder", at: root.appending(path: "data"))
-        let failures = Collected()
-        let store = Store(directory: root.appending(path: "data")) { failures.add($0.message) }
+        let failures = LockedBox<[String]>([])
+        let store = Store(directory: root.appending(path: "data")) { failures.append($0.message) }
         store.save(AppState.initial)
         store.flush()
-        #expect(failures.messages.count == 1)
-        #expect(failures.messages.first?.contains("state.json") == true)
+        #expect(failures.value.count == 1)
+        #expect(failures.value.first?.contains("state.json") == true)
     }
 
     // MARK: Tolerant decoding
@@ -219,19 +214,11 @@ import Testing
 
     // MARK: Pruning
 
-    private func turn(_ n: Int, output: String) -> (items: [TranscriptItem], messages: [ChatMessage]) {
-        let call = ToolCall(kind: .file, title: "Lendo", detail: "f\(n)", state: .done, output: output)
-        return ([TranscriptItem(.user(text: "pergunta \(n)", attachments: [])), TranscriptItem(.tool(call)),
-                 TranscriptItem(.bot(text: "resposta \(n)", isStreaming: false))],
-                [.user("pergunta \(n)"), ChatMessage(role: .assistant, content: "", toolCalls: [ToolCallRequest(id: "c\(n)", name: "read_file", arguments: "{}")]),
-                 .tool("c\(n)", output), ChatMessage(role: .assistant, content: "resposta \(n)")])
-    }
-
     private func longConversation() -> (Conversation, outputs: [String]) {
         let outputs = (1...3).map { n in "\(n)-início " + String(repeating: "x", count: 20_000) + " fim-\(n)" }
         var conversation = Conversation()
         for (index, output) in outputs.enumerated() {
-            let part = turn(index + 1, output: output)
+            let part = storeTurn(index + 1, output: output)
             conversation.items += part.items
             conversation.messages += part.messages
         }
@@ -263,7 +250,7 @@ import Testing
 
     @Test func shortConversationsAreNotPruned() {
         var conversation = Conversation()
-        let part = turn(1, output: String(repeating: "y", count: 50_000))
+        let part = storeTurn(1, output: String(repeating: "y", count: 50_000))
         conversation.items = part.items
         conversation.messages = part.messages
         #expect(conversation.pruningOldToolOutputs().messages == conversation.messages)
@@ -427,13 +414,4 @@ import Testing
 extension Store {
     func loadState() -> AppState? { readState().value }
     func loadConversation(_ botID: UUID) -> Conversation? { readConversation(botID).value }
-}
-
-/// Messages collected from the store's queue.
-private final class Collected: @unchecked Sendable {
-    private let lock = NSLock()
-    private var items: [String] = []
-
-    func add(_ message: String) { lock.withLock { items.append(message) } }
-    var messages: [String] { lock.withLock { items } }
 }

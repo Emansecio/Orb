@@ -142,21 +142,19 @@ struct AnthropicClientTests {
     @Test func inStreamErrorsKeepTheirTypeAndAreRetryable() throws {
         for type in ["overloaded_error", "api_error"] {
             var assembler = AnthropicStreamAssembler()
-            do {
-                _ = try assembler.ingest(try #require(JSONValue.parse(#"{"type":"error","error":{"type":"\#(type)","message":"Overloaded"}}"#)))
-                Issue.record("should have thrown")
-            } catch let error as LLMError {
-                #expect(error == .stream(type: type, message: "Overloaded"))
-                #expect(error.isRetryable)
-            }
+            let event = try #require(JSONValue.parse(#"{"type":"error","error":{"type":"\#(type)","message":"Overloaded"}}"#))
+            let error = try #require(#expect(throws: LLMError.self) {
+                _ = try assembler.ingest(event)
+            })
+            #expect(error == .stream(type: type, message: "Overloaded"))
+            #expect(error.isRetryable)
         }
         var assembler = AnthropicStreamAssembler()
-        do {
-            _ = try assembler.ingest(try #require(JSONValue.parse(#"{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 9 > 8"}}"#)))
-            Issue.record("should have thrown")
-        } catch let error as LLMError {
-            guard case .contextExceeded = error else { Issue.record("not mapped: \(error)"); return }
-        }
+        let event = try #require(JSONValue.parse(#"{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 9 > 8"}}"#))
+        let error = try #require(#expect(throws: LLMError.self) {
+            _ = try assembler.ingest(event)
+        })
+        guard case .contextExceeded = error else { Issue.record("not mapped: \(error)"); return }
     }
 
     // MARK: Reasoning
@@ -286,31 +284,25 @@ struct AnthropicClientTests {
             """)])
         let client = client(host: "anthropic-broken.test") { _ in "k" }
         var events: [LLMEvent] = []
-        do {
+        let error = try #require(await #expect(throws: LLMError.self) {
             for try await event in client.stream(model: "m", messages: [.user("oi")], tools: []) { events.append(event) }
-            Issue.record("should have thrown")
-        } catch let error as LLMError {
-            #expect(error.isRetryable)
-        }
+        })
+        #expect(error.isRetryable)
         // The input is billed whether or not the answer arrives: it is announced as soon as it is read, and comes again ahead of the error.
         let used = TokenUsage(input: 1200, output: 1)
         #expect(events == [.usage(used), .finished(.incomplete, used)])
     }
 
-    @Test func overloadedHTTPResponsesAreRetryableWithTheirDelay() async {
+    @Test func overloadedHTTPResponsesAreRetryableWithTheirDelay() async throws {
         StubProtocol.queue(host: "anthropic-529.test", [
             .init(status: 529, body: #"{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#, headers: ["retry-after": "3"]),
         ])
         let client = client(host: "anthropic-529.test") { _ in "k" }
-        do {
+        let error = try #require(await #expect(throws: LLMError.self) {
             for try await _ in client.stream(model: "m", messages: [.user("oi")], tools: []) {}
-            Issue.record("should have thrown")
-        } catch let error as LLMError {
-            #expect(error == .http(status: 529, message: "Overloaded", retryAfter: 3))
-            #expect(error.isRetryable)
-        } catch {
-            Issue.record("unexpected \(error)")
-        }
+        })
+        #expect(error == .http(status: 529, message: "Overloaded", retryAfter: 3))
+        #expect(error.isRetryable)
     }
 }
 

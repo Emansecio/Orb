@@ -11,8 +11,6 @@ private func connector(_ service: FakeOAuthService, _ settings: MCPOAuthSettings
     return config
 }
 
-private func message(_ error: any Error) -> String { (error as? ToolError)?.message ?? "\(error)" }
-
 /// A login already in the vault, as the sign-in leaves it.
 private func seed(_ vault: MemoryVault, _ id: UUID, _ service: FakeOAuthService, expiresIn: TimeInterval = 3600,
                   refreshToken: String? = "rt-0", secret: String? = nil, method: String = "none", registrationPort: UInt16? = nil) throws {
@@ -99,12 +97,10 @@ struct MCPDiscoveryTests {
             let service = FakeOAuthService { $0.methods = methods }
             let browser = FakeOAuthService.Browser()
             let auth = MCPAuth(vault: MemoryVault(), session: service.session)
-            do {
+            let error = try #require(await #expect(throws: ToolError.self, "expected a refusal") {
                 _ = try await auth.signIn(connector(service), open: browser.open)
-                Issue.record("expected a refusal")
-            } catch {
-                #expect(message(error) == "Este serviço não oferece login seguro (PKCE). Conexão recusada.")
-            }
+            })
+            #expect(error.message == "Este serviço não oferece login seguro (PKCE). Conexão recusada.")
             #expect(browser.urls.isEmpty)
             #expect(!service.requests.contains { $0.label.contains("/register") || $0.label.contains("/token") })
         }
@@ -131,12 +127,10 @@ struct MCPDiscoveryTests {
         let auth = MCPAuth(vault: MemoryVault(), session: session)
         var config = MCPServerConfig(name: "Vazio", url: "https://mcp-none.test/mcp")
         config.oauth = MCPOAuthSettings()
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "expected an error") {
             _ = try await auth.signIn(config, open: FakeOAuthService.Browser().open)
-            Issue.record("expected an error")
-        } catch {
-            #expect(message(error) == "O Vazio não explicou como entrar (sem metadados de login).")
-        }
+        })
+        #expect(error.message == "O Vazio não explicou como entrar (sem metadados de login).")
     }
 }
 
@@ -196,12 +190,10 @@ struct MCPSignInTests {
         let service = FakeOAuthService()
         let auth = MCPAuth(vault: MemoryVault(), session: service.session, signInTimeout: .seconds(1))
         let browser = FakeOAuthService.Browser { $0["state"] = "forged" }
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "expected the sign-in to time out") {
             _ = try await auth.signIn(connector(service), open: browser.open)
-            Issue.record("expected the sign-in to time out")
-        } catch {
-            #expect(message(error) == "O login demorou demais; tente de novo.")
-        }
+        })
+        #expect(error.message == "O login demorou demais; tente de novo.")
         #expect(!service.requests.contains { $0.label == "auth POST /token" })
     }
 
@@ -209,13 +201,11 @@ struct MCPSignInTests {
         let service = FakeOAuthService()
         let auth = MCPAuth(vault: MemoryVault(), session: service.session)
         let browser = FakeOAuthService.Browser { $0["iss"] = "https://evil.example.com"; $0["error"] = "access_denied" }
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "expected a refusal") {
             _ = try await auth.signIn(connector(service), open: browser.open)
-            Issue.record("expected a refusal")
-        } catch {
-            #expect(message(error).contains("não veio do serviço esperado"))
-            #expect(!message(error).contains("access_denied")) // an error from the wrong server is not shown
-        }
+        })
+        #expect(error.message.contains("não veio do serviço esperado"))
+        #expect(!error.message.contains("access_denied")) // an error from the wrong server is not shown
         #expect(!service.requests.contains { $0.label == "auth POST /token" })
     }
 
@@ -248,35 +238,29 @@ struct MCPSignInTests {
         let waiting = Task { try await auth.signIn(connector(service), open: { _ in }) }
         await waitUntil("the sign-in to be waiting for the browser") { service.requests.contains { $0.label == "auth POST /register" } }
         waiting.cancel()
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "expected the sign-in to end") {
             _ = try await waiting.value
-            Issue.record("expected the sign-in to end")
-        } catch {
-            #expect(message(error) == "Login cancelado.")
-        }
+        })
+        #expect(error.message == "Login cancelado.")
     }
 
     @Test func aBrowserThatNeverComesBackTimesOut() async throws {
         let service = FakeOAuthService()
         let auth = MCPAuth(vault: MemoryVault(), session: service.session, signInTimeout: .milliseconds(200))
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "expected a timeout") {
             _ = try await auth.signIn(connector(service), open: { _ in })
-            Issue.record("expected a timeout")
-        } catch {
-            #expect(message(error) == "O login demorou demais; tente de novo.")
-        }
+        })
+        #expect(error.message == "O login demorou demais; tente de novo.")
     }
 
     @Test func aDeniedLoginIsSaidInPlainWords() async throws {
         let service = FakeOAuthService()
         let auth = MCPAuth(vault: MemoryVault(), session: service.session)
         let browser = FakeOAuthService.Browser { $0["error"] = "access_denied"; $0["code"] = nil }
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "expected an error") {
             _ = try await auth.signIn(connector(service), open: browser.open)
-            Issue.record("expected an error")
-        } catch {
-            #expect(message(error) == "Login cancelado.")
-        }
+        })
+        #expect(error.message == "Login cancelado.")
     }
 
     @Test func anAppRegisteredByThePersonIsUsedAsIsAndNeverRegisteredAgain() async throws {
@@ -288,12 +272,10 @@ struct MCPSignInTests {
                                                          authorizeParameters: ["access_type": "offline", "prompt": "consent"],
                                                          redirect: "http://localhost:\(port)/slack/callback"))
         // The editor wants the secret first.
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "expected a request for the secret") {
             _ = try await auth.signIn(config, open: FakeOAuthService.Browser().open)
-            Issue.record("expected a request for the secret")
-        } catch {
-            #expect(message(error) == "O Notion pede um app registrado: cole o Client ID e o Client Secret.")
-        }
+        })
+        #expect(error.message == "O Notion pede um app registrado: cole o Client ID e o Client Secret.")
         await auth.setClientSecret("s3cret", for: config.id)
 
         let browser = FakeOAuthService.Browser()
@@ -325,12 +307,10 @@ struct MCPSignInTests {
         let service = FakeOAuthService { $0.offersRegistration = false }
         let browser = FakeOAuthService.Browser()
         let auth = MCPAuth(vault: MemoryVault(), session: service.session)
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "expected an error") {
             _ = try await auth.signIn(connector(service), open: browser.open)
-            Issue.record("expected an error")
-        } catch {
-            #expect(message(error).hasPrefix("O Notion pede um app registrado: cole o Client ID"))
-        }
+        })
+        #expect(error.message.hasPrefix("O Notion pede um app registrado: cole o Client ID"))
         #expect(browser.urls.isEmpty)
     }
 
@@ -392,29 +372,25 @@ struct MCPSignInTests {
         let config = connector(service)
         let browser = FakeOAuthService.Browser()
         // The person deletes the connector while the browser is open, then finishes the login there.
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "expected the login to be cancelled") {
             _ = try await auth.signIn(config) { url in
                 await auth.deleteAccount(config.id)
                 await browser.open(url)
             }
-            Issue.record("expected the login to be cancelled")
-        } catch {
-            #expect(message(error) == "Login cancelado.")
-        }
+        })
+        #expect(error.message == "Login cancelado.")
         #expect(vault.accounts.isEmpty)
         #expect(!service.requests.contains { $0.label == "auth POST /token" }) // the code was never exchanged
         #expect(await !auth.isSignedIn(config.id))
 
         // The same with "Sair da conta".
-        do {
+        let secondError = try #require(await #expect(throws: ToolError.self, "expected the login to be cancelled") {
             _ = try await auth.signIn(config) { url in
                 await auth.signOut(config.id)
                 await browser.open(url)
             }
-            Issue.record("expected the login to be cancelled")
-        } catch {
-            #expect(message(error) == "Login cancelado.")
-        }
+        })
+        #expect(secondError.message == "Login cancelado.")
         #expect(await !auth.isSignedIn(config.id))
         #expect(!vault.accounts.contains { (vault.get($0) ?? "").contains("at-1") })
     }
@@ -425,12 +401,10 @@ struct MCPSignInTests {
         let auth = MCPAuth(vault: vault, session: service.session)
         var plain = connector(service)
         plain.url = plain.url.replacingOccurrences(of: "https://", with: "http://")
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "expected an error") {
             _ = try await auth.signIn(plain, open: FakeOAuthService.Browser().open)
-            Issue.record("expected an error")
-        } catch {
-            #expect(message(error) == "O endereço do conector Notion não usa HTTPS; o login foi recusado.")
-        }
+        })
+        #expect(error.message == "O endereço do conector Notion não usa HTTPS; o login foi recusado.")
         #expect(service.requests.isEmpty)
         try seed(vault, plain.id, service)
         #expect(auth.tokenProvider(for: plain) == nil)
@@ -454,12 +428,10 @@ struct MCPSignInTests {
         let auth = MCPAuth(vault: MemoryVault(), session: service.session)
         let task = Task { try await auth.signIn(connector(service), open: { _ in }) }
         task.cancel()
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "expected the sign-in to end") {
             _ = try await task.value
-            Issue.record("expected the sign-in to end")
-        } catch {
-            #expect(message(error) == "Login cancelado.")
-        }
+        })
+        #expect(error.message == "Login cancelado.")
     }
 
     @Test func scopesFollowTheChallengeThenThePersonThenWhatTheResourceLists() {
@@ -698,12 +670,10 @@ struct MCPLoginTransportTests {
         let auth = MCPAuth(vault: vault, session: service.session)
         let config = connector(service)
         try seed(vault, config.id, service)
-        do {
+        let required = try #require(await #expect(throws: MCPAuthRequired.self, "expected the login to be asked for") {
             try await initialize(transport(service, auth: auth, config))
-            Issue.record("expected the login to be asked for")
-        } catch let required as MCPAuthRequired {
-            #expect(required.reason == .expired)
-        }
+        })
+        #expect(required.reason == .expired)
         #expect(service.requests.filter { $0.label == "mcp POST /mcp" }.count == 2) // once, renewed, once more: never a loop
     }
 
@@ -711,13 +681,11 @@ struct MCPLoginTransportTests {
         let service = FakeOAuthService { $0.challengeScope = "files:read" }
         let auth = MCPAuth(vault: MemoryVault(), session: service.session)
         let config = connector(service)
-        do {
+        let required = try #require(await #expect(throws: MCPAuthRequired.self, "expected the login to be asked for") {
             try await initialize(transport(service, auth: auth, config))
-            Issue.record("expected the login to be asked for")
-        } catch let required as MCPAuthRequired {
-            #expect(required.reason == .signIn && required.challenge.scope == "files:read")
-            #expect(required.challenge.resourceMetadata?.path == "/.well-known/oauth-protected-resource/mcp")
-        }
+        })
+        #expect(required.reason == .signIn && required.challenge.scope == "files:read")
+        #expect(required.challenge.resourceMetadata?.path == "/.well-known/oauth-protected-resource/mcp")
         #expect(service.requests.count == 1 && service.requests[0].headers["Authorization"] == nil)
     }
 
@@ -726,12 +694,10 @@ struct MCPLoginTransportTests {
         let auth = MCPAuth(vault: MemoryVault(), session: service.session)
         let config = connector(service, nil) // from the registry: it does not say it signs in
         #expect(auth.tokenProvider(for: config) != nil)
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "expected an error") {
             try await initialize(transport(service, auth: auth, config))
-            Issue.record("expected an error")
-        } catch {
-            #expect(message(error).hasPrefix("O conector Notion respondeu HTTP 401"))
-        }
+        })
+        #expect(error.message.hasPrefix("O conector Notion respondeu HTTP 401"))
     }
 
     @Test func aKeyPastedByHandIsLeftAloneAndAnOldMessageStays() async throws {
@@ -741,12 +707,10 @@ struct MCPLoginTransportTests {
         let auth = MCPAuth(vault: MemoryVault(), session: service.session)
         #expect(auth.tokenProvider(for: config) == nil)
         let connection = MCPConnection(config: config, token: auth.tokenProvider(for: config), session: service.session)
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "expected an error") {
             _ = try await connection.start()
-            Issue.record("expected an error")
-        } catch {
-            #expect(message(error).hasPrefix("O conector Remoto respondeu HTTP 401"))
-        }
+        })
+        #expect(error.message.hasPrefix("O conector Remoto respondeu HTTP 401"))
         #expect(service.requests.allSatisfy { $0.headers["Authorization"] == "Bearer pasted" })
     }
 
@@ -767,12 +731,10 @@ struct MCPLoginTransportTests {
             $0.challengeStatus = 403
             $0.challengeHeader = #"Bearer error="insufficient_scope", scope="chat:write", resource_metadata="https://x.test/prm""#
         }
-        do {
+        let required = try #require(await #expect(throws: MCPAuthRequired.self, "expected the permission to be asked for") {
             _ = try await connection.call("echo", arguments: .object([:]))
-            Issue.record("expected the permission to be asked for")
-        } catch let required as MCPAuthRequired {
-            #expect(required.reason == .moreScope && required.challenge.scope == "chat:write")
-        }
+        })
+        #expect(required.reason == .moreScope && required.challenge.scope == "chat:write")
         #expect(service.requests.filter { $0.label == "mcp POST /mcp" && $0.json?["method"]?.string == "tools/call" }.count == 1)
         #expect(service.requests.filter { $0.label == "auth POST /token" }.isEmpty) // nothing was renewed for a 403
     }
@@ -797,12 +759,10 @@ struct MCPLoginStatusTests {
         plain.id = UUID()
         await manager.sync([config, plain])
         #expect(await manager.status()[plain.id] == .idle(toolCount: nil))
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "expected an error") {
             _ = try await manager.ensureStarted(plain.id)
-            Issue.record("expected an error")
-        } catch {
-            #expect(message(error) == "Notion precisa de login. Peça para a pessoa clicar em Entrar em Conectores.")
-        }
+        })
+        #expect(error.message == "Notion precisa de login. Peça para a pessoa clicar em Entrar em Conectores.")
         #expect(await manager.status()[plain.id] == .needsSignIn(nil))
     }
 
@@ -814,12 +774,10 @@ struct MCPLoginStatusTests {
         let config = connector(service)
         try seed(vault, config.id, service, expiresIn: 10)
         await manager.sync([config])
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "expected an error") {
             _ = try await manager.call(config.id, tool: "echo", arguments: .object([:]))
-            Issue.record("expected an error")
-        } catch {
-            #expect(message(error) == "A sessão do Notion expirou. Peça para a pessoa clicar em Entrar de novo em Conectores.")
-        }
+        })
+        #expect(error.message == "A sessão do Notion expirou. Peça para a pessoa clicar em Entrar de novo em Conectores.")
         #expect(await manager.status()[config.id] == .needsSignIn("A sessão do Notion expirou. Entre de novo."))
         // The next attempt finds no token, and the card still says the session ended (not a first-time "Entrar").
         _ = try? await manager.call(config.id, tool: "echo", arguments: .object([:]))
@@ -842,12 +800,10 @@ struct MCPLoginStatusTests {
             $0.challengeStatus = 403
             $0.challengeHeader = #"Bearer error="insufficient_scope", scope="chat:write""#
         }
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "expected an error") {
             _ = try await manager.call(config.id, tool: "echo", arguments: .object([:]))
-            Issue.record("expected an error")
-        } catch {
-            #expect(message(error) == "Notion pediu mais permissão. Peça para a pessoa clicar em Permitir mais em Conectores.")
-        }
+        })
+        #expect(error.message == "Notion pediu mais permissão. Peça para a pessoa clicar em Permitir mais em Conectores.")
         #expect(await manager.status()[config.id] == .needsMorePermission("chat:write"))
     }
 
@@ -867,12 +823,10 @@ struct MCPLoginStatusTests {
             }
         }
         await manager.sync([config])
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "expected an error") {
             _ = try await manager.call(config.id, tool: "echo", arguments: .object([:]))
-            Issue.record("expected an error")
-        } catch {
-            #expect(message(error).hasSuffix("Permitir mais em Conectores."))
-        }
+        })
+        #expect(error.message.hasSuffix("Permitir mais em Conectores."))
         #expect(await manager.status()[config.id] == .needsMorePermission("chat:write"))
         // Another tool of the same connector works with the token it has, and must not make the card forget the request.
         #expect(try await manager.call(config.id, tool: "echo", arguments: .object([:])) == "ok")

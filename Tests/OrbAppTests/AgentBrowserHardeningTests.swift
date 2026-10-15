@@ -224,7 +224,7 @@ struct AgentBrowserSessionGuardTests {
           *) echo '{"success":true,"data":{"url":"https://a.test/","title":"A"},"error":null}' ;;
         esac
         """.write(to: script, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        try script.makeExecutable()
         let shell = ["PATH": "/usr/bin:/bin", "AGENT_BROWSER_PROFILE": "/Users/me/Chrome", "HTTPS_PROXY": "http://proxy:3128"]
         let configuration = AgentBrowserConfig(executable: script.path, session: "orb-real", engine: .chrome, stateDirectory: state)
         let driver = AgentBrowserDriver(config: configuration, environment: { shell })

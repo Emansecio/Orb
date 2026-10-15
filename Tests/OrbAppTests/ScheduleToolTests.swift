@@ -21,25 +21,19 @@ private let daily9: JSONValue = .object(["kind": .string("daily"), "hour": .numb
 // MARK: - The schedule
 
 struct OnceAndCronScheduleTests {
-    private let utc: Calendar = {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "UTC")!
-        return calendar
-    }()
-
     private func date(_ text: String) -> Date { try! Date(text, strategy: .iso8601) }
 
     @Test func aCronLineFindsItsNextTimeInItsTimeZone() {
         let friday = date("2026-10-16T09:00:00Z")
-        #expect(Schedule.cron(expression: "30 8 * * 1-5", timeZone: nil).next(after: friday, calendar: utc) == date("2026-10-19T08:30:00Z"))
+        #expect(Schedule.cron(expression: "30 8 * * 1-5", timeZone: nil).next(after: friday, calendar: utcCalendar) == date("2026-10-19T08:30:00Z"))
         // 9:00 in São Paulo is 12:00 UTC.
-        #expect(Schedule.cron(expression: "0 9 * * *", timeZone: "America/Sao_Paulo").next(after: date("2026-10-13T00:00:00Z"), calendar: utc)
+        #expect(Schedule.cron(expression: "0 9 * * *", timeZone: "America/Sao_Paulo").next(after: date("2026-10-13T00:00:00Z"), calendar: utcCalendar)
                 == date("2026-10-13T12:00:00Z"))
         // Day of the month and of the week both restricted: either one, here the Monday before the 1st.
-        #expect(Schedule.cron(expression: "0 0 1 * 1", timeZone: nil).next(after: date("2026-10-13T10:00:00Z"), calendar: utc)
+        #expect(Schedule.cron(expression: "0 0 1 * 1", timeZone: nil).next(after: date("2026-10-13T10:00:00Z"), calendar: utcCalendar)
                 == date("2026-10-19T00:00:00Z"))
         // A step in the day field still counts as "any": every other day, not every day (as cron does it).
-        #expect(Schedule.cron(expression: "0 9 */2 * *", timeZone: nil).next(after: date("2026-10-13T10:00:00Z"), calendar: utc)
+        #expect(Schedule.cron(expression: "0 9 */2 * *", timeZone: nil).next(after: date("2026-10-13T10:00:00Z"), calendar: utcCalendar)
                 == date("2026-10-15T09:00:00Z"))
     }
 
@@ -225,13 +219,11 @@ struct ScheduleCommandTests {
                 == .create(name: "Duas linhas", prompt: "x", schedule: .everyHours(2)))
     }
 
-    @Test func tooShortAnIntervalIsRefusedWithTheReason() {
-        do {
+    @Test func tooShortAnIntervalIsRefusedWithTheReason() throws {
+        let error = try #require(#expect(throws: ToolError.self, "accepted 5 minutes") {
             _ = try ScheduleCommand(call("create", prompt: "x", when: every(minutes: 5)))
-            Issue.record("accepted 5 minutes")
-        } catch {
-            #expect(error.localizedDescription.contains("15 minutos"))
-        }
+        })
+        #expect(error.localizedDescription.contains("15 minutos"))
     }
 
     @Test func theOtherActionsTakeANameExceptList() throws {
@@ -498,13 +490,11 @@ struct SchedulePermissionTests {
         _ = try run(model, atlas, call("create", name: "Notícias", prompt: "y", when: daily9))
         #expect(try run(model, atlas, call("pause", name: "  noticias ")).contains("Notícias"))
         for wrong in ["Resumo", "notic", "inexistente"] {
-            do {
+            let error = try #require(#expect(throws: ToolError.self, "deleted “\(wrong)”") {
                 _ = try run(model, atlas, call("delete", name: wrong))
-                Issue.record("deleted “\(wrong)”")
-            } catch {
-                // It says which names there are, so the Orb can try again with one of them.
-                #expect(error.localizedDescription.contains("Resumo de e-mails") && error.localizedDescription.contains("Notícias"))
-            }
+            })
+            // It says which names there are, so the Orb can try again with one of them.
+            #expect(error.localizedDescription.contains("Resumo de e-mails") && error.localizedDescription.contains("Notícias"))
         }
         #expect(model.routines.count == 2)
         #expect(throws: ToolError.self) { try ScheduleCommand(call("delete", name: "   ")) }

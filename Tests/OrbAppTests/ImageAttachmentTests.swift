@@ -500,33 +500,15 @@ struct ImageContextTests {
 
 // MARK: - Engine
 
-private actor Calls {
-    private(set) var received: [[ChatMessage]] = []
-    private var plan: [Result<[LLMEvent], Error>]
-
-    init(_ plan: [Result<[LLMEvent], Error>]) { self.plan = plan }
-
-    func next(_ messages: [ChatMessage]) throws -> [LLMEvent] {
-        received.append(messages)
-        return try (plan.isEmpty ? .success([.text("fim")]) : plan.removeFirst()).get()
-    }
-}
-
-private struct PlannedLLM: LLMClient {
-    let calls: Calls
-
-    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
-        AsyncThrowingStream { continuation in
-            Task {
-                do {
-                    for event in try await calls.next(messages) { continuation.yield(event) }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
+/// A script of what each call does in turn: answer with the events or fail (before any is streamed); once the plan is
+/// spent, a plain "fim".
+private func plannedCalls(_ plan: [Result<[LLMEvent], Error>]) -> CallScript {
+    CallScript(replies: plan.map { result in
+        switch result {
+        case .success(let events): ModelReply(events)
+        case .failure(let error): .failing(error)
         }
-    }
+    }, whenExhausted: .fim)
 }
 
 /// A read-only tool that returns a picture along with its text.
@@ -544,11 +526,11 @@ private struct LookAtTool: AgentTool {
 }
 
 struct ImageEngineTests {
-    private func request(_ calls: Calls, images: [ImageAttachment] = [], supportsImages: Bool? = nil, tools: [any AgentTool] = [],
+    private func request(_ calls: CallScript, images: [ImageAttachment] = [], supportsImages: Bool? = nil, tools: [any AgentTool] = [],
                          rejected: RaisedFlag? = nil, acceptsImages: Bool = true) -> TurnRequest {
         let onRejected: (@Sendable () -> Void)? = rejected.map { flag in { @Sendable in flag.raise() } }
         return TurnRequest(bot: Bot(name: "T", role: "", orb: OrbConfig(), permissionMode: .auto), model: "m", system: "sys", history: [],
-                    prompt: "veja isto", client: PlannedLLM(calls: calls), tools: tools,
+                    prompt: "veja isto", client: CallScriptModel(script: calls), tools: tools,
                     context: ToolContext(workingDirectory: URL(fileURLWithPath: NSTemporaryDirectory()), acceptsImages: acceptsImages),
                     images: images, supportsImages: supportsImages, onImagesRejected: onRejected)
     }
@@ -559,10 +541,6 @@ struct ImageEngineTests {
         return events
     }
 
-    private func notices(_ events: [TurnEvent]) -> [String] {
-        events.compactMap { if case .notice(let text) = $0 { text } else { nil } }
-    }
-
     private func recorded(_ events: [TurnEvent]) -> [ChatMessage] {
         events.compactMap { if case .message(let message) = $0 { message } else { nil } }
     }
@@ -570,23 +548,23 @@ struct ImageEngineTests {
     @Test func theUserMessageCarriesThePicturesAndTheModelGetsThem() async throws {
         let folder = Folder()
         let image = try folder.attachment()
-        let calls = Calls([])
+        let calls = plannedCalls([])
         let events = await run(request(calls, images: [image], supportsImages: true))
         #expect(recorded(events).first?.images == [image])
         let sent = await calls.received[0]
         #expect(sent.last?.images == [image])
-        #expect(notices(events).isEmpty)
+        #expect(events.notices.isEmpty)
     }
 
     @Test func aModelThatCannotSeeNeverGetsPicturesOnlyTheirPaths() async throws {
         let folder = Folder()
         let image = try folder.attachment()
-        let calls = Calls([])
+        let calls = plannedCalls([])
         let events = await run(request(calls, images: [image], supportsImages: false))
         let sent = await calls.received[0]
         #expect(sent.allSatisfy { $0.images.isEmpty })
         #expect(sent.last?.content.contains("[imagem: \(image.path) — este modelo não aceita imagens]") == true)
-        #expect(notices(events) == ["Este modelo não vê imagens; mandei só o caminho do arquivo."])
+        #expect(events.notices == ["Este modelo não vê imagens; mandei só o caminho do arquivo."])
         // The conversation keeps the picture: a later switch to a model that sees can use it.
         #expect(recorded(events).first?.images == [image])
     }
@@ -594,7 +572,7 @@ struct ImageEngineTests {
     @Test func aProviderThatRefusesPicturesIsRetriedOnceWithoutThem() async throws {
         let folder = Folder()
         let image = try folder.attachment()
-        let calls = Calls([.failure(LLMError.http(status: 400, message: "This model does not support image input")),
+        let calls = plannedCalls([.failure(LLMError.http(status: 400, message: "This model does not support image input")),
                            .success([.text("Não vejo, mas segue o caminho.")])])
         let rejected = RaisedFlag()
         let events = await run(request(calls, images: [image], supportsImages: nil, rejected: rejected))
@@ -603,7 +581,7 @@ struct ImageEngineTests {
         #expect(received[0].last?.images == [image])
         #expect(received[1].allSatisfy { $0.images.isEmpty })
         #expect(received[1].last?.content.contains("[imagem: \(image.path) — este modelo não aceita imagens]") == true)
-        #expect(notices(events) == ["Este modelo não vê imagens; mandei só o caminho do arquivo."])
+        #expect(events.notices == ["Este modelo não vê imagens; mandei só o caminho do arquivo."])
         #expect(rejected.isRaised)
         #expect(recorded(events).last?.content == "Não vejo, mas segue o caminho.")
         #expect(!events.contains { if case .failed = $0 { true } else { false } })
@@ -611,7 +589,7 @@ struct ImageEngineTests {
 
     @Test func otherFailuresAreNotBlamedOnThePictures() async throws {
         let folder = Folder()
-        let calls = Calls([.failure(LLMError.http(status: 401, message: "invalid image api key")),
+        let calls = plannedCalls([.failure(LLMError.http(status: 401, message: "invalid image api key")),
                            .success([.text("x")])])
         let events = await run(request(calls, images: [try folder.attachment()], supportsImages: nil))
         #expect(await calls.received.count == 1)
@@ -620,7 +598,7 @@ struct ImageEngineTests {
 
     @Test func aRefusalThatIsNotAboutPicturesIsNotRetriedWithoutThem() async throws {
         // No pictures in the request: an error that mentions images cannot be about them.
-        let calls = Calls([.failure(LLMError.http(status: 400, message: "image input is not supported")), .success([.text("x")])])
+        let calls = plannedCalls([.failure(LLMError.http(status: 400, message: "image input is not supported")), .success([.text("x")])])
         let events = await run(request(calls, images: [], supportsImages: nil))
         #expect(await calls.received.count == 1)
         #expect(events.contains { if case .failed = $0 { true } else { false } })
@@ -629,7 +607,7 @@ struct ImageEngineTests {
     @Test func aToolPictureIsRecordedOnTheToolMessageAndSentOnTheNextCall() async throws {
         let folder = Folder()
         let shot = try folder.attachment("tela.jpg")
-        let calls = Calls([.success([.toolCalls([ToolCallRequest(id: "c1", name: "look", arguments: "{}")])]),
+        let calls = plannedCalls([.success([.toolCalls([ToolCallRequest(id: "c1", name: "look", arguments: "{}")])]),
                            .success([.text("Vi a tela.")])])
         let events = await run(request(calls, supportsImages: true, tools: [LookAtTool(image: shot)]))
         let toolMessage = try #require(recorded(events).first { $0.role == .tool })
@@ -641,7 +619,7 @@ struct ImageEngineTests {
     @Test func aToolPictureToAModelThatCannotSeeBecomesItsPath() async throws {
         let folder = Folder()
         let shot = try folder.attachment("tela.jpg")
-        let calls = Calls([.success([.toolCalls([ToolCallRequest(id: "c1", name: "look", arguments: "{}")])]),
+        let calls = plannedCalls([.success([.toolCalls([ToolCallRequest(id: "c1", name: "look", arguments: "{}")])]),
                            .success([.text("ok")])])
         _ = await run(request(calls, supportsImages: false, tools: [LookAtTool(image: shot)], acceptsImages: true))
         let second = await calls.received[1]

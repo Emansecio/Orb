@@ -151,21 +151,6 @@ final class FakeIndicator: TakeoverIndicator, @unchecked Sendable {
     func ended() async { lock.withLock { log.append("ended") } }
 }
 
-/// Lets one task wait until another says go.
-actor TakeoverGate {
-    private var open = false
-    private var waiters: [CheckedContinuation<Void, Never>] = []
-    func wait() async {
-        if open { return }
-        await withCheckedContinuation { waiters.append($0) }
-    }
-    func release() {
-        open = true
-        waiters.forEach { $0.resume() }
-        waiters = []
-    }
-}
-
 // MARK: - Rig
 
 private let safari = TakeoverFront(pid: 10, name: "Safari", bundleID: "com.apple.Safari")
@@ -308,11 +293,11 @@ struct ScreenTakeoverTests {
 
     @Test func cancellingTheTaskStillGivesTheScreenBackBeforeItReturns() async throws {
         let rig = TakeoverRig()
-        let started = TakeoverGate()
+        let started = TestGate()
         let task = Task {
             try await rig.takeOver { hand in
                 try await hand.click(at: CGPoint(x: 40, y: 40), button: .left, count: 1)
-                await started.release()
+                await started.open()
                 try await Task.sleep(for: .seconds(30))
             }
         }
@@ -329,13 +314,13 @@ struct ScreenTakeoverTests {
 
     @Test func aTaskCancelledBeforeItStartsTakesNothing() async throws {
         let rig = TakeoverRig()
-        let gate = TakeoverGate()
+        let gate = TestGate()
         let task = Task {
             await gate.wait()
             return try await rig.takeOver { _ in 1 }
         }
         task.cancel()
-        await gate.release()
+        await gate.open()
         await #expect(throws: CancellationError.self) { _ = try await task.value }
         #expect(rig.world.log.isEmpty && rig.indicator.calls.isEmpty)
         // And the lock was not left held.
@@ -401,10 +386,10 @@ struct ScreenTakeoverTests {
         let lock = TakeoverLock()
         let first = TakeoverRig(lock: lock)
         let second = TakeoverRig(lock: lock)
-        let inside = TakeoverGate(), finish = TakeoverGate()
+        let inside = TestGate(), finish = TestGate()
         let running = Task {
             try await first.takeOver { _ in
-                await inside.release()
+                await inside.open()
                 await finish.wait()
                 return 1
             }
@@ -412,7 +397,7 @@ struct ScreenTakeoverTests {
         await inside.wait()
         await #expect(throws: TakeoverFailure.busy) { _ = try await second.takeOver { _ in 2 } }
         #expect(second.world.log.isEmpty && second.indicator.calls.isEmpty, "the refused one touched nothing")
-        await finish.release()
+        await finish.open()
         _ = try await running.value
         // The lock is free again.
         #expect(try await second.takeOver { _ in 3 }.value == 3)

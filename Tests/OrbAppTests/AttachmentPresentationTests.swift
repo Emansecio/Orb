@@ -10,7 +10,7 @@ final class AttachmentPresentationTests {
 
     init() throws { try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) }
 
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     private func file(_ name: String, bytes: Int = 0) throws -> String {
         let url = root.appending(path: name)
@@ -241,7 +241,7 @@ final class AttachmentPresentationTests {
 
     /// Runs one tool call through the engine (no permission asked) and returns the files its `toolFinished` carried.
     private func finishedFiles(tool: some AgentTool, arguments: String) async throws -> [ProducedFile] {
-        let client = OneCallLLM(call: ToolCallRequest(id: "c1", name: tool.spec.name, arguments: arguments))
+        let client = CallScriptModel(script: CallScript([[.toolCalls([ToolCallRequest(id: "c1", name: tool.spec.name, arguments: arguments)])], [.text("Pronto.")]]))
         let bot = Bot(name: "Teste", role: "", orb: OrbConfig(), permissionMode: .bypass)
         let request = TurnRequest(bot: bot, model: "fake", system: "sys", history: [], prompt: "oi", client: client, tools: [tool],
                                   context: ToolContext(workingDirectory: root),
@@ -255,22 +255,3 @@ final class AttachmentPresentationTests {
 
 }
 
-/// A model that asks for one tool call and then answers.
-private actor OneCallState {
-    var calls = 0
-    func next() -> Int { calls += 1; return calls }
-}
-
-private struct OneCallLLM: LLMClient {
-    let call: ToolCallRequest
-    let state = OneCallState()
-
-    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
-        AsyncThrowingStream { continuation in
-            Task {
-                continuation.yield(await state.next() == 1 ? .toolCalls([call]) : .text("Pronto."))
-                continuation.finish()
-            }
-        }
-    }
-}

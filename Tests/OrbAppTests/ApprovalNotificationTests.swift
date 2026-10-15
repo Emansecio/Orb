@@ -176,7 +176,7 @@ private extension ApprovalRequest {
 /// The card's data and the app model's side of the new answers.
 @Suite final class ApprovalModelTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbApprovalModel-\(UUID().uuidString)")
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     @MainActor private func model() -> AppModel {
         var state = AppState.initial

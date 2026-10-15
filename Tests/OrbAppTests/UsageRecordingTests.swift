@@ -5,17 +5,6 @@ import Testing
 /// The history of what the models were used for: rows by hour × Orb × model × source, merged in batches, written by month,
 /// read back tolerantly, and erased by "Redefinir o Orb". (The prices and the page are in `UsagePricingTests` and `UsageReportTests`.)
 
-/// Dates in a fixed zone, so hours and months do not depend on the machine running the tests.
-private let utc: Calendar = {
-    var calendar = Calendar(identifier: .gregorian)
-    calendar.timeZone = TimeZone(identifier: "UTC") ?? .gmt
-    return calendar
-}()
-
-func utcDate(_ year: Int, _ month: Int, _ day: Int, _ hour: Int = 0, _ minute: Int = 0) -> Date {
-    utc.date(from: DateComponents(year: year, month: month, day: day, hour: hour, minute: minute)) ?? .distantPast
-}
-
 struct UsageMonthTests {
     private let orb = UUID()
     private func key(_ hour: Int, model: String = "openai/gpt-5", source: UsageSource = .chat, orb: UUID? = nil) -> UsageKey {
@@ -94,19 +83,19 @@ struct UsageMonthTests {
 }
 
 struct UsageStoreTests {
-    private let root = FileManager.default.temporaryDirectory.appending(path: "OrbUsage-\(UUID().uuidString)")
+    private let folder = TempFolder("OrbUsage")
+    private var root: URL { folder.url }
     private let orb = UUID()
 
     private func store() -> Store { Store(directory: root) }
 
     @Test func rowsGoToTheFileOfTheirMonthAndAreAddedInOrder() async throws {
-        defer { removeTestFolder(root) }
         let store = store()
         let lastOfOctober = UsageKey(hour: utcDate(2026, 10, 31, 23), orb: orb, model: "openai/gpt-5", source: .chat)
         let firstOfNovember = UsageKey(hour: utcDate(2026, 11, 1, 0), orb: orb, model: "openai/gpt-5", source: .chat)
         store.addUsage([lastOfOctober: UsageTotals(requests: 1, input: 10), firstOfNovember: UsageTotals(requests: 1, input: 20)],
-                       names: [orb: "Atlas"], calendar: utc)
-        store.addUsage([lastOfOctober: UsageTotals(requests: 1, input: 5)], names: [orb: "Atlas"], calendar: utc)
+                       names: [orb: "Atlas"], calendar: utcCalendar)
+        store.addUsage([lastOfOctober: UsageTotals(requests: 1, input: 5)], names: [orb: "Atlas"], calendar: utcCalendar)
         store.flush()
 
         let october = try JSONDecoder().decode(UsageMonth.self, from: Data(contentsOf: root.appending(path: "uso/2026-10.json")))
@@ -114,20 +103,19 @@ struct UsageStoreTests {
         #expect(october.buckets.map(\.totals.input) == [15] && november.buckets.map(\.totals.input) == [20])
 
         // Read back across the turn of the month, oldest first, with the names.
-        let read = await store.readUsage(from: utcDate(2026, 10, 30), to: utcDate(2026, 11, 2), calendar: utc)
+        let read = await store.readUsage(from: utcDate(2026, 10, 30), to: utcDate(2026, 11, 2), calendar: utcCalendar)
         #expect(read.buckets.map(\.totals.input) == [15, 20] && read.names == [orb: "Atlas"] && read.notices.isEmpty)
         // A range that touches only November reads only November.
-        let later = await store.readUsage(from: utcDate(2026, 11, 1), to: utcDate(2026, 11, 20), calendar: utc)
+        let later = await store.readUsage(from: utcDate(2026, 11, 1), to: utcDate(2026, 11, 20), calendar: utcCalendar)
         #expect(later.buckets.map(\.totals.input) == [20])
     }
 
     @Test func monthIDsCoverTheRangeIncludingTheTurnOfTheYear() {
-        #expect(Store.usageMonths(from: utcDate(2026, 12, 20), to: utcDate(2027, 2, 3), calendar: utc) == ["2026-12", "2027-01", "2027-02"])
-        #expect(Store.usageMonths(from: utcDate(2026, 10, 9), to: utcDate(2026, 10, 9, 23), calendar: utc) == ["2026-10"])
+        #expect(Store.usageMonths(from: utcDate(2026, 12, 20), to: utcDate(2027, 2, 3), calendar: utcCalendar) == ["2026-12", "2027-01", "2027-02"])
+        #expect(Store.usageMonths(from: utcDate(2026, 10, 9), to: utcDate(2026, 10, 9, 23), calendar: utcCalendar) == ["2026-10"])
     }
 
     @Test func aDamagedMonthIsNewsNotAFailedSave() throws {
-        defer { removeTestFolder(root) }
         final class Heard: @unchecked Sendable {
             private let lock = NSLock()
             private var items: [String] = []
@@ -140,7 +128,7 @@ struct UsageStoreTests {
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data(#"{"buckets":[{"#.utf8).write(to: file)
         let key = UsageKey(hour: utcDate(2026, 10, 9, 10), orb: orb, model: "openai/gpt-5", source: .chat)
-        store.addUsage([key: UsageTotals(requests: 1, input: 3)], names: [:], calendar: utc)
+        store.addUsage([key: UsageTotals(requests: 1, input: 3)], names: [:], calendar: utcCalendar)
         store.flush()
         #expect(failures.all.isEmpty)
         #expect(notices.all.count == 1)
@@ -150,7 +138,6 @@ struct UsageStoreTests {
     }
 
     @Test func aMonthThatCannotBeReadIsReportedOnceNotAtEveryFlush() throws {
-        defer { removeTestFolder(root) }
         final class Heard: @unchecked Sendable {
             private let lock = NSLock()
             private var items: [String] = []
@@ -164,7 +151,7 @@ struct UsageStoreTests {
         try FileManager.default.createDirectory(at: file, withIntermediateDirectories: true)
         let key = UsageKey(hour: utcDate(2026, 10, 9, 10), orb: orb, model: "openai/gpt-5", source: .chat)
         for _ in 0..<3 {
-            store.addUsage([key: UsageTotals(requests: 1, input: 3)], names: [:], calendar: utc)
+            store.addUsage([key: UsageTotals(requests: 1, input: 3)], names: [:], calendar: utcCalendar)
             store.flush()
         }
         #expect(notices.all.count == 1)
@@ -172,16 +159,15 @@ struct UsageStoreTests {
     }
 
     @Test func aFileThatCannotBeDecodedIsSetAsideAndTheHistoryStartsAgain() async throws {
-        defer { removeTestFolder(root) }
         let store = store()
         let file = root.appending(path: "uso/2026-10.json")
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("isto não é json".utf8).write(to: file)
 
-        let read = await store.readUsage(from: utcDate(2026, 10, 1), to: utcDate(2026, 10, 2), calendar: utc)
+        let read = await store.readUsage(from: utcDate(2026, 10, 1), to: utcDate(2026, 10, 2), calendar: utcCalendar)
         #expect(read.buckets.isEmpty && read.notices.count == 1)
         let key = UsageKey(hour: utcDate(2026, 10, 9, 10), orb: orb, model: "openai/gpt-5", source: .chat)
-        store.addUsage([key: UsageTotals(requests: 1, input: 3)], names: [:], calendar: utc)
+        store.addUsage([key: UsageTotals(requests: 1, input: 3)], names: [:], calendar: utcCalendar)
         store.flush()
         let names = try FileManager.default.contentsOfDirectory(atPath: root.appending(path: "uso").path)
         #expect(names.contains { $0.hasPrefix("2026-10.json.corrupt-") } && names.contains("2026-10.json"))
@@ -192,14 +178,14 @@ struct UsageStoreTests {
 
 @MainActor
 struct UsageRecorderTests {
-    private let root = FileManager.default.temporaryDirectory.appending(path: "OrbUsageRecorder-\(UUID().uuidString)")
+    private let folder = TempFolder("OrbUsageRecorder")
+    private var root: URL { folder.url }
     private let orb = UUID()
 
     @Test func manyUsesInAnHourAreOneRowWrittenInOneBatch() async throws {
-        defer { removeTestFolder(root) }
         let store = Store(directory: root)
         var clock = utcDate(2026, 10, 9, 14, 5)
-        let recorder = UsageRecorder(store: store, now: { clock }, calendar: utc)
+        let recorder = UsageRecorder(store: store, now: { clock }, calendar: utcCalendar)
         for _ in 0..<20 { recorder.record(UsageTotals(requests: 1, input: 100, output: 10), orb: orb, name: "Atlas", model: "openai/gpt-5", source: .chat) }
         clock = utcDate(2026, 10, 9, 14, 59)
         recorder.record(UsageTotals(requests: 1, input: 1), orb: orb, name: "Atlas", model: "openai/gpt-5", source: .chat)
@@ -213,7 +199,7 @@ struct UsageRecorderTests {
         recorder.flush()
         store.flush()
         #expect(!recorder.hasPending)
-        let read = await store.readUsage(from: utcDate(2026, 10, 9), to: utcDate(2026, 10, 10), calendar: utc)
+        let read = await store.readUsage(from: utcDate(2026, 10, 9), to: utcDate(2026, 10, 10), calendar: utcCalendar)
         #expect(read.buckets.count == 2)
         let fourteen = try #require(read.buckets.first { $0.key.hour == utcDate(2026, 10, 9, 14) })
         #expect(fourteen.totals == UsageTotals(requests: 21, input: 2_001, output: 200))
@@ -222,21 +208,19 @@ struct UsageRecorderTests {
     }
 
     @Test func theBatchGoesOutOnItsOwnAfterTheDelay() async throws {
-        defer { removeTestFolder(root) }
         let store = Store(directory: root)
-        let recorder = UsageRecorder(store: store, calendar: utc)
+        let recorder = UsageRecorder(store: store, calendar: utcCalendar)
         recorder.record(UsageTotals(requests: 1, input: 4), orb: orb, name: "Atlas", model: "openai/gpt-5", source: .chat)
         #expect(recorder.hasPending)
         // The delay is ten seconds: do not wait for it, only check that a timer is armed by flushing in its place.
         recorder.flush()
         store.flush()
-        let read = await store.readUsage(from: .now.addingTimeInterval(-86_400 * 40), to: .now.addingTimeInterval(86_400), calendar: utc)
+        let read = await store.readUsage(from: .now.addingTimeInterval(-86_400 * 40), to: .now.addingTimeInterval(86_400), calendar: utcCalendar)
         #expect(read.buckets.map(\.totals.input) == [4])
     }
 
     @Test func nothingIsKeptAfterTheHistoryIsClosed() {
-        defer { removeTestFolder(root) }
-        let recorder = UsageRecorder(store: Store(directory: root), calendar: utc)
+        let recorder = UsageRecorder(store: Store(directory: root), calendar: utcCalendar)
         recorder.record(UsageTotals(requests: 1, input: 4), orb: orb, name: "Atlas", model: "openai/gpt-5", source: .chat)
         recorder.close()
         #expect(!recorder.hasPending)
@@ -427,13 +411,13 @@ struct AbsurdUsageCountsTests {
         #expect(sum.input == TokenUsage.maxCount && sum.requests == TokenUsage.maxCount)
 
         let store = Store(directory: root)
-        let recorder = UsageRecorder(store: store, now: { utcDate(2026, 10, 9, 14, 5) }, calendar: utc)
+        let recorder = UsageRecorder(store: store, now: { utcDate(2026, 10, 9, 14, 5) }, calendar: utcCalendar)
         for _ in 0..<3 { recorder.record(used, orb: orb, name: "Atlas", model: "openai/gpt-5", source: .chat) }
         recorder.flush()
         store.flush()
-        let read = await store.readUsage(from: utcDate(2026, 10, 9), to: utcDate(2026, 10, 10), calendar: utc)
+        let read = await store.readUsage(from: utcDate(2026, 10, 9), to: utcDate(2026, 10, 10), calendar: utcCalendar)
         #expect(read.buckets.count == 1)
-        let report = UsageReport.make(buckets: read.buckets, period: .today, now: utcDate(2026, 10, 9, 15), calendar: utc, book: PriceBook(),
+        let report = UsageReport.make(buckets: read.buckets, period: .today, now: utcDate(2026, 10, 9, 15), calendar: utcCalendar, book: PriceBook(),
                                       orbNames: [orb: "Atlas"])
         #expect(report.totalTokens > 0)
     }

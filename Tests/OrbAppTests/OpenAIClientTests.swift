@@ -298,40 +298,32 @@ struct OpenAIReliabilityTests {
         #expect(ProviderTransport.retryAfter(in: response(["Retry-After": "Fri, 15 Jan 2027 07:00:00 GMT"]), now: now) == 0)
     }
 
-    @Test func rateLimitErrorsCarryRetryAfter() async {
+    @Test func rateLimitErrorsCarryRetryAfter() async throws {
         let client = StubProtocol.client(host: "limit.test", apiKey: nil, status: 429, body: #"{"error":{"message":"Slow down"}}"#)
         StubProtocol.queue(host: "limit.test", [.init(status: 429, body: #"{"error":{"message":"Slow down"}}"#, headers: ["Retry-After": "7"])])
-        do {
+        let error = try #require(await #expect(throws: LLMError.self) {
             for try await _ in client.stream(model: "m", messages: [], tools: []) {}
-            Issue.record("should have thrown")
-        } catch let error as LLMError {
-            #expect(error == .http(status: 429, message: "Slow down", retryAfter: 7))
-            #expect(error.retryAfter == 7)
-            #expect(error.isRetryable)
-        } catch {
-            Issue.record("unexpected \(error)")
-        }
+        })
+        #expect(error == .http(status: 429, message: "Slow down", retryAfter: 7))
+        #expect(error.retryAfter == 7)
+        #expect(error.isRetryable)
     }
 
-    @Test func anExhaustedQuotaIsNotRetriedAndPointsToTheBalance() async {
+    @Test func anExhaustedQuotaIsNotRetriedAndPointsToTheBalance() async throws {
         let body = #"{"error":{"message":"You exceeded your current quota, please check your plan and billing details.","type":"insufficient_quota","code":"insufficient_quota"}}"#
         let client = StubProtocol.client(host: "quota.test", apiKey: nil, status: 429, body: body)
         StubProtocol.queue(host: "quota.test", [.init(status: 429, body: body), .init(status: 429, body: body)])
         let attempts = Box<Int>(0)
-        do {
+        let error = try #require(await #expect(throws: LLMError.self) {
             try await withRetries(sleep: { _ in }) {
                 attempts.update { $0 += 1 }
                 for try await _ in client.stream(model: "m", messages: [], tools: []) {}
             }
-            Issue.record("should have thrown")
-        } catch let error as LLMError {
-            #expect(!error.isRetryable)
-            #expect(error.errorDescription?.contains("saldo") == true)
-            #expect(error.errorDescription?.contains("espere um pouco") == false)
-            #expect(error.errorDescription?.contains("insufficient_quota") == true)
-        } catch {
-            Issue.record("unexpected \(error)")
-        }
+        })
+        #expect(!error.isRetryable)
+        #expect(error.errorDescription?.contains("saldo") == true)
+        #expect(error.errorDescription?.contains("espere um pouco") == false)
+        #expect(error.errorDescription?.contains("insufficient_quota") == true)
         #expect(attempts.value == 1)
         #expect(StubProtocol.sent(to: "quota.test").count == 1)
         // A plain rate limit is still a wait-and-retry.
@@ -353,7 +345,7 @@ struct OpenAIReliabilityTests {
         }
     }
 
-    @Test func contextOverflowIsDistinguishable() async {
+    @Test func contextOverflowIsDistinguishable() async throws {
         let bodies = [
             #"{"error":{"message":"This model's maximum context length is 128000 tokens.","code":"context_length_exceeded"}}"#,
             #"{"error":{"type":"invalid_request_error","message":"prompt is too long: 250000 tokens > 200000 maximum"}}"#,
@@ -361,15 +353,11 @@ struct OpenAIReliabilityTests {
         ]
         for (index, body) in bodies.enumerated() {
             let client = StubProtocol.client(host: "ctx\(index).test", apiKey: nil, status: 400, body: body)
-            do {
+            let error = try #require(await #expect(throws: LLMError.self) {
                 for try await _ in client.stream(model: "m", messages: [], tools: []) {}
-                Issue.record("should have thrown")
-            } catch let error as LLMError {
-                guard case .contextExceeded = error else { Issue.record("not mapped: \(error)"); continue }
-                #expect(!error.isRetryable)
-            } catch {
-                Issue.record("unexpected \(error)")
-            }
+            })
+            guard case .contextExceeded = error else { Issue.record("not mapped: \(error)"); continue }
+            #expect(!error.isRetryable)
         }
         // Another 400 stays a plain HTTP error.
         let other = StubProtocol.client(host: "ctx-other.test", apiKey: nil, status: 400, body: #"{"error":{"message":"bad tool schema"}}"#)
@@ -378,19 +366,15 @@ struct OpenAIReliabilityTests {
         }
     }
 
-    @Test func transportFailuresBecomeRetryableNetworkErrors() async {
+    @Test func transportFailuresBecomeRetryableNetworkErrors() async throws {
         let client = StubProtocol.client(host: "down.test", apiKey: nil, status: 200, body: "")
         StubProtocol.queue(host: "down.test", [.init(failure: URLError.timedOut.rawValue)])
-        do {
+        let error = try #require(await #expect(throws: LLMError.self) {
             for try await _ in client.stream(model: "m", messages: [], tools: []) {}
-            Issue.record("should have thrown")
-        } catch let error as LLMError {
-            guard case .network(let code, _) = error else { Issue.record("not wrapped: \(error)"); return }
-            #expect(code == URLError.timedOut.rawValue)
-            #expect(error.isRetryable)
-        } catch {
-            Issue.record("unexpected \(error)")
-        }
+        })
+        guard case .network(let code, _) = error else { Issue.record("not wrapped: \(error)"); return }
+        #expect(code == URLError.timedOut.rawValue)
+        #expect(error.isRetryable)
     }
 
     // MARK: Credentials

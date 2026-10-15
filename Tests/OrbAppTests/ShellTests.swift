@@ -8,8 +8,7 @@ enum FakeShell {
     static func make(in directory: URL, name: String = "fakeshell", exports: [String: String] = [:], preamble: String = "") throws -> String {
         let script = directory.appending(path: name)
         let lines = exports.map { "export \($0.key)='\($0.value)'" }.joined(separator: "\n")
-        try "#!/bin/sh\n\(preamble)\n\(lines)\nexec /bin/sh -c \"$2\"\n".write(to: script, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        try writeExecutable("#!/bin/sh\n\(preamble)\n\(lines)\nexec /bin/sh -c \"$2\"\n", to: script)
         return script.path
     }
 }
@@ -232,7 +231,7 @@ final class RunCommandTests {
                               outputsDirectory: directory.appending(path: "saidas"))
     }
 
-    deinit { try? FileManager.default.removeItem(at: directory) }
+    deinit { removeTestFolder(directory) }
 
     private func run(_ command: String, _ extra: [String: JSONValue] = [:]) async throws -> String {
         try await RunCommandTool().run(.object(extra.merging(["command": .string(command)]) { $1 }), context: context)
@@ -267,8 +266,7 @@ final class RunCommandTests {
         let bin = directory.appending(path: "fakebin")
         try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
         let program = bin.appending(path: "meucmd")
-        try "#!/bin/sh\necho achei-o\n".write(to: program, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: program.path)
+        try writeExecutable("#!/bin/sh\necho achei-o\n", to: program)
         try "export PATH='\(bin.path)':$PATH\n".write(to: directory.appending(path: ".zprofile"), atomically: true, encoding: .utf8)
         let base = ["PATH": "/usr/bin:/bin", "HOME": directory.path, "ZDOTDIR": directory.path]
         return ToolContext(workingDirectory: directory, botID: UUID(),

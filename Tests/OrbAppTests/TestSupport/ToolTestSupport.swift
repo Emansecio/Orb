@@ -33,6 +33,16 @@ final class ToolWorkspace {
         try await tool.run(.object(arguments), context: context)
     }
 
+    /// What a call that is expected to fail says: the error's message, or "" when the call succeeds.
+    func failure(_ tool: some AgentTool, _ arguments: [String: JSONValue]) async -> String {
+        do {
+            _ = try await run(tool, arguments)
+            return ""
+        } catch {
+            return (error as? ToolError)?.message ?? "\(error)"
+        }
+    }
+
     /// How a call ends: its result, or its error message. Nil when it has not ended after `seconds`, so a call that
     /// blocks forever (a read on a pipe nobody writes to) fails the test instead of hanging the run.
     func outcome(of tool: some AgentTool, _ arguments: [String: JSONValue], seconds: Int = 3) async -> String? {
@@ -113,4 +123,15 @@ enum Fixtures {
         context.textPosition = point
         CTLineDraw(CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: attributes)), context)
     }
+}
+
+/// A read-only tool called "look" that answers at once with `result`, for engine tests that need a tool to call.
+struct FixedLookTool: AgentTool {
+    var result = "visto"
+    var spec: ToolSpec { ToolSpec(name: "look", description: "Looks", parameters: .schema([:])) }
+    var kind: ToolCall.Kind { .file }
+    var capability: Capability? { nil }
+    func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
+    func summary(_ arguments: JSONValue) -> (title: String, detail: String) { ("Olhando", "") }
+    func run(_ arguments: JSONValue, context: ToolContext) async throws -> String { result }
 }

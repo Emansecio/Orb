@@ -17,7 +17,7 @@ final class CompactionFlowTests {
 
     /// An Orb whose model has a 32k window, a folder with a big file, and eight earlier turns with long answers (about
     /// 33,000 characters: under the budget, so sending folds nothing; the file read during the turn does not fit).
-    private func setUp(_ script: Recorder) throws -> (AppModel, UUID, URL) {
+    private func setUp(_ script: CallScript) throws -> (AppModel, UUID, URL) {
         let folder = root.appending(path: "pasta")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let file = folder.appending(path: "grande.txt")
@@ -43,7 +43,7 @@ final class CompactionFlowTests {
         model.providers = [ProviderAccount(kind: .custom)]
         model.defaultModel = "custom/modelo"
         model.learnContextWindow(32_000, of: "custom/modelo")
-        model.clientOverride = { ReplayLLM(recorder: script) }
+        model.clientOverride = { CallScriptModel(script: script) }
         return (model, state.bots[0].id, file)
     }
 
@@ -56,9 +56,9 @@ final class CompactionFlowTests {
     }
 
     @Test func aFoldInsideATurnExtendsTheLedgerIsToldOnceAndSavesTheMemoryOnce() async throws {
-        let script = Recorder([])
+        let script = CallScript([], whenExhausted: .fim)
         let (model, botID, file) = try setUp(script)
-        await script.reset(with: [read(file, "c1"), read(file, "c2"), read(file, "c3"), [.text("pronto")], [.text("ok")]])
+        await script.setAnswers([read(file, "c1"), read(file, "c2"), read(file, "c3"), [.text("pronto")], [.text("ok")]])
         let bank = model.memory.bank(for: botID)
 
         #expect(model.send("leia o arquivo grande três vezes", to: botID))
@@ -106,7 +106,7 @@ final class CompactionFlowTests {
     }
 
     @Test func compactNowUsesTheSameMachineryAndTheMeterAgreesWithItsNumbers() throws {
-        let (model, botID, _) = try setUp(Recorder([]))
+        let (model, botID, _) = try setUp(CallScript([], whenExhausted: .fim))
         let bot = try #require(model.bot(botID))
         let budget = try #require(model.contextBudget(for: bot))
         let before = try #require(model.contextFill(for: botID))

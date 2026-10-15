@@ -39,46 +39,6 @@ func isValidConversation(_ messages: [ChatMessage]) -> Bool {
     return true
 }
 
-/// Answers each request with the next scripted reply (or a failure first), and keeps what it was sent.
-actor Recorder {
-    private var responses: [[LLMEvent]]
-    private(set) var received: [[ChatMessage]] = []
-    private var failures: [Error]
-
-    init(_ responses: [[LLMEvent]], failures: [Error] = []) {
-        self.responses = responses
-        self.failures = failures
-    }
-
-    /// Replaces the replies still to give (when they need what `setUp` made).
-    func reset(with replies: [[LLMEvent]]) { responses = replies }
-
-    func next(_ messages: [ChatMessage]) throws -> [LLMEvent] {
-        received.append(messages)
-        if !failures.isEmpty { throw failures.removeFirst() }
-        return responses.isEmpty ? [.text("fim")] : responses.removeFirst()
-    }
-}
-
-struct ReplayLLM: LLMClient {
-    let recorder: Recorder
-
-    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
-        AsyncThrowingStream { continuation in
-            Task {
-                do {
-                    for event in try await recorder.next(messages) { continuation.yield(event) }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-        }
-    }
-
-    func models() async throws -> [String] { ["fake"] }
-}
-
 /// A `read_file` that returns `size` characters.
 struct OutputTool: AgentTool {
     let size: Int

@@ -4,33 +4,12 @@ import Testing
 
 /// What each model request carries, with the real `AppModel` turn in the middle: the folder snapshot and the related
 /// memory go once, then only what changed.
-
-private actor Requests {
-    private(set) var received: [[ChatMessage]] = []
-    func record(_ messages: [ChatMessage]) { received.append(messages) }
-}
-
-private struct RecordingModel: LLMClient {
-    var requests = Requests()
-
-    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
-        AsyncThrowingStream { continuation in
-            Task {
-                await requests.record(messages)
-                continuation.yield(.text("feito"))
-                continuation.yield(.finished(.done, nil))
-                continuation.finish()
-            }
-        }
-    }
-}
-
 @Suite final class PrefaceFlowTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbPrefaceFlow-\(UUID().uuidString)")
 
     deinit { removeTestFolder(root) }
 
-    @MainActor private func setUp(_ stub: RecordingModel) throws -> (AppModel, Bot, URL) {
+    @MainActor private func setUp(_ stub: CallScriptModel) throws -> (AppModel, Bot, URL) {
         let folder = root.appending(path: "pasta")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         for index in 0..<25 { try "x".write(to: folder.appending(path: "arquivo\(index).txt"), atomically: true, encoding: .utf8) }
@@ -56,7 +35,7 @@ private struct RecordingModel: LLMClient {
     private func userMessages(_ request: [ChatMessage]) -> [String] { request.filter { $0.role == .user }.map(\.content) }
 
     @Test @MainActor func theFolderAndTheMemoryGoOnceThenOnlyWhatChanged() async throws {
-        let stub = RecordingModel()
+        let stub = CallScriptModel(always: [.text("feito"), .finished(.done, nil)])
         let (model, bot, folder) = try setUp(stub)
         let bank = model.memory.bank(for: bot.id)
         await bank.remember("O banco de dados do projeto Fênix é Postgres 16 hospedado na Hetzner.")
@@ -68,7 +47,7 @@ private struct RecordingModel: LLMClient {
         await say("Obrigado!", model, bot)
         await say("Quero rever o banco de dados do projeto Fênix de novo", model, bot)
 
-        let requests = await stub.requests.received
+        let requests = await stub.script.received
         #expect(requests.count == 3)
         let first = try #require(userMessages(requests[0]).last)
         #expect(first.contains(WorkspaceSnapshot.openTag) && first.contains("Postgres 16"))
@@ -85,19 +64,19 @@ private struct RecordingModel: LLMClient {
     }
 
     @Test @MainActor func aFileEditedInPlaceComesAsOneShortLineNotAWholeSnapshot() async throws {
-        let stub = RecordingModel()
+        let stub = CallScriptModel(always: [.text("feito"), .finished(.done, nil)])
         let (model, bot, folder) = try setUp(stub)
         await say("Olá", model, bot)
         // Only a file's time changes: the snapshot's hash is the same, but the model is told which file was edited.
         try "mais".write(to: folder.appending(path: "arquivo3.txt"), atomically: true, encoding: .utf8)
         await say("e então?", model, bot)
-        let second = try #require(await userMessages(stub.requests.received[1]).last)
+        let second = try #require(await userMessages(stub.script.received[1]).last)
         #expect(!second.contains(WorkspaceSnapshot.openTag))
         #expect(second.contains(WorkspaceSnapshot.changesOpenTag) && second.contains("Edited since: arquivo3.txt"))
         #expect(second.contains("re-list the folder"))
         // Said once: the next message has nothing new about the folder.
         await say("tudo certo?", model, bot)
-        let third = try #require(await userMessages(stub.requests.received[2]).last)
+        let third = try #require(await userMessages(stub.script.received[2]).last)
         #expect(!third.contains(WorkspaceSnapshot.changesOpenTag) && !third.contains(WorkspaceSnapshot.openTag))
     }
 }

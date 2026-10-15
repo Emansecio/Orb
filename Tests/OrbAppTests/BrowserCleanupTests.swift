@@ -106,7 +106,7 @@ import Testing
         let layout = BrowserInstallLayout(root: root)
         try? FileManager.default.createDirectory(at: layout.binDirectory, withIntermediateDirectories: true)
         try? Data("#!/bin/sh\n".utf8).write(to: layout.agentBrowser)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: layout.agentBrowser.path)
+        try? layout.agentBrowser.makeExecutable()
         let world = FakeBrowserWorld()
         let hub = BrowserHub(profilesDirectory: root, locate: { BrowserEngineStatus(engine: $0) }, makeDriver: world.makeDriver)
         let name = AgentBrowserConfig.sessionName(botID: UUID(), engine: .obscura)
@@ -208,8 +208,7 @@ import Testing
         defer { try? FileManager.default.removeItem(at: folder) }
         let log = folder.appending(path: "log")
         let script = folder.appending(path: "agent-browser")
-        try "#!/bin/sh\nsleep 0.3\necho \"$@\" > '\(log.path)'\n".write(to: script, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        try writeExecutable("#!/bin/sh\nsleep 0.3\necho \"$@\" > '\(log.path)'\n", to: script)
         let driver = AgentBrowserDriver(config: AgentBrowserConfig(executable: script.path, session: "orb-x-chrome", engine: .chrome))
         driver.closeSynchronously(timeout: 5)
         #expect(try String(contentsOf: log, encoding: .utf8) == "--session orb-x-chrome --json close\n", "it had finished when the call returned")

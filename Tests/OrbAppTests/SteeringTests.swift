@@ -5,20 +5,6 @@ import Testing
 // Talking to an Orb while it works: the queue, the engine handing queued messages to the model between steps, and
 // the app model showing them as queued, delivered, sent after the turn or given back.
 
-private actor Latch {
-    private var isOpen = false
-    private var waiting: [CheckedContinuation<Void, Never>] = []
-    func wait() async {
-        if isOpen { return }
-        await withCheckedContinuation { waiting.append($0) }
-    }
-    func open() {
-        isOpen = true
-        waiting.forEach { $0.resume() }
-        waiting = []
-    }
-}
-
 private actor Seen {
     private(set) var calls: [[ChatMessage]] = []
     func record(_ messages: [ChatMessage]) { calls.append(messages) }
@@ -28,7 +14,7 @@ private actor Seen {
 /// Answers "resposta N" to every call, holding the first call until `gate` opens, and remembers what it was sent.
 private struct HeldModel: LLMClient {
     var seen = Seen()
-    var gate: Latch?
+    var gate: TestGate?
     var failsFirst = false
     /// The first answer calls this tool (so the turn has a step boundary); later ones are text.
     var toolOnFirst = false
@@ -54,15 +40,6 @@ private struct HeldModel: LLMClient {
             }
         }
     }
-}
-
-private struct LookTool: AgentTool {
-    var spec: ToolSpec { ToolSpec(name: "look", description: "Looks", parameters: .schema([:])) }
-    var kind: ToolCall.Kind { .file }
-    var capability: Capability? { nil }
-    func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
-    func summary(_ arguments: JSONValue) -> (title: String, detail: String) { ("Olhando", "") }
-    func run(_ arguments: JSONValue, context: ToolContext) async throws -> String { "viu" }
 }
 
 private func steered(_ text: String) -> SteeredMessage { SteeredMessage(text: text, prompt: text) }
@@ -102,7 +79,7 @@ struct SteeringQueueTests {
 }
 
 struct SteeringEngineTests {
-    private func request(_ client: HeldModel, steering: SteeringQueue?, tools: [any AgentTool] = [LookTool()]) -> TurnRequest {
+    private func request(_ client: HeldModel, steering: SteeringQueue?, tools: [any AgentTool] = [FixedLookTool(result: "viu")]) -> TurnRequest {
         let bot = Bot(name: "Teste", role: "", orb: OrbConfig(), permissionMode: .auto)
         return TurnRequest(bot: bot, model: "fake", system: "sys", history: [], prompt: "oi", client: client, tools: tools,
                            context: ToolContext(workingDirectory: URL(fileURLWithPath: NSTemporaryDirectory())), steering: steering)
@@ -129,7 +106,7 @@ struct SteeringEngineTests {
 
     @Test func aMessageQueuedDuringAStepGoesInBetweenSteps() async throws {
         let queue = SteeringQueue()
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate, toolOnFirst: true)
         let turn = Task { await run(request(client, steering: queue)) }
         await waitUntil("the first model call") { await client.seen.count >= 1 }
@@ -148,7 +125,7 @@ struct SteeringEngineTests {
 
     @Test func aMessageQueuedWhileTheFinalAnswerIsWrittenKeepsTheTurnGoing() async throws {
         let queue = SteeringQueue()
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate) // answers in text at once: no tool step in this turn
         let turn = Task { await run(request(client, steering: queue)) }
         await waitUntil("the first model call") { await client.seen.count >= 1 }
@@ -200,7 +177,7 @@ struct SteeringEngineTests {
     }
 
     @Test @MainActor func aMessageSentDuringATurnIsQueuedAndShownAsWaiting() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
         #expect(model.submit("primeiro", to: bot.id))
@@ -218,7 +195,7 @@ struct SteeringEngineTests {
     }
 
     @Test @MainActor func theQueuedMessageJoinsTheTranscriptWhenTheModelGetsIt() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
         model.submit("primeiro", to: bot.id)
@@ -236,7 +213,7 @@ struct SteeringEngineTests {
     }
 
     @Test @MainActor func lettingTheCommandGoSendsWhatWasQueuedForAfterTheTaskIntoIt() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
         model.submit("primeiro", to: bot.id)
@@ -288,7 +265,7 @@ struct SteeringEngineTests {
     }
 
     @Test @MainActor func aFileAloneIsQueuedWhileTheOrbWorks() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
         model.submit("primeiro", to: bot.id)
@@ -307,7 +284,7 @@ struct SteeringEngineTests {
     }
 
     @Test @MainActor func quittingKeepsTheQueueTheDraftAndTheirFilesForTheNextLaunch() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
         model.submit("primeiro", to: bot.id)
@@ -339,7 +316,7 @@ struct SteeringEngineTests {
     }
 
     @Test @MainActor func takingAMessageBackReturnsItToTheDraft() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
         model.submit("primeiro", to: bot.id)
@@ -357,7 +334,7 @@ struct SteeringEngineTests {
     }
 
     @Test @MainActor func stoppingGivesWhatWasQueuedBackToTheDraft() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
         model.submit("primeiro", to: bot.id)
@@ -373,7 +350,7 @@ struct SteeringEngineTests {
     }
 
     @Test @MainActor func stoppingKeepsWhatWasQueuedAndItsAttachmentsInTheComposer() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
         let file = root.appending(path: "nota.txt")
@@ -394,7 +371,7 @@ struct SteeringEngineTests {
     }
 
     @Test @MainActor func theCompactCommandTypedDuringATurnIsNotQueuedForTheModel() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
         model.submit("primeiro", to: bot.id)
@@ -416,7 +393,7 @@ struct SteeringEngineTests {
     }
 
     @Test @MainActor func stopAndSendEndsTheTurnAndSendsTheQueuedMessageNow() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
         model.submit("primeiro", to: bot.id)
@@ -433,7 +410,7 @@ struct SteeringEngineTests {
     }
 
     @Test @MainActor func quittingMidTaskSaysTheAppClosedAndOffersToContinue() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
         model.submit("primeiro", to: bot.id)
@@ -447,7 +424,7 @@ struct SteeringEngineTests {
     }
 
     @Test @MainActor func quittingMidRoutineRunAsksToCheckBeforeRepeatingAndOffersNoContinue() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
         let routine = Routine(name: "R", botID: bot.id, prompt: "faça", schedule: .everyHours(1))
@@ -465,7 +442,7 @@ struct SteeringEngineTests {
     }
 
     @Test @MainActor func stopAndSendGoesBeforeARoutineWaitingForTheOrb() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
         let routine = Routine(name: "R", botID: bot.id, prompt: "faça", schedule: .everyHours(1))
@@ -491,7 +468,7 @@ struct SteeringEngineTests {
     }
 
     @Test @MainActor func stopAndSendWithNothingToSendLetsTheQueuedRoutineStart() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
         let routine = Routine(name: "R", botID: bot.id, prompt: "faça", schedule: .everyHours(1))
@@ -510,7 +487,7 @@ struct SteeringEngineTests {
     }
 
     @Test @MainActor func stopAndSendRightAfterTheMessageEnteredTheTaskSendsItAsTheNewRequest() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
         model.submit("primeiro", to: bot.id)
@@ -538,7 +515,7 @@ struct SteeringEngineTests {
     }
 
     @Test @MainActor func aMessageTheOrbAlreadyActedOnIsNotSentAgain() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
         model.submit("primeiro", to: bot.id)
@@ -555,7 +532,7 @@ struct SteeringEngineTests {
     }
 
     @Test @MainActor func stopAndSendTakesWhatIsTypedToo() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
         model.submit("primeiro", to: bot.id)
@@ -567,7 +544,7 @@ struct SteeringEngineTests {
     }
 
     @Test @MainActor func theQueueBubblesStopAndSendLeavesTheComposerAlone() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
         model.submit("primeiro", to: bot.id)
@@ -593,7 +570,7 @@ struct SteeringEngineTests {
     }
 
     @Test @MainActor func aFailedTurnDoesNotSendWhatWasQueuedByItself() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate, failsFirst: true)
         let (model, bot) = setUp(client)
         model.submit("primeiro", to: bot.id)
@@ -636,7 +613,7 @@ struct SteeringEngineTests {
     }
 
     @Test @MainActor func queuingScrollsTheChatToTheWaitingBubble() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
         model.submit("primeiro", to: bot.id)
@@ -650,7 +627,7 @@ struct SteeringEngineTests {
     }
 
     @Test @MainActor func deliveringAQueuedMessageDoesNotPullTheChatToTheEnd() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
         model.submit("primeiro", to: bot.id)
@@ -665,7 +642,7 @@ struct SteeringEngineTests {
     }
 
     @Test @MainActor func aSkillInAQueuedMessageCountsOnceWhicheverWayItIsDelivered() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
         model.skills = [Skill(slug: "resumir", name: "Resumir", summary: "", instructions: "resuma")]
@@ -679,7 +656,7 @@ struct SteeringEngineTests {
         await waitUntilIdle(model, bot.id)
 
         // Delivered between steps instead.
-        let gate2 = Latch()
+        let gate2 = TestGate()
         let (model2, bot2) = setUp(HeldModel(gate: gate2))
         model2.skills = [Skill(slug: "resumir", name: "Resumir", summary: "", instructions: "resuma")]
         model2.submit("primeiro", to: bot2.id)
@@ -691,7 +668,7 @@ struct SteeringEngineTests {
     }
 
     @Test @MainActor func askingToRememberMidTurnTellsTheModelToSave() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
         model.submit("primeiro", to: bot.id)
@@ -734,7 +711,7 @@ struct SteeringEngineTests {
     }
 
     @Test @MainActor func aMessageIsNotQueuedWhileAPictureIsStillBeingPrepared() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
         model.submit("primeiro", to: bot.id)
@@ -749,7 +726,7 @@ struct SteeringEngineTests {
     }
 
     @Test @MainActor func aMessageFromThePanelIsQueuedWithoutTouchingTheComposer() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
         #expect(!model.queueOutsideComposer("cedo demais", to: bot.id)) // the Orb is free: nothing to queue behind
@@ -770,7 +747,7 @@ struct SteeringEngineTests {
     }
 
     @Test @MainActor func theRunningRoutineIsNamedForTheComposer() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
         #expect(model.runningRoutineName(bot.id) == nil)
@@ -785,7 +762,7 @@ struct SteeringEngineTests {
     }
 
     @Test @MainActor func aRoutineRunCannotTakeYourMessages() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
         let routine = Routine(name: "R", botID: bot.id, prompt: "faça", schedule: .everyHours(1))
@@ -879,7 +856,7 @@ struct SteeringModesTests {
 struct SteeringModesEngineTests {
     private func request(_ client: HeldModel, steering: SteeringQueue?) -> TurnRequest {
         let bot = Bot(name: "Teste", role: "", orb: OrbConfig(), permissionMode: .auto)
-        return TurnRequest(bot: bot, model: "fake", system: "sys", history: [], prompt: "oi", client: client, tools: [LookTool()],
+        return TurnRequest(bot: bot, model: "fake", system: "sys", history: [], prompt: "oi", client: client, tools: [FixedLookTool(result: "viu")],
                            context: ToolContext(workingDirectory: URL(fileURLWithPath: NSTemporaryDirectory())), steering: steering)
     }
 
@@ -891,7 +868,7 @@ struct SteeringModesEngineTests {
 
     @Test func theEngineDeliversTheSteeredOnesInTheMiddleAndLeavesTheOthers() async throws {
         let queue = SteeringQueue()
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate, toolOnFirst: true)
         let turn = Task { await run(request(client, steering: queue)) }
         await waitUntil("the first model call") { await client.seen.count >= 1 }
@@ -912,7 +889,7 @@ struct SteeringModesEngineTests {
 
     @Test func aMessageForAfterTheTaskDoesNotKeepTheTurnGoing() async throws {
         let queue = SteeringQueue()
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate) // answers in text at once
         let turn = Task { await run(request(client, steering: queue)) }
         await waitUntil("the first model call") { await client.seen.count >= 1 }
@@ -934,7 +911,7 @@ extension SteeringModelTests {
     }
 
     @Test @MainActor func theWaitingOnesBecomeTheNextRequestWhenTheTaskEndsInTheOrderOfSending() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
         model.submit("primeiro", to: bot.id)
@@ -955,7 +932,7 @@ extension SteeringModelTests {
     }
 
     @Test @MainActor func theSteeredOneEntersTheTaskMarkedAndTheOtherFollowsAfterIt() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate, toolOnFirst: true)
         let (model, bot) = setUp(client)
         model.submit("primeiro", to: bot.id)
@@ -986,7 +963,7 @@ extension SteeringModelTests {
     }
 
     @Test @MainActor func stoppingGivesBackWhatReachedTheTaskUnanswered() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
         model.submit("primeiro", to: bot.id)
@@ -1005,7 +982,7 @@ extension SteeringModelTests {
     }
 
     @Test @MainActor func stopAndSendFromTheBubbleSendsWhatReachedTheTaskUnanswered() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
         model.submit("primeiro", to: bot.id)
@@ -1035,7 +1012,7 @@ extension SteeringModelTests {
     }
 
     @Test @MainActor func aWaitingMessageSwitchesModeUntilItIsDelivered() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate, toolOnFirst: true)
         let (model, bot) = setUp(client)
         model.submit("primeiro", to: bot.id)
@@ -1059,7 +1036,7 @@ extension SteeringModelTests {
     }
 
     @Test @MainActor func aMessageSwitchedToAfterTheTaskIsNotDeliveredInTheMiddle() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate, toolOnFirst: true)
         let (model, bot) = setUp(client)
         model.submit("primeiro", to: bot.id)
@@ -1096,7 +1073,7 @@ extension SteeringModelTests {
     }
 
     @Test @MainActor func stopAndSendTakesBothModes() async throws {
-        let gate = Latch()
+        let gate = TestGate()
         let client = HeldModel(gate: gate)
         let (model, bot) = setUp(client)
         model.submit("primeiro", to: bot.id)

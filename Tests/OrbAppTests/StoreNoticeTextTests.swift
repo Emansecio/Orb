@@ -8,30 +8,18 @@ import Testing
 
     deinit { removeTestFolder(root) }
 
-    private final class Collected: @unchecked Sendable {
-        private let lock = NSLock()
-        private var items: [StoreNotice] = []
-        func add(_ notice: StoreNotice) { lock.withLock { items.append(notice) } }
-        var notices: [StoreNotice] { lock.withLock { items } }
-    }
-
-    private func put(_ text: String, at url: URL) throws {
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data(text.utf8).write(to: url)
-    }
-
     private let lia = Bot(name: "Lia", role: "x", orb: OrbConfig(), model: "", permissionMode: .ask)
 
     // MARK: Failed saves
 
     @Test func aFailedSaveOfAConversationNamesTheOrb() throws {
         try put("a file, not a folder", at: root.appending(path: "conversations")) // nothing can be written in it
-        let failures = Collected()
-        let store = Store(directory: root) { failures.add($0) }
+        let failures = LockedBox<[StoreNotice]>([])
+        let store = Store(directory: root) { failures.append($0) }
         store.save(Conversation(items: [TranscriptItem(.user(text: "oi", attachments: []))], messages: [.user("oi")]), for: lia.id)
         store.flush()
 
-        let notice = try #require(failures.notices.first)
+        let notice = try #require(failures.value.first)
         #expect(notice.message.contains("\(lia.id.uuidString).json")) // the store itself names the file…
         let shown = AppModel.described(notice, bots: [lia], routines: [])
         #expect(shown.message.hasPrefix("Não foi possível salvar a conversa de Lia: "))
@@ -41,12 +29,12 @@ import Testing
 
     @Test func aFailedSaveOfTheSettingsSaysSo() throws {
         try put("a file, not a folder", at: root.appending(path: "data"))
-        let failures = Collected()
-        let store = Store(directory: root.appending(path: "data")) { failures.add($0) }
+        let failures = LockedBox<[StoreNotice]>([])
+        let store = Store(directory: root.appending(path: "data")) { failures.append($0) }
         store.save(AppState.initial)
         store.flush()
 
-        let shown = AppModel.described(try #require(failures.notices.first), bots: [], routines: [])
+        let shown = AppModel.described(try #require(failures.value.first), bots: [], routines: [])
         #expect(shown.message.hasPrefix("Não foi possível salvar os ajustes do app (Orbs, rotinas, provedores): "))
     }
 
@@ -68,8 +56,8 @@ import Testing
     }
 
     @Test func theNoteBesideAConversationNeverAlarmsAnyone() throws {
-        let failures = Collected()
-        let store = Store(directory: root) { failures.add($0) }
+        let failures = LockedBox<[StoreNotice]>([])
+        let store = Store(directory: root) { failures.append($0) }
         store.save(Conversation(items: [TranscriptItem(.user(text: "oi", attachments: []))], messages: [.user("oi")]), for: lia.id)
         store.flush()
         // The note is gone and something that is not a file sits in its place: it can't be made again.
@@ -79,18 +67,18 @@ import Testing
 
         _ = store.readConversation(lia.id)
         store.flush()
-        #expect(failures.notices.isEmpty)
+        #expect(failures.value.isEmpty)
     }
 
     @Test func aConnectorsCatalogNeverAlarmsAnyoneEither() throws {
-        let failures = Collected()
-        let store = Store(directory: root) { failures.add($0) }
+        let failures = LockedBox<[StoreNotice]>([])
+        let store = Store(directory: root) { failures.append($0) }
         // A folder where the file should go: it can't be written, and it is only a cache.
         let id = UUID()
         try FileManager.default.createDirectory(at: root.appending(path: "conectores/\(id.uuidString).json"), withIntermediateDirectories: true)
         store.saveConnectorCatalog(ConnectorCatalog(handshake: MCPHandshake(), specs: [], annotations: [:]), for: id)
         store.flush()
-        #expect(failures.notices.isEmpty)
+        #expect(failures.value.isEmpty)
     }
 
     // MARK: Items that could not be read

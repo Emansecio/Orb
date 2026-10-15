@@ -4,23 +4,6 @@ import Testing
 
 // Orbs asking each other for work, end to end with a model that is a script: who asks whom, who is woken by what, what stops it.
 
-/// Opens when told to; until then `wait()` suspends.
-private actor Valve {
-    private var isOpen = false
-    private var waiting: [CheckedContinuation<Void, Never>] = []
-
-    func wait() async {
-        if isOpen { return }
-        await withCheckedContinuation { waiting.append($0) }
-    }
-
-    func open() {
-        isOpen = true
-        waiting.forEach { $0.resume() }
-        waiting = []
-    }
-}
-
 private actor Counter {
     private var value = 0
     func next() -> Int {
@@ -213,7 +196,7 @@ private final class Hooks: GroupTurnHooks {
     }
 
     @Test func theAskerWaitsOnScreenWhileTheTargetWorks() async throws {
-        let valve = Valve()
+        let valve = TestGate()
         let team = Team { seen in
             switch seen.who {
             case "Atlas":
@@ -243,7 +226,7 @@ private final class Hooks: GroupTurnHooks {
     }
 
     @Test func aBusyTargetQueuesTheRequestAndRunsItAfterItsOwnTurn() async throws {
-        let valve = Valve()
+        let valve = TestGate()
         let team = Team { seen in
             switch seen.who {
             case "Atlas":
@@ -272,7 +255,7 @@ private final class Hooks: GroupTurnHooks {
     }
 
     @Test func aBusyAskerGetsTheAnswerWhenItsTurnEnds() async throws {
-        let target = Valve(), busy = Valve()
+        let target = TestGate(), busy = TestGate()
         let team = Team { seen in
             switch seen.who {
             case "Atlas":
@@ -411,7 +394,7 @@ private final class Hooks: GroupTurnHooks {
     }
 
     @Test func theFourthOpenRequestAndTheFifthHopAreRefusedByTheHub() async throws {
-        let valve = Valve() // the targets are busy, so the requests stay open
+        let valve = TestGate() // the targets are busy, so the requests stay open
         let team = Team { seen in
             await valve.wait()
             return say("x")
@@ -474,7 +457,7 @@ private final class Hooks: GroupTurnHooks {
     // MARK: Stopping
 
     @Test func stoppingTheIdleAskerCancelsTheWholeChain() async throws {
-        let valve = Valve()
+        let valve = TestGate()
         let team = Team { seen in
             switch seen.who {
             case "Atlas":
@@ -510,7 +493,7 @@ private final class Hooks: GroupTurnHooks {
     }
 
     @Test func stoppingTheTargetStopsTheChainToo() async throws {
-        let valve = Valve()
+        let valve = TestGate()
         let team = Team { seen in
             switch seen.who {
             case "Atlas":
@@ -535,7 +518,7 @@ private final class Hooks: GroupTurnHooks {
     }
 
     @Test func stoppingReachesNestedRequestsAndWaitingOrbs() async throws {
-        let valve = Valve()
+        let valve = TestGate()
         let team = Team { seen in
             switch seen.who {
             case "Atlas":
@@ -566,7 +549,7 @@ private final class Hooks: GroupTurnHooks {
     }
 
     /// Atlas asks Pesquisador, who asks Revisor and waits (Revisor is held on a valve): Pesquisador's side conversation is kept in memory.
-    private func waitingMiddleTeam(_ valve: Valve) -> Team {
+    private func waitingMiddleTeam(_ valve: TestGate) -> Team {
         Team { seen in
             switch seen.who {
             case "Atlas":
@@ -588,7 +571,7 @@ private final class Hooks: GroupTurnHooks {
     }
 
     @Test func stoppingTheChainClosesTheLinesOfARequestThatWaitedForItsChildren() async throws {
-        let valve = Valve()
+        let valve = TestGate()
         let team = waitingMiddleTeam(valve)
         defer { team.cleanUp() }
         let model = team.model
@@ -604,7 +587,7 @@ private final class Hooks: GroupTurnHooks {
     }
 
     @Test func aTimedOutRequestThatWaitedForItsChildrenClosesItsLines() async throws {
-        let valve = Valve()
+        let valve = TestGate()
         let team = waitingMiddleTeam(valve)
         defer { team.cleanUp() }
         let model = team.model
@@ -619,7 +602,7 @@ private final class Hooks: GroupTurnHooks {
     }
 
     @Test func anOrbDeletedMidChainAnswersFailedToWhoWaited() async throws {
-        let valve = Valve()
+        let valve = TestGate()
         let team = Team { seen in
             switch seen.who {
             case "Atlas":
@@ -652,7 +635,7 @@ private final class Hooks: GroupTurnHooks {
     // MARK: The switch, and the permissions
 
     @Test func theSwitchHidesTheToolAndTheTeammatesAndStopsWhatIsGoingOn() async throws {
-        let valve = Valve()
+        let valve = TestGate()
         let team = Team { seen in
             switch seen.who {
             case "Atlas":
@@ -734,12 +717,10 @@ private final class Hooks: GroupTurnHooks {
         let hub = team.model.delegation
         let list = try await hub.handleTool(.object(["action": .string("list")]), orb: team.atlas.id)
         #expect(list == "- Pesquisador: Pesquisa e resume (livre)\n- Revisor: Revisa o que foi feito (livre)")
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "a request to nobody went through") {
             _ = try await hub.handleTool(.object(["action": .string("ask"), "to": .string("Zé"), "message": .string("x")]), orb: team.atlas.id)
-            Issue.record("a request to nobody went through")
-        } catch {
-            #expect(error.localizedDescription.contains("Não existe um Orb chamado “Zé”"))
-        }
+        })
+        #expect(error.localizedDescription.contains("Não existe um Orb chamado “Zé”"))
         let sent = try await hub.handleTool(.object(["action": .string("ask"), "to": .string("pesq"), "message": .string("Pesquise")]), orb: team.atlas.id,
                                             messageID: UUID(uuidString: "A1B2C3D4-0000-4000-8000-000000000000")!)
         #expect(sent == "Pedido enviado a Pesquisador (id a1b2). A resposta chega sozinha como mensagem; não espere nem repita o pedido. Termine o que puder sem ela.")
@@ -874,7 +855,7 @@ private actor Names {
     }
 
     @Test func stoppingTheGroupCancelsEveryTurnAndPostsNothingMore() async throws {
-        let valve = Valve()
+        let valve = TestGate()
         let team = Team { seen in
             switch seen.who {
             case "Atlas":

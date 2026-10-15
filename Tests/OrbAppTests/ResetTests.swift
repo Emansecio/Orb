@@ -340,7 +340,7 @@ import Testing
         return { release.signal() }
     }
 
-    private func preferencesStore() -> DictionaryPreferences { DictionaryPreferences() }
+    private func preferencesStore() -> FakePreferences { FakePreferences() }
 
     // MARK: Never in a developer mode, never on a folder that is not the app's
 
@@ -622,13 +622,6 @@ import Testing
 
 private final class ReportBox: @unchecked Sendable {
     var report: ResetReport?
-}
-
-/// Preferences in a dictionary (what `LegacyMigration.run` writes to).
-private final class DictionaryPreferences: PreferenceStore {
-    var values: [String: Any] = [:]
-    func object(forKey key: String) -> Any? { values[key] }
-    func set(_ value: Any?, forKey key: String) { values[key] = value }
 }
 
 /// A model that never answers, and notes when its call is cancelled.

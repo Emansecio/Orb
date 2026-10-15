@@ -3,25 +3,16 @@ import Testing
 @testable import Orb
 
 final class ToolTests {
-    let directory: URL
+    let workspace: ToolWorkspace
+    var directory: URL { workspace.directory }
     /// Where tool outputs that outgrow the cap are saved, away from the working directory.
-    let outputs: URL
-    let context: ToolContext
+    var outputs: URL { workspace.outputs }
+    var context: ToolContext { workspace.context }
 
-    init() throws {
-        directory = FileManager.default.temporaryDirectory.appending(path: "OrbToolTests-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        outputs = FileManager.default.temporaryDirectory.appending(path: "OrbToolTests-saidas-\(UUID().uuidString)")
-        context = ToolContext(workingDirectory: directory, outputsDirectory: outputs)
-    }
-
-    deinit {
-        try? FileManager.default.removeItem(at: directory)
-        try? FileManager.default.removeItem(at: outputs)
-    }
+    init() throws { workspace = try ToolWorkspace() }
 
     private func run(_ tool: some AgentTool, _ arguments: [String: JSONValue]) async throws -> String {
-        try await tool.run(.object(arguments), context: context)
+        try await workspace.run(tool, arguments)
     }
 
     // MARK: run_command

@@ -17,15 +17,6 @@ final class FileAccessTests {
         }
     }
 
-    private func failure(_ tool: some AgentTool, _ arguments: [String: JSONValue]) async -> String {
-        do {
-            _ = try await workspace.run(tool, arguments)
-            return ""
-        } catch {
-            return (error as? ToolError)?.message ?? "\(error)"
-        }
-    }
-
     private func lock(_ name: String, mode: Int = 0o000) throws {
         try FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: workspace.url(name).path)
     }
@@ -36,26 +27,26 @@ final class FileAccessTests {
         try workspace.write("locked.txt", "segredo\n")
         try lock("locked.txt")
         for tool: any AgentTool in [ReadFileTool()] {
-            let message = await failure(tool, ["path": .string("locked.txt")])
+            let message = await workspace.failure(tool, ["path": .string("locked.txt")])
             #expect(message.contains("Sem permissão para ler"), Comment(rawValue: message))
             #expect(message.contains(workspace.url("locked.txt").lastPathComponent))
             #expect(message.contains("Privacidade e Segurança") && message.contains("sudo"))
             #expect(!message.contains("couldn’t be opened"))
         }
-        let edit = await failure(EditFileTool(), ["path": .string("locked.txt"), "old_text": .string("a"), "new_text": .string("b")])
+        let edit = await workspace.failure(EditFileTool(), ["path": .string("locked.txt"), "old_text": .string("a"), "new_text": .string("b")])
         #expect(edit.contains("Sem permissão para ler") && edit.contains("locked.txt"))
     }
 
     @Test func aProtectedFileIsNotOverwrittenInSilence() async throws {
         try workspace.write("fixo.txt", "original\n")
         try lock("fixo.txt", mode: 0o444)
-        let message = await failure(WriteFileTool(), ["path": .string("fixo.txt"), "content": .string("novo")])
+        let message = await workspace.failure(WriteFileTool(), ["path": .string("fixo.txt"), "content": .string("novo")])
         #expect(message.contains("protegido contra escrita") && message.contains("chmod u+w"), Comment(rawValue: message))
         #expect(try workspace.readText("fixo.txt") == "original\n")
         // Appending to and editing it are refused the same way, and it stays as it was.
-        let append = await failure(WriteFileTool(), ["path": .string("fixo.txt"), "content": .string("mais"), "append": .bool(true)])
+        let append = await workspace.failure(WriteFileTool(), ["path": .string("fixo.txt"), "content": .string("mais"), "append": .bool(true)])
         #expect(!append.isEmpty)
-        let edit = await failure(EditFileTool(), ["path": .string("fixo.txt"), "old_text": .string("original"), "new_text": .string("x")])
+        let edit = await workspace.failure(EditFileTool(), ["path": .string("fixo.txt"), "old_text": .string("original"), "new_text": .string("x")])
         #expect(edit.contains("protegido contra escrita"))
         #expect(try workspace.readText("fixo.txt") == "original\n")
         // Once the owner lifts the protection, writing works again and keeps the mode.
@@ -68,7 +59,7 @@ final class FileAccessTests {
         try FileManager.default.createDirectory(at: workspace.url("ro"), withIntermediateDirectories: true)
         try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: workspace.url("ro").path)
         defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: workspace.url("ro").path) }
-        let message = await failure(WriteFileTool(), ["path": .string("ro/novo.txt"), "content": .string("x")])
+        let message = await workspace.failure(WriteFileTool(), ["path": .string("ro/novo.txt"), "content": .string("x")])
         #expect(message.contains("Sem permissão para gravar em") && message.contains("ro/novo.txt"), Comment(rawValue: message))
     }
 
@@ -89,13 +80,13 @@ final class FileAccessTests {
     @Test func aLinkLoopIsNamedInsteadOfPassingForAMissingFile() async throws {
         try workspace.link("loop1", to: "loop2")
         try workspace.link("loop2", to: "loop1")
-        let read = await failure(ReadFileTool(), ["path": .string("loop1")])
+        let read = await workspace.failure(ReadFileTool(), ["path": .string("loop1")])
         #expect(read.contains("Link simbólico em loop") && !read.contains("não encontrado"))
-        let write = await failure(WriteFileTool(), ["path": .string("loop1"), "content": .string("x")])
+        let write = await workspace.failure(WriteFileTool(), ["path": .string("loop1"), "content": .string("x")])
         #expect(write.contains("Link simbólico em loop"))
         // The link is still a link: nothing replaced it with a file.
         #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: workspace.url("loop1").path)) != nil)
-        let edit = await failure(EditFileTool(), ["path": .string("loop1"), "old_text": .string("a"), "new_text": .string("b")])
+        let edit = await workspace.failure(EditFileTool(), ["path": .string("loop1"), "old_text": .string("a"), "new_text": .string("b")])
         #expect(edit.contains("Link simbólico em loop"))
         // Ordinary links are not loops, nor is a dangling one.
         try workspace.write("real.txt", "ok\n")

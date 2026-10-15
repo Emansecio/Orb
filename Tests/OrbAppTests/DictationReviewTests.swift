@@ -5,28 +5,6 @@ import Testing
 // The dictated text read over by the Orb's model when the microphone closes: what is worth a request, what is sent, what
 // of the reply is kept, and the call itself.
 
-private actor Sent {
-    var requests: [(model: String, messages: [ChatMessage])] = []
-    func note(_ model: String, _ messages: [ChatMessage]) { requests.append((model, messages)) }
-}
-
-private struct Reviewer: LLMClient {
-    var events: [LLMEvent] = []
-    var failure: Error?
-    let sent = Sent()
-
-    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
-        AsyncThrowingStream { continuation in
-            Task {
-                await sent.note(model, messages)
-                if let failure { continuation.finish(throwing: failure); return }
-                events.forEach { continuation.yield($0) }
-                continuation.finish()
-            }
-        }
-    }
-}
-
 struct DictationReviewTests {
     private let heard = "abre a planilha de vendas e me manda um resumo do clow de"
 
@@ -68,20 +46,20 @@ struct DictationReviewTests {
     }
 
     @Test func oneRequestWithoutToolsAndWhatItCost() async throws {
-        let reviewer = Reviewer(events: [.text("Abre a planilha de vendas e me manda "), .text("um resumo do Claude."),
+        let reviewer = CallScriptModel(always: [.text("Abre a planilha de vendas e me manda "), .text("um resumo do Claude."),
                                          .finished(.done, TokenUsage(input: 300, output: 20))])
         let result = await DictationReview.revise(heard, context: [], vocabulary: [], client: reviewer, model: "haiku")
         #expect(result == DictationReview.Result(text: "Abre a planilha de vendas e me manda um resumo do Claude.",
                                                  usage: TokenUsage(input: 300, output: 20)))
-        let sent = await reviewer.sent.requests
-        #expect(sent.count == 1 && sent.first?.model == "haiku")
+        let calls = await reviewer.script.calls
+        #expect(calls.count == 1 && calls.first?.model == "haiku")
     }
 
     @Test func aFailureOrAnAnswerKeepsTheTextButNotWhatItCost() async {
         let failed = await DictationReview.revise(heard, context: [], vocabulary: [],
-                                                  client: Reviewer(failure: LLMError.network(code: -1009, message: "offline")), model: "m")
+                                                  client: CallScriptModel(failure: LLMError.network(code: -1009, message: "offline")), model: "m")
         #expect(failed == DictationReview.Result(text: nil, usage: nil))
-        let answered = await DictationReview.revise(heard, context: [], vocabulary: [], client: Reviewer(events: [
+        let answered = await DictationReview.revise(heard, context: [], vocabulary: [], client: CallScriptModel(always: [
             .usage(TokenUsage(input: 300, output: 0)), .text(String(repeating: "Claro, aqui está o resumo. ", count: 20)),
         ]), model: "m")
         #expect(answered == DictationReview.Result(text: nil, usage: TokenUsage(input: 300, output: 0)))
@@ -113,7 +91,7 @@ struct DictationReviewTests {
         removeTestFolder(root)
     }
 
-    @MainActor private func setUp(_ reviewer: Reviewer) -> (AppModel, UUID) {
+    @MainActor private func setUp(_ reviewer: CallScriptModel) -> (AppModel, UUID) {
         let state = AppState.initial
         let store = Store(directory: root)
         store.save(state)
@@ -130,14 +108,14 @@ struct DictationReviewTests {
     }
 
     @Test @MainActor func theRevisedTextComesBackAndItsCostIsKeptApartFromTheChat() async throws {
-        let reviewer = Reviewer(events: [.text("Abre a planilha de vendas e me manda um resumo, por favor."),
+        let reviewer = CallScriptModel(always: [.text("Abre a planilha de vendas e me manda um resumo, por favor."),
                                          .finished(.done, TokenUsage(input: 400, output: 15))])
         let (model, botID) = setUp(reviewer)
         let text = await model.reviewDictation("abre a planilha de vendas e me manda um resumo por favor", of: botID, vocabulary: ["Atlas"])
         #expect(text == "Abre a planilha de vendas e me manda um resumo, por favor.")
-        let sent = await reviewer.sent.requests
-        #expect(sent.count == 1 && sent.first?.model == "haiku")
-        #expect(sent.first?.messages.last?.content.contains("Atlas") == true)
+        let calls = await reviewer.script.calls
+        #expect(calls.count == 1 && calls.first?.model == "haiku")
+        #expect(calls.first?.sent.last?.content.contains("Atlas") == true)
 
         model.usageLog.flush()
         model.store.flush()
@@ -148,9 +126,9 @@ struct DictationReviewTests {
     }
 
     @Test @MainActor func anOrbThatIsGoneGetsNoRequest() async {
-        let reviewer = Reviewer(events: [.text("Texto.")])
+        let reviewer = CallScriptModel(always: [.text("Texto.")])
         let (model, _) = setUp(reviewer)
         #expect(await model.reviewDictation("abre a planilha de vendas", of: UUID(), vocabulary: []) == nil)
-        #expect(await reviewer.sent.requests.isEmpty)
+        #expect(await reviewer.script.calls.isEmpty)
     }
 }

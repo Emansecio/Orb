@@ -5,26 +5,6 @@ import Testing
 // The model's note on a long stretch saved to the memory (`SessionNote`): asked only when you turned it on, only for a
 // stretch with enough requests and no connector, and it joins the page written by rules instead of replacing it.
 
-private actor NoteRequests {
-    private(set) var count = 0
-    func asked() { count += 1 }
-}
-
-private struct NoteModel: LLMClient {
-    let requests: NoteRequests
-
-    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
-        AsyncThrowingStream { continuation in
-            Task {
-                if messages.first?.content == ChunkSummarizer.instructions { await requests.asked() }
-                continuation.yield(.text("O usuário montou o Atlas com SQLite na porta 4711; ficou faltando o certificado."))
-                continuation.yield(.finished(.done, TokenUsage(input: 2_000, output: 40)))
-                continuation.finish()
-            }
-        }
-    }
-}
-
 @MainActor
 final class SessionNoteTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbSessionNote-\(UUID().uuidString)")
@@ -52,7 +32,7 @@ final class SessionNoteTests {
         #expect(!input.contains("Guardando")) // saving to the memory is not worth summarizing
     }
 
-    private func setUp(on: Bool) throws -> (AppModel, UUID, NoteRequests) {
+    private func setUp(on: Bool) throws -> (AppModel, UUID, CallScript) {
         var conversation = Conversation()
         conversation.items = stretch(requests: SessionNote.minimumRequests)
         let state = AppState.initial
@@ -64,8 +44,9 @@ final class SessionNoteTests {
         model.providers = [ProviderAccount(kind: .custom)]
         model.defaultModel = "custom/modelo"
         model.writesStretchNotes = true
-        let requests = NoteRequests()
-        model.clientOverride = { NoteModel(requests: requests) }
+        let requests = CallScript([[.text("O usuário montou o Atlas com SQLite na porta 4711; ficou faltando o certificado."),
+                                   .finished(.done, TokenUsage(input: 2_000, output: 40))]])
+        model.clientOverride = { CallScriptModel(script: requests) }
         let suite = UserDefaults(suiteName: "OrbSessionNote-\(UUID().uuidString)")!
         suite.set(on, forKey: SessionNote.settingKey)
         model.preferences = suite
@@ -84,7 +65,7 @@ final class SessionNoteTests {
         let bodies = await sessionBodies(model, botID)
         #expect(bodies.count == 1) // the same page, not a second one
         #expect(bodies[0].contains("porta 4711") && bodies[0].contains("## Pedidos"))
-        #expect(await requests.count == 1)
+        #expect(await requests.calls.filter { $0.system == ChunkSummarizer.instructions }.count == 1)
     }
 
     @Test func offOrNotAPauseNothingIsAsked() async throws {
@@ -94,7 +75,7 @@ final class SessionNoteTests {
             #expect(model.session(botID).saveMemory(summarize: summarize))
             await waitUntil("the page") { await !self.sessionBodies(model, botID).isEmpty }
             try await Task.sleep(for: .milliseconds(200))
-            #expect(await requests.count == 0)
+            #expect(await requests.calls.filter { $0.system == ChunkSummarizer.instructions }.count == 0)
             #expect(await sessionBodies(model, botID).first?.contains("## Resumo") == false)
         }
     }

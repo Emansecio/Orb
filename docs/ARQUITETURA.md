@@ -570,10 +570,26 @@ São mais de 3.900 testes em `Tests/OrbAppTests`, em Swift Testing (`@Test`, `@S
 - **Isolamento.** Cada suíte usa pastas temporárias próprias (`Store(directory:)` tem a sua fila de escrita), e
   `AppModel(store:runsBackgroundWork: false, asyncLoading:, secretVault:)` (e `devRun: true`, que também pula os conectores) não inicia agendador, Keychain nem observadores
   do app (o cofre de segredos é um `MemoryVault`). `QuietNotifications.hold()` impede banners do processo de teste.
-- **Modelo falso.** Os testes injetam um `LLMClient` próprio: `AppModel.clientOverride`, ou um `ScriptedLLM`/`RecordingLLM`
-  passado direto ao `AgentEngine.run`. Cada arquivo define o seu, pequeno (respostas roteirizadas, portas que só abrem quando
-  o teste manda, gravação das requisições); o que mais de um arquivo usa mora em `TestSupport/` (`ReplayLLM` e `Recorder` para o
-  contexto, `RaisedFlag`, `notifies(reading:whenYouDo:)`, `hasPython`, as visões do `AppModel` que só os testes leem). O Claude Code é testado com um `claude` falso, um script que o
+- **Modelo falso e auxiliares.** Os testes injetam um `LLMClient` próprio: `AppModel.clientOverride`, ou um modelo passado
+  direto ao `AgentEngine.run`. O que mais de um arquivo precisa mora em `TestSupport/`, e só lá: antes de escrever um fake,
+  um portão ou uma limpeza, procure. A convenção:
+  1. **Modelo falso roteirizado é sempre `CallScript` (+ `CallScriptModel`).** O roteiro dá as respostas em ordem
+     (`ModelReply.say`, `.calling`, `.failing`), diz o que fazer quando acabam (`whenExhausted`: `.repeatLast` ou `.fim`, sempre
+     explícito), pode esperar (`holdsCall`, `before:`) e grava o que recebeu (`calls`, `received`). Um tipo novo só se
+     testar algo que o roteiro não expressa (um modelo que nunca termina, portão por chave, rota pelo prompt), com um
+     comentário dizendo o quê.
+  2. **Esperar um passo é `TestGate`; esperar um estado é `waitUntil`** (`TestSupport/Waiting.swift`). Nada de laço com
+     `Task.sleep` calado.
+  3. **Pasta temporária é `TempFolder`, como propriedade da suíte** (apaga no `deinit` com `removeTestFolder`, selando as
+     gravações tardias). Nunca como variável local nem em tupla: o ARC solta o objeto no meio do teste. Nada de
+     `defer { removeTestFolder }` por teste numa suíte que já tem a raiz.
+  4. **Erro esperado é `#expect(throws:)`** (`#expect(throws: Tipo.self)` ou `#expect(throws: valor)`), nunca
+     `do { …; Issue.record } catch`. Para conferir a mensagem: `let error = try #require(await #expect(throws: ToolError.self) { … })`.
+  5. **O que um segundo arquivo precisar vai para `TestSupport/` na hora.** A segunda cópia de um helper já é motivo
+     para subir; a terceira não passa na revisão.
+
+  Estão lá, entre outros: `LockedBox`, `utcCalendar`/`utcDate`, `failureMessage`, `writeExecutable`, `notices`, `FakePreferences`, `StoreFixtures`, `RaisedFlag`,
+  `notifies(reading:whenYouDo:)`, `hasPython` e as visões do `AppModel` que só os testes leem. O Claude Code é testado com um `claude` falso, um script que o
   próprio teste grava e passa ao `ClaudeCodeClient` (`ORB_CLAUDE_PATH` faz o app usar outro executável).
 - **Fixtures sem binários**: PDFs e PNGs são desenhados na hora (`Fixtures`), e o AX (Acessibilidade) é uma árvore falsa
   injetável (`AccessibilitySystem`, com `TestSupport/AccessibilityFakes.swift`; a tomada de tela tem o seu mundo falso em
