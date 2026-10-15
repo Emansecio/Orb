@@ -42,15 +42,6 @@ private struct HeldModel: LLMClient {
     }
 }
 
-private struct LookTool: AgentTool {
-    var spec: ToolSpec { ToolSpec(name: "look", description: "Looks", parameters: .schema([:])) }
-    var kind: ToolCall.Kind { .file }
-    var capability: Capability? { nil }
-    func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
-    func summary(_ arguments: JSONValue) -> (title: String, detail: String) { ("Olhando", "") }
-    func run(_ arguments: JSONValue, context: ToolContext) async throws -> String { "viu" }
-}
-
 private func steered(_ text: String) -> SteeredMessage { SteeredMessage(text: text, prompt: text) }
 
 struct SteeringQueueTests {
@@ -88,7 +79,7 @@ struct SteeringQueueTests {
 }
 
 struct SteeringEngineTests {
-    private func request(_ client: HeldModel, steering: SteeringQueue?, tools: [any AgentTool] = [LookTool()]) -> TurnRequest {
+    private func request(_ client: HeldModel, steering: SteeringQueue?, tools: [any AgentTool] = [FixedLookTool(result: "viu")]) -> TurnRequest {
         let bot = Bot(name: "Teste", role: "", orb: OrbConfig(), permissionMode: .auto)
         return TurnRequest(bot: bot, model: "fake", system: "sys", history: [], prompt: "oi", client: client, tools: tools,
                            context: ToolContext(workingDirectory: URL(fileURLWithPath: NSTemporaryDirectory())), steering: steering)
@@ -865,7 +856,7 @@ struct SteeringModesTests {
 struct SteeringModesEngineTests {
     private func request(_ client: HeldModel, steering: SteeringQueue?) -> TurnRequest {
         let bot = Bot(name: "Teste", role: "", orb: OrbConfig(), permissionMode: .auto)
-        return TurnRequest(bot: bot, model: "fake", system: "sys", history: [], prompt: "oi", client: client, tools: [LookTool()],
+        return TurnRequest(bot: bot, model: "fake", system: "sys", history: [], prompt: "oi", client: client, tools: [FixedLookTool(result: "viu")],
                            context: ToolContext(workingDirectory: URL(fileURLWithPath: NSTemporaryDirectory())), steering: steering)
     }
 

@@ -32,19 +32,10 @@ extension Store {
         }
     }
 
-    private func turn(_ n: Int, output: String) -> (items: [TranscriptItem], messages: [ChatMessage]) {
-        let call = ToolCall(kind: .file, title: "Lendo", detail: "f\(n)", state: .done, output: output)
-        return ([TranscriptItem(.user(text: "pergunta \(n)", attachments: [])), TranscriptItem(.tool(call)),
-                 TranscriptItem(.bot(text: "resposta \(n)", isStreaming: false))],
-                [.user("pergunta \(n)"),
-                 ChatMessage(role: .assistant, content: "", toolCalls: [ToolCallRequest(id: "c\(n)", name: "read_file", arguments: "{}")]),
-                 .tool("c\(n)", output), ChatMessage(role: .assistant, content: "resposta \(n)")])
-    }
-
     private func conversation(turns: Int, outputSize: Int = 9_000) -> Conversation {
         var conversation = Conversation()
         for n in 1...max(1, turns) {
-            let part = turn(n, output: "\(n)-início " + String(repeating: "á", count: outputSize) + " fim-\(n)")
+            let part = storeTurn(n, output: "\(n)-início " + String(repeating: "á", count: outputSize) + " fim-\(n)")
             conversation.items += part.items
             conversation.messages += part.messages
         }
@@ -70,7 +61,7 @@ extension Store {
         for step in 0..<150 {
             switch random.next(9) {
             case 0, 1: // a new turn
-                let part = turn(100 + step, output: String(repeating: "ç", count: 200 + random.next(9_000)))
+                let part = storeTurn(100 + step, output: String(repeating: "ç", count: 200 + random.next(9_000)))
                 live.items += part.items
                 live.messages += part.messages
             case 2: // the last item grows, as a streaming reply does
@@ -144,7 +135,7 @@ extension Store {
         #expect(outputs.map(\.count).allSatisfy { $0 > 10_000 }, "two user turns: nothing is old yet")
         encoder.commit(output, fingerprint: nil)
 
-        let part = turn(3, output: "novo")
+        let part = storeTurn(3, output: "novo")
         live.items += part.items
         live.messages += part.messages
         output = try #require(try encoder.encode(live))
@@ -216,8 +207,8 @@ extension Store {
     @Test func aFailedWriteIsNeverMistakenForAFinishedOne() throws {
         let id = UUID()
         var live = conversation(turns: 2)
-        let failures = Collected()
-        let store = Store(directory: root) { failures.add($0.message) }
+        let failures = LockedBox<[String]>([])
+        let store = Store(directory: root) { failures.append($0.message) }
         store.save(live, for: id)
         store.flush()
 
@@ -227,7 +218,7 @@ extension Store {
         store.save(live, for: id)
         store.flush()
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder.path)
-        guard failures.messages.count == 1 else { return } // running as root: the write could not fail
+        guard failures.value.count == 1 else { return } // running as root: the write could not fail
 
         // The same conversation, saved again: it must reach the disk this time.
         store.save(live, for: id)
@@ -326,7 +317,7 @@ extension Store {
         let store = Store(directory: root)
         store.save(conversation(turns: 1), for: id)
         store.flush()
-        let sizes = Collected()
+        let sizes = LockedBox<[String]>([])
         let versions = (2...25).map { conversation(turns: $0, outputSize: 3_000) }
         let writer = Task.detached {
             for version in versions {
@@ -340,12 +331,12 @@ extension Store {
                 Issue.record("a read saw a missing or damaged file: \(String(describing: read.notice?.message))")
                 break
             }
-            sizes.add("\(value.items.count)")
+            sizes.append("\(value.items.count)")
         }
         await writer.value
         store.flush()
         #expect(store.readConversation(id).value?.items.count == 75)
-        #expect(sizes.messages.allSatisfy { (Int($0) ?? 0) % 3 == 0 }, "every read was a whole conversation")
+        #expect(sizes.value.allSatisfy { (Int($0) ?? 0) % 3 == 0 }, "every read was a whole conversation")
     }
 
     // MARK: Notes about a conversation
@@ -407,13 +398,4 @@ extension Store {
         #expect(!FileManager.default.fileExists(atPath: metaURL(id).path))
         #expect(store.readMeta(id) == .empty)
     }
-}
-
-/// Messages collected from several threads.
-private final class Collected: @unchecked Sendable {
-    private let lock = NSLock()
-    private var items: [String] = []
-
-    func add(_ message: String) { lock.withLock { items.append(message) } }
-    var messages: [String] { lock.withLock { items } }
 }

@@ -124,3 +124,14 @@ enum Fixtures {
         CTLineDraw(CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: attributes)), context)
     }
 }
+
+/// A read-only tool called "look" that answers at once with `result`, for engine tests that need a tool to call.
+struct FixedLookTool: AgentTool {
+    var result = "visto"
+    var spec: ToolSpec { ToolSpec(name: "look", description: "Looks", parameters: .schema([:])) }
+    var kind: ToolCall.Kind { .file }
+    var capability: Capability? { nil }
+    func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
+    func summary(_ arguments: JSONValue) -> (title: String, detail: String) { ("Olhando", "") }
+    func run(_ arguments: JSONValue, context: ToolContext) async throws -> String { result }
+}
