@@ -56,6 +56,11 @@ jobs:
       - name: Compilar
         run: swift build
 
+      # O release não tem as telas de revisão (--snapshot etc. ficam atrás de #if DEBUG || ORB_DEV_TOOLS) e precisa compilar
+      # sozinho: sem este passo, um símbolo de produção escondido por engano nesse #if só quebraria no bundle.sh.
+      - name: Compilar (release)
+        run: swift build -c release
+
       # Em série: a máquina do CI tem poucos núcleos, e com ~3900 testes em paralelo os que esperam por algo (processos,
       # servidores falsos, prazos de rede) estouram o tempo. Aqui leva ~2 min; no CI, alguns minutos.
       # A saída vai também para um arquivo (tee, com pipefail para a falha do swift test não se perder) que o passo
