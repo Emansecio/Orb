@@ -1,3 +1,4 @@
+#if DEBUG || ORB_DEV_TOOLS
 import SwiftUI
 
 /// `--snapshot sidebar-categories`: Orbs sorted in two categories, one open and one folded with a message waiting.
@@ -29,3 +30,4 @@ enum SidebarCategorySnapshots {
         return AnyView(SidebarView(previewDropY: screen == "sidebar-categories-dragging" ? 140 : nil).frame(width: 280))
     }
 }
+#endif

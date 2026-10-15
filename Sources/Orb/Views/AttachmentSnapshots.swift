@@ -1,3 +1,4 @@
+#if DEBUG || ORB_DEV_TOOLS
 import SwiftUI
 
 // Review scenes for the attachments in the chat (`Orb --snapshot transcript-attachments|transcript-outputs|
@@ -85,3 +86,4 @@ enum AttachmentSnapshots {
         lane.enqueue(SteeredMessage(text: "E me mande um resumo no fim.", files: [URL(fileURLWithPath: file("main.swift", size: 900))], prompt: ""))
     }
 }
+#endif

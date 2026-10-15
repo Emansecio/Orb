@@ -9,6 +9,15 @@ enum Launcher {
         if let options = ClaudePipeServer.Options(arguments: CommandLine.arguments) {
             ClaudePipeServer.run(options)
         }
+        #if !(DEBUG || ORB_DEV_TOOLS)
+        // The review screens are not in this build. Leave before OrbApp exists: no model, no window, no data folder is touched.
+        if CommandLine.arguments.contains(where: ["--snapshot", "--render-orbs"].contains) {
+            let note = "--snapshot e --render-orbs só existem em build de desenvolvimento (swift build) ou num release feito com "
+                + "ORB_DEV_TOOLS (swift build -c release -Xswiftc -DORB_DEV_TOOLS).\n"
+            FileHandle.standardError.write(Data(note.utf8))
+            exit(64)
+        }
+        #endif
         OrbApp.main()
     }
 }
@@ -29,7 +38,9 @@ struct OrbApp: App {
                     OrbImages.prewarmResting(model.bots.map(\.orb), selected: model.selectedBot?.orb,
                                              scale: NSScreen.main?.backingScaleFactor ?? 2)
                 }
+                #if DEBUG || ORB_DEV_TOOLS
                 .task { await SwitchBench.runIfAsked(model) }
+                #endif
                 .task {
                     // Snapshots send their own launch prompt; the regular window must not send it again.
                     if !CommandLine.arguments.contains("--snapshot") { model.sendLaunchPrompt() }
@@ -76,11 +87,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The panel that says an Orb has the screen (any process holding a takeover tells the app).
         if snapshot == nil, !CommandLine.arguments.contains(where: ["--render-orbs", "--render-icon"].contains) { TakeoverHUD.shared.install() }
         // Dev aid: `Orb --snapshot skills-explore out.png` renders one screen offscreen and exits.
+        #if DEBUG || ORB_DEV_TOOLS
         if let snapshot {
             NSApp.windows.forEach { $0.orderOut(nil) }
             Snapshot.render(snapshot.screen, to: snapshot.url)
             return
         }
+        #else
+        // Not reached in practice (`Launcher.main` already left), kept as a second guard before any UI is set up.
+        if snapshot != nil {
+            FileHandle.standardError.write(Data("--snapshot só existe em build de desenvolvimento (swift build ou ORB_DEV_TOOLS)\n".utf8))
+            exit(64)
+        }
+        #endif
         // Dev aid: `Orb --render-orbs out.png` writes a sheet of Orbs × activities and exits.
         let arguments = CommandLine.arguments
         if let flag = arguments.firstIndex(of: "--render-orbs"), arguments.indices.contains(flag + 1) {
@@ -100,15 +119,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             #else
             // The bench and the review sheets are not in this build: say so instead of writing the activities sheet
             // to a file called "bench" or ignoring the sheet's name.
-            if arguments[flag + 1] == "bench" || arguments.indices.contains(flag + 2) {
-                let note = "--render-orbs bench e as folhas de revisão só existem em debug ou num release feito com "
-                    + "ORB_DEV_TOOLS (swift build -c release -Xswiftc -DORB_DEV_TOOLS).\n"
-                FileHandle.standardError.write(Data(note.utf8))
-                DevRun.finish(status: 1)
-            }
+            let note = "--render-orbs só existe em debug ou num release feito com "
+                + "ORB_DEV_TOOLS (swift build -c release -Xswiftc -DORB_DEV_TOOLS).\n"
+            FileHandle.standardError.write(Data(note.utf8))
+            DevRun.finish(status: 1)
             #endif
+            #if DEBUG || ORB_DEV_TOOLS
             OrbSheet.render(to: URL(fileURLWithPath: arguments[flag + 1]))
             DevRun.finish()
+            #endif
         }
         // `Orb --render-icon out.png [pixels]` writes the app icon (1024 px by default; used by scripts/bundle.sh).
         if let flag = arguments.firstIndex(of: "--render-icon"), arguments.indices.contains(flag + 1) {
@@ -214,6 +233,7 @@ struct AppCommands: Commands {
     }
 }
 
+#if DEBUG || ORB_DEV_TOOLS
 /// Static sheet of Orbs × activities, for design review (composited exactly like the app).
 @MainActor
 enum OrbSheet {
@@ -374,3 +394,4 @@ private struct ApprovalCardsSample: View {
         .background(Palette.canvas)
     }
 }
+#endif

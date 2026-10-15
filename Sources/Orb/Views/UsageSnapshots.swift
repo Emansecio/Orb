@@ -1,3 +1,4 @@
+#if DEBUG || ORB_DEV_TOOLS
 import SwiftUI
 
 /// `Orb --snapshot settings-usage | settings-usage-empty out.png`: the Uso tab of Ajustes, with a month of made-up use (three Orbs,
@@ -69,3 +70,4 @@ enum UsageSnapshots {
         model.store.flush()
     }
 }
+#endif

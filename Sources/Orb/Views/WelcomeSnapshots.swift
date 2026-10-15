@@ -1,3 +1,4 @@
+#if DEBUG || ORB_DEV_TOOLS
 import SwiftUI
 
 /// `Orb --snapshot welcome… out.png`: the welcome screen beside the sidebar, over an empty data folder
@@ -48,3 +49,4 @@ enum WelcomeSnapshots {
         return NewBotSnapshots.sampleKept(nina, luna)
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if DEBUG || ORB_DEV_TOOLS
 import SwiftUI
 
 /// `Orb --snapshot context-meter | context-nudge | context-popover | context-popover-result |
@@ -90,3 +91,4 @@ enum ContextSnapshots {
                 .background(Palette.canvas))
     }
 }
+#endif
