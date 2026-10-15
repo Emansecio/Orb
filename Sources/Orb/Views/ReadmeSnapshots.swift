@@ -1,3 +1,4 @@
+#if DEBUG || ORB_DEV_TOOLS
 import SwiftUI
 
 /// The pictures of the README (`scripts/readme-shots.sh`). `Orb --snapshot readme-<scene> out.png` draws any other scene
@@ -97,3 +98,4 @@ enum ReadmeSnapshots {
         return items
     }
 }
+#endif

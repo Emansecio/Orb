@@ -121,18 +121,6 @@ struct CallScriptModel: LLMClient {
     var arrangesPromptCache = false
     var appendsFinished = false
 
-    init(script: CallScript, arrangesPromptCache: Bool = false, appendsFinished: Bool = false) {
-        self.script = script
-        self.arrangesPromptCache = arrangesPromptCache
-        self.appendsFinished = appendsFinished
-    }
-
-    /// The same answer to every call; `model.script.calls` keeps what each was sent.
-    init(always events: [LLMEvent] = [], failure: (any Error)? = nil, arrangesPromptCache: Bool = false, appendsFinished: Bool = false) {
-        self.init(script: CallScript(replies: [ModelReply(events, failure: failure)]), arrangesPromptCache: arrangesPromptCache,
-                  appendsFinished: appendsFinished)
-    }
-
     func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
         AsyncThrowingStream { continuation in
             Task {
@@ -146,5 +134,13 @@ struct CallScriptModel: LLMClient {
                 if let failure = reply.failure { continuation.finish(throwing: failure) } else { continuation.finish() }
             }
         }
+    }
+}
+
+extension CallScriptModel {
+    /// The same answer to every call; `model.script.calls` keeps what each was sent.
+    init(always events: [LLMEvent] = [], failure: (any Error)? = nil, arrangesPromptCache: Bool = false, appendsFinished: Bool = false) {
+        self.init(script: CallScript(replies: [ModelReply(events, failure: failure)]), arrangesPromptCache: arrangesPromptCache,
+                  appendsFinished: appendsFinished)
     }
 }
