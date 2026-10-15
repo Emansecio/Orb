@@ -41,12 +41,7 @@ struct PermissionRule: Codable, Hashable, Sendable {
     }
 
     var family: PermissionFamily
-    var scope: Scope
-
-    init(family: PermissionFamily, scope: Scope = .any) {
-        self.family = family
-        self.scope = scope
-    }
+    var scope: Scope = .any
 
     static func shell(_ words: String...) -> PermissionRule { PermissionRule(family: .shell, scope: .commandPrefix(words)) }
     static func folder(_ path: String) -> PermissionRule { PermissionRule(family: .writeFiles, scope: .folder(path)) }
@@ -66,7 +61,9 @@ struct PermissionRule: Codable, Hashable, Sendable {
         case .connectorTool(let key): family == .connector && !key.isEmpty
         }
     }
+}
 
+extension PermissionRule {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         family = try c.decode(PermissionFamily.self, forKey: .family)

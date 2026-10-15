@@ -16,22 +16,6 @@ struct UserProfile: Codable, Equatable, Sendable {
     /// File name inside `perfil/` of the data folder; empty when there is no photo.
     var photo = ""
 
-    init(name: String = "", nickname: String = "", about: String = "", photo: String = "") {
-        self.name = name
-        self.nickname = nickname
-        self.about = about
-        self.photo = photo
-    }
-
-    /// A field of the wrong type loses only itself, never the file (`DecodeLoss` keeps a copy of it).
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        func text(_ key: CodingKeys) -> String {
-            do { return try c.decodeIfPresent(String.self, forKey: key) ?? "" } catch { DecodeLoss.record(); return "" }
-        }
-        self.init(name: text(.name), nickname: text(.nickname), about: text(.about), photo: text(.photo))
-    }
-
     /// Nothing the Orbs would read: the photo stays on the Mac, so it does not count.
     var hasText: Bool { [name, nickname, about].contains { !MemoryText.flatten($0).isEmpty } }
 
@@ -64,6 +48,17 @@ struct UserProfile: Codable, Equatable, Sendable {
 
     private static func line(_ text: String, _ limit: Int) -> String {
         MemoryText.flatten(MemorySanitizer.scrub(String(text.prefix(limit * 2)))).prefix(limit).trimmingCharacters(in: .whitespaces)
+    }
+}
+
+extension UserProfile {
+    /// A field of the wrong type loses only itself, never the file (`DecodeLoss` keeps a copy of it).
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        func text(_ key: CodingKeys) -> String {
+            do { return try c.decodeIfPresent(String.self, forKey: key) ?? "" } catch { DecodeLoss.record(); return "" }
+        }
+        self.init(name: text(.name), nickname: text(.nickname), about: text(.about), photo: text(.photo))
     }
 }
 

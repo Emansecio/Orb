@@ -14,14 +14,6 @@ struct ModelPrice: Codable, Hashable, Sendable {
     var cacheWrite1h: Double?
     var output: Double
 
-    init(input: Double, cacheRead: Double? = nil, cacheWrite: Double? = nil, cacheWrite1h: Double? = nil, output: Double) {
-        self.input = input
-        self.cacheRead = cacheRead
-        self.cacheWrite = cacheWrite
-        self.cacheWrite1h = cacheWrite1h
-        self.output = output
-    }
-
     /// A Claude price: Anthropic charges 1.25 times the input to write the cache for five minutes and twice for an hour.
     static func claude(input: Double, cacheRead: Double, output: Double) -> ModelPrice {
         ModelPrice(input: input, cacheRead: cacheRead, cacheWrite: input * 1.25, cacheWrite1h: input * 2, output: output)
@@ -31,23 +23,6 @@ struct ModelPrice: Codable, Hashable, Sendable {
     func scaled(by factor: Double) -> ModelPrice {
         ModelPrice(input: input * factor, cacheRead: cacheRead.map { $0 * factor }, cacheWrite: cacheWrite.map { $0 * factor },
                    cacheWrite1h: cacheWrite1h.map { $0 * factor }, output: output * factor)
-    }
-
-    /// Prices must be numbers from zero up; a damaged one is not a price.
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        func price(_ key: CodingKeys) throws -> Double? {
-            guard let value = try c.decodeIfPresent(Double.self, forKey: key) else { return nil }
-            guard value.isFinite, value >= 0 else {
-                throw DecodingError.dataCorruptedError(forKey: key, in: c, debugDescription: "not a price")
-            }
-            return value
-        }
-        guard let input = try price(.input), let output = try price(.output) else {
-            throw DecodingError.dataCorruptedError(forKey: .input, in: c, debugDescription: "no price")
-        }
-        self.init(input: input, cacheRead: try price(.cacheRead), cacheWrite: try price(.cacheWrite), cacheWrite1h: try price(.cacheWrite1h),
-                  output: output)
     }
 
     /// The most a price the user types may be (per million tokens): a slip of the finger is not a price.
@@ -64,6 +39,25 @@ struct ModelPrice: Codable, Hashable, Sendable {
         let write = cacheWrite ?? input
         return (Double(totals.input) * input + Double(totals.cacheRead) * (cacheRead ?? input)
             + Double(fiveMinutes) * write + Double(hourLong) * (cacheWrite1h ?? write) + Double(totals.output) * output) / 1_000_000
+    }
+}
+
+extension ModelPrice {
+    /// Prices must be numbers from zero up; a damaged one is not a price.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        func price(_ key: CodingKeys) throws -> Double? {
+            guard let value = try c.decodeIfPresent(Double.self, forKey: key) else { return nil }
+            guard value.isFinite, value >= 0 else {
+                throw DecodingError.dataCorruptedError(forKey: key, in: c, debugDescription: "not a price")
+            }
+            return value
+        }
+        guard let input = try price(.input), let output = try price(.output) else {
+            throw DecodingError.dataCorruptedError(forKey: .input, in: c, debugDescription: "no price")
+        }
+        self.init(input: input, cacheRead: try price(.cacheRead), cacheWrite: try price(.cacheWrite), cacheWrite1h: try price(.cacheWrite1h),
+                  output: output)
     }
 }
 

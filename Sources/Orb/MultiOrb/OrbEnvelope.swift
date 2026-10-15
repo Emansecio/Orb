@@ -16,17 +16,17 @@ struct OrbEnvelope: Codable, Equatable, Sendable {
     }
 
     /// The message id, for telling a repeat from a new message.
-    var id: UUID
-    var chainID: UUID
+    var id: UUID = UUID()
+    var chainID: UUID = UUID()
     var kind: Kind
     var from: OrbRef
     var to: OrbRef
     /// ask and tell: up to `DelegationLimits.messageLimit` characters; reply: up to `replyLimit`.
     var text: String
     /// 1 in the first request of a chain.
-    var hop: Int
+    var hop: Int = 1
     /// The Orbs of the chain, from the first to `from`.
-    var path: [UUID]
+    var path: [UUID] = []
     /// The request a reply closes.
     var replyTo: UUID?
     /// The request the asker was serving when it asked (a request that waits for its children).
@@ -34,26 +34,10 @@ struct OrbEnvelope: Codable, Equatable, Sendable {
     /// Only in a reply.
     var status: ReplyStatus?
     var groupID: UUID?
-    var sentAt: Date
+    var sentAt: Date = .now
+}
 
-    init(id: UUID = UUID(), chainID: UUID = UUID(), kind: Kind, from: OrbRef, to: OrbRef, text: String, hop: Int = 1,
-         path: [UUID] = [], replyTo: UUID? = nil, servingRequest: UUID? = nil, status: ReplyStatus? = nil,
-         groupID: UUID? = nil, sentAt: Date = .now) {
-        self.id = id
-        self.chainID = chainID
-        self.kind = kind
-        self.from = from
-        self.to = to
-        self.text = text
-        self.hop = hop
-        self.path = path
-        self.replyTo = replyTo
-        self.servingRequest = servingRequest
-        self.status = status
-        self.groupID = groupID
-        self.sentAt = sentAt
-    }
-
+extension OrbEnvelope {
     /// Tolerant decoding: everything but the ids has a default.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)

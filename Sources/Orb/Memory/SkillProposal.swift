@@ -13,18 +13,12 @@ struct SkillDigest: Codable, Equatable, Sendable {
     var instructions: String
     /// The Orb may propose a better version of it (`Skill.isImprovable`).
     var improvable: Bool
+}
 
+extension SkillDigest {
     init(_ skill: Skill) {
         self.init(slug: skill.slug, name: skill.name, summary: skill.summary, instructions: skill.instructions,
                   improvable: skill.isImprovable)
-    }
-
-    init(slug: String, name: String, summary: String, instructions: String, improvable: Bool) {
-        self.slug = slug
-        self.name = name
-        self.summary = summary
-        self.instructions = instructions
-        self.improvable = improvable
     }
 }
 

@@ -173,18 +173,15 @@ struct ModelRef: Hashable, Sendable {
     var provider: ProviderKind
     var model: String
 
-    init(provider: ProviderKind, model: String) {
-        self.provider = provider
-        self.model = model
-    }
+    var text: String { "\(provider.rawValue)/\(model)" }
+}
 
+extension ModelRef {
     init?(_ text: String) {
         let parts = text.split(separator: "/", maxSplits: 1).map(String.init)
         guard parts.count == 2, let provider = ProviderKind(rawValue: parts[0]), !parts[1].isEmpty else { return nil }
         self.init(provider: provider, model: parts[1])
     }
-
-    var text: String { "\(provider.rawValue)/\(model)" }
 }
 
 // MARK: - Live catalogs

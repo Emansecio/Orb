@@ -16,29 +16,6 @@ struct OrbGroup: Identifiable, Codable, Sendable, Equatable {
     /// How many Orbs a group has.
     static let memberLimits = 2...8
 
-    init(id: UUID = UUID(), name: String, memberIDs: [UUID], orchestratorID: UUID, budget: GroupBudget = GroupBudget(),
-         policy: GroupPolicy = GroupPolicy(), createdAt: Date = .now) {
-        self.id = id
-        self.name = name
-        self.memberIDs = memberIDs
-        self.orchestratorID = orchestratorID
-        self.budget = budget
-        self.policy = policy
-        self.createdAt = createdAt
-    }
-
-    /// Tolerant decoding: a group saved by another version still opens.
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        id = try c.value(.id, default: UUID())
-        name = try c.value(.name, default: "")
-        memberIDs = try c.lossyArray(.memberIDs)
-        orchestratorID = try c.decodeIfPresent(UUID.self, forKey: .orchestratorID) ?? memberIDs.first ?? UUID()
-        budget = (try? c.decodeIfPresent(GroupBudget.self, forKey: .budget)) ?? GroupBudget()
-        policy = (try? c.decodeIfPresent(GroupPolicy.self, forKey: .policy)) ?? GroupPolicy()
-        createdAt = try c.value(.createdAt, default: Date.now)
-    }
-
     /// The group as it should be when only the Orbs in `alive` exist: members that are gone leave (and duplicates), a missing
     /// orchestrator becomes the first member, and a group left with fewer than two members is dissolved (nil).
     func normalized(alive: Set<UUID>) -> OrbGroup? {
@@ -54,16 +31,27 @@ struct OrbGroup: Identifiable, Codable, Sendable, Equatable {
     }
 }
 
+extension OrbGroup {
+    /// Tolerant decoding: a group saved by another version still opens.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.value(.id, default: UUID())
+        name = try c.value(.name, default: "")
+        memberIDs = try c.lossyArray(.memberIDs)
+        orchestratorID = try c.decodeIfPresent(UUID.self, forKey: .orchestratorID) ?? memberIDs.first ?? UUID()
+        budget = (try? c.decodeIfPresent(GroupBudget.self, forKey: .budget)) ?? GroupBudget()
+        policy = (try? c.decodeIfPresent(GroupPolicy.self, forKey: .policy)) ?? GroupPolicy()
+        createdAt = try c.value(.createdAt, default: Date.now)
+    }
+}
+
 /// What one request of the user may spend in a group: the turns and the tokens, before the group pauses and asks.
 struct GroupBudget: Codable, Sendable, Equatable {
     var maxTurns = 12
     var maxTokens = 150_000
+}
 
-    init(maxTurns: Int = 12, maxTokens: Int = 150_000) {
-        self.maxTurns = maxTurns
-        self.maxTokens = maxTokens
-    }
-
+extension GroupBudget {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         maxTurns = max(1, try c.value(.maxTurns, default: 12))
@@ -101,24 +89,14 @@ struct GroupPauseItem: Codable, Equatable, Sendable {
     var groupID: UUID
     var runID: UUID
     var reason: Reason
-    var state: State
+    var state: State = .open
     var turnsUsed: Int
     var tokensUsed: Int
     var turnLimit: Int
     var tokenLimit: Int
+}
 
-    init(groupID: UUID, runID: UUID, reason: Reason, state: State = .open, turnsUsed: Int, tokensUsed: Int,
-         turnLimit: Int, tokenLimit: Int) {
-        self.groupID = groupID
-        self.runID = runID
-        self.reason = reason
-        self.state = state
-        self.turnsUsed = turnsUsed
-        self.tokensUsed = tokensUsed
-        self.turnLimit = turnLimit
-        self.tokenLimit = tokenLimit
-    }
-
+extension GroupPauseItem {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         groupID = try c.decode(UUID.self, forKey: .groupID)

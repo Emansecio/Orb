@@ -7,42 +7,27 @@ struct OrbProposal: Codable, Equatable, Sendable {
     var creator: OrbRef
     var name: String
     /// One line.
-    var role: String
+    var role: String = ""
     /// How it should work; up to 1,500 characters here (the Orb's identity keeps up to 12,000).
-    var instructions: String
+    var instructions: String = ""
     /// Never more than the creator has, never `.connectors`.
-    var capabilities: Set<Capability>
+    var capabilities: Set<Capability> = []
     /// Up to `modeCeiling`.
-    var mode: PermissionMode
+    var mode: PermissionMode = .ask
     /// The most permissive mode the card lets the person pick (the creator's own, never "Sem pedir permissão").
-    var modeCeiling: PermissionMode
-    var orb: OrbConfig
+    var modeCeiling: PermissionMode = .auto
+    var orb: OrbConfig = OrbConfig()
     /// The creator's model; empty is the app's default. Read only on the card.
-    var model: String
+    var model: String = ""
     /// Why, in one sentence.
     var reason: String?
     /// What the creator has among the switches the card can offer.
-    var creatorCapabilities: Set<Capability>
+    var creatorCapabilities: Set<Capability> = []
     /// An Orb already has this name: the card warns that the folder gets another name.
-    var nameTaken: Bool
+    var nameTaken: Bool = false
+}
 
-    init(creator: OrbRef, name: String, role: String = "", instructions: String = "", capabilities: Set<Capability> = [],
-         mode: PermissionMode = .ask, modeCeiling: PermissionMode = .auto, orb: OrbConfig = OrbConfig(), model: String = "",
-         reason: String? = nil, creatorCapabilities: Set<Capability> = [], nameTaken: Bool = false) {
-        self.creator = creator
-        self.name = name
-        self.role = role
-        self.instructions = instructions
-        self.capabilities = capabilities
-        self.mode = mode
-        self.modeCeiling = modeCeiling
-        self.orb = orb
-        self.model = model
-        self.reason = reason
-        self.creatorCapabilities = creatorCapabilities
-        self.nameTaken = nameTaken
-    }
-
+extension OrbProposal {
     /// Tolerant decoding: a proposal saved in a conversation opens in any version that knows the type.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)

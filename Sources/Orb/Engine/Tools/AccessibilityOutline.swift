@@ -387,14 +387,6 @@ struct ShotGeometry: Sendable, Equatable {
     var windowFrame: CGRect
     /// The `CGWindowID` that was captured.
     var windowID: UInt32
-
-    init(pixelWidth: Int, pixelHeight: Int, scale: Double, windowFrame: CGRect, windowID: UInt32) {
-        self.pixelWidth = pixelWidth
-        self.pixelHeight = pixelHeight
-        self.scale = scale
-        self.windowFrame = windowFrame
-        self.windowID = windowID
-    }
 }
 
 /// What one `ui_read` showed: for each id its role and name, and which window it came from. `ui_act` finds the element
@@ -409,15 +401,7 @@ struct UISnapshot: Sendable, Equatable {
         /// Position and size in points relative to the window's top-left corner; nil when not read.
         var frame: CGRect?
         /// Whether the element has an action a click can trigger (press, pick, confirm…).
-        var actionable: Bool
-
-        init(rawRole: String, label: String, secure: Bool, frame: CGRect? = nil, actionable: Bool = false) {
-            self.rawRole = rawRole
-            self.label = label
-            self.secure = secure
-            self.frame = frame
-            self.actionable = actionable
-        }
+        var actionable: Bool = false
     }
 
     var app: AccessibilityApp
@@ -425,25 +409,13 @@ struct UISnapshot: Sendable, Equatable {
     var windowIndex: Int?
     var windowTitle: String
     var entries: [String: Entry]
-    var takenAt: Date
+    var takenAt: Date = .now
     /// Counts the readings of this app by this Orb, so a live reference can be tied to the reading it came from.
-    var generation: Int
+    var generation: Int = 0
     /// Screenshot mark number → element id, for the marks drawn on the last screenshot of this window.
-    var marks: [Int: String]
+    var marks: [Int: String] = [:]
     /// Where that screenshot sits; nil when no screenshot goes with this reading.
     var shot: ShotGeometry?
-
-    init(app: AccessibilityApp, windowIndex: Int?, windowTitle: String, entries: [String: Entry], takenAt: Date = .now,
-         generation: Int = 0, marks: [Int: String] = [:], shot: ShotGeometry? = nil) {
-        self.app = app
-        self.windowIndex = windowIndex
-        self.windowTitle = windowTitle
-        self.entries = entries
-        self.takenAt = takenAt
-        self.generation = generation
-        self.marks = marks
-        self.shot = shot
-    }
 
     /// Whether a call naming `name` may be about this app: the same test that finds the app (`RunningAppMatcher`),
     /// an exact name or bundle identifier, or a name that contains the text.

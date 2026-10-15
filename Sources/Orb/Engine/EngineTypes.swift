@@ -122,14 +122,9 @@ struct ImageAttachment: Codable, Hashable, Sendable {
     var mediaType: String
     var width: Int
     var height: Int
+}
 
-    init(path: String, mediaType: String, width: Int, height: Int) {
-        self.path = path
-        self.mediaType = mediaType
-        self.width = width
-        self.height = height
-    }
-
+extension ImageAttachment {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         path = try c.decode(String.self, forKey: .path)
@@ -208,17 +203,9 @@ struct ReasoningPart: Codable, Hashable, Sendable {
     /// Responses: how many of the reply's function calls came before this item, so it goes back right before the
     /// call it produced. nil (older traces) counts as 0.
     var callsBefore: Int?
+}
 
-    init(kind: Kind, text: String = "", signature: String? = nil, data: String? = nil, id: String? = nil,
-         callsBefore: Int? = nil) {
-        self.kind = kind
-        self.text = text
-        self.signature = signature
-        self.data = data
-        self.id = id
-        self.callsBefore = callsBefore
-    }
-
+extension ReasoningPart {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         kind = try c.decode(Kind.self, forKey: .kind)

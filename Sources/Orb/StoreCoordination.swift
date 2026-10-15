@@ -150,14 +150,9 @@ struct ConversationMeta: Codable, Sendable, Equatable {
 
     /// An Orb that never said anything: no file.
     static let empty = ConversationMeta(itemCount: 0, memorySavedCount: 0, lastItemDate: nil, file: nil)
+}
 
-    init(itemCount: Int, memorySavedCount: Int, lastItemDate: Date?, file: FileFingerprint?) {
-        self.itemCount = itemCount
-        self.memorySavedCount = memorySavedCount
-        self.lastItemDate = lastItemDate
-        self.file = file
-    }
-
+extension ConversationMeta {
     init(of conversation: Conversation, file: FileFingerprint?) {
         self.init(itemCount: conversation.items.count, memorySavedCount: conversation.memorySavedCount ?? 0,
                   lastItemDate: conversation.items.last?.date, file: file)

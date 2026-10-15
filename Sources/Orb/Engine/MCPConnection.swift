@@ -8,13 +8,9 @@ struct MCPToolAnnotations: Codable, Sendable, Equatable {
     var openWorld: Bool?
 
     static let none = MCPToolAnnotations()
+}
 
-    init(readOnly: Bool? = nil, destructive: Bool? = nil, openWorld: Bool? = nil) {
-        self.readOnly = readOnly
-        self.destructive = destructive
-        self.openWorld = openWorld
-    }
-
+extension MCPToolAnnotations {
     /// Reads the `annotations` object of a tool; wrong types are ignored.
     init(json: JSONValue?) {
         readOnly = json?["readOnlyHint"]?.bool

@@ -34,11 +34,6 @@ struct ContextCut: Sendable, Equatable {
     var skipped = 0
     /// Tool outputs of the task, oldest first, already past their fresh period (shortened).
     var settled = 0
-
-    init(summary: String? = nil, ledger: ConversationLedger? = nil) {
-        self.summary = summary
-        self.ledger = ledger
-    }
 }
 
 // MARK: - Window

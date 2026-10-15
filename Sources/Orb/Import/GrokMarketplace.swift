@@ -14,19 +14,6 @@ struct MarketplaceBot: Decodable, Equatable, Sendable {
         var content = ""
 
         private enum CodingKeys: String, CodingKey { case name, description, content }
-
-        init(name: String = "", description: String = "", content: String = "") {
-            self.name = name
-            self.description = description
-            self.content = content
-        }
-
-        init(from decoder: any Decoder) throws {
-            let values = try decoder.container(keyedBy: CodingKeys.self)
-            name = (try? values.decode(String.self, forKey: .name)) ?? ""
-            description = (try? values.decode(String.self, forKey: .description)) ?? ""
-            content = (try? values.decode(String.self, forKey: .content)) ?? ""
-        }
     }
 
     var id = ""
@@ -48,25 +35,9 @@ struct MarketplaceBot: Decodable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case id, name, creatorName, description, summary, addHref, categories, color, instructions, memories, skills, routines, integrations
     }
+}
 
-    init(id: String = "", name: String = "", creatorName: String = "", description: String = "", summary: String = "",
-         addHref: String = "", categories: [String] = [], color: String = "", instructions: String = "", memories: [Entry] = [],
-         skills: [Entry] = [], routines: [Entry] = [], integrations: [Entry] = []) {
-        self.id = id
-        self.name = name
-        self.creatorName = creatorName
-        self.description = description
-        self.summary = summary
-        self.addHref = addHref
-        self.categories = categories
-        self.color = color
-        self.instructions = instructions
-        self.memories = memories
-        self.skills = skills
-        self.routines = routines
-        self.integrations = integrations
-    }
-
+extension MarketplaceBot {
     init(from decoder: any Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         func text(_ key: CodingKeys) -> String { (try? values.decode(String.self, forKey: key)) ?? "" }
@@ -84,6 +55,15 @@ struct MarketplaceBot: Decodable, Equatable, Sendable {
         skills = list(.skills)
         routines = list(.routines)
         integrations = list(.integrations)
+    }
+}
+
+extension MarketplaceBot.Entry {
+    init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        name = (try? values.decode(String.self, forKey: .name)) ?? ""
+        description = (try? values.decode(String.self, forKey: .description)) ?? ""
+        content = (try? values.decode(String.self, forKey: .content)) ?? ""
     }
 }
 

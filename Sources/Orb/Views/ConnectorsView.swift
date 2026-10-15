@@ -67,19 +67,9 @@ struct ConnectorDraft: Identifiable {
 
     /// Came from the catalog: the sheet asks only for keys, the rest sits under "Avançado".
     var isGuided: Bool { !summary.isEmpty || !inputs.isEmpty || config.source != nil }
+}
 
-    init(config: MCPServerConfig, inputs: [RegistryServer.Input] = [], summary: String = "", isOfficial: Bool = false,
-         folderArgumentIndex: Int? = nil, helpURL: URL? = nil, guide: ConnectorGuide? = nil, note: String? = nil) {
-        self.config = config
-        self.inputs = inputs
-        self.summary = summary
-        self.isOfficial = isOfficial
-        self.folderArgumentIndex = folderArgumentIndex
-        self.helpURL = helpURL
-        self.guide = guide
-        self.note = note
-    }
-
+extension ConnectorDraft {
     init(template: ConnectorTemplate) {
         self.init(config: template.config.withNewID(), inputs: template.inputs, summary: template.summary,
                   folderArgumentIndex: template.folderArgumentIndex, helpURL: template.helpURL, guide: template.guide, note: template.note)

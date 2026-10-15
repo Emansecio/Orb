@@ -7,21 +7,7 @@ struct DeleteOrbSummary: Equatable {
     /// The Orb's own working folder as shown to the user ("~/Orbs/Atlas"); nil when it works in the home folder.
     var folder: String?
     /// The groups it belongs to: it leaves them (MultiOrb).
-    var groupCount: Int
-
-    init(name: String, routineCount: Int, folder: String?, groupCount: Int = 0) {
-        self.name = name
-        self.routineCount = routineCount
-        self.folder = folder
-        self.groupCount = groupCount
-    }
-
-    @MainActor
-    init(bot: Bot, routineCount: Int, groupCount: Int = 0, home: String = NSHomeDirectory()) {
-        let shown = bot.workingDirectory.isEmpty ? nil : OrbFolder.display(bot.workingURL, home: home)
-        self.init(name: bot.name, routineCount: routineCount, folder: shown == "~" ? nil : shown,
-                  groupCount: groupCount)
-    }
+    var groupCount: Int = 0
 
     /// "A conversa, 2 rotinas e a participação em 2 grupos vão embora."
     var goes: String {
@@ -58,6 +44,15 @@ struct DeleteOrbSummary: Equatable {
         case 1: parts[0]
         default: parts.dropLast().joined(separator: ", ") + " e " + parts[parts.count - 1]
         }
+    }
+}
+
+extension DeleteOrbSummary {
+    @MainActor
+    init(bot: Bot, routineCount: Int, groupCount: Int = 0, home: String = NSHomeDirectory()) {
+        let shown = bot.workingDirectory.isEmpty ? nil : OrbFolder.display(bot.workingURL, home: home)
+        self.init(name: bot.name, routineCount: routineCount, folder: shown == "~" ? nil : shown,
+                  groupCount: groupCount)
     }
 }
 

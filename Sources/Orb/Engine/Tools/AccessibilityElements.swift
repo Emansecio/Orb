@@ -25,11 +25,6 @@ enum AXAttributeValue: Sendable {
 struct AXTextRange: Sendable, Equatable {
     var location: Int
     var length: Int
-
-    init(location: Int, length: Int) {
-        self.location = location
-        self.length = length
-    }
 }
 
 /// Why an Accessibility call failed, reduced to what the tools tell the model.
@@ -121,13 +116,6 @@ struct AccessibilityApp: Sendable, Equatable {
     /// When the process started: with the pid and bundle identifier it tells a running app from a new one that reused
     /// the pid. Nil when unknown.
     var launchDate: Date?
-
-    init(name: String, bundleID: String?, pid: Int32, launchDate: Date? = nil) {
-        self.name = name
-        self.bundleID = bundleID
-        self.pid = pid
-        self.launchDate = launchDate
-    }
 }
 
 /// The calls into macOS, injectable so the tools are tested without touching the real Accessibility API.
