@@ -4,7 +4,7 @@ Como o Orb decide se uma ação roda, pergunta ou é recusada. Vale para todo Or
 incluído (o `claude` é só o cano até o modelo, veja "Claude Code"): o motor (`AgentEngine`) transforma a chamada numa
 `PermissionCall` e pergunta a `PermissionPolicy.evaluate` antes de rodar qualquer ferramenta.
 
-Para o ponto de vista de quem usa o app, veja a seção "Permissões" do [README](../README.md).
+Para o ponto de vista de quem usa o app, veja a seção "Permissões" do [manual](MANUAL.md#permissões).
 
 ## Visão geral
 
@@ -114,7 +114,7 @@ Detalhes que costumam surpreender:
   opção anterior (`sort -T -- -o x`, `grep -e -- -r x .`, `git grep -e -- -iO'cmd'`). O `diff` com um operando que é pasta (ou pode
   ser: `~`, `.`, curinga, `~usuario`) ou com `--from-file` volta ao cartão, porque compara com o arquivo de mesmo nome dentro da
   pasta (`diff .npmrc ~` mostraria `~/.npmrc`). Na dúvida a linha só vai ao cartão.
-- **O navegador do Orb** (`browse_*`, `web_search`; veja o README, "Navegador"). `browse_open`, a aba nova de `browse_tabs` e
+- **O navegador do Orb** (`browse_*`, `web_search`; veja o [manual](MANUAL.md#navegador), "Navegador"). `browse_open`, a aba nova de `browse_tabs` e
   `web_search` são `.sensitive` na família `web`, como `web_fetch`: cartão no Perguntar antes, "Sempre permitir" por site (a pesquisa
   tem a regra `search`, "Pesquisar na web", que nunca cobre ler uma página). `browse_click`, `browse_fill`, `browse_select`,
   `browse_press` e `browse_show` mudam coisas dentro de páginas em que o Orb pode estar logado: são `.sensitive` na família
@@ -434,7 +434,7 @@ Separadas das anteriores: dizem o que o **macOS** deixa o app fazer. Ficam em Aj
 - `ui_read` e `ui_act` só são oferecidos ao modelo com a Acessibilidade concedida (o prompt avisa quando ficam de fora).
 - As permissões valem para a identidade de assinatura do app. Com assinatura ad-hoc (o padrão de `scripts/bundle.sh`), cada
   compilação é "outro app" para o macOS; `scripts/make-signing-identity.sh` cria o certificado local "Orb Local" que mantém
-  a identidade (veja o README).
+  a identidade (veja [Assinatura estável](../README.md#assinatura-estável-recomendado) no README).
 
 ## Limites conhecidos
 
