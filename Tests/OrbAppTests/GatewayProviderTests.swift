@@ -157,13 +157,11 @@ struct GatewayWireTests {
                                      session: StubProtocol.session)
         client.sendsBearer = true
         StubProtocol.queue(host: "api.commandcode.ai", [.init(status: 403, body: body)])
-        do {
+        let error = try #require(await #expect(throws: LLMError.self, "expected a 403") {
             for try await _ in client.stream(model: "claude-haiku-4-5-20251001", messages: [.user("oi")], tools: []) {}
-            Issue.record("expected a 403")
-        } catch let error as LLMError {
-            let text = error.errorDescription ?? ""
-            #expect(text.contains("plano não inclui acesso à API") && !text.contains("Chave ou login inválido"))
-        }
+        })
+        let text = error.errorDescription ?? ""
+        #expect(text.contains("plano não inclui acesso à API") && !text.contains("Chave ou login inválido"))
         // Anthropic's own 403 is not about a plan.
         #expect(ProviderTransport.errorMessage(from: Data(body.utf8), status: 403, host: "api.anthropic.com") == "Go plan has no API access")
     }

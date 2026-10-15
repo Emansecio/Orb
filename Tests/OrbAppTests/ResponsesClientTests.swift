@@ -182,25 +182,22 @@ struct ResponsesClientTests {
 
     @Test func failuresKeepTheirCodeAndContextOverflowIsDistinct() throws {
         var assembler = ResponsesStreamAssembler()
-        do {
-            _ = try assembler.ingest(try #require(JSONValue.parse(#"{"type":"response.failed","response":{"error":{"code":"server_error","message":"oops"}}}"#)))
-            Issue.record("should have thrown")
-        } catch let error as LLMError {
-            #expect(error == .stream(type: "server_error", message: "oops"))
-            #expect(error.isRetryable)
-        }
-        do {
-            _ = try assembler.ingest(try #require(JSONValue.parse(#"{"type":"response.failed","response":{"error":{"code":"context_length_exceeded","message":"Too long"}}}"#)))
-            Issue.record("should have thrown")
-        } catch let error as LLMError {
-            #expect(error == .contextExceeded("Too long"))
-        }
-        do {
-            _ = try assembler.ingest(try #require(JSONValue.parse(#"{"type":"error","code":"rate_limit_exceeded","message":"Slow down"}"#)))
-            Issue.record("should have thrown")
-        } catch let error as LLMError {
-            #expect(error == .stream(type: "rate_limit_exceeded", message: "Slow down"))
-        }
+        let event = try #require(JSONValue.parse(#"{"type":"response.failed","response":{"error":{"code":"server_error","message":"oops"}}}"#))
+        let error = try #require(#expect(throws: LLMError.self) {
+            _ = try assembler.ingest(event)
+        })
+        #expect(error == .stream(type: "server_error", message: "oops"))
+        #expect(error.isRetryable)
+        let secondEvent = try #require(JSONValue.parse(#"{"type":"response.failed","response":{"error":{"code":"context_length_exceeded","message":"Too long"}}}"#))
+        let secondError = try #require(#expect(throws: LLMError.self) {
+            _ = try assembler.ingest(secondEvent)
+        })
+        #expect(secondError == .contextExceeded("Too long"))
+        let thirdEvent = try #require(JSONValue.parse(#"{"type":"error","code":"rate_limit_exceeded","message":"Slow down"}"#))
+        let thirdError = try #require(#expect(throws: LLMError.self) {
+            _ = try assembler.ingest(thirdEvent)
+        })
+        #expect(thirdError == .stream(type: "rate_limit_exceeded", message: "Slow down"))
     }
 
     // MARK: End to end (stubbed network)

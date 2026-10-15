@@ -494,48 +494,40 @@ struct ClaudeCodeClientTests {
     @Test func rateLimitBecomesAnHTTP429ThatTheEngineRetries() async throws {
         let rig = try Rig(scenario: "rate_limit")
         defer { rig.cleanUp() }
-        do {
+        let error = try #require(await #expect(throws: LLMError.self) {
             _ = try await collect(rig.client().stream(model: "m", messages: [.system("s"), .user("Oi")], tools: [], toolChoice: .auto))
-            Issue.record("expected an error")
-        } catch let error as LLMError {
-            #expect(error == .http(status: 429, message: "Limite de uso"))
-            #expect(error.isRetryable)
-        }
+        })
+        #expect(error == .http(status: 429, message: "Limite de uso"))
+        #expect(error.isRetryable)
         #expect(await waitUntil { rig.scratchEntries.isEmpty })
     }
 
     @Test func promptTooLongBecomesContextExceeded() async throws {
         let rig = try Rig(scenario: "context")
         defer { rig.cleanUp() }
-        do {
+        let error = try #require(await #expect(throws: LLMError.self) {
             _ = try await collect(rig.client().stream(model: "m", messages: [.system("s"), .user("Oi")], tools: [], toolChoice: .auto))
-            Issue.record("expected an error")
-        } catch let error as LLMError {
-            #expect(error == .contextExceeded("Prompt is too long"))
-        }
+        })
+        #expect(error == .contextExceeded("Prompt is too long"))
     }
 
     @Test func aLoginErrorBecomesAnHTTP401() async throws {
         let rig = try Rig(scenario: "auth")
         defer { rig.cleanUp() }
-        do {
+        let error = try #require(await #expect(throws: LLMError.self) {
             _ = try await collect(rig.client().stream(model: "m", messages: [.system("s"), .user("Oi")], tools: [], toolChoice: .auto))
-            Issue.record("expected an error")
-        } catch let error as LLMError {
-            #expect(error == .http(status: 401, message: "Not logged in"))
-        }
+        })
+        #expect(error == .http(status: 401, message: "Not logged in"))
     }
 
     @Test func aProcessThatDiesEarlyReportsItsStderr() async throws {
         let rig = try Rig(scenario: "die")
         defer { rig.cleanUp() }
-        do {
+        let error = try #require(await #expect(throws: LLMError.self) {
             _ = try await collect(rig.client().stream(model: "m", messages: [.system("s"), .user("Oi")], tools: [], toolChoice: .auto))
-            Issue.record("expected an error")
-        } catch let error as LLMError {
-            guard case .invalidResponse(let detail) = error else { Issue.record("wrong error \(error)"); return }
-            #expect(detail.contains("boom: sem rede"))
-        }
+        })
+        guard case .invalidResponse(let detail) = error else { Issue.record("wrong error \(error)"); return }
+        #expect(detail.contains("boom: sem rede"))
         #expect(await waitUntil { rig.scratchEntries.isEmpty })
     }
 
@@ -543,13 +535,11 @@ struct ClaudeCodeClientTests {
         let rig = try Rig(scenario: "text")
         defer { rig.cleanUp() }
         let client = ClaudeCodeClient(launch: { nil }, orbBinary: URL(fileURLWithPath: "/fake/Orb"), folders: rig.folders)
-        do {
+        let error = try #require(await #expect(throws: ClaudePipeError.self) {
             _ = try await collect(client.stream(model: "m", messages: [.system("s"), .user("Oi")], tools: [], toolChoice: .auto))
-            Issue.record("expected an error")
-        } catch let error as ClaudePipeError {
-            #expect(error == .notInstalled)
-            #expect(error.localizedDescription == "O Claude Code não foi encontrado neste Mac. Veja Ajustes → Modelos.")
-        }
+        })
+        #expect(error == .notInstalled)
+        #expect(error.localizedDescription == "O Claude Code não foi encontrado neste Mac. Veja Ajustes → Modelos.")
         #expect(rig.launches.isEmpty)
     }
 
@@ -557,14 +547,12 @@ struct ClaudeCodeClientTests {
         let rig = try Rig(scenario: "init_silent")
         defer { rig.cleanUp() }
         let started = ContinuousClock.now
-        do {
+        let error = try #require(await #expect(throws: LLMError.self) {
             _ = try await collect(rig.client(initializeTimeout: .milliseconds(400)).stream(model: "m", messages: [.system("s"), .user("Oi")],
                                                                                               tools: [], toolChoice: .auto))
-            Issue.record("expected an error")
-        } catch let error as LLMError {
-            guard case .invalidResponse(let detail) = error else { Issue.record("wrong error \(error)"); return }
-            #expect(detail.contains("inicialização"))
-        }
+        })
+        guard case .invalidResponse(let detail) = error else { Issue.record("wrong error \(error)"); return }
+        #expect(detail.contains("inicialização"))
         #expect(ContinuousClock.now - started < .seconds(15))
         #expect(await waitUntil { rig.scratchEntries.isEmpty })
     }
