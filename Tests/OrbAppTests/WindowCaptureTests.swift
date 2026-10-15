@@ -163,38 +163,32 @@ struct WindowCaptureTests {
         #expect(picture.width == 80 && seen.count == 1)
     }
 
-    @Test func aMissingPermissionIsReportedNotRetriedAnotherWay() async {
+    @Test func aMissingPermissionIsReportedNotRetriedAnotherWay() async throws {
         let fallback = Counter()
         let declined = NSError(domain: "com.apple.ScreenCaptureKit.SCStreamErrorDomain", code: -3801)
         let capturer = LiveWindowCapturer(backend: backend(primary: { _, _ in throw declined }, fallback: { _, _ in fallback.bump(); return try self.image() }))
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "expected an error") {
             _ = try await capturer.capture(window(1), maxSide: 1_000)
-            Issue.record("expected an error")
-        } catch {
-            #expect(error.localizedDescription == MacPermissionProblem.screenRecording.modelMessage)
-            #expect(fallback.count == 0)
-        }
+        })
+        #expect(error.localizedDescription == MacPermissionProblem.screenRecording.modelMessage)
+        #expect(fallback.count == 0)
     }
 
-    @Test func aWindowThatClosedIsNotChasedAndAFailingFallbackReportsItsMessage() async {
+    @Test func aWindowThatClosedIsNotChasedAndAFailingFallbackReportsItsMessage() async throws {
         let fallback = Counter()
         let gone = LiveWindowCapturer(backend: backend(primary: { window, _ in throw WindowCaptureError.windowGone(window.windowID) },
                                                        fallback: { _, _ in fallback.bump(); return try self.image() }))
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "expected an error") {
             _ = try await gone.capture(window(5), maxSide: 800)
-            Issue.record("expected an error")
-        } catch {
-            #expect(error.localizedDescription.contains("fechou"))
-        }
+        })
+        #expect(error.localizedDescription.contains("fechou"))
         #expect(fallback.count == 0)
 
         let both = LiveWindowCapturer(backend: backend(primary: { _, _ in throw Boom() }, fallback: { _, _ in throw WindowCaptureError.failed("could not create image from window") }))
-        do {
+        let secondError = try #require(await #expect(throws: ToolError.self, "expected an error") {
             _ = try await both.capture(window(5), maxSide: 800)
-            Issue.record("expected an error")
-        } catch {
-            #expect(error.localizedDescription.contains("could not create image from window"))
-        }
+        })
+        #expect(secondError.localizedDescription.contains("could not create image from window"))
     }
 
     @Test func aCancelledTaskDoesNotFallBack() {

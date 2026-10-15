@@ -117,12 +117,10 @@ final class OfficeReaderTests {
 
     @Test func aFileThatIsNotAZipSaysSo() async throws {
         try workspace.write("falso.xlsx", "isto não é um zip")
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "expected an error") {
             _ = try await workspace.run(ReadFileTool(), ["path": .string("falso.xlsx")])
-            Issue.record("expected an error")
-        } catch {
-            #expect((error as? ToolError)?.message.contains("corrompido ou não é um Excel válido") == true)
-        }
+        })
+        #expect(error.message.contains("corrompido ou não é um Excel válido"))
     }
 
     @Test func readFilePagesAnExcelFileByLines() async throws {
@@ -137,12 +135,10 @@ final class OfficeReaderTests {
     @Test func otherBinaryFormatsGetSpecificAdvice() async throws {
         for (name, needle) in [("a.pages", "iWork"), ("b.numbers", "iWork"), ("c.key", "iWork"), ("e.ppt", "formato antigo"), ("f.zip", "compactado")] {
             try workspace.write(name, Data([0x50, 0x4B, 0x03, 0x04, 0x00, 0x01, 0x02]))
-            do {
+            let error = try #require(await #expect(throws: ToolError.self, "expected an error for \(name)") {
                 _ = try await workspace.run(ReadFileTool(), ["path": .string(name)])
-                Issue.record("expected an error for \(name)")
-            } catch {
-                #expect((error as? ToolError)?.message.contains(needle) == true, Comment(rawValue: "\(name): \(error)"))
-            }
+            })
+            #expect(error.message.contains(needle), Comment(rawValue: "\(name): \(error)"))
         }
     }
 }

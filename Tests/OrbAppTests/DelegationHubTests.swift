@@ -717,12 +717,10 @@ private final class Hooks: GroupTurnHooks {
         let hub = team.model.delegation
         let list = try await hub.handleTool(.object(["action": .string("list")]), orb: team.atlas.id)
         #expect(list == "- Pesquisador: Pesquisa e resume (livre)\n- Revisor: Revisa o que foi feito (livre)")
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "a request to nobody went through") {
             _ = try await hub.handleTool(.object(["action": .string("ask"), "to": .string("Zé"), "message": .string("x")]), orb: team.atlas.id)
-            Issue.record("a request to nobody went through")
-        } catch {
-            #expect(error.localizedDescription.contains("Não existe um Orb chamado “Zé”"))
-        }
+        })
+        #expect(error.localizedDescription.contains("Não existe um Orb chamado “Zé”"))
         let sent = try await hub.handleTool(.object(["action": .string("ask"), "to": .string("pesq"), "message": .string("Pesquise")]), orb: team.atlas.id,
                                             messageID: UUID(uuidString: "A1B2C3D4-0000-4000-8000-000000000000")!)
         #expect(sent == "Pedido enviado a Pesquisador (id a1b2). A resposta chega sozinha como mensagem; não espere nem repita o pedido. Termine o que puder sem ela.")

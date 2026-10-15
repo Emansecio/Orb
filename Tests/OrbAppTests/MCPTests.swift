@@ -64,8 +64,6 @@ private func fakeConfig(arguments: [String] = []) throws -> MCPServerConfig {
                            environment: ["ORB_TEST": "ok"])
 }
 
-private func message(_ error: any Error) -> String { (error as? ToolError)?.message ?? "\(error)" }
-
 @Suite(.enabled(if: hasPython))
 struct MCPConnectionTests {
     @Test func startListCallErrorStop() async throws {
@@ -107,26 +105,22 @@ struct MCPConnectionTests {
     @Test func processExitFailsPendingRequests() async throws {
         let connection = MCPConnection(config: try fakeConfig())
         _ = try await connection.start()
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "expected an error") {
             _ = try await connection.call("crash", arguments: .object([:]))
-            Issue.record("expected an error")
-        } catch {
-            #expect(message(error).contains("encerrado"))
-            #expect(message(error).contains("boom"))
-        }
+        })
+        #expect(error.message.contains("encerrado"))
+        #expect(error.message.contains("boom"))
         #expect(await !connection.isRunning)
     }
 
     @Test func missingCommandReportsStderr() async throws {
         let connection = MCPConnection(config: MCPServerConfig(name: "Quebrado", command: "orb-no-such-command-xyz"))
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "expected an error") {
             _ = try await connection.start()
-            Issue.record("expected an error")
-        } catch {
-            #expect(message(error).contains("Quebrado"))
-            #expect(message(error).contains("orb-no-such-command-xyz"))
-            #expect(message(error).contains("not found"))
-        }
+        })
+        #expect(error.message.contains("Quebrado"))
+        #expect(error.message.contains("orb-no-such-command-xyz"))
+        #expect(error.message.contains("not found"))
     }
 
     @Test func localServersFindCommandsOnThePathOfTheUsersShell() async throws {

@@ -219,13 +219,11 @@ struct ScheduleCommandTests {
                 == .create(name: "Duas linhas", prompt: "x", schedule: .everyHours(2)))
     }
 
-    @Test func tooShortAnIntervalIsRefusedWithTheReason() {
-        do {
+    @Test func tooShortAnIntervalIsRefusedWithTheReason() throws {
+        let error = try #require(#expect(throws: ToolError.self, "accepted 5 minutes") {
             _ = try ScheduleCommand(call("create", prompt: "x", when: every(minutes: 5)))
-            Issue.record("accepted 5 minutes")
-        } catch {
-            #expect(error.localizedDescription.contains("15 minutos"))
-        }
+        })
+        #expect(error.localizedDescription.contains("15 minutos"))
     }
 
     @Test func theOtherActionsTakeANameExceptList() throws {
@@ -492,13 +490,11 @@ struct SchedulePermissionTests {
         _ = try run(model, atlas, call("create", name: "Notícias", prompt: "y", when: daily9))
         #expect(try run(model, atlas, call("pause", name: "  noticias ")).contains("Notícias"))
         for wrong in ["Resumo", "notic", "inexistente"] {
-            do {
+            let error = try #require(#expect(throws: ToolError.self, "deleted “\(wrong)”") {
                 _ = try run(model, atlas, call("delete", name: wrong))
-                Issue.record("deleted “\(wrong)”")
-            } catch {
-                // It says which names there are, so the Orb can try again with one of them.
-                #expect(error.localizedDescription.contains("Resumo de e-mails") && error.localizedDescription.contains("Notícias"))
-            }
+            })
+            // It says which names there are, so the Orb can try again with one of them.
+            #expect(error.localizedDescription.contains("Resumo de e-mails") && error.localizedDescription.contains("Notícias"))
         }
         #expect(model.routines.count == 2)
         #expect(throws: ToolError.self) { try ScheduleCommand(call("delete", name: "   ")) }

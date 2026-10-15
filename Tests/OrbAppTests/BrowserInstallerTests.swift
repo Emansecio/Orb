@@ -188,12 +188,11 @@ import Testing
             return try await working.handler(call, output)
         }
         let (failing, _) = makeInstaller(brokenAfterTheMove)
-        do {
+        let error = try #require(await #expect(throws: BrowserInstallError.self, "a Chromium that does not start in its place is a failed update") {
             try await failing.install(.cloak, components: [.cloak])
-            Issue.record("a Chromium that does not start in its place is a failed update")
-        } catch BrowserInstallError.updateRolledBack(let name, _) {
-            #expect(name == "CloakBrowser")
-        }
+        })
+        guard case .updateRolledBack(let name, _) = error else { Issue.record("wrong error \(error)"); return }
+        #expect(name == "CloakBrowser")
         #expect(FileManager.default.fileExists(atPath: marker.path), "the old install is the one in place")
         #expect(FileManager.default.fileExists(atPath: oldChromium.path) && !FileManager.default.fileExists(atPath: layout.cloakCache.appending(path: "chromium-146.0.1.1").path))
         #expect(failing.records()["cloak"] == before, "the record still says what is really there")
@@ -613,12 +612,11 @@ import Testing
                 tag: obscuraTag, assets: [(arm.obscuraAssets[0], data, true)]))
             network.serve(file: FakeInstallNetwork.assetURL(tag: obscuraTag, arm.obscuraAssets[0]), data)
             let (installer, runner) = makeInstaller()
-            do {
+            let error = try #require(await #expect(throws: BrowserInstallError.self, "a \(kind) link in the package must stop the install") {
                 try await installer.install(.obscura, components: [.obscura])
-                Issue.record("a \(kind) link in the package must stop the install")
-            } catch BrowserInstallError.failed("Obscura", let detail) {
-                #expect(detail.contains("atalho ou link"), "\(kind): \(detail)")
-            }
+            })
+            guard case .failed("Obscura", let detail) = error else { Issue.record("wrong error \(error)"); return }
+            #expect(detail.contains("atalho ou link"), "\(kind): \(detail)")
             #expect(!FileManager.default.fileExists(atPath: layout.obscura.path) && !FileManager.default.fileExists(atPath: layout.obscuraWorker.path))
             #expect(!runner.calls.contains { $0.arguments.contains("-xzf") }, "nothing was even extracted")
         }
@@ -704,23 +702,21 @@ import Testing
         configuration.protocolClasses = [RedirectingProtocol.self]
         let network = URLSessionInstallNetwork(session: URLSession(configuration: configuration))
         // A document that is handed to a plain-HTTP address on the way is refused.
-        do {
+        let error = try #require(await #expect(throws: BrowserInstallError.self, "a redirect to http must be refused") {
             _ = try await network.data(from: URL(string: "https://example.test/release")!)
-            Issue.record("a redirect to http must be refused")
-        } catch BrowserInstallError.failed(_, let detail) {
-            #expect(detail.contains("sem HTTPS"), "\(detail)")
-        }
+        })
+        guard case .failed(_, let detail) = error else { Issue.record("wrong error \(error)"); return }
+        #expect(detail.contains("sem HTTPS"), "\(detail)")
         // One that goes on over https is followed.
         let data = try await network.data(from: URL(string: "https://example.test/moved")!)
         #expect(String(decoding: data, as: UTF8.self) == "arrived")
         // The same for a download: nothing is written.
         let file = root.deletingLastPathComponent().appending(path: "baixado")
-        do {
+        let downloadError = try #require(await #expect(throws: BrowserInstallError.self, "a download must not follow a redirect to http") {
             _ = try await network.download(URL(string: "https://example.test/release")!, to: file) { _, _ in }
-            Issue.record("a download must not follow a redirect to http")
-        } catch BrowserInstallError.failed(_, let detail) {
-            #expect(detail.contains("sem HTTPS"), "\(detail)")
-        }
+        })
+        guard case .failed(_, let downloadDetail) = downloadError else { Issue.record("wrong error \(downloadError)"); return }
+        #expect(downloadDetail.contains("sem HTTPS"), "\(downloadDetail)")
         #expect(!FileManager.default.fileExists(atPath: file.path))
         let kept = file.deletingLastPathComponent().appending(path: "baixado-ok")
         _ = try await network.download(URL(string: "https://example.test/moved")!, to: kept) { _, _ in }

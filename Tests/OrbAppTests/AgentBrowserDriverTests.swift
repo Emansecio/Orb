@@ -265,20 +265,18 @@ struct AgentBrowserDriverTests {
         }
         await #expect(throws: BrowserDriverError.noPage) { _ = try await driver(mode: "unlaunched").snapshot(interactive: true, selector: nil) }
         await #expect(throws: BrowserDriverError.self) { _ = try await driver(mode: "silent").read() }
-        do {
+        let error = try #require(await #expect(throws: BrowserDriverError.self, "a missing Chrome must not look like a page") {
             _ = try await driver(mode: "nochrome").open("https://a.test/")
-            Issue.record("a missing Chrome must not look like a page")
-        } catch BrowserDriverError.notInstalled(let message) {
-            #expect(message.contains("agent-browser install"))
-        }
+        })
+        guard case .notInstalled(let message) = error else { Issue.record("wrong error \(error)"); return }
+        #expect(message.contains("agent-browser install"))
         // An executable that is not there.
         let missing = AgentBrowserDriver(config: AgentBrowserConfig(executable: "/nonexistent/agent-browser", session: "s", engine: .chrome),
                                          environment: { nil })
-        do {
+        let missingError = try #require(await #expect(throws: BrowserDriverError.self, "a missing command must fail") {
             _ = try await missing.open("https://a.test/")
-            Issue.record("a missing command must fail")
-        } catch BrowserDriverError.notInstalled {
-        }
+        })
+        guard case .notInstalled = missingError else { Issue.record("wrong error \(missingError)"); return }
     }
 
     @Test(.enabled(if: hasPython)) func aCommandThatNeverAnswersIsGivenUpOn() async throws {

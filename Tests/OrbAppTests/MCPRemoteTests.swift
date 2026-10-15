@@ -175,8 +175,6 @@ private struct FakeHTTPServer {
     func stop() { process.terminate() }
 }
 
-private func message(_ error: any Error) -> String { (error as? ToolError)?.message ?? error.localizedDescription }
-
 @Suite(.enabled(if: hasPython))
 struct MCPRemoteTests {
     @Test func streamableHTTP() async throws {
@@ -211,12 +209,10 @@ struct MCPRemoteTests {
         let server = try FakeHTTPServer(mode: "streamable")
         defer { server.stop() }
         let connection = MCPConnection(config: server.config(path: "/mcp", token: nil))
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "expected an error") {
             _ = try await connection.start()
-            Issue.record("expected an error")
-        } catch {
-            #expect(message(error) == "O conector Remoto respondeu HTTP 401: missing token")
-        }
+        })
+        #expect(error.message == "O conector Remoto respondeu HTTP 401: missing token")
         #expect(await !connection.isRunning)
     }
 
@@ -234,12 +230,10 @@ struct MCPRemoteTests {
         let connection = MCPConnection(config: server.config(path: "/mcp"))
         _ = try await connection.start()
         #expect(try await connection.call("expire", arguments: .object([:])) == "ok")
-        do {
+        let error = try #require(await #expect(throws: MCPSessionExpired.self, "expected an error") {
             _ = try await connection.call("echo", arguments: .object(["text": .string("x")]))
-            Issue.record("expected an error")
-        } catch {
-            #expect(message(error).contains("expirou"))
-        }
+        })
+        #expect(error.localizedDescription.contains("expirou"))
         #expect(await !connection.isRunning)
     }
 
@@ -271,12 +265,10 @@ struct MCPRemoteTests {
         await #expect(throws: CancellationError.self) { try await slow.value }
         await waitUntil("the connection to close") { await !connection.isRunning }
 
-        do {
+        let error = try #require(await #expect(throws: MCPSessionExpired.self, "expected an error") {
             _ = try await connection.call("echo", arguments: .object(["text": .string("x")]))
-            Issue.record("expected an error")
-        } catch {
-            #expect(message(error).contains("expirou"), "\(message(error))")
-        }
+        })
+        #expect(error.localizedDescription.contains("expirou"), "\(error.localizedDescription)")
     }
 
     @Test func aCallAlreadyAtTheServerIsNotRepeatedWhenAnotherRequestFindsTheSessionExpired() async throws {
@@ -293,12 +285,10 @@ struct MCPRemoteTests {
         #expect(try await manager.call(config.id, tool: "expire", arguments: .object([:])) == "ok")
         // This one never reached the server (404), so it is repeated on a new session; "slow" is not.
         #expect(try await manager.call(config.id, tool: "echo", arguments: .object(["text": .string("oi")])) == "oi")
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "expected an error") {
             _ = try await slow.value
-            Issue.record("expected an error")
-        } catch {
-            #expect(message(error).contains("pode ter sido executada"), "\(message(error))")
-        }
+        })
+        #expect(error.message.contains("pode ter sido executada"), "\(error.message)")
         let state = try await server.state()
         #expect(state["calls"]?.array?.filter { $0 == .string("slow") }.count == 1)
         await manager.sync([])
@@ -317,12 +307,10 @@ struct MCPRemoteTests {
         let pending = Task { try await manager.call(config.id, tool: "pinglate", arguments: .object([:])) }
         _ = try await server.state { $0["calls"]?.array?.contains(.string("pinglate")) == true }
         #expect(try await manager.call(config.id, tool: "expire", arguments: .object([:])) == "ok")
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "expected an error") {
             _ = try await pending.value
-            Issue.record("expected an error")
-        } catch {
-            #expect(message(error).contains("pode ter sido executada"), "\(message(error))")
-        }
+        })
+        #expect(error.message.contains("pode ter sido executada"), "\(error.message)")
         let state = try await server.state()
         #expect(state["calls"]?.array?.filter { $0 == .string("pinglate") }.count == 1)
         await manager.sync([])
@@ -346,12 +334,10 @@ struct MCPRemoteTests {
         let server = try FakeHTTPServer(mode: "legacy")
         defer { server.stop() }
         let connection = MCPConnection(config: server.config(path: "/evil"))
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "expected an error") {
             _ = try await connection.start()
-            Issue.record("expected an error")
-        } catch {
-            #expect(message(error).contains("outro servidor"))
-        }
+        })
+        #expect(error.message.contains("outro servidor"))
     }
 
     @Test func invalidURL() async throws {

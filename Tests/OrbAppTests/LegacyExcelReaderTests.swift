@@ -488,20 +488,16 @@ final class LegacyExcelReaderTests {
 
     @Test func readFileExplainsAnXlsThatCannotBeRead() async throws {
         try workspace.write("quebrado.xls", Data([0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1, 0, 0]))
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "expected an error") {
             _ = try await workspace.run(ReadFileTool(), ["path": .string("quebrado.xls")])
-            Issue.record("expected an error")
-        } catch {
-            #expect((error as? ToolError)?.message.contains("corrompido ou truncado") == true)
-        }
+        })
+        #expect(error.message.contains("corrompido ou truncado"))
         // The old PowerPoint format still has no reader.
         try workspace.write("velho.ppt", Data([0xD0, 0xCF, 0x11, 0xE0, 0, 1, 2]))
-        do {
+        let oldFormat = try #require(await #expect(throws: ToolError.self, "expected an error") {
             _ = try await workspace.run(ReadFileTool(), ["path": .string("velho.ppt")])
-            Issue.record("expected an error")
-        } catch {
-            #expect((error as? ToolError)?.message.contains("formato antigo do PowerPoint") == true)
-        }
+        })
+        #expect(oldFormat.message.contains("formato antigo do PowerPoint"))
     }
 
     @Test func anXlsxSavedWithTheXlsExtensionIsReadAsAnXlsx() async throws {
