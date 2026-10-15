@@ -368,27 +368,21 @@ struct MacToolTests {
         #expect(try AppQuitTool.select("safari", in: running, ownPID: 1) == [apps[0]])
         #expect(try AppQuitTool.select("com.google.Chrome", in: running, ownPID: 1) == [apps[1], apps[2]])
         // "Mail" is not running and only Mailspring contains it: nothing is quit, Mailspring is suggested.
-        do {
+        let error = try #require(#expect(throws: ToolError.self, "a partial match must not be accepted") {
             _ = try AppQuitTool.select("Mail", in: running, ownPID: 1)
-            Issue.record("a partial match must not be accepted")
-        } catch let error as ToolError {
-            #expect(error.message.contains("Mailspring"))
-            #expect(error.message.contains("nome exato"))
-        }
+        })
+        #expect(error.message.contains("Mailspring"))
+        #expect(error.message.contains("nome exato"))
         #expect(RunningAppMatcher.match("Mail", in: running, exactOnly: true) == .none)
         #expect(RunningAppMatcher.match("mailspring", in: running, exactOnly: true) == .found([mail]))
         #expect(throws: ToolError.self) { try AppQuitTool.select("Pages", in: running, ownPID: 1) }
     }
 
-    @Test func quitRefusesTheOrbItself() {
-        do {
+    @Test func quitRefusesTheOrbItself() throws {
+        let error = try #require(#expect(throws: ToolError.self, "the Orb must not quit itself") {
             _ = try AppQuitTool.select("safari", in: apps, ownPID: 10)
-            Issue.record("the Orb must not quit itself")
-        } catch let error as ToolError {
-            #expect(error.message.contains("próprio Orb"))
-        } catch {
-            Issue.record("unexpected error \(error)")
-        }
+        })
+        #expect(error.message.contains("próprio Orb"))
     }
 
     @Test func quitReportsUnknownAppsAndRefusesTheOrbItself() async {

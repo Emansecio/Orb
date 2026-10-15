@@ -144,13 +144,11 @@ final class WebToolTests {
 
     @Test func fetchChecksTheStatusAndTheURL() async throws {
         let tool = WebFetchTool(session: WebStubProtocol.session(host: "gone.test", .init(status: 404, headers: ["Content-Type": "text/html"], body: Data("<p>nope</p>".utf8))))
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "a 404 should not read as a page") {
             _ = try await tool.run(.object(["url": .string("https://gone.test/x")]), context: workspace.context)
-            Issue.record("a 404 should not read as a page")
-        } catch let error as ToolError {
-            #expect(error.message.hasPrefix("O site respondeu HTTP 404 para https://gone.test/x."))
-            #expect(error.message.contains("confira a URL"))
-        }
+        })
+        #expect(error.message.hasPrefix("O site respondeu HTTP 404 para https://gone.test/x."))
+        #expect(error.message.contains("confira a URL"))
         await #expect(throws: ToolError.self) { try await tool.run(.object(["url": .string("file:///etc/passwd")]), context: workspace.context) }
         await #expect(throws: ToolError.self) { try await tool.run(.object([:]), context: workspace.context) }
     }
@@ -166,13 +164,11 @@ final class WebToolTests {
         let pdf = try Fixtures.pdf(pages: ["Relatório longo"])
         let stub = WebStubProtocol.Stub(headers: ["Content-Type": "application/pdf"], body: pdf.prefix(pdf.count / 2))
         let tool = WebFetchTool(session: WebStubProtocol.session(host: "cutpdf.test", stub), pdfLimit: pdf.count / 2)
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "a truncated PDF should not read as complete") {
             _ = try await tool.run(.object(["url": .string("https://cutpdf.test/")]), context: workspace.context)
-            Issue.record("a truncated PDF should not read as complete")
-        } catch let error as ToolError {
-            #expect(error.message.contains("save_to"))
-            #expect(error.message.contains("read_file"))
-        }
+        })
+        #expect(error.message.contains("save_to"))
+        #expect(error.message.contains("read_file"))
     }
 
     @Test func fetchReadsAPDFServedWithAGenericType() async throws {
@@ -216,12 +212,10 @@ final class WebToolTests {
         let tool = WebFetchTool(session: WebStubProtocol.session(host: "cutnoterm.test", stub), pdfLimit: pdf.count / 2, cache: WebPageCache())
         var context = workspace.context
         context.canSaveFiles = false
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "a truncated PDF should not read as complete") {
             _ = try await tool.run(.object(["url": .string("https://cutnoterm.test/")]), context: context)
-            Issue.record("a truncated PDF should not read as complete")
-        } catch let error as ToolError {
-            #expect(!error.message.contains("conexão melhor") && error.message.contains("Terminal"), "\(error.message)")
-        }
+        })
+        #expect(!error.message.contains("conexão melhor") && error.message.contains("Terminal"), "\(error.message)")
     }
 
     @Test func fetchSurvivesHugeOffsets() async throws {
@@ -517,12 +511,10 @@ final class WebFetchBehaviorTests {
     @Test func httpErrorsSayWhatToDo() async throws {
         for (status, hint) in [(403, "bloqueia leitores"), (429, "espere"), (503, "Erro no servidor"), (410, "confira a URL")] {
             let host = "status\(status).test"
-            do {
+            let error = try #require(await #expect(throws: ToolError.self, "HTTP \(status) should fail") {
                 _ = try await tool(host, .init(status: status)).run(arguments(host), context: workspace.context)
-                Issue.record("HTTP \(status) should fail")
-            } catch let error as ToolError {
-                #expect(error.message.contains("HTTP \(status) para https://\(host)/doc") && error.message.contains(hint), "\(error.message)")
-            }
+            })
+            #expect(error.message.contains("HTTP \(status) para https://\(host)/doc") && error.message.contains(hint), "\(error.message)")
         }
     }
 
@@ -560,12 +552,10 @@ final class WebFetchBehaviorTests {
 
     @Test func aDownloadAnnouncedAsTooBigFailsBeforeAnyByteIsRead() async throws {
         let stub = WebStubProtocol.Stub(headers: ["Content-Type": "application/zip", "Content-Length": "200000000"], body: Data("x".utf8))
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "a 200 MB download should be refused") {
             _ = try await tool("big.test", stub).run(arguments("big.test", ["save_to": .string("big.zip")]), context: workspace.context)
-            Issue.record("a 200 MB download should be refused")
-        } catch let error as ToolError {
-            #expect(error.message.contains("100 MB") && error.message.contains("limite do save_to"))
-        }
+        })
+        #expect(error.message.contains("100 MB") && error.message.contains("limite do save_to"))
         #expect(!FileManager.default.fileExists(atPath: workspace.url("big.zip").path))
         let names = try FileManager.default.contentsOfDirectory(atPath: workspace.directory.path)
         #expect(!names.contains { $0.hasPrefix(".orb-download") })
@@ -575,12 +565,10 @@ final class WebFetchBehaviorTests {
         var context = workspace.context
         context.canSaveFiles = false
         let stub = WebStubProtocol.Stub(headers: ["Content-Type": "application/zip"], body: Data("x".utf8))
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "save_to writes a file, so it needs \"Terminal e arquivos\"") {
             _ = try await tool("nofiles.test", stub).run(arguments("nofiles.test", ["save_to": .string("a.zip")]), context: context)
-            Issue.record("save_to writes a file, so it needs \"Terminal e arquivos\"")
-        } catch let error as ToolError {
-            #expect(error.message.contains("Terminal e arquivos"))
-        }
+        })
+        #expect(error.message.contains("Terminal e arquivos"))
         #expect(!FileManager.default.fileExists(atPath: workspace.url("a.zip").path))
         // Reading the page is still fine.
         #expect(try await tool("nofiles.test", .init(headers: ["Content-Type": "text/plain"], body: Data("ok".utf8))).run(arguments("nofiles.test"), context: context).contains("ok"))
@@ -769,20 +757,16 @@ final class EndlessResponseTests {
         let host = "endlesspdf.test"
         let session = EndlessStreamProtocol.session(host: host, .init(mime: "application/pdf", chunk: Data("%PDF-1.4 ".utf8), interval: 0.05))
         let tool = WebFetchTool(session: session, cache: WebPageCache(), readDeadline: .seconds(1))
-        do {
+        let error = try #require(await #expect(throws: ToolError.self, "a PDF cut by time should not read as complete") {
             _ = try await tool.run(arguments(host), context: workspace.context)
-            Issue.record("a PDF cut by time should not read as complete")
-        } catch let error as ToolError {
-            #expect(error.message.contains("save_to") && error.message.contains("não terminou"), "\(error.message)")
-        }
+        })
+        #expect(error.message.contains("save_to") && error.message.contains("não terminou"), "\(error.message)")
         var context = workspace.context
         context.canSaveFiles = false
-        do {
+        let withoutFiles = try #require(await #expect(throws: ToolError.self, "a PDF cut by time should not read as complete") {
             _ = try await tool.run(arguments(host), context: context)
-            Issue.record("a PDF cut by time should not read as complete")
-        } catch let error as ToolError {
-            #expect(!error.message.contains("save_to") && error.message.contains("não terminou"), "\(error.message)")
-        }
+        })
+        #expect(!withoutFiles.message.contains("save_to") && withoutFiles.message.contains("não terminou"), "\(withoutFiles.message)")
     }
 
     @Test func aPageCutByTimeKeepsTheNoteWhenItIsReadInPieces() async throws {

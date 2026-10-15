@@ -185,22 +185,18 @@ struct WebSearchToolTests {
     @Test func aGoogleConsentPageLeavesTheTabOpenForTheUser() async throws {
         let setup = FakeBrowserSetup()
         setup.driver.state.withLock { $0.evaluation = #"{"results":[],"url":"https://consent.google.com/ml?continue=x"}"# }
-        do {
+        let blocked = try #require(await #expect(throws: SearchBlocked.self, "a consent page must not look like an empty search") {
             _ = try await WebSearchTool().run(.object(["query": .string("x")]), context: setup.context(provider: .google))
-            Issue.record("a consent page must not look like an empty search")
-        } catch let blocked as SearchBlocked {
-            #expect(blocked.message.contains("browse_show") && blocked.message.contains("Do not try to solve it"))
-        }
+        })
+        #expect(blocked.message.contains("browse_show") && blocked.message.contains("Do not try to solve it"))
         #expect(!setup.driver.calls.contains { $0.hasPrefix("closeTab") }, "browse_show shows this page")
 
         let obscura = FakeBrowserSetup(engine: .obscura)
         obscura.driver.state.withLock { $0.evaluation = #"{"results":[],"url":"https://www.google.com/sorry/index"}"# }
-        do {
+        let obscuraBlocked = try #require(await #expect(throws: SearchBlocked.self) {
             _ = try await WebSearchTool().run(.object(["query": .string("x")]), context: obscura.context(provider: .google))
-            Issue.record("blocked")
-        } catch let blocked as SearchBlocked {
-            #expect(blocked.message.contains("no window") && !blocked.message.contains("Call browse_show"))
-        }
+        })
+        #expect(obscuraBlocked.message.contains("no window") && !obscuraBlocked.message.contains("Call browse_show"))
     }
 
     // MARK: TinyFish
