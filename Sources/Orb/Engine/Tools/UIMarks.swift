@@ -39,19 +39,10 @@ struct UIMarkCandidate: Sendable, Equatable {
     /// Title, else description: what `ui_act` compares to know it found the same element.
     var label: String
     /// A placeholder or help text, for the legend when there is no label.
-    var hint: String
+    var hint: String = ""
     /// Position and size in points, relative to the window's top-left corner.
     var frame: CGRect
-    var secure: Bool
-
-    init(id: String, rawRole: String, label: String, hint: String = "", frame: CGRect, secure: Bool = false) {
-        self.id = id
-        self.rawRole = rawRole
-        self.label = label
-        self.hint = hint
-        self.frame = frame
-        self.secure = secure
-    }
+    var secure: Bool = false
 }
 
 struct UIMark: Sendable, Equatable {

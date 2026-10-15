@@ -303,24 +303,16 @@ final class LiveTakeoverHand: TakeoverHand, @unchecked Sendable {
 
 /// Lends the screen: brings the app up, runs the body with the real input, and always puts everything back.
 struct LiveScreenOwner: ScreenOwner {
-    var platform: any TakeoverPlatform
-    var events: any AccessibilityEvents
-    var indicator: (any TakeoverIndicator)?
-    var lock: TakeoverLock
+    var platform: any TakeoverPlatform = LiveTakeoverPlatform()
+    var events: any AccessibilityEvents = UnavailableAccessibilityEvents()
+    var indicator: (any TakeoverIndicator)? = TakeoverBroadcast()
+    var lock: TakeoverLock = .shared
     /// How long the app has to become the active one (`AXApplicationActivated`).
     var activationTimeout: Duration = .milliseconds(500)
     var stepLimit: Duration = .seconds(2)
     var pause: Duration = .milliseconds(8)
     /// How long the person's app has to come back to the front.
     var restoreTimeout: Duration = .milliseconds(500)
-
-    init(platform: any TakeoverPlatform = LiveTakeoverPlatform(), events: any AccessibilityEvents = UnavailableAccessibilityEvents(),
-         indicator: (any TakeoverIndicator)? = TakeoverBroadcast(), lock: TakeoverLock = .shared) {
-        self.platform = platform
-        self.events = events
-        self.indicator = indicator
-        self.lock = lock
-    }
 
     /// What was in front before.
     private struct Saved: Sendable {

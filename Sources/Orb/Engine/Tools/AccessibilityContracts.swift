@@ -263,16 +263,8 @@ struct CapturableWindow: Sendable, Equatable {
     var pid: Int32
     /// In screen points.
     var frame: CGRect
-    var title: String
-    var isOnScreen: Bool
-
-    init(windowID: UInt32, pid: Int32, frame: CGRect, title: String = "", isOnScreen: Bool = true) {
-        self.windowID = windowID
-        self.pid = pid
-        self.frame = frame
-        self.title = title
-        self.isOnScreen = isOnScreen
-    }
+    var title: String = ""
+    var isOnScreen: Bool = true
 }
 
 /// Images of single windows, also when covered or on another Space.
@@ -306,17 +298,9 @@ struct TakeoverReport<Value: Sendable>: Sendable {
     /// The app put back in front (its name); nil when nothing needed restoring.
     var restoredApp: String?
     /// Whether the pointer is back where it was.
-    var cursorRestored: Bool
+    var cursorRestored: Bool = true
     /// The app that was in front could not be put back (neither way worked): the person must be told.
-    var restoreFailed: Bool
-
-    init(value: Value, duration: Duration, restoredApp: String? = nil, cursorRestored: Bool = true, restoreFailed: Bool = false) {
-        self.value = value
-        self.duration = duration
-        self.restoredApp = restoredApp
-        self.cursorRestored = cursorRestored
-        self.restoreFailed = restoreFailed
-    }
+    var restoreFailed: Bool = false
 }
 
 /// Lends the screen to a Orb for a short time and gives it back. Whatever happens to `body` (it throws, the task is
