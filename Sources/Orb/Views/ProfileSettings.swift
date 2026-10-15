@@ -173,6 +173,7 @@ struct ProfileAvatar: View {
 
 // MARK: - Snapshots
 
+#if DEBUG || ORB_DEV_TOOLS
 /// What `--snapshot settings-profile | sidebar-profile` shows: a made-up profile with a photo drawn on the spot, in the
 /// snapshot's own data folder (never the user's).
 @MainActor
@@ -204,3 +205,4 @@ enum ProfileSnapshots {
         return NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) ?? Data()
     }
 }
+#endif

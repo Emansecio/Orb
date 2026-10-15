@@ -534,6 +534,7 @@ private struct NewBotFolderSection: View {
 
 // MARK: - Snapshots
 
+#if DEBUG || ORB_DEV_TOOLS
 /// `--snapshot new-orb-kept`: the new-Orb sheet over two kept memories, the newest one chosen. They are written into
 /// the snapshot's own data folder (a temporary one, or `ORB_DATA_DIR`), never the user's.
 @MainActor
@@ -638,3 +639,4 @@ enum NewBotSnapshots {
         KeptMemories.write(profile, into: folder)
     }
 }
+#endif
