@@ -5,17 +5,6 @@ import Testing
 // Alike pages proposed as one: which go together, what of the model's merge is kept, and how the memory is rewritten
 // only once you accept.
 
-private struct Merger: LLMClient {
-    var events: [LLMEvent] = []
-
-    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
-        AsyncThrowingStream { continuation in
-            events.forEach { continuation.yield($0) }
-            continuation.finish()
-        }
-    }
-}
-
 @Suite final class MemoryMergeTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbMerge-\(UUID().uuidString)")
     deinit { removeTestFolder(root) }
@@ -65,13 +54,13 @@ private struct Merger: LLMClient {
     @Test func aCutOffAnswerIsAFailureAndKeepIsAnAnswer() async {
         let pages = [item("fatos/a.md", "Servidor", server1), item("fatos/b.md", "Porta", server2)]
         let used = TokenUsage(input: 300, output: 30)
-        let (merged, usage) = await MemoryMerge.merge(pages, client: Merger(events: [
+        let (merged, usage) = await MemoryMerge.merge(pages, client: CallScriptModel(always: [
             .text("# Servidor\nO servidor de produção do site fica na máquina 10.0.0.12 e usa a porta 8443."), .finished(.done, used),
         ]), model: "haiku")
         guard case .merged(let group) = merged else { Issue.record("not merged: \(merged)"); return }
         #expect(group.sources.map(\.path) == ["fatos/a.md", "fatos/b.md"] && group.kind == "fato" && usage == used)
-        #expect(await MemoryMerge.merge(pages, client: Merger(events: [.text("KEEP"), .finished(.done, used)]), model: "h").0 == .kept)
-        #expect(await MemoryMerge.merge(pages, client: Merger(events: [.text("# Servidor\n…"), .finished(.maxTokens, used)]),
+        #expect(await MemoryMerge.merge(pages, client: CallScriptModel(always: [.text("KEEP"), .finished(.done, used)]), model: "h").0 == .kept)
+        #expect(await MemoryMerge.merge(pages, client: CallScriptModel(always: [.text("# Servidor\n…"), .finished(.maxTokens, used)]),
                                         model: "h").0 == .failed)
     }
 

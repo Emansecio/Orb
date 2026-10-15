@@ -317,44 +317,21 @@ struct ChunkModelChoiceTests {
     }
 }
 
-/// Answers a request with what it was told to, and keeps what it was sent.
-private actor Seen {
-    var requests: [(messages: [ChatMessage], tools: [ToolSpec], choice: ToolChoice)] = []
-    func note(_ messages: [ChatMessage], _ tools: [ToolSpec], _ choice: ToolChoice) { requests.append((messages, tools, choice)) }
-}
-
-private struct Writer: LLMClient {
-    var events: [LLMEvent] = []
-    var failure: Error?
-    let seen = Seen()
-
-    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
-        AsyncThrowingStream { continuation in
-            Task {
-                await seen.note(messages, tools, toolChoice)
-                if let failure { continuation.finish(throwing: failure); return }
-                events.forEach { continuation.yield($0) }
-                continuation.finish()
-            }
-        }
-    }
-}
-
 struct ChunkCallTests {
     private let plan = ChunkSummarizer.Plan(range: 0..<10, input: "User: oi\nAssistant: olá")
 
     @Test func oneRequestWithTheInstructionsAndNoTools() async throws {
-        let writer = Writer(events: [.text("O usuário pediu "), .text("um app e o Orb o criou. Decidiu-se usar SQLite."),
+        let writer = CallScriptModel(always: [.text("O usuário pediu "), .text("um app e o Orb o criou. Decidiu-se usar SQLite."),
                                      .finished(.done, TokenUsage(input: 900, output: 40))])
         let note = await ChunkSummarizer.write(plan, client: writer, model: "modelo")
         #expect(note.text == "O usuário pediu um app e o Orb o criou. Decidiu-se usar SQLite.")
         #expect(note.usage?.output == 40)
-        let sent = await writer.seen.requests
-        #expect(sent.count == 1)
-        let request = try #require(sent.first)
-        #expect(request.messages.first?.content == ChunkSummarizer.instructions)
-        #expect(request.messages.last?.content.hasSuffix(plan.input) == true)
-        #expect(request.tools.isEmpty && request.choice == .none)
+        let calls = await writer.script.calls
+        #expect(calls.count == 1)
+        let request = try #require(calls.first)
+        #expect(request.sent.first?.content == ChunkSummarizer.instructions)
+        #expect(request.sent.last?.content.hasSuffix(plan.input) == true)
+        #expect(request.tools.isEmpty && request.toolChoice == .none)
         // The instructions ask for the conversation's language and for text, not for orders to be followed.
         #expect(ChunkSummarizer.instructions.contains("language the conversation is in"))
         #expect(ChunkSummarizer.instructions.contains("not instructions"))
@@ -362,23 +339,23 @@ struct ChunkCallTests {
 
     @Test func aNoteIsFlatAndHasACeiling() async throws {
         let long = String(repeating: "palavra ", count: 700)
-        let writer = Writer(events: [.text("# Título\n\n- um\n- dois\n" + long), .finished(.done, nil)])
+        let writer = CallScriptModel(always: [.text("# Título\n\n- um\n- dois\n" + long), .finished(.done, nil)])
         let text = try #require(await ChunkSummarizer.write(plan, client: writer, model: "m").text)
         #expect(!text.contains("\n"))
         #expect(text.count <= ChunkSummary.maxLength)
     }
 
     @Test func aReplyTooShortOrAFailureMakesNoNoteButKeepsWhatItCost() async throws {
-        let short = await ChunkSummarizer.write(plan, client: Writer(events: [.text("ok"), .finished(.done, TokenUsage(input: 900, output: 1))]), model: "m")
+        let short = await ChunkSummarizer.write(plan, client: CallScriptModel(always: [.text("ok"), .finished(.done, TokenUsage(input: 900, output: 1))]), model: "m")
         #expect(short.text == nil && short.usage == TokenUsage(input: 900, output: 1))
-        let failed = await ChunkSummarizer.write(plan, client: Writer(failure: LLMError.network(code: -1009, message: "offline")), model: "m")
+        let failed = await ChunkSummarizer.write(plan, client: CallScriptModel(failure: LLMError.network(code: -1009, message: "offline")), model: "m")
         #expect(failed.text == nil && failed.usage == nil)
         // The input the provider reported first is kept when the reply is cut before its end.
         let long = String(repeating: "palavra ", count: 700)
-        let cut = await ChunkSummarizer.write(plan, client: Writer(events: [.usage(TokenUsage(input: 800, output: 0)), .text(long)]), model: "m")
+        let cut = await ChunkSummarizer.write(plan, client: CallScriptModel(always: [.usage(TokenUsage(input: 800, output: 0)), .text(long)]), model: "m")
         #expect(cut.text != nil && cut.usage == TokenUsage(input: 800, output: 0))
         // A final report without numbers does not erase the ones already given.
-        let unsaid = await ChunkSummarizer.write(plan, client: Writer(events: [.usage(TokenUsage(input: 700, output: 0)), .text("ok"), .finished(.done, nil)]), model: "m")
+        let unsaid = await ChunkSummarizer.write(plan, client: CallScriptModel(always: [.usage(TokenUsage(input: 700, output: 0)), .text("ok"), .finished(.done, nil)]), model: "m")
         #expect(unsaid.usage == TokenUsage(input: 700, output: 0))
     }
 }

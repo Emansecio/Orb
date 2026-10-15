@@ -4,19 +4,6 @@ import Testing
 
 // The pinned memory kept short: what the pass is sent, what of its answer is kept, and how the memory is rewritten.
 
-private struct Consolidator: LLMClient {
-    var events: [LLMEvent] = []
-    var failure: Error?
-
-    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
-        AsyncThrowingStream { continuation in
-            if let failure { continuation.finish(throwing: failure); return }
-            events.forEach { continuation.yield($0) }
-            continuation.finish()
-        }
-    }
-}
-
 @Suite final class MemoryConsolidationTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbConsolidation-\(UUID().uuidString)")
     deinit { removeTestFolder(root) }
@@ -72,15 +59,15 @@ private struct Consolidator: LLMClient {
 
     @Test func oneRequestAndWhatItCostEvenWhenNothingIsKept() async {
         let used = TokenUsage(input: 500, output: 40)
-        let kept = await MemoryConsolidation.consolidate(original, client: Consolidator(events: [
+        let kept = await MemoryConsolidation.consolidate(original, client: CallScriptModel(always: [
             .text("## Notes\n- Responder sempre em português do Brasil\n"), .text("## Preferences\n- Prefere respostas longas e detalhadas"),
             .finished(.done, used),
         ]), model: "haiku")
         #expect(kept.pinned?.count == 2 && kept.usage == used)
-        let failed = await MemoryConsolidation.consolidate(original, client: Consolidator(failure: LLMError.network(code: -1009, message: "offline")),
+        let failed = await MemoryConsolidation.consolidate(original, client: CallScriptModel(failure: LLMError.network(code: -1009, message: "offline")),
                                                            model: "haiku")
         #expect(failed == MemoryConsolidation.Result(pinned: nil, usage: nil))
-        let cut = await MemoryConsolidation.consolidate(original, client: Consolidator(events: [
+        let cut = await MemoryConsolidation.consolidate(original, client: CallScriptModel(always: [
             .text("## Notes\n- Responder sempre em português do Brasil\n## Preferences\n"), .finished(.maxTokens, used),
         ]), model: "haiku")
         #expect(cut == MemoryConsolidation.Result(pinned: nil, usage: used)) // cut off: the newest items would be lost
