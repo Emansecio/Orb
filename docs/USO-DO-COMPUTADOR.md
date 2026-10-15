@@ -48,7 +48,7 @@ AX). N2 nunca é automático.
 | Observar mudanças | `AXObserver`: `AXValueChanged`, `AXUIElementDestroyed`, `AXCreated`, `AXWindowCreated`, `AXFocusedUIElementChanged`, `AXFocusedWindowChanged`, `AXTitleChanged`, `AXSelectedChildrenChanged`, `AXSelectedRowsChanged`, `AXSelectedTextChanged`, `AXLayoutChanged`, `AXSheetCreated`, `AXRowCountChanged`, `AXLoadComplete`. | Polling a 250 ms quando `notificationUnsupported`. | Canvas: diff de screenshot 32×32 a 2 Hz, só se pedido. |
 
 **Versões.** 14: ativação cooperativa — em N2 usar `AXFrontmost=true` no elemento do app. 15: sem
-`CGWindowListCreateImage`; o macOS reconfirma Gravação de Tela periodicamente (README avisa). 26: não usar a captura HDR.
+`CGWindowListCreateImage`; o macOS reconfirma Gravação de Tela periodicamente (o manual avisa). 26: não usar a captura HDR.
 27: smoke roda aqui.
 
 **Proibidas:** `_AXUIElementGetWindow`, `CGS*`, `SLS*`/SkyLight, `CGEventPostToPSN`, `AXUIElementPostKeyboardEvent`,
@@ -185,7 +185,7 @@ app e cursor (≤ 2 pt). Opcional Finder/TextEdit só leitura com `ORB_AX_SMOKE_
 - **WP-C — tomada de tela, cancelamento, harness e textos:** novo `ScreenTakeover.swift`; `MCPStdioServer.swift`
   (concorrência, cancelamento, EOF/SIGTERM); HUD opcional; `Package.swift` + `Tests/OrbAXFixture/`; `AXSmokeTests`;
   `SystemPrompt.swift` (`PromptParts.appControl` só nas linhas de `computerUse`, mantendo as frases testadas);
-  `ToolEconomyTests` (tetos); README ("Apps em segundo plano") e `docs/PERMISSOES.md`. Aceite: restauração sob
+  `ToolEconomyTests` (tetos); o manual ("Apps em segundo plano") e `docs/PERMISSOES.md`. Aceite: restauração sob
   cancelamento; testes de cancelamento do MCP; smoke completo verde neste Mac; CI verde com smoke desligado.
 
 **Coordenação com o navegador:** `PermissionPolicy.swift` não muda aqui; tetos de specs combinados (17.500 / sub-tetos);

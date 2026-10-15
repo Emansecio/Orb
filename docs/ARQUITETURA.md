@@ -237,7 +237,7 @@ passa do limite. Erros de rede e de HTTP voltam em português, com o endereço e
 **Busca.** `web_search` (`WebSearchTool`) devolve títulos, endereços e trechos pelo provedor que o Orb escolheu (DuckDuckGo, Google pelo
 navegador do Orb ou TinyFish, com chave); a página de resultados não é uma API, então quando o formato muda a ferramenta diz que não achou
 nada em vez de inventar. Vale para qualquer modelo, o do Claude Code incluído: o `claude` não tem ferramenta de busca própria no cano. Veja o
-README ("Pesquisa").
+[manual](MANUAL.md#navegador) ("Pesquisa").
 
 Os nomes e as descrições das ferramentas para o modelo são em inglês; o que aparece para você (título e detalhe de cada
 linha, cartões) é em português (`AgentTool.summary`).

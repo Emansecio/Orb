@@ -2,7 +2,7 @@
 
 Como o Orb decide o que o modelo vê de uma conversa que não cabe na janela dele, e como faz isso gastando poucos tokens.
 Para quem desenvolve; o lado de quem usa (anel de contexto, "Compactar agora", "Contexto das conversas") está no
-[README](../README.md).
+[manual](MANUAL.md#contexto-da-conversa).
 
 Três ideias dirigem tudo:
 
