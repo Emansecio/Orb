@@ -250,29 +250,6 @@ struct ConnectorToolEconomyTests {
 
 // MARK: - The permission policy sees the real tool
 
-private actor Steps {
-    private var steps: [[LLMEvent]]
-    private(set) var toolLists: [[String]] = []
-    init(_ steps: [[LLMEvent]]) { self.steps = steps }
-    func next(_ tools: [ToolSpec]) -> [LLMEvent] {
-        toolLists.append(tools.map(\.name))
-        return steps.isEmpty ? [.text("fim")] : steps.removeFirst()
-    }
-}
-
-private struct StepLLM: LLMClient {
-    let steps: Steps
-    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
-        AsyncThrowingStream { continuation in
-            Task {
-                for event in await steps.next(tools) { continuation.yield(event) }
-                continuation.finish()
-            }
-        }
-    }
-    func models() async throws -> [String] { ["fake"] }
-}
-
 /// A server whose tools declare what they do, and that answers with what it was asked.
 private let gatewayServer = #"""
 import json, sys
@@ -321,13 +298,13 @@ private func gatewayConfig(name: String = "GitHub") throws -> MCPServerConfig {
 @Suite(.enabled(if: hasPython))
 struct ConnectorGatewayEngineTests {
     private func run(_ steps: [[LLMEvent]], mode: PermissionMode = .ask, rules: [PermissionRule] = [], config: MCPServerConfig,
-                     manager: MCPManager, decision: ApprovalDecision = .once) async -> (events: [TurnEvent], steps: Steps) {
+                     manager: MCPManager, decision: ApprovalDecision = .once) async -> (events: [TurnEvent], steps: CallScript) {
         await manager.sync([config])
-        let script = Steps(steps)
+        let script = CallScript(steps, whenExhausted: .fim)
         var bot = Bot(name: "Teste", role: "", orb: OrbConfig(), permissionMode: mode)
         bot.permissionRules = rules
         let request = TurnRequest(bot: bot, model: "fake", system: "sys", history: [], prompt: "oi",
-                                  client: StepLLM(steps: script), tools: ConnectorGateway.tools(for: [config], manager: manager),
+                                  client: CallScriptModel(script: script), tools: ConnectorGateway.tools(for: [config], manager: manager),
                                   context: ToolContext(workingDirectory: FileManager.default.temporaryDirectory))
         let engine = AgentEngine()
         var events: [TurnEvent] = []
@@ -424,7 +401,7 @@ struct ConnectorGatewayEngineTests {
     @Test func theToolListNeverChangesDuringTheTurn() async throws {
         let manager = MCPManager(), config = try gatewayConfig()
         let (_, script) = await run([[listing(config)], [call("read")], [.text("Ok")]], config: config, manager: manager)
-        let lists = await script.toolLists
+        let lists = await script.calls.map(\.tools)
         try #require(lists.count == 3)
         #expect(Set(lists).count == 1)
         #expect(lists[0] == ["connector_tools", "connector_call"])
@@ -448,15 +425,15 @@ struct ConnectorTurnTests {
         model.connectors = [config]
         model.bots[0].capabilities = [.connectors]
         model.bots[0].workingDirectory = root.path
-        let steps = Steps([[.toolCalls([ToolCallRequest(id: "a", name: "connector_tools", arguments: #"{"connector":"GitHub"}"#)])],
+        let steps = CallScript([[.toolCalls([ToolCallRequest(id: "a", name: "connector_tools", arguments: #"{"connector":"GitHub"}"#)])],
                            [.toolCalls([ToolCallRequest(id: "b", name: "connector_call", arguments: #"{"connector":"GitHub","tool":"read","arguments":{}}"#)])],
-                           [.text("pronto")]])
-        model.clientOverride = { StepLLM(steps: steps) }
+                           [.text("pronto")]], whenExhausted: .fim)
+        model.clientOverride = { CallScriptModel(script: steps) }
         let bot = model.bots[0]
         #expect(model.send("oi", to: bot.id))
-        await waitUntil("the turn to end") { await steps.toolLists.count >= 3 && !model.isWorking(bot.id) }
+        await waitUntil("the turn to end") { await steps.calls.count >= 3 && !model.isWorking(bot.id) }
 
-        let lists = await steps.toolLists
+        let lists = await steps.calls.map(\.tools)
         try #require(lists.count == 3)
         #expect(Set(lists).count == 1)
         #expect(lists[0].contains("connector_tools") && lists[0].contains("connector_call"))

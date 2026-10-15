@@ -90,32 +90,13 @@ struct CacheMetricsTests {
 
 // MARK: - The engine reports each request
 
-private actor Replies {
-    private var queue: [[LLMEvent]]
-    init(_ queue: [[LLMEvent]]) { self.queue = queue }
-    func next() -> [LLMEvent] { queue.isEmpty ? [.text("fim")] : queue.removeFirst() }
-}
-
-private struct ReplyingLLM: LLMClient {
-    let replies: Replies
-    var arrangesPromptCache = true
-    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
-        AsyncThrowingStream { continuation in
-            Task {
-                for event in await replies.next() { continuation.yield(event) }
-                continuation.finish()
-            }
-        }
-    }
-}
-
 struct EngineCacheReportTests {
     private let lookCall = LLMEvent.toolCalls([ToolCallRequest(id: "c1", name: "look", arguments: "{}")])
 
     private func events(_ replies: [[LLMEvent]], arrangesCache: Bool = true) async -> [TurnEvent] {
         let bot = Bot(name: "Teste", role: "", orb: OrbConfig(), permissionMode: .auto)
         let request = TurnRequest(bot: bot, model: "fake", system: "sys", history: [], prompt: "oi",
-                                  client: ReplyingLLM(replies: Replies(replies), arrangesPromptCache: arrangesCache), tools: [FixedLookTool()],
+                                  client: CallScriptModel(script: CallScript(replies, whenExhausted: .fim), arrangesPromptCache: arrangesCache), tools: [FixedLookTool()],
                                   context: ToolContext(workingDirectory: URL(fileURLWithPath: NSTemporaryDirectory())))
         var collected: [TurnEvent] = []
         for await event in AgentEngine().run(request) { collected.append(event) }

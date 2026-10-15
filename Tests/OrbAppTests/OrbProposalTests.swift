@@ -168,24 +168,6 @@ struct OrbProposeToolTests {
 
 // MARK: - The card in the app
 
-private actor Script {
-    private var responses: [[LLMEvent]]
-    init(_ responses: [[LLMEvent]]) { self.responses = responses }
-    func next() -> [LLMEvent] { responses.isEmpty ? [.text("fim"), .finished(.done, nil)] : responses.removeFirst() }
-}
-
-private struct ScriptedLLM: LLMClient {
-    let script: Script
-    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
-        AsyncThrowingStream { continuation in
-            Task {
-                for event in await script.next() { continuation.yield(event) }
-                continuation.finish()
-            }
-        }
-    }
-}
-
 @Suite final class OrbProposeFlowTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbPropose-\(UUID().uuidString)")
 
@@ -215,8 +197,9 @@ private struct ScriptedLLM: LLMClient {
         model.providers = [ProviderAccount(kind: .custom)]
         model.defaultModel = "custom/modelo"
         model.proposedOrbFolderBase = root.appending(path: "Orbs")
-        let script = Script([[proposeCall(extra), .finished(.toolUse, nil)], second])
-        model.clientOverride = { ScriptedLLM(script: script) }
+        let script = CallScript([[proposeCall(extra), .finished(.toolUse, nil)], second],
+                                whenExhausted: .reply(ModelReply([.text("fim"), .finished(.done, nil)])))
+        model.clientOverride = { CallScriptModel(script: script) }
         return (model, model.bots[0])
     }
 

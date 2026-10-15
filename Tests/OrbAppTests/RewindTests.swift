@@ -2,26 +2,8 @@ import Foundation
 import Testing
 @testable import Orb
 
-/// Answers every request with "Pronto." and keeps what it was sent, so the tests can see which history the model got.
-private actor Received {
-    private(set) var requests: [[ChatMessage]] = []
-    func add(_ messages: [ChatMessage]) { requests.append(messages) }
-}
-
-private struct RecordingModel: LLMClient {
-    let received: Received
-
-    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
-        AsyncThrowingStream { continuation in
-            Task {
-                await received.add(messages)
-                continuation.yield(.text("Pronto."))
-                continuation.yield(.finished(.done, nil))
-                continuation.finish()
-            }
-        }
-    }
-}
+/// A script that answers every request "Pronto." and keeps what it was sent.
+private func answeringDone() -> CallScript { CallScript([[.text("Pronto."), .finished(.done, nil)]]) }
 
 private func user(_ text: String, _ files: [String] = []) -> TranscriptItem { TranscriptItem(.user(text: text, attachments: files)) }
 private func bot(_ text: String) -> TranscriptItem { TranscriptItem(.bot(text: text, isStreaming: false)) }
@@ -345,7 +327,7 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     private let folder = TempFolder("OrbRewind")
     private var root: URL { folder.url }
 
-    @MainActor private func model(with chat: Conversation, connected: Bool = true, received: Received = Received()) -> (AppModel, UUID) {
+    @MainActor private func model(with chat: Conversation, connected: Bool = true, received: CallScript = answeringDone()) -> (AppModel, UUID) {
         var state = AppState.initial
         state.bots[0].workingDirectory = root.path
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -357,7 +339,7 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
         if connected {
             model.providers = [ProviderAccount(kind: .custom)]
             model.defaultModel = "custom/modelo"
-            model.clientOverride = { RecordingModel(received: received) }
+            model.clientOverride = { CallScriptModel(script: received) }
         }
         return (model, model.bots[0].id)
     }
@@ -375,7 +357,7 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
         var chat = conversation(["a", "b"])
         chat.items.insert(tool("Rodando no Terminal", "touch x"), at: 4)
         chat.items.append(notice("Você interrompeu esta resposta"))
-        let received = Received()
+        let received = answeringDone()
         let (model, id) = model(with: chat, received: received)
         await model.loadedConversation(id)
         let bubble = try #require(row("b", in: model, id))
@@ -395,7 +377,7 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
         // Your bubble stays where it was: the same row, not one leaving and another arriving.
         #expect(row("b", in: model, id)?.id == bubble.id)
         // The model saw the conversation without the discarded turn, and "b" once.
-        let sent = try #require(await received.requests.last)
+        let sent = try #require(await received.received.last)
         #expect(sent.map(\.content).contains("resposta a a") && !sent.map(\.content).contains("resposta a b"))
         #expect(sent.filter { $0.role == .user }.count == 2) // "a" and the new "b": the old "b" is not there as well
         let messages = try #require(model.conversations[id]).messages
@@ -529,7 +511,7 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
         var chat = conversation(["a", "b", "c"])
         chat.items.insert(notice("Você interrompeu esta resposta"), at: 4)
         chat.items.insert(tool("Gravando arquivo", "/tmp/x", kind: .file), at: 5)
-        let received = Received()
+        let received = answeringDone()
         let (model, id) = model(with: chat, received: received)
         await model.loadedConversation(id)
         model.setDraft("rascunho", for: id)
@@ -547,7 +529,7 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
         #expect(items.first.map { if case .greeting = $0.kind { true } else { false } } == true)
         #expect(row("b, mas melhor", in: model, id)?.id == target.id) // the bubble changed in place
         // The model's history was cut at the same message: no "b", "c" or their replies.
-        let sent = try #require(await received.requests.last)
+        let sent = try #require(await received.received.last)
         let contents = sent.map(\.content)
         #expect(contents.contains("resposta a a") && !contents.contains("resposta a b") && !contents.contains("c"))
         #expect(sent.filter { $0.role == .user }.map(\.content).contains { $0.contains("b, mas melhor") })
@@ -623,7 +605,7 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
         #expect(users(model.transcript(id)) == ["a", "b"] && model.isEditing(id))
         model.providers = [ProviderAccount(kind: .custom)]
         model.defaultModel = "custom/modelo"
-        model.clientOverride = { RecordingModel(received: Received()) }
+        model.clientOverride = { CallScriptModel(script: answeringDone()) }
         #expect(!model.submitEdit("   ", to: id)) // nothing to send
         #expect(model.submitEdit("b2", to: id))
         await settle(model, id)
@@ -753,7 +735,7 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func theRequestIsLinkedToItsBubbleWhenItReachesTheModelAndTheLinkSurvivesRewinds() async throws {
-        let received = Received()
+        let received = answeringDone()
         let (model, id) = model(with: Conversation(), received: received)
         await model.loadedConversation(id)
         #expect(model.submit("2", to: id))
@@ -782,7 +764,7 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func aRequestStoppedBeforeTheModelDoesNotMakeTheNextOneWithTheSameWordsPairWithIt() async throws {
-        let received = Received()
+        let received = answeringDone()
         let (model, id) = model(with: Conversation(), received: received)
         await model.loadedConversation(id)
         #expect(model.submit("faz X", to: id))
@@ -805,7 +787,7 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
         #expect(model.beginEditing(itemID: target, of: id))
         #expect(model.submitEdit("4", to: id))
         await settle(model, id)
-        let sent = try #require(await received.requests.last)
+        let sent = try #require(await received.received.last)
         #expect(sent.filter { $0.role == .user }.map { TurnPreface.requestWords($0.content) } == ["faz X", "4"])
         #expect(sent.filter { $0.role == .assistant }.count == 1)
         #expect(users(model.transcript(id)) == ["faz X", "2", "4"]) // the stopped one is still on the screen, before the cut

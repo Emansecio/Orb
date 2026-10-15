@@ -5,26 +5,6 @@ import Testing
 // `ask_user`: the Orb asks the person something in its own chat and waits, on a card, for the answer; the tool gives the model
 // what they picked or wrote, or that they skipped it.
 
-/// A model that plays one scripted answer per call.
-private actor QuestionScript {
-    private var responses: [[LLMEvent]]
-    init(_ responses: [[LLMEvent]]) { self.responses = responses }
-    func next() -> [LLMEvent] { responses.isEmpty ? [.text("fim")] : responses.removeFirst() }
-}
-
-private struct QuestionLLM: LLMClient {
-    let script: QuestionScript
-
-    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
-        AsyncThrowingStream { continuation in
-            Task {
-                for event in await script.next() { continuation.yield(event) }
-                continuation.finish()
-            }
-        }
-    }
-}
-
 struct AskUserEngineTests {
     private let askCall = LLMEvent.toolCalls([ToolCallRequest(
         id: "q1", name: AskUserTool.name,
@@ -33,7 +13,7 @@ struct AskUserEngineTests {
     private func request(mode: PermissionMode = .ask) -> TurnRequest {
         let bot = Bot(name: "Atlas", role: "", orb: OrbConfig(), permissionMode: mode)
         return TurnRequest(bot: bot, model: "fake", system: "sys", history: [], prompt: "organiza",
-                           client: QuestionLLM(script: QuestionScript([[askCall], [.text("Certo.")]])),
+                           client: CallScriptModel(script: CallScript([[askCall], [.text("Certo.")]], whenExhausted: .fim)),
                            tools: [AskUserTool()], context: ToolContext(workingDirectory: FileManager.default.temporaryDirectory))
     }
 
@@ -74,7 +54,7 @@ struct AskUserEngineTests {
                                       ToolCallRequest(id: "q2", name: AskUserTool.name, arguments: #"{"question":"Segunda?"}"#)])
         let bot = Bot(name: "Atlas", role: "", orb: OrbConfig(), permissionMode: .ask)
         let turn = TurnRequest(bot: bot, model: "fake", system: "sys", history: [], prompt: "organiza",
-                               client: QuestionLLM(script: QuestionScript([[two], [.text("Certo.")]])),
+                               client: CallScriptModel(script: CallScript([[two], [.text("Certo.")]], whenExhausted: .fim)),
                                tools: [AskUserTool()], context: ToolContext(workingDirectory: FileManager.default.temporaryDirectory))
         let engine = AgentEngine()
         let (cards, _) = await drive(engine, turn) { card in
