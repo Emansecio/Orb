@@ -266,9 +266,11 @@ enum OrbSheet {
 /// Offscreen render of one screen with real data, for visual review without touching the user's screen.
 @MainActor
 enum Snapshot {
-    static func render(_ screen: String, to url: URL) {
+    static func render(_ requested: String, to url: URL) {
         // The Keychain stays untouched: a seed with token-looking values would leave orphan items there.
         let model = AppModel(secretVault: MemoryVault())
+        // `readme-<scene>`: the scene with a model connected (the README's pictures).
+        let screen = ReadmeSnapshots.prepare(requested, model: model) ?? requested
         model.showInspector = false // the inspector column does not render offscreen
         if screen.hasSuffix("-profile") { ProfileSnapshots.fill(model) }
         if screen.hasPrefix("routine") || screen == "inspector-routines" { RoutinesSnapshots.seed(model) }
@@ -276,6 +278,8 @@ enum Snapshot {
         let height = ProcessInfo.processInfo.environment["ORB_SNAPSHOT_HEIGHT"].flatMap(Double.init)
         let content: AnyView = switch screen {
         case "app": AnyView(RootView())
+        case "showcase": ReadmeSnapshots.app(model)
+        case "permission": ReadmeSnapshots.permission(model)
         case "skills": AnyView(SkillsView())
         case "skills-explore": AnyView(SkillsView(tab: .explore))
         case "connectors": AnyView(ConnectorsView(tab: .installed))

@@ -82,13 +82,21 @@ struct EventsSummary: View {
     var body: some View {
         if kind == .routineRun, case .event(let last) = items[items.count - 1].kind {
             // The routine's runs: the count and the last one's line (its note while folded), on the left like each run.
-            let marked = items.lazy.compactMap { if case .event(let event) = $0.kind { event.outcome } else { nil } }
-                .last { $0 == .failed || $0 == .attention }
-            RoutineRunLine(event: last, title: TranscriptFolding.eventsTitle(kind, items), mark: marked ?? last.outcome,
+            RoutineRunLine(event: last, title: TranscriptFolding.eventsTitle(kind, items), mark: Self.marked(items) ?? last.outcome,
                            showsNote: !unfolded, chevron: unfolded ? "chevron.down" : "chevron.right")
         } else {
             folded
         }
+    }
+
+    /// The outcome of the last run that failed or needs you, which the folded line keeps showing. A plain loop: the chain of
+    /// closures it replaces took the CI's compiler too long to type-check.
+    private static func marked(_ items: [TranscriptItem]) -> OrbEvent.Outcome? {
+        for item in items.reversed() {
+            guard case .event(let event) = item.kind, let outcome = event.outcome else { continue }
+            if outcome == .failed || outcome == .attention { return outcome }
+        }
+        return nil
     }
 
     private var folded: some View {
