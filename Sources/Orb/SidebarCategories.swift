@@ -13,14 +13,9 @@ struct SidebarCategory: Identifiable, Codable, Sendable, Equatable {
 
     /// The longest name a category keeps.
     static let nameLimit = 80
+}
 
-    init(id: UUID = UUID(), name: String, botIDs: [UUID] = [], isCollapsed: Bool = false) {
-        self.id = id
-        self.name = name
-        self.botIDs = botIDs
-        self.isCollapsed = isCollapsed
-    }
-
+extension SidebarCategory {
     /// Tolerant decoding: a category saved by another version still opens.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)

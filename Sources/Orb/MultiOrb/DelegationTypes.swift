@@ -14,20 +14,11 @@ struct DelegationRequest: Sendable, Equatable {
     }
 
     var envelope: OrbEnvelope
-    var state: State
+    var state: State = .queued
     /// The requests the target asked in turn and has not seen answered.
-    var openChildren: Set<UUID>
+    var openChildren: Set<UUID> = []
     var startedAt: Date?
     var finishedAt: Date?
-
-    init(envelope: OrbEnvelope, state: State = .queued, openChildren: Set<UUID> = [], startedAt: Date? = nil,
-         finishedAt: Date? = nil) {
-        self.envelope = envelope
-        self.state = state
-        self.openChildren = openChildren
-        self.startedAt = startedAt
-        self.finishedAt = finishedAt
-    }
 }
 
 /// The limits of Orbs talking to each other (tests cite these).

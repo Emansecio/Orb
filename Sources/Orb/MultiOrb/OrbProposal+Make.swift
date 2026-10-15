@@ -6,22 +6,13 @@ struct OrbCreationSupport: Sendable {
     /// The Orb that proposes it, as it is now (the engine refreshes its permission mode before the tool runs).
     var creator: Bot
     /// The names the Orbs have now, for the card's "another folder name" warning.
-    var existingNames: [String]
+    var existingNames: [String] = []
     /// How many Orbs this creator already made, and how many Orbs have been made by Orbs in all (`OrbProposal.perCreatorLimit`).
     var createdByCreator = 0
     var createdTotal = 0
     /// Creates the Orb for the card `approvalID` (the person said "Criar"). It reads the proposal as the card holds it, which
     /// is what "Editar antes" changed, and answers with what the model is told.
-    var create: OrbCreationHandler
-
-    init(creator: Bot, existingNames: [String] = [], createdByCreator: Int = 0, createdTotal: Int = 0,
-         create: @escaping OrbCreationHandler = { _, _ in .failed("Não foi possível criar o Orb agora.") }) {
-        self.creator = creator
-        self.existingNames = existingNames
-        self.createdByCreator = createdByCreator
-        self.createdTotal = createdTotal
-        self.create = create
-    }
+    var create: OrbCreationHandler = { _, _ in .failed("Não foi possível criar o Orb agora.") }
 }
 
 typealias OrbCreationHandler = @Sendable (_ approvalID: UUID, _ proposal: OrbProposal) async -> ProposalOutcome

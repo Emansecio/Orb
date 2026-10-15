@@ -78,12 +78,6 @@ struct Store: Sendable {
     /// read with items left out, or set aside. Nothing was lost by saving, so it must not count as a save failure.
     var onNotice: (@Sendable (StoreNotice) -> Void)?
 
-    init(directory: URL, onSaveFailure: (@Sendable (StoreNotice) -> Void)? = nil, onNotice: (@Sendable (StoreNotice) -> Void)? = nil) {
-        self.directory = directory
-        self.onSaveFailure = onSaveFailure
-        self.onNotice = onNotice
-    }
-
     /// Every write, in order. One queue per data folder (the app has one; tests have one each, so a test that holds
     /// the writer cannot stall the others).
     private var queue: DispatchQueue { WriterQueues.queue(for: directory) }

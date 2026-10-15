@@ -5,12 +5,9 @@ import Foundation
 struct OrbRef: Codable, Hashable, Sendable {
     var id: UUID
     var name: String
+}
 
-    init(id: UUID, name: String) {
-        self.id = id
-        self.name = name
-    }
-
+extension OrbRef {
     init(_ bot: Bot) { self.init(id: bot.id, name: bot.name) }
 
     init(from decoder: Decoder) throws {

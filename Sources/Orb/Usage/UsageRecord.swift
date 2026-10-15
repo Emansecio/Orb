@@ -106,11 +106,17 @@ struct UsageBucket: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey { case hour, orb, model, source }
 
-    init(key: UsageKey, totals: UsageTotals) {
-        self.key = key
-        self.totals = totals
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(Int(key.hour.timeIntervalSince1970), forKey: .hour)
+        try c.encode(key.orb.uuidString, forKey: .orb)
+        try c.encode(key.model, forKey: .model)
+        try c.encode(key.source, forKey: .source)
+        try totals.encode(to: encoder)
     }
+}
 
+extension UsageBucket {
     /// The hour is whole seconds since 1970; a row without hour, Orb or model cannot be placed and is skipped.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -122,15 +128,6 @@ struct UsageBucket: Codable, Equatable, Sendable {
         let source = (try? c.decodeIfPresent(UsageSource.self, forKey: .source)) ?? .chat
         key = UsageKey(hour: Date(timeIntervalSince1970: TimeInterval(seconds)), orb: orb, model: model, source: source)
         totals = try UsageTotals(from: decoder)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var c = encoder.container(keyedBy: CodingKeys.self)
-        try c.encode(Int(key.hour.timeIntervalSince1970), forKey: .hour)
-        try c.encode(key.orb.uuidString, forKey: .orb)
-        try c.encode(key.model, forKey: .model)
-        try c.encode(key.source, forKey: .source)
-        try totals.encode(to: encoder)
     }
 }
 

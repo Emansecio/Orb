@@ -29,36 +29,6 @@ struct OrbEvent: Codable, Equatable, Sendable {
     var file: String?
     var outcome: Outcome?
 
-    init(kind: Kind, actor: OrbRef? = nil, subject: OrbRef? = nil, detail: String? = nil,
-         requestID: UUID? = nil, chainID: UUID? = nil, groupID: UUID? = nil,
-         note: String? = nil, file: String? = nil, outcome: Outcome? = nil) {
-        self.kind = kind
-        self.actor = actor
-        self.subject = subject
-        self.detail = detail
-        self.requestID = requestID
-        self.chainID = chainID
-        self.groupID = groupID
-        self.note = note
-        self.file = file
-        self.outcome = outcome
-    }
-
-    /// Tolerant decoding: a field this version cannot read is left out instead of losing the line.
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        kind = try c.value(.kind, default: Kind.unknown)
-        actor = (try? c.decodeIfPresent(OrbRef.self, forKey: .actor)) ?? nil
-        subject = (try? c.decodeIfPresent(OrbRef.self, forKey: .subject)) ?? nil
-        detail = (try? c.decodeIfPresent(String.self, forKey: .detail)) ?? nil
-        requestID = (try? c.decodeIfPresent(UUID.self, forKey: .requestID)) ?? nil
-        chainID = (try? c.decodeIfPresent(UUID.self, forKey: .chainID)) ?? nil
-        groupID = (try? c.decodeIfPresent(UUID.self, forKey: .groupID)) ?? nil
-        note = (try? c.decodeIfPresent(String.self, forKey: .note)) ?? nil
-        file = (try? c.decodeIfPresent(String.self, forKey: .file)) ?? nil
-        outcome = (try? c.decodeIfPresent(Outcome.self, forKey: .outcome)) ?? nil
-    }
-
     /// The line as the chat shows it ("Atlas criou o Pesquisador"). Pure: the same event always reads the same.
     var sentence: String {
         let actorName = actor?.name ?? "Um Orb"
@@ -106,6 +76,23 @@ struct OrbEvent: Codable, Equatable, Sendable {
         case .finished, nil: "terminou"
         }
         return "Rotina “\(detail ?? "")” \(how)"
+    }
+}
+
+extension OrbEvent {
+    /// Tolerant decoding: a field this version cannot read is left out instead of losing the line.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try c.value(.kind, default: Kind.unknown)
+        actor = (try? c.decodeIfPresent(OrbRef.self, forKey: .actor)) ?? nil
+        subject = (try? c.decodeIfPresent(OrbRef.self, forKey: .subject)) ?? nil
+        detail = (try? c.decodeIfPresent(String.self, forKey: .detail)) ?? nil
+        requestID = (try? c.decodeIfPresent(UUID.self, forKey: .requestID)) ?? nil
+        chainID = (try? c.decodeIfPresent(UUID.self, forKey: .chainID)) ?? nil
+        groupID = (try? c.decodeIfPresent(UUID.self, forKey: .groupID)) ?? nil
+        note = (try? c.decodeIfPresent(String.self, forKey: .note)) ?? nil
+        file = (try? c.decodeIfPresent(String.self, forKey: .file)) ?? nil
+        outcome = (try? c.decodeIfPresent(Outcome.self, forKey: .outcome)) ?? nil
     }
 
     /// A run told as text by versions before the event: "Rotina “X” terminou: … (relatório em …)". nil for any other notice.

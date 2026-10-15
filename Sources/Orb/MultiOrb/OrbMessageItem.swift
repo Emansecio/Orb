@@ -33,20 +33,9 @@ struct OrbMessageItem: Codable, Equatable, Sendable {
     var requestID: UUID
     var chainID: UUID
     var groupID: UUID?
+}
 
-    init(direction: Direction, kind: Kind, state: State, from: OrbRef, to: OrbRef? = nil, text: String,
-         requestID: UUID, chainID: UUID, groupID: UUID? = nil) {
-        self.direction = direction
-        self.kind = kind
-        self.state = state
-        self.from = from
-        self.to = to
-        self.text = text
-        self.requestID = requestID
-        self.chainID = chainID
-        self.groupID = groupID
-    }
-
+extension OrbMessageItem {
     /// Tolerant decoding: everything but the ids has a default.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)

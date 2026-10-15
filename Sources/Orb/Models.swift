@@ -406,13 +406,9 @@ struct ApprovalItem: Codable, Sendable, Equatable, Hashable {
     var toolName: String
     var title: String
     var command: String
+}
 
-    init(toolName: String, title: String, command: String) {
-        self.toolName = toolName
-        self.title = title
-        self.command = command
-    }
-
+extension ApprovalItem {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         toolName = try c.value(.toolName, default: "")

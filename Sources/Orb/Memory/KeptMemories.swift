@@ -9,13 +9,9 @@ struct KeptProfile: Codable, Equatable, Sendable {
     var orb: OrbConfig
 
     static let fileName = "perfil.json"
+}
 
-    init(name: String, role: String, orb: OrbConfig) {
-        self.name = name
-        self.role = role
-        self.orb = orb
-    }
-
+extension KeptProfile {
     init(_ bot: Bot) { self.init(name: bot.name, role: bot.role, orb: bot.orb) }
 }
 
