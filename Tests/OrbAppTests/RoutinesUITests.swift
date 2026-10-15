@@ -4,11 +4,7 @@ import Testing
 
 /// The words and groupings of the routines page and the conversations menu (see AppModel+RoutinesUI.swift).
 struct RoutinesUITests {
-    private var calendar: Calendar {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "UTC")!
-        return calendar
-    }
+    private let calendar = utcCalendar
 
     /// Thursday, 8 October 2026, 12:00 UTC.
     private var now: Date { date(2026, 10, 8, 12, 0) }

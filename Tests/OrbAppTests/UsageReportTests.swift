@@ -5,12 +5,6 @@ import Testing
 /// The sums behind the Uso page: periods, hour, day, Orb and model, the turn of the month, a routine's use, plans and local
 /// models beside billed ones, and what is said when nothing was billed.
 struct UsageReportTests {
-    private var utc: Calendar {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "UTC") ?? .gmt
-        return calendar
-    }
-
     private let atlas = UUID(), luna = UUID()
     private let sonnet = "anthropic/claude-sonnet-5-5" // US$ 2 in, 0.10 cached, 10 out per million
     private let gpt = "openai/gpt-5.4" // 2.50 in, 0.25 cached, 15 out
@@ -21,7 +15,7 @@ struct UsageReportTests {
 
     private func report(_ buckets: [UsageBucket], _ period: UsagePeriod, now: Date = utcDate(2026, 10, 9, 15, 30),
                         book: PriceBook = PriceBook()) -> UsageReport {
-        UsageReport.make(buckets: buckets, period: period, now: now, calendar: utc, book: book,
+        UsageReport.make(buckets: buckets, period: period, now: now, calendar: utcCalendar, book: book,
                          orbNames: [atlas: "Atlas", luna: "Luna"])
     }
 
@@ -29,11 +23,11 @@ struct UsageReportTests {
 
     @Test func theFourPeriodsStartWhereTheirNamesSay() {
         let now = utcDate(2026, 10, 9, 15, 30)
-        #expect(UsagePeriod.today.interval(now: now, calendar: utc).start == utcDate(2026, 10, 9))
-        #expect(UsagePeriod.week.interval(now: now, calendar: utc).start == utcDate(2026, 10, 3)) // today and the six days before
-        #expect(UsagePeriod.month30.interval(now: now, calendar: utc).start == utcDate(2026, 9, 10))
-        #expect(UsagePeriod.thisMonth.interval(now: now, calendar: utc).start == utcDate(2026, 10, 1))
-        #expect(UsagePeriod.thisMonth.interval(now: utcDate(2026, 11, 1, 0, 5), calendar: utc).start == utcDate(2026, 11, 1))
+        #expect(UsagePeriod.today.interval(now: now, calendar: utcCalendar).start == utcDate(2026, 10, 9))
+        #expect(UsagePeriod.week.interval(now: now, calendar: utcCalendar).start == utcDate(2026, 10, 3)) // today and the six days before
+        #expect(UsagePeriod.month30.interval(now: now, calendar: utcCalendar).start == utcDate(2026, 9, 10))
+        #expect(UsagePeriod.thisMonth.interval(now: now, calendar: utcCalendar).start == utcDate(2026, 10, 1))
+        #expect(UsagePeriod.thisMonth.interval(now: utcDate(2026, 11, 1, 0, 5), calendar: utcCalendar).start == utcDate(2026, 11, 1))
         #expect(UsagePeriod.allCases.map(\.title) == ["Hoje", "7 dias", "30 dias", "Este mês"])
         #expect(UsagePeriod.today.barUnit == .hour && UsagePeriod.week.barUnit == .day)
     }
@@ -158,7 +152,7 @@ struct UsageReportTests {
         let gone = UUID()
         let rows = [bucket(utcDate(2026, 10, 9, 10), orb: gone, model: sonnet, UsageTotals(requests: 1, input: 1_000_000)),
                     bucket(utcDate(2026, 10, 9, 10), orb: UUID(), model: sonnet, UsageTotals(requests: 1, input: 1_000_000))]
-        let named = UsageReport.make(buckets: rows, period: .today, now: utcDate(2026, 10, 9, 15), calendar: utc, book: PriceBook(),
+        let named = UsageReport.make(buckets: rows, period: .today, now: utcDate(2026, 10, 9, 15), calendar: utcCalendar, book: PriceBook(),
                                      orbNames: [:], rememberedNames: [gone: "Orb antigo"])
         #expect(Set(named.orbRows.map(\.name)) == ["Orb antigo", "Orb apagado"])
     }
