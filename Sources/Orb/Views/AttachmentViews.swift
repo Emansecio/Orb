@@ -153,7 +153,7 @@ struct FileCard: View {
         }
         .padding(.horizontal, 8)
         .frame(maxWidth: isCompact ? 280 : AttachmentStack.width, minHeight: minHeight ?? (isCompact ? 40 : 48), alignment: .leading)
-        .hoverFill(isHovering && info.state == .ok, in: .rect(cornerRadius: 10), color: Palette.agentBubble, resting: Palette.raised)
+        .hoverFill(isHovering && info.state == .ok, in: .rect(cornerRadius: 10), color: Palette.raisedHover, resting: Palette.raised)
         .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.line) }
         .opacity(info.state == .missing ? 0.55 : 1)
         .motion(Motion.fade, value: info)

@@ -97,6 +97,25 @@ extension View {
     func alignedWithReplyText() -> some View {
         padding(.leading, gutter).padding(.trailing, 90)
     }
+
+    /// The bubble of an Orb's words (a reply, a member's words in a group, an exchange, the wizard): `Palette.agentBubble`,
+    /// darker than the person's bubble, as wide as its longest line (`proseHugsText`) up to the width it is given. Code,
+    /// tables and rules take the whole width, and the bubble with them.
+    func replyBubble() -> some View {
+        environment(\.proseHugsText, true)
+            .padding(.horizontal, ReplyBubble.horizontalPadding)
+            .padding(.vertical, ReplyBubble.verticalPadding)
+            .background(Palette.agentBubble, in: .rect(cornerRadius: ReplyBubble.radius))
+    }
+}
+
+/// The measures of `replyBubble()`, so the avatar beside it can be set against its first line.
+enum ReplyBubble {
+    static let horizontalPadding: CGFloat = 14
+    static let verticalPadding: CGFloat = 9
+    static let radius: CGFloat = 16
+    /// How far down a 30 pt avatar goes, from the bubble's top, for its middle to be level with the first line.
+    static let avatarDrop: CGFloat = 3
 }
 
 // MARK: - Spoken labels
@@ -327,7 +346,8 @@ private struct BotMessage: View {
 
     // The bubble is padded and given the row's width instead of sharing an HStack with the avatar and a Spacer:
     // the text then gets one definite width to wrap to (an HStack asks for several sizes, and each one lays the
-    // whole text out). The avatar floats over the left padding; the right one is 80 and the HStack's spacing, 10.
+    // whole text out), and the bubble is as wide as its longest line within it. The avatar floats over the left
+    // padding; the right one leaves room for the buttons beside the bubble.
     var body: some View {
         content
             // The reply's text never animates: not as it streams, and not when the last flush swaps the paragraphs for
@@ -337,12 +357,12 @@ private struct BotMessage: View {
             .foregroundStyle(Palette.ink)
             .lineSpacing(Palette.conversationLineSpacing)
             .textSelection(.enabled)
-            // No bubble: the reply is text beside its Orb, the first line level with the avatar's middle.
-            .padding(.top, 5)
-            .padding(.bottom, 2)
+            // In its bubble, beside its Orb: the bubble's edge is the chat's left edge (the tool lines' text, the cards'
+            // edge), the first line level with the avatar's middle.
+            .replyBubble()
             .overlay(alignment: .bottomTrailing) {
-                // Past the text's last line end, in the space the right padding leaves; the row's hover keeps it up
-                // while the pointer travels to it.
+                // Beside the bubble, in the space the right padding leaves; the row's hover keeps it up while the
+                // pointer travels to it.
                 // Shown while something is selected too: "Citar" is for the selection.
                 if live == nil {
                     let shows = hovering || selection != nil
@@ -373,6 +393,7 @@ private struct BotMessage: View {
                     }
                 }
                 .animation(Motion.fade, value: isLastReply)
+                .offset(y: ReplyBubble.avatarDrop)
                 .accessibilityHidden(true)
             }
             .onHover { if live == nil { hovering = $0 } }
@@ -447,7 +468,7 @@ private struct GreetingReplies: View {
             }
         }
         .frame(maxWidth: 360)
-        .padding(.leading, 40)
+        .padding(.leading, gutter) // under the bubble's edge
         .motion(Motion.exit, value: isTyping)
     }
 }

@@ -26,8 +26,12 @@ enum Palette {
     static let surface = Color(hex: 0x181818)       // cards, composer
     static let surfaceFocused = Color(hex: 0x1D1D1D) // surface 2 % lighter: the composer while it has the focus
     static let raised = Color(hex: 0x222222)        // code blocks, chips
-    static let agentBubble = Color(hex: 0x262626)
+    /// An Orb's reply: a step above `canvas` (it reads as a surface, so the reply has depth) and below `userBubble`, so
+    /// whose words are whose shows in the fill too. Code and tables inside it keep `raised` and their hairline.
+    static let agentBubble = Color(hex: 0x1A1A1A)
     static let userBubble = Color(hex: 0x2C2C2C)
+    /// A `raised` fill under the pointer (an attachment's card).
+    static let raisedHover = Color(hex: 0x262626)
 
     // Ink
     static let ink = Color(hex: 0xFCFCFC)

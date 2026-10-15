@@ -1,7 +1,7 @@
 import SwiftUI
 
-// A member's words in a group read like one Orb's reply in the single chat (BotMessage): no bubble, the text beside the
-// Orb's avatar, the first line level with the avatar's middle, "Copiar" on hover. The person's own words keep their bubble.
+// A member's words in a group read like one Orb's reply in the single chat (BotMessage): the reply's bubble beside the
+// Orb's avatar, its name above, "Copiar" beside the bubble on hover. The person's own words keep their bubble.
 
 /// The color that stands for an Orb: its palette's core (bars, borders, rings). Gray for an Orb that is gone.
 enum OrbColor {
@@ -76,19 +76,24 @@ struct GroupMessageBubble: View {
     private var name: String { look?.name ?? message.from.name }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 4) {
             if showsHeader { header }
             text
+                .replyBubble()
+                .overlay(alignment: .bottomTrailing) {
+                    // Beside the bubble, in the space the right padding leaves (as a reply's buttons in the single chat).
+                    copyButton
+                        .fixedSize()
+                        .alignmentGuide(.trailing) { $0[.leading] - 6 }
+                        .opacity(hovering ? 1 : 0)
+                        .allowsHitTesting(hovering)
+                }
         }
         .padding(.leading, 44)
-        .frame(maxWidth: 680, alignment: .leading)
+        .padding(.trailing, 40)
+        .frame(maxWidth: 720, alignment: .leading)
         .overlay(alignment: .topLeading) {
             if showsHeader { avatar.frame(width: 30, height: 30).accessibilityHidden(true) }
-        }
-        .overlay(alignment: .bottomTrailing) {
-            copyButton
-                .opacity(hovering ? 1 : 0)
-                .allowsHitTesting(hovering)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(.rect)
@@ -131,7 +136,6 @@ struct GroupMessageBubble: View {
             .foregroundStyle(Palette.ink)
             .lineSpacing(Palette.conversationLineSpacing)
             .textSelection(.enabled)
-            .padding(.bottom, 2)
     }
 
     @ViewBuilder private var avatar: some View {

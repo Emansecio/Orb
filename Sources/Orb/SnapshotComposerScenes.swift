@@ -17,7 +17,8 @@ extension Snapshot {
             model.setDraft("e confere também a pasta de downloads", for: bot.id)
             model.dictation.pose(.listening, level: 0.4, for: bot.id)
             return view
-        case "chat-working", "chat-working-wait", "chat-working-retry", "chat-attachments-queued", "chat-working-steered":
+        case "chat-working", "chat-working-wait", "chat-working-retry", "chat-attachments-queued", "chat-working-steered",
+             "chat-working-streaming":
             return workingTurn(screen, model: model, bot: bot)
         case "chat-typed":
             seedConversation(model, bot: bot)
@@ -124,8 +125,9 @@ extension Snapshot {
     /// Mid-turn, 16 s in, after two steps that are done: `chat-working` runs `swift build --jobs 6` (the phrase with its
     /// target, "3 ações"; one message that reached the Orb mid-task, marked, and two that wait: one steers, one for
     /// after the task), `chat-working-wait` waits for your answer to a card (the phrase
-    /// stands still in the warning color) and `chat-working-retry` waits to try again (the countdown takes the
-    /// clock's place). The phrases come in at once (no minimum time), as in a turn that has been going on a while.
+    /// stands still in the warning color), `chat-working-retry` waits to try again (the countdown takes the
+    /// clock's place) and `chat-working-streaming` is in the middle of writing its answer. The phrases come in at once
+    /// (no minimum time), as in a turn that has been going on a while.
     @MainActor
     private static func workingTurn(_ screen: String, model: AppModel, bot: Bot) -> AnyView {
         let id = bot.id
@@ -157,6 +159,9 @@ extension Snapshot {
         case "chat-working-steered":
             // A message of yours reached the task and the Orb has not acted on it yet: its bubble offers "Parar e enviar".
             items.append(TranscriptItem(.user(text: "Roda de novo, era a internet aqui.", attachments: []), duringTask: true))
+        case "chat-working-streaming":
+            // The reply being written (sent once the conversation is in place, below): its bubble grows with it.
+            break
         default:
             let build = ToolCall(kind: .shell, title: "Rodando no Terminal", detail: "swift build --jobs 6")
             if screen == "chat-working" {
@@ -181,6 +186,9 @@ extension Snapshot {
         return AnyView(ChatView(botID: id).task {
             try? await Task.sleep(for: .seconds(1))
             model.seedConversation(Conversation(items: items), for: id)
+            if screen == "chat-working-streaming" {
+                model.apply(.text("Compilei e encontrei **2 erros**, os dois no módulo Engine:\n\n- `Turn.swift:42`: um tipo que não"), to: id)
+            }
         })
     }
 

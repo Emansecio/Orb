@@ -173,13 +173,15 @@ private struct WizardBotRow<Content: View>: View {
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             BotAvatar(orb: orb, size: 30, animated: false)
+                .padding(.top, ReplyBubble.avatarDrop)
                 .accessibilityHidden(true)
+            // The reply's bubble, as in an Orb's chat.
             content
                 .font(.system(size: 14))
                 .foregroundStyle(Palette.ink)
                 .lineSpacing(4)
                 .textSelection(.enabled)
-                .padding(.top, 4)
+                .replyBubble()
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.trailing, 24)

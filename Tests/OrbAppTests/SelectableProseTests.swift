@@ -64,8 +64,28 @@ struct SelectableProseTests {
         let view = ProseTextView()
         view.show(ProseText.make([.paragraph(String(repeating: "palavra ", count: 20))], cursor: false, cached: false, highlight: nil),
                   cursor: false, fades: false)
-        let wide = view.height(forWidth: 2_000), narrow = view.height(forWidth: 200)
+        let wide = view.size(forWidth: 2_000).height, narrow = view.size(forWidth: 200).height
         #expect(wide > 10 && wide < 30)
         #expect(narrow > wide * 4)
+    }
+
+    /// Inside a bubble the text is as wide as its longest line, and laid out again at that width it keeps its lines.
+    @Test func theLongestLineIsTheWidthAndKeepsTheLinesWhereTheyBreak() {
+        // Already laid out in a frame as wide as the chat (the container's own used rect then spans all of it).
+        let short = ProseTextView()
+        short.frame = NSRect(x: 0, y: 0, width: 600, height: 20)
+        short.show(ProseText.make([.paragraph("Oi! Em que posso ajudar?")], cursor: false, cached: false, highlight: nil),
+                   cursor: false, fades: false)
+        let line = short.size(forWidth: 600)
+        #expect(line.width > 40 && line.width < 300)
+        #expect(short.size(forWidth: line.width) == line)
+
+        let long = ProseTextView()
+        long.show(ProseText.make([.paragraph(String(repeating: "palavra ", count: 40)), .list([MarkdownListItem(depth: 0, marker: .bullet, text: "um item")])],
+                                 cursor: false, cached: false, highlight: nil),
+                  cursor: false, fades: false)
+        let wrapped = long.size(forWidth: 300)
+        #expect(wrapped.width <= 300 && wrapped.width > 250)
+        #expect(long.size(forWidth: wrapped.width).height == wrapped.height)
     }
 }

@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// What an Orb says in an exchange or a group, drawn as a reply of an Orb in the chat is drawn (`BotMessage`): no bubble, the
-/// avatar at the left, a header with the name in a lighter tint of the Orb's color and its role, then the text as Markdown.
+/// What an Orb says in an exchange or a group, drawn as a reply of an Orb in the chat is drawn (`BotMessage`): the avatar at
+/// the left, a header with the name in a lighter tint of the Orb's color and its role, then the text as Markdown in the reply's
+/// bubble.
 /// Every Orb speaks on the left, whoever it is: the bubble on the right belongs to the person (docs/historico/MULTI-ORBS.md, 8.10).
 /// `continues`: the same Orb spoke just before, so the avatar and the header are left out and the text follows closely.
 struct OrbSpeechBubble: View {
@@ -33,6 +34,7 @@ struct OrbSpeechBubble: View {
                     .lineSpacing(Palette.conversationLineSpacing)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
+                    .replyBubble()
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
