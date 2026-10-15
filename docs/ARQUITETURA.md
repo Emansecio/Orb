@@ -302,7 +302,7 @@ O avatar e seu sistema de animação: `OrbModel` (config, catálogo, imagens), `
 | Ajustes | `SettingsView` (Geral, Modelos, Uso, Permissões), `ProfileSettings` (a seção "Você" e `ProfileAvatar`, que a barra lateral também usa), `ResetOrbSheet` ("Redefinir o Orb?" e o alerta), `ProviderSettings`, `ProviderPresentation`, `CustomProviderFields`, `ClaudeCodeSettings`, `MacPermissionsView`, `ContextSettings` |
 | Páginas | `RoutinesView`, `SkillsView`, `ConnectorsView`, `CatalogParts` |
 | Sistema | `CommandPalette` (⌘K e a folha de atalhos; as teclas vêm de `ShortcutCatalog`, em `Shortcuts.swift`, a mesma lista que Ajustes → Geral mostra), `QuickAskView` (painel da barra de menus), `SheetKit` (folhas: `orbSheet`, `SheetFooter`/`SheetFooterBar`, `ActionRow` das linhas de botões dos cartões), `ImportPanel` (a importação de outro assistente, dentro da folha Novo Orb) |
-| Para revisão (só `--snapshot`) | `WelcomeSnapshots`, `CatalogSnapshots` (com as cenas `skill-proposal`, `skill-proposal-update`), `ContextSnapshots`, `SystemSnapshots`, `TranscriptSamples` (`transcript-skill-proposal`), `AttachmentSnapshots`, e `SnapshotComposerScenes.swift` (na raiz de `Sources/Orb/`) |
+| Para revisão (só `--snapshot`, só em debug ou `ORB_DEV_TOOLS`) | `WelcomeSnapshots`, `CatalogSnapshots` (com as cenas `skill-proposal`, `skill-proposal-update`), `ContextSnapshots`, `SystemSnapshots`, `TranscriptSamples` (`transcript-skill-proposal`), `AttachmentSnapshots`, e `SnapshotComposerScenes.swift` (na raiz de `Sources/Orb/`) |
 
 ## O caminho de um turno
 
@@ -606,9 +606,15 @@ open -n build/Orb.app --env ORB_DATA_DIR=/tmp/orb-teste --env ORB_SEND="Como est
 | Argumento | Efeito |
 |---|---|
 | `--pipe-tools <declarações.json> --pipe-mailbox <pasta>` (montado pelo `ClaudeCodeClient`) | roda só o servidor MCP que declara as ferramentas do Orb ao CLI do Claude Code (que é apenas o cano até o modelo); os resultados vêm da caixa de correio que o motor do Orb preenche; sem janela |
-| `--snapshot <modo> <arquivo.png>` | desenha uma tela fora da vista e sai (abaixo) |
+| `--snapshot <modo> <arquivo.png>` | desenha uma tela fora da vista e sai (abaixo; só em build de desenvolvimento) |
 | `--render-orbs <arquivo.png>` | folha de Orbs × atividades (`docs/orbs-activities.png`) |
 | `--render-icon <arquivo.png> [pixels]` | o ícone do app, desenhado no tamanho pedido (padrão 1024; `scripts/bundle.sh` chama um por tamanho do iconset) |
+
+`--snapshot` e `--render-orbs` só existem em build de desenvolvimento (`swift build`, que é debug, ou um release com
+`-Xswiftc -DORB_DEV_TOOLS`, p. ex. `ORB_DEV_TOOLS=1 scripts/bundle.sh`): ficam atrás de `#if DEBUG || ORB_DEV_TOOLS`, junto com as
+cenas (`*Snapshots.swift`, `TranscriptSamples`, `SnapshotComposerScenes`, `SwitchBench`). No app distribuído, os dois avisam no stderr
+e saem com código 64 em `Launcher.main`, antes de existir modelo, janela ou pasta de dados. `--render-icon` fica em todos os
+builds (o `bundle.sh` o usa em release). Para gerar uma tela: `.build/debug/Orb --snapshot skills /tmp/skills.png`.
 
 Os três modos de desenho (`--snapshot`, `--render-orbs`, `--render-icon`) usam uma pasta de dados temporária nova, nunca a sua
 (`DevRun.dataFolder`), a menos que você defina `ORB_DATA_DIR` de propósito. Neles o Keychain não é lido, gravado nem migrado do

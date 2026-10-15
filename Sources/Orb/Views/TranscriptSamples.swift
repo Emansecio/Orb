@@ -1,3 +1,4 @@
+#if DEBUG || ORB_DEV_TOOLS
 import SwiftUI
 
 /// `Orb --snapshot transcript[-approvals|-long-command|-question|-quote|-notices|-compacted|-failed|-attachments|-outputs|-screen-steps] out.png`:
@@ -170,3 +171,4 @@ enum TranscriptSample {
 private enum AgentEngineNotice {
     static let paused = AgentEngine.pausedNotice(after: 100)
 }
+#endif

@@ -1,3 +1,4 @@
+#if DEBUG || ORB_DEV_TOOLS
 import SwiftUI
 
 /// `Orb --snapshot <mode> out.png` screens of the catalogs' sheets (see `Snapshot` in OrbApp.swift).
@@ -181,3 +182,4 @@ enum SkillSnapshots {
         return SkillDraft(skill: skill, slug: parsed.slug, botID: bot.id, orbName: bot.name, isUpdate: update)
     }
 }
+#endif

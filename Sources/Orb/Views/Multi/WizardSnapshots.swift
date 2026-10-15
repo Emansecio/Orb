@@ -1,3 +1,4 @@
+#if DEBUG || ORB_DEV_TOOLS
 import SwiftUI
 
 /// `--snapshot` modes of the "Criar conversando" assistant, each the new-Orb sheet in the assistant with a runner put in a given
@@ -91,3 +92,4 @@ enum WizardSnapshots {
         return draft
     }
 }
+#endif

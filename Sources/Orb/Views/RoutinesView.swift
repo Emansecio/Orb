@@ -1009,6 +1009,7 @@ struct RoutineEditor: View {
 
 // MARK: Snapshots
 
+#if DEBUG || ORB_DEV_TOOLS
 /// Screens of this file for `Orb --snapshot <mode> out.png` (see `Snapshot`).
 @MainActor
 enum RoutinesSnapshots {
@@ -1083,4 +1084,5 @@ enum RoutinesSnapshots {
         }
     }
 }
+#endif
 

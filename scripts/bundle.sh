@@ -8,7 +8,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 CONFIG="${1:-release}"
-swift build -c "$CONFIG"
+# ORB_DEV_TOOLS=1 brings the review screens (--snapshot, --render-orbs sheets and bench) into a release build; they are always in debug.
+EXTRA=()
+if [[ -n "${ORB_DEV_TOOLS:-}" ]]; then EXTRA=(-Xswiftc -DORB_DEV_TOOLS); fi
+swift build -c "$CONFIG" "${EXTRA[@]}"
 BIN="$(swift build -c "$CONFIG" --show-bin-path)/Orb"
 
 APP="build/Orb.app"

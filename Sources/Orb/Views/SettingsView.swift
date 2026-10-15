@@ -346,6 +346,7 @@ struct GeneralSettings: View {
 
 // MARK: - Snapshots
 
+#if DEBUG || ORB_DEV_TOOLS
 /// `--snapshot settings-general | settings-profile | settings-reset | settings-models | settings-perms[-tested|-stale] | first-run-banner`: each tab of Ajustes on its own
 /// (the tab bar does not render offscreen), at the size the window gives it.
 @MainActor
@@ -392,6 +393,7 @@ enum SettingsSnapshots {
                                    awaitsRelaunch: [.screenRecording])
     }
 }
+#endif
 
 /// One short sentence under a setting, with the rest behind "Saiba mais": for notes whose extra detail matters to
 /// few people, so the page is not a wall of gray text.

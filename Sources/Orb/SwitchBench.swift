@@ -1,3 +1,4 @@
+#if DEBUG || ORB_DEV_TOOLS
 import AppKit
 
 /// A measure of how long changing Orbs takes, for tuning it: `ORB_DATA_DIR=<a copy> ORB_BENCH_SWITCH=<rounds> Orb` opens the
@@ -56,3 +57,4 @@ enum SwitchBench {
     }
 }
 
+#endif

@@ -1,3 +1,4 @@
+#if DEBUG || ORB_DEV_TOOLS
 import SwiftUI
 
 /// Review samples for `--snapshot` (see `Snapshot` in OrbApp.swift): the menu bar panel with permission requests and a
@@ -62,3 +63,4 @@ enum SystemSnapshots {
         })
     }
 }
+#endif

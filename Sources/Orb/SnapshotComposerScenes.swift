@@ -1,3 +1,4 @@
+#if DEBUG || ORB_DEV_TOOLS
 import SwiftUI
 
 // Review snapshots of the composer and the chat while an Orb works (`Orb --snapshot <mode> out.png`, see
@@ -218,3 +219,4 @@ extension Snapshot {
         model.apply(.toolStarted(ToolCall(kind: .shell, title: "Rodando no Terminal", detail: "ls ~/Downloads")), to: bot.id)
     }
 }
+#endif
