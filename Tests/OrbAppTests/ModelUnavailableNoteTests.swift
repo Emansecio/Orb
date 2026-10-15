@@ -6,7 +6,7 @@ import Testing
 @Suite final class ModelUnavailableNoteTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbModelNote-\(UUID().uuidString)")
 
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     @MainActor private func model(connected: Set<ProviderKind>) -> AppModel {
         let store = Store(directory: root)

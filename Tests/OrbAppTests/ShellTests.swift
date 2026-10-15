@@ -231,7 +231,7 @@ final class RunCommandTests {
                               outputsDirectory: directory.appending(path: "saidas"))
     }
 
-    deinit { try? FileManager.default.removeItem(at: directory) }
+    deinit { removeTestFolder(directory) }
 
     private func run(_ command: String, _ extra: [String: JSONValue] = [:]) async throws -> String {
         try await RunCommandTool().run(.object(extra.merging(["command": .string(command)]) { $1 }), context: context)

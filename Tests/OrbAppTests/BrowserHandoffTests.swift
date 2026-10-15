@@ -196,7 +196,7 @@ struct BrowserHandoffEngineTests {
 
 @Suite final class BrowserHandoffModelTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbHandoff-\(UUID().uuidString)")
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     @MainActor private func model() -> AppModel {
         var state = AppState.initial

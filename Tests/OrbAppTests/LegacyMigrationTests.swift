@@ -8,7 +8,7 @@ import Testing
     var legacy: URL { root.appending(path: "OpenBot") }
     var directory: URL { root.appending(path: "Orb") }
 
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     private func write(_ text: String, to url: URL, modified: Date) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)

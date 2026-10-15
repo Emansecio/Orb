@@ -19,7 +19,7 @@ private struct Consolidator: LLMClient {
 
 @Suite final class MemoryConsolidationTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbConsolidation-\(UUID().uuidString)")
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     private let start = Date(timeIntervalSince1970: 1_790_000_000)
     private let original = MemoryConsolidation.Pinned(

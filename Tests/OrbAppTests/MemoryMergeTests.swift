@@ -18,7 +18,7 @@ private struct Merger: LLMClient {
 
 @Suite final class MemoryMergeTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbMerge-\(UUID().uuidString)")
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     private let start = Date(timeIntervalSince1970: 1_790_000_000)
 

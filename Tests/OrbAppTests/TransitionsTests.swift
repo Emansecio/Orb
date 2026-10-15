@@ -9,7 +9,7 @@ import Testing
 @Suite("Transitions", .serialized) final class TransitionsTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbTransitions-\(UUID().uuidString)")
 
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     @MainActor private func makeModel() -> AppModel {
         AppModel(store: Store(directory: root.appending(path: "dados")), runsBackgroundWork: false)

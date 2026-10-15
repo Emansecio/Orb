@@ -6,7 +6,7 @@ import Testing
 @Suite final class PanelUITests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbPanel-\(UUID().uuidString)")
 
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     private func defaults() -> UserDefaults {
         let suite = "OrbPanelTests-\(UUID().uuidString)"

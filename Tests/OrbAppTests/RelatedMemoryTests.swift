@@ -8,7 +8,7 @@ import Testing
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbRelated-\(UUID().uuidString)")
     let day: TimeInterval = 86_400
 
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     func bank(_ name: String = "orb") -> MemoryBank { MemoryBank(directory: root.appending(path: name)) }
 

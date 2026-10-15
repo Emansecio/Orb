@@ -10,7 +10,7 @@ import Testing
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbMemory-\(UUID().uuidString)")
     let day: TimeInterval = 86_400
 
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     func bank(_ name: String = "orb") -> MemoryBank { MemoryBank(directory: root.appending(path: name)) }
 
@@ -407,7 +407,7 @@ struct MemoryIntentTests {
 /// Regressions found in review: each test reproduces a reported failure.
 @Suite final class MemoryReviewTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbMemoryReview-\(UUID().uuidString)")
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
     func bank(_ name: String = "orb") -> MemoryBank { MemoryBank(directory: root.appending(path: name)) }
 
     @Test func recallRanksTheBestMatchesNotTheFirstRows() async {

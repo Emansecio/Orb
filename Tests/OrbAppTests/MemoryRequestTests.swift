@@ -6,7 +6,7 @@ import Testing
 @Suite @MainActor final class MemoryRequestTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbMemoryRequest-\(UUID().uuidString)")
 
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     private func setUp() -> (AppModel, BotSession) {
         let store = Store(directory: root.appending(path: "dados"))

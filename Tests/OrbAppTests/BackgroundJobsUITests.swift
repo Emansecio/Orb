@@ -7,7 +7,7 @@ import Testing
 @Suite final class BackgroundJobsUITests {
     let root = FileManager.default.temporaryDirectory.appending(path: "orb-jobs-ui-\(UUID().uuidString)")
 
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     @MainActor private func makeModel() -> (AppModel, UUID) {
         let model = AppModel(store: Store(directory: root.appending(path: "data")), runsBackgroundWork: false)

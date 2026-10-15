@@ -13,7 +13,7 @@ import Testing
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     }
 
-    deinit { try? FileManager.default.removeItem(at: folder) }
+    deinit { removeTestFolder(folder) }
 
     @Test func onlyChangesTheListCanShowCount() {
         let root = "/Users/x/projeto"

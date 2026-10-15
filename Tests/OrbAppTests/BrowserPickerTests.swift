@@ -77,7 +77,7 @@ struct BrowserPickerCopyTests {
 
 @Suite final class BrowserPickerModelTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbPickers-\(UUID().uuidString)")
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     @MainActor private func model(vault: (any SecretVault)? = nil) -> (AppModel, UUID) {
         var state = AppState.initial

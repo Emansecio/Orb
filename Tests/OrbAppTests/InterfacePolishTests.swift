@@ -8,7 +8,7 @@ import Testing
 @Suite final class InterfacePolishTests {
     let root = FileManager.default.temporaryDirectory.appending(path: "OrbInterface-\(UUID().uuidString)")
 
-    deinit { try? FileManager.default.removeItem(at: root) }
+    deinit { removeTestFolder(root) }
 
     @MainActor private func model() -> AppModel {
         var state = AppState.initial
