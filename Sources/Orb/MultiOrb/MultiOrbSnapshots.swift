@@ -1,3 +1,4 @@
+#if DEBUG || ORB_DEV_TOOLS
 import SwiftUI
 
 /// The `--snapshot` modes of the multi-Orb features. Each package registers its modes in its own file (an enum with
@@ -14,3 +15,4 @@ enum MultiOrbSnapshots {
             ?? MultiOrbSnapshotsFinal.view(screen, model: model)
     }
 }
+#endif

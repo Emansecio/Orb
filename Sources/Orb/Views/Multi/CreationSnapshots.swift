@@ -1,3 +1,4 @@
+#if DEBUG || ORB_DEV_TOOLS
 import SwiftUI
 
 /// `--snapshot` modes of the creation card: `orb-proposal` (open), `orb-proposal-editing`, `orb-proposal-created`,
@@ -70,3 +71,4 @@ enum CreationSnapshots {
         .background(Palette.chrome))
     }
 }
+#endif

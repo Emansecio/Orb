@@ -1,3 +1,4 @@
+#if DEBUG || ORB_DEV_TOOLS
 import SwiftUI
 
 /// `--snapshot` modes of the exchange lines, the folds, the exchange view and the sidebar while Orbs talk (docs/historico/MULTI-ORBS.md,
@@ -207,3 +208,4 @@ enum DelegationSnapshots {
         researcher.setPartner(PartnerTint(botID: team.atlas.id, color: team.atlas.orb.color))
     }
 }
+#endif

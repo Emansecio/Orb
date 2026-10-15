@@ -1,3 +1,4 @@
+#if DEBUG || ORB_DEV_TOOLS
 import SwiftUI
 
 /// `--snapshot` modes of the group screens: groups-sidebar, group-chat, group-working (presence and the budget), group-pause
@@ -141,3 +142,4 @@ extension GroupLive {
         setBudget(usage)
     }
 }
+#endif
