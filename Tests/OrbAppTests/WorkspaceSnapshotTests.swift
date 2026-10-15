@@ -173,8 +173,7 @@ struct WorkspaceSnapshotTests {
         let folder = try Folder()
         let marker = folder.url.deletingLastPathComponent().appending(path: "git-ran")
         let script = folder.url.deletingLastPathComponent().appending(path: "fake-git")
-        try "#!/bin/sh\ntouch '\(marker.path)'\n".write(to: script, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        try writeExecutable("#!/bin/sh\ntouch '\(marker.path)'\n", to: script)
         try folder.write("a.txt")
         let snapshot = await capture(folder, gitPath: script.path)
         #expect(snapshot.git == nil)
@@ -186,8 +185,7 @@ struct WorkspaceSnapshotTests {
         try await folder.git(["init", "-q"])
         try folder.write("a.txt")
         let script = folder.url.deletingLastPathComponent().appending(path: "slow-git")
-        try "#!/bin/sh\nsleep 30\n".write(to: script, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        try writeExecutable("#!/bin/sh\nsleep 30\n", to: script)
 
         let start = ContinuousClock.now
         let snapshot = await capture(folder, gitPath: script.path, gitTimeout: .milliseconds(300))

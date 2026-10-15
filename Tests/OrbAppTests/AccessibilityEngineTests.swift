@@ -45,10 +45,6 @@ private struct Bench {
         try await actor(system).run(.object(arguments), context: context)
     }
 
-    func failure(_ body: () async throws -> String) async -> String {
-        do { _ = try await body(); return "" } catch { return error.localizedDescription }
-    }
-
     /// Adds a screenshot's marks and geometry to the last reading, as the screenshot tool does.
     func addShot(marks: [Int: String], windowFrame: CGRect, scale: Double = 2, windowID: UInt32 = 77) throws {
         var snapshot = try #require(store.snapshot(bot: context.botID, app: AccessibilityApp(name: "Notas", bundleID: "com.apple.Notes", pid: 100)))
@@ -124,7 +120,7 @@ struct AccessibilityLadderTests {
         bench.system.windowCapturer.setWindows([CapturableWindow(windowID: 55, pid: 100, frame: windowFrame, title: "A")], pid: 100)
         let system = WithoutInput(base: bench.system)
         try await bench.read(system: system)
-        let message = await bench.failure { try await bench.act(["action": .string("press"), "id": .string("w1.1")], system: system) }
+        let message = await failureMessage { try await bench.act(["action": .string("press"), "id": .string("w1.1")], system: system) }
         #expect(message.hasPrefix(UIActTool.takeoverMarker))
         #expect(message.contains("takeover") && message.contains("repetir pode duplicar"))
         #expect(bench.system.screenOwner.takes == 0, "the screen is never taken without being asked")
@@ -134,7 +130,7 @@ struct AccessibilityLadderTests {
         let logo = framed(fake("AXImage", description: "Logo"), CGRect(x: 120, y: 140, width: 40, height: 20))
         let bench = Bench(windows: [framed(fake("AXWindow", title: "A", [logo]), windowFrame)])
         try await bench.read()
-        let message = await bench.failure { try await bench.act(["action": .string("press"), "id": .string("w1.1")]) }
+        let message = await failureMessage { try await bench.act(["action": .string("press"), "id": .string("w1.1")]) }
         #expect(message.hasPrefix(UIActTool.takeoverMarker) && message.contains("janela"))
         #expect(bench.system.syntheticInput.events.isEmpty)
     }
@@ -194,7 +190,7 @@ struct AccessibilityLadderTests {
         try await bench.read()
         let root = bench.root
         bench.system.syntheticInput.beforeEach = { root.attrs["AXFrontmost"] = .bool(true) }
-        let message = await bench.failure {
+        let message = await failureMessage {
             try await bench.act(["action": .string("type"), "id": .string("w1.1"), "value": .string(String(repeating: "x", count: 60))])
         }
         #expect(message.contains("veio para a frente"), Comment(rawValue: message))
@@ -207,7 +203,7 @@ struct AccessibilityLadderTests {
         bench.root.attrs["AXFocusedUIElement"] = .element(field)
         let system = WithoutInput(base: bench.system)
         try await bench.read(system: system)
-        let message = await bench.failure { try await bench.act(["action": .string("type"), "id": .string("w1.1"), "value": .string("oi")], system: system) }
+        let message = await failureMessage { try await bench.act(["action": .string("type"), "id": .string("w1.1"), "value": .string("oi")], system: system) }
         #expect(message.hasPrefix(UIActTool.takeoverMarker))
     }
 
@@ -241,9 +237,9 @@ struct AccessibilityLadderTests {
         let text = try await bench.act(["action": .string("key"), "app": .string("Notas"), "keys": .string("return, tab")])
         #expect(text.contains("evento ao app"))
         #expect(bench.system.syntheticInput.events == [.keys([KeyStroke(.named(.return)), KeyStroke(.named(.tab))], pid: 100)])
-        let bad = await bench.failure { try await bench.act(["action": .string("key"), "app": .string("Notas"), "keys": .string("hyper+x")]) }
+        let bad = await failureMessage { try await bench.act(["action": .string("key"), "app": .string("Notas"), "keys": .string("hyper+x")]) }
         #expect(bad.contains("Modificador desconhecido"))
-        let unnamed = await bench.failure { try await bench.act(["action": .string("key"), "keys": .string("return")]) }
+        let unnamed = await failureMessage { try await bench.act(["action": .string("key"), "keys": .string("return")]) }
         #expect(unnamed.contains("Diga em qual app"), "without a reading, key needs the app")
     }
 
@@ -277,7 +273,7 @@ struct AccessibilityLadderTests {
         let text = try await bench.act(["action": .string("select"), "id": .string("w1.1"), "value": .string("grande")])
         #expect(text.hasPrefix("Escolhi “Grande” em popup “Tamanho”"))
         #expect(popup.performed.isEmpty, "the popup is not opened")
-        let message = await bench.failure { try await bench.act(["action": .string("select"), "id": .string("w1.2"), "value": .string("Azul")]) }
+        let message = await failureMessage { try await bench.act(["action": .string("select"), "id": .string("w1.2"), "value": .string("Azul")]) }
         #expect(message.hasPrefix(UIActTool.takeoverMarker))
         _ = try await bench.act(["action": .string("select"), "id": .string("w1.3"), "value": .string("linha 2")])
         #expect(row.assignedValue("AXSelected")?.bool == true)
@@ -287,7 +283,7 @@ struct AccessibilityLadderTests {
         let label = fake("AXStaticText", value: .string("texto"), actions: ["AXShowMenu"])
         let bench = Bench(windows: [fake("AXWindow", title: "A", [label])])
         try await bench.read()
-        let message = await bench.failure { try await bench.act(["action": .string("show_menu"), "id": .string("w1.1")]) }
+        let message = await failureMessage { try await bench.act(["action": .string("show_menu"), "id": .string("w1.1")]) }
         #expect(message.hasPrefix(UIActTool.takeoverMarker))
         #expect(label.performed.isEmpty)
     }
@@ -307,11 +303,11 @@ struct AccessibilityLadderTests {
             .object(["action": .string("increment"), "id": .string("w1.3")]),
             .object(["action": .string("press"), "id": .string("w1.2")]),
         ])
-        let message = await bench.failure { try await bench.act(["action": .string("press"), "steps": failing]) }
+        let message = await failureMessage { try await bench.act(["action": .string("press"), "steps": failing]) }
         #expect(message.hasPrefix("O passo 2 de 3 falhou") && message.contains("Antes dele:\n1. Cliquei"))
         #expect(one.performed.count == 2 && two.performed.count == 1)
         let tooMany = JSONValue.array(Array(repeating: .object(["action": .string("press"), "id": .string("w1.1")]), count: 9))
-        #expect(await bench.failure { try await bench.act(["action": .string("press"), "steps": tooMany]) }.contains("No máximo 8"))
+        #expect(await failureMessage { try await bench.act(["action": .string("press"), "steps": tooMany]) }.contains("No máximo 8"))
         // The first dangerous step makes the whole call dangerous.
         let mixed: JSONValue = .array([.object(["action": .string("press"), "id": .string("w1.1")]),
                                        .object(["action": .string("pick_menu"), "menu_path": .array([.string("Arquivo"), .string("Excluir")])])])
@@ -347,7 +343,7 @@ struct AccessibilityLadderTests {
         row.onSet = { name, _ in if name == "AXSelected" { row.attrs["AXSelected"] = .bool(false) } }
         let bench = Bench(windows: [fake("AXWindow", title: "A", [fake("AXTable", title: "T", [row])])])
         try await bench.read()
-        let message = await bench.failure { try await bench.act(["action": .string("select"), "id": .string("w1.1.1")]) }
+        let message = await failureMessage { try await bench.act(["action": .string("select"), "id": .string("w1.1.1")]) }
         #expect(message.contains("não confirmou"), Comment(rawValue: message))
     }
 
@@ -382,7 +378,7 @@ struct AccessibilityRefusalTests {
         try await bench.read()
         bench.system.frontmost = 100
         bench.system.userIdle = 1
-        let message = await bench.failure { try await bench.act(["action": .string("type"), "id": .string("w1.1"), "value": .string("oi")]) }
+        let message = await failureMessage { try await bench.act(["action": .string("type"), "id": .string("w1.1"), "value": .string("oi")]) }
         #expect(message.contains("O usuário está usando Notas agora"))
         #expect(bench.system.syntheticInput.events.isEmpty)
         // In the background, or after a pause, it goes.
@@ -395,7 +391,7 @@ struct AccessibilityRefusalTests {
         let (bench, _) = typingBench()
         try await bench.read()
         bench.root.attrs["AXFocusedUIElement"] = .element(fake("AXTextField", title: "Outro lugar"))
-        let message = await bench.failure { try await bench.act(["action": .string("type"), "id": .string("w1.1"), "value": .string("oi")]) }
+        let message = await failureMessage { try await bench.act(["action": .string("type"), "id": .string("w1.1"), "value": .string("oi")]) }
         #expect(message.contains("O foco de Notas não está no campo pedido"))
         #expect(bench.system.syntheticInput.events.isEmpty)
     }
@@ -409,7 +405,7 @@ struct AccessibilityRefusalTests {
         // Typing into "the focused field" cannot be judged before running: it turns out to be a password field.
         let blind: [String: JSONValue] = ["action": .string("type"), "value": .string("hunter2")]
         #expect(bench.actor().danger(.object(blind)) == nil)
-        let message = await bench.failure { try await bench.act(blind) }
+        let message = await failureMessage { try await bench.act(blind) }
         #expect(message.contains("campo de senha") && bench.system.syntheticInput.events.isEmpty)
         // Named by id, the card says it is a password field, and then it runs.
         let named: [String: JSONValue] = ["action": .string("type"), "id": .string("w1.1"), "value": .string("hunter2")]
@@ -420,7 +416,7 @@ struct AccessibilityRefusalTests {
         #expect(bench.system.syntheticInput.typed(to: 100) == "hunter2")
         #expect(!secret.reads.contains("AXValue"))
         let keys: [String: JSONValue] = ["action": .string("key"), "keys": .string("return")]
-        #expect(await bench.failure { try await bench.act(keys) }.contains("campo de senha"))
+        #expect(await failureMessage { try await bench.act(keys) }.contains("campo de senha"))
     }
 
     @Test func aDangerousElementFoundOnlyAtRunTimeIsRefused() async throws {
@@ -435,7 +431,7 @@ struct AccessibilityRefusalTests {
         bench.system.hitHandler = { _, _ in delete }
         let call: [String: JSONValue] = ["action": .string("click"), "x": .number(180), "y": .number(110)]
         #expect(bench.actor().danger(.object(call)) == nil, "the card judged the reading: a click on OK")
-        let message = await bench.failure { try await bench.act(call) }
+        let message = await failureMessage { try await bench.act(call) }
         #expect(message.hasPrefix("Não fiz:") && message.contains("apaga"))
         #expect(delete.performed.isEmpty && ok.performed.isEmpty)
     }
@@ -460,7 +456,7 @@ struct AccessibilityRefusalTests {
         let button = fakeButton("Salvar")
         let bench = Bench(windows: [fake("AXWindow", title: "A", [button])])
         bench.system.roots[200] = fakeApp(windows: [fake("AXWindow", title: "Safari", [fakeButton("Salvar")])])
-        let message = await bench.failure { try await bench.act(["action": .string("press"), "id": .string("w1.1")]) }
+        let message = await failureMessage { try await bench.act(["action": .string("press"), "id": .string("w1.1")]) }
         #expect(message.contains("Diga o app") && button.performed.isEmpty)
         try await bench.read() // Notas, by name, while Safari is in front
         _ = try await bench.act(["action": .string("press"), "id": .string("w1.1")])
@@ -483,7 +479,7 @@ struct AccessibilityRefusalTests {
         #expect(text.contains("veio para a frente sozinho"))
         #expect(safari.assignedValue("AXFrontmost")?.bool == true, "the user's app is put back with AXFrontmost, never activate")
         bench.system.frontmost = 200
-        let focus = await bench.failure { try await bench.act(["action": .string("focus"), "id": .string("w1.2")]) }
+        let focus = await failureMessage { try await bench.act(["action": .string("focus"), "id": .string("w1.2")]) }
         #expect(focus.hasPrefix(UIActTool.takeoverMarker))
         #expect(bench.system.activated.isEmpty)
     }
@@ -507,7 +503,7 @@ struct AccessibilityPointingTests {
         _ = try await bench.act(["action": .string("press"), "id": .string("#3")])
         #expect(ok.performed == ["AXPress"])
         #expect(bench.actor().summary(.object(["action": .string("press"), "id": .string("#3")])).title == "Clicando em “OK”")
-        let unknown = await bench.failure { try await bench.act(["action": .string("press"), "id": .string("#9")]) }
+        let unknown = await failureMessage { try await bench.act(["action": .string("press"), "id": .string("#9")]) }
         #expect(unknown.contains("A marca #9 não está no último screenshot"))
     }
 
@@ -541,12 +537,12 @@ struct AccessibilityPointingTests {
         try bench.addShot(marks: [:], windowFrame: windowFrame)
         let window = try #require(bench.root.attrs["AXWindows"]?.elements?.first as? FakeElement)
         window.frame = CGRect(x: 100, y: 100, width: 410, height: 300)
-        let message = await bench.failure { try await bench.act(["action": .string("click"), "x": .number(180), "y": .number(110)]) }
+        let message = await failureMessage { try await bench.act(["action": .string("click"), "x": .number(180), "y": .number(110)]) }
         #expect(message.contains("mudou de tamanho") && message.contains("chame ui_read de novo"))
         #expect(ok.performed.isEmpty)
         let noShot = Bench(windows: [fake("AXWindow", title: "A")])
         try await noShot.read()
-        #expect(await noShot.failure { try await noShot.act(["action": .string("click"), "x": .number(1), "y": .number(1)]) }.contains("tire um screenshot"))
+        #expect(await failureMessage { try await noShot.act(["action": .string("click"), "x": .number(1), "y": .number(1)]) }.contains("tire um screenshot"))
     }
 
     @Test func aRightClickOrDoubleClickIsAnEventEvenOnAButton() async throws {
@@ -581,10 +577,10 @@ struct AccessibilityReviewTests {
         // A card that did not show the danger does not cover the Return found at run time.
         var unconfirmed = bench.context
         unconfirmed.judgedDanger = false
-        let message = await bench.failure { try await bench.actor().run(.object(call), context: unconfirmed) }
+        let message = await failureMessage { try await bench.actor().run(.object(call), context: unconfirmed) }
         #expect(message.hasPrefix("Não fiz:") && message.contains("quebra de linha"))
         let blind: [String: JSONValue] = ["action": string("type"), "value": string("oi\n")]
-        #expect(await bench.failure { try await bench.actor().run(.object(blind), context: unconfirmed) }.contains("quebra de linha"))
+        #expect(await failureMessage { try await bench.actor().run(.object(blind), context: unconfirmed) }.contains("quebra de linha"))
         #expect(bench.system.syntheticInput.events.isEmpty)
         var confirmed = bench.context
         confirmed.judgedDanger = true
@@ -619,12 +615,12 @@ struct AccessibilityReviewTests {
         system.frontmost = 200
         field.onSet = { name, _ in if name == "AXFocused" { system.frontmost = 100 } }
         try await bench.read()
-        let message = await bench.failure { try await bench.act(["action": string("type"), "id": string("w1.1"), "value": string("oi")]) }
+        let message = await failureMessage { try await bench.act(["action": string("type"), "id": string("w1.1"), "value": string("oi")]) }
         #expect(message.hasPrefix(UIActTool.takeoverMarker) && message.contains("veio para a frente"))
         #expect(system.syntheticInput.events.isEmpty, "nothing typed into an app the person now has in front")
         #expect(safari.assignedValue("AXFrontmost")?.bool == true && system.frontmost == 200)
         // Remembered: focusing it again needs the screen.
-        #expect(await bench.failure { try await bench.act(["action": string("focus"), "id": string("w1.1")]) }.hasPrefix(UIActTool.takeoverMarker))
+        #expect(await failureMessage { try await bench.act(["action": string("focus"), "id": string("w1.1")]) }.hasPrefix(UIActTool.takeoverMarker))
     }
 
     @Test func anErrorAfterActingStillSendsTheAppBack() async throws {
@@ -638,7 +634,7 @@ struct AccessibilityReviewTests {
         system.syntheticInput.beforeEach = { system.frontmost = 100 }
         system.syntheticInput.error = ToolError("o app recusou o evento")
         try await bench.read()
-        let message = await bench.failure { try await bench.act(["action": string("key"), "keys": string("f5")]) }
+        let message = await failureMessage { try await bench.act(["action": string("key"), "keys": string("f5")]) }
         #expect(message.contains("recusou") && message.contains("veio para a frente sozinho"))
         #expect(safari.assignedValue("AXFrontmost")?.bool == true, "the person's app is given back on the error path too")
     }
@@ -677,7 +673,7 @@ struct AccessibilityReviewTests {
         // The card was judged from other readings (before this one) and said it was harmless.
         var context = bench.context
         context.judgedDanger = false
-        let message = await bench.failure { try await bench.actor().run(.object(call), context: context) }
+        let message = await failureMessage { try await bench.actor().run(.object(call), context: context) }
         #expect(message.hasPrefix("Não fiz:") && delete.performed.isEmpty)
     }
 
@@ -717,7 +713,7 @@ struct AccessibilityReviewTests {
         try await bench.read()
         try bench.addShot(marks: [:], windowFrame: windowFrame)
         window.frame = CGRect(x: 100, y: 100, width: 520, height: 300)
-        let message = await bench.failure {
+        let message = await failureMessage {
             try await bench.act(["action": string("click"), "x": .number(180), "y": .number(110), "takeover": .bool(true)])
         }
         #expect(message.contains("mudou de tamanho"))
@@ -808,7 +804,7 @@ struct AccessibilityStaleIdTests {
         // The live reference dies with the element; the path then leads nowhere.
         target.failures["*"] = .invalidElement
         window.children.removeLast()
-        let message = await bench.failure { try await bench.act(["action": .string("press"), "id": .string("w1.2")]) }
+        let message = await failureMessage { try await bench.act(["action": .string("press"), "id": .string("w1.2")]) }
         #expect(message.contains("w1.2 não existe mais") && message.contains("chame ui_read de novo"))
     }
 
@@ -817,7 +813,7 @@ struct AccessibilityStaleIdTests {
         let bench = Bench(windows: [fake("AXWindow", title: "Doc", [target])])
         try await bench.read()
         target.attrs["AXTitle"] = .string("Apagar")
-        let message = await bench.failure { try await bench.act(["action": .string("press"), "id": .string("w1.1")]) }
+        let message = await failureMessage { try await bench.act(["action": .string("press"), "id": .string("w1.1")]) }
         #expect(message.contains("w1.1 era “Salvar” e agora é “Apagar”") && message.contains("chame ui_read de novo"))
         #expect(target.performed.isEmpty)
     }
@@ -828,7 +824,7 @@ struct AccessibilityStaleIdTests {
         bench.system.apps[0].launchDate = launched
         try await bench.read()
         bench.system.apps[0].launchDate = launched.addingTimeInterval(60) // the same pid, another process
-        let message = await bench.failure { try await bench.act(["action": .string("press"), "id": .string("w1.1")]) }
+        let message = await failureMessage { try await bench.act(["action": .string("press"), "id": .string("w1.1")]) }
         #expect(message.contains("fechou ou foi reaberto"))
     }
 }
@@ -892,7 +888,7 @@ struct AccessibilityWaitTests {
         let text = try await bench.read(["app": .string("Notas"), "wait": .string("appears"), "query": .string("Nunca"), "timeout": .number(1)])
         #expect(text.contains("(não aconteceu em 1 s)"))
         #expect(started.duration(to: clock.now) >= .seconds(1))
-        let missing = await bench.failure { try await bench.read(["app": .string("Notas"), "wait": .string("appears")]) }
+        let missing = await failureMessage { try await bench.read(["app": .string("Notas"), "wait": .string("appears")]) }
         #expect(missing.contains("precisa de query"))
     }
 
@@ -1114,16 +1110,16 @@ struct AccessibilityHangTests {
             defer { root.stall = .zero }
             var hop = await schedulingDelay()
             var started = clock.now
-            let first = await bench.failure { try await bench.read() }
+            let first = await failureMessage { try await bench.read() }
             firsts.append((started.duration(to: clock.now), .milliseconds(450) + hop))
             #expect(first.contains("Notas não respondeu em 0,3 s"))
 
             hop = await schedulingDelay()
             started = clock.now
-            let second = await bench.failure { try await bench.read() }
+            let second = await failureMessage { try await bench.read() }
             seconds.append((started.duration(to: clock.now), .milliseconds(20) + hop))
             #expect(second.contains("ainda está ocupado"))
-            let action = await bench.failure { try await bench.act(["action": .string("press"), "app": .string("Notas"), "id": .string("w1.1")]) }
+            let action = await failureMessage { try await bench.act(["action": .string("press"), "app": .string("Notas"), "id": .string("w1.1")]) }
             #expect(action.contains("ainda está ocupado"))
             if firsts.last!.took <= firsts.last!.allowed, seconds.last!.took <= seconds.last!.allowed { break }
         }
@@ -1150,7 +1146,7 @@ struct AccessibilityHangTests {
             let (bench, root) = hungBench(stall: .seconds(1))
             defer { root.stall = .zero }
             let ticker = await MainTicker.start()
-            _ = await bench.failure { try await bench.read() }
+            _ = await failureMessage { try await bench.read() }
             gaps.append((await ticker.stop(), idle))
             if gaps.last!.hung <= .milliseconds(50) { break }
         }

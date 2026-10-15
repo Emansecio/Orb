@@ -33,6 +33,16 @@ final class ToolWorkspace {
         try await tool.run(.object(arguments), context: context)
     }
 
+    /// What a call that is expected to fail says: the error's message, or "" when the call succeeds.
+    func failure(_ tool: some AgentTool, _ arguments: [String: JSONValue]) async -> String {
+        do {
+            _ = try await run(tool, arguments)
+            return ""
+        } catch {
+            return (error as? ToolError)?.message ?? "\(error)"
+        }
+    }
+
     /// How a call ends: its result, or its error message. Nil when it has not ended after `seconds`, so a call that
     /// blocks forever (a read on a pipe nobody writes to) fails the test instead of hanging the run.
     func outcome(of tool: some AgentTool, _ arguments: [String: JSONValue], seconds: Int = 3) async -> String? {

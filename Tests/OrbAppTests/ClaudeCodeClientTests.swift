@@ -202,7 +202,7 @@ private struct Rig {
         try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
         script = root.appending(path: "claude")
         try fakeClaude.write(to: script, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        try script.makeExecutable()
         folders = ClaudePipeFolders(workingDirectory: root.appending(path: "cwd", directoryHint: .isDirectory),
                                     scratch: root.appending(path: "runs", directoryHint: .isDirectory),
                                     home: root.appending(path: "home", directoryHint: .isDirectory))

@@ -136,7 +136,7 @@ struct MCPConnectionTests {
         defer { removeTestFolder(directory) }
         let command = directory.appendingPathComponent("fake-mcp")
         try ("#!/usr/bin/python3\n" + fakeServer).write(to: command, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: command.path)
+        try command.makeExecutable()
         let base = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": NSHomeDirectory()]
         let userShell = try FakeShell.make(in: directory, exports: ["PATH": "\(directory.path):/usr/bin:/bin"])
         let config = MCPServerConfig(name: "Arquivos", command: "fake-mcp", environment: ["ORB_TEST": "ok"])

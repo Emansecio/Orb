@@ -45,8 +45,7 @@ import Testing
                     .appending(path: ".agent-browser/browsers/chrome-\(chrome)/Google Chrome for Testing.app/Contents/MacOS")
                 try FileManager.default.createDirectory(at: browser, withIntermediateDirectories: true)
                 let file = browser.appending(path: "Google Chrome for Testing")
-                try Data("chrome".utf8).write(to: file)
-                try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
+                try writeExecutable("chrome", to: file)
                 return FakeInstallRunner.ok("")
             }
             if exe.hasSuffix("Google Chrome for Testing"), args == ["--version"] { return FakeInstallRunner.ok("Google Chrome for Testing \(chrome)\n") }
@@ -57,8 +56,7 @@ import Testing
                 let venv = URL(fileURLWithPath: args[2]).appending(path: "bin")
                 try FileManager.default.createDirectory(at: venv, withIntermediateDirectories: true)
                 let file = venv.appending(path: "python")
-                try Data("python".utf8).write(to: file)
-                try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
+                try writeExecutable("python", to: file)
                 return FakeInstallRunner.ok("")
             }
             if args == ["-m", "pip", "install", "cloakbrowser==\(BrowserInstaller.cloakPackageVersion)"] { return FakeInstallRunner.ok("Successfully installed cloakbrowser-0.6.0") }
@@ -69,8 +67,7 @@ import Testing
                 let binary = cache.appending(path: "chromium-\(cloak)/Chromium.app/Contents/MacOS")
                 try FileManager.default.createDirectory(at: binary, withIntermediateDirectories: true)
                 let file = binary.appending(path: "Chromium")
-                try Data("chromium".utf8).write(to: file)
-                try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
+                try writeExecutable("chromium", to: file)
                 return FakeInstallRunner.ok("")
             }
             if args.first == "-c", args.last?.contains("__version__") == true { return FakeInstallRunner.ok("0.6.0\n") }
@@ -372,8 +369,7 @@ import Testing
         let binary = layout.cloakCache.appending(path: "chromium-145.0.1.1/Chromium.app/Contents/MacOS")
         try FileManager.default.createDirectory(at: binary, withIntermediateDirectories: true)
         let file = binary.appending(path: "Chromium")
-        try Data("chromium".utf8).write(to: file)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
+        try writeExecutable("chromium", to: file)
         #expect(installer.isInstalled(.cloak), "no Python needed")
     }
 
@@ -389,8 +385,7 @@ import Testing
         let binary = layout.cloakCache.appending(path: "chromium-145.0.1.1/Chromium.app/Contents/MacOS")
         try FileManager.default.createDirectory(at: binary, withIntermediateDirectories: true)
         let file = binary.appending(path: "Chromium")
-        try Data("chromium".utf8).write(to: file)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
+        try writeExecutable("chromium", to: file)
         installer.removeLegacyCloakEnvironment()
         #expect(!FileManager.default.fileExists(atPath: layout.cloakDirectory.appending(path: "venv").path))
         #expect(installer.isInstalled(.cloak), "the Chromium stays")

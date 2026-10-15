@@ -13,15 +13,6 @@ final class FileToolTests {
         try await workspace.run(tool, arguments)
     }
 
-    private func failure(_ tool: some AgentTool, _ arguments: [String: JSONValue]) async -> String {
-        do {
-            _ = try await run(tool, arguments)
-            return ""
-        } catch {
-            return (error as? ToolError)?.message ?? "\(error)"
-        }
-    }
-
     // MARK: read_file: encodings and lines
 
     @Test func readSurvivesHugeNumbers() async throws {
@@ -95,11 +86,11 @@ final class FileToolTests {
     @Test func editRefusesAStretchThatIncludesAnInvalidByteAndLeavesTheFileUntouched() async throws {
         let bytes = Data("coração\nfim ".utf8) + Data([0xC3, 0x0A]) + Data("Ásia e ação\n".utf8)
         try workspace.write("sujo.txt", bytes)
-        let message = await failure(EditFileTool(), ["path": .string("sujo.txt"), "old_text": .string("fim \u{FFFD}"), "new_text": .string("atenção")])
+        let message = await workspace.failure(EditFileTool(), ["path": .string("sujo.txt"), "old_text": .string("fim \u{FFFD}"), "new_text": .string("atenção")])
         #expect(message.contains("bytes inválidos"))
         #expect(try workspace.read("sujo.txt") == bytes)
         // Text that borrows the private-use characters standing in for the bytes cannot smuggle bytes in.
-        let smuggled = await failure(EditFileTool(), ["path": .string("sujo.txt"), "old_text": .string("fim"), "new_text": .string("\u{F7C3}")])
+        let smuggled = await workspace.failure(EditFileTool(), ["path": .string("sujo.txt"), "old_text": .string("fim"), "new_text": .string("\u{F7C3}")])
         #expect(smuggled.contains("bytes inválidos"))
         #expect(try workspace.read("sujo.txt") == bytes)
     }
@@ -199,8 +190,8 @@ final class FileToolTests {
         let tail = try await run(ReadFileTool(), ["path": .string("doc.pdf"), "pages": .string("2-")])
         #expect(tail.contains("Segunda") && tail.contains("Terceira") && !tail.contains("Primeira"))
 
-        #expect(await failure(ReadFileTool(), ["path": .string("doc.pdf"), "pages": .string("9")]).contains("Intervalo de páginas inválido"))
-        #expect(await failure(ReadFileTool(), ["path": .string("doc.pdf"), "pages": .string("a-b")]).contains("inválido"))
+        #expect(await workspace.failure(ReadFileTool(), ["path": .string("doc.pdf"), "pages": .string("9")]).contains("Intervalo de páginas inválido"))
+        #expect(await workspace.failure(ReadFileTool(), ["path": .string("doc.pdf"), "pages": .string("a-b")]).contains("inválido"))
     }
 
     @Test func pageRangesParse() throws {
@@ -218,7 +209,7 @@ final class FileToolTests {
         try workspace.write("blank.pdf", try Fixtures.pdf(pages: [""]))
         #expect(try await run(ReadFileTool(), ["path": .string("blank.pdf")]).contains("Nenhum texto extraível"))
         try workspace.write("broken.pdf", "not a pdf")
-        #expect(await failure(ReadFileTool(), ["path": .string("broken.pdf")]).contains("PDF"))
+        #expect(await workspace.failure(ReadFileTool(), ["path": .string("broken.pdf")]).contains("PDF"))
     }
 
     @Test func readWordProcessorDocuments() async throws {
@@ -248,12 +239,12 @@ final class FileToolTests {
         try workspace.write("blank.png", try Fixtures.png(text: ""))
         #expect(try await run(ReadFileTool(), ["path": .string("blank.png")]).contains("Nenhum texto reconhecido"))
         try workspace.write("fake.png", "not an image")
-        #expect(await failure(ReadFileTool(), ["path": .string("fake.png")]).contains("imagem"))
+        #expect(await workspace.failure(ReadFileTool(), ["path": .string("fake.png")]).contains("imagem"))
     }
 
     @Test func otherBinariesAreRefusedClearly() async throws {
         try workspace.write("blob.bin", Data([0x50, 0x4B, 0x00, 0x01]))
-        let message = await failure(ReadFileTool(), ["path": .string("blob.bin")])
+        let message = await workspace.failure(ReadFileTool(), ["path": .string("blob.bin")])
         #expect(message.contains("binário"))
         #expect(message.contains("run_command"))
     }
@@ -284,7 +275,7 @@ final class FileToolTests {
 
     @Test func writeKeepsPermissions() async throws {
         let script = try workspace.write("run.sh", "#!/bin/sh\necho 1\n")
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        try script.makeExecutable()
         _ = try await run(WriteFileTool(), ["path": .string("run.sh"), "content": .string("#!/bin/sh\necho 2\n")])
         let permissions = try FileManager.default.attributesOfItem(atPath: script.path)[.posixPermissions] as? Int
         #expect(permissions == 0o755)
@@ -343,7 +334,7 @@ final class FileToolTests {
 
     @Test func writeRefusesFolders() async throws {
         try FileManager.default.createDirectory(at: workspace.url("dir"), withIntermediateDirectories: true)
-        #expect(await failure(WriteFileTool(), ["path": .string("dir"), "content": .string("x")]).contains("pasta"))
+        #expect(await workspace.failure(WriteFileTool(), ["path": .string("dir"), "content": .string("x")]).contains("pasta"))
     }
 
     // MARK: edit_file
@@ -361,19 +352,19 @@ final class FileToolTests {
 
     @Test func editWithNoMatchExplainsWhatToDo() async throws {
         try workspace.write("a.txt", "alpha\nbeta\n")
-        let missing = await failure(EditFileTool(), ["path": .string("a.txt"), "old_text": .string("gamma"), "new_text": .string("x")])
+        let missing = await workspace.failure(EditFileTool(), ["path": .string("a.txt"), "old_text": .string("gamma"), "new_text": .string("x")])
         #expect(missing.contains("não foi encontrado"))
         #expect(missing.contains("read_file"))
         #expect(!missing.contains("números de linha"))
 
-        let numbered = await failure(EditFileTool(), ["path": .string("a.txt"), "old_text": .string("     1\talpha"), "new_text": .string("x")])
+        let numbered = await workspace.failure(EditFileTool(), ["path": .string("a.txt"), "old_text": .string("     1\talpha"), "new_text": .string("x")])
         #expect(numbered.contains("números de linha"))
         #expect(try workspace.readText("a.txt") == "alpha\nbeta\n")
     }
 
     @Test func editWithSeveralMatchesNeedsContextOrReplaceAll() async throws {
         try workspace.write("dup.txt", "x = 1\ny = 2\nx = 1\n")
-        let ambiguous = await failure(EditFileTool(), ["path": .string("dup.txt"), "old_text": .string("x = 1"), "new_text": .string("x = 9")])
+        let ambiguous = await workspace.failure(EditFileTool(), ["path": .string("dup.txt"), "old_text": .string("x = 1"), "new_text": .string("x = 9")])
         #expect(ambiguous.contains("2 vezes"))
         #expect(ambiguous.contains("linhas 1, 3"))
         #expect(ambiguous.contains("mais linhas"))
@@ -413,7 +404,7 @@ final class FileToolTests {
         _ = try await run(EditFileTool(), ["path": .string("latin.txt"), "old_text": .string("café"), "new_text": .string("pão")])
         #expect(try workspace.read("latin.txt") == (try #require("pão\n".data(using: .windowsCP1252))))
         // Characters Windows-1252 cannot hold are refused instead of being replaced by "?".
-        #expect(await failure(EditFileTool(), ["path": .string("latin.txt"), "old_text": .string("pão"), "new_text": .string("日本")]).contains("Windows-1252"))
+        #expect(await workspace.failure(EditFileTool(), ["path": .string("latin.txt"), "old_text": .string("pão"), "new_text": .string("日本")]).contains("Windows-1252"))
         #expect(try workspace.read("latin.txt") == (try #require("pão\n".data(using: .windowsCP1252))))
 
         try workspace.write("bom.txt", Data([0xEF, 0xBB, 0xBF]) + Data("abc\n".utf8))
@@ -441,12 +432,12 @@ final class FileToolTests {
 
     @Test func editRefusesBadInput() async throws {
         try workspace.write("a.txt", "a\n")
-        #expect(await failure(EditFileTool(), ["path": .string("nope.txt"), "old_text": .string("a"), "new_text": .string("b")]).contains("write_file"))
-        #expect(await failure(EditFileTool(), ["path": .string("a.txt"), "old_text": .string(""), "new_text": .string("b")]).contains("old_text"))
-        #expect(await failure(EditFileTool(), ["path": .string("a.txt"), "old_text": .string("a"), "new_text": .string("a")]).contains("idênticos"))
-        #expect(await failure(EditFileTool(), ["path": .string("a.txt"), "old_text": .string("a")]).contains("new_text"))
+        #expect(await workspace.failure(EditFileTool(), ["path": .string("nope.txt"), "old_text": .string("a"), "new_text": .string("b")]).contains("write_file"))
+        #expect(await workspace.failure(EditFileTool(), ["path": .string("a.txt"), "old_text": .string(""), "new_text": .string("b")]).contains("old_text"))
+        #expect(await workspace.failure(EditFileTool(), ["path": .string("a.txt"), "old_text": .string("a"), "new_text": .string("a")]).contains("idênticos"))
+        #expect(await workspace.failure(EditFileTool(), ["path": .string("a.txt"), "old_text": .string("a")]).contains("new_text"))
         try workspace.write("blob.bin", Data([1, 0, 2]))
-        #expect(await failure(EditFileTool(), ["path": .string("blob.bin"), "old_text": .string("a"), "new_text": .string("b")]).contains("binário"))
+        #expect(await workspace.failure(EditFileTool(), ["path": .string("blob.bin"), "old_text": .string("a"), "new_text": .string("b")]).contains("binário"))
     }
 
     @Test func editApprovalCardShowsAShortDiff() {
@@ -487,7 +478,7 @@ final class FileToolTests {
         // Running as root (some CI) reads anything; the assertions only make sense when the folder is really locked.
         guard (try? FileManager.default.contentsOfDirectory(atPath: locked.path)) == nil else { return }
 
-        let message = await failure(ListDirectoryTool(), ["path": .string("locked")])
+        let message = await workspace.failure(ListDirectoryTool(), ["path": .string("locked")])
         #expect(message.contains("Não consegui ler"))
 
         // An unreadable subfolder is skipped and mentioned, the rest is still listed.

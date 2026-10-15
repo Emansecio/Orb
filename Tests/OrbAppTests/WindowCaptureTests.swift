@@ -347,10 +347,6 @@ struct ScreenshotToolTests {
         return try await rig.tool.run(.object(arguments), context: ToolContext(workingDirectory: FileManager.default.temporaryDirectory))
     }
 
-    private func failure(_ body: () async throws -> String) async -> String {
-        do { _ = try await body(); return "" } catch { return error.localizedDescription }
-    }
-
     private func path(in report: String) -> String? {
         report.firstMatch(of: /Captura salva em (\S+\.jpg)/).map { String($0.1) }
     }
@@ -456,7 +452,7 @@ struct ScreenshotToolTests {
         #expect(byNumber.contains("w1.1") && rig.system.windowCapturer.captures.last?.windowID == 77)
         let snapshot = try #require(rig.store.snapshot(bot: nil, app: editor))
         #expect(snapshot.windowIndex == 1)
-        let bad = await failure { try await run(rig, ["app": .string("Editor"), "window": .number(7)]) }
+        let bad = await failureMessage { try await run(rig, ["app": .string("Editor"), "window": .number(7)]) }
         #expect(bad.contains("2 janelas"))
         try? FileManager.default.removeItem(at: rig.folder)
     }
@@ -471,18 +467,18 @@ struct ScreenshotToolTests {
     @Test func anUnknownAppAndAnAmbiguousOneAreExplained() async {
         let rig = rig()
         rig.system.apps.append(FakeAccessibility.app("Editor de Texto", "com.example.text", pid: 300))
-        #expect(await failure { try await run(rig, ["app": .string("Fantasma")]) }.contains("Não há nenhum app aberto chamado"))
-        #expect(await failure { try await run(rig, ["app": .string("Edit")]) }.contains("vários apps"))
+        #expect(await failureMessage { try await run(rig, ["app": .string("Fantasma")]) }.contains("Não há nenhum app aberto chamado"))
+        #expect(await failureMessage { try await run(rig, ["app": .string("Edit")]) }.contains("vários apps"))
     }
 
     @Test func aWindowTheCapturerCannotSeeListsWhatItCan() async {
         let rig = rig()
         rig.system.windowCapturer.setWindows([CapturableWindow(windowID: 5, pid: 100, frame: CGRect(x: 900, y: 900, width: 50, height: 50), title: "Outra"),
                                               CapturableWindow(windowID: 6, pid: 100, frame: CGRect(x: 0, y: 0, width: 60, height: 60), title: "Mais")], pid: 100)
-        let message = await failure { try await run(rig, ["app": .string("Editor")]) }
+        let message = await failureMessage { try await run(rig, ["app": .string("Editor")]) }
         #expect(message.contains("“Outra”") && message.contains("“Mais”"), Comment(rawValue: message))
         rig.system.windowCapturer.setWindows([], pid: 100)
-        #expect(await failure { try await run(rig, ["app": .string("Editor")]) }.contains("nenhuma janela que possa ser capturada"))
+        #expect(await failureMessage { try await run(rig, ["app": .string("Editor")]) }.contains("nenhuma janela que possa ser capturada"))
     }
 
     // MARK: OCR
@@ -531,7 +527,7 @@ struct ScreenshotToolTests {
 
     @Test func withNeitherPermissionTheCallFailsWithScreenRecordingAdvice() async {
         let rig = rig(trusted: false, screen: false)
-        let message = await failure { try await run(rig, ["app": .string("Editor")]) }
+        let message = await failureMessage { try await run(rig, ["app": .string("Editor")]) }
         #expect(message == MacPermissionProblem.screenRecording.modelMessage)
         #expect(rig.requests.count == 1)
     }
@@ -543,7 +539,7 @@ struct ScreenshotToolTests {
         #expect(report.contains("Não consegui capturar a imagem") && report.contains("[1] w1.1"))
         #expect(!report.contains("Captura salva"))
         // Without marks there is nothing to give: the error stands.
-        let message = await failure { try await run(rig, ["app": .string("Editor"), "marks": .bool(false)]) }
+        let message = await failureMessage { try await run(rig, ["app": .string("Editor"), "marks": .bool(false)]) }
         #expect(message.contains("could not create image"))
     }
 

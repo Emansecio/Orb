@@ -221,8 +221,7 @@ struct MacToolTests {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
         let script = folder.appending(path: "instalar")
-        try Data("#!/bin/sh\necho oi\n".utf8).write(to: script)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        try writeExecutable("#!/bin/sh\necho oi\n", to: script)
         let note = folder.appending(path: "leia-me")
         try Data("texto".utf8).write(to: note)
         try FileManager.default.createDirectory(at: folder.appending(path: "Documentos"), withIntermediateDirectories: true)

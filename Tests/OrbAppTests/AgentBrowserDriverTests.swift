@@ -52,7 +52,7 @@ private enum FakeAgentBrowser {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let executable = folder.appending(path: "agent-browser")
         try script.trimmingCharacters(in: .whitespaces).write(to: executable, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+        try executable.makeExecutable()
         return (executable, folder.appending(path: "log.jsonl"), folder)
     }
 

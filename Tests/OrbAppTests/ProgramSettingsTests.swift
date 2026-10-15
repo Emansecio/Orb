@@ -199,15 +199,14 @@ struct ProgramSettingsTests {
         try FileManager.default.createDirectory(at: hooks, withIntermediateDirectories: true)
         // The samples git ships are inert.
         let sample = hooks.appending(path: "post-index-change.sample")
-        try "#!/bin/sh\n".write(to: sample, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: sample.path)
+        try writeExecutable("#!/bin/sh\n", to: sample)
         #expect(readOnly("git status", in: folder))
         // A hook that is not executable is ignored by git.
         let hook = hooks.appending(path: "post-index-change")
         try "#!/bin/sh\ntouch /tmp/ran\n".write(to: hook, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: hook.path)
         #expect(readOnly("git status", in: folder))
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hook.path)
+        try hook.makeExecutable()
         #expect(!readOnly("git status", in: folder))
         #expect(!readOnly("git diff", in: folder))
     }
