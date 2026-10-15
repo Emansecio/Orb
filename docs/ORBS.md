@@ -476,11 +476,13 @@ do editor). Arte no app: 12 MB → 3,9 MB.
 ./scripts/bundle.sh && open build/Orb.app
 
 # Folha de referência: Orbs de exemplo × atividades (usa o renderizador estático)
-./build/Orb.app/Contents/MacOS/Orb --render-orbs docs/orbs-activities.png
+# (--render-orbs e --snapshot só existem em build de desenvolvimento: use o binário de debug, ou
+# `ORB_DEV_TOOLS=1 ./scripts/bundle.sh` para um bundle de release com as telas de revisão)
+.build/debug/Orb --render-orbs docs/orbs-activities.png
 
 # Uma tela do editor, fora da vista (os outros modos de --snapshot estão em ARQUITETURA.md);
 # editor-<categoria> abre numa categoria (editor-hair, editor-eyes, editor-color…)
-./build/Orb.app/Contents/MacOS/Orb --snapshot editor /tmp/editor.png
+.build/debug/Orb --snapshot editor /tmp/editor.png
 ORB_DATA_DIR=/tmp/orb-design .build/debug/Orb --snapshot editor-hair /tmp/editor.png
 
 # Folhas de revisão de design (composição idêntica à do app): cabelos, cabelo-padrao, cabelo-acessorio,
