@@ -23,6 +23,8 @@ struct AppState: Codable, Sendable {
     var priceCorrections: [String: ModelPrice] = [:]
     /// The groups of Orbs (see `OrbGroup`); their threads are in `conversations/_grupos/`.
     var groups: [OrbGroup] = []
+    /// The sidebar's categories of Orbs (see `SidebarCategory`); older files have none.
+    var categories: [SidebarCategory] = []
 
     /// What the app starts with when there is no data yet (a new install, after "Redefinir o Orb"): no Orb, so the
     /// window opens on the welcome, where Atlas is one click away.
@@ -963,6 +965,7 @@ extension AppState {
         }
         priceCorrections = ((try? c.decodeIfPresent([String: Price].self, forKey: .priceCorrections)) ?? nil)?.compactMapValues(\.value) ?? [:]
         groups = try c.lossyArray(.groups)
+        categories = try c.lossyArray(.categories)
         try migrateSingleProvider(from: decoder)
     }
 

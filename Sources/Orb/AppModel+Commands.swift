@@ -148,7 +148,8 @@ extension AppModel {
 
     /// Orb number `index` (0-based) in the sidebar's order, as ⌘1…⌘9 pick it.
     func botID(atShortcut index: Int) -> UUID? {
-        botIDs.indices.contains(index) ? botIDs[index] : nil
+        let order = sidebarBotIDs
+        return order.indices.contains(index) ? order[index] : nil
     }
 
     // MARK: Deleting an Orb

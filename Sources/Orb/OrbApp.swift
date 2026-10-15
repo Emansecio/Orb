@@ -203,7 +203,7 @@ struct AppCommands: Commands {
                 .disabled(sheetOpen)
             Divider()
             // Only the names and the order are read, so a status or a new unread message does not rebuild the menu.
-            ForEach(Array(model.botIDs.prefix(9).enumerated()), id: \.element) { index, id in
+            ForEach(Array(model.sidebarBotIDs.prefix(9).enumerated()), id: \.element) { index, id in
                 Button(model.live(id).look.name) { showMain(); model.selection = .bot(id) }
                     .keyboardShortcut(AppShortcut.bot(at: index))
                     .disabled(sheetOpen)
@@ -316,6 +316,7 @@ enum Snapshot {
             AnyView(model.bots.first.map { TranscriptSample.view(name, model: model, bot: $0) })
         default:
             RoutinesSnapshots.view(screen, model: model)
+                ?? SidebarCategorySnapshots.view(screen, model: model)
                 ?? ContextSnapshots.view(screen, model: model)
                 ?? UsageSnapshots.view(screen, model: model)
                 ?? Snapshot.composerScene(screen, model: model)

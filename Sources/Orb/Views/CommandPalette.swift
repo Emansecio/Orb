@@ -10,6 +10,8 @@ struct PaletteEntry: Identifiable, Equatable {
         case newBot, importOrb, focusComposer, findInConversation, openFolder, toggleInspector, shortcuts
         /// A group's chat (its id), and "Novo grupo…".
         case group(UUID), newGroup
+        /// Names a new category of the sidebar.
+        case newCategory
     }
 
     /// The order of the groups when nothing was typed.
@@ -115,6 +117,8 @@ enum PaletteBuilder {
         list.append(PaletteEntry(id: "new-group", title: CommandName.newGroup, subtitle: "Orbs que trabalham juntos", symbol: "person.2",
                                  section: .actions, shortcut: ShortcutCatalog.keys(for: .newGroup), action: .newGroup,
                                  keywords: "grupo equipe orquestrador juntos"))
+        list.append(PaletteEntry(id: "new-category", title: CommandName.newCategory, subtitle: "Organizar Orbs na lista", symbol: "rectangle.stack",
+                                 section: .actions, shortcut: nil, action: .newCategory, keywords: "pasta seção organizar lateral projeto"))
         list.append(PaletteEntry(id: "import-orb", title: CommandName.importOrb, subtitle: "Trazer o que outro assistente sabe", symbol: "square.and.arrow.down",
                                  section: .actions, shortcut: nil, action: .importOrb, keywords: "chatgpt gemini hermes openclaw memória migrar"))
         list.append(PaletteEntry(id: "shortcuts", title: CommandName.shortcuts, subtitle: nil, symbol: "keyboard", section: .actions,
@@ -249,7 +253,7 @@ struct CommandPalette: View {
 
     /// Built once when it opens, not on each keystroke.
     private func build() {
-        entries = PaletteBuilder.entries(orbs: model.botIDs.map { model.live($0).look }, current: model.commandBotID,
+        entries = PaletteBuilder.entries(orbs: model.sidebarBotIDs.map { model.live($0).look }, current: model.commandBotID,
                                          routines: model.routines, skills: model.skills, groups: model.groups)
         folded = PaletteSearch.fold(entries)
     }
@@ -272,6 +276,7 @@ struct CommandPalette: View {
         case .newBot: model.showNewBot = true
         case .group(let id): model.selection = .group(id)
         case .newGroup: model.showNewGroup = true
+        case .newCategory: model.categoryNaming = .new(moving: nil)
         case .importOrb: model.startNewOrbImporting()
         case .focusComposer: model.focusComposer()
         case .findInConversation: model.findInConversation()

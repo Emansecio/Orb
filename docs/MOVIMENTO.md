@@ -347,6 +347,12 @@ O que usa cada padrão:
   trocam no lugar; o cartão pausado esmaece (`animateChanges(of: isEnabled)`).
 - **Barra lateral.** Um Orb novo sobe 6 pt e um apagado some em fade, com os vizinhos deslizando, preso à lista de ids. O destaque não desliza
   nessa hora (`sidebarListChanged`). O convite some em fade.
+- **Categorias da barra lateral.** Recolher ou expandir gira a seta em `Motion.panel` e os Orbs descem 4 pt (`unfold`); as seções de baixo
+  deslizam em `Motion.content`. Arrastando um Orb, a lista abre um vão (contorno tracejado, como o convite do primeiro Orb) onde ele cairia:
+  os vizinhos sobem ou descem em `Motion.content` seguindo o ponteiro, e o lugar que ele deixou se fecha. Os quadros das linhas são lidos
+  antes desse deslocamento (`sidebarDropItem`), então o vão nunca persegue o ponteiro. Sobre uma categoria recolhida, o cabeçalho acende e
+  o vão abre logo abaixo dele. Solto, o Orb aparece no vão e as linhas assentam onde já estão, no mesmo movimento. Um Orb que só mudou de
+  lugar na lista não conta como linha que nasce ou some. Com Reduzir movimento, o vão pula de lugar e nada desliza.
 - **Banner "Conecte um modelo".** Sobe e some com o compositor acompanhando, preso a `shows`; as frases e os botões trocam no lugar (C). Na troca de Orb ele
   é uma vista nova e aparece na hora. Se travar com uma conversa muito longa, ficar só com o fade (`.quiet`).
 - **Cartão de aprovação.** O campo de "Dizer o que fazer em vez disso" desce 4 pt (`unfold`) e o link some em fade; o cartão cresce em `Motion.content`.

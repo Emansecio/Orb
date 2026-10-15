@@ -7,7 +7,7 @@ import os
 final class AppModel {
     // MARK: Persisted state
 
-    var bots: [Bot] { didSet { scheduleStateSave(); syncLives(); normalizeGroups() } }
+    var bots: [Bot] { didSet { scheduleStateSave(); syncLives(); normalizeGroups(); normalizeCategories() } }
     var routines: [Routine] { didSet { scheduleStateSave(); queueFollowsEdits(from: oldValue); syncActivities() } }
     var skills: [Skill] { didSet { scheduleStateSave() } }
     var connectors: [MCPServerConfig] { didSet { scheduleStateSave(); syncConnectors() } }
@@ -23,6 +23,8 @@ final class AppModel {
     // MARK: MultiOrb (WP0)
     /// The groups of Orbs (`normalizeGroups` keeps them true to `bots`).
     var groups: [OrbGroup] { didSet { scheduleStateSave() } }
+    /// The sidebar's categories of Orbs (see `SidebarCategory`): only how the list is laid out, nothing an Orb reads.
+    var categories: [SidebarCategory] { didSet { scheduleStateSave() } }
     /// Orbs asking each other for work.
     @ObservationIgnored lazy var delegation: DelegationHub = DelegationHub(model: self)
     /// A group's thread and its live state, made when the group is first opened.
@@ -113,6 +115,10 @@ final class AppModel {
     var showShortcuts = false
     /// The cursor is in the find field of a chat: Esc and ⌘↩ are the field's, not an approval card's.
     @ObservationIgnored var findFieldHasFocus = false
+    /// What the sidebar's category name field is open for (a new category or a rename); nil while it is closed.
+    var categoryNaming: CategoryNaming?
+    /// The Orb whose sidebar row is being dragged (set as the drag starts); nothing is drawn from it directly.
+    @ObservationIgnored var draggedBotID: UUID?
     /// The Orb whose "Apagar…" sheet is open (one dialog for the sidebar and the inspector).
     var deletingBotID: UUID?
     /// The edit sheets that are on screen right now (each registers itself, see `registersOpenSheet`). Tokens rather
@@ -355,13 +361,17 @@ final class AppModel {
         learnedContexts = state.learnedContexts
         priceCorrections = state.priceCorrections
         groups = state.groups
+        let readCategories = SidebarOrder.normalized(state.categories, botIDs: state.bots.map(\.id))
+        categories = readCategories
+        // The Orb shown at launch is the one at the top of the sidebar (with categories, not always the first in `bots`).
+        let firstShown = SidebarOrder.all(state.bots.map(\.id), categories: readCategories).first.flatMap { id in state.bots.first { $0.id == id } }
         outputsDirectory = ToolOutputCap.directory(inDataFolder: store.directory)
         browserHub = BrowserHub.live(dataFolder: store.directory)
         // Only the Orb shown first is read at launch, and the window does not wait for it (`beginLoading` below).
         let readsFirstLater = asyncLoading ?? runsBackgroundWork
         for bot in state.bots { session(bot.id).isUnloaded = true }
         restoreDrafts()
-        if !readsFirstLater, let first = state.bots.first {
+        if !readsFirstLater, let first = firstShown {
             let read = store.readConversation(first.id)
             notices += Self.labeled(read.notice, for: first).map { [$0] } ?? []
             let shown = session(first.id)
@@ -376,7 +386,7 @@ final class AppModel {
         // Orbs made by an earlier version: if they are all deleted, the welcome screen says "Hora de um Orb novo".
         if !state.bots.isEmpty { noteOrbCreated() }
         if !runsBackgroundWork { resetEnvironment = .inert } // a model that is not the running app never resets the app's preferences
-        selection = state.bots.first.map { .bot($0.id) }
+        selection = firstShown.map { .bot($0.id) }
         self.store.onSaveFailure = { [weak self] notice in
             Task { @MainActor in self?.reportSaveFailure(notice) }
         }
@@ -400,7 +410,7 @@ final class AppModel {
         syncConnectors()
         // Tokens an older version left in the data file move to the Keychain with the next save.
         if secrets.hasUnprotectedSecrets(connectors) { scheduleStateSave() }
-        if readsFirstLater, let first = state.bots.first { beginLoading(first.id) }
+        if readsFirstLater, let first = firstShown { beginLoading(first.id) }
         Task { [weak self, changes = jobs.changes] in
             for await botID in changes { await self?.showJobs(of: botID) }
         }
@@ -2150,7 +2160,8 @@ final class AppModel {
         for (id, live) in lives where live.unread > 0 { unread[id.uuidString] = live.unread }
         return AppState(bots: bots, routines: routines, skills: skills, connectors: connectorSecrets.redact(connectors),
                         providers: providers, defaultModel: defaultModel, unread: unread, contextMemory: contextMemory,
-                        learnedContexts: learnedContexts, profile: profile, priceCorrections: priceCorrections, groups: groups)
+                        learnedContexts: learnedContexts, profile: profile, priceCorrections: priceCorrections, groups: groups,
+                        categories: categories)
     }
 
     private func scheduleStateSave() {

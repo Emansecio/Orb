@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
@@ -6,39 +7,78 @@ struct SidebarView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The one selection background slides between the rows through this namespace.
     @Namespace private var selectionSpace
-    /// The Orbs the rows were last laid out for (nil until the first appearance): an update that changes this list
-    /// together with the selection is a row coming or going, and its layout must not animate.
+    /// An Orb's row slides from where it was to where it went (into a category, out of one) through this one.
+    @Namespace private var rowSpace
+    /// The Orbs the rows were last laid out for (nil until the first appearance): an update that adds or removes one
+    /// together with the selection is a row coming or going, and its layout must not animate (an Orb that only moved in
+    /// the list is neither).
     @State private var settledBotIDs: [UUID]?
     /// The height of the window's toolbar over the sidebar (its top safe area), applied once by hand: left to the scroll
     /// view, it is applied twice and "Orbs" starts a whole toolbar below the window's buttons.
     @State private var toolbarHeight: CGFloat = 0
     /// For snapshots: the words of the invitation when the screen beside it forces its own (the app reads them from the model).
     var invitationCopy: WelcomeCopy?
+    /// For snapshots: the dragged Orb (`AppModel.draggedBotID`) held at this height over the Orbs, so the rows part where
+    /// it would land.
+    var previewDropY: CGFloat?
 
     /// With no Orbs the dashed invitation at the top is the way to make one: no second button for the same thing.
     private var showsNewOrb: Bool { SidebarFooter.showsNewOrb(botCount: model.botIDs.count) }
+    /// The Orb being dragged over the list and the gap the rows open for it, and the rows' frames it is worked out from.
+    @State private var drag: SidebarDragPreview?
+    @State private var dropFrames: [SidebarDropKey: CGRect] = [:]
 
     var body: some View {
+        let order = model.sidebarBotIDs
+        let isNamingNewCategory = if case .new = model.categoryNaming { true } else { false }
         ScrollView {
             VStack(alignment: .leading, spacing: 1) {
-                SectionTitle("Orbs")
-                if model.botIDs.isEmpty {
-                    // No Orbs: an invitation in the list's own place. It shows the welcome screen (what you get with
-                    // nothing selected); when that is already on screen, the click opens the New Orb sheet instead.
-                    SidebarRow(isSelected: model.selection == nil, selectionSpace: selectionSpace, isDashed: true,
-                               help: model.selection == nil ? Tip.createFirstOrb : Tip.showWelcome) {
-                        if model.selection == nil {
-                            model.startNewOrb(from: nil)
-                        } else {
-                            model.selection = nil
+                // The Orbs, loose and in categories, as one place to drop on: the gap opens anywhere among them.
+                VStack(alignment: .leading, spacing: 1) {
+                    SectionTitle("Orbs")
+                        .sidebarDropFrame(.looseTitle)
+                    if model.botIDs.isEmpty {
+                        // No Orbs: an invitation in the list's own place. It shows the welcome screen (what you get with
+                        // nothing selected); when that is already on screen, the click opens the New Orb sheet instead.
+                        SidebarRow(isSelected: model.selection == nil, selectionSpace: selectionSpace, isDashed: true,
+                                   help: model.selection == nil ? Tip.createFirstOrb : Tip.showWelcome) {
+                            if model.selection == nil {
+                                model.startNewOrb(from: nil)
+                            } else {
+                                model.selection = nil
+                            }
+                        } content: { _ in
+                            FirstOrbInvitation(isSelected: model.selection == nil, title: (invitationCopy ?? model.welcomeCopy).invitationTitle)
                         }
-                    } content: { _ in
-                        FirstOrbInvitation(isSelected: model.selection == nil, title: (invitationCopy ?? model.welcomeCopy).invitationTitle)
+                        .transition(.opacity)
                     }
-                    .transition(.opacity)
+                    ForEach(model.looseBotIDs, id: \.self) { id in
+                        SidebarBotRow(botID: id, index: order.firstIndex(of: id) ?? order.count, selectionSpace: selectionSpace, rowSpace: rowSpace)
+                            .sidebarDropItem(.row(id), drag)
+                            .transition(.adapted(.arrive, reduceMotion: reduceMotion))
+                    }
+                    // The categories, after the loose Orbs: only how the list is laid out.
+                    ForEach(model.categories) { category in
+                        SidebarCategorySection(category: category, order: order, drag: drag, selectionSpace: selectionSpace, rowSpace: rowSpace)
+                            .transition(.adapted(.arrive, reduceMotion: reduceMotion))
+                    }
                 }
-                ForEach(Array(model.botIDs.enumerated()), id: \.element) { index, id in
-                    SidebarBotRow(botID: id, index: index, selectionSpace: selectionSpace)
+                .coordinateSpace(.named(SidebarDrop.space))
+                .onPreferenceChange(SidebarDropFrames.self) { frames in
+                    dropFrames = frames
+                    if let previewDropY, let held = model.draggedBotID {
+                        drag = SidebarDrop.preview(dragging: held, at: previewDropY, in: SidebarDrop.sections(loose: model.looseBotIDs, categories: model.categories,
+                                                                                                             botIDs: model.botIDs), frames: frames)
+                    }
+                }
+                .onDrop(of: [.plainText], delegate: SidebarDropDelegate(
+                    model: model, sections: SidebarDrop.sections(loose: model.looseBotIDs, categories: model.categories, botIDs: model.botIDs),
+                    frames: dropFrames, drag: $drag, reduceMotion: reduceMotion))
+                .background(alignment: .topLeading) { SidebarDropGap(gap: drag?.gap) }
+
+                // "Nova categoria" under the categories.
+                if SidebarOrder.showsNewCategory(botCount: model.botIDs.count, categoryCount: model.categories.count) || isNamingNewCategory {
+                    NewCategoryRow(selectionSpace: selectionSpace)
                         .transition(.adapted(.arrive, reduceMotion: reduceMotion))
                 }
 
@@ -85,12 +125,14 @@ struct SidebarView: View {
             // one: the animation of the list wins when both change in one update, and the highlight (which would slide
             // with it) holds still then, see `SidebarRow`.
             .animateChanges(of: model.botIDs)
-            .environment(\.sidebarListChanged, settledBotIDs.map { $0 != model.botIDs } ?? false)
+            // A category made, folded, unfolded or deleted, an Orb moved into one: the rows below slide in the content curve.
+            .animateChanges(of: model.categories)
+            .environment(\.sidebarListChanged, settledBotIDs.map { Set($0) != Set(model.botIDs) } ?? false)
             // Bound to the selection alone: the background slides to the new row and the title changes color with it,
             // while a status or an unread count that changes in a row does not animate along (no animation per Orb).
             // Not when the list itself changed in the same update (a new or a deleted Orb): then only the rows' own
             // transitions apply and the ones below do not slide.
-            .animation(Motion.selection(reduceMotion: reduceMotion, listChanged: settledBotIDs.map { $0 != model.botIDs } ?? false),
+            .animation(Motion.selection(reduceMotion: reduceMotion, listChanged: settledBotIDs.map { Set($0) != Set(model.botIDs) } ?? false),
                        value: model.selection)
             .onChange(of: model.botIDs, initial: true) { settledBotIDs = model.botIDs }
         }
@@ -157,20 +199,23 @@ private struct SectionTitle: View {
 /// the row (the Orbs' rows show their ⌘1…⌘9 then). Only the selected row paints the selection background, and it is
 /// the same view for every row (`matchedGeometryEffect`): when the selection changes it slides from one row to the
 /// other instead of vanishing and reappearing. Hover is per row, in fast and out slow.
-private struct SidebarRow<Content: View>: View {
+struct SidebarRow<Content: View>: View {
     let isSelected: Bool
     let selectionSpace: Namespace.ID
     /// A dashed outline: the row that invites you to make the first Orb.
     var isDashed = false
     var help = ""
+    /// What the row carries when it is dragged (an Orb's row, onto a category); nil for a row that is not dragged.
+    var dragPayload: String?
     let action: () -> Void
     @ViewBuilder let content: (Bool) -> Content
+    /// Runs as the drag starts, before the row is over anything.
+    var dragBegan: () -> Void = {}
     @Environment(\.sidebarListChanged) private var listChanged
     @State private var isHovering = false
 
     var body: some View {
-        Button(action: action) {
-            content(isHovering)
+        let row = content(isHovering)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -192,8 +237,24 @@ private struct SidebarRow<Content: View>: View {
                     }
                 }
                 .contentShape(.rect)
+        Group {
+            if let dragPayload {
+                // On macOS a `Button` takes the mouse down for itself and a drag never starts from it: a row that can be
+                // dragged answers the click with a tap, and is still a button for VoiceOver.
+                row
+                    .onTapGesture(perform: action)
+                    .onDrag {
+                        dragBegan()
+                        return NSItemProvider(object: dragPayload as NSString)
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAction(.default, action)
+            } else {
+                Button(action: action) { row }
+                    .buttonStyle(.plain)
+            }
         }
-        .buttonStyle(.plain)
         .help(help)
         .onHover { isHovering = $0 }
         .accessibilityAddTraits(isSelected ? .isSelected : [])
@@ -238,17 +299,19 @@ private struct ProfileAvatarButton: View {
 
 /// One Orb's row. Reads only its own Orb's state, so a tool call, a status or a new unread message in another Orb
 /// re-renders that Orb's row and nothing here.
-private struct SidebarBotRow: View {
+struct SidebarBotRow: View {
     @Environment(AppModel.self) private var model
     let botID: UUID
     /// Position in the list: the first nine answer ⌘1…⌘9.
     let index: Int
     let selectionSpace: Namespace.ID
+    /// Moved into or out of a category, the row slides from where it was to where it went.
+    let rowSpace: Namespace.ID
 
     var body: some View {
         let live = model.live(botID)
         let isSelected = model.selection == .bot(botID)
-        SidebarRow(isSelected: isSelected, selectionSpace: selectionSpace) {
+        SidebarRow(isSelected: isSelected, selectionSpace: selectionSpace, dragPayload: SidebarOrder.dragPayload(botID)) {
             model.selection = .bot(botID)
         } content: { isHovering in
             BotRowContent(row: BotRow(look: live.look, workText: live.shownWork?.text, shimmers: live.shownWork?.shimmers ?? false, activity: live.activity, isSelected: isSelected,
@@ -258,10 +321,14 @@ private struct SidebarBotRow: View {
                                       hint: isHovering && index < 9 ? AppShortcut.bot(at: index).label : nil,
                                       landing: live.landing))
                 .equatable()
+        } dragBegan: {
+            model.draggedBotID = botID
         }
+        .matchedGeometryEffect(id: botID, in: rowSpace)
         .contextMenu {
             Button(CommandName.openFolder, systemImage: "folder") { model.openFolder(of: botID) }
             Button("Personalizar…", systemImage: "paintpalette") { model.showLookEditor(of: botID) }
+            MoveToCategoryMenu(botID: botID)
             // MARK: MultiOrb (WP6)
             Button("Criar grupo com…", systemImage: "person.3") {
                 model.newGroupStart = botID
@@ -275,7 +342,29 @@ private struct SidebarBotRow: View {
     }
 }
 
-private struct NavLabel: View {
+/// "Mover para" in an Orb's menu: the categories (a check on the one it is in), a new one, and out of its category.
+private struct MoveToCategoryMenu: View {
+    @Environment(AppModel.self) private var model
+    let botID: UUID
+
+    var body: some View {
+        let current = model.category(of: botID)?.id
+        Menu("Mover para", systemImage: "rectangle.stack") {
+            ForEach(model.categories) { category in
+                Toggle(category.name, isOn: Binding(get: { current == category.id },
+                                                    set: { model.moveBot(botID, to: $0 ? category.id : nil) }))
+            }
+            if !model.categories.isEmpty { Divider() }
+            Button("Nova categoria…") { model.categoryNaming = .new(moving: botID) }
+            if current != nil {
+                Divider()
+                Button("Tirar da categoria") { model.moveBot(botID, to: nil) }
+            }
+        }
+    }
+}
+
+struct NavLabel: View {
     let title: String
     /// The row is the selected one: its title goes from `secondary` to `ink` along with the background.
     let isSelected: Bool

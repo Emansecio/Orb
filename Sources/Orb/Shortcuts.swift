@@ -13,6 +13,7 @@ enum CommandName {
     static let newBot = "Novo Orb…"
     static let quit = "Encerrar Orb"
     static let newGroup = "Novo grupo…"
+    static let newCategory = "Nova categoria…"
     static let importOrb = "Importar de outro assistente…"
     static let goTo = "Ir para…"
     static let writeMessage = "Escrever uma mensagem"
