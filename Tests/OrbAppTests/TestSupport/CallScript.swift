@@ -98,10 +98,11 @@ actor CallScript {
     func setAnswers(_ new: [[LLMEvent]]) { replies = new.map { ModelReply($0) } }
 
     func answer(model: String = "", _ messages: [ChatMessage], _ tools: [ToolSpec], toolChoice: ToolChoice = .auto) async -> ModelReply {
+        // The hook runs before the call is counted: while it waits, `calls` still has only the earlier ones.
+        if let before { await before(calls.count) }
         calls.append(Call(model: model, sent: messages, messages: Array(messages.dropFirst()), tools: tools.map(\.name),
                           system: messages.first?.content ?? "", toolChoice: toolChoice))
         let number = calls.count
-        if let before { await before(number - 1) }
         if failsCall == number { return .failing(LLMError.notConfigured) }
         let reply: ModelReply
         switch whenExhausted {
