@@ -2,16 +2,6 @@ import Foundation
 import Testing
 @testable import Orb
 
-private struct EchoModel: LLMClient {
-    func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
-        AsyncThrowingStream { continuation in
-            continuation.yield(.text("Pronto."))
-            continuation.yield(.finished(.done, nil))
-            continuation.finish()
-        }
-    }
-}
-
 /// Notices that offer an action, "Tentar de novo" and "Continuar", the one line of an answered approval, and what
 /// VoiceOver says for the transcript.
 @Suite("Ações do transcript") struct TranscriptActionsTests {
@@ -169,7 +159,7 @@ private struct EchoModel: LLMClient {
         if connected {
             model.providers = [ProviderAccount(kind: .custom)]
             model.defaultModel = "custom/modelo"
-            model.clientOverride = { EchoModel() }
+            model.clientOverride = { CallScriptModel(always: [.text("Pronto."), .finished(.done, nil)]) }
         }
         return (model, model.bots[0].id)
     }
