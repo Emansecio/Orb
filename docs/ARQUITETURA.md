@@ -475,6 +475,17 @@ de ferramenta cuja chamada foi pulada sai também (o provedor recusa um resultad
 texto de versões novas (`OrbTemperament`, `APIFormat`, modo de permissão…) caem no padrão em vez de derrubar o Orb; um
 modelo de provedor com formato desconhecido sai da lista. A gravação incremental da conversa mantém o formato do arquivo, legível por versões anteriores.
 
+### Convenção: inits dos tipos de dados
+
+- Não escreva `init` memberwise à mão: o Swift gera um, e só deixa de gerar quando algum `init` está declarado no corpo do tipo.
+- `init(from:)` e inits de conveniência vão numa `extension` do tipo, no mesmo arquivo (o `CodingKeys` privado exige o mesmo
+  arquivo), para o Swift continuar gerando o memberwise. Tipo aninhado pede a extension qualificada (`extension TaskPlan.Step`).
+  Mover o `init(from:)` para a extension não muda o formato em disco.
+- O valor padrão fica na propriedade (`var state: State = .queued`), não no init. Um `let` com valor inicial não entra no
+  memberwise, e a ordem dos parâmetros é a ordem de declaração das propriedades.
+- Init manual só com motivo, explicado num comentário de uma linha: rótulo `_`, validação ou conversão, propriedade `private`
+  sem valor inicial, dependência injetada em `let`, classe ou actor.
+
 ### Filas e gravação
 
 - Gravações: **uma fila serial por pasta de dados** (`WriterQueues`), em ordem, fora da thread principal. O estado é salvo
