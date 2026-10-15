@@ -2,23 +2,6 @@ import Foundation
 import Testing
 @testable import Orb
 
-/// Opens when told to; until then `wait()` suspends.
-private actor Gate {
-    private var isOpen = false
-    private var waiting: [CheckedContinuation<Void, Never>] = []
-
-    func wait() async {
-        if isOpen { return }
-        await withCheckedContinuation { waiting.append($0) }
-    }
-
-    func open() {
-        isOpen = true
-        waiting.forEach { $0.resume() }
-        waiting = []
-    }
-}
-
 /// What the stub model was sent, one entry per model call.
 private actor Calls {
     private(set) var received: [[ChatMessage]] = []
@@ -30,9 +13,9 @@ private actor Calls {
 private struct StubModel: LLMClient {
     var reply = "Tudo em ordem.\nNada mais a relatar."
     var calls = Calls()
-    var gate: Gate?
+    var gate: TestGate?
     /// Instead of `gate`, for every model call after the first (the routine's, when a question came first).
-    var laterGate: Gate?
+    var laterGate: TestGate?
     var failure: Error?
 
     func stream(model: String, messages: [ChatMessage], tools: [ToolSpec], toolChoice: ToolChoice) -> AsyncThrowingStream<LLMEvent, Error> {
@@ -344,7 +327,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
     // MARK: A busy Orb
 
     @Test @MainActor func aRoutineDueWhileTheOrbIsBusyWaitsAndThenRunsOnce() async throws {
-        let gate = Gate()
+        let gate = TestGate()
         let stub = StubModel(gate: gate)
         let (model, bot, routine) = setUp(stub)
         #expect(model.send("pergunta", to: bot.id))
@@ -370,7 +353,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
     }
 
     @Test @MainActor func anIntervalRoutineIsDueOnceAndNeverPilesUp() async throws {
-        let gate = Gate()
+        let gate = TestGate()
         let (model, bot, routine) = setUp(StubModel(gate: gate))
         model.routines[0].schedule = .everyMinutes(15)
         model.routines[0].lastRun = .now.addingTimeInterval(-16 * 60)
@@ -411,7 +394,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
     }
 
     @Test @MainActor func aTestRunStillGoingWhenTheMomentComesLeavesTheMomentDue() async throws {
-        let gate = Gate()
+        let gate = TestGate()
         let (model, bot, routine) = setUp(StubModel(gate: gate))
         model.routines[0].schedule = .once(.now.addingTimeInterval(3600))
         model.routines[0].createdAt = .now
@@ -523,7 +506,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
     }
 
     @Test @MainActor func aRoutineQueuedForAnOrbThatIsDeletedNeverRuns() async throws {
-        let gate = Gate()
+        let gate = TestGate()
         let (model, bot, routine) = setUp(StubModel(gate: gate))
         #expect(model.send("pergunta", to: bot.id))
         let question = try #require(model.turns[bot.id])
@@ -561,7 +544,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
     }
 
     @Test @MainActor func aRoutineWaitsForItsConversationWithoutBlockingTheMainThread() async throws {
-        let gate = Gate()
+        let gate = TestGate()
         let (model, bot, routine) = setUp(StubModel(gate: gate))
         let release = holdRoutineConversation(model, bot, routine)
         defer { release.signal() }
@@ -615,7 +598,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
     // MARK: Your chat is safe
 
     @Test @MainActor func stoppingARoutineGivesTheChatBackAndRecordsAFailedRun() async throws {
-        let gate = Gate()
+        let gate = TestGate()
         let stub = StubModel(gate: gate)
         let (model, bot, routine) = setUp(stub)
         model.runRoutine(routine.id)
@@ -647,7 +630,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
     }
 
     @Test @MainActor func aRoutineStoppedAtTheStepLimitIsAFailedRunThatSaysWhy() async throws {
-        let gate = Gate()
+        let gate = TestGate()
         let stub = StubModel(gate: gate)
         let (model, bot, routine) = setUp(stub)
         model.runRoutine(routine.id)
@@ -698,7 +681,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
     }
 
     @Test @MainActor func theMacIsKeptAwakeOnlyWhileARoutineRuns() async throws {
-        let gate = Gate()
+        let gate = TestGate()
         let stub = StubModel(gate: gate)
         let (model, bot, routine) = setUp(stub)
         let activity = FakeActivity()
@@ -723,7 +706,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
     }
 
     @Test @MainActor func aRoutineStoppedAtAnApprovalCardLetsTheMacSleep() async throws {
-        let gate = Gate()
+        let gate = TestGate()
         let stub = StubModel(gate: gate)
         let (model, bot, routine) = setUp(stub)
         let activity = FakeActivity()
@@ -780,7 +763,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
     }
 
     @Test @MainActor func whileARoutineRunsTheChatOnDiskIsNotTouched() async throws {
-        let gate = Gate()
+        let gate = TestGate()
         let stub = StubModel(gate: gate)
         let (model, bot, routine) = setUp(stub)
         model.runRoutine(routine.id)
@@ -799,7 +782,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
     }
 
     @Test @MainActor func yourChatIsOnDiskWhenAQueuedRoutineStartsRightAfterItsTurn() async throws {
-        let first = Gate(), later = Gate()
+        let first = TestGate(), later = TestGate()
         let (model, bot, routine) = setUp(StubModel(gate: first, laterGate: later))
         #expect(model.send("pergunta do usuário", to: bot.id))
         model.runRoutine(routine.id)
@@ -832,7 +815,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
     }
 
     @Test @MainActor func aQueuedRoutineMovedToAnotherOrbRunsWhenThatOrbIsFree() async throws {
-        let gate = Gate()
+        let gate = TestGate()
         let stub = StubModel(gate: gate)
         let (model, bot, routine) = setUp(stub)
         let folder = root.appending(path: "pasta-outro")
@@ -857,7 +840,7 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
     }
 
     @Test @MainActor func aQueuedRoutineThatIsSwitchedOffDoesNotRun() async throws {
-        let gate = Gate()
+        let gate = TestGate()
         let stub = StubModel(gate: gate)
         let (model, bot, routine) = setUp(stub)
         #expect(model.send("pergunta", to: bot.id))

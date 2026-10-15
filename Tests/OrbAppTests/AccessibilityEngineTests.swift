@@ -654,11 +654,11 @@ struct AccessibilityReviewTests {
         system.roots[200] = safari
         system.frontmost = 200
         try await bench.read()
-        let gate = TakeoverGate()
+        let gate = TestGate()
         // The app comes forward while the text goes out, and the turn is stopped then.
         system.syntheticInput.beforeEach = {
             system.frontmost = 100
-            Task { await gate.release() }
+            Task { await gate.open() }
         }
         system.syntheticInput.chunkSize = 1
         let task = Task { try await bench.act(["action": string("type"), "id": string("w1.1"), "value": string(String(repeating: "a", count: 200))]) }
