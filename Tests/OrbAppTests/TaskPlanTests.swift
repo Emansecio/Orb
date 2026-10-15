@@ -218,7 +218,8 @@ private func plannedTask() -> [ChatMessage] {
 }
 
 struct TaskPlanConversationTests {
-    let root = FileManager.default.temporaryDirectory.appending(path: "OrbTaskPlan-\(UUID().uuidString)")
+    private let folder = TempFolder("OrbTaskPlan")
+    var root: URL { folder.url }
 
     @Test func theConversationTakesThePlanFromTheCallsThatRan() {
         var chat = Conversation()
@@ -246,7 +247,6 @@ struct TaskPlanConversationTests {
     }
 
     @Test func thePlanSurvivesSavingAndReopening() throws {
-        defer { removeTestFolder(root) }
         var chat = Conversation(messages: plannedTask())
         chat.taskPlan = TaskPlan.replay(chat.messages, now: Date(timeIntervalSince1970: 1_790_000_000))
         let id = UUID()

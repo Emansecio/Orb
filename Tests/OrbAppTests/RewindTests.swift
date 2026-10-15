@@ -342,7 +342,8 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
 
     // MARK: In the app
 
-    private let root = FileManager.default.temporaryDirectory.appending(path: "OrbRewind-\(UUID().uuidString)")
+    private let folder = TempFolder("OrbRewind")
+    private var root: URL { folder.url }
 
     @MainActor private func model(with chat: Conversation, connected: Bool = true, received: Received = Received()) -> (AppModel, UUID) {
         var state = AppState.initial
@@ -371,7 +372,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func redoingDropsTheLastTurnAndSendsTheSameRequestAgain() async throws {
-        defer { removeTestFolder(root) }
         var chat = conversation(["a", "b"])
         chat.items.insert(tool("Rodando no Terminal", "touch x"), at: 4)
         chat.items.append(notice("Você interrompeu esta resposta"))
@@ -403,7 +403,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func redoingKeepsThePicturesAndFilesOfTheRequest() async throws {
-        defer { removeTestFolder(root) }
         let file = root.appendingPathComponent("relatorio.txt")
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         try "dados".write(to: file, atomically: true, encoding: .utf8)
@@ -423,7 +422,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func redoingASkillRequestCountsItsUseOnce() async {
-        defer { removeTestFolder(root) }
         let skill = Skill(slug: "relatorio", name: "Relatório", summary: "", instructions: "Faça o relatório.", uses: 1)
         var chat = Conversation()
         chat.items = [user("/relatorio da semana"), bot("feito")]
@@ -440,7 +438,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func redoingFadesTheRowsThatGoAndThenCuts() async throws {
-        defer { removeTestFolder(root) }
         let chat = conversation(["a", "b"])
         let (model, id) = model(with: chat)
         await model.loadedConversation(id)
@@ -457,7 +454,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func redoingIsRefusedWhileTheOrbWorksAWaitsOrARoutineRuns() async {
-        defer { removeTestFolder(root) }
         var chat = conversation(["a"])
         let (model, id) = model(with: chat)
         await model.loadedConversation(id)
@@ -478,7 +474,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func redoingIsRefusedWhenMessagesCameInTheMiddleOfTheTask() async {
-        defer { removeTestFolder(root) }
         var chat = conversation(["a"])
         chat.items.insert(TranscriptItem(.user(text: "e mais isto", attachments: []), duringTask: true), at: 2)
         chat.messages.insert(.user("e mais isto"), at: 1)
@@ -490,7 +485,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func redoingWithoutAModelLeavesTheChatAsItWas() async {
-        defer { removeTestFolder(root) }
         let chat = conversation(["a"])
         let (model, id) = model(with: chat, connected: false)
         model.providers = []
@@ -500,7 +494,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func editingPutsTheMessageInTheComposerAndKeepsWhatWasThere() async throws {
-        defer { removeTestFolder(root) }
         let (model, id) = model(with: conversation(["a", "b", "c"]))
         await model.loadedConversation(id)
         model.setDraft("rascunho", for: id)
@@ -520,7 +513,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func editingFromTheMenuSaysWhyWhenTheMessageCannotBeEdited() async throws {
-        defer { removeTestFolder(root) }
         var chat = conversation(["a", "b"])
         let index = try #require(chat.items.firstIndex { if case .user("b", _) = $0.kind { true } else { false } })
         chat.items[index].duringTask = true
@@ -534,7 +526,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func sendingAnEditReplacesTheMessageAndDropsEverythingAfterIt() async throws {
-        defer { removeTestFolder(root) }
         var chat = conversation(["a", "b", "c"])
         chat.items.insert(notice("Você interrompeu esta resposta"), at: 4)
         chat.items.insert(tool("Gravando arquivo", "/tmp/x", kind: .file), at: 5)
@@ -572,7 +563,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func theCutConversationIsSaved() async throws {
-        defer { removeTestFolder(root) }
         let (model, id) = model(with: conversation(["a", "b", "c"]))
         await model.loadedConversation(id)
         let target = try #require(row("b", in: model, id))
@@ -588,7 +578,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func editingTheFirstMessageStartsTheConversationOver() async throws {
-        defer { removeTestFolder(root) }
         var chat = conversation(["a", "b"])
         chat.memorySavedCount = 5
         let (model, id) = model(with: chat)
@@ -604,7 +593,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func editingBringsBackTheAttachmentsThatAreStillThere() async throws {
-        defer { removeTestFolder(root) }
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let file = root.appendingPathComponent("a.txt")
         try "x".write(to: file, atomically: true, encoding: .utf8)
@@ -626,7 +614,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func anEditNeedsSomethingToSendAndAModel() async throws {
-        defer { removeTestFolder(root) }
         let (model, id) = model(with: conversation(["a", "b"]), connected: false)
         model.providers = []
         await model.loadedConversation(id)
@@ -644,7 +631,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func editingIsRefusedWhileTheOrbWorksWaitsOrARoutineRuns() async throws {
-        defer { removeTestFolder(root) }
         let (model, id) = model(with: conversation(["a", "b"]))
         await model.loadedConversation(id)
         let target = try #require(row("a", in: model, id))
@@ -665,7 +651,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func aTurnThatStartsDuringTheEditStopsTheSend() async throws {
-        defer { removeTestFolder(root) }
         let (model, id) = model(with: conversation(["a", "b"]))
         await model.loadedConversation(id)
         let target = try #require(row("b", in: model, id))
@@ -676,7 +661,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func aMessageAlreadyInTheSummaryCannotBeEditedButALaterOneCan() async throws {
-        defer { removeTestFolder(root) }
         var chat = conversation(["a", "b", "c", "d"])
         chat.summary = "Pedido original: a"
         chat.summaryCoveredCount = 4 // "a", "b" and their replies are in the summary
@@ -699,7 +683,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func editingAfterAFailedRequestCutsWhereTheNextRecordedOneBegins() async throws {
-        defer { removeTestFolder(root) }
         // A request that failed before it reached the model sits between two that did: editing the one after it cuts there.
         var chat = conversation(["a", "c"])
         chat.items.insert(user("falhou"), at: 3)
@@ -715,7 +698,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func beginningAnotherEditPutsTheFirstStashBack() async throws {
-        defer { removeTestFolder(root) }
         let (model, id) = model(with: conversation(["a", "b"]))
         await model.loadedConversation(id)
         model.setDraft("meu rascunho", for: id)
@@ -728,7 +710,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func theEditedPicturesStayOnDiskWhenTheyLeaveTheStrip() async throws {
-        defer { removeTestFolder(root) }
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let photo = root.appendingPathComponent("foto.jpg")
         try Data([0xFF]).write(to: photo)
@@ -760,7 +741,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func theLinkSurvivesTheSavedConversation() async throws {
-        defer { removeTestFolder(root) }
         let chat = conversation(["a", "b"], linked: true)
         let (model, id) = model(with: chat)
         await model.loadedConversation(id)
@@ -773,7 +753,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func theRequestIsLinkedToItsBubbleWhenItReachesTheModelAndTheLinkSurvivesRewinds() async throws {
-        defer { removeTestFolder(root) }
         let received = Received()
         let (model, id) = model(with: Conversation(), received: received)
         await model.loadedConversation(id)
@@ -803,7 +782,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func aRequestStoppedBeforeTheModelDoesNotMakeTheNextOneWithTheSameWordsPairWithIt() async throws {
-        defer { removeTestFolder(root) }
         let received = Received()
         let (model, id) = model(with: Conversation(), received: received)
         await model.loadedConversation(id)
@@ -834,7 +812,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func aSteeredMessageGetsItsBubbleUnderTheIdItsModelCopyCarries() async throws {
-        defer { removeTestFolder(root) }
         let (model, id) = model(with: conversation(["a"], linked: true))
         await model.loadedConversation(id)
         let queued = SteeredMessage(text: "ah, e o rodapé", prompt: "ah, e o rodapé")
@@ -853,7 +830,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func retryingDoesNotTakeBackAnEarlierMessageWithTheSameWords() async throws {
-        defer { removeTestFolder(root) }
         let first = user("2"), second = user("2")
         var chat = Conversation()
         // The first "2" was stopped after it reached the model; the second failed before it did.
@@ -870,7 +846,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func picturesOfARequestThatNeverReachedTheModelStayPictures() async throws {
-        defer { removeTestFolder(root) }
         let (model, id) = model(with: Conversation())
         let folder = model.images.folder(for: id)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -891,7 +866,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func anOldConversationThatCannotBePairedIsRefusedWithAReasonThatKeepsTheButton() async throws {
-        defer { removeTestFolder(root) }
         let u1 = user("faz X"), u2 = user("2"), u3 = user("2")
         var chat = Conversation()
         chat.items = [u1, bot("feito"), u2, notice("Você interrompeu esta resposta"), u3, bot("B3")]
@@ -924,7 +898,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     // MARK: A turn that starts during an edit
 
     @MainActor @Test func stopAndSendDuringAnEditDoesNotQueueTheEditAsAMessage() async throws {
-        defer { removeTestFolder(root) }
         let (model, id) = model(with: conversation(["a", "b"]))
         await model.loadedConversation(id)
         model.setDraft("rascunho", for: id)
@@ -942,7 +915,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func aTurnThatStartsDuringAnEditGivesTheEditUpFirst() async throws {
-        defer { removeTestFolder(root) }
         var chat = conversation(["a"])
         chat.items += [user("b"), notice("Não deu certo: sem rede")] // "b" failed before it reached the model
         let (model, id) = model(with: chat)
@@ -969,7 +941,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func aSendThatIsRefusedDuringAnEditLeavesTheEditAlone() async throws {
-        defer { removeTestFolder(root) }
         let (model, id) = model(with: conversation(["a", "b"]))
         await model.loadedConversation(id)
         #expect(model.beginEditing(itemID: try #require(row("a", in: model, id)).id, of: id))
@@ -979,7 +950,6 @@ private func bots(_ items: [TranscriptItem]) -> [String] {
     }
 
     @MainActor @Test func whatComesBackToTheComposerDuringAnEditWaitsInTheStashNotInTheEdit() async throws {
-        defer { removeTestFolder(root) }
         let (model, id) = model(with: conversation(["a", "b"]))
         await model.loadedConversation(id)
         model.setDraft("rascunho", for: id)

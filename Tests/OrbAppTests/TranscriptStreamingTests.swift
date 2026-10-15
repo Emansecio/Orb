@@ -174,7 +174,8 @@ import Testing
 
     // MARK: The model
 
-    private let root = FileManager.default.temporaryDirectory.appending(path: "OrbStreaming-\(UUID().uuidString)")
+    private let folder = TempFolder("OrbStreaming")
+    private var root: URL { folder.url }
 
     @MainActor private func twoOrbs() -> (AppModel, UUID, UUID) {
         var state = AppState.initial
@@ -195,7 +196,6 @@ import Testing
     }
 
     @MainActor @Test func theTextOfAStreamingReplyIsKeptApartFromTheItems() async throws {
-        defer { removeTestFolder(root) }
         let (model, first, _) = twoOrbs()
         model.apply(.text("Olá"), to: first)
         model.flushText(first)
@@ -217,7 +217,6 @@ import Testing
     }
 
     @MainActor @Test func closingAReplyPutsTheWholeTextInTheItem() async throws {
-        defer { removeTestFolder(root) }
         let (model, first, _) = twoOrbs()
         model.apply(.text("\n\n  Olá"), to: first) // newlines before the first word are dropped
         model.flushText(first)
@@ -236,7 +235,6 @@ import Testing
     }
 
     @MainActor @Test func theReplyIsWrittenToDiskWhileItStreams() async throws {
-        defer { removeTestFolder(root) }
         let (model, first, _) = twoOrbs()
         model.apply(.text("Começo"), to: first)
         model.flushText(first)
@@ -251,7 +249,6 @@ import Testing
     }
 
     @MainActor @Test func aReplyStreamingInAnotherOrbDoesNotTouchTheChatOfThisOne() async throws {
-        defer { removeTestFolder(root) }
         let (model, first, second) = twoOrbs()
         let visible = model.orbTranscript(first)
         let revision = visible.revision
@@ -272,7 +269,6 @@ import Testing
     }
 
     @MainActor @Test func theChatViewStaysInStepWithTheConversation() async throws {
-        defer { removeTestFolder(root) }
         let (model, first, second) = twoOrbs()
         model.selection = .bot(second) // starts reading its conversation, off the main thread
         await model.loadedConversation(second)

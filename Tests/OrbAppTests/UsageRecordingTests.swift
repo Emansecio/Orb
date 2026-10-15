@@ -83,13 +83,13 @@ struct UsageMonthTests {
 }
 
 struct UsageStoreTests {
-    private let root = FileManager.default.temporaryDirectory.appending(path: "OrbUsage-\(UUID().uuidString)")
+    private let folder = TempFolder("OrbUsage")
+    private var root: URL { folder.url }
     private let orb = UUID()
 
     private func store() -> Store { Store(directory: root) }
 
     @Test func rowsGoToTheFileOfTheirMonthAndAreAddedInOrder() async throws {
-        defer { removeTestFolder(root) }
         let store = store()
         let lastOfOctober = UsageKey(hour: utcDate(2026, 10, 31, 23), orb: orb, model: "openai/gpt-5", source: .chat)
         let firstOfNovember = UsageKey(hour: utcDate(2026, 11, 1, 0), orb: orb, model: "openai/gpt-5", source: .chat)
@@ -116,7 +116,6 @@ struct UsageStoreTests {
     }
 
     @Test func aDamagedMonthIsNewsNotAFailedSave() throws {
-        defer { removeTestFolder(root) }
         final class Heard: @unchecked Sendable {
             private let lock = NSLock()
             private var items: [String] = []
@@ -139,7 +138,6 @@ struct UsageStoreTests {
     }
 
     @Test func aMonthThatCannotBeReadIsReportedOnceNotAtEveryFlush() throws {
-        defer { removeTestFolder(root) }
         final class Heard: @unchecked Sendable {
             private let lock = NSLock()
             private var items: [String] = []
@@ -161,7 +159,6 @@ struct UsageStoreTests {
     }
 
     @Test func aFileThatCannotBeDecodedIsSetAsideAndTheHistoryStartsAgain() async throws {
-        defer { removeTestFolder(root) }
         let store = store()
         let file = root.appending(path: "uso/2026-10.json")
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -181,11 +178,11 @@ struct UsageStoreTests {
 
 @MainActor
 struct UsageRecorderTests {
-    private let root = FileManager.default.temporaryDirectory.appending(path: "OrbUsageRecorder-\(UUID().uuidString)")
+    private let folder = TempFolder("OrbUsageRecorder")
+    private var root: URL { folder.url }
     private let orb = UUID()
 
     @Test func manyUsesInAnHourAreOneRowWrittenInOneBatch() async throws {
-        defer { removeTestFolder(root) }
         let store = Store(directory: root)
         var clock = utcDate(2026, 10, 9, 14, 5)
         let recorder = UsageRecorder(store: store, now: { clock }, calendar: utcCalendar)
@@ -211,7 +208,6 @@ struct UsageRecorderTests {
     }
 
     @Test func theBatchGoesOutOnItsOwnAfterTheDelay() async throws {
-        defer { removeTestFolder(root) }
         let store = Store(directory: root)
         let recorder = UsageRecorder(store: store, calendar: utcCalendar)
         recorder.record(UsageTotals(requests: 1, input: 4), orb: orb, name: "Atlas", model: "openai/gpt-5", source: .chat)
@@ -224,7 +220,6 @@ struct UsageRecorderTests {
     }
 
     @Test func nothingIsKeptAfterTheHistoryIsClosed() {
-        defer { removeTestFolder(root) }
         let recorder = UsageRecorder(store: Store(directory: root), calendar: utcCalendar)
         recorder.record(UsageTotals(requests: 1, input: 4), orb: orb, name: "Atlas", model: "openai/gpt-5", source: .chat)
         recorder.close()
