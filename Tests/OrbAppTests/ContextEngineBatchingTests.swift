@@ -30,10 +30,6 @@ private func recorded(_ events: [TurnEvent]) -> [ChatMessage] {
     events.compactMap { if case .message(let message) = $0 { message } else { nil } }
 }
 
-private func notices(_ events: [TurnEvent]) -> [String] {
-    events.compactMap { if case .notice(let text) = $0 { text } else { nil } }
-}
-
 /// Collects what `onContextLearned` was called with.
 private final class Learned: @unchecked Sendable {
     private let lock = NSLock()
@@ -315,7 +311,7 @@ struct EngineStepLimitTests {
         // The user sees what the model wrote, not the record.
         let shown = events.compactMap { if case .text(let delta) = $0 { delta } else { nil } }.joined()
         #expect(shown == "Fiz duas leituras.")
-        #expect(notices(events) == [AgentEngine.pausedNotice(after: 3)])
+        #expect(events.notices == [AgentEngine.pausedNotice(after: 3)])
         // Roles alternate: the assistant's closing words are one message.
         #expect(messages.map(\.role) == [.user, .assistant, .tool, .assistant, .tool, .assistant])
     }
@@ -329,7 +325,7 @@ struct EngineStepLimitTests {
         #expect(last.role == .assistant && last.toolCalls.isEmpty)
         #expect(last.content.hasPrefix(ProgressRecord.marker))
         #expect(messages.dropLast().last?.role == .tool)
-        #expect(notices(events) == [AgentEngine.pausedNotice(after: 3)])
+        #expect(events.notices == [AgentEngine.pausedNotice(after: 3)])
     }
 
     @Test func aTurnThatFinishesInTimeLeavesNoRecord() async {

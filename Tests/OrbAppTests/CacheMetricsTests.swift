@@ -139,10 +139,6 @@ struct EngineCacheReportTests {
         events.compactMap { if case .usage(let usage) = $0 { usage } else { nil } }
     }
 
-    private func notices(_ events: [TurnEvent]) -> [String] {
-        events.compactMap { if case .notice(let text) = $0 { text } else { nil } }
-    }
-
     @Test func eachRequestIsReportedAloneBeforeTheTurnsRunningTotal() async throws {
         let first = TokenUsage(input: 0, output: 10, cacheRead: 0, cacheWrite: 8_000)
         let second = TokenUsage(input: 300, output: 20, cacheRead: 8_000, cacheWrite: 0)
@@ -172,7 +168,7 @@ struct EngineCacheReportTests {
         let all = await events([[lookCall, .finished(.toolUse, miss)], [lookCall, .finished(.toolUse, miss)],
                                 [lookCall, .finished(.toolUse, miss)], [lookCall, .finished(.toolUse, miss)],
                                 [.text("pronto"), .finished(.done, miss)]])
-        #expect(notices(all) == [CacheHealth.notice])
+        #expect(all.notices == [CacheHealth.notice])
     }
 
     @Test func aClientThatNeverAsksForACacheIsNotBlamedForMissingIt() async {
@@ -180,7 +176,7 @@ struct EngineCacheReportTests {
         let all = await events([[lookCall, .finished(.toolUse, miss)], [lookCall, .finished(.toolUse, miss)],
                                 [lookCall, .finished(.toolUse, miss)], [lookCall, .finished(.toolUse, miss)],
                                 [.text("pronto"), .finished(.done, miss)]], arrangesCache: false)
-        #expect(notices(all).isEmpty)
+        #expect(all.notices.isEmpty)
     }
 
     @Test func onlyTheClientsThatArrangeACacheAreHeldToIt() throws {
@@ -201,14 +197,14 @@ struct EngineCacheReportTests {
         let hit = TokenUsage(input: 200, output: 10, cacheRead: 9_000, cacheWrite: 0)
         let all = await events([[lookCall, .finished(.toolUse, write)], [lookCall, .finished(.toolUse, hit)],
                                 [lookCall, .finished(.toolUse, hit)], [.text("pronto"), .finished(.done, hit)]])
-        #expect(notices(all).isEmpty)
+        #expect(all.notices.isEmpty)
     }
 
     @Test func aServerWithoutACacheReportSaysNothing() async {
         let plain = TokenUsage(input: 9_000, output: 10)
         let all = await events([[lookCall, .finished(.toolUse, plain)], [lookCall, .finished(.toolUse, plain)],
                                 [lookCall, .finished(.toolUse, plain)], [.text("pronto"), .finished(.done, plain)]])
-        #expect(notices(all).isEmpty)
+        #expect(all.notices.isEmpty)
     }
 }
 
@@ -220,10 +216,6 @@ struct AppModelCacheReportTests {
         let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
         let model = AppModel(store: Store(directory: root), runsBackgroundWork: false)
         return (model, model.bots[0], root)
-    }
-
-    private func notices(_ model: AppModel, _ bot: Bot) -> [String] {
-        model.transcript(bot.id).compactMap { if case .notice(let text) = $0.kind { text } else { nil } }
     }
 
     @Test func theLatestRequestAndTheTurnTotalAreKeptApart() {
@@ -246,6 +238,6 @@ struct AppModelCacheReportTests {
         model.apply(.notice(CacheHealth.notice), to: bot.id)
         model.apply(.notice("Outro aviso"), to: bot.id)
         // Other notices are not collapsed; the cache one is.
-        #expect(notices(model, bot) == [CacheHealth.notice, "Outro aviso", "Outro aviso"])
+        #expect(model.notices(bot.id) == [CacheHealth.notice, "Outro aviso", "Outro aviso"])
     }
 }

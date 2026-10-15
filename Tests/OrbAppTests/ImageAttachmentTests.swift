@@ -559,10 +559,6 @@ struct ImageEngineTests {
         return events
     }
 
-    private func notices(_ events: [TurnEvent]) -> [String] {
-        events.compactMap { if case .notice(let text) = $0 { text } else { nil } }
-    }
-
     private func recorded(_ events: [TurnEvent]) -> [ChatMessage] {
         events.compactMap { if case .message(let message) = $0 { message } else { nil } }
     }
@@ -575,7 +571,7 @@ struct ImageEngineTests {
         #expect(recorded(events).first?.images == [image])
         let sent = await calls.received[0]
         #expect(sent.last?.images == [image])
-        #expect(notices(events).isEmpty)
+        #expect(events.notices.isEmpty)
     }
 
     @Test func aModelThatCannotSeeNeverGetsPicturesOnlyTheirPaths() async throws {
@@ -586,7 +582,7 @@ struct ImageEngineTests {
         let sent = await calls.received[0]
         #expect(sent.allSatisfy { $0.images.isEmpty })
         #expect(sent.last?.content.contains("[imagem: \(image.path) — este modelo não aceita imagens]") == true)
-        #expect(notices(events) == ["Este modelo não vê imagens; mandei só o caminho do arquivo."])
+        #expect(events.notices == ["Este modelo não vê imagens; mandei só o caminho do arquivo."])
         // The conversation keeps the picture: a later switch to a model that sees can use it.
         #expect(recorded(events).first?.images == [image])
     }
@@ -603,7 +599,7 @@ struct ImageEngineTests {
         #expect(received[0].last?.images == [image])
         #expect(received[1].allSatisfy { $0.images.isEmpty })
         #expect(received[1].last?.content.contains("[imagem: \(image.path) — este modelo não aceita imagens]") == true)
-        #expect(notices(events) == ["Este modelo não vê imagens; mandei só o caminho do arquivo."])
+        #expect(events.notices == ["Este modelo não vê imagens; mandei só o caminho do arquivo."])
         #expect(rejected.isRaised)
         #expect(recorded(events).last?.content == "Não vejo, mas segue o caminho.")
         #expect(!events.contains { if case .failed = $0 { true } else { false } })

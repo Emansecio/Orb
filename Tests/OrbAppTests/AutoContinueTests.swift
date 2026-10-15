@@ -136,10 +136,6 @@ struct PlanProgressTests {
                call(TaskPlanTool.name, #"{"action": "update", "updates": [{"step": 2, "state": "done"}]}"#), said("Pronto: site no ar.")]
     }
 
-    @MainActor private func notices(_ model: AppModel, _ botID: UUID) -> [String] {
-        model.transcript(botID).compactMap { if case .notice(let text) = $0.kind { text } else { nil } }
-    }
-
     @Test @MainActor func theSwitchIsOnUntilAjustesSavesItOff() {
         let (model, _) = setUp(CallScript([said("oi")]), continues: nil)
         #expect(model.continuesLongTasks)
@@ -154,7 +150,7 @@ struct PlanProgressTests {
         #expect(model.send("publica o site", to: botID))
         await waitUntilIdle(model, botID)
         #expect(await script.calls.count == AgentEngine.defaultMaxSteps + 3)
-        #expect(notices(model, botID) == [AutoContinue.notice(stretch: 2, of: AutoContinue.maxStretches)])
+        #expect(model.notices(botID) == [AutoContinue.notice(stretch: 2, of: AutoContinue.maxStretches)])
         #expect(model.session(botID).conversation?.taskPaused == false)
         #expect(model.live(botID).stretch == nil, "the line goes once the turn ends")
     }
@@ -165,7 +161,7 @@ struct PlanProgressTests {
         #expect(model.send("publica o site", to: botID))
         await waitUntilIdle(model, botID)
         #expect(await script.calls.count == AgentEngine.defaultMaxSteps)
-        #expect(notices(model, botID) == [AgentEngine.pausedNotice(after: AgentEngine.defaultMaxSteps)])
+        #expect(model.notices(botID) == [AgentEngine.pausedNotice(after: AgentEngine.defaultMaxSteps)])
         #expect(model.session(botID).conversation?.taskPaused == true)
     }
 }

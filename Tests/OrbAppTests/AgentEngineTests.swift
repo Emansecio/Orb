@@ -388,10 +388,6 @@ extension AgentEngineTests {
         events.compactMap { if case .failed(let text) = $0 { text } else { nil } }
     }
 
-    private func notices(_ events: [TurnEvent]) -> [String] {
-        events.compactMap { if case .notice(let text) = $0 { text } else { nil } }
-    }
-
     /// An engine that does not really wait between retries, and the waits it was asked for.
     private func quickEngine() -> (AgentEngine, Counter) {
         let waits = Counter()
@@ -756,7 +752,7 @@ extension AgentEngineTests {
         let script = Script([cut, cut, cut, cut])
         let events = await run(AgentEngine(), request(script, mode: .ask, runs: Counter()))
         #expect(await script.received.count == AgentEngine.cutContinueLimit + 1)
-        #expect(notices(events).count == 1)
+        #expect(events.notices.count == 1)
         #expect(failures(events).isEmpty)
     }
 
@@ -832,7 +828,7 @@ extension AgentEngineTests {
         // Only the result of the step after which 3 remain carries it, at the end.
         #expect(results.map { $0.hasSuffix(warning) } == [false, true, false, false])
         #expect(results[1] == "viu x\n\n" + warning)
-        #expect(notices(events) == [AgentEngine.pausedNotice(after: 5)])
+        #expect(events.notices == [AgentEngine.pausedNotice(after: 5)])
         #expect(failures(events).isEmpty)
     }
 
@@ -842,7 +838,7 @@ extension AgentEngineTests {
         let events = await run(AgentEngine(), request(script, mode: .bypass, runs: runs, maxSteps: 3))
         #expect(await runs.value == 2)
         #expect(await script.choices.last == ToolChoice.none)
-        #expect(notices(events) == [AgentEngine.pausedNotice(after: 3)])
+        #expect(events.notices == [AgentEngine.pausedNotice(after: 3)])
         #expect(failures(events).isEmpty)
         // No call is left without an answer in the history.
         #expect(messages(events).filter { $0.role == .tool }.count == 2)
@@ -874,7 +870,7 @@ extension AgentEngineTests {
         let script = Script([[touchCall], [.text("Feito")]])
         let events = await run(AgentEngine(), request(script, mode: .auto, runs: Counter(), maxSteps: 5))
         #expect(await script.choices == [.auto, .auto])
-        #expect(notices(events).isEmpty)
+        #expect(events.notices.isEmpty)
         #expect(!messages(events).contains { $0.content.contains("[Orb:") })
     }
 

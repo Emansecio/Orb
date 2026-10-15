@@ -71,10 +71,6 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
         call("remember", .object(["fact": .string(text), "tipo": .string("skill")]))
     }
 
-    @MainActor private func notices(_ model: AppModel, _ botID: UUID) -> [String] {
-        model.transcript(botID).compactMap { if case .notice(let text) = $0.kind { text } else { nil } }
-    }
-
     @Test @MainActor func aLongTurnEndsWithAReviewThatKeepsAProposalAndTellsOnce() async throws {
         let script = CallScript(steps(10) + [said("pronto"), proposing(SkillSamples.good), said("Propus /publicar-site.")])
         let (model, botID) = setUp(script)
@@ -82,8 +78,8 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
         await waitUntilIdle(model, botID)
         let bank = model.memory.bank(for: botID)
         await waitUntil("the proposal") { await bank.proposals().count == 1 }
-        await waitUntil("the notice") { !notices(model, botID).isEmpty }
-        #expect(notices(model, botID) == ["Skill proposta: /publicar-site — Publicar site"])
+        await waitUntil("the notice") { !model.notices(botID).isEmpty }
+        #expect(model.notices(botID) == ["Skill proposta: /publicar-site — Publicar site"])
 
         // The review is one more call of the same conversation: same system prompt, same tools, the turn's whole
         // history as it was, and then the review's message (so the provider's cache is still good).
@@ -101,7 +97,7 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
         #expect(session.stepsSinceSkill == 0 && session.skillReview == nil)
         #expect(model.transcript(botID).filter { if case .bot = $0.kind { true } else { false } }.count == 1)
         await model.collectSkillProposals(botID)
-        #expect(notices(model, botID).count == 1)
+        #expect(model.notices(botID).count == 1)
     }
 
     @Test @MainActor func theReviewSendsTheBigOutputsAndArgumentsOfTheTurnWholeLikeItsLastCall() async throws {
@@ -198,7 +194,7 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
         await waitUntilIdle(model, botID)
         await waitUntil("the review to answer") { await script.calls.count == 15 && model.session(botID).skillReview == nil }
         #expect(model.session(botID).stepsSinceSkill == 0)
-        #expect(notices(model, botID).isEmpty) // "Nothing to save." says nothing
+        #expect(model.notices(botID).isEmpty) // "Nothing to save." says nothing
     }
 
     @Test @MainActor func theSwitchInAjustesTurnsTheReviewOff() async {
@@ -250,7 +246,7 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
         let bank = model.memory.bank(for: botID)
         try? await Task.sleep(for: .milliseconds(100))
         #expect(await bank.proposals().isEmpty)
-        #expect(notices(model, botID).isEmpty)
+        #expect(model.notices(botID).isEmpty)
     }
 
     @Test @MainActor func onlyStepsOfOrbsOwnEngineInConversationsCount() {
@@ -363,10 +359,10 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
         let session = model.session(botID)
         session.routineID = UUID()
         await model.collectSkillProposals(botID)
-        #expect(notices(model, botID).isEmpty && session.announcedProposals.isEmpty)
+        #expect(model.notices(botID).isEmpty && session.announcedProposals.isEmpty)
         session.routineID = nil
         await model.collectSkillProposals(botID)
-        #expect(notices(model, botID) == ["Skill proposta: /publicar-site — Publicar site"])
+        #expect(model.notices(botID) == ["Skill proposta: /publicar-site — Publicar site"])
     }
 
     // MARK: Deciding
