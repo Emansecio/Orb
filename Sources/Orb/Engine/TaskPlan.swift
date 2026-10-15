@@ -19,19 +19,6 @@ struct TaskPlan: Codable, Sendable, Equatable {
         var state = State.pending
         /// Why the step is blocked; only for `.blocked`.
         var reason: String?
-
-        init(text: String, state: State = .pending, reason: String? = nil) {
-            self.text = text
-            self.state = state
-            self.reason = reason
-        }
-
-        init(from decoder: Decoder) throws {
-            let c = try decoder.container(keyedBy: CodingKeys.self)
-            text = try c.value(.text, default: "")
-            state = try c.value(.state, default: .pending)
-            reason = try c.decodeIfPresent(String.self, forKey: .reason)
-        }
     }
 
     // Limits of what is kept: the plan goes in front of the model again and again, so every character counts.
@@ -48,22 +35,7 @@ struct TaskPlan: Codable, Sendable, Equatable {
     var goal: String
     var steps: [Step]
     var next: String?
-    var updatedAt: Date
-
-    init(goal: String, steps: [Step], next: String? = nil, updatedAt: Date = .now) {
-        self.goal = goal
-        self.steps = steps
-        self.next = next
-        self.updatedAt = updatedAt
-    }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        goal = try c.value(.goal, default: "")
-        steps = try c.lossyArray(.steps)
-        next = try c.decodeIfPresent(String.self, forKey: .next)
-        updatedAt = try c.value(.updatedAt, default: .distantPast)
-    }
+    var updatedAt: Date = .now
 
     /// Some step is not done yet: the plan still steers the work (it goes in the prompt and shows in the chat).
     var isActive: Bool { steps.contains { $0.state != .done } }
@@ -195,6 +167,25 @@ struct TaskPlan: Codable, Sendable, Equatable {
     }
 
     static func clip(_ text: String, _ limit: Int) -> String { MemoryText.clip(MemoryText.flatten(text), limit) }
+}
+
+extension TaskPlan.Step {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        text = try c.value(.text, default: "")
+        state = try c.value(.state, default: .pending)
+        reason = try c.decodeIfPresent(String.self, forKey: .reason)
+    }
+}
+
+extension TaskPlan {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        goal = try c.value(.goal, default: "")
+        steps = try c.lossyArray(.steps)
+        next = try c.decodeIfPresent(String.self, forKey: .next)
+        updatedAt = try c.value(.updatedAt, default: .distantPast)
+    }
 }
 
 extension Conversation {

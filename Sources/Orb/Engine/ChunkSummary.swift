@@ -16,13 +16,9 @@ struct ChunkSummary: Codable, Sendable, Equatable {
     var start: Int
     var end: Int
     var text: String
+}
 
-    init(start: Int, end: Int, text: String) {
-        self.start = start
-        self.end = end
-        self.text = text
-    }
-
+extension ChunkSummary {
     /// Tolerant (see Store.swift): a field that is missing makes a note that is never used, not a lost conversation.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)

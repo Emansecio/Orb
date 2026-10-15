@@ -41,16 +41,6 @@ struct CompactionReport: Sendable, Equatable {
     /// The model's notes on the stretches this fold took (see `ChunkSummary`): they go to the memory with them.
     var digests: [String] = []
 
-    init(kind: Kind, foldedMessages: Int, tokensBefore: Int?, tokensAfter: Int?, fold: Fold? = nil,
-         digests: [String] = []) {
-        self.kind = kind
-        self.digests = digests
-        self.foldedMessages = foldedMessages
-        self.tokensBefore = tokensBefore
-        self.tokensAfter = tokensAfter
-        self.fold = fold
-    }
-
     /// How the notice of older turns become a summary starts, now and in older versions: the chat folds what came before
     /// the latest one (`CompactedFold`).
     static let foldNoticePrefixes = ["Compactei a conversa:", "Conversa compactada:"]

@@ -18,16 +18,9 @@ struct MCPOAuthSettings: Codable, Hashable, Sendable {
     var authorizeParameters: [String: String] = [:]
     /// The redirect address of an app registered to the letter (Slack compares the port too). nil: `http://127.0.0.1:<port>/callback`.
     var redirect: String?
+}
 
-    init(clientID: String? = nil, needsClientSecret: Bool = false, scopes: String? = nil,
-         authorizeParameters: [String: String] = [:], redirect: String? = nil) {
-        self.clientID = clientID
-        self.needsClientSecret = needsClientSecret
-        self.scopes = scopes
-        self.authorizeParameters = authorizeParameters
-        self.redirect = redirect
-    }
-
+extension MCPOAuthSettings {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         clientID = (try? c.decodeIfPresent(String.self, forKey: .clientID)) ?? nil
@@ -67,15 +60,10 @@ struct MCPChallenge: Equatable, Sendable {
     var scope: String?
     var error: String?
     /// The header offered the Bearer scheme (the server wants an access token, not some other key).
-    var isBearer: Bool
+    var isBearer: Bool = false
+}
 
-    init(resourceMetadata: URL? = nil, scope: String? = nil, error: String? = nil, isBearer: Bool = false) {
-        self.resourceMetadata = resourceMetadata
-        self.scope = scope
-        self.error = error
-        self.isBearer = isBearer
-    }
-
+extension MCPChallenge {
     /// Reads the Bearer challenge of the header; other schemes in the same header are skipped.
     init(header: String?) {
         var parameters: [String: String] = [:]
