@@ -594,9 +594,35 @@ private final class Hooks: GroupTurnHooks {
         model.send("peça", to: team.atlas.id, fromUser: true)
         await waitUntil("the middle one to wait") { team.request(from: team.atlas, to: team.pesquisador)?.state == .awaitingChildren }
         let middle = try #require(team.request(from: team.atlas, to: team.pesquisador))
-        model.delegation.sweep(now: .now.addingTimeInterval(DelegationLimits.requestTimeout + 60))
+        model.delegation.sweep(now: .now.addingTimeInterval(DelegationLimits.workTimeout + 60))
         #expect(model.delegation.requests[middle.id]?.state == .failed)
         #expect(try openLines(of: team, request: middle).isEmpty)
+        await valve.open()
+        await team.settle()
+    }
+
+    @Test func waitingForWorkThatGoesOnIsNotATimeoutUntilTheCeiling() async throws {
+        let valve = TestGate()
+        let team = waitingMiddleTeam(valve)
+        defer { team.cleanUp() }
+        let model = team.model, hub = model.delegation
+        model.send("peça", to: team.atlas.id, fromUser: true)
+        await waitUntil("Pesquisador to wait for Revisor at work") {
+            team.request(from: team.atlas, to: team.pesquisador)?.state == .awaitingChildren
+                && team.request(from: team.pesquisador, to: team.revisor)?.state == .running
+        }
+        let middle = try #require(team.request(from: team.atlas, to: team.pesquisador))
+        // A second request to Revisor queues behind the turn it is in.
+        let queued = try hub.submit(from: team.atlas.id, to: "Revisor", text: "Outra coisa.", kind: .ask, messageID: UUID(), groupID: nil)
+        #expect(hub.requests[queued.id]?.state == .queued)
+        // Past half an hour: Pesquisador waits for a child at work, and the queue waits for a turn in progress.
+        hub.sweep(now: .now.addingTimeInterval(DelegationLimits.requestTimeout + 60))
+        #expect(hub.requests[middle.id]?.state == .awaitingChildren)
+        #expect(hub.requests[queued.id]?.state == .queued)
+        // Past the ceiling, a turn that never ends no longer holds them.
+        hub.sweep(now: .now.addingTimeInterval(DelegationLimits.workTimeout + 60))
+        #expect(hub.requests[middle.id]?.state == .failed)
+        #expect(hub.requests[queued.id]?.state == .failed)
         await valve.open()
         await team.settle()
     }

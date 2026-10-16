@@ -28,6 +28,9 @@ enum DelegationLimits {
     static let messageLimit = 4_000, replyLimit = 6_000, wakeBatch = 5
     static let sideRunMaxSteps = 40, requestTimeout: TimeInterval = 30 * 60, keptPedidos = 20
     static let rosterLimit = 12, roleClip = 80
+    /// How long a request may wait while the work it waits for goes on (a child still at work, a queue behind a turn in
+    /// progress): past `requestTimeout` it is still waiting for real work, so only this ceiling ends it (a turn that hangs).
+    static let workTimeout: TimeInterval = 3 * 3600
 }
 
 /// Why a request between Orbs was not sent. `message` is what the model reads (it becomes a `ToolError`).
@@ -43,7 +46,7 @@ enum DelegationRefusal: Error, Equatable, Sendable {
         case .notInGroup: "Esse Orb não está neste grupo."
         case .hopLimit: "Limite de \(DelegationLimits.maxHops) encadeamentos atingido: responda com o que tem."
         case .alreadyInChain(let name): "\(name) já está esperando por você nesta conversa."
-        case .tooManyOpen: "Você já tem \(DelegationLimits.maxOpenPerOrb) pedidos abertos; espere as respostas."
+        case .tooManyOpen: "Você já tem o máximo de pedidos abertos; espere as respostas."
         case .budgetSpent: "O orçamento desta conversa entre Orbs acabou."
         case .pairLimit: "Você já falou \(DelegationLimits.maxPerPair) vezes com esse Orb nesta conversa."
         case .duplicate: "Pedido idêntico já enviado."

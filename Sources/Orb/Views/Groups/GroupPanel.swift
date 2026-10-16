@@ -185,13 +185,12 @@ private struct GroupSettingsTab: View {
                         .onSubmit { commitName() }
                 }
                 field("Orçamento por pedido") {
-                    Picker("Orçamento", selection: Binding(
-                        get: { preset ?? .balanced },
-                        set: { model.setGroupBudget($0.budget, of: group.id) })) {
-                        ForEach(GroupBudgetPreset.allCases) { Text($0.title).tag($0) }
+                    let choice = Binding(get: { preset ?? .balanced }, set: { model.setGroupBudget($0.budget, of: group.id) })
+                    // Four segments need the panel wider than its narrowest: there, the same choice is a menu.
+                    ViewThatFits(in: .horizontal) {
+                        budgetPicker(choice).pickerStyle(.segmented)
+                        budgetPicker(choice).pickerStyle(.menu)
                     }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
                     Stepper(value: Binding(get: { group.budget.maxTurns }, set: { setBudget(turns: $0) }), in: 2...60, step: 2) {
                         Text("Turnos: \(group.budget.maxTurns)").font(.system(size: 13)).foregroundStyle(Palette.secondary)
                     }
@@ -227,6 +226,13 @@ private struct GroupSettingsTab: View {
         }
         .onAppear { nameDraft = group.name }
         .onChange(of: group.name) { nameDraft = group.name }
+    }
+
+    private func budgetPicker(_ choice: Binding<GroupBudgetPreset>) -> some View {
+        Picker("Orçamento", selection: choice) {
+            ForEach(GroupBudgetPreset.allCases) { Text($0.title).tag($0) }
+        }
+        .labelsHidden()
     }
 
     private func field<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {

@@ -563,16 +563,22 @@ final class DelegationHub: DelegationService {
     }
 
     /// Run by the scheduler every 30 seconds: a request that waited too long ends `failed`, and what is old and idle is forgotten.
+    /// Waiting for work that goes on (a target busy with a turn, a child still at work) is not waiting too long: only
+    /// `workTimeout` ends it.
     func sweep(now: Date = .now) {
         // A group's pause is not a timeout: what the group holds back (queued turns, answers in the inbox) waits for "Continuar".
-        for request in requests.values where request.state == .queued && !held.contains(request.id)
-            && now.timeIntervalSince(request.envelope.sentAt) > DelegationLimits.requestTimeout {
+        for request in requests.values where request.state == .queued && !held.contains(request.id) {
+            let waited = now.timeIntervalSince(request.envelope.sentAt)
+            guard waited > DelegationLimits.requestTimeout else { continue }
+            if waited <= DelegationLimits.workTimeout, isInTurn(request.envelope.to.id) { continue }
             fail(request, "Tempo esgotado")
         }
         let answered = Set(inbox.values.flatMap { $0.compactMap(\.servingRequest) })
         for (id, since) in waitingSince where now.timeIntervalSince(since) > DelegationLimits.requestTimeout {
             guard let request = requests[id], request.state == .awaitingChildren else { continue }
             if answered.contains(id) || !request.openChildren.isDisjoint(with: held) { continue }
+            let working = request.openChildren.contains { requests[$0].map { Self.isOpen($0.state) } ?? false }
+            if working, now.timeIntervalSince(since) <= DelegationLimits.workTimeout { continue }
             fail(request, "Tempo esgotado")
         }
         let busy = Set(requests.values.filter { Self.isOpen($0.state) }.map(\.envelope.chainID))
@@ -679,9 +685,13 @@ final class DelegationHub: DelegationService {
     }
 
     private func isBusy(_ botID: UUID) -> Bool {
+        isInTurn(botID) || !(queues[botID] ?? []).isEmpty
+    }
+
+    /// The Orb is in a turn (its own chat, a routine, a request), or one is starting.
+    private func isInTurn(_ botID: UUID) -> Bool {
         guard let model else { return false }
         return model.isWorking(botID) || model.sessions[botID]?.turnTask != nil || starting.contains(botID)
-            || !(queues[botID] ?? []).isEmpty
     }
 
     // MARK: What the person sees

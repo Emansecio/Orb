@@ -37,9 +37,10 @@ enum NewGroupRules {
     }
 }
 
-/// The three budgets a group can start with (per request of the person): Econômico, Equilibrado and Amplo.
+/// The budgets a group can start with (per request of the person): Econômico, Equilibrado, Amplo and Projeto (a request
+/// that builds something from start to finish: as many turns and tokens as the panel's steppers go).
 enum GroupBudgetPreset: String, CaseIterable, Identifiable {
-    case economical, balanced, broad
+    case economical, balanced, broad, project
 
     var id: String { rawValue }
 
@@ -48,6 +49,7 @@ enum GroupBudgetPreset: String, CaseIterable, Identifiable {
         case .economical: "Econômico"
         case .balanced: "Equilibrado"
         case .broad: "Amplo"
+        case .project: "Projeto"
         }
     }
 
@@ -56,6 +58,7 @@ enum GroupBudgetPreset: String, CaseIterable, Identifiable {
         case .economical: GroupBudget(maxTurns: 8, maxTokens: 100_000)
         case .balanced: GroupBudget(maxTurns: 12, maxTokens: 150_000)
         case .broad: GroupBudget(maxTurns: 24, maxTokens: 300_000)
+        case .project: GroupBudget(maxTurns: 60, maxTokens: 2_000_000)
         }
     }
 

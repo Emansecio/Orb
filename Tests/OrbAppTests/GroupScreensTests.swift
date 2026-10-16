@@ -155,10 +155,14 @@ struct NewGroupRulesTests {
         #expect(NewGroupRules.orchestrator(afterRemoving: b, current: a, selected: [a]) == a)
     }
 
-    @Test func budgetPresetsAreTheThreeOfTheSpec() {
+    @Test func budgetPresetsAreTheThreeOfTheSpecAndAProject() {
         #expect(GroupBudgetPreset.economical.budget == GroupBudget(maxTurns: 8, maxTokens: 100_000))
         #expect(GroupBudgetPreset.balanced.budget == GroupBudget(maxTurns: 12, maxTokens: 150_000))
         #expect(GroupBudgetPreset.broad.budget == GroupBudget(maxTurns: 24, maxTokens: 300_000))
+        // Projeto is as far as the panel's steppers go (turns 2...60, tokens up to 2 million), so a preset never sits outside them.
+        #expect(GroupBudgetPreset.project.budget == GroupBudget(maxTurns: 60, maxTokens: 2_000_000))
+        #expect(GroupBudgetPreset.allCases.map(\.title) == ["Econômico", "Equilibrado", "Amplo", "Projeto"])
+        #expect(GroupBudgetPreset.matching(GroupBudget(maxTurns: 60, maxTokens: 2_000_000)) == .project)
         #expect(GroupBudgetPreset.matching(GroupBudget(maxTurns: 24, maxTokens: 300_000)) == .broad)
         #expect(GroupBudgetPreset.matching(GroupBudget(maxTurns: 13, maxTokens: 150_000)) == nil)
     }

@@ -77,8 +77,8 @@ enum DelegationRules {
         if path.contains(target.id), input.waitingInPath.contains(target.id) {
             throw DelegationRefusal.alreadyInChain(target.name)
         }
-        // 7. Open requests (a notice needs no answer, so it is not one).
-        if input.kind == .ask, input.openFromSender >= DelegationLimits.maxOpenPerOrb { throw DelegationRefusal.tooManyOpen }
+        // 7. Open requests (a notice needs no answer, so it is not one); in a group, one per teammate when that is more.
+        if input.kind == .ask, input.openFromSender >= openLimit(groupSize: input.groupMembers?.count) { throw DelegationRefusal.tooManyOpen }
         // 8. and 9. The chain's budget and the pair; a group's own budget (turns and tokens, visible to the person) governs its requests.
         if input.groupID == nil {
             let facts = input.chain
@@ -94,6 +94,12 @@ enum DelegationRules {
         if input.seenMessage || input.recentSameText { throw DelegationRefusal.duplicate }
         return Plan(target: target, text: text, chainID: input.context?.chainID ?? input.newChainID, hop: hop, path: path,
                     isNewChain: input.context == nil)
+    }
+
+    /// How many requests an Orb may have waiting for an answer: `maxOpenPerOrb`, or in a group of more than four, one per
+    /// teammate (the orchestrator of a group of six assigns five pieces at once).
+    static func openLimit(groupSize: Int?) -> Int {
+        max(DelegationLimits.maxOpenPerOrb, (groupSize ?? 0) - 1)
     }
 
     /// "pesquisador", "Pesquisador" and "pesquisadór" are one name; a name that starts the same way as exactly one Orb is that

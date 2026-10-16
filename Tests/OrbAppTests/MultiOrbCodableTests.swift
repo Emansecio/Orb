@@ -330,6 +330,26 @@ struct MultiOrbInvariantTests {
         #expect(DelegationLimits.maxTokensPerChain == 200_000 && DelegationLimits.maxPerPair == 3)
         #expect(DelegationLimits.messageLimit == 4_000 && DelegationLimits.replyLimit == 6_000)
         #expect(DelegationLimits.replyLimit > DelegationLimits.messageLimit)
+        #expect(DelegationLimits.workTimeout > DelegationLimits.requestTimeout)
+    }
+
+    @Test func inABigGroupAnOrbMayWaitForOneAnswerPerTeammate() throws {
+        #expect(DelegationRules.openLimit(groupSize: nil) == 3)
+        #expect(DelegationRules.openLimit(groupSize: 3) == 3)
+        #expect(DelegationRules.openLimit(groupSize: 6) == 5)
+        #expect(DelegationRules.openLimit(groupSize: 8) == 7)
+        let members = (1...6).map { OrbRef(id: UUID(), name: "Orb \($0)") }
+        var asking = DelegationRules.Input(groupID: UUID(), groupMembers: Set(members.map(\.id)), orbs: members, sender: members[0],
+                                           targetName: "Orb 6", text: "Faça a parte 5")
+        asking.openFromSender = 4
+        _ = try DelegationRules.validate(asking)
+        asking.openFromSender = 5
+        #expect(throws: DelegationRefusal.tooManyOpen) { try DelegationRules.validate(asking) }
+        // Outside a group the limit stays three.
+        asking.groupID = nil
+        asking.groupMembers = nil
+        asking.openFromSender = 3
+        #expect(throws: DelegationRefusal.tooManyOpen) { try DelegationRules.validate(asking) }
     }
 
     @Test func everyRefusalSaysSomethingInPortugueseAndNamesWhatMatters() {
@@ -338,7 +358,7 @@ struct MultiOrbInvariantTests {
         for refusal in refusals { #expect(!refusal.message.isEmpty && refusal.toolError.message == refusal.message) }
         #expect(DelegationRefusal.hopLimit.message == "Limite de 4 encadeamentos atingido: responda com o que tem.")
         #expect(DelegationRefusal.alreadyInChain("Revisor").message == "Revisor já está esperando por você nesta conversa.")
-        #expect(DelegationRefusal.tooManyOpen.message == "Você já tem 3 pedidos abertos; espere as respostas.")
+        #expect(DelegationRefusal.tooManyOpen.message == "Você já tem o máximo de pedidos abertos; espere as respostas.")
         #expect(DelegationRefusal.budgetSpent.message == "O orçamento desta conversa entre Orbs acabou.")
         #expect(DelegationRefusal.duplicate.message == "Pedido idêntico já enviado.")
         #expect(DelegationRefusal.unknownOrb("Zé").message.contains("Zé"))
