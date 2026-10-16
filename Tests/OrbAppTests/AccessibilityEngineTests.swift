@@ -1296,9 +1296,11 @@ struct AccessibilityHangTests {
     @Test func aCallThatFinishesBeforeItsDeadlineIsNotCancelledByIt() async throws {
         let sessions = AXSessions()
         let app = AccessibilityApp(name: "Rápido", bundleID: nil, pid: 6_011)
-        let value = try await sessions.run(app, within: .milliseconds(150)) { 7 }
-        try await Task.sleep(for: .milliseconds(250))
-        #expect(value == 7 && sessions.runningCount == 0 && !sessions.session(for: app.pid).isStuck)
+        // The work hands back its own token, so the test sees what the deadline did to it once it passed.
+        let token = try await sessions.run(app, within: .milliseconds(400)) { AXWorkToken.current }
+        try await Task.sleep(for: .milliseconds(600))
+        #expect(token?.isCancelled == false, "the deadline came after the work and left it alone")
+        #expect(sessions.runningCount == 0 && !sessions.session(for: app.pid).isStuck)
     }
 
     @Test func workStoppedWhileWaitingInTheAppsQueueNeverRuns() async throws {

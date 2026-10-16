@@ -247,23 +247,24 @@ final class LiveTakeoverHand: TakeoverHand, @unchecked Sendable {
 
     func type(_ text: String) async throws {
         var chunk: [UInt16] = []
-        func flush() async throws {
+        func flush(last: Bool) async throws {
             guard !chunk.isEmpty else { return }
             // The step limit is for one chunk (one event and its wait), not for the whole text: a long text must not hit it
-            // halfway and be left half typed. The limit of the whole takeover still holds.
+            // halfway and be left half typed. The limit of the whole takeover still holds. A slow chunk stops the ones after
+            // it; after the last one the text is whole, and calling it a failure would make the model type it again.
             let deadline = begin()
             try tick(deadline)
             poster.text(chunk)
             chunk.removeAll(keepingCapacity: true)
             try await Task.sleep(for: .milliseconds(4))
-            try checkTime(deadline)
+            if !last { try checkTime(deadline) }
         }
         for character in text {
             let units = Array(String(character).utf16)
-            if chunk.count + units.count > Self.typeChunk { try await flush() }
+            if chunk.count + units.count > Self.typeChunk { try await flush(last: false) }
             chunk += units
         }
-        try await flush()
+        try await flush(last: true)
     }
 
     func key(_ stroke: KeyStroke) async throws {

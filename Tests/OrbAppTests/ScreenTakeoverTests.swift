@@ -522,6 +522,15 @@ struct ScreenTakeoverTests {
         #expect(rig.world.front?.pid == 10)
     }
 
+    @Test func aSlowLastChunkIsNotCalledAFailureOnceTheTextIsWhole() async throws {
+        // The only chunk takes longer than the step limit, but it went out whole: failing now would make the model type it again.
+        let rig = TakeoverRig(stepLimit: .milliseconds(80))
+        rig.world.poster.delay = .milliseconds(150)
+        _ = try await rig.takeOver { hand in try await hand.type("xxxxx") }
+        #expect(rig.world.poster.events == [.text(Array("xxxxx".utf16))])
+        #expect(rig.world.front?.pid == 10)
+    }
+
     @Test func aLongTextIsNotCutHalfwayByTheLimitOfOneStep() async throws {
         // Each chunk is well within the step limit; only the text as a whole takes longer than it.
         let rig = TakeoverRig(stepLimit: .milliseconds(400))
