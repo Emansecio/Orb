@@ -25,7 +25,7 @@ enum SendOrigin: Sendable, Equatable {
             return envelopes.map { envelope in
                 OrbMessageItem(direction: .reply, kind: .reply, state: Self.state(of: envelope.status), from: envelope.from,
                                to: envelope.to, text: envelope.text, requestID: envelope.replyTo ?? envelope.id,
-                               chainID: envelope.chainID, groupID: envelope.groupID)
+                               chainID: envelope.chainID, groupID: envelope.groupID, fromChat: envelope.fromChat ? true : nil)
             }
         }
     }

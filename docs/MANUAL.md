@@ -489,7 +489,9 @@ aviso dizendo por quê.
 ## Orbs juntos
 
 Com **Orbs podem conversar entre si** ligado em Ajustes → Geral, um Orb pede ajuda a outro sozinho, com a ferramenta `orbs`:
-- **`ask`** acorda o outro Orb, que trabalha numa conversa à parte; a resposta volta como mensagem e acorda quem pediu.
+- **`ask`** acorda o outro Orb, que trabalha numa conversa à parte; a resposta volta como mensagem e acorda quem pediu. Quem
+  pediu a vários é acordado **uma vez**, quando todas as respostas chegaram: cada linha marca ✓ assim que a sua resposta chega,
+  e a linha de trabalho mostra quem falta ("Esperando Revisor").
 - **`tell`** só deixa um aviso: não acorda ninguém nem espera resposta. O aviso aparece na hora no chat do destino, e o Orb o lê
   no topo da próxima mensagem que receber. Num grupo, o aviso é um post no fio.
 - **`list`** mostra os colegas e se estão livres, ocupados ou esperando a sua aprovação. Num grupo, mostra o que cada membro
@@ -498,11 +500,18 @@ Com **Orbs podem conversar entre si** ligado em Ajustes → Geral, um Orb pede a
 - **Conversas abertas.** Em Ajustes, sob os interruptores, "Conversas abertas entre Orbs" lista os pedidos em andamento fora
   de grupo: quem pediu a quem, o quê, em que pé está e há quanto tempo, com **Parar** para a conversa inteira. Os de um grupo
   ficam na tela do grupo.
-- **Acionar um grupo pelo chat.** Com **Orbs podem acionar grupos** ligado (padrão), você pode pedir no chat de um Orb que ele
-  mande algo a um grupo de que faz parte ("peça ao grupo Lançamento…"). O pedido vai ao orquestrador, o fio mostra "Pesquisador
-  pediu ao Atlas, a seu pedido: …" e a resposta final do grupo volta ao chat. Isso vale só quando você pede, no chat do Orb:
-  uma rotina ou um pedido de outro Orb não acionam grupos, e um grupo que já está trabalhando recusa até terminar. Parar o
-  chat que espera para o grupo também.
+- **Criar um grupo pelo chat.** Com **Orbs podem acionar grupos** ligado (padrão), peça ao Orb: "cria um grupo Lançamento com
+  o Pesquisador e o Revisor". Ele cria o grupo com o orquestrador que você disser (ou o primeiro da lista), o chat mostra "Atlas
+  criou o grupo Lançamento com 3 Orbs" (a linha abre o grupo) e cada membro ganha "entrou no grupo". O nome não pode repetir o
+  de um Orb ou de outro grupo.
+- **Acionar um grupo pelo chat.** No mesmo interruptor, você pode pedir no chat de um Orb que ele mande algo a um grupo de que
+  faz parte ("peça ao grupo Lançamento…"). O pedido vai ao orquestrador, o fio mostra "Pesquisador pediu ao Atlas, a seu
+  pedido: …" e a resposta final do grupo volta ao chat ("O grupo Lançamento respondeu"). Dentro do grupo, o orquestrador pode
+  passar parte do trabalho ao próprio Orb que pediu. Se o grupo já está trabalhando, o pedido entra no que está em andamento e o
+  orquestrador o pega depois do turno atual. Isso vale só quando você pede, no chat do Orb: uma rotina ou um pedido de outro
+  Orb não criam nem acionam grupos. Parar o chat que espera para o grupo também.
+- **Quadro do grupo no chat.** No chat pessoal, o Orb consulta o quadro dos grupos de que faz parte (`group_recall`): as
+  decisões e notas que os membros guardaram. Guardar no quadro continua sendo só nos turnos do grupo.
 - **Mensagens seguidas ao grupo.** Se você manda uma segunda mensagem antes de o turno da primeira começar, as duas vão juntas
   no mesmo turno.
 - **Só leitura num grupo.** O painel do grupo e a criação avisam quando um membro está em Só leitura: ele não pede nada aos

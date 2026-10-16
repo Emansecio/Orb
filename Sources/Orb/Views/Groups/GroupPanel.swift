@@ -102,8 +102,9 @@ private struct ReadOnlyNotes: View {
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(lines, id: \.text) { line in
                     Label(line.text, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
+                        .font(.system(size: 12))
                         .foregroundStyle(Palette.warn)
+                        .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                     if line.isOrchestrator {
                         Menu("Trocar orquestrador") {
@@ -112,7 +113,8 @@ private struct ReadOnlyNotes: View {
                             }
                         }
                         .menuStyle(.button)
-                        .buttonStyle(GhostStyle())
+                        .buttonStyle(SecondaryPillStyle())
+                        .controlSize(.small)
                         .fixedSize()
                         .help("Escolhe outro membro para receber os pedidos e distribuir o trabalho")
                     }

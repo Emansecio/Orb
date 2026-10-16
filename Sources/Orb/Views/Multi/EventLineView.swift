@@ -40,22 +40,52 @@ struct EventLineView: View {
             }
         } else if event.kind == .routineRun {
             RoutineRunLine(event: event)
-        } else {
-            HStack(spacing: 6) {
-                Image(systemName: Self.symbol(for: event.kind))
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.muted)
-                    .accessibilityHidden(true)
-                Text(event.sentence)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Palette.muted)
-                    .multilineTextAlignment(centered ? .center : .leading)
-                    .contentTransition(.opacity)
+        } else if let group = openableGroup {
+            Button {
+                model.selection = .group(group)
+            } label: {
+                line(opens: true)
             }
-            .frame(maxWidth: .infinity, alignment: centered ? .center : .leading)
-            .accessibilityElement(children: .combine)
+            .buttonStyle(.plain)
+            .help("Abrir o grupo")
+            .accessibilityLabel(event.sentence)
+            .accessibilityHint("Abre o grupo")
             .accessibilityIdentifier("event-line")
+        } else {
+            line(opens: false)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("event-line")
         }
+    }
+
+    /// In an Orb's chat, the line about a group that still exists opens it.
+    private var openableGroup: UUID? {
+        guard !centered, event.kind == .groupCreated || event.kind == .joinedGroup, let id = event.groupID,
+              model.group(id) != nil else { return nil }
+        return id
+    }
+
+    /// The symbol and the sentence; with the chevron of the lines that open something.
+    private func line(opens: Bool) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: Self.symbol(for: event.kind))
+                .font(.system(size: 11))
+                .foregroundStyle(Palette.muted)
+                .accessibilityHidden(true)
+            Text(event.sentence)
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.muted)
+                .multilineTextAlignment(centered ? .center : .leading)
+                .contentTransition(.opacity)
+            if opens {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Palette.faint)
+                    .accessibilityHidden(true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: centered ? .center : .leading)
+        .contentShape(.rect)
     }
 
     /// The symbol of a kind of line.

@@ -165,6 +165,14 @@ struct TranscriptFoldingTests {
         #expect(ExchangeWords.line(for: msg(.tell, from: atlas, to: reviewer, chain: chain)) == "Atlas avisou o Revisor")
         #expect(ExchangeWords.line(for: msg(.reply, .reply, from: researcher, to: atlas, chain: chain)) == "Pesquisador respondeu a Atlas")
         #expect(ExchangeWords.line(for: msg(.reply, .reply, from: researcher, to: lia, chain: chain)) == "Pesquisador respondeu à Lia")
+        // A request to a group from the chat, and the group's answer, name the group.
+        let group = OrbRef(id: atlas.id, name: "Lançamento")
+        var ask = msg(.ask, from: researcher, to: group, chain: chain)
+        ask.fromChat = true
+        #expect(ExchangeWords.line(for: ask) == "Pesquisador pediu ao grupo Lançamento")
+        var answer = msg(.reply, .reply, from: group, to: researcher, chain: chain)
+        answer.fromChat = true
+        #expect(ExchangeWords.line(for: answer) == "O grupo Lançamento respondeu a Pesquisador")
     }
 
     @Test("Lista em português")

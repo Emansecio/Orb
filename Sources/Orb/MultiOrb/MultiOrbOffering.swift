@@ -9,6 +9,10 @@ struct MultiOrbOffering: Sendable, Equatable {
     var propose = false
     /// `group_remember` and `group_recall`: only in a group's turn.
     var groupMemory = false
+    /// `group_recall` alone, in the Orb's own chat, for the boards of the groups it is in (`ToolContext.groupBoards`).
+    var groupRecall = false
+    /// `group_create`: in the Orb's own chat, with "Orbs podem acionar grupos" on.
+    var groupCreate = false
     /// `ask_user`: only in an Orb's own chat, where the person is to answer (a routine or a request reports what it needs).
     var askUser = false
 }

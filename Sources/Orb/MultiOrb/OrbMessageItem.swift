@@ -33,8 +33,8 @@ struct OrbMessageItem: Codable, Equatable, Sendable {
     var requestID: UUID
     var chainID: UUID
     var groupID: UUID?
-    /// In a group's thread: a member sent this to the group from its own chat, at the person's request ("a seu pedido").
-    /// nil otherwise (and in what older versions wrote).
+    /// A request a member sent to a group from its own chat, at the person's request: in the thread, "a seu pedido"; in the
+    /// chat, the request and the group's answer name the group. nil otherwise (and in what older versions wrote).
     var fromChat: Bool?
 }
 

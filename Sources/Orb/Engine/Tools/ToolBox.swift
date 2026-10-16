@@ -24,7 +24,9 @@ enum ToolBox {
             switch tool.spec.name {
             case "orbs": multi.orbs
             case OrbProposeTool.name: multi.propose
-            case "group_remember", "group_recall": multi.groupMemory
+            case GroupCreateTool.name: multi.groupCreate
+            case "group_remember": multi.groupMemory
+            case "group_recall": multi.groupMemory || multi.groupRecall
             default: false
             }
         }

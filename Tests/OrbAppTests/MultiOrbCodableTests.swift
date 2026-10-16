@@ -456,7 +456,9 @@ struct MultiOrbToolOfferTests {
             #expect(!tool.spec.description.isEmpty, "\(tool.spec.name)")
             #expect(tool.spec.parameters["type"] == .string("object"), "\(tool.spec.name)")
             #expect(tool.spec.parameters["required"]?.array?.isEmpty != true, "\(tool.spec.name)")
-            #expect(tool.kind == (tool.spec.name.hasPrefix("group_") ? .memory : .orbs), "\(tool.spec.name)")
+            // The board's tools are memory; the others, creating a group too, reach other Orbs.
+            let isBoard = ["group_remember", "group_recall"].contains(tool.spec.name)
+            #expect(tool.kind == (isBoard ? .memory : .orbs), "\(tool.spec.name)")
         }
     }
 

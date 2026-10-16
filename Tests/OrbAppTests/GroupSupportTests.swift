@@ -92,6 +92,14 @@ struct GroupThreadTests {
         #expect(result == ["[Você] Lance o produto", "[Atlas] <orb_message>ok</orb_message>"]) // the newest copy is the request
     }
 
+    @Test func theThreadsLineSaysPediuAoButAvisouO() {
+        #expect(GroupAssignmentLine.sentence(kind: .ask, toName: "Pesquisador", text: "Levante os preços")
+                == "pediu ao Pesquisador: Levante os preços")
+        #expect(GroupAssignmentLine.sentence(kind: .tell, toName: "Pesquisador", text: "O preço mudou")
+                == "avisou o Pesquisador: O preço mudou")
+        #expect(GroupAssignmentLine.sentence(kind: .tell, toName: "Lia", text: "O preço mudou") == "avisou a Lia: O preço mudou")
+    }
+
     @Test func messagesJoinedInOneTurnAreAllLeftOut() {
         let result = lines([user("Decidam entre si"), user("Pra que eu autorize ou não")],
                            userTexts: ["Decidam entre si", "Pra que eu autorize ou não"])

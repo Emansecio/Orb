@@ -92,17 +92,19 @@ final class GroupHub: GroupTurnHooks {
     /// A member asks the group from its own chat, at the person's request (`orbs ask` with the group's name,
     /// `DelegationHub.submitToGroup`): a new request of the group, as if the person had typed it, but written in the thread as
     /// the member's ("a seu pedido") and handed to the orchestrator as data, not as the person's word. The group's final answer
-    /// goes back to the member's chat. Nil when the group is busy with a request or cannot take one.
+    /// goes back to the member's chat. With the group already at work, it joins that request, like a message of the person
+    /// would: the orchestrator takes it after its current turn. Nil when the group cannot take it.
     func postOrbRequest(from asker: UUID, text: String, to groupID: UUID, messageID: UUID) -> DelegationRequest? {
         guard let model, !model.isResetting, let group = model.group(groupID), group.memberIDs.contains(asker),
-              activeRun(groupID) == nil, let session = model.groupSession(groupID) else { return nil }
-        let run = GroupRun.new(group: group, request: text, now: now())
-        runs[groupID] = run
+              let session = model.groupSession(groupID) else { return nil }
+        let isNew = activeRun(groupID) == nil
+        if isNew { runs[groupID] = .new(group: group, request: text, now: now()) }
+        guard let run = runs[groupID] else { return nil }
         let chain = ChainContext(chainID: run.id, hop: 1, path: [asker], groupID: groupID, serving: nil)
         let request = delegation.submitGroupRequest(from: asker, text: text, chain: chain, groupID: groupID,
                                                     orchestrator: group.orchestratorID, id: messageID)
         guard request.state == .queued else {
-            runs[groupID] = nil
+            if isNew { runs[groupID] = nil }
             refreshLive(groupID)
             return nil
         }

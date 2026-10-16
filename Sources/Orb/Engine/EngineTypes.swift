@@ -617,6 +617,8 @@ struct ToolContext: Sendable {
     var draft: BridgeHandler?
     /// The group's shared board, in a group's turn.
     var groupMemory: MemoryBank?
+    /// The boards of the groups the Orb is in, by name, in its own chat (`group_recall` reads them).
+    var groupBoards: [String: MemoryBank] = [:]
     // MARK: end MultiOrb (WP0)
     // MARK: MultiOrb (WP3)
     /// What `orb_propose` knows about the Orb that proposes and the others (see `OrbCreationSupport`); nil where it cannot run.

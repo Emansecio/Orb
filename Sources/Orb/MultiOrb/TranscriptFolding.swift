@@ -275,13 +275,17 @@ enum TranscriptFolding {
 
 /// The sentences of one message between Orbs, as the chat's line reads them ("Atlas pediu ajuda ao Revisor").
 enum ExchangeWords {
-    /// The line of a message: what it is, from whom and to whom.
+    /// The line of a message: what it is, from whom and to whom. A request sent to a group from the chat, and the group's
+    /// answer, name the group as one ("Atlas pediu ao grupo Lançamento", "O grupo Lançamento respondeu a Atlas").
     static func line(for message: OrbMessageItem) -> String {
         let from = message.from.name
         let to = message.to?.name ?? "outro Orb"
+        let toGroup = message.fromChat == true && message.direction != .post
         switch message.kind {
+        case .ask where toGroup: return "\(from) pediu ao grupo \(to)"
         case .ask: return "\(from) pediu ajuda \(PortugueseArticle.contraction(for: to)) \(to)"
         case .tell: return "\(from) avisou \(PortugueseArticle.article(for: to)) \(to)"
+        case .reply where toGroup: return "O grupo \(from) respondeu \(preposition(for: to)) \(to)"
         case .reply: return "\(from) respondeu \(preposition(for: to)) \(to)"
         }
     }

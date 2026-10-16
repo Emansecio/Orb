@@ -1498,7 +1498,7 @@ final class AppModel {
         // MARK: MultiOrb (WP1)
         // Asking and telling other Orbs needs no card per message (a mode that reads only still refuses it): the turn grants it.
         let multi = multiOrbOffering(for: botID)
-        if multi.orbs { turnGrants.append(PermissionRule(family: .delegation)) }
+        if multi.orbs || multi.groupCreate { turnGrants.append(PermissionRule(family: .delegation)) }
         for grant in groupTurn?.grants ?? [] where !turnGrants.contains(grant) { turnGrants.append(grant) }
         // MARK: end MultiOrb (WP1)
 
@@ -1540,7 +1540,7 @@ final class AppModel {
         context.taskPlan = TaskPlanBoard(plan)
         let userTurns = session.userTurnCount()
         // MARK: MultiOrb (WP1)
-        if multi.orbs { context.orbs = delegationHandler(for: botID) }
+        if multi.orbs || multi.groupCreate { context.orbs = delegationHandler(for: botID) }
         let teammates = multi.orbs ? orbsSection(for: bot) : ""
         let baseContext = context
         // MARK: end MultiOrb (WP1)
@@ -1602,6 +1602,10 @@ final class AppModel {
             if multi.propose { context.orbCreation = orbCreationSupport(for: bot) }
             // MARK: end MultiOrb (WP3)
             context.groupMemory = groupTurn?.bank // MultiOrb (WP5)
+            if multi.groupRecall {
+                context.groupBoards = Dictionary(groups(containing: bot.id).map { ($0.name, memory.groupBank(for: $0.id)) },
+                                                 uniquingKeysWith: { first, _ in first })
+            }
             var tools = ToolBox.offered(for: bot.capabilities, accessibilityGranted: accessibilityGranted, browser: browserAvailability,
                                         multi: multi)
             // The connectors' own tools do not travel with the request: the model lists and calls them through two fixed ones.

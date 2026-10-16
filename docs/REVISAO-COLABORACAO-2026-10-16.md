@@ -55,7 +55,8 @@ já foi feito.
 | 15 | Coberto pelo achado 1: o prompt já diz os colegas e os grupos; o `list` serve para o estado (achados 8 e 12). | — |
 
 **Diferenças em relação ao proposto:**
-- **Achado 2:** com o grupo já trabalhando, o pedido é recusado ("espere ele terminar"), e não enfileirado.
+- **Achado 2:** com o grupo já trabalhando, o pedido era recusado. Na rodada seguinte (abaixo) ele passou a entrar no pedido em
+  andamento.
 - **Achado 4:** sem o toggle interno de transição. Saiu a linha `OrbEvent.tellFailed` da fase 2 da REVISAO-TURNO: um `tell`
   que não roda turno não falha (o caso continua decodificando, para conversas antigas). Um orquestrador que retoma no meio de um
   pedido só lê os `tell` do fio no próximo turno novo.
@@ -68,6 +69,20 @@ já foi feito.
 **Regressão.** Só suítes filtradas, sem a suíte inteira e sem `--snapshot`: as áreas tocadas (delegação, grupos, rotinas,
 agendamento, turno, Ajustes, dicas, motor, conversa, store, aprovações e permissões) somam 1.284 testes em 226 suítes, todos verdes. A interface nova (avisos de Só leitura,
 toggle, lista de conversas abertas, "Ver no grupo" na folha da troca) não foi conferida em captura.
+
+### Depois da fase 2: usável de ponta a ponta (16/10)
+
+Uma rodada com o Orb usado como a pessoa usaria ("cria um grupo", "pede ao grupo", "o que o grupo decidiu?") achou o que
+ainda impedia o uso, e foi corrigido:
+
+| Ponto | O que mudou | Teste |
+|---|---|---|
+| Esperar todas as respostas | Um Orb que pediu a dois era acordado pela primeira resposta e dava o "resultado final" duas vezes (sonda: "Resultado final" escrito antes de o Revisor responder). Agora a caixa guarda as respostas até não haver mais nada aberto daquele mesmo trabalho (o mesmo pedido, a mesma execução de rotina ou o chat), e o Orb é acordado uma vez com todas. A linha do chat marca ✓ quando cada resposta chega, e "Esperando Revisor" mostra quem falta. Vale também para o orquestrador de um grupo. | `DelegationHubTests` |
+| A→B→A com pedido do chat | Quando um membro mandava um pedido ao grupo pelo chat, o orquestrador não podia passar trabalho a esse membro dentro do grupo ("já está esperando a resposta"). Quem espera é o chat dele: esse pedido não conta mais como espera na cadeia. | `GroupsOverTheRealHubTests` |
+| Grupo ocupado | O pedido do chat entra no pedido em andamento, como uma mensagem da pessoa entraria, em vez de ser recusado. A recusa `busy` virou `unavailable` (o grupo não pôde receber). | idem |
+| Criar grupo | Ferramenta `group_create` no chat próprio, sob "Orbs podem acionar grupos" e só num turno que a pessoa começou. Nome repetido de Orb ou de grupo, membros fora de 2 a 8, nome desconhecido e orquestrador fora dos membros são recusados com o próximo passo. O chat de quem criou diz "Atlas criou o grupo X com 3 Orbs" (no lugar de "entrou no grupo"), e a linha abre o grupo; os membros recebem "entrou no grupo", que também abre. | `GroupsOverTheRealHubTests` |
+| Quadro no chat | `group_recall` é oferecido no chat próprio para os grupos de que o Orb faz parte (`group` diz qual), e o prompt diz isso. Guardar no quadro continua só no turno do grupo. | idem |
+| Rotina com pedido que falhou | O texto que retoma a rotina não pedia para dizer o que não deu certo (precedência do `?:`). | regressão |
 
 ## Como foi feita
 

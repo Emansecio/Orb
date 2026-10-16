@@ -261,11 +261,13 @@ struct GroupAssignmentLine: View {
         .accessibilityHidden(true)
     }
 
-    /// "pediu ao Pesquisador: Levante três…" (or "avisou à Lia: …" for a tell), the first line of the text cut to 90 characters.
+    /// "pediu ao Pesquisador: Levante três…" (or "avisou a Lia: …" for a tell: "avisar" takes the article, not "ao"), the first
+    /// line of the text cut to 90 characters.
     /// A request a member sent from its chat because you asked says so: "pediu ao Atlas, a seu pedido: …".
     static func sentence(kind: OrbMessageItem.Kind, toName: String, text: String, fromChat: Bool = false) -> String {
-        let verb = kind == .tell ? "avisou" : "pediu"
-        return "\(verb) \(PortugueseArticle.contraction(for: toName)) \(toName)\(fromChat ? ", a seu pedido" : ""): \(oneLine(text))"
+        let to = kind == .tell ? "avisou \(PortugueseArticle.article(for: toName))"
+            : "pediu \(PortugueseArticle.contraction(for: toName))"
+        return "\(to) \(toName)\(fromChat ? ", a seu pedido" : ""): \(oneLine(text))"
     }
 
     /// The first line of the text, cut to 90 characters (the line says the rest is in the card).

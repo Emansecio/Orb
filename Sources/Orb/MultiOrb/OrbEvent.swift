@@ -47,7 +47,8 @@ struct OrbEvent: Codable, Equatable, Sendable {
             guard parts.count > 1, let count = Int(parts[parts.count - 1].trimmingCharacters(in: .whitespaces)) else {
                 return "Grupo \(detail) criado"
             }
-            return "Grupo \(parts.dropLast().joined(separator: " · ")) criado com \(count) \(count == 1 ? "Orb" : "Orbs")"
+            let name = parts.dropLast().joined(separator: " · "), orbs = "\(count) \(count == 1 ? "Orb" : "Orbs")"
+            return actor.map { "\($0.name) criou o grupo \(name) com \(orbs)" } ?? "Grupo \(name) criado com \(orbs)"
         case .routineCreated:
             return "\(actorName) criou a rotina “\(detail)”"
         case .renamed:

@@ -11,13 +11,15 @@ import SwiftUI
 /// - `delegation-exchange`: the read-only exchange view.
 /// - `delegation-waiting`: the work line of an Orb that waits for two answers, with the partner's glyph and the Parar button.
 /// - `sidebar-talking`: the sidebar while Atlas talks with Pesquisador: the rings and the phrases of both sides.
+/// - `delegation-group`: Atlas creates the group Lançamento, asks it from its chat and gets the group's answer, and a notice
+///   from the Revisor arrives.
 @MainActor
 enum DelegationSnapshots {
     static func view(_ screen: String, model: AppModel) -> AnyView? {
         guard let atlas = model.bots.first else { return nil }
         switch screen {
         case "events", "events-folded", "delegation-thread", "delegation-waiting", "delegation-folded", "delegation-exchange",
-             "sidebar-talking":
+             "sidebar-talking", "delegation-group":
             break
         default:
             return nil
@@ -35,6 +37,11 @@ enum DelegationSnapshots {
             live.setChainWork(WorkPhrase.waiting(for: [team.researcher.name, team.reviewer.name]))
             live.setPartner(PartnerTint(botID: team.researcher.id, color: team.researcher.orb.color))
             return chat(model, atlas, waiting(team))
+        case "delegation-group":
+            let group = OrbGroup(name: "Lançamento", memberIDs: [atlas.id, team.researcher.id, team.reviewer.id],
+                                 orchestratorID: team.researcher.id)
+            model.groups = [group]
+            return chat(model, atlas, groupLines(team, group: group.id))
         case "delegation-folded":
             return AnyView(foldedPreview(team))
         case "delegation-exchange":
@@ -85,6 +92,29 @@ enum DelegationSnapshots {
     }
 
     private static func say(_ text: String) -> TranscriptItem { TranscriptItem(.bot(text: text, isStreaming: false)) }
+
+    /// Atlas's chat: a request to the group Lançamento (the Pesquisador orchestrates), the group's answer, then a notice.
+    private static func groupLines(_ team: Team, group groupID: UUID) -> [TranscriptItem] {
+        let chain = UUID(), request = UUID()
+        let group = OrbRef(id: team.researcher.id, name: "Lançamento")
+        func line(_ direction: OrbMessageItem.Direction, _ kind: OrbMessageItem.Kind, from: OrbRef, to: OrbRef, _ text: String,
+                  fromChat: Bool? = true) -> TranscriptItem {
+            TranscriptItem(.orbMessage(OrbMessageItem(direction: direction, kind: kind, state: .replied, from: from, to: to,
+                                                      text: text, requestID: request, chainID: chain, fromChat: fromChat)))
+        }
+        return [
+            TranscriptItem(.user(text: "Cria o grupo Lançamento com o Pesquisador e o Revisor e pede os preços dos concorrentes",
+                                 attachments: [])),
+            TranscriptItem(.event(OrbEvent(kind: .groupCreated, actor: OrbRef(team.atlas), detail: "Lançamento · 3",
+                                           groupID: groupID))),
+            line(.sent, .ask, from: OrbRef(team.atlas), to: group, "Levantem o preço de três concorrentes no plano anual."),
+            say("Pedi ao grupo Lançamento; a resposta chega aqui."),
+            line(.reply, .reply, from: group, to: OrbRef(team.atlas), "Todoist US$ 48, Things US$ 50 (uma vez), TickTick US$ 36."),
+            say("O grupo respondeu: o TickTick é o mais barato no plano anual."),
+            line(.received, .tell, from: OrbRef(team.reviewer), to: OrbRef(team.atlas), "O Things mudou o preço ontem.",
+                 fromChat: nil),
+        ]
+    }
 
     private static func events(_ team: Team) -> [TranscriptItem] {
         let chain = UUID()

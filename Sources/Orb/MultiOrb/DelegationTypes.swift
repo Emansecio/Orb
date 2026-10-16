@@ -46,6 +46,24 @@ enum DelegationRefusal: Error, Equatable, Sendable {
     case ownGroup(String)
     /// `orbs ask` with the name of a group was not let through (`DelegationHub.submitToGroup`).
     case groupDoor(String, GroupDoor)
+    /// `group_create` was not let through (`DelegationHub.createGroup`).
+    case groupSetup(GroupSetup)
+
+    /// Why a group was not created.
+    enum GroupSetup: Sendable, Equatable {
+        /// "Orbs podem acionar grupos" is off.
+        case switchedOff
+        /// A routine's run or another Orb's request: only the Orb's own chat may create a group.
+        case notFromHere
+        /// The turn is the chat's but the person did not start it.
+        case notAsked
+        case noName
+        /// An Orb or a group already has the name.
+        case nameTaken(String)
+        case memberCount
+        case orchestratorNotMember(String)
+        case unavailable
+    }
 
     /// Why a request to a group was refused.
     enum GroupDoor: Sendable, Equatable {
@@ -56,8 +74,8 @@ enum DelegationRefusal: Error, Equatable, Sendable {
         case notFromHere
         /// The turn is the chat's but the person did not start it (an answer from another Orb woke it).
         case notAsked
-        /// The group is working on a request already.
-        case busy
+        /// The group could not take the request (the app is resetting, its orchestrator is gone).
+        case unavailable
         /// A group is asked, not told.
         case tell
     }
@@ -100,11 +118,31 @@ enum DelegationRefusal: Error, Equatable, Sendable {
                     + "outro Orb). Diga no resultado o que o grupo deveria fazer."
             case .notAsked:
                 "Você só aciona o grupo “\(name)” quando o usuário pede, no turno dele: pergunte se ele quer."
-            case .busy:
-                "O grupo “\(name)” já está trabalhando num pedido: espere ele terminar (o usuário acompanha na tela do grupo) ou "
-                    + "peça a cada membro separadamente."
+            case .unavailable:
+                "O grupo “\(name)” não pôde receber o pedido agora: diga isso ao usuário e ofereça pedir a cada membro "
+                    + "separadamente."
             case .tell:
                 "Para um grupo, use ask: o grupo trabalha no fio dele e a resposta final volta para você."
+            }
+        case .groupSetup(let why):
+            switch why {
+            case .switchedOff:
+                "O usuário desligou “Orbs podem acionar grupos” nos Ajustes: ele cria o grupo em Novo grupo (⌥⌘G). Diga isso."
+            case .notFromHere:
+                "Daqui não se cria grupo: só no seu chat, a pedido do usuário. Diga no resultado que grupo faria sentido."
+            case .notAsked:
+                "Você só cria um grupo quando o usuário pede, no turno dele: pergunte se ele quer."
+            case .noName:
+                "Dê um nome ao grupo em name."
+            case .nameTaken(let name):
+                "Já existe um Orb ou um grupo chamado “\(name)”: escolha outro nome."
+            case .memberCount:
+                "Um grupo tem de \(OrbGroup.memberLimits.lowerBound) a \(OrbGroup.memberLimits.upperBound) Orbs: ponha os nomes "
+                    + "em members (list mostra os colegas)."
+            case .orchestratorNotMember(let name):
+                "“\(name)” não está em members: o orquestrador é um dos membros."
+            case .unavailable:
+                "Não consegui criar o grupo agora: diga isso ao usuário; ele cria em Novo grupo (⌥⌘G)."
             }
         case .ownGroup(let name):
             "Você já está trabalhando no grupo “\(name)”: peça a um membro pelo nome (os membros estão no início da mensagem do "

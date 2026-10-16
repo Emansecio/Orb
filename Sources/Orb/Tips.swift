@@ -217,7 +217,7 @@ enum Tip {
     static let summarizeSessions = "Pede ao modelo um resumo das conversas longas guardadas; uma chamada curta por conversa"
     static let reviewDictation = "Corrige o texto ditado com o modelo do Orb antes de você enviar"
     static let orbsCanTalk = "Deixa os Orbs pedirem ajuda uns aos outros; Parar interrompe a conversa toda"
-    static let orbsCanStartGroups = "Deixa um Orb mandar um pedido a um grupo de que faz parte quando você pede no chat dele"
+    static let orbsCanStartGroups = "Deixa um Orb criar um grupo ou pedir a um grupo dele quando você pede no chat"
     static let dataFolder = "Mostra no Finder a pasta com conversas, memórias e ajustes"
     static let keptMemoriesFolder = "Mostra no Finder as memórias guardadas de Orbs apagados"
     static let orbsFolder = "Mostra no Finder a pasta onde ficam as pastas dos Orbs"

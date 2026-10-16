@@ -410,8 +410,35 @@ final class DelegationHub: DelegationService {
                                 hop: envelope.hop, path: envelope.path, replyTo: envelope.id,
                                 servingRequest: envelope.servingRequest, status: status, groupID: envelope.groupID)
         reply.servingRoutine = envelope.servingRoutine
+        reply.fromChat = envelope.fromChat // the chat's line names the group that answered
         inbox[envelope.from.id, default: []].append(reply)
+        markArrived(reply)
+        refresh(envelope.from.id)
         schedulePump(envelope.from.id)
+    }
+
+    /// The asker's line for the request reads answered as soon as the answer arrives, even when the asker is woken only once the
+    /// rest of what it asked is in (`deliverInbox`): in its chat, in the conversation a request keeps while it waits, or in a
+    /// routine's run that waits.
+    private func markArrived(_ reply: OrbEnvelope) {
+        let requestID = reply.replyTo ?? reply.id, state = SendOrigin.state(of: reply.status)
+        if let serving = reply.servingRequest {
+            suspended[serving]?.items.settingSent(requestID, to: state)
+        } else if let routine = reply.servingRoutine {
+            waitingRoutines[routine]?.conversation.items.settingSent(requestID, to: state)
+        } else {
+            markSent(requestID, asker: reply.to.id, as: state)
+        }
+    }
+
+    /// Something the Orb asked for the same work as `reply` (the same request it serves, routine run or chat) is still open.
+    private func stillAwaited(like reply: OrbEnvelope, by botID: UUID) -> Bool {
+        requests.values.contains { request in
+            let envelope = request.envelope
+            return Self.isOpen(request.state) && envelope.kind == .ask && envelope.from.id == botID
+                && (envelope.from.id != envelope.to.id || envelope.fromChat)
+                && envelope.servingRequest == reply.servingRequest && envelope.servingRoutine == reply.servingRoutine
+        }
     }
 
     static let failedLead = "Não consegui: "
@@ -421,12 +448,20 @@ final class DelegationHub: DelegationService {
     func deliverInbox(for botID: UUID) -> Bool {
         guard let model, !isShuttingDown else { return false }
         var waiting = (inbox[botID] ?? []).filter { chainStates[$0.chainID]?.cancelled != true }
+        // The answers of work whose other answers are still to come stay in the box: the Orb is woken once, with all of them.
+        var held: [OrbEnvelope] = []
         while let first = waiting.first {
-            let batch = Array(waiting.filter { $0.servingRequest == first.servingRequest && $0.servingRoutine == first.servingRoutine }
-                .prefix(DelegationLimits.wakeBatch))
-            let taken = Set(batch.map(\.id))
-            waiting.removeAll { taken.contains($0.id) }
-            inbox[botID] = waiting.isEmpty ? nil : waiting
+            let sameWork = waiting.filter { $0.servingRequest == first.servingRequest && $0.servingRoutine == first.servingRoutine }
+            let ids = Set(sameWork.map(\.id))
+            waiting.removeAll { ids.contains($0.id) }
+            if stillAwaited(like: first, by: botID) {
+                held += sameWork
+                continue
+            }
+            let batch = Array(sameWork.prefix(DelegationLimits.wakeBatch))
+            held += sameWork.dropFirst(DelegationLimits.wakeBatch)
+            let rest = held + waiting
+            inbox[botID] = rest.isEmpty ? nil : rest
             if let serving = first.servingRequest {
                 guard var request = requests[serving], request.state == .awaitingChildren, var conversation = suspended[serving] else {
                     continue // the request it belonged to is gone (stopped, timed out): nobody waits for this answer
@@ -471,7 +506,7 @@ final class DelegationHub: DelegationService {
             session.chain = nil // no model: the notice says so, and the answers have nobody to wake
             continue
         }
-        inbox[botID] = nil
+        inbox[botID] = held.isEmpty ? nil : held
         return false
     }
 
@@ -718,8 +753,12 @@ final class DelegationHub: DelegationService {
     }
 
     /// The Orb waits for this one (it asked and nobody answered yet).
+    /// Whether the Orb waits for an answer in the chain. A request a member sent its group from its chat does not count: what
+    /// waits is its chat, so inside the group the orchestrator may still hand it work.
     private func waiting(_ botID: UUID, inChain chainID: UUID) -> Bool {
-        requests.values.contains { Self.isOpen($0.state) && $0.envelope.chainID == chainID && $0.envelope.from.id == botID }
+        requests.values.contains {
+            Self.isOpen($0.state) && $0.envelope.chainID == chainID && $0.envelope.from.id == botID && !$0.envelope.fromChat
+        }
     }
 
     /// Whoever asked the request the Orb is serving, for the working line ("Pedido de Atlas").
@@ -749,6 +788,8 @@ final class DelegationHub: DelegationService {
         case "list":
             guard model.orbsCanTalk || groupID != nil else { throw DelegationRefusal.switchedOff.toolError }
             return teammatesText(for: botID, groupID: groupID)
+        case "create_group":
+            do { return try createGroup(arguments, by: botID) } catch let refusal as DelegationRefusal { throw refusal.toolError }
         case "ask", "tell":
             let kind: OrbEnvelope.Kind = arguments["action"]?.string?.lowercased() == "tell" ? .tell : .ask
             let name = arguments["to"]?.string ?? "", text = arguments["message"]?.string ?? ""
@@ -955,7 +996,7 @@ final class DelegationHub: DelegationService {
         guard text.count <= DelegationLimits.messageLimit else { throw DelegationRefusal.tooLong }
         guard !seenMessageIDs.contains(messageID) else { throw DelegationRefusal.duplicate }
         guard let request = model.groupHub.postOrbRequest(from: botID, text: text, to: group.id, messageID: messageID) else {
-            throw DelegationRefusal.groupDoor(name, .busy)
+            throw DelegationRefusal.groupDoor(name, .unavailable)
         }
         seenMessageIDs.append(messageID)
         if seenMessageIDs.count > Self.seenLimit { seenMessageIDs.removeFirst(seenMessageIDs.count - Self.seenLimit) }
@@ -964,10 +1005,51 @@ final class DelegationHub: DelegationService {
         model.session(botID).append(.orbMessage(OrbMessageItem(direction: .sent, kind: .ask, state: .open, from: OrbRef(sender),
                                                                to: OrbRef(id: envelope.to.id, name: name), text: text,
                                                                requestID: envelope.id, chainID: envelope.chainID,
-                                                               groupID: group.id)))
+                                                               groupID: group.id, fromChat: true)))
         model.live(botID).poked()
         refresh(botID)
         return envelope
+    }
+
+    /// `group_create`: a group of the user's Orbs, made from the Orb's own chat in a turn the person started. The refusals say
+    /// what to do instead; nothing is created when one is thrown.
+    private func createGroup(_ arguments: JSONValue, by botID: UUID) throws -> String {
+        guard let model, !isShuttingDown else { throw DelegationRefusal.groupSetup(.unavailable) }
+        guard model.orbsCanStartGroups else { throw DelegationRefusal.groupSetup(.switchedOff) }
+        guard model.isOwnChat(botID) else { throw DelegationRefusal.groupSetup(.notFromHere) }
+        guard model.session(botID).turnAskedByUser else { throw DelegationRefusal.groupSetup(.notAsked) }
+        let name = (arguments["name"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { throw DelegationRefusal.groupSetup(.noName) }
+        let orbs = model.bots.map(OrbRef.init)
+        // A name that an Orb or another group has would make `orbs ask` ambiguous.
+        guard DelegationRules.resolve(name, among: orbs) == nil,
+              !model.groups.contains(where: { DelegationRules.fold($0.name) == DelegationRules.fold(name) }) else {
+            throw DelegationRefusal.groupSetup(.nameTaken(name))
+        }
+        var members: [OrbRef] = []
+        for typed in arguments["members"]?.array?.compactMap(\.string) ?? [] {
+            guard let orb = DelegationRules.resolve(typed, among: orbs) else { throw DelegationRefusal.unknownOrb(typed) }
+            if !members.contains(where: { $0.id == orb.id }) { members.append(orb) }
+        }
+        guard OrbGroup.memberLimits.contains(members.count), var lead = members.first else {
+            throw DelegationRefusal.groupSetup(.memberCount)
+        }
+        if let typed = arguments["orchestrator"]?.string, !typed.trimmingCharacters(in: .whitespaces).isEmpty {
+            guard let orb = DelegationRules.resolve(typed, among: members) else {
+                throw DelegationRefusal.groupSetup(.orchestratorNotMember(typed))
+            }
+            lead = orb
+        }
+        guard let group = model.createGroup(name: name, members: members.map(\.id), orchestrator: lead.id,
+                                            objective: arguments["objective"]?.string ?? "", createdBy: botID) else {
+            throw DelegationRefusal.groupSetup(.unavailable)
+        }
+        let others = members.filter { $0.id != lead.id }.map(\.name)
+        let next = members.contains(where: { $0.id == botID })
+            ? "Para mandar o primeiro pedido, use orbs ask com to “\(group.name)”."
+            : "Você não é membro: o usuário manda os pedidos na tela do grupo."
+        return "Grupo \(group.name) criado: \(lead.name) orquestra; os outros membros são \(Self.list(others)). O usuário vê o grupo "
+            + "na lateral. " + next
     }
 
     /// Who a request went to, as the asker reads it: the Orb, or the group for a request sent to one from a chat.

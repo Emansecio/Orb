@@ -48,5 +48,5 @@ struct OrbsTool: AgentTool {
 extension ToolBox {
     /// The tools that exist only with more than one Orb (`MultiOrbOffering` says which an Orb is offered). Not in `all`, so
     /// an Orb that has none of them pays nothing for them.
-    static let multiOrbTools: [any AgentTool] = [OrbsTool(), OrbProposeTool()] + groupMemoryTools
+    static let multiOrbTools: [any AgentTool] = [OrbsTool(), OrbProposeTool(), GroupCreateTool()] + groupMemoryTools
 }

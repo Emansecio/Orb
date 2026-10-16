@@ -115,6 +115,12 @@ struct GeneralSettings: View {
     @State private var orbsCanTalk = true
     @State private var orbsCanStartGroups = true
     @State private var openTalks: [DelegationHub.OpenTalk] = []
+    /// The open talks a review snapshot shows in place of the hub's (`settings-orbs`).
+    private let sampleTalks: [DelegationHub.OpenTalk]?
+
+    init(sampleTalks: [DelegationHub.OpenTalk]? = nil) {
+        self.sampleTalks = sampleTalks
+    }
     @State private var isConfirmingOrbsOff = false
 
     /// Turning it off while Orbs talk asks first (it stops their conversations); turning it on never does.
@@ -191,7 +197,7 @@ struct GeneralSettings: View {
                 Toggle(isOn: Binding(get: { orbsCanStartGroups }, set: { orbsCanStartGroups = $0; model.orbsCanStartGroups = $0 })) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Orbs podem acionar grupos")
-                        Text("Quando você pede no chat, o Orb manda o pedido a um grupo de que faz parte; o orquestrador recebe e a resposta final volta para o chat. Nunca por conta própria.")
+                        Text("Quando você pede no chat, o Orb cria um grupo ou manda um pedido a um grupo de que faz parte; a resposta final do grupo volta para o chat. Nunca por conta própria.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -200,15 +206,16 @@ struct GeneralSettings: View {
                 .onAppear { orbsCanStartGroups = model.orbsCanStartGroups }
                 // The hub is not observed: the open requests are read again every two seconds while Ajustes is open.
                 .task {
+                    if let sampleTalks { openTalks = sampleTalks; return }
                     while !Task.isCancelled {
                         let now = model.delegation.openTalks()
                         if now != openTalks { openTalks = now }
                         try? await Task.sleep(for: .seconds(2))
                     }
                 }
-                OpenTalksRows(talks: $openTalks)
                 // MARK: end MultiOrb (WP1)
             }
+            OpenTalksSection(talks: $openTalks)
             ContextMemorySettings()
             LearnedWindowsSettings(rows: $learnedWindows)
             Section {
@@ -372,6 +379,20 @@ enum SettingsSnapshots {
         let content: AnyView
         switch screen {
         case "settings-general", "settings-profile": (tab, content) = (.general, AnyView(GeneralSettings()))
+        case "settings-orbs":
+            // All of Geral, tall enough to reach the Orbs' switches and the open talks below them.
+            let talks = [
+                DelegationHub.OpenTalk(id: UUID(), chainID: UUID(), title: "Atlas → Pesquisador",
+                                       detail: "“Pesquise o preço do Mac mini M5 em três lojas” · esperando Revisor · há 4 min"),
+                DelegationHub.OpenTalk(id: UUID(), chainID: UUID(), title: "Pesquisador → Revisor",
+                                       detail: "“Confira se estes preços incluem impostos” · trabalhando · há 2 min"),
+                DelegationHub.OpenTalk(id: UUID(), chainID: UUID(), title: "Lia (rotina) → Atlas",
+                                       detail: "“Resuma os e-mails de ontem” · na fila · há menos de 1 min"),
+            ]
+            return AnyView(GeneralSettings(sampleTalks: talks)
+                .frame(width: 640, height: 2000)
+                .background(Palette.chrome)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading))
         case "settings-reset":
             // The sheet on its own, as wide as a sheet is, with the numbers of the example in its description.
             return AnyView(ResetOrbSheet(sample: ResetSummary(orbs: 3, conversations: 42, routines: 5, connectors: 2, skills: 4,

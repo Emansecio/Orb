@@ -69,10 +69,11 @@ extension AppModel {
     // MARK: Making and changing
 
     /// Makes a group of `members` (2 to 8 existing Orbs; the first is the orchestrator unless `orchestrator` is one of them).
-    /// Nil when the members do not fit. `objective` is the group's goal on its board.
+    /// Nil when the members do not fit. `objective` is the group's goal on its board. `creator`: the Orb that created it from
+    /// its chat (`group_create`); its chat says so ("Atlas criou o grupo…") in place of "entrou no grupo", and so does the thread.
     @discardableResult
     func createGroup(name: String, members: [UUID], orchestrator: UUID? = nil, objective: String = "",
-                     policy: GroupPolicy = GroupPolicy()) -> OrbGroup? {
+                     policy: GroupPolicy = GroupPolicy(), createdBy creator: UUID? = nil) -> OrbGroup? {
         var seen = Set<UUID>()
         let ids = members.filter { bot($0) != nil && seen.insert($0).inserted }
         guard OrbGroup.memberLimits.contains(ids.count) else { return nil }
@@ -81,10 +82,12 @@ extension AppModel {
                              policy: policy)
         groups.append(group)
         let session = groupSession(group.id)
-        session?.append(.event(OrbEvent(kind: .groupCreated, detail: "\(title) · \(ids.count)", groupID: group.id)))
-        for id in ids {
+        let created = OrbEvent(kind: .groupCreated, actor: creator.map(orbRef), detail: "\(title) · \(ids.count)", groupID: group.id)
+        session?.append(.event(created))
+        for id in ids where id != creator {
             appendToChat(.event(OrbEvent(kind: .joinedGroup, subject: orbRef(id), detail: title, groupID: group.id)), of: id)
         }
+        if let creator { appendToChat(.event(created), of: creator) }
         let goal = objective.trimmingCharacters(in: .whitespacesAndNewlines)
         if !goal.isEmpty {
             let bank = memory.groupBank(for: group.id)

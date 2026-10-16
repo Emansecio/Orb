@@ -22,7 +22,8 @@ extension AppModel {
 
     /// Which multi-Orb tools the Orb's next turn is offered. `orbs`: the switch is on and there is a teammate, or the turn is a
     /// group's. `propose` (WP3): the Orb's own chat only, not a routine's or a request's side conversation, which nobody
-    /// watches to answer the card. `groupMemory` belongs to the groups' package and is off here.
+    /// watches to answer the card. In the own chat too: reading the boards of its groups, and creating a group with "Orbs podem
+    /// acionar grupos" on. `groupMemory` belongs to the groups' package and is off here.
     func multiOrbOffering(for botID: UUID) -> MultiOrbOffering {
         // MultiOrb (WP5): in a member's turn the group decides: `orbs` when it lets members talk (the orchestrator always may),
         // and the board's tools.
@@ -31,7 +32,9 @@ extension AppModel {
         let ownChat = isOwnChat(botID)
         // A member of a group may ask the group from its chat even with the switch off: groups do not depend on it.
         let hasTeam = inGroup || (orbsCanTalk && bots.count > 1) || (ownChat && canStartGroups(botID))
-        return MultiOrbOffering(orbs: hasTeam, propose: ownChat, groupMemory: false, askUser: ownChat)
+        return MultiOrbOffering(orbs: hasTeam, propose: ownChat, groupMemory: false,
+                                groupRecall: ownChat && !groups(containing: botID).isEmpty,
+                                groupCreate: ownChat && orbsCanStartGroups && bots.count > 1, askUser: ownChat)
     }
 
     /// The Orb's turn (or the next one) is its own chat's: not a routine's run, a request from another Orb or a group's turn.
@@ -51,7 +54,8 @@ extension AppModel {
         let team = delegation.roster(for: bot.id, groupID: group).compactMap { self.bot($0.id) }
         let teammates = OrbsPrompt.section(for: bot, roster: team, isGroup: group != nil)
         guard group == nil else { return teammates }
-        let groups = OrbsPrompt.groups(groupLines(for: bot.id), canStart: isOwnChat(bot.id) && orbsCanStartGroups)
+        let groups = OrbsPrompt.groups(groupLines(for: bot.id), canStart: isOwnChat(bot.id) && orbsCanStartGroups,
+                                       canRecall: isOwnChat(bot.id))
         return [teammates, groups].filter { !$0.isEmpty }.joined(separator: "\n\n")
     }
 

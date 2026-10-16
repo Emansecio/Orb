@@ -444,6 +444,41 @@ private final class Hooks: GroupTurnHooks {
         await team.settle()
     }
 
+    @Test func anOrbThatAskedTwoIsWokenOnceWithBothAnswers() async throws {
+        let valve = TestGate()
+        let team = Team { seen in
+            switch seen.who {
+            case "Atlas":
+                if seen.toolResult != nil { return say("Pedi aos dois.") }
+                if seen.user.contains("<orb_reply") { return say("Resultado com as duas partes.") }
+                return twoCalls([("Pesquisador", "Pesquise o preço"), ("Revisor", "Revise o texto")])
+            case "Pesquisador": return say("Pesquisa pronta.")
+            default:
+                await valve.wait()
+                return say("Revisão pronta.")
+            }
+        }
+        defer { team.cleanUp() }
+        let model = team.model
+        model.send("faça", to: team.atlas.id, fromUser: true)
+        await waitUntil("the first answer to arrive") { team.request(from: team.atlas, to: team.pesquisador)?.state == .replied }
+        await waitUntil("the asker's line to read answered") {
+            team.orbMessages(team.atlas).contains { $0.direction == .sent && $0.to?.name == "Pesquisador" && $0.state == .replied }
+        }
+        // The answer that came is shown as such; the Orb is not woken while the other is still at work (its turn is over and the
+        // box has been looked at: a wrong wake would have started by now).
+        await waitUntil("the asker's turn to end") { model.sessions[team.atlas.id]?.turnTask == nil }
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(model.sessions[team.atlas.id]?.turnTask == nil)
+        #expect(model.live(team.atlas.id).chainWork?.phrase == "Esperando Revisor")
+        #expect(team.botTexts(team.atlas) == ["Pedi aos dois."])
+        await valve.open()
+        await team.settle()
+        #expect(team.botTexts(team.atlas) == ["Pedi aos dois.", "Resultado com as duas partes."])
+        let woken = try #require(await team.log.calls(by: "Atlas").last?.user)
+        #expect(woken.contains("Pesquisa pronta.") && woken.contains("Revisão pronta."))
+    }
+
     @Test func aTellWakesNobodyAndIsReadOnceWithTheTargetsNextMessage() async throws {
         let team = Team { seen in
             switch seen.who {
@@ -894,7 +929,8 @@ private final class Hooks: GroupTurnHooks {
         #expect(throws: DelegationRefusal.switchedOff) {
             try model.delegation.submit(from: team.atlas.id, to: "Revisor", text: "x", kind: .ask, messageID: UUID(), groupID: nil)
         }
-        #expect(model.multiOrbOffering(for: team.atlas.id) == MultiOrbOffering(propose: true, askUser: true)) // only the creation tool stays (WP3), and asking you
+        // What stays: proposing an Orb (WP3), creating a group (groups do not depend on the switch) and asking you.
+        #expect(model.multiOrbOffering(for: team.atlas.id) == MultiOrbOffering(propose: true, groupCreate: true, askUser: true))
         model.orbsCanTalk = true
         #expect(model.multiOrbOffering(for: team.atlas.id).orbs)
     }
@@ -1376,6 +1412,9 @@ private actor Names {
         #expect(lines.first?.direction == .sent && lines.first?.to?.name == "Lançamento" && lines.first?.state == .replied)
         let reply = try #require(lines.first { $0.direction == .reply })
         #expect(reply.from.name == "Lançamento" && reply.text == "Mercado levantado e revisado.")
+        // The chat names the group as one: "pediu ao grupo", "O grupo … respondeu".
+        #expect(lines.first.map(ExchangeWords.line(for:)) == "Pesquisador pediu ao grupo Lançamento")
+        #expect(ExchangeWords.line(for: reply) == "O grupo Lançamento respondeu a Pesquisador")
         let wake = try #require(await team.log.calls(by: "Pesquisador").last)
         #expect(wake.user.contains("<orb_reply from=\"Lançamento\""))
         #expect(team.botTexts(team.pesquisador) == ["Pedi ao grupo.", "O grupo respondeu."])
@@ -1460,15 +1499,132 @@ private actor Names {
                                          orb: team.pesquisador.id)
             Issue.record("a group it is not in took the request")
         } catch { #expect((error as? ToolError)?.message.hasPrefix("Você não faz parte do grupo “Dupla”") == true) }
-        // A group already at work.
-        model.postUserMessage("Preparar o lançamento", to: group.id)
-        await waitUntil("the orchestrator to work") { model.isWorking(team.atlas.id) }
-        #expect(await refusal(from: team.pesquisador).hasPrefix("O grupo “Lançamento” já está trabalhando num pedido"))
         session.turnAskedByUser = false
         await valve.open()
-        await waitUntil("the request to end") { model.groupHub.run(group.id) == nil }
         await team.settle()
-        #expect(model.groupHub.run(other.id) == nil)
+        #expect(model.groupHub.run(group.id) == nil && model.groupHub.run(other.id) == nil)
+    }
+
+    @Test func aGroupAtWorkTakesTheChatsRequestAndMayHandTheAskerWork() async throws {
+        let valve = TestGate()
+        let team = Team { seen in
+            switch seen.who {
+            case "Atlas":
+                if seen.user.contains("<orb_reply") { return say("Preços prontos para o Pesquisador.") }
+                if seen.toolResult != nil { return say("Pedi ao Pesquisador.") }
+                if seen.user.contains("Levantem os preços") { return orbsCall("ask", to: "Pesquisador", "Levante os preços você mesmo.") }
+                await valve.wait()
+                return say("Lançamento preparado.")
+            case "Pesquisador":
+                if seen.user.contains("<orb_reply") { return say("O grupo respondeu.") }
+                if seen.user.contains("Levante os preços você mesmo") { return say("Preços levantados.") }
+                if seen.toolResult != nil { return say("Pedi ao grupo.") }
+                return orbsCall("ask", to: "Lançamento", "Levantem os preços.")
+            default: return say("?")
+            }
+        }
+        defer { team.cleanUp() }
+        let model = team.model
+        let group = group(team)
+        // The group is at work on the person's request when the Pesquisador's chat asks it.
+        model.postUserMessage("Preparar o lançamento", to: group.id)
+        await waitUntil("the orchestrator to work") { model.isWorking(team.atlas.id) }
+        model.send("peça ao grupo", to: team.pesquisador.id, fromUser: true)
+        await waitUntil("the request to reach the group") { await team.log.calls(by: "Pesquisador").contains { $0.toolResult != nil } }
+        let sent = try #require(await team.log.calls(by: "Pesquisador").first { $0.toolResult != nil }?.toolResult)
+        #expect(sent.hasPrefix("Pedido enviado ao grupo Lançamento"))
+        await valve.open()
+        await waitUntil("the group to finish") { model.groupHub.run(group.id) == nil }
+        await team.settle()
+        // Inside the group the orchestrator handed the asker work (its chat waiting is not the member waiting), and the
+        // group's answer came back to the chat.
+        let refused = await team.log.calls(by: "Atlas").compactMap(\.toolResult).filter { $0.contains("já está esperando") }
+        #expect(refused.isEmpty)
+        #expect(await team.log.calls(by: "Pesquisador").contains { $0.user.contains("Levante os preços você mesmo") })
+        #expect(team.botTexts(team.pesquisador) == ["Pedi ao grupo.", "O grupo respondeu."])
+    }
+
+    @Test func anOrbCreatesAGroupAtThePersonsRequestAndSendsItTheFirstRequest() async throws {
+        let team = Team { seen in
+            guard seen.who == "Atlas" else { return say("?") }
+            if seen.user.contains("<orb_reply") { return say("O grupo respondeu.") }
+            if seen.user.contains("sent this to the group from your own chat") { return say("Plano feito pelo grupo.") }
+            if let result = seen.toolResult, result.hasPrefix("Pedido enviado") { return say("Criei e pedi.") }
+            if seen.toolResult != nil { return orbsCall("ask", to: "Lançamento", "Façam o plano do lançamento.") }
+            let arguments = JSONValue.object([
+                "name": .string("Lançamento"), "orchestrator": .string("Atlas"),
+                "members": .array(["Atlas", "Pesquisador", "Revisor"].map(JSONValue.string)),
+            ]).jsonString
+            return [.toolCalls([ToolCallRequest(id: "g1", name: GroupCreateTool.name, arguments: arguments)])]
+        }
+        defer { team.cleanUp() }
+        let model = team.model
+        model.groupHub.settle = .zero
+        model.groupHub.isAppActive = { false }
+        model.send("crie um grupo Lançamento com o Pesquisador e o Revisor e peça o plano", to: team.atlas.id, fromUser: true)
+        await waitUntil("the group to be created") { !model.groups.isEmpty }
+        await waitUntil("the group's request to end") { model.groupHub.run(model.groups[0].id) == nil }
+        await team.settle()
+        let group = try #require(model.groups.first)
+        #expect(group.name == "Lançamento" && group.orchestratorID == team.atlas.id && group.memberIDs.count == 3)
+        let created = try #require(await team.log.calls(by: "Atlas").compactMap(\.toolResult).first)
+        #expect(created.hasPrefix("Grupo Lançamento criado: Atlas orquestra; os outros membros são Pesquisador e Revisor."))
+        // The creator's chat says it created the group (not that it joined); the others' say they joined.
+        #expect(team.events(team.atlas).map(\.sentence).contains("Atlas criou o grupo Lançamento com 3 Orbs"))
+        #expect(!team.events(team.atlas).contains { $0.kind == .joinedGroup })
+        #expect(team.events(team.pesquisador).map(\.sentence) == ["Pesquisador entrou no grupo Lançamento"])
+        #expect(team.botTexts(team.atlas) == ["Criei e pedi.", "O grupo respondeu."])
+    }
+
+    @Test func creatingAGroupIsRefusedWithWhatToDoInstead() async throws {
+        let team = Team { _ in say("?") }
+        defer { team.cleanUp() }
+        let model = team.model, hub = model.delegation
+        func create(_ name: String, _ members: [String], orchestrator: String? = nil) async -> String {
+            var fields: [String: JSONValue] = ["action": .string("create_group"), "name": .string(name),
+                                               "members": .array(members.map(JSONValue.string))]
+            if let orchestrator { fields["orchestrator"] = .string(orchestrator) }
+            do { return try await hub.handleTool(.object(fields), orb: team.atlas.id) } catch {
+                return (error as? ToolError)?.message ?? ""
+            }
+        }
+        let session = model.session(team.atlas.id)
+        #expect(await create("Dupla", ["Atlas", "Revisor"]).hasPrefix("Você só cria um grupo quando o usuário pede"))
+        session.turnAskedByUser = true
+        #expect(await create("Revisor", ["Atlas", "Pesquisador"]).hasPrefix("Já existe um Orb ou um grupo chamado “Revisor”"))
+        #expect(await create("Dupla", ["Atlas"]).hasPrefix("Um grupo tem de 2 a 8 Orbs"))
+        #expect(await create("Dupla", ["Atlas", "Lia"]).hasPrefix("Não existe um Orb chamado “Lia”"))
+        #expect(await create("Dupla", ["Atlas", "Revisor"], orchestrator: "Pesquisador").hasPrefix("“Pesquisador” não está em members"))
+        model.orbsCanStartGroups = false
+        #expect(await create("Dupla", ["Atlas", "Revisor"]).hasPrefix("O usuário desligou “Orbs podem acionar grupos”"))
+        #expect(model.multiOrbOffering(for: team.atlas.id).groupCreate == false)
+        #expect(model.groups.isEmpty)
+        model.orbsCanStartGroups = true
+        // Not a member: the group is made, and the Orb is told the person starts its work.
+        #expect(await create("Dupla", ["Pesquisador", "Revisor"]).hasSuffix("Você não é membro: o usuário manda os pedidos na tela do grupo."))
+        #expect(await create("dupla", ["Atlas", "Revisor"]).hasPrefix("Já existe um Orb ou um grupo chamado “dupla”"))
+        session.turnAskedByUser = false
+    }
+
+    @Test func inItsChatAnOrbReadsTheBoardOfItsGroups() async throws {
+        let team = Team { seen in
+            guard seen.who == "Atlas" else { return say("?") }
+            if let result = seen.toolResult { return say("Quadro: \(result)") }
+            let arguments = JSONValue.object(["query": .string("tom"), "group": .string("lancamento")]).jsonString
+            return [.toolCalls([ToolCallRequest(id: "r1", name: "group_recall", arguments: arguments)])]
+        }
+        defer { team.cleanUp() }
+        let model = team.model
+        #expect(model.multiOrbOffering(for: team.atlas.id).groupRecall == false) // in no group yet
+        let group = group(team)
+        #expect(model.multiOrbOffering(for: team.atlas.id).groupRecall == true)
+        _ = await model.memory.groupBank(for: group.id).remember("Tom direto, sem jargão.", kind: .preferencia, title: "Tom")
+        model.send("o que o grupo decidiu sobre o tom?", to: team.atlas.id, fromUser: true)
+        await team.settle()
+        let read = try #require(await team.log.calls(by: "Atlas").compactMap(\.toolResult).first)
+        #expect(read.contains("Tom direto"))
+        let system = try #require(await team.log.calls(by: "Atlas").first?.system)
+        #expect(system.contains("group_recall searches a group's shared board"))
     }
 
     @Test func stoppingTheChatThatWaitsForItsGroupStopsTheGroup() async throws {

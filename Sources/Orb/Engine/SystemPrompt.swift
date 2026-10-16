@@ -274,7 +274,7 @@ enum OrbsPrompt {
     /// What the Orb is told, outside a group's turn, about the groups it is in: their names and members, and what it can do
     /// about them (empty without groups). `canStart`: its own chat, with "Orbs podem acionar grupos" on. The same bytes for the
     /// same groups, so the provider's cache holds.
-    static func groups(_ groups: [GroupLine], canStart: Bool = false) -> String {
+    static func groups(_ groups: [GroupLine], canStart: Bool = false, canRecall: Bool = false) -> String {
         guard !groups.isEmpty else { return "" }
         let lines = groups.prefix(groupLimit).map { "- " + line($0) }
         let how = canStart
@@ -284,11 +284,12 @@ enum OrbsPrompt {
             : "You cannot write in a group's thread or start its work: the user does that on the group's screen. If asked to, say "
                 + "so and offer to ask the members one by one with orbs (each request runs outside the group) or to write the text "
                 + "for the user to paste."
+        let recall = canRecall ? " group_recall searches a group's shared board (its decisions and notes)." : ""
         return """
         ## Your groups
         Groups of the user you are a member of (each has a shared thread on its own screen):
         \(lines.joined(separator: "\n"))
-        \(how)
+        \(how)\(recall)
         """
     }
 

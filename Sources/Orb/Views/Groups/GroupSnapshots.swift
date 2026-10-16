@@ -2,21 +2,22 @@
 import SwiftUI
 
 /// `--snapshot` modes of the group screens: groups-sidebar, group-chat, group-working (presence and what the request spent),
-/// group-new, group-panel, group-board and group-empty. Each mode seeds four Orbs and the
+/// group-new, group-panel, group-board and group-empty. group-panel-readonly and group-new-readonly put Atlas (the orchestrator)
+/// and the Revisor in Só leitura; group-chat-requests adds a request a member sent from its chat and a notice. Each mode seeds four Orbs and the
 /// sample groups into the model, with the live state that mode shows.
 @MainActor
 enum GroupSnapshots {
     static func view(_ screen: String, model: AppModel) -> AnyView? {
         let modes: Set<String> = ["groups-sidebar", "group-chat", "group-working", "group-new", "group-panel", "group-board",
-                                  "group-empty"]
+                                  "group-empty", "group-panel-readonly", "group-new-readonly", "group-chat-requests"]
         guard modes.contains(screen) else { return nil }
         let sample = SampleGroups(model: model, mode: screen)
         switch screen {
         case "groups-sidebar":
             return AnyView(SidebarView().frame(width: 280))
-        case "group-new":
+        case "group-new", "group-new-readonly":
             return AnyView(NewGroupSheet(startingWith: sample.atlas.id).frame(width: 560))
-        case "group-panel":
+        case "group-panel", "group-panel-readonly":
             return AnyView(GroupPanel(groupID: sample.launch.id).frame(width: 360, height: 700))
         case "group-board":
             return AnyView(GroupBoardView(memory: SampleGroups.board, setObjective: { _ in }, remember: { _ in },
@@ -43,10 +44,16 @@ private struct SampleGroups {
     let empty: OrbGroup
 
     init(model: AppModel, mode: String) {
-        atlas = model.bots.first ?? Bot(name: "Atlas", role: "Assistente do seu Mac", orb: WelcomeLooks.atlas)
+        var lead = model.bots.first ?? Bot(name: "Atlas", role: "Assistente do seu Mac", orb: WelcomeLooks.atlas)
         research = Bot(name: "Pesquisador", role: "Pesquisa na web", orb: WelcomeLooks.bento)
-        review = Bot(name: "Revisor", role: "Revisa código",
-                     orb: OrbConfig(color: "grafite", eyes: "pilulas", brows: "retas", accessories: ["fones"]))
+        var reviewer = Bot(name: "Revisor", role: "Revisa código",
+                           orb: OrbConfig(color: "grafite", eyes: "pilulas", brows: "retas", accessories: ["fones"]))
+        if mode.hasSuffix("-readonly") {
+            lead.permissionMode = .readOnly
+            reviewer.permissionMode = .readOnly
+        }
+        atlas = lead
+        review = reviewer
         lia = Bot(name: "Lia", role: "Cuida de e-mails", orb: WelcomeLooks.lia)
         model.bots = [atlas, research, review, lia]
 
@@ -58,7 +65,10 @@ private struct SampleGroups {
         model.groupSessions = [:]
         model.groupLives = [:]
 
-        let conversation = Self.conversation(atlas: atlas, research: research, review: review, group: launch.id)
+        var conversation = Self.conversation(atlas: atlas, research: research, review: review, group: launch.id)
+        if mode == "group-chat-requests" {
+            conversation.items += Self.fromChat(atlas: atlas, research: research, review: review, group: launch.id)
+        }
         let working = mode == "group-working" || mode == "groups-sidebar"
         model.groupSessions[launch.id] = GroupSession(groupID: launch.id, conversation: conversation)
         model.groupSessions[empty.id] = GroupSession(groupID: empty.id)
@@ -101,6 +111,19 @@ private struct SampleGroups {
             """),
             TranscriptItem(.user(text: "Ótimo. Capriche no tom, sem jargão.", attachments: [])),
         ])
+    }
+
+    /// A request the Pesquisador sent to the group from its own chat ("a seu pedido") and a notice from the Revisor.
+    private static func fromChat(atlas: Bot, research: Bot, review: Bot, group: UUID) -> [TranscriptItem] {
+        let chain = UUID()
+        return [
+            TranscriptItem(.orbMessage(OrbMessageItem(direction: .post, kind: .ask, state: .open, from: OrbRef(research),
+                                                      to: OrbRef(atlas), text: "Levantem quanto cada concorrente cobra no plano anual.",
+                                                      requestID: UUID(), chainID: chain, groupID: group, fromChat: true))),
+            TranscriptItem(.orbMessage(OrbMessageItem(direction: .post, kind: .tell, state: .replied, from: OrbRef(review),
+                                                      to: OrbRef(research), text: "O Things mudou o preço ontem: confira no site.",
+                                                      requestID: UUID(), chainID: chain, groupID: group))),
+        ]
     }
 
     /// What the board holds: the objective, the agreements and what the members saved.
