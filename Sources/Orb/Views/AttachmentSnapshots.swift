@@ -40,7 +40,8 @@ enum AttachmentSnapshots {
         ]
     }
 
-    /// `transcript-outputs`: a file the Orb made, one it changed and a capture of the screen, under their tool lines.
+    /// `transcript-outputs`: a file the Orb made, one it changed and a capture of the screen, under their tool lines; the
+    /// reply shows the capture (`MarkdownBlock.image`).
     static func outputs() -> [TranscriptItem] {
         let notes = file("NOTAS.md", size: 3_400)
         let readme = file("README.md", size: 1_200)
@@ -54,7 +55,7 @@ enum AttachmentSnapshots {
             call(.file, "Gravando arquivo", notes, files: [ProducedFile(path: notes, created: true)]),
             call(.file, "Editando arquivo", readme, files: [ProducedFile(path: readme, created: false)]),
             call(.computer, "Capturando a tela", "", files: [ProducedFile(path: capture, created: true)]),
-            TranscriptItem(.bot(text: "Anotei em NOTAS.md, ajustei o README e tirei uma captura da tela.", isStreaming: false)),
+            TranscriptItem(.bot(text: "Anotei em NOTAS.md, ajustei o README e tirei uma captura da tela.\n\n![A tela depois das mudanças](\(capture))\n\nSe quiser, mando para alguém.", isStreaming: false)),
         ]
     }
 

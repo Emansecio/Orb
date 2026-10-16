@@ -813,7 +813,7 @@ struct ToolCallLine: View {
             }
 
             if call.state == .done, let files = call.files, !files.isEmpty {
-                ProducedFilesView(files: files).padding(.leading, 22)
+                ProducedFilesView(files: files, captures: Set(call.capturedPictures.map(\.path))).padding(.leading, 22)
             }
 
             if isExpanded, let output = call.output {
@@ -983,7 +983,7 @@ struct ToolGroupRow: View, Equatable {
             ScreenStepsStrip(steps: steps).padding(.leading, 22)
         }
         if !files.isEmpty {
-            ProducedFilesView(files: files).padding(.leading, 22)
+            ProducedFilesView(files: files, captures: Set(calls.flatMap(\.capturedPictures).map(\.path))).padding(.leading, 22)
         }
     }
 }

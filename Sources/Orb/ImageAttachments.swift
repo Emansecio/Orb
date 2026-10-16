@@ -225,6 +225,65 @@ struct ImageStore: Sendable {
     }
 }
 
+// MARK: - Pictures nothing points at
+
+extension ImageStore {
+    /// How long a picture nothing points at is kept: a picture just attached or captured is not in a saved file yet.
+    static let orphanAge: TimeInterval = 7 * 24 * 3600
+
+    /// Deletes the pictures of the store that no saved file of the app names any more: the captures of a conversation
+    /// that was cleared, rewound or deleted, and the pictures of a draft that was thrown away. A picture is kept when
+    /// its name (`<uuid>.jpg|png`) appears in the state, the drafts or any conversation file (an Orb's, an archived one,
+    /// a routine's, a request from another Orb, a group's thread, and the `.corrupt-…` copies of any of them), in whatever
+    /// field: a message, a tool's files, a reply that shows it. Only files untouched for `olderThan`. When a file cannot be read, nothing is deleted. Run at launch,
+    /// off the main thread, before anything new can point at an old picture. Returns how many it deleted.
+    @discardableResult
+    func removeOrphans(dataFolder: URL, olderThan: TimeInterval = ImageStore.orphanAge, now: Date = .now,
+                       read: (URL) -> Data? = { url in Store.gate.reading(url) { try? Data(contentsOf: url) } }) -> Int {
+        let manager = FileManager.default
+        guard let named = Self.namedPictures(dataFolder: dataFolder, read: read) else { return 0 }
+        let keys: [URLResourceKey] = [.contentModificationDateKey, .isRegularFileKey]
+        var deleted = 0
+        for folder in (try? manager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? [] {
+            for file in (try? manager.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys)) ?? [] {
+                guard Self.isStoredName(file.lastPathComponent), !named.contains(file.lastPathComponent),
+                      let values = try? file.resourceValues(forKeys: Set(keys)), values.isRegularFile == true,
+                      let date = values.contentModificationDate, now.timeIntervalSince(date) > olderThan else { continue }
+                if (try? manager.removeItem(at: file)) != nil { deleted += 1 }
+            }
+        }
+        return deleted
+    }
+
+    /// The names of stored pictures that the app's saved files mention, or nil when one of them could not be read.
+    static func namedPictures(dataFolder: URL, read: (URL) -> Data?) -> Set<String>? {
+        let manager = FileManager.default
+        // `x.json`, and the copies set aside: `x.json.corrupt-<date>`, `state.json.<…>`.
+        let saved = { (url: URL) in url.lastPathComponent.hasSuffix(".json") || url.lastPathComponent.contains(".json.") }
+        var files = ((try? manager.contentsOfDirectory(at: dataFolder, includingPropertiesForKeys: nil)) ?? []).filter(saved)
+        let conversations = dataFolder.appending(path: "conversations")
+        if manager.fileExists(atPath: conversations.path) {
+            guard let walker = manager.enumerator(at: conversations, includingPropertiesForKeys: nil) else { return nil }
+            for case let url as URL in walker where saved(url) { files.append(url) }
+        }
+        var names = Set<String>()
+        for file in files {
+            guard let data = read(file) else {
+                // Gone in between (a conversation deleted while this ran) is fine; unreadable is not.
+                if manager.fileExists(atPath: file.path) { return nil } else { continue }
+            }
+            let text = String(decoding: data, as: UTF8.self)
+            for match in text.matches(of: storedName) { names.insert(String(match.output)) }
+        }
+        return names
+    }
+
+    /// `<UUID>.jpg` or `.png`, the names `add` gives.
+    nonisolated(unsafe) private static let storedName = /[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}\.(?:jpg|png)/
+
+    static func isStoredName(_ name: String) -> Bool { name.wholeMatch(of: storedName) != nil }
+}
+
 // MARK: - On the wire
 
 enum ImageWire {
@@ -279,12 +338,21 @@ enum ImageWire {
     static func dataURL(mediaType: String, base64: String) -> String { "data:\(mediaType);base64,\(base64)" }
 }
 
+extension ImageAttachment {
+    /// The line that names a picture in the text the model reads: under a tool's result while the picture is there, and in
+    /// its place once it leaves the window (`elidingOldImages`). With it the Orb can show the picture in a reply
+    /// (`MarkdownBlock.image`).
+    static func note(for image: ImageAttachment) -> String { "[imagem anexada: \(image.path)]" }
+}
+
 extension ChatMessage {
     /// The message with its pictures replaced by one line of text each (`note` says what to write for a picture).
     func replacingImages(with note: (ImageAttachment) -> String) -> ChatMessage {
         guard !images.isEmpty else { return self }
         var copy = self
-        copy.content += (content.isEmpty ? "" : "\n") + images.map(note).joined(separator: "\n")
+        // A tool's message already names its pictures (`ImageAttachment.note`): the same line is not written twice.
+        let notes = images.map(note).filter { !content.contains($0) }
+        copy.content += notes.isEmpty ? "" : (content.isEmpty ? "" : "\n") + notes.joined(separator: "\n")
         copy.images = []
         return copy
     }

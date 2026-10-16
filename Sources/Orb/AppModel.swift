@@ -420,9 +420,11 @@ final class AppModel {
         let outputs = outputsDirectory
         // A developer run shares the user's $TMPDIR (`ORB_DATA_DIR` only moves the data), so it leaves alone what a running app wrote.
         let cleansTemporaryFiles = !DevRun.isActive
+        let images = images, dataFolder = store.directory
         Task.detached(priority: .utility) {
             ToolOutputCap.cleanUp(directory: outputs)
             if cleansTemporaryFiles { LegacyTemporaryFiles.removeStaleMCPConfigs() }
+            images.removeOrphans(dataFolder: dataFolder)
         }
         ApprovalNotifications.clearStale()
         ApprovalNotifications.install { [weak self] route in self?.handle(route) }

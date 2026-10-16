@@ -29,7 +29,7 @@ enum ProseSegment: Equatable {
     static func isProse(_ block: MarkdownBlock) -> Bool {
         switch block {
         case .paragraph, .heading, .list, .quote: true
-        case .code, .table, .rule: false
+        case .code, .table, .rule, .image: false
         }
     }
 }
@@ -83,7 +83,7 @@ enum ProseText {
                     if number > 0 { text.append(NSAttributedString(string: "\n")) }
                     text.append(listItem(item, cached: cached || number < items.count - 1, highlight: highlight, spacing: number == items.count - 1 ? 0 : itemSpacing))
                 }
-            case .code, .table, .rule:
+            case .code, .table, .rule, .image:
                 continue // never in a run (`ProseSegment`)
             }
             // The space after each block, as the stack of blocks had it; none after the last.

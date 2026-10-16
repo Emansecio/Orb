@@ -1089,7 +1089,10 @@ actor AgentEngine {
             let files = (target.map { [ProducedFile(path: $0.url.path, created: !$0.existed)] } ?? [])
                 + result.images.map { ProducedFile(path: $0.path, created: true) }
             out.yield(.toolFinished(id: started.id, state: result.failed ? .failed : .done, output: Self.preview(result.text), files: files))
-            return ToolOutcome(result.text, isError: result.failed, images: result.images)
+            // The path of each picture goes with it, as an elided one's does (`elidingOldImages`): the Orb can show it to the
+            // person in its reply (`MarkdownBlock.image`), and the line does not change when the picture leaves the window.
+            let text = result.text + result.images.map { "\n" + ImageAttachment.note(for: $0) }.joined()
+            return ToolOutcome(text, isError: result.failed, images: result.images)
         } catch {
             let message = error.localizedDescription
             out.yield(.toolFinished(id: started.id, state: .failed, output: message))

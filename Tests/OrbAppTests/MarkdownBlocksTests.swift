@@ -17,6 +17,35 @@ import Testing
         #expect(MarkdownBlocks.parse("").isEmpty)
     }
 
+    @Test func aPictureOnThisMacAloneOnItsLineIsABlock() {
+        #expect(MarkdownBlocks.parse("![A tela de login](/Users/x/anexos/a.jpg)") == [.image(alt: "A tela de login", path: "/Users/x/anexos/a.jpg")])
+        // A path with spaces in <…>, a file:// URL, ~/ and an empty caption.
+        #expect(MarkdownBlocks.parse("![Gráfico](</Users/x/Meus Documentos/g.png>)") == [.image(alt: "Gráfico", path: "/Users/x/Meus Documentos/g.png")])
+        #expect(MarkdownBlocks.parse("![](file:///tmp/Captura%20final.png)") == [.image(alt: "", path: "/tmp/Captura final.png")])
+        let home = NSString(string: "~/Desktop/g.png").expandingTildeInPath
+        #expect(MarkdownBlocks.parse("  ![g](~/Desktop/g.png)  ") == [.image(alt: "g", path: home)])
+        // It ends the paragraph above it and starts the one below.
+        #expect(MarkdownBlocks.parse("Veja:\n![tela](/x/a.png)\nPronto.") == [.paragraph("Veja:"), .image(alt: "tela", path: "/x/a.png"), .paragraph("Pronto.")])
+        #expect(MarkdownBlocks.plainText(of: "![tela](/x/a.png)") == "tela: /x/a.png")
+    }
+
+    @Test func aWebAddressOrAPictureInASentenceStaysText() {
+        // Nothing a reply points at is fetched: a web picture is not a block.
+        for line in ["![pixel](https://exemplo.com/p.png?d=segredo)", "![x](//exemplo.com/p.png)", "![x](imagens/rel.png)",
+                     "Olhe ![x](/x/a.png) aqui", "![relatório](/x/relatório.pdf)", "![x](/x/a b.png)", "![x]](/x/a.png)"] {
+            #expect(MarkdownBlocks.parse(line) == [.paragraph(line)], "\(line)")
+        }
+    }
+
+    @Test func aPictureOfAReplyKeepsItsProportionsWithinTheBound() {
+        // A Retina capture of 2880×1800 px is 1440×900 pt: shrunk to fit 420×300, in its own proportions.
+        let wide = ReplyImageSizes.fitted(width: 2880, height: 1800)
+        #expect(wide.width <= 420 && wide.height <= 300 && abs(wide.width / wide.height - 1.6) < 0.02)
+        // A small chart is not blown up; a sliver keeps 40 pt.
+        #expect(ReplyImageSizes.fitted(width: 400, height: 300) == CGSize(width: 200, height: 150))
+        #expect(ReplyImageSizes.fitted(width: 2000, height: 20).height == 40)
+    }
+
     @Test func headingsHaveALevelAndLoseTheirHashes() {
         #expect(MarkdownBlocks.parse("# Título") == [.heading(level: 1, text: "Título")])
         #expect(MarkdownBlocks.parse("### Passo 3 ###") == [.heading(level: 3, text: "Passo 3")])

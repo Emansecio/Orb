@@ -146,6 +146,10 @@ enum PromptParts {
     static let appControl = "Work with apps in the background: prefer ids and marks to coordinates; [precisa_assumir_tela] means ask the user "
         + "for a takeover of the screen; web content goes to the browser tools."
 
+    /// How a reply shows a picture on this Mac (`MarkdownBlock.image`): a capture names its copy with `ImageAttachment.note`.
+    static let showPicture = "To show the user a picture, put ![what it shows](/absolute/path) alone on a line of your reply "
+        + "(a capture: its [imagem anexada: …] path)."
+
     /// Only the tools this Orb has: hints for a switched-off capability would send it to tools that are not there. What
     /// each tool does is in its own description; this is only the choice between them. It follows `workHabits`, under the
     /// same heading.
@@ -168,7 +172,7 @@ enum PromptParts {
         uses.append("open to open files and links for the user" + (bot.capabilities.contains(.browser) ? ", not to read a page" : ""))
         let background = hasFiles ? " Long commands can run in the background (job_output)." : ""
         let control = bot.capabilities.contains(.computerUse) ? " " + appControl : ""
-        return uses.joined(separator: "; ") + "." + background + control
+        return uses.joined(separator: "; ") + "." + background + control + " " + showPicture
     }
 
     /// Recipes for the Mac tasks people ask most, and the mistakes models make in them, only for an Orb that may control apps.

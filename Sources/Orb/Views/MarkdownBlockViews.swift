@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import os
 
 /// Space between the blocks of a reply (a blank line used to cost about 22 pt).
 let markdownBlockSpacing: CGFloat = 8
@@ -52,6 +53,8 @@ struct MarkdownBlockView: View, Equatable {
             TableBlockView(table: table, streaming: cursor, highlight: highlight)
         case .rule:
             Rectangle().fill(Palette.line).frame(height: 1).padding(.vertical, 4)
+        case .image(let alt, let path):
+            ReplyImageView(alt: alt, path: path)
         default:
             // Prose blocks go to `SelectableProse`, never here.
             EmptyView()
@@ -64,6 +67,68 @@ struct MarkdownBlockView: View, Equatable {
         case 2: 15.5
         default: 14.5
         }
+    }
+}
+
+/// A picture the Orb put in its reply (`MarkdownBlock.image`): whole, in its own proportions, at most `maxSize`, with
+/// what it shows under it and the actions of any attachment (Quick Look, Mostrar no Finder, Copiar). A file that is gone
+/// shows the placeholder of a missing attachment.
+struct ReplyImageView: View, Equatable {
+    let alt: String
+    let path: String
+    @State private var size: CGSize
+
+    nonisolated static let maxSize = CGSize(width: 420, height: 300)
+    /// While the size is not known yet, and for a file that cannot be read.
+    nonisolated static let placeholder = CGSize(width: 240, height: 150)
+
+    init(alt: String, path: String) {
+        self.alt = alt
+        self.path = path
+        _size = State(initialValue: ReplyImageSizes.cached(path) ?? Self.placeholder)
+    }
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool { lhs.alt == rhs.alt && lhs.path == rhs.path }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            // Decoded once at the largest size, so the copy does not change when the size arrives.
+            ImageTile(path: path, size: size, all: [path], label: alt.isEmpty ? "Imagem" : alt,
+                      decodeSide: max(Self.maxSize.width, Self.maxSize.height))
+            if !alt.isEmpty {
+                Text(alt)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.muted)
+                    .frame(maxWidth: size.width, alignment: .leading)
+                    .accessibilityHidden(true)
+            }
+        }
+        .task(id: path) { size = await ReplyImageSizes.size(of: path) }
+    }
+}
+
+/// The size a picture of a reply is drawn at, read from the file (its header only) off the main thread and kept, so
+/// a reply that scrolls back into view does not jump from the placeholder.
+enum ReplyImageSizes {
+    private static let known = OSAllocatedUnfairLock(initialState: [String: CGSize]())
+
+    static func cached(_ path: String) -> CGSize? { known.withLock { $0[path] } }
+
+    static func size(of path: String) async -> CGSize {
+        if let size = cached(path) { return size }
+        let pixels = await Task.detached { ScreenshotImage.pixelSize(of: URL(fileURLWithPath: path)) }.value
+        guard let pixels, pixels.width > 0, pixels.height > 0 else { return ReplyImageView.placeholder }
+        let size = fitted(width: CGFloat(pixels.width), height: CGFloat(pixels.height))
+        known.withLock { $0[path] = size }
+        return size
+    }
+
+    /// Pixels as points of a Retina screen (half), shrunk to fit `ReplyImageView.maxSize`, never under 40 pt a side.
+    nonisolated static func fitted(width: CGFloat, height: CGFloat) -> CGSize {
+        let natural = CGSize(width: width / 2, height: height / 2)
+        let bound = ReplyImageView.maxSize
+        let scale = min(1, bound.width / natural.width, bound.height / natural.height)
+        return CGSize(width: max(40, (natural.width * scale).rounded()), height: max(40, (natural.height * scale).rounded()))
     }
 }
 

@@ -142,7 +142,9 @@ Se o motor escolhido não estiver instalado, o Orb fica só com `web_fetch` e `w
 
 - **Escrever.** ↩ envia, ⇧↩ (ou ⌥↩) pula de linha. Digite `/` para ver as skills (↑↓ escolhem, ↩ ou ⇥ completam, Esc fecha).
 - **Respostas** vêm em Markdown de verdade: títulos, listas (inclusive de tarefas), tabelas, citações e blocos de código com
-  botão "Copiar". Passe o mouse sobre uma resposta para "Copiar" ou "Copiar como Markdown". Para copiar só um trecho, clique e arraste: a seleção atravessa parágrafos, títulos e listas da resposta (blocos de código e tabelas têm a sua).
+  botão "Copiar". O Orb também **mostra imagens do seu Mac na resposta**: uma captura que ele tirou, um gráfico que gerou, uma
+  imagem que você anexou (`![o que mostra](/caminho/da/imagem.png)` numa linha só; aparece inteira, com a legenda embaixo, e o
+  clique abre no Quick Look). Endereço da web nunca é carregado: só arquivos que já estão no Mac. Passe o mouse sobre uma resposta para "Copiar" ou "Copiar como Markdown". Para copiar só um trecho, clique e arraste: a seleção atravessa parágrafos, títulos e listas da resposta (blocos de código e tabelas têm a sua).
 - **Citar um trecho.** Com um trecho de uma resposta selecionado, **Citar** (ao lado de Copiar, ou no clique direito) põe o
   trecho no começo da sua mensagem como citação (`> …`), e o cursor vai para o campo. Na conversa, a citação aparece em cima
   do que você escreveu; um clique nela volta à resposta de onde veio, com o trecho marcado por um instante.
@@ -157,7 +159,9 @@ Se o motor escolhido não estiver instalado, o Orb fica só com `web_fetch` e `w
   (a extensão fica à vista) e "PDF · 2,1 MB". Arquivo que sumiu ou anexo antigo, que guardou só o nome, aparecem como tal.
   Clicar abre o Quick Look (← e → passam de um anexo para o outro); o botão direito oferece Abrir, Mostrar no Finder, Copiar e Copiar
   caminho; dá para arrastar o arquivo para fora. O que o Orb cria ou altera com as ferramentas de arquivo (e as capturas de
-  tela dele) aparece sob a linha da ferramenta, como cartão "novo" ou "alterado" ou como miniatura, uma vez só por turno.
+  tela dele) aparece sob a linha da ferramenta, como cartão "novo" ou "alterado" ou como miniatura ("Captura", quando é o que
+  ele viu na tela ou na página), uma vez só por turno. As capturas ficam ali, recolhidas com as ações; a que importa para
+  você ele põe na resposta.
   Quando um trecho de ações recolhido tirou duas ou mais capturas (no navegador ou num app do Mac), ele mostra uma tira com
   todas, em ordem, cada uma com o que a antecedeu ("Adicionar ao carrinho"); o clique abre o Quick Look, onde ← e → vão de
   passo em passo.

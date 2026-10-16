@@ -238,6 +238,63 @@ struct ImageStoreTests {
         await waitUntil("the Orb's pictures to be deleted") { !FileManager.default.fileExists(atPath: image.path) }
         #expect(!FileManager.default.fileExists(atPath: image.path))
     }
+
+    // MARK: Pictures nothing points at
+
+    /// A data folder with pictures of one Orb, all a week and a day old unless `fresh`.
+    private func orphanRig(_ folder: Folder) throws -> (store: ImageStore, pictures: [String: URL]) {
+        let store = ImageStore(dataFolder: folder.url)
+        let bot = UUID()
+        var pictures: [String: URL] = [:]
+        for key in ["mensagem", "captura", "resposta", "rascunho", "grupo", "corrompida", "orfa", "nova"] {
+            let image = try store.add(try Pictures.data(width: 20, height: 20), name: key, botID: bot)
+            let age: TimeInterval = key == "nova" ? 3600 : ImageStore.orphanAge + 86_400
+            try FileManager.default.setAttributes([.modificationDate: Date.now.addingTimeInterval(-age)], ofItemAtPath: image.path)
+            pictures[key] = URL(fileURLWithPath: image.path)
+        }
+        func write(_ text: String, _ path: String) throws {
+            let url = folder.url.appending(path: path)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(text.utf8).write(to: url)
+        }
+        // Slashes escaped as JSONEncoder writes them: the name is what counts.
+        let escaped = { (key: String) in pictures[key]!.path.replacingOccurrences(of: "/", with: "\\/") }
+        try write(#"{"images":[{"path":"\#(escaped("mensagem"))"}]}"#, "conversations/\(bot.uuidString).json")
+        try write(#"{"files":[{"path":"\#(escaped("captura"))"}]}"#, "conversations/\(bot.uuidString)/routine-x.json")
+        try write(#"{"text":"![tela](\#(escaped("resposta")))"}"#, "conversations/\(bot.uuidString)/arquivada.json")
+        try write(#"{"pictures":["\#(escaped("rascunho"))"]}"#, Store.draftsFileName)
+        try write(#"{"anexos":["\#(pictures["grupo"]!.lastPathComponent)"]}"#, "conversations/_grupos/g.json")
+        try write(#"{"images":[{"path":"\#(escaped("corrompida"))"}]}"#, "conversations/\(bot.uuidString).json.corrupt-20261015-120000")
+        return (store, pictures)
+    }
+
+    @Test func aPictureNoSavedFileNamesGoesOnceItIsAWeekOld() throws {
+        let folder = Folder()
+        let (store, pictures) = try orphanRig(folder)
+        let other = folder.url.appending(path: "anexos/\(UUID().uuidString)/leia-me.txt")
+        try FileManager.default.createDirectory(at: other.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: other)
+        try FileManager.default.setAttributes([.modificationDate: Date.distantPast], ofItemAtPath: other.path)
+
+        #expect(store.removeOrphans(dataFolder: folder.url) == 1)
+        #expect(!FileManager.default.fileExists(atPath: pictures["orfa"]!.path))
+        // Named somewhere (a message, a tool's files, a reply, a draft, a group's thread, a copy set aside), too new, or not
+        // a picture of the store.
+        for key in ["mensagem", "captura", "resposta", "rascunho", "grupo", "corrompida", "nova"] {
+            #expect(FileManager.default.fileExists(atPath: pictures[key]!.path), "\(key)")
+        }
+        #expect(FileManager.default.fileExists(atPath: other.path))
+    }
+
+    @Test func aFileThatCannotBeReadDeletesNothing() throws {
+        let folder = Folder()
+        let (store, pictures) = try orphanRig(folder)
+        let deleted = store.removeOrphans(dataFolder: folder.url) { url in
+            url.lastPathComponent == "routine-x.json" ? nil : try? Data(contentsOf: url)
+        }
+        #expect(deleted == 0)
+        #expect(FileManager.default.fileExists(atPath: pictures["orfa"]!.path))
+    }
 }
 
 // MARK: - Persistence
@@ -453,6 +510,13 @@ struct ImageContextTests {
         #expect(conversation.filter { !$0.images.isEmpty }.count == 5)
     }
 
+    @Test func aCaptureThatAlreadyNamesItsPictureIsNotNamedTwiceWhenItLeaves() {
+        let shot = picture("s1")
+        let tool = ChatMessage.tool("c1", "captura\n" + ImageAttachment.note(for: shot), images: [shot])
+        let elided = tool.replacingImages(with: ImageAttachment.note(for:))
+        #expect(elided.content == "captura\n[imagem anexada: /anexos/s1.jpg]" && elided.images.isEmpty)
+    }
+
     @Test func fewerThanThreeTurnsKeepEverything() {
         let conversation: [ChatMessage] = [.user("um", images: [picture("a")]), ChatMessage(role: .assistant, content: "ok"),
                                            .user("dois", images: [picture("b")])]
@@ -611,7 +675,8 @@ struct ImageEngineTests {
                            .success([.text("Vi a tela.")])])
         let events = await run(request(calls, supportsImages: true, tools: [LookAtTool(image: shot)]))
         let toolMessage = try #require(recorded(events).first { $0.role == .tool })
-        #expect(toolMessage.content == "texto" && toolMessage.images == [shot])
+        // The path goes with the picture, so the Orb can show it in its reply.
+        #expect(toolMessage.content == "texto\n[imagem anexada: \(shot.path)]" && toolMessage.images == [shot])
         let second = await calls.received[1]
         #expect(second.last?.role == .tool && second.last?.images == [shot])
     }

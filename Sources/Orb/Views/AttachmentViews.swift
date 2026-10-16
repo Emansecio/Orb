@@ -77,19 +77,22 @@ struct ImageTile: View {
     let all: [String]
     let label: String
     var more = 0
+    /// The side the picture is decoded for (`ImageThumbnail`): the chat's grid copy unless the tile is larger.
+    var decodeSide = Thumbnails.gridSide
     @State private var info: AttachmentInfo
 
-    init(path: String, size: CGSize, all: [String], label: String, more: Int = 0) {
+    init(path: String, size: CGSize, all: [String], label: String, more: Int = 0, decodeSide: CGFloat = Thumbnails.gridSide) {
         self.path = path
         self.size = size
         self.all = all
         self.label = label
         self.more = more
+        self.decodeSide = decodeSide
         _info = State(initialValue: AttachmentInfo.cachedOrQuick(path))
     }
 
     var body: some View {
-        ImageThumbnail(path: path, size: size)
+        ImageThumbnail(path: path, size: size, decodeSide: decodeSide)
             .overlay {
                 if more > 0 {
                     RoundedRectangle(cornerRadius: 10).fill(.black.opacity(0.45))
@@ -165,9 +168,11 @@ struct FileCard: View {
 }
 
 /// The files the Orb made or changed with a tool call, under its line: a card for each ("novo" or "alterado"), a
-/// thumbnail for a picture (a capture of the screen). At most three.
+/// thumbnail for a picture. At most three. `captures`: the pictures that are what the Orb saw (a capture of the screen
+/// or a page, see `ToolCall.capturedPictures`), named so instead of "Imagem criada".
 struct ProducedFilesView: View {
     let files: [ProducedFile]
+    var captures: Set<String> = []
 
     static let limit = 3
 
@@ -178,7 +183,7 @@ struct ProducedFilesView: View {
             // By path: when `BotSession.takeOver` takes a file off an earlier call, the card of the file that stays keeps its own.
             ForEach(shown, id: \.path) { file in
                 if file.path.hasPrefix("/"), ImageProcessing.isImageFile(URL(fileURLWithPath: file.path)) {
-                    ImageTile(path: file.path, size: CGSize(width: 112, height: 72), all: all, label: "Imagem criada")
+                    ImageTile(path: file.path, size: CGSize(width: 112, height: 72), all: all, label: captures.contains(file.path) ? "Captura" : "Imagem criada")
                 } else {
                     FileCard(path: file.path, all: all, style: .compact, note: file.created ? "novo" : "alterado")
                 }
@@ -235,8 +240,7 @@ struct ScreenStepsStrip: View {
         var steps: [Step] = []
         var before: ToolCall?
         for call in calls where call.state == .done {
-            let looks = call.kind == .computer || call.kind == .browser
-            let pictures = !looks ? [] : (call.files ?? []).filter { $0.path.hasPrefix("/") && ImageProcessing.isImageFile(URL(fileURLWithPath: $0.path)) }
+            let pictures = call.capturedPictures
             guard !pictures.isEmpty else {
                 before = call
                 continue
@@ -246,6 +250,15 @@ struct ScreenStepsStrip: View {
             before = nil
         }
         return steps.count >= minimum ? steps : nil
+    }
+}
+
+extension ToolCall {
+    /// The pictures of this call that are what the Orb saw: captures of the screen or a page. A chart a command drew or a
+    /// picture written to a file is a result, not a capture.
+    var capturedPictures: [ProducedFile] {
+        guard kind == .computer || kind == .browser else { return [] }
+        return (files ?? []).filter { $0.path.hasPrefix("/") && ImageProcessing.isImageFile(URL(fileURLWithPath: $0.path)) }
     }
 }
 

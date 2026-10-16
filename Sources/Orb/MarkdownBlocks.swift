@@ -1,6 +1,7 @@
 import Foundation
 
-// Block-level Markdown for the replies of an Orb: paragraphs, headings, lists, quotes, code, tables, rules.
+// Block-level Markdown for the replies of an Orb: paragraphs, headings, lists, quotes, code, tables, rules, and pictures
+// on this Mac.
 //
 // Light and dependency-free on purpose. The text is first cut into the same pieces the streaming path uses (blank
 // lines outside a code fence, see `ReplyParagraphs`) and each piece is read into blocks, so a reply that is done
@@ -17,6 +18,9 @@ enum MarkdownBlock: Equatable, Sendable {
     case code(language: String?, code: String, isClosed: Bool)
     case table(MarkdownTable)
     case rule
+    /// `![what it shows](/path/picture.png)` on a line of its own: a picture on this Mac that the reply shows (a capture,
+    /// a chart the Orb drew). `path` is absolute. Never a web address (see `MarkdownBlocks.image`).
+    case image(alt: String, path: String)
 }
 
 struct MarkdownListItem: Equatable, Sendable {
@@ -74,6 +78,11 @@ enum MarkdownBlocks {
             }
             if let heading = heading(line) {
                 blocks.append(.heading(level: heading.level, text: heading.text))
+                index += 1
+                continue
+            }
+            if let image = image(line) {
+                blocks.append(.image(alt: image.alt, path: image.path))
                 index += 1
                 continue
             }
@@ -143,6 +152,8 @@ enum MarkdownBlocks {
             return ([table.header] + table.rows).map { $0.map(inlinePlain).joined(separator: "\t") }.joined(separator: "\n")
         case .rule:
             return "—"
+        case .image(let alt, let path):
+            return alt.isEmpty ? path : "\(alt): \(path)"
         }
     }
 
@@ -225,6 +236,37 @@ enum MarkdownBlocks {
         return String(rest)
     }
 
+    /// A picture alone on its line, `![what it shows](address)`, whose address is a picture file on this Mac: an absolute
+    /// path, `~/…`, a `file://` URL, or any of them in `<…>` (a path with spaces). Anything else stays text: a web address
+    /// (the app never fetches what a reply points at, so a reply cannot send anything out), a picture in the middle of a
+    /// sentence, a file that is not a picture. Whether the file is there is the view's business: the parser reads no disk.
+    static func image(_ line: Substring) -> (alt: String, path: String)? {
+        let text = line.trimmingCharacters(in: .whitespaces)
+        guard text.hasPrefix("!["), text.hasSuffix(")"), let middle = text.range(of: "](") else { return nil }
+        let alt = text[text.index(text.startIndex, offsetBy: 2)..<middle.lowerBound]
+        guard !alt.contains("]") else { return nil }
+        var address = text[middle.upperBound..<text.index(before: text.endIndex)].trimmingCharacters(in: .whitespaces)
+        if address.hasPrefix("<"), address.hasSuffix(">") {
+            address = String(address.dropFirst().dropLast())
+        } else if address.contains(" ") {
+            return nil
+        }
+        let path: String
+        if address.hasPrefix("file://") {
+            guard let url = URL(string: address), url.isFileURL, !url.path.isEmpty else { return nil }
+            path = url.path
+        } else if address.hasPrefix("~/") {
+            path = NSString(string: address).expandingTildeInPath
+        } else if address.hasPrefix("/"), !address.hasPrefix("//") { // "//host/…" is a web address in Markdown
+            path = address
+        } else {
+            return nil
+        }
+        let file = URL(fileURLWithPath: path).standardizedFileURL
+        guard ImageProcessing.isImageFile(file) else { return nil }
+        return (alt.trimmingCharacters(in: .whitespaces), file.path)
+    }
+
     /// The start of a list item: its indentation, mark and text.
     private static func listMarker(_ line: Substring) -> (indent: Int, marker: MarkdownListItem.Marker, text: String)? {
         let width = indent(of: line)
@@ -256,7 +298,8 @@ enum MarkdownBlocks {
 
     /// Whether a line begins a block of its own (so it ends the paragraph above it).
     private static func startsBlock(_ line: Substring, at index: Int, in lines: [Substring]) -> Bool {
-        if fenceOpening(line) != nil || heading(line) != nil || isRule(line) || isQuote(line) || listMarker(line) != nil { return true }
+        if fenceOpening(line) != nil || heading(line) != nil || isRule(line) || isQuote(line) || listMarker(line) != nil
+            || image(line) != nil { return true }
         return index + 1 < lines.count && table(startingAt: index, in: lines) != nil
     }
 

@@ -40,6 +40,19 @@ final class AttachmentPresentationTests {
         #expect(ScreenStepsStrip.steps(of: Array(calls.prefix(2))) == nil)
     }
 
+    @Test func onlyWhatTheOrbSawIsACapture() {
+        let page = ToolCall(kind: .browser, title: "Capturando a página", detail: "", state: .done, output: "ok",
+                            files: [ProducedFile(path: "/x/a.png", created: true), ProducedFile(path: "/x/notas.md", created: true)])
+        let screen = ToolCall(kind: .computer, title: "Capturando a janela", detail: "Safari", state: .done, output: "ok",
+                              files: [ProducedFile(path: "/x/b.jpg", created: true)])
+        // A chart a command drew is "Imagem criada", not a capture.
+        let chart = ToolCall(kind: .shell, title: "Executando", detail: "python plot.py", state: .done, output: "ok",
+                             files: [ProducedFile(path: "/x/grafico.png", created: true)])
+        #expect(page.capturedPictures.map(\.path) == ["/x/a.png"])
+        #expect(screen.capturedPictures.map(\.path) == ["/x/b.jpg"])
+        #expect(chart.capturedPictures.isEmpty)
+    }
+
     // MARK: Layout
 
     @Test func picturesAndFilesAreToldApart() {

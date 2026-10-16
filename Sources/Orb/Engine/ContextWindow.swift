@@ -384,7 +384,7 @@ extension [ChatMessage] {
         let recentToolImages = Set(toolImages.suffix(kept))
         return enumerated().map { index, message in
             let keep = index >= oldest && (message.role != .tool || recentToolImages.contains(index))
-            return keep ? message : message.replacingImages { "[imagem anexada: \($0.path)]" }
+            return keep ? message : message.replacingImages(with: ImageAttachment.note(for:))
         }
     }
 }
