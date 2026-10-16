@@ -521,6 +521,52 @@ struct AccessibilityRefusalTests {
         #expect(focus.hasPrefix(UIActTool.takeoverMarker))
         #expect(bench.system.activated.isEmpty)
     }
+
+    @Test func anAppThePersonWentToStaysInFrontAndIsNotTakenForOneThatStealsFocus() async throws {
+        let button = fakeButton("Abrir")
+        let field = fake("AXTextField", title: "Nome")
+        field.settable = ["AXFocused"]
+        let bench = Bench(windows: [fake("AXWindow", title: "A", [button, field])])
+        let safari = fakeApp(windows: [])
+        safari.settable = ["AXFrontmost"]
+        bench.system.roots[200] = safari
+        bench.system.frontmost = 200
+        let system = bench.system
+        // While the press runs, the person clicks the app to watch: it is in front because of a click of theirs.
+        button.onPerform = { _ in system.frontmost = 100; system.userIdle = 0.5 }
+        try await bench.read()
+        let text = try await bench.act(["action": .string("press"), "id": .string("w1.1")])
+        #expect(text.contains("o usuário foi até ele") && !text.contains("sozinho"), Comment(rawValue: text))
+        #expect(safari.assignedValue("AXFrontmost") == nil && system.frontmost == 100, "the person's choice is not undone")
+        // Not remembered as an app that steals focus: with the person away again, focusing it goes in the background.
+        system.userIdle = .infinity
+        system.frontmost = 200
+        _ = try await bench.act(["action": .string("focus"), "id": .string("w1.2")])
+        #expect(field.assignedValue("AXFocused")?.bool == true)
+
+        // Past the 2 s it is the app that came by itself, as before.
+        button.onPerform = { _ in system.frontmost = 100; system.userIdle = 2.5 }
+        let late = try await bench.act(["action": .string("press"), "id": .string("w1.1")])
+        #expect(late.contains("veio para a frente sozinho") && safari.assignedValue("AXFrontmost")?.bool == true)
+    }
+
+    @Test func nothingIsTypedIntoAnAppThePersonJustWentTo() async throws {
+        let field = fake("AXTextField", title: "Nome")
+        field.settable = ["AXFocused"]
+        let bench = Bench(windows: [fake("AXWindow", title: "A", [field])])
+        bench.root.attrs["AXFocusedUIElement"] = .element(field)
+        let system = bench.system
+        let safari = fakeApp(windows: [])
+        safari.settable = ["AXFrontmost"]
+        system.roots[200] = safari
+        system.frontmost = 200
+        // The focus lands while the person clicks the app: it is in front, and the person may be typing in it.
+        field.onSet = { name, _ in if name == "AXFocused" { system.frontmost = 100; system.userIdle = 0.5 } }
+        try await bench.read()
+        let message = await failureMessage { try await bench.act(["action": .string("type"), "id": .string("w1.1"), "value": .string("oi")]) }
+        #expect(message.contains("está usando") && message.contains("o usuário foi até ele"), Comment(rawValue: message))
+        #expect(system.syntheticInput.events.isEmpty && safari.assignedValue("AXFrontmost") == nil && system.frontmost == 100)
+    }
 }
 
 // MARK: - Ids by mark and by point

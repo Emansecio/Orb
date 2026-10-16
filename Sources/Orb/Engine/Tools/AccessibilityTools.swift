@@ -23,7 +23,7 @@ enum UIAppResolver {
         var message: String {
             switch self {
             case .notRunning(let name):
-                "O app \"\(name)\" não está aberto. Abra-o com open e tente de novo (apps_list mostra o que está aberto)."
+                "O app \"\(name)\" não está aberto. Abra-o com open (abre em segundo plano, sem tirar a pessoa do que ela usa) e tente de novo; apps_list mostra o que está aberto."
             case .ambiguous(let names):
                 "Mais de um app combina: \(names.joined(separator: ", ")). Diga o nome exato ou o bundle identifier."
             case .isOrb:
@@ -1505,13 +1505,21 @@ struct UIActTool: AgentTool {
         }
     }
 
+    /// A key or a click of the person's this recent means it was the person who went to the app, not the app that came.
+    static let personWentThere: TimeInterval = 2
+
     /// After every action, and after a failed or cancelled one, the app in front must be the one that was: an app that
     /// brought itself forward is sent back (`AXFrontmost` on the user's app, never `activate`) and remembered as one that
-    /// steals focus. Not cancellable: it runs in its own task, awaited whatever happens to the caller's.
+    /// steals focus. Unless the person pressed a key or a button in the last 2 s: then the person went to the app (to
+    /// watch, say), and it stays in front and is not taken for one that steals focus. Not cancellable: it runs in its own
+    /// task, awaited whatever happens to the caller's.
     private func restoreFront(_ before: Int32?, app: AccessibilityApp, session: AXAppSession) async -> [String] {
         let system = system, sessions = sessions
         return await Task.detached(priority: .userInitiated) {
             guard let before, before != app.pid, await system.frontmostPID() == app.pid else { return [String]() }
+            if system.secondsSinceUserInput() < Self.personWentThere {
+                return ["Aviso: \(app.name) está na frente porque o usuário foi até ele agora; não devolvi o app anterior."]
+            }
             session.state.withLock { $0.stealsFocus = true }
             let previous = AccessibilityApp(name: "", bundleID: nil, pid: before)
             _ = try? await sessions.run(previous, within: sessions.deadlines.action) {
@@ -1529,6 +1537,8 @@ struct UIActTool: AgentTool {
         let front: Int32?
         if case .some(let given) = known { front = given } else { front = await system.frontmostPID() }
         guard front == app.pid else { return }
+        // The person went to the app and may be typing in it: nothing is sent, and the app is not sent back.
+        try await refuseIfUserIsActive(app, front: .some(front))
         let notes = await restoreFront(before, app: app, session: session)
         throw Self.needsScreen(what, because: "\(app.name) veio para a frente ao receber o foco"
                                + (notes.isEmpty ? "" : " (devolvi o app que estava na frente)"))

@@ -6,12 +6,17 @@ struct OpenTool: AgentTool {
         description: """
         Open a URL in the default browser, a file or folder in its default app, or launch an app by name or \
         bundle identifier. "localhost:3000" works. Set `app` to open the target with a specific app. It only \
-        opens things: to read a page or file use web_fetch or read_file.
+        opens things: to read a page or file use web_fetch or read_file. Opens in the background (ui_* tools work \
+        there); `front: true` only if the person asked to see it.
         """,
         parameters: .schema([
             "target": .property("string", "URL (https://…, localhost:3000, mailto:…), file or folder path, or app name."),
             "app": .property("string"),
+            "front": .property("boolean"),
         ], required: ["target"]))
+
+    /// Opens through LaunchServices; the tests put one that only records.
+    var opener: any URLOpening = LiveURLOpener()
 
     var kind: ToolCall.Kind { .computer }
     var capability: Capability? { nil }
@@ -74,8 +79,9 @@ struct OpenTool: AgentTool {
 
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) {
         let target = arguments["target"]?.string ?? ""
-        guard let app = arguments["app"]?.string, !app.isEmpty else { return ("Abrindo", target) }
-        return ("Abrindo com \(app)", target)
+        let front = arguments["front"]?.bool == true ? " na frente" : ""
+        guard let app = arguments["app"]?.string, !app.isEmpty else { return ("Abrindo" + front, target) }
+        return ("Abrindo com \(app)" + front, target)
     }
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
@@ -84,26 +90,27 @@ struct OpenTool: AgentTool {
             throw ToolError("Rodar Atalhos está desligado para este Orb: \"\(Capability.computerUse.label)\" precisa estar ligado. "
                             + "Diga ao usuário para ligá-lo no painel do Orb (Geral) se a tarefa precisar disso.")
         }
+        let front = arguments["front"]?.bool == true
         if let appName = arguments.nonEmptyString("app") {
             guard let appURL = await Self.application(named: appName) else {
                 throw ToolError("Não encontrei o app \"\(appName)\" neste Mac.")
             }
             let resource = try await resolve(target, context: context, allowingApps: false)
-            do { try await Self.open(resource, with: appURL) }
+            do { try await opener.open(resource, with: appURL, front: front) }
             catch { throw ToolError("Não consegui abrir \(target) com \(appName): \(error.localizedDescription)") }
-            return "Aberto \(Self.describe(resource)) com \(appURL.deletingPathExtension().lastPathComponent)."
+            return "Aberto \(Self.describe(resource)) com \(appURL.deletingPathExtension().lastPathComponent)" + Self.where(front)
         }
         let url = try await resolve(target, context: context, allowingApps: true)
-        guard await MainActor.run(body: { NSWorkspace.shared.open(url) }) else {
-            throw ToolError("Não consegui abrir \(target).")
-        }
-        return "Aberto: \(Self.describe(url))"
+        do { try await opener.open(url, with: nil, front: front) }
+        catch { throw ToolError("Não consegui abrir \(target): \(error.localizedDescription)") }
+        return "Aberto \(Self.describe(url))" + Self.where(front)
     }
 
     private static func describe(_ url: URL) -> String { url.isFileURL ? url.path : url.absoluteString }
 
-    @MainActor private static func open(_ url: URL, with app: URL) async throws {
-        _ = try await NSWorkspace.shared.open([url], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
+    /// How it opened, so the model does not tell the person to look at a window that stayed behind.
+    private static func `where`(_ front: Bool) -> String {
+        front ? ", na frente." : " em segundo plano: o app não veio para a frente, e a pessoa segue no que estava fazendo."
     }
 
     private func resolve(_ target: String, context: ToolContext, allowingApps: Bool) async throws -> URL {
@@ -144,6 +151,31 @@ struct OpenTool: AgentTool {
         return ApplicationLookup.fallbackFolders.lazy
             .map { URL(fileURLWithPath: $0).appending(path: ApplicationLookup.bundleName(name)) }
             .first { FileManager.default.fileExists(atPath: $0.path) }
+    }
+}
+
+/// Opens a URL, file or app. In the background unless `front`: the app launches or takes the document without coming
+/// to the front (like `open -g`), so the person keeps the app they were using.
+protocol URLOpening: Sendable {
+    /// `app` opens `url` with that app; nil uses the default one (an app's own URL launches it).
+    func open(_ url: URL, with app: URL?, front: Bool) async throws
+}
+
+struct LiveURLOpener: URLOpening {
+    func open(_ url: URL, with app: URL?, front: Bool) async throws {
+        try await Self.open(url, with: app, front: front)
+    }
+
+    @MainActor private static func open(_ url: URL, with app: URL?, front: Bool) async throws {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = front
+        if let app {
+            _ = try await NSWorkspace.shared.open([url], withApplicationAt: app, configuration: configuration)
+        } else if url.isFileURL, url.pathExtension.lowercased() == "app" {
+            _ = try await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+        } else {
+            _ = try await NSWorkspace.shared.open(url, configuration: configuration)
+        }
     }
 }
 

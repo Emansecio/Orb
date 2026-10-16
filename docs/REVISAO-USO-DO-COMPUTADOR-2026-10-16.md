@@ -12,11 +12,11 @@ Escopo: `Sources/Orb/Engine/Tools/Accessibility*.swift` (Contracts, Elements, Ev
 - digitar um texto longo no takeover estourava o limite de 2 s "da etapa" no meio e deixava o texto pela metade;
 - `wait` relia a janela inteira a cada 250 ms durante até 30 s.
 
-O que continua tirando o foco sem necessidade é **uma decisão de produto**: `open` ativa o app (`NSWorkspace.open`), e a mensagem de "app não está aberto" manda o modelo usar `open`.
+O que continua tirando o foco sem necessidade é **uma decisão de produto**: `open` ativa o app (`NSWorkspace.open`), e a mensagem de "app não está aberto" manda o modelo usar `open`. (Decidido e corrigido depois: P1-2, abaixo.)
 
 ## Situação depois da fase 2 (16/10)
 
-Os achados P1-1 e P2-1 a P2-6 estão corrigidos, com teste; os P3 baratos também. Nenhum limite voltou (nem passos por turno nem orçamento): o que entrou são relógios **internos** de uma busca, sempre menores que o prazo que já existia, e a regra de cancelar o trabalho quando o prazo vence.
+Os achados P1-1, P1-2 e P2-1 a P2-7 estão corrigidos, com teste; os P3 baratos também. Nenhum limite voltou (nem passos por turno nem orçamento): o que entrou são relógios **internos** de uma busca, sempre menores que o prazo que já existia, e a regra de cancelar o trabalho quando o prazo vence.
 
 | Achado | O que mudou | Teste |
 |---|---|---|
@@ -27,12 +27,14 @@ Os achados P1-1 e P2-1 a P2-6 estão corrigidos, com teste; os P3 baratos també
 | P2-4 | `select` por valor numa tabela usa `UIActTool.findRow`: 500 linhas no máximo, 1,2 s, para no cancelamento. Se não achou antes do fim, o erro diz quantas linhas olhou e manda usar `ui_read` com `query`. | `aRowSearchStopsAtItsBudgetAndSaysHowFarItLooked` |
 | P2-5 | `UIWaiter.pause(after:took:)`: depois de uma olhada que custou 100 ms ou mais, a pausa tem o tamanho da olhada (no máximo 1 s). O app lento não fica ocupado mais da metade do tempo com `wait: appears`. Olhada barata mantém o ritmo de 50 ms a 250 ms. | `AccessibilityWaitTests.anExpensiveLookIsFollowedByAPauseAsLongAsTheLook` (o teste de ritmo dos 250 ms desliga o espaçamento: `spacesLooksByCost`) |
 | P2-6 | `LiveTakeoverHand.type` aplica o limite de etapa **por pedaço** de 20 unidades (o evento e a sua espera), com `checkTime` depois do pedaço. O limite do takeover inteiro continua valendo. | `ScreenTakeoverTests`: `aLongTextIsNotCutHalfwayByTheLimitOfOneStep`; `oneStepCannotTakeMoreThanItsOwnLimit` passou a usar um pedaço de 150 ms contra o limite de 80 ms |
+| P2-6 (conferência) | Na revisão final: o último pedaço não passa mais pelo `checkTime` (o texto já saiu inteiro; "Uma etapa passou de 2 s" faria o modelo digitá-lo de novo). Um pedaço lento no meio continua parando os seguintes. | `ScreenTakeoverTests.aSlowLastChunkIsNotCalledAFailureOnceTheTextIsWhole` |
+| P1-2 | Decisão do usuário (16/10): tudo o que o `open` abre (app, arquivo, link, e arquivo com `app`) vai **em segundo plano**, com `NSWorkspace.OpenConfiguration.activates = false` (`LiveURLOpener`, atrás do protocolo `URLOpening`). Só `front: true` ativa; a descrição manda usá-lo só quando a pessoa pediu para ver. A saída diz "em segundo plano" ou "na frente", o cartão diz "Abrindo na frente", e a recusa "não está aberto" manda abrir com `open`, em segundo plano. O teto das specs sobe de 18.250 para 18.400. | `MacToolTests`: `everythingOpensInTheBackgroundUnlessFrontIsAsked`, `theAppNotOpenMessageSaysOpenKeepsItInTheBackground` |
+| P2-7 | Decisão do usuário (16/10): se a pessoa apertou tecla ou botão nos últimos 2 s (`AccessibilitySystem.secondsSinceUserInput`, `.hidSystemState`, que não conta os eventos sintéticos do Orb), foi ela que foi ao app: ele fica na frente, não ganha a marca `stealsFocus`, e a saída avisa. Teclas e texto para um app em que ela acabou de entrar são recusados como "o usuário está usando". Passados os 2 s, o comportamento é o de antes. | `AccessibilityRefusalTests`: `anAppThePersonWentToStaysInFrontAndIsNotTakenForOneThatStealsFocus`, `nothingIsTypedIntoAnAppThePersonJustWentTo` |
 | P3-1 | Saem `UIMenu.listing(under:)` (a revisão de higiene já citava), `UILiveElements.removeAll()`, `UIReadTool.read` (só um teste usava; o teste chama `reading`), `LiveTakeoverPlatform.init() {}` e `LiveTakeoverPoster.flags` (usa `SyntheticEventBuilder.flags(for:)`). | compilação e as suítes de sempre |
 
 **Ficou, e por quê:**
 
-- **P1-2** (`open` ativa o app): decisão sua, abaixo.
-- **P2-7** (devolver o app anterior quando foi a própria pessoa que foi para o app alvo): decisão sua.
+- **P1-2** e **P2-7**: ficaram para decisão do usuário e entraram depois dela (linhas acima).
 - **P3-2 a P3-9:** custo maior que o ganho agora, ou muda um contrato; cada um tem a razão na tabela de achados.
 
 **Regressão.** Só suítes filtradas, sem a suíte inteira e sem `--snapshot`; a lista com as linhas finais de cada execução está no relatório da entrega. Não rodaram, pelas regras: `AXSmokeTests`, a `WindowCaptureSmokeTests` e qualquer coisa com `ORB_AX_SMOKE`, `ORB_AX_SMOKE_SYSTEM`, `ORB_AX_TAKEOVER`, `ORB_LIVE_TESTS` ou `ORB_DEV_TOOLS` (apps reais, eventos sintéticos de verdade, captura de tela e tomada de tela).
@@ -47,7 +49,7 @@ Da `REVISAO-HIGIENE-2026-10-15.md` e do `docs/USO-DO-COMPUTADOR.md` §0: timeout
 
 **P1-1. O prazo vence, o trabalho continua e a ação ainda pode sair.** `AccessibilitySession.swift:178-185` (antes da correção): o cronômetro de GCD marcava a chamada como atrasada e entregava "não respondeu em N s", mas não cancelava o `AXWorkToken`; só o ⌘. o cancelava (`:187-190`). `LiveAccessibilityElement.perform` e `setValue` checam `AXWork.checkCancellation()` (`AccessibilityElements.swift:381-389`), mas o token nunca estava cancelado. Uma ação de 2 s que lia devagar (`subscribe` + `capture` + `resolve` + `AXPress`) falhava para o modelo e **apertava o botão no app logo depois**; o modelo tentava de novo e apertava duas vezes (um "Enviar", um "Comprar"). Além disso, a sessão ficava "ocupada" (`overdue`) até o trabalho terminar por conta própria, e as chamadas seguintes ouviam "o app não responde" de um app que só estava lento. **Correção mínima:** cancelar o token quando o cronômetro vence primeiro. **Teste:** `pastTheDeadlineTheWorkIsToldToStopSoASlowActionNeverReachesTheApp`. **Corrigido.**
 
-**P1-2. `open` traz o app para a frente.** `MacTools.swift:97` (`NSWorkspace.shared.open(url)`) e `:106` (`OpenConfiguration()` com `activates` padrão, que é `true`). A mensagem de `UIAppResolver.Failure.notRunning` (`AccessibilityTools.swift:26`) diz "Abra-o com open e tente de novo". Ou seja, o caminho normal para operar um app fechado tira a tela de quem usa o Mac. **Correção mínima:** abrir apps com `NSWorkspace.openApplication(at:configuration:)` e `activates = false` quando o alvo é um app; ficaria como "o app abre sem ir para a frente". **Teste:** a configuração montada por uma função estática (`activates == false`); a abertura de verdade só em app real. **Não corrigido:** quando a pessoa diz "abre o Notas" ela provavelmente quer ver o app. Decisão de produto (abaixo).
+**P1-2. `open` traz o app para a frente.** `MacTools.swift:97` (`NSWorkspace.shared.open(url)`) e `:106` (`OpenConfiguration()` com `activates` padrão, que é `true`). A mensagem de `UIAppResolver.Failure.notRunning` (`AccessibilityTools.swift:26`) diz "Abra-o com open e tente de novo". Ou seja, o caminho normal para operar um app fechado tira a tela de quem usa o Mac. **Correção mínima:** abrir apps com `NSWorkspace.openApplication(at:configuration:)` e `activates = false` quando o alvo é um app; ficaria como "o app abre sem ir para a frente". **Teste:** a configuração montada por uma função estática (`activates == false`); a abertura de verdade só em app real. **Corrigido depois da decisão do usuário:** tudo abre em segundo plano, e `front: true` traz para a frente.
 
 ### P2
 
@@ -63,7 +65,7 @@ Da `REVISAO-HIGIENE-2026-10-15.md` e do `docs/USO-DO-COMPUTADOR.md` §0: timeout
 
 **P2-6. Digitar texto longo no takeover estoura o limite "da etapa".** `ScreenTakeover.swift:244-260` (antes): `begin()` dava um prazo de 2 s para o `type` inteiro, e cada pedaço (20 unidades) chama `platform.frontmost()` no `tick` (janela do sistema + pergunta ao app). Perto de 2.000 caracteres o texto parava no meio com "Uma etapa passou de 2 s", metade digitada no app do usuário, sem dizer quanto. **Correção mínima:** o limite é por pedaço (`checkTime` depois do pedaço); o limite total de 10 s continua. **Teste:** `aLongTextIsNotCutHalfwayByTheLimitOfOneStep`. **Corrigido.**
 
-**P2-7. A devolução do app da frente pode contrariar a própria pessoa.** `AccessibilityTools.swift:1511-1522`: depois de toda ação, se o app alvo está na frente e o app de antes não era ele, o Orb o trata como "roubou o foco", manda o anterior de volta e marca o app (`stealsFocus`) para o resto da sessão. Se foi a pessoa que clicou no app alvo para ver o que o Orb fazia, ela é arrancada de lá, e o app passa a pedir takeover para focar e digitar. O sinal certo seria "a pessoa não mexeu no teclado nem no mouse nos últimos segundos", mas ele erra no caso inverso (o app roubou o foco enquanto a pessoa digita, e é aí que devolver mais importa). **Não corrigido:** é decisão de produto (abaixo).
+**P2-7. A devolução do app da frente pode contrariar a própria pessoa.** `AccessibilityTools.swift:1511-1522`: depois de toda ação, se o app alvo está na frente e o app de antes não era ele, o Orb o trata como "roubou o foco", manda o anterior de volta e marca o app (`stealsFocus`) para o resto da sessão. Se foi a pessoa que clicou no app alvo para ver o que o Orb fazia, ela é arrancada de lá, e o app passa a pedir takeover para focar e digitar. O sinal certo seria "a pessoa não mexeu no teclado nem no mouse nos últimos segundos", mas ele erra no caso inverso (o app roubou o foco enquanto a pessoa digita, e é aí que devolver mais importa). **Corrigido depois da decisão do usuário:** 2 s sem tecla nem botão da pessoa.
 
 ### P3
 
@@ -108,7 +110,7 @@ Da `REVISAO-HIGIENE-2026-10-15.md` e do `docs/USO-DO-COMPUTADOR.md` §0: timeout
 | `ui_act` com `takeover` | 10 s no total, 2 s por clique, tecla ou pedaço de texto; 0,5 s para o app vir; 0,5 s para voltar | uma frase | **Sim**, com confirmação; devolve app, janela e cursor |
 | `screenshot` (janela) | ScreenCaptureKit 10 s, depois `screencapture` 20 s; marcas 3,5 s; OCR 20 s | JPEG até 450 KB; legenda até 4.000 caracteres; OCR 1.500 (com imagem) ou 8.000 (sem) | Não |
 | `screenshot` (tela) | `screencapture` 20 s; OCR 20 s | PNG nativo (anexado já reduzido); OCR 1.500 ou 8.000 | Não (o diálogo de permissão aparece uma vez por processo) |
-| `open` | sem prazo (LaunchServices); busca de app por nome 5 s (`mdfind`) | uma linha | **Sim**: ativa o app aberto (P1-2) |
+| `open` | sem prazo (LaunchServices); busca de app por nome 5 s (`mdfind`) | uma linha | Não: abre em segundo plano; só `front: true` traz para a frente (P1-2) |
 | `applescript` | 60 s (até 300) | até 20.000 caracteres | Depende do script; o diálogo de Automação aparece uma vez por app e a espera dele não conta |
 | `shortcuts_list` / `shortcuts_run` | 20 s / 60 s (até 300) | 300 nomes / 20.000 caracteres | A lista não; o Atalho depende do que ele faz |
 | `clipboard_read` / `clipboard_write` | sem prazo (ator principal) | 20.000 caracteres | Não |
@@ -122,9 +124,11 @@ Da `REVISAO-HIGIENE-2026-10-15.md` e do `docs/USO-DO-COMPUTADOR.md` §0: timeout
 - **Versão:** `db080f6` (main). Trabalho no branch do worktree, sem tocar na main nem em `~/Library/Application Support/Orb` e `~/Orbs`.
 - **Leitura:** li inteiros os 14 arquivos do escopo, os dois documentos de contexto e os trechos citados das revisões anteriores. Cada achado foi conferido na linha antes de entrar aqui, e os de tempo e cancelamento ganharam teste que **falha sem a correção** (o relógio, o token, a soltura do botão, o pedaço de texto).
 - **Testes:** só suítes filtradas das áreas tocadas, com fakes (nenhum app real lido, clicado ou digitado, nenhuma captura, nenhuma tomada de tela). O app não foi aberto e não houve `--snapshot`.
-- **Falta app real ou captura:** (1) que o cancelamento por prazo interrompe de fato uma caminhada num app lento de verdade (Xcode com um projeto grande); (2) o duplo clique N1 com ⌘. no meio; (3) um texto de 2.000 caracteres no takeover; (4) `wait: appears` num app grande, medindo a carga no app; (5) o P1-2, `open` sem ativar, quando a decisão for tomada.
+- **Falta app real ou captura:** (1) que o cancelamento por prazo interrompe de fato uma caminhada num app lento de verdade (Xcode com um projeto grande); (2) o duplo clique N1 com ⌘. no meio; (3) um texto de 2.000 caracteres no takeover; (4) `wait: appears` num app grande, medindo a carga no app; (5) o P1-2, `open` sem ativar, num app que se ativa sozinho ao abrir; (6) o P2-7 com a pessoa clicando no app no meio de uma ação.
 
-## Perguntas só suas
+## Perguntas só suas (respondidas em 16/10)
+
+Respostas: (1) tudo abre em segundo plano, inclusive arquivos e links, e só `front: true` traz para a frente; (2) não devolver quando a pessoa usou teclado ou mouse nos últimos 2 s. As duas entraram (P1-2 e P2-7).
 
 1. **`open` de um app deve ir para a frente?** Hoje vai. Se a resposta for "não, a menos que eu peça", o Orb abre o app sem ativá-lo e diz isso ("abri o Notas sem trazê-lo para a frente"). Pela meta de segundo plano eu faria assim para apps, e manteria arquivos e links como estão (quem pede para abrir um arquivo quer vê-lo).
 2. **Devolver o app anterior quando você mesmo foi ao app alvo.** Hoje o Orb o devolve sempre que o alvo veio para a frente durante uma ação. Dá para não devolver quando você usou o teclado ou o mouse nos últimos 2 s, ao custo de não devolver também quando o app rouba o foco enquanto você digita. Qual dos dois erros incomoda menos?

@@ -40,7 +40,7 @@ AX). N2 nunca é automático.
 | Atalhos | Primeiro achar no menu o item com `AXMenuItemCmdChar`/`CmdModifiers`/`CmdVirtualKey` iguais e `AXPress` nele (independe do layout, funciona em segundo plano). | Evento com `flags` explícitos; keycode via `UCKeyTranslate` no layout atual (ABNT2 ≠ US). | — |
 | Menus | `AXPress` no caminho `AXMenuBar → AXMenu → item` sem abrir o menu e sem ativar o app; menus de status por `AXExtrasMenuBar`. | — | Habilitado pode estar defasado; menus dinâmicos (Recentes, Janela, Serviços) só se preenchem abertos. Menu de contexto (`AXShowMenu`) e abrir menu são visíveis e modais → N2. |
 | Rolar | `AXScrollToVisible`; `AXValue` 0…1 da `AXScrollBar`. | `CGEvent(scrollWheelEvent2Source:units:.pixel…)` na janela, `postToPid`. | — |
-| Focar campo | `AXFocused=true` só no elemento. Nunca `AXMain`/`AXFocused` em janela, nem `AXRaise`. | — | Se o app se ativar sozinho: devolver o app anterior na hora e marcar o app como "rouba foco" na sessão (focar/digitar nele passa a pedir N2). |
+| Focar campo | `AXFocused=true` só no elemento. Nunca `AXMain`/`AXFocused` em janela, nem `AXRaise`. | — | Se o app se ativar sozinho: devolver o app anterior na hora e marcar o app como "rouba foco" na sessão (focar/digitar nele passa a pedir N2). Exceto se a pessoa apertou tecla ou botão nos últimos 2 s (`secondsSinceUserInput`, `.hidSystemState`): foi ela que foi ao app; ele fica na frente, sem a marca, e teclas e texto são recusados como "o usuário está usando". |
 | Listas e tabelas | `AXSelected` na linha; `AXSelectedRows`; `AXSelectedChildren`; `AXDisclosing`; combobox `AXValue`. | — | Popup (`AXPopUpButton`): tentar `AXChildren → AXMenu → item`; a maioria só expõe o menu aberto → N2. |
 | Arrastar e soltar | Não há; oferecer alternativa semântica (arquivos, AppleScript). | Não funciona (`NSDraggingSession` exige HID real). | Só N2, movimento interpolado em 15 passos. |
 | Clicar em coordenada | Hit-test local nos frames do snapshot (menor área que contém o ponto), confirmado por `AXUIElementCopyElementAtPosition` (usa ordem z: falha com janela coberta, por isso o local vem antes); sobe até o ancestral acionável (≤ 5 níveis) e `AXPress`. | Mouse down/up com `mouseEventClickState` e `.mouseEventWindowUnderMousePointer`/`…ThatCanHandleThisEvent` = `CGWindowID`, `postToPid`; só se a janela aceitar first mouse. | Hover/tooltips não existem em segundo plano (usar `AXHelp`) → N2. |
@@ -85,7 +85,13 @@ um `UISnapshot` com marcas e geometria, mesclado com o anterior (mesma janela, <
 acionáveis, visíveis, ≥ 6×6 pt, dentro da janela, em ordem de leitura. Degrada: sem Gravação de Tela só a legenda; sem
 Acessibilidade só a imagem; `CGRequestScreenCaptureAccess` no máximo uma vez por processo.
 
-**Specs:** teto total 17.500 caracteres, sub-teto testado de 4.800 para `ui_read`+`ui_act`+`screenshot`.
+**`open`** (`MacTools.swift`): apps, arquivos e links abrem **em segundo plano** (`NSWorkspace.OpenConfiguration.activates =
+false`, como `open -g`; `URLOpening`/`LiveURLOpener`, um gravador nos testes); `front: true` ativa, e a descrição manda usá-lo
+só quando a pessoa pediu para ver. A saída diz "em segundo plano" ou "na frente"; o cartão diz "Abrindo na frente". A recusa
+"app não está aberto" do `ui_*` manda abrir com `open`, em segundo plano.
+
+**Specs:** teto total 18.400 caracteres (subiu com `task_plan` e com o `front` do `open`), sub-teto testado de 4.800 para
+`ui_read`+`ui_act`+`screenshot`.
 
 ## 3. Desempenho e confiabilidade
 
