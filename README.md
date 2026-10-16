@@ -255,6 +255,16 @@ swift test           # mais de 3.900 testes (motor, provedores, Claude Code, fer
 ./scripts/readme-shots.sh  # refaz as imagens deste README (docs/readme), com dados inventados
 ```
 
+Para reduzir o pico de processos e memória durante o desenvolvimento, rode a suíte em série e deixe os navegadores reais para a validação de integração:
+
+```bash
+ORB_SKIP_REAL_BROWSER_TESTS=1 swift test --no-parallel
+# Para validar apenas a área alterada (o filtro aceita uma expressão regular):
+ORB_SKIP_REAL_BROWSER_TESTS=1 swift test --no-parallel --filter 'WaitingTests|ChildProcessTests'
+```
+
+`swift test` já compila o necessário. Use `--skip-build` somente ao repetir uma execução sem alterações nos fontes. Os testes de navegadores reais continuam disponíveis com `swift test --no-parallel`, sem a variável acima; os de Acessibilidade exigem `ORB_AX_SMOKE=1` e a permissão do macOS.
+
 | Documento | Assunto |
 |---|---|
 | [docs/ARQUITETURA.md](docs/ARQUITETURA.md) | mapa dos módulos, caminho de um turno, persistência, concorrência, desempenho, testes e ferramentas de desenvolvimento |

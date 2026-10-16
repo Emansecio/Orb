@@ -1,24 +1,24 @@
 import Foundation
-import os
 import Testing
 
 /// The polling helper the timing-sensitive tests rely on.
 struct WaitingTests {
     @Test func returnsAtOnceWhenTheConditionAlreadyHolds() async {
-        let began = ContinuousClock.now
-        #expect(await waitUntil("nothing", timeout: .seconds(30)) { true })
-        #expect(ContinuousClock.now - began < .seconds(20)) // far below the 30 s timeout, with room for a loaded Mac
+        var calls = 0
+        #expect(await waitUntil("nothing", timeout: .zero, poll: .seconds(30)) {
+            calls += 1
+            return true
+        })
+        #expect(calls == 1)
     }
 
     @Test func returnsAsSoonAsTheConditionStartsToHold() async {
-        let ready = OSAllocatedUnfairLock(initialState: false)
-        Task {
-            try? await Task.sleep(for: .milliseconds(50))
-            ready.withLock { $0 = true }
-        }
-        let began = ContinuousClock.now
-        #expect(await waitUntil("the flag", timeout: .seconds(30)) { ready.withLock { $0 } })
-        #expect(ContinuousClock.now - began < .seconds(20)) // far below the 30 s timeout, with room for a loaded Mac
+        var calls = 0
+        #expect(await waitUntil("the third look", poll: .milliseconds(1)) {
+            calls += 1
+            return calls == 3
+        })
+        #expect(calls == 3)
     }
 
     @Test func anAsyncConditionCanReadAnActor() async {
@@ -51,5 +51,34 @@ struct WaitingTests {
         await #expect(throws: Stop.self) {
             try await waitUntil("never") { throw Stop() }
         }
+    }
+
+    @Test func cancellationDoesNotEvaluateTheCondition() async {
+        let waiting = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return await waitUntil("already cancelled") {
+                Issue.record("A cancelled wait must not evaluate its condition")
+                return true
+            }
+        }
+        #expect(await !waiting.value)
+    }
+
+    @Test(arguments: [false, true]) func cancellationDuringTheConditionIsNotReportedAsATimeout(satisfied: Bool) async {
+        let waiting = Task {
+            await waitUntil("cancelled by its condition", timeout: .zero) {
+                withUnsafeCurrentTask { $0?.cancel() }
+                return satisfied
+            }
+        }
+        #expect(await !waiting.value)
+    }
+
+    @Test func aLongPollDoesNotExtendTheTimeout() async {
+        await withKnownIssue("a condition that never holds must time out") {
+            let began = ContinuousClock.now
+            #expect(await !waitUntil("a long poll", timeout: .milliseconds(20), poll: .seconds(30)) { false })
+            #expect(ContinuousClock.now - began < .seconds(10))
+        } matching: { $0.description.contains("Timed out") }
     }
 }

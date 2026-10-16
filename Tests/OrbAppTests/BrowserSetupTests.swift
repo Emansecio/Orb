@@ -313,7 +313,7 @@ struct BrowserDriverRealityTests {
         setup.install(.chrome)
         #expect(setup.working == .chrome && setup.row(.chrome)?.isInstalling == true)
         #expect(setup.row(.obscura)?.isBlocked == true && setup.row(.obscura)?.canInstall == false)
-        for _ in 0..<300 where setup.working != nil || setup.row(.chrome)?.isInstalling == true { try await Task.sleep(for: .milliseconds(20)) }
+        await waitUntil("the failed install to settle") { setup.working == nil && setup.row(.chrome)?.isInstalling != true }
         #expect(setup.working == nil)
         guard case .failed(let message)? = setup.row(.chrome)?.phase else { Issue.record("\(String(describing: setup.row(.chrome)))"); return }
         #expect(message == BrowserInstallError.noNetwork.errorDescription)
@@ -333,9 +333,10 @@ struct BrowserDriverRealityTests {
                                          freeSpace: { _ in nil }, findPython: { _ in "/usr/bin/python3" })
         let setup = BrowserSetup(installer: installer, status: status(ready: []))
         setup.install(.obscura)
-        while !started.value { try await Task.sleep(for: .milliseconds(10)) }
+        defer { setup.cancel() }
+        guard await waitUntil("the download to start", { started.value }) else { return }
         setup.cancel()
-        for _ in 0..<300 where setup.working != nil || setup.row(.obscura)?.isInstalling == true { try await Task.sleep(for: .milliseconds(20)) }
+        await waitUntil("the cancelled install to settle") { setup.working == nil && setup.row(.obscura)?.isInstalling != true }
         #expect(setup.working == nil)
         #expect(setup.row(.obscura)?.phase == .notInstalled, "cancelled is not a failure")
     }

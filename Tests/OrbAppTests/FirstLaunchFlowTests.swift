@@ -85,7 +85,7 @@ import Testing
             await model.connectionsChecked()
             return model.hasCheckedConnections
         }
-        for _ in 0..<500 where model.connectionWaiterCount == 0 { try? await Task.sleep(for: .milliseconds(5)) }
+        await waitUntil("the connection waiter to register") { model.connectionWaiterCount > 0 }
         #expect(model.connectionWaiterCount == 1)
         model.publishConnections([.openai])
         #expect(await released.value)
@@ -200,7 +200,7 @@ import Testing
 
     @MainActor private func retried(_ steps: FirstRunModel, _ model: AppModel) async {
         steps.retry(model: model)
-        for _ in 0..<200 where steps.working != nil { try? await Task.sleep(for: .milliseconds(10)) }
+        await waitUntil("the model retry to finish") { steps.working == nil }
     }
 
     @Test @MainActor func tryingChatGPTAgainAfterAFailedListDoesNotAskForAnotherLogin() async {

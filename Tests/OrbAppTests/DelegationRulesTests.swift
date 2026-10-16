@@ -244,7 +244,10 @@ struct DelegationPersistenceTests {
             let chat = Conversation(items: [TranscriptItem(.notice("pedido \(index)"))])
             store.saveSideConversation(chat, prefix: Store.pedidoPrefix, id: id, for: bot)
             store.flush()
-            Thread.sleep(forTimeInterval: 0.02) // distinct write dates
+            // Explicit dates make pruning deterministic without blocking a test worker.
+            let file = root.appending(path: "conversations/\(bot.uuidString)/\(Store.pedidoPrefix)-\(id.uuidString).json")
+            try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: Double(index + 1))],
+                                                  ofItemAtPath: file.path)
         }
         let read = store.readSideConversation(prefix: Store.pedidoPrefix, id: ids[4], for: bot)
         #expect(read.value?.items.count == 1)

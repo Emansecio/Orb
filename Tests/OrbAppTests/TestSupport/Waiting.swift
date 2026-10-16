@@ -23,10 +23,14 @@ func waitUntil(
 ) async rethrows -> Bool {
     let deadline = ContinuousClock.now + timeout
     while true {
-        if try await condition() { return true }
-        if ContinuousClock.now >= deadline { break }
-        try? await Task.sleep(for: poll)
         if Task.isCancelled { return false }
+        let satisfied = try await condition()
+        if Task.isCancelled { return false }
+        if satisfied { return true }
+        if ContinuousClock.now >= deadline { break }
+        // A long polling interval must not extend the timeout.
+        do { try await Task.sleep(for: min(poll, ContinuousClock.now.duration(to: deadline))) }
+        catch { return false }
     }
     Issue.record("Timed out after \(timeout) waiting for \(what())", sourceLocation: sourceLocation)
     return false

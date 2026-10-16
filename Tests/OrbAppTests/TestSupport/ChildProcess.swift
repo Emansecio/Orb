@@ -31,14 +31,15 @@ final class ChildProcess: @unchecked Sendable {
         process.standardInput = input
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
-        output.fileHandleForReading.readabilityHandler = { [self] handle in
+        output.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            guard let self else { handle.readabilityHandler = nil; return }
             let data = handle.availableData
             guard !data.isEmpty else { handle.readabilityHandler = nil; return }
-            lock.withLock {
-                buffer.append(data)
-                while let newline = buffer.firstIndex(of: 10) {
-                    read.append(String(decoding: buffer[buffer.startIndex..<newline], as: UTF8.self))
-                    buffer.removeSubrange(buffer.startIndex...newline)
+            self.lock.withLock {
+                self.buffer.append(data)
+                while let newline = self.buffer.firstIndex(of: 10) {
+                    self.read.append(String(decoding: self.buffer[self.buffer.startIndex..<newline], as: UTF8.self))
+                    self.buffer.removeSubrange(self.buffer.startIndex...newline)
                 }
             }
         }
@@ -60,10 +61,13 @@ final class ChildProcess: @unchecked Sendable {
     func closeInput() { try? input.fileHandleForWriting.close() }
     func terminate() { kill(process.processIdentifier, SIGTERM) }
 
-    /// The exit status, or nil if it did not exit within `timeout` (the process is then killed).
+    /// The exit status, or nil on cancellation or timeout (the process is then killed).
     func exit(within timeout: Duration) async -> Int32? {
         let deadline = ContinuousClock.now.advanced(by: timeout)
-        while process.isRunning, ContinuousClock.now < deadline { try? await Task.sleep(for: .milliseconds(10)) }
+        while process.isRunning, ContinuousClock.now < deadline, !Task.isCancelled {
+            do { try await Task.sleep(for: .milliseconds(10)) }
+            catch { break }
+        }
         guard !process.isRunning else {
             kill(process.processIdentifier, SIGKILL)
             return nil
@@ -74,11 +78,16 @@ final class ChildProcess: @unchecked Sendable {
     func waitForReply(_ id: Double, timeout: Duration = .seconds(10)) async -> JSONValue? {
         let deadline = ContinuousClock.now.advanced(by: timeout)
         while ContinuousClock.now < deadline {
+            if Task.isCancelled { return nil }
             if let found = reply(id: id) { return found }
-            try? await Task.sleep(for: .milliseconds(10))
+            do { try await Task.sleep(for: .milliseconds(10)) }
+            catch { return nil }
         }
         return reply(id: id)
     }
 
-    deinit { if process.isRunning { kill(process.processIdentifier, SIGKILL) } }
+    deinit {
+        output.fileHandleForReading.readabilityHandler = nil
+        if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+    }
 }
