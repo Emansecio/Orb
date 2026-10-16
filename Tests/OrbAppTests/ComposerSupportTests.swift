@@ -376,6 +376,38 @@ struct ComposerSupportTests {
         #expect(close.windowResized(to: 1000, isOpen: true) == false)
         #expect(close.windowResized(to: 1500, isOpen: false) == true)
     }
+
+    // The panel closed itself right after you opened it in a window under 1210 pt: the split view's width, read before,
+    // swells for a moment while the panel slides in, which read as the window getting wide and then narrow again.
+    @Test @MainActor func theInspectorIsToldTheWindowsWidthNotTheWidthOfWhatIsInIt() async throws {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1027, height: 600), styleMask: [.titled, .resizable],
+                              backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        let content = try #require(window.contentView)
+        let reader = WindowWidthReader.ReaderView(frame: NSRect(x: 0, y: 0, width: 1027, height: 1))
+        var widths: [CGFloat] = []
+        reader.onChange = { widths.append($0) }
+        content.addSubview(reader)
+        await waitUntil("the first width") { !widths.isEmpty } // told once it is in the window
+        #expect(widths == [window.frame.width])
+
+        // What is in the window grows while the panel slides in: not the window, so nothing is told.
+        reader.setFrameSize(NSSize(width: 1327, height: 1))
+        content.setFrameSize(NSSize(width: 1327, height: 600))
+        #expect(widths == [window.frame.width])
+
+        // The window itself is resized: that is told, once per width.
+        window.setContentSize(NSSize(width: 1400, height: 600))
+        window.setContentSize(NSSize(width: 1400, height: 700))
+        #expect(widths.count == 2 && widths.last == window.frame.width)
+
+        // Told to the panel's rule, opening the panel in the narrow window never closes it.
+        var close = InspectorAutoClose()
+        #expect(close.windowResized(to: widths[0], isOpen: false) == nil)
+        close.userToggled()
+        #expect(close.windowResized(to: widths[0], isOpen: true) == nil)
+        reader.removeFromSuperview()
+    }
 }
 
 /// ⇧↩ breaks the line where the cursor is instead of sending.

@@ -30,11 +30,12 @@ struct RootView: View {
             fixSelection()
         }
         .onChange(of: model.selection) { fixSelection() }
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+        // The window's own width: the split view's swells for a moment while the panel slides in (see `WindowWidthReader`).
+        .background(WindowWidthReader { width in
             guard let open = autoClose.windowResized(to: width, isOpen: model.showInspector) else { return }
             autoChange = open
             model.setInspector(open)
-        }
+        })
         .onChange(of: model.showInspector) { _, isOpen in
             if autoChange == isOpen { autoChange = nil } else { autoClose.userToggled() }
         }
@@ -177,6 +178,52 @@ private struct DetailView: View {
             if model.botIDs.isEmpty {
                 WelcomeView(ledger: welcomeLedger)
             }
+        }
+    }
+}
+
+/// Tells the width of the window it is in: once it is in the window, then each time the window is resized to another width.
+/// The Orb's panel steps aside by the window's width (`InspectorAutoClose`), and only the window will do: the width of the
+/// split view swells for a moment while the panel slides in, which read as the window getting wide and narrow again, so
+/// the panel closed itself right after you opened it in a window under 1210 pt.
+struct WindowWidthReader: NSViewRepresentable {
+    let onChange: (CGFloat) -> Void
+
+    func makeNSView(context: Context) -> ReaderView {
+        let view = ReaderView()
+        view.onChange = onChange
+        return view
+    }
+
+    func updateNSView(_ view: ReaderView, context: Context) { view.onChange = onChange }
+
+    final class ReaderView: NSView {
+        var onChange: (CGFloat) -> Void = { _ in }
+        private var observer: NSObjectProtocol?
+        private var told: CGFloat?
+
+        /// Leaving the window lets the observation go (and a view that leaves for good leaves its window first).
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+            observer = nil
+            told = nil
+            guard let window else { return }
+            // Posted on the main thread, where the window is resized: the block runs there, at once.
+            observer = NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: window,
+                                                              queue: nil) { [weak self] _ in
+                MainActor.assumeIsolated { self?.tell() }
+            }
+            // The first width waits a turn of the main loop: joining the window happens while SwiftUI updates its views.
+            DispatchQueue.main.async { [weak self] in self?.tell() }
+        }
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        private func tell() {
+            guard let width = window?.frame.width, width != told else { return }
+            told = width
+            onChange(width)
         }
     }
 }
