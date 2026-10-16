@@ -332,7 +332,8 @@ struct ContextWindow: Sendable, Equatable {
             summary = extended.render()
         }
         let note = ContextSummary.mergedNotes(dropped == 0 ? carriedNote : nil,
-                                              ContextSummary.stepsNote(skippedSteps, maxLines: digestLines))
+                                              ContextSummary.stepsNote(skippedSteps, maxLines: digestLines),
+                                              fileLimit: ToolDigest.maxFiles(lines: digestLines))
         let shown = [summary, note].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
         let messages = shown.isEmpty ? [] : ContextSummary.pair(shown, foldedTurns: summary != nil)
         if dropped > 0 {
@@ -518,11 +519,21 @@ enum ContextSummary {
     /// The summary text of a pair at the start of `messages` (from an earlier fit), or nil.
     static func leading(in messages: [ChatMessage]) -> String? { inherited(in: messages)?.summary }
 
-    /// An earlier note and a new one as one note (the title once).
-    static func mergedNotes(_ earlier: String?, _ new: String) -> String {
+    /// An earlier note and a new one as one note (the title once, and one files line at the end naming both's files).
+    static func mergedNotes(_ earlier: String?, _ new: String, fileLimit: Int = ToolDigest.maxFiles()) -> String {
         guard let earlier, !earlier.isEmpty else { return new }
         guard !new.isEmpty else { return earlier }
-        return ([earlier] + new.components(separatedBy: "\n").dropFirst()).joined(separator: "\n")
+        let lines = earlier.components(separatedBy: "\n") + new.components(separatedBy: "\n").dropFirst()
+        let isFiles = { (line: String) in line.hasPrefix(ToolDigest.filesTitle) }
+        var files: [String] = []
+        for line in lines where isFiles(line) {
+            for file in ToolDigest.files(inLine: line) {
+                files.removeAll { $0 == file }
+                files.append(file)
+            }
+        }
+        let filesLine = ToolDigest.filesLine(files, limit: fileLimit)
+        return (lines.filter { !isFiles($0) } + (filesLine.map { [$0] } ?? [])).joined(separator: "\n")
     }
 
     /// The summary of `dropped` added to `previous` (the text of an earlier summary, carried once as it is).
@@ -535,10 +546,12 @@ enum ContextSummary {
     }
 
     /// Lines about steps of the current request that were set aside to make room: one for each (see `ToolDigest`).
+    /// Below them, one line with the files those steps changed (`ToolDigest.filesLine`), however many lines were cut.
     static func stepsNote(_ skipped: [ChatMessage], maxLines: Int = ToolDigest.maxLines) -> String {
         let lines = ToolDigest.lines(for: skipped, maxLines: maxLines)
         guard !lines.isEmpty else { return "" }
-        return stepsNoteTitle + "\n" + lines.joined(separator: "\n")
+        let files = ToolDigest.filesLine(ToolDigest.writtenFiles(in: skipped), limit: ToolDigest.maxFiles(lines: maxLines))
+        return ([stepsNoteTitle] + lines + (files.map { [$0] } ?? [])).joined(separator: "\n")
     }
 }
 
@@ -738,5 +751,30 @@ enum ContextOverflow {
         return LLMError.isContextOverflow(text)
             || ["too many tokens", "maximum length", "input length", "context size", "maximum prompt length", "input token count"]
                 .contains { text.contains($0) }
+    }
+}
+
+/// What `Conversation.prepareHistory` reads and writes of a conversation: two equal shapes give the same history.
+struct HistoryShape: Equatable {
+    var messages: Int
+    var summary: String?
+    var summaryCoveredCount: Int?
+    var condensedCount: Int?
+    var compactions: Int?
+    var ledger: ConversationLedger?
+    var chunks: [ChunkSummary]?
+    var paused: Bool
+    var lastModelCall: Date?
+
+    init(_ conversation: Conversation) {
+        messages = conversation.messages.count
+        summary = conversation.summary
+        summaryCoveredCount = conversation.summaryCoveredCount
+        condensedCount = conversation.condensedCount
+        compactions = conversation.compactions
+        ledger = conversation.ledger
+        chunks = conversation.chunkSummaries
+        paused = conversation.isTaskPaused
+        lastModelCall = conversation.lastModelCall
     }
 }

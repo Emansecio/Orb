@@ -18,6 +18,8 @@ struct WebFetchTool: AgentTool {
     /// The longest a page is read for: the request's own timeout only covers silence between packets, so an endless
     /// stream (server-sent events, a radio) with the odd keep-alive would hold the turn forever.
     static let readDeadline = Duration.seconds(30)
+    /// The longest a `save_to` download is given (100 MB at a slow 2 Mbit/s fits), for the same reason.
+    static let downloadDeadline = Duration.seconds(600)
     /// A body whose size the server announced ends by itself, so a slow link (a big PDF on hotel Wi-Fi) may take longer than
     /// for one that could go on forever. The byte limit and the silence timeout still apply.
     static let finiteReadDeadline = Duration.seconds(180)
@@ -321,6 +323,11 @@ struct WebFetchTool: AgentTool {
 
     // MARK: Errors
 
+    static func downloadTooSlow(_ deadline: Duration, bytes: Int) -> String {
+        "O download passou de \(Int(deadline.components.seconds / 60)) min (\(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)) "
+            + "baixados) e foi interrompido; nada foi gravado. Se o Orb tiver o Terminal, baixe com run_command (curl -L -o)."
+    }
+
     static let tooLargeMessage = "O arquivo passa de \(maxDownloadBytes / 1_000_000) MB, o limite do save_to. Se o Orb tiver o Terminal, baixe com run_command (curl -L -o); senão, peça ao usuário para baixar."
 
     /// What an HTTP error status means for the model, with the address that answered it.
@@ -377,7 +384,9 @@ struct WebFetchTool: AgentTool {
 
     /// Streams the body to a temporary file next to `target` and moves it into place, so a failed or oversized
     /// download never leaves a half-written file behind. Returns the size in bytes.
-    private static func download(_ bytes: URLSession.AsyncBytes, to target: URL) async throws -> Int {
+    /// Given up after `deadline`, with nothing left behind.
+    static func download(_ bytes: URLSession.AsyncBytes, to target: URL, deadline: Duration = downloadDeadline) async throws -> Int {
+        let ends = ContinuousClock.now + deadline
         let destination = target.resolvingLinkChain
         guard !destination.isExistingDirectory else { throw ToolError("\(destination.path) é uma pasta; informe o nome do arquivo em save_to.") }
         let manager = FileManager.default
@@ -397,6 +406,9 @@ struct WebFetchTool: AgentTool {
                     total += buffer.count
                     try handle.write(contentsOf: buffer)
                     buffer.removeAll(keepingCapacity: true)
+                }
+                if buffer.count % 1_024 == 0, ContinuousClock.now > ends {
+                    throw ToolError(Self.downloadTooSlow(deadline, bytes: total + buffer.count))
                 }
                 if total + buffer.count > maxDownloadBytes {
                     throw ToolError(tooLargeMessage)

@@ -214,10 +214,10 @@ extension BotSession {
 
     /// The conversation since the last saved stretch (nil when there is nothing new, or not yet idle for `gap`).
     /// Marks it saved. `end`: only the items before this index (a compaction at sending saves what came before the
-    /// message being sent).
+    /// message being sent, which is taken as the turn starts: what came before it no longer changes).
     func pendingStretch(ifIdleFor gap: TimeInterval? = nil, upTo end: Int? = nil) -> [TranscriptItem]? {
         ensureLoaded()
-        guard turnTask == nil, let conversation else { return nil }
+        guard turnTask == nil || end != nil, let conversation else { return nil }
         let stop = min(end ?? conversation.items.count, conversation.items.count)
         let start = min(conversation.memorySavedCount ?? 0, stop)
         let stretch = Array(conversation.items[start..<stop])

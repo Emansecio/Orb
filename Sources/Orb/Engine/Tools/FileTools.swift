@@ -58,14 +58,15 @@ struct ReadFileTool: AgentTool {
             let office = OfficeReader.isOffice(url)
             let legacyExcel = LegacyExcelReader.isLegacyExcel(url)
             let key = DocumentTextCache.Key(url, size: size)
-            let text = try await runDetached {
+            // A system converter cannot be interrupted midway: ⌘. stops waiting for it (it finishes on its own, unread).
+            let text = try await cancellably { try await runDetached {
                 try FileAccess.translating(url, writing: false) {
                     try DocumentTextCache.shared.text(for: key) {
                         if office { return try OfficeReader.text(at: url) }
                         return try legacyExcel ? LegacyExcelReader.text(at: url) : DocumentReader.documentText(at: url)
                     }
                 }
-            }
+            } }
             return Self.numbered(TextFile.lines(of: text), arguments: arguments, note: "documento .\(url.pathExtension.lowercased()) convertido em texto")
         }
 
@@ -483,15 +484,26 @@ struct SearchFilesTool: AgentTool {
         }
         mdfindArguments += Self.looksLikeFileName(query) ? ["-name", query] : [query]
 
-        let result = try await ProcessRunner.run("/usr/bin/mdfind", mdfindArguments, timeout: .seconds(30), outputLimit: 1_000_000)
+        let result = try await ProcessRunner.run("/usr/bin/mdfind", mdfindArguments, timeout: .seconds(Self.timeLimit), outputLimit: 1_000_000)
+        return try Self.answer(result, limit: limit)
+    }
+
+    static let timeLimit = 30
+
+    /// What the model reads of a search: the paths, and when the search ran out of time, that the list may be incomplete
+    /// (the paths found so far are kept, but a short list must not read as everything there is).
+    static func answer(_ result: ProcessOutput, limit: Int) throws -> String {
         // stderr is merged in (Spotlight logs noise there); results are the absolute paths.
         let paths = result.output.split(separator: "\n").filter { $0.hasPrefix("/") }
+        let cut = "[a busca passou de \(timeLimit) s e foi interrompida: a lista pode estar incompleta; restrinja com directory ou uma busca mais exata]"
         guard !paths.isEmpty else {
+            if result.timedOut { return "Nenhum arquivo encontrado antes do fim do prazo. " + cut }
             if result.status != 0 { throw ToolError("A busca falhou: \(result.output)") }
             return "Nenhum arquivo encontrado. O Spotlight pode não indexar essa pasta (pastas ocultas, node_modules, volumes externos ou arquivos recentes); tente glob para nomes ou grep para conteúdo."
         }
         var lines = paths.prefix(limit).map(String.init)
         if paths.count > limit { lines.append("[... mais \(paths.count - limit) resultados; refine a busca ...]") }
+        if result.timedOut { lines.append(cut) }
         return lines.joined(separator: "\n")
     }
 

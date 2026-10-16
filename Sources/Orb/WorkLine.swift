@@ -218,13 +218,48 @@ enum WorkPhrase {
 
 // MARK: - The meter next to the phrase
 
+/// What the running turn has used so far, summed over its model calls: a turn has no step limit, so this is how the person
+/// notices one that costs more than it should, while it runs.
+struct TurnSpend: Equatable, Sendable {
+    /// Every token of every call: the prompt (cached or not) and the reply.
+    var tokens: Int
+    /// What it cost at the provider's prices, when the model is billed by use and its price is known.
+    var dollars: Double?
+
+    init(tokens: Int, dollars: Double? = nil) {
+        self.tokens = tokens
+        self.dollars = dollars
+    }
+
+    init(_ usage: TokenUsage, dollars: Double? = nil) {
+        let parts = [usage.input, usage.output, usage.cacheRead, usage.cacheWrite].map { $0 ?? 0 }
+        self.init(tokens: parts.reduce(0) { sum, part in
+            let (total, overflow) = sum.addingReportingOverflow(part)
+            return overflow ? .max : total
+        }, dollars: dollars)
+    }
+
+    /// From here on the meter says it: below, a turn costs too little to be worth a word.
+    static let shownFrom = 50_000
+
+    /// "180 mil tokens · US$ 0,42"; nil below `shownFrom`.
+    var text: String? {
+        guard tokens >= Self.shownFrom else { return nil }
+        let said = UsageFormat.tokens(tokens)
+        guard let dollars, dollars > 0 else { return said }
+        return said + " · " + UsageFormat.dollars(dollars)
+    }
+}
+
 enum WorkMeter {
     /// "16 s · 3 ações": how long the turn has gone on and how many actions it made. The clock is empty during the first
-    /// second and the count appears from the second action: one is the line itself.
-    static func text(elapsed: String, actions: Int) -> String {
+    /// second and the count appears from the second action: one is the line itself. `spend`: what the turn used, once it
+    /// is enough to matter ("16 min · 140 ações · 2,1 milhões de tokens · US$ 3,10").
+    static func text(elapsed: String, actions: Int, spend: TurnSpend? = nil) -> String {
         var parts: [String] = []
         if !elapsed.isEmpty { parts.append(elapsed) }
         if actions >= 2 { parts.append("\(actions) ações") }
+        if let spent = spend?.text { parts.append(spent) }
         return parts.joined(separator: " · ")
     }
 

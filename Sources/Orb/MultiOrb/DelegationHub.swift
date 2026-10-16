@@ -41,6 +41,8 @@ final class DelegationHub: DelegationService {
     private var waitingSince: [UUID: Date] = [:]
     /// Orbs whose group turn is being prepared (its opening text is asked of the group, which may take a moment).
     private var starting: Set<UUID> = []
+    /// Requests at work past `workTimeout` whose banner went out (once each).
+    private(set) var toldStillRunning: Set<UUID> = []
 
     static let seenLimit = 500
     static let keptRequests = 300
@@ -259,7 +261,7 @@ final class DelegationHub: DelegationService {
                 let said = reply.map { OrbEnvelopeText.sanitize($0) } ?? ""
                 outcome = succeeded ? (.ok, said.isEmpty ? "Concluí, sem nada a relatar." : said)
                     // What it got to say (a task stopped at the step limit says how far it went) goes with the reason.
-                    : (.failed, "Não consegui: " + Self.reason(in: own) + (said.isEmpty ? "" : "\n\n" + said))
+                    : (.failed, Self.failedLead + Self.reason(in: own) + (said.isEmpty ? "" : "\n\n" + said))
             }
         }
         own.items.settingReceived(requestID, to: !finished ? .cancelled : waits ? .open : (outcome?.status == .ok ? .replied : .failed))
@@ -321,6 +323,7 @@ final class DelegationHub: DelegationService {
     /// have nobody to answer).
     private func answer(_ request: DelegationRequest, status: OrbEnvelope.ReplyStatus, text: String) {
         let envelope = request.envelope
+        if envelope.kind == .tell, status == .failed { toldFailure(of: request, text: text) }
         guard envelope.kind == .ask, envelope.from.id != envelope.to.id, let model, !isShuttingDown,
               model.bot(envelope.from.id) != nil, chainStates[envelope.chainID]?.cancelled != true else { return }
         let name = model.bot(envelope.to.id)?.name ?? envelope.to.name
@@ -331,6 +334,22 @@ final class DelegationHub: DelegationService {
         inbox[envelope.from.id, default: []].append(reply)
         schedulePump(envelope.from.id)
     }
+
+    /// A `tell` waits for no answer, so a failure would reach nobody: the chat of the Orb that sent it gets a line saying so
+    /// (not the turn: there is nothing to answer). A stopped chain, a group's turn and an Orb gone say nothing.
+    private func toldFailure(of request: DelegationRequest, text: String) {
+        let envelope = request.envelope
+        guard envelope.groupID == nil, envelope.from.id != envelope.to.id, let model, !isShuttingDown,
+              model.bot(envelope.from.id) != nil, chainStates[envelope.chainID]?.cancelled != true else { return }
+        let reason = text.hasPrefix(Self.failedLead) ? String(text.dropFirst(Self.failedLead.count)) : text
+        let line = reason.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+        let actor = model.bot(envelope.to.id).map(OrbRef.init) ?? envelope.to
+        appendToChat(of: envelope.from.id, .event(OrbEvent(kind: .tellFailed, actor: actor,
+                                                           detail: Conversation.clipped(line, to: RoutineRun.summaryLimit),
+                                                           requestID: envelope.id, chainID: envelope.chainID)))
+    }
+
+    static let failedLead = "Não consegui: "
 
     /// Hands the Orb the answers waiting for it, when it is free: up to `wakeBatch` of the same continuation at once. An answer to
     /// a request the Orb was serving resumes that request's conversation; any other wakes the chat. True when a turn began.
@@ -412,7 +431,8 @@ final class DelegationHub: DelegationService {
         // Their requests are marked first, so the end of each turn finds nothing to answer.
         for botID in running {
             model.session(botID).stop(startsQueuedRoutines: false,
-                                      notice: isShuttingDown ? BotSession.quitSideNotice : BotSession.stoppedNotice)
+                                      notice: isShuttingDown ? BotSession.quitSideNotice
+                                          : reason == .gaveUp ? ApprovalWait.gaveUpNotice : BotSession.stoppedNotice)
         }
         refresh(Array(touched))
         // A group's chain says it stopped in the group's own thread (`groupStopped`), never in its orchestrator's private chat.
@@ -496,8 +516,15 @@ final class DelegationHub: DelegationService {
 
     /// Run by the scheduler every 30 seconds: a request that waited too long ends `failed`, and what is old and idle is forgotten.
     /// Waiting for work that goes on (a target busy with a turn, a child still at work) is not waiting too long: only
-    /// `workTimeout` ends it.
+    /// `workTimeout` ends it. A request at work past `workTimeout` is not ended (turns have no limit): you are told, once,
+    /// with a banner that can stop it.
     func sweep(now: Date = .now) {
+        for request in requests.values where request.state == .running && !toldStillRunning.contains(request.id) {
+            guard let started = request.startedAt, now.timeIntervalSince(started) > DelegationLimits.workTimeout else { continue }
+            toldStillRunning.insert(request.id)
+            model?.notifyAboutTurn(of: request.envelope.to.id, Self.stillRunningNotice(request, after: now.timeIntervalSince(started)))
+        }
+        toldStillRunning = toldStillRunning.filter { requests[$0]?.state == .running }
         for request in requests.values where request.state == .queued {
             let waited = now.timeIntervalSince(request.envelope.sentAt)
             guard waited > DelegationLimits.requestTimeout else { continue }
@@ -518,6 +545,13 @@ final class DelegationHub: DelegationService {
             chainStates[id] = nil
         }
         pruneRequests()
+    }
+
+    /// The banner of a request still at work after `elapsed` seconds.
+    static func stillRunningNotice(_ request: DelegationRequest, after elapsed: TimeInterval) -> String {
+        let envelope = request.envelope
+        return "\(envelope.to.name) está há \(Int(elapsed / 3600)) h no pedido de \(envelope.from.name) e continua trabalhando. "
+            + "Se não era para isso, use Parar."
     }
 
     /// The finished requests are kept for the chains' sake and for the tests, but not forever.

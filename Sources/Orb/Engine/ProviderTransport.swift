@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// What a wire format adds to a streamed exchange: how its JSON events become `LLMEvent`s. The rest (the request,
 /// the status check, reading the events, cancellation) is `ProviderTransport`.
@@ -47,6 +48,22 @@ enum ProviderTransport {
     /// How long a connection may stay silent before it is given up on (URLSession counts it between received bytes,
     /// so a long answer is fine; local models can take long before the first token).
     static let idleTimeout: TimeInterval = 300
+    /// How long a response may go on without one real event (text, reasoning, a piece of a tool call, anything but a
+    /// keep-alive): a provider that only sends keep-alives (SSE comments, Anthropic's `ping`) never trips `idleTimeout`, and
+    /// would hold the turn for ever. Long enough for a model that reasons in silence before its first token.
+    static let contentTimeout: TimeInterval = 600
+    /// Tests shorten `contentTimeout` for the streams they open (a task-local: read when the stream starts).
+    @TaskLocal static var contentTimeoutOverride: TimeInterval?
+
+    /// The error of a response that sent nothing but keep-alives for `contentTimeout` (tried once more, see `Retry`).
+    static func stalled(after seconds: TimeInterval) -> LLMError {
+        .stream(type: LLMError.stalledType, message: "\(Int((seconds / 60).rounded())) min sem enviar nada além de sinais de vida")
+    }
+
+    /// Whether an event is only a keep-alive: Anthropic's `ping` (comments never become events).
+    static func isKeepAlive(_ event: SSEEvent) -> Bool {
+        event.name == "ping" || event.data.hasPrefix(#"{"type":"ping""#) || event.data.hasPrefix(#"{"type": "ping""#)
+    }
 
     /// Streams one model response: `body` is encoded once, off the caller's thread; `request` addresses it for a
     /// credential. Events reach the stream as they are read; errors are `LLMError`s (see `LLMError.wrapping`).
@@ -55,8 +72,11 @@ enum ProviderTransport {
         body: @escaping @Sendable () throws -> Data, request: @escaping @Sendable (String?) -> URLRequest, mapper: Mapper
     ) -> AsyncThrowingStream<LLMEvent, Error> {
         AsyncThrowingStream { continuation in
+            let timeout = contentTimeoutOverride ?? contentTimeout
+            let activity = StreamActivity()
             let task = Task {
                 var mapper = mapper
+                defer { activity.finish() }
                 do {
                     let payload = try body()
                     let (bytes, response) = try await open(session, credentials: credentials) { key in
@@ -81,6 +101,7 @@ enum ProviderTransport {
                     /// Maps one event; true when reading can stop.
                     func handle(_ event: SSEEvent) throws -> Bool {
                         sawEvent = true
+                        if !isKeepAlive(event) { activity.touch() }
                         let data = event.data
                         if event.isDone { sawDone = true; return true }
                         guard let value = JSONValue.parse(data) else {
@@ -115,10 +136,27 @@ enum ProviderTransport {
                     // A response that broke off was billed for what it had read and written. What the provider already
                     // reported (Anthropic's input tokens come first) goes ahead of the error, as an unfinished response.
                     if let used = (mapper as? any AssemblingMapper)?.usage { continuation.yield(.finished(.incomplete, used)) }
-                    continuation.finish(throwing: LLMError.wrapping(error))
+                    // Stopped by the watch below, not by whoever reads the stream: the provider went quiet.
+                    continuation.finish(throwing: activity.hasStalled ? stalled(after: timeout) : LLMError.wrapping(error))
                 }
             }
-            continuation.onTermination = { _ in task.cancel() }
+            // Ends the response that sends nothing real for `timeout`; ends by itself when the response does.
+            let watch = Task {
+                while !Task.isCancelled, !activity.isFinished {
+                    let left = activity.secondsLeft(of: timeout)
+                    if left <= 0 {
+                        activity.stall()
+                        task.cancel()
+                        return
+                    }
+                    try? await Task.sleep(for: .seconds(left))
+                }
+            }
+            activity.watch(watch)
+            continuation.onTermination = { _ in
+                task.cancel()
+                watch.cancel()
+            }
         }
     }
 
@@ -250,5 +288,48 @@ enum ProviderTransport {
             if data.count >= errorBodyLimit { break }
         }
         return data
+    }
+}
+
+/// When a streamed response last sent something real, whether the watch gave up on it, and the watch itself (cancelled
+/// as soon as the response ends, so no sleeping task outlives it).
+final class StreamActivity: Sendable {
+    private struct State {
+        var last = ContinuousClock.now
+        var stalled = false
+        var finished = false
+        var watch: Task<Void, Never>?
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
+
+    func touch() { state.withLock { $0.last = .now } }
+
+    func secondsLeft(of timeout: TimeInterval) -> TimeInterval {
+        let idle = state.withLock { $0.last.duration(to: .now) }
+        return timeout - (Double(idle.components.seconds) + Double(idle.components.attoseconds) / 1e18)
+    }
+
+    func stall() { state.withLock { $0.stalled = true } }
+    var hasStalled: Bool { state.withLock { $0.stalled } }
+    var isFinished: Bool { state.withLock { $0.finished } }
+
+    /// The response ended (however): the watch stops.
+    func finish() {
+        let watch = state.withLock { state -> Task<Void, Never>? in
+            state.finished = true
+            defer { state.watch = nil }
+            return state.watch
+        }
+        watch?.cancel()
+    }
+
+    /// Hands over the watch; one for a response that already ended is cancelled at once.
+    func watch(_ task: Task<Void, Never>) {
+        let finished = state.withLock { state -> Bool in
+            if !state.finished { state.watch = task }
+            return state.finished
+        }
+        if finished { task.cancel() }
     }
 }

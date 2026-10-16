@@ -7,8 +7,14 @@ enum ToolDigest {
     /// Most lines a digest keeps (the newest ones); older steps are counted.
     static let maxLines = 24
     static let maxLineLength = 150
-    /// Characters a digest of `lines` lines can take at most, header included.
-    static func maxCharacters(lines: Int = maxLines) -> Int { lines * (maxLineLength + 1) + 80 }
+    /// Characters a digest of `lines` lines can take at most, header and the files line included.
+    static func maxCharacters(lines: Int = maxLines) -> Int {
+        lines * (maxLineLength + 1) + 80 + maxFiles(lines: lines) * (maxPathLength + 2) + filesTitle.count
+    }
+    /// Files the files line names at most (the newest): two per line of the digest, up to 40.
+    static func maxFiles(lines: Int = maxLines) -> Int { min(40, lines * 2) }
+    static let maxPathLength = 60
+    static let filesTitle = "Arquivos alterados nestes passos: "
     static var maxCharacters: Int { maxCharacters() }
 
     /// How many lines a window of `limit` characters can spare: a sixth of it at most, and never fewer than 6.
@@ -44,6 +50,37 @@ enum ToolDigest {
         let steps = lines.indices.filter { !pinned.contains($0) }.suffix(maxLines - 1 - pinned.count)
         let kept = (pinned + steps).sorted()
         return ["(+\(lines.count - kept.count) linhas anteriores)"] + kept.map { lines[$0] }
+    }
+
+    /// The files the calls in `messages` wrote or changed and that worked, each once, in the order last touched. The
+    /// digest keeps only its newest lines: this keeps what the task changed early on in sight.
+    static func writtenFiles(in messages: [ChatMessage]) -> [String] {
+        let failed = Set(messages.filter { $0.role == .tool && $0.isError }.compactMap(\.toolCallID))
+        var files: [String] = []
+        for message in messages where message.role == .assistant {
+            for call in message.toolCalls where (call.name == "write_file" || call.name == "edit_file") && !failed.contains(call.id) {
+                guard let path = JSONValue.parse(call.arguments)?["path"]?.string, !path.isEmpty else { continue }
+                files.removeAll { $0 == path }
+                files.append(path)
+            }
+        }
+        return files
+    }
+
+    /// The files line of a steps note: the newest `limit` of `files`, the rest counted.
+    static func filesLine(_ files: [String], limit: Int = maxFiles()) -> String? {
+        guard !files.isEmpty else { return nil }
+        let kept = files.suffix(limit).map { oneLine($0, maxPathLength) }
+        let earlier = files.count - kept.count
+        return filesTitle + (earlier > 0 ? "(+\(earlier) antes) " : "") + kept.joined(separator: ", ")
+    }
+
+    /// The files a files line names, in its order (what `filesLine` wrote, without the count of earlier ones).
+    static func files(inLine line: String) -> [String] {
+        guard line.hasPrefix(filesTitle) else { return [] }
+        var rest = Substring(line.dropFirst(filesTitle.count))
+        if rest.hasPrefix("(+"), let close = rest.range(of: ") ") { rest = rest[close.upperBound...] }
+        return rest.components(separatedBy: ", ").filter { !$0.isEmpty }
     }
 
     /// A call to a connector, through the gateway (`connector_tools`, `connector_call`) or by the tool's own name

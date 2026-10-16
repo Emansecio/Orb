@@ -38,6 +38,12 @@ extension BotSession {
         clearBeats()
         resetWork()
         model?.workAnnouncer.reset()
+        model?.live(id).setTurnSpend(nil)
+        // Written at once, with the message that opened the turn: a crash in the next seconds no longer loses it.
+        if conversation != nil {
+            conversation?.turnOpen = true
+            scheduleSave(delay: 0)
+        }
         return turn
     }
 
@@ -122,6 +128,8 @@ extension BotSession {
         ApprovalNotifications.clear(model.pendingApprovals(of: id).map(\.id))
         let gate = model.gate, botID = id
         Task { await gate.cancelApprovals(for: botID) }
+        flushText()
+        keepCutReply(liveText?.text)
         closeStreaming()
         model.setAwaitingApproval(false, of: id)
         mutateItems { items in
@@ -143,6 +151,20 @@ extension BotSession {
         }
         append(.notice(notice))
         finishTurn(turn, succeeded: false, userStopped: true, startsQueuedRoutines: startsQueuedRoutines)
+    }
+
+    /// The reply you stopped while it was being written: what you read of it is part of the conversation, as a dropped
+    /// connection leaves it (`AgentEngine.interruptedMarker`), so the next turn knows it. Only the part not recorded yet
+    /// (a reply carried on after a cut already has its start in the history).
+    private func keepCutReply(_ text: String?) {
+        var said = text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if let last = conversation?.messages.last, last.role == .assistant {
+            let recorded = last.content.replacingOccurrences(of: AgentEngine.interruptedMarker, with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if said.hasPrefix(recorded) { said = String(said.dropFirst(recorded.count)).trimmingCharacters(in: .whitespacesAndNewlines) }
+        }
+        guard !said.isEmpty else { return }
+        changeConversation { $0.absorb(ChatMessage(role: .assistant, content: said + AgentEngine.interruptedMarker)) }
     }
 
     static let stoppedNotice = "Você interrompeu esta resposta"
@@ -252,10 +274,13 @@ extension BotSession {
             if text == AgentEngine.cutShortNotice { turnCutShort = true }
             // The cache warning is said once per conversation, not at every turn that still has the problem.
             if text == CacheHealth.notice, conversation?.items.contains(where: { $0.kind == .notice(text) }) == true { break }
+            // Going in circles: whoever is not looking at this Orb gets a banner with "Parar" (a routine's run, above all).
+            if text == LoopWatch.userNotice { model.notifyAboutTurn(of: id, text) }
             closeStreaming()
             append(.notice(text))
         case .usage(let total):
             setUsage(total)
+            model.live(id).setTurnSpend(TurnSpend(total, dollars: spentDollars(total)))
             // The model calls are counted one by one, as `.requestUsage` arrives.
         case .requestUsage(let used):
             setRequestUsage(used)
@@ -305,6 +330,13 @@ extension BotSession {
         return UsageLabel(model: name, source: source)
     }
 
+    /// What `total` cost at the provider's prices, when the turn's model is billed by use and its price is known.
+    private func spentDollars(_ total: TokenUsage) -> Double? {
+        guard let model, let label = usageLabel else { return nil }
+        if case .paid(let dollars) = model.priceBook.cost(of: UsageTotals(total), model: label.model) { return dollars }
+        return nil
+    }
+
     private struct UsageLabel {
         var model: String
         var source: UsageSource
@@ -315,6 +347,7 @@ extension BotSession {
     /// shows the error.
     func finishTurn(_ turn: UUID, succeeded: Bool = true, userStopped: Bool = false, startsQueuedRoutines: Bool = true) {
         guard turnID == turn, turnTask != nil, let model else { return }
+        conversation?.turnOpen = nil
         let botID = id
         let ranRoutine = routineID != nil
         // A task that stopped at the step limit is not done: a routine run or another Orb's request records that it did
@@ -373,7 +406,7 @@ extension BotSession {
                 model.delegation.finishSideRun(id, runID: routineID, kind: kind ?? .delegation, serving: serving,
                                                succeeded: completed, userStopped: userStopped, reply: reply)
             } else {
-                model.finishRoutineRun(id, routineID: routineID, succeeded: completed, reply: reply)
+                model.finishRoutineRun(id, routineID: routineID, succeeded: completed, reply: reply, userStopped: userStopped)
             }
         }
         if userStopped {

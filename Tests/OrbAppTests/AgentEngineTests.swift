@@ -413,24 +413,26 @@ extension AgentEngineTests {
         #expect(messages(events).last?.content == "ok")
     }
 
-    @Test func aFailureAfterTextWasShownIsNotRetriedAndKeepsTheText() async {
+    @Test func aFailureAfterTextWasShownIsNotRetriedButGoesOnFromTheText() async {
+        // The same response is not asked again (it would repeat the text): the text is kept and the turn goes on from it.
         let (engine, waits) = quickEngine()
         let script = CallScript(replies: [ModelReply([.text("Vou começar")], failure: LLMError.http(status: 529, message: "Overloaded")),
-                                        ModelReply([.text("não deveria chegar")])], whenExhausted: .fim)
+                                        ModelReply([.text("e continuo")])], whenExhausted: .fim)
         let events = await run(engine, request(script, mode: .ask, runs: Counter()))
-        #expect(await script.received.count == 1)
+        #expect(await script.received.count == 2)
         #expect(await waits.value == 0)
-        #expect(failures(events).count == 1)
+        #expect(failures(events).isEmpty)
         let recorded = messages(events)
-        #expect(recorded.map(\.role) == [.user, .assistant])
-        #expect(recorded.last?.content == "Vou começar\n\n[resposta interrompida]")
+        #expect(recorded.map(\.role) == [.user, .assistant, .assistant])
+        #expect(recorded[1].content == "Vou começar\n\n[resposta interrompida]")
+        #expect(recorded.last?.content == "e continuo")
     }
 
     @Test func whatABrokenOffRequestUsedIsStillCounted() async {
         let script = CallScript(replies: [ModelReply([.text("Vou começar"), .finished(.incomplete, TokenUsage(input: 100, output: 3))],
                                                  failure: URLError(.networkConnectionLost))], whenExhausted: .fim)
         let events = await run(AgentEngine(), request(script, mode: .ask, runs: Counter()))
-        #expect(failures(events).count == 1)
+        #expect(failures(events).isEmpty) // gone on once from the text (the next call says "fim")
         let requests = events.compactMap { event -> TokenUsage? in if case .requestUsage(let used) = event { used } else { nil } }
         #expect(requests == [TokenUsage(input: 100, output: 3)])
         let totals = events.compactMap { event -> TokenUsage? in if case .usage(let total) = event { total } else { nil } }

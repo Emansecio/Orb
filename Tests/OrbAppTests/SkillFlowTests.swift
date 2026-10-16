@@ -59,13 +59,15 @@ private func call(_ name: String, _ arguments: JSONValue, id: String = UUID().uu
     // MARK: The review
 
     /// One model answer that asks for `count` recalls at once: one step, however many calls.
-    private func recalls(_ count: Int) -> [LLMEvent] {
+    /// `query`: each step its own, so a long turn is not one going in circles (`LoopWatch`).
+    private func recalls(_ count: Int, query: String = "deploy") -> [LLMEvent] {
         let id = UUID().uuidString
-        return [.toolCalls((0..<count).map { ToolCallRequest(id: "\(id)-\($0)", name: "recall", arguments: #"{"query":"deploy"}"#) }), .finished(.toolUse, nil)]
+        return [.toolCalls((0..<count).map { ToolCallRequest(id: "\(id)-\($0)", name: "recall", arguments: #"{"query":"\#(query)"}"#) }),
+                .finished(.toolUse, nil)]
     }
 
     /// `count` model answers that each ask for one recall: `count` steps.
-    private func steps(_ count: Int) -> [[LLMEvent]] { (0..<count).map { _ in recalls(1) } }
+    private func steps(_ count: Int) -> [[LLMEvent]] { (0..<count).map { recalls(1, query: "deploy \($0)") } }
 
     private func proposing(_ text: String) -> [LLMEvent] {
         call("remember", .object(["fact": .string(text), "tipo": .string("skill")]))

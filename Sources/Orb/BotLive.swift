@@ -100,6 +100,8 @@ final class BotLive {
     /// depends on its own Orb only.
     private(set) var lastUsage: TokenUsage?
     private(set) var compactedTo: Int?
+    /// What the running turn used so far, summed over its calls (the working line's meter says it); nil when no turn runs.
+    private(set) var turnSpend: TurnSpend?
     /// The processes the Orb left running (`run_command` with background), shown above the message box until they end.
     private(set) var jobs: [BackgroundJobs.Snapshot] = []
     /// The turn waits for a command that can go on in the background (`CommandRelease`): the working line offers it.
@@ -154,6 +156,7 @@ final class BotLive {
     func setStatus(_ text: String?) {
         if text == nil { // the end of a turn does not wait for the phrase on screen
             setWork(nil)
+            assign(\.turnSpend, to: nil)
         }
         guard text != status else { return }
         status = text
@@ -192,6 +195,9 @@ final class BotLive {
 
     /// Tests shorten the time a phrase stays.
     func setWorkDwell(_ duration: Duration) { dwell.minDwell = duration }
+
+    /// What the running turn has used so far (nil: a new turn starts from nothing).
+    func setTurnSpend(_ spend: TurnSpend?) { assign(\.turnSpend, to: spend) }
 
     /// Moves the start of the running turn (tests and review snapshots show a turn that has gone on a while).
     func backdateWork(to date: Date) {

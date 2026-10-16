@@ -939,7 +939,7 @@ private struct WorkingLine: View {
                     // The phrase leaving follows its parent when the line is pushed down by a row coming in above it,
                     // instead of staying drawn where the line used to be.
                     .geometryGroup()
-                    WorkMeterView(work: work, since: live.workingSince)
+                    WorkMeterView(work: work, since: live.workingSince, spend: live.turnSpend)
                     // A command holds the turn: it can go on by itself while you talk to the Orb. The button waits a
                     // moment (`CommandRelease.buttonDelay`), so a quick command ends before it ever shows, and once
                     // pressed it stands dimmed until the command is let go (a quarter of a second at most).
@@ -1069,6 +1069,8 @@ private struct WorkMeterView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let work: WorkLine
     let since: Date?
+    /// What the turn used so far (`TurnSpend`): said from `TurnSpend.shownFrom` on.
+    var spend: TurnSpend?
     /// Where the ticks start when there is no start time (the wait to try again): fixed when the meter appears, so a
     /// redraw of the line does not move the second marks (`.now` in the body would restart the clock at every one).
     @State private var anchor = Date()
@@ -1093,6 +1095,6 @@ private struct WorkMeterView: View {
     private func text(at now: Date) -> String {
         if case .retrying(let until) = work.tone { return WorkMeter.countdown(until: until, now: now) }
         let elapsed = since.map { ElapsedFormat.working(since: $0, now: now) } ?? ""
-        return WorkMeter.text(elapsed: elapsed, actions: work.actions)
+        return WorkMeter.text(elapsed: elapsed, actions: work.actions, spend: spend)
     }
 }

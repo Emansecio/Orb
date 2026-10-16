@@ -259,7 +259,8 @@ actor MCPManager {
         while true {
             guard let entry = entries[id] else { throw ToolError("Esse conector não existe mais.") }
             guard entry.config.isEnabled else { throw ToolError("O conector \(entry.config.name) está desligado.") }
-            if let starting = entry.starting { return try await starting.value }
+            // Waiting stops at ⌘. (the start goes on for whoever else waits for it, and for the next call).
+            if let starting = entry.starting { return try await cancellably { try await starting.value } }
             if let connection = entry.connection {
                 if await connection.isRunning {
                     entries[id]?.lastUsed = .now
@@ -277,7 +278,7 @@ actor MCPManager {
             entries[id]?.starting = task
             entries[id]?.status = .starting
             publish()
-            return try await task.value
+            return try await cancellably { try await task.value }
         }
     }
 

@@ -197,6 +197,8 @@ actor AgentEngine {
         // Counts repeated calls and failures; `circling`: the last step's results told the model it was going in circles.
         var watch = LoopWatch()
         var circling = false
+        // How many times `watch` spoke this turn: at `LoopWatch.alertAfter` the person is told as well, once.
+        var circlingNotes = 0
         // What the calls showed, to check a reply that says the work is done (`CompletionWatch`).
         var completion = CompletionWatch()
         // A `task_plan` call ran in this turn: the plan is this turn's work, not one left from an earlier task.
@@ -207,9 +209,12 @@ actor AgentEngine {
         var sendImages = request.supportsImages != false
         if !sendImages, !request.images.isEmpty { out.yield(.notice(ImageRejection.notice)) }
 
+        // A response cut off mid-answer is carried on once from where it stopped (see `StreamInterrupted`).
+        var resumedAfterCut = false
+
         do {
             var step = 0
-            while true {
+            steps: while true {
                 step += 1
                 guard step <= maxSteps else { return }
                 // The last step answers in text (the tools stay listed, so the provider's cache still applies).
@@ -285,7 +290,14 @@ actor AgentEngine {
                         // What the user already read is part of the conversation, so the next turn must know it.
                         record(ChatMessage(role: .assistant, content: interrupted.partialText + Self.interruptedMarker),
                                in: &messages, out: out)
-                        out.yield(.failed(interrupted.underlying.localizedDescription))
+                        // Once per turn it goes on from there, as a reply cut at the output limit does; a second cut ends it.
+                        guard resumedAfterCut || isLastStep || Task.isCancelled else {
+                            resumedAfterCut = true
+                            nudges.append(messages.count) // not recorded: it only steers this turn
+                            messages.append(.user(Self.continueNudge))
+                            continue steps
+                        }
+                        out.yield(.failed(Self.cutMidAnswer(interrupted.underlying)))
                         return
                     }
                 }
@@ -419,6 +431,10 @@ actor AgentEngine {
 
                 circling = await runCalls(calls, request: request, reason: said, allowed: &allowed, toolNames: toolNames, note: note,
                                           watch: &watch, completion: &completion, planTouched: &planTouched, messages: &messages, out: out)
+                if circling {
+                    circlingNotes += 1
+                    if circlingNotes == LoopWatch.alertAfter { out.yield(.notice(LoopWatch.userNotice)) }
+                }
                 workedSinceReminder = true
                 try Task.checkCancellation()
             }
@@ -539,6 +555,13 @@ actor AgentEngine {
     static let unstatedWindowShare = 0.85
 
     static let interruptedMarker = "\n\n[resposta interrompida]"
+    /// A response that broke off after part of it was shown, twice in a turn: what came out stays in the conversation.
+    /// A dropped connection is named by its own detail, not by "Sem conexão": the answer had been arriving.
+    static func cutMidAnswer(_ error: any Error) -> String {
+        let detail = if case LLMError.network(_, let message) = error { message } else { error.localizedDescription }
+        return "O provedor cortou a resposta no meio (\(detail)). O que já tinha saído ficou na conversa: "
+            + "peça “continua” para seguir dali."
+    }
     static let continueNudge = "continue"
     /// Replies cut at the output limit that are continued in one turn (more would be a model that cannot finish).
     static let cutContinueLimit = 2
@@ -693,11 +716,21 @@ actor AgentEngine {
                           out: AsyncStream<TurnEvent>.Continuation) async -> Bool {
         let (calls, request) = await resolved(calls, in: request)
         var circling = false
-        func append(_ outcome: ToolOutcome, for call: ToolCallRequest) {
+        // The output as the model gets it. A long one may be written to a file (`ToolOutputCap`): that happens away from
+        // the engine, which serves every Orb.
+        func capped(_ outcome: ToolOutcome, for call: ToolCallRequest) async -> String {
             let kind = request.tools.first { $0.spec.name == call.name }?.kind
+            let output = outcome.text, botID = request.bot.id, directory = request.outputsDirectory, names = toolNames
             // A file read is the file: asked for again, it comes back. Anything else may not, a failed build's log least.
-            var text = ToolOutputCap.apply(outcome.text, botID: request.bot.id, callID: call.id, toolNames: toolNames,
-                                           directory: request.outputsDirectory, keepsCopy: kind != .file)
+            let cap = { @Sendable in
+                ToolOutputCap.apply(output, botID: botID, callID: call.id, toolNames: names, directory: directory, keepsCopy: kind != .file)
+            }
+            guard output.utf8.count > ToolOutputCap.copiedFrom else { return cap() } // short: no file, nothing to wait for
+            return await Task.detached(priority: .userInitiated, operation: cap).value
+        }
+        func append(_ outcome: ToolOutcome, capped text: String, for call: ToolCallRequest) {
+            var text = text
+            let kind = request.tools.first { $0.spec.name == call.name }?.kind
             // A call the user refused never ran: it is no failure of its own, nor a result to compare.
             if !outcome.text.hasPrefix(PermissionPolicy.refusalPrefix) {
                 watch.record(call, result: outcome.text, failed: outcome.isError, live: LoopWatch.isLive(call.name, kind: kind))
@@ -729,7 +762,7 @@ actor AgentEngine {
                 break
             }
             if let refused = confirmed.refused[index] {
-                append(refused, for: calls[index])
+                append(refused, capped: await capped(refused, for: calls[index]), for: calls[index])
                 index += 1
                 continue
             }
@@ -737,7 +770,7 @@ actor AgentEngine {
             while end < calls.count, Self.runsWithoutAsking(calls[end], request: request) { end += 1 }
             guard end - index > 1 else {
                 let outcome = await execute(calls[index], request: request, reason: reason, allowed: &allowed, approved: confirmed.approved.contains(index), out: out)
-                append(outcome, for: calls[index])
+                append(outcome, capped: await capped(outcome, for: calls[index]), for: calls[index])
                 index += 1
                 continue
             }
@@ -762,7 +795,8 @@ actor AgentEngine {
                 return done
             }
             for (offset, call) in batch.enumerated() {
-                append(outcomes[offset] ?? ToolOutcome("Error: the tool did not run.", isError: true), for: call)
+                let outcome = outcomes[offset] ?? ToolOutcome("Error: the tool did not run.", isError: true)
+                append(outcome, capped: await capped(outcome, for: call), for: call)
             }
             index = end
         }

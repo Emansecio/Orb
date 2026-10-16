@@ -151,7 +151,9 @@ struct ScreenshotTool: AgentTool {
         }
 
         let wantsText = OCRPolicy.shouldRun(mode: ocrMode, labeledElements: nil)
-        let text = wantsText ? await Task.detached { (try? TextRecognizer.recognize(imageAt: file)) ?? "" }.value : ""
+        let text = wantsText ? (try? await withDeadline(Self.ocrDeadline, "a leitura do texto da imagem") {
+            try await runDetached { try TextRecognizer.recognize(imageAt: file) }
+        }) ?? "" : ""
         var report = "Captura salva em \(file.path) (\(size.width)×\(size.height) px)."
         if !hadAccess {
             report += "\nWarning: Orb does not have Screen Recording yet, so the capture may show only the wallpaper, without "
@@ -449,9 +451,14 @@ struct ScreenshotTool: AgentTool {
     /// Vision for one picture at a time per process: it is heavy.
     private static let visionGate = AsyncGate(limit: 1)
 
+    /// Vision that never answers lets go of the gate after `ocrDeadline` (the picture is still returned, without its text).
     private static func recognize(_ image: CGImage) async throws -> [OCRLine] {
-        try await visionGate.run { try await runDetached { try TextRecognizer.recognize(image, fast: true) } }
+        try await visionGate.run {
+            try await withDeadline(ocrDeadline, "a leitura do texto da imagem") { try await runDetached { try TextRecognizer.recognize(image, fast: true) } }
+        }
     }
+
+    static let ocrDeadline: TimeInterval = 20
 
     /// The app with the front-most ordinary window that is not one of `excluding`, from the system's on-screen window list.
     static let liveFrontWindowPID: @Sendable (Set<Int32>) -> Int32? = { excluding in

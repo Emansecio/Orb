@@ -28,7 +28,8 @@ enum DelegationLimits {
     static let requestTimeout: TimeInterval = 30 * 60, keptPedidos = 20
     static let rosterLimit = 12, roleClip = 80
     /// How long a request may wait while the work it waits for goes on (a child still at work, a queue behind a turn in
-    /// progress): past `requestTimeout` it is still waiting for real work, so only this ceiling ends it (a turn that hangs).
+    /// progress): past `requestTimeout` it is still waiting for real work, so only this ceiling ends it. A request at work
+    /// itself is never ended by time: past this, you get a banner with Parar (`DelegationHub.sweep`).
     static let workTimeout: TimeInterval = 3 * 3600
 }
 

@@ -130,7 +130,7 @@ extension AppModel {
     /// holds its chat or the routines queued behind it, and the chat says why.
     func giveUpWaiting(on approvalID: UUID, of botID: UUID) {
         guard isPending(approvalID, of: botID) else { return }
-        stop(botID, notice: ApprovalWait.gaveUpNotice)
+        stop(botID, notice: ApprovalWait.gaveUpNotice, reason: .gaveUp)
     }
 
     func isPending(_ approvalID: UUID, of botID: UUID) -> Bool {
@@ -148,6 +148,8 @@ extension AppModel {
         case .openGroup(let groupID):
             if group(groupID) != nil { selection = .group(groupID) }
             ApprovalNotifications.bringAppToFront()
+        case .stop(let botID):
+            if bot(botID) != nil, canStop(botID) { stopTurn(botID) }
         case .ignore:
             break
         }

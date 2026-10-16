@@ -196,7 +196,9 @@ Se o motor escolhido não estiver instalado, o Orb fica só com `web_fetch` e `w
   desenhada por causa dela, só a que você escolhe aparece (a lista de mensagens já desenha só as que estão à vista). Enquanto você
   olha um resultado, o chat não vai sozinho para o fim com a resposta que chega; enviar uma mensagem volta a seguir. Até 1000
   resultados aparecem ("3 de 1000+"). A resposta que ainda está sendo escrita fica de fora até terminar. VoiceOver lê "3 de 12 resultados".
-- **Parar.** O botão Parar ou **⌘.**; o Orb avisa "Você interrompeu esta resposta".
+- **Parar.** O botão Parar ou **⌘.**; o Orb avisa "Você interrompeu esta resposta". O que ele já tinha escrito fica na conversa,
+  marcado "[resposta interrompida]", e o próximo pedido o leva em conta. Ler um PDF ou planilha longa, esperar um conector que
+  demora a iniciar ou uma captura de tela travada também param na hora.
 - **Refazer e Editar** (com o Orb parado). Passe o mouse sobre a **última resposta**: ao lado de "Copiar" há o botão
   **Refazer**, que descarta a resposta e tudo o que o pedido acrescentou (linhas de ferramenta, avisos) e faz o mesmo pedido de novo, como se
   fosse a primeira vez. Sobre **qualquer mensagem sua** aparece o lápis **Editar**: a mensagem (e os anexos que ainda existem) vai para o
@@ -228,15 +230,22 @@ Se o motor escolhido não estiver instalado, o Orb fica só com `web_fetch` e `w
   com educação (no máximo uma vez a cada 8 s). Com "Reduzir movimento" as frases só trocam de opacidade.
 - **Quando algo dá errado**, a mensagem vem com a ação: "Tentar de novo" (reenvia, se nada tinha sido feito; se já tinha
   respondido, pede para continuar), "Continuar", "Abrir Ajustes" (chave inválida, sem modelo) ou, numa conversa grande demais, "Compactar
-  e tentar de novo" (resume o começo e reenvia; só aparece quando há o que resumir). Limite de uso (429) e instabilidade do provedor são tentados de novo sozinhos algumas vezes, com a espera à vista.
+  e tentar de novo" (resume o começo e reenvia; só aparece quando há o que resumir). Limite de uso (429) e instabilidade do provedor são tentados de novo sozinhos algumas vezes, com a espera à vista (num limite de uso,
+  esperas de 5, 15, 30 e 60 s antes de desistir). Um provedor que fica 10 min mandando só sinais de vida, sem texto, é dado como
+  parado ("Provedor sem resposta") e tentado mais uma vez. Se a resposta cai no meio do texto, o Orb grava o que saiu e segue dali uma
+  vez; se cair de novo, avisa "O provedor cortou a resposta no meio" e você pede "continua".
   **Outro modelo** refaz o pedido uma vez com o modelo padrão do app ou um dos usados há pouco, sem mudar o do Orb. A frase do
   aviso é do Orb; a mensagem do provedor fica recolhida em **Detalhes**. Uma resposta vazia ganha uma nova tentativa sozinha
   antes de virar falha.
 - **Quando o Orb anda em círculos** (a mesma chamada com o mesmo resultado três vezes, ou três falhas seguidas), o próprio
   resultado avisa o modelo para mudar de caminho ou dizer o que o bloqueia, e a linha de trabalho mostra "Mudando de abordagem".
-  É uma contagem, sem chamar outro modelo; horários, IDs e caminhos de saídas salvas não contam como diferença.
+  É uma contagem, sem chamar outro modelo; horários, IDs e caminhos de saídas salvas não contam como diferença. Se isso se repete
+  (9 voltas no mesmo turno), a conversa ganha um aviso, uma vez, e, se você não está olhando esse Orb, chega um banner com **Parar**.
+  O Orb não para sozinho: a decisão é sua.
 - **Tarefas longas.** Um turno não tem limite de passos, nem numa rotina, num pedido de outro Orb ou num grupo: o Orb trabalha
-  até terminar ou até você parar (botão ou ⌘.).
+  até terminar ou até você parar (botão ou ⌘.). A partir de 50 mil tokens a linha de trabalho mostra o que o turno já gastou
+  ("4 min · 30 ações · 180 mil tokens", com o valor em dólares quando o modelo é pago por uso e o preço é conhecido). Um pedido de
+  outro Orb que passa de 3 h trabalhando gera um banner com **Parar**; ele não é encerrado sozinho.
 - **Skills.** `/resumir`, `/organizar` e `/revisar` vêm prontas; veja [Conectores e skills](#conectores-e-skills).
 
 ## Permissões
@@ -640,7 +649,8 @@ resposta e **responder pedidos de permissão** de todos os Orbs. Se o Orb escolh
 como no chat (numa rotina, o painel avisa que ela precisa terminar). "Ver conversa" continua no app. A conversa é a mesma do chat.
 
 Em Ajustes → Geral: **Abrir ao iniciar sessão**, **Me avisar quando um Orb terminar ou precisar de mim** (banners só aparecem com o
-app em segundo plano), a **Pasta de dados**, as **Memórias guardadas**, a **Pasta dos Orbs** com "Mostrar no Finder" e
+app em segundo plano; também avisam quando uma rotina não termina, com o motivo, e quando um Orb parece andar em círculos ou passa
+de 3 h num pedido, com **Parar**), a **Pasta de dados**, as **Memórias guardadas**, a **Pasta dos Orbs** com "Mostrar no Finder" e
 **Redefinir o Orb…**.
 
 ## Redefinir o Orb

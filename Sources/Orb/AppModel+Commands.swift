@@ -132,7 +132,7 @@ extension AppModel {
     var canSendCommandToBackground: Bool { selectedBotID.map { live($0).commandWaited } ?? false }
 
     /// The Orb works, or idles waiting on a chain of requests to other Orbs (`chainWork`): either can be stopped.
-    private func canStop(_ botID: UUID) -> Bool { isWorking(botID) || live(botID).chainWork != nil }
+    func canStop(_ botID: UUID) -> Bool { isWorking(botID) || live(botID).chainWork != nil }
 
     /// ⇧⌘O: the Orb's folder in the Finder.
     func openFolder(of botID: UUID) {

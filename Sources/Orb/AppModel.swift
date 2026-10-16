@@ -1525,11 +1525,7 @@ final class AppModel {
             + AttachmentText.estimate(for: attachments, texts: attachmentTexts.cached(attachments), room: attachmentRoom)
         let attachmentTexts = attachmentTexts
         yieldStretchNote(to: botID, provider: ref.provider)
-        let prepared = session.changeConversation { $0.prepareHistory(budget: budget, reserving: reserve, now: .now) }
-        let history = prepared.history
-        let ledger = session.conversation?.currentLedger
-        let chunks = session.conversation?.chunks(inHistory: history) ?? []
-        if let report = prepared.compaction { session.announce(report, memoryUpTo: itemsBeforeMessage) }
+        let sentAt = Date.now
         let bank = memory.bank(for: botID)
         var context = ToolContext(workingDirectory: bot.workingURL, memory: bank, botID: botID, jobs: jobs,
                                   schedule: scheduleHandler(for: botID), imageStore: images, acceptsImages: sees != false,
@@ -1550,7 +1546,6 @@ final class AppModel {
         let sessionID = session.gatewaySessionID()
         let lastWorkspace = session.conversation?.workspaceSeen
         let memoryInPrompt = session.conversation?.memoryInPrompt
-        let sentMemories = TurnPreface.relatedLines(in: history)
 
         session.turnModel = ref.text
         let turn = session.beginTurn()
@@ -1561,13 +1556,22 @@ final class AppModel {
         session.commandRelease = release
         session.turnTask = Task { [self] in
             guard !Task.isCancelled else { return } // stopped before it began
+            // The window is worked out off the main thread: on a long conversation it takes a good part of a second.
+            let prepared = await preparedHistory(of: session, budget: budget, reserving: reserve, now: sentAt)
+            guard session.isCurrent(turn) else { return } // stopped while it was worked out: the next turn folds instead
+            let history = prepared.history
+            let ledger = session.conversation?.currentLedger
+            let chunks = session.conversation?.chunks(inHistory: history) ?? []
+            if let report = prepared.compaction { session.announce(report, memoryUpTo: itemsBeforeMessage) }
+            let sentMemories = TurnPreface.relatedLines(in: history)
+            // The attachments are read while the memory is gathered (the prompt's inputs need the brief, the files nothing).
+            async let files = attachmentTexts.texts(attachments)
             let brief = await bank.brief(for: typed, context: TurnPreface.taskContext(history: history, goal: ledger?.goal),
                                          conversationIsNew: history.isEmpty, userTurns: userTurns,
                                          canSave: bot.permissionMode != .readOnly, alreadySent: sentMemories,
                                          profile: profile.promptSection)
             let inputs = await TurnPromptInputs.gather(bot: bot, skills: skills, brief: brief)
-            let files = await attachmentTexts.texts(attachments)
-            let message = prompt + AttachmentText.block(for: attachments, texts: files, room: attachmentRoom)
+            let message = prompt + AttachmentText.block(for: attachments, texts: await files, room: attachmentRoom)
             guard session.isCurrent(turn) else { return } // stopped while preparing
             let built = TurnPrompt.native(inputs, history: history, lastWorkspaceHash: lastWorkspaceHash, lastWorkspace: lastWorkspace,
                                           memoryInPrompt: memoryInPrompt, plan: plan)
@@ -1637,6 +1641,31 @@ final class AppModel {
 
     // MARK: Context
 
+    /// `Conversation.prepareHistory` for the turn about to start, worked out on a copy away from the main thread and kept
+    /// (the summary, the ledger and the counts it moves) only if the conversation's history did not change meanwhile;
+    /// otherwise worked out again here, on what it is now.
+    func preparedHistory(of session: BotSession, budget: ContextBudget, reserving reserve: Int, now: Date) async
+        -> (history: [ChatMessage], firstCompaction: Bool, compaction: CompactionReport?) {
+        let copy = session.conversation ?? Conversation()
+        let (worked, result) = await Task.detached(priority: .userInitiated) {
+            var worked = copy
+            let result = worked.prepareHistory(budget: budget, reserving: reserve, now: now)
+            return (worked, result)
+        }.value
+        guard HistoryShape(session.conversation ?? Conversation()) == HistoryShape(copy) else {
+            return session.changeConversation { $0.prepareHistory(budget: budget, reserving: reserve, now: now) }
+        }
+        guard HistoryShape(worked) != HistoryShape(copy) else { return result } // nothing folded or condensed: nothing to keep
+        session.changeConversation {
+            $0.summary = worked.summary
+            $0.ledger = worked.ledger
+            $0.summaryCoveredCount = worked.summaryCoveredCount
+            $0.condensedCount = worked.condensedCount
+            $0.compactions = worked.compactions
+        }
+        return result
+    }
+
     /// Characters set aside for what a request carries besides the history and the message: the workspace snapshot
     /// and the memory notes.
     nonisolated static let prefaceAllowance = 4_000
@@ -1703,8 +1732,9 @@ final class AppModel {
 
     /// Stops the Orb's running turn. Stopping is for the whole conversation between Orbs it takes part in: whatever the Orb asked
     /// and is waiting for, and whatever it was asked and is working on, stops too (even when its own turn is over and it only waits).
-    func stop(_ botID: UUID, startsQueuedRoutines: Bool = true, notice: String = BotSession.stoppedNotice) {
-        for chain in delegation.chains(involving: botID) { delegation.cancelChain(chain, by: .user) }
+    /// `reason`: who ended it, for the chains it was part of (only yours reads "Você parou").
+    func stop(_ botID: UUID, startsQueuedRoutines: Bool = true, notice: String = BotSession.stoppedNotice, reason: CancelReason = .user) {
+        for chain in delegation.chains(involving: botID) { delegation.cancelChain(chain, by: reason) }
         sessions[botID]?.stop(startsQueuedRoutines: startsQueuedRoutines, notice: notice)
     }
 
@@ -1956,7 +1986,7 @@ final class AppModel {
 
     /// The end of a routine's run: its conversation is saved, the chat comes back, the run goes into the routine's
     /// history (and, for an Orb with a folder of its own, its report into `Rotinas/`), and the chat gets one line.
-    func finishRoutineRun(_ botID: UUID, routineID: UUID, succeeded: Bool, reply: String?) {
+    func finishRoutineRun(_ botID: UUID, routineID: UUID, succeeded: Bool, reply: String?, userStopped: Bool = false) {
         let finished = Date.now
         let session = session(botID)
         let started = session.routineStart ?? finished
@@ -1982,6 +2012,8 @@ final class AppModel {
                 } else { nil }
             }.first
             run.summary = Conversation.clipped(why ?? "Não terminou.", to: RoutineRun.summaryLimit)
+            // Nobody watched it fail: the banner says so, as one that worked brings its report (you stopped it yourself: none).
+            if !userStopped { notify(bot.name, RoutineRun.failureBanner(routine: routine.name, why: run.summary)) }
         }
         if let index = routines.firstIndex(where: { $0.id == routineID }) {
             // The report's progress line moves the goal, if the routine has one; a goal reached pauses the routine.
@@ -2154,10 +2186,27 @@ final class AppModel {
         UserDefaults.standard.object(forKey: notifyWhenDoneKey) as? Bool ?? true
     }
 
+    /// The last banner the app meant to post (whether or not the settings and focus let it out), for the tests.
+    @ObservationIgnored private(set) var lastBanner: (title: String, body: String)?
+
     /// Posts a banner when the app is in the background (bundled app only).
     func notify(_ title: String, _ body: String) {
+        lastBanner = (title, body)
         guard !(NSApp?.isActive ?? false), Self.notificationsEnabled, ApprovalNotifications.isAvailable else { return }
         let content = ApprovalNotifications.plainContent(title: title, body: body)
+        Task { await ApprovalNotifications.send(content) }
+    }
+
+    /// A banner about the Orb's running turn going wrong by itself (in circles, on for hours), with "Parar": posted when
+    /// you are not looking at that Orb (the app is behind other windows, or another Orb or group is open). A tap opens the Orb.
+    func notifyAboutTurn(of botID: UUID, _ body: String) {
+        if let bot = bot(botID) { lastBanner = (bot.name, body) }
+        guard let bot = bot(botID), ApprovalNotifications.isAvailable,
+              ApprovalNotifications.shouldPost(appIsActive: NSApp?.isActive ?? false, selectedBotID: selectedBotID, botID: botID,
+                                               enabled: Self.notificationsEnabled) else { return }
+        let content = ApprovalNotifications.plainContent(title: bot.name, body: body)
+        content.categoryIdentifier = ApprovalNotifications.stopCategory
+        content.userInfo = [ApprovalNotifications.botKey: botID.uuidString]
         Task { await ApprovalNotifications.send(content) }
     }
 

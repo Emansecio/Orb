@@ -27,6 +27,7 @@ enum OfficeReader {
         if sheets.isEmpty { throw ToolError("A planilha \(url.lastPathComponent) não tem abas legíveis.") }
         var blocks: [String] = []
         for (index, sheet) in sheets.enumerated() {
+            try Task.checkCancellation() // ⌘. reaches a big workbook between its sheets
             guard let data = part(url, sheet.path) else { continue }
             let rows = SheetParser.parse(data, strings: strings, maxRows: maxRows + 1)
             blocks.append(sheetBlock(number: index + 1, name: sheet.name, rows: rows.rows, cutColumns: rows.cutColumns))
@@ -66,6 +67,7 @@ enum OfficeReader {
         guard !slides.isEmpty else { throw ToolError("A apresentação \(url.lastPathComponent) não tem slides legíveis.") }
         var blocks: [String] = []
         for (index, path) in slides.enumerated() {
+            try Task.checkCancellation()
             guard let data = part(url, path) else { continue }
             var block = "## Slide \(index + 1)\n" + (DrawingTextParser.parse(data).joined(separator: "\n"))
             // Speaker notes sit in a part with the same number.

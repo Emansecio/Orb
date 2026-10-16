@@ -442,7 +442,8 @@ enum LLMError: LocalizedError, Equatable {
             Self.describe(status: status, message: message) + Self.waitNote(retryAfter)
         case .contextExceeded(let message): "A conversa ficou grande demais para este modelo. Detalhe do provedor: \(message)"
         case .stream(let type, let message):
-            if Self.rateLimitTypes.contains(type) { Self.describe(status: 429, message: message) }
+            if type == Self.stalledType { "O provedor parou de responder (\(message)). Tente de novo em instantes." }
+            else if Self.rateLimitTypes.contains(type) { Self.describe(status: 429, message: message) }
             else if Self.retryableStreamErrors.contains(type) { Self.describe(status: 503, message: message) }
             else { "O provedor devolveu um erro (\(type)): \(message)" }
         case .network(_, let message): "Sem conexão com o provedor: \(message)"
@@ -474,7 +475,10 @@ enum LLMError: LocalizedError, Equatable {
     }
 
     static let retryableStatuses: Set<Int> = [408, 409, 429, 500, 502, 503, 504, 529]
-    static let retryableStreamErrors: Set<String> = ["overloaded_error", "api_error", "rate_limit_error", "server_error", "rate_limit_exceeded"]
+    static let retryableStreamErrors: Set<String> = ["overloaded_error", "api_error", "rate_limit_error", "server_error", "rate_limit_exceeded",
+                                                     stalledType]
+    /// The app's own: a response that sent only keep-alives for `ProviderTransport.contentTimeout`.
+    static let stalledType = "orb_stalled"
     /// The two lookup failures are what a Mac that just woke up reports until the network is back.
     static let retryableNetworkCodes: Set<URLError.Code> = [.timedOut, .networkConnectionLost, .cannotConnectToHost, .notConnectedToInternet,
                                                             .cannotFindHost, .dnsLookupFailed]

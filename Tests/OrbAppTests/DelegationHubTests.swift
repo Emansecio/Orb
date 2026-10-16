@@ -350,6 +350,55 @@ private final class Hooks: GroupTurnHooks {
         #expect(request.user.contains("No reply is expected."))
     }
 
+    @Test func aTellThatFailsSaysSoInTheSendersChat() async throws {
+        let valve = TestGate()
+        let team = Team { seen in
+            switch seen.who {
+            case "Atlas": return say("Ok.")
+            default:
+                await valve.wait()
+                return say("Tarde.")
+            }
+        }
+        defer { team.cleanUp() }
+        let model = team.model, hub = model.delegation
+        // Revisor is held in a turn of its own; the tell waits behind it until the ceiling.
+        model.send("trabalhe", to: team.revisor.id, fromUser: true)
+        await waitUntil("Revisor to work") { model.isWorking(team.revisor.id) }
+        let tell = try hub.submit(from: team.atlas.id, to: "Revisor", text: "Já mudei o README.", kind: .tell, messageID: UUID(), groupID: nil)
+        hub.sweep(now: .now.addingTimeInterval(DelegationLimits.workTimeout + 60))
+        #expect(hub.requests[tell.id]?.state == .failed)
+        let failed = team.events(team.atlas).filter { $0.kind == .tellFailed }
+        #expect(failed.count == 1)
+        #expect(failed.first?.sentence == "Revisor não conseguiu fazer o que você pediu: Tempo esgotado")
+        await valve.open()
+        await team.settle()
+        #expect(team.events(team.atlas).filter { $0.kind == .tellFailed }.count == 1)
+    }
+
+    @Test func aCardNobodyAnsweredForADayIsNotCalledYourStop() async throws {
+        let team = Team { seen in
+            switch seen.who {
+            case "Atlas":
+                if seen.toolResult != nil { return say("Pedi.") }
+                return orbsCall("ask", to: "Pesquisador", "Grave o resumo.")
+            default:
+                if seen.toolResult != nil { return say("Feito.") }
+                let arguments = JSONValue.object(["fact": .string("O resumo sai às sextas.")]).jsonString
+                return [.toolCalls([ToolCallRequest(id: "m1", name: "remember", arguments: arguments)])] // asks first in mode ask
+            }
+        }
+        defer { team.cleanUp() }
+        let model = team.model
+        model.send("peça", to: team.atlas.id, fromUser: true)
+        await waitUntil("the card") { !model.pendingApprovals(of: team.pesquisador.id).isEmpty }
+        let card = try #require(model.pendingApprovals(of: team.pesquisador.id).first)
+        model.giveUpWaiting(on: card.id, of: team.pesquisador.id)
+        await team.settle()
+        #expect(team.request(from: team.atlas, to: team.pesquisador)?.state == .cancelled)
+        #expect(!team.events(team.atlas).contains { $0.kind == .chainStopped }) // nobody stopped it
+    }
+
     // MARK: No limits
 
     @Test func aModelThatKeepsAskingIsNotCutOffAndEveryoneEndsIdle() async throws {
@@ -595,6 +644,41 @@ private final class Hooks: GroupTurnHooks {
         hub.sweep(now: .now.addingTimeInterval(DelegationLimits.workTimeout + 60))
         #expect(hub.requests[middle.id]?.state == .failed)
         #expect(hub.requests[queued.id]?.state == .failed)
+        await valve.open()
+        await team.settle()
+    }
+
+    @Test func aRequestAtWorkPastTheCeilingIsToldOnceAndNotEnded() async throws {
+        let valve = TestGate()
+        let team = Team { seen in
+            switch seen.who {
+            case "Atlas":
+                if seen.toolResult != nil { return say("Pedi.") }
+                return orbsCall("ask", to: "Pesquisador", "Pesquise.")
+            default:
+                await valve.wait()
+                return say("Tarde.")
+            }
+        }
+        defer { team.cleanUp() }
+        let model = team.model, hub = model.delegation
+        model.send("peça", to: team.atlas.id, fromUser: true)
+        await waitUntil("the request to run") { team.request(from: team.atlas, to: team.pesquisador)?.state == .running }
+        let request = try #require(team.request(from: team.atlas, to: team.pesquisador))
+        hub.sweep(now: .now.addingTimeInterval(DelegationLimits.requestTimeout + 60))
+        #expect(hub.toldStillRunning.isEmpty) // half an hour of work is nothing to tell
+        hub.sweep(now: .now.addingTimeInterval(DelegationLimits.workTimeout + 60))
+        #expect(hub.requests[request.id]?.state == .running) // no limit: told, not ended
+        #expect(hub.toldStillRunning == [request.id])
+        hub.sweep(now: .now.addingTimeInterval(DelegationLimits.workTimeout + 3600))
+        #expect(hub.toldStillRunning == [request.id]) // once
+        #expect(DelegationHub.stillRunningNotice(request, after: DelegationLimits.workTimeout + 60)
+            == "Pesquisador está há 3 h no pedido de Atlas e continua trabalhando. Se não era para isso, use Parar.")
+        // The banner's Parar stops it.
+        model.handle(.stop(botID: team.pesquisador.id))
+        await waitUntil("the request to end") { hub.requests[request.id]?.state == .cancelled }
+        hub.sweep()
+        #expect(hub.toldStillRunning.isEmpty)
         await valve.open()
         await team.settle()
     }

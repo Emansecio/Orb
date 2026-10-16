@@ -262,12 +262,17 @@ final class LiveWindowCapturer: WindowCapturer, @unchecked Sendable {
 }
 
 extension CaptureBackend {
+    static let sckDeadline: TimeInterval = 10
+
     /// The window server's list for listing (a millisecond, no permission needed, the same windows and numbers as
     /// ScreenCaptureKit's, which takes tens of milliseconds), ScreenCaptureKit for capturing, `screencapture -o -l` when
     /// that fails.
     static let screenCaptureKit = CaptureBackend(
         windows: { WindowServerList.capturable() },
-        primary: { window, maxSide in try await SCKSession.shared.capture(window, maxSide: maxSide) },
+        // ScreenCaptureKit now and then never answers: past `sckDeadline` the capture goes to `screencapture` instead.
+        primary: { window, maxSide in
+            try await withDeadline(sckDeadline, "a captura da janela") { try await SCKSession.shared.capture(window, maxSide: maxSide) }
+        },
         fallback: { window, maxSide in try await ScreencaptureCommand.capture(window, maxSide: maxSide) })
 }
 

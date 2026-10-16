@@ -40,7 +40,8 @@ private func call(_ name: String, _ arguments: String) -> [LLMEvent] {
 
     @Test @MainActor func aLongTaskRunsPastTheEnginesDefaultWithoutPausing() async {
         let steps = AgentEngine.defaultMaxSteps * 2
-        let script = CallScript((0..<steps).map { _ in call("recall", #"{"query": "deploy"}"#) } + [said("Pronto: site no ar.")])
+        // Each step asks something new: a long task, not one going in circles (that one tells the person, see `LoopWatch.userNotice`).
+        let script = CallScript((0..<steps).map { call("recall", #"{"query": "deploy \#($0)"}"#) } + [said("Pronto: site no ar.")])
         let (model, botID) = setUp(script)
         #expect(model.send("publica o site", to: botID))
         await waitUntilIdle(model, botID)

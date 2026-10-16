@@ -235,12 +235,16 @@ struct Conversation: Codable, Sendable {
     /// The plan of the task in progress (`task_plan`), as the calls in `messages` left it: kept beside them so it does not
     /// depend on what the summary says, and worked out from them again when "Refazer" cuts some of them away.
     var taskPlan: TaskPlan?
+    /// A turn was running when this was saved (set when it begins, cleared when it ends): read back after a crash, the
+    /// chat says the turn was cut off even when the disk caught it at a quiet moment (nothing streaming or running).
+    var turnOpen: Bool?
 
     /// After a quit or crash mid-turn: nothing is streaming, running or waiting anymore. `notice` goes at the end when a turn
     /// was cut off there (something was still going, or your message got no answer), so the chat says what happened.
     func closingInterruptedTurn(notice: String? = nil) -> Conversation {
         var copy = self
-        var cutOff = if case .user = items.last?.kind { true } else { false }
+        var cutOff = if case .user = items.last?.kind { true } else { turnOpen == true }
+        copy.turnOpen = nil
         for index in copy.items.indices {
             let before = copy.items[index].kind
             switch copy.items[index].kind {
@@ -311,6 +315,7 @@ extension Conversation {
         memoryInPrompt = (try? c.decodeIfPresent(String.self, forKey: .memoryInPrompt)) ?? nil
         // A plan this version cannot read is dropped; the calls that made it are still in `messages`.
         taskPlan = (try? c.decodeIfPresent(TaskPlan.self, forKey: .taskPlan)) ?? nil
+        turnOpen = (try? c.decodeIfPresent(Bool.self, forKey: .turnOpen)) ?? nil
     }
 
     /// Where a position in the stored list lands once the elements that could not be read (nil) are left out.

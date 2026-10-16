@@ -9,6 +9,12 @@ struct LoopWatch: Sendable {
         + "Tente outro caminho ou, se está esperando algo ou travado, pare e diga ao usuário o que falta]"
     static let failingNote = "[Orb: as últimas \(repeats) chamadas de ferramenta falharam. Não repita o que falhou: entenda por quê e "
         + "tente outro caminho; pare só se for algo que só o usuário resolve, e diga o quê]"
+    /// Notes in one turn after which the person is told too (the model was told `alertAfter` times and went on): a turn has
+    /// no step limit, so only the person can end one going in circles.
+    static let alertAfter = 3
+    /// What the chat says, once per turn, and the banner when nobody is looking (`BotSession.apply`).
+    static let userNotice = "Parece que estou dando voltas: repeti a mesma ação, ou falhei, \(repeats * alertAfter) vezes sem avançar. "
+        + "Se não era para isso, pare com ⌘. ou no botão Parar."
 
     /// Times each call (tool, arguments and result) was seen this turn, by its hash.
     private var seen: [Int: Int] = [:]

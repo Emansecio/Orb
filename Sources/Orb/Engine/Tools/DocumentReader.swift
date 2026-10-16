@@ -55,6 +55,7 @@ enum DocumentReader {
         var output = "PDF com \(count) página\(count == 1 ? "" : "s"); mostrando \(range.lowerBound == range.upperBound ? "a página \(range.lowerBound)" : "as páginas \(range.lowerBound)-\(range.upperBound)")."
         var wroteText = false
         for number in range {
+            try Task.checkCancellation() // ⌘. reaches a long PDF between its pages
             let text = (document.page(at: number - 1)?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let block = "\n\n--- Página \(number) ---\n" + text
             if output.count + block.count > maxCharacters {
@@ -78,8 +79,9 @@ enum DocumentReader {
     static func allPDFText(_ data: Data) throws -> String {
         guard let document = PDFDocument(data: data) else { throw ToolError("Não consegui abrir o PDF (corrompido ou protegido).") }
         if document.isLocked { throw ToolError("O PDF está protegido por senha.") }
-        return (0..<document.pageCount).map { index in
-            "--- Página \(index + 1) ---\n" + (document.page(at: index)?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return try (0..<document.pageCount).map { index in
+            try Task.checkCancellation()
+            return "--- Página \(index + 1) ---\n" + (document.page(at: index)?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         }.joined(separator: "\n\n")
     }
 

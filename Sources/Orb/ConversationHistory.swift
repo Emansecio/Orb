@@ -111,6 +111,14 @@ extension RoutineRun {
         return Conversation.clipped(text, to: limit)
     }
 
+    /// The banner of a run that did not finish: the routine and why ("Não deu certo: " said once, by "não terminou").
+    static func failureBanner(routine: String, why: String) -> String {
+        let reason = why.hasPrefix(failedPrefix) ? String(why.dropFirst(failedPrefix.count)) : why
+        return preview(of: "A rotina “\(routine)” não terminou: \(reason)")
+    }
+
+    static let failedPrefix = "Não deu certo: "
+
     private static func plain(_ line: Substring) -> String {
         line.replacingOccurrences(of: "**", with: "").trimmingCharacters(in: CharacterSet(charactersIn: "#*>-_` \t"))
     }

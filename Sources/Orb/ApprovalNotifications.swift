@@ -15,6 +15,10 @@ enum ApprovalNotifications {
     static let handoffCategory = "orb.approval.handoff"
     static let allowAction = "orb.approval.allow"
     static let denyAction = "orb.approval.deny"
+    /// A banner about a turn that may be going wrong by itself (in circles, on for hours): its one button stops the turn.
+    static let stopCategory = "orb.turn.stop"
+    static let stopAction = "orb.turn.stop.action"
+    static let stopTitle = "Parar"
     static let botKey = "botID"
     static let approvalKey = "approvalID"
     /// A banner shows a few lines; the full command is on the card.
@@ -75,6 +79,8 @@ enum ApprovalNotifications {
         case open(botID: UUID?)
         /// A group's banner (its pause, its end): show the group.
         case openGroup(UUID)
+        /// "Parar" on a banner about a turn (`stopCategory`): stop the Orb's turn, as ⌘. would.
+        case stop(botID: UUID)
         case ignore
     }
 
@@ -92,6 +98,9 @@ enum ApprovalNotifications {
         case allowAction, denyAction:
             guard let botID, let approvalID else { return .ignore }
             return .decide(actionIdentifier == allowAction ? .once : .deny, botID: botID, approvalID: approvalID)
+        case stopAction:
+            guard let botID else { return .ignore }
+            return .stop(botID: botID)
         default:
             return .ignore
         }
@@ -106,8 +115,11 @@ enum ApprovalNotifications {
             let deny = UNNotificationAction(identifier: denyAction, title: denyTitle, options: [])
             return UNNotificationCategory(identifier: identifier, actions: [allow, deny], intentIdentifiers: [], options: [])
         }
+        let stop = UNNotificationCategory(identifier: stopCategory,
+                                          actions: [UNNotificationAction(identifier: stopAction, title: stopTitle, options: [])],
+                                          intentIdentifiers: [], options: [])
         return [make(category, requiresUnlock: false), make(dangerousCategory, requiresUnlock: true),
-                make(handoffCategory, requiresUnlock: false, allowTitle: handoffDoneTitle, denyTitle: handoffCancelTitle)]
+                make(handoffCategory, requiresUnlock: false, allowTitle: handoffDoneTitle, denyTitle: handoffCancelTitle), stop]
     }
 
     static func content(for payload: Payload) -> UNMutableNotificationContent {

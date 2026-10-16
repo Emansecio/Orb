@@ -121,16 +121,25 @@ enum ConnectorGateway {
         }
         let tool = MCPTool(serverName: config.name, remote: found.spec, serverID: config.id, manager: manager,
                            annotations: found.annotations, siblings: catalog.tools.map(\.name))
-        return (tool, passedArguments(arguments["arguments"]))
+        return (tool, try passedArguments(arguments["arguments"]))
     }
 
-    /// The `arguments` object of the call; models sometimes send it as JSON text, or leave it out.
-    private static func passedArguments(_ value: JSONValue?) -> JSONValue {
+    /// The `arguments` object of the call; models sometimes send it as JSON text, or leave it out. Text that is no JSON
+    /// object is an error the model can fix: sent as `{}`, the call would run without what it meant to pass.
+    static func passedArguments(_ value: JSONValue?) throws -> JSONValue {
         switch value {
-        case .object?: value ?? .object([:])
-        case .string(let text)?: JSONValue.parse(text) ?? .object([:])
-        default: .object([:])
+        case .object?: return value ?? .object([:])
+        case .string(let text)? where text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty: return .object([:])
+        case .string(let text)?:
+            if case .object? = JSONValue.parse(text) { return JSONValue.parse(text) ?? .object([:]) }
+            throw ToolError(Self.invalidArguments(text))
+        case nil, .null?: return .object([:])
+        default: throw ToolError(Self.invalidArguments(value?.jsonString ?? ""))
         }
+    }
+
+    static func invalidArguments(_ text: String) -> String {
+        "arguments precisa ser um objeto JSON ({\"campo\": valor}); recebi: \(text.prefix(200)). Corrija e chame de novo."
     }
 }
 

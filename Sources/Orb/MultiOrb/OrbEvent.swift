@@ -5,7 +5,7 @@ import Foundation
 struct OrbEvent: Codable, Equatable, Sendable {
     enum Kind: String, Codable, Sendable {
         case orbCreated, joinedGroup, leftGroup, groupCreated, routineCreated, renamed
-        case chainStopped, groupRunDone, groupStopped, delegationReceived, routineRun, unknown
+        case chainStopped, groupRunDone, groupStopped, delegationReceived, routineRun, tellFailed, unknown
 
         /// A kind from a newer version reads as `unknown`.
         init(from decoder: Decoder) throws { self = try decoder.rawValue(Self.self, fallback: .unknown) }
@@ -62,6 +62,8 @@ struct OrbEvent: Codable, Equatable, Sendable {
             return "\(actorName) pediu ajuda \(PortugueseArticle.contraction(for: subjectName)) \(subjectName)"
         case .routineRun:
             return headline + (note.map { ": " + $0 } ?? "")
+        case .tellFailed:
+            return "\(actorName) não conseguiu fazer o que você pediu" + (detail.isEmpty ? "" : ": " + detail)
         case .unknown:
             return detail
         }

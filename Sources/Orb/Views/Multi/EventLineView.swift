@@ -66,6 +66,7 @@ struct EventLineView: View {
         case .routineCreated, .routineRun: "clock.arrow.circlepath"
         case .renamed: "pencil"
         case .chainStopped, .groupStopped: "stop.circle"
+        case .tellFailed: "exclamationmark.circle"
         case .groupRunDone: "checkmark.circle"
         case .delegationReceived: "bubble.left"
         case .unknown: "info.circle"

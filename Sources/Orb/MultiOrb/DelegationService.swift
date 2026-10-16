@@ -3,6 +3,8 @@ import Foundation
 /// Who or what ended a chain of requests.
 enum CancelReason: String, Sendable, Equatable {
     case user, switchOff, orbDeleted
+    /// A card waited a day with no answer and the Orb gave up (`AppModel.giveUpWaiting`): nobody stopped it.
+    case gaveUp
 }
 
 /// What the app offers Orbs that ask each other for work. `DelegationHub` implements it (a shell until the runtime lands).
