@@ -9,19 +9,22 @@ struct ForgottenMemory: Equatable, Sendable {
     var title: String
     var text: String
     var archivedText: String?
+    /// The page's earlier versions (`MemoryBank.versionsFolder`), by file name.
+    var versions: [String: String] = [:]
 
-    /// The same paths `MemoryBank.forget` accepts: pages the panel lists, never the identity or anything outside.
-    static func isForgettable(_ path: String) -> Bool {
-        path.range(of: #"^(fatos|preferencias|procedimentos|sessoes)/[^/]+\.md$"#, options: .regularExpression) != nil
-            && !path.contains("/.")
-    }
+    static func isForgettable(_ path: String) -> Bool { MemoryBank.isForgettable(path) }
 
-    /// Reads the page (and its archive) from the Orb's memory folder; nil when it is not there or not forgettable.
+    /// Reads the page (and its archive and versions) from the Orb's memory folder; nil when it is not there or not forgettable.
     static func capture(_ path: String, title: String, in directory: URL) -> ForgottenMemory? {
         guard isForgettable(path),
               let text = try? String(contentsOf: directory.appending(path: path), encoding: .utf8) else { return nil }
         let archived = try? String(contentsOf: directory.appending(path: "_arquivo/" + path), encoding: .utf8)
-        return ForgottenMemory(path: path, title: title, text: text, archivedText: archived)
+        let folder = directory.appending(path: MemoryBank.versionsFolder(of: path))
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+        let versions = Dictionary(uniqueKeysWithValues: names.compactMap { name in
+            (try? String(contentsOf: folder.appending(path: name), encoding: .utf8)).map { (name, $0) }
+        })
+        return ForgottenMemory(path: path, title: title, text: text, archivedText: archived, versions: versions)
     }
 
     /// Writes the page back, unless something already sits at its path. Returns whether it did.
@@ -38,6 +41,11 @@ struct ForgottenMemory: Equatable, Sendable {
                 try FileManager.default.createDirectory(at: archive.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try Data(archivedText.utf8).write(to: archive, options: .atomic)
             }
+            let folder = directory.appending(path: MemoryBank.versionsFolder(of: path))
+            for (name, text) in versions {
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                try Data(text.utf8).write(to: folder.appending(path: name), options: .atomic)
+            }
             return true
         } catch {
             return false
@@ -47,15 +55,24 @@ struct ForgottenMemory: Equatable, Sendable {
 
 extension AppModel {
     /// Forgets a memory page and hands back what is needed to bring it back. The panel shows "Desfazer" for a few
-    /// seconds with it; nothing else is kept.
+    /// seconds with it; nothing else is kept. Nil, with a notice, when the page could not be read first (there would be
+    /// no way back) or its file stayed.
     func forgetMemoryUndoably(_ item: MemorySnapshot.Item, of botID: UUID) async -> ForgottenMemory? {
         let bank = memory.bank(for: botID)
         let directory = bank.directory
         let path = item.path, title = item.title
         let forgotten = await Task.detached { ForgottenMemory.capture(path, title: title, in: directory) }.value
-        await bank.forget(path)
+        guard let forgotten, await bank.forget(path) else {
+            addNotice(StoreNotice(message: Self.couldNotForget(title)))
+            await refreshMemory(botID)
+            return nil
+        }
         await refreshMemory(botID)
         return forgotten
+    }
+
+    static func couldNotForget(_ title: String) -> String {
+        "Não consegui esquecer “\(MemoryText.clip(title, 60))”: o arquivo continua na memória (confira as permissões da pasta)."
     }
 
     /// Puts a forgotten page back (the index picks the file up again) and refreshes the panel.

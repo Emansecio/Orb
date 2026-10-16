@@ -37,10 +37,13 @@ extension AppModel {
         let directory = bank.directory
         let path = item.path, title = item.title
         Task {
-            if let forgotten = await Task.detached(operation: { ForgottenMemory.capture(path, title: title, in: directory) }).value {
-                forgottenGroupNotes[id, default: [:]][path] = forgotten
+            guard let forgotten = await Task.detached(operation: { ForgottenMemory.capture(path, title: title, in: directory) }).value,
+                  await bank.forget(path) else {
+                addNotice(StoreNotice(message: Self.couldNotForget(title)))
+                await refreshGroupBoard(id)
+                return
             }
-            await bank.forget(path)
+            forgottenGroupNotes[id, default: [:]][path] = forgotten
             await refreshGroupBoard(id)
         }
     }

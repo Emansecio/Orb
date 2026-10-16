@@ -132,7 +132,9 @@ final class MemoryIndex {
     func transaction(_ work: () -> Void) {
         let began = run("BEGIN IMMEDIATE")
         work()
-        if began { run("COMMIT") }
+        // A commit that fails (a full disk) must not leave the connection inside the transaction for good: the files are
+        // the truth, and the next reconcile writes it again.
+        if began, !run("COMMIT") { run("ROLLBACK") }
     }
 
     private func prepare(_ sql: String, _ arguments: [Value]) -> OpaquePointer? {

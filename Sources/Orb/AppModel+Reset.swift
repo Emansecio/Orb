@@ -99,13 +99,16 @@ extension AppModel {
     /// to be written, at most `wait`; a turn that has not ended (`pendingStretch` finds nothing) saves nothing.
     func saveLastStretches(wait: Duration) async {
         var pending: [(bank: MemoryBank, stretch: [TranscriptItem])] = []
+        // Pages already on their way (a compaction, a pause) are waited for too, so the kept memory has them.
+        let writing = bots.compactMap { session($0.id).memoryWrites }
         for bot in bots {
             if let stretch = session(bot.id).pendingStretch() { pending.append((memory.bank(for: bot.id), stretch)) }
         }
-        guard !pending.isEmpty else { return }
+        guard !pending.isEmpty || !writing.isEmpty else { return }
         let finished = OSAllocatedUnfairLock(initialState: false)
         let pages = pending
         Task.detached(priority: .userInitiated) {
+            for write in writing { _ = await write.value }
             for (bank, stretch) in pages {
                 if let page = SessionSummary.page(from: stretch) { await bank.saveSession(page) }
             }

@@ -49,8 +49,11 @@ enum RememberOutcome: Equatable, Sendable {
 
 /// What goes into the system prompt for one message.
 struct MemoryBrief: Equatable, Sendable {
-    /// Identity, preferences and, while it lasts, the interview: the Orb's standing instructions.
+    /// Identity and preferences: the Orb's standing instructions.
     var pinned = ""
+    /// The first conversation's interview, while it lasts (its first messages). It travels with the message, not in the
+    /// system prompt: its end would change the memory there and send all of it again (`TurnPreface.memoryUpdate`).
+    var interview = ""
     /// Notes saved from conversations (where you left off, related memories, other titles), fenced as history.
     var notes = ""
     /// Only the memories related to this message.
@@ -60,7 +63,7 @@ struct MemoryBrief: Equatable, Sendable {
     var relatedHeaders: [String] = []
     var footer = ""
 
-    var full: String { Self.heading + [pinned, notes, footer].filter { !$0.isEmpty }.joined(separator: "\n\n") }
+    var full: String { Self.heading + [pinned, interview, notes, footer].filter { !$0.isEmpty }.joined(separator: "\n\n") }
 
     /// Only what stays the same from one message to the next (identity, preferences, footer): the system prompt.
     /// The notes depend on the message and travel with it (`TurnPreface`), so the prompt cache survives the turns.
@@ -114,6 +117,8 @@ actor MemoryBank {
     /// ai-memory's defaults: ~35-day half-life, access reinforcement, cold below 0.2; sessions younger than
     /// 30 days are never compacted.
     static let lambda = 0.02, sigma = 0.6, mu = 0.04, coldThreshold = 0.2, minimumAgeDays = 30.0
+    /// The most sessions one `sweep` compacts (~5 ms each).
+    static let sweepBatch = 50
     /// Longest text one `remember` keeps.
     static let maximumLength = 2_000
     /// Longest identity notes you can save from the editor. The notes grow past `maximumLength` as the Orb adds
@@ -170,16 +175,24 @@ actor MemoryBank {
     }
 
     /// Your own edit of the identity notes (from the panel). Notes above `identityMaximumLength` are refused,
-    /// never cut.
+    /// never cut. `base`: the text the editor opened with; notes the Orb saved while it was open are kept.
     @discardableResult
-    func setIdentity(_ body: String, now: Date = .now) -> Bool {
+    func setIdentity(_ body: String, basedOn base: String? = nil, now: Date = .now) -> Bool {
         // The editor counts what was typed, so that is what the limit is on (and a huge paste is not scrubbed first).
         guard body.count <= Self.identityMaximumLength else { return false }
         // Scrubbing may lengthen a short secret ("senha: 1234" becomes "senha: [removido]"): that is not refused again.
-        let cleaned = Self.clean(body, limit: nil)
+        var cleaned = Self.clean(body, limit: nil)
         prepare(now: now)
         var page = identity() ?? MemoryPage(path: Self.identityPath, kind: .identidade, title: "Identidade", body: "",
                                             created: now, updated: now, origin: .voce)
+        if let base, page.body != base {
+            let opened = Set(Self.identityNotes(in: base))
+            let added = Self.identityNotes(in: page.body).filter { !opened.contains($0) && !cleaned.contains($0) }
+            if !added.isEmpty {
+                if !cleaned.contains(Self.identityNotesHeader) { cleaned += (cleaned.isEmpty ? "" : "\n\n") + Self.identityNotesHeader }
+                cleaned += "\n" + added.joined(separator: "\n")
+            }
+        }
         page.body = cleaned
         page.updated = now
         page.origin = .voce
@@ -219,11 +232,15 @@ actor MemoryBank {
             page.interviewPending = false
             let note = MemoryText.flatten(text)
             var lines = page.body.components(separatedBy: "\n")
+            // Only the notes list can be updated: a line you wrote above it is yours and stays as it is.
+            let header = lines.firstIndex(of: Self.identityNotesHeader)
+            let notes = header.map { start in (start + 1)..<(lines[(start + 1)...].firstIndex { $0.hasPrefix("## ") } ?? lines.endIndex) } ?? 0..<0
             let outcome: RememberOutcome
-            if let index = lines.firstIndex(where: { $0.hasPrefix("- ") && MemoryText.similarity(String($0.dropFirst(2)), note) >= 0.75 }) {
+            if let index = lines[notes].firstIndex(where: { $0.hasPrefix("- ") && Self.isUpdate(of: String($0.dropFirst(2)), by: note) }) {
                 if MemoryText.fold(String(lines[index].dropFirst(2))) == MemoryText.fold(note) {
                     outcome = .alreadyKnown(page.path)
                 } else {
+                    guard keepVersion(of: page, now: now) else { return .failed }
                     lines[index] = "- " + note
                     outcome = .updated(page.path)
                 }
@@ -245,13 +262,13 @@ actor MemoryBank {
                                             ? MemoryText.flatten(text.components(separatedBy: "\n").first ?? text)
                                             : MemoryText.flatten(Self.clean(title ?? "")), 80)
             if var page = similarPage(to: text, kind: kind) {
-                if MemoryText.fold(page.body) == MemoryText.fold(text) {
-                    page.updated = now
-                    return write(page) ? .alreadyKnown(page.path) : .failed
-                }
+                // Already there: left as it is. A new date would reorder the preferences, and with them the system prompt.
+                if MemoryText.fold(page.body) == MemoryText.fold(text) { return .alreadyKnown(page.path) }
+                guard keepVersion(of: page, now: now) else { return .failed }
                 page.body = text
                 page.title = pageTitle
-                page.origin = origin
+                // A page you wrote stays yours when the Orb corrects it (consolidation and merges leave yours alone).
+                if page.origin != .voce { page.origin = origin }
                 page.updated = now
                 return write(page) ? .updated(page.path) : .failed
             }
@@ -305,6 +322,12 @@ actor MemoryBank {
     func related(to message: String, context: String = "", limit: Int = MemoryBank.relatedLimit, excluding: Set<String> = [],
                  isSent: (MemoryHit) -> Bool = { _ in false }, now: Date = .now) -> [MemoryHit] {
         prepare(now: now)
+        return relatedHits(to: message, context: context, limit: limit, excluding: excluding, isSent: isSent, now: now)
+    }
+
+    /// `related`, on the index as it is (the brief does not wait for a look at the folder).
+    private func relatedHits(to message: String, context: String, limit: Int, excluding: Set<String>,
+                             isSent: (MemoryHit) -> Bool, now: Date) -> [MemoryHit] {
         let terms = MemoryText.lookupTerms(message, context: context)
         guard !terms.isEmpty, let match = MemoryText.ftsQuery(terms.joined(separator: " ")) else { return [] }
         // Only subject words raise the bar (fewer than three terms need one either way, so no tagging then). The tagger
@@ -345,8 +368,9 @@ actor MemoryBank {
     func brief(for message: String, context: String = "", conversationIsNew: Bool, userTurns: Int = 1,
                canSave: Bool = true, alreadySent: [String] = [], budget: Int = MemoryBank.briefBudget, profile: String = "",
                now: Date = .now) -> MemoryBrief {
-        prepare(now: now)
-        sweep(now: now)
+        // The index as it is: hand edits are picked up after the turn (`snapshotIfChanged`) and the cold sessions are
+        // compacted then too (`sweep`), so a big folder never holds up the message.
+        prepare(now: now, reconciling: false)
         var brief = MemoryBrief()
         brief.footer = canSave
             ? "Search your memory with the recall tool. Save lasting facts, preferences, procedures and notes about how to work with the user with remember."
@@ -369,16 +393,18 @@ actor MemoryBank {
         if !preferences.isEmpty {
             take("## The user's preferences with you\n" + preferenceLayout.text, into: &pinned)
         }
+        brief.pinned = pinned.joined(separator: "\n\n")
         if identityPage?.interviewPending == true, userTurns <= 4 {
+            var interview: [String] = []
             take("""
             ## Getting to know the user
             This is your first conversation with the user and the app has already greeted them, so do not introduce yourself \
             again. Ask 2–4 short questions to learn how they want you to work (what to help with, tone, what to avoid). If they open with a concrete \
             request, help with it first and ask afterwards. Save each answer with remember: tipo "identidade" for \
             how you should work, "preferencia" for their preferences.
-            """, into: &pinned)
+            """, into: &interview)
+            brief.interview = interview.joined()
         }
-        brief.pinned = pinned.joined(separator: "\n\n")
 
         var notes: [String] = []
         var shown: Set<String> = [Self.identityPath]
@@ -388,8 +414,8 @@ actor MemoryBank {
             let length = MemoryText.flatten($0.body).count
             return length <= preferenceLayout.each || length <= 400
         }.map(\.path))
-        let related = related(to: message, context: context, excluding: shown,
-                              isSent: { hit in Self.isSent(Self.relatedHeader(hit), in: alreadySent) }, now: now)
+        let related = relatedHits(to: message, context: context, limit: Self.relatedLimit, excluding: shown,
+                                  isSent: { hit in Self.isSent(Self.relatedHeader(hit), in: alreadySent) }, now: now)
         var relatedLines: [String] = []
         for hit in related {
             let line = Self.relatedLine(hit)
@@ -406,11 +432,12 @@ actor MemoryBank {
             shown.insert(last.path)
             take("### Where you left off (\(Self.dayFormat.string(from: last.date)))\n" + Self.leftOff(last.body), into: &notes)
         }
-        let others = (items(.fato, limit: 12) + items(.procedimento, limit: 8)).filter { !shown.contains($0.path) }
+        // Read wider than shown: a series (an hourly log) takes one line, so the other titles still get theirs.
+        let others = Self.titleLines(items(.fato, limit: 60).filter { !shown.contains($0.path) }, limit: 12)
+            + Self.titleLines(items(.procedimento, limit: 40).filter { !shown.contains($0.path) }, limit: 8)
         if !others.isEmpty {
             var lines: [String] = []
-            for item in others {
-                let line = "- [\(item.kind.label)] \(Self.untrusted(MemoryText.clip(item.title, 100)))"
+            for line in others {
                 guard lines.reduce(0, { $0 + $1.count + 1 }) + line.count + 80 <= left else { break }
                 lines.append(line)
             }
@@ -459,7 +486,7 @@ actor MemoryBank {
         salience * exp(-lambda * ageDays) + sigma * log(1 + Double(accessCount)) * exp(-mu * daysSinceAccess)
     }
 
-    /// Compacts cold session pages (at most once a day unless `force`): the page keeps its requests, paths, links
+    /// Compacts cold session pages (at most once a day unless `force`, `sweepBatch` at a time): the page keeps its requests, paths, links
     /// and code, and the full text moves to `_arquivo/`. Facts, procedures, preferences and identity never age.
     /// Returns how many pages were compacted.
     @discardableResult
@@ -471,6 +498,9 @@ actor MemoryBank {
         var compacted = 0
         let rows = index.rows("SELECT path, updated, access_count, last_access, salience FROM pages WHERE kind = 'sessao' AND compacted = 0")
         for row in rows {
+            // A pass compacts a batch at most: after a long pause the rest waits for the next one (the next turn),
+            // instead of one turn compacting thousands of pages.
+            guard compacted < Self.sweepBatch else { return compacted }
             let updated = row.double(1) ?? now.timeIntervalSince1970
             let age = (now.timeIntervalSince1970 - updated) / 86_400
             let sinceAccess = (now.timeIntervalSince1970 - (row.double(3) ?? updated)) / 86_400
@@ -523,15 +553,27 @@ actor MemoryBank {
         return pages + "|\(identity?.body.hashValue ?? 0)|\(identity?.interviewPending == true)"
     }
 
-    /// Deletes a page for good, with its archived full text (you asked to forget it). Only pages listed in the
-    /// panel can be forgotten; the identity is edited instead.
-    func forget(_ path: String) {
+    /// Deletes a page for good, with its archived full text and earlier versions (you asked to forget it). Only pages
+    /// listed in the panel can be forgotten; the identity is edited instead. False when the file is still there (no
+    /// permission, locked): the index keeps it, so the panel never says it was forgotten.
+    /// `keepingVersions`: a merge or a consolidation replacing the page, not you forgetting it, so its history stays.
+    @discardableResult
+    func forget(_ path: String, keepingVersions: Bool = false) -> Bool {
         prepare(now: .now)
-        guard path.range(of: #"^(fatos|preferencias|procedimentos|sessoes)/[^/]+\.md$"#, options: .regularExpression) != nil,
-              !path.contains("/.") else { return }
-        try? FileManager.default.removeItem(at: directory.appending(path: path))
+        guard Self.isForgettable(path) else { return false }
+        let file = directory.appending(path: path)
+        try? FileManager.default.removeItem(at: file)
+        guard !FileManager.default.fileExists(atPath: file.path) else { return false }
         try? FileManager.default.removeItem(at: directory.appending(path: "_arquivo/" + path))
+        if !keepingVersions { try? FileManager.default.removeItem(at: directory.appending(path: Self.versionsFolder(of: path))) }
         index?.run("DELETE FROM pages WHERE path = ?", [.text(path)])
+        return true
+    }
+
+    /// The pages the panel lists and "Esquecer" accepts: never the identity, nor anything outside the kinds' folders.
+    static func isForgettable(_ path: String) -> Bool {
+        path.range(of: #"^(fatos|preferencias|procedimentos|sessoes)/[^/]+\.md$"#, options: .regularExpression) != nil
+            && !path.contains("/.")
     }
 
     /// Brings the index in line with the files, so pages edited, added or removed by hand count.
@@ -543,16 +585,17 @@ actor MemoryBank {
             lastCheckpoint = now
             index.run("PRAGMA wal_checkpoint(PASSIVE)")
         }
-        let files = pageFiles()
+        let (files, unreadable) = pageFiles()
         let known = Dictionary(index.rows("SELECT path, mtime FROM pages").map { ($0.text(0), $0.double(1) ?? 0) },
                                uniquingKeysWith: { first, _ in first })
         index.transaction {
             for file in files where known[file.path].map({ abs($0 - file.mtime) > 0.001 }) ?? true {
-                guard let text = try? String(contentsOf: file.url, encoding: .utf8) else { continue }
+                guard let text = Self.pageText(file.url) else { continue }
                 upsert(MemoryPage.parse(text, path: file.path, modified: Date(timeIntervalSince1970: file.mtime)), mtime: file.mtime)
             }
+            // A folder that is there but could not be listed says nothing about its pages: they stay (with their uses).
             let present = Set(files.map(\.path))
-            for path in known.keys where !present.contains(path) {
+            for path in known.keys where !present.contains(path) && !unreadable.contains(String(path.prefix { $0 != "/" })) {
                 index.run("DELETE FROM pages WHERE path = ?", [.text(path)])
             }
         }
@@ -562,7 +605,8 @@ actor MemoryBank {
 
     /// Opens the index on first use (off the main thread) and picks up hand edits every `reconcileInterval`. An index
     /// that could not be opened is tried again every `indexRetryInterval`, not given up for the whole session.
-    func prepare(now: Date) {
+    /// `reconciling` false: only a fresh index (or one that missed a write) looks at the folder now.
+    func prepare(now: Date, reconciling: Bool = true) {
         if !isPrepared || (index == nil && now >= nextIndexAttempt) {
             isPrepared = true
             index = openIndex()
@@ -573,6 +617,7 @@ actor MemoryBank {
                 lastReconcile = .distantPast
             }
         }
+        guard reconciling || lastReconcile == .distantPast else { return }
         if now.timeIntervalSince(lastReconcile) >= Self.reconcileInterval { reconcile(now: now) }
     }
 
@@ -622,9 +667,33 @@ actor MemoryBank {
                 index.run("DELETE FROM pages WHERE path = ?", [.text(row.text(0))])
                 continue
             }
-            if MemoryText.similarity(page.body, text) >= 0.75 { return page }
+            if Self.isUpdate(of: page.body, by: text) { return page }
         }
         return nil
+    }
+
+    /// Whether `new` says nearly what `old` says, so it replaces it (a correction) instead of being kept beside it: most
+    /// words shared, and no name or label that only one of them has (see `MemoryText.namesApart`).
+    static func isUpdate(of old: String, by new: String) -> Bool {
+        MemoryText.similarity(old, new) >= 0.75 && !MemoryText.namesApart(old, new)
+    }
+
+    /// Where the earlier texts of a page go when an update replaces them: `_arquivo/atualizacoes/<page>/`, one file each.
+    static func versionsFolder(of path: String) -> String {
+        "_arquivo/atualizacoes/" + (path as NSString).deletingPathExtension
+    }
+
+    /// Keeps `page` as it is on disk now, before an update replaces its text, so a wrong update loses nothing.
+    private func keepVersion(of page: MemoryPage, now: Date) -> Bool {
+        let folder = directory.appending(path: Self.versionsFolder(of: page.path))
+        let stamp = Int(now.timeIntervalSince1970 * 1000)
+        var url = folder.appending(path: "\(stamp).md"), extra = 1
+        while FileManager.default.fileExists(atPath: url.path) {
+            extra += 1
+            url = folder.appending(path: "\(stamp)-\(extra).md")
+        }
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return (try? Data(page.markdown().utf8).write(to: url, options: .atomic)) != nil
     }
 
     /// The preference pages a `MemoryConsolidation` may rewrite, newest first: not the ones you wrote, nor the long ones.
@@ -654,8 +723,14 @@ actor MemoryBank {
 
     func read(_ path: String) -> MemoryPage? {
         let url = directory.appending(path: path)
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        guard let text = Self.pageText(url) else { return nil }
         return MemoryPage.parse(text, path: path, modified: Self.modificationDate(url))
+    }
+
+    /// A page's text: UTF-8, or Windows/Latin-1 for a note another program saved that way (the app writes it back as UTF-8).
+    static func pageText(_ url: URL) -> String? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return String(data: data, encoding: .utf8) ?? String(data: data, encoding: .windowsCP1252)
     }
 
     @discardableResult
@@ -725,15 +800,21 @@ actor MemoryBank {
         }
     }
 
-    private func pageFiles() -> [(path: String, url: URL, mtime: Double)] {
-        Set(MemoryKind.allCases.map(\.folder)).flatMap { folder -> [(path: String, url: URL, mtime: Double)] in
-            let urls = (try? FileManager.default.contentsOfDirectory(at: directory.appending(path: folder),
-                                                                     includingPropertiesForKeys: [.contentModificationDateKey],
-                                                                     options: [.skipsHiddenFiles])) ?? []
-            return urls.filter { $0.pathExtension == "md" }.map {
+    /// The pages on disk, and the folders that exist but could not be listed (no permission): those are unknown, not empty.
+    private func pageFiles() -> (files: [(path: String, url: URL, mtime: Double)], unreadable: Set<String>) {
+        var files: [(path: String, url: URL, mtime: Double)] = [], unreadable = Set<String>()
+        for folder in Set(MemoryKind.allCases.map(\.folder)) {
+            let url = directory.appending(path: folder)
+            guard let urls = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: [.contentModificationDateKey],
+                                                                          options: [.skipsHiddenFiles]) else {
+                if FileManager.default.fileExists(atPath: url.path) { unreadable.insert(folder) }
+                continue
+            }
+            files += urls.filter { $0.pathExtension == "md" }.map {
                 ("\(folder)/\($0.lastPathComponent)", $0, Self.modificationDate($0).timeIntervalSince1970)
             }
         }
+        return (files, unreadable)
     }
 
     private static func modificationDate(_ url: URL) -> Date {
@@ -744,7 +825,8 @@ actor MemoryBank {
 
     /// Secrets scrubbed, control characters dropped (newlines kept), trimmed and capped (`limit` nil: not capped).
     static func clean(_ text: String, limit: Int? = maximumLength) -> String {
-        let scrubbed = MemorySanitizer.scrub(text)
+        // A huge text is cut before it is scrubbed (which reads all of it): only the start is kept anyway.
+        let scrubbed = MemorySanitizer.scrub(limit.map { String(text.prefix($0 * 4)) } ?? text)
         let visible = String(String.UnicodeScalarView(scrubbed.unicodeScalars.filter {
             !CharacterSet.controlCharacters.contains($0) || $0 == "\n" || $0 == "\t"
         }))
@@ -812,6 +894,24 @@ actor MemoryBank {
         return headAndTail(body, limit)
     }
 
+    /// Up to `limit` title lines, newest first. Titles that differ only in their numbers ("Diário 15/10 rodada 23:21",
+    /// "Diário 15/10 rodada 22:21") are one series: its newest page, with how many more there are.
+    static func titleLines(_ items: [MemorySnapshot.Item], limit: Int) -> [String] {
+        var keys: [String] = [], newest: [String: MemorySnapshot.Item] = [:], counts: [String: Int] = [:]
+        for item in items {
+            let words = MemoryText.fold(item.title).filter { !$0.isNumber }.components(separatedBy: CharacterSet.alphanumerics.inverted)
+            let key = words.filter { !$0.isEmpty }.joined(separator: " ")
+            let series = key.isEmpty ? item.path : key
+            if newest[series] == nil { keys.append(series); newest[series] = item }
+            counts[series, default: 0] += 1
+        }
+        return keys.prefix(limit).compactMap { series in
+            guard let item = newest[series] else { return nil }
+            let more = (counts[series] ?? 1) - 1
+            return "- [\(item.kind.label)] \(untrusted(MemoryText.clip(item.title, 100)))" + (more > 0 ? " (+\(more) like it)" : "")
+        }
+    }
+
     /// Preferences read from the index at most (the prompt shows far fewer).
     static let pinnedPreferenceLimit = 200
 
@@ -856,7 +956,8 @@ actor MemoryBank {
         // What was left open before what was done: past the share, the end is what goes.
         let open = SessionSummary.section("Pendências", in: body).prefix(3)
         if !open.isEmpty { lines.append("- Left open: " + open.map { untrusted(MemoryText.clip($0, 140)) }.joined(separator: " | ")) }
-        let done = SessionSummary.section("O que foi feito", in: body).suffix(4)
+        // What was done is the commands and pages themselves: the model's note already says it, in fewer words.
+        let done = SessionSummary.section("Resumo", in: body).isEmpty ? SessionSummary.section("O que foi feito", in: body).suffix(4) : []
         if !done.isEmpty { lines.append("- Done: " + done.map { untrusted(MemoryText.clip($0, 120)) }.joined(separator: " | ")) }
         if let answer = SessionSummary.paragraph("Última resposta", in: body) {
             lines.append("- Your last answer: " + untrusted(MemoryText.clip(answer, 200)))

@@ -156,7 +156,7 @@ extension MemoryBank {
         if let body = identity()?.body, !old.notes.isEmpty {
             guard setIdentity(Self.replacingIdentityNotes(in: body, with: new.notes), now: now) else { return false }
         }
-        for page in consolidablePreferences(now: now) { forget(page.path) }
+        for page in consolidablePreferences(now: now) { forget(page.path, keepingVersions: true) }
         let written = new.preferences.map { remember($0, kind: .preferencia, now: now) }
         guard !written.contains(.failed) else {
             for preference in old.preferences { remember(preference, kind: .preferencia, now: now) }

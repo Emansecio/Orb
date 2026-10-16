@@ -21,14 +21,17 @@ documento descreve o que existe no código. Como a memória se combina com a com
     _propostas/<comando>.md   skills que o Orb propôs e esperam a sua decisão (não são páginas de memória)
     _skills.json              cópia das skills que o Orb pode usar, escrita pelo app (não é página de memória)
     _arquivo/                 texto completo das páginas de sessão compactadas (mesmos caminhos)
-    index.sqlite              índice de busca (+ -wal e -shm, o -wal com checkpoint de hora em hora e teto de 1 MB); reconstruível a partir dos .md
+    _arquivo/atualizacoes/<página>/<ms>.md   o texto anterior de cada página que uma correção substituiu
+    index.sqlite              índice de busca (+ -wal e -shm; o -wal volta a no máximo 1 MB a cada checkpoint, de hora em hora); reconstruível a partir dos .md
   _guardadas/<nome> – <aaaa-mm-dd hh.mm>/    memória de Orbs apagados ou redefinidos com "guardar a memória"
     perfil.json               quem era o Orb: nome, papel e aparência (OrbConfig). Sem liberações, modo nem segredos
     …o resto igual à pasta de um Orb (nucleo/, fatos/, …); com " (2)" no fim se o nome já existia
 ```
 
 Os arquivos `.md` são a fonte da verdade: dá para abrir no Obsidian, editar à mão ou apagar. A cada ~20 s de uso (e quando
-o app volta para a frente) o índice confere as datas dos arquivos e se atualiza (`MemoryBank.reconcile`); se o `index.sqlite`
+o app volta para a frente) o índice confere as datas dos arquivos e se atualiza (`MemoryBank.reconcile`). O resumo de cada
+mensagem (`brief`) não espera essa conferência: usa o índice como está, e a edição feita por fora entra no fim do turno. Uma
+pasta que existe mas não lista (sem permissão) não tem as páginas tiradas do índice: elas ficam, com a contagem de uso. Se o `index.sqlite`
 sumir ou corromper, ele é refeito a partir das páginas (só se perde a contagem de uso). Só a corrupção apaga o arquivo: um
 índice que outro processo está usando (por exemplo, o app reconstruindo) ou uma pasta que não
 abre não são apagados, e abrir um índice já certo não escreve nada, então não espera a trava. Se não abriu, o banco tenta de
@@ -55,7 +58,10 @@ Texto da página.
 ```
 
 Campos extras (como `tags` do Obsidian) são mantidos quando o app reescreve a página. Um `.md` sem esse bloco também é lido
-(o tipo vem da pasta, o título da primeira linha).
+(o tipo vem da pasta, o título da primeira linha). Notas de outros programas também são lidas: com BOM no início, em
+Latin-1/Windows (regravadas em UTF-8 só se o app reescrever a página) ou com data sem hora (`criado: 2026-10-07` é esse dia
+no fuso do Mac). Uma régua `---` no topo só abre o bloco de campos se houver pelo menos uma linha `chave: valor`; uma régua
+seguida de lista fica no texto. Um título que começa e termina com aspas é gravado com um par a mais, para voltar igual.
 
 ## Tipos
 
@@ -82,7 +88,7 @@ as últimas decisões ("Decidido: …") e o que ficou pendente (`MemoryRow.detai
 | Durante a conversa | `remember` guarda e `recall` busca (veja "Ferramentas") |
 | Você pede para guardar | "memorize…", "lembra que…" etc. (`MemoryIntent`, abaixo) |
 | 30 min sem mensagens, abrir o app, **ou quando a conversa é compactada** | O trecho ainda não salvo (`Conversation.memorySavedCount`) vira uma página em `sessoes/`. Quando o começo da conversa vira resumo para caber na janela do modelo (sozinho ou em "Compactar agora"), o que ele continha é gravado **antes**, uma vez, com a nota do modelo sobre o trecho quando existe (vale também para a dobra feita no meio de um turno, gravada no fim dele). Execuções de rotinas não viram sessões |
-| Uma vez por dia (durante o uso) | Varredura de envelhecimento (`MemoryBank.sweep`): sessões frias são compactadas (abaixo) |
+| Uma vez por dia (durante o uso) | Varredura de envelhecimento (`MemoryBank.sweep`), no fim de um turno, nunca antes dele: sessões frias são compactadas (abaixo), no máximo 50 por passada (`sweepBatch`); o resto fica para o turno seguinte |
 | Fim de um turno concluído, com mais de 30 notas e preferências fixadas | `MemoryConsolidation`, em segundo plano e sem aviso: uma chamada sem ferramentas ao modelo barato do Orb junta as que dizem o mesmo, fica com a mais nova quando duas discordam e larga o que era de uma conversa só. As listas antigas vão para `_arquivo/consolidacoes/<ts>.md`; uma passagem que não deu em nada só tenta de novo no dia seguinte |
 | Fim de um turno concluído, com 40 fatos e procedimentos escritos pelo Orb (e depois a cada 20 a mais) | `MemoryMerge` **propõe** juntar páginas parecidas. Agrupa só páginas do mesmo tipo, parecidas com a primeira do grupo (`MemoryText.similarity` ≥ 0,25, sem encadear; até 5 por grupo e 6 grupos), e manda cada grupo ao modelo barato, que responde `KEEP` quando os assuntos diferem ou as páginas se contradizem. Uma fusão que perde um caminho, URL, código ou número de 2+ dígitos, ou fica maior que as fontes juntas, é recusada (nunca cortada). Nada muda até você clicar **Unificar** no aviso “Unificação de memória proposta: …” (a proposta fica em `_unificacao.json` por 7 dias e bloqueia outra; o botão só aparece no aviso que mostra a proposta que ainda espera, e uma proposta que a rotina pegaria no meio não é gravada). Ao aplicar, cada grupo cuja página mudou ou sumiu desde a proposta é pulado; os originais vão inteiros para `_arquivo/consolidacoes/unificacao-<ts>-<n>-<título>.md` e a página nova guarda a data de criação da mais antiga. Páginas que você escreveu, sessões e preferências ficam de fora. Não roda durante uma rotina nem num Orb só leitura |
 | Criar um Orb a partir de uma importação | Em "Novo Orb" → "Começar de" → "Importar de outro assistente". `OrbImportReader` (`Import/`, sem UI, fora da main thread) lê o que foi colado, escolhido ou solto (Cartão do Orb em Markdown, Character Card V1/V2/V3, pasta do Hermes/OpenClaw por lista fechada, texto livre) e a prévia mostra cada item com caixa de seleção; os suspeitos (`ImportGuard`) vêm desmarcados. `OrbImport.plan()` aplica a seleção e os limites: a identidade vai até 1.500 caracteres (`identityShare`; acima disso o texto inteiro também vira fatos de até `maximumLength` (2.000) caracteres, "Instruções completas de <origem> (1/3)", dentro do teto de 60; a leitura vai até 6.000 e a prévia diz quanto ficou de fora), as preferências até 40 de 240 caracteres e 1.500 no total (`preferencesShare`; o resto vira fato), no máximo 60 fatos, 12 procedimentos e 5 skills. `AppModel.createBot(importing:)` soma a identidade ao que você digitou, grava as páginas por `MemoryBank.importPages` (o mesmo `remember`: dedup e segredos, origem `voce`, porque a prévia é a sua aprovação) e cria as skills com `orbIDs = [novo Orb]` e `source: "importado"`. **A entrevista conta como feita** quando entrou identidade ou preferências. Com uma memória guardada escolhida, a importação é ignorada. Nada de permissões, modo, capacidades, conectores ou rotinas vem do arquivo |
@@ -130,8 +136,9 @@ qualquer que seja o tamanho da memória. Ele se divide em duas partes, por causa
 
 | Parte | Vai em | Conteúdo |
 |---|---|---|
-| `stable` | prompt do sistema (igual de uma mensagem para outra) | o perfil da usuária (veja abaixo; nada quando vazio), identidade (até 1 500 caracteres: saem primeiro as notas mais antigas, com a marca "(+N older notes left out of this prompt)"; só o seu texto, quando não cabe sozinho, vira começo e fim), preferências (até 1 500, entre as 200 mais novas: cada uma cortada em `max(240, 1 500 ÷ N)`, e as que não cabem viram a linha "(+N older preferences not shown here; recall finds them)"; o painel avisa quantas não cabem inteiras e se a consolidação vai juntá-las, que agora roda também quando elas não cabem, mirando 1 200 caracteres), a entrevista enquanto pendente (até a 4ª mensagem sua) e a linha de como usar `remember`/`recall` |
-| `notes` | prefácio da mensagem (`<orb_context>`), dentro de `<memory_notes>` | até **3 lembranças ligadas à mensagem** (220 caracteres cada, 900 no total); "onde paramos" (até 900, **só ao começar uma conversa nova**: Resumo, Pedidos sem repetir o que virou decisão, Decisões, Pendências, o que foi feito e a última resposta em 200 caracteres); títulos de outros fatos (12) e procedimentos (8) |
+| `stable` | prompt do sistema (igual de uma mensagem para outra) | o perfil da usuária (veja abaixo; nada quando vazio), identidade (até 1 500 caracteres: saem primeiro as notas mais antigas, com a marca "(+N older notes left out of this prompt)"; só o seu texto, quando não cabe sozinho, vira começo e fim), preferências (até 1 500, entre as 200 mais novas: cada uma cortada em `max(240, 1 500 ÷ N)`, e as que não cabem viram a linha "(+N older preferences not shown here; recall finds them)"; o painel avisa quantas não cabem inteiras e se a consolidação vai juntá-las, que agora roda também quando elas não cabem, mirando 1 200 caracteres) e a linha de como usar `remember`/`recall` |
+| `interview` | prefácio da mensagem, fora de `<memory_notes>` | a entrevista enquanto pendente (até a 4ª mensagem sua). Fica fora do prompt do sistema: o fim dela mudaria a memória congelada ali e mandaria toda a memória de novo (`memory_update`) |
+| `notes` | prefácio da mensagem (`<orb_context>`), dentro de `<memory_notes>` | até **3 lembranças ligadas à mensagem** (220 caracteres cada, 900 no total); "onde paramos" (até 900, **só ao começar uma conversa nova**: Resumo, Pedidos sem repetir o que virou decisão, Decisões, Pendências, o que foi feito (só quando não há Resumo, que já diz isso em menos palavras) e a última resposta em 200 caracteres); títulos de outros fatos (12) e procedimentos (8), em que uma série de títulos que só mudam nos números ("Diário 15/10 rodada 23:21", "… 22:21") ocupa uma linha só, a mais nova com "(+N like it)" (`MemoryBank.titleLines`) |
 
 Detalhes que importam:
 
@@ -174,8 +181,15 @@ Detalhes que importam:
 de toda conversa. `recall` não pede. Veja [PERMISSOES.md](PERMISSOES.md).
 
 Guardar algo quase igual a uma lembrança existente do mesmo tipo (≥ 75% das palavras, contando números) **atualiza** a
-existente com o texto novo: correções vencem. "Node 20" e "Node 22" são fatos diferentes. A identidade é uma lista de
-notas sob "## Como funcionar" e segue a mesma regra por linha. Cada texto guardado é limpo (`MemorySanitizer`) e cortado em
+existente com o texto novo: correções vencem ("Node 20" → "Node 22", "às 10h" → "às 11h"). Não é correção, e vira página nova,
+quando uma palavra que só um dos dois tem é um nome (com maiúscula: "cliente Acme" × "cliente Beta") ou um rótulo de 1 ou 2
+caracteres ("máquina A" × "máquina B", "SP" × "RJ") (`MemoryBank.isUpdate`, `MemoryText.namesApart`). Antes de atualizar, o
+texto anterior vai para `_arquivo/atualizacoes/<página>/`: um limiar errado nunca apaga nada. Guardar o que já está lá não
+muda nada (nem a data, que reordenaria as preferências do prompt). Uma página sua (`origem: voce`) continua sua quando o Orb
+a corrige, e por isso fica fora da consolidação e da unificação. A identidade é uma lista de
+notas sob "## Como funcionar" e segue a mesma regra por linha, só dentro dessa lista: uma linha que você escreveu acima dela
+nunca é trocada por uma nota do Orb. Salvar o editor de "Como funciona" mantém as notas que o Orb guardou enquanto ele estava
+aberto (`setIdentity(_:basedOn:)`). Cada texto guardado é limpo (`MemorySanitizer`) e cortado em
 2 000 caracteres.
 
 ## Pedir para guardar
@@ -210,9 +224,11 @@ contém o pedido leva a mesma instrução (e o app a trata como mensagem própri
 
 ## Esquecer e desfazer
 
-"Esquecer" (painel, tela "Memória de <Orb>") apaga a página e o texto arquivado dela (`MemoryBank.forget`: só
-`fatos/`, `preferencias/`, `procedimentos/` e `sessoes/`; a identidade se edita). Antes de apagar, o app guarda o texto em
-memória (`ForgottenMemory`) e mostra "<Orb> esqueceu isso. Desfazer" por 10 s (a contagem espera enquanto o mouse ou o foco
+"Esquecer" (painel, tela "Memória de <Orb>") apaga a página, o texto arquivado dela e as versões anteriores
+(`MemoryBank.forget`: só `fatos/`, `preferencias/`, `procedimentos/` e `sessoes/`; a identidade se edita). Se o arquivo não
+sai (sem permissão na pasta), nada muda no índice e o app avisa "Não consegui esquecer…": o painel nunca diz que esqueceu o
+que ficou no disco. A unificação e a consolidação, que substituem páginas sem você pedir para esquecer, mantêm as versões.
+Antes de apagar, o app guarda o texto (e as versões) em memória (`ForgottenMemory`) e mostra "<Orb> esqueceu isso. Desfazer" por 10 s (a contagem espera enquanto o mouse ou o foco
 estão no aviso); ⌘Z também desfaz, a menos que um campo de texto tenha algo para desfazer. O aviso vive no `AppModel`
 (`MemoryUndo`), então sobrevive à troca de Orb. Desfazer reescreve a página (e o arquivo) se nada ocupou o caminho e
 reindexa. O VoiceOver é avisado nos dois casos.
@@ -234,9 +250,13 @@ reindexa. O VoiceOver é avisado nos dois casos.
   aprovação) orientam o comportamento. O que se importa de outro assistente é texto de fora: só vira identidade ou preferência
   depois da sua prévia (itens que parecem ordens ao Orb vêm desmarcados), com os mesmos tetos de 1.500 caracteres cada, e as
   permissões continuam sendo impostas pelo código, seja qual for o texto.
-- **Segredos fora**: chaves de API (`sk-…`, `ghp_…`, `github_pat_…`, `xox…`, AWS, Google), JWT, `Bearer`/`Basic`,
-  `usuário:senha@` em URLs, `curl -u`, variáveis como `DB_PASSWORD=…`/`MY_TOKEN: …`, JSON `"password": "…"` e chaves
-  privadas são removidos antes de qualquer coisa ser gravada.
+- **Segredos fora**: chaves de API (`sk-…`, `ghp_…`, `github_pat_…`, `xox…`, `xapp-…`, Stripe `sk_live_…`/`rk_live_…`/`whsec_…`,
+  `hf_…`, `glpat-…`, `npm_…`, `xai-…`, `gsk_…`, AWS `AKIA…`/`ASIA…`, Google), tokens de bot do Telegram, o caminho de um webhook
+  do Slack, JWT, `Bearer`/`Basic` (com cara de credencial: "basic configuration" fica), `usuário:senha@` em URLs (também com
+  usuário vazio ou `@` na senha), `curl -u`, `--password …`, variáveis como `DB_PASSWORD=…`/`MY_TOKEN: …`, `'password' => '…'`,
+  JSON `"password": "…"` (o valor entre aspas inteiro), "minha senha é X" (quando X tem dígito ou símbolo) e chaves privadas,
+  inclusive PGP, são removidos antes de qualquer coisa ser gravada. `max_tokens: 4096` e `tokenizer:` não são segredo. Um texto
+  enorme é cortado antes da limpeza (só o começo fica, de qualquer jeito).
 
 ## Claude Code
 

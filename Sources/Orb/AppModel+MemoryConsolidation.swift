@@ -27,7 +27,12 @@ extension AppModel {
                 // On the Uso page, apart from the chat: a call the app made for itself.
                 recordAuxiliaryUsage(usage, botID: botID, model: ModelRef(provider: ref.provider, model: model).text)
             }
-            guard let consolidated = result.pinned, await bank.applyConsolidation(consolidated, replacing: pinned) else { return }
+            guard let consolidated = result.pinned else { return }
+            guard await bank.applyConsolidation(consolidated, replacing: pinned) else {
+                // The Orb saved a preference while the model worked: try again after the next turn, not tomorrow.
+                if await bank.pinnedForConsolidation() != pinned { session.memoryConsolidationTried = nil }
+                return
+            }
             // Done: the next pass waits for the threshold, not the clock. Unless what it left still does not fit (a pass
             // that shortened too little): then a day, or each message would pay for another one.
             let after = await bank.pinnedForConsolidation()

@@ -1051,7 +1051,13 @@ final class AppModel {
                 await bank.startFromKept(notes: identity, interview: interview)
             } else {
                 await bank.ensureIdentity(notes: notes, interview: interview && !answered)
-                if let plan { await bank.importPages(plan.pages) }
+                // The chat said "Importei" already (before the greeting): a page that could not be written is told too.
+                if let plan {
+                    let missed = plan.pages.count - (await bank.importPages(plan.pages))
+                    if missed > 0 {
+                        append(.notice("Não consegui gravar \(missed) de \(plan.pages.count) lembranças importadas (falta espaço ou permissão na pasta da memória)."), to: bot.id)
+                    }
+                }
             }
             await refreshMemory(bot.id)
         }
@@ -1146,7 +1152,9 @@ final class AppModel {
         if keepMemory {
             let stretch = session.pendingStretch()
             let bank = library.bank(for: botID)
+            let writing = session.memoryWrites // a page on its way (a compaction, a pause) goes into the kept memory too
             let copying = Task.detached(priority: .utility) {
+                _ = await writing?.value
                 if let stretch, let page = SessionSummary.page(from: stretch) { await bank.saveSession(page) }
                 return library.keep(botID, name: name, profile: profile)
             }
@@ -1236,9 +1244,10 @@ final class AppModel {
     }
 
     /// Saves your edit of the identity notes. False (with a notice) when they could not be written: the editor stays open.
-    func setIdentity(_ text: String, of botID: UUID) async -> Bool {
+    /// `base`: the text the editor opened with (notes the Orb saved meanwhile are kept).
+    func setIdentity(_ text: String, basedOn base: String? = nil, of botID: UUID) async -> Bool {
         let bank = memory.bank(for: botID)
-        let saved = await bank.setIdentity(text)
+        let saved = await bank.setIdentity(text, basedOn: base)
         if !saved && bot(botID) != nil { addNotice(Self.couldNotSaveIdentity) }
         await refreshMemory(botID)
         return saved

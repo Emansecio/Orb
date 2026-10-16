@@ -224,7 +224,8 @@ enum TurnPrompt {
         let report = inputs.snapshot.report(lastHash: lastWorkspaceHash, seen: lastWorkspace,
                                             modelHasSnapshot: TurnPreface.hasSnapshot(in: history))
         // The full notes (where you left off, other titles) once, at the start; later only what fits the message.
-        let notes = history.isEmpty ? inputs.brief.notes : TurnPreface.relatedNotes(inputs.brief)
+        let notes = [inputs.brief.interview, history.isEmpty ? inputs.brief.notes : TurnPreface.relatedNotes(inputs.brief)]
+            .filter { !$0.isEmpty }.joined(separator: "\n\n")
         let frozen = (history.isEmpty ? nil : memoryInPrompt) ?? inputs.brief.stable
         let current = TurnPreface.memoryUpdate(inputs.brief.stable)
         let known = TurnPreface.latestMemoryUpdate(in: history) ?? TurnPreface.memoryUpdate(frozen)

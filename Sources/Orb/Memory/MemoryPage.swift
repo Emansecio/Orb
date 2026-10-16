@@ -72,7 +72,7 @@ struct MemoryPage: Equatable, Sendable {
     func markdown() -> String {
         var lines = ["---",
                      "tipo: \(kind.rawValue)",
-                     "titulo: \(MemoryText.flatten(title))",
+                     "titulo: \(Self.quoted(MemoryText.flatten(title)))",
                      "criado: \(created.formatted(.iso8601))",
                      "atualizado: \(updated.formatted(.iso8601))",
                      "origem: \(origin.rawValue)"]
@@ -83,18 +83,26 @@ struct MemoryPage: Equatable, Sendable {
         return lines.joined(separator: "\n")
     }
 
-    /// Reads a page written by `markdown()` or by hand (CRLF line endings, missing fields and plain notes without
+    /// A title in quotes gets one more pair, which `parse` takes off: `"Citação"` comes back with its quotes.
+    private static func quoted(_ title: String) -> String {
+        guard title.count >= 2, let first = title.first, first == title.last, first == "\"" || first == "'" else { return title }
+        return "\(first)\(title)\(first)"
+    }
+
+    /// Reads a page written by `markdown()` or by hand (CRLF line endings, a BOM, missing fields and plain notes without
     /// frontmatter all work).
     static func parse(_ text: String, path: String, modified: Date = .now) -> MemoryPage {
+        let text = text.hasPrefix("\u{FEFF}") ? String(text.dropFirst()) : text
         let lines = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
             .components(separatedBy: "\n")
         var fields: [String: String] = [:], extra: [String] = []
         var bodyLines = lines[...]
-        // Frontmatter only when the block between the first two `---` lines looks like `key: value` lines (a
-        // plain note may start with a horizontal rule).
+        // Frontmatter only when the block between the first two `---` lines looks like `key: value` lines and has at
+        // least one (a plain note may start with a horizontal rule, even one followed by a list).
         if lines.first?.trimmingCharacters(in: .whitespaces) == "---",
            let end = lines.dropFirst().firstIndex(where: { $0.trimmingCharacters(in: .whitespaces) == "---" }),
-           lines[1..<end].allSatisfy({ $0.trimmingCharacters(in: .whitespaces).isEmpty || $0.contains(":") || $0.hasPrefix(" ") || $0.hasPrefix("-") }) {
+           lines[1..<end].allSatisfy({ $0.trimmingCharacters(in: .whitespaces).isEmpty || $0.contains(":") || $0.hasPrefix(" ") || $0.hasPrefix("-") }),
+           lines[1..<end].contains(where: { $0.contains(":") && !$0.hasPrefix(" ") && !$0.hasPrefix("-") }) {
             for line in lines[1..<end] {
                 guard let colon = line.firstIndex(of: ":"), !line.hasPrefix(" "), !line.hasPrefix("-") else {
                     if !line.trimmingCharacters(in: .whitespaces).isEmpty { extra.append(line) }
@@ -114,7 +122,7 @@ struct MemoryPage: Equatable, Sendable {
         let kind = fields["tipo"].flatMap { MemoryKind(rawValue: $0.lowercased()) }
             ?? MemoryKind.allCases.first { $0.folder == folder } ?? .fato
         let fallbackTitle = body.components(separatedBy: "\n").first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "# ")) } ?? path
+            .map(MemoryText.flatten) ?? path
         return MemoryPage(path: path, kind: kind,
                           title: fields["titulo"].flatMap { $0.isEmpty ? nil : $0 } ?? String(fallbackTitle.prefix(80)),
                           body: body,
@@ -128,11 +136,11 @@ struct MemoryPage: Equatable, Sendable {
 
     private static let known: Set<String> = ["tipo", "titulo", "criado", "atualizado", "origem", "compactado", "entrevista"]
 
-    /// ISO 8601 with or without fractional seconds, or a plain date ("2026-10-07").
+    /// ISO 8601 with or without fractional seconds, or a plain date ("2026-10-07", that day here, not in UTC).
     static func date(_ text: String) -> Date? {
         (try? Date(text, strategy: .iso8601))
             ?? (try? Date(text, strategy: Date.ISO8601FormatStyle(includingFractionalSeconds: true)))
-            ?? (try? Date(text, strategy: Date.ISO8601FormatStyle().year().month().day()))
+            ?? (try? Date(text, strategy: Date.ISO8601FormatStyle(timeZone: .current).year().month().day()))
     }
 }
 
@@ -166,8 +174,27 @@ enum MemoryText {
     /// Near-duplicates score ≥ 0.75.
     static func similarity(_ a: String, _ b: String) -> Double {
         let x = Set(words(a).map(stem)), y = Set(words(b).map(stem))
-        guard !x.isEmpty || !y.isEmpty else { return 1 }
+        // Nothing to compare by ("Ele é." and "Ela é.", emoji): alike only when they are the same text.
+        guard !x.isEmpty || !y.isEmpty else { return fold(a).trimmingCharacters(in: .whitespaces) == fold(b).trimmingCharacters(in: .whitespaces) ? 1 : 0 }
         return Double(x.intersection(y).count) / Double(x.union(y).count)
+    }
+
+    /// Whether two texts that read nearly alike are still about different things: a word only one of them has is a name
+    /// (capitalized there: "cliente Acme" × "cliente Beta") or a short label ("máquina A" × "máquina B", "SP" × "RJ").
+    /// A changed number alone is not: "Node 20" → "Node 22" corrects the fact.
+    static func namesApart(_ a: String, _ b: String) -> Bool {
+        func marks(_ text: String) -> [String: Bool] {
+            var marks: [String: Bool] = [:]
+            for word in text.components(separatedBy: CharacterSet.alphanumerics.inverted) where !word.isEmpty {
+                let folded = fold(word)
+                let isName = word.first?.isUppercase == true
+                let isLabel = word.count <= 2 && word.contains(where: \.isLetter) && (isName || !stopwords.contains(folded))
+                marks[stem(folded), default: false] = marks[stem(folded), default: false] || isName || isLabel
+            }
+            return marks
+        }
+        let x = marks(a), y = marks(b)
+        return Set(x.keys).symmetricDifference(y.keys).contains { x[$0] ?? y[$0] ?? false }
     }
 
     /// FTS5 query matching any meaningful word of `text` by prefix, with its singular/plural variants ("reunião" ↔
@@ -349,8 +376,9 @@ enum MemoryText {
         let cleaned = String(String.UnicodeScalarView(text.unicodeScalars.filter {
             !CharacterSet.controlCharacters.contains($0) || $0 == "\n" || $0 == "\t"
         }))
-        return cleaned.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ")
-            .trimmingCharacters(in: CharacterSet(charactersIn: "# "))
+        let line = cleaned.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ")
+        // A heading's marks at the start only: "Aprender C#" and "F#" keep theirs.
+        return String(line.drop { $0 == "#" || $0 == " " })
     }
 
     /// Paths, URLs and `code` spans: what a compacted page keeps (ai-memory's extractive tier-down).
@@ -399,22 +427,35 @@ enum MemorySanitizer {
     private static let urlReference = #"(?-i:\$(?:\(|\{|[A-Z_][A-Z0-9_]*(?=@))|<[^<>\n]{1,80}>)"#
 
     private static let rules: [(NSRegularExpression, String)] = [
-        (#"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)"#, "[chave privada removida]"),
+        (#"-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY(?: BLOCK)?-----|$)"#, "[chave privada removida]"),
         (#"(?<![A-Za-z0-9])sk-(?:ant-|proj-)?[A-Za-z0-9_\-]{16,}"#, "[chave removida]"),
-        (#"(?<![A-Za-z0-9])(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})"#, "[token removido]"),
-        (#"(?<![A-Za-z0-9])xox[abprs]-[A-Za-z0-9\-]{10,}"#, "[token removido]"),
-        (#"(?<![A-Za-z0-9])AKIA[0-9A-Z]{16}"#, "[chave removida]"),
+        // Tokens known by their prefix: GitHub, Slack, Stripe, Hugging Face, GitLab, npm, xAI, Groq, DigitalOcean, Shopify.
+        (#"(?<![A-Za-z0-9])(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[a-z]-[A-Za-z0-9\-]{10,}|xapp-[A-Za-z0-9\-]{10,}|(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}|whsec_[A-Za-z0-9]{20,}|hf_[A-Za-z0-9]{30,}|glpat-[A-Za-z0-9_\-]{20,}|npm_[A-Za-z0-9]{30,}|xai-[A-Za-z0-9]{20,}|gsk_[A-Za-z0-9]{20,}|dop_v1_[a-f0-9]{40,}|shpat_[a-fA-F0-9]{20,})"#, "[token removido]"),
+        // A Telegram bot's token (also inside `api.telegram.org/bot<token>/`) and a Slack webhook's path.
+        (#"(?<![0-9])[0-9]{8,10}:[A-Za-z0-9_\-]{35}(?![A-Za-z0-9_\-])"#, "[token removido]"),
+        (#"(?i)(hooks\.slack\.com/services/)[A-Za-z0-9/_\-]+"#, "$1[removido]"),
+        (#"(?<![A-Za-z0-9])(?:AKIA|ASIA)[0-9A-Z]{16}"#, "[chave removida]"),
         (#"(?<![A-Za-z0-9])AIza[0-9A-Za-z_\-]{30,}"#, "[chave removida]"),
         (#"eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}"#, "[token removido]"),
-        (#"(?i)\b(bearer|basic)\s+[A-Za-z0-9._\-+/=]{12,}"#, "$1 [removido]"),
-        // user:password@ in URLs (postgres://, mysql://, https://…); the scheme starts where a scheme can start (see below)
-        (#"(?i)(?<![a-z0-9+.\-])([a-z][a-z0-9+.\-]*://[^\s:/@]+):(?!\#(urlReference))[^\s@/]+@"#, "$1:[removido]@"),
+        // Only a credential-looking value (a digit or base64 padding): "basic configuration" stays.
+        (#"(?i)\b(bearer|basic)\s+(?=[A-Za-z0-9._\-+/=]*[0-9=+/])[A-Za-z0-9._\-+/=]{12,}"#, "$1 [removido]"),
+        // user:password@ in URLs (postgres://, redis://:password@…); the password runs to the last `@` of the host part
+        // (`p@ss@host`). The scheme starts where a scheme can start (see below).
+        (#"(?i)(?<![a-z0-9+.\-])([a-z][a-z0-9+.\-]*://[^\s:/@]*):(?!\#(urlReference))[^\s/]+@"#, "$1:[removido]@"),
         // curl -u user:pass
         (#"(?i)(\s-u\s+[^\s:]+):(?!["']?\#(reference))\S+"#, "$1:[removido]"),
-        // KEY=value, MY_TOKEN: value, "password": "value", ?access_token=value (names containing the words below). The
-        // name starts where a name can start: tried from every letter of a long run (a hash, base64), it took minutes.
-        (#"(?i)(?<![\w.\-])([\w.\-]*(?:password|passwd|senha|secret|segredo|token|api[_\-]?key|access[_\-]?key|private[_\-]?key|credential)[\w.\-]*["']?\s*[:=]\s*)(["']?)(?!\#(reference))[^\s"',;&]+"#,
+        // --password hunter2, --token=abc
+        (#"(?i)(?<![\w\-])(--(?:password|passwd|token|api-key|secret)[ =])(?!["']?\#(reference))(?!\[)\S+"#, "$1[removido]"),
+        // KEY=value, MY_TOKEN: value, "password": "value", 'password' => 'value', ?access_token=value (names containing the
+        // words below; a quoted value goes to its closing quote). Not `max_tokens: 4096` or `tokenizer:`. The name starts
+        // where a name can start: tried from every letter of a long run (a hash, base64), it took minutes. A value already
+        // replaced by a rule above (`[chave removida]`) is left as it is.
+        (#"(?i)(?<![\w.\-])(?![\w.\-]*(?:tokens|tokenizer)(?!\w))([\w.\-]*(?:password|passwd|passphrase|senha|secret|segredo|token|api[_\-]?key|access[_\-]?key|private[_\-]?key|account[_\-]?key|signing[_\-]?key|encryption[_\-]?key|credential)[\w.\-]*["']?[ \t]*(?:=>|[:=])[ \t]*)(?:(["'])(?!\#(reference))(?!\[)[^"'\n]+(?=["'])|(?!\#(reference))(?!\[)[^\s"',;&]+)"#,
          "$1$2[removido]"),
+        // "minha senha é Casa2024!", "a senha do wifi é …", "my password is …": only a value that looks like one (a digit or a
+        // symbol), so "a senha é obrigatória" stays.
+        (#"(?i)\b((?:senha|password|passcode|chave)(?: d[aoe]s? \w+){0,2} (?:é|eh|is|era|será|fica) (?:a |o )?)(?=\S*[0-9!@#$%&*])(?!\#(reference))(?!\[)[^\s,;]{4,}"#,
+         "$1[removido]"),
     ].map { (try! NSRegularExpression(pattern: $0.0), $0.1) }
 
     static func scrub(_ text: String) -> String {

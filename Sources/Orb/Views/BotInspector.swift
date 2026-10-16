@@ -15,6 +15,8 @@ struct BotInspector: View {
     /// The kind the memory sheet opens on (nil: all of it).
     @State private var memorySheetKind: MemoryKind?
     @State private var identityDraft = ""
+    /// What the editor opened with: notes the Orb saves while it is open are kept on save.
+    @State private var identityBase = ""
     @State private var isSavingIdentity = false
     @State private var identitySaveFailed = false
     /// The instruction file in the Orb's folder, if any (read off the main thread when the folder changes).
@@ -107,7 +109,7 @@ struct BotInspector: View {
                     isSavingIdentity = true
                     identitySaveFailed = false
                     Task {
-                        let saved = await model.setIdentity(identityDraft, of: bot.id)
+                        let saved = await model.setIdentity(identityDraft, basedOn: identityBase, of: bot.id)
                         isSavingIdentity = false
                         if saved { isEditingIdentity = false } else { identitySaveFailed = true }
                     }
@@ -594,6 +596,7 @@ struct BotInspector: View {
             Task {
                 // From the file, not the panel's snapshot: the Orb may have added notes meanwhile.
                 identityDraft = await model.identityText(of: bot.id)
+                identityBase = identityDraft
                 identitySaveFailed = false
                 isEditingIdentity = true
             }

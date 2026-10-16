@@ -13,11 +13,12 @@ enum GroupBoard {
     /// titles of the others (`group_recall` gives the rest). Empty when the board is. Notes were written by Orbs from
     /// conversations that may hold text from the web, so they are plain lines marked as data.
     static func brief(bank: MemoryBank, message: String) async -> String {
-        let snapshot = await bank.snapshot()
+        // Only what the brief shows is read (not the whole board, sessions included, at every member's turn).
+        await bank.prepare(now: .now)
         var parts: [String] = []
-        let goal = MemoryBank.untrusted(snapshot.identity)
+        let goal = MemoryBank.untrusted(await bank.identity()?.body ?? "")
         if !goal.isEmpty { parts.append("Goal: " + MemoryText.clip(goal, goalShare)) }
-        let agreements = snapshot.items(.preferencia).prefix(agreementLimit)
+        let agreements = await bank.items(.preferencia, limit: agreementLimit)
         if !agreements.isEmpty {
             let lines = agreements.map { "- " + MemoryText.clip(MemoryBank.untrusted($0.body), 160) }
             parts.append("Agreements:\n" + MemoryText.clip(lines.joined(separator: "\n"), agreementShare))
@@ -31,12 +32,16 @@ enum GroupBoard {
                 return MemoryBank.relatedLine(hit)
             }.joined(separator: "\n"))
         }
-        let others = (snapshot.items(.fato) + snapshot.items(.procedimento)).filter { !relatedPaths.contains($0.path) }.prefix(8)
+        let titles = 8, wider = titles + MemoryBank.relatedLimit // what the related notes take out must not leave fewer
+        let others = (await bank.items(.fato, limit: wider) + bank.items(.procedimento, limit: wider))
+            .filter { !relatedPaths.contains($0.path) }.prefix(titles)
         if !others.isEmpty {
             parts.append("Other notes (group_recall has the details): "
                 + others.map { MemoryText.clip(MemoryBank.untrusted($0.title), 60) }.joined(separator: "; "))
         }
-        return MemoryText.clip(parts.joined(separator: "\n"), briefLimit)
+        // Brackets become ‹ ›, as in the thread (`GroupThread.fenced`): a note can't close `<board>` and pass for the thread or
+        // the request.
+        return GroupThread.fenced(MemoryText.clip(parts.joined(separator: "\n"), briefLimit))
     }
 
     /// The session page of a finished request (rules only, no model): what was asked and what the group came to. Secrets are

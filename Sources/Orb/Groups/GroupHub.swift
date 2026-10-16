@@ -344,7 +344,11 @@ final class GroupHub: GroupTurnHooks {
                                           members: run.participants.map { name(of: $0) }, turns: run.turnsUsed,
                                           tokens: run.tokensUsed, group: group.name, started: run.startedAt, ended: now())
         let bank = model.memory.groupBank(for: groupID)
-        Task { await bank.saveSession(page) }
+        Task {
+            if await !bank.saveSession(page) {
+                session.append(.notice("Não consegui guardar este pedido no quadro do grupo (falta espaço ou permissão na pasta)."))
+            }
+        }
         runs[groupID] = nil
         refreshLive(groupID)
         notifyAway(groupID, title: group.name, body: "O grupo terminou: " + summary)

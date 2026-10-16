@@ -203,7 +203,7 @@ extension MemoryBank {
                                     body: group.body, created: pages.map(\.created).min() ?? now, updated: now, origin: .orb,
                                     extraFields: pages.flatMap(\.extraFields).reduce(into: []) { if !$0.contains($1) { $0.append($1) } })
             guard write(merged) else { continue }
-            for page in pages { forget(page.path) }
+            for page in pages { forget(page.path, keepingVersions: true) }
             applied += 1
             replaced += pages.count
         }

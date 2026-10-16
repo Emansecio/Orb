@@ -425,11 +425,11 @@ struct MemoryIntentTests {
         #expect(await bank.remember("O projeto usa Node 22 em produção.") != .alreadyKnown(""))
         let bodies = await bank.snapshot().items(.fato).map(\.body)
         #expect(bodies.contains("O projeto usa Node 22 em produção."))
-        // A near-duplicate refresh takes the newer text and says who wrote it.
+        // A near-duplicate refresh takes the newer text; a page you wrote stays yours (consolidation leaves it alone).
         guard case .saved(let coffee) = await bank.remember("Prefere café sem açúcar pela manhã.", origin: .voce) else { return }
         #expect(await bank.remember("Prefere café sem açúcar de manhã.") == .updated(coffee))
         let page = try? String(contentsOf: bank.directory.appending(path: coffee), encoding: .utf8)
-        #expect(page?.contains("de manhã.") == true && page?.contains("origem: orb") == true)
+        #expect(page?.contains("de manhã.") == true && page?.contains("origem: voce") == true)
     }
 
     @Test func emptyAndFailedSavesAreReported() async {
