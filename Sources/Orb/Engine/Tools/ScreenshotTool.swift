@@ -346,8 +346,10 @@ struct ScreenshotTool: AgentTool {
             guard wantsMarks, let axWindow, let frame = axWindow.frame else { return nil }
             let element = axWindow.element, prefix = "w\(axWindow.index + 1)"
             do {
+                // The walk stops by itself a little before the deadline: a slow app gives fewer marks, not none.
+                let limits = UIMarkCollector.Limits(seconds: max(0.1, UIReadTool.seconds(sessions.deadlines.read) - 0.5))
                 return .success(try await sessions.run(app, within: sessions.deadlines.read) {
-                    UIMarkCollector.collect(window: element, prefix: prefix, origin: frame.origin, size: frame.size)
+                    UIMarkCollector.collect(window: element, prefix: prefix, origin: frame.origin, size: frame.size, limits: limits)
                 })
             } catch {
                 return .failure(error)

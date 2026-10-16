@@ -301,12 +301,6 @@ struct UIReadTool: AgentTool {
     }
 
     /// Reads one window (and the menus when asked or when there is no window). Blocking: call it on the app's queue.
-    static func read(root: any AccessibilityElement, app: AccessibilityApp, window selector: String?, query: String?,
-                     includeMenus: Bool, limits: UIOutlineLimits) throws -> (text: String, snapshot: UISnapshot) {
-        let reading = try reading(root: root, app: app, window: selector, query: query, includeMenus: includeMenus, limits: limits)
-        return (reading.text, reading.snapshot)
-    }
-
     static func reading(root: any AccessibilityElement, app: AccessibilityApp, window selector: String?, query: String?,
                         includeMenus: Bool, limits: UIOutlineLimits) throws -> UIReading {
         let top: [String: AXAttributeValue]
@@ -437,6 +431,21 @@ struct UIWaiter: Sendable {
         look < Self.ticks.count ? min(Self.ticks[look], poll) : poll
     }
 
+    /// Whether a look that costs the app a lot of work is followed by a pause as long as the look itself (at most
+    /// `maxBackoff`), so a wait never keeps a slow app busy more than about half the time. Off for tests that count pauses.
+    var spacesLooksByCost = true
+    /// A look shorter than this is not worth spacing out.
+    static let cheapLook: Duration = .milliseconds(100)
+    static let maxBackoff: Duration = .seconds(1)
+
+    /// The pause that follows a look that took `took`: the usual tick, or the look's own length when it was expensive (walking a
+    /// large window for a text that is not there yet).
+    func pause(after look: Int, took: Duration) -> Duration {
+        let usual = tick(after: look)
+        guard spacesLooksByCost, took >= Self.cheapLook else { return usual }
+        return max(usual, min(took, Self.maxBackoff))
+    }
+
     /// Notifications that say the window changed (focus and layout alone do not).
     static let changeNotifications: Set<AXNotification> = [
         .valueChanged, .titleChanged, .created, .elementDestroyed, .windowCreated, .sheetCreated, .rowCountChanged,
@@ -484,6 +493,7 @@ struct UIWaiter: Sendable {
             // Counted before looking: a notification that comes while the look runs makes the next look start at once.
             let seen = watcher.count
             let left = max(clock.now.duration(to: end + sessions.deadlines.waitGrace), .milliseconds(100))
+            let lookStarted = clock.now
             let probe = try await UIAccess.mapped(app) {
                 try await sessions.run(app, within: min(sessions.deadlines.action, left)) {
                     try Self.probe(condition, root: system.root(of: app), app: app, selector: selector, snapshot: snapshot, cached: cached)
@@ -506,7 +516,7 @@ struct UIWaiter: Sendable {
             }
             let remaining = clock.now.duration(to: end)
             guard remaining > .zero else { return "(não aconteceu em \(UIClock.seconds(timeout)))" }
-            let pause = min(tick(after: looks), remaining)
+            let pause = min(self.pause(after: looks, took: lookStarted.duration(to: clock.now)), remaining)
             looks += 1
             onPause?(pause)
             if watcher.isFinished {
@@ -822,11 +832,7 @@ enum UIMenu {
         throw ToolError("Faltou o caminho do menu.")
     }
 
-    /// `- Novo`, `- Abrir recente ▸`, `- Salvar (desativado)` for the items under a menu bar item or submenu item.
-    static func listing(under item: any AccessibilityElement) -> String {
-        listing(of: items(under: item))
-    }
-
+    /// `- Novo`, `- Abrir recente ▸`, `- Salvar (desativado)` for the items of a menu or submenu.
     static func listing(of items: [any AccessibilityElement]) -> String {
         let lines = items.compactMap { entry -> String? in
             let name = title(of: entry)
@@ -840,15 +846,18 @@ enum UIMenu {
     }
 
     /// The enabled menu item whose keyboard shortcut is `stroke`, found without opening any menu (the shortcut then works
-    /// whatever the keyboard layout and with the app in the background). Looks at most `limit` items deep in submenus.
-    static func item(for stroke: KeyStroke, root: any AccessibilityElement, limit: Int = 800) -> (element: any AccessibilityElement, titles: [String])? {
+    /// whatever the keyboard layout and with the app in the background). Looks at most `limit` items deep in submenus, and
+    /// gives up after `seconds` (each item is a round trip, and a big menu must not use up the call's deadline: the key
+    /// then goes as an event) or when the call was cancelled.
+    static func item(for stroke: KeyStroke, root: any AccessibilityElement, limit: Int = 800, seconds: Double = 1) -> (element: any AccessibilityElement, titles: [String])? {
         guard let bar = root.element("AXMenuBar"), let top = bar.elements("AXChildren") else { return nil }
         var budget = limit
+        let started = Date()
         let names = ["AXTitle", "AXEnabled", "AXMenuItemCmdChar", "AXMenuItemCmdModifiers", "AXMenuItemCmdVirtualKey", "AXChildren"]
 
         func search(_ items: [any AccessibilityElement], path: [String], depth: Int) -> (any AccessibilityElement, [String])? {
             for item in items {
-                guard budget > 0 else { return nil }
+                guard budget > 0, !AXWork.isCancelled, Date().timeIntervalSince(started) < seconds else { return nil }
                 budget -= 1
                 guard let values = item.read(names).attributes else { continue }
                 let title = values["AXTitle"]?.string ?? ""
@@ -2152,8 +2161,10 @@ struct UIActTool: AgentTool {
         case "table", "outline", "list":
             let rows = target.element.elements("AXRows") ?? target.element.elements("AXChildren") ?? []
             let wanted = UIText.fold(value)
-            guard let row = rows.prefix(500).first(where: { UIText.fold(rowText($0)).contains(wanted) }) else {
-                throw ToolError("Nenhuma linha de \(target.name) tem \(UIText.quoted(value)).")
+            let found = findRow(wanted, in: rows)
+            guard let row = found.row else {
+                throw ToolError("Nenhuma linha de \(target.name) tem \(UIText.quoted(value))"
+                                + (found.examined < rows.count ? " entre as \(found.examined) primeiras de \(rows.count) (ui_read com query acha as outras)." : "."))
             }
             try checkDanger(rowText(row), "a linha \(UIText.quoted(value))")
             guard UIRowSelection.select([row], in: target.element) else {
@@ -2171,6 +2182,20 @@ struct UIActTool: AgentTool {
         default:
             throw ToolError("\(target.name) não tem opções para escolher; para texto use set_value.")
         }
+    }
+
+    /// The first row whose text has `wanted` (folded), looking at the first `limit` rows for at most `seconds`; each row costs
+    /// several round trips, so a long table is not read to the end. `examined` is how many rows were looked at.
+    static func findRow(_ wanted: String, in rows: [any AccessibilityElement], limit: Int = 500, seconds: Double = 1.2)
+        -> (row: (any AccessibilityElement)?, examined: Int) {
+        let started = Date()
+        var examined = 0
+        for row in rows.prefix(limit) {
+            if AXWork.isCancelled || Date().timeIntervalSince(started) >= seconds { break }
+            examined += 1
+            if UIText.fold(rowText(row)).contains(wanted) { return (row, examined) }
+        }
+        return (nil, examined)
     }
 
     /// The words of a table row: its own name, else the text of its first cells.

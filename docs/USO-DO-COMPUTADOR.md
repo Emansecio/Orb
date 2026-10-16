@@ -91,8 +91,11 @@ Acessibilidade só a imagem; `CGRequestScreenCaptureAccess` no máximo uma vez p
 
 - `actor AXAppSession` por pid com `unownedExecutor` = `DispatchSerialQueue` (IPC bloqueia GCD, não o pool cooperativo),
   em `AXSessions.shared` (`AccessibilitySession.swift`): no máximo 4 sessões em voo; prazos leitura 4/8 s, ação 2 s, espera
-  = timeout + 0,5 s; estourado → "\(app) não respondeu" e a sessão fica `busy` até a chamada presa voltar; chamadas novas
-  falham em < 20 ms ("ainda ocupado").
+  = timeout + 0,5 s; estourado → "\(app) não respondeu", o trabalho é **cancelado** (o token da chamada: para no próximo
+  elemento e uma ação que ainda não saiu nunca sai depois do aviso) e a sessão fica `busy` até ele voltar; chamadas novas
+  falham em < 20 ms ("ainda ocupado"). As buscas longas têm relógio próprio, menor que o prazo: atalho no menu 1 s (passado
+  isso a tecla vai como evento), linha de tabela 500 linhas e 1,2 s, marcas do `screenshot` 3,5 s, e o `wait` espaça as
+  olhadas caras (pausa do tamanho da olhada, no máximo 1 s).
 - `AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 1.0)` uma vez por processo + 1,0 s na raiz.
 - Primeiro `.cannotComplete` aborta a leitura com corte `.hung`: `read(_:) -> AXRead` expõe a falha.
 - `UILiveElements` em memória (bot, pid, geração): `id → referência AX viva`; ≤ 4.000 referências, LRU de 6 snapshots por
@@ -143,7 +146,8 @@ Acessibilidade só a imagem; `CGRequestScreenCaptureAccess` no máximo uma vez p
   em app de mensagem (envia), `cmd+delete` no Finder (apaga); em `steps` vale a primeira etapa perigosa.
 - Takeover (`ScreenOwner` ao vivo): trava; guarda pid da frente, janela focada e cursor; `AXFrontmost=true` no alvo e
   `AXRaise`/`AXMain` na janela-alvo, espera `AXApplicationActivated` ≤ 500 ms; etapas com `CGEventSource(.privateState)`
-  em `.cghidEventTap`; aborta se o cursor real se afastar > 3 pt; teto 10 s total e 2 s por etapa; restauração não
+  em `.cghidEventTap`; aborta se o cursor real se afastar > 3 pt; teto 10 s total e 2 s por etapa (no texto, por pedaço de
+  20 unidades, para um texto longo não parar no meio); restauração não
   cancelável (`Task.detached` aguardada): `AXFrontmost` no app anterior, `AXMain` na janela anterior,
   `CGWarpMouseCursorPosition` + `CGAssociateMouseAndMouseCursorPosition(1)`, e conferência. HUD opcional (`NSPanel` não
   ativante) "Orb está usando a tela — mexa o mouse para parar".

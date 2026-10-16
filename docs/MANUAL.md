@@ -343,6 +343,9 @@ usando o Mac e o app da frente, o foco e o cursor ficam onde estavam.
 - **O que funciona em segundo plano**: ler a interface do app (mesmo coberto, em outro Espaço ou minimizado), apertar botões,
   preencher campos, digitar, atalhos de teclado (pelo menu do app), escolher itens de menu, selecionar linhas, rolar e clicar em
   um ponto da janela quando o app aceita o primeiro clique. A captura de tela vem da própria janela, também quando está coberta.
+  Se um app não responde no prazo, o Orb diz isso e **não** faz depois o que tinha pedido (nada de clique atrasado); um
+  Parar no meio de um clique sempre solta o botão. Em tabelas muito longas, escolher uma linha pelo texto olha as primeiras
+  500 e diz até onde olhou; o Orb então usa a busca (`query`) da leitura.
 - **O cartão "Usar a tela"**: o que só funciona com o mouse e o teclado de verdade (arrastar e soltar, menus de contexto, passar o
   mouse, apps sem Acessibilidade) o Orb **pede** antes. Você aprova o cartão (ele lista as etapas), o Orb traz o app para a frente
   por até 10 s, faz o que precisa e **devolve** o app que estava na frente, a janela e o cursor. Um aviso "Orb está usando a tela

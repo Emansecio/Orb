@@ -404,7 +404,8 @@ struct LiveSyntheticInput: SyntheticInput {
     func click(at point: CGPoint, window: UInt32, button: MouseButton, count: Int, to pid: Int32) async throws {
         let events = try SyntheticEventBuilder.clickEvents(at: point, window: window, button: button, count: count, source: source)
         for (index, event) in events.enumerated() {
-            try Task.checkCancellation()
+            // Stop is looked at only before a press: between a press and its release it would leave the button held down in the app.
+            if index % 2 == 0 { try Task.checkCancellation() }
             try sink.post(event, to: pid)
             // A gap after each release, so the app sees two clicks and not one long one.
             if index % 2 == 1, index < events.count - 1 { try await pause(pacing.betweenClicks) }
