@@ -90,7 +90,14 @@ false`, como `open -g`; `URLOpening`/`LiveURLOpener`, um gravador nos testes); `
 só quando a pessoa pediu para ver. A saída diz "em segundo plano" ou "na frente"; o cartão diz "Abrindo na frente". A recusa
 "app não está aberto" do `ui_*` manda abrir com `open`, em segundo plano.
 
-**Specs:** teto total 18.400 caracteres (subiu com `task_plan` e com o `front` do `open`), sub-teto testado de 4.800 para
+**`app_dictionary`** (`AppDictionary.swift`, `.safe`, `computerUse`): `app` (nome, bundle id ou caminho do `.app`), `search`, `suite`, `offset`. Roda `/usr/bin/sdef`
+(20 s, cancelável), lê o XML com `XMLParser` (itens `hidden` saem) e devolve uma linha por comando (`cmd show <tipo> param?:tipo -> resultado`),
+classe (`class note (item): name:text, id:text ro; elements: …`; `+` é extensão) e enumeração, com a descrição cortada em 70 caracteres.
+`search` mantém o que casa (de uma classe, só as propriedades que casam); páginas de 6.000 caracteres, com `offset` para continuar. A Standard Suite
+(`xi:include`, que o `sdef` não expande) vira uma linha. Cache por caminho + versão + build (40 apps). Sem dicionário: diz isso e sugere
+`shortcuts_list` ou `ui_read`/`ui_act`. A descrição do `applescript` e o prompt mandam lê-lo antes de escrever para um app desconhecido.
+
+**Specs:** teto total 18.900 caracteres (subiu com `task_plan`, com o `front` do `open` e com o `app_dictionary`), sub-teto testado de 4.800 para
 `ui_read`+`ui_act`+`screenshot`.
 
 ## 3. Desempenho e confiabilidade

@@ -32,6 +32,14 @@ Os achados P1-1, P1-2 e P2-1 a P2-7 estão corrigidos, com teste; os P3 baratos 
 | P2-7 | Decisão do usuário (16/10): se a pessoa apertou tecla ou botão nos últimos 2 s (`AccessibilitySystem.secondsSinceUserInput`, `.hidSystemState`, que não conta os eventos sintéticos do Orb), foi ela que foi ao app: ele fica na frente, não ganha a marca `stealsFocus`, e a saída avisa. Teclas e texto para um app em que ela acabou de entrar são recusados como "o usuário está usando". Passados os 2 s, o comportamento é o de antes. | `AccessibilityRefusalTests`: `anAppThePersonWentToStaysInFrontAndIsNotTakenForOneThatStealsFocus`, `nothingIsTypedIntoAnAppThePersonJustWentTo` |
 | P3-1 | Saem `UIMenu.listing(under:)` (a revisão de higiene já citava), `UILiveElements.removeAll()`, `UIReadTool.read` (só um teste usava; o teste chama `reading`), `LiveTakeoverPlatform.init() {}` e `LiveTakeoverPoster.flags` (usa `SyntheticEventBuilder.flags(for:)`). | compilação e as suítes de sempre |
 
+## Fase 3 (16/10): ver o app antes de agir
+
+Pedido do usuário: o Orb sabe que algo existe e onde buscar; o detalhe só entra quando precisa. O modelo local (Foundation Models) foi descartado por ele.
+
+| Item | O que mudou | Teste |
+|---|---|---|
+| 1 | `app_dictionary` (`.safe`): o dicionário AppleScript do app, lido do `sdef` só quando o Orb pede, em resumo compacto (suítes, classes com propriedades e elementos, comandos com parâmetros), filtrável por `search`/`suite`, em páginas de 6.000 caracteres (`offset`), em cache por app e versão. App sem dicionário: diz isso e sugere Atalhos ou `ui_read`/`ui_act`. A descrição do `applescript` e o prompt ganham uma frase. Teto das specs 18.400 para 18.900. | `AppDictionaryTests` (fixture de sdef, cache, sem dicionário, páginas) |
+
 **Ficou, e por quê:**
 
 - **P1-2** e **P2-7**: ficaram para decisão do usuário e entraram depois dela (linhas acima).

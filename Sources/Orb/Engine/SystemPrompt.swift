@@ -161,7 +161,7 @@ enum PromptParts {
             uses.append("edit_file for small changes (write_file for new files or full rewrites)")
         }
         if bot.capabilities.contains(.computerUse) {
-            uses.append("applescript and shortcuts_run to work with apps")
+            uses.append("applescript and shortcuts_run to work with apps (app_dictionary before scripting one you do not know well)")
             uses.append("ui_read then ui_act for apps with no AppleScript or Shortcuts support (read the screen before acting, read again after it changes)")
         }
         if bot.capabilities.contains(.browser) {

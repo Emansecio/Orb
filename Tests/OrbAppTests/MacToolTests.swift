@@ -39,7 +39,7 @@ struct MacToolTests {
     @Test func registersEveryMacToolWithTheRightCapabilityAndRisk() {
         let tools = Dictionary(uniqueKeysWithValues: ToolBox.macTools.map { ($0.spec.name, $0) })
         let expected: [(name: String, risk: ToolRisk, capability: Capability?)] = [
-            ("shortcuts_list", .safe, .computerUse), ("shortcuts_run", .sensitive, .computerUse),
+            ("shortcuts_list", .safe, .computerUse), ("app_dictionary", .safe, .computerUse), ("shortcuts_run", .sensitive, .computerUse),
             ("clipboard_read", .safe, .computerUse), ("clipboard_write", .sensitive, .computerUse),
             ("screenshot", .safe, .computerUse), ("notify", .safe, nil),
             ("apps_list", .safe, .computerUse),

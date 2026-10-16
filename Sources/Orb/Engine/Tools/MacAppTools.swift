@@ -520,6 +520,6 @@ enum TrashGuard {
 extension ToolBox {
     static let macAppTools: [any AgentTool] = [
         ShortcutsListTool(), ShortcutsRunTool(), ClipboardReadTool(), ClipboardWriteTool(), ScreenshotTool(),
-        NotifyTool(), AppsListTool(), AppQuitTool(), TrashTool(),
+        NotifyTool(), AppsListTool(), AppQuitTool(), TrashTool(), AppDictionaryTool(),
     ]
 }

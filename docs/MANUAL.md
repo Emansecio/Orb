@@ -328,6 +328,10 @@ lista e adicionar de novo. Depois de "Pedir agora" ou de ir aos Ajustes do Siste
   conhecido que está fechado é aberto escondido antes, para o aviso não cair dentro do tempo do script). App recusado falha na hora.
 - No **Automático**, enviar e-mail ou mensagem por AppleScript (ou apertar Return no WhatsApp/Telegram…), apagar vários itens de
   uma vez e abrir scripts, instaladores ou links que rodam Atalhos perguntam antes, como os outros comandos perigosos.
+- **Dicionário do app, só quando precisa**: antes de escrever um AppleScript para um app que não conhece bem, o Orb lê o dicionário dele
+  (`app_dictionary`, a partir do `sdef` do app): as suítes, as classes com propriedades e elementos e os comandos com parâmetros,
+  num resumo curto, filtrável por texto ou suíte e em páginas. Só lê, não pede permissão; fica em cache por app e versão. App sem
+  dicionário é dito como tal, com o caminho dos Atalhos ou da interface.
 - O Orb recebe receitas curtas para as tarefas comuns do Mac (datas sem depender do idioma, rascunho no Mail, Lembretes, Notas,
   Calendário, Música) e conselhos para os erros típicos do AppleScript.
 - No painel do Orb, a chave "Controlar apps do Mac" ligada traz o atalho **Permissões**.

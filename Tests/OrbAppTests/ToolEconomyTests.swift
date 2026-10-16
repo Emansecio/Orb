@@ -19,7 +19,9 @@ struct ToolSpecEconomyTests {
     /// their own ceiling below, and the rest stays as it was.
     /// Raised to 18,250 for `task_plan` (~720), the plan of a long task kept outside the conversation (docs/AUTONOMIA-2026-10-13.md).
     /// Raised to 18,400 for `open` in the background and its `front` (~130, docs/REVISAO-USO-DO-COMPUTADOR-2026-10-16.md).
-    private static let specCharsCeiling = 18_400
+    /// Raised to 18,900 for `app_dictionary` (~500, with the line in `applescript`): the AppleScript dictionary of an app, read on demand
+    /// so the model stops writing scripts from memory (docs/REVISAO-USO-DO-COMPUTADOR-2026-10-16.md, fase 3). It is the detail that stays out of the prompt.
+    private static let specCharsCeiling = 18_900
     /// `ui_read`, `ui_act` and `screenshot` together: waiting, steps, takeover, marks and OCR all have to fit here.
     private static let appControlSpecCharsCeiling = 4_800
     /// The tools of the Orb's own browser are offered only when an engine is installed, so they have a ceiling of their own.

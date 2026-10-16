@@ -264,7 +264,7 @@ struct AppleScriptTool: AgentTool {
         apps (Mail, Calendar, Finder…). Output "structured" keeps strings and numbers \
         apart. Stops after 60 seconds (timeout_seconds up to 300). macOS asks the user for Automation permission on \
         the first use of each app and the call waits; on a permission error, pass the message on instead of \
-        retrying. Prefer a dedicated tool (open, browser_tab, clipboard_read, screenshot…) when one exists.
+        retrying. For an app you do not know well, read app_dictionary first. Prefer a dedicated tool (open, browser_tab, clipboard_read, screenshot…) when one exists.
         """,
         parameters: .schema([
             "script": .property("string"),

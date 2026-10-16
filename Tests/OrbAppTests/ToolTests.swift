@@ -149,7 +149,7 @@ final class ToolTests {
         let safe = ToolBox.all.filter { $0.risk(.object(["target": .string("https://example.com")])) == .safe }
         #expect(Set(safe.map(\.spec.name)) == [
             "read_file", "list_directory", "search_files", "grep", "glob", "recall", "job_output", "job_stop",
-            "shortcuts_list", "clipboard_read", "screenshot", "notify", "apps_list", "browser_tab", "ui_read",
+            "shortcuts_list", "clipboard_read", "screenshot", "notify", "apps_list", "app_dictionary", "browser_tab", "ui_read",
             // It writes nothing but the plan of the task, kept with the conversation.
             "task_plan",
             // The Orb's own browser: they look at the page it already has open (which asked first), and "Só leitura" refuses them
