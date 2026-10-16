@@ -270,9 +270,7 @@ extension AppModel {
             groupID: group.id, runID: run.id, requestID: turn.requestID,
             groupName: group.name, role: role,
             offering: offering, grants: [PermissionRule(family: .delegation), PermissionRule(family: .groupMemory)],
-            bank: memory.groupBank(for: group.id),
-            sideRun: SideRunInfo(kind: .group, id: turn.requestID,
-                                 chain: ChainContext(chainID: run.id, hop: 1, path: [], groupID: group.id, serving: turn.requestID)))
+            bank: memory.groupBank(for: group.id))
     }
 
     /// Where an approval card of a member in a group is answered: the group's own screen.
@@ -294,7 +292,6 @@ struct GroupTurnExtras {
     var offering: MultiOrbOffering
     var grants: [PermissionRule]
     var bank: MemoryBank
-    var sideRun: SideRunInfo
 
     /// The group section of the system prompt.
     var system: String {

@@ -51,6 +51,27 @@ final class FakeDelegationService: DelegationService {
         return request
     }
 
+    func submitGroupRequest(from asker: UUID, text: String, chain: ChainContext, groupID: UUID, orchestrator: UUID,
+                            id: UUID) -> DelegationRequest {
+        var envelope = OrbEnvelope(id: id, chainID: chain.chainID, kind: .ask, from: ref(asker), to: ref(orchestrator), text: text,
+                                   hop: chain.hop, path: chain.path, groupID: groupID)
+        envelope.fromChat = true
+        let request = DelegationRequest(envelope: envelope, state: failsGroupTurns ? .failed : .queued)
+        requests[envelope.id] = request
+        order.append(envelope.id)
+        groupTurns.append(request)
+        return request
+    }
+
+    func joinQueuedGroupTurn(member: UUID, chainID: UUID, text: String) -> DelegationRequest? {
+        guard let id = order.last(where: { requests[$0]?.envelope.to.id == member }), let request = requests[id],
+              request.state == .queued, request.envelope.chainID == chainID, request.envelope.from.id == member,
+              !request.envelope.fromChat else { return nil }
+        requests[id]?.envelope.text = request.envelope.text + "\n\n" + text
+        if let index = groupTurns.firstIndex(where: { $0.envelope.id == id }) { groupTurns[index] = requests[id] ?? request }
+        return requests[id]
+    }
+
     func cancelChain(_ id: UUID, by: CancelReason) {
         cancelled.append((id, by))
         for (key, request) in requests where request.envelope.chainID == id && [.queued, .running, .awaitingChildren].contains(request.state) {

@@ -83,6 +83,12 @@ struct NewGroupSheet: View {
                                           makeOrchestrator: { makeOrchestrator(look.id) })
                         }
                     }
+                    ForEach(model.readOnlyNotes(members: chosen, orchestrator: orchestrator), id: \.text) { line in
+                        Label(line.text, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(Palette.warn)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 field("Objetivo (opcional)") {
                     TextField("O que o grupo deve entregar", text: $objective, axis: .vertical)

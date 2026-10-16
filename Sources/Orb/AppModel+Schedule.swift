@@ -25,7 +25,7 @@ extension AppModel {
         switch try ScheduleCommand(arguments) {
         case .create(let name, let prompt, let schedule, let goal, let enabled, let runNow):
             // A run that reads an e-mail or a page must not be able to plant tasks that outlive it.
-            guard sessions[botID]?.routineID == nil else { throw ToolError("Uma tarefa agendada não cria outras tarefas.") }
+            if let refusal = sideRunRefusal(botID, routine: "Uma tarefa agendada não cria outras tarefas.") { throw refusal }
             guard own.count < Self.scheduledTaskLimit else {
                 throw ToolError("Este Orb já tem \(Self.scheduledTaskLimit) tarefas agendadas. Apague alguma antes (action delete).")
             }
@@ -46,7 +46,7 @@ extension AppModel {
                 + "Ela aparece na aba Rotinas do painel, onde dá para pausar ou apagar."
                 + (waits ? " Como \(orb.name) pergunta antes de agir, cada execução espera a sua aprovação (em Automático ela roda sozinha)." : "")
         case .update(let name, let prompt, let schedule, let goal):
-            guard sessions[botID]?.routineID == nil else { throw ToolError("Uma tarefa agendada não altera tarefas.") }
+            if let refusal = sideRunRefusal(botID, routine: "Uma tarefa agendada não altera tarefas.") { throw refusal }
             let current = try own.named(name)
             guard let index = routines.firstIndex(where: { $0.id == current.id }) else { throw ToolError("Não achei a tarefa “\(name)”.") }
             if let prompt { routines[index].prompt = prompt }
@@ -76,23 +76,40 @@ extension AppModel {
             }.joined(separator: "\n")
         case .setEnabled(let name, let enabled):
             // A run may stop tasks, never start them again.
-            guard !enabled || sessions[botID]?.routineID == nil else { throw ToolError("Uma tarefa agendada não retoma outras tarefas.") }
+            if enabled, let refusal = sideRunRefusal(botID, routine: "Uma tarefa agendada não retoma outras tarefas.") { throw refusal }
             let routine = try own.named(name)
             guard routine.isEnabled != enabled else { return "“\(routine.name)” já estava \(enabled ? "ativa" : "pausada")." }
             setRoutineEnabled(routine.id, enabled)
             return enabled ? "Retomei “\(routine.name)”. \(RoutineText.preview(of: routine.schedule))."
                 : "Pausei “\(routine.name)”. Ela não roda até ser retomada."
         case .run(let name):
-            guard sessions[botID]?.routineID == nil else { throw ToolError("Uma tarefa agendada não dispara outras tarefas.") }
+            if let refusal = sideRunRefusal(botID, routine: "Uma tarefa agendada não dispara outras tarefas.") { throw refusal }
             let routine = try own.named(name)
             guard !isRoutineRunning(routine.id) else { return "“\(routine.name)” já está rodando." }
             runRoutine(routine.id)
             return "Pedi para rodar “\(routine.name)” agora. " + Self.runNowNote
         case .delete(let name):
-            guard sessions[botID]?.routineID == nil else { throw ToolError("Uma tarefa agendada não apaga tarefas; pode só pausá-las.") }
+            if let refusal = sideRunRefusal(botID, routine: "Uma tarefa agendada não apaga tarefas; pode só pausá-las.") { throw refusal }
             let routine = try own.named(name)
             deleteRoutine(routine.id)
             return "Apaguei “\(routine.name)”."
+        }
+    }
+
+    /// Why a turn that is not the Orb's own chat may not change its tasks (nil in the chat). `routine` is the refusal of a
+    /// routine's run; a request from another Orb and a group's turn (`routineID` marks them too) are told what they are and what
+    /// to do instead.
+    private func sideRunRefusal(_ botID: UUID, routine: String) -> ToolError? {
+        guard let session = sessions[botID], session.routineID != nil else { return nil }
+        switch session.sideKind {
+        case .group:
+            return ToolError("Num turno de grupo não se agenda nem se muda tarefa: proponha a rotina na sua resposta, e o usuário "
+                + "a cria no chat deste Orb.")
+        case .delegation:
+            return ToolError("Num pedido de outro Orb não se agenda nem se muda tarefa: sugira a rotina no seu resultado, e o "
+                + "usuário decide.")
+        case .routine, nil:
+            return ToolError(routine)
         }
     }
 

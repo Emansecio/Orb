@@ -33,6 +33,9 @@ final class DelegationHub: DelegationService {
     private(set) var queues: [UUID: [UUID]] = [:]
     /// Per Orb: the answers waiting to be handed to it.
     private(set) var inbox: [UUID: [OrbEnvelope]] = [:]
+    /// Per Orb: the notices (`tell`) other Orbs left it outside a group, oldest first. A notice wakes nobody: it goes on top of
+    /// the next message the Orb gets, whatever starts its next turn (`takeNotices`).
+    private(set) var notices: [UUID: [OrbEnvelope]] = [:]
     private(set) var chainStates: [UUID: ChainState] = [:]
     /// The last `seenLimit` message ids, to tell a repeat from a new message.
     private(set) var seenMessageIDs: [UUID] = []
@@ -44,7 +47,18 @@ final class DelegationHub: DelegationService {
     /// Requests at work past `workTimeout` whose banner went out (once each).
     private(set) var toldStillRunning: Set<UUID> = []
 
+    /// A routine's run that asked other Orbs and waits for their answers: its conversation, kept to resume from, and when the
+    /// run began (its history counts the whole run). By routine id.
+    struct RoutineWait {
+        var botID: UUID
+        var conversation: Conversation
+        var started: Date
+    }
+    private(set) var waitingRoutines: [UUID: RoutineWait] = [:]
+
     static let seenLimit = 500
+    /// Notices kept per Orb until its next turn (the oldest go first).
+    static let noticeLimit = 10
     static let keptRequests = 300
     static let chainRetention: TimeInterval = 2 * 3600
 
@@ -68,6 +82,8 @@ final class DelegationHub: DelegationService {
         var input = DelegationRules.Input(
             switchOn: model.orbsCanTalk, groupID: groupID, groupMembers: group.map { Set($0.memberIDs) }, orbs: orbs,
             sender: OrbRef(sender), targetName: name, text: text, kind: kind, messageID: messageID, context: context)
+        input.groupNames = model.groups.map(\.name)
+        input.groupName = (groupID ?? context?.groupID).flatMap { id in model.groups.first { $0.id == id }?.name }
         input.seenMessage = seenMessageIDs.contains(messageID)
         if let context, let state = chainStates[context.chainID] {
             input.chainStopped = state.cancelled
@@ -91,15 +107,17 @@ final class DelegationHub: DelegationService {
         seenMessageIDs.append(messageID)
         if seenMessageIDs.count > Self.seenLimit { seenMessageIDs.removeFirst(seenMessageIDs.count - Self.seenLimit) }
 
-        let envelope = OrbEnvelope(id: messageID, chainID: plan.chainID, kind: kind, from: OrbRef(sender), to: plan.target,
+        var envelope = OrbEnvelope(id: messageID, chainID: plan.chainID, kind: kind, from: OrbRef(sender), to: plan.target,
                                    text: plan.text, hop: plan.hop, path: plan.path, servingRequest: session.servingRequest,
                                    groupID: groupID ?? context?.groupID, sentAt: now)
+        if kind == .tell { return leaveNotice(envelope, session: session) }
+        // A routine's run that asks is resumed by the answer (`holdRoutine`), so the answer must say which run it is for.
+        if session.routineID != nil, session.sideKind == nil { envelope.servingRoutine = session.routineID }
         requests[envelope.id] = DelegationRequest(envelope: envelope, state: .queued)
-        if kind == .ask, let serving = envelope.servingRequest { requests[serving]?.openChildren.insert(envelope.id) }
+        if let serving = envelope.servingRequest { requests[serving]?.openChildren.insert(envelope.id) }
         queues[plan.target.id, default: []].append(envelope.id)
         // What the asker's chat shows: "Atlas pediu ajuda ao Revisor" (the exchange lives in the lines, not in a card).
-        session.append(.orbMessage(OrbMessageItem(direction: .sent, kind: kind == .ask ? .ask : .tell,
-                                                  state: kind == .ask ? .open : .replied, from: envelope.from, to: plan.target,
+        session.append(.orbMessage(OrbMessageItem(direction: .sent, kind: .ask, state: .open, from: envelope.from, to: plan.target,
                                                   text: plan.text, requestID: envelope.id, chainID: plan.chainID,
                                                   groupID: envelope.groupID)))
         model.live(from).poked()
@@ -108,17 +126,59 @@ final class DelegationHub: DelegationService {
         return envelope
     }
 
+    /// A notice (`tell`) runs no turn. In a group it is a post in the thread, which the member's next turn reads with the rest
+    /// of the thread; elsewhere it waits in the target's box for its next turn, and the target's chat shows it at once.
+    private func leaveNotice(_ envelope: OrbEnvelope, session: BotSession) -> OrbEnvelope {
+        guard let model else { return envelope }
+        let line = OrbMessageItem(direction: .sent, kind: .tell, state: .replied, from: envelope.from, to: envelope.to,
+                                  text: envelope.text, requestID: envelope.id, chainID: envelope.chainID, groupID: envelope.groupID)
+        session.append(.orbMessage(line))
+        if envelope.groupID != nil {
+            groupHooks?.noticePosted(envelope)
+        } else {
+            var box = notices[envelope.to.id] ?? []
+            box.append(envelope)
+            notices[envelope.to.id] = Array(box.suffix(Self.noticeLimit))
+            var received = line
+            received.direction = .received
+            appendToChat(of: envelope.to.id, .orbMessage(received))
+            model.live(envelope.to.id).poked()
+        }
+        model.live(envelope.from.id).poked()
+        return envelope
+    }
+
+    /// The notices waiting for the Orb, as the top of the message that starts its turn; nil when there are none. They are
+    /// handed once. A group's turn takes none: they belong to the Orb's own work, not to the group's thread.
+    func takeNotices(for botID: UUID) -> String? {
+        let waiting = (notices.removeValue(forKey: botID) ?? []).filter { chainStates[$0.chainID]?.cancelled != true }
+        return waiting.isEmpty ? nil : OrbEnvelopeText.notices(waiting)
+    }
+
     /// A turn of a member of a group: the group's runtime asks the hub for it so the target's queue, its own conversation and the
     /// limits are the same as for any request. `askedBy` nil: the person asked (nobody gets a reply).
     func submitGroupTurn(member: UUID, text: String, chain context: ChainContext, groupID: UUID,
                          askedBy: UUID?) -> DelegationRequest {
+        queueGroupTurn(member: member, text: text, chain: context, groupID: groupID, askedBy: askedBy, id: UUID(), fromChat: false)
+    }
+
+    func submitGroupRequest(from asker: UUID, text: String, chain context: ChainContext, groupID: UUID, orchestrator: UUID,
+                            id: UUID) -> DelegationRequest {
+        queueGroupTurn(member: orchestrator, text: text, chain: context, groupID: groupID, askedBy: asker, id: id, fromChat: true)
+    }
+
+    private func queueGroupTurn(member: UUID, text: String, chain context: ChainContext, groupID: UUID, askedBy: UUID?, id: UUID,
+                                fromChat: Bool) -> DelegationRequest {
         let from = askedBy.flatMap { model?.bot($0) } ?? model?.bot(member)
         let target = model?.bot(member)
-        let envelope = OrbEnvelope(
-            id: UUID(), chainID: context.chainID, kind: .ask, from: from.map(OrbRef.init) ?? OrbRef(id: askedBy ?? member, name: ""),
+        // From the asker's own chat there is no request it serves: the answer wakes that chat.
+        let serving = fromChat ? nil : context.serving ?? askedBy.flatMap { model?.session($0).servingRequest }
+        var envelope = OrbEnvelope(
+            id: id, chainID: context.chainID, kind: .ask, from: from.map(OrbRef.init) ?? OrbRef(id: askedBy ?? member, name: ""),
             to: target.map(OrbRef.init) ?? OrbRef(id: member, name: ""), text: text, hop: context.hop + 1,
             path: context.path.isEmpty ? [(askedBy ?? member)] : context.path,
-            servingRequest: context.serving ?? askedBy.flatMap { model?.session($0).servingRequest }, groupID: groupID)
+            servingRequest: serving, groupID: groupID)
+        envelope.fromChat = fromChat
         guard model != nil, target != nil, !isShuttingDown else { return DelegationRequest(envelope: envelope, state: .failed) }
         var chain = chainStates[context.chainID] ?? ChainState(origin: .group(context.chainID), originBot: askedBy ?? member,
                                                                groupID: groupID)
@@ -132,6 +192,15 @@ final class DelegationHub: DelegationService {
         refresh(member)
         schedulePump(member)
         return request
+    }
+
+    func joinQueuedGroupTurn(member: UUID, chainID: UUID, text: String) -> DelegationRequest? {
+        // Only the last in the member's queue: what others asked it in between keeps its place.
+        guard let id = queues[member]?.last, let request = requests[id], request.state == .queued,
+              request.envelope.chainID == chainID, request.envelope.groupID != nil, request.envelope.from.id == member,
+              !request.envelope.fromChat else { return nil }
+        requests[id]?.envelope.text = request.envelope.text + "\n\n" + text
+        return requests[id]
     }
 
     // MARK: Running
@@ -171,7 +240,7 @@ final class DelegationHub: DelegationService {
             // an assignment from another Orb as a request, the person's own message as it was typed.
             let preface = await self.groupHooks?.prompt(for: request, member: botID) ?? ""
             let envelope = request.envelope
-            let body = envelope.from.id == envelope.to.id ? envelope.text : OrbEnvelopeText.request(envelope)
+            let body = envelope.from.id == envelope.to.id && !envelope.fromChat ? envelope.text : OrbEnvelopeText.request(envelope)
             let prompt = preface.isEmpty ? body : preface + "\n\n" + body
             // Read off the main thread while `starting` still holds the Orb, so nothing else takes it meanwhile.
             let read = await model.store.readSideConversationAsync(prefix: Store.grupoPrefix, id: envelope.groupID ?? request.id, for: botID)
@@ -268,6 +337,15 @@ final class DelegationHub: DelegationService {
         // The conversation of the run goes to its file; the chat comes back.
         write(own, kind: kind, runID: runID, for: botID)
         if waits { suspended[requestID] = own }
+        // A member has one conversation per group, which every turn of it in the group shares: a request of the member that
+        // waits there keeps a copy to resume from, and this turn, which began from the file, holds that copy and more. The copy
+        // follows, so the turn that resumes later does not write this one away.
+        if kind == .group {
+            for (id, _) in suspended where id != requestID {
+                guard let waiting = requests[id], waiting.envelope.to.id == botID, waiting.envelope.groupID == runID else { continue }
+                suspended[id] = own
+            }
+        }
         session.unparkChat()
         session.scheduleSave(delay: 0)
         if session.hasUnsavedStretch() { session.scheduleMemorySave() }
@@ -320,33 +398,20 @@ final class DelegationHub: DelegationService {
     // MARK: Answering
 
     /// The reply of `request` goes to the asker's inbox (a `tell`, a group turn the person asked for and a chain that was stopped
-    /// have nobody to answer).
+    /// have nobody to answer). A request a member sent its group from its chat is answered by the group, in that chat, even when
+    /// the member is the orchestrator itself.
     private func answer(_ request: DelegationRequest, status: OrbEnvelope.ReplyStatus, text: String) {
         let envelope = request.envelope
-        if envelope.kind == .tell, status == .failed { toldFailure(of: request, text: text) }
-        guard envelope.kind == .ask, envelope.from.id != envelope.to.id, let model, !isShuttingDown,
+        guard envelope.kind == .ask, envelope.from.id != envelope.to.id || envelope.fromChat, let model, !isShuttingDown,
               model.bot(envelope.from.id) != nil, chainStates[envelope.chainID]?.cancelled != true else { return }
-        let name = model.bot(envelope.to.id)?.name ?? envelope.to.name
-        let reply = OrbEnvelope(chainID: envelope.chainID, kind: .reply, from: OrbRef(id: envelope.to.id, name: name),
+        let name = displayName(of: envelope)
+        var reply = OrbEnvelope(chainID: envelope.chainID, kind: .reply, from: OrbRef(id: envelope.to.id, name: name),
                                 to: envelope.from, text: Conversation.clipped(text, to: DelegationLimits.replyLimit),
                                 hop: envelope.hop, path: envelope.path, replyTo: envelope.id,
                                 servingRequest: envelope.servingRequest, status: status, groupID: envelope.groupID)
+        reply.servingRoutine = envelope.servingRoutine
         inbox[envelope.from.id, default: []].append(reply)
         schedulePump(envelope.from.id)
-    }
-
-    /// A `tell` waits for no answer, so a failure would reach nobody: the chat of the Orb that sent it gets a line saying so
-    /// (not the turn: there is nothing to answer). A stopped chain, a group's turn and an Orb gone say nothing.
-    private func toldFailure(of request: DelegationRequest, text: String) {
-        let envelope = request.envelope
-        guard envelope.groupID == nil, envelope.from.id != envelope.to.id, let model, !isShuttingDown,
-              model.bot(envelope.from.id) != nil, chainStates[envelope.chainID]?.cancelled != true else { return }
-        let reason = text.hasPrefix(Self.failedLead) ? String(text.dropFirst(Self.failedLead.count)) : text
-        let line = reason.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
-        let actor = model.bot(envelope.to.id).map(OrbRef.init) ?? envelope.to
-        appendToChat(of: envelope.from.id, .event(OrbEvent(kind: .tellFailed, actor: actor,
-                                                           detail: Conversation.clipped(line, to: RoutineRun.summaryLimit),
-                                                           requestID: envelope.id, chainID: envelope.chainID)))
     }
 
     static let failedLead = "Não consegui: "
@@ -357,7 +422,8 @@ final class DelegationHub: DelegationService {
         guard let model, !isShuttingDown else { return false }
         var waiting = (inbox[botID] ?? []).filter { chainStates[$0.chainID]?.cancelled != true }
         while let first = waiting.first {
-            let batch = Array(waiting.filter { $0.servingRequest == first.servingRequest }.prefix(DelegationLimits.wakeBatch))
+            let batch = Array(waiting.filter { $0.servingRequest == first.servingRequest && $0.servingRoutine == first.servingRoutine }
+                .prefix(DelegationLimits.wakeBatch))
             let taken = Set(batch.map(\.id))
             waiting.removeAll { taken.contains($0.id) }
             inbox[botID] = waiting.isEmpty ? nil : waiting
@@ -372,10 +438,26 @@ final class DelegationHub: DelegationService {
                             resuming: true) { return true }
                 continue
             }
+            if let routine = first.servingRoutine {
+                // The run of a routine that waits for these answers goes on in its own conversation; with no run waiting (it
+                // ended, was deleted or stopped) nobody wants them.
+                guard var wait = waitingRoutines.removeValue(forKey: routine) else { continue }
+                for reply in batch { wait.conversation.items.settingSent(reply.replyTo ?? reply.id, to: SendOrigin.state(of: reply.status)) }
+                let chain = ChainContext(chainID: first.chainID, hop: max(0, first.hop - 1), path: first.path, groupID: nil)
+                chainStates[first.chainID]?.touched = .now
+                if model.resumeRoutine(routine, of: botID, conversation: wait.conversation, started: wait.started, chain: chain,
+                                       text: OrbEnvelopeText.reply(batch, inRoutine: true), origin: .orbReply(batch)) {
+                    refresh(botID)
+                    return true
+                }
+                continue
+            }
             let session = model.session(botID)
             session.ensureLoaded()
             let hop = max(0, first.hop - 1)
-            session.chain = ChainContext(chainID: first.chainID, hop: hop, path: first.path, groupID: first.groupID)
+            // A group's answer to the chat (`OrbEnvelope.fromChat`) does not make the chat a turn of the group: what it asks next
+            // begins a chain of its own.
+            session.chain = first.groupID != nil ? nil : ChainContext(chainID: first.chainID, hop: hop, path: first.path, groupID: nil)
             session.servingRequest = nil
             for reply in batch {
                 session.changeConversation { $0.items.settingSent(reply.replyTo ?? reply.id, to: SendOrigin.state(of: reply.status)) }
@@ -392,6 +474,42 @@ final class DelegationHub: DelegationService {
         inbox[botID] = nil
         return false
     }
+
+    // MARK: A routine that waits
+
+    /// The run of `routineID` ended its turn having asked other Orbs: if an answer is still to come (or waits in the box), the
+    /// run is not over. Its conversation is kept to resume from when the answers arrive (`deliverInbox`), and true is returned:
+    /// the app does not record the run yet.
+    func holdRoutine(_ routineID: UUID, of botID: UUID, conversation: Conversation, started: Date) -> Bool {
+        guard !isShuttingDown, routineAwaits(routineID, of: botID) else { return false }
+        waitingRoutines[routineID] = RoutineWait(botID: botID, conversation: conversation, started: started)
+        schedulePump(botID)
+        return true
+    }
+
+    /// The run of `routineID` asked something that is still open, or has an answer waiting to be handed to it.
+    private func routineAwaits(_ routineID: UUID, of botID: UUID) -> Bool {
+        requests.values.contains { Self.isOpen($0.state) && $0.envelope.servingRoutine == routineID && $0.envelope.from.id == botID }
+            || (inbox[botID] ?? []).contains { $0.servingRoutine == routineID && chainStates[$0.chainID]?.cancelled != true }
+    }
+
+    /// The routine's run waits for answers from other Orbs (`holdRoutine`).
+    func isWaiting(routine routineID: UUID) -> Bool { waitingRoutines[routineID] != nil }
+
+    /// A waiting run whose answers will no longer come (its chain was stopped, the Orb it asked was deleted) ends now, with
+    /// what it has; the app records it (`AppModel.closeRoutineRun`).
+    private func settleWaitingRoutines() {
+        guard let model, !isShuttingDown else { return }
+        for (routineID, wait) in waitingRoutines where !routineAwaits(routineID, of: wait.botID) {
+            waitingRoutines[routineID] = nil
+            model.closeRoutineRun(routineID, of: wait.botID, conversation: wait.conversation, started: wait.started,
+                                  why: "A resposta do outro Orb não veio: a conversa entre Orbs foi interrompida.")
+        }
+    }
+
+    /// The routine was deleted, or the app quits: its waiting run is let go of. Returns what was kept, if anything.
+    @discardableResult
+    func forgetWaitingRoutine(_ routineID: UUID) -> RoutineWait? { waitingRoutines.removeValue(forKey: routineID) }
 
     // MARK: Stopping
 
@@ -422,6 +540,10 @@ final class DelegationHub: DelegationService {
                 groupHooks?.turnFinished(requests[envelope.id] ?? request, reply: nil, outcome: .cancelled)
             }
         }
+        for botID in Array(notices.keys) {
+            notices[botID]?.removeAll { $0.chainID == id }
+            if notices[botID]?.isEmpty == true { notices[botID] = nil }
+        }
         for botID in Array(inbox.keys) {
             let before = inbox[botID]?.count ?? 0
             inbox[botID]?.removeAll { $0.chainID == id }
@@ -441,6 +563,9 @@ final class DelegationHub: DelegationService {
                                                               chainID: id)))
         }
         for botID in touched { schedulePump(botID) }
+        // A group's chain stopped by the person from elsewhere (the Parar of whoever waits for it) stops the group.
+        if reason == .user, chain.groupID != nil, !alreadyCancelled { groupHooks?.chainStopped(id) }
+        settleWaitingRoutines()
     }
 
     /// Stops every chain (the switch of Ajustes was turned off, or the app is being reset). A group's chains do not depend on the
@@ -485,8 +610,12 @@ final class DelegationHub: DelegationService {
         }
         inbox[id] = nil
         queues[id] = nil
+        notices[id] = nil
+        for botID in Array(notices.keys) { notices[botID]?.removeAll { $0.from.id == id } }
         for botID in running { model?.session(botID).stop(startsQueuedRoutines: false) }
+        for (routineID, wait) in waitingRoutines where wait.botID == id { waitingRoutines[routineID] = nil }
         refresh(Array(Set(affected.flatMap { [$0.envelope.from.id, $0.envelope.to.id] })))
+        settleWaitingRoutines()
     }
 
     /// The request waited for its children and will not resume: the conversation kept in memory for it is closed on disk, its
@@ -622,13 +751,21 @@ final class DelegationHub: DelegationService {
             return teammatesText(for: botID, groupID: groupID)
         case "ask", "tell":
             let kind: OrbEnvelope.Kind = arguments["action"]?.string?.lowercased() == "tell" ? .tell : .ask
+            let name = arguments["to"]?.string ?? "", text = arguments["message"]?.string ?? ""
             do {
-                let envelope = try submit(from: botID, to: arguments["to"]?.string ?? "", text: arguments["message"]?.string ?? "",
-                                          kind: kind, messageID: messageID, groupID: groupID)
+                // Outside a group's turn, a group's name (that no Orb has) is a request to that group.
+                if groupID == nil, let group = group(named: name) {
+                    let envelope = try submitToGroup(group, from: botID, text: text, kind: kind, messageID: messageID)
+                    return "Pedido enviado ao grupo \(group.name) (id \(envelope.shortID)): \(envelope.to.name) orquestra, o grupo "
+                        + "trabalha no fio dele e a resposta final chega sozinha como mensagem; não espere nem repita o pedido. "
+                        + "O usuário acompanha na tela do grupo."
+                }
+                let envelope = try submit(from: botID, to: name, text: text, kind: kind, messageID: messageID, groupID: groupID)
                 return kind == .ask
-                    ? "Pedido enviado a \(envelope.to.name) (id \(envelope.shortID)). A resposta chega sozinha como mensagem; "
-                        + "não espere nem repita o pedido. Termine o que puder sem ela."
-                    : "Aviso enviado a \(envelope.to.name)."
+                    ? "Pedido enviado a \(envelope.to.name) (id \(envelope.shortID)). A resposta chega sozinha como mensagem"
+                        + (envelope.servingRoutine != nil ? " e retoma esta execução da rotina" : "")
+                        + "; não espere nem repita o pedido. Termine o que puder sem ela."
+                    : "Aviso deixado para \(envelope.to.name): \(envelope.groupID == nil ? "ele lê na próxima mensagem que receber" : "fica no fio do grupo, que ele lê no próximo turno"). tell não acorda; para acordar e ter resposta, use ask."
             } catch let refusal as DelegationRefusal {
                 throw refusal.toolError
             }
@@ -637,15 +774,73 @@ final class DelegationHub: DelegationService {
         }
     }
 
-    /// "- Pesquisador: Pesquisa na web e resume (livre)": the teammates, without ids or folders.
+    /// "- Pesquisador: Pesquisa na web e resume (livre)": the teammates, without ids or folders. Outside a group's turn, the
+    /// groups the Orb is in come after them.
     func teammatesText(for botID: UUID, groupID: UUID?) -> String {
         guard let model else { return "" }
         let team = roster(for: botID, groupID: groupID).compactMap { model.bot($0.id) }
-        guard !team.isEmpty else { return "Não há outros Orbs." }
-        return team.prefix(DelegationLimits.rosterLimit * 4).map { orb in
+        let teammates = team.isEmpty ? "Não há outros Orbs." : team.prefix(DelegationLimits.rosterLimit * 4).map { orb in
             let role = MemoryText.clip(MemoryText.flatten(orb.role), DelegationLimits.roleClip)
-            return "- \(orb.name)\(role.isEmpty ? "" : ": " + role) (\(isBusy(orb.id) ? "ocupado" : "livre"))"
+            let state = groupID.map { groupStatus(of: orb.id, in: $0) } ?? status(of: orb.id)
+            return "- \(orb.name)\(role.isEmpty ? "" : ": " + role) (\(state))"
         }.joined(separator: "\n")
+        guard groupID == nil else { return teammates }
+        let groups = model.groupLines(for: botID).prefix(OrbsPrompt.groupLimit).map { group in
+            let lead = group.youOrchestrate ? "você orquestra" : "\(group.orchestrator) orquestra"
+            return "- \(group.name): \(lead)" + (group.others.isEmpty ? "" : "; outros membros: " + group.others.joined(separator: ", "))
+        }
+        guard !groups.isEmpty else { return teammates }
+        return teammates + "\n\nSeus grupos (o usuário inicia o trabalho de um grupo na tela dele; você não escreve no fio):\n"
+            + groups.joined(separator: "\n")
+    }
+
+    /// "livre", "ocupado", or "espera aprovação do usuário": a card of its turn is open, so whoever waits for it waits for the
+    /// person, not for the work.
+    private func status(of botID: UUID) -> String {
+        if model?.liveBot(botID)?.needsYou == true { return "espera aprovação do usuário" }
+        return isBusy(botID) ? "ocupado" : "livre"
+    }
+
+    /// In a group's turn, what the member is doing for the group: each open assignment ("trabalhando em “…” (pedido de Atlas,
+    /// há 4 min)"), and whether it waits for the person. With none, `status(of:)`.
+    private func groupStatus(of botID: UUID, in groupID: UUID, now: Date = .now) -> String {
+        var parts: [String] = []
+        if model?.liveBot(botID)?.needsYou == true { parts.append("espera aprovação do usuário") }
+        let open = requests.values.filter { $0.envelope.groupID == groupID && $0.envelope.to.id == botID && Self.isOpen($0.state) }
+            .sorted(by: Self.older)
+        parts += open.prefix(3).map { assignmentText($0, now: now) }
+        if open.count > 3 { parts.append("e mais \(open.count - 3)") }
+        return parts.isEmpty ? status(of: botID) : parts.joined(separator: "; ")
+    }
+
+    /// One open request as `list` tells it: what, for whom, since when.
+    private func assignmentText(_ request: DelegationRequest, now: Date) -> String {
+        let envelope = request.envelope
+        let what = "“" + MemoryText.clip(MemoryText.flatten(envelope.text), 60) + "”"
+        let who = envelope.from.id == envelope.to.id && !envelope.fromChat ? "pedido do usuário" : "pedido de \(currentName(envelope.from))"
+        switch request.state {
+        case .queued:
+            return "na fila: \(what) (\(who))"
+        case .awaitingChildren:
+            let names = request.openChildren.compactMap { requests[$0].map { currentName($0.envelope.to) } }
+            let waits = names.isEmpty ? "esperando respostas" : "esperando " + Self.list(Array(Set(names)).sorted())
+            return "\(waits) em \(what) (\(who))"
+        default:
+            return "trabalhando em \(what) (\(who), \(Self.ago(request.startedAt ?? envelope.sentAt, now: now)))"
+        }
+    }
+
+    /// "há menos de 1 min", "há 4 min", "há 2 h".
+    static func ago(_ date: Date, now: Date = .now) -> String {
+        let minutes = Int(now.timeIntervalSince(date) / 60)
+        if minutes < 1 { return "há menos de 1 min" }
+        return minutes < 120 ? "há \(minutes) min" : "há \(minutes / 60) h"
+    }
+
+    /// "A", "A e B", "A, B e C".
+    static func list(_ names: [String]) -> String {
+        guard names.count > 1, let last = names.last else { return names.first ?? "" }
+        return names.dropLast().joined(separator: ", ") + " e " + last
     }
 
     private func isBusy(_ botID: UUID) -> Bool {
@@ -660,6 +855,37 @@ final class DelegationHub: DelegationService {
 
     // MARK: What the person sees
 
+    /// A request between Orbs outside groups still open, as Ajustes lists it (a group's are on the group's screen).
+    struct OpenTalk: Identifiable, Equatable {
+        var id: UUID
+        var chainID: UUID
+        /// "Atlas → Pesquisador".
+        var title: String
+        /// "“Revise o texto” · trabalhando · há 4 min".
+        var detail: String
+    }
+
+    /// The open requests outside groups, oldest first: who asked whom, what, where it stands and since when.
+    func openTalks(now: Date = .now) -> [OpenTalk] {
+        requests.values
+            .filter { $0.envelope.groupID == nil && $0.envelope.kind == .ask && Self.isOpen($0.state)
+                && chainStates[$0.envelope.chainID]?.cancelled != true }
+            .sorted(by: Self.older)
+            .map { request in
+                let envelope = request.envelope
+                let from = currentName(envelope.from) + (envelope.servingRoutine != nil ? " (rotina)" : "")
+                let state: String = switch request.state {
+                case .queued: "na fila"
+                case .awaitingChildren:
+                    "esperando " + Self.list(Array(Set(request.openChildren.compactMap { requests[$0].map { currentName($0.envelope.to) } })).sorted())
+                default: "trabalhando"
+                }
+                let what = "“" + MemoryText.clip(MemoryText.flatten(envelope.text), 80) + "”"
+                return OpenTalk(id: envelope.id, chainID: envelope.chainID, title: "\(from) → \(currentName(envelope.to))",
+                                detail: "\(what) · \(state) · \(Self.ago(envelope.sentAt, now: now))")
+            }
+    }
+
     /// Writes the Orb's wait ("Esperando Pesquisador") and its partner to its live state (only what changed is written).
     func refresh(_ ids: UUID...) { refresh(ids) }
 
@@ -670,7 +896,7 @@ final class DelegationHub: DelegationService {
             let asks = openRequests(from: id)
             var names: [String] = []
             for request in asks {
-                let name = model.bot(request.envelope.to.id)?.name ?? request.envelope.to.name
+                let name = displayName(of: request.envelope)
                 if !names.contains(name) { names.append(name) }
             }
             live.setChainWork(Self.waitLine(names))
@@ -702,7 +928,58 @@ final class DelegationHub: DelegationService {
         return nil
     }
 
+    // MARK: A group asked from a chat
+
+    /// The group whose name this is, when no Orb has it.
+    private func group(named name: String) -> OrbGroup? {
+        guard let model, DelegationRules.resolve(name, among: model.bots.map(OrbRef.init)) == nil else { return nil }
+        let wanted = DelegationRules.fold(name)
+        guard !wanted.isEmpty else { return nil }
+        return model.groups.first { DelegationRules.fold($0.name) == wanted }
+    }
+
+    /// `orbs ask` with the name of a group the Orb is in, from its own chat and in a turn the person started: a new request of
+    /// the group (`GroupHub.postOrbRequest`), marked as the Orb's and handed to the orchestrator as data. The refusals say what
+    /// to do instead; nothing changes when one is thrown.
+    private func submitToGroup(_ group: OrbGroup, from botID: UUID, text raw: String, kind: OrbEnvelope.Kind,
+                               messageID: UUID) throws -> OrbEnvelope {
+        guard let model, !isShuttingDown, let sender = model.bot(botID) else { throw DelegationRefusal.switchedOff }
+        let name = group.name
+        guard kind == .ask else { throw DelegationRefusal.groupDoor(name, .tell) }
+        guard model.orbsCanStartGroups else { throw DelegationRefusal.groupDoor(name, .switchedOff) }
+        guard group.memberIDs.contains(botID) else { throw DelegationRefusal.groupDoor(name, .notMember) }
+        guard model.isOwnChat(botID) else { throw DelegationRefusal.groupDoor(name, .notFromHere) }
+        guard model.session(botID).turnAskedByUser else { throw DelegationRefusal.groupDoor(name, .notAsked) }
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { throw DelegationRefusal.emptyMessage }
+        guard text.count <= DelegationLimits.messageLimit else { throw DelegationRefusal.tooLong }
+        guard !seenMessageIDs.contains(messageID) else { throw DelegationRefusal.duplicate }
+        guard let request = model.groupHub.postOrbRequest(from: botID, text: text, to: group.id, messageID: messageID) else {
+            throw DelegationRefusal.groupDoor(name, .busy)
+        }
+        seenMessageIDs.append(messageID)
+        if seenMessageIDs.count > Self.seenLimit { seenMessageIDs.removeFirst(seenMessageIDs.count - Self.seenLimit) }
+        let envelope = request.envelope
+        // The asker's chat: "Atlas pediu ao Estúdio" (the group's name, the orchestrator's color).
+        model.session(botID).append(.orbMessage(OrbMessageItem(direction: .sent, kind: .ask, state: .open, from: OrbRef(sender),
+                                                               to: OrbRef(id: envelope.to.id, name: name), text: text,
+                                                               requestID: envelope.id, chainID: envelope.chainID,
+                                                               groupID: group.id)))
+        model.live(botID).poked()
+        refresh(botID)
+        return envelope
+    }
+
+    /// Who a request went to, as the asker reads it: the Orb, or the group for a request sent to one from a chat.
+    private func displayName(of envelope: OrbEnvelope) -> String {
+        if envelope.fromChat, let group = envelope.groupID.flatMap({ id in model?.groups.first { $0.id == id } }) { return group.name }
+        return model?.bot(envelope.to.id)?.name ?? envelope.to.name
+    }
+
     // MARK: Helpers
+
+    /// The Orb's name now (it may have been renamed since the envelope was written).
+    private func currentName(_ ref: OrbRef) -> String { model?.bot(ref.id)?.name ?? ref.name }
 
     private func newChain(startedBy sender: Bot, session: BotSession, groupID: UUID?) -> ChainState {
         let origin: ChainState.Origin = if let groupID { .group(groupID) }

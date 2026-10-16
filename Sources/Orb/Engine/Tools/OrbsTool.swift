@@ -9,9 +9,9 @@ struct OrbsTool: AgentTool {
     let spec = ToolSpec(
         name: "orbs",
         description: """
-        Work with the user's other Orbs. list: teammates and whether each is free. ask: send a request; returns at once and \
-        the answer arrives later as a message that wakes you. tell: send information, no answer expected. A teammate has not \
-        seen this chat: write self-contained messages.
+        Work with the user's other Orbs. list: teammates and whether each is free. ask: send a request that wakes them; \
+        returns at once and the answer arrives later as a message that wakes you. tell: leave information without waking them \
+        (they read it with their next message); no answer. A teammate has not seen this chat: write self-contained messages.
         """,
         parameters: .schema([
             "action": .object(["type": .string("string"), "enum": .array(actions.map(JSONValue.string))]),

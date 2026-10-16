@@ -14,10 +14,16 @@ struct ExchangeSheet: View {
     @State private var showsWork = false
 
     /// The side conversation of the Orb that answered (`pedido-<id>.json`): the request addressed to it, when the Orb still exists.
+    /// A notice (`tell`) runs nothing, so it has none; a request to a group is worked in the group (`group`).
     private var work: (botID: UUID, requestID: UUID)? {
-        guard let answered = parties.last, model.bot(answered.id) != nil,
-              let request = messages.last(where: { $0.to?.id == answered.id })?.requestID else { return nil }
+        guard group == nil, let answered = parties.last, model.bot(answered.id) != nil,
+              let request = messages.last(where: { $0.to?.id == answered.id && $0.kind != .tell })?.requestID else { return nil }
         return (answered.id, request)
+    }
+
+    /// The group a request of this exchange went to from the chat (its work is in the group's thread).
+    private var group: UUID? {
+        messages.lazy.compactMap(\.groupID).first { id in model.group(id) != nil }
     }
 
     var body: some View {
@@ -103,7 +109,13 @@ struct ExchangeSheet: View {
     private var footer: some View {
         SheetFooterBar {
             Spacer(minLength: 0)
-            if let answered = parties.last, onOpenWork != nil || work != nil {
+            if let group {
+                Button("Ver no grupo") {
+                    dismiss()
+                    model.selection = .group(group)
+                }
+                .buttonStyle(SecondaryPillStyle())
+            } else if let answered = parties.last, onOpenWork != nil || work != nil {
                 Button("Ver o trabalho \(Self.ofThe(answered.name))") { if let onOpenWork { onOpenWork() } else { showsWork = true } }
                     .buttonStyle(SecondaryPillStyle())
             }

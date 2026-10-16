@@ -1475,6 +1475,7 @@ final class AppModel {
             session.resumableSince = .now
             session.resumedAfterJobs = 0
         }
+        session.turnAskedByUser = origin.isUser && session.routineID == nil
         setStatus("Pensando", of: botID)
         session.resetWork()
         session.showWork(WorkPhrase.line(status: "Pensando"))
@@ -1510,7 +1511,9 @@ final class AppModel {
         if !pictures.isEmpty {
             prompt += Self.pictureNote(pictures, modelSees: sees)
         }
-        prompt = unattendedPrompt(prompt, for: botID)
+        prompt = unattendedPrompt(prompt, for: botID, origin: origin)
+        // What other Orbs left it (`orbs tell`) goes on top of the message, once; a group's turn reads its thread instead.
+        if session.sideKind != .group, let notices = delegation.takeNotices(for: botID) { prompt = notices + "\n\n" + prompt }
         if intent != nil {
             prompt += MemoryIntent.instruction(tool: rememberTool)
         }
@@ -1538,7 +1541,6 @@ final class AppModel {
         let userTurns = session.userTurnCount()
         // MARK: MultiOrb (WP1)
         if multi.orbs { context.orbs = delegationHandler(for: botID) }
-        context.sideRun = session.routineID.flatMap { id in session.sideKind.map { SideRunInfo(kind: $0, id: id, chain: session.chain) } }
         let teammates = multi.orbs ? orbsSection(for: bot) : ""
         let baseContext = context
         // MARK: end MultiOrb (WP1)
@@ -1725,6 +1727,12 @@ final class AppModel {
     /// requests) and the transcript says it was interrupted.
     func stopTurnsForQuit() {
         delegation.isShuttingDown = true // the turns that end now answer nobody and start nothing
+        // A run that waits for other Orbs ends here: the answers will not come (nothing between Orbs survives the app closing).
+        for (routineID, wait) in delegation.waitingRoutines {
+            delegation.forgetWaitingRoutine(routineID)
+            closeRoutineRun(routineID, of: wait.botID, conversation: wait.conversation, started: wait.started,
+                            why: "O app fechou antes da resposta do outro Orb.", quietly: true)
+        }
         for (id, session) in sessions where session.turnTask != nil {
             stop(id, startsQueuedRoutines: false, notice: session.routineID == nil ? BotSession.quitNotice : BotSession.quitSideNotice)
         }
@@ -1837,6 +1845,8 @@ final class AppModel {
             return
         }
         guard sessions[routine.botID]?.routineID != routineID, !startingRoutines.values.contains(routineID) else { return }
+        // A run waiting for other Orbs' answers is still this routine's run: the next one waits for it to end.
+        guard !delegation.isWaiting(routine: routineID) else { return }
         guard !queuedRoutines.contains(routineID) else {
             startIdleQueuedRoutines() // waiting, but its Orb may be free by now (the routine was moved to another Orb)
             return
@@ -1875,6 +1885,7 @@ final class AppModel {
         queuedRoutines.removeAll { $0 == routineID }
         routines.removeAll { $0.id == routineID }
         unsavedRoutineConversations[routineID] = nil
+        delegation.forgetWaitingRoutine(routineID)
         if sessions[routine.botID]?.routineID == routineID { stop(routine.botID) }
         store.deleteRoutineConversation(routine: routineID, for: routine.botID)
     }
@@ -1996,7 +2007,46 @@ final class AppModel {
         if routine != nil { saveRoutineConversation(own, routine: routineID, for: botID) }
         session.unparkChat()
         if session.hasUnsavedStretch() { session.scheduleMemorySave() } // the run cancelled the chat's pending save
-        guard let routine, let bot = bot(botID) else { return }
+        // It asked other Orbs and their answers are still to come: the run is not over, the answers resume it.
+        if routine != nil, succeeded, !userStopped,
+           delegation.holdRoutine(routineID, of: botID, conversation: own, started: started) { return }
+        recordRoutineRun(routineID, of: botID, conversation: own, started: started, finished: finished, succeeded: succeeded,
+                         reply: reply, userStopped: userStopped)
+    }
+
+    /// The answers a waiting run asked for came (`DelegationHub.deliverInbox`): the run goes on in its own conversation, with the
+    /// answers as its message. False when it cannot (the routine is gone, no model): the run then ends with the reason.
+    func resumeRoutine(_ routineID: UUID, of botID: UUID, conversation: Conversation, started: Date, chain: ChainContext?,
+                       text: String, origin: SendOrigin) -> Bool {
+        guard !isResetting, bot(botID) != nil, routines.contains(where: { $0.id == routineID }) else { return false }
+        let session = session(botID)
+        ensureLoaded(botID)
+        session.startRoutineRun(routineID, conversation: conversation, at: started, chain: chain)
+        if send(text, to: botID, origin: origin) {
+            setStatus(routineStatus("Pensando", for: botID), of: botID)
+            return true
+        }
+        session.endSideRun()
+        closeRoutineRun(routineID, of: botID, conversation: conversation, started: started,
+                        why: "Não retomou com a resposta: conecte um modelo em Ajustes.")
+        return false
+    }
+
+    /// A run that waited and will not go on ends here, failed, with `why`.
+    func closeRoutineRun(_ routineID: UUID, of botID: UUID, conversation: Conversation, started: Date, why: String,
+                         quietly: Bool = false) {
+        var own = conversation
+        own.items.append(TranscriptItem(.notice(why)))
+        if routines.contains(where: { $0.id == routineID }) { saveRoutineConversation(own, routine: routineID, for: botID) }
+        recordRoutineRun(routineID, of: botID, conversation: own, started: started, finished: .now, succeeded: false, reply: nil,
+                         userStopped: quietly)
+    }
+
+    /// The run goes into the routine's history (and, for an Orb with a folder of its own, its report into `Rotinas/`), and the
+    /// chat gets one line.
+    private func recordRoutineRun(_ routineID: UUID, of botID: UUID, conversation own: Conversation, started: Date, finished: Date,
+                                  succeeded: Bool, reply: String?, userStopped: Bool) {
+        guard let routine = routines.first(where: { $0.id == routineID }), let bot = bot(botID) else { return }
 
         var run = RoutineRun(date: started, finishedAt: finished, succeeded: succeeded, summary: "")
         if succeeded {
@@ -2056,9 +2106,11 @@ final class AppModel {
         return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
     }
 
-    /// What the model gets for a turn: a routine's run is told that nobody is there.
-    private func unattendedPrompt(_ prompt: String, for botID: UUID) -> String {
-        guard let routineID = sessions[botID]?.routineID, let routine = routines.first(where: { $0.id == routineID }) else { return prompt }
+    /// What the model gets for a turn: a routine's run is told that nobody is there (once, at its start: the answers that resume
+    /// it come as they are).
+    private func unattendedPrompt(_ prompt: String, for botID: UUID, origin: SendOrigin) -> String {
+        guard origin.isUser, let routineID = sessions[botID]?.routineID,
+              let routine = routines.first(where: { $0.id == routineID }) else { return prompt }
         return RoutinePrompt.unattended(prompt, routine: routine.name, previous: routine.runs.first { $0.report != nil },
                                         goal: routine.goal)
     }

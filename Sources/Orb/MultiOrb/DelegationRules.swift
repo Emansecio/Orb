@@ -11,6 +11,9 @@ enum DelegationRules {
         var groupMembers: Set<UUID>?
         /// Every Orb, in the order of the sidebar.
         var orbs: [OrbRef] = []
+        /// The names of the person's groups, so a group's name is not told "no such Orb"; and the group whose turn this is.
+        var groupNames: [String] = []
+        var groupName: String?
         var sender: OrbRef
         var targetName: String
         var text: String
@@ -47,6 +50,12 @@ enum DelegationRules {
         guard input.switchOn || input.groupID != nil else { throw DelegationRefusal.switchedOff }
         // 2. The target: the same name without accents or case, else a unique prefix; not the sender; in the group, a member.
         guard let target = resolve(input.targetName, among: input.orbs) else {
+            // A group's name is not an Orb's, and the refusal says what to do instead.
+            let wanted = fold(input.targetName)
+            if let own = input.groupName, !wanted.isEmpty, fold(own) == wanted { throw DelegationRefusal.ownGroup(own) }
+            if let group = input.groupNames.first(where: { !wanted.isEmpty && fold($0) == wanted }) {
+                throw DelegationRefusal.groupName(group)
+            }
             throw DelegationRefusal.unknownOrb(input.targetName.trimmingCharacters(in: .whitespacesAndNewlines))
         }
         guard target.id != input.sender.id else { throw DelegationRefusal.selfRequest }

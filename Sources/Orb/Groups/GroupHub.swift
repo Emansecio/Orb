@@ -28,6 +28,9 @@ final class GroupHub: GroupTurnHooks {
     private(set) var activeTurns: [UUID: ActiveTurn] = [:]
     /// Where each member's last turn in each group left the thread, so the next turn is handed only what came after.
     private var consumed: [UUID: [UUID: Int]] = [:]
+    /// The person's messages a turn not yet started answers, by request (more than one when they wrote again before it began:
+    /// `enqueue`). Its preface leaves them out of the thread.
+    private var personTexts: [UUID: [String]] = [:]
     /// How long after a turn ends the hub waits before deciding the request is over (the delegation hub may still be waking
     /// whoever asked).
     var settle: Duration = .milliseconds(80)
@@ -86,9 +89,44 @@ final class GroupHub: GroupTurnHooks {
         return true
     }
 
+    /// A member asks the group from its own chat, at the person's request (`orbs ask` with the group's name,
+    /// `DelegationHub.submitToGroup`): a new request of the group, as if the person had typed it, but written in the thread as
+    /// the member's ("a seu pedido") and handed to the orchestrator as data, not as the person's word. The group's final answer
+    /// goes back to the member's chat. Nil when the group is busy with a request or cannot take one.
+    func postOrbRequest(from asker: UUID, text: String, to groupID: UUID, messageID: UUID) -> DelegationRequest? {
+        guard let model, !model.isResetting, let group = model.group(groupID), group.memberIDs.contains(asker),
+              activeRun(groupID) == nil, let session = model.groupSession(groupID) else { return nil }
+        let run = GroupRun.new(group: group, request: text, now: now())
+        runs[groupID] = run
+        let chain = ChainContext(chainID: run.id, hop: 1, path: [asker], groupID: groupID, serving: nil)
+        let request = delegation.submitGroupRequest(from: asker, text: text, chain: chain, groupID: groupID,
+                                                    orchestrator: group.orchestratorID, id: messageID)
+        guard request.state == .queued else {
+            runs[groupID] = nil
+            refreshLive(groupID)
+            return nil
+        }
+        // The request is the run's own, as the person's would be: its answer is the final one, and it is written here once.
+        runs[groupID]?.asked[request.envelope.id] = group.orchestratorID
+        runs[groupID]?.posted.insert(request.envelope.id)
+        session.append(.orbMessage(OrbMessageItem(direction: .post, kind: .ask, state: .open, from: reference(asker),
+                                                  to: reference(group.orchestratorID), text: text, requestID: request.envelope.id,
+                                                  chainID: run.id, groupID: groupID, fromChat: true)))
+        addUnread(groupID)
+        model.groupLive(groupID).setRunState(.running)
+        refreshLive(groupID)
+        scheduleIdleCheck(groupID)
+        return request
+    }
+
     /// Asks `member` for a turn on behalf of the person.
     private func enqueue(_ member: UUID, text: String, in groupID: UUID) {
         guard let model, let run = activeRun(groupID), model.group(groupID)?.memberIDs.contains(member) == true else { return }
+        // A message right after another, before the member's turn for it began, goes with it: one turn reads both.
+        if let joined = delegation.joinQueuedGroupTurn(member: member, chainID: run.id, text: text) {
+            personTexts[joined.envelope.id, default: []].append(text)
+            return
+        }
         let chain = ChainContext(chainID: run.id, hop: 1, path: [], groupID: groupID, serving: nil)
         let request = delegation.submitGroupTurn(member: member, text: text, chain: chain, groupID: groupID, askedBy: nil)
         switch request.state {
@@ -98,6 +136,7 @@ final class GroupHub: GroupTurnHooks {
             break
         default:
             runs[groupID]?.asked[request.envelope.id] = member
+            personTexts[request.envelope.id] = [text]
         }
         scheduleIdleCheck(groupID)
     }
@@ -112,11 +151,13 @@ final class GroupHub: GroupTurnHooks {
         let from = min(consumed[group.id]?[member] ?? 0, session.items.count)
         let slice = session.items[from...]
         consumed[group.id, default: [:]][member] = session.items.count
+        let asked = personTexts.removeValue(forKey: request.envelope.id) ?? [request.envelope.text]
         let thread = GroupThread.lines(from: slice, member: member, request: request.envelope.id,
-                                       userText: fromUser ? request.envelope.text.trimmingCharacters(in: .whitespacesAndNewlines) : nil)
+                                       userTexts: fromUser ? asked.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } : [])
         let board = await GroupBoard.brief(bank: model.memory.groupBank(for: group.id), message: request.envelope.text)
         let members = group.memberIDs.map { id in
-            GroupPrompt.Member(name: name(of: id), role: model.bot(id)?.role ?? "", isOrchestrator: id == group.orchestratorID)
+            GroupPrompt.Member(name: name(of: id), role: model.bot(id)?.role ?? "", isOrchestrator: id == group.orchestratorID,
+                               waitsForUser: id != member && model.liveBot(id)?.needsYou == true)
         }
         return GroupPrompt.preface(.init(groupName: group.name, you: name(of: member),
                                          role: member == group.orchestratorID ? .orchestrator : .member,
@@ -152,7 +193,10 @@ final class GroupHub: GroupTurnHooks {
         switch outcome {
         case .ok:
             if !text.isEmpty {
-                let asker = fromUser ? nil : reference(request.envelope.from.id)
+                // The answer to a member who asked from its chat says where it went ("Atlas → Gestor"), unless it is its own.
+                let envelope = request.envelope
+                let toAsker = envelope.from.id != member && (!fromUser || envelope.fromChat)
+                let asker = toAsker ? reference(envelope.from.id) : nil
                 let post = OrbMessageItem(direction: .post, kind: interim ? .tell : .reply, state: .replied, from: reference(member),
                                           to: asker, text: String(text.prefix(DelegationLimits.replyLimit)),
                                           requestID: request.envelope.id, chainID: run.id, groupID: group.id)
@@ -176,10 +220,25 @@ final class GroupHub: GroupTurnHooks {
         scheduleIdleCheck(group.id)
     }
 
+    func noticePosted(_ envelope: OrbEnvelope) {
+        guard let groupID = envelope.groupID, let run = activeRun(groupID), run.id == envelope.chainID,
+              let session = model?.groupSession(groupID) else { return }
+        let post = OrbMessageItem(direction: .post, kind: .tell, state: .replied, from: reference(envelope.from.id),
+                                  to: reference(envelope.to.id), text: String(envelope.text.prefix(DelegationLimits.messageLimit)),
+                                  requestID: envelope.id, chainID: run.id, groupID: groupID)
+        session.append(.orbMessage(post))
+        addUnread(groupID)
+    }
+
+    func chainStopped(_ chainID: UUID) {
+        guard let groupID = runs.first(where: { $0.value.id == chainID && $0.value.isOpen })?.key else { return }
+        stopGroup(groupID)
+    }
+
     func refusal(forRequestFrom asker: UUID, to member: UUID, chain: UUID) -> DelegationRefusal? {
         guard let entry = runs.first(where: { $0.value.id == chain }), let group = model?.group(entry.key) else { return nil }
         guard group.memberIDs.contains(member), group.memberIDs.contains(asker) else { return .notInGroup }
-        if !group.policy.membersMayTalk, asker != group.orchestratorID { return .notInGroup }
+        if !group.policy.membersMayTalk, asker != group.orchestratorID { return .membersMayNotTalk }
         return nil
     }
 
@@ -206,6 +265,7 @@ final class GroupHub: GroupTurnHooks {
         guard let model, let run = activeRun(groupID) else { return }
         let members = Set(run.running.map(\.member)).union(activeTurns.filter { $0.value.runID == run.id }.keys)
         runs[groupID]?.phase = .stopped
+        for id in run.asked.keys { personTexts[id] = nil } // the turns that did not begin will not
         runs[groupID]?.asked = [:]
         delegation.cancelChain(run.id, by: reason)
         for member in members {

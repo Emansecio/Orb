@@ -217,7 +217,8 @@ struct GroupAssignmentLine: View {
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(Palette.hint)
                     miniAvatar(to)
-                    Text(GroupAssignmentLine.sentence(kind: message.kind, toName: toName, text: message.text))
+                    Text(GroupAssignmentLine.sentence(kind: message.kind, toName: toName, text: message.text,
+                                                      fromChat: message.fromChat == true))
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.muted)
                         .lineLimit(1)
@@ -246,7 +247,7 @@ struct GroupAssignmentLine: View {
         .padding(.leading, 40)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Pedido de \(from?.name ?? message.from.name) a \(toName)")
+        .accessibilityLabel("Pedido de \(from?.name ?? message.from.name) a \(toName)\(message.fromChat == true ? ", a seu pedido" : "")")
     }
 
     private func miniAvatar(_ look: BotLook?) -> some View {
@@ -261,9 +262,10 @@ struct GroupAssignmentLine: View {
     }
 
     /// "pediu ao Pesquisador: Levante três…" (or "avisou à Lia: …" for a tell), the first line of the text cut to 90 characters.
-    static func sentence(kind: OrbMessageItem.Kind, toName: String, text: String) -> String {
+    /// A request a member sent from its chat because you asked says so: "pediu ao Atlas, a seu pedido: …".
+    static func sentence(kind: OrbMessageItem.Kind, toName: String, text: String, fromChat: Bool = false) -> String {
         let verb = kind == .tell ? "avisou" : "pediu"
-        return "\(verb) \(PortugueseArticle.contraction(for: toName)) \(toName): \(oneLine(text))"
+        return "\(verb) \(PortugueseArticle.contraction(for: toName)) \(toName)\(fromChat ? ", a seu pedido" : ""): \(oneLine(text))"
     }
 
     /// The first line of the text, cut to 90 characters (the line says the rest is in the card).

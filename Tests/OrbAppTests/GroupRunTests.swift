@@ -32,7 +32,26 @@ struct GroupLoopTests {
         world.model.postUserMessage("@revisor olha esse texto", to: world.groupID)
         #expect(world.fake.groupTurns.map(\.envelope.to.id) == [world.revisor.id])
         world.model.postUserMessage("@Pesquisador e @Revisor, vejam", to: world.groupID)
-        #expect(world.fake.groupTurns.map(\.envelope.to.id) == [world.revisor.id, world.pesquisador.id, world.revisor.id])
+        // The Revisor's turn had not begun: the second message joins it.
+        #expect(world.fake.groupTurns.map(\.envelope.to.id) == [world.revisor.id, world.pesquisador.id])
+        #expect(world.fake.groupTurns.first?.envelope.text == "@revisor olha esse texto\n\n@Pesquisador e @Revisor, vejam")
+    }
+
+    @Test @MainActor func twoMessagesInARowAreOneTurnThatReadsBoth() async {
+        let world = GroupWorld()
+        world.model.postUserMessage("Decidam entre si quem faz o texto.", to: world.groupID)
+        world.model.postUserMessage("Pra que eu autorize ou não.", to: world.groupID)
+        #expect(world.fake.groupTurns.count == 1)
+        let turn = world.lastGroupTurn
+        #expect(world.fake.request(turn.envelope.id).envelope.text
+                == "Decidam entre si quem faz o texto.\n\nPra que eu autorize ou não.")
+        // Both are the request, not the thread: the preface does not repeat them.
+        await world.fake.start(world.fake.request(turn.envelope.id))
+        let preface = world.fake.prefaces[turn.envelope.id]?.first ?? ""
+        #expect(!preface.contains("Decidam entre si") && !preface.contains("autorize"))
+        // Once the turn began, the next message is a turn of its own.
+        world.model.postUserMessage("E me avisem.", to: world.groupID)
+        #expect(world.fake.groupTurns.count == 2 && world.lastGroupTurn.envelope.text == "E me avisem.")
     }
 
     @Test @MainActor func everyoneIsCalledByTodos() {
@@ -206,7 +225,7 @@ struct GroupPolicyAndExtrasTests {
         let toMember = try world.fake.ask(from: world.atlas.id, to: world.pesquisador.id, text: "faça", parent: first)
         world.fake.finish(first, reply: "Delego.")
         await world.fake.start(toMember)
-        #expect(throws: DelegationRefusal.notInGroup) {
+        #expect(throws: DelegationRefusal.membersMayNotTalk) {
             try world.fake.ask(from: world.pesquisador.id, to: world.revisor.id, text: "e você?", parent: toMember)
         }
         // And the Orb that cannot talk is not even offered the tool; the orchestrator is.
@@ -222,7 +241,6 @@ struct GroupPolicyAndExtrasTests {
         let extras = try #require(world.model.groupTurnExtras(for: world.atlas.id))
         #expect(extras.groupID == world.groupID && extras.offering == MultiOrbOffering(orbs: true, propose: false, groupMemory: true))
         #expect(extras.grants == [PermissionRule(family: .delegation), PermissionRule(family: .groupMemory)])
-        #expect(extras.sideRun.kind == .group && extras.sideRun.chain?.groupID == world.groupID)
         let names = ToolBox.offered(for: [], accessibilityGranted: true, multi: extras.offering).map(\.spec.name)
         #expect(names.contains("orbs") && names.contains("group_remember") && names.contains("group_recall") && !names.contains("orb_propose"))
         let system = extras.system

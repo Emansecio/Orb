@@ -530,6 +530,27 @@ struct SchedulePermissionTests {
         _ = try run(model, atlas, call("pause", name: "Manhã"))
     }
 
+    /// A group's turn and a request from another Orb are not "a scheduled task": each refusal says where the Orb is and what to
+    /// do instead (a real thread: "a ferramenta de agendamento recusou a criação da tarefa").
+    @Test @MainActor func aGroupTurnOrARequestIsToldWhatItIsNotThatItIsATask() throws {
+        let (model, atlas, _) = setUp()
+        let session = model.session(atlas.id)
+        func refusal(_ arguments: JSONValue) -> String {
+            do { _ = try run(model, atlas, arguments); return "" } catch { return (error as? ToolError)?.message ?? "" }
+        }
+        session.routineID = UUID()
+        session.sideKind = .group
+        #expect(refusal(call("create", name: "Outra", prompt: "y", when: daily9)).hasPrefix("Num turno de grupo não se agenda"))
+        #expect(refusal(call("create", name: "Outra", prompt: "y", when: daily9)).contains("proponha a rotina na sua resposta"))
+        session.sideKind = .delegation
+        #expect(refusal(call("create", name: "Outra", prompt: "y", when: daily9)).hasPrefix("Num pedido de outro Orb não se agenda"))
+        #expect(refusal(call("delete", name: "Outra")).hasPrefix("Num pedido de outro Orb"))
+        session.sideKind = nil // a routine's own run keeps its words
+        #expect(refusal(call("create", name: "Outra", prompt: "y", when: daily9)) == "Uma tarefa agendada não cria outras tarefas.")
+        #expect(model.routines.isEmpty)
+        session.routineID = nil
+    }
+
     @Test @MainActor func aTaskCanBeCreatedPaused() throws {
         let (model, atlas, _) = setUp()
         let said = try run(model, atlas, call("create", name: "Depois", prompt: "x", when: daily9, extra: ["enabled": .bool(false)]))

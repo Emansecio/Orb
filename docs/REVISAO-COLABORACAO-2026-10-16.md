@@ -1,4 +1,4 @@
-# Revisão: colaboração e autonomia entre Orbs — 16/10/2026 (fase 1, só diagnóstico)
+# Revisão: colaboração e autonomia entre Orbs — 16/10/2026 (fase 1, diagnóstico; fase 2, correções)
 
 ## Resposta direta
 
@@ -29,6 +29,45 @@ Conferido no `HEAD` `cbbad6c`. As linhas citadas são desse commit.
 > - no **passo 3 do cenário**, o limite de 40 passos deixa de existir.
 >
 > O resto vale igual.
+
+## Situação depois da fase 2 (16/10)
+
+Os achados 1 a 10, 12 e 14 estão implementados, cada um com teste, nas seis etapas da "Ordem sugerida"; cada etapa ficou
+usável sozinha. Os achados 11, 13 e 15 ficam justificados abaixo. Nenhum limite voltou: tudo é ver, avisar ou não perder o que
+já foi feito.
+
+| Achado | O que mudou | Teste |
+|---|---|---|
+| 1 | No chat próprio, o prompt ganha `## Your groups`: uma linha por grupo ("AcessosFit: you orchestrate; members: …"), até 12, e a regra do que fazer. O texto só muda quando os grupos mudam (cache). O `orbs list` fora do grupo termina com "Seus grupos (…)". Um Orb sem grupo recebe o texto de antes. | `OrbsGroupsPromptTests`; `DelegationHubTests` (prompt e `list` de um membro) |
+| 2 | `orbs ask` com o nome de um grupo do qual o Orb é membro, do chat próprio e num turno que a pessoa começou (`turnAskedByUser`), vira um pedido do grupo (`GroupHub.postOrbRequest`). O fio mostra "Pesquisador pediu ao Atlas, a seu pedido: …"; o orquestrador recebe o texto como dado do membro, não como fala da pessoa (`OrbEnvelope.fromChat`); a resposta final volta ao chat de quem pediu, também quando quem pede é o próprio orquestrador. Toggle novo em Ajustes, **Orbs podem acionar grupos**, ligado por padrão e independente de "Orbs podem conversar". Recusas com motivo: rotina ou pedido recebido, turno que a pessoa não pediu, `tell`, toggle desligado, não membro e grupo já trabalhando. Parar o chat que espera o grupo para o grupo (`GroupTurnHooks.chainStopped`). | `DelegationHubTests` com o hub real (membro, orquestrador, recusas, Parar) |
+| 3 | Cada `DelegationRefusal` diz o que aconteceu e o que fazer. Casos novos: `membersMayNotTalk` (a política do grupo, que antes usava `notInGroup`), `groupName` e `ownGroup` (um nome de grupo não é mais "não existe um Orb chamado…") e `groupDoor`. O agendamento num turno de grupo ou num pedido diz o que o turno é e onde propor a rotina (`sideRunRefusal`). | tabela em `MultiOrbCodableTests`; `DelegationRulesTests`; `ScheduleToolTests`; `GroupRunTests` |
+| 4 | `tell` não abre turno. Fora do grupo, o aviso fica na caixa do destino (até 10, os mais antigos saem) e entra uma vez como `<orb_notice>` no topo da próxima mensagem dele, seja qual for o turno; o chat do destino mostra a linha na hora. No grupo, vira um post no fio, que o próximo turno lê no preface. O prompt e a descrição da ferramenta dizem "ask acorda; tell não acorda". | `DelegationHubTests` (ninguém acorda, lido uma vez, destino ocupado, desligar descarta, `tell` no grupo) |
+| 5 | Com o `c3d8029` o limite de encadeamento já não existia: saíram o `GroupTurnExtras.sideRun` morto e o `ToolContext.sideRun`, que só ele usava. O teste do cenário fica. | `DelegationHubTests`: Atlas → Pesquisador → Revisor → Dev → volta, dentro do grupo |
+| 6 | A rotina que pergunta espera a resposta. Se, ao fim do turno, há um `ask` dela aberto, a execução não é registrada: a conversa fica guardada (`DelegationHub.holdRoutine`) e a resposta retoma a execução na própria conversa (`AppModel.resumeRoutine`), com o fecho "Continue the routine's task…". O histórico ganha uma execução só, no fim real, com o relatório final; banner e não lidos esperam o fim. Enquanto espera, a rotina não dispara de novo. Se a conversa entre Orbs para, o Orb pedido é apagado ou o app fecha, a execução termina como falha com o motivo. | `DelegationHubTests` (retoma na rotina e o chat não ganha turno; Parar encerra e não roda duas vezes) |
+| 7 | Aviso no painel do grupo (aba de membros, com o menu "Trocar orquestrador") e na criação: "Atlas está em Só leitura: como orquestrador, não consegue distribuir o trabalho." e "A e B estão em Só leitura: não pedem nada aos colegas nem alteram arquivos." | `GroupReadOnlyNoteTests` (o texto; a tela não foi conferida com `--snapshot`) |
+| 8 | O `list` diz "espera aprovação do usuário" para quem tem cartão aberto, e a linha "Members" do preface marca "(…; waiting for the user's approval)". | `DelegationHubTests`; `GroupSupportTests` |
+| 9 | Reproduzido antes da correção: o segundo turno se perdia. Agora, quando um turno de grupo termina, as cópias guardadas de outros pedidos suspensos do mesmo membro no mesmo grupo passam a ser a conversa que acabou de ser gravada; quem retoma depois parte dela. | `DelegationHubTests`: dois pedidos ao mesmo membro, o primeiro suspenso; `grupo-<id>.json` fica com os dois |
+| 10 | Uma mensagem da pessoa ao grupo, enquanto o turno da mensagem anterior para o mesmo membro ainda não começou (o último da fila dele), entra nesse turno (`joinQueuedGroupTurn`). O preface não repete no fio as mensagens que viraram o pedido. | `GroupLoopTests`; `GroupSupportTests`; `DelegationHubTests` com o hub real |
+| 11 | Não feito: é o item 7 da REVISAO-GRUPOS (rodada de discussão) e o plano do grupo. Os achados 4, 10 e 12 diminuem o atrito. | — |
+| 12 | No grupo, o `list` mostra o que cada membro está fazendo: "trabalhando em “…” (pedido de Atlas, há 4 min)", "na fila: …", "esperando Revisor em “…” (pedido do usuário)", e "espera aprovação do usuário". Vai no `list`, não no prompt de sistema (cache). | `DelegationHubTests`: dois pedidos abertos no grupo |
+| 13 | Deixou de existir com o `c3d8029`. | — |
+| 14 | Em Ajustes, sob os toggles dos Orbs, "Conversas abertas entre Orbs" lista os pedidos abertos fora de grupo: "Atlas → Pesquisador", o texto, o estado (na fila, trabalhando, esperando X), há quanto tempo e **Parar** (`cancelChain(.user)`). Lida de novo a cada 2 s enquanto Ajustes está aberto. | `DelegationHubTests` (`openTalks` e Parar; a tela não foi conferida com `--snapshot`) |
+| 15 | Coberto pelo achado 1: o prompt já diz os colegas e os grupos; o `list` serve para o estado (achados 8 e 12). | — |
+
+**Diferenças em relação ao proposto:**
+- **Achado 2:** com o grupo já trabalhando, o pedido é recusado ("espere ele terminar"), e não enfileirado.
+- **Achado 4:** sem o toggle interno de transição. Saiu a linha `OrbEvent.tellFailed` da fase 2 da REVISAO-TURNO: um `tell`
+  que não roda turno não falha (o caso continua decodificando, para conversas antigas). Um orquestrador que retoma no meio de um
+  pedido só lê os `tell` do fio no próximo turno novo.
+- **Achado 6:** foi a correção principal, não a alternativa (tirar `ask` da rotina). Uma resposta que chega para uma execução
+  que já terminou é descartada.
+- **Achado 7:** teste do texto em vez do snapshot do painel, que não foi rodado (rouba o foco da tela).
+- **Achado 9:** em vez de juntar as duas cópias ao retomar, a cópia suspensa acompanha o arquivo a cada turno que termina.
+- **Achado 14:** em Ajustes, não no menu da barra.
+
+**Regressão.** Só suítes filtradas, sem a suíte inteira e sem `--snapshot`: as áreas tocadas (delegação, grupos, rotinas,
+agendamento, turno, Ajustes, dicas, motor, conversa, store, aprovações e permissões) somam 1.284 testes em 226 suítes, todos verdes. A interface nova (avisos de Só leitura,
+toggle, lista de conversas abertas, "Ver no grupo" na folha da troca) não foi conferida em captura.
 
 ## Como foi feita
 

@@ -69,8 +69,8 @@ struct GroupThreadTests {
 
     private func user(_ text: String) -> TranscriptItem { TranscriptItem(.user(text: text, attachments: [])) }
 
-    private func lines(_ items: [TranscriptItem], member: UUID = ana.id, request: UUID? = nil, userText: String? = nil) -> [String] {
-        GroupThread.lines(from: items[...], member: member, request: request, userText: userText)
+    private func lines(_ items: [TranscriptItem], member: UUID = ana.id, request: UUID? = nil, userTexts: [String] = []) -> [String] {
+        GroupThread.lines(from: items[...], member: member, request: request, userTexts: userTexts)
     }
 
     @Test func theThreadReadsLikeAChatAndOrbsWordsAreDataInsideAFence() {
@@ -88,8 +88,14 @@ struct GroupThreadTests {
     }
 
     @Test func thePersonsMessageThatIsTheRequestIsLeftOutOnceAndOnlyOnce() {
-        let result = lines([user("Lance o produto"), post(atlas, "ok"), user("Lance o produto")], userText: "Lance o produto")
+        let result = lines([user("Lance o produto"), post(atlas, "ok"), user("Lance o produto")], userTexts: ["Lance o produto"])
         #expect(result == ["[Você] Lance o produto", "[Atlas] <orb_message>ok</orb_message>"]) // the newest copy is the request
+    }
+
+    @Test func messagesJoinedInOneTurnAreAllLeftOut() {
+        let result = lines([user("Decidam entre si"), user("Pra que eu autorize ou não")],
+                           userTexts: ["Decidam entre si", "Pra que eu autorize ou não"])
+        #expect(result.isEmpty)
     }
 
     @Test func anOrbCannotCloseTheFenceOrInjectMarkup() {
@@ -156,9 +162,39 @@ struct GroupPromptTests {
         </board>
         </group>
         """)
+        // A member whose approval card is open waits for the person, not for the work: the line says so.
+        let waiting = GroupPrompt.preface(.init(groupName: "G", you: "A", role: .orchestrator,
+                                                members: [.init(name: "A", role: "", isOrchestrator: true),
+                                                          .init(name: "QA", role: "Testa", isOrchestrator: false, waitsForUser: true),
+                                                          .init(name: "Dev", role: "", isOrchestrator: false, waitsForUser: true)],
+                                                thread: [], board: ""))
+        #expect(waiting.contains("Members: A (orchestrator), QA (Testa; waiting for the user's approval), Dev (waiting for the user's approval)"))
         let bare = GroupPrompt.preface(.init(groupName: "G", you: "A", role: .orchestrator,
                                              members: [.init(name: "A", role: "", isOrchestrator: true)], thread: [], board: ""))
         #expect(!bare.contains("<thread") && !bare.contains("<board>") && bare.hasSuffix("</group>"))
+    }
+}
+
+struct GroupReadOnlyNoteTests {
+    private let atlas = UUID(), dev = UUID(), qa = UUID()
+
+    private func lines(readers: Set<UUID>, orchestrator: UUID?) -> [GroupReadOnlyNote.Line] {
+        let names = [atlas: "Atlas", dev: "Dev", qa: "QA"]
+        return GroupReadOnlyNote.lines(members: [atlas, dev, qa], orchestrator: orchestrator, name: { names[$0] ?? "?" },
+                                       isReadOnly: { readers.contains($0) })
+    }
+
+    @Test func anOrchestratorInReadOnlyIsToldFirstAndTheMembersTogether() {
+        #expect(lines(readers: [], orchestrator: atlas).isEmpty)
+        let all = lines(readers: [atlas, dev, qa], orchestrator: atlas)
+        #expect(all == [
+            .init(text: "Atlas está em Só leitura: como orquestrador, não consegue distribuir o trabalho.", isOrchestrator: true),
+            .init(text: "Dev e QA estão em Só leitura: não pedem nada aos colegas nem alteram arquivos.", isOrchestrator: false),
+        ])
+        #expect(lines(readers: [qa], orchestrator: atlas)
+            == [.init(text: "QA está em Só leitura: não pede nada aos colegas nem altera arquivos.", isOrchestrator: false)])
+        // While the new group has no orchestrator yet, a reader is only a member.
+        #expect(lines(readers: [atlas], orchestrator: nil).map(\.isOrchestrator) == [false])
     }
 }
 

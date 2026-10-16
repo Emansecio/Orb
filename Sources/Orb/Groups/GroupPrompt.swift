@@ -11,6 +11,8 @@ enum GroupPrompt {
         var name: String
         var role: String
         var isOrchestrator: Bool
+        /// An approval card of its turn is open: it waits for the user, not for the work.
+        var waitsForUser = false
     }
 
     // MARK: System section
@@ -58,7 +60,8 @@ enum GroupPrompt {
         var lines = ["<group name=\"\(label(p.groupName))\" you=\"\(label(p.you))\" role=\"\(p.role.rawValue)\">"]
         lines.append("Members: " + p.members.map { member in
             let role = member.isOrchestrator ? "orchestrator" : MemoryText.clip(MemoryText.flatten(member.role), 80)
-            return role.isEmpty ? label(member.name) : "\(label(member.name)) (\(role))"
+            let notes = [role, member.waitsForUser ? "waiting for the user's approval" : ""].filter { !$0.isEmpty }
+            return notes.isEmpty ? label(member.name) : "\(label(member.name)) (\(notes.joined(separator: "; ")))"
         }.joined(separator: ", "))
         if !p.thread.isEmpty {
             lines.append("<thread since your last turn>")
@@ -89,16 +92,16 @@ enum GroupThread {
 
     /// The lines for `items` as the Orb `member` reads them. Left out: what the Orb said itself (its own conversation has it),
     /// the assignment this turn answers (`request`, which comes right after the preface) and, when the turn answers the
-    /// person (`userText`), that message. At most `maxItems` items and `maxCharacters` characters, the newest kept; each cut
+    /// person (`userTexts`), those messages (each once, the newest copy). At most `maxItems` items and `maxCharacters` characters, the newest kept; each cut
     /// to `itemLimit`.
-    static func lines(from items: ArraySlice<TranscriptItem>, member: UUID, request: UUID?, userText: String?) -> [String] {
-        var skippedUser = false
+    static func lines(from items: ArraySlice<TranscriptItem>, member: UUID, request: UUID?, userTexts: [String]) -> [String] {
+        var toSkip = userTexts
         var kept: [String] = []
         for item in items.reversed() {
             switch item.kind {
             case .user(let text, _):
-                if let userText, !skippedUser, text.trimmingCharacters(in: .whitespacesAndNewlines) == userText {
-                    skippedUser = true
+                if let index = toSkip.firstIndex(of: text.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                    toSkip.remove(at: index)
                     continue
                 }
                 kept.append("[Você] " + MemoryText.clip(text, itemLimit))

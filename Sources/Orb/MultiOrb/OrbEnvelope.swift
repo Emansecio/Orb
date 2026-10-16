@@ -35,6 +35,11 @@ struct OrbEnvelope: Codable, Equatable, Sendable {
     var status: ReplyStatus?
     var groupID: UUID?
     var sentAt: Date = .now
+    /// A member asked its group from its own chat, at the person's request (`orbs ask` with the group's name): the group's
+    /// orchestrator answers it, and the reply goes back to that chat even when the asker is the orchestrator itself.
+    var fromChat = false
+    /// The routine whose run asked (nil outside a routine): its answer resumes that run, not the chat.
+    var servingRoutine: UUID?
 }
 
 extension OrbEnvelope {
@@ -54,5 +59,7 @@ extension OrbEnvelope {
         status = (try? c.decodeIfPresent(ReplyStatus.self, forKey: .status)) ?? nil
         groupID = (try? c.decodeIfPresent(UUID.self, forKey: .groupID)) ?? nil
         sentAt = try c.value(.sentAt, default: Date.now)
+        fromChat = try c.value(.fromChat, default: false)
+        servingRoutine = (try? c.decodeIfPresent(UUID.self, forKey: .servingRoutine)) ?? nil
     }
 }

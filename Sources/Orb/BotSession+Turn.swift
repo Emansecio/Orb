@@ -409,6 +409,8 @@ extension BotSession {
                 model.finishRoutineRun(id, routineID: routineID, succeeded: completed, reply: reply, userStopped: userStopped)
             }
         }
+        // A routine that waits for other Orbs is not done: its banner and unread come with the run's end.
+        let waits = routineID.map { model.delegation.isWaiting(routine: $0) } ?? false
         if userStopped {
             model.live(id).cued(.blink)
         } else if succeeded {
@@ -418,12 +420,12 @@ extension BotSession {
                 celebrate(OrbCelebration.level(seconds: turnSeconds, actions: turnActions, ranRoutine: ranRoutine,
                                                selected: model.selection == .bot(id)))
             }
-            if !isOrbRun, let bot = model.bot(id), let reply { model.notify(bot.name, RoutineRun.preview(of: reply)) }
+            if !isOrbRun, !waits, let bot = model.bot(id), let reply { model.notify(bot.name, RoutineRun.preview(of: reply)) }
         } else {
             flash(\.hasFailed, seconds: 2.5)
         }
         // The one who asked is told, not the one who did the work (its unread count goes to the asker when the answer arrives).
-        if !isOrbRun, model.selection != .bot(id) || !(NSApp?.isActive ?? false) {
+        if !isOrbRun, !waits, model.selection != .bot(id) || !(NSApp?.isActive ?? false) {
             model.setUnread(model.live(id).unread + 1, for: id)
         }
         if routineID == nil { scheduleSave(delay: 0) } // a routine's was written by `finishRoutineRun`

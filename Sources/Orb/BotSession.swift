@@ -143,6 +143,9 @@ final class BotSession {
     @ObservationIgnored var chain: ChainContext?
     /// The request between Orbs the running side run answers (what a request `orbs` makes while it runs is a child of it).
     @ObservationIgnored var servingRequest: UUID?
+    /// The running turn is one the person started in the Orb's own chat (not a routine, another Orb's request or answer, a group's
+    /// turn): only such a turn may send a request to a group (`DelegationHub.submitToGroup`).
+    @ObservationIgnored var turnAskedByUser = false
     // MARK: end MultiOrb (WP1)
     /// The snapshot and rules marks of the running turn, recorded on its conversation once the model has been given them.
     @ObservationIgnored var pendingMarks: DeliveryMarks?

@@ -113,6 +113,8 @@ struct GeneralSettings: View {
     @State private var hasOrbsFolder = false
     @State private var isShowingReset = false
     @State private var orbsCanTalk = true
+    @State private var orbsCanStartGroups = true
+    @State private var openTalks: [DelegationHub.OpenTalk] = []
     @State private var isConfirmingOrbsOff = false
 
     /// Turning it off while Orbs talk asks first (it stops their conversations); turning it on never does.
@@ -186,6 +188,25 @@ struct GeneralSettings: View {
                 } message: {
                     Text("Há Orbs conversando agora. Desligar interrompe essas conversas.")
                 }
+                Toggle(isOn: Binding(get: { orbsCanStartGroups }, set: { orbsCanStartGroups = $0; model.orbsCanStartGroups = $0 })) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Orbs podem acionar grupos")
+                        Text("Quando você pede no chat, o Orb manda o pedido a um grupo de que faz parte; o orquestrador recebe e a resposta final volta para o chat. Nunca por conta própria.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .help(Tip.orbsCanStartGroups)
+                .onAppear { orbsCanStartGroups = model.orbsCanStartGroups }
+                // The hub is not observed: the open requests are read again every two seconds while Ajustes is open.
+                .task {
+                    while !Task.isCancelled {
+                        let now = model.delegation.openTalks()
+                        if now != openTalks { openTalks = now }
+                        try? await Task.sleep(for: .seconds(2))
+                    }
+                }
+                OpenTalksRows(talks: $openTalks)
                 // MARK: end MultiOrb (WP1)
             }
             ContextMemorySettings()

@@ -16,6 +16,13 @@ protocol DelegationService: AnyObject {
                 groupID: UUID?) throws -> OrbEnvelope
     /// Asks a member of a group for a turn.
     func submitGroupTurn(member: UUID, text: String, chain: ChainContext, groupID: UUID, askedBy: UUID?) -> DelegationRequest
+    /// A member asks its group from its own chat, at the person's request: the orchestrator gets a turn whose final answer goes
+    /// back to the asker's chat (`OrbEnvelope.fromChat`). `id` is the message id of the call.
+    func submitGroupRequest(from asker: UUID, text: String, chain: ChainContext, groupID: UUID, orchestrator: UUID,
+                            id: UUID) -> DelegationRequest
+    /// The person wrote to the group again before `member`'s turn for their last message began: `text` joins that turn, which
+    /// answers both. Nil when there is no such turn (the new message gets a turn of its own).
+    func joinQueuedGroupTurn(member: UUID, chainID: UUID, text: String) -> DelegationRequest?
     func cancelChain(_ id: UUID, by: CancelReason)
     /// The chains the Orb takes part in (asker with an open request, target at work, reply waiting for it).
     func chains(involving botID: UUID) -> [UUID]
@@ -33,15 +40,22 @@ protocol GroupTurnHooks: AnyObject {
     func turnStarted(_ request: DelegationRequest)
     func turnFinished(_ request: DelegationRequest, reply: String?, outcome: OrbEnvelope.ReplyStatus)
     // MARK: MultiOrb (WP5)
-    /// Asked by `submit` for a request inside a group's chain, after its own checks: a refusal (`.notInGroup` when the group's
-    /// policy keeps members from asking each other) replaces the send. The default allows.
+    /// Asked by `submit` for a request inside a group's chain, after its own checks: a refusal (`.membersMayNotTalk` when the
+    /// group's policy keeps members from asking each other) replaces the send. The default allows.
     func refusal(forRequestFrom asker: UUID, to member: UUID, chain: UUID) -> DelegationRefusal?
     // MARK: end MultiOrb (WP5)
+    /// A group's chain was stopped by the person from outside the group's screen (the Parar of an Orb that waits for it, or of a
+    /// member at work): the group stops as with "Parar grupo".
+    func chainStopped(_ chainID: UUID)
+    /// A member left a notice (`tell`) inside the group's chain: it is a post in the thread and runs no turn.
+    func noticePosted(_ envelope: OrbEnvelope)
 }
 
 // MARK: MultiOrb (WP5)
 // Optional parts of the contract: a class that conforms gets these when it does not write its own.
 extension GroupTurnHooks {
     func refusal(forRequestFrom asker: UUID, to member: UUID, chain: UUID) -> DelegationRefusal? { nil }
+    func chainStopped(_ chainID: UUID) {}
+    func noticePosted(_ envelope: OrbEnvelope) {}
 }
 // MARK: end MultiOrb (WP5)

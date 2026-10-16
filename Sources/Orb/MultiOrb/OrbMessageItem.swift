@@ -33,6 +33,9 @@ struct OrbMessageItem: Codable, Equatable, Sendable {
     var requestID: UUID
     var chainID: UUID
     var groupID: UUID?
+    /// In a group's thread: a member sent this to the group from its own chat, at the person's request ("a seu pedido").
+    /// nil otherwise (and in what older versions wrote).
+    var fromChat: Bool?
 }
 
 extension OrbMessageItem {
@@ -48,5 +51,6 @@ extension OrbMessageItem {
         requestID = try c.decode(UUID.self, forKey: .requestID)
         chainID = try c.decode(UUID.self, forKey: .chainID)
         groupID = (try? c.decodeIfPresent(UUID.self, forKey: .groupID)) ?? nil
+        fromChat = (try? c.decodeIfPresent(Bool.self, forKey: .fromChat)) ?? nil
     }
 }

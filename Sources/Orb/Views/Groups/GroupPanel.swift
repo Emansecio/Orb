@@ -64,6 +64,7 @@ private struct GroupMembersTab: View {
         let candidates = model.botIDs.filter { !group.memberIDs.contains($0) }
         ScrollView {
             VStack(alignment: .leading, spacing: 4) {
+                ReadOnlyNotes(group: group)
                 ForEach(looks, id: \.id) { look in
                     MemberRow(look: look, group: group, canRemove: looks.count > OrbGroup.memberLimits.lowerBound)
                 }
@@ -86,6 +87,39 @@ private struct GroupMembersTab: View {
             }
             .padding(.horizontal, 14)
             .padding(.bottom, 16)
+        }
+    }
+}
+
+/// Who in the group is in Só leitura and what that keeps them from doing; an orchestrator in it can be swapped from here.
+private struct ReadOnlyNotes: View {
+    @Environment(AppModel.self) private var model
+    let group: OrbGroup
+
+    var body: some View {
+        let lines = model.readOnlyNotes(members: group.memberIDs, orchestrator: group.orchestratorID)
+        if !lines.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(lines, id: \.text) { line in
+                    Label(line.text, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(Palette.warn)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if line.isOrchestrator {
+                        Menu("Trocar orquestrador") {
+                            ForEach(group.memberIDs.filter { $0 != group.orchestratorID }, id: \.self) { id in
+                                Button(model.live(id).look.name) { model.setOrchestrator(id, of: group.id) }
+                            }
+                        }
+                        .menuStyle(.button)
+                        .buttonStyle(GhostStyle())
+                        .fixedSize()
+                        .help("Escolhe outro membro para receber os pedidos e distribuir o trabalho")
+                    }
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.bottom, 8)
         }
     }
 }

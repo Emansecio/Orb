@@ -3,7 +3,7 @@
 Tudo o que o app faz, tela por tela. A apresentação e a instalação estão no [README](../README.md); o lado de dentro
 (módulos, decisões, testes) está em [ARQUITETURA.md](ARQUITETURA.md).
 
-[Primeiro uso: conectar um modelo](#primeiro-uso-conectar-um-modelo) · [A tela de boas-vindas](#a-tela-de-boas-vindas) · [A janela](#a-janela) · [Criar um Orb](#criar-um-orb) · [Conversar](#conversar) · [Permissões](#permissões) · [Permissões do macOS](#permissões-do-macos) · [Memória](#memória) · [Conversas e rotinas](#conversas-e-rotinas) · [Contexto da conversa](#contexto-da-conversa) · [Uso e custos](#uso-e-custos) · [Conectores e skills](#conectores-e-skills) · [Atalhos](#atalhos) · [Barra de menus e pergunta rápida](#barra-de-menus-e-pergunta-rápida) · [Redefinir o Orb](#redefinir-o-orb) · [Privacidade](#privacidade) · [Problemas comuns](#problemas-comuns)
+[Primeiro uso: conectar um modelo](#primeiro-uso-conectar-um-modelo) · [A tela de boas-vindas](#a-tela-de-boas-vindas) · [A janela](#a-janela) · [Criar um Orb](#criar-um-orb) · [Conversar](#conversar) · [Permissões](#permissões) · [Permissões do macOS](#permissões-do-macos) · [Memória](#memória) · [Conversas e rotinas](#conversas-e-rotinas) · [Orbs juntos](#orbs-juntos) · [Contexto da conversa](#contexto-da-conversa) · [Uso e custos](#uso-e-custos) · [Conectores e skills](#conectores-e-skills) · [Atalhos](#atalhos) · [Barra de menus e pergunta rápida](#barra-de-menus-e-pergunta-rápida) · [Redefinir o Orb](#redefinir-o-orb) · [Privacidade](#privacidade) · [Problemas comuns](#problemas-comuns)
 
 ## Primeiro uso: conectar um modelo
 
@@ -481,6 +481,35 @@ aviso dizendo por quê.
   oferece "Usar Automático" e "Usar Só leitura"). Em Avançado: "Permissões da rotina" (Igual ao Orb, Automático ou Só leitura).
 - Se o Orb está ocupado, a rotina entra na fila ("Na fila") e roda quando ele terminar. "Rodar agora" e "Rodar uma vez
   agora, para testar" ao criar. O mesmo vale para "Rodar agora" no painel do Orb. Rotina desativada fica "Pausada".
+- **Pedir a outro Orb.** Uma rotina que pede algo a outro Orb (`orbs ask`) espera a resposta: a execução segue na conversa
+  dela quando a resposta chega, e só então entra no histórico, com o relatório final (o banner também espera). Seu chat não ganha
+  turno com isso. Enquanto ela espera, o próximo horário não dispara outra execução. Se você para a conversa entre Orbs, ou se o
+  app fecha antes da resposta, a execução termina como falha, com o motivo. Rotinas não acionam grupos.
+
+## Orbs juntos
+
+Com **Orbs podem conversar entre si** ligado em Ajustes → Geral, um Orb pede ajuda a outro sozinho, com a ferramenta `orbs`:
+- **`ask`** acorda o outro Orb, que trabalha numa conversa à parte; a resposta volta como mensagem e acorda quem pediu.
+- **`tell`** só deixa um aviso: não acorda ninguém nem espera resposta. O aviso aparece na hora no chat do destino, e o Orb o lê
+  no topo da próxima mensagem que receber. Num grupo, o aviso é um post no fio.
+- **`list`** mostra os colegas e se estão livres, ocupados ou esperando a sua aprovação. Num grupo, mostra o que cada membro
+  está fazendo ("trabalhando em “…” (pedido de Atlas, há 4 min)", "na fila", "esperando Revisor"). Fora do grupo, mostra
+  também os grupos de que o Orb faz parte, que ele já conhece pelo prompt.
+- **Conversas abertas.** Em Ajustes, sob os interruptores, "Conversas abertas entre Orbs" lista os pedidos em andamento fora
+  de grupo: quem pediu a quem, o quê, em que pé está e há quanto tempo, com **Parar** para a conversa inteira. Os de um grupo
+  ficam na tela do grupo.
+- **Acionar um grupo pelo chat.** Com **Orbs podem acionar grupos** ligado (padrão), você pode pedir no chat de um Orb que ele
+  mande algo a um grupo de que faz parte ("peça ao grupo Lançamento…"). O pedido vai ao orquestrador, o fio mostra "Pesquisador
+  pediu ao Atlas, a seu pedido: …" e a resposta final do grupo volta ao chat. Isso vale só quando você pede, no chat do Orb:
+  uma rotina ou um pedido de outro Orb não acionam grupos, e um grupo que já está trabalhando recusa até terminar. Parar o
+  chat que espera para o grupo também.
+- **Mensagens seguidas ao grupo.** Se você manda uma segunda mensagem antes de o turno da primeira começar, as duas vão juntas
+  no mesmo turno.
+- **Só leitura num grupo.** O painel do grupo e a criação avisam quando um membro está em Só leitura: ele não pede nada aos
+  colegas nem altera arquivos; um orquestrador em Só leitura não consegue distribuir o trabalho, e o aviso oferece **Trocar
+  orquestrador**.
+- Quando um Orb não pode fazer algo (outro Orb não existe, o nome é de um grupo, o grupo só deixa o orquestrador distribuir), a
+  recusa diz o que aconteceu e o que fazer em seguida, e o Orb explica isso a você.
 
 ## Contexto da conversa
 

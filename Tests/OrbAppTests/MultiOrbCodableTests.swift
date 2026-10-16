@@ -339,14 +339,32 @@ struct MultiOrbInvariantTests {
         #expect(throws: DelegationRefusal.stopped) { try DelegationRules.validate(asking) }
     }
 
-    @Test func everyRefusalSaysSomethingInPortugueseAndNamesWhatMatters() {
-        let refusals: [DelegationRefusal] = [.switchedOff, .unknownOrb("Zé"), .selfRequest, .notInGroup, .alreadyInChain("Revisor"),
-                                             .stopped, .duplicate, .emptyMessage, .tooLong, .orbBusyDeleting]
-        for refusal in refusals { #expect(!refusal.message.isEmpty && refusal.toolError.message == refusal.message) }
-        #expect(DelegationRefusal.alreadyInChain("Revisor").message == "Revisor já está esperando por você nesta conversa.")
-        #expect(DelegationRefusal.stopped.message == "Esta conversa entre Orbs foi interrompida.")
-        #expect(DelegationRefusal.duplicate.message == "Pedido idêntico já enviado.")
-        #expect(DelegationRefusal.unknownOrb("Zé").message.contains("Zé"))
+    /// Each refusal says what happened and what to do next (the model reads it as the tool's error).
+    @Test func everyRefusalSaysWhatHappenedAndWhatToDoNext() {
+        let table: [(DelegationRefusal, String)] = [
+            (.switchedOff, "faça você mesmo"),
+            (.unknownOrb("Zé"), "uma chamada para cada"),
+            (.selfRequest, "faça você mesmo"),
+            (.notInGroup, "peça só aos membros"),
+            (.membersMayNotTalk, "responda com o resultado"),
+            (.alreadyInChain("Revisor"), "Termine o turno"),
+            (.stopped, "termine com o que tem"),
+            (.duplicate, "não repita"),
+            (.emptyMessage, "escreva o pedido"),
+            (.tooLong, "resuma"),
+            (.orbBusyDeleting, "peça a outro colega"),
+            (.groupName("Estúdio"), "ofereça pedir a cada membro"),
+            (.ownGroup("Estúdio"), "peça a um membro pelo nome"),
+        ]
+        for (refusal, next) in table {
+            #expect(refusal.message.contains(next), "\(refusal)")
+            #expect(refusal.toolError.message == refusal.message)
+        }
+        #expect(DelegationRefusal.alreadyInChain("Revisor").message.hasPrefix("Revisor já está esperando a resposta desta conversa"))
+        #expect(DelegationRefusal.unknownOrb("Zé").message.hasPrefix("Não existe um Orb chamado “Zé”."))
+        #expect(DelegationRefusal.groupName("Estúdio").message.hasPrefix("“Estúdio” é um grupo, não um Orb."))
+        // The group's policy is not "not a member": the colleague is in the group.
+        #expect(!DelegationRefusal.membersMayNotTalk.message.contains("não está neste grupo"))
     }
 
     @Test func theProposalOutcomesSayWhatTheContractSays() {

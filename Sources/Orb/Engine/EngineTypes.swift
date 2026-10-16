@@ -617,8 +617,6 @@ struct ToolContext: Sendable {
     var draft: BridgeHandler?
     /// The group's shared board, in a group's turn.
     var groupMemory: MemoryBank?
-    /// The turn is a side run (a routine, a request from another Orb, a group's turn) and where it stands in its chain.
-    var sideRun: SideRunInfo?
     // MARK: end MultiOrb (WP0)
     // MARK: MultiOrb (WP3)
     /// What `orb_propose` knows about the Orb that proposes and the others (see `OrbCreationSupport`); nil where it cannot run.
