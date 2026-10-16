@@ -177,6 +177,13 @@ Ao fim da etapa 3, o exemplo do Estúdio já roda do começo ao fim com você ap
 
 ## Status
 
+**Depois, no mesmo dia, por decisão sua: sem limites.** Saíram o orçamento do grupo (turnos e tokens por pedido, as
+predefinições, a pausa com Continuar/Encerrar) e os limites entre Orbs (encadeamentos, pedidos abertos, vezes por par,
+mensagens, turnos e tokens por cadeia), e também o limite de passos por turno. Ficam: parar com ⌘. ou Parar grupo, a
+recusa do A→B→A, a de mensagem repetida, o tamanho da mensagem e os tempos de espera (`requestTimeout`, `workTimeout`).
+O topo do grupo mostra o que o pedido já usou. Os itens 4, 5 e 6 abaixo ficam como histórico, e a renovação por progresso
+(resto do item 5) deixa de existir.
+
 **Etapa 1, feita em 16/10:**
 
 - **Item 4.**

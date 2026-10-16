@@ -2,8 +2,8 @@ import Foundation
 import Testing
 @testable import Orb
 
-// The group screens' rules as plain values (docs/historico/MULTI-ORBS.md, WP6): the stacked avatars, the presence words, the budget
-// text, the new group's rules, the mentions, the shortcut and the sidebar's spoken words.
+// The group screens' rules as plain values (docs/historico/MULTI-ORBS.md, WP6): the stacked avatars, the presence words, the new
+// group's rules, the mentions, the shortcut and the sidebar's spoken words.
 
 @Suite("Pilha de avatares")
 struct StackedAvatarsTests {
@@ -68,43 +68,6 @@ struct GroupPresenceTests {
     }
 }
 
-@Suite("Orçamento do grupo")
-struct GroupBudgetTextTests {
-    private func usage(turns: Int, tokensUsed: Int = 0) -> GroupBudgetUsage {
-        GroupBudgetUsage(turnsUsed: turns, turnLimit: 100, tokensUsed: tokensUsed, tokenLimit: 100_000)
-    }
-
-    @Test func theShareIsTheLargerOfTurnsAndTokens() {
-        #expect(GroupBudgetText.fraction(usage(turns: 10, tokensUsed: 50_000)) == 0.5)
-        #expect(GroupBudgetText.fraction(usage(turns: 10, tokensUsed: 90_000)) == 0.9)
-    }
-
-    /// 0, 79, 80 and 100 %: the text shows from 80 %, the warning color only past it.
-    @Test func textAppearsFromEightyPercentAndWarnsPastIt() {
-        #expect(!GroupBudgetText.showsText(0))
-        #expect(!GroupBudgetText.showsText(0.79))
-        #expect(GroupBudgetText.showsText(0.8))
-        #expect(!GroupBudgetText.isWarning(0.8))
-        #expect(GroupBudgetText.isWarning(0.81))
-        #expect(GroupBudgetText.showsText(1.0) && GroupBudgetText.isWarning(1.0))
-    }
-
-    @Test func barMovesInStepsOfFivePercent() {
-        #expect(GroupBudgetText.barStep(0) == 0)
-        #expect(GroupBudgetText.barStep(0.79) == 15)
-        #expect(GroupBudgetText.barStep(1.0) == 20)
-        #expect(GroupBudgetText.barStep(1.7) == 20)
-    }
-
-    @Test func labelNamesTheTurnsOrTheTokensThatRunOut() {
-        #expect(GroupBudgetText.label(GroupBudgetUsage(turnsUsed: 3, turnLimit: 12, tokensUsed: 0, tokenLimit: 150_000)) == "3/12 turnos")
-        #expect(GroupBudgetText.label(GroupBudgetUsage(turnsUsed: 3, turnLimit: 12, tokensUsed: 120_000, tokenLimit: 150_000))
-            == "120 mil/150 mil tokens")
-        #expect(GroupBudgetText.thousands(950) == "950")
-        #expect(GroupBudgetText.thousands(42_300) == "42 mil")
-    }
-}
-
 @Suite("Novo grupo")
 struct NewGroupRulesTests {
     private func look(_ name: String, _ role: String) -> BotLook {
@@ -154,18 +117,6 @@ struct NewGroupRulesTests {
         #expect(NewGroupRules.orchestrator(afterRemoving: a, current: a, selected: [b]) == b)
         #expect(NewGroupRules.orchestrator(afterRemoving: b, current: a, selected: [a]) == a)
     }
-
-    @Test func budgetPresetsAreTheThreeOfTheSpecAndAProject() {
-        #expect(GroupBudgetPreset.economical.budget == GroupBudget(maxTurns: 8, maxTokens: 100_000))
-        #expect(GroupBudgetPreset.balanced.budget == GroupBudget(maxTurns: 12, maxTokens: 150_000))
-        #expect(GroupBudgetPreset.broad.budget == GroupBudget(maxTurns: 24, maxTokens: 300_000))
-        // Projeto is as far as the panel's steppers go (turns 2...60, tokens up to 2 million), so a preset never sits outside them.
-        #expect(GroupBudgetPreset.project.budget == GroupBudget(maxTurns: 60, maxTokens: 2_000_000))
-        #expect(GroupBudgetPreset.allCases.map(\.title) == ["Econômico", "Equilibrado", "Amplo", "Projeto"])
-        #expect(GroupBudgetPreset.matching(GroupBudget(maxTurns: 60, maxTokens: 2_000_000)) == .project)
-        #expect(GroupBudgetPreset.matching(GroupBudget(maxTurns: 24, maxTokens: 300_000)) == .broad)
-        #expect(GroupBudgetPreset.matching(GroupBudget(maxTurns: 13, maxTokens: 150_000)) == nil)
-    }
 }
 
 @Suite("Menções do compositor")
@@ -213,9 +164,8 @@ struct GroupTextsTests {
     }
 
     @Test func theSecondLineSaysWhatTheGroupDoes() {
-        #expect(GroupRowText.secondLine(presence: nil, orbCount: 3, paused: false) == "3 Orbs")
-        #expect(GroupRowText.secondLine(presence: "Revisor está trabalhando…", orbCount: 3, paused: false) == "Revisor está trabalhando…")
-        #expect(GroupRowText.secondLine(presence: nil, orbCount: 3, paused: true) == "Pausado: continuar?")
+        #expect(GroupRowText.secondLine(presence: nil, orbCount: 3) == "3 Orbs")
+        #expect(GroupRowText.secondLine(presence: "Revisor está trabalhando…", orbCount: 3) == "Revisor está trabalhando…")
     }
 
     @Test func deletingAnOrbSaysItLeavesTheGroups() {

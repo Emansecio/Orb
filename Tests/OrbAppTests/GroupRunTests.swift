@@ -54,7 +54,7 @@ struct GroupLoopTests {
 
         // The orchestrator's first turn: the preface names the group, its role and the members; the person's message is the request, not the thread.
         let preface = world.fake.prefaces[first.envelope.id]?.first ?? ""
-        #expect(preface.contains("<group name=\"Lançamento\" you=\"Atlas\" role=\"orchestrator\" budget=\"0 of 12 turns\">"))
+        #expect(preface.contains("<group name=\"Lançamento\" you=\"Atlas\" role=\"orchestrator\">"))
         #expect(preface.contains("Members: Atlas (orchestrator), Pesquisador (Papel de Pesquisador), Revisor (Papel de Revisor)"))
         #expect(!preface.contains("<thread"))
         #expect(world.live.typing == [world.atlas.id])
@@ -99,7 +99,7 @@ struct GroupLoopTests {
         let done = world.events.last
         #expect(done?.kind == .groupRunDone && done?.detail == "6 turnos · 0 tokens")
         #expect(done?.sentence == "Pedido concluído: 6 turnos · 0 tokens")
-        #expect(world.live.runState == .idle && world.live.typing.isEmpty && world.live.work == nil && world.live.budget == nil)
+        #expect(world.live.runState == .idle && world.live.typing.isEmpty && world.live.work == nil && world.live.usage == nil)
         // The assignments got their answers.
         let states = world.items.compactMap { item -> OrbMessageItem.State? in
             if case .orbMessage(let message) = item.kind, message.kind == .ask { message.state } else { nil }
@@ -233,127 +233,38 @@ struct GroupPolicyAndExtrasTests {
         #expect(world.model.groupTurnExtras(for: world.atlas.id) == nil)
     }
 
-    @Test @MainActor func aMembersTurnIsFiledAsTheGroupsAndItsTokensCountAgainstTheBudget() async {
+    @Test @MainActor func aMembersTurnIsFiledAsTheGroupsAndItsTokensAreCounted() async {
         let world = GroupWorld()
         _ = await startOrchestratorTurn(world)
         world.model.recordUsage(UsageTotals(requests: 1, input: 600, output: 400), botID: world.atlas.id, model: "custom/modelo", source: .group)
         #expect(world.hub.run(world.groupID)?.tokensUsed == 1_000)
-        #expect(world.live.budget?.tokensUsed == 1_000)
+        #expect(world.live.usage?.tokensUsed == 1_000)
         world.model.recordUsage(UsageTotals(requests: 1, input: 50), botID: world.atlas.id, model: "custom/modelo", source: .chat)
         #expect(world.hub.run(world.groupID)?.tokensUsed == 1_000) // a chat turn is not the group's
-        world.hub.tokensUsed(10, chain: world.hub.run(world.groupID)!.id)
-        #expect(world.hub.run(world.groupID)?.tokensUsed == 1_010)
         // Rereading the cache is not spending: Claude Code rereads tens of thousands of tokens every turn.
         world.model.recordUsage(UsageTotals(requests: 1, input: 5, cacheRead: 70_000, cacheWrite: 200, output: 95), botID: world.atlas.id,
                                 model: "custom/modelo", source: .group)
-        #expect(world.hub.run(world.groupID)?.tokensUsed == 1_310)
+        #expect(world.hub.run(world.groupID)?.tokensUsed == 1_300)
     }
 }
 
-struct GroupBudgetTests {
-    @Test @MainActor func theTurnBudgetPausesAndDoesNotStartAnotherTurn() async throws {
-        let world = GroupWorld(budget: GroupBudget(maxTurns: 2, maxTokens: 100_000))
+/// Nothing limits a request: it runs as many turns and spends as many tokens as it takes, and the header only counts them.
+struct GroupNoLimitTests {
+    @Test @MainActor func aRequestRunsAsManyTurnsAsItTakes() async throws {
+        let world = GroupWorld()
         let first = await startOrchestratorTurn(world)
-        let work = try world.fake.ask(from: world.atlas.id, to: world.pesquisador.id, text: "pesquise", parent: first)
-        world.fake.finish(first, reply: "Delego.")
-        await world.fake.run(work, reply: "feito") // the second turn
-        #expect(world.hub.run(world.groupID)?.turnsUsed == 2)
-
-        // The orchestrator would wake for the answer: the budget is spent, so the turn does not start and the group pauses.
-        #expect(await world.fake.start(first) == false)
-        #expect(world.hub.run(world.groupID)?.turnsUsed == 2)
-        #expect(world.live.runState == .paused(.turns))
-        #expect(world.live.work?.phrase == "Pausado: continuar?")
-        let card = try #require(world.pauses.first)
-        #expect(world.pauses.count == 1 && card.state == .open && card.reason == .turns && card.turnsUsed == 2 && card.turnLimit == 2)
-        #expect(card.runID == world.hub.run(world.groupID)?.id && card.groupID == world.groupID)
-        // Nobody can ask anyone now.
-        #expect(throws: DelegationRefusal.budgetSpent) {
-            try world.fake.ask(from: world.atlas.id, to: world.revisor.id, text: "mais um", parent: first)
+        world.model.recordUsage(UsageTotals(requests: 1, input: 3_000_000), botID: world.atlas.id, model: "m/x", source: .group)
+        let works = try (1...30).map { round in
+            try world.fake.ask(from: world.atlas.id, to: world.pesquisador.id, text: "parte \(round)", parent: first)
         }
-        #expect(world.pauses.count == 1) // the card is made once
-        #expect(world.notices.map(\.body) == ["O grupo pausou: continuar?"] && world.notices[0].group == world.groupID)
-        #expect(world.items.contains { if case .groupPause = $0.kind { true } else { false } })
-    }
-
-    @Test @MainActor func continuingAddsAnotherWindowAndLetsTheHeldTurnRun() async throws {
-        let world = GroupWorld(budget: GroupBudget(maxTurns: 2, maxTokens: 100_000))
-        let first = await startOrchestratorTurn(world)
-        let work = try world.fake.ask(from: world.atlas.id, to: world.pesquisador.id, text: "pesquise", parent: first)
         world.fake.finish(first, reply: "Delego.")
-        await world.fake.run(work, reply: "feito")
-        #expect(await world.fake.start(first) == false)
-        let chain = try #require(world.hub.run(world.groupID)?.id)
-
-        world.model.continueRun(world.groupID)
-        #expect(world.hub.run(world.groupID)?.turnLimit == 4 && world.hub.run(world.groupID)?.tokenLimit == 200_000)
-        #expect(world.hub.run(world.groupID)?.phase == .active && world.live.runState == .running)
-        #expect(world.pauses.first?.state == .continued)
-        #expect(world.fake.resumed == [chain])
-        await world.fake.wake(first, reply: "Concluído depois da pausa.")
+        for (round, work) in works.enumerated() { await world.fake.run(work, reply: "feito \(round + 1)") }
+        #expect(world.hub.run(world.groupID)?.turnsUsed == 31)
+        #expect(world.pauses.isEmpty && world.live.runState == .running)
+        #expect(world.live.usage == GroupUsage(turnsUsed: 31, tokensUsed: 3_000_000))
+        await world.fake.wake(first, reply: "Tudo pronto.")
         await world.waitForFinish()
-        #expect(world.events.last?.kind == .groupRunDone && world.events.last?.detail == "3 turnos · 0 tokens")
-    }
-
-    @Test @MainActor func theTokenBudgetPausesToo() async throws {
-        let world = GroupWorld(budget: GroupBudget(maxTurns: 12, maxTokens: 1_000))
-        let first = await startOrchestratorTurn(world)
-        let work = try world.fake.ask(from: world.atlas.id, to: world.pesquisador.id, text: "pesquise", parent: first)
-        world.fake.finish(first, reply: "Delego.")
-        await world.fake.start(work)
-        world.model.recordUsage(UsageTotals(requests: 1, input: 900, output: 300), botID: world.pesquisador.id, model: "m/x", source: .group)
-        world.fake.finish(work, reply: "feito")
-        #expect(world.hub.run(world.groupID)?.phase == .active) // spending does not pause by itself
-        #expect(await world.fake.start(first) == false)
-        #expect(world.live.runState == .paused(.tokens))
-        let card = try #require(world.pauses.first)
-        #expect(card.reason == .tokens && card.tokensUsed == 1_200 && card.tokenLimit == 1_000)
-        world.model.continueRun(world.groupID)
-        #expect(world.hub.run(world.groupID)?.tokenLimit == 2_000) // the 1.000 spent plus another window of 1.000
-    }
-
-    @Test @MainActor func aMessageWhilePausedWaitsInTheThreadForTheDecision() async throws {
-        let world = GroupWorld(budget: GroupBudget(maxTurns: 2, maxTokens: 100_000))
-        let first = await startOrchestratorTurn(world)
-        let work = try world.fake.ask(from: world.atlas.id, to: world.pesquisador.id, text: "pesquise", parent: first)
-        let more = try world.fake.ask(from: world.atlas.id, to: world.revisor.id, text: "revise", parent: first)
-        world.fake.finish(first, reply: "Delego.")
-        await world.fake.start(work) // the second and last turn
-        #expect(await world.fake.start(more) == false) // the turn limit is 2: spent
-        #expect(world.live.runState == .paused(.turns))
-        let before = world.fake.groupTurns.count
-        world.model.postUserMessage("E aí?", to: world.groupID)
-        #expect(world.fake.groupTurns.count == before) // nothing sent
-        #expect(world.items.contains { if case .user(let text, _) = $0.kind { text == "E aí?" } else { false } })
-        world.model.continueRun(world.groupID)
-        #expect(world.fake.groupTurns.count == before + 1 && world.fake.groupTurns.last?.envelope.text == "E aí?")
-    }
-
-    @Test @MainActor func endingFromThePauseCancelsTheQueueAndClosesTheCard() async throws {
-        let world = GroupWorld(budget: GroupBudget(maxTurns: 2, maxTokens: 100_000))
-        let first = await startOrchestratorTurn(world)
-        let chain = try #require(world.hub.run(world.groupID)?.id)
-        let work = try world.fake.ask(from: world.atlas.id, to: world.pesquisador.id, text: "pesquise", parent: first)
-        let more = try world.fake.ask(from: world.atlas.id, to: world.revisor.id, text: "revise", parent: first)
-        world.fake.finish(first, reply: "Delego.")
-        await world.fake.start(work)
-        #expect(await world.fake.start(more) == false)
-        world.model.endRun(world.groupID)
-        #expect(world.fake.cancelled.map(\.chain) == [chain] && world.fake.cancelled.first?.reason == .budget)
-        #expect(world.pauses.first?.state == .ended)
-        #expect(world.events.last?.kind == .groupStopped && world.events.last?.sentence == "Você parou o grupo")
-        #expect(world.hub.run(world.groupID) == nil && world.live.runState == .idle)
-        #expect(!world.events.contains { $0.kind == .groupRunDone })
-    }
-
-    @Test func theBudgetNumbersTheHeaderShows() {
-        let low = GroupBudgetUsage(turnsUsed: 3, turnLimit: 12, tokensUsed: 30_000, tokenLimit: 150_000)
-        #expect(low.turnFraction == 0.25 && low.tokenFraction == 0.2 && low.fraction == 0.25 && !low.isNearLimit)
-        #expect(!GroupBudgetUsage(turnsUsed: 9, turnLimit: 12, tokensUsed: 0, tokenLimit: 100).isNearLimit) // 75 %: not yet
-        #expect(!GroupBudgetUsage(turnsUsed: 79, turnLimit: 100, tokensUsed: 0, tokenLimit: 100).isNearLimit)
-        #expect(GroupBudgetUsage(turnsUsed: 80, turnLimit: 100, tokensUsed: 0, tokenLimit: 100).isNearLimit)
-        #expect(GroupBudgetUsage(turnsUsed: 0, turnLimit: 12, tokensUsed: 90_000, tokenLimit: 100_000).isNearLimit)
-        #expect(GroupBudgetUsage(turnsUsed: 20, turnLimit: 12, tokensUsed: 0, tokenLimit: 100).fraction == 1)
+        #expect(world.events.last?.kind == .groupRunDone && world.events.last?.detail == "32 turnos · 3000 mil tokens")
     }
 }
 
@@ -469,15 +380,14 @@ struct GroupUnreadAndNoticeTests {
 
 struct GroupPresenceLineTests {
     @Test func theLineSaysWhoDoesWhat() {
-        #expect(GroupPresence.line(typing: [], waiting: [], orchestratorOnly: false, orchestrator: "Atlas", paused: false) == nil)
-        #expect(GroupPresence.line(typing: ["Atlas"], waiting: [], orchestratorOnly: true, orchestrator: "Atlas", paused: false)?.phrase == "Atlas coordena…")
-        #expect(GroupPresence.line(typing: ["Lia"], waiting: [], orchestratorOnly: false, orchestrator: "Atlas", paused: false)?.phrase == "Lia trabalhando…")
-        #expect(GroupPresence.line(typing: ["Lia", "Teo", "Ana"], waiting: [], orchestratorOnly: false, orchestrator: "Atlas", paused: false)?.phrase
+        #expect(GroupPresence.line(typing: [], waiting: [], orchestratorOnly: false, orchestrator: "Atlas") == nil)
+        #expect(GroupPresence.line(typing: ["Atlas"], waiting: [], orchestratorOnly: true, orchestrator: "Atlas")?.phrase == "Atlas coordena…")
+        #expect(GroupPresence.line(typing: ["Lia"], waiting: [], orchestratorOnly: false, orchestrator: "Atlas")?.phrase == "Lia trabalhando…")
+        #expect(GroupPresence.line(typing: ["Lia", "Teo", "Ana"], waiting: [], orchestratorOnly: false, orchestrator: "Atlas")?.phrase
                 == "Lia, Teo e Ana trabalhando…")
-        let waiting = GroupPresence.line(typing: ["Lia"], waiting: ["Lia"], orchestratorOnly: false, orchestrator: "Atlas", paused: false)
+        let waiting = GroupPresence.line(typing: ["Lia"], waiting: ["Lia"], orchestratorOnly: false, orchestrator: "Atlas")
         #expect(waiting?.phrase == "Lia espera você" && waiting?.tone == .waiting)
-        #expect(GroupPresence.line(typing: ["Lia", "Teo"], waiting: ["Lia", "Teo"], orchestratorOnly: false, orchestrator: "Atlas", paused: false)?.phrase
+        #expect(GroupPresence.line(typing: ["Lia", "Teo"], waiting: ["Lia", "Teo"], orchestratorOnly: false, orchestrator: "Atlas")?.phrase
                 == "Lia e Teo esperam você")
-        #expect(GroupPresence.line(typing: ["Lia"], waiting: [], orchestratorOnly: false, orchestrator: "Atlas", paused: true)?.phrase == "Pausado: continuar?")
     }
 }

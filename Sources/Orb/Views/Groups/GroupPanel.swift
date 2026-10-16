@@ -172,7 +172,6 @@ private struct GroupSettingsTab: View {
     @State private var isConfirmingDelete = false
 
     var body: some View {
-        let preset = GroupBudgetPreset.matching(group.budget)
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 field("Nome") {
@@ -183,25 +182,6 @@ private struct GroupSettingsTab: View {
                         .padding(.vertical, 7)
                         .background(Palette.surface, in: .rect(cornerRadius: 8))
                         .onSubmit { commitName() }
-                }
-                field("Orçamento por pedido") {
-                    let choice = Binding(get: { preset ?? .balanced }, set: { model.setGroupBudget($0.budget, of: group.id) })
-                    // Four segments need the panel wider than its narrowest: there, the same choice is a menu.
-                    ViewThatFits(in: .horizontal) {
-                        budgetPicker(choice).pickerStyle(.segmented)
-                        budgetPicker(choice).pickerStyle(.menu)
-                    }
-                    Stepper(value: Binding(get: { group.budget.maxTurns }, set: { setBudget(turns: $0) }), in: 2...60, step: 2) {
-                        Text("Turnos: \(group.budget.maxTurns)").font(.system(size: 13)).foregroundStyle(Palette.secondary)
-                    }
-                    Stepper(value: Binding(get: { group.budget.maxTokens }, set: { setBudget(tokens: $0) }),
-                            in: 20_000...2_000_000, step: 10_000) {
-                        Text("Tokens: \(GroupBudgetText.thousands(group.budget.maxTokens))")
-                            .font(.system(size: 13)).foregroundStyle(Palette.secondary)
-                    }
-                    Text("Quando um pedido chega ao limite, o grupo pausa e pergunta se deve continuar. O que já estava rodando termina, então o total pode passar um pouco do limite.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Palette.faint)
                 }
                 field("Conversa") {
                     Toggle(isOn: Binding(
@@ -228,13 +208,6 @@ private struct GroupSettingsTab: View {
         .onChange(of: group.name) { nameDraft = group.name }
     }
 
-    private func budgetPicker(_ choice: Binding<GroupBudgetPreset>) -> some View {
-        Picker("Orçamento", selection: choice) {
-            ForEach(GroupBudgetPreset.allCases) { Text($0.title).tag($0) }
-        }
-        .labelsHidden()
-    }
-
     private func field<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
@@ -249,11 +222,6 @@ private struct GroupSettingsTab: View {
         let name = nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, name != group.name else { nameDraft = group.name; return }
         model.renameGroup(group.id, to: name)
-    }
-
-    private func setBudget(turns: Int? = nil, tokens: Int? = nil) {
-        model.setGroupBudget(GroupBudget(maxTurns: turns ?? group.budget.maxTurns, maxTokens: tokens ?? group.budget.maxTokens),
-                             of: group.id)
     }
 
     private func delete() {

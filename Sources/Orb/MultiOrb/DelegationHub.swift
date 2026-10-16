@@ -14,11 +14,8 @@ final class DelegationHub: DelegationService {
     /// Set while the app quits: the turns that end then are cut short and leave nobody to wake.
     var isShuttingDown = false
 
-    /// Who sent to whom, in one chain.
-    struct PairKey: Hashable { var from: UUID; var to: UUID }
-
-    /// What a chain of requests has spent. It outlives its last request (a woken asker that asks again is still in it), so the
-    /// limits cannot be started over by answering.
+    /// A chain of requests: where it began, whether the person stopped it and what was just sent (to tell a repeat). It outlives
+    /// its last request (a woken asker that asks again is still in it).
     struct ChainState {
         enum Origin: Equatable { case chat(UUID), routine(UUID), group(UUID) }
 
@@ -26,17 +23,9 @@ final class DelegationHub: DelegationService {
         /// The Orb that began the chain: where "Você parou a conversa" is written.
         var originBot: UUID
         var groupID: UUID?
-        var messages = 0
-        var turns = 0
-        var tokens = 0
         var cancelled = false
-        var pairs: [PairKey: Int] = [:]
         var recent: [String: Date] = [:]
         var touched = Date.now
-
-        var facts: DelegationRules.ChainFacts {
-            DelegationRules.ChainFacts(messages: messages, turns: turns, tokens: tokens, cancelled: cancelled)
-        }
     }
 
     private(set) var requests: [UUID: DelegationRequest] = [:]
@@ -50,11 +39,6 @@ final class DelegationHub: DelegationService {
     /// The side conversation of a request that waits for its children, kept in memory so it resumes without a read.
     private var suspended: [UUID: Conversation] = [:]
     private var waitingSince: [UUID: Date] = [:]
-    // MARK: MultiOrb (WP5)
-    /// Queued group turns the group's runtime said not to start yet (its budget is spent or it is paused), by request id. They go
-    /// back to their targets' queues on `resumeHeldWork` ("Continuar"); a stopped chain cancels them where they stand.
-    private var held: [UUID] = []
-    // MARK: end MultiOrb (WP5)
     /// Orbs whose group turn is being prepared (its opening text is asked of the group, which may take a moment).
     private var starting: Set<UUID> = []
 
@@ -83,26 +67,22 @@ final class DelegationHub: DelegationService {
             switchOn: model.orbsCanTalk, groupID: groupID, groupMembers: group.map { Set($0.memberIDs) }, orbs: orbs,
             sender: OrbRef(sender), targetName: name, text: text, kind: kind, messageID: messageID, context: context)
         input.seenMessage = seenMessageIDs.contains(messageID)
-        input.openFromSender = openRequests(from: from).count
         if let context, let state = chainStates[context.chainID] {
-            input.chain = state.facts
+            input.chainStopped = state.cancelled
             input.waitingInPath = Set(context.path.filter { waiting($0, inChain: context.chainID) })
         }
-        // The pair and the repeat need the target, which the rules resolve: resolve it the same way here.
+        // The repeat needs the target, which the rules resolve: resolve it the same way here.
         if let target = DelegationRules.resolve(name, among: orbs), let context, let state = chainStates[context.chainID] {
-            input.chain.pairCount = state.pairs[PairKey(from: from, to: target.id)] ?? 0
             let key = DelegationRules.repeatKey(to: target.id, text: text)
             if let when = state.recent[key], now.timeIntervalSince(when) < DelegationRules.duplicateWindow { input.recentSameText = true }
         }
         let plan = try DelegationRules.validate(input)
-        // MARK: MultiOrb (WP5): a request inside a group's chain also answers to the group's budget and policy.
+        // MARK: MultiOrb (WP5): a request inside a group's chain also answers to the group's policy.
         if groupID ?? context?.groupID != nil,
            let refusal = groupHooks?.refusal(forRequestFrom: from, to: plan.target.id, chain: plan.chainID) { throw refusal }
         // MARK: end MultiOrb (WP5)
 
         var chain = chainStates[plan.chainID] ?? newChain(startedBy: sender, session: session, groupID: groupID ?? context?.groupID)
-        chain.messages += 1
-        chain.pairs[PairKey(from: from, to: plan.target.id), default: 0] += 1
         chain.recent[DelegationRules.repeatKey(to: plan.target.id, text: plan.text)] = now
         chain.touched = now
         chainStates[plan.chainID] = chain
@@ -166,11 +146,6 @@ final class DelegationHub: DelegationService {
             }
             guard model.bot(botID) != nil else { fail(request, "Esse Orb foi apagado"); continue }
             if request.envelope.groupID != nil {
-                // MultiOrb (WP5): the group's budget or pause may keep the turn waiting; it stays queued, off the queue, until "Continuar".
-                if groupHooks?.canStartTurn(request) == false {
-                    if !held.contains(id) { held.append(id) }
-                    continue
-                }
                 startGroupRun(request)
                 return true
             }
@@ -238,7 +213,6 @@ final class DelegationHub: DelegationService {
         running.startedAt = request.startedAt ?? .now
         requests[envelope.id] = running
         waitingSince[envelope.id] = nil
-        chainStates[envelope.chainID]?.turns += 1
         chainStates[envelope.chainID]?.touched = .now
         if kind == .group { groupHooks?.turnStarted(running) }
         guard model.send(text, to: botID, origin: origin) else {
@@ -363,20 +337,11 @@ final class DelegationHub: DelegationService {
     func deliverInbox(for botID: UUID) -> Bool {
         guard let model, !isShuttingDown else { return false }
         var waiting = (inbox[botID] ?? []).filter { chainStates[$0.chainID]?.cancelled != true }
-        var heldBack: [OrbEnvelope] = [] // MultiOrb (WP5): answers inside a group's chain that the group does not let start a turn yet
         while let first = waiting.first {
-            if let serving = first.servingRequest, first.groupID != nil, let request = requests[serving],
-               groupHooks?.canStartTurn(request) == false {
-                let same = waiting.filter { $0.servingRequest == serving }
-                heldBack += same
-                waiting.removeAll { reply in same.contains { $0.id == reply.id } }
-                inbox[botID] = heldBack + waiting
-                continue
-            }
             let batch = Array(waiting.filter { $0.servingRequest == first.servingRequest }.prefix(DelegationLimits.wakeBatch))
             let taken = Set(batch.map(\.id))
             waiting.removeAll { taken.contains($0.id) }
-            inbox[botID] = (heldBack + waiting).isEmpty ? nil : heldBack + waiting
+            inbox[botID] = waiting.isEmpty ? nil : waiting
             if let serving = first.servingRequest {
                 guard var request = requests[serving], request.state == .awaitingChildren, var conversation = suspended[serving] else {
                     continue // the request it belonged to is gone (stopped, timed out): nobody waits for this answer
@@ -396,7 +361,6 @@ final class DelegationHub: DelegationService {
             for reply in batch {
                 session.changeConversation { $0.items.settingSent(reply.replyTo ?? reply.id, to: SendOrigin.state(of: reply.status)) }
             }
-            chainStates[first.chainID]?.turns += 1
             chainStates[first.chainID]?.touched = .now
             if model.send(OrbEnvelopeText.reply(batch), to: botID, origin: .orbReply(batch)) {
                 model.live(botID).glanced()
@@ -406,32 +370,9 @@ final class DelegationHub: DelegationService {
             session.chain = nil // no model: the notice says so, and the answers have nobody to wake
             continue
         }
-        inbox[botID] = heldBack.isEmpty ? nil : heldBack
+        inbox[botID] = nil
         return false
     }
-
-    // MARK: MultiOrb (WP5)
-
-    /// The group's pause ended ("Continuar"): the turns it held back go to their targets' queues again, and the answers it held
-    /// wake their Orbs.
-    func resumeHeldWork(chain: UUID) {
-        let ready = held.filter { requests[$0]?.envelope.chainID == chain }
-        held.removeAll { id in ready.contains(id) || requests[id]?.state != .queued }
-        var targets: [UUID] = []
-        // The wait restarts: the time the group spent paused does not count against the requests it held.
-        for id in requests.keys where requests[id]?.envelope.chainID == chain {
-            if requests[id]?.state == .queued { requests[id]?.envelope.sentAt = .now }
-            if requests[id]?.state == .awaitingChildren { waitingSince[id] = .now }
-        }
-        for id in ready {
-            guard let request = requests[id], request.state == .queued else { continue }
-            queues[request.envelope.to.id, default: []].insert(id, at: 0)
-            if !targets.contains(request.envelope.to.id) { targets.append(request.envelope.to.id) }
-        }
-        for (botID, replies) in inbox where replies.contains(where: { $0.chainID == chain }) && !targets.contains(botID) { targets.append(botID) }
-        for botID in targets { schedulePump(botID) }
-    }
-    // MARK: end MultiOrb (WP5)
 
     // MARK: Stopping
 
@@ -553,21 +494,11 @@ final class DelegationHub: DelegationService {
         refresh(request.envelope.from.id, request.envelope.to.id)
     }
 
-    // MARK: Accounting
-
-    /// Adds what a turn used to the budget of its chain (fresh tokens: what the provider charges in full or writes to its cache).
-    func tokensUsed(_ n: Int, chain: UUID) {
-        guard n > 0, chainStates[chain] != nil else { return }
-        chainStates[chain]?.tokens += n
-        chainStates[chain]?.touched = .now
-    }
-
     /// Run by the scheduler every 30 seconds: a request that waited too long ends `failed`, and what is old and idle is forgotten.
     /// Waiting for work that goes on (a target busy with a turn, a child still at work) is not waiting too long: only
     /// `workTimeout` ends it.
     func sweep(now: Date = .now) {
-        // A group's pause is not a timeout: what the group holds back (queued turns, answers in the inbox) waits for "Continuar".
-        for request in requests.values where request.state == .queued && !held.contains(request.id) {
+        for request in requests.values where request.state == .queued {
             let waited = now.timeIntervalSince(request.envelope.sentAt)
             guard waited > DelegationLimits.requestTimeout else { continue }
             if waited <= DelegationLimits.workTimeout, isInTurn(request.envelope.to.id) { continue }
@@ -576,7 +507,7 @@ final class DelegationHub: DelegationService {
         let answered = Set(inbox.values.flatMap { $0.compactMap(\.servingRequest) })
         for (id, since) in waitingSince where now.timeIntervalSince(since) > DelegationLimits.requestTimeout {
             guard let request = requests[id], request.state == .awaitingChildren else { continue }
-            if answered.contains(id) || !request.openChildren.isDisjoint(with: held) { continue }
+            if answered.contains(id) { continue }
             let working = request.openChildren.contains { requests[$0].map { Self.isOpen($0.state) } ?? false }
             if working, now.timeIntervalSince(since) <= DelegationLimits.workTimeout { continue }
             fail(request, "Tempo esgotado")
@@ -586,7 +517,6 @@ final class DelegationHub: DelegationService {
         for (id, chain) in chainStates where !busy.contains(id) && now.timeIntervalSince(chain.touched) > Self.chainRetention {
             chainStates[id] = nil
         }
-        held.removeAll { requests[$0]?.state != .queued }
         pruneRequests()
     }
 

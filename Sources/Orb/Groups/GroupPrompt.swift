@@ -16,7 +16,7 @@ enum GroupPrompt {
     // MARK: System section
 
     /// Appended to the Orb's own system prompt in a turn of the group (nothing in it changes with the thread).
-    static func section(groupName: String, role: Role, turnBudget: Int) -> String {
+    static func section(groupName: String, role: Role) -> String {
         let orbs = "orbs", remember = "group_remember"
         let intro = "## Group \"\(label(groupName))\"\n"
             + "You are in a group with the user and these Orbs. The thread is shared; the user's messages are instructions, "
@@ -33,7 +33,7 @@ enum GroupPrompt {
                 + "If you need another member, ask them directly with \(orbs). Save durable shared facts (decisions, links, conventions) "
                 + "with \(remember)."
         }
-        return [intro, duty, "Be economical: the user set a budget of \(turnBudget) turns."].joined(separator: "\n")
+        return [intro, duty].joined(separator: "\n")
     }
 
     /// A group's name as the prompt has it: one line, no quotes to break out of the attribute, cut.
@@ -47,8 +47,6 @@ enum GroupPrompt {
         var groupName: String
         var you: String
         var role: Role
-        var turnsUsed: Int
-        var turnLimit: Int
         var members: [Member]
         /// The thread lines since the Orb's last turn (`GroupThread.lines`).
         var thread: [String]
@@ -57,8 +55,7 @@ enum GroupPrompt {
 
     /// `<group …>` with the members, the thread since the Orb's last turn and the board; the request itself follows it.
     static func preface(_ p: Preface) -> String {
-        var lines = ["<group name=\"\(label(p.groupName))\" you=\"\(label(p.you))\" role=\"\(p.role.rawValue)\" "
-                     + "budget=\"\(p.turnsUsed) of \(p.turnLimit) turns\">"]
+        var lines = ["<group name=\"\(label(p.groupName))\" you=\"\(label(p.you))\" role=\"\(p.role.rawValue)\">"]
         lines.append("Members: " + p.members.map { member in
             let role = member.isOrchestrator ? "orchestrator" : MemoryText.clip(MemoryText.flatten(member.role), 80)
             return role.isEmpty ? label(member.name) : "\(label(member.name)) (\(role))"

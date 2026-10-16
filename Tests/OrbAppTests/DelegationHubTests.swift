@@ -350,26 +350,27 @@ private final class Hooks: GroupTurnHooks {
         #expect(request.user.contains("No reply is expected."))
     }
 
-    // MARK: Limits
+    // MARK: No limits
 
-    @Test func aModelThatKeepsAskingStopsAtTheLimitsAndEveryoneEndsIdle() async throws {
+    @Test func aModelThatKeepsAskingIsNotCutOffAndEveryoneEndsIdle() async throws {
         let counter = Counter()
         let team = Team { seen in
             switch seen.who {
             case "Atlas":
-                if let result = seen.toolResult { return say("Parei: \(result)") }
-                // Each wake asks again with new words, so only the pair limit can stop it.
-                return orbsCall("ask", to: "Pesquisador", "Mais uma vez (\(await counter.next()))")
+                if seen.toolResult != nil { return say("Pedi.") }
+                // Each wake asks again with new words, more times than one pair could before; then it is done.
+                let round = await counter.next()
+                return round <= 6 ? orbsCall("ask", to: "Pesquisador", "Mais uma vez (\(round))") : say("Chega.")
             default: return say("Respondido.")
             }
         }
         defer { team.cleanUp() }
         team.model.send("comece", to: team.atlas.id, fromUser: true)
-        await waitUntil("the loop to stop") { team.botTexts(team.atlas).contains { $0.contains("Você já falou 3 vezes") } }
+        await waitUntil("the asking to end") { team.botTexts(team.atlas).contains("Chega.") }
         await team.settle()
         let asked = team.model.delegation.requests.values.filter { $0.envelope.from.id == team.atlas.id }
-        #expect(asked.count == DelegationLimits.maxPerPair)
-        #expect(await team.log.count(by: "Pesquisador") == DelegationLimits.maxPerPair)
+        #expect(asked.count == 6)
+        #expect(await team.log.count(by: "Pesquisador") == 6)
     }
 
     @Test func aTargetCannotAskBackWhoIsWaitingForIt() async throws {
@@ -393,7 +394,7 @@ private final class Hooks: GroupTurnHooks {
         #expect(team.request(from: team.pesquisador, to: team.atlas) == nil)
     }
 
-    @Test func theFourthOpenRequestAndTheFifthHopAreRefusedByTheHub() async throws {
+    @Test func manyOpenRequestsAndADeepChainAreAccepted() async throws {
         let valve = TestGate() // the targets are busy, so the requests stay open
         let team = Team { seen in
             await valve.wait()
@@ -401,57 +402,28 @@ private final class Hooks: GroupTurnHooks {
         }
         defer { team.cleanUp() }
         let hub = team.model.delegation
-        // Three open requests from one Orb, in any chain; the fourth waits for answers.
-        for index in 1...3 {
-            _ = try hub.submit(from: team.atlas.id, to: index == 3 ? "Revisor" : "Pesquisador", text: "pedido \(index)", kind: .ask,
-                               messageID: UUID(), groupID: nil)
+        for index in 1...6 {
+            _ = try hub.submit(from: team.atlas.id, to: index.isMultiple(of: 2) ? "Revisor" : "Pesquisador", text: "pedido \(index)",
+                               kind: .ask, messageID: UUID(), groupID: nil)
         }
-        #expect(throws: DelegationRefusal.tooManyOpen) {
-            try hub.submit(from: team.atlas.id, to: "Revisor", text: "pedido 4", kind: .ask, messageID: UUID(), groupID: nil)
-        }
-        #expect(hub.openRequests(from: team.atlas.id).count == 3)
-        // A turn at hop 4 cannot ask again.
-        team.model.session(team.revisor.id).chain = ChainContext(chainID: UUID(), hop: 4, path: [team.revisor.id])
-        #expect(throws: DelegationRefusal.hopLimit) {
-            try hub.submit(from: team.revisor.id, to: "Atlas", text: "x", kind: .ask, messageID: UUID(), groupID: nil)
-        }
+        #expect(hub.openRequests(from: team.atlas.id).count == 6)
+        team.model.session(team.revisor.id).chain = ChainContext(chainID: UUID(), hop: 40, path: [team.revisor.id])
+        #expect(try hub.submit(from: team.revisor.id, to: "Atlas", text: "x", kind: .ask, messageID: UUID(), groupID: nil).hop == 41)
         team.model.session(team.revisor.id).chain = nil
         await valve.open()
         await team.settle()
     }
 
-    @Test func theSameMessageTwiceIsOneRequestAndTheBudgetCountsTokens() async throws {
+    @Test func theSameMessageTwiceIsOneRequest() async throws {
         let team = Team { _ in say("x") }
         defer { team.cleanUp() }
         let hub = team.model.delegation
         let id = UUID()
-        let first = try hub.submit(from: team.atlas.id, to: "Pesquisador", text: "Pesquise", kind: .ask, messageID: id, groupID: nil)
+        _ = try hub.submit(from: team.atlas.id, to: "Pesquisador", text: "Pesquise", kind: .ask, messageID: id, groupID: nil)
         #expect(throws: DelegationRefusal.duplicate) {
             try hub.submit(from: team.atlas.id, to: "Revisor", text: "Outra", kind: .ask, messageID: id, groupID: nil)
         }
         await team.settle()
-        // The chain of the first request has spent its tokens: a turn in it cannot ask any more.
-        hub.tokensUsed(DelegationLimits.maxTokensPerChain, chain: first.chainID)
-        let session = team.model.session(team.atlas.id)
-        session.chain = ChainContext(chainID: first.chainID, hop: 0, path: [team.atlas.id])
-        #expect(throws: DelegationRefusal.budgetSpent) {
-            try hub.submit(from: team.atlas.id, to: "Revisor", text: "Mais", kind: .ask, messageID: UUID(), groupID: nil)
-        }
-        session.chain = nil
-    }
-
-    @Test func aTurnsUsageCountsAgainstItsChain() async throws {
-        let team = Team { _ in say("x") }
-        defer { team.cleanUp() }
-        let hub = team.model.delegation
-        let first = try hub.submit(from: team.atlas.id, to: "Pesquisador", text: "Pesquise", kind: .ask, messageID: UUID(), groupID: nil)
-        await team.settle()
-        let session = team.model.session(team.pesquisador.id)
-        session.chain = ChainContext(chainID: first.chainID, hop: 1, path: [team.atlas.id, team.pesquisador.id])
-        team.model.recordUsage(UsageTotals(input: 1_000, cacheRead: 50_000, cacheWrite: 500, output: 250), botID: team.pesquisador.id,
-                               model: "custom/modelo", source: .delegation)
-        session.chain = nil
-        #expect(hub.chainStates[first.chainID]?.tokens == 1_750) // what is charged in full or written: not the cache reads
     }
 
     // MARK: Stopping
@@ -795,11 +767,11 @@ private actor Names {
 }
 
 @Suite @MainActor struct GroupsOverTheRealHubTests {
-    private func group(_ team: Team, budget: GroupBudget = GroupBudget()) -> OrbGroup {
+    private func group(_ team: Team) -> OrbGroup {
         let hub = team.model.groupHub
         hub.settle = .zero
         hub.isAppActive = { false }
-        return team.model.createGroup(name: "Lançamento", members: [team.atlas.id, team.pesquisador.id, team.revisor.id], budget: budget)!
+        return team.model.createGroup(name: "Lançamento", members: [team.atlas.id, team.pesquisador.id, team.revisor.id])!
     }
 
     private func finalPosts(_ team: Team, _ group: OrbGroup, _ text: String) -> Int {
@@ -854,7 +826,7 @@ private actor Names {
         #expect(side != nil)
     }
 
-    @Test func aSpentBudgetPausesAndContinuarResumesTheHeldAnswer() async throws {
+    @Test func theAnswerWakesTheOrchestratorWithNoPauseHoweverManyTurns() async throws {
         let team = Team { seen in
             switch seen.who {
             case "Atlas":
@@ -865,19 +837,13 @@ private actor Names {
             }
         }
         defer { team.cleanUp() }
-        let group = group(team, budget: GroupBudget(maxTurns: 2, maxTokens: 1_000_000))
+        let group = group(team)
         team.model.postUserMessage("Descubra o número", to: group.id)
-        await waitUntil("the group to pause") { team.model.groupLive(group.id).runState == .paused(.turns) }
-        // The answer is held, not delivered: Atlas is not woken while the group waits for the person.
-        #expect(team.model.groupSession(group.id)?.items.contains { if case .groupPause(let pause) = $0.kind { pause.state == .open } else { false } } == true)
-        #expect(!team.botTexts(team.atlas).contains("Fechado com o que o Pesquisador achou."))
-        #expect(await team.log.calls(by: "Atlas").count == 2) // its first turn (the ask and the words after it), not the wake
-        team.model.continueRun(group.id)
-        await waitUntil("the held answer to wake the orchestrator") { self.finalPosts(team, group, "Fechado com o que o Pesquisador achou.") == 1 }
+        await waitUntil("the answer to wake the orchestrator") { self.finalPosts(team, group, "Fechado com o que o Pesquisador achou.") == 1 }
         await waitUntil("the request to end") { team.model.groupHub.run(group.id) == nil }
         await team.settle()
         #expect(finalPosts(team, group, "Fechado com o que o Pesquisador achou.") == 1)
-        #expect(team.model.groupSession(group.id)?.items.contains { if case .groupPause(let pause) = $0.kind { pause.state == .continued } else { false } } == true)
+        #expect(team.model.groupSession(group.id)?.items.contains { if case .groupPause = $0.kind { true } else { false } } == false)
     }
 
     @Test func stoppingTheGroupCancelsEveryTurnAndPostsNothingMore() async throws {
@@ -911,46 +877,27 @@ private actor Names {
         #expect(!team.events(team.atlas).contains { $0.kind == .chainStopped })
     }
 
-    @Test func endingFromThePauseDoesNotWriteInTheOrchestratorsPrivateChat() async throws {
+    @Test func stoppingTheGroupDoesNotWriteInTheOrchestratorsPrivateChat() async throws {
+        let valve = TestGate()
         let team = Team { seen in
             switch seen.who {
             case "Atlas":
-                if seen.user.contains("<orb_reply") { return say("Isto não devia aparecer.") }
                 if seen.toolResult != nil { return say("Pedi ao Pesquisador.") }
                 return orbsCall("ask", to: "Pesquisador", "Pesquise.")
-            default: return say("Achei 42.")
+            default:
+                await valve.wait()
+                return say("Achei 42.")
             }
         }
         defer { team.cleanUp() }
-        let group = group(team, budget: GroupBudget(maxTurns: 2, maxTokens: 1_000_000))
+        let group = group(team)
         team.model.postUserMessage("Descubra o número", to: group.id)
-        await waitUntil("the group to pause") { team.model.groupLive(group.id).runState == .paused(.turns) }
-        team.model.endRun(group.id)
+        await waitUntil("the researcher to be asked") { team.request(from: team.atlas, to: team.pesquisador) != nil }
+        team.model.stopGroup(group.id)
+        await valve.open()
         await team.settle()
         #expect(team.model.groupLive(group.id).runState == .idle)
         #expect(!team.events(team.atlas).contains { $0.kind == .chainStopped })
         #expect(team.model.groupSession(group.id)?.items.contains { if case .event(let event) = $0.kind { event.kind == .groupStopped } else { false } } == true)
-    }
-
-    @Test func aPausedGroupDoesNotTimeOutAndContinuarStillDeliversTheHeldAnswer() async throws {
-        let team = Team { seen in
-            switch seen.who {
-            case "Atlas":
-                if seen.user.contains("<orb_reply") { return say("Fechado com o que o Pesquisador achou.") }
-                if seen.toolResult != nil { return say("Pedi ao Pesquisador.") }
-                return orbsCall("ask", to: "Pesquisador", "Pesquise.")
-            default: return say("Achei 42.")
-            }
-        }
-        defer { team.cleanUp() }
-        let group = group(team, budget: GroupBudget(maxTurns: 2, maxTokens: 1_000_000))
-        team.model.postUserMessage("Descubra o número", to: group.id)
-        await waitUntil("the group to pause") { team.model.groupLive(group.id).runState == .paused(.turns) }
-        // Half an hour and more pass while the group waits for the person.
-        team.model.delegation.sweep(now: .now.addingTimeInterval(DelegationLimits.requestTimeout + 60))
-        #expect(team.model.delegation.requests.values.allSatisfy { $0.state != .failed })
-        team.model.continueRun(group.id)
-        await waitUntil("the held answer to wake the orchestrator") { self.finalPosts(team, group, "Fechado com o que o Pesquisador achou.") == 1 }
-        await team.settle()
     }
 }

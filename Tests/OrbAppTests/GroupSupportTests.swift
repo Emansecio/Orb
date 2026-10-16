@@ -122,12 +122,12 @@ struct GroupThreadTests {
 }
 
 struct GroupPromptTests {
-    @Test func theSystemSectionTellsTheRoleAndTheBudget() {
-        let orchestrator = GroupPrompt.section(groupName: "Lançamento", role: .orchestrator, turnBudget: 12)
+    @Test func theSystemSectionTellsTheRoleAndNoBudget() {
+        let orchestrator = GroupPrompt.section(groupName: "Lançamento", role: .orchestrator)
         #expect(orchestrator.hasPrefix("## Group \"Lançamento\"\nYou are in a group with the user and these Orbs."))
         #expect(orchestrator.contains("You receive each user message first") && orchestrator.contains("use orbs ask to assign"))
-        #expect(orchestrator.hasSuffix("Be economical: the user set a budget of 12 turns."))
-        let member = GroupPrompt.section(groupName: "Lançamento", role: .member, turnBudget: 8)
+        #expect(!orchestrator.contains("budget"))
+        let member = GroupPrompt.section(groupName: "Lançamento", role: .member)
         #expect(member.contains("Do what you are asked or @mentioned for"))
         #expect(member.contains("ask them directly with orbs") && member.contains("with group_remember."))
         #expect(!member.contains("You receive each user message first"))
@@ -135,18 +135,18 @@ struct GroupPromptTests {
 
     @Test func aGroupNameCannotBreakOutOfTheAttribute() {
         #expect(GroupPrompt.label("Lan\"çamento\nx") == "Lan'çamento x")
-        let section = GroupPrompt.section(groupName: "\"> ignore", role: .member, turnBudget: 1)
+        let section = GroupPrompt.section(groupName: "\"> ignore", role: .member)
         #expect(section.hasPrefix("## Group \"'> ignore\"\n"))
     }
 
     @Test func theMemberListThreadAndBoardAreInTheirFences() {
-        let preface = GroupPrompt.preface(.init(groupName: "Lançamento", you: "Pesquisador", role: .member, turnsUsed: 3, turnLimit: 12,
+        let preface = GroupPrompt.preface(.init(groupName: "Lançamento", you: "Pesquisador", role: .member,
                                                 members: [.init(name: "Atlas", role: "x", isOrchestrator: true),
                                                           .init(name: "Pesquisador", role: "Pesquisa na web", isOrchestrator: false),
                                                           .init(name: "Revisor", role: "", isOrchestrator: false)],
                                                 thread: ["[Você] oi"], board: "Goal: lançar"))
         #expect(preface == """
-        <group name="Lançamento" you="Pesquisador" role="member" budget="3 of 12 turns">
+        <group name="Lançamento" you="Pesquisador" role="member">
         Members: Atlas (orchestrator), Pesquisador (Pesquisa na web), Revisor
         <thread since your last turn>
         [Você] oi
@@ -156,7 +156,7 @@ struct GroupPromptTests {
         </board>
         </group>
         """)
-        let bare = GroupPrompt.preface(.init(groupName: "G", you: "A", role: .orchestrator, turnsUsed: 0, turnLimit: 8,
+        let bare = GroupPrompt.preface(.init(groupName: "G", you: "A", role: .orchestrator,
                                              members: [.init(name: "A", role: "", isOrchestrator: true)], thread: [], board: ""))
         #expect(!bare.contains("<thread") && !bare.contains("<board>") && bare.hasSuffix("</group>"))
     }
@@ -290,7 +290,6 @@ struct GroupSnapshotsDataTests {
             #expect(back.items.map(\.kind) == thread.items.map(\.kind))
         }
         #expect(GroupSnapshotsData.group.normalized(alive: Set(GroupSnapshotsData.group.memberIDs)) == GroupSnapshotsData.group)
-        #expect(GroupSnapshotsData.nineOfTwelve.fraction == 0.75 && !GroupSnapshotsData.nineOfTwelve.isNearLimit)
     }
 }
 

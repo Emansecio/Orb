@@ -80,8 +80,6 @@ enum GroupSnapshotsData {
                        turnLimit: 12, tokenLimit: 150_000)
     }
 
-    /// The counter of a request at 9 of 12 turns.
-    static var nineOfTwelve: GroupBudgetUsage {
-        GroupBudgetUsage(turnsUsed: 9, turnLimit: 12, tokensUsed: 71_000, tokenLimit: 150_000)
-    }
+    /// What a request spent after nine turns.
+    static var nineTurns: GroupUsage { GroupUsage(turnsUsed: 9, tokensUsed: 71_000) }
 }

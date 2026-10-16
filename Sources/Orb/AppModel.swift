@@ -1544,11 +1544,6 @@ final class AppModel {
         if multi.orbs { context.orbs = delegationHandler(for: botID) }
         context.sideRun = session.routineID.flatMap { id in session.sideKind.map { SideRunInfo(kind: $0, id: id, chain: session.chain) } }
         let teammates = multi.orbs ? orbsSection(for: bot) : ""
-        let maxSteps = session.sideKind == .delegation || session.sideKind == .group ? DelegationLimits.sideRunMaxSteps
-            : session.routineID != nil ? AgentEngine.routineMaxSteps : AgentEngine.defaultMaxSteps
-        // Past the step limit the task goes on by itself while its plan moves forward: only in your own conversation
-        // (not a routine, another Orb's request or a group's turn), and only while Ajustes allows it.
-        let stretches = session.routineID == nil && groupTurn == nil && continuesLongTasks ? AutoContinue.maxStretches : 1
         let baseContext = context
         // MARK: end MultiOrb (WP1)
         let lastWorkspaceHash = session.conversation?.workspaceHash
@@ -1620,7 +1615,7 @@ final class AppModel {
             let request = TurnRequest(bot: bot, model: ref.model, system: system, history: history,
                                       prompt: TurnPreface.prepend(built.preface, to: message),
                                       client: client, tools: tools, context: context, budget: budget, ledger: ledger,
-                                      chunks: chunks, maxSteps: maxSteps, stretches: stretches,
+                                      chunks: chunks, maxSteps: .max, // no limit: the turn runs until the model answers or you stop it (⌘.)
                                       unattended: session.routineID != nil && session.sideKind != .group,
                                       turnGrants: turnGrants, permissions: permissionSource(for: bot),
                                       images: pictures, requestItem: bubble, supportsImages: sees,
@@ -1639,9 +1634,6 @@ final class AppModel {
         }
         return true
     }
-
-    /// Ajustes → Geral: a long task goes on past the step limit while its plan moves forward (on unless turned off).
-    var continuesLongTasks: Bool { preferences.object(forKey: AutoContinue.settingKey) as? Bool ?? true }
 
     // MARK: Context
 

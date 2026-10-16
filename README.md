@@ -113,7 +113,7 @@ você a um modelo nem a uma cota.
 | **Memória** | por bot, guardada pelo serviço | páginas Markdown que você abre, edita e apaga (até no Obsidian), com busca local |
 | **Skills** | você pede para salvar ou grava uma demonstração | depois de uma tarefa longa, o Orb propõe a skill sozinho, e você aprova |
 | **Espaço de trabalho** | um computador para todos os bots, com os mesmos arquivos e logins | cada Orb tem a sua pasta, o seu navegador e os seus logins |
-| **Equipe** | até 6 bots num grupo | grupos de 2 a 8 Orbs com orquestrador, quadro compartilhado e orçamento; fora dos grupos, os Orbs também pedem ajuda uns aos outros sozinhos |
+| **Equipe** | até 6 bots num grupo | grupos de 2 a 8 Orbs com orquestrador e quadro compartilhado; fora dos grupos, os Orbs também pedem ajuda uns aos outros sozinhos |
 | **Seus dados** | na nuvem do serviço | no seu Mac, com as chaves no Keychain e sem telemetria |
 | **Código** | fechado | aberto |
 
@@ -149,11 +149,11 @@ você a um modelo nem a uma cota.
 
 ### Uma equipe de Orbs
 
-- Os Orbs pedem ajuda uns aos outros por conta própria, com limites que evitam loops: no máximo 4 encadeamentos,
-  12 mensagens e 200 mil tokens por cadeia. Um Orb que está esperando uma resposta não pode ser chamado de volta por quem
-  ele está esperando.
+- Os Orbs pedem ajuda uns aos outros por conta própria, sem limite de pedidos, encadeamentos ou turnos: você para uma
+  conversa entre eles com ⌘. ou Parar. Um Orb que está esperando uma resposta não pode ser chamado de volta por quem ele
+  está esperando.
 - Num grupo, um Orb orquestra: divide o pedido, chama os membros e junta o resultado. O grupo tem um quadro compartilhado
-  (objetivo, combinados e fatos) e um orçamento de turnos e tokens.
+  (objetivo, combinados e fatos), e o topo mostra quantos turnos e tokens o pedido já usou.
 - Um Orb pode propor a criação de outro, especializado. A proposta aparece num cartão no chat, e o Orb novo só passa a existir
   quando você aceita.
 

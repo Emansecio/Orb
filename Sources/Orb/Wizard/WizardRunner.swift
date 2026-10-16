@@ -245,7 +245,7 @@ final class WizardRunner {
                 failure = message
             case .notice(let text):
                 if text == AgentEngine.pausedNotice(after: Self.maxSteps) { reachedStepLimit = true }
-            case .status, .approval, .toolFinished, .pendingUsage, .taskPaused, .stretch, .steered, .compacted:
+            case .status, .approval, .toolFinished, .pendingUsage, .taskPaused, .steered, .compacted:
                 break
             }
         }

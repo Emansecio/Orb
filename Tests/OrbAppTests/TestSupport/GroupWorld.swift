@@ -23,7 +23,7 @@ final class GroupWorld {
     /// `names` are the Orbs (the first three of any list are Atlas, Pesquisador and Revisor by default); with `group` the first
     /// `members` of them are made a group named "Lançamento", the first as orchestrator.
     init(names: [String] = ["Atlas", "Pesquisador", "Revisor"], members: Int? = nil, makesGroup: Bool = true,
-         budget: GroupBudget = GroupBudget(), policy: GroupPolicy = GroupPolicy()) {
+         policy: GroupPolicy = GroupPolicy()) {
         var state = AppState(bots: names.map { Bot(name: $0, role: "Papel de \($0)", orb: OrbConfig()) })
         state.bots = state.bots.map { bot in
             var bot = bot
@@ -43,7 +43,7 @@ final class GroupWorld {
         hub.postNotice = { [weak self] title, body, id in self?.notices.append((title, body, id)) }
         if makesGroup {
             let ids = bots.prefix(members ?? bots.count).map(\.id)
-            group = model.createGroup(name: "Lançamento", members: ids, budget: budget, policy: policy)
+            group = model.createGroup(name: "Lançamento", members: ids, policy: policy)
         }
     }
 

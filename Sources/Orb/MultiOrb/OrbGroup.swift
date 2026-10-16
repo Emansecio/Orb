@@ -8,8 +8,6 @@ struct OrbGroup: Identifiable, Codable, Sendable, Equatable {
     /// In display order; includes the orchestrator.
     var memberIDs: [UUID]
     var orchestratorID: UUID
-    /// What one request of the user may spend.
-    var budget = GroupBudget()
     var policy = GroupPolicy()
     var createdAt = Date.now
 
@@ -39,23 +37,8 @@ extension OrbGroup {
         name = try c.value(.name, default: "")
         memberIDs = try c.lossyArray(.memberIDs)
         orchestratorID = try c.decodeIfPresent(UUID.self, forKey: .orchestratorID) ?? memberIDs.first ?? UUID()
-        budget = (try? c.decodeIfPresent(GroupBudget.self, forKey: .budget)) ?? GroupBudget()
         policy = (try? c.decodeIfPresent(GroupPolicy.self, forKey: .policy)) ?? GroupPolicy()
         createdAt = try c.value(.createdAt, default: Date.now)
-    }
-}
-
-/// What one request of the user may spend in a group: the turns and the tokens, before the group pauses and asks.
-struct GroupBudget: Codable, Sendable, Equatable {
-    var maxTurns = 12
-    var maxTokens = 150_000
-}
-
-extension GroupBudget {
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        maxTurns = max(1, try c.value(.maxTurns, default: 12))
-        maxTokens = max(1, try c.value(.maxTokens, default: 150_000))
     }
 }
 
@@ -71,7 +54,8 @@ struct GroupPolicy: Codable, Sendable, Equatable {
     }
 }
 
-/// The card a group's thread shows when a request reached its budget and the group paused (`TranscriptItem.Kind.groupPause`).
+/// The card a group's thread showed when a request reached its budget and the group paused (`TranscriptItem.Kind.groupPause`).
+/// Groups have no budget anymore: the type stays so threads saved with these cards still open, as a record.
 struct GroupPauseItem: Codable, Equatable, Sendable {
     enum Reason: String, Codable, Sendable {
         case turns, tokens

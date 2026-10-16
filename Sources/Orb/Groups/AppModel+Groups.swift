@@ -2,15 +2,8 @@ import AppKit
 import Foundation
 
 // The app's side of the groups (docs/historico/MULTI-ORBS.md, 7): making, changing and deleting them, keeping them true to the Orbs that
-// exist, a group's thread and live state, and the doors the person uses to talk to a group, continue it, end it or stop it.
+// exist, a group's thread and live state, and the doors the person uses to talk to a group or stop it.
 // The loop itself is `GroupHub`.
-
-extension GroupBudget {
-    /// The presets of the panel and the new-group sheet (Econômico, Equilibrado, Amplo).
-    static let economic = GroupBudget(maxTurns: 8, maxTokens: 100_000)
-    static let balanced = GroupBudget(maxTurns: 12, maxTokens: 150_000)
-    static let wide = GroupBudget(maxTurns: 24, maxTokens: 300_000)
-}
 
 extension AppModel {
     // MARK: Looking
@@ -79,13 +72,13 @@ extension AppModel {
     /// Nil when the members do not fit. `objective` is the group's goal on its board.
     @discardableResult
     func createGroup(name: String, members: [UUID], orchestrator: UUID? = nil, objective: String = "",
-                     budget: GroupBudget = GroupBudget(), policy: GroupPolicy = GroupPolicy()) -> OrbGroup? {
+                     policy: GroupPolicy = GroupPolicy()) -> OrbGroup? {
         var seen = Set<UUID>()
         let ids = members.filter { bot($0) != nil && seen.insert($0).inserted }
         guard OrbGroup.memberLimits.contains(ids.count) else { return nil }
         let title = Self.groupTitle(name, fallback: ids.compactMap { bot($0)?.name })
         let group = OrbGroup(name: title, memberIDs: ids, orchestratorID: orchestrator.flatMap { ids.contains($0) ? $0 : nil } ?? ids[0],
-                             budget: budget, policy: policy)
+                             policy: policy)
         groups.append(group)
         let session = groupSession(group.id)
         session?.append(.event(OrbEvent(kind: .groupCreated, detail: "\(title) · \(ids.count)", groupID: group.id)))
@@ -137,11 +130,6 @@ extension AppModel {
         guard let index = groups.firstIndex(where: { $0.id == groupID }), groups[index].memberIDs.contains(botID) else { return false }
         if groups[index].orchestratorID != botID { groups[index].orchestratorID = botID }
         return true
-    }
-
-    func setGroupBudget(_ budget: GroupBudget, of groupID: UUID) {
-        guard let index = groups.firstIndex(where: { $0.id == groupID }), groups[index].budget != budget else { return }
-        groups[index].budget = budget
     }
 
     func setGroupPolicy(_ policy: GroupPolicy, of groupID: UUID) {
@@ -230,12 +218,6 @@ extension AppModel {
     @discardableResult
     func postUserMessage(_ text: String, to groupID: UUID) -> Bool { groupHub.postUserMessage(text, to: groupID) }
 
-    /// "Continuar" on the pause card.
-    func continueRun(_ groupID: UUID) { groupHub.continueRun(groupID) }
-
-    /// "Encerrar" on the pause card.
-    func endRun(_ groupID: UUID) { groupHub.endRun(groupID) }
-
     /// "Parar grupo" and ⌘.: everything the group is doing stops.
     func stopGroup(_ groupID: UUID) { groupHub.stopGroup(groupID) }
 
@@ -286,7 +268,7 @@ extension AppModel {
         let offering = MultiOrbOffering(orbs: isOrchestrator || group.policy.membersMayTalk, propose: false, groupMemory: true)
         return GroupTurnExtras(
             groupID: group.id, runID: run.id, requestID: turn.requestID,
-            groupName: group.name, role: role, turnBudget: run.turnLimit,
+            groupName: group.name, role: role,
             offering: offering, grants: [PermissionRule(family: .delegation), PermissionRule(family: .groupMemory)],
             bank: memory.groupBank(for: group.id),
             sideRun: SideRunInfo(kind: .group, id: turn.requestID,
@@ -309,7 +291,6 @@ struct GroupTurnExtras {
     var requestID: UUID
     var groupName: String
     var role: GroupPrompt.Role
-    var turnBudget: Int
     var offering: MultiOrbOffering
     var grants: [PermissionRule]
     var bank: MemoryBank
@@ -317,6 +298,6 @@ struct GroupTurnExtras {
 
     /// The group section of the system prompt.
     var system: String {
-        GroupPrompt.section(groupName: groupName, role: role, turnBudget: turnBudget)
+        GroupPrompt.section(groupName: groupName, role: role)
     }
 }

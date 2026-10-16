@@ -281,8 +281,6 @@ extension BotSession {
             scheduleSave(delay: Self.streamingSaveInterval)
         case .steered(let messageID):
             model.deliverSteered(messageID, to: id)
-        case .stretch(let number, let limit):
-            model.live(id).setStretch(number > 1 ? TurnStretch(number: number, limit: limit) : nil)
         }
     }
 

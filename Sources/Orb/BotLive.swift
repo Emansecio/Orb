@@ -104,9 +104,6 @@ final class BotLive {
     private(set) var jobs: [BackgroundJobs.Snapshot] = []
     /// The turn waits for a command that can go on in the background (`CommandRelease`): the working line offers it.
     private(set) var commandWaited = false
-    /// The stretch the running turn is in once it went on by itself past the step limit (`AutoContinue`), for the line
-    /// of the plan; nil in the first stretch and when no turn runs.
-    private(set) var stretch: TurnStretch?
 
     // MARK: What the activity follows
 
@@ -157,7 +154,6 @@ final class BotLive {
     func setStatus(_ text: String?) {
         if text == nil { // the end of a turn does not wait for the phrase on screen
             setWork(nil)
-            setStretch(nil)
         }
         guard text != status else { return }
         status = text
@@ -216,7 +212,6 @@ final class BotLive {
 
     func setCommandWaited(_ waited: Bool) { assign(\.commandWaited, to: waited) }
 
-    func setStretch(_ stretch: TurnStretch?) { assign(\.stretch, to: stretch) }
 
     func setUnread(_ count: Int) { assign(\.unread, to: count) }
 

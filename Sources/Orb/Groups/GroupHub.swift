@@ -4,13 +4,12 @@ import Foundation
 /// The runtime of the groups: the loop of docs/historico/MULTI-ORBS.md 7.3. The person's message goes to the orchestrator (or to the members
 /// it @mentions); the orchestrator plans and assigns with `orbs ask`; the members work in turns of their own, in parallel, and talk
 /// to each other when they need to; every answer wakes whoever asked, until the orchestrator closes the round with the final
-/// answer and nothing is left to do. A request has a budget (turns and tokens); when it is spent the group pauses and the
-/// person decides (Continuar / Encerrar). Parar grupo cancels everything.
+/// answer and nothing is left to do. Nothing limits a request's turns or tokens (the header counts them); Parar grupo cancels
+/// everything.
 ///
 /// The hub does not run the turns. It asks the delegation service for them (`submitGroupTurn`) and is told, through
 /// `GroupTurnHooks`, when each one is about to start (`prompt`), starts and ends. What it needs from the delegation hub, besides
-/// the WP0 interfaces: `canStartTurn` before a queued turn or a wake-up starts and `refusal(forRequestFrom:…)` before a member's
-/// `orbs ask` is accepted (both default to "yes"), and `resumeHeldWork` after "Continuar".
+/// the WP0 interfaces: `refusal(forRequestFrom:…)` before a member's `orbs ask` is accepted (the group's policy).
 @MainActor
 final class GroupHub: GroupTurnHooks {
     /// The turn a member is in right now (the engine asks `AppModel.groupTurnExtras` which group it belongs to).
@@ -53,7 +52,7 @@ final class GroupHub: GroupTurnHooks {
 
     func run(_ groupID: UUID) -> GroupRun? { runs[groupID] }
 
-    /// The request of the group that is going on (running or paused).
+    /// The request of the group that is going on.
     func activeRun(_ groupID: UUID) -> GroupRun? { runs[groupID].flatMap { $0.isOpen ? $0 : nil } }
 
     func isActive(_ groupID: UUID) -> Bool { activeRun(groupID) != nil }
@@ -65,9 +64,8 @@ final class GroupHub: GroupTurnHooks {
 
     // MARK: The person's messages
 
-    /// The person writes to the group. The message always goes into the thread; it reaches the orchestrator, or the members it
-    /// @mentions, unless the group is paused (then it waits for the person's decision on the card). Returns false when nothing
-    /// was sent (no such group, an empty message, the app is resetting).
+    /// The person writes to the group. The message goes into the thread and reaches the orchestrator, or the members it
+    /// @mentions. Returns false when nothing was sent (no such group, an empty message, the app is resetting).
     @discardableResult
     func postUserMessage(_ raw: String, to groupID: UUID) -> Bool {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -84,24 +82,13 @@ final class GroupHub: GroupTurnHooks {
             live.setRunState(.running)
             refreshLive(groupID)
         }
-        for member in targets {
-            if runs[groupID]?.isPaused == true {
-                runs[groupID]?.held.append(.init(member: member, text: text))
-            } else {
-                enqueue(member, text: text, in: groupID)
-            }
-        }
+        for member in targets { enqueue(member, text: text, in: groupID) }
         return true
     }
 
     /// Asks `member` for a turn on behalf of the person.
     private func enqueue(_ member: UUID, text: String, in groupID: UUID) {
         guard let model, let run = activeRun(groupID), model.group(groupID)?.memberIDs.contains(member) == true else { return }
-        guard run.budgetAllows else {
-            runs[groupID]?.held.append(.init(member: member, text: text))
-            pause(groupID)
-            return
-        }
         let chain = ChainContext(chainID: run.id, hop: 1, path: [], groupID: groupID, serving: nil)
         let request = delegation.submitGroupTurn(member: member, text: text, chain: chain, groupID: groupID, askedBy: nil)
         switch request.state {
@@ -128,13 +115,12 @@ final class GroupHub: GroupTurnHooks {
         let thread = GroupThread.lines(from: slice, member: member, request: request.envelope.id,
                                        userText: fromUser ? request.envelope.text.trimmingCharacters(in: .whitespacesAndNewlines) : nil)
         let board = await GroupBoard.brief(bank: model.memory.groupBank(for: group.id), message: request.envelope.text)
-        let current = runs[group.id] ?? run
         let members = group.memberIDs.map { id in
             GroupPrompt.Member(name: name(of: id), role: model.bot(id)?.role ?? "", isOrchestrator: id == group.orchestratorID)
         }
         return GroupPrompt.preface(.init(groupName: group.name, you: name(of: member),
                                          role: member == group.orchestratorID ? .orchestrator : .member,
-                                         turnsUsed: current.turnsUsed, turnLimit: current.turnLimit, members: members,
+                                         members: members,
                                          thread: thread, board: board))
     }
 
@@ -190,41 +176,19 @@ final class GroupHub: GroupTurnHooks {
         scheduleIdleCheck(group.id)
     }
 
-    func canStartTurn(_ request: DelegationRequest) -> Bool {
-        guard let (group, run) = lookup(request) else { return true }
-        if run.isPaused { return false }
-        guard run.budgetAllows else {
-            pause(group.id)
-            return false
-        }
-        return true
-    }
-
     func refusal(forRequestFrom asker: UUID, to member: UUID, chain: UUID) -> DelegationRefusal? {
         guard let entry = runs.first(where: { $0.value.id == chain }), let group = model?.group(entry.key) else { return nil }
         guard group.memberIDs.contains(member), group.memberIDs.contains(asker) else { return .notInGroup }
-        if entry.value.isPaused || !entry.value.budgetAllows {
-            pause(group.id)
-            return .budgetSpent
-        }
         if !group.policy.membersMayTalk, asker != group.orchestratorID { return .notInGroup }
         return nil
     }
 
     // MARK: Tokens
 
-    /// Tokens a member's turn used (from the usage record of the turn): they count against the request's budget. The request is
-    /// not paused here; the next turn that wants to start finds the budget spent (`canStartTurn`), so a request that was about to
-    /// end anyway does not stop to ask.
+    /// Tokens a member's turn used (from the usage record of the turn), for the request's count.
     func noteTokens(_ tokens: Int, botID: UUID) {
         guard tokens > 0, let turn = activeTurns[botID] else { return }
         addTokens(tokens, group: turn.groupID, run: turn.runID)
-    }
-
-    /// The same, by chain (the delegation hub's `tokensUsed(_:chain:)`).
-    func tokensUsed(_ tokens: Int, chain: UUID) {
-        guard tokens > 0, let entry = runs.first(where: { $0.value.id == chain }) else { return }
-        addTokens(tokens, group: entry.key, run: chain)
     }
 
     private func addTokens(_ tokens: Int, group groupID: UUID, run runID: UUID) {
@@ -233,39 +197,7 @@ final class GroupHub: GroupTurnHooks {
         refreshLive(groupID)
     }
 
-    // MARK: Budget: pause, continue, end
-
-    /// Pauses the request: no new turn starts (the ones running finish), and a card in the thread asks the person.
-    func pause(_ groupID: UUID) {
-        guard let model, let run = runs[groupID], run.phase == .active, let reason = run.exhausted,
-              let session = model.groupSession(groupID) else { return }
-        update(groupID) { $0.phase = .paused(reason) }
-        session.append(.groupPause(GroupPauseItem(groupID: groupID, runID: run.id, reason: reason, state: .open,
-                                                  turnsUsed: run.turnsUsed, tokensUsed: run.tokensUsed,
-                                                  turnLimit: run.turnLimit, tokenLimit: run.tokenLimit)))
-        addUnread(groupID)
-        refreshLive(groupID)
-        notifyAway(groupID, title: model.group(groupID)?.name ?? "Grupo", body: "O grupo pausou: continuar?")
-    }
-
-    /// "Continuar": another window of the budget on top of what was spent; the turns held back go out.
-    func continueRun(_ groupID: UUID) {
-        guard let model, let group = model.group(groupID), let run = runs[groupID], run.isPaused else { return }
-        update(groupID) { run in
-            run.extend(by: group.budget)
-            run.phase = .active
-        }
-        resolvePauseCards(groupID, run: run.id, to: .continued)
-        let held = runs[groupID]?.held ?? []
-        runs[groupID]?.held = []
-        refreshLive(groupID)
-        for turn in held { enqueue(turn.member, text: turn.text, in: groupID) }
-        delegation.resumeHeldWork(chain: run.id)
-        scheduleIdleCheck(groupID)
-    }
-
-    /// "Encerrar": the queue is cancelled and the request is over.
-    func endRun(_ groupID: UUID) { terminate(groupID, by: .budget) }
+    // MARK: Stopping
 
     /// "Parar grupo" and ⌘.: everything the group is doing stops.
     func stopGroup(_ groupID: UUID) { terminate(groupID, by: .user) }
@@ -274,31 +206,17 @@ final class GroupHub: GroupTurnHooks {
         guard let model, let run = activeRun(groupID) else { return }
         let members = Set(run.running.map(\.member)).union(activeTurns.filter { $0.value.runID == run.id }.keys)
         runs[groupID]?.phase = .stopped
-        runs[groupID]?.held = []
         runs[groupID]?.asked = [:]
         delegation.cancelChain(run.id, by: reason)
         for member in members {
             activeTurns[member] = nil
             model.stop(member, startsQueuedRoutines: false)
         }
-        resolvePauseCards(groupID, run: run.id, to: .ended)
         if writesEvent {
             model.groupSession(groupID)?.append(.event(OrbEvent(kind: .groupStopped, chainID: run.id, groupID: groupID)))
         }
         runs[groupID] = nil
         refreshLive(groupID)
-    }
-
-    private func resolvePauseCards(_ groupID: UUID, run runID: UUID, to state: GroupPauseItem.State) {
-        model?.groupSession(groupID)?.updateAll(where: { kind in
-            if case .groupPause(let pause) = kind { return pause.runID == runID && pause.state == .open }
-            return false
-        }, { kind in
-            if case .groupPause(var pause) = kind {
-                pause.state = state
-                kind = .groupPause(pause)
-            }
-        })
     }
 
     // MARK: When the request is over
@@ -316,7 +234,7 @@ final class GroupHub: GroupTurnHooks {
     /// Whether the request has nothing left: no turn running, none asked and not started, no one waiting for an answer or
     /// holding one to deliver.
     private func isIdle(_ run: GroupRun, group: OrbGroup) -> Bool {
-        guard run.phase == .active, run.running.isEmpty, run.asked.isEmpty, run.held.isEmpty else { return false }
+        guard run.phase == .active, run.running.isEmpty, run.asked.isEmpty else { return false }
         for member in group.memberIDs {
             if delegation.chains(involving: member).contains(run.id) { return false }
             let open = delegation.openRequests(from: member).contains {
@@ -385,23 +303,19 @@ final class GroupHub: GroupTurnHooks {
             live.setTyping([])
             live.setWaiting([])
             live.setWork(nil)
-            live.setBudget(nil)
+            live.setUsage(nil)
             return
         }
-        switch run.phase {
-        case .active: live.setRunState(.running)
-        case .paused(let reason): live.setRunState(.paused(reason))
-        case .done, .stopped: live.setRunState(.idle)
-        }
+        live.setRunState(run.phase == .active ? .running : .idle)
         var typing: [UUID] = []
         for turn in run.running where !typing.contains(turn.member) { typing.append(turn.member) }
         live.setTyping(typing)
         let waiting = typing.filter { model.liveBot($0)?.needsYou == true }
         live.setWaiting(waiting)
-        live.setBudget(run.usage)
+        live.setUsage(run.usage)
         live.setWork(GroupPresence.line(typing: typing.map { name(of: $0) }, waiting: waiting.map { name(of: $0) },
                                         orchestratorOnly: !typing.isEmpty && typing.allSatisfy { $0 == group.orchestratorID },
-                                        orchestrator: name(of: group.orchestratorID), paused: run.isPaused))
+                                        orchestrator: name(of: group.orchestratorID)))
     }
 
     // MARK: Unread and banners
@@ -482,10 +396,9 @@ final class GroupHub: GroupTurnHooks {
 /// What the group says it is doing, in the words the sidebar and the header use (the presence strip's half is in
 /// `GroupPresenceStrip.swift`).
 extension GroupPresence {
-    /// "Atlas coordena…", "Pesquisador trabalhando…", "Pesquisador e Revisor trabalhando…", "Pesquisador espera você", "Pausado:
-    /// continuar?"; nil when no one is in a turn.
-    static func line(typing: [String], waiting: [String], orchestratorOnly: Bool, orchestrator: String, paused: Bool) -> WorkLine? {
-        if paused { return WorkLine(verb: "Pausado: continuar?", tone: .waiting) }
+    /// "Atlas coordena…", "Pesquisador trabalhando…", "Pesquisador e Revisor trabalhando…", "Pesquisador espera você"; nil
+    /// when no one is in a turn.
+    static func line(typing: [String], waiting: [String], orchestratorOnly: Bool, orchestrator: String) -> WorkLine? {
         if !waiting.isEmpty { return WorkLine(verb: "\(list(waiting)) \(waiting.count == 1 ? "espera" : "esperam") você", tone: .waiting) }
         guard !typing.isEmpty else { return nil }
         if orchestratorOnly { return WorkLine(verb: "\(orchestrator) coordena") }

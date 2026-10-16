@@ -6,8 +6,6 @@ enum GroupRunState: Equatable, Sendable {
     /// No request is running.
     case idle
     case running
-    /// The budget was reached and the group waits for the person (Continuar / Encerrar).
-    case paused(GroupPauseItem.Reason)
 }
 
 /// One group as the views see it: what changes while the app runs (who is typing, whether the group waits for you, the
@@ -21,15 +19,14 @@ final class GroupLive {
     private(set) var runState = GroupRunState.idle
     /// The members in a turn right now, in the order they began.
     private(set) var typing: [UUID] = []
-    /// What the group says it is doing ("Atlas coordena…", "Pesquisador e Revisor trabalhando…", "Pausado: continuar?"); nil
-    /// when it does nothing.
+    /// What the group says it is doing ("Atlas coordena…", "Pesquisador e Revisor trabalhando…"); nil when it does nothing.
     private(set) var work: WorkLine?
     /// A member waits for your answer (an approval card).
     private(set) var needsYou = false
     /// The members that wait for your answer.
     private(set) var waiting: [UUID] = []
-    /// What the running request has spent of its budget; nil when none runs.
-    private(set) var budget: GroupBudgetUsage?
+    /// What the running request has spent so far; nil when none runs.
+    private(set) var usage: GroupUsage?
 
     init(id: UUID) { self.id = id }
 
@@ -50,5 +47,5 @@ final class GroupLive {
         if needsYou != !members.isEmpty { needsYou = !members.isEmpty }
     }
 
-    func setBudget(_ usage: GroupBudgetUsage?) { if budget != usage { budget = usage } }
+    func setUsage(_ usage: GroupUsage?) { if self.usage != usage { self.usage = usage } }
 }

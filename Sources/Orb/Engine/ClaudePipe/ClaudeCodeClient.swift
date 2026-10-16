@@ -266,7 +266,7 @@ final class ClaudeCodeClient: LLMClient, @unchecked Sendable {
                 mailbox = ClaudePipeMailbox(directory: mailboxFolder)
             }
             arguments += ["--setting-sources", "", "--disable-slash-commands", "--no-session-persistence", "--permission-prompt-tool", "stdio",
-                          "--permission-mode", "default", "--max-turns", "1000"]
+                          "--permission-mode", "default"]
             if model != "default", !model.isEmpty { arguments.append("--model=\(model)") }
             if let effort, !effort.isEmpty { arguments.append("--effort=\(effort)") }
 

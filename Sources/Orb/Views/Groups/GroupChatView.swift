@@ -81,7 +81,7 @@ private struct GroupHeaderBar: View {
         let looks = model.groupLooks(group)
         GroupHeader(name: group.name,
                     members: looks.map { StackedAvatars.Member(id: $0.id, orb: $0.orb, activity: model.live($0.id).activity) },
-                    orbCount: looks.count, usage: live.budget, isActive: live.runState != .idle,
+                    orbCount: looks.count, usage: live.usage, isActive: live.runState != .idle,
                     onStop: { model.stopGroup(group.id) }, onPanel: { model.toggleInspector() })
     }
 }

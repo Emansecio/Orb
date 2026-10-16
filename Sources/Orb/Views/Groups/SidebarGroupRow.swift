@@ -2,9 +2,8 @@ import SwiftUI
 
 /// The sentences of a group's sidebar row, as plain values the tests read.
 enum GroupRowText {
-    /// The second line: what the group does ("Pesquisador está escrevendo…"), "Pausado: continuar?", or "3 Orbs".
-    static func secondLine(presence: String?, orbCount: Int, paused: Bool) -> String {
-        if paused { return "Pausado: continuar?" }
+    /// The second line: what the group does ("Pesquisador está escrevendo…"), or "3 Orbs".
+    static func secondLine(presence: String?, orbCount: Int) -> String {
         if let presence { return presence }
         return orbCount == 1 ? "1 Orb" : "\(orbCount) Orbs"
     }
@@ -56,7 +55,6 @@ struct SidebarGroupRow: View {
         let looks = model.groupLooks(group)
         let presenceItems = model.groupPresence(group, live: live)
         let presence = GroupPresence.sidebarText(presenceItems)
-        let paused: Bool = { if case .paused = live.runState { true } else { false } }()
         let working = live.runState == .running
         Button {
             model.selection = .group(group.id)
@@ -69,9 +67,9 @@ struct SidebarGroupRow: View {
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Palette.ink)
                         .lineLimit(1)
-                    Text(GroupRowText.secondLine(presence: presence, orbCount: looks.count, paused: paused))
+                    Text(GroupRowText.secondLine(presence: presence, orbCount: looks.count))
                         .font(.system(size: 11))
-                        .foregroundStyle(live.needsYou || paused ? Palette.warn : Palette.faint)
+                        .foregroundStyle(live.needsYou ? Palette.warn : Palette.faint)
                         .lineLimit(1)
                         .contentTransition(.opacity)
                         .help(GroupPresence.text(presenceItems) ?? "")

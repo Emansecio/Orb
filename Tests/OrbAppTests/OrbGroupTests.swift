@@ -61,22 +61,15 @@ struct OrbGroupMakingTests {
         #expect(brief.contains("Goal: Lançar a versão 2 em outubro."))
     }
 
-    @Test @MainActor func renamingChangingTheBudgetAndThePolicyAreSavedWithTheState() throws {
+    @Test @MainActor func renamingAndThePolicyAreSavedWithTheState() throws {
         let world = GroupWorld()
         world.model.renameGroup(world.groupID, to: "  Produto  ")
         world.model.renameGroup(world.groupID, to: "   ") // ignored
-        world.model.setGroupBudget(.wide, of: world.groupID)
         world.model.setGroupPolicy(GroupPolicy(membersMayTalk: false), of: world.groupID)
         let group = try #require(world.model.group(world.groupID))
-        #expect(group.name == "Produto" && group.budget == GroupBudget(maxTurns: 24, maxTokens: 300_000) && !group.policy.membersMayTalk)
+        #expect(group.name == "Produto" && !group.policy.membersMayTalk)
         world.model.saveNow()
         #expect(world.store.readState().value?.groups == [group])
-    }
-
-    @Test @MainActor func theBudgetPresetsAreTheOnesOfTheDocument() {
-        #expect(GroupBudget.economic == GroupBudget(maxTurns: 8, maxTokens: 100_000))
-        #expect(GroupBudget.balanced == GroupBudget())
-        #expect(GroupBudget.wide == GroupBudget(maxTurns: 24, maxTokens: 300_000))
     }
 }
 

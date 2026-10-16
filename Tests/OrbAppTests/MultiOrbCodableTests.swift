@@ -39,7 +39,7 @@ struct MultiOrbRoundTripTests {
         #expect(try roundTrip(envelope) == envelope)
 
         let orbGroup = OrbGroup(name: "Lançamento", memberIDs: [atlas.id, revisor.id], orchestratorID: atlas.id,
-                                budget: GroupBudget(maxTurns: 8, maxTokens: 100_000), policy: GroupPolicy(membersMayTalk: false))
+                                policy: GroupPolicy(membersMayTalk: false))
         #expect(try roundTrip(orbGroup) == orbGroup)
 
         let proposal = OrbProposal(creator: atlas, name: "Pesquisador", role: "Pesquisa na web", instructions: "Você pesquisa.",
@@ -116,9 +116,8 @@ struct MultiOrbCompatibilityTests {
     @Test func aGroupMissingFieldsGetsDefaults() throws {
         let one = "00000000-0000-4000-8000-0000000000A1"
         let group = try decode(OrbGroup.self, #"{"memberIDs":["\#(one)"]}"#)
-        #expect(group.budget == GroupBudget() && group.policy == GroupPolicy())
+        #expect(group.policy == GroupPolicy())
         #expect(group.orchestratorID == UUID(uuidString: one))
-        #expect(group.budget.maxTurns == 12 && group.budget.maxTokens == 150_000)
     }
 
     @Test func aBotWithAnUnreadableOriginStillLoads() throws {
@@ -324,42 +323,28 @@ struct MultiOrbInvariantTests {
         #expect(OrbGroup.memberLimits == 2...8)
     }
 
-    @Test func theLimitsAreTheOnesTheContractNames() {
-        #expect(DelegationLimits.maxHops == 4 && DelegationLimits.maxOpenPerOrb == 3)
-        #expect(DelegationLimits.maxMessagesPerChain == 12 && DelegationLimits.maxTurnsPerChain == 10)
-        #expect(DelegationLimits.maxTokensPerChain == 200_000 && DelegationLimits.maxPerPair == 3)
+    @Test func theSizesAreTheOnesTheContractNames() {
         #expect(DelegationLimits.messageLimit == 4_000 && DelegationLimits.replyLimit == 6_000)
         #expect(DelegationLimits.replyLimit > DelegationLimits.messageLimit)
         #expect(DelegationLimits.workTimeout > DelegationLimits.requestTimeout)
     }
 
-    @Test func inABigGroupAnOrbMayWaitForOneAnswerPerTeammate() throws {
-        #expect(DelegationRules.openLimit(groupSize: nil) == 3)
-        #expect(DelegationRules.openLimit(groupSize: 3) == 3)
-        #expect(DelegationRules.openLimit(groupSize: 6) == 5)
-        #expect(DelegationRules.openLimit(groupSize: 8) == 7)
-        let members = (1...6).map { OrbRef(id: UUID(), name: "Orb \($0)") }
-        var asking = DelegationRules.Input(groupID: UUID(), groupMembers: Set(members.map(\.id)), orbs: members, sender: members[0],
-                                           targetName: "Orb 6", text: "Faça a parte 5")
-        asking.openFromSender = 4
-        _ = try DelegationRules.validate(asking)
-        asking.openFromSender = 5
-        #expect(throws: DelegationRefusal.tooManyOpen) { try DelegationRules.validate(asking) }
-        // Outside a group the limit stays three.
-        asking.groupID = nil
-        asking.groupMembers = nil
-        asking.openFromSender = 3
-        #expect(throws: DelegationRefusal.tooManyOpen) { try DelegationRules.validate(asking) }
+    @Test func howManyRequestsAndHowDeepAreNotLimited() throws {
+        let orbs = (1...8).map { OrbRef(id: UUID(), name: "Orb \($0)") }
+        var asking = DelegationRules.Input(orbs: orbs, sender: orbs[0], targetName: "Orb 8", text: "Faça a parte 50")
+        asking.context = ChainContext(chainID: UUID(), hop: 40, path: Array(orbs.prefix(7).map(\.id)))
+        let plan = try DelegationRules.validate(asking)
+        #expect(plan.hop == 41 && plan.target == orbs[7])
+        asking.chainStopped = true
+        #expect(throws: DelegationRefusal.stopped) { try DelegationRules.validate(asking) }
     }
 
     @Test func everyRefusalSaysSomethingInPortugueseAndNamesWhatMatters() {
-        let refusals: [DelegationRefusal] = [.switchedOff, .unknownOrb("Zé"), .selfRequest, .notInGroup, .hopLimit, .alreadyInChain("Revisor"),
-                                             .tooManyOpen, .budgetSpent, .pairLimit, .duplicate, .emptyMessage, .tooLong, .orbBusyDeleting]
+        let refusals: [DelegationRefusal] = [.switchedOff, .unknownOrb("Zé"), .selfRequest, .notInGroup, .alreadyInChain("Revisor"),
+                                             .stopped, .duplicate, .emptyMessage, .tooLong, .orbBusyDeleting]
         for refusal in refusals { #expect(!refusal.message.isEmpty && refusal.toolError.message == refusal.message) }
-        #expect(DelegationRefusal.hopLimit.message == "Limite de 4 encadeamentos atingido: responda com o que tem.")
         #expect(DelegationRefusal.alreadyInChain("Revisor").message == "Revisor já está esperando por você nesta conversa.")
-        #expect(DelegationRefusal.tooManyOpen.message == "Você já tem o máximo de pedidos abertos; espere as respostas.")
-        #expect(DelegationRefusal.budgetSpent.message == "O orçamento desta conversa entre Orbs acabou.")
+        #expect(DelegationRefusal.stopped.message == "Esta conversa entre Orbs foi interrompida.")
         #expect(DelegationRefusal.duplicate.message == "Pedido idêntico já enviado.")
         #expect(DelegationRefusal.unknownOrb("Zé").message.contains("Zé"))
     }
@@ -396,7 +381,6 @@ struct DelegationShellTests {
         let turn = hub.submitGroupTurn(member: revisor.id, text: "x", chain: chain, groupID: UUID(), askedBy: nil)
         #expect(turn.state == .failed && turn.envelope.to.id == revisor.id && turn.envelope.chainID == chain.chainID)
         hub.cancelChain(chain.chainID, by: .user)
-        hub.tokensUsed(10, chain: chain.chainID)
         #expect(hub.chains(involving: atlas.id).isEmpty)
         #expect(hub.openRequests(from: atlas.id).isEmpty)
         #expect(hub.roster(for: atlas.id, groupID: nil).isEmpty)

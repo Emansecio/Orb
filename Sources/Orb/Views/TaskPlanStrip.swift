@@ -3,17 +3,14 @@ import SwiftUI
 /// The plan of the task (`task_plan`) at the end of the chat, while some step of it is open: one quiet line
 /// ("Plano  3 de 5 etapas · Próximo: …") that opens into the steps. It reads the plan itself, so an update redraws this
 /// line alone, in place: the list does not animate for it (see the comment on the list's animations in `ChatView`),
-/// only opening and closing the line does. While the task goes on by itself past the step limit (`AutoContinue`), the
-/// line also says which stretch runs.
+/// only opening and closing the line does.
 struct TaskPlanStrip: View {
     let transcript: OrbTranscript
-    let live: BotLive
     @State private var isExpanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         if let plan = transcript.plan {
-            let stretch = live.stretch?.label
             VStack(alignment: .leading, spacing: 6) {
                 Button {
                     withAnimation(Motion.adapted(Motion.content, reduceMotion: reduceMotion)) { isExpanded.toggle() }
@@ -26,14 +23,6 @@ struct TaskPlanStrip: View {
                         (Text("Plano").foregroundColor(Palette.muted) + Text("  " + Self.summary(plan)).foregroundColor(Palette.faint))
                             .font(.system(size: 12))
                             .lineLimit(1)
-                        if let stretch {
-                            // Kept whole: the summary before it is what gives way on a narrow chat.
-                            Text(stretch)
-                                .font(.system(size: 12))
-                                .foregroundStyle(Palette.accentText)
-                                .lineLimit(1)
-                                .fixedSize()
-                        }
                         Image(systemName: "chevron.right")
                             .font(.system(size: 9, weight: .semibold))
                             .foregroundStyle(Palette.faint)
@@ -45,7 +34,7 @@ struct TaskPlanStrip: View {
                 }
                 .buttonStyle(.plain)
                 .help(Tip.togglePlan(isExpanded: isExpanded))
-                .accessibilityLabel("Plano, " + Self.summary(plan) + (stretch.map { ", " + $0 } ?? ""))
+                .accessibilityLabel("Plano, " + Self.summary(plan))
                 .accessibilityValue(isExpanded ? "expandido" : "recolhido")
                 .accessibilityHint("Mostra as etapas")
 

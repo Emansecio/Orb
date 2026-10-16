@@ -19,8 +19,6 @@ final class FakeDelegationService: DelegationService {
     /// Every request in the order it was made (the person's and the members').
     private(set) var order: [UUID] = []
     private(set) var cancelled: [(chain: UUID, reason: CancelReason)] = []
-    private(set) var resumed: [UUID] = []
-    private(set) var tokens: [(chain: UUID, tokens: Int)] = []
     /// What the preface of each turn said (`prompt(for:)`), by request id; one entry per start.
     private(set) var prefaces: [UUID: [String]] = [:]
     /// The members that are owed a wake-up in a chain (an answer arrived and they have not run again).
@@ -78,10 +76,6 @@ final class FakeDelegationService: DelegationService {
 
     func roster(for botID: UUID, groupID: UUID?) -> [OrbRef] { [] }
 
-    func tokensUsed(_ n: Int, chain: UUID) { tokens.append((chain, n)) }
-
-    func resumeHeldWork(chain: UUID) { resumed.append(chain) }
-
     // MARK: Playing the members
 
     /// The latest version of a request.
@@ -104,12 +98,10 @@ final class FakeDelegationService: DelegationService {
         return request
     }
 
-    /// The turn starts: the group runtime is asked for its preface (kept in `prefaces`) and told. Nothing starts when the runtime
-    /// says no (`canStartTurn`); the request stays queued, as in the real hub. Returns whether it started.
+    /// The turn starts: the group runtime is asked for its preface (kept in `prefaces`) and told. Returns whether it started.
     @discardableResult
     func start(_ request: DelegationRequest) async -> Bool {
         var current = self.request(request.envelope.id)
-        guard groupHooks?.canStartTurn(current) ?? true else { return false }
         let member = current.envelope.to.id
         if let preface = await groupHooks?.prompt(for: current, member: member) { prefaces[current.envelope.id, default: []].append(preface) }
         inbox[member]?.remove(current.envelope.chainID)

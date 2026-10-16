@@ -21,12 +21,11 @@ struct DelegationRequest: Sendable, Equatable {
     var finishedAt: Date?
 }
 
-/// The limits of Orbs talking to each other (tests cite these).
+/// The sizes and waits of Orbs talking to each other (tests cite these). How many requests, how deep a chain and how many
+/// turns are not limited: the person stops a chain with ⌘. or Parar.
 enum DelegationLimits {
-    static let maxHops = 4, maxOpenPerOrb = 3, maxMessagesPerChain = 12, maxTurnsPerChain = 10
-    static let maxTokensPerChain = 200_000, maxPerPair = 3
     static let messageLimit = 4_000, replyLimit = 6_000, wakeBatch = 5
-    static let sideRunMaxSteps = 40, requestTimeout: TimeInterval = 30 * 60, keptPedidos = 20
+    static let requestTimeout: TimeInterval = 30 * 60, keptPedidos = 20
     static let rosterLimit = 12, roleClip = 80
     /// How long a request may wait while the work it waits for goes on (a child still at work, a queue behind a turn in
     /// progress): past `requestTimeout` it is still waiting for real work, so only this ceiling ends it (a turn that hangs).
@@ -35,8 +34,8 @@ enum DelegationLimits {
 
 /// Why a request between Orbs was not sent. `message` is what the model reads (it becomes a `ToolError`).
 enum DelegationRefusal: Error, Equatable, Sendable {
-    case switchedOff, unknownOrb(String), selfRequest, notInGroup, hopLimit, alreadyInChain(String)
-    case tooManyOpen, budgetSpent, pairLimit, duplicate, emptyMessage, tooLong, orbBusyDeleting
+    case switchedOff, unknownOrb(String), selfRequest, notInGroup, alreadyInChain(String)
+    case stopped, duplicate, emptyMessage, tooLong, orbBusyDeleting
 
     var message: String {
         switch self {
@@ -44,11 +43,8 @@ enum DelegationRefusal: Error, Equatable, Sendable {
         case .unknownOrb(let name): "Não existe um Orb chamado “\(name)”. Use list para ver os colegas."
         case .selfRequest: "Você não pode pedir a si mesmo."
         case .notInGroup: "Esse Orb não está neste grupo."
-        case .hopLimit: "Limite de \(DelegationLimits.maxHops) encadeamentos atingido: responda com o que tem."
         case .alreadyInChain(let name): "\(name) já está esperando por você nesta conversa."
-        case .tooManyOpen: "Você já tem o máximo de pedidos abertos; espere as respostas."
-        case .budgetSpent: "O orçamento desta conversa entre Orbs acabou."
-        case .pairLimit: "Você já falou \(DelegationLimits.maxPerPair) vezes com esse Orb nesta conversa."
+        case .stopped: "Esta conversa entre Orbs foi interrompida."
         case .duplicate: "Pedido idêntico já enviado."
         case .emptyMessage: "A mensagem está vazia."
         case .tooLong: "A mensagem passa de \(DelegationLimits.messageLimit) caracteres: resuma."

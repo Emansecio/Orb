@@ -291,7 +291,7 @@ struct ClaudeCodeClientTests {
         #expect(value(after: "--output-format") == "stream-json")
         #expect(value(after: "--permission-prompt-tool") == "stdio")
         #expect(value(after: "--permission-mode") == "default")
-        #expect(value(after: "--max-turns") == "1000")
+        #expect(!args.contains("--max-turns"), "no limit on turns")
         #expect(!args.contains("--mcp-config"))
         #expect(!args.contains { $0.hasPrefix("--resume") })
         #expect(!args.contains { $0.hasPrefix("--effort") })

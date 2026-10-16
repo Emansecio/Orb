@@ -52,12 +52,9 @@ struct DelegationRulesTests {
         #expect(refusal(input(to: "Zé", text: "")) == .unknownOrb("Zé"))
     }
 
-    @Test func theHopLimitIsExactlyFour() throws {
-        func plan(hop: Int) throws -> DelegationRules.Plan {
-            try DelegationRules.validate(input(context: ChainContext(chainID: UUID(), hop: hop, path: [atlas.id])))
-        }
-        #expect(try plan(hop: 3).hop == 4)
-        #expect(throws: DelegationRefusal.hopLimit) { try plan(hop: 4) }
+    @Test func aChainMayGoAsDeepAsItTakes() throws {
+        let plan = try DelegationRules.validate(input(context: ChainContext(chainID: UUID(), hop: 50, path: [atlas.id])))
+        #expect(plan.hop == 51)
     }
 
     @Test func aTargetThatWaitsInThePathIsRefused() {
@@ -70,47 +67,25 @@ struct DelegationRulesTests {
         #expect(throws: Never.self) { try DelegationRules.validate(back) }
     }
 
-    @Test func openRequestsAreLimitedToThreeAndANoticeIsNotOne() throws {
-        var asking = input()
-        asking.openFromSender = 2
-        _ = try DelegationRules.validate(asking)
-        asking.openFromSender = 3
-        #expect(throws: DelegationRefusal.tooManyOpen) { try DelegationRules.validate(asking) }
-        asking.kind = .tell
-        _ = try DelegationRules.validate(asking)
+    @Test func onlyAChainThePersonStoppedTakesNoMoreRequests() throws {
+        var request = input()
+        _ = try DelegationRules.validate(request)
+        request.chainStopped = true
+        #expect(throws: DelegationRefusal.stopped) { try DelegationRules.validate(request) }
     }
 
-    @Test func theBudgetOfAChainIs12Messages10Turns200ThousandTokensAndThreePerPair() throws {
-        func check(_ change: (inout DelegationRules.ChainFacts) -> Void) throws {
-            var request = input()
-            change(&request.chain)
-            _ = try DelegationRules.validate(request)
-        }
-        try check { $0.messages = 11 }
-        #expect(throws: DelegationRefusal.budgetSpent) { try check { $0.messages = 12 } }
-        try check { $0.turns = 9 }
-        #expect(throws: DelegationRefusal.budgetSpent) { try check { $0.turns = 10 } }
-        try check { $0.tokens = 199_999 }
-        #expect(throws: DelegationRefusal.budgetSpent) { try check { $0.tokens = 200_000 } }
-        #expect(throws: DelegationRefusal.budgetSpent) { try check { $0.cancelled = true } }
-        try check { $0.pairCount = 2 }
-        #expect(throws: DelegationRefusal.pairLimit) { try check { $0.pairCount = 3 } }
-    }
-
-    @Test func aGroupsRequestsAnswerToTheGroupsBudgetNotToTheChains() throws {
+    @Test func aGroupsRequestsAnswerToItsMembers() throws {
         let group = UUID()
         var member = input()
         member.groupID = group
         member.groupMembers = [atlas.id, pesquisador.id]
         member.switchOn = false // groups do not depend on the switch
-        member.chain.messages = 50
-        member.chain.pairCount = 9
         _ = try DelegationRules.validate(member)
         member.groupMembers = [atlas.id, revisor.id]
         #expect(throws: DelegationRefusal.notInGroup) { try DelegationRules.validate(member) }
         member.groupMembers = [atlas.id, pesquisador.id]
-        member.chain.cancelled = true
-        #expect(throws: DelegationRefusal.budgetSpent) { try DelegationRules.validate(member) }
+        member.chainStopped = true
+        #expect(throws: DelegationRefusal.stopped) { try DelegationRules.validate(member) }
     }
 
     @Test func aRepeatIsRefusedByIdOrByWords() {

@@ -103,7 +103,6 @@ struct GeneralSettings: View {
     @State private var learnedWindows: [LearnedWindowRow] = []
     @AppStorage(AppModel.notifyWhenDoneKey) private var notifyWhenDone = true
     @AppStorage(SkillReview.settingKey) private var proposeSkills = true
-    @AppStorage(AutoContinue.settingKey) private var continueLongTasks = true
     @AppStorage(SessionNote.settingKey) private var summarizeSessions = false
     @AppStorage(DictationReview.settingKey) private var reviewDictation = true
     @AppStorage(GlobalHotKey.defaultsKey) private var globalShortcut = false
@@ -150,15 +149,6 @@ struct GeneralSettings: View {
                     }
                 }
                 .help(Tip.proposeSkills)
-                Toggle(isOn: $continueLongTasks) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Continuar sozinho em tarefas longas")
-                        Text("O Orb segue sem pedir “continua”, em até \(AutoContinue.maxStretches) trechos de \(AgentEngine.defaultMaxSteps) passos. Desligado, ele pausa e espera você.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .help(Tip.continueLongTasks)
                 Toggle(isOn: $summarizeSessions) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Resumir com o modelo as conversas longas que vão para a memória")

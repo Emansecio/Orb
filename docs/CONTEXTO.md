@@ -187,7 +187,9 @@ Dentro do turno em andamento (`ContextWindow.fit`, passo 4):
   (até 24 linhas: as linhas `[usuário]`, até metade, e os passos mais novos; o resto é contado). O pedido que começou a
   tarefa e o passo mais novo ficam sempre, e uma mensagem mandada durante a tarefa que sai da janela fica no resumo dos passos.
 
-Ao bater no limite de passos (30 por turno, 60 numa rotina) o motor deixa um **registro de progresso**
+Os turnos do app (conversa, rotina, pedido de outro Orb, grupo) não têm limite de passos: seguem até o modelo responder ou
+você parar. Quando quem chama o motor põe um limite (o assistente de criação e a revisão de skills), ao bater nele o motor
+deixa um **registro de progresso**
 (`ProgressRecord`) no histórico e emite `taskPaused`: o próximo "continua" retoma de onde parou. `Conversation.taskPaused`
 é um campo explícito (zerado na próxima mensagem do usuário), então um modelo que imita o marcador numa resposta comum não
 pausa nada. O "continue" que o motor injeta após uma resposta cortada por `max_tokens` (`nudge`) não conta como início de

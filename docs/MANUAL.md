@@ -235,8 +235,8 @@ Se o motor escolhido não estiver instalado, o Orb fica só com `web_fetch` e `w
 - **Quando o Orb anda em círculos** (a mesma chamada com o mesmo resultado três vezes, ou três falhas seguidas), o próprio
   resultado avisa o modelo para mudar de caminho ou dizer o que o bloqueia, e a linha de trabalho mostra "Mudando de abordagem".
   É uma contagem, sem chamar outro modelo; horários, IDs e caminhos de saídas salvas não contam como diferença.
-- **Tarefas longas.** Um turno tem até 100 passos (150 numa rotina). Ao chegar lá o Orb deixa um registro do que fez e avisa
-  "Pausei depois de 100 passos…": diga **"continua"**.
+- **Tarefas longas.** Um turno não tem limite de passos, nem numa rotina, num pedido de outro Orb ou num grupo: o Orb trabalha
+  até terminar ou até você parar (botão ou ⌘.).
 - **Skills.** `/resumir`, `/organizar` e `/revisar` vêm prontas; veja [Conectores e skills](#conectores-e-skills).
 
 ## Permissões

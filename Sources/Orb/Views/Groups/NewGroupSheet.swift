@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// What a new group starts with, as plain rules the tests read: how many Orbs, the suggested name, the budget presets.
+/// What a new group starts with, as plain rules the tests read: how many Orbs and the suggested name.
 enum NewGroupRules {
     static let limits = OrbGroup.memberLimits
 
@@ -37,38 +37,7 @@ enum NewGroupRules {
     }
 }
 
-/// The budgets a group can start with (per request of the person): Econômico, Equilibrado, Amplo and Projeto (a request
-/// that builds something from start to finish: as many turns and tokens as the panel's steppers go).
-enum GroupBudgetPreset: String, CaseIterable, Identifiable {
-    case economical, balanced, broad, project
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .economical: "Econômico"
-        case .balanced: "Equilibrado"
-        case .broad: "Amplo"
-        case .project: "Projeto"
-        }
-    }
-
-    var budget: GroupBudget {
-        switch self {
-        case .economical: GroupBudget(maxTurns: 8, maxTokens: 100_000)
-        case .balanced: GroupBudget(maxTurns: 12, maxTokens: 150_000)
-        case .broad: GroupBudget(maxTurns: 24, maxTokens: 300_000)
-        case .project: GroupBudget(maxTurns: 60, maxTokens: 2_000_000)
-        }
-    }
-
-    /// The preset a budget is, when it is one of them.
-    static func matching(_ budget: GroupBudget) -> GroupBudgetPreset? {
-        allCases.first { $0.budget == budget }
-    }
-}
-
-/// "Novo grupo": a name, the Orbs (two to eight, one of them the orchestrator), an objective and a budget. The Orbs scroll
+/// "Novo grupo": a name, the Orbs (two to eight, one of them the orchestrator), and an objective. The Orbs scroll
 /// above a fixed footer. Opened from the sidebar's "+", ⌥⌘G, the palette, or an Orb's menu ("Criar grupo com…", which starts
 /// with that Orb as orchestrator).
 struct NewGroupSheet: View {
@@ -82,7 +51,6 @@ struct NewGroupSheet: View {
     @State private var written = ""
     @State private var isNameEdited = false
     @State private var objective = ""
-    @State private var preset = GroupBudgetPreset.balanced
     @Namespace private var starSpace
 
     private var looks: [BotLook] { model.botIDs.map { model.live($0).look } }
@@ -125,20 +93,10 @@ struct NewGroupSheet: View {
                         .padding(.vertical, 8)
                         .background(Palette.surface, in: .rect(cornerRadius: 10))
                 }
-                field("Orçamento por pedido") {
-                    Picker("Orçamento", selection: $preset) {
-                        ForEach(GroupBudgetPreset.allCases) { Text($0.title).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    Text("\(preset.budget.maxTurns) turnos · \(GroupBudgetText.thousands(preset.budget.maxTokens)) tokens por pedido. Ao chegar ao limite, o grupo pergunta se deve continuar.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Palette.faint)
-                }
             }
             .padding(20)
         }
-        // Taller than the default sheet: the grid, the objective and the budget fit without scrolling at the usual window size.
+        // Taller than the default sheet: the grid and the objective fit without scrolling at the usual window size.
         .orbSheet("Novo grupo", subtitle: "O orquestrador recebe cada pedido e divide o trabalho.", size: .medium, maxHeight: 700) {
             HStack(spacing: 10) {
                 if !canCreate {
@@ -197,7 +155,7 @@ struct NewGroupSheet: View {
     private func create() {
         guard canCreate, let orchestrator else { return }
         guard let group = model.createGroup(name: NewGroupRules.name(written: nameShown, suggested: suggested), members: chosen,
-                                            orchestrator: orchestrator, objective: objective, budget: preset.budget) else { return }
+                                            orchestrator: orchestrator, objective: objective) else { return }
         model.selection = .group(group.id)
         dismiss()
     }

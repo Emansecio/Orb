@@ -3,16 +3,6 @@ import Foundation
 /// What a request between Orbs has to satisfy, as pure functions over a snapshot (no hub, no clock): the order of the
 /// refusals is the contract (`DelegationRefusal`), and the tests cite each limit. The hub builds the `Input` from its state.
 enum DelegationRules {
-    /// What the hub knows about the chain a request would join.
-    struct ChainFacts: Equatable, Sendable {
-        var messages = 0
-        var turns = 0
-        var tokens = 0
-        var cancelled = false
-        /// Requests the sender already made to this very target in the chain.
-        var pairCount = 0
-    }
-
     struct Input: Sendable {
         /// The switch of Ajustes (a group's request does not depend on it).
         var switchOn = true
@@ -28,9 +18,8 @@ enum DelegationRules {
         var messageID = UUID()
         /// The chain the sender's turn belongs to (nil: the turn is the person's own chat; a new chain begins).
         var context: ChainContext?
-        var chain = ChainFacts()
-        /// Requests of the sender, in every chain, that nobody answered yet.
-        var openFromSender = 0
+        /// The person stopped the chain the request would join.
+        var chainStopped = false
         /// Orbs of the chain's path that wait for an answer in this chain.
         var waitingInPath: Set<UUID> = []
         var seenMessage = false
@@ -71,35 +60,16 @@ enum DelegationRules {
         // 4. The chain: the sender's own, or a new one that starts with this request.
         let hop = (input.context?.hop ?? 0) + 1
         let path = (input.context?.path.isEmpty == false ? input.context?.path : nil) ?? [input.sender.id]
-        // 5. How deep.
-        guard hop <= DelegationLimits.maxHops else { throw DelegationRefusal.hopLimit }
-        // 6. No A→B→A: the target is already in the path and waits for an answer.
+        // 5. No A→B→A: the target is already in the path and waits for an answer.
         if path.contains(target.id), input.waitingInPath.contains(target.id) {
             throw DelegationRefusal.alreadyInChain(target.name)
         }
-        // 7. Open requests (a notice needs no answer, so it is not one); in a group, one per teammate when that is more.
-        if input.kind == .ask, input.openFromSender >= openLimit(groupSize: input.groupMembers?.count) { throw DelegationRefusal.tooManyOpen }
-        // 8. and 9. The chain's budget and the pair; a group's own budget (turns and tokens, visible to the person) governs its requests.
-        if input.groupID == nil {
-            let facts = input.chain
-            if facts.cancelled || facts.messages >= DelegationLimits.maxMessagesPerChain
-                || facts.turns >= DelegationLimits.maxTurnsPerChain || facts.tokens >= DelegationLimits.maxTokensPerChain {
-                throw DelegationRefusal.budgetSpent
-            }
-            if facts.pairCount >= DelegationLimits.maxPerPair { throw DelegationRefusal.pairLimit }
-        } else if input.chain.cancelled {
-            throw DelegationRefusal.budgetSpent
-        }
-        // 10. The same message again (by id), or the same words to the same target a moment ago.
+        // 6. A chain the person stopped takes no more requests. How many, how deep and how long are not limited.
+        if input.chainStopped { throw DelegationRefusal.stopped }
+        // 7. The same message again (by id), or the same words to the same target a moment ago.
         if input.seenMessage || input.recentSameText { throw DelegationRefusal.duplicate }
         return Plan(target: target, text: text, chainID: input.context?.chainID ?? input.newChainID, hop: hop, path: path,
                     isNewChain: input.context == nil)
-    }
-
-    /// How many requests an Orb may have waiting for an answer: `maxOpenPerOrb`, or in a group of more than four, one per
-    /// teammate (the orchestrator of a group of six assigns five pieces at once).
-    static func openLimit(groupSize: Int?) -> Int {
-        max(DelegationLimits.maxOpenPerOrb, (groupSize ?? 0) - 1)
     }
 
     /// "pesquisador", "Pesquisador" and "pesquisadór" are one name; a name that starts the same way as exactly one Orb is that

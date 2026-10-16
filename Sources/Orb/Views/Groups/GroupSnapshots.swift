@@ -1,14 +1,14 @@
 #if DEBUG || ORB_DEV_TOOLS
 import SwiftUI
 
-/// `--snapshot` modes of the group screens: groups-sidebar, group-chat, group-working (presence and the budget), group-pause
-/// (the card that asks to continue), group-new, group-panel, group-board and group-empty. Each mode seeds four Orbs and the
+/// `--snapshot` modes of the group screens: groups-sidebar, group-chat, group-working (presence and what the request spent),
+/// group-new, group-panel, group-board and group-empty. Each mode seeds four Orbs and the
 /// sample groups into the model, with the live state that mode shows.
 @MainActor
 enum GroupSnapshots {
     static func view(_ screen: String, model: AppModel) -> AnyView? {
-        let modes: Set<String> = ["groups-sidebar", "group-chat", "group-working", "group-pause", "group-new", "group-panel",
-                                  "group-board", "group-empty"]
+        let modes: Set<String> = ["groups-sidebar", "group-chat", "group-working", "group-new", "group-panel", "group-board",
+                                  "group-empty"]
         guard modes.contains(screen) else { return nil }
         let sample = SampleGroups(model: model, mode: screen)
         switch screen {
@@ -50,8 +50,7 @@ private struct SampleGroups {
         lia = Bot(name: "Lia", role: "Cuida de e-mails", orb: WelcomeLooks.lia)
         model.bots = [atlas, research, review, lia]
 
-        launch = OrbGroup(name: "Lançamento", memberIDs: [atlas.id, research.id, review.id], orchestratorID: atlas.id,
-                          budget: GroupBudget(maxTurns: 12, maxTokens: 150_000))
+        launch = OrbGroup(name: "Lançamento", memberIDs: [atlas.id, research.id, review.id], orchestratorID: atlas.id)
         let revision = OrbGroup(name: "Revisão do texto", memberIDs: [lia.id, review.id], orchestratorID: lia.id)
         let general = OrbGroup(name: "Pesquisa geral", memberIDs: [atlas.id, research.id, review.id, lia.id], orchestratorID: atlas.id)
         empty = OrbGroup(name: "Ideias", memberIDs: [atlas.id, lia.id], orchestratorID: atlas.id)
@@ -59,28 +58,19 @@ private struct SampleGroups {
         model.groupSessions = [:]
         model.groupLives = [:]
 
-        var conversation = Self.conversation(atlas: atlas, research: research, review: review, group: launch.id)
+        let conversation = Self.conversation(atlas: atlas, research: research, review: review, group: launch.id)
         let working = mode == "group-working" || mode == "groups-sidebar"
-        let paused = mode == "group-pause"
-        if paused {
-            conversation.items.append(TranscriptItem(.groupPause(GroupPauseItem(groupID: launch.id, runID: UUID(), reason: .turns,
-                                                                                state: .open, turnsUsed: 12, tokensUsed: 148_000,
-                                                                                turnLimit: 12, tokenLimit: 150_000))))
-        }
         model.groupSessions[launch.id] = GroupSession(groupID: launch.id, conversation: conversation)
         model.groupSessions[empty.id] = GroupSession(groupID: empty.id)
 
         let live = model.groupLive(launch.id)
         if working {
             live.update(runState: .running, typing: [research.id, review.id], work: nil, needsYou: false, unread: 0,
-                        usage: GroupBudgetUsage(turnsUsed: 9, turnLimit: 12, tokensUsed: 96_000, tokenLimit: 150_000))
-        } else if paused {
-            live.update(runState: .paused(.turns), typing: [], work: nil, needsYou: false, unread: 0,
-                        usage: GroupBudgetUsage(turnsUsed: 12, turnLimit: 12, tokensUsed: 148_000, tokenLimit: 150_000))
+                        usage: GroupUsage(turnsUsed: 9, tokensUsed: 96_000))
         } else {
             live.update(runState: .idle, typing: [], work: nil, needsYou: false, unread: 0, usage: nil)
         }
-        model.groupLive(revision.id).update(runState: .paused(.turns), typing: [], work: nil, needsYou: true, unread: 2, usage: nil)
+        model.groupLive(revision.id).update(runState: .running, typing: [], work: nil, needsYou: true, unread: 2, usage: nil)
         model.groupLive(general.id).update(runState: .idle, typing: [], work: nil, needsYou: false, unread: 3, usage: nil)
     }
 
@@ -133,13 +123,13 @@ private struct SampleGroups {
 
 extension GroupLive {
     /// Sets the whole live state at once, for the snapshot modes and the screen tests (the runtime uses the single setters).
-    func update(runState: GroupRunState, typing: [UUID], work: WorkLine?, needsYou: Bool, unread: Int, usage: GroupBudgetUsage?) {
+    func update(runState: GroupRunState, typing: [UUID], work: WorkLine?, needsYou: Bool, unread: Int, usage: GroupUsage?) {
         setRunState(runState)
         setTyping(typing)
         setWork(work)
         setWaiting(needsYou ? typing : [])
         setUnread(unread)
-        setBudget(usage)
+        setUsage(usage)
     }
 }
 #endif
