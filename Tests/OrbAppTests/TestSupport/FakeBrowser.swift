@@ -20,7 +20,13 @@ final class FakeBrowserDriver: BrowserDriver, @unchecked Sendable {
         /// What `command` answers (its `data`), and what `manual` says.
         var commandReply: JSONValue = .null
         var manualText = "Core Commands:\n  open <url>\n  get title\n\nStreaming:\n  stream enable\n\nSnapshot Options:\n  -i"
+        /// `BrowserDriver.generation`: a test raises it for a browser that closed and opened again.
+        var generation = 0
+        /// Commands that fail (by their words, "tab close c1"), the others answering as usual.
+        var failingCommands: [String: BrowserDriverError] = [:]
     }
+
+    var generation: Int { state.withLock { $0.generation } }
 
     let state = OSAllocatedUnfairLock(initialState: State())
 
@@ -95,6 +101,7 @@ final class FakeBrowserDriver: BrowserDriver, @unchecked Sendable {
 
     func command(_ arguments: [String], text: Bool) async throws -> JSONValue {
         let state = try note("command " + arguments.joined(separator: " ") + (text ? " (text)" : ""))
+        if let failure = state.failingCommands[arguments.joined(separator: " ")] { throw failure }
         return state.commandReply
     }
 

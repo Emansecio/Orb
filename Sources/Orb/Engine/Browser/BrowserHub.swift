@@ -58,30 +58,83 @@ actor AsyncMutex {
     }
 }
 
-/// Which tab belongs to which conversation in one Orb's browser, and which one is current. A conversation gets a tab on its first
-/// call after another one used the browser; the first one keeps the tab the browser started with. A tab is switched to only when the
-/// conversation that calls is not the one that called last, so one conversation alone costs nothing extra.
+/// Which tabs belong to which conversation in one Orb's browser, and which conversation called last (its tab is the browser's
+/// current one). A conversation gets a tab on its first call after another one used the browser; the first one keeps the tab the
+/// browser started with. A tab is switched to only when the conversation that calls is not the one that called last, so one
+/// conversation alone costs nothing extra. Every call of a conversation runs under the browser's lock right after its tab is made
+/// current (`BrowserSession.exclusive`), so the switch and the command are one step for the other conversations.
+///
+/// Tabs are named by the label the book gave them (`c` and the first letters of the conversation's id) or by the browser's own id
+/// (`t1`, and `t3` for one the conversation opened or chose with `browse_tabs`).
 final class TabBook: @unchecked Sendable {
-    /// More than this many tabs of conversations: the one used longest ago is closed.
+    /// More than this many tabs of conversations: the ones of the conversation used longest ago are closed (with a proxy that
+    /// needs a login, where closing a tab breaks agent-browser 0.39.1, its tab is handed to the new conversation instead).
     static let limit = 6
 
     private struct State {
+        /// The conversation that called last.
         var current: String?
-        var tabs: [String: String] = [:]
-        /// Scopes, the one used last at the end.
+        /// The tabs of each conversation; the first is the one it works in.
+        var tabs: [String: [String]] = [:]
+        /// Conversations, the one used last at the end.
         var order: [String] = []
+        /// Tabs no conversation has any more (the first tab, or any when tabs are not closed): a new conversation takes one of
+        /// these before opening a tab.
+        var spare: [String] = []
+        /// The browser these tabs are in (`BrowserDriver.generation`): another one has none of them.
+        var generation = 0
+
+        var count: Int { tabs.values.reduce(0) { $0 + $1.count } + spare.count }
+
+        mutating func touch(_ scope: String) {
+            order.removeAll { $0 == scope }
+            order.append(scope)
+        }
+
+        mutating func take(_ tab: String, for scope: String) {
+            spare.removeAll { $0 == tab }
+            for (other, list) in tabs where other != scope && list.contains(tab) {
+                let rest = list.filter { $0 != tab }
+                tabs[other] = rest.isEmpty ? nil : rest
+                if rest.isEmpty { order.removeAll { $0 == other } }
+            }
+            tabs[scope] = [tab] + (tabs[scope] ?? []).filter { $0 != tab }
+            current = scope
+            touch(scope)
+        }
+
+        /// The browser started again (closed and opened, shown in a window, or gone): the only page left is the one open now, which
+        /// the conversation that called last opened.
+        mutating func restart(generation: Int) {
+            let owner = current
+            self = State(generation: generation)
+            if let owner { take("t1", for: owner) }
+        }
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
 
-    func tab(for scope: String) -> String? { state.withLock { $0.tabs[scope] } }
+    /// The tab a conversation works in.
+    func tab(for scope: String) -> String? { state.withLock { $0.tabs[scope]?.first } }
 
-    func adopt(_ tab: String, for scope: String) {
-        state.withLock {
-            $0.tabs[scope] = tab
-            $0.current = scope
-            $0.order.removeAll { $0 == scope }
-            $0.order.append(scope)
+    /// Every tab a conversation has, the one it works in first.
+    func tabs(of scope: String) -> [String] { state.withLock { $0.tabs[scope] ?? [] } }
+
+    /// Every tab some conversation has.
+    var ownedTabs: Set<String> { state.withLock { Set($0.tabs.values.joined()) } }
+
+    /// The tab is this conversation's, and the one it works in.
+    func adopt(_ tab: String, for scope: String) { state.withLock { $0.take(tab, for: scope) } }
+
+    /// The tab was closed.
+    func forget(_ tab: String) {
+        state.withLock { state in
+            state.spare.removeAll { $0 == tab }
+            for (scope, list) in state.tabs where list.contains(tab) {
+                let rest = list.filter { $0 != tab }
+                state.tabs[scope] = rest.isEmpty ? nil : rest
+                if list.first == tab, state.current == scope { state.current = nil }
+            }
         }
     }
 
@@ -90,57 +143,154 @@ final class TabBook: @unchecked Sendable {
         "c" + String(scope.lowercased().filter { $0.isLetter || $0.isNumber }.prefix(8))
     }
 
-    /// Makes `scope`'s tab the current one. A failure here is not the call's: it goes on in the tab the browser has.
-    func activate(_ scope: String, driver: any BrowserDriver) async {
-        let plan = state.withLock { state -> (known: String?, first: Bool) in
-            state.order.removeAll { $0 == scope }
-            state.order.append(scope)
-            if state.current == scope { return (nil, false) }
-            return (state.tabs[scope], state.tabs.isEmpty && state.current == nil)
+    private enum Step {
+        case stay
+        case switchTo(String)
+        case reuse(String)
+        case takeFrom(scope: String, tab: String)
+        case open
+    }
+
+    /// Makes `scope`'s tab the current one. A failure here is not the call's: it goes on in the tab the browser has. `closesTabs`:
+    /// whether a tab may be closed in this browser (see `limit`).
+    func activate(_ scope: String, driver: any BrowserDriver, closesTabs: Bool = true) async {
+        let generation = driver.generation
+        let step = state.withLock { state -> Step in
+            if state.generation != generation { state.restart(generation: generation) }
+            state.touch(scope)
+            if state.current == scope { return .stay }
+            if let known = state.tabs[scope]?.first { return .switchTo(known) }
+            return Self.fresh(&state, for: scope, closesTabs: closesTabs)
         }
-        if state.withLock({ $0.current == scope }) { return }
-        if plan.first {
+        await perform(step, for: scope, driver: driver, closesTabs: closesTabs)
+    }
+
+    /// What a conversation with no tab gets: the browser's own first tab when nothing is open yet, a spare one, the tab of the
+    /// conversation used longest ago when no tab may be closed and there are enough, or a new one.
+    private static func fresh(_ state: inout State, for scope: String, closesTabs: Bool) -> Step {
+        if let spare = state.spare.first { return .reuse(spare) }
+        if state.tabs.isEmpty, state.current == nil {
             // The browser's own first tab (it is not even open yet when the first call is the `open`).
-            adopt("t1", for: scope)
-            return
+            state.take("t1", for: scope)
+            return .stay
         }
-        if let known = plan.known {
+        if !closesTabs, state.count >= limit, let old = state.order.first(where: { $0 != scope && state.tabs[$0] != nil }),
+           let tab = state.tabs[old]?.first {
+            return .takeFrom(scope: old, tab: tab)
+        }
+        return .open
+    }
+
+    private func perform(_ step: Step, for scope: String, driver: any BrowserDriver, closesTabs: Bool) async {
+        switch step {
+        case .stay:
+            return
+        case .switchTo(let tab), .reuse(let tab), .takeFrom(_, let tab):
             do {
-                _ = try await driver.command(["tab", known])
-                state.withLock { $0.current = scope }
+                _ = try await driver.command(["tab", tab])
+                adopt(tab, for: scope)
                 return
             } catch BrowserDriverError.noPage {
-                reset()
+                restartEmpty(for: scope, driver: driver)
+                return
             } catch {
-                // That tab is gone (closed by the page or by hand): a new one below.
-                state.withLock { _ = $0.tabs.removeValue(forKey: scope) }
+                // That tab is gone (closed by the page or by hand): another one below.
+                forget(tab)
             }
+            let next = state.withLock { Self.fresh(&$0, for: scope, closesTabs: closesTabs) }
+            if case .open = next { await openTab(for: scope, driver: driver, closesTabs: closesTabs) }
+            else if case .stay = next { return }
+            else { await perform(next, for: scope, driver: driver, closesTabs: closesTabs) }
+        case .open:
+            await openTab(for: scope, driver: driver, closesTabs: closesTabs)
         }
+    }
+
+    private func openTab(for scope: String, driver: any BrowserDriver, closesTabs: Bool) async {
         let label = Self.label(for: scope)
         do {
             _ = try await driver.command(["tab", "new", "--label", label])
             adopt(label, for: scope)
-            await trim(keeping: scope, driver: driver)
+            if closesTabs { await trim(keeping: scope, driver: driver) }
         } catch BrowserDriverError.noPage {
-            // No browser is open (it was closed): the next `open` starts one, and its first tab is this conversation's.
-            reset()
-            adopt("t1", for: scope)
+            restartEmpty(for: scope, driver: driver)
         } catch {
             // The call goes on in the current tab, which is what there was before tabs of their own.
         }
     }
 
-    private func reset() { state.withLock { $0 = State() } }
+    /// No browser is open (it was closed, or it went away): the next `open` starts one, and its first tab is this conversation's.
+    private func restartEmpty(for scope: String, driver: any BrowserDriver) {
+        state.withLock { state in
+            state = State(generation: driver.generation)
+            state.take("t1", for: scope)
+        }
+    }
 
     private func trim(keeping scope: String, driver: any BrowserDriver) async {
-        let victim = state.withLock { state -> (scope: String, tab: String)? in
-            guard state.tabs.count > Self.limit,
-                  let old = state.order.first(where: { $0 != scope && state.tabs[$0] != "t1" }), let tab = state.tabs[old] else { return nil }
-            state.tabs.removeValue(forKey: old)
+        let victims = state.withLock { state -> [String] in
+            guard state.count > Self.limit,
+                  let old = state.order.first(where: { $0 != scope && state.tabs[$0]?.contains("t1") == false }),
+                  let tabs = state.tabs.removeValue(forKey: old) else { return [] }
             state.order.removeAll { $0 == old }
-            return (old, tab)
+            return tabs
         }
-        if let victim { _ = try? await driver.command(["tab", "close", victim.tab]) }
+        for tab in victims { _ = try? await driver.command(["tab", "close", tab]) }
+    }
+
+    /// The conversation is over: its tabs are closed, or kept as spares when this browser may not close one (and the first tab,
+    /// which is never closed, is always kept).
+    func end(_ scope: String, driver: any BrowserDriver, closesTabs: Bool) async {
+        let tabs = state.withLock { state -> [String] in
+            guard state.generation == driver.generation, let tabs = state.tabs.removeValue(forKey: scope) else {
+                state.tabs[scope] = nil
+                state.order.removeAll { $0 == scope }
+                return []
+            }
+            state.order.removeAll { $0 == scope }
+            if state.current == scope { state.current = nil }
+            return tabs
+        }
+        for tab in tabs {
+            if closesTabs, tab != "t1", (try? await driver.command(["tab", "close", tab])) != nil { continue }
+            state.withLock { if !$0.spare.contains(tab) { $0.spare.append(tab) } }
+        }
+    }
+
+    /// The pages the conversations other than `keeping` have open (one per conversation: the tab it works in), to open again
+    /// after the browser starts over (`restore`). Only web pages.
+    func pages(excluding keeping: String?, driver: any BrowserDriver) async -> [(scope: String, url: String)] {
+        let mapping = state.withLock { state in state.tabs.compactMapValues(\.first).filter { $0.key != keeping } }
+        guard !mapping.isEmpty, let list = try? await driver.tabs() else { return [] }
+        let order = state.withLock { $0.order }
+        return order.reversed().compactMap { scope in
+            guard let tab = mapping[scope], let found = list.first(where: { $0.id == tab || $0.label == tab }),
+                  found.url.hasPrefix("http") else { return nil }
+            return (scope, found.url)
+        }
+    }
+
+    /// After the browser started over (a proxy, the window shown or hidden): the page open now is `owner`'s, and the other
+    /// conversations get their pages back, each in a tab of its own, at most `limit` in all.
+    func restore(_ pages: [(scope: String, url: String)], owner: String?, driver: any BrowserDriver) async {
+        state.withLock { state in
+            state = State(generation: driver.generation)
+            if let owner { state.take("t1", for: owner) }
+        }
+        var opened = false
+        for page in pages.prefix(Self.limit - 1) where page.scope != owner {
+            let label = Self.label(for: page.scope)
+            guard (try? await driver.command(["tab", "new", "--label", label, page.url])) != nil else { continue }
+            opened = true
+            state.withLock { state in
+                state.tabs[page.scope] = [label]
+                state.order.insert(page.scope, at: 0)
+            }
+        }
+        guard opened else { return }
+        // The tab that was current goes back to the front.
+        if owner != nil, (try? await driver.command(["tab", "t1"])) != nil { return }
+        state.withLock { $0.current = nil }
     }
 }
 
@@ -196,11 +346,11 @@ final class BrowserSession: @unchecked Sendable {
     /// the elements it saw (a ref belongs to the tab it was read in).
     func scoped(_ scope: String) -> BrowserSession { BrowserSession(sharing: self, scope: scope) }
 
-    /// Runs `work` alone on this browser.
+    /// Runs `work` alone on this browser, in this conversation's tab.
     func exclusive<T: Sendable>(_ work: @Sendable () async throws -> T) async throws -> T {
         await mutex.lock()
         do {
-            if let scope { await tabs.activate(scope, driver: driver) }
+            if let scope { await tabs.activate(scope, driver: driver, closesTabs: closesTabs) }
             let result = try await work()
             await mutex.unlock()
             return result
@@ -210,14 +360,63 @@ final class BrowserSession: @unchecked Sendable {
         }
     }
 
+    /// Whether a tab may be closed in this browser: not when its proxy needs a login, where agent-browser 0.39.1 loses the
+    /// browser on `tab close` ("Failed to install browser network controls", measured), so tabs are reused instead.
+    var closesTabs: Bool { !BrowserProxy.hasUser(proxy) }
+
     /// The tab the person or the Orb just made current (`browse_tabs`) is this conversation's from now on.
     func adoptCurrentTab() async {
         guard let scope, let list = try? await driver.tabs(), let active = list.first(where: \.isActive) else { return }
-        tabs.adopt(active.id, for: scope)
+        tabs.adopt(active.label ?? active.id, for: scope)
     }
 
     /// The tab this conversation works in, if it has one yet (for tests and the tab list).
     var tabName: String? { scope.flatMap { tabs.tab(for: $0) } }
+
+    /// The tabs of the browser this conversation may see and use: its own, and the current one when it is nobody's (a page the
+    /// conversation's own click opened). How many tabs other conversations of the Orb have is all it learns of them.
+    func visibleTabs() async throws -> (mine: [BrowserTab], others: Int) {
+        let list = try await driver.tabs()
+        guard let scope else { return (list, 0) }
+        let mine = Set(tabs.tabs(of: scope)), owned = tabs.ownedTabs
+        let visible = list.filter { tab in
+            mine.contains(tab.id) || tab.label.map(mine.contains) == true
+                || (tab.isActive && !owned.contains(tab.id) && tab.label.map(owned.contains) != true)
+        }
+        return (visible, list.count - visible.count)
+    }
+
+    /// The tab was closed (`browse_tabs close`).
+    func forgetTab(_ tab: BrowserTab) {
+        tabs.forget(tab.id)
+        if let label = tab.label { tabs.forget(label) }
+    }
+
+    /// The conversation is over: its tabs go (see `TabBook.end`). Under the browser's lock, without making any tab current.
+    func endScope(_ scope: String) async {
+        let root = base ?? self
+        _ = try? await root.exclusive { await root.tabs.end(scope, driver: root.driver, closesTabs: root.closesTabs) }
+    }
+
+    /// The pages of the other conversations, read before the browser starts over (`restoreTabs`). Inside `exclusive`.
+    func pagesOfOtherConversations() async -> [(scope: String, url: String)] {
+        await tabs.pages(excluding: scope, driver: driver)
+    }
+
+    /// The browser started over with this conversation's page in its first tab: the other conversations get theirs back. Inside
+    /// `exclusive`.
+    func restoreTabs(_ pages: [(scope: String, url: String)]) async {
+        await tabs.restore(pages, owner: scope, driver: driver)
+    }
+
+    /// Runs `relaunch` (`setHeaded`, which closes the browser and opens this conversation's page again) and gives the other
+    /// conversations their pages back. Inside `exclusive`.
+    func relaunchKeepingTabs<T: Sendable>(_ relaunch: @Sendable () async throws -> T) async throws -> T {
+        let pages = await pagesOfOtherConversations()
+        let result = try await relaunch()
+        await restoreTabs(pages)
+        return result
+    }
 
     var snapshotMemory: (text: String, url: String) { memory.withLock { ($0.snapshotText, $0.snapshotURL) } }
     var readMemory: (text: String, url: String) { memory.withLock { ($0.readText, $0.readURL) } }
@@ -384,6 +583,12 @@ final class BrowserHub: Sendable {
     func proxy(botID: UUID) -> String? { proxies.withLock { $0[botID] } }
 
     func existingSession(botID: UUID) -> BrowserSession? { sessions.withLock { $0[botID] } }
+
+    /// A conversation of the Orb is over (a routine's run, a request from another Orb): its tab is closed and its view forgotten.
+    func endScope(botID: UUID, scope: String) async {
+        scoped.withLock { _ = $0[botID]?.removeValue(forKey: scope) }
+        await existingSession(botID: botID)?.endScope(scope)
+    }
 
     // MARK: Labels
 

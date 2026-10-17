@@ -36,6 +36,14 @@ extension AppModel {
         return BrowserProxy.joined(address, password: vault.get(BrowserProxy.keychainAccount(botID: bot.id)))
     }
 
+    /// A conversation of the Orb that will not come back (a routine's run, a request from another Orb) is over: the tab it had in
+    /// the Orb's browser is closed (`BrowserHub.endScope`). A chat and a group keep theirs.
+    func endBrowserConversation(_ conversation: Conversation, of botID: UUID) {
+        guard let scope = conversation.gatewaySessionID else { return }
+        let hub = browserHub
+        Task { await hub.endScope(botID: botID, scope: scope) }
+    }
+
     func setSearchProvider(_ provider: SearchProvider, for botID: UUID) {
         update(botID) { $0.searchProvider = provider }
     }

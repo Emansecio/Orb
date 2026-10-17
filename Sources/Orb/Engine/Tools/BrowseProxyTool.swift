@@ -52,7 +52,7 @@ struct BrowseProxyTool: BrowseTool {
     /// one it had and says so. Every page is opened and read under the browser's lock, in this conversation's tab.
     private func apply(_ proxy: String?, replacing old: String?, hub: BrowserHub, botID: UUID, context: ToolContext) async throws -> String {
         let scope = context.browser.scope, mode = context.browser.mode
-        let returnTo = await Self.currentPage(hub: hub, botID: botID, mode: mode, scope: scope)
+        let (returnTo, others) = await Self.openPages(hub: hub, botID: botID, mode: mode, scope: scope)
         hub.setProxy(proxy, botID: botID)
         let address: String
         do {
@@ -71,8 +71,7 @@ struct BrowseProxyTool: BrowseTool {
         } catch {
             hub.setProxy(old, botID: botID)
             if let restored = try? await hub.session(botID: botID, mode: mode, scope: scope) {
-                restored.forgetPage()
-                if let returnTo { _ = try? await restored.exclusive { try await restored.driver.open(returnTo) } }
+                await Self.reopen(returnTo, others: others, in: restored)
             }
             if error is CancellationError { throw error }
             let why = error is DeadlineExceeded ? "it did not answer in \(Int(Self.checkTimeout)) s"
@@ -81,19 +80,30 @@ struct BrowseProxyTool: BrowseTool {
                 + "\(BrowserProxy.redacting(BrowserProxy.redacting(why, proxy: proxy), proxy: old)). It is back to \(old.map(BrowserProxy.display) ?? "direct"). "
                 + "Check that the tunnel or proxy is up, then try again.")
         }
-        let session = try await hub.session(botID: botID, mode: mode, scope: scope)
-        session.forgetPage()
-        if let returnTo { _ = try? await session.exclusive { try await session.driver.open(returnTo) } }
+        await Self.reopen(returnTo, others: others, in: try await hub.session(botID: botID, mode: mode, scope: scope))
         await context.browser.saveProxy?(proxy)
         let route = proxy.map { "goes through \(BrowserProxy.display($0))" } ?? "goes direct again"
         return "Your browser \(route). Sites see the address \(address). Logins and cookies stayed. "
             + (returnTo.map { "Reopened \($0). " } ?? "") + "Tell the user what you set and the address."
     }
 
-    /// The page this conversation had open, read in its own tab (nil: no browser running, or nothing worth reopening).
-    private static func currentPage(hub: BrowserHub, botID: UUID, mode: BrowserMode, scope: String?) async -> String? {
+    /// The page this conversation had open, read in its own tab, and the pages of the Orb's other conversations, which the browser
+    /// that opens through the proxy gives back to them (nil and none: no browser running).
+    private static func openPages(hub: BrowserHub, botID: UUID, mode: BrowserMode, scope: String?) async
+        -> (mine: String?, others: [(scope: String, url: String)]) {
         guard hub.existingSession(botID: botID) != nil, let session = try? await hub.session(botID: botID, mode: mode, scope: scope),
-              let url = try? await session.exclusive({ try await session.driver.currentURL() }) else { return nil }
-        return url.hasPrefix("http") ? url : nil
+              let found = try? await session.exclusive({ (try await session.driver.currentURL(), await session.pagesOfOtherConversations()) })
+        else { return (nil, []) }
+        return (found.0.flatMap { $0.hasPrefix("http") ? $0 : nil }, found.1)
+    }
+
+    /// This conversation's page again in the browser that just started (its first tab), and the other conversations' in tabs of
+    /// their own.
+    private static func reopen(_ page: String?, others: [(scope: String, url: String)], in session: BrowserSession) async {
+        session.forgetPage()
+        _ = try? await session.exclusive {
+            if let page { _ = try? await session.driver.open(page) }
+            await session.restoreTabs(others)
+        }
     }
 }

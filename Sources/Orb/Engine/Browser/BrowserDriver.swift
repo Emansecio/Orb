@@ -26,6 +26,8 @@ struct BrowserTab: Sendable, Equatable {
     var title: String
     var url: String
     var isActive: Bool
+    /// The name the app gave the tab (`tab new --label`), if any.
+    var label: String? = nil
 }
 
 /// The readable text of the page the browser has open.
@@ -46,8 +48,6 @@ enum BrowserDriverError: LocalizedError, Equatable {
     case timedOut(String)
     /// The browser answered with an error; its own words.
     case failed(String)
-    /// The engine cannot do this (a window in Obscura).
-    case unsupported(String)
 
     var errorDescription: String? {
         switch self {
@@ -55,7 +55,6 @@ enum BrowserDriverError: LocalizedError, Equatable {
         case .noPage: "No page is open in the browser (it was never opened, or it was closed: after a while unused, say): call browse_open with an address first."
         case .timedOut(let what): "The browser did not answer in time (\(what)). The page may be heavy or stuck; try browse_close and open it again."
         case .failed(let message): message
-        case .unsupported(let message): message
         }
     }
 }
@@ -101,6 +100,9 @@ protocol BrowserDriver: Sendable {
     func command(_ arguments: [String], text: Bool) async throws -> JSONValue
     /// What `agent-browser <topic> --help` says (the whole list of commands without a topic): the manual `browse_run` offers.
     func manual(_ topic: String?) async throws -> String
+    /// Goes up each time this driver learns that its browser closed or went away, so what was known about its tabs is not
+    /// taken for the tabs of the next one (`TabBook`).
+    var generation: Int { get }
 }
 
 extension BrowserDriver {
@@ -110,4 +112,5 @@ extension BrowserDriver {
     func closeSynchronously(timeout: TimeInterval) {}
     func runningSessions() async -> [String] { [] }
     func runningSessionsSynchronously(timeout: TimeInterval) -> [String] { [] }
+    var generation: Int { 0 }
 }

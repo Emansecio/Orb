@@ -204,6 +204,12 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
     /// Until when a command that worked proves the background process is there, so the next command need not ask.
     private let aliveUntil = OSAllocatedUnfairLock<ContinuousClock.Instant?>(initialState: nil)
     static let aliveWindow = Duration.seconds(3)
+    private let generations = OSAllocatedUnfairLock(initialState: 0)
+
+    var generation: Int { generations.withLock { $0 } }
+
+    /// The browser closed or went away: what was known of its tabs is not the next one's.
+    private func browserGone() { generations.withLock { $0 += 1 } }
 
     var config: AgentBrowserConfig { state.withLock { $0 } }
 
@@ -258,6 +264,7 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
     }
 
     private func markClosed() {
+        if !closed.withLock({ $0 }) { browserGone() }
         closed.withLock { $0 = true }
         aliveUntil.withLock { $0 = nil }
         launched.withLock { $0 = nil }
@@ -267,7 +274,10 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
     private func requireRunningSession() async throws {
         if closed.withLock({ $0 }) { throw BrowserDriverError.noPage }
         if let until = aliveUntil.withLock({ $0 }), until > .now { return }
-        guard try await listSessions().contains(config.session) else { throw BrowserDriverError.noPage }
+        guard try await listSessions().contains(config.session) else {
+            markClosed()
+            throw BrowserDriverError.noPage
+        }
         aliveUntil.withLock { $0 = .now + Self.aliveWindow }
     }
 
@@ -380,13 +390,22 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
     /// be reused with the wrong profile or program. So the flags of the launch are written down (`sessoes/<session>.launch`), and
     /// a running session that did not start with these is closed, and gone, before the page opens in a new one. Nothing to
     /// compare without the app's folder.
+    ///
+    /// A browser this driver launched is asked about only when no command proved it is there a moment ago: one that went away on
+    /// its own (unused for half an hour, or it crashed) is noticed here, before the `open` starts another, so the tabs known of it
+    /// are not taken for the new one's (`generation`).
     private func prepareLaunch() async throws {
         let current = config
-        guard current.stateDirectory != nil, !closed.withLock({ $0 }) else { return }
+        guard !closed.withLock({ $0 }) else { return }
         let fingerprint = current.launchFingerprint
-        if launched.withLock({ $0 }) == fingerprint { return }
-        guard try await listSessions().contains(current.session) else { return }
-        if current.recordedFingerprint() == fingerprint { return }
+        let ours = launched.withLock { $0 } == fingerprint
+        if ours, aliveUntil.withLock({ $0.map { $0 > .now } ?? false }) { return }
+        guard ours || current.stateDirectory != nil else { return }
+        guard try await listSessions().contains(current.session) else {
+            if launched.withLock({ $0 }) != nil { markClosed() }
+            return
+        }
+        if ours || current.recordedFingerprint() == fingerprint { return }
         _ = try? await send(["close"], needsSession: false)
         markClosed()
         await waitUntilGone()
@@ -448,7 +467,7 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
         let data = try await send(["tab"])
         return (data["tabs"]?.array ?? []).map { tab in
             BrowserTab(id: tab["tabId"]?.string ?? tab["label"]?.string ?? "", title: tab["title"]?.string ?? "",
-                       url: tab["url"]?.string ?? "", isActive: tab["active"]?.bool ?? false)
+                       url: tab["url"]?.string ?? "", isActive: tab["active"]?.bool ?? false, label: tab["label"]?.string)
         }
     }
 

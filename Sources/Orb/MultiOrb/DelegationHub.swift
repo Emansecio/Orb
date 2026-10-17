@@ -349,6 +349,8 @@ final class DelegationHub: DelegationService {
         session.unparkChat()
         session.scheduleSave(delay: 0)
         if session.hasUnsavedStretch() { session.scheduleMemorySave() }
+        // A request that is answered is over, and so is its tab in the Orb's browser (one that waits for its children keeps it).
+        if kind == .delegation, !waits { model.endBrowserConversation(own, of: botID) }
         if kind == .delegation { model.store.prunePedidos(for: botID, keeping: DelegationLimits.keptPedidos) }
 
         guard let current else { refresh(botID); return }

@@ -568,7 +568,7 @@ struct BrowseTabsTool: BrowseTool {
 
     let spec = ToolSpec(
         name: "browse_tabs",
-        description: "The browser's tabs. list (default) shows them with ids (t1, t2…); new opens one (optionally at `url`) and makes it current; select and close take `tab`.",
+        description: "This conversation's tabs. list (default) shows them with ids (t1, t2…); new opens one (optionally at `url`) and makes it current; select and close take `tab`.",
         parameters: .schema([
             "action": .object(["type": .string("string"), "enum": .array(BrowseTabsTool.actions.map { .string($0) })]),
             "tab": .property("string", "Tab id from list."),
@@ -590,30 +590,54 @@ struct BrowseTabsTool: BrowseTool {
         }
     }
 
+    /// Each conversation of the Orb (a chat, a routine run, a group turn) has tabs of its own in the one browser: this one sees and
+    /// moves among its own only, and learns how many the others have, never what is in them.
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
         let action = action(arguments)
         guard Self.actions.contains(action) else { throw ToolError("`action` is one of: \(Self.actions.joined(separator: ", ")).") }
         let session = try await BrowseSupport.session(context)
         return try await session.exclusive {
+            func mine(_ id: String) async throws -> BrowserTab {
+                // Without a conversation (the browser as it is), any tab of the list.
+                guard session.scope != nil else { return BrowserTab(id: id, title: "", url: "", isActive: false) }
+                guard let tab = try await session.visibleTabs().mine.first(where: { $0.id == id || $0.label == id }) else {
+                    throw ToolError("No tab \(id) among this conversation's tabs (browse_tabs list shows them).")
+                }
+                return tab
+            }
             switch action {
             case "new":
                 let address = try arguments.nonEmptyString("url").map(BrowseSupport.address)
                 try await session.driver.newTab(address)
                 session.forgetPage()
+                await session.adoptCurrentTab()
             case "select":
-                try await session.driver.selectTab(try arguments.requiredString("tab"))
+                let tab = try await mine(try arguments.requiredString("tab"))
+                try await session.driver.selectTab(tab.id)
                 session.forgetPage()
+                await session.adoptCurrentTab()
             case "close":
-                try await session.driver.closeTab(arguments.nonEmptyString("tab"))
+                guard session.closesTabs else {
+                    throw ToolError("Tabs are not closed while the browser goes through a proxy that needs a login (it would restart the "
+                        + "browser and lose every page). Leave it open, or select another tab.")
+                }
+                if session.scope == nil {
+                    try await session.driver.closeTab(arguments.nonEmptyString("tab"))
+                } else {
+                    let tab = try await mine(arguments.nonEmptyString("tab") ?? session.tabName ?? "")
+                    try await session.driver.closeTab(tab.id)
+                    // The browser shows another tab now, maybe another conversation's: this one's next call goes back to its own.
+                    session.forgetTab(tab)
+                }
                 session.forgetPage()
             default:
                 break
             }
-            if action != "list" { await session.adoptCurrentTab() }
-            let tabs = try await session.driver.tabs()
-            guard !tabs.isEmpty else { return "No tabs open." }
+            let (tabs, others) = try await session.visibleTabs()
+            let elsewhere = others == 0 ? "" : "\n(\(others) other tab\(others == 1 ? "" : "s") of this Orb belong\(others == 1 ? "s" : "") to its other conversations.)"
+            guard !tabs.isEmpty else { return "No tabs of this conversation are open." + elsewhere }
             return tabs.map { "\($0.id)\($0.isActive ? " *" : "")  \($0.title.isEmpty ? "(no title)" : "“\($0.title)”")  \($0.url)" }.joined(separator: "\n")
-                + "\n(* is the current tab)"
+                + "\n(* is the current tab)" + elsewhere
         }
     }
 }
@@ -648,7 +672,7 @@ struct BrowseShowTool: BrowseTool {
             do {
                 page = try await session.exclusive {
                     session.forgetPage()
-                    return try await session.driver.setHeaded(!hide)
+                    return try await session.relaunchKeepingTabs { try await session.driver.setHeaded(!hide) }
                 }
             } catch is CancellationError {
                 // Parar in the middle of opening the window: it may be up already, or about to be. Nobody wants it.
@@ -675,7 +699,7 @@ struct BrowseShowTool: BrowseTool {
             } else {
                 _ = try? await session.exclusive {
                     session.forgetPage()
-                    return try await session.driver.setHeaded(false)
+                    return try await session.relaunchKeepingTabs { try await session.driver.setHeaded(false) }
                 }
                 session.setShowingWindow(false)
             }
@@ -691,7 +715,7 @@ struct BrowseShowTool: BrowseTool {
         Task.detached {
             _ = try? await session.exclusive {
                 session.forgetPage()
-                return try await session.driver.setHeaded(false)
+                return try await session.relaunchKeepingTabs { try await session.driver.setHeaded(false) }
             }
             session.setShowingWindow(false)
         }

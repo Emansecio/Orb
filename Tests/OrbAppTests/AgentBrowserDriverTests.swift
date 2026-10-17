@@ -187,7 +187,7 @@ struct AgentBrowserDriverTests {
         #expect(snapshot.refs == ["e1": BrowserRef(role: "button", name: "Go"), "e2": BrowserRef(role: "textbox", name: "Senha")])
         let tabs = try await driver.tabs()
         #expect(tabs == [BrowserTab(id: "t1", title: "Um", url: "https://a.test/", isActive: true),
-                         BrowserTab(id: "t2", title: "Dois", url: "https://b.test/", isActive: false)])
+                         BrowserTab(id: "t2", title: "Dois", url: "https://b.test/", isActive: false, label: "docs")])
         let page = try await driver.read()
         #expect(page == BrowserReadout(url: "https://a.test/final", content: "# Título\nTexto"))
         // A script's result that is not text comes back as JSON.

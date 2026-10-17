@@ -122,6 +122,30 @@ struct BrowserProxyTests {
         #expect(text.contains("Reopened https://site.test/cart"))
     }
 
+    @Test func theOtherConversationsGetTheirPagesBackThroughTheProxy() async throws {
+        let labelB = TabBook.label(for: "chat-B")
+        for scope in ["chat-A", "chat-B"] {
+            var context = context()
+            context.browser.scope = scope
+            _ = try await BrowseScrollTool().run(.object([:]), context: context)
+        }
+        setup.driver.state.withLock {
+            $0.readContent = "203.0.113.7"
+            $0.url = "https://b.test/cart"
+            $0.tabs = [BrowserTab(id: "t1", title: "A", url: "https://a.test/inbox", isActive: false),
+                       BrowserTab(id: "t2", title: "B", url: "https://b.test/cart", isActive: true, label: labelB)]
+        }
+        var context = context()
+        context.browser.scope = "chat-B"
+        let text = try await BrowseProxyTool().run(.object(["action": .string("set"), "proxy": .string("socks5://127.0.0.1:1080")]), context: context)
+        #expect(text.contains("Reopened https://b.test/cart"))
+        let calls = setup.driver.calls
+        let check = try #require(calls.firstIndex(of: "open \(BrowserProxy.ipCheckURL)"))
+        #expect(Array(calls.dropFirst(check)).filter { $0.hasPrefix("open") || $0.hasPrefix("command tab") }
+                == ["open \(BrowserProxy.ipCheckURL)", "open https://b.test/cart",
+                    "command tab new --label \(TabBook.label(for: "chat-A")) https://a.test/inbox", "command tab t1"])
+    }
+
     @Test func aProxyThatDoesNotWorkIsUndoneAndSaysWhy() async throws {
         setup.hub.setProxy("socks5://127.0.0.1:1111", botID: setup.botID)
         setup.driver.state.withLock { $0.readContent = "<html>no route</html>" }

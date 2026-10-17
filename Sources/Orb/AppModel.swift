@@ -2075,6 +2075,7 @@ final class AppModel {
     /// chat gets one line.
     private func recordRoutineRun(_ routineID: UUID, of botID: UUID, conversation own: Conversation, started: Date, finished: Date,
                                   succeeded: Bool, reply: String?, userStopped: Bool) {
+        endBrowserConversation(own, of: botID) // the run is over: its tab in the Orb's browser goes
         guard let routine = routines.first(where: { $0.id == routineID }), let bot = bot(botID) else { return }
 
         var run = RoutineRun(date: started, finishedAt: finished, succeeded: succeeded, summary: "")
