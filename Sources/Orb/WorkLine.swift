@@ -221,7 +221,9 @@ enum WorkPhrase {
 /// What the running turn has used so far, summed over its model calls: a turn has no step limit, so this is how the person
 /// notices one that costs more than it should, while it runs.
 struct TurnSpend: Equatable, Sendable {
-    /// Every token of every call: the prompt (cached or not) and the reply.
+    /// The tokens of every call charged in full or written to the cache, and the reply: what a budget between Orbs counts
+    /// (`UsageTotals.budgetTokens`). Reading the cache is left out: each step rereads the whole history at a tenth of the
+    /// price, and a turn with history would pass `shownFrom` at its first call (the dollars next to it count the reads).
     var tokens: Int
     /// What it cost at the provider's prices, when the model is billed by use and its price is known.
     var dollars: Double?
@@ -232,7 +234,7 @@ struct TurnSpend: Equatable, Sendable {
     }
 
     init(_ usage: TokenUsage, dollars: Double? = nil) {
-        let parts = [usage.input, usage.output, usage.cacheRead, usage.cacheWrite].map { $0 ?? 0 }
+        let parts = [usage.input, usage.output, usage.cacheWrite].map { $0 ?? 0 }
         self.init(tokens: parts.reduce(0) { sum, part in
             let (total, overflow) = sum.addingReportingOverflow(part)
             return overflow ? .max : total

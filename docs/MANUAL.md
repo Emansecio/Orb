@@ -250,7 +250,8 @@ Se o navegador não estiver instalado, o Orb fica só com `web_fetch` e `web_sea
   O Orb não para sozinho: a decisão é sua.
 - **Tarefas longas.** Um turno não tem limite de passos, nem numa rotina, num pedido de outro Orb ou num grupo: o Orb trabalha
   até terminar ou até você parar (botão ou ⌘.). A partir de 50 mil tokens a linha de trabalho mostra o que o turno já gastou
-  ("4 min · 30 ações · 180 mil tokens", com o valor em dólares quando o modelo é pago por uso e o preço é conhecido). Um pedido de
+  ("4 min · 30 ações · 180 mil tokens", sem contar o histórico relido do cache, e com o valor em dólares, que conta, quando o
+  modelo é pago por uso e o preço é conhecido). Um pedido de
   outro Orb que passa de 3 h trabalhando gera um banner com **Parar**; ele não é encerrado sozinho.
 - **Skills.** `/resumir`, `/organizar` e `/revisar` vêm prontas; veja [Conectores e skills](#conectores-e-skills).
 

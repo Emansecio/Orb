@@ -4,7 +4,7 @@ Revisão local, sem chamar nenhum provedor: leitura do código a partir do HEAD 
 
 ## Resumo
 
-O caminho dos tokens está bem feito: cada cliente normaliza a contagem para `input + cacheRead + cacheWrite` (o prompt inteiro) e `output`, os repasses de falha e de nova tentativa estão contados uma vez, o cache de prompt tem marcadores e ordem de chaves estáveis, e o histórico só muda em lotes. Achei **três erros de contagem** (todos corrigidos, com teste que falhava antes), **uma confirmação em teste** do que o cache precisa (a requisição de um passo é o começo da do passo seguinte, nos três formatos) e **cinco propostas** de maior efeito que dependem de decisão ou de medição com o app aberto.
+O caminho dos tokens está bem feito: cada cliente normaliza a contagem para `input + cacheRead + cacheWrite` (o prompt inteiro) e `output`, os repasses de falha e de nova tentativa estão contados uma vez, o cache de prompt tem marcadores e ordem de chaves estáveis, e o histórico só muda em lotes. Achei **três erros de contagem** (todos corrigidos, com teste que falhava antes), **uma confirmação em teste** do que o cache precisa (a requisição de um passo é o começo da do passo seguinte, nos três formatos) e seis propostas; a revisão do código corrigiu uma delas (item 7, a linha de trabalho), e ficam **cinco propostas** de maior efeito que dependem de decisão ou de medição com o app aberto.
 
 | # | Achado | Prioridade | Estado |
 |---|--------|-----------|--------|
@@ -14,7 +14,7 @@ O caminho dos tokens está bem feito: cada cliente normaliza a contagem para `in
 | 4 | `stream_options` só vai para hosts conhecidos: xAI (chat), gateways custom e servidores locais não reportam uso (sem custo, medidor real nem aviso de cache) | P2 | proposta |
 | 5 | O medidor de contexto é só estimativa (3,5 caracteres por token); o número real da última chamada não calibra nada | P2 | proposta |
 | 6 | OpenAI: o cache em memória dura 5 a 10 min; `prompt_cache_retention: "24h"` seguraria o início da conversa entre turnos distantes sem custo extra | P2 | proposta |
-| 7 | A linha de trabalho soma leituras de cache como "tokens" (de 50 mil em diante) | P3 | proposta |
+| 7 | A linha de trabalho soma leituras de cache como "tokens" (de 50 mil em diante) | P3 | corrigido na revisão do código |
 | 8 | Raciocínio criptografado do Responses vai de volta nos dois últimos turnos; o orçamento o conta como texto | P3 | proposta |
 | 9 | "Parar" em OpenAI/Responses perde a chamada inteira (não há uso adiantado); cancelar o assistente de criação também | P3 | proposta |
 | 10 | Saídas de turnos anteriores viram prévia de 4.000 caracteres na virada do turno (uma reescrita de cache por turno) | P3 | análise, sem mudança |
@@ -52,9 +52,9 @@ Preço: `PriceBook.cost` usa o preço corrigido pelo usuário, depois o da lista
 
 ### O que a revisão conferiu e está certo
 
-- **Entrada contada duas vezes em turnos de várias chamadas**: não. `Reply.usage` é a chamada, `usage` do turno é a soma de `Reply.usage`; `.requestUsage` grava cada chamada uma vez e `.usage` (a soma) não é gravado (`BotSession+Turn.swift:285-288`; teste `everyModelCallOfAChatTurnIsCountedWithItsOrbAndModel`).
+- **Entrada contada duas vezes em turnos de várias chamadas**: não. `Reply.usage` é a chamada, `usage` do turno é a soma de `Reply.usage`; `.requestUsage` grava cada chamada uma vez e `.usage` (a soma) não é gravado (`BotSession+Turn.swift:289-296`; teste `everyModelCallOfAChatTurnIsCountedWithItsOrbAndModel`).
 - **Retentativas**: uma tentativa que quebrou depois de o provedor dizer o que usou entra como descartada (`countDiscarded`, `AgentEngine.swift:170`, `:503`, `:539`); uma tentativa que falhou antes de qualquer uso não conta (não foi cobrada); a última tentativa cortada devolve o `Reply` e é contada uma vez na linha 305.
-- **Parar no meio**: `play` guarda o `.pendingUsage` e grava se o `.requestUsage` não chegou (`BotSession+Turn.swift:100-119`).
+- **Parar no meio**: `play` guarda o `.pendingUsage` e grava se o `.requestUsage` não chegou (`BotSession+Turn.swift:100-127`).
 - **Saída contada como entrada**: não; **raciocínio fora da conta**: não (já está em `output_tokens`/`completion_tokens`).
 - **Preço ao modelo errado**: a normalização remove prefixo do provedor, `:thinking`, data e `-latest`, e só aceita sufixos de mesma família (`codex`, `preview`, `chat`…); `-mini`, `-pro` ficam sem preço em vez de herdar o do irmão.
 - **Aviso "O provedor não está reaproveitando…"** (`CacheHealth`): dispara com 3 ou mais chamadas, prompt médio de 4.096 ou mais e razão abaixo de 20% da soma do turno, só em cliente que arruma cache (`arrangesPromptCache`: Anthropic, Claude Code, OpenAI, Responses em `api.openai.com`/`chatgpt.com`), uma vez por turno e por conversa. A primeira chamada de um turno é sempre uma escrita, por isso o juízo é pela soma e não pela primeira. Não achei jeito de falso positivo no desenho; a única imprecisão é que as chamadas descartadas entram no prompt total mas não em `requestsWithUsage` (efeito desprezível).
@@ -79,7 +79,7 @@ A Anthropic diz a saída de verdade só no `message_delta`; no `message_start` v
 
 ### P2-2. Nota de trecho lida só até o teto (corrigido) e P3-1, ramo morto do assistente (corrigido)
 
-`ChunkSummarizer.write` para de ler quando o texto passa de `maxLength + 400`, então nunca vê o `message_delta` e contava a saída do `message_start`; agora usa a mesma estimativa (`ChunkSummary.swift:265`). O teste `ChunkCallTests.aReplyTooShortOrAFailureMakesNoNoteButKeepsWhatItCost` fixava a saída zerada e passou a esperar a estimativa.
+`ChunkSummarizer.write` para de ler quando o texto passa de `maxLength + 400`, então nunca vê o `message_delta` e contava a saída do `message_start`; agora usa a mesma estimativa (`ChunkSummary.swift:267`). O teste `ChunkCallTests.aReplyTooShortOrAFailureMakesNoNoteButKeepsWhatItCost` fixava a saída zerada e passou a esperar a estimativa.
 
 `WizardRunner.consume` tinha `case .usage(let total): if !tracksHistory { record(total) }`. Hoje `tracksHistory` é sempre verdadeiro, então o ramo não roda; mas `.usage` é a soma corrente do turno, e gravá-la a cada chamada contaria a primeira chamada de novo na segunda. Virou `case .usage: break` com a razão em comentário.
 
@@ -111,7 +111,7 @@ Referências do código: ferramentas e sistema somam cerca de 8 mil tokens por r
 | Raciocínio reenviado | Anthropic: o app não liga thinking, só reenvia o assinado que o endpoint produziu; Responses: itens criptografados vão de volta até a condensação (dois turnos) | de 0,5 a 3 mil tokens por passo de reasoning, lidos do cache | em parte (item 8) |
 | Compactação | sem modelo; vai a 50% do orçamento; um resumo ≤ 3.000 caracteres (~860 tokens) mais ≤ 4.000 de "sala" para notas | uma reescrita de cache (≈ 40 mil tokens a 1,25x no Equilibrado) por ~40 mil tokens novos de conversa (estimativa: de 8 a 10 turnos) | sim |
 
-Um turno típico (6 passos, histórico de 40 mil tokens, ferramentas e sistema de 8 mil): 6 × 48 mil = 288 mil tokens de prompt, dos quais cerca de 90% são leitura de cache (≈ 29 mil tokens equivalentes de entrada a preço cheio) mais uma escrita de ~12 mil na virada. A linha de trabalho diria "~300 mil tokens", acima do que se paga: item 7.
+Um turno típico (6 passos, histórico de 40 mil tokens, ferramentas e sistema de 8 mil): 6 × 48 mil = 288 mil tokens de prompt, dos quais cerca de 90% são leitura de cache (≈ 29 mil tokens equivalentes de entrada a preço cheio) mais uma escrita de ~12 mil na virada. A linha de trabalho dizia "~300 mil tokens", acima do que se paga; desde o item 7 conta ~16 mil (entrada, escrita e resposta) e não aparece.
 
 ## 5. Chamadas extras de modelo fora do turno
 
@@ -135,7 +135,7 @@ Conclusão: cada chamada extra já usa o menor modelo possível ou o cache do tu
 
 **P2-5. `prompt_cache_retention: "24h"` na OpenAI.** O cache em memória da OpenAI dura 5 a 10 minutos de inatividade (até 1 hora); a retenção estendida de 24 h para os modelos que a aceitam não tem custo extra, segundo a documentação da OpenAI de que me lembro (não conferi, sem rede), e o Orb volta a conversas depois de mais de 10 minutos com frequência. Proposta: mandar o campo só em `api.openai.com` e só para modelos de uma lista que o aceitam, com o mesmo recuo do item 4 se o corpo for recusado. Não implementei: não dá para conferir sem chamar a API, e um campo recusado custa o turno. Ganho estimado: no turno que volta depois de 10 a 60 minutos, o histórico (40 mil tokens) é lido a um décimo em vez de pago por inteiro, ou seja ~36 mil tokens equivalentes a menos por volta.
 
-**P3-2. Linha de trabalho com tokens "novos".** `TurnSpend` soma `input + output + cacheRead + cacheWrite` (`WorkLine.swift:234`), como diz a documentação do tipo, então um turno de 6 passos com 48 mil de prompt mostra 300 mil tokens e passa dos 50 mil quase sempre que há histórico. O dinheiro ao lado já está certo. Proposta: mostrar também "(X novos)" ou limitar o gatilho de 50 mil a `input + cacheWrite + output`, como o orçamento de grupo (`UsageTotals.budgetTokens`). Não mexi: é decisão de produto sobre o que o número significa.
+**P3-2. Linha de trabalho com tokens "novos" (corrigido na revisão do código).** `TurnSpend` somava `input + output + cacheRead + cacheWrite`, então um turno de 6 passos com 48 mil de prompt mostrava 300 mil tokens e passava dos 50 mil (`TurnSpend.shownFrom`, "abaixo disso o turno custa pouco demais para dizer") já na primeira chamada de qualquer conversa com histórico: o gatilho não separava mais nada. Era erro de contagem contra o próprio propósito do número, com correção pequena: agora conta `input + cacheWrite + output`, a mesma regra do orçamento de grupo (`UsageTotals.budgetTokens`, `Usage/UsageRecord.swift:57`), em `WorkLine.swift:236-242`. O dinheiro ao lado continua contando as leituras pelo preço delas. O painel de uso (`UsageTotals.tokens`) segue somando tudo, porque lá o número é o volume e não o alerta. Teste: `TurnReliabilityTests.theMeterSaysWhatTheTurnSpentOnceItMatters` (a soma sem leituras, e um turno de 280 mil lidos do cache que não aparece).
 
 **P3-3. Raciocínio criptografado do Responses.** Os itens `reasoning` (com `encrypted_content`) voltam em todos os passos dos dois últimos turnos (`ResponsesClient.requestBody`, linha 94-102); pelo que me lembro da documentação da OpenAI (não conferi, sem rede), o servidor descarta o raciocínio de antes da última mensagem do usuário, então o que vale ainda é o do turno corrente. Proposta: mandar de volta só os itens posteriores à última mensagem do usuário. O orçamento (`contextCharacters`) também conta o `data` desses itens por 3,5 caracteres por token, o que provavelmente superestima. Ganho: até alguns milhares de tokens por requisição e menos bytes na rede; a incerteza é se o servidor cobra o que descarta. Medir com `ORB_DEBUG_USAGE` antes e depois.
 
@@ -159,4 +159,4 @@ Só anotado, nada alterado: as ferramentas somam cerca de 6.900 tokens por requi
 
 ## 10. Testes
 
-Novos ou ajustados (todos filtrados, sem suíte inteira): `AnthropicClientTests` (2), `UsageEventsTests` (1), `CachePrefixStabilityTests` (3 casos), `ChunkCallTests` (expectativa corrigida). Antes da correção os quatro primeiros falhavam; depois, 925 testes em 161 suítes de provedores, uso, contexto, compactação, turno, Claude Code e preço passam.
+Novos ou ajustados (todos filtrados, sem suíte inteira): `AnthropicClientTests` (2), `UsageEventsTests` (1), `CachePrefixStabilityTests` (3 casos), `ChunkCallTests` (expectativa corrigida) e, na revisão do código, `TurnReliabilityTests` (item 7). Sem a correção (o código de `c51ba85` com os testes novos) falham quatro: os dois de `AnthropicClientTests`, o de `UsageEventsTests` e o de `ChunkCallTests`; os de `CachePrefixStabilityTests` passam, porque guardam o que já estava certo. Com a correção, 925 testes em 161 suítes de provedores, uso, contexto, compactação, turno, Claude Code e preço passam.
