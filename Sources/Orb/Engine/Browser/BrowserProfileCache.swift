@@ -54,10 +54,23 @@ enum BrowserProfileCache {
         return freed
     }
 
-    /// Cleans when a week has passed since the last time and there is enough to remove; the day is noted either way.
+    /// Whether a browser has the profile open, by Chromium's own lock: `SingletonLock`, a link to `<host>-<pid>` that the browser
+    /// makes when it opens the profile and removes when it closes. A lock left by a browser that crashed names a process that is
+    /// gone; one that cannot be read counts as in use.
+    static func isInUse(profile: URL) -> Bool {
+        let lock = profile.appending(path: "SingletonLock").path
+        guard let target = try? FileManager.default.destinationOfSymbolicLink(atPath: lock) else {
+            return FileManager.default.fileExists(atPath: lock)
+        }
+        guard let pid = target.split(separator: "-").last.flatMap({ pid_t($0) }), pid > 0 else { return true }
+        return kill(pid, 0) == 0 || errno == EPERM
+    }
+
+    /// Cleans when a week has passed since the last time and there is enough to remove; the day is noted either way. Never while
+    /// a browser has the profile open (`isInUse`), whoever started it.
     @discardableResult
     static func cleanIfDue(profile: URL, now: Date = .now, worth: Int64 = worthIt) -> Int64 {
-        guard FileManager.default.fileExists(atPath: profile.path), due(profile: profile, now: now) else { return 0 }
+        guard FileManager.default.fileExists(atPath: profile.path), due(profile: profile, now: now), !isInUse(profile: profile) else { return 0 }
         guard size(profile: profile) >= worth else {
             try? String(now.timeIntervalSince1970).write(to: stamp(for: profile), atomically: true, encoding: .utf8)
             return 0

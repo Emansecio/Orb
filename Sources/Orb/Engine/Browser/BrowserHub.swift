@@ -474,6 +474,8 @@ final class BrowserHub: Sendable {
     private let labels = OSAllocatedUnfairLock<[UUID: [String: String]]>(initialState: [:])
     private let proxies = OSAllocatedUnfairLock<[UUID: String]>(initialState: [:])
     private let scoped = OSAllocatedUnfairLock<[UUID: [String: BrowserSession]]>(initialState: [:])
+    /// The Orbs whose profile caches are being emptied now (`cleanCachesIfDue`): their browser waits.
+    private let cleaning = OSAllocatedUnfairLock<Set<UUID>>(initialState: [])
 
     init(profilesDirectory: URL?,
          locate: (@Sendable () async -> BrowserStatus)? = nil,
@@ -557,6 +559,8 @@ final class BrowserHub: Sendable {
     }
 
     func session(botID: UUID, mode: BrowserMode) async throws -> BrowserSession {
+        // The profile's caches are being emptied (a moment): the browser opens after, not on top of it.
+        while cleaning.withLock({ $0.contains(botID) }) { try await Task.sleep(for: .milliseconds(100)) }
         if let existing = sessions.withLock({ $0[botID] }), existing.mode == mode, existing.proxy == proxy(botID: botID) { return existing }
         let status = await status()
         guard status.isReady else { throw BrowserDriverError.notInstalled(status.modelNote ?? "The browser is not installed.") }
@@ -663,7 +667,8 @@ final class BrowserHub: Sendable {
     }
 
     /// Empties the caches of the Orb's profile when a week has passed since the last time (see `BrowserProfileCache`): logins, cookies
-    /// and storage stay. Never while the Orb's browser is running. Returns the bytes freed.
+    /// and storage stay. Never while the Orb's browser is running: not held here, no session of the Orb in agent-browser's list,
+    /// and no browser holding the profile's own lock (`BrowserProfileCache.isInUse`). Returns the bytes freed.
     @discardableResult
     func cleanCachesIfDue(botID: UUID, worth: Int64 = BrowserProfileCache.worthIt) async -> Int64 {
         guard let profile = profileFolder(botID: botID), BrowserProfileCache.due(profile: profile),
@@ -672,7 +677,10 @@ final class BrowserHub: Sendable {
             let prefix = AgentBrowserConfig.botPrefix(botID)
             guard await runningSessions(executable: executable, where: { $0.hasPrefix(prefix) }).isEmpty else { return 0 }
         }
-        // The browser may have been opened while the question was asked.
+        // The browser may have been opened while the question was asked; from here until the end, none opens (`session` waits).
+        let started = cleaning.withLock { $0.insert(botID).inserted }
+        guard started else { return 0 }
+        defer { cleaning.withLock { _ = $0.remove(botID) } }
         guard existingSession(botID: botID) == nil else { return 0 }
         return BrowserProfileCache.cleanIfDue(profile: profile, worth: worth)
     }

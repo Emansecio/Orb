@@ -14,6 +14,12 @@ struct BrowserProfileCacheTests {
 
     private func exists(_ path: String, in profile: URL) -> Bool { FileManager.default.fileExists(atPath: profile.appending(path: path).path) }
 
+    /// What a cleaning never touches: logins, cookies, storage of sites and of extensions, preferences.
+    static let kept = ["Default/Cookies", "Default/Login Data", "Default/Local Storage/leveldb/000003.log", "Default/IndexedDB/https_x/1",
+                       "Default/Preferences", "Default/Service Worker/Database/CURRENT", "Local State", "Default/Web Data",
+                       "Default/Local Extension Settings/abc/000003.log", "Default/Sync Extension Settings/abc/LOG", "Default/Extension State/LOG",
+                       "Default/Extensions/abc/1.0/manifest.json", "Default/Session Storage/LOG", "Default/Storage/ext/abc/def/LOG"]
+
     /// A profile folder (`<orb>/chrome`) with caches and with what must survive.
     private func makeProfile() throws -> URL {
         let profile = root.appending(path: UUID().uuidString).appending(path: "chrome")
@@ -21,8 +27,7 @@ struct BrowserProfileCacheTests {
                       "Default/Service Worker/ScriptCache/a", "GrShaderCache/b", "GPUPersistentCache/c"] {
             try write(cache, bytes: 5_000, in: profile)
         }
-        for keep in ["Default/Cookies", "Default/Login Data", "Default/Local Storage/leveldb/000003.log", "Default/IndexedDB/https_x/1",
-                     "Default/Preferences", "Default/Service Worker/Database/CURRENT", "Local State", "Default/Web Data"] {
+        for keep in Self.kept {
             try write(keep, in: profile)
         }
         return profile
@@ -38,8 +43,7 @@ struct BrowserProfileCacheTests {
                      "Default/Service Worker/ScriptCache", "GrShaderCache", "GPUPersistentCache"] {
             #expect(!exists(gone, in: profile), "\(gone)")
         }
-        for kept in ["Default/Cookies", "Default/Login Data", "Default/Local Storage/leveldb/000003.log", "Default/IndexedDB/https_x/1",
-                     "Default/Preferences", "Default/Service Worker/Database/CURRENT", "Local State", "Default/Web Data"] {
+        for kept in Self.kept {
             #expect(exists(kept, in: profile), "\(kept)")
         }
         #expect(BrowserProfileCache.lastCleaned(profile: profile) != nil)
@@ -98,5 +102,21 @@ struct BrowserProfileCacheTests {
         // Not again within the week.
         try write("Default/Cache/data_1", bytes: 5_000, in: profile)
         #expect(await setup.hub.cleanCachesIfDue(botID: setup.botID, worth: 1) == 0)
+    }
+
+    @Test func aProfileABrowserHasOpenIsNeverCleaned() throws {
+        let profile = try makeProfile()
+        defer { try? FileManager.default.removeItem(at: root) }
+        // Chromium's lock names this very process: a browser that is running.
+        let lock = profile.appending(path: "SingletonLock")
+        try FileManager.default.createSymbolicLink(atPath: lock.path, withDestinationPath: "mac.local-\(ProcessInfo.processInfo.processIdentifier)")
+        #expect(BrowserProfileCache.isInUse(profile: profile))
+        #expect(BrowserProfileCache.cleanIfDue(profile: profile, worth: 1) == 0)
+        #expect(exists("Default/Cache/data_0", in: profile) && BrowserProfileCache.lastCleaned(profile: profile) == nil)
+        // A lock a crashed browser left names a process that is gone: the profile is free.
+        try FileManager.default.removeItem(at: lock)
+        try FileManager.default.createSymbolicLink(atPath: lock.path, withDestinationPath: "mac.local-999999")
+        #expect(!BrowserProfileCache.isInUse(profile: profile))
+        #expect(BrowserProfileCache.cleanIfDue(profile: profile, worth: 1) > 0)
     }
 }
