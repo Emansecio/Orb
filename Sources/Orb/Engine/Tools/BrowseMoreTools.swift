@@ -397,7 +397,12 @@ enum BrowseRunRules {
         var found: [(index: Int, access: Access)] = []
         let sub = words.dropFirst().first?.lowercased()
         switch first {
-        case "screenshot": if let index = plain(from: 1).first { found.append((index, .write)) }
+        case "screenshot":
+            // `screenshot [selector] [path]`: a word is the path when it looks like one (a folder or a picture's name), never a selector.
+            for index in plain(from: 1) where !words[index].hasPrefix("@") && !words[index].hasPrefix("#") {
+                let word = words[index].lowercased()
+                if word.contains("/") || [".png", ".jpg", ".jpeg", ".webp", ".pdf"].contains(where: word.hasSuffix) { found.append((index, .write)) }
+            }
         case "pdf": if words.count > 1 { found.append((1, .write)) }
         case "download": if words.count > 2 { found.append((2, .write)) }
         case "upload": for index in plain(from: 2) { found.append((index, .read)) }

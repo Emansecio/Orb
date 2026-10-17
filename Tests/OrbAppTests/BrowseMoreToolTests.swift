@@ -259,6 +259,8 @@ struct BrowseMoreToolTests {
         let context = setup.context(directory: directory)
         let tool = BrowseRunTool()
         #expect(BrowseRunRules.files(["screenshot", "--full", "shot.png"]).map(\.index) == [2])
+        #expect(BrowseRunRules.files(["screenshot", "@e3", "out/shot.png"]).map(\.index) == [2])
+        #expect(BrowseRunRules.files(["screenshot", "div.card"]).isEmpty && BrowseRunRules.files(["screenshot", "@e3"]).isEmpty)
         #expect(BrowseRunRules.files(["download", "@e1", "x.bin"]).first?.access == .write)
         #expect(BrowseRunRules.files(["upload", "@e1", "a.txt"]).first?.access == .read)
         #expect(BrowseRunRules.files(["get", "title"]).isEmpty)
