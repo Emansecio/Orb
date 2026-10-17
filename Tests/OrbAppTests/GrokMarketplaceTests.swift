@@ -133,6 +133,20 @@ struct GrokMarketplaceTests {
         #expect(imported.link == "https://x.ai/bot/marketplace/bots/researchy")
     }
 
+    @Test func anIdThatIsNoTokenIsNeverMadeIntoAnAddress() async throws {
+        for badID in ["../x?y", "a b", "a/b"] {
+            let list = try page([listed.merging(["id": badID]) { $1 }])
+            let fetches = Fetches()
+            await #expect(throws: MarketplaceFailure.unreadable) {
+                _ = try await GrokMarketplace.bot(.share("i2hvaEONDg6_gEF5C9RlK")) { url in
+                    await fetches.add(url)
+                    return list
+                }
+            }
+            #expect(await fetches.urls == [GrokMarketplace.home], "\(badID): only the list is asked for")
+        }
+    }
+
     @Test func failuresSayWhatHappened() async throws {
         let list = try page([listed])
         await #expect(throws: MarketplaceFailure.notFound) {

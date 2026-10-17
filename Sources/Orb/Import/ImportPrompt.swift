@@ -4,9 +4,6 @@ import Foundation
 /// `OrbImportReader` reads best; any other shape still works (see the reader). Keep the headings here and in the reader
 /// the same: a test reads an answer written exactly as this asks.
 enum ImportPrompt {
-    /// Changes whenever the format does.
-    static let version = 1
-
     static let text = """
     Estou mudando para outro assistente e quero levar o que você sabe sobre mim e como trabalha comigo. Responda com UM único bloco de código Markdown, sem nada antes nem depois, neste formato exato (títulos em português, como abaixo):
 

@@ -234,7 +234,9 @@ extension OrbImportReader {
             var value = (card[key] as? String) ?? ""
             for (pattern, replacement) in [(#"\{\{\s*original\s*\}\}"#, ""), (#"\{\{\s*char\s*\}\}|<BOT>"#, nickname),
                                            (#"\{\{\s*user\s*\}\}|<USER>"#, "a pessoa")] {
-                value = value.replacingOccurrences(of: pattern, with: replacement, options: [.regularExpression, .caseInsensitive])
+                // The replacement is a regex template: a `$0` or a `\` in the character's name is text, not a reference.
+                value = value.replacingOccurrences(of: pattern, with: NSRegularExpression.escapedTemplate(for: replacement),
+                                                   options: [.regularExpression, .caseInsensitive])
             }
             return value
         }
