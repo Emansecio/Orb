@@ -116,6 +116,14 @@ struct BrowseMoreToolTests {
         #expect(unknown.contains("`by` is one of"))
     }
 
+    @Test func aNameThatIsNotARoleDoesNotHideAPasswordField() async {
+        let label = await message(BrowseFindTool(), ["by": .string("label"), "value": .string("Senha"), "do": .string("fill"), "text": .string("x"), "name": .string("campo")])
+        #expect(label.lowercased().contains("password"))
+        let placeholder = await message(BrowseFindTool(), ["by": .string("placeholder"), "value": .string("Password"), "do": .string("fill"), "text": .string("x"), "name": .string("x")])
+        #expect(placeholder.lowercased().contains("password"))
+        #expect(!setup.driver.calls.contains { $0.hasPrefix("command find") })
+    }
+
     // MARK: Dialog
 
     @Test func dialogSaysWhatIsOpenAndAnswersIt() async throws {
@@ -264,6 +272,12 @@ struct BrowseMoreToolTests {
         setup.driver.state.withLock { $0.commandReply = .null }
         #expect(try await run(BrowseRunTool(), ["args": .array([.string("scroll"), .string("down"), .number(300)])]).contains("Done."))
         #expect(setup.driver.calls.last == "command scroll down 300")
+    }
+
+    @Test func aHugeNumberInTheArgsIsTextNotACrash() {
+        #expect(BrowseRunRules.words(.object(["args": .array([.string("scroll"), .number(1e30)])])) == ["scroll", "1e+30"])
+        #expect(BrowseRunRules.words(.object(["args": .array([.number(300), .number(1.5), .number(-2)])])) == ["300", "1.5", "-2"])
+        #expect(BrowseRunRules.words(.object(["args": .array([.number(.infinity)])])) == ["inf"])
     }
 
     @Test func runJudgesFilesLikeTheToolsThatTouchThem() async throws {

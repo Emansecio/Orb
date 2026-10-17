@@ -24,11 +24,17 @@ struct GroupRememberTool: AgentTool {
     /// A fact or a procedure is covered by the turn's grant (`PermissionFamily.groupMemory`); a preference is a standing
     /// rule for the group, so it still asks.
     func risk(_ arguments: JSONValue) -> ToolRisk {
-        (arguments["tipo"]?.string.flatMap(MemoryKind.init)?.isPinned ?? false) ? .instructs : .sensitive
+        (Self.requestedKind(arguments)?.isPinned ?? false) ? .instructs : .sensitive
+    }
+
+    /// The `tipo` the way `run` reads it (`Preferencia` and ` preferencia ` are `preferencia`), so the card, the risk and
+    /// the saved note all agree on the kind.
+    private static func requestedKind(_ arguments: JSONValue) -> MemoryKind? {
+        arguments["tipo"]?.string.flatMap { MemoryKind(rawValue: $0.trimmingCharacters(in: .whitespaces).lowercased()) }
     }
 
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) {
-        let kind = arguments["tipo"]?.string.flatMap(MemoryKind.init) ?? .fato
+        let kind = Self.requestedKind(arguments) ?? .fato
         return ("Guardando no quadro do grupo (\(kind.label.lowercased()))", arguments["fact"]?.string ?? "")
     }
 
@@ -36,7 +42,7 @@ struct GroupRememberTool: AgentTool {
         let fact = try arguments.requiredString("fact")
         guard let board = context.groupMemory else { throw ToolError("O quadro do grupo não está disponível agora.") }
         // The board has no identity page (the goal is the person's to edit) and no session pages (the app writes them).
-        let requested = arguments["tipo"]?.string?.lowercased() ?? "fato"
+        let requested = arguments["tipo"]?.string?.trimmingCharacters(in: .whitespaces).lowercased() ?? "fato"
         guard Self.kinds.contains(requested), let kind = MemoryKind(rawValue: requested) else {
             throw ToolError("tipo deve ser fato, procedimento ou preferencia.")
         }

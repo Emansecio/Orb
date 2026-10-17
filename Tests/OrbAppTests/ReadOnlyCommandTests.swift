@@ -43,7 +43,7 @@ struct ReadOnlyCommandTests {
             "node a.js", "python3 a.py", "sh -c ls", "bash a.sh", "env ls", "xargs ls", "time ls", "sudo ls", "open .", "curl https://x.dev",
             "ls | xargs rm", "ls | tee out.txt", "ls | sh", "/bin/ls", "./ls", "FOO=1 ls", "command ls",
             // not plain
-            "ls $(pwd)", "ls `pwd`", "ls & ls", "sleep 1 &", "cat <<EOF\nx\nEOF", "echo $HOME", "ls $DIR", "cat <a.txt", "cat 'sem fechar",
+            "ls $(pwd)", "ls `pwd`", "ls & ls", "sleep 1 &", "ls &", "cat a.txt &", "git status &", "tail -f a.log &", "cat <<EOF\nx\nEOF", "echo $HOME", "ls $DIR", "cat <a.txt", "cat 'sem fechar",
             "diff <(ls) <(ls)", "git status && rm -rf x", "ls; touch a",
             // recursion and wildcards that could walk into private files
             "grep -rn senha .", "grep -R x ~", "grep -d recurse x .", "grep --recursive x .", "egrep -rl x .", "cat ~/.s*/id_*", "cat /Users/teste/.*/id_rsa",
@@ -52,6 +52,14 @@ struct ReadOnlyCommandTests {
             "cd", "cd -", "cd $HOME", "cd ~/.ssh && cat id_rsa", "cd .. ; cd ..; cd .ssh; cat id_rsa",
         ]
         for command in acting { #expect(!readOnly(command), Comment(rawValue: command)) }
+    }
+
+    /// A closing `&` leaves no segment after it, so the one it ends carries the mark that it runs in the background.
+    @Test func aClosingAmpersandMarksTheCommandItEnds() {
+        #expect(ShellCommandLine.parse("ls &").segments.map(\.runsInBackground) == [true])
+        #expect(ShellCommandLine.parse("a & b").segments.map(\.runsInBackground) == [true, false])
+        #expect(ShellCommandLine.parse("a && b").segments.map(\.runsInBackground) == [false, false])
+        #expect(!readOnly("ls &") && !readOnly("tail -f a.log &") && readOnly("ls && ls"))
     }
 
     @Test func secretsAreNeverReadOnlyEvenWhenTheCommandOnlyLooks() {
