@@ -313,8 +313,19 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
         words.map { "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'" }.joined(separator: " ")
     }
 
+    /// "A JavaScript confirm dialog is blocking the page: "ok?". Resolve it with `dialog accept`…" as the sentence the model acts on:
+    /// every command fails like this until someone answers the dialog, and `dialog` is `browse_dialog` to it.
+    static func dialogBlocking(_ message: String) -> String? {
+        guard let match = message.range(of: #"A JavaScript (\w+) dialog is blocking the page: "(.*?)"[.\s]"#, options: .regularExpression) else { return nil }
+        let found = String(message[match])
+        let kind = found.split(separator: " ").dropFirst(2).first.map(String.init) ?? "dialog"
+        let text = found.split(separator: "\"", omittingEmptySubsequences: false).dropFirst().first.map(String.init) ?? ""
+        return "A JavaScript \(kind) dialog (“\(text.clipped(to: 200))”) is open and blocks the page: call browse_dialog to accept or dismiss it, then retry."
+    }
+
     /// An error message of the command line as the error the tools show.
     static func classify(_ message: String) -> BrowserDriverError {
+        if let blocked = dialogBlocking(message) { return .failed(blocked) }
         let lowered = message.lowercased()
         if lowered.contains("browser not launched") || lowered.contains("no active page") || lowered.contains("no page") && lowered.contains("open") {
             return .noPage
@@ -444,6 +455,21 @@ final class AgentBrowserDriver: BrowserDriver, @unchecked Sendable {
     func closeTab(_ id: String?) async throws {
         if let id { try Self.requireTabID(id) }
         try await send(["tab", "close"] + (id.map { [$0] } ?? []))
+    }
+
+    func command(_ arguments: [String], text: Bool) async throws -> JSONValue {
+        try await send(arguments, text: text)
+    }
+
+    /// `agent-browser <topic> --help` (a word of letters and dashes, never an option of its own), run outside any session.
+    func manual(_ topic: String?) async throws -> String {
+        if let topic, topic.range(of: #"^[a-z][a-z0-9-]*$"#, options: .regularExpression) == nil {
+            throw BrowserDriverError.failed("`manual` is the name of one command, like wait or find.")
+        }
+        let current = config
+        let environment = current.environment(base: await self.environment())
+        let output = try await run(current.executable, (topic.map { [$0] } ?? []) + ["--help"], environment, Self.commandTimeout)
+        return output.output.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     func attribute(_ name: String, of ref: String) async throws -> String? {

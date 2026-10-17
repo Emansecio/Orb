@@ -48,6 +48,14 @@ Limites da medição: uma rodada por montagem (um Mac, uma rede), páginas públ
 
 (Preenchido por etapa, abaixo.)
 
+### Etapa 2: comandos de cara e `browse_run`
+
+- Ferramentas por ação, para o custo não crescer uma por comando: `browse_click` (click, dblclick, hover, check, uncheck, focus, scrollintoview, drag), `browse_press` (com `text`/`insert`), `browse_scroll` (com `ref`), e seis novas: `browse_wait`, `browse_find`, `browse_dialog`, `browse_files`, `browse_page` (frame, pdf, state save/load, mouse) e `browse_run` (qualquer comando, manual sob demanda). `BrowserDriver` ganhou `command(_:text:)` e `manual(_:)`.
+- Custo das especificações das ferramentas do navegador (descrição mais esquema, em caracteres): 13 ferramentas antes, até o teto de 4.200 (medidas na etapa 1 abaixo dele); 19 agora, 7.519 (as 13 viraram 4.519; wait 447, find 634, dialog 295, files 373, page 659, run 592). O teto do `ToolEconomyTests` foi para 7.600. Elas só aparecem com o navegador pronto.
+- `browse_run`: o manual é o `--help` do agent-browser (a versão 0.39.1 não traz as skills), sem as seções do que é recusado; recusa os comandos e opções que trocariam o navegador; leitura é `.safe`, o resto `.sensitive`; arquivos citados no comando passam pelas mesmas regras de `save_to` e de leitura de chaves (e por Terminal e arquivos).
+- Um diálogo JavaScript aberto trava todos os comandos: o erro vira "A JavaScript confirm dialog (...) is open... call browse_dialog" e o `browse_click` o relata em vez de dar erro no endereço.
+- Testes: `BrowseMoreToolTests`; `BrowserLocatorTests` e `ToolEconomyTests` ajustados.
+
 ### Etapa 1: um navegador, dois modos
 
 - Saem o seletor de motores, o Obscura, o CloakBrowser (e a semente, o venv e o Python) e a "Leitura simples" como motor (`web_fetch` continua). `BrowserEngineKind` virou `BrowserMode` (`background` padrão, `visible`); `BrowserEngine.swift` virou `BrowserLocator.swift` (Chrome, depois Brave, Chromium e Canary em Applications; o Chrome for Testing só como reserva).

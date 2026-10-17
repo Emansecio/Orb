@@ -183,6 +183,11 @@ final class BrowserHub: Sendable {
     }
 
     /// How the Orb's browser is launched for this mode and status.
+    /// Where the Orb keeps the cookies and storage it saved by name (`browse_page state_save`), next to its profile.
+    func stateFolder(botID: UUID) -> URL? {
+        profilesDirectory?.appending(path: botID.uuidString).appending(path: "estado")
+    }
+
     func configuration(botID: UUID, mode: BrowserMode, status: BrowserStatus) -> AgentBrowserConfig {
         remember(status)
         Self.adoptOldProfile(for: botID, in: profilesDirectory)

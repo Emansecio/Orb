@@ -17,6 +17,9 @@ final class FakeBrowserDriver: BrowserDriver, @unchecked Sendable {
         var hasPage = true
         var headed = false
         var screenshotBytes: Data?
+        /// What `command` answers (its `data`), and what `manual` says.
+        var commandReply: JSONValue = .null
+        var manualText = "Core Commands:\n  open <url>\n  get title\n\nStreaming:\n  stream enable\n\nSnapshot Options:\n  -i"
     }
 
     let state = OSAllocatedUnfairLock(initialState: State())
@@ -89,6 +92,15 @@ final class FakeBrowserDriver: BrowserDriver, @unchecked Sendable {
     }
 
     func close() async throws { try note("close") }
+
+    func command(_ arguments: [String], text: Bool) async throws -> JSONValue {
+        let state = try note("command " + arguments.joined(separator: " ") + (text ? " (text)" : ""))
+        return state.commandReply
+    }
+
+    func manual(_ topic: String?) async throws -> String {
+        try note("manual \(topic ?? "-")").manualText
+    }
 }
 
 /// A hub whose browser is `driver`, installed as far as the tools can tell, and the tool context that reaches it.

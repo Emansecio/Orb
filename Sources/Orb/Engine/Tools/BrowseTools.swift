@@ -28,6 +28,23 @@ enum BrowseSupport {
         return text
     }
 
+    /// A string argument limited to `values`, for the schema.
+    static func choice(_ values: [String]) -> JSONValue {
+        .object(["type": .string("string"), "enum": .array(values.map { .string($0) })])
+    }
+
+    /// The address of the page after an action, or the sentence that tells a JavaScript dialog is open: while one is, no command
+    /// answers but `dialog`, so the question about the address is where the dialog shows.
+    static func addressOrDialog(_ session: BrowserSession) async -> (url: String?, dialog: String?) {
+        do {
+            return (try await session.driver.currentURL(), nil)
+        } catch BrowserDriverError.failed(let message) where message.contains("dialog (") && message.contains("blocks the page") {
+            return (nil, message)
+        } catch {
+            return (nil, nil)
+        }
+    }
+
     /// An address to open: http(s) only (a bare "example.com" gets https://).
     static func address(_ text: String) throws -> String {
         var address = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -138,7 +155,7 @@ struct BrowseOpenTool: BrowseTool {
     let spec = ToolSpec(
         name: "browse_open",
         description: """
-        Open a web page in your own browser: a real engine that runs JavaScript and keeps the user's logins between runs. Returns \
+        Open a web page in your own browser: a real Chrome that runs JavaScript and keeps the user's logins between runs. Returns \
         the final address and title. Then browse_snapshot to act on it, or browse_read for its text. If the page asks for a login, \
         a 2FA code or a captcha, do not try it yourself: call browse_show.
         """,
@@ -284,31 +301,63 @@ struct BrowseScreenshotTool: BrowseTool {
 // MARK: - Acting
 
 struct BrowseClickTool: BrowseTool {
+    /// What the tool can do to an element, by the command of the browser that does it.
+    static let actions = ["click", "dblclick", "hover", "check", "uncheck", "focus", "scrollintoview", "drag"]
+    /// The ones that only look or move the pointer: they change nothing on the page by themselves.
+    private static let gentle: Set<String> = ["hover", "focus", "scrollintoview"]
+
     let spec = ToolSpec(
         name: "browse_click",
-        description: "Click an element by its ref from the latest browse_snapshot. Returns the page address afterwards; snapshot again if the page changed.",
-        parameters: .schema(["ref": .property("string")], required: ["ref"]))
+        description: """
+        Act on an element by its ref from the latest browse_snapshot. `action`: click (default), dblclick, hover, check, uncheck, \
+        focus, scrollintoview, or drag (onto the ref in `to`). Returns the page address afterwards; snapshot again if the page \
+        changed. A JavaScript dialog that opens is reported: answer it with browse_dialog.
+        """,
+        parameters: .schema(["ref": .property("string"), "action": BrowseSupport.choice(actions), "to": .property("string")], required: ["ref"]))
 
-    func risk(_ arguments: JSONValue) -> ToolRisk { .sensitive }
+    private func action(_ arguments: JSONValue) -> String { arguments.nonEmptyString("action")?.lowercased() ?? "click" }
+
+    func risk(_ arguments: JSONValue) -> ToolRisk { Self.gentle.contains(action(arguments)) ? .safe : .sensitive }
+    func readsLivePage(_ arguments: JSONValue) -> Bool { Self.gentle.contains(action(arguments)) }
 
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) { summary(arguments, context: ToolContext(workingDirectory: URL(fileURLWithPath: "/"))) }
 
     func summary(_ arguments: JSONValue, context: ToolContext) -> (title: String, detail: String) {
         let ref = (try? BrowseSupport.ref(arguments)) ?? ""
-        return (label(ofRef: arguments, context: context).map { "Clicando em “\($0)”" } ?? "Clicando na página", ref)
+        let name = label(ofRef: arguments, context: context)
+        func named(_ verb: String, _ fallback: String) -> String { name.map { "\(verb) “\($0)”" } ?? fallback }
+        switch action(arguments) {
+        case "dblclick": return (named("Clicando duas vezes em", "Clicando duas vezes na página"), ref)
+        case "hover": return (named("Passando o mouse sobre", "Passando o mouse na página"), ref)
+        case "check": return (named("Marcando", "Marcando uma caixa"), ref)
+        case "uncheck": return (named("Desmarcando", "Desmarcando uma caixa"), ref)
+        case "focus": return (named("Focando em", "Focando um campo"), ref)
+        case "scrollintoview": return (named("Rolando até", "Rolando a página"), ref)
+        case "drag": return (named("Arrastando", "Arrastando na página"), ref + " → " + (arguments["to"]?.string ?? ""))
+        default: return (named("Clicando em", "Clicando na página"), ref)
+        }
     }
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
         let ref = try BrowseSupport.ref(arguments)
+        let action = action(arguments)
+        guard Self.actions.contains(action) else { throw ToolError("`action` is one of: \(Self.actions.joined(separator: ", ")).") }
+        let target = action == "drag" ? try BrowseSupport.ref(arguments, key: "to") : nil
         let session = try await BrowseSupport.session(context)
-        let url = try await BrowseSupport.acting {
+        let (url, dialog) = try await BrowseSupport.acting {
             try await session.exclusive {
-                try await session.driver.click(ref)
-                return try await session.driver.currentURL()
+                if action == "click" {
+                    try await session.driver.click(ref)
+                } else {
+                    _ = try await session.driver.command([action, "@" + ref] + (target.map { ["@" + $0] } ?? []))
+                }
+                return await BrowseSupport.addressOrDialog(session)
             }
         }
         session.pageChanged()
-        return "Clicked \(ref). Page: \(url ?? "unknown"). If the page changed, take a new browse_snapshot."
+        let done = action == "click" ? "Clicked \(ref)" : "\(action) \(ref)" + (target.map { " → \($0)" } ?? "") + " done"
+        if let dialog { return done + ". " + dialog }
+        return done + ". Page: \(url ?? "unknown"). If the page changed, take a new browse_snapshot."
     }
 }
 
@@ -383,10 +432,10 @@ struct BrowsePressTool: BrowseTool {
         name: "browse_press",
         description: """
         Press one named key on the page: Enter, Tab, Shift+Tab, Escape, ArrowUp/Down/Left/Right, PageUp, PageDown, Home, End, \
-        Backspace, Delete or Space. Enter can submit a form. Not for typing text (browse_fill) and refused while a password or \
-        card field has the focus.
+        Backspace, Delete or Space. Or type `text` with real keystrokes into what has the focus (`insert`: no key events; for \
+        editors that ignore browse_fill). Refused while a password or card field has the focus.
         """,
-        parameters: .schema(["key": .property("string")], required: ["key"]))
+        parameters: .schema(["key": .property("string"), "text": .property("string"), "insert": .property("boolean")]))
 
     /// The keys the tool presses, as the browser names them, by the words a model may use for them. Nothing that types a
     /// character (`a`, `Control+v`, `Meta+v` pasting what the clipboard holds): a key press must not become a way to type
@@ -427,10 +476,26 @@ struct BrowsePressTool: BrowseTool {
     func summary(_ arguments: JSONValue) -> (title: String, detail: String) { ("Pressionando uma tecla", arguments["key"]?.string ?? "") }
 
     func run(_ arguments: JSONValue, context: ToolContext) async throws -> String {
+        if let text = arguments.nonEmptyString("text") {
+            let session = try await BrowseSupport.session(context)
+            let insert = arguments.flag("insert")
+            let url = try await BrowseSupport.acting {
+                try await session.exclusive {
+                    let focus = try await session.driver.evaluate(Self.focusScript)
+                    if let reason = Self.secretReason(focus: focus) {
+                        throw ToolError(SecretField.refusal(reason) + " (Typing is refused while it has the focus.)")
+                    }
+                    _ = try await session.driver.command(["keyboard", insert ? "inserttext" : "type", text], text: true)
+                    return try await session.driver.currentURL()
+                }
+            }
+            session.pageChanged()
+            return "Typed \(text.count) characters. Page: \(url ?? "unknown")."
+        }
         let given = try arguments.requiredString("key").trimmingCharacters(in: .whitespaces)
         guard let key = Self.namedKey(given) else {
             throw ToolError("`key` is one of: Enter, Tab, Shift+Tab, Escape, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, PageUp, PageDown, Home, End, "
-                + "Backspace, Delete, Space. To type text use browse_fill (not for passwords or card numbers: browse_show).")
+                + "Backspace, Delete, Space. To type text use `text` or browse_fill (not for passwords or card numbers: browse_show).")
         }
         let session = try await BrowseSupport.session(context)
         let url = try await session.exclusive {
@@ -449,8 +514,9 @@ struct BrowsePressTool: BrowseTool {
 struct BrowseScrollTool: BrowseTool {
     let spec = ToolSpec(
         name: "browse_scroll",
-        description: "Scroll the page (long pages and lists load more as you scroll). Then browse_snapshot or browse_read.",
+        description: "Scroll the page (long pages and lists load more as you scroll), or bring the element `ref` into view. Then browse_snapshot or browse_read.",
         parameters: .schema([
+            "ref": .property("string"),
             "direction": .object(["type": .string("string"), "enum": .array(BrowserScrollDirection.allCases.map { .string($0.rawValue) }),
                                   "description": .string("Default down.")]),
             "amount": .property("integer", "Pixels (default 600)."),
@@ -466,6 +532,12 @@ struct BrowseScrollTool: BrowseTool {
         }
         let pixels = arguments.integer("amount", default: 600, in: 1...10_000)
         let session = try await BrowseSupport.session(context)
+        if arguments.nonEmptyString("ref") != nil {
+            let ref = try BrowseSupport.ref(arguments)
+            try await BrowseSupport.acting { try await session.exclusive { _ = try await session.driver.command(["scrollintoview", "@" + ref]) } }
+            session.pageChanged()
+            return "Scrolled \(ref) into view."
+        }
         try await session.exclusive { try await session.driver.scroll(direction, pixels: pixels) }
         session.pageChanged()
         return "Scrolled \(direction.rawValue) \(pixels) px."
@@ -658,6 +730,7 @@ extension ToolBox {
     static let browseTools: [any AgentTool] = [
         BrowseOpenTool(), BrowseSnapshotTool(), BrowseReadTool(), BrowseScreenshotTool(), BrowseClickTool(), BrowseFillTool(),
         BrowseSelectTool(), BrowsePressTool(), BrowseScrollTool(), BrowseBackTool(), BrowseTabsTool(), BrowseShowTool(), BrowseCloseTool(),
+        BrowseWaitTool(), BrowseFindTool(), BrowseDialogTool(), BrowseFilesTool(), BrowsePageTool(), BrowseRunTool(),
     ]
 
     static let browseToolNames: Set<String> = Set(browseTools.map(\.spec.name))

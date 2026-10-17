@@ -95,9 +95,18 @@ protocol BrowserDriver: Sendable {
     func runningSessions() async -> [String]
     /// The same without a task, for the moment the app quits.
     func runningSessionsSynchronously(timeout: TimeInterval) -> [String]
+    /// Any `agent-browser` command, in the Orb's own session (`["get", "title"]`), and the `data` of its reply. What the tools
+    /// have no command of their own for goes through here (`browse_run`, `browse_dialog`, `browse_wait`…).
+    /// `text`: the words after the command name are text of the page (what to type), never options.
+    func command(_ arguments: [String], text: Bool) async throws -> JSONValue
+    /// What `agent-browser <topic> --help` says (the whole list of commands without a topic): the manual `browse_run` offers.
+    func manual(_ topic: String?) async throws -> String
 }
 
 extension BrowserDriver {
+    func command(_ arguments: [String], text: Bool) async throws -> JSONValue { throw BrowserDriverError.failed("This browser has no such command.") }
+    func command(_ arguments: [String]) async throws -> JSONValue { try await command(arguments, text: false) }
+    func manual(_ topic: String?) async throws -> String { throw BrowserDriverError.failed("This browser has no manual.") }
     func closeSynchronously(timeout: TimeInterval) {}
     func runningSessions() async -> [String] { [] }
     func runningSessionsSynchronously(timeout: TimeInterval) -> [String] { [] }
