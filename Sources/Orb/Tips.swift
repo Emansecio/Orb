@@ -214,6 +214,7 @@ enum Tip {
     // MARK: Ajustes
 
     static let launchAtLogin = "Abre o Orb sozinho quando você entra no Mac"
+    static let openLoginItems = "Abre Itens de Início, nos Ajustes do Sistema, onde o Orb espera a sua aprovação"
     static let notifyWhenDone = "Mostra uma notificação quando um Orb termina ou precisa de você"
     static let proposeSkills = "Deixa o Orb propor skills; nada é salvo sem a sua aprovação"
     static let summarizeSessions = "Pede ao modelo um resumo das conversas longas guardadas; uma chamada curta por conversa"
@@ -322,7 +323,7 @@ enum Tip {
          createAtlas, startWithClaudeCode, otherWaysToConnect(isShowing: true), otherWaysToConnect(isShowing: false),
          newRoutineCreatingAtlas, newRoutineNeedingModel, routineTemplateCreatingAtlas, allKeptMemories, continueFromMemory, modelSettings, useClaudeCode, signInClaudeCode, signInChatGPT,
          pasteKey, stopConnecting, retryConnecting, useLocalServer("Ollama"), createOrbSheet(),
-         launchAtLogin, notifyWhenDone, proposeSkills, summarizeSessions, reviewDictation, orbsCanTalk, orbsCanStartGroups, dataFolder, keptMemoriesFolder, orbsFolder, resetOrb,
+         launchAtLogin, openLoginItems, notifyWhenDone, proposeSkills, summarizeSessions, reviewDictation, orbsCanTalk, orbsCanStartGroups, dataFolder, keptMemoriesFolder, orbsFolder, resetOrb,
          openSystemNotifications, askNotifications, globalShortcut,
          profilePhotoAvatar, profilePhotoChoose, profilePhotoRemove,
          addProvider, refreshModels, removeProvider, signOutChatGPT, replaceKey, deleteKey, saveKey, keepKey, getKey, listAllModels,

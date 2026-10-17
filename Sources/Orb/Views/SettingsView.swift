@@ -106,8 +106,10 @@ struct GeneralSettings: View {
     @AppStorage(SessionNote.settingKey) private var summarizeSessions = false
     @AppStorage(DictationReview.settingKey) private var reviewDictation = true
     @AppStorage(GlobalHotKey.defaultsKey) private var globalShortcut = false
-    @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
+    @State private var launchAtLogin = LoginItemState(SMAppService.mainApp.status).isOn
     @State private var loginError: String?
+    /// What the Mac still waits for before the Orb opens at login (nil when nothing).
+    @State private var loginApproval = LoginItemState(SMAppService.mainApp.status).approvalMessage
     @State private var notifications: NotificationPermission?
     @State private var keptCount = 0
     @State private var hasOrbsFolder = false
@@ -144,6 +146,17 @@ struct GeneralSettings: View {
                         .font(.caption)
                         .foregroundStyle(Palette.danger)
                         .transition(.quiet)
+                }
+                if let loginApproval {
+                    LabeledContent {
+                        Button("Abrir Ajustes do Sistema") { SMAppService.openSystemSettingsLoginItems() }
+                            .help(Tip.openLoginItems)
+                    } label: {
+                        Label(loginApproval, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(Palette.warn)
+                    }
+                    .transition(.quiet)
                 }
                 Toggle("Me avisar quando um Orb terminar ou precisar de mim", isOn: $notifyWhenDone)
                     .help(Tip.notifyWhenDone)
@@ -321,6 +334,7 @@ struct GeneralSettings: View {
     private func refresh() async {
         learnedWindows = model.learnedWindowRows()
         notifications = await NotificationPermission.current()
+        readLoginItem() // the item may have been changed in the System Settings meanwhile
         // A look at the disk, once, off the render path.
         let memories = model.memory.root
         keptCount = await Task.detached(priority: .utility) { KeptMemories.count(in: memories) }.value
@@ -358,15 +372,53 @@ struct GeneralSettings: View {
         } catch {
             loginError = "Não foi possível mudar: \(error.localizedDescription)"
         }
-        launchAtLogin = SMAppService.mainApp.status == .enabled
+        let state = readLoginItem()
+        // No error from the system, but the item is not on: the Mac says why (it is the System Settings' to approve).
+        if loginError == nil, state.approvalMessage == nil, let message = state.message { loginError = message }
+    }
+
+    /// Reads the item's state into the switch (and the approval line).
+    @discardableResult
+    private func readLoginItem() -> LoginItemState {
+        let state = LoginItemState(SMAppService.mainApp.status)
+        launchAtLogin = state.isOn
+        loginApproval = state.approvalMessage
+        return state
+    }
+}
+
+// MARK: - Login item
+
+/// How the Mac's login item reads on the switch "Abrir ao iniciar sessão": on only when enabled; and what to tell when it is
+/// not on and the person should know why (it waits for their approval in the System Settings, or the app was not found).
+struct LoginItemState: Equatable {
+    var isOn: Bool
+    var message: String?
+    /// The message is about an approval only the person can give (a button opens the System Settings).
+    var needsApproval: Bool
+
+    var approvalMessage: String? { needsApproval ? message : nil }
+
+    init(_ status: SMAppService.Status) {
+        switch status {
+        case .enabled: (isOn, message, needsApproval) = (true, nil, false)
+        case .requiresApproval:
+            (isOn, message, needsApproval) = (false, "O macOS espera a sua aprovação: ligue o Orb em Ajustes do Sistema > Itens de Início.", true)
+        case .notFound:
+            (isOn, message, needsApproval) = (false, "O macOS não encontrou o Orb para abrir ao iniciar sessão. Abra o app instalado em Aplicativos.", false)
+        case .notRegistered: (isOn, message, needsApproval) = (false, nil, false)
+        @unknown default: (isOn, message, needsApproval) = (false, nil, false)
+        }
     }
 }
 
 // MARK: - Snapshots
 
 #if DEBUG || ORB_DEV_TOOLS
-/// `--snapshot settings-general | settings-profile | settings-reset | settings-models | settings-perms[-tested|-stale] | first-run-banner`: each tab of Ajustes on its own
-/// (the tab bar does not render offscreen), at the size the window gives it.
+/// `--snapshot settings-general | settings-profile | settings-orbs | settings-reset | settings-models | settings-perms[-tested|-stale] | settings-usage[...] | first-run-banner`:
+/// each tab of Ajustes on its own (the tab bar does not render offscreen), at the size the window gives it. Two differ:
+/// `settings-orbs` is all of Geral at 2000 pt, tall enough to reach the Orbs' switches and the open talks (with samples), and
+/// `settings-usage[...]` is drawn by `UsageSnapshots` (it needs the model).
 @MainActor
 enum SettingsSnapshots {
     static func view(_ screen: String, firstBotID: UUID?) -> AnyView? {
