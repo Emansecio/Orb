@@ -159,6 +159,28 @@ import Testing
         #expect(siblings(of: stateURL, withPrefix: "state.json.corrupt-").count == 1)
     }
 
+    @Test func anItemSkippedWhenNoCopyCanBeKeptBlocksTheWritesAndSaysSo() throws {
+        var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(AppState.initial)) as? [String: Any])
+        var bots = try #require(json["bots"] as? [[String: Any]])
+        bots.append(["name": "Sem id"]) // unreadable bot: skipped
+        json["bots"] = bots
+        let original = String(decoding: try JSONSerialization.data(withJSONObject: json), as: UTF8.self)
+        try put(original, at: stateURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: root.path) // no new files: no copy
+        let failures = LockedBox<[String]>([])
+        let store = Store(directory: root) { failures.append($0.message) }
+        let read = store.readState()
+        guard getuid() != 0 else { return } // root can write there anyway
+        #expect(read.value != nil && read.notice?.copy == nil)
+        #expect(read.notice?.message.contains("não foi possível guardar uma cópia") == true)
+        #expect(Store.gate.isBlocked(stateURL))
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.path)
+        store.save(AppState.initial)
+        store.flush()
+        #expect(try String(contentsOf: stateURL, encoding: .utf8) == original) // the skipped bot is still in the file
+    }
+
     @Test func unknownValuesInTheStateKeepTheRestOfIt() throws {
         let state = AppState.initial
         var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(state)) as? [String: Any])

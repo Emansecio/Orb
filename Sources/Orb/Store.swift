@@ -520,8 +520,15 @@ struct Store: Sendable {
             let (value, skipped) = try DecodeLoss.measure { try JSONDecoder().decode(type, from: data) }
             guard skipped > 0 else { return StoreRead(value: value, fingerprint: fingerprint) }
             // Whatever was skipped disappears from the file on the next save: keep the original beside it.
-            guard let copy = keepAside(url, moving: false) else { return StoreRead(value: value, fingerprint: fingerprint) }
             let lost = skipped == 1 ? "1 item não pôde ser lido" : "\(skipped) itens não puderam ser lidos"
+            guard let copy = keepAside(url, moving: false) else {
+                // As for a file that does not decode at all: without the copy, the next save would lose them for good.
+                Self.gate.block(url)
+                return StoreRead(value: value, notice: StoreNotice(
+                    message: "Ao ler “\(name)”, \(lost) e \(skipped == 1 ? "ficou" : "ficaram") de fora, e não foi possível guardar uma cópia do arquivo. "
+                        + "Para não perder nada, o Orb não vai gravar nesse arquivo até você abrir o app de novo.", file: url),
+                    fingerprint: fingerprint)
+            }
             return StoreRead(value: value, notice: StoreNotice(
                 message: "Ao ler “\(name)”, \(lost) (talvez de uma versão mais nova do Orb) "
                     + "e \(skipped == 1 ? "ficou" : "ficaram") de fora. O arquivo original foi guardado como “\(copy.lastPathComponent)”.",
