@@ -383,6 +383,12 @@ private struct UsageRowView: View {
 struct PriceDraft: Equatable {
     var input = "", cacheRead = "", cacheWrite = "", output = ""
 
+    /// The price the editor starts from: the table's own, without the factor of the hour (DeepSeek's half off-peak, Google's
+    /// raise in 2027). What is saved becomes a fixed correction for all the usage, so it must not carry one moment's factor.
+    static func baseline(for modelID: String, in book: PriceBook) -> (price: ModelPrice, source: PriceSource)? {
+        book.price(for: modelID)
+    }
+
     init(_ price: ModelPrice?) {
         guard let price else { return }
         input = UsageFormat.priceText(price.input)
@@ -417,7 +423,7 @@ private struct PriceEditor: View {
 
     private enum Field { case input, cacheRead, cacheWrite, output }
 
-    private var current: (price: ModelPrice, source: PriceSource)? { model.priceBook.price(for: modelID, at: .now) }
+    private var current: (price: ModelPrice, source: PriceSource)? { PriceDraft.baseline(for: modelID, in: model.priceBook) }
     private var typed: ModelPrice? { draft.price(replacing: current?.price) }
 
     var body: some View {
