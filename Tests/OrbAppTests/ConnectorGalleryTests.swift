@@ -247,6 +247,14 @@ struct LocalConnectorInstallTests {
 // The variable/header rows of the connector sheet.
 
 struct KeyValueRowTests {
+    @Test func theEditorStoresTheNameCommandAndAddressWithoutTheSpacesAroundThem() {
+        let local = ConnectorEditing.normalized(MCPServerConfig(name: " Meu servidor ", command: " npx\n"))
+        #expect(local.name == "Meu servidor" && local.command == "npx")
+        let remote = ConnectorEditing.normalized(MCPServerConfig(name: "Remoto", url: "  https://x.com/mcp \n"))
+        #expect(remote.url == "https://x.com/mcp" && remote.isRemote)
+        #expect(ConnectorEditing.normalized(MCPServerConfig(name: "Já certo", command: "uvx")).command == "uvx")
+    }
+
     @Test func aFieldThatOutlivesItsRowNeitherCrashesNorTouchesAnotherRow() {
         // The Binding closures are @Sendable; the test is single-threaded, so nothing races on the array.
         nonisolated(unsafe) var store = [KeyValueRow(key: "A", value: "1"), KeyValueRow(key: "B", value: "2")]

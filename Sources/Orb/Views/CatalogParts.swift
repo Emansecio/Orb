@@ -276,6 +276,23 @@ enum ExplorePhase: Equatable {
     }
 }
 
+/// The wait before "this is taking long" shows: true only when it ran to the end, false when cancelled.
+enum SlowHint {
+    static func arrives(after interval: Duration = .seconds(3)) async -> Bool {
+        do { try await Task.sleep(for: interval) } catch { return false }
+        return !Task.isCancelled
+    }
+}
+
+/// Whether a search that was started for some text is still the one the page is asking for. A "Tentar de novo" search runs
+/// outside the page's `.task(id:)`, so typing never cancels it: when it comes back after the text changed, it must not
+/// put its results, its error or its end of loading over the newer search.
+enum RegistryQuery {
+    static func isCurrent(_ started: String, query: String) -> Bool {
+        started == query.trimmingCharacters(in: .whitespaces)
+    }
+}
+
 /// Loading, error and empty states for a catalog search.
 struct CatalogStateView: View {
     let isLoading: Bool
@@ -304,8 +321,9 @@ struct CatalogStateView: View {
                     }
                 }
                 .task {
-                    try? await Task.sleep(for: .seconds(3))
-                    isSlow = true
+                    // Each load starts without the hint; a cancelled wait never turns it on.
+                    isSlow = false
+                    isSlow = await SlowHint.arrives()
                 }
             } else if let error {
                 ContentUnavailableView {
@@ -409,7 +427,8 @@ extension Int {
     var installsLabel: String {
         let value = Double(self)
         let number: String = switch self {
-        case 1_000_000...: (value / 1_000_000).formatted(.number.precision(.fractionLength(0...1)).locale(.app)) + " mi"
+        // 999.500 and up round to "1.000 mil" in the thousands, so they already read as a million.
+        case 999_500...: (value / 1_000_000).formatted(.number.precision(.fractionLength(0...1)).locale(.app)) + " mi"
         case 1_000...: (value / 1_000).formatted(.number.precision(.fractionLength(0)).locale(.app)) + " mil"
         default: "\(self)"
         }

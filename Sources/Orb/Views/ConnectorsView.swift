@@ -682,13 +682,15 @@ private struct ExploreConnectors: View {
         guard isSearching else { results = []; return }
         isLoading = true
         error = nil
-        defer { isLoading = false }
+        let text = query.trimmingCharacters(in: .whitespaces)
+        // A retry that comes back after the text changed leaves the newer search's state alone.
+        defer { if Task.isCancelled || RegistryQuery.isCurrent(text, query: query) { isLoading = false } }
         do {
-            let found = try await MCPRegistry.shared.search(query.trimmingCharacters(in: .whitespaces))
-            if !Task.isCancelled { results = found }
+            let found = try await MCPRegistry.shared.search(text)
+            if !Task.isCancelled, RegistryQuery.isCurrent(text, query: query) { results = found }
         } catch {
             // A newer search cancels this one; only real failures are shown.
-            if !Task.isCancelled { self.error = error.localizedDescription }
+            if !Task.isCancelled, RegistryQuery.isCurrent(text, query: query) { self.error = error.localizedDescription }
         }
     }
 }
@@ -1254,6 +1256,7 @@ struct ConnectorEditor: View {
     }
 
     private func save() {
+        config = ConnectorEditing.normalized(config)
         let pairs = values.map { row -> (String, String) in
             let key = row.key.trimmingCharacters(in: .whitespaces)
             var value = row.value
@@ -1341,6 +1344,18 @@ struct ConnectorEditor: View {
             settings.redirect = SlackApp.redirectURL
         }
         return settings
+    }
+}
+
+extension ConnectorEditing {
+    /// The name, command and address without the spaces and line breaks around them (the form checks them that way too):
+    /// a command pasted as "npx " would otherwise run as `exec "npx "` and fail with "command not found".
+    static func normalized(_ config: MCPServerConfig) -> MCPServerConfig {
+        var config = config
+        config.name = config.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        config.command = config.command.trimmingCharacters(in: .whitespacesAndNewlines)
+        config.url = config.url.trimmingCharacters(in: .whitespacesAndNewlines)
+        return config
     }
 }
 
