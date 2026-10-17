@@ -289,4 +289,16 @@ struct WorkspaceSnapshotCacheTests {
         _ = await cache.snapshot(for: bot, folder: folder)
         #expect(await counter.count == 2)
     }
+
+    @Test func aScanInFlightWhenInvalidatedIsNotKept() async {
+        let counter = Counter()
+        let cache = cache(counter: counter)
+        let bot = UUID(), folder = URL(fileURLWithPath: "/tmp/a")
+        let running = Task { await cache.snapshot(for: bot, folder: folder) }
+        while await counter.count == 0 { await Task.yield() } // the scan has begun, and has not ended
+        await cache.invalidate(bot)
+        _ = await running.value
+        _ = await cache.snapshot(for: bot, folder: folder)
+        #expect(await counter.count == 2)
+    }
 }

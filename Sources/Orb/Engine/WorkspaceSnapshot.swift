@@ -339,7 +339,7 @@ actor WorkspaceSnapshots {
     private let lifetime: TimeInterval
     private let capture: Capture
     private var entries: [UUID: Entry] = [:]
-    private var running: [UUID: (folder: String, task: Task<WorkspaceSnapshot, Never>)] = [:]
+    private var running: [UUID: (folder: String, token: UUID, task: Task<WorkspaceSnapshot, Never>)] = [:]
 
     init(lifetime: TimeInterval = 60, capture: @escaping Capture = { await WorkspaceSnapshot.capture(folder: $0) }) {
         self.lifetime = lifetime
@@ -354,16 +354,23 @@ actor WorkspaceSnapshots {
         if let current = running[botID], current.folder == path { return await current.task.value }
         let capture = capture
         let task = Task { await capture(folder) }
-        running[botID] = (path, task)
+        let token = UUID()
+        running[botID] = (path, token, task)
         let snapshot = await task.value
-        // A newer request for another folder may have replaced this one while it ran.
-        if running[botID]?.folder == path { running[botID] = nil }
-        entries[botID] = Entry(folder: path, takenAt: now, snapshot: snapshot)
+        // Kept only if this scan is still the one in flight: a newer request for another folder replaced it, or
+        // `invalidate` ran while it read (it may have read the folder before the change that asked for the rescan).
+        if running[botID]?.token == token {
+            running[botID] = nil
+            entries[botID] = Entry(folder: path, takenAt: now, snapshot: snapshot)
+        }
         return snapshot
     }
 
     /// The next request reads the folder again (after the Orb changed files, say).
-    func invalidate(_ botID: UUID) { entries[botID] = nil }
+    func invalidate(_ botID: UUID) {
+        entries[botID] = nil
+        running[botID] = nil
+    }
 }
 
 // MARK: - Hashing
