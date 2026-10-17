@@ -31,6 +31,9 @@ struct RoutinesUITests {
         #expect(mismatch("Relatório diário", .once(now)) != nil)
         #expect(mismatch("Checar anúncios (4h)", .everyHours(6)) == "O nome diz 4 h, mas ela roda a cada 6 h.")
         #expect(mismatch("Checar anúncios (4h)", .everyHours(4)) == nil)
+        // "a cada Nh" is the common way to write it: "a cada" must not hide the hours.
+        #expect(mismatch("Checar anúncios a cada 4h", .everyHours(6)) == "O nome diz 4 h, mas ela roda a cada 6 h.")
+        #expect(mismatch("Checar anúncios a cada 4h", .everyHours(4)) == nil)
         #expect(mismatch("Resumo às 9h", .once(now)) == nil) // a time of day is not a rhythm
     }
 

@@ -188,7 +188,7 @@ enum RoutineText {
 
     /// A name that promises a rhythm the schedule does not keep: "(4h)" on a task that runs once, or every 6 hours.
     static func nameMismatch(of routine: Routine) -> String? {
-        guard let match = routine.name.firstMatch(of: /(?i)(?:\(|cada\s*)(\d+)\s*h\b|a cada|diári|diariamente|semanal|todo dia|toda semana|de hora em hora/)
+        guard let match = routine.name.firstMatch(of: /(?i)(?:\(|(?:a\s+)?cada\s*)(\d+)\s*h\b|a cada|diári|diariamente|semanal|todo dia|toda semana|de hora em hora/)
         else { return nil }
         switch (routine.schedule, match.1.flatMap { Int($0) }) {
         case (.once, _): return "O nome sugere repetição, mas ela roda uma vez só."
