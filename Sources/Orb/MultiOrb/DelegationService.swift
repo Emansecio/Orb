@@ -7,7 +7,7 @@ enum CancelReason: String, Sendable, Equatable {
     case gaveUp
 }
 
-/// What the app offers Orbs that ask each other for work. `DelegationHub` implements it (a shell until the runtime lands).
+/// What the app offers Orbs that ask each other for work. `DelegationHub` implements it; `FakeDelegationService` (tests) is the stand-in.
 @MainActor
 protocol DelegationService: AnyObject {
     var groupHooks: GroupTurnHooks? { get set }

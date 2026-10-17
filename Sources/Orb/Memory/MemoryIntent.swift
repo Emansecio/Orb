@@ -64,7 +64,8 @@ struct MemoryIntent: Equatable, Sendable {
 
         let matched = text.index(text.startIndex, offsetBy: start)..<text.index(text.startIndex, offsetBy: end)
         let separators = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ":;,.-–— "))
-        var rest = text[matched.upperBound...].trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
+        // Only the punctuation of a sentence is trimmed: "10%", "C#", "(Rafa)" and a closing quote belong to what is kept.
+        var rest = text[matched.upperBound...].trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ".,;:!?¿¡…-–—")))
         // "Guarda isso na memória", "Memorize isto: …", "Memoriza aí: …", "…, por favor" are the request, not the content.
         while let next = dropComplement(from: rest) { rest = next }
         for filler in fillers {

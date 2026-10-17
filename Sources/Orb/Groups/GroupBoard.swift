@@ -54,7 +54,10 @@ enum GroupBoard {
         if !outcome.isEmpty {
             // Headings inside the answer would read as sections of this page.
             let answer = outcome.components(separatedBy: "\n")
-                .map { $0.trimmingCharacters(in: .whitespaces).hasPrefix("#") ? $0.trimmingCharacters(in: CharacterSet(charactersIn: "# ")) : $0 }
+                .map { raw -> String in
+                    let trimmed = raw.trimmingCharacters(in: .whitespaces)
+                    return trimmed.hasPrefix("#") ? String(trimmed.drop(while: { $0 == "#" || $0 == " " })) : raw
+                }
                 .joined(separator: "\n")
             body += "\n\n## Resultado\n" + MemoryText.clip(MemorySanitizer.scrub(answer), 900)
         }
@@ -70,7 +73,9 @@ enum GroupUsageText {
     static func turns(_ n: Int) -> String { "\(n) \(n == 1 ? "turno" : "turnos")" }
 
     static func tokens(_ n: Int) -> String {
-        n >= 1_000 ? "\(Int((Double(n) / 1_000).rounded())) mil tokens" : "\(n) \(n == 1 ? "token" : "tokens")"
+        // From 999.500 on, thousands would round to "1000 mil": the million has its own words (as `UsageFormat.tokens`).
+        if n >= 999_500 { return UsageFormat.tokens(n) }
+        return n >= 1_000 ? "\(Int((Double(n) / 1_000).rounded())) mil tokens" : "\(n) \(n == 1 ? "token" : "tokens")"
     }
 
     static func summary(turns n: Int, tokens t: Int) -> String { "\(turns(n)) · \(tokens(t))" }

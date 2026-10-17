@@ -206,6 +206,7 @@ private struct GroupSettingsTab: View {
     let group: OrbGroup
     @State private var nameDraft = ""
     @State private var isConfirmingDelete = false
+    @FocusState private var isNameFocused: Bool
 
     var body: some View {
         ScrollView {
@@ -217,6 +218,7 @@ private struct GroupSettingsTab: View {
                         .padding(.horizontal, 10)
                         .padding(.vertical, 7)
                         .background(Palette.surface, in: .rect(cornerRadius: 8))
+                        .focused($isNameFocused)
                         .onSubmit { commitName() }
                 }
                 field("Conversa") {
@@ -242,6 +244,9 @@ private struct GroupSettingsTab: View {
         }
         .onAppear { nameDraft = group.name }
         .onChange(of: group.name) { nameDraft = group.name }
+        // Leaving the field (another tab, the panel closed, another group) keeps what was typed, as the Orb's inspector does.
+        .onChange(of: isNameFocused) { old, new in if old && !new { commitName() } }
+        .onDisappear { if GroupNameEdit.commit(draft: nameDraft, current: group.name) != nil { commitName() } }
     }
 
     private func field<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -255,13 +260,20 @@ private struct GroupSettingsTab: View {
     }
 
     private func commitName() {
-        let name = nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, name != group.name else { nameDraft = group.name; return }
+        guard let name = GroupNameEdit.commit(draft: nameDraft, current: group.name) else { nameDraft = group.name; return }
         model.renameGroup(group.id, to: name)
     }
 
     private func delete() {
         model.deleteGroup(group.id)
         model.selection = model.botIDs.first.map { .bot($0) }
+    }
+}
+
+/// What the group's name field writes: the typed name, trimmed, when it is a new one (nil for an empty draft or the same name).
+enum GroupNameEdit {
+    static func commit(draft: String, current: String) -> String? {
+        let name = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty || name == current ? nil : name
     }
 }

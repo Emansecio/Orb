@@ -44,6 +44,13 @@ enum ExchangeSource {
         }
     }
 
+    /// The Orbs of an exchange with no message to read them from (the asker was deleted or began another conversation): the two
+    /// the event line names.
+    static func parties(of messages: [OrbMessageItem], event: OrbEvent) -> [OrbRef] {
+        let found = parties(of: messages)
+        return found.isEmpty ? [event.actor, event.subject].compactMap { $0 } : found
+    }
+
     /// The Orbs an exchange is between, each once, in the order they first speak.
     static func parties(of messages: [OrbMessageItem]) -> [OrbRef] {
         var parties: [OrbRef] = []

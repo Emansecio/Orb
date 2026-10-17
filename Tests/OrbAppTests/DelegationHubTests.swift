@@ -786,6 +786,23 @@ private final class Hooks: GroupTurnHooks {
         await team.settle()
     }
 
+    @Test func deletingTheAskerClosesTheLinesOfAWaitingTarget() async throws {
+        let valve = TestGate()
+        let team = waitingMiddleTeam(valve)
+        defer { team.cleanUp() }
+        let model = team.model
+        model.send("peça", to: team.atlas.id, fromUser: true)
+        await waitUntil("the middle one to wait") { team.request(from: team.atlas, to: team.pesquisador)?.state == .awaitingChildren }
+        await waitUntil("the asker turn to end") { team.botTexts(team.atlas) == ["Pedi."] }
+        let middle = try #require(team.request(from: team.atlas, to: team.pesquisador))
+        #expect(try !openLines(of: team, request: middle).isEmpty)
+        model.deleteBot(team.atlas.id)
+        #expect(model.delegation.requests[middle.id]?.state == .cancelled)
+        #expect(try openLines(of: team, request: middle).isEmpty)
+        await valve.open()
+        await team.settle()
+    }
+
     @Test func aTimedOutRequestThatWaitedForItsChildrenClosesItsLines() async throws {
         let valve = TestGate()
         let team = waitingMiddleTeam(valve)

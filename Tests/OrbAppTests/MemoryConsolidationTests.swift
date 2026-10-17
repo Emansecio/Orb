@@ -28,6 +28,13 @@ import Testing
         #expect(MemoryConsolidation.parse(hardlyShorter, from: many) == nil) // past the ceiling
     }
 
+    @Test func aLongNoteSurvivesAPass() {
+        let long = (1...100).map { "passo\($0)" }.joined(separator: " ") // 600+ characters, over the length of an item
+        let pinned = MemoryConsolidation.Pinned(notes: [long, "b"], preferences: ["c"])
+        let parsed = MemoryConsolidation.parse("## Notes\n- \(long)\n## Preferences\n", from: pinned)
+        #expect(parsed?.notes == [long])
+    }
+
     @Test func aPassIsDueWhenWhatItCanShortenDoesNotFit() {
         let few = MemoryConsolidation.Pinned(notes: ["a", "b"], preferences: ["c"])
         #expect(!MemoryConsolidation.isDue(few, identityLength: 100))
@@ -94,6 +101,17 @@ import Testing
                                                                    includingPropertiesForKeys: nil)
         let text = try String(contentsOf: try #require(archived.first), encoding: .utf8)
         #expect(text.contains("Hoje pediu um resumo da reunião") && text.contains("Gosta de respostas curtas"))
+    }
+
+    @Test func aClosedBankWritesNoArchive() async {
+        let bank = MemoryBank(directory: root.appending(path: "orb"))
+        for (offset, preference) in ["Respostas curtas", "Respostas longas", "Respostas médias"].enumerated() {
+            await bank.remember(preference, kind: .preferencia, now: start.addingTimeInterval(Double(offset)))
+        }
+        let pinned = await bank.pinnedForConsolidation()
+        bank.close()
+        #expect(await !bank.applyConsolidation(MemoryConsolidation.Pinned(preferences: ["Respostas curtas"]), replacing: pinned))
+        #expect(!FileManager.default.fileExists(atPath: root.appending(path: "orb/_arquivo").path))
     }
 
     @Test func aMemorySavedDuringThePassIsNotLost() async {

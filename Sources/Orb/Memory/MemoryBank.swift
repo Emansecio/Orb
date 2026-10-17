@@ -156,7 +156,9 @@ actor MemoryBank {
         let hasIdentity = !(identity()?.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
         let hasPreferences = !(index?.rows("SELECT path FROM pages WHERE kind = ? LIMIT 1", [.text(MemoryKind.preferencia.rawValue)]).isEmpty ?? true)
         if !notes.isEmpty { remember(notes, kind: .identidade, origin: .voce, now: now) }
-        if hasIdentity || hasPreferences || !interview { finishInterview() }
+        // Saving the notes ends the interview (a note is an answer); with nothing learned and the interview asked for, what you
+        // wrote is not the answer: it stays pending, as for a new Orb.
+        if hasIdentity || hasPreferences || !interview { finishInterview() } else if !notes.isEmpty { restartInterview(now: now) }
     }
 
     /// The pages of a confirmed import (`OrbImport.plan`), kept as the person's own (they saw each one in the preview).

@@ -23,6 +23,15 @@ struct StackedAvatarsTests {
     }
 }
 
+@Suite("Nome do grupo")
+struct GroupNameEditTests {
+    @Test func aTypedNameIsKeptTrimmedAndAnEmptyOrSameOneIsNot() {
+        #expect(GroupNameEdit.commit(draft: "  Lançamento v2 ", current: "Lançamento") == "Lançamento v2")
+        #expect(GroupNameEdit.commit(draft: "   ", current: "Lançamento") == nil)
+        #expect(GroupNameEdit.commit(draft: " Lançamento ", current: "Lançamento") == nil)
+    }
+}
+
 @Suite("Texto de presença")
 struct GroupPresenceTests {
     private func item(_ name: String, _ state: GroupPresenceState) -> GroupPresenceItem {

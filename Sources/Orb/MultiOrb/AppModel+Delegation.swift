@@ -76,9 +76,4 @@ extension AppModel {
 
     /// Who asked the request the Orb is working on, for the working line ("Pedido de Atlas"); nil outside a request.
     func requesterName(of botID: UUID) -> String? { delegation.requesterName(of: botID) }
-
-    /// The request, if any, the Orb's running side run answers.
-    func servingRequest(of botID: UUID) -> DelegationRequest? {
-        sessions[botID]?.servingRequest.flatMap { delegation.requests[$0] }
-    }
 }

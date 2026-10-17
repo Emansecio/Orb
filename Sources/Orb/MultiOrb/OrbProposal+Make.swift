@@ -30,6 +30,9 @@ extension OrbProposal {
         String(MemoryText.flatten(MemorySanitizer.scrub(name)).prefix(nameLimit)).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Whether "Criar" may answer: a name that is empty once clipped would be swapped for a generic one.
+    var canCreate: Bool { !Self.clippedName(name).isEmpty }
+
     /// The modes a card may offer, least to most permissive. "Sem pedir permissão" is never one of them.
     static let modeOrder: [PermissionMode] = [.readOnly, .ask, .auto]
 

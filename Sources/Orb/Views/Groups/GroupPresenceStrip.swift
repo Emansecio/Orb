@@ -58,11 +58,7 @@ enum GroupPresence {
 
     /// "A", "A e B", "A, B e C".
     static func names(_ items: [GroupPresenceItem]) -> String {
-        names(items.map(\.name))
-    }
-
-    static func names(_ names: [String]) -> String {
-        PortugueseList.join(names)
+        PortugueseList.join(items.map(\.name))
     }
 
     private static func verb(_ state: GroupPresenceState, plural: Bool) -> String {

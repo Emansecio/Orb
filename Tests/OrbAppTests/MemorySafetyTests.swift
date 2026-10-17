@@ -158,6 +158,8 @@ import Testing
             #expect(MemorySanitizer.scrub(prose) == prose, "\(prose) → \(MemorySanitizer.scrub(prose))")
         }
         #expect(MemoryText.flatten("## Aprender C#") == "Aprender C#")
+        #expect(MemoryText.flatten("Linha1\rLinha2") == "Linha1 Linha2")
+        #expect(MemoryText.flatten("a\u{0B}b\u{0C}c\u{85}d\u{07}e") == "a b c de")
     }
 
     @Test func aHugeTextIsCutBeforeItIsScrubbed() async {
