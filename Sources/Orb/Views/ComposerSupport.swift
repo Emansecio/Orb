@@ -48,6 +48,9 @@ enum SkillSearch {
         guard !words.isEmpty else { return skills }
         let options: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
         func score(_ skill: Skill) -> Int? {
+            // The slug typed in full comes first, so it is never cut from the few suggestions shown
+            // (and Return sends it) behind longer slugs that merely start the same way.
+            if words.count == 1, skill.slug.compare(words[0], options: .caseInsensitive) == .orderedSame { return -1 }
             var total = 0
             for word in words {
                 if skill.slug.range(of: word, options: options.union(.anchored)) != nil

@@ -250,6 +250,16 @@ struct ComposerSupportTests {
         #expect(!SkillSearch.isComplete("/nada", skills: skills))
     }
 
+    @Test func aSlugTypedInFullIsNotCutFromTheFiveSuggestions() {
+        let many = ["revisar-a", "revisar-b", "revisar-c", "revisar-d", "revisar-e", "revisar"]
+            .map { Skill(slug: $0, name: $0, summary: "", instructions: "") }
+        let shown = Array(SkillSearch.matches(many, "revisar").prefix(5))
+        #expect(shown.first?.slug == "revisar")
+        #expect(SkillSearch.isComplete("/revisar", skills: shown), "Return sends it instead of completing another")
+        #expect(SkillSearch.matches(many, "REVISAR").first?.slug == "revisar")
+        #expect(SkillSearch.matches(many, "revisar-").first?.slug == "revisar-a", "a partial word keeps the order")
+    }
+
     // MARK: Clock
 
     @Test func theClockIsShortAndStaysSteady() {
