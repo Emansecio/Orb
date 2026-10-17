@@ -261,6 +261,8 @@ enum ChunkSummarizer {
             failed = true
         }
         let note = ConversationLedger.clip(text, ChunkSummary.maxLength)
+        // Reading stopped at the limit above, before the provider's closing count: what was written until then was billed.
+        if text.count > ChunkSummary.maxLength + 400 { usage = usage?.withOutput(atLeastCharacters: text.count) }
         return Note(text: !failed && note.count >= minimumLength ? note : nil, usage: usage)
     }
 }

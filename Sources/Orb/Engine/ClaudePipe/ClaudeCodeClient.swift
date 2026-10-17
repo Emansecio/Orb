@@ -577,11 +577,7 @@ struct ClaudePipeStepState {
     private mutating func record(usage reported: JSONValue?) -> [LLMEvent] {
         guard let reported, case .object = reported else { return [] }
         var total = usage ?? TokenUsage()
-        if let value = TokenUsage.sane(reported["input_tokens"]?.int) { total.input = value }
-        if let value = TokenUsage.sane(reported["output_tokens"]?.int) { total.output = value }
-        if let value = TokenUsage.sane(reported["cache_read_input_tokens"]?.int) { total.cacheRead = value }
-        if let value = TokenUsage.sane(reported["cache_creation_input_tokens"]?.int) { total.cacheWrite = value }
-        if let value = TokenUsage.sane(reported["cache_creation"]?["ephemeral_1h_input_tokens"]?.int) { total.cacheWrite1h = value }
+        total.absorb(messages: reported)
         usage = total
         guard let shown = totalUsage else { return [] }
         return [.usage(shown)]
