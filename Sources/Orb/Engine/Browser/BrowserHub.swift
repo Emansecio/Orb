@@ -580,8 +580,14 @@ final class BrowserHub: Sendable {
             // effort). Both browsers have the same session name, so a call that finds the new session in the meantime must not open
             // a page before that close is done, or the close would take the new browser too (`settleClosing`).
             if let replaced = sessions.updateValue(session, forKey: botID) {
-                let closing = Task<Void, Never> { try? await replaced.driver.close() }
-                closings.withLock { $0[botID] = closing }
+                // A close still going on (a second replacement right after the first) is waited for, so the closes do not overlap.
+                closings.withLock { closings in
+                    let before = closings[botID]
+                    closings[botID] = Task<Void, Never> {
+                        await before?.value
+                        try? await replaced.driver.close()
+                    }
+                }
             }
             return session
         }
