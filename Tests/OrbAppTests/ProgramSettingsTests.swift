@@ -161,6 +161,10 @@ struct ProgramSettingsTests {
             ("worktree outside", "[core]\n\tworktree = /tmp/elsewhere\n"),
             ("worktree relative outside", "[core]\n\tworktree = ../../elsewhere\n"),
             ("unterminated header", "[core\n\tfsmonitor = true\n"),
+            ("comment continuation", "[core]\n\t# x \\\n\tfsmonitor = /tmp/x\n"),
+            ("value comment continuation", "[core]\n\tfsmonitor = false # c \\\n\tfsmonitor = /tmp/x\n"),
+            ("bom core fsmonitor", "\u{FEFF}[core]\n\tfsmonitor = /tmp/x\n"),
+            ("bom include", "\u{FEFF}[include]\n\tpath = /tmp/x\n"),
         ]
         for (name, config) in hostile {
             let folder = try makeFolder()
@@ -189,6 +193,13 @@ struct ProgramSettingsTests {
             _ = try makeRepo(config: Self.cleanConfig + config, in: folder)
             #expect(readOnly("git status", in: folder), Comment(rawValue: name))
         }
+    }
+
+    @Test func aByteOrderMarkDoesNotHideTheFirstHeaderButCleanSettingsStayExempt() throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        _ = try makeRepo(config: "\u{FEFF}" + Self.cleanConfig, in: folder)
+        #expect(readOnly("git status", in: folder))
     }
 
     @Test func aHookThatRunsAfterTheIndexIsRewrittenIsNotExempt() throws {

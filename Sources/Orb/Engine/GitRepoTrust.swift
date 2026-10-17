@@ -123,6 +123,12 @@ enum GitRepoTrust {
     /// settings. `gitDir` is where a relative `core.worktree` is resolved from, `root` the folder that holds the worktree.
     static func isSafe(config text: String, gitDir: URL, root: URL) -> Bool {
         var section = ""
+        // The tool skips a byte-order mark at the very start of the file and reads `[core]` after it as usual.
+        var text = text
+        if text.unicodeScalars.first == "\u{FEFF}" { text = String(String.UnicodeScalarView(text.unicodeScalars.dropFirst())) }
+        // A comment ends at the end of its physical line: a comment that ends in a backslash does not take the next
+        // line with it, so which line is a key is not something the joined text can tell. Such a file is never exempt.
+        guard !hasCommentContinuation(text) else { return false }
         for line in logicalLines(text) {
             var rest = Substring(line.trimmingCharacters(in: .whitespaces))
             if rest.isEmpty || rest.hasPrefix("#") || rest.hasPrefix(";") { continue }
@@ -191,6 +197,25 @@ enum GitRepoTrust {
         }
         if !current.isEmpty { result.append(current) }
         return result
+    }
+
+    /// Whether some line ends in a backslash (an odd number of them) after a `#` or `;` that starts a comment outside quotes.
+    private static func hasCommentContinuation(_ text: String) -> Bool {
+        for raw in text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline) {
+            guard raw.reversed().prefix(while: { $0 == "\\" }).count % 2 == 1 else { continue }
+            var quoted = false, escaped = false
+            for character in raw {
+                if escaped { escaped = false; continue }
+                if character == "\\" {
+                    escaped = true
+                } else if character == "\"" {
+                    quoted.toggle()
+                } else if !quoted, character == "#" || character == ";" {
+                    return true
+                }
+            }
+        }
+        return false
     }
 
     /// The index of the `]` that closes a `[section "sub"]` header, skipping one inside quotes.
