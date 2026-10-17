@@ -62,6 +62,15 @@ struct CatalogTests {
         #expect(server.title == "remote")
     }
 
+    @Test func theOfficialSealNeedsTheWholeNamespace() {
+        #expect(RegistryServer.isOfficial("io.modelcontextprotocol/filesystem"))
+        #expect(RegistryServer.isOfficial("io.github.modelcontextprotocol/servers"))
+        #expect(RegistryServer.isOfficial("io.modelcontextprotocol.anything/x"))
+        #expect(!RegistryServer.isOfficial("io.github.modelcontextprotocol-evil/x"))
+        #expect(!RegistryServer.isOfficial("io.modelcontextprotocolx.app/x"))
+        #expect(!RegistryServer.isOfficial("io.github.someone/modelcontextprotocol"))
+    }
+
     @Test func unsupportedRegistryEntriesAreSkipped() throws {
         let json = try #require(JSONValue.parse("""
         {"name": "com.example/nuget", "packages": [{"registryType": "nuget", "identifier": "X"}]}

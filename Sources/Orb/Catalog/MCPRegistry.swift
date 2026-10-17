@@ -26,7 +26,13 @@ struct RegistryServer: Identifiable, Hashable, Sendable {
 
     /// The registry's own reference servers.
     var isOfficial: Bool { Self.isOfficial(id) }
-    static func isOfficial(_ id: String) -> Bool { id.hasPrefix("io.modelcontextprotocol") || id.hasPrefix("io.github.modelcontextprotocol") }
+    /// Compares the whole namespace (the part before the first "/"), never a bare text prefix: anyone can publish
+    /// as `io.github.modelcontextprotocol-evil/...` or under a domain such as `modelcontextprotocolx.io`.
+    static func isOfficial(_ id: String) -> Bool {
+        let namespace = id.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? id
+        return namespace == "io.modelcontextprotocol" || namespace.hasPrefix("io.modelcontextprotocol.")
+            || namespace == "io.github.modelcontextprotocol"
+    }
 }
 
 /// Searches https://registry.modelcontextprotocol.io (search is a substring match on the server name).
