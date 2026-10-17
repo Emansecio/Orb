@@ -42,6 +42,8 @@ Pedido do usuário: o Orb sabe que algo existe e onde buscar; o detalhe só entr
 | 2 | `apps_list` diz, por app, se aceita AppleScript, se o AX é bom ou fraco (Electron, Chromium, Qt, Java) e quais Atalhos têm o nome dele; tudo do pacote do app e da lista de Atalhos, em cache, sem chamada ao app. Primeira chamada 0,19 s, seguintes 25 ms. Teto das specs 18.900 para 18.950. | `AppControlInfoTests` |
 | 3 | Tabelas e formulários em grade numa imagem: `RecognizeDocumentsRequest` (macOS 26, atrás de `#available`) devolve linhas e colunas como markdown quando as caixas do OCR comum parecem uma tabela; o OCR comum segue como padrão e reserva; vale para `screenshot`, `read_file` de imagem e `browse_screenshot`, no prazo de 20 s. Sem custo de spec. | `TableRecognizerTests` (inclui uma tabela desenhada em memória e lida pelo Vision de verdade) |
 
+**Novidades do macOS 26 e 27 conferidas (só sugestão, nada implementado).** Duas buscas na web não acharam nada concreto sobre App Intents executáveis sem Atalho, Acessibilidade ou ScreenCaptureKit que sirva a este desenho. Nos cabeçalhos do SDK 27, o ScreenCaptureKit trouxe só coisas de gravação de vídeo (buffer de clipes, microfone, erro de armazenamento), sem uso aqui. O que apareceu e valeu foi o `RecognizeDocumentsRequest` do Vision (item 3, feito). Sugestão para depois, a confirmar na documentação da Apple antes de gastar tempo: ver se o app com App Intents aparece no `shortcuts list` como ação própria (aí `app_dictionary` e `apps_list` poderiam citar as ações do app); não tentei, porque exige abrir apps e a regra era só ler.
+
 **Ficou, e por quê:**
 
 - **P1-2** e **P2-7**: ficaram para decisão do usuário e entraram depois dela (linhas acima).
