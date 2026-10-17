@@ -79,7 +79,9 @@ extension AppModel {
             if enabled, let refusal = sideRunRefusal(botID, routine: "Uma tarefa agendada não retoma outras tarefas.") { throw refusal }
             let routine = try own.named(name)
             guard routine.isEnabled != enabled else { return "“\(routine.name)” já estava \(enabled ? "ativa" : "pausada")." }
-            setRoutineEnabled(routine.id, enabled)
+            guard setRoutineEnabled(routine.id, enabled) else {
+                return "Não retomei “\(routine.name)”: a data dela já passou e não haveria próxima execução. Mude a data (update com when) ou crie outra."
+            }
             return enabled ? "Retomei “\(routine.name)”. \(RoutineText.preview(of: routine.schedule))."
                 : "Pausei “\(routine.name)”. Ela não roda até ser retomada."
         case .run(let name):
@@ -116,9 +118,13 @@ extension AppModel {
     /// The run waits for the Orb's current turn (this one, when the Orb asked in its chat) to end.
     static let runNowNote = "A execução começa assim que este Orb estiver livre e tem conversa própria; o resultado aparece no chat quando ela terminar."
 
-    func setRoutineEnabled(_ id: UUID, _ enabled: Bool) {
-        guard let index = routines.firstIndex(where: { $0.id == id }) else { return }
+    /// Turns a routine on or off. A routine for one moment already past stays off (it would have no next run): false then.
+    @discardableResult
+    func setRoutineEnabled(_ id: UUID, _ enabled: Bool) -> Bool {
+        guard let index = routines.firstIndex(where: { $0.id == id }) else { return false }
+        guard !enabled || routines[index].canBeEnabled() else { return false }
         routines[index].setEnabled(enabled)
+        return true
     }
 
     /// Lets the panel show the new task, when it is on screen for this Orb: its tab opens and the row is highlighted

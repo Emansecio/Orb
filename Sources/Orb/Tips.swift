@@ -65,6 +65,7 @@ enum Tip {
     static let routinePermissions = "Define como a rotina pede permissão, já que ninguém responde"
     static let allRoutines = "Abre a página Rotinas, com as de todos os Orbs"
     static func routineToggle(isOn: Bool) -> String { isOn ? "Pausa esta rotina" : "Ativa esta rotina" }
+    static let routineDatePassed = "A data desta rotina já passou. Edite a data para ligar de novo"
 
     // MARK: Orb panel
 
@@ -301,7 +302,7 @@ enum Tip {
          manageGrants, adjustContext, chooseModel, forgetWindow, suggestion, routineIdea, queueAfterTask, steerNow,
          newRoutine, editRoutine, deleteRoutine, runRoutineNow, runRoutineAgain, queuedRoutine, routineConversation,
          copyReport, openReportFile, runOnceNow, routinePermissions, allRoutines,
-         routineToggle(isOn: true), routineToggle(isOn: false),
+         routineToggle(isOn: true), routineToggle(isOn: false), routineDatePassed,
          customizeOrb, refreshFolder, removeGrant, removeAllGrants, recreateFolder, changeFolder, manageConnectors, cancelLogin,
          macPermissions, showInstructions, openFolderInFinder("Orb"), openFolderInTerminal("Orb"),
          createFirstOrb, showWelcome, skillsPage, keptMemoryInFinder, dismissNotice, deleteWithMemory,

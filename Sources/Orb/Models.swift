@@ -552,6 +552,15 @@ struct Routine: Identifiable, Codable, Sendable {
         if enabled && !isEnabled { lastRun = now }
         isEnabled = enabled
     }
+
+    /// Whether turning it on would leave it a next run. A routine for one moment that has already passed would not: it would
+    /// show as on and never run (its date has to change first).
+    func canBeEnabled(now: Date = .now) -> Bool {
+        guard !isEnabled else { return true }
+        var switched = self
+        switched.setEnabled(true, now: now)
+        return switched.nextRun != .distantFuture
+    }
 }
 
 extension Routine {

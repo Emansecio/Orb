@@ -239,11 +239,13 @@ private struct RoutineCard: View {
                         .help("Esta rotina roda em “\(mode.label)”, mesmo que o Orb use outro modo")
                 }
                 Spacer()
-                Toggle("Ativa", isOn: Binding(get: { routine.isEnabled }, set: { routine.setEnabled($0) }))
+                let datePassed = !routine.canBeEnabled()
+                Toggle("Ativa", isOn: Binding(get: { routine.isEnabled }, set: { if !$0 || routine.canBeEnabled() { routine.setEnabled($0) } }))
                     .toggleStyle(.switch)
                     .labelsHidden()
                     .controlSize(.small)
-                    .help(Tip.routineToggle(isOn: routine.isEnabled))
+                    .disabled(datePassed)
+                    .help(datePassed ? Tip.routineDatePassed : Tip.routineToggle(isOn: routine.isEnabled))
             }
             Text(routine.name)
                 .font(.system(size: 15, weight: .semibold))

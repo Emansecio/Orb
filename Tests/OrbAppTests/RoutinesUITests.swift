@@ -23,6 +23,19 @@ struct RoutinesUITests {
         #expect(RoutineText.resolvedName("", prompt: "Faça o backup") == "Faça o backup")
     }
 
+    @Test func aOneTimeRoutineWhoseMomentPassedCannotBeTurnedBackOn() {
+        let past = Routine(name: "Uma vez", botID: UUID(), prompt: "x", schedule: .once(now.addingTimeInterval(-3600)), isEnabled: false,
+                           createdAt: now.addingTimeInterval(-86_400))
+        #expect(!past.canBeEnabled(now: now))
+        let ahead = Routine(name: "Uma vez", botID: UUID(), prompt: "x", schedule: .once(now.addingTimeInterval(3600)), isEnabled: false,
+                            createdAt: now.addingTimeInterval(-86_400))
+        #expect(ahead.canBeEnabled(now: now))
+        let daily = Routine(name: "Todo dia", botID: UUID(), prompt: "x", schedule: .daily(hour: 9, minute: 0), isEnabled: false)
+        #expect(daily.canBeEnabled(now: now))
+        // One that is on already has nothing to turn on.
+        #expect(Routine(name: "Ligada", botID: UUID(), prompt: "x", schedule: .once(now.addingTimeInterval(-3600))).canBeEnabled(now: now))
+    }
+
     @Test func aNameThatPromisesARhythmTheScheduleDoesNotKeepIsFlagged() {
         func mismatch(_ name: String, _ schedule: Schedule) -> String? {
             RoutineText.nameMismatch(of: Routine(name: name, botID: UUID(), prompt: "x", schedule: schedule))
