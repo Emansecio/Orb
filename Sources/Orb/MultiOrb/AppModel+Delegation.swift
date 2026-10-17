@@ -27,13 +27,14 @@ extension AppModel {
     func multiOrbOffering(for botID: UUID) -> MultiOrbOffering {
         // MultiOrb (WP5): in a member's turn the group decides: `orbs` when it lets members talk (the orchestrator always may),
         // and the board's tools.
+        // `sideRun` follows the session, as `sideRunRefusal` does: what the short `schedule` leaves out is what the app refuses.
+        let ownChat = isOwnChat(botID)
         if let group = groupTurnExtras(for: botID) {
             var offering = group.offering
-            offering.sideRun = true
+            offering.sideRun = !ownChat
             return offering
         }
         let inGroup = turnGroup(of: botID) != nil
-        let ownChat = isOwnChat(botID)
         // A member of a group may ask the group from its chat even with the switch off: groups do not depend on it.
         let hasTeam = inGroup || (orbsCanTalk && bots.count > 1) || (ownChat && canStartGroups(botID))
         return MultiOrbOffering(orbs: hasTeam, propose: ownChat, groupMemory: false,

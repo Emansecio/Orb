@@ -551,6 +551,35 @@ struct SchedulePermissionTests {
         session.routineID = nil
     }
 
+    /// The short `schedule` (`ScheduleTool.sideRunSpec`) goes where the app takes only what it lists: an action it leaves out
+    /// is refused in a routine's run, a request from another Orb and a group's turn, and the Orb's own chat gets the whole tool.
+    @Test @MainActor func theShortToolGoesWhereTheAppTakesOnlyWhatItLists() throws {
+        let (model, atlas, _) = setUp()
+        _ = try run(model, atlas, call("create", name: "Manhã", prompt: "x", when: daily9))
+        let session = model.session(atlas.id)
+        func actions(_ spec: ToolSpec) -> [String] {
+            spec.parameters["properties"]?["action"]?["enum"]?.array?.compactMap(\.string) ?? []
+        }
+        let short = actions(ScheduleTool.sideRunSpec)
+        #expect(short == ["list", "pause"])
+        #expect(!model.multiOrbOffering(for: atlas.id).sideRun)
+        for kind in [nil, .routine, .delegation, .group] as [SideRunKind?] {
+            session.routineID = UUID()
+            session.sideKind = kind
+            #expect(model.multiOrbOffering(for: atlas.id).sideRun)
+            for action in actions(ScheduleTool().spec) where !short.contains(action) {
+                let arguments = action == "create" ? call(action, name: "Outra", prompt: "y", when: daily9)
+                    : call(action, name: "Manhã", prompt: "y")
+                #expect(throws: ToolError.self, "\(action) in \(String(describing: kind))") { try run(model, atlas, arguments) }
+            }
+            for action in short { _ = try run(model, atlas, call(action, name: "Manhã")) }
+        }
+        session.routineID = nil
+        session.sideKind = nil
+        #expect(!model.multiOrbOffering(for: atlas.id).sideRun)
+        #expect(model.routines.count == 1 && model.routines[0].prompt == "x")
+    }
+
     @Test @MainActor func aTaskCanBeCreatedPaused() throws {
         let (model, atlas, _) = setUp()
         let said = try run(model, atlas, call("create", name: "Depois", prompt: "x", when: daily9, extra: ["enabled": .bool(false)]))
