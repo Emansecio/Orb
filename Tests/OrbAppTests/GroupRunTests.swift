@@ -356,6 +356,20 @@ struct GroupUnreadAndNoticeTests {
         #expect(world.live.unread == 0 && world.session.unread == 0)
     }
 
+    @Test @MainActor func comingBackToTheAppReadsTheGroupThatIsOpen() async {
+        let world = GroupWorld()
+        let first = await startOrchestratorTurn(world)
+        world.fake.finish(first, reply: "Olá!")
+        await world.waitForFinish()
+        world.model.selection = .group(world.groupID)
+        // The app went to the background with the group open: a member answers and the dot lights up beside it.
+        world.hub.isFocused = { _ in false }
+        world.hub.addUnread(world.groupID)
+        #expect(world.live.unread == 1 && world.session.unread == 1)
+        world.model.appDidBecomeActive()
+        #expect(world.live.unread == 0 && world.session.unread == 0)
+    }
+
     @Test @MainActor func nothingIsUnreadWhileTheGroupIsInFront() async {
         let world = GroupWorld()
         world.hub.isFocused = { _ in true }

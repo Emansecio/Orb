@@ -163,7 +163,7 @@ final class AppModel {
 
     // MARK: Per-Orb live state
 
-    /// The Orbs in sidebar order. Changes only when an Orb is added, deleted or moved, so a list that shows one
+    /// The Orbs in creation order (`sidebarBotIDs` has the sidebar's, with its categories). Changes only when an Orb is added, deleted or moved, so a list that shows one
     /// view per Orb (sidebar, menu bar, Orbs menu) re-renders then and not when an Orb's own state changes.
     private(set) var botIDs: [UUID] = []
     /// The Orbs working right now and the ones waiting for an answer, in sidebar order (the menu bar lists them).
@@ -246,9 +246,9 @@ final class AppModel {
     @ObservationIgnored var profilePhotoGeneration = 0
     /// What the reset needs from outside the app (tests lead it to a temporary folder and keep it from quitting).
     @ObservationIgnored var resetEnvironment = ResetEnvironment()
-    /// Stands in for the provider's client (tests).
     /// Where "the home folder" is, for deciding whether an Orb's folder is its own (tests point it elsewhere).
     @ObservationIgnored var homeFolder = FileManager.default.homeDirectoryForCurrentUser
+    /// Stands in for the provider's client (tests).
     @ObservationIgnored var clientOverride: (@MainActor () -> (any LLMClient)?)?
     /// Whether macOS trusts the app for Accessibility, read when a turn starts (tests replace it).
     @ObservationIgnored var accessibilityProbe: @Sendable () -> Bool = { LiveMacPermissionSystem().isAccessibilityTrusted() }
@@ -485,10 +485,7 @@ final class AppModel {
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.backgroundRelief?.cancel()
-                if let self, case .bot(let id) = self.selection {
-                    self.setUnread(0, for: id)
-                    Task { await self.refreshMemory(id) } // picks up pages edited by hand meanwhile
-                }
+                self?.appDidBecomeActive()
             }
         }
         // A while in the background, the memory freed while you used the app goes back to the system.
@@ -638,10 +635,7 @@ final class AppModel {
     /// The model a bot actually uses: its own or the default ("provider/model").
     func modelRef(for bot: Bot) -> ModelRef? { ModelRef(bot.model.isEmpty ? defaultModel : bot.model) }
 
-    /// Short model name for the UI ("" when none is set).
-    func modelName(for bot: Bot) -> String { modelName(forModel: bot.model) }
-
-    /// The same for a bot's `model` string alone (views that show nothing else of the bot).
+    /// Short model name for the UI ("" when none is set), from a bot's `model` string.
     func modelName(forModel model: String) -> String {
         guard let ref = ModelRef(model.isEmpty ? defaultModel : model) else { return "" }
         return account(ref.provider)?.models.first { $0.id == ref.model }?.name ?? ref.model
@@ -1145,6 +1139,7 @@ final class AppModel {
         // First, so that stopping a running routine does not start the next one waiting for this Orb.
         let ownRoutines = routines.filter { $0.botID == botID }.map(\.id)
         queuedRoutines.removeAll { ownRoutines.contains($0) }
+        for id in ownRoutines { unsavedRoutineConversations[id] = nil } // or `saveNow` writes the deleted Orb's folder back
         routines.removeAll { $0.botID == botID }
         delegation.orbDeleted(botID) // before the stop: whoever waited for this Orb is told, and what it asked is dropped
         stop(botID)
@@ -1189,16 +1184,31 @@ final class AppModel {
         sessions[botID] = nil // with its transcript: whatever still holds the session writes to nothing anyone shows
         store.deleteConversation(botID)
         store.deleteArchive(botID) // the routines' conversations and the requests' ones
-        if selection == .bot(botID) { selection = bots.first.map { .bot($0.id) } }
+        if selection == .bot(botID) { selection = sidebarBotIDs.first.map { .bot($0) } } // the one at the top of the sidebar, as at launch
         if lastSelectedBotID == botID { lastSelectedBotID = nil } // a catalog sheet must not default to an Orb that is gone
         return keeping
     }
 
+    /// Back in front: what you are looking at is read (an Orb's or a group's unread dot goes away).
+    func appDidBecomeActive() {
+        switch selection {
+        case .bot(let id):
+            setUnread(0, for: id)
+            Task { await refreshMemory(id) } // picks up pages edited by hand meanwhile
+        case .group(let id):
+            groupHub.markRead(id) // what a member said while the app was behind
+        default:
+            break
+        }
+    }
+
     func selectAdjacentBot(offset: Int) {
-        guard !bots.isEmpty else { return }
-        let current = selectedBot.flatMap { bot in bots.firstIndex { $0.id == bot.id } } ?? -offset
-        let next = (current + offset + bots.count) % bots.count
-        selection = .bot(bots[next].id)
+        // The order the sidebar shows (loose Orbs, then the categories), the same one ⌘1…⌘9 count by.
+        let order = sidebarBotIDs
+        guard !order.isEmpty else { return }
+        let current = selectedBot.flatMap { bot in order.firstIndex(of: bot.id) } ?? -offset
+        let next = (current + offset + order.count) % order.count
+        selection = .bot(order[next])
     }
 
     // MARK: Reset

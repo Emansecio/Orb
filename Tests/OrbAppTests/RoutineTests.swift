@@ -751,6 +751,18 @@ private func waitForModelCalls(_ stub: StubModel, _ count: Int = 1) async {
         #expect(model.unsavedRoutineConversations.isEmpty)
     }
 
+    @Test @MainActor func aDeletedOrbDoesNotGetItsUnwrittenRoutineConversationBackOnQuit() throws {
+        let (model, bot, routine) = setUp()
+        var kept = Conversation().startingRoutineRun(at: .now.addingTimeInterval(-60))
+        kept.items.append(TranscriptItem(.bot(text: "rodada que não gravou", isStreaming: false)))
+        model.unsavedRoutineConversations[routine.id] = (bot.id, kept)
+        _ = model.deleteBot(bot.id)
+        #expect(model.unsavedRoutineConversations.isEmpty)
+        model.saveNow()
+        model.store.flush()
+        #expect(model.store.readRoutineConversation(routine: routine.id, for: bot.id).value == nil)
+    }
+
     @Test @MainActor func aRoutineThatDidNotRunHoldsNothing() async throws {
         let (model, _, routine) = setUp(StubModel())
         model.providers = [] // no model connected: the routine does not happen
