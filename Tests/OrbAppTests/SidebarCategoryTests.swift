@@ -349,6 +349,34 @@ struct SidebarCategoryPersistenceTests {
         #expect(world.model.selection == .bot(world.ids[1])) // the first loose Orb, not the first in the category
     }
 
+    @Test @MainActor func nextAndPreviousOrbWalkTheSidebarNotTheOrderOfCreation() throws {
+        let world = CategoryWorld()
+        let model = world.model
+        let ids = world.ids
+        model.createCategory(named: "Pesquisa", moving: ids[1])
+        #expect(model.sidebarBotIDs == [ids[0], ids[2], ids[3], ids[1]])
+        model.selection = .bot(ids[0])
+        model.selectAdjacentBot(offset: 1)
+        #expect(model.selection == .bot(ids[2]))
+        model.selectAdjacentBot(offset: 1)
+        model.selectAdjacentBot(offset: 1)
+        #expect(model.selection == .bot(ids[1])) // the one in the category is the last shown
+        model.selectAdjacentBot(offset: 1)
+        #expect(model.selection == .bot(ids[0])) // and it wraps to the first
+        model.selectAdjacentBot(offset: -1)
+        #expect(model.selection == .bot(ids[1]))
+    }
+
+    @Test @MainActor func deletingTheSelectedOrbSelectsTheOneAtTheTopOfTheSidebar() throws {
+        let world = CategoryWorld()
+        let model = world.model
+        let ids = world.ids
+        model.createCategory(named: "Pesquisa", moving: ids[0])
+        model.selection = .bot(ids[1])
+        _ = model.deleteBot(ids[1])
+        #expect(model.selection == .bot(ids[2])) // not ids[0], the first created, which sits in the category
+    }
+
     @Test func anOlderStateFileOpensWithNoCategories() throws {
         var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(AppState.initial)) as? [String: Any])
         object["categories"] = nil

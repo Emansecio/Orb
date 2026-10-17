@@ -20,6 +20,27 @@ struct HoverTipsTests {
         }
     }
 
+    @Test func everyTipIsInTheListThatHoldsThemToTheStyle() throws {
+        // A tip left out of `Tip.all` escapes the style checks above; the ones left out on purpose are named here.
+        let onPurpose: Set<String> = ["cronExpression", "sendToBackground", "answerQuestion", "withoutFullStop", "all"]
+        let file = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appending(path: "Sources/Orb/Tips.swift")
+        let source = try String(contentsOf: file, encoding: .utf8)
+        let split = try #require(source.range(of: "static var all: [String]"))
+        let declarations = String(source[..<split.lowerBound]), listed = String(source[split.lowerBound...])
+        let names = declarations.components(separatedBy: "\n").compactMap { line -> String? in
+            guard line.hasPrefix("    static let ") || line.hasPrefix("    static func ") else { return nil }
+            let rest = line.dropFirst(line.hasPrefix("    static let ") ? "    static let ".count : "    static func ".count)
+            return String(rest.prefix { $0.isLetter || $0.isNumber || $0 == "_" })
+        }
+        #expect(names.count > 150, "a varredura achou só \(names.count) dicas: o padrão de busca quebrou?")
+        let missing = names.filter { name in
+            !onPurpose.contains(name) && listed.range(of: "\\b\(name)\\b", options: .regularExpression) == nil
+        }
+        #expect(missing.isEmpty, "dicas fora de Tip.all: \(missing)")
+    }
+
     @Test func noTwoTipsAreTheSameText() {
         // The same action is never explained twice; a text two controls share is one constant.
         let tips = Tip.all

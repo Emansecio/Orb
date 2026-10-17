@@ -39,7 +39,6 @@ extension Snapshot {
             // With a model, so the context ring sits beside the microphone as it does in use.
             seedConversation(model, bot: bot)
             seedProviders(model)
-            Dictation.showsInSnapshots = true
             if screen == "chat-dictating" {
                 model.setDraft("Abre a planilha de vendas e me diz quais clientes compraram mais neste mês, por favor", for: bot.id)
                 model.dictation.pose(.listening, level: 0.7, for: bot.id)

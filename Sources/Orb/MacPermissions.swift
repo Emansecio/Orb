@@ -78,7 +78,7 @@ enum MacPermissionKind: Hashable, Sendable {
             switch target.bundleID {
             case "com.apple.systemevents": "Teclado, cliques e janelas de outros apps"
             case "com.apple.finder": "Pastas, arquivos e Lixeira"
-            default: "Controlar o \(target.name) quando você pede"
+            default: "Controlar o app \(target.name) quando você pede"
             }
         case .accessibility: "Digitar, clicar e ler a interface de outros apps"
         case .screenRecording: "Ver o que há na tela e nas janelas de outros apps"
@@ -586,14 +586,14 @@ extension ToolCall {
 /// Finds the apps a script talks to and settles their Automation consent before the script runs, so the system dialog
 /// does not race the script's timeout.
 enum AutomationPreflight {
-    /// Names of the apps a script addresses: `tell application "X"`, `application id "…"`, or JXA's `Application("X")`.
-    /// Full-line comments are ignored; the result keeps first-seen order without repeats.
     // `app`/`application`, optionally `id`, then a quoted name: covers tell blocks, one-liners and "of application".
     private static let applescriptAppExpression = try? NSRegularExpression(
         pattern: #"\bapp(?:lication)?\s+(?:id\s+)?"([^"\n]+)""#, options: [.caseInsensitive])
     private static let javascriptAppExpression = try? NSRegularExpression(
         pattern: #"\bApplication\s*\(\s*(?:"([^"\n]+)"|'([^'\n]+)')\s*\)"#)
 
+    /// Names of the apps a script addresses: `tell application "X"`, `application id "…"`, or JXA's `Application("X")`.
+    /// Full-line comments are ignored; the result keeps first-seen order without repeats.
     static func appNames(in script: String, language: AppleScript.Language) -> [String] {
         let code = script.split(separator: "\n", omittingEmptySubsequences: false).filter { line in
             let trimmed = line.trimmingCharacters(in: .whitespaces)

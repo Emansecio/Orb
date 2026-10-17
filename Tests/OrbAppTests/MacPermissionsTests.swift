@@ -145,6 +145,14 @@ struct MacPermissionsTests {
         #expect(MacPermissionKind.accessibility.canBeAskedNow)
     }
 
+    @Test func theAutomationLinesNameTheAppWithoutAnArticleThatDisagreesWithIt() {
+        for target in AutomationTarget.known where !["com.apple.finder", "com.apple.systemevents"].contains(target.bundleID) {
+            let detail = MacPermissionKind.automation(target).detail
+            #expect(detail == "Controlar o app \(target.name) quando você pede", "\(detail)")
+        }
+        #expect(!MacPermissionKind.automation(AutomationTarget.known(named: "Notas")!).detail.contains("o Notas"))
+    }
+
     @Test func statusesSayWhetherTheSystemPromptCanStillAppear() {
         #expect(MacPermissionStatus.notDetermined.canShowSystemPrompt)
         #expect(MacPermissionStatus.notGranted.canShowSystemPrompt)

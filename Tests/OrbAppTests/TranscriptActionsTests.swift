@@ -54,6 +54,14 @@ import Testing
         #expect(NoticeAction.actions(for: notice(.notConfigured)) == [.openSettings, .retry])
     }
 
+    @Test func aModelTheProviderRefusedWithAGoodKeyOnlyOffersToTryAgain() {
+        // The sentence says "a chave está certa": the word "chave" must not send the person to Ajustes first.
+        let refused = notice(.http(status: 403, message: "model gpt-x is disabled for this workspace"))
+        #expect(refused.contains("recusou este modelo"))
+        #expect(NoticeAction.actions(for: refused) == [.retry])
+        #expect(NoticeAction.actions(for: refused, canCompact: false, canSwitchModel: true) == [.retry, .otherModel])
+    }
+
     @Test func theProvidersOwnWordsDoNotChooseTheAction() {
         // "login" and "chave" in the provider's text must not turn a rate limit into a settings problem.
         #expect(NoticeAction.actions(for: notice(.http(status: 429, message: "faça login ou troque a chave, ajustes necessários"))) == [.retry])

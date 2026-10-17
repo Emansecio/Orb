@@ -45,6 +45,16 @@ struct ApprovalNotificationTests {
         #expect(payload.category == "orb.approval.dangerous")
     }
 
+    @Test func theStopBannerOfATurnIsTakenDownLikeTheOthersAndIsOnePerOrb() {
+        // Started again, the app takes down every banner whose buttons mean nothing now, "Parar" included.
+        #expect(ApprovalNotifications.staleCategories.contains(ApprovalNotifications.stopCategory))
+        #expect(ApprovalNotifications.staleCategories.contains(ApprovalNotifications.category))
+        let one = UUID(), other = UUID()
+        #expect(ApprovalNotifications.stopBannerID(one) == ApprovalNotifications.stopBannerID(one))
+        #expect(ApprovalNotifications.stopBannerID(one) != ApprovalNotifications.stopBannerID(other))
+        #expect(ApprovalNotifications.stopBannerID(one).contains(one.uuidString))
+    }
+
     @Test func bothCategoriesOfferAllowAndDenyAndOnlyTheDangerousOneNeedsUnlocking() throws {
         let categories = ApprovalNotifications.categories()
         let normal = try #require(categories.first { $0.identifier == "orb.approval" })

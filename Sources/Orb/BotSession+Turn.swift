@@ -370,6 +370,7 @@ extension BotSession {
         turnTask = nil
         turnID = nil
         pendingMarks = nil
+        ApprovalNotifications.clearStopBanner(of: botID) // its "Parar" would stop the next turn
         // The turn may have changed files: the next message reads the folder again.
         Task { await WorkspaceSnapshots.shared.invalidate(botID) }
         let compacted = compactedInTurn

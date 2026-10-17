@@ -27,8 +27,10 @@ struct CronExpression: Hashable, Sendable {
         weekdays = Set(try Self.values(fields[4], 0...7, "dia da semana", names: Self.weekdayNames).map { $0 % 7 + 1 })
         anyDay = fields[2].hasPrefix("*")
         anyWeekday = fields[4].hasPrefix("*")
-        // Within an hour (and from one hour to the next) two runs never come closer than this.
-        let gaps = zip(minutes, minutes.dropFirst() + [minutes[0] + 60]).map { $1 - $0 }
+        // Two runs of a day never come closer than this, counted over the times the hours and minutes make together
+        // (so "0,50 8 * * *" is two runs 50 minutes apart, not 10), and from the last one to the first of the next day.
+        let times = hours.flatMap { hour in minutes.map { hour * 60 + $0 } }
+        let gaps = zip(times, times.dropFirst() + [times[0] + 24 * 60]).map { $1 - $0 }
         guard gaps.allSatisfy({ $0 >= Schedule.minuteRange.lowerBound }) else {
             throw Invalid(reason: "Não agendo tarefas com intervalo menor que \(Schedule.minuteRange.lowerBound) minutos.")
         }

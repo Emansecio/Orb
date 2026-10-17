@@ -411,13 +411,15 @@ import Testing
         #expect(FileManager.default.fileExists(atPath: folder.appending(path: "fatos").path))
     }
 
-    @Test @MainActor func aNoticeThatWasClosedIsNotBroughtBackByTheMove() async throws {
+    @Test @MainActor func aNoticeThatWasClosedIsNotBroughtBackByTheMove() async {
         let model = model()
         let luna = model.botIDs[1]
         await model.memory.bank(for: luna).remember("Algo para guardar")
         model.confirmDelete(luna, keepMemory: true)
         model.dismissKeptMemoryNotice()
-        try await Task.sleep(for: .milliseconds(300)) // long enough for the move to finish
+        // The move is over when the list of kept memories changes; the notice's own task resumes right after it.
+        await waitUntil("the move to finish") { model.keptMemoriesVersion > 0 }
+        for _ in 0..<20 { await Task.yield() }
         #expect(model.keptMemoryNotice == nil)
     }
 }

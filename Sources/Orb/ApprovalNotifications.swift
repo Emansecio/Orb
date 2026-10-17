@@ -182,10 +182,26 @@ enum ApprovalNotifications {
     static func clearStale() {
         guard isAvailable else { return }
         UNUserNotificationCenter.current().getDeliveredNotifications { delivered in
-            let stale = delivered.filter { [category, dangerousCategory, handoffCategory].contains($0.request.content.categoryIdentifier) }
+            let stale = delivered.filter { staleCategories.contains($0.request.content.categoryIdentifier) }
                 .map(\.request.identifier)
             if !stale.isEmpty { UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: stale) }
         }
+    }
+
+    /// The banners whose buttons mean nothing once the run that posted them is gone: an approval card's, a handoff's and the
+    /// "Parar" of a turn that went in circles.
+    static let staleCategories = [category, dangerousCategory, handoffCategory, stopCategory]
+
+    /// The one "Parar" banner an Orb has: a new one takes the place of the old.
+    static func stopBannerID(_ botID: UUID) -> String { "stop-\(botID.uuidString)" }
+
+    /// Takes down the "Parar" banner of an Orb whose turn is over (or never will be again): tapping it later would
+    /// stop whatever turn the Orb is running by then.
+    static func clearStopBanner(of botID: UUID) {
+        guard isAvailable else { return }
+        let center = UNUserNotificationCenter.current()
+        center.removeDeliveredNotifications(withIdentifiers: [stopBannerID(botID)])
+        center.removePendingNotificationRequests(withIdentifiers: [stopBannerID(botID)])
     }
 
     /// Takes down the banners of cards that were answered (in the app, by a mode change or by stopping the Orb).
