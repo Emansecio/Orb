@@ -639,7 +639,8 @@ final class DelegationHub: DelegationService {
                 requests[envelope.id]?.state = .cancelled
                 requests[envelope.id]?.finishedAt = .now
                 queues[envelope.to.id]?.removeAll { $0 == envelope.id }
-                suspended[envelope.id] = nil
+                // A target that waited for its own helpers keeps its conversation in memory: its open lines close on disk too.
+                closeSuspended(request, as: .cancelled)
                 waitingSince[envelope.id] = nil
                 if was == .running { running.append(envelope.to.id) }
                 else if envelope.groupID != nil { groupHooks?.turnFinished(requests[envelope.id] ?? request, reply: nil, outcome: .cancelled) }
@@ -754,7 +755,6 @@ final class DelegationHub: DelegationService {
         return model.bots.filter { $0.id != botID }.map(OrbRef.init)
     }
 
-    /// The Orb waits for this one (it asked and nobody answered yet).
     /// Whether the Orb waits for an answer in the chain. A request a member sent its group from its chat does not count: what
     /// waits is its chat, so inside the group the orchestrator may still hand it work.
     private func waiting(_ botID: UUID, inChain chainID: UUID) -> Bool {
