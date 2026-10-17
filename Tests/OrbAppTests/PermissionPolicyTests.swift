@@ -513,14 +513,22 @@ struct PermissionRulePersistenceTests {
         #expect(Set(bot.permissionRules) == [
             PermissionRule(family: .shell), PermissionRule(family: .writeFiles), PermissionRule(family: .web),
             PermissionRule(family: .open), PermissionRule(family: .appleScript), PermissionRule(family: .macApps),
-            PermissionRule(family: .memory), .connector("GitHub__create_issue"),
+            PermissionRule(family: .memory), .connector("GitHub__create_issue"), PermissionRule(family: .web, scope: .search),
         ])
         // The same grant under both engines' names is one rule, so switching model keeps working.
-        #expect(bot.permissionRules.count == 8)
+        #expect(bot.permissionRules.count == 9)
         // Saved again, the old field is gone and the rules survive.
         let saved = String(decoding: try JSONEncoder().encode(bot), as: UTF8.self)
         #expect(!saved.contains("allowedTools"))
         #expect(try decode(saved).permissionRules == bot.permissionRules)
+    }
+
+    @Test func anOldWebSearchGrantDoesNotBecomeAnySite() throws {
+        let bot = try decode(#"{"id":"\#(UUID().uuidString)","name":"Velho","allowedTools":["WebSearch"]}"#)
+        #expect(bot.permissionRules == [PermissionRule(family: .web, scope: .search)])
+        let page = PermissionPolicy.call(for: WebFetchTool(), arguments: .object(["url": .string("https://a.test/x")]),
+                                         context: ToolContext(workingDirectory: FileManager.default.temporaryDirectory), home: FileManager.default.temporaryDirectory)
+        #expect(!PermissionPolicy.isCovered(page, by: bot.permissionRules))
     }
 
     @Test func rulesRoundTrip() throws {

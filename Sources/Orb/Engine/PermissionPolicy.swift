@@ -467,7 +467,7 @@ enum PermissionPolicy {
 
     /// What a connector tool does to the world outside, by the verbs in its name: `send`, `post`, `reply`, `forward`,
     /// `share`, `publish`, `comment`, `push`, `merge`, `submit`, `upload`, `notify`, `delete`, `remove`, `trash`, `archive`,
-    /// `schedule`, `invite`, `transfer`. The sentence completes
+    /// `schedule`, `invite`, `transfer`, `destroy`, `purge`, `commit`. The sentence completes
     /// "o nome da ferramenta indica que ela …" on the approval card.
     private static let outwardVerbs: [String: String] = [
         "send": "envia algo", "post": "publica algo", "reply": "envia uma resposta", "forward": "encaminha mensagens",
@@ -640,7 +640,9 @@ enum PermissionPolicy {
         switch name {
         case "run_command", "Bash": return PermissionRule(family: .shell)
         case "write_file", "edit_file", "trash", "Write", "Edit", "MultiEdit", "NotebookEdit": return PermissionRule(family: .writeFiles)
-        case "web_fetch", "WebFetch", "WebSearch": return PermissionRule(family: .web)
+        case "web_fetch", "WebFetch": return PermissionRule(family: .web)
+        // Letting the Orb search never meant letting it read any page: that is the `.search` rule, not "any site".
+        case "WebSearch": return PermissionRule(family: .web, scope: .search)
         case "open": return PermissionRule(family: .open)
         case "applescript": return PermissionRule(family: .appleScript)
         case "shortcuts_run", "clipboard_write", "app_quit": return PermissionRule(family: .macApps)
