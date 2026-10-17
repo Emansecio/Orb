@@ -314,11 +314,13 @@ enum ConversationSearch {
         var to = text.index(match.upperBound, offsetBy: contextAfter, limitedBy: text.endIndex) ?? text.endIndex
         // Whole words at the cut: step in to the next space, unless that would leave nothing of the context.
         if from > text.startIndex,
-           let space = text[from..<match.lowerBound].firstIndex(where: \.isWhitespace) {
+           let space = text[from..<match.lowerBound].firstIndex(where: \.isWhitespace),
+           text.index(after: space) < match.lowerBound {
             from = text.index(after: space)
         }
         if to < text.endIndex,
-           let space = text[match.upperBound..<to].lastIndex(where: \.isWhitespace) {
+           let space = text[match.upperBound..<to].lastIndex(where: \.isWhitespace),
+           space > match.upperBound {
             to = space
         }
         let before = (from > text.startIndex ? "…" : "") + flatten(text[from..<match.lowerBound], trimmingMarks: true)

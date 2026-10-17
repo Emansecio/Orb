@@ -174,14 +174,16 @@ final class ConversationFind {
             cursor = FindCursor()
             focus = nil
             jump = nil
+            pausesFollowing = false // no hit is on show: the chat follows the end again, as `clearResults` leaves it
             needsJump = false
+            lastJumpItemIndex = nil
             announce?("Nenhum resultado")
             return
         }
         if needsJump {
             needsJump = false
             cursor.reset(count: found.hits.count, selecting: FindCursor.initialIndex(count: found.hits.count))
-            reveal(announcing: true)
+            reveal()
         } else {
             cursor.reset(count: found.hits.count, selecting: FindCursor.index(keeping: previous, in: found.hits))
             // The same message stays marked, the new text in it too; no scroll, no wash.
@@ -212,24 +214,24 @@ final class ConversationFind {
     /// ↩, ↓ or ⌘G.
     func next() {
         guard cursor.next() != nil else { return }
-        reveal(announcing: true)
+        reveal()
     }
 
     /// ⇧↩, ↑ or ⇧⌘G.
     func previous() {
         guard cursor.previous() != nil else { return }
-        reveal(announcing: true)
+        reveal()
     }
 
     /// A row of the list of results was chosen.
     func choose(_ index: Int) {
         cursor.select(index)
         guard cursor.index == index else { return }
-        reveal(announcing: true)
+        reveal()
     }
 
     /// Takes the chat to the chosen hit.
-    private func reveal(announcing: Bool) {
+    private func reveal() {
         guard let results, let hit = currentHit else { return }
         jumpTokens += 1
         let glides = lastJumpItemIndex.map { abs($0 - hit.itemIndex) <= FindJump.nearItems } ?? false
@@ -238,7 +240,7 @@ final class ConversationFind {
                         glides: glides)
         focus = FindFocus(itemID: hit.itemID, query: results.query, isFlashing: true)
         pausesFollowing = true
-        if announcing, let index = cursor.index { announce?(results.spokenLabel(index: index)) }
+        if let index = cursor.index { announce?(results.spokenLabel(index: index)) }
         flashTask?.cancel()
         let id = hit.itemID, flash = delays.flash
         flashTask = Task { [weak self] in
@@ -262,7 +264,17 @@ final class ConversationFind {
         let flash = delays.flash
         flashTask = Task { [weak self] in
             try? await Task.sleep(for: flash)
-            guard !Task.isCancelled, let self, focus?.itemID == itemID, !isOpen else { return }
+            guard !Task.isCancelled, let self, focus?.itemID == itemID else { return }
+            if isOpen {
+                // The bar is open: the wash goes and the marks go back to the search's hit (which keeps the chat paused).
+                if let hit = currentHit, let results {
+                    focus = FindFocus(itemID: hit.itemID, query: results.query, isFlashing: false)
+                } else {
+                    focus = nil
+                    pausesFollowing = false
+                }
+                return
+            }
             focus = nil
             jump = nil
             pausesFollowing = false

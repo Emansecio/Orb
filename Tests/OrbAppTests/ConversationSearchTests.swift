@@ -113,6 +113,15 @@ import Testing
         #expect(hit.snippet.before == "…" + String(repeating: "palavra ", count: 4))
     }
 
+    @Test func aSnippetKeepsSomeContextWhenTheOnlySpaceTouchesTheMatch() throws {
+        // A long word right after the match: the only space is the one against it, so the cut goes through the word.
+        let after = try #require(try hits("alvo", in: [bot("veja alvo " + String(repeating: "x", count: 120))]).first)
+        #expect(after.snippet.after.contains("xxx") && after.snippet.after.hasSuffix("…"))
+        // And a long word right before it.
+        let before = try #require(try hits("alvo", in: [bot(String(repeating: "y", count: 50) + " alvo fim")]).first)
+        #expect(before.snippet.before.contains("yyy") && before.snippet.before.hasPrefix("…"))
+    }
+
     @Test func aShortMessageIsItsOwnSnippetWithoutEllipsis() throws {
         let hit = try #require(try hits("mundo", in: [bot("Olá mundo cruel")]).first)
         #expect(hit.snippet == ConversationSearch.Snippet(before: "Olá ", match: "mundo", after: " cruel"))
@@ -413,6 +422,30 @@ import Testing
         #expect(spoken == ["Nenhum resultado"])
         find.next() // nothing to go to
         #expect(find.jump == nil)
+    }
+
+    @Test func aSearchThatFindsNothingLetsTheChatFollowAgain() async {
+        let find = make([bot("alvo")])
+        find.open()
+        find.query = "alvo"
+        await find.settled()
+        #expect(find.pausesFollowing)
+        find.query = "alvox"
+        await find.settled()
+        #expect(find.results?.hits.isEmpty == true && find.focus == nil && !find.pausesFollowing)
+    }
+
+    @Test func aQuoteClickedWithTheBarOpenGivesTheMarksBackToTheHitWhenTheWashFades() async {
+        let target = bot("alvo")
+        let find = make([target], flash: .milliseconds(30))
+        find.open()
+        find.query = "alvo"
+        await find.settled()
+        find.reveal(quoteOf: UUID(), words: "outras palavras")
+        #expect(find.focus?.query == "outras palavras" && find.focus?.isFlashing == true)
+        #expect(await waitUntil("a mancha da citação sumir") { find.focus?.isFlashing == false })
+        #expect(find.focus == FindFocus(itemID: target.id, query: "alvo", isFlashing: false))
+        #expect(find.pausesFollowing)
     }
 
     @Test func whenTheConversationChangesTheSelectionStaysWhereItWasAndNothingScrolls() async {
