@@ -295,7 +295,9 @@ enum Tip {
     /// A sentence of the app's own prose, as the tail of a tip: no full stop at the end.
     static func withoutFullStop(_ text: String) -> String { text.hasSuffix(".") ? String(text.dropLast()) : text }
 
-    /// Every fixed text above, for the test that holds them to the style.
+    /// Every fixed text above, for the test that holds them to the style. Three are left out on purpose, for being more
+    /// than one sentence or longer than 90 characters: `cronExpression`, `sendToBackground` and `answerQuestion`.
+    /// (A test reads this file and fails for any other tip that is not listed.)
     static var all: [String] {
         [attach, removeAttachment, previewAttachment, previewImage, missingAttachment, moreAttachments,
          manageGrants, adjustContext, chooseModel, forgetWindow, suggestion, routineIdea, queueAfterTask, steerNow,
@@ -331,7 +333,11 @@ enum Tip {
          autoColor, routineTemplate, openRunReport, exploreSkills, showProviderDetails, hideProviderDetails,
          previewActivity("pensando"),
          findResults, findClose, findInConversation(), findNext(), findPrevious(),
-         newBot(), settings(), inspector(isShowing: true), inspector(isShowing: false)]
+         newBot(), settings(), inspector(isShowing: true), inspector(isShowing: false),
+         togglePlan(isExpanded: true), togglePlan(isExpanded: false), pickAnswer, quoteSelection, goToQuote, answerInApp, skipQuestion,
+         importSource, importOpenMarketplace,
+         permissionAction(.ask), permissionAction(.openAppAndAsk(appName: "Notas")), permissionAction(.openSystemSettings),
+         permissionAction(.test), permissionAction(.relaunch)]
     }
 }
 
