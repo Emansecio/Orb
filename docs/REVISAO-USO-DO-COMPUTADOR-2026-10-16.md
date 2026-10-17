@@ -39,6 +39,7 @@ Pedido do usuário: o Orb sabe que algo existe e onde buscar; o detalhe só entr
 | Item | O que mudou | Teste |
 |---|---|---|
 | 1 | `app_dictionary` (`.safe`): o dicionário AppleScript do app, lido do `sdef` só quando o Orb pede, em resumo compacto (suítes, classes com propriedades e elementos, comandos com parâmetros), filtrável por `search`/`suite`, em páginas de 6.000 caracteres (`offset`), em cache por app e versão. App sem dicionário: diz isso e sugere Atalhos ou `ui_read`/`ui_act`. A descrição do `applescript` e o prompt ganham uma frase. Teto das specs 18.400 para 18.900. | `AppDictionaryTests` (fixture de sdef, cache, sem dicionário, páginas) |
+| 2 | `apps_list` diz, por app, se aceita AppleScript, se o AX é bom ou fraco (Electron, Chromium, Qt, Java) e quais Atalhos têm o nome dele; tudo do pacote do app e da lista de Atalhos, em cache, sem chamada ao app. Primeira chamada 0,19 s, seguintes 25 ms. Teto das specs 18.900 para 18.950. | `AppControlInfoTests` |
 
 **Ficou, e por quê:**
 

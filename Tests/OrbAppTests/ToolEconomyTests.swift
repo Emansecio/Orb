@@ -21,7 +21,8 @@ struct ToolSpecEconomyTests {
     /// Raised to 18,400 for `open` in the background and its `front` (~130, docs/REVISAO-USO-DO-COMPUTADOR-2026-10-16.md).
     /// Raised to 18,900 for `app_dictionary` (~500, with the line in `applescript`): the AppleScript dictionary of an app, read on demand
     /// so the model stops writing scripts from memory (docs/REVISAO-USO-DO-COMPUTADOR-2026-10-16.md, fase 3). It is the detail that stays out of the prompt.
-    private static let specCharsCeiling = 18_900
+    /// Raised to 18,950 for `apps_list` saying how to control each app (~120; item 2 of the same phase).
+    private static let specCharsCeiling = 18_950
     /// `ui_read`, `ui_act` and `screenshot` together: waiting, steps, takeover, marks and OCR all have to fit here.
     private static let appControlSpecCharsCeiling = 4_800
     /// The tools of the Orb's own browser are offered only when an engine is installed, so they have a ceiling of their own.

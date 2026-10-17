@@ -97,7 +97,13 @@ classe (`class note (item): name:text, id:text ro; elements: …`; `+` é extens
 (`xi:include`, que o `sdef` não expande) vira uma linha. Cache por caminho + versão + build (40 apps). Sem dicionário: diz isso e sugere
 `shortcuts_list` ou `ui_read`/`ui_act`. A descrição do `applescript` e o prompt mandam lê-lo antes de escrever para um app desconhecido.
 
-**Specs:** teto total 18.900 caracteres (subiu com `task_plan`, com o `front` do `open` e com o `app_dictionary`), sub-teto testado de 4.800 para
+**`apps_list`** (`AppControlInfo.swift`): cada app ganha ` · AppleScript` ou ` · sem AppleScript` (`NSAppleScriptEnabled` verdadeiro, Boolean ou
+texto "YES", ou `OSAScriptingDefinition`, no Info.plist), ` · AX bom` ou ` · AX fraco (Electron|Chromium|Qt|Java)` (por frameworks no pacote: nenhuma
+chamada AX, então não acorda nem trava o app; "poucas folhas na árvore" ficou de fora porque exigiria ler a árvore) e ` · Atalhos: …` (até 3
+Atalhos com o nome do app no nome). Cache por caminho + data do Info.plist (`AppControlCache`) e da lista de Atalhos por 5 min
+(`ShortcutNamesCache`, `shortcuts list` com prazo de 2 s; falha vale 1 min). Medido: primeira chamada 0,19 s (o `shortcuts list`), seguintes 25 ms.
+
+**Specs:** teto total 18.950 caracteres (subiu com `task_plan`, com o `front` do `open`, com o `app_dictionary` e com o `apps_list`), sub-teto testado de 4.800 para
 `ui_read`+`ui_act`+`screenshot`.
 
 ## 3. Desempenho e confiabilidade

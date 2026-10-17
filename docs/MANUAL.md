@@ -332,6 +332,10 @@ lista e adicionar de novo. Depois de "Pedir agora" ou de ir aos Ajustes do Siste
   (`app_dictionary`, a partir do `sdef` do app): as suítes, as classes com propriedades e elementos e os comandos com parâmetros,
   num resumo curto, filtrável por texto ou suíte e em páginas. Só lê, não pede permissão; fica em cache por app e versão. App sem
   dicionário é dito como tal, com o caminho dos Atalhos ou da interface.
+- **Saber de antemão como controlar cada app**: a lista de apps abertos (`apps_list`) diz de cada um se aceita AppleScript, se a
+  Acessibilidade dele é boa ou fraca (apps feitos com Electron, Chromium, Qt ou Java mostram pouco da interface) e quais Atalhos têm o
+  nome do app. O Orb escolhe o caminho na primeira tentativa. Vem só do pacote do app e da lista de Atalhos (guardados em cache), sem
+  falar com o app: listar não acorda nem toma a tela de ninguém.
 - O Orb recebe receitas curtas para as tarefas comuns do Mac (datas sem depender do idioma, rascunho no Mail, Lembretes, Notas,
   Calendário, Música) e conselhos para os erros típicos do AppleScript.
 - No painel do Orb, a chave "Controlar apps do Mac" ligada traz o atalho **Permissões**.
