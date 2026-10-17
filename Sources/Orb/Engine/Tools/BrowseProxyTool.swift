@@ -7,9 +7,9 @@ struct BrowseProxyTool: BrowseTool {
     let spec = ToolSpec(
         name: "browse_proxy",
         description: """
-        Where your browser's traffic goes. `set` with `proxy` (socks5://127.0.0.1:1080, http://host:port) reopens the browser \
-        through it (logins stay), returns the address sites see, and keeps it for you; `clear` goes direct; `status` shows it. \
-        Start the tunnel yourself first. Tell the user what you set.
+        Where your browser's traffic goes, for a site that blocks your address: `set` a `proxy` (socks5://127.0.0.1:1080, \
+        http://host:port) reopens the browser through it (logins stay), says the address sites see and keeps it; `clear` goes \
+        direct; `status` shows it. Start the tunnel first; tell the user what you set.
         """,
         parameters: .schema(["action": BrowseSupport.choice(["status", "set", "clear"]), "proxy": .property("string")]))
 

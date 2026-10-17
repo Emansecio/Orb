@@ -9,8 +9,8 @@ struct BrowseWaitTool: BrowseTool {
     let spec = ToolSpec(
         name: "browse_wait",
         description: """
-        Wait for one thing: `text` to appear, `url` (a glob like **/done) to be reached, `ref` to show, `load` (load, \
-        domcontentloaded or networkidle) or `ms`. Fails when `timeout` (ms, default 10000, up to 40000) runs out.
+        Wait for one of: `text` to appear, `url` (a glob like **/done), `ref` to show, a `load` state, or `ms`. Fails after \
+        `timeout` ms (default 10000, up to 40000).
         """,
         parameters: .schema([
             "text": .property("string"), "url": .property("string"), "ref": .property("string"),
@@ -71,9 +71,9 @@ struct BrowseFindTool: BrowseTool {
     let spec = ToolSpec(
         name: "browse_find",
         description: """
-        Find an element by what a person sees, with no ref, and act on it: `by` (role with `name`, text, label, placeholder, alt, \
-        title, testid) and `value`; `do` text (default: reads it), click, fill (with `text`), check or hover. For what \
-        browse_snapshot did not list. Never for passwords or card numbers: browse_show.
+        Find an element by what a person sees (no ref) and act on it: `by` and `value` (a role also takes `name`); `do` (default \
+        text, which reads it; fill types `text`). For what browse_snapshot did not list. Never for passwords or card numbers: \
+        browse_show.
         """,
         parameters: .schema([
             "by": BrowseSupport.choice(locators), "value": .property("string"), "name": .property("string"),
@@ -136,8 +136,8 @@ struct BrowseDialogTool: BrowseTool {
     let spec = ToolSpec(
         name: "browse_dialog",
         description: """
-        A page's JavaScript dialog (alert, confirm, prompt): `action` status (default), accept or dismiss (`text` answers a \
-        prompt). While one is open nothing else works on the page.
+        A JavaScript dialog (alert, confirm, prompt): `action` (default status); `text` answers a prompt. While one is open \
+        nothing else works on the page.
         """,
         parameters: .schema(["action": BrowseSupport.choice(["status", "accept", "dismiss"]), "text": .property("string")]))
 
@@ -243,9 +243,9 @@ struct BrowsePageTool: BrowseTool {
     let spec = ToolSpec(
         name: "browse_page",
         description: """
-        The page as a whole. `frame`: work inside the iframe `ref` (or `main`), then snapshot again. `pdf`: save the page at `path`. \
-        `state_save` / `state_load`: this Orb's cookies and storage under `name`. `mouse_move`, `mouse_down`, `mouse_up` \
-        (`x`, `y`, `button`), `mouse_wheel` (`dy`, `dx`).
+        The page as a whole, by `action`: frame works inside the iframe `ref` (or main), then snapshot again; pdf saves it at \
+        `path`; state_save and state_load keep this Orb's cookies and storage under `name`; mouse_* take `x`, `y`, `button`, \
+        or `dy`, `dx` for the wheel.
         """,
         parameters: .schema([
             "action": BrowseSupport.choice(actions), "ref": .property("string"), "path": .property("string"), "name": .property("string"),
@@ -497,11 +497,10 @@ struct BrowseRunTool: BrowseTool {
     let spec = ToolSpec(
         name: "browse_run",
         description: """
-        Any other agent-browser command, in your browser's own session: `args` is the command as words, like \
-        ["get","text","@e3"], ["cookies"], ["network","requests"] or ["eval","document.title"]; elements are the @e12 refs of \
-        browse_snapshot. The manual is on demand: `manual` empty lists the commands, `manual` with a command's name explains it \
-        (the same as `skills get core --full`). Refused: open and close (use browse_open and browse_close), and what would change \
-        which browser this is.
+        Any other agent-browser command in your session: `args` as words, like ["get","text","@e3"], ["network","requests"] \
+        or ["eval","document.title"] (elements: the @e12 refs of browse_snapshot). `manual` empty lists the commands; with a \
+        command's name, explains it. Refused: open, close and tab (browse_open, browse_close, browse_tabs) and what changes the \
+        browser itself.
         """,
         parameters: .schema(["args": .object(["type": .string("array"), "items": .property("string")]), "manual": .property("string")]))
 

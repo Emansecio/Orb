@@ -155,9 +155,9 @@ struct BrowseOpenTool: BrowseTool {
     let spec = ToolSpec(
         name: "browse_open",
         description: """
-        Open a web page in your own browser: a real Chrome that runs JavaScript and keeps the user's logins between runs. Returns \
-        the final address and title. Then browse_snapshot to act on it, or browse_read for its text. If the page asks for a login, \
-        a 2FA code or a captcha, do not try it yourself: call browse_show.
+        Open a page in your own browser (a real Chrome: JavaScript, the user's logins kept). Returns the final address and title; \
+        then browse_snapshot to act on it or browse_read for its text. A login, a 2FA code or a captcha is not yours to try: call \
+        browse_show.
         """,
         parameters: .schema(["url": .property("string")], required: ["url"]))
 
@@ -182,13 +182,12 @@ struct BrowseSnapshotTool: BrowseTool {
     let spec = ToolSpec(
         name: "browse_snapshot",
         description: """
-        List what the current page offers to click or fill: one line per element with a ref (e12) for browse_click, browse_fill \
-        and browse_select. Refs change when the page does: snapshot again after it changes. 12,000 characters (`max_chars` up to \
-        24,000); the closing note gives the `offset` to continue. `full` also lists text and headings; `selector` (CSS) limits \
-        it to part of the page.
+        What the page offers to click or fill, one line per element with a ref (e12) for the other browse_* tools. Refs change \
+        with the page: snapshot again after it changes. 12,000 characters (`max_chars` up to 24,000; the closing note gives the \
+        next `offset`). `full` adds text and headings; `selector` (CSS) limits it to part of the page.
         """,
         parameters: .schema([
-            "offset": .property("integer", "First character, to continue a long snapshot (default 0)."),
+            "offset": .property("integer"),
             "max_chars": .property("integer"),
             "full": .property("boolean"),
             "selector": .property("string"),
@@ -225,11 +224,11 @@ struct BrowseReadTool: BrowseTool {
     let spec = ToolSpec(
         name: "browse_read",
         description: """
-        The readable text of the current page as the browser shows it now (after JavaScript, with the session's logins), as light \
-        Markdown. 12,000 characters (`max_chars` up to 24,000); the closing note gives the `offset` to continue.
+        The page's readable text as the browser shows it now (after JavaScript, logged in), as light Markdown. 12,000 characters \
+        (`max_chars` up to 24,000; the closing note gives the next `offset`).
         """,
         parameters: .schema([
-            "offset": .property("integer", "First character, to continue a long page (default 0)."),
+            "offset": .property("integer"),
             "max_chars": .property("integer"),
         ]))
 
@@ -257,8 +256,8 @@ struct BrowseScreenshotTool: BrowseTool {
     let spec = ToolSpec(
         name: "browse_screenshot",
         description: """
-        A picture of the current page (what the viewport shows), returned as an image if your model sees images; otherwise the \
-        text on it (OCR). For charts, layouts and unlabeled buttons that browse_snapshot cannot describe.
+        A picture of the visible page: an image if you see images, else the text on it (OCR). For charts, layouts and unlabeled \
+        buttons that browse_snapshot cannot describe.
         """,
         parameters: .schema([:]))
 
@@ -309,9 +308,9 @@ struct BrowseClickTool: BrowseTool {
     let spec = ToolSpec(
         name: "browse_click",
         description: """
-        Act on an element by its ref from the latest browse_snapshot. `action`: click (default), dblclick, hover, check, uncheck, \
-        focus, scrollintoview, or drag (onto the ref in `to`). Returns the page address afterwards; snapshot again if the page \
-        changed. A JavaScript dialog that opens is reported: answer it with browse_dialog.
+        Act on an element by its ref from the latest browse_snapshot: `action` (default click; drag goes onto the ref in `to`). \
+        Returns the address after; snapshot again if the page changed. A JavaScript dialog that opens is reported: answer it \
+        with browse_dialog.
         """,
         parameters: .schema(["ref": .property("string"), "action": BrowseSupport.choice(actions), "to": .property("string")], required: ["ref"]))
 
@@ -431,9 +430,9 @@ struct BrowsePressTool: BrowseTool {
     let spec = ToolSpec(
         name: "browse_press",
         description: """
-        Press one named key on the page: Enter, Tab, Shift+Tab, Escape, ArrowUp/Down/Left/Right, PageUp, PageDown, Home, End, \
-        Backspace, Delete or Space. Or type `text` with real keystrokes into what has the focus (`insert`: no key events; for \
-        editors that ignore browse_fill). Refused while a password or card field has the focus.
+        Press a named key: Enter, Tab, Shift+Tab, Escape, ArrowUp/Down/Left/Right, PageUp, PageDown, Home, End, Backspace, \
+        Delete or Space. Or type `text` with real keystrokes where the focus is (`insert`: no key events, for editors that \
+        ignore browse_fill). Refused while a password or card field has the focus.
         """,
         parameters: .schema(["key": .property("string"), "text": .property("string"), "insert": .property("boolean")]))
 
@@ -514,12 +513,11 @@ struct BrowsePressTool: BrowseTool {
 struct BrowseScrollTool: BrowseTool {
     let spec = ToolSpec(
         name: "browse_scroll",
-        description: "Scroll the page (long pages and lists load more as you scroll), or bring the element `ref` into view. Then browse_snapshot or browse_read.",
+        description: "Scroll the page (default down 600 px; long pages and lists load more as you scroll), or bring `ref` into view. Then browse_snapshot or browse_read.",
         parameters: .schema([
             "ref": .property("string"),
-            "direction": .object(["type": .string("string"), "enum": .array(BrowserScrollDirection.allCases.map { .string($0.rawValue) }),
-                                  "description": .string("Default down.")]),
-            "amount": .property("integer", "Pixels (default 600)."),
+            "direction": BrowseSupport.choice(BrowserScrollDirection.allCases.map(\.rawValue)),
+            "amount": .property("integer"),
         ]))
 
     func risk(_ arguments: JSONValue) -> ToolRisk { .safe }
@@ -570,8 +568,8 @@ struct BrowseTabsTool: BrowseTool {
         name: "browse_tabs",
         description: "This conversation's tabs. list (default) shows them with ids (t1, t2…); new opens one (optionally at `url`) and makes it current; select and close take `tab`.",
         parameters: .schema([
-            "action": .object(["type": .string("string"), "enum": .array(BrowseTabsTool.actions.map { .string($0) })]),
-            "tab": .property("string", "Tab id from list."),
+            "action": BrowseSupport.choice(BrowseTabsTool.actions),
+            "tab": .property("string"),
             "url": .property("string"),
         ]))
 
@@ -646,10 +644,9 @@ struct BrowseShowTool: BrowseTool {
     let spec = ToolSpec(
         name: "browse_show",
         description: """
-        Show the browser to the user in a window (same session, logins kept), for what only a person can do: log in, enter a 2FA \
-        code, solve a captcha, approve something. Never try those yourself. The call waits while the user does it in the window \
-        and returns when they click Pronto on a card in the chat (or Cancelar, which says they declined). Then take a fresh \
-        browse_snapshot. If the result says instead to ask the user and stop, do that. `hide` sends the browser back to the background.
+        Open your browser in a window for what only the person can do (log in, a 2FA code, a captcha, an approval); never try \
+        those yourself. Waits until they click Pronto on a card in the chat (Cancelar: they declined); then take a fresh \
+        browse_snapshot. If the result says to ask the user and stop, do that. `hide` sends it back to the background.
         """,
         parameters: .schema(["hide": .property("boolean")]))
 
